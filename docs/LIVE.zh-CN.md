@@ -39,6 +39,8 @@ uv run levi live stop                            # 只停自己的进程
 
 `levi live once [--fake-vlm]` 标完当前已完成的片段就退出（加 `--fake-vlm` 时使用假的模型服务，不需要 GPU）。`levi live init` 把所有默认值写成 `<工作区>/live.toml`。`levi live report` 把某个数据集或会话的统计打印成报告，`levi live stats backfill` 为统计功能出现之前标注的片段补记录（见“统计与报告”）。`levi live start` 在启动核心之前，把它校验过的配置（文件、`--config`、命令行覆盖）写到 `<工作区>/live/effective.toml`，所以核心读到的是本次会话的设置，而不是上一次的。`levi live resume` 清除服务放弃了的 vLLM 启动失败。`once --fake-vlm` 必须指定临时的 `--workspace`：默认工作区、`LEVI_LIVE_WORKSPACE`、上一次 `start` 用的工作区以及任何 `start` 运行过的工作区都会被拒绝；没有 `--home` 或 `LEVI_LIVE_HOME` 时它用一个临时 home（临时目录下的 `levi-live-fake-home-*`，命令结束时删除），不碰真实服务的状态文件和锁。
 
+`levi live queue list` / `levi live queue set <数据集> auto|history|paused|off` 查看和修改每个数据集的后台标注方式，`levi live status` 会说明标注是否在让出 GPU 以及原因，见[后台标注队列与避让规则](#后台标注队列与避让规则)。
+
 不加 `--auto-approve` 时，服务仍会镜像、建视图并**生成计划**，然后等待：由人在 LEVI 页面批准计划（数据集显示 `awaiting_approval`）。加上它，由下文的“自动批准主体”（有审计）代为通过这些关口。
 
 默认值不指向任何一台机器上的目录。工作区默认 `~/.levi-live/workspace`（状态文件、pid 文件和锁在 `~/.levi-live/`，可用 `--home` 或 `LEVI_LIVE_HOME` 改）；命令没有给 `--workspace`、`LEVI_LIVE_WORKSPACE` 或 `--config` 时，作用于用同一个 home 最近一次 `levi live start` 运行的工作区（记在 `<home>/started.json`；这条记录出现之前启动的服务，通过 `status.json` 找，且要求该工作区有只有 `start` 才写的服务日志），前提是它仍是实时工作区、不是产品工作区。`levi live once` 不会改变它：home 里没有 `started.json` 时，真实的 `once` 在改写状态文件之前，先把状态文件指向的旧服务工作区写进 `started.json`。监视的 rollout 根目录（评测客户端的 `--rollout-root`）**没有默认值**：没有它时 `levi live start` 和 `once` 拒绝运行，并说明怎样设置（`--root`、`[watch] roots`）。启动前服务按本机检查配置（`levi live doctor` 显示同样的检查）：vLLM 脚本存在且可执行、pid 目录可写、GPU 锁文件能打开、根目录存在、没有路径指向别的用户的家目录（从别的机器拷来的 `live.toml`）；会让服务无法工作的问题会中止启动并给出修法，其余是警告。
@@ -143,6 +145,66 @@ uv run levi live stop                            # 只停自己的进程
 **停止 vLLM。** 只有服务器的整个进程组都退出、`nvidia-smi` 也不再列出它的任何进程之后才放锁（最多等 60 秒）；如果它们还在释放显存，锁保留，决策是 `gpu_not_free`，每个 tick 再看一次。
 
 始终成立：GPU 锁（配置了 `gpu.lock_file` 时，在它上面的 `flock`，`LEVI_AGENT=live`）跟着 vLLM 进程走：vLLM 启动时带着锁的文件描述符，所以监督进程被 `kill -9` 后，只要 vLLM 还活着锁就在；重启的监督进程只有在锁仍被它持有时才接管运行中的 vLLM（否则拒绝并说明）；只有确认 vLLM 真的退出才放锁，`levi live doctor` 会报告孤儿 vLLM 以及如何停止。只停自己启动的服务（按进程身份核对），不碰别人的；不是它启动的 vLLM 只有在 `adopt_external`（或 `manual`）下才使用且从不动它；:5000 和策略端口从不连接；空闲 tick 不碰 :8100。残余风险（见实测报告）：余量只有 1.3–1.5 GB；第一集可能遇到一次 280 ms 的策略离群值；vLLM 清醒时用更大的 `MEM_FRACTION` 重启策略服务器会加载失败，请在 vLLM 唤醒前启动它，或先 `levi live stop`。
+
+## 后台标注队列与避让规则
+
+后台标注是自动功能：`pipeline.background = true`（默认）时，每个实时数据集都会登记标注；服务运行期间新完成的片段自动标注；机器人、策略部署或别人的作业需要 GPU 时让出，之后自己接着做，从上次停下的片段继续。下面的内容默认全部开启，不需要手动打开。
+
+**标注模式。** 每个实时数据集（一条管线，`<group>__<task>`）有一个模式，记在 `<工作区>/live/queue.json`（原子写入并 fsync；读不了的文件绝不覆盖：任何修改都会带原因被拒绝，所有数据集按 `paused` 处理，直到有人修好）。
+
+| 模式 | 标哪些片段 |
+| --- | --- |
+| `auto`（新数据集默认） | 服务运行期间完成的片段 |
+| `history` | 同 `auto`，**另外**标这个数据集被 `watch.backlog = "skip"` 跳过的历史（服务第一次运行之前完成的片段），按从新到旧的顺序。`watch.backlog` 本身不变，这是对单个数据集的显式例外；`[queue] history = "registered_only"` 时生效（取 `"off"` 时按 `auto` 处理） |
+| `paused` | 不标；片段照常镜像和计数，队列保留 |
+| `off` | 不标 |
+
+把 `history` 改回 `auto` 时，已经收进来的历史片段仍会被标完，其余的重新被搁置。只有人能改模式：`levi live queue set <数据集> <模式>`，或 `POST /api/levi/live/datasets/{name}/labelling`（需要页面的 UI 令牌；agent 凭证返回 403）。监督进程只给没见过的数据集登记 `[queue] default_mode`。
+
+**队列。** 同一时刻只处理一个批次（和以前一样）。`auto` 的数据集排在 `history` 前面，同级里等得最久的先做；`history` 数据集的片段从新到旧（`[queue] order`）。`status.json` 的 `queue` 列出每个数据集（见下）。
+
+**避让规则（`[gpu.yield]`，默认开启）。** 任一原因成立期间：worker 被通知取消在途请求（它每 0.2 秒读一次 `live/gate.json`，监督进程 0.25 秒内再看一次，请求在 1 秒内被切断），2 秒后 worker 被停掉（它的运行暂停，之后从上一个标完的片段接着做），**vLLM 既不启动也不唤醒**；已经醒着的 vLLM 按原有的睡眠规则处理（`gpu.min_free_mib`、空闲超时）。`live/gate.json` 以代码 `yield` 关闭，实时工作区核心里人按的“运行”也会被挡住。
+
+| 原因（`code`） | 成立条件 |
+| --- | --- |
+| `deployment` | `gpu.policy_ports` 里有端口在 `/proc/net/tcp*` 中处于监听（不连接），**或**有评测会话还没结束（`standby`、`running`、`homing`、`waiting_reset`、`fault`；`stopped`、`finished` 和已崩溃的不算）：整个部署期间都让出，不只是 `running` |
+| `robot_quiet` | 有会话处于 `gpu.quiet_states` 中的状态 |
+| `foreign_gpu` | 本服务自己的 vLLM 之外的进程占用 GPU 显存超过 `foreign_gpu_mib`（2000）（`nvidia-smi --query-compute-apps`，最多每 5 秒读一次，只在有活要做或正在让出时读） |
+| `foreign_lock` | 别人持有 `gpu.lock_file`（从 `/proc/locks` 读，不取锁） |
+| `probe_error` | 读不到 socket 表、GPU 进程列表或锁持有者：**按让出处理（失败即关闭）**，看不见的当作在用 |
+| （vLLM 拿不到显存） | 不是让出原因：原有的 `insufficient_vram`、`vram`、`gpu_wait` 判定照常 |
+
+**恢复。** 所有原因必须连续消失 `resume_after_s`（60）秒；中途有原因回来就重新计时。之后下一批从还没标的片段开始，不重复。在线判定保留自己的闸门（它本来就为部署期间服务），但 `foreign_gpu`、`foreign_lock`、`probe_error` 成立时不会为它唤醒模型。
+
+| 设置 | 默认 | 含义 |
+| --- | --- | --- |
+| `[gpu.yield] enabled` | true | false：规则关闭，行为和没有这一节之前一样（只有 timeshare 闸门） |
+| `resume_after_s` | 60 | 恢复标注前需要安静多久（0–86400） |
+| `foreign_gpu_mib` | 2000 | 别的进程占用多少显存就让出；0 关掉这项检查（也不再调用 nvidia-smi），用于没有 NVIDIA GPU 的机器 |
+| `foreign_lock` | true | 别人持有 `gpu.lock_file` 时让出 |
+| `[queue] default_mode` | `auto` | 没登记过的数据集的模式（`auto`、`paused`、`off`） |
+| `history` | `registered_only` | `registered_only` 或 `off` |
+| `order` | `newest_first` | `history` 数据集的片段顺序（`newest_first`、`oldest_first`） |
+| `batch_max` | 0 | 每批片段数；0 表示用 `watch.batch_max_episodes` |
+
+**旧版本。** 不认识 `[queue]` 或 `[gpu.yield]` 的版本会拒绝整个文件。所以 `levi live init` 会写出这两张表（只有这里它们一定出现）；服务给 worker 写的 `live/effective.toml` 和 `levi live start` 创建的文件在它们等于默认值时不写，这样旧版本读这些文件和以前完全一样。每个数据集的模式在 `queue.json` 里，旧版本从不读它。
+
+**状态字段。** `status.json` 有 `queue: [{dataset, mode, waiting, state, reason}]`，`state` 取 `queued`、`running`、`yielding`、`paused`（`off` 也用它）、`done`、`failed`；还有 `yield: {enabled, active, reasons: [{code, text}], since, resume_at}`；`gate.json` 带同样的 `yield` 对象。恢复前的安静期里唯一的原因是 `resuming`。`labelling_paused`（评测客户端读的字段）在部署期间不设置，只有 `foreign_gpu`、`foreign_lock`、`probe_error` 持续超过 `gpu.blocked_pause_s` 时才设（代码 `gpu_in_use`）。`levi live status` 和 `levi live doctor` 会用话说明是否在让出、原因，以及每个数据集的模式和状态；`levi live queue list` 把模式和等待的片段数放在一起显示。
+
+**为什么在让出，怎样恢复？**
+
+1. `levi live status`：`yield` 一行写明从什么时候开始、为什么（`deployment`：停掉策略服务器并结束评测会话；`foreign_gpu`：点名的进程是别的作业；`foreign_lock`：用 `fuser` 或 `lslocks` 找持有者；`probe_error`：文字说明读不了什么，例如 `nvidia-smi`）。
+2. 原因消失后会出现 `resume at`；60 秒后标注自动继续，不需要任何命令。
+3. `queue.json` 损坏时 `levi live doctor` 会报；修好或删掉它（服务会重新登记数据集），在此之前什么都不标。
+4. 想在策略服务器运行时照样标注，设 `[gpu.yield] enabled = false`（重启服务）：恢复以前的 timeshare 行为。
+
+### 与产品的子任务标注用同一个引擎
+
+worker 用来规划运行的 `runs.plan` 和 workflow 模型，与人做子任务标注时用的相同。三件事让两边保持一致：
+
+- **`[pipeline.workflow]`**（默认空）把选项并入时间片段 workflow，例如 `event_intelligence = { mode = "candidates" }`（见[事件智能](EVENTS.zh-CN.md)）。读文件时用规划器自己的模型检查键，未知或非法的键带着原话被拒绝；worker 自己设置的选项（`kind`、`definitions`、`coarse_step_seconds`、`max_evidence_frames`、`refine`、`pilot_episode`、`require_human_pilot`、`anchored`）不能在这里写。它作用于时间片段运行，不作用于释放复核。空表不会写进任何文件；表非空时，监督进程启动时会导入规划器的模型（pydantic）。`pipeline.temporal = true` 仍是默认：分析需要时间片段。
+- **能力漂移**，在 `levi live doctor` 里：列出本版本 LEVI 的 workflow 接受、而实时管线既没设置也没声明“保持默认”的选项，只作为提示（不改任何东西），这样升级新增了选项就会被注意到。
+- **`capability` 记录**，作为数据集状态里每个片段记录的顶层键（`demos.<demo>.capability`），`stats.jsonl` 的对应行里也有，不超过 4 KB：`{schema: "levi.live.capability.v1", levi: {commit, version}, plan_digest（最近一个阶段的）, plans: {temporal, review}, spec: "id@version"|null（释放复核的）, event_intelligence: {mode, algorithm_sha256}（时间片段的）, at}`。一个批次自己完成或失败后，worker 还会调用评测后分析（`analysis.sync_quiet`，该模块存在时）；让出期间从不调用。在它出现之前做的结果没有这个字段；读取方用 `capability.of(part)`，对它们返回空。没有任何已有字段改变含义，结果仍然标为“自动、未复核”。
 
 ## 自动批准主体
 
@@ -377,6 +439,9 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 | | `max_body_mb` | 8 | 0.5–64 MiB |
 | | `pressure_avg10_max`、`pressure_kinds` | 0（关）、`["cpu", "memory", "io"]` | 主机压力超限时不放行在线判定，见[真机控制回路的防护](#真机控制回路的防护可选) |
 | `pipeline` | `background` | true | false：不启动 worker，不做后台模型请求（见下） |
+| | `workflow` | 空表 | `[pipeline.workflow]`：并入时间片段 workflow 的额外选项，由规划器自己的模型检查（例如 `event_intelligence = { mode = "candidates" }`），见[后台标注队列与避让规则](#后台标注队列与避让规则) |
+| `gpu.yield` | `enabled`、`resume_after_s`、`foreign_gpu_mib`、`foreign_lock` | true、60、2000、true | 标注何时给 GPU 让路；只有改动过或 `levi live init` 才写进文件（见[后台标注队列与避让规则](#后台标注队列与避让规则)） |
+| `queue` | `default_mode`、`history`、`order`、`batch_max` | `auto`、`registered_only`、`newest_first`、0 | 标注队列；只有改动过或 `levi live init` 才写进文件 |
 
 设置在启动时读取：改完 `live.toml` 后 `levi live stop` 再 `levi live start`（重启的是实时服务，不是产品 LEVI）。`enabled = true` 时，监督进程在启动时载入答案校验相关的代码（pydantic、numpy、模型客户端），常驻内存多约 26 MiB（本机实测）。
 
@@ -605,6 +670,7 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 | `<工作区>/live/datasets/<名字>.json` | 每个数据集的状态：各片段及状态（被人排除的带 `excluded`）、进行中的批次、上一批、判定 |
 | `<工作区>/live/audit.jsonl` | 自动批准主体的审计日志，以及人排除或恢复每个片段的一行（轮转） |
 | `<工作区>/live/worker.json`、`gate.json`、`vllm.json`、`service.json` | worker 进度、闸门、本服务启动的 vLLM、首次启动时间 |
+| `<工作区>/live/queue.json` | 每个数据集的标注模式（`auto`、`history`、`paused`、`off`），原子写入；见[后台标注队列与避让规则](#后台标注队列与避让规则) |
 | `<工作区>/live/gate.jsonl` | 闸门的每一次变化（轮转；见“历史与统计”） |
 | `<工作区>/live/stats.jsonl` | 每个已标片段一条记录（轮转；见“历史与统计”） |
 | `<工作区>/live/online.jsonl` | 每个在线判定请求一行，不存图像（轮转；见[在线判定](#在线判定接口-c5)）；`live/online-tmp/` 只在模型读取期间存放请求的图像 |
@@ -706,6 +772,8 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 | `GET /audit?limit=50` | 自动批准主体的审计记录，最新在前，≤ 100 条，每条含 `tool`、`decision: allowed/refused`、`run_id` 等。人排除或恢复片段的行是 `principal: "local-human"`、`actor: "person"`、`tool: "episode.exclude"` 或 `"episode.restore"`、`dataset`、`demo`、可选的 `reason`、可选的 `via: "product"`（在产品 LEVI 页面上操作）、`decision: "completed"`。 |
 | `POST /datasets/{name}/exclude` | 请求体 `{"demos": ["demo_0003", …], "reason": "…"?}`（1 到 500 个名字，原因最长 300 字符）。排除这些片段（要么全部成功，要么都不改）。回答 `{"enabled", "dataset", "changed": [...], "unchanged": [...]（本来就已排除）, "counts", "excluded_count", "review_runs_open", "review_hidden": [...]（片段已全部排除、不计入的待复核运行）}`。404：数据集或片段不存在（会点名），或不是实时工作区；409：片段在进行中的批次里（“being labelled …”），或从未纳入数据集（被拒收、卡住）；401/403：不是人在操作（见上）。 |
 | `POST /datasets/{name}/restore` | 请求体 `{"demos": [...]}`。把已排除的片段放回来；回答同上（`review_hidden` 是恢复之后仍不计入的运行）；没排除的片段在 `unchanged` 里。片段不存在返回 404。 |
+| `GET /queue` | `{"enabled", "default_mode", "history", "order", "problem"（`queue.json` 读不了的原因，否则为 null）, "datasets": {名字: {"mode", "since", "by"}}, "queue": [状态行], "yield": {…}}`。 |
+| `POST /datasets/{name}/labelling` | 请求体 `{"mode": "auto\|history\|paused\|off", "request_id"}`（人：UI 令牌；agent 凭证返回 403）。回答 `{"enabled", "dataset", "mode", "previous", "changed", "replayed"}`；同一个 `request_id` 再来不会再改一次（`replayed`），用于别的改动则 409；模式不对 422，数据集不存在 404，`queue.json` 读不了 409（原样保留）。每次改动在 `live/audit.jsonl` 记一行 `labelling.set`。 |
 | `POST /datasets/{name}/demos/{demo}/exclude`、`…/restore` | 对单个片段做同样的事（前者可带可选请求体 `{"reason"}`）。 |
 | `GET /service` | 服务的运行情况，只读：`enabled`（`LEVI_LIVE_SERVICE_CONTROL`）、`served_by_live_service`、`workspace_found`、`workspace_name`；`unit`（`name`、`installed`、`load_state`、`state`、`sub_state`、`main_pid`、`exec_main_status`、`n_restarts`、`ui`、`runs_live`、`flapping`、`problem`）；`holder`（`pid`、`alive`、`started_by`：`unit`/`terminal`/`terminal_once`/`other`/null、`cgroup_unit`、`name`、`started_at`）；`ports`（每项 `port`、`role`：`core`/`online`/`vllm`/`ui`、`state`：`free`/`ours`/`foreign`/`unknown`、`pid`、`name`）；`gpu`（`state`：`ok`/`unreadable`/`unknown`；`lock`：`configured`、`state`：`disabled`/`free`/`live`/`other`、`pid`、`name`；`others`：其他计算进程，读不到时为 null；`vllm_state`）；`evaluation`（`active`，无法判断时为 null；`count`、`sessions`）；`start_checks`/`stop_checks`（每项 `code`、`level`：`refuse`/`confirm`/`warn`、`message`）；`can_start`、`can_stop`、`refusals`、`needs_confirmation`（`start`、`stop`）；`operation`（进行中的操作或 null）；`confirm`（`start`、`stop`、`force_phrase`）。 |
 | `POST /service/start` | 请求体 `{"request_id", "confirm": "start-live", "confirm_gpu_shared"?, "reset_failed"?}`，`request_id` 为 8 到 80 个字母、数字、点、下划线、冒号或连字符。202：`{"operation_id", "action", "request_id", "state": "running", "method": "systemctl", "created", …}`。400 `confirm_required`/`request_id_invalid`；403 `disabled` 或不是人在操作；409 `already_running`、`terminal_instance`、`once_instance`、`holder_unidentified`、`unit_flapping`、`unit_busy`、`unit_failed`、`port_foreign`、`gpu_shared_unconfirmed`、`served_by_live_service`、`request_reused`；412 `unit_not_installed`、`unit_name_invalid`、`unit_is_self`、`unit_not_live`、`no_live_workspace`、`not_writable`；423 `busy`（带进行中的 `operation_id`）；503 `systemd_unavailable`、`ports_unknown`。错误详情是 `{"code", "message", …}`。 |

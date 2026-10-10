@@ -30,6 +30,7 @@ audited with ``via: "product"``.
 The JSON shapes are documented in ``docs/LIVE.md``.
 """
 
+import contextlib
 import contextvars
 import os
 import re
@@ -57,6 +58,7 @@ from . import (
     statsview,
 )
 from . import config as live_config
+from . import queue as labelling_queue
 
 router = APIRouter(prefix="/api/levi/live", tags=["Live annotation"])
 
@@ -734,6 +736,75 @@ def restore_demos(name: str, body: Restoration, request: Request):
     in ``unchanged``."""
     _person(request)
     return _restore(name, body.demos)
+
+
+class Labelling(BaseModel):
+    mode: str = Field(min_length=1, max_length=16)
+    request_id: str = Field(min_length=1, max_length=80)
+
+
+@router.get("/queue")
+def queue_view():
+    """The background labelling queue: the registered modes and the status
+    file's per-dataset rows (state, waiting episodes, why it is held)."""
+    config = _config()
+    if config is None:
+        return _disabled()
+    value = jsonio.read(config.status_file) or {}
+    return {
+        "enabled": True,
+        **labelling_queue.listing(config),
+        "queue": value.get("queue") or [],
+        "yield": value.get("yield"),
+    }
+
+
+@router.post("/datasets/{name}/labelling")
+def set_labelling(name: str, body: Labelling, request: Request):
+    """Set how a dataset is labelled in the background: ``auto``, ``history``,
+    ``paused`` or ``off`` (a person's action; an agent credential gets 403).
+    Repeating a ``request_id`` changes nothing a second time; a damaged
+    ``queue.json`` is refused (409) and left as it is."""
+    _person(request)
+    config = _live_config(name)
+    if not locate.confined(labelling_queue.path(config), config.workspace):
+        raise HTTPException(
+            409, "The live workspace's state lies outside it; nothing was changed"
+        )
+    try:
+        done = labelling_queue.set_mode(
+            config, name, body.mode, by="person", request_id=body.request_id
+        )
+    except labelling_queue.Invalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except labelling_queue.Conflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except labelling_queue.Unreadable as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if done["changed"]:
+        _audit_labelling(config, name, done)
+    return {"enabled": True, **done}
+
+
+def _audit_labelling(config, name, done):
+    """One line in ``live/audit.jsonl``; a log that cannot be written does not
+    undo the change."""
+    record = {
+        "time": time.time(),
+        "principal": "person",
+        "tool": "labelling.set",
+        "dataset": name,
+        "mode": done["mode"],
+        "previous": done["previous"],
+        "decision": "completed",
+    }
+    via = _via(config)
+    if via:
+        record["via"] = via
+    with contextlib.suppress(Exception):  # the change was made
+        jsonio.append_line(
+            config.live_dir / auto.AUDIT, record, max_bytes=auto.AUDIT_MAX_BYTES
+        )
 
 
 @router.post("/datasets/{name}/demos/{demo}/exclude")

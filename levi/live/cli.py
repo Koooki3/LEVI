@@ -7,6 +7,7 @@
     levi live once [--fake-vlm]
     levi live report [--dataset X] [--session Y] [--format md|json|csv] [--out P]
     levi live stats backfill [--dataset X] [--dry-run]
+    levi live queue list|set DATASET MODE
     levi live init
 
 Standard library only until the service needs more: the supervisor imports no
@@ -37,6 +38,7 @@ from . import (
     statsview,
 )
 from . import config as live_config
+from . import queue as labelling_queue
 from . import report as live_report
 from . import sessions as live_sessions
 
@@ -693,6 +695,32 @@ def _page(value) -> str:
     return "in the product LEVI (/live)"
 
 
+def format_yield(value) -> list:
+    """The status lines about the labelling's yield rules."""
+    if not isinstance(value, dict):
+        return []
+    if not value.get("enabled", True):
+        return ["yield      off ([gpu.yield] enabled = false)"]
+    if not value.get("active"):
+        return ["yield      not yielding: the GPU is free for the labelling"]
+    since = value.get("since")
+    when = (
+        time.strftime("%H:%M:%S", time.localtime(since))
+        if type(since) in (int, float)
+        else "?"
+    )
+    lines = [f"yield      YIELDING the GPU since {when}; nothing is started or woken"]
+    for reason in value.get("reasons") or []:
+        lines.append(f"  why      {reason.get('code')}: {reason.get('text')}")
+    resume = value.get("resume_at")
+    if type(resume) in (int, float):
+        lines.append(
+            f"  resume   at {time.strftime('%H:%M:%S', time.localtime(resume))} "
+            "if nothing comes back"
+        )
+    return lines
+
+
 def format_status(value, alive) -> str:
     if not value:
         return "No status file: the live service has not run here."
@@ -708,6 +736,7 @@ def format_status(value, alive) -> str:
         f"gpu        mode {gpu.get('mode')}, vLLM {gpu.get('vllm_state')}, policy server "
         f"{'seen' if gpu.get('policy_server_seen') else 'not seen'}; {((gpu.get('decision') or {}).get('reason')) or ''}"
     )
+    lines.extend(format_yield(value.get("yield")))
     judge = value.get("online_judge")
     if isinstance(judge, dict):
         lines.append(
@@ -760,6 +789,12 @@ def format_status(value, alive) -> str:
     worker = value.get("worker")
     if worker:
         lines.append(f"worker     {worker['dataset']}: {worker.get('phase')}")
+    for row in value.get("queue") or []:
+        lines.append(
+            f"queue      {row.get('dataset')}: {row.get('mode')}, "
+            f"{row.get('waiting')} waiting, {row.get('state')}"
+            + (f" ({row['reason']})" if row.get("reason") else "")
+        )
     lines.append("datasets   name: pending / annotating / done / failed / waiting")
     for name, row in (value.get("datasets") or {}).items():
         flag = "  FR3 FAULT" if row.get("fault") else ""
@@ -948,6 +983,36 @@ def diagnose(config) -> dict:
         warnings.append(
             f"{copied} file(s) were copied, not hard-linked: the rollout root is on another file system"
         )
+    report["yield"] = (value or {}).get("yield")
+    report["labelling"] = (value or {}).get("queue") or []
+    from . import capability
+
+    try:
+        report["capability_drift"] = capability.drift(config)
+    except Exception as exc:  # noqa: BLE001 - a hint, never a failure
+        report["capability_drift"] = []
+        report["notes"].append(f"capability check skipped: {type(exc).__name__}")
+    for item in report["capability_drift"]:
+        report["notes"].append(
+            f"capability drift: this LEVI's workflow has the option {item['option']!r} "
+            f"(default {item['default']!r}) that the live pipeline neither sets nor "
+            "declares; set it under [pipeline.workflow] in live.toml to use it, or "
+            "ignore this note (nothing was changed)"
+        )
+    queue_problem = labelling_queue.load(config)[1]
+    if queue_problem:
+        warnings.append(
+            f"{queue_problem}: nothing is labelled until it is repaired "
+            "(`levi live queue list`)"
+        )
+    if (value or {}).get("yield", {}).get("active") and any(
+        r.get("code") in ("probe_error", "foreign_gpu", "foreign_lock")
+        for r in value["yield"].get("reasons") or []
+    ):
+        warnings.append(
+            "the labelling is yielding the GPU to another user or an unreadable "
+            "probe: " + "; ".join(r["text"] for r in value["yield"]["reasons"])
+        )
     report["queue"] = {
         "depth": (value or {}).get("queue_depth"),
         "datasets": {
@@ -1054,6 +1119,13 @@ def cmd_doctor(args) -> int:
         print(
             f"queue      depth {report['queue']['depth']}; {report['queue']['datasets']}"
         )
+        for line in format_yield(report.get("yield")):
+            print(line)
+        for row in report.get("labelling") or []:
+            print(
+                f"labelling  {row['dataset']}: {row['mode']}, {row['waiting']} waiting, "
+                f"{row['state']}" + (f" ({row['reason']})" if row.get("reason") else "")
+            )
         print(f"fr3        {report['fr3']}")
         lock = report.get("gpu_lock") or {}
         print(
@@ -1349,6 +1421,72 @@ def cmd_stats(args) -> int:
     return 0
 
 
+def cmd_queue(args) -> int:
+    """``levi live queue list`` and ``set``: a person's way to read and change
+    a dataset's labelling mode (``queue.json``). The running service picks the
+    change up on its next scan; nothing is started or stopped here."""
+    config = resolve_config(args)
+    if args.queue_command == "list":
+        listing = labelling_queue.listing(config)
+        value = read_status(config)[0]
+        rows = {r["dataset"]: r for r in (value or {}).get("queue") or []}
+        if args.json:
+            print(json.dumps({**listing, "status": rows}, ensure_ascii=False, indent=1))
+            return 1 if listing["problem"] else 0
+        if listing["problem"]:
+            print(f"queue.json cannot be read: {listing['problem']}", file=sys.stderr)
+            return 1
+        print(
+            f"default mode {listing['default_mode']}; history "
+            f"{listing['history']}; order {listing['order']}"
+        )
+        names = sorted(set(listing["datasets"]) | set(rows))
+        for name in names:
+            mode = (listing["datasets"].get(name) or {}).get("mode") or "(default)"
+            status = rows.get(name) or {}
+            print(
+                f"{name}: {mode}"
+                + (
+                    f", {status.get('waiting')} waiting, {status.get('state')}"
+                    if status
+                    else ""
+                )
+                + (f" ({status['reason']})" if status.get("reason") else "")
+            )
+        if not names:
+            print("no dataset is registered yet")
+        return 0
+    name = args.dataset
+    known = (
+        mirror.load_state(config, name)
+        or name in (labelling_queue.listing(config)["datasets"])
+    )
+    if not known:
+        print(
+            f"levi live: no live dataset called {name!r} (`levi live queue list`)",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        done = labelling_queue.set_mode(
+            config, name, args.mode, by="cli", request_id=args.request_id
+        )
+    except (labelling_queue.Invalid, labelling_queue.Conflict) as exc:
+        print(f"levi live: {exc}", file=sys.stderr)
+        return 2
+    except labelling_queue.Unreadable as exc:
+        print(f"levi live: {exc}", file=sys.stderr)
+        return 1
+    if done["changed"]:
+        print(f"{name}: {done['previous']} -> {done['mode']}")
+    else:
+        print(
+            f"{name}: already {done['mode']}"
+            + (" (replayed)" if done["replayed"] else "")
+        )
+    return 0
+
+
 def cmd_init(args) -> int:
     config = resolve_config(args)
     check_workspace(config, args.adopt_workspace)
@@ -1357,7 +1495,9 @@ def cmd_init(args) -> int:
     if target.exists():
         print(f"{target} exists; not overwritten")
         return 0
-    target.write_text(live_config.render(config))
+    # Every default, the labelling queue and the yield rules included (the
+    # tables older versions do not know are written only here, on purpose).
+    target.write_text(live_config.render(config, full=True))
     print(f"wrote {target}")
     return 0
 
@@ -1421,6 +1561,29 @@ def build_parser():
         "--reason", default="", help="why (kept, at most 300 characters)"
     )
     exclude.add_argument("--restore", action="store_true", help="put them back instead")
+    queue = sub.add_parser(
+        "queue", help="the labelling mode of each live dataset (queue.json)"
+    )
+    queue_sub = queue.add_subparsers(dest="queue_command", required=True)
+    listed = queue_sub.add_parser("list", help="the modes and what waits")
+    add_config_options(listed)
+    listed.add_argument("--json", action="store_true")
+    changed = queue_sub.add_parser("set", help="change one dataset's mode")
+    add_config_options(changed)
+    changed.add_argument(
+        "dataset", help="the dataset's name (see `levi live queue list`)"
+    )
+    changed.add_argument(
+        "mode",
+        choices=live_config.LABELLING_MODES,
+        help="auto: new episodes; history: also the past, newest first; "
+        "paused: keep the queue, label nothing; off: label nothing",
+    )
+    changed.add_argument(
+        "--request-id",
+        default=None,
+        help="repeat a call safely: the same id changes nothing twice",
+    )
     init = sub.add_parser("init", help="write a live.toml with every default")
     add_config_options(init)
     rep = sub.add_parser(
@@ -1465,6 +1628,7 @@ def main(argv=None) -> int:
         "resume": cmd_resume,
         "exclude": cmd_exclude,
         "init": cmd_init,
+        "queue": cmd_queue,
         "report": cmd_report,
         "stats": cmd_stats,
     }

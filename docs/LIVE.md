@@ -39,6 +39,8 @@ uv run levi live stop                            # stops only its own processes
 
 `levi live once [--fake-vlm]` labels everything that is finished now and exits (with `--fake-vlm` against a stand-in model server, no GPU; it needs a scratch `--workspace` and refuses the default workspace, `LEVI_LIVE_WORKSPACE`, the one the last `start` used and any workspace a `start` has run on; without `--home` or `LEVI_LIVE_HOME` it uses a scratch home (`levi-live-fake-home-*` in the temporary folder, removed when the command ends), so the real service's status and lock are never touched). `levi live resume` clears a vLLM start failure the service gave up on. `levi live init` writes `<workspace>/live.toml` with every default. `levi live report` prints the statistics of a dataset or session as a report, and `levi live stats backfill` adds records for demos labelled before the statistics existed (see "Statistics and reports").
 
+`levi live queue list` / `levi live queue set <dataset> auto|history|paused|off` shows and changes how each dataset is labelled in the background, and `levi live status` says when the labelling is yielding the GPU and why: see [Background labelling queue and yield rules](#background-labelling-queue-and-yield-rules).
+
 Without `--auto-approve` the service still mirrors, builds views and **plans**, then waits: a person approves the plan in the LEVI page (the dataset shows `awaiting_approval`). With it, the audited automatic approver (below) takes those gates.
 
 No default names a folder of one machine. The workspace defaults to `~/.levi-live/workspace` (status, pid file and lock live in `~/.levi-live/`, `--home` or `LEVI_LIVE_HOME`); a command given no `--workspace`, `LEVI_LIVE_WORKSPACE` or `--config` acts on the workspace the last `levi live start` with that home ran on (recorded in `<home>/started.json`; a service started before that record existed is found through `status.json` when its workspace has the service log only `start` writes), when it is still a live workspace and not a product workspace. `levi live once` never changes it: before a real `once` rewrites the status file of a home that has no `started.json`, the workspace of the older service that file names is written into `started.json`. The rollout roots (the evaluation client's `--rollout-root`) have **no default**: `levi live start` and `once` refuse to run without one and say how to set it (`--root`, `[watch] roots`). Before it starts, the service checks the configuration against the machine (`levi live doctor` shows the same checks): the vLLM scripts exist and are executable, the pid folder can be written, the GPU lock file can be opened, the roots exist, and no path points into another user's home (a `live.toml` copied from another machine); a problem that would keep the service from working stops the start with its fix, the rest are warnings.
@@ -135,6 +137,7 @@ A finished demo is hard-linked file by file into `<workspace>/captures/<name>/.p
 | | `cleanup` | true | drop finished runs' inputs and evidence |
 | | `keep_review_runs` | 10 | open release-review runs per dataset that keep their frozen input (committing one needs it); older ones are cancelled and cleaned |
 | | `background` | true | false: the background labelling is off (no worker, no time segments, no review); rollouts are still mirrored with their operator label and online result, and the statistics and the page work as before. See [Online judgement](#online-judgement-interface-c5) |
+| | `workflow` | empty table | `[pipeline.workflow]`: extra options for the time-segment workflow, checked by the planner's own model (for example `event_intelligence = { mode = "candidates" }`); see [Background labelling queue and yield rules](#background-labelling-queue-and-yield-rules) |
 | `resources` | `nice`, `ionice_class`, `threads`, `view_workers` | 19, 3 (idle), 2, 1 | see "Keeping it light" |
 | | `worker_idle_exit_s` | 5 | accepted in `live.toml` but not read by any code yet: a worker exits when its batch is done, not after an idle wait |
 | | `log_max_mb`, `log_backups`, `cache_max_gib`, `status_max_datasets` | 5, 3, 20, 64 | bounds |
@@ -142,6 +145,8 @@ A finished demo is hard-linked file by file into `<workspace>/captures/<name>/.p
 | `online` | `enabled`, `host`, `port`, `spec`, `timeout_s`, `max_body_mb` | false, `127.0.0.1`, 7882, `generic-final.v1.json`, 15, 8 | the online judgement's endpoint (interface C5); see [Online judgement](#online-judgement-interface-c5) |
 | | `pressure_avg10_max`, `pressure_kinds` | 0 (off), `["cpu", "memory", "io"]` | refuse an online judgement while the host is under pressure; see [Protecting the robot's control loop](#protecting-the-robots-control-loop-optional) |
 | `judge` | `task_text` | empty table | the lab's own wording of an instruction for the judgements' questions (`[judge.task_text]`, keys are task texts or task folder names); the robot policy's instruction is never touched; see [Judge-side task text](#judge-side-task-text) |
+| `gpu.yield` | `enabled`, `resume_after_s`, `foreign_gpu_mib`, `foreign_lock` | true, 60, 2000, true | when the labelling gives the GPU way; written to the file only when changed or by `levi live init` (see [Background labelling queue and yield rules](#background-labelling-queue-and-yield-rules)) |
+| `queue` | `default_mode`, `history`, `order`, `batch_max` | `auto`, `registered_only`, `newest_first`, 0 | the labelling queue; written only when changed or by `levi live init` |
 
 The service sets `LEVI_DROID_SAMPLE=off` (no sample download), `LEVI_GPU_SHARING=allow` (its own policy replaces LEVI's off-peak guard, see below), `LEVI_SYNC_DISCOVER=off` and `LEVI_SYNC_INTERVAL=30` for the live workspace.
 
@@ -183,6 +188,66 @@ The supervisor re-decides the gate every 0.25 s while a worker runs (the worker 
 **Stopping vLLM.** The lock is let go only after the server's whole process group is gone and `nvidia-smi` no longer lists any of its processes (up to 60 s); if they are still releasing the card the lock is kept, the decision is `gpu_not_free`, and each tick looks again.
 
 Always true: the GPU lock (`flock` on `gpu.lock_file` when one is configured, `LEVI_AGENT=live`) follows the vLLM process: vLLM is started with the lock's descriptor open, so the lock survives a `kill -9` of the supervisor for as long as vLLM lives, and a restarted supervisor takes the running vLLM back only if the lock is still held by it (else it refuses and says so); the lock is let go only once vLLM is really gone, and `levi live doctor` reports an orphan vLLM and how to stop it. It stops only a server it started (verified by process identity), never another agent's; a vLLM it did not start is used only with `adopt_external` (or in `manual` mode) and never touched; `:5000` and the policy ports are never connected to; an idle tick does not touch `:8100`. Residual risks (measured, see the report): only 1.3-1.5 GB spare; the first episode may see one 280 ms outlier from the policy; a policy server restarted with a larger `MEM_FRACTION` while vLLM is awake fails to load, so start it before vLLM wakes or stop the service first (`levi live stop`).
+
+## Background labelling queue and yield rules
+
+The background labelling is an automatic function: with `pipeline.background = true` (the default) every live dataset is registered for labelling, the service labels what finishes while it runs, gives the GPU way whenever the robot, a policy deployment or somebody else's job needs it, and carries on by itself afterwards, from the episode it stopped at. Everything below is on by default; nothing needs switching on.
+
+**Labelling modes.** Each live dataset (one pipeline, `<group>__<task>`) has a mode, kept in `<workspace>/live/queue.json` (written atomically and fsynced; a file that cannot be read is never overwritten: every change is refused with the reason and the datasets read as `paused` until a person repairs it).
+
+| Mode | What is labelled |
+| --- | --- |
+| `auto` (new datasets) | episodes that finish while the service runs |
+| `history` | as `auto`, **and** this dataset's history that `watch.backlog = "skip"` set aside (episodes finished before the service first ran), newest first. `watch.backlog` itself is not changed; this is an explicit exception for one dataset, allowed while `[queue] history = "registered_only"` (with `"off"` it acts as `auto`) |
+| `paused` | nothing; the episodes are still mirrored and counted, and the queue is kept |
+| `off` | nothing |
+
+Switching `history` back to `auto` leaves the history episodes already taken in to be labelled; the rest is set aside again. Only a person changes a mode: `levi live queue set <dataset> <mode>`, or `POST /api/levi/live/datasets/{name}/labelling` (the page's UI token; an agent credential gets 403). The supervisor only registers a dataset it has not seen, with `[queue] default_mode`.
+
+**The queue.** One batch at a time (as before). Datasets in `auto` go before datasets in `history`; among equals the one that waited longest goes first. A `history` dataset's episodes go newest first (`[queue] order`). `status.json` lists every dataset in `queue` (below).
+
+**Yield rules (`[gpu.yield]`, on by default).** While any reason holds, the worker is told to cancel its request in flight (it reads `live/gate.json` every 0.2 s and the supervisor looks again within 0.25 s, so a request is cut in under a second) and is stopped 2 s later (its runs pause and resume from the last finished episode), and **vLLM is neither started nor woken**; an awake vLLM follows the ordinary sleep rules (`gpu.min_free_mib`, idle timeout). `live/gate.json` closes with code `yield`, which also holds back a person's Run in the live workspace's core.
+
+| Reason (`code`) | Holds while |
+| --- | --- |
+| `deployment` | a port of `gpu.policy_ports` has a listener in `/proc/net/tcp*` (nothing connects), **or** an evaluation session has not ended (`standby`, `running`, `homing`, `waiting_reset` or `fault`; not `stopped`, `finished` or crashed): the whole deployment, not only `running` |
+| `robot_quiet` | a session is in one of `gpu.quiet_states` |
+| `foreign_gpu` | processes other than this service's own vLLM use more than `foreign_gpu_mib` (2000) of GPU memory (`nvidia-smi --query-compute-apps`, read at most every 5 s, and only while something waits or a yield is on) |
+| `foreign_lock` | somebody else holds `gpu.lock_file` (read from `/proc/locks`, no lock is taken) |
+| `probe_error` | the socket table, the GPU's process list or the lock holders cannot be read: **fail closed**, what cannot be seen is taken as in use |
+| (vLLM cannot get the room) | not a yield reason: the existing `insufficient_vram`, `vram` and `gpu_wait` decisions keep applying |
+
+**Resuming.** All reasons must stay gone for `resume_after_s` (60) in a row; a reason that comes back starts the count again. Then the next batch starts from the episodes not yet labelled, none twice. The online judgement keeps its own gate (it exists for the deployment) but never wakes the model while `foreign_gpu`, `foreign_lock` or `probe_error` holds.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `[gpu.yield] enabled` | true | false: the rules are off and the service behaves as before this section existed (timeshare gate only) |
+| `resume_after_s` | 60 | quiet time before labelling resumes (0-86400) |
+| `foreign_gpu_mib` | 2000 | other processes' GPU memory that makes it yield; 0 switches the check (and its nvidia-smi calls) off, for a machine without an NVIDIA GPU |
+| `foreign_lock` | true | yield while somebody else holds `gpu.lock_file` |
+| `[queue] default_mode` | `auto` | the mode of a dataset nobody registered (`auto`, `paused`, `off`) |
+| `history` | `registered_only` | `registered_only` or `off` |
+| `order` | `newest_first` | the order of a `history` dataset's episodes (`newest_first`, `oldest_first`) |
+| `batch_max` | 0 | episodes per batch; 0 uses `watch.batch_max_episodes` |
+
+**Older readers.** A version that does not know `[queue]` or `[gpu.yield]` refuses the whole file. So `levi live init` writes both tables (this is the one place they always appear), and the file the service writes for its worker (`live/effective.toml`) and the file `levi live start` creates leave them out while they equal their defaults, so those files read in an older version as they always did. The mode of each dataset is in `queue.json`, which older versions never read.
+
+**Status fields.** `status.json` has `queue: [{dataset, mode, waiting, state, reason}]` with `state` one of `queued`, `running`, `yielding`, `paused` (also for `off`), `done`, `failed`, and `yield: {enabled, active, reasons: [{code, text}], since, resume_at}`; `gate.json` carries the same `yield` object. During the quiet period before resuming, the one reason is `resuming`. `labelling_paused` (the field the evaluation client reads) is not set for a deployment, only for `foreign_gpu`, `foreign_lock` or `probe_error` lasting `gpu.blocked_pause_s` (code `gpu_in_use`). `levi live status` and `levi live doctor` print the yield, why in words, and every dataset's mode and state; `levi live queue list` shows modes next to what waits.
+
+**Why is it yielding, and how does it resume?**
+
+1. `levi live status`: the `yield` line says since when and why (`deployment`: stop the policy server and end the evaluation session; `foreign_gpu`: the process named is another job's; `foreign_lock`: `fuser`/`lslocks` name the holder; `probe_error`: the text says what cannot be read, for example `nvidia-smi`).
+2. When the reason goes, `resume at` appears; labelling continues 60 s later without any command.
+3. A damaged `queue.json` shows in `levi live doctor`; repair or delete it (the service registers the datasets again), nothing is labelled until then.
+4. To label while a policy server runs anyway, set `[gpu.yield] enabled = false` (restart the service): the earlier timeshare behaviour returns.
+
+### Using the engine of the product's subtask annotation
+
+The worker plans its runs with the same `runs.plan` and workflow model a person's subtask annotation uses. Three things keep the two aligned:
+
+- **`[pipeline.workflow]`** (empty by default) merges options into the time-segment workflow, for example `event_intelligence = { mode = "candidates" }` (see [Event intelligence](EVENTS.md)). Keys are checked when the file is read by the planner's own model, so an unknown or invalid key is refused with its message, and the options the worker sets itself (`kind`, `definitions`, `coarse_step_seconds`, `max_evidence_frames`, `refine`, `pilot_episode`, `require_human_pilot`, `anchored`) cannot be named. It applies to the time-segment run, not to the release review. An empty table is not written to any file. A non-empty one makes the supervisor import the planner's model (pydantic) at start. `pipeline.temporal = true` stays the default: the time segments are what the analysis needs.
+- **Capability drift** in `levi live doctor`: it lists the options this LEVI's workflow accepts that the live pipeline neither sets nor has declared it leaves at the default, as notes (nothing is changed), so an upgrade that adds an option is noticed.
+- **A `capability` record** as a top-level key of each episode's record in the dataset state (`demos.<demo>.capability`) and of its row in `stats.jsonl`, under 4 KB: `{schema: "levi.live.capability.v1", levi: {commit, version}, plan_digest (the latest stage's), plans: {temporal, review}, spec: "id@version"|null (the release review's), event_intelligence: {mode, algorithm_sha256} (the time segments'), at}`. After a batch that finished or failed on its own, the worker also calls the post-evaluation analysis (`analysis.sync_quiet`), when that module exists; never while the labelling yields. Results made before it existed have none; readers use `capability.of(part)`, which returns nothing for them. No existing field changed its meaning, and the result is still marked automatic and unreviewed.
 
 ## The automatic approver
 
@@ -644,6 +709,7 @@ A person can take an episode out of a live dataset from the live page (a mishap,
 | `<workspace>/live/datasets/<name>.json` | per-dataset state: demos and their state (and `excluded` on those a person removed), the batch in progress, last batch, verdicts |
 | `<workspace>/live/audit.jsonl` | the approver's audit log, and a line for every episode a person removed or restored (rotates) |
 | `<workspace>/live/worker.json`, `gate.json`, `vllm.json`, `service.json` | worker progress, the gate, the vLLM this service started, first-start time |
+| `<workspace>/live/queue.json` | each dataset's labelling mode (`auto`, `history`, `paused`, `off`), written atomically; see [Background labelling queue and yield rules](#background-labelling-queue-and-yield-rules) |
 | `<workspace>/live/gate.jsonl` | every change of the gate (rotates; see "History and statistics") |
 | `<workspace>/live/stats.jsonl` | one record per labelled demo (rotates; see "History and statistics") |
 | `<workspace>/live/online.jsonl` | one line per online judgement request, no images (rotates; see [Online judgement](#online-judgement-interface-c5)); `live/online-tmp/` holds a request's images while the model reads them |
@@ -737,7 +803,7 @@ The quantitative record of the labelling: how long each stage takes after an epi
           "vllm": {"state": "stopped", "port": 8100, "profile": null, "max_model_len": null, "started_at": null, "error": "", "owned": false},
           "policy_server_seen": true,
           "gate": {"open": false, "code": "policy_inferring|robot_quiet|episode_imminent|unknown_client|open", "reason": "…"},
-          "decision": {"allowed": false, "code": "ok|settling|insufficient_vram|vram|lock|gate_closed|evaluation_active|standby_settling|prewarm_waiting_for_policy|gpu_not_free|backoff|needs_attention|external_busy|policy_large|manual|error|asleep", "reason": "…"},
+          "decision": {"allowed": false, "code": "ok|settling|insufficient_vram|vram|lock|gate_closed|evaluation_active|standby_settling|prewarm_waiting_for_policy|gpu_not_free|backoff|needs_attention|external_busy|policy_large|manual|yield|error|asleep", "reason": "…"},
           "free_mib": 21574, "free_mib_at": 1790000000.0, "idle_since": null, "prewarm": false, "lock_held": false},
   "datasets": {"pi05__stack_plates": {"episodes": 12, "pending": 2, "annotating": 0, "done": 9, "failed": 1,
         "skipped": 0, "rejected": 0, "waiting": 1, "backlog": 0, "incomplete": 1, "fr3_fault": 1, "discarded": 0,
@@ -745,6 +811,8 @@ The quantitative record of the labelling: how long each stage takes after an epi
         "state": "idle|pending|annotating|awaiting_approval|error", "awaiting": "plan|changes (when awaiting_approval)",
         "stuck": 0, "source_changed": 0, "excluded": 0, "review_runs_open": 3,
         "fault": true, "fault_reasons": ["…"]}},
+  "queue": [{"dataset": "pi05__stack_plates", "mode": "auto|history|paused|off", "waiting": 2, "state": "queued|running|yielding|paused|done|failed", "reason": ""}],
+  "yield": {"enabled": true, "active": false, "reasons": [{"code": "deployment|robot_quiet|foreign_gpu|foreign_lock|probe_error|resuming", "text": "…"}], "since": null, "resume_at": null},
   "queue_depth": 1, "worker": {"pid": 99, "dataset": "…", "phase": "temporal", "note": null, "started_at": 1.0},
   "sessions": [{"group": "pi05", "task_folder": "stack_plates", "state": "running", "reported_state": "running", "crashed": false,
         "age_s": 0.4, "reason": "", "levi_enabled": true, "episode": {"no": 3, "target": 10, "counted": 2}, "last_episode": {},
@@ -782,6 +850,8 @@ Served by the core of the live workspace and by the product LEVI's core, which r
 | `GET /audit?limit=50` | `{"enabled", "audit": [ {"time", "principal": "live-auto", "tool", "run_id"?, "changeset_id"?, "revision"?, "repo_id"?, "episodes"?, "decision": "allowed|refused", "reason"?} ]}` newest first, ≤ 100. Lines of a person's removal or restore have `"principal": "local-human"`, `"actor": "person"`, `"tool": "episode.exclude"` or `"episode.restore"`, `"dataset"`, `"demo"`, `"reason"?`, `"via": "product"`? (made on the product LEVI's page), `"decision": "completed"`. |
 | `POST /datasets/{name}/exclude` | Body `{"demos": ["demo_0003", …], "reason": "…"?}` (1 to 500 names, the reason at most 300 characters). Removes the episodes (all or nothing). `{"enabled", "dataset", "changed": [...], "unchanged": [...] (already removed), "counts", "excluded_count", "review_runs_open", "review_hidden": [...] (open review runs whose episodes are all removed, not counted)}`. 404: unknown dataset or episode (named), or not a live workspace; 409: an episode is in the batch in progress ("being labelled …"), or was never taken into the dataset (rejected, stuck); 401/403: not a person (see above). |
 | `POST /datasets/{name}/restore` | Body `{"demos": [...]}`. Puts removed episodes back; the answer is as above, (`review_hidden` is what is still not counted after the restore); episodes that are not removed are in `unchanged`. 404 for an unknown episode. |
+| `GET /queue` | `{"enabled", "default_mode", "history", "order", "problem" (why `queue.json` cannot be read, else null), "datasets": {name: {"mode", "since", "by"}}, "queue": [status rows], "yield": {…}}`. |
+| `POST /datasets/{name}/labelling` | Body `{"mode": "auto\|history\|paused\|off", "request_id"}` (a person: the UI token; an agent credential gets 403). `{"enabled", "dataset", "mode", "previous", "changed", "replayed"}`; the same `request_id` again changes nothing (`replayed`), for another change it is 409; 422 for a bad mode, 404 for an unknown dataset, 409 when `queue.json` cannot be read (it is left as it is). One line `labelling.set` in `live/audit.jsonl` per change. |
 | `POST /datasets/{name}/demos/{demo}/exclude`, `…/restore` | The same for one episode (the first takes an optional body `{"reason"}`). |
 | `GET /service` | `{"enabled" (LEVI_LIVE_SERVICE_CONTROL), "served_by_live_service", "workspace_found", "workspace_name", "unit": {"name", "installed", "load_state", "state", "sub_state", "main_pid", "exec_main_status", "n_restarts", "ui", "runs_live", "flapping", "problem"}, "holder": {"pid", "alive", "started_by": "unit"\|"terminal"\|"terminal_once"\|"other"\|null, "cgroup_unit", "name", "started_at"}, "ports": [{"port", "role": "core"\|"online"\|"vllm"\|"ui", "state": "free"\|"ours"\|"foreign"\|"unknown", "pid", "name"}], "gpu": {"state": "ok"\|"unreadable"\|"unknown", "lock": {"configured", "state": "disabled"\|"free"\|"live"\|"other", "pid", "name"}, "others": [{"pid", "name", "memory_mib"}] \| null (unreadable), "vllm_state"}, "evaluation": {"active" (null: cannot be told), "count", "sessions"}, "start_checks"/"stop_checks": [{"code", "level": "refuse"\|"confirm"\|"warn", "message"}], "can_start", "can_stop", "refusals", "needs_confirmation": {"start", "stop"}, "operation": the running one \| null, "confirm": {"start", "stop", "force_phrase"}}`. Read-only. |
 | `POST /service/start` | Body `{"request_id", "confirm": "start-live", "confirm_gpu_shared"?, "reset_failed"?}`. 202 `{"operation_id", "action", "request_id", "state": "running", "method": "systemctl", "created", …}`. 400 `confirm_required`/`request_id_invalid`; 403 `disabled` or not a person; 409 `already_running`, `terminal_instance`, `once_instance`, `holder_unidentified`, `unit_flapping`, `unit_busy`, `unit_failed`, `port_foreign`, `gpu_shared_unconfirmed`, `served_by_live_service`, `request_reused`; 412 `unit_not_installed`, `unit_name_invalid`, `unit_is_self`, `unit_not_live`, `no_live_workspace`, `not_writable`; 423 `busy` (with the running `operation_id`); 503 `systemd_unavailable`, `ports_unknown`. The detail is `{"code", "message", …}`; `request_id` is 8 to 80 letters, digits, dots, underscores, colons or hyphens. |

@@ -406,6 +406,14 @@ class Pipeline:
     # settings are then not used (and not checked); they stay as they are, so
     # switching back needs no other edit.
     background: bool = True
+    # Extra options for the time-segment (temporal) workflow the worker hands
+    # to ``runs.plan``, the same engine a person's subtask annotation uses
+    # (``[pipeline.workflow]``; for example ``event_intelligence = { mode =
+    # "candidates" }``). Checked by ``runs.plan``'s own workflow model at
+    # load time; the options the worker sets itself cannot be named. Empty
+    # (the default): nothing is merged and the table is not written to a file,
+    # so a default file reads in older versions as it always did.
+    workflow: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -613,6 +621,10 @@ class Config:
         if w.batch_max_episodes < 1:
             problems.append("watch.batch_max_episodes must be >= 1")
         problems.extend(_queue_problems(self))
+        if p.workflow:
+            from . import capability
+
+            problems.extend(capability.problems(self))
         if p.max_attempts < 1:
             problems.append("pipeline.max_attempts must be >= 1")
         if r.report_keep < 1:
@@ -1361,9 +1373,24 @@ def load(path=None, workspace=None) -> Config:
     return config
 
 
+def _toml_key(key) -> str:
+    text = str(key)
+    if text and all(c.isalnum() and c.isascii() or c in "_-" for c in text):
+        return text
+    return _toml_value(text)
+
+
 def _toml_value(value) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, dict):
+        return (
+            "{ "
+            + ", ".join(f"{_toml_key(k)} = {_toml_value(v)}" for k, v in value.items())
+            + " }"
+            if value
+            else "{}"
+        )
     if isinstance(value, (int, float)):
         return repr(value)
     if isinstance(value, list):
@@ -1406,6 +1433,8 @@ def render(config: Config | None = None, full: bool = False) -> str:
             value = getattr(obj, f.name)
             if dataclasses.is_dataclass(value) or isinstance(value, dict):
                 child = f"{name}.{f.name.rstrip('_')}"
+                if isinstance(value, dict) and not value:
+                    continue  # a table of free keys with nothing in it
                 if (
                     child in OMIT_TABLES_AT_DEFAULT
                     and not full

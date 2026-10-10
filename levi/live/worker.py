@@ -40,7 +40,17 @@ import time
 from pathlib import Path
 
 from . import auto as approver_log
-from . import catalogue, exclusion, generic, gpumgr, jsonio, judge, mirror, stats
+from . import (
+    capability,
+    catalogue,
+    exclusion,
+    generic,
+    gpumgr,
+    jsonio,
+    judge,
+    mirror,
+    stats,
+)
 from . import config as live_config
 from . import queue as labelling_queue
 
@@ -570,6 +580,9 @@ class Worker:
                         cameras,
                         generic.guideline(task, p.guideline),
                         {
+                            # Extra options of ``[pipeline.workflow]`` first:
+                            # what the worker sets itself always wins.
+                            **p.workflow,
                             "kind": "temporal",
                             "definitions": generic.definitions(),
                             "coarse_step_seconds": step,
@@ -634,6 +647,17 @@ class Worker:
                     segments.get(proposal["episode_index"], 0) + 1
                 )
 
+        # How these segments were made (LEVI commit, plan digest, event
+        # intelligence): a record next to the result, never read to decide.
+        made = None
+        with contextlib.suppress(Exception):
+            made = capability.stamp(run, kind="temporal", at=now)
+
+        def remember(row):
+            if made:
+                with contextlib.suppress(Exception):
+                    row["capability"] = capability.combine(row.get("capability"), made)
+
         def change_state(value):
             for demo in demos:
                 ep = index[demo]
@@ -650,6 +674,7 @@ class Worker:
                         },
                         episode_index=ep,
                     )
+                    remember(row)
                 elif ep in failed:
                     row["attempts"] = row.get("attempts", 0) + 1
                     row["reason"] = f"{failed[ep]['phase']}: {failed[ep]['reason']}"[
@@ -699,6 +724,7 @@ class Worker:
         # asks for the last placement (``basis.require_place``) reads them.
         rows = self.state().get("demos") or {}
         results = {}
+        made: dict = {}
         for demo in demos:
             try:
                 record = self.call(
@@ -743,6 +769,17 @@ class Worker:
                 "review": "auto",
                 "evaluated": False,
             }
+            # How this verdict was made: the episode's top-level ``capability``
+            # (see ``capability.combine``), set where the verdict is stored.
+            with contextlib.suppress(Exception):
+                made[demo] = capability.stamp(
+                    run,
+                    kind="review",
+                    spec=(
+                        (record.get("spec") or {}).get("id"),
+                        (record.get("spec") or {}).get("version"),
+                    ),
+                )
             if reworded:
                 # The question quoted the lab's wording, not the recorded text.
                 results[demo]["task_rewritten"] = reworded
@@ -759,6 +796,11 @@ class Worker:
             for demo, verdict in results.items():
                 row = value["demos"].setdefault(demo, {})
                 row["verdict"] = verdict
+                if demo in made:
+                    with contextlib.suppress(Exception):
+                        row["capability"] = capability.combine(
+                            row.get("capability"), made[demo]
+                        )
                 if verdict is None:
                     row["verdict_reason"] = (
                         "no anchored record (episode set aside or no gripper openings)"
@@ -995,6 +1037,9 @@ class Worker:
             },
             # The operator label (ground truth), apart from the verdict.
             "operator_label": stats.operator_brief(row.get("operator_label")),
+            # How the automatic results were made (capability.py); absent for
+            # an episode labelled before the record existed.
+            **({"capability": row["capability"]} if capability.of(row) else {}),
         }
 
     def finish(self, batch, index=None):
@@ -1334,7 +1379,27 @@ def main(argv=None) -> int:
                     "updated_at": time.time(),
                 },
             )
+    after_batch(config, args.dataset, code)
     return code
+
+
+def after_batch(config, name, code) -> bool:
+    """After a batch ended on its own (finished or failed), record the
+    post-evaluation analysis of this dataset: ``analysis.sync_quiet`` is
+    idempotent, safe to run concurrently and never raises. Not after a batch
+    that was stopped (so not while the labelling yields the GPU), that waits
+    for a person or the model, or that found nothing to do. The analysis
+    module may be absent (an older checkout): then nothing happens. True when
+    it was called."""
+    if code not in (OK, ERROR):
+        return False
+    try:
+        from . import analysis
+    except ImportError:
+        return False
+    with contextlib.suppress(Exception):
+        analysis.sync_quiet(config, name)
+    return True
 
 
 def _open_runs(batch):
