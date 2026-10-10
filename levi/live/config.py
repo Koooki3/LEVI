@@ -27,6 +27,22 @@ DEFAULT_VLLM_SCRIPT = "scripts/vllm/serve.sh"
 DEFAULT_VLLM_PID_DIR = "~/.levi-live/vllm"
 GPU_MODES = ("auto", "timeshare", "coexist", "manual")
 LOCK_UNAVAILABLE = ("continue", "wait")
+# The states an evaluation session file can report (interface C2), the
+# values ``gpu.busy_states`` and ``gpu.quiet_states`` may list.
+SESSION_STATES = (
+    "standby",
+    "running",
+    "homing",
+    "waiting_reset",
+    "fault",
+    "stopped",
+    "finished",
+)
+# Pressure Stall Information files (``/proc/pressure/<kind>``) the online
+# judgement may watch (``online.pressure_kinds``).
+PRESSURE_KINDS = ("cpu", "memory", "io")
+# A CPU number larger than this in ``vllm.cpus`` is a typo, not a machine.
+MAX_CPU = 8191
 CHECKOUT = Path(__file__).resolve().parents[2]
 
 
@@ -105,6 +121,16 @@ class Gpu:
     # model no request then). Homing, waiting for the reset, standby, fault,
     # stopped and finished leave the GPU to the model.
     busy_states: list = field(default_factory=lambda: ["running"])
+    # Session states in which the robot moves although the policy does not
+    # infer (for example ``["homing"]``): the gate closes as it does for
+    # ``busy_states`` (code ``robot_quiet``), so a sleeping vLLM is not woken
+    # and neither the background labelling nor an online judgement sends a
+    # request; an online judgement waits for the gate as it does for
+    # ``episode_imminent``. Empty (the default): no state is quiet, the gate
+    # is decided exactly as before. Applies in timeshare and coexist; manual
+    # mode never closes the gate. The states are only ever read from the
+    # session files, never inferred.
+    quiet_states: list = field(default_factory=list)
     # The next episode follows a ``waiting_reset`` by the client's
     # ``reset_wait_s``: the gate closes this many seconds before it (the
     # policy's first inference must not meet a model request), and stays
@@ -242,6 +268,18 @@ class Vllm:
     # keep it resident: idle only puts it to sleep, it stops with the service.
     # The way to avoid any cold start while the robot evaluates.
     prewarm: bool = False
+    # The niceness (0-19) the vLLM this service starts runs at, through
+    # ``nice -n`` in front of the launch script. -1 (the default): no prefix,
+    # vLLM inherits the supervisor's own priority (``resources.nice``). A
+    # process without privileges cannot lower its niceness, so a value below
+    # ``resources.nice`` is refused.
+    nice: int = -1
+    # CPUs the vLLM this service starts may run on, in ``taskset -c`` list
+    # form ("8-15,24-31"), through ``taskset -c`` in front of the launch
+    # script; children (the engine processes) inherit it. Empty (the
+    # default): no prefix, the CPUs are not restricted. ``levi live doctor``
+    # fails a list that names none of the CPUs this process may use.
+    cpus: str = ""
 
 
 @dataclass
@@ -312,6 +350,13 @@ class Online:
     timeout_s: float = 15.0
     # Largest request body accepted (MiB); a larger one is refused with 413.
     max_body_mb: float = 8.0
+    # Host pressure: when the "some avg10" of any of ``pressure_kinds`` in
+    # /proc/pressure is above this (a percentage, 0-100), an online
+    # judgement is not admitted (``gate_closed: host_pressure: ...``, the
+    # client retries within its deadline). 0 (the default): off, nothing is
+    # read. A kernel without the files is never a refusal.
+    pressure_avg10_max: float = 0.0
+    pressure_kinds: list = field(default_factory=lambda: list(PRESSURE_KINDS))
 
 
 @dataclass
@@ -456,6 +501,8 @@ class Config:
             problems.append("service.poll_idle_s >= 1 and poll_active_s >= 0.5")
         if not 0 <= r.nice <= 19:
             problems.append("resources.nice must be 0-19")
+        problems.extend(_quiet_problems(g))
+        problems.extend(_vllm_priority_problems(v, r))
         if r.threads < 1 or r.view_workers < 1:
             problems.append("resources.threads and view_workers must be >= 1")
         if not 0.5 <= g.resume_stable_s <= 60:
@@ -477,6 +524,68 @@ class Config:
         if problems:
             raise ValueError("Invalid live configuration: " + "; ".join(problems))
         return self
+
+
+def _state_list_problems(key, states) -> list:
+    """``states`` must list session states (``SESSION_STATES``) by name."""
+    if not all(isinstance(x, str) for x in states):
+        return [f"{key} must list session state names"]
+    unknown = sorted(set(states) - set(SESSION_STATES))
+    if unknown:
+        return [
+            (
+                f"{key} names unknown session state(s) {', '.join(unknown)}; "
+                f"the states are {', '.join(SESSION_STATES)}"
+            )
+        ]
+    return []
+
+
+def _quiet_problems(g) -> list:
+    return _state_list_problems("gpu.quiet_states", g.quiet_states)
+
+
+def parse_cpus(text) -> list:
+    """The CPUs of a ``taskset -c`` list ("8-15,24-31"), sorted; ValueError
+    naming what is wrong. Only the list form is accepted (not a hex mask)."""
+    cpus: set = set()
+    parts = str(text).replace(" ", "").split(",")
+    if not str(text).strip():
+        raise ValueError("it is empty")
+    for part in parts:
+        if not part:
+            raise ValueError(f"{text!r} has an empty item")
+        low, dash, high = part.partition("-")
+        if not low.isdigit() or (dash and not high.isdigit()):
+            raise ValueError(
+                f"{part!r} is not a CPU number or a range a-b "
+                '(the taskset -c list form, e.g. "8-15,24-31")'
+            )
+        first, last = int(low), int(high) if dash else int(low)
+        if first > last:
+            raise ValueError(f"the range {part!r} runs backwards")
+        if last > MAX_CPU:
+            raise ValueError(f"CPU {last} is above {MAX_CPU}")
+        cpus.update(range(first, last + 1))
+    return sorted(cpus)
+
+
+def _vllm_priority_problems(v, r) -> list:
+    out = []
+    if v.nice != -1 and not 0 <= v.nice <= 19:
+        out.append("vllm.nice must be -1 (inherit the service's priority) or 0-19")
+    elif v.nice != -1 and v.nice < r.nice:
+        out.append(
+            f"vllm.nice {v.nice} is below resources.nice {r.nice}: the service "
+            "runs at resources.nice and cannot lower a child's niceness without "
+            "privileges; use at least resources.nice, or -1 to inherit it"
+        )
+    if v.cpus:
+        try:
+            parse_cpus(v.cpus)
+        except ValueError as exc:
+            out.append(f"vllm.cpus {v.cpus!r} is not a CPU list: {exc}")
+    return out
 
 
 def _review_only_problems(p) -> list:
@@ -561,6 +670,24 @@ def _online_problems(config) -> list:
         out.append("online.timeout_s must be 1-120 seconds")
     if not 0.5 <= o.max_body_mb <= 64:
         out.append("online.max_body_mb must be 0.5-64")
+    if not 0 <= o.pressure_avg10_max <= 100:
+        out.append("online.pressure_avg10_max must be 0 (off) to 100 (a percentage)")
+    if not isinstance(o.pressure_kinds, list) or not all(
+        isinstance(k, str) for k in o.pressure_kinds
+    ):
+        out.append("online.pressure_kinds must list cpu, memory or io")
+    else:
+        unknown = sorted(set(o.pressure_kinds) - set(PRESSURE_KINDS))
+        if unknown:
+            out.append(
+                f"online.pressure_kinds names unknown kind(s) {', '.join(unknown)}; "
+                f"use {', '.join(PRESSURE_KINDS)}"
+            )
+        elif o.pressure_avg10_max > 0 and not o.pressure_kinds:
+            out.append(
+                "online.pressure_kinds is empty although online.pressure_avg10_max "
+                "is set: name at least one of cpu, memory, io"
+            )
     if not o.enabled:
         return out
     taken = {
@@ -725,6 +852,8 @@ def checks(config: "Config", *, watching: bool = True) -> list:
                     "writes vllm_<port>.pid there",
                 )
             )
+    out.extend(_launch_prefix_checks(c))
+    out.extend(_pressure_checks(c))
     # The shared GPU lock.
     if not c.gpu.lock_file:
         out.append(
@@ -782,6 +911,129 @@ def checks(config: "Config", *, watching: bool = True) -> list:
                 )
             )
     return out
+
+
+def allowed_cpus() -> set | None:
+    """The CPUs this process may run on (its affinity, which a child it
+    starts inherits), None when it cannot be read."""
+    try:
+        return set(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        return None
+
+
+def _launch_prefix_checks(c) -> list:
+    """``vllm.nice`` and ``vllm.cpus`` against this machine: the commands
+    exist, and the CPU list names CPUs this process may use (``taskset``
+    refuses a list with none of them, and vLLM would then not start)."""
+    import shutil
+
+    v, out = c.vllm, []
+    if v.nice == -1 and not v.cpus:
+        return out
+    if c.gpu.mode == "manual":
+        out.append(
+            _check(
+                "warn",
+                "vllm.cpus" if v.cpus else "vllm.nice",
+                "vllm.nice / vllm.cpus are set but gpu.mode is manual: this "
+                "service starts no vLLM, so they are not used",
+                "start your own vLLM with nice/taskset, or leave them at -1 / empty",
+            )
+        )
+        return out
+    if v.nice != -1:
+        if shutil.which("nice") is None:
+            out.append(
+                _check(
+                    "fail",
+                    "vllm.nice",
+                    "vllm.nice is set but the nice command is not on PATH",
+                    "install coreutils, or set vllm.nice = -1",
+                )
+            )
+        else:
+            out.append(_check("ok", "vllm.nice", f"vLLM runs at nice {v.nice}"))
+    if v.cpus:
+        try:
+            wanted = set(parse_cpus(v.cpus))
+        except ValueError:  # validate() refuses it first
+            wanted = set()
+        allowed = allowed_cpus()
+        if shutil.which("taskset") is None:
+            out.append(
+                _check(
+                    "fail",
+                    "vllm.cpus",
+                    "vllm.cpus is set but the taskset command is not on PATH",
+                    'install util-linux, or set vllm.cpus = ""',
+                )
+            )
+        elif allowed is not None and not wanted & allowed:
+            out.append(
+                _check(
+                    "fail",
+                    "vllm.cpus",
+                    f"vllm.cpus {v.cpus} names none of the CPUs this process may "
+                    f"use ({cpu_text(allowed)}): vLLM could not run",
+                    "choose CPUs from that list, or leave vllm.cpus empty",
+                )
+            )
+        elif allowed is not None and wanted - allowed:
+            out.append(
+                _check(
+                    "warn",
+                    "vllm.cpus",
+                    f"vllm.cpus {v.cpus} names CPUs this process may not use "
+                    f"({cpu_text(wanted - allowed)}); vLLM runs on the others "
+                    f"({cpu_text(wanted & allowed)})",
+                    "correct vllm.cpus",
+                )
+            )
+        else:
+            out.append(_check("ok", "vllm.cpus", f"vLLM runs on CPUs {v.cpus}"))
+    return out
+
+
+def cpu_text(cpus) -> str:
+    """A set of CPUs as a ``taskset -c`` list ("0-3,8")."""
+    runs, ordered = [], sorted(cpus)
+    for cpu in ordered:
+        if runs and cpu == runs[-1][1] + 1:
+            runs[-1][1] = cpu
+        else:
+            runs.append([cpu, cpu])
+    return ",".join(str(a) if a == b else f"{a}-{b}" for a, b in runs)
+
+
+def _pressure_checks(c) -> list:
+    """With the host-pressure refusal on, the PSI files must be readable:
+    a kernel without them never refuses, so the setting would do nothing."""
+    o = c.online
+    if not (o.enabled and o.pressure_avg10_max > 0):
+        return []
+    missing = [
+        k for k in o.pressure_kinds if not os.access(f"/proc/pressure/{k}", os.R_OK)
+    ]
+    if missing:
+        return [
+            _check(
+                "warn",
+                "online.pressure_avg10_max",
+                "online.pressure_avg10_max is set but /proc/pressure/"
+                f"{{{','.join(missing)}}} cannot be read (a kernel without PSI): "
+                "host pressure never refuses an online judgement",
+                "boot with psi=1, or set online.pressure_avg10_max = 0",
+            )
+        ]
+    return [
+        _check(
+            "ok",
+            "online.pressure_avg10_max",
+            f"online judgements are refused above {o.pressure_avg10_max:g}% "
+            f"some avg10 of {', '.join(o.pressure_kinds)}",
+        )
+    ]
 
 
 def preflight(config: "Config", *, watching: bool = True) -> list:

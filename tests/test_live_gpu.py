@@ -2052,3 +2052,351 @@ def test_a_dual_label_session_closes_the_gate_only_while_the_policy_runs(tmp_pat
         assert ctl._evaluation_unfinished() is True, state
     s.state = "finished"
     assert ctl._evaluation_unfinished() is False
+
+
+# --- optional robot-side protection: quiet states, vLLM priority and CPUs ----------------
+
+
+ALL_STATES = live_config.SESSION_STATES
+
+
+def quiet_cfg(mode="timeshare", states=("homing",)):
+    c = cfg_for(mode)
+    c.gpu.quiet_states = list(states)
+    return c.validate()
+
+
+def test_the_new_settings_default_to_the_old_behaviour():
+    c = live_config.Config()
+    assert c.gpu.quiet_states == []
+    assert c.vllm.nice == -1 and c.vllm.cpus == ""
+    assert c.online.pressure_avg10_max == 0.0
+    assert c.online.pressure_kinds == ["cpu", "memory", "io"]
+    # The gate is decided exactly as before for every state and mode.
+    for mode in ("timeshare", "coexist", "manual"):
+        for state in ALL_STATES:
+            for crashed in (False, True):
+                for policy_up in (False, True):
+                    sessions = {("g", "t"): session(state, crashed=crashed)}
+                    found = gpumgr.gate(c, mode, sessions, policy_up)
+                    # main's rule: running infers; a policy server that only
+                    # an ended session could vouch for is an unknown client.
+                    expect_closed = mode == "timeshare" and (
+                        (state == "running" and not crashed)
+                        or (policy_up and state in ("stopped", "finished"))
+                    )
+                    assert found.open is not expect_closed, (mode, state, crashed)
+                    if mode != "timeshare":
+                        assert (found.code, found.reason) == (
+                            "open",
+                            f"gpu.mode is {mode}",
+                        )
+    # And the launch command is exactly the script and its arguments.
+    assert gpumgr.launch_prefix(c, current_nice=0) == []
+
+
+def test_a_quiet_state_closes_the_gate_as_robot_quiet():
+    c = quiet_cfg()
+    gate = gpumgr.gate
+    homing = {("g", "t"): session("homing")}
+    for mode in ("timeshare", "coexist"):
+        found = gate(c, mode, homing, True)
+        assert not found.open and found.code == "robot_quiet", mode
+        assert "g/t is homing" in found.reason and "quiet_states" in found.reason
+    # Manual never closes the gate; a crashed client does not move the robot.
+    assert gate(c, "manual", homing, True).open
+    assert gate(
+        c, "timeshare", {("g", "t"): session("homing", crashed=True)}, True
+    ).open
+    # The other states keep their old answers.
+    for state in ("waiting_reset", "standby", "fault"):
+        assert gate(c, "timeshare", {("g", "t"): session(state)}, True).open, state
+    assert gate(c, "coexist", {("g", "t"): session("running")}, True).open
+    # Inference comes first: one task running and another homing.
+    both = {("g", "a"): session("homing"), ("g", "b"): session("running")}
+    assert gate(c, "timeshare", both, True).code == "policy_inferring"
+    assert gate(c, "coexist", both, True).code == "robot_quiet"
+
+
+def test_the_quiet_gate_follows_the_session_through_an_episode():
+    """standby -> running -> homing -> waiting_reset -> running: closed
+    exactly in running (inferring) and homing (quiet), with the right code."""
+    c = quiet_cfg()
+    seen = []
+    for state in (
+        "standby",
+        "running",
+        "homing",
+        "waiting_reset",
+        "running",
+        "finished",
+    ):
+        found = gpumgr.gate(c, "timeshare", {("g", "t"): session(state)}, False)
+        seen.append((state, found.open, found.code))
+    assert seen == [
+        ("standby", True, "open"),
+        ("running", False, "policy_inferring"),
+        ("homing", False, "robot_quiet"),
+        ("waiting_reset", True, "open"),
+        ("running", False, "policy_inferring"),
+        ("finished", True, "open"),
+    ]
+
+
+def test_quiet_comes_before_the_imminent_episode_and_the_unknown_client():
+    c = quiet_cfg(states=("homing", "waiting_reset"))
+    s = session("waiting_reset")
+    s.reset_wait_s = 10.0
+    now = 1000.0
+    found = gpumgr.gate(
+        c, "timeshare", {("g", "t"): s}, True, now=now, waiting_since={s.path: now - 8}
+    )
+    assert found.code == "robot_quiet"
+    # Without the quiet state the same moment is the imminent episode.
+    plain = cfg_for()
+    found = gpumgr.gate(
+        plain,
+        "timeshare",
+        {("g", "t"): s},
+        True,
+        now=now,
+        waiting_since={s.path: now - 8},
+    )
+    assert found.code == "episode_imminent"
+
+
+@pytest.mark.parametrize(
+    "value, words",
+    [
+        (["homeing"], "unknown session state"),
+        (["homing", 3], "must list session state names"),
+        (["Homing"], "unknown session state"),
+    ],
+)
+def test_a_wrong_quiet_state_is_an_error(value, words):
+    c = live_config.Config()
+    c.gpu.quiet_states = value
+    with pytest.raises(ValueError, match=words):
+        c.validate()
+
+
+def test_quiet_states_round_trip_through_live_toml(tmp_path):
+    c = live_config.Config()
+    c.gpu.quiet_states = ["homing", "waiting_reset"]
+    c.vllm.nice = 19
+    c.vllm.cpus = "2-3,5"
+    c.online.pressure_avg10_max = 25.0
+    c.online.pressure_kinds = ["cpu"]
+    path = tmp_path / "live.toml"
+    path.write_text(live_config.render(c))
+    back = live_config.load(path)
+    assert back.gpu.quiet_states == ["homing", "waiting_reset"]
+    assert (back.vllm.nice, back.vllm.cpus) == (19, "2-3,5")
+    assert back.online.pressure_avg10_max == 25.0
+    assert back.online.pressure_kinds == ["cpu"]
+    # The defaults render and read back as the defaults.
+    path.write_text(live_config.render(live_config.Config()))
+    plain = live_config.load(path)
+    assert plain.gpu.quiet_states == [] and plain.vllm.nice == -1
+    assert plain.vllm.cpus == "" and plain.online.pressure_avg10_max == 0.0
+
+
+def test_a_quiet_homing_keeps_a_sleeping_vllm_asleep_until_the_reset(ctl):
+    ctl.config.gpu.quiet_states = ["homing"]
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    t = time.time()
+    ctl.rollouts.session("standby")
+    up(ctl, t)
+    ctl.sleep_vllm("test", "for the test")
+    assert ctl.vllm.state == "asleep"
+    ctl.spawned.clear()
+    ctl.rollouts.write(1)
+    ctl.rollouts.session("homing")
+    assert step(ctl, t + 2) == "gate_closed" and ctl.vllm.state == "asleep"
+    assert ctl.gate.code == "robot_quiet" and ctl.spawned == []
+    gate = json.loads((ctl.config.live_dir / "gate.json").read_text())
+    assert gate["open"] is False and gate["code"] == "robot_quiet"
+    # The status does not call it a pause that needs anyone.
+    assert ctl.status(t + 2)["labelling_paused"] is None
+    # Homing over: the gate opens, vLLM wakes and the worker starts.
+    ctl.rollouts.session("waiting_reset")
+    ctl._waiting_since = {}
+    ctl.tick(t + 3)
+    assert ctl.gate.open and ctl.vllm.state == "ready"
+    assert ctl.spawned == ["pi05_fake__stack_the_plates"]
+
+
+def test_without_quiet_states_homing_still_wakes_vllm(ctl):
+    """The default: homing leaves the GPU to the model, as before."""
+    ctl.rollouts.write(0)
+    ctl.machine.ports, ctl.machine.policy_mib = {8000}, 7685
+    t = time.time()
+    ctl.rollouts.session("standby")
+    up(ctl, t)
+    ctl.sleep_vllm("test", "for the test")
+    ctl.rollouts.write(1)
+    ctl.rollouts.session("homing")
+    ctl.tick(t + 2)
+    assert ctl.gate.open and ctl.vllm.state == "ready"
+
+
+class FakePopen:
+    """Records the command; the "script" exits 0 and writes no pid file."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, argv, **kwargs):
+        self.calls.append((list(argv), kwargs))
+
+        class Done:
+            def wait(self, timeout=None):
+                return 0
+
+        return Done()
+
+
+def test_the_launch_command_is_unchanged_by_default(live):
+    c, _ = live
+    popen = FakePopen()
+    gpumgr.Vllm(c, popen=popen).start(c.vllm_profile())
+    (argv, kwargs) = popen.calls[0]
+    assert argv[0] == str(c.vllm_script)
+    assert argv[1:] == gpumgr.launch_args(c, c.vllm_profile())
+    assert kwargs["start_new_session"] is True
+
+
+def test_the_launch_goes_through_taskset_and_nice_when_configured(live, monkeypatch):
+    c, _ = live
+    c.vllm.cpus = "5, 2-3"
+    c.vllm.nice = 19
+    c.validate()
+    monkeypatch.setattr(gpumgr.os, "getpriority", lambda *a: 4)
+    popen = FakePopen()
+    fd = os.open(os.devnull, os.O_RDONLY)
+    try:
+        gpumgr.Vllm(c, popen=popen).start(c.vllm_profile(), fd=fd)
+    finally:
+        os.close(fd)
+    (argv, kwargs) = popen.calls[0]
+    script = argv.index(str(c.vllm_script))
+    assert argv[:script] == ["taskset", "-c", "2-3,5", "nice", "-n", "15"]
+    assert argv[script + 1 :] == gpumgr.launch_args(c, c.vllm_profile())
+    # The GPU lock's descriptor still reaches vLLM through both commands.
+    assert kwargs["pass_fds"] == (fd,)
+
+
+def test_nice_adds_only_what_is_missing_and_never_lowers():
+    c = live_config.Config()
+    c.vllm.nice = 19
+    assert gpumgr.launch_prefix(c, current_nice=0) == ["nice", "-n", "19"]
+    assert gpumgr.launch_prefix(c, current_nice=12) == ["nice", "-n", "7"]
+    assert gpumgr.launch_prefix(c, current_nice=19) == []
+    c.vllm.nice = -1
+    assert gpumgr.launch_prefix(c, current_nice=0) == []
+
+
+@pytest.mark.parametrize(
+    "cpus, words",
+    [
+        ("abc", "not a CPU number"),
+        ("3-1", "runs backwards"),
+        ("1,,2", "empty item"),
+        ("-1", "not a CPU number"),
+        ("0xff", "not a CPU number"),
+        ("1-", "not a CPU number"),
+        ("9000", "above"),
+    ],
+)
+def test_a_wrong_cpu_list_is_an_error(cpus, words):
+    c = live_config.Config()
+    c.vllm.cpus = cpus
+    with pytest.raises(ValueError, match=f"vllm.cpus .*{words}"):
+        c.validate()
+
+
+def test_the_cpu_list_is_read_like_taskset_does():
+    assert live_config.parse_cpus("8-11,24-27") == [8, 9, 10, 11, 24, 25, 26, 27]
+    assert live_config.parse_cpus("3") == [3]
+    assert live_config.parse_cpus(" 1 , 0 ") == [0, 1]
+    assert live_config.cpu_text({0, 1, 2, 3, 8, 10, 11}) == "0-3,8,10-11"
+
+
+@pytest.mark.parametrize(
+    "nice, words", [(20, "must be -1"), (-5, "must be -1"), (5, "below")]
+)
+def test_a_wrong_vllm_nice_is_an_error(nice, words):
+    c = live_config.Config()  # resources.nice 19
+    c.vllm.nice = nice
+    with pytest.raises(ValueError, match=words):
+        c.validate()
+    c.resources.nice = 0
+    c.vllm.nice = 5
+    c.validate()  # at or above the service's own: fine
+
+
+def _checks(c, key):
+    return [x for x in live_config.checks(c, watching=False) if x["key"] == key]
+
+
+def test_the_doctor_checks_the_cpus_against_this_machine(live, monkeypatch):
+    c, _ = live
+    assert _checks(c, "vllm.cpus") == [] and _checks(c, "vllm.nice") == []
+    monkeypatch.setattr(live_config, "allowed_cpus", lambda: {0, 1, 2, 3})
+    c.vllm.cpus = "2-3"
+    assert [x["level"] for x in _checks(c, "vllm.cpus")] == ["ok"]
+    c.vllm.cpus = "3-5"
+    (found,) = _checks(c, "vllm.cpus")
+    assert found["level"] == "warn" and "4-5" in found["message"]
+    c.vllm.cpus = "8-9"
+    (found,) = _checks(c, "vllm.cpus")
+    assert found["level"] == "fail" and "0-3" in found["message"]
+    with pytest.raises(ValueError, match="names none of the CPUs"):
+        live_config.preflight(c, watching=False)
+    # No taskset on the machine: a fail too.
+    c.vllm.cpus = "2"
+    import shutil
+
+    real = shutil.which
+    monkeypatch.setattr(
+        shutil, "which", lambda name, *a, **k: None if name == "taskset" else real(name)
+    )
+    (found,) = _checks(c, "vllm.cpus")
+    assert found["level"] == "fail" and "taskset" in found["message"]
+    # Manual mode starts no vLLM: the settings are only a warning.
+    c.gpu.mode = "manual"
+    (found,) = _checks(c, "vllm.cpus")
+    assert found["level"] == "warn" and "manual" in found["message"]
+
+
+def test_vllm_really_runs_at_the_configured_nice_and_cpus(live):
+    """Through the fake serve script: the server it detaches inherits both."""
+    c, _ = live
+    cpu = min(os.sched_getaffinity(0))
+    c.vllm.cpus = str(cpu)
+    c.vllm.nice = 19
+    c.validate()
+    vllm = gpumgr.Vllm(c)
+    assert vllm.start(c.vllm_profile()), vllm.error
+    try:
+        pid = vllm._pid()
+        assert os.sched_getaffinity(pid) == {cpu}
+        assert os.getpriority(os.PRIO_PROCESS, pid) == 19
+    finally:
+        assert vllm.stop()
+
+
+@pytest.mark.parametrize("doc", ["docs/LIVE.md", "docs/LIVE.zh-CN.md"])
+def test_the_protection_settings_are_documented(doc):
+    text = (PROJECT / doc).read_text(encoding="utf-8")
+    for key in (
+        "gpu.quiet_states",
+        "robot_quiet",
+        "vllm.nice",
+        "vllm.cpus",
+        "online.pressure_avg10_max",
+        "online.pressure_kinds",
+        "host_pressure",
+    ):
+        assert f"`{key}" in text, f"{doc} does not name {key}"

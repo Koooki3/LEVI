@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import jsonio
+from .config import cpu_text, parse_cpus
 
 HEALTH_TIMEOUT_S = 2.0
 
@@ -255,7 +256,8 @@ def decide(
 @dataclass
 class Gate:
     open: bool
-    code: str  # open | policy_inferring | unknown_client
+    # open | policy_inferring | robot_quiet | episode_imminent | unknown_client
+    code: str
     reason: str
 
 
@@ -276,14 +278,15 @@ def gate(
     to say otherwise -- a listening policy server, which may be called by a
     client this service knows nothing about. Homing, waiting for the reset,
     standby, fault, stopped, finished and a crashed client leave the GPU to the
-    model. Coexist and manual never close it."""
-    if mode != "timeshare":
+    model. Coexist and manual never close it.
+
+    ``gpu.quiet_states`` (empty by default) adds states in which the robot
+    moves and the model must stay quiet (``robot_quiet``), in timeshare and
+    coexist; manual still never closes the gate. Inference comes first: a
+    session that is running names the gate ``policy_inferring``."""
+    if mode not in ("timeshare", "coexist"):
         return Gate(True, "open", f"gpu.mode is {mode}")
-    busy = [
-        s
-        for s in sessions.values()
-        if s.state in config.gpu.busy_states and not s.crashed
-    ]
+    busy = [] if mode == "coexist" else _in_states(sessions, config.gpu.busy_states)
     if busy:
         s = busy[0]
         return Gate(
@@ -291,6 +294,17 @@ def gate(
             "policy_inferring",
             f"{s.group}/{s.task_folder} is {s.state}: the policy is inferring",
         )
+    quiet = _in_states(sessions, config.gpu.quiet_states)
+    if quiet:
+        s = quiet[0]
+        return Gate(
+            False,
+            "robot_quiet",
+            f"{s.group}/{s.task_folder} is {s.state}: the robot moves and "
+            "gpu.quiet_states keeps the model quiet",
+        )
+    if mode == "coexist":
+        return Gate(True, "open", f"gpu.mode is {mode}")
     # The next episode is due: a session waiting for the operator's reset
     # starts running ``reset_wait_s`` after it began waiting. Close ahead of it.
     if now is not None and waiting_since:
@@ -316,6 +330,13 @@ def gate(
             "it is idle",
         )
     return Gate(True, "open", "the policy is not inferring")
+
+
+def _in_states(sessions, states) -> list:
+    """Sessions (not crashed) whose reported state is one of ``states``."""
+    if not states:
+        return []
+    return [s for s in sessions.values() if s.state in states and not s.crashed]
 
 
 def _witnesses(sessions, policy_since) -> bool:
@@ -418,6 +439,56 @@ def _serves(pid, inodes, depth=6) -> bool:
         except (OSError, ValueError, IndexError):
             return False
     return False
+
+
+# --- host pressure (the online judgement's optional refusal) ----------------------
+
+
+PRESSURE_DIR = "/proc/pressure"
+
+
+def host_pressure(kinds, root=PRESSURE_DIR) -> dict:
+    """``{kind: some avg10}`` (a percentage) of each of ``kinds`` that can be
+    read from ``<root>/<kind>`` (Pressure Stall Information); a kind whose
+    file is missing or unreadable is left out."""
+    found = {}
+    for kind in kinds:
+        try:
+            text = (Path(root) / kind).read_text()
+        except OSError:
+            continue
+        for line in text.splitlines():
+            fields = line.split()
+            if not fields or fields[0] != "some":
+                continue
+            for item in fields[1:]:
+                key, _, value = item.partition("=")
+                if key == "avg10":
+                    try:
+                        found[kind] = float(value)
+                    except ValueError:
+                        pass
+            break
+    return found
+
+
+def pressure_over(online, reader=None) -> str | None:
+    """Why an online judgement is refused for host pressure now, or None.
+    ``online``: the ``[online]`` settings; off (``pressure_avg10_max`` 0)
+    reads nothing. Unreadable files never refuse."""
+    limit = online.pressure_avg10_max
+    if not limit or limit <= 0:
+        return None
+    read = reader or host_pressure
+    over = {
+        kind: value
+        for kind, value in read(online.pressure_kinds).items()
+        if value > limit
+    }
+    if not over:
+        return None
+    words = ", ".join(f"{k} some avg10 {v:g}%" for k, v in sorted(over.items()))
+    return f"{words} is over online.pressure_avg10_max ({limit:g}%)"
 
 
 # --- the shared GPU lock -----------------------------------------------------------
@@ -552,6 +623,26 @@ def script_env(config) -> dict:
     if v.model:
         env["LEVI_VLLM_MODEL"] = v.model
     return env
+
+
+def launch_prefix(config, current_nice=None) -> list:
+    """What goes in front of the launch script for ``vllm.cpus`` (``taskset
+    -c``) and ``vllm.nice`` (``nice -n``); empty with the defaults, so the
+    command is exactly the script and its arguments. ``nice -n`` adds to the
+    niceness the script would inherit (this process's, ``current_nice``), so
+    the increment is what takes vLLM to ``vllm.nice``; none when it already
+    runs there or higher (a process cannot lower it without privileges)."""
+    v, prefix = config.vllm, []
+    if v.cpus:
+        cpus = parse_cpus(v.cpus)  # validated: a list a typo cannot reach
+        prefix += ["taskset", "-c", cpu_text(cpus)]
+    if v.nice != -1:
+        now = (
+            os.getpriority(os.PRIO_PROCESS, 0) if current_nice is None else current_nice
+        )
+        if v.nice > now:
+            prefix += ["nice", "-n", str(v.nice - now)]
+    return prefix
 
 
 def launch_args(config, profile) -> list:
@@ -769,10 +860,13 @@ class Vllm:
             env["VLLM_SERVER_DEV_MODE"] = "1"
         self.config.logs_dir.mkdir(parents=True, exist_ok=True)
         log = self.config.logs_dir / "vllm-launch.log"
+        prefix: list = []
         try:
+            prefix = launch_prefix(self.config)
             with log.open("ab") as sink:
                 process = self.popen(
                     [
+                        *prefix,
                         str(self.config.vllm_script),
                         *launch_args(self.config, profile),
                     ],
@@ -786,9 +880,12 @@ class Vllm:
                 code = process.wait(timeout=120)
         except (OSError, subprocess.SubprocessError) as exc:
             self.state = "error"
+            through = (
+                f" through {' '.join(prefix)} (vllm.cpus, vllm.nice)" if prefix else ""
+            )
             self.error = (
                 f"vLLM launch failed: {type(exc).__name__} running "
-                f"{self.config.vllm_script} (vllm.script; docs/VLLM.md, "
+                f"{self.config.vllm_script}{through} (vllm.script; docs/VLLM.md, "
                 "`levi live doctor`)"
             )
             return False

@@ -981,6 +981,12 @@ class Controller:
                 )
                 code = "gate_closed" if inferring else "gate_pending"
                 return False, code, f"{gate.code}: {gate.reason}"
+            # Optional (``online.pressure_avg10_max``, off by default): a host
+            # already under CPU/memory/IO pressure gets no model request on
+            # top; transient, the client retries within its deadline.
+            pressed = gpumgr.pressure_over(c.online)
+            if pressed:
+                return False, "gate_closed", f"host_pressure: {pressed}"
             if not self.vllm.mine():
                 if (mode == "manual" or c.vllm.adopt_external) and self.vllm.external():
                     self._online_external_at = time.time()

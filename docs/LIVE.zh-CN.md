@@ -95,6 +95,7 @@ uv run levi live stop                            # 只停自己的进程
 - `resources.report_keep` 默认 20：`live/reports/` 里保留的会话报告份数，写入新报告时删除最旧的。
 - `pipeline.background` 默认 true。设为 false 时关掉后台标注（不启动 worker，不做时间片段和复核），rollout 照常连同操作员标签和在线结果一起镜像，统计和页面照常可用。`[online]`（`enabled` false、`host` `127.0.0.1`、`port` 7882、`spec` `generic-final.v1.json`、`timeout_s` 15、`max_body_mb` 8）是在线判定的接口。两者见[在线判定](#在线判定接口-c5)。
 - `gpu.policy_ports` 默认 `[8000]`，只在内核的 socket 表里查，从不连接。`gpu.policy_loaded_min_mib` 6000、`gpu.policy_load_wait_s` 120：监听着的策略端口只有进程占用到这么多显存才算“策略服务器已加载”（用于预算规划）；占得更少说明还在加载，vLLM 等待（`settling`），端口出现 `policy_load_wait_s` 秒后按“只有 vLLM”规划；读不到显存同样按“只有 vLLM”的保守预算。`gpu.standby_min_s` 20：冷启动要等会话在 `standby` 待满这么久（它的第一集几秒内就会开始）；这是缓解，不是保证，评测前用 `--prewarm`。`gpu.wake_margin_mib` 850：唤醒时在预算（减去睡眠中的 vLLM 仍占的部分）之外保留的空闲显存；启动用 `vllm.margin_mib`。**在真 GPU 上测过**（策略服务器 `.22`）：睡眠的 vLLM 旁空闲 22768 MiB，唤醒并做完第一批请求用了约 21758 MiB。原来的 300 会在空闲 21843 MiB 时放行唤醒，唤醒后只剩约 85 MiB，低于 `min_free_mib`（600），vLLM 会立刻又被放睡；800 在放行线上仍只剩约 585；850 时唤醒需要 22393，正好在线上也剩 635 MiB，实测的 22768 放行，富余约 375 MiB（按这些数字算出来的，没有观察到真正的来回抖动）。`gpu.blocked_pause_s` 300：GPU 锁被别的 agent 持有、:8100 上有别人的 vLLM、睡眠的 vLLM 因显存不够唤不醒，持续这么久后写进 `labelling_paused`。`gpu.resume_stable_s` 3（0.5–60 秒）、`gpu.resume_max_bounces` 3：人的运行被实时闸门拦住（`blocked`）后，闸门连续开着这么久就自动继续（避开 `episode_imminent` 窗口；用监督进程写在 `gate.json` 里的 `opened_at`，所以两次采样之间的关上又打开也算），每次打开一次；连续被拦这么多次、中间没有进展（完成片段或结算了 token），就留给人点“继续”；0 表示关闭自动恢复。`gpu.unknown_client_pause_s` 600：没有会话为之作证的策略服务器让闸门一直关着，超过这么久状态里 `labelling_paused` 写 `unknown_client`。
+- 真机防护的三项设置默认全关（关着时行为与以前完全一样）：`gpu.quiet_states` 默认 `[]`（例如 `["homing"]`：会话处于这些状态时闸门关闭，代码 `robot_quiet`）；`vllm.nice` 默认 -1（继承服务自己的优先级）、`vllm.cpus` 默认空（不限 CPU）；`online.pressure_avg10_max` 默认 0（关）、`online.pressure_kinds` 默认 `["cpu", "memory", "io"]`。见[真机控制回路的防护](#真机控制回路的防护可选)。
 - `vllm.prewarm` 默认 false（`levi live start --prewarm`）：服务启动后、没有评测在跑时就把 vLLM 拉起来并保持常驻，空闲只睡眠，服务停止才停。这是**评测期间不冷启动**的办法。
 - vLLM 的显存预算和上下文长度在每次启动时按**当时的空闲显存**选择（见下），`gpu_memory_utilization_max/min`、`min_utilization_with_policy/alone`（都是 0.725）、`kv_bytes_per_token`、`min_model_len` 是这个选择的界限（按**热**编译缓存下的实测校准，见下）；`margin_mib` 1100；`max_start_failures` 3、`start_backoff_s` 60、`start_backoff_max_s` 600。
 - 路径类设置的默认值：`service.workspace` 为 `~/.levi-live/workspace`；`watch.roots` 无默认值，必须设置；`fr3.health_file` 为空（没有健康监控文件，FR3 状态为 `missing`，doctor 不报警）；`gpu.lock_file` 为空（不与其他 GPU 用户共用锁；需要时指向本机其他 GPU 用户也使用的 `flock` 文件，例如产品 LEVI 的 `LEVI_GPU_LOCK_FILE`）；`vllm.script` 和 `vllm.stop_script` 都是仓库自带的 `scripts/vllm/serve.sh`（相对路径相对 LEVI 检出目录），`vllm.pid_dir` 为 `~/.levi-live/vllm`，约定见 [vLLM](VLLM.zh-CN.md)；`vllm.model` 为 `RedHatAI/Qwen3.8-27B-INT4`（自带脚本服务的模型，`LEVI_VLLM_MODEL`），`vllm.served_model` 为 `qwen3.8-27b`。
@@ -116,6 +117,7 @@ uv run levi live stop                            # 只停自己的进程
 | --- | --- | --- |
 | 有会话处于 `running`（策略在推理） | **关** | 不发请求；在途的请求立即取消，运行退避 |
 | 会话处于 `waiting_reset`，且下一集将在 `gpu.lead_s`（3 秒）内开始（开始 = 它开始等待后再过 `levi.reset_wait_s`） | **关**（`episode_imminent`） | 新一集的第一次推理不会撞上模型请求 |
+| 会话处于 `gpu.quiet_states` 中的状态（默认没有；例如 `homing`） | **关**（`robot_quiet`） | 不发请求，也不唤醒睡眠中的 vLLM；`coexist` 下同样生效 |
 | `homing`、更早的 `waiting_reset`、`standby`、`fault` | 开 | 已醒着的 vLLM 工作（此时不**新启动**，见下） |
 | 有策略服务器在监听，且没有仍然有效的会话为它作证（策略服务器出现之前就结束的会话不算：会话文件从不删除） | **关**（可能有我们不知道的客户端在用） | 等待 |
 | 没有策略服务器 | 开 | 工作 |
@@ -317,6 +319,7 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 | | `spec` | `generic-final.v1.json` | `levi/live/specs` 里的文件，`episode.rule` 为 `final_state`，没有起始检查和否决项，每个视图的偏移用秒给出，问题里有 `{task}` 占位符 |
 | | `timeout_s` | 15 | 1–120 秒，从请求到达时算起（包括等闸门和唤醒）；客户端可以按自己的截止时间提前放弃 |
 | | `max_body_mb` | 8 | 0.5–64 MiB |
+| | `pressure_avg10_max`、`pressure_kinds` | 0（关）、`["cpu", "memory", "io"]` | 主机压力超限时不放行在线判定，见[真机控制回路的防护](#真机控制回路的防护可选) |
 | `pipeline` | `background` | true | false：不启动 worker，不做后台模型请求（见下） |
 
 设置在启动时读取：改完 `live.toml` 后 `levi live stop` 再 `levi live start`（重启的是实时服务，不是产品 LEVI）。`enabled = true` 时，监督进程在启动时载入答案校验相关的代码（pydantic、numpy、模型客户端），常驻内存多约 26 MiB（本机实测）。
@@ -373,9 +376,9 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 
 - `outcome` 和 `undecided` 按 `final_state` 规则：物体静止地放在目的地且稳定为成功；任何明确的其他答案为失败；有 `unclear` 答案、且没有明确的失败答案压过它时，为失败并且 `undecided: true`。`reading` 是规格的 `valid_when` 对答案的读取结果（`supported`、`contradicted`、`unknown`），`checks` 是逐条条件。`status` 不是 `ok` 时 `outcome` 和 `reading` 为 null。
 - `tokens` 和 `prompt_tokens` 是服务器报告的数（没报告时为 null）；`elapsed_s` 从请求到达算起。
-- `reason` 的格式是 `<代码>: <说明>`，第一个冒号前的代码是固定的，供程序判断。**瞬时**代码（评测客户端在自己的截止时间内重试）：`gate_closed`、`busy`、`service_busy`。其余代码在两集之间的空当里重试也不会消失。`ok` 时为 null，只有答案等过闸门时写 `gate_waited: ...`（见下）。**`unavailable`**（什么都没发给模型；除下面说的等待闸门外立即返回，不到 1 秒）：`busy`（已有一个在线判定在进行，一次只做一个）、`gate_closed`（策略正在推理，或等待的闸门没有及时打开：`policy_inferring`、`episode_imminent`、`unknown_client`）、`cold_start`（vLLM 没在运行：在线判定从不冷启动它）、`vllm_starting`、`no_room`（vLLM 在睡眠，按 GPU 规则此刻不能唤醒）、`wake_failed`、`vllm_failed`（服务已放弃启动 vLLM）、`service_busy`（监督进程正在启动、停止 vLLM 或让它睡眠）、`shutting_down`；以及模型工作时被打断的 `gate_closed ... (the request was cut)`、`vllm_sleeping`、`vllm_stopping`。**`error`**：`timeout`（`timeout_s` 内没有答案，请求被切断）、`model_error`（服务器出错或拒绝）、`invalid_answer`（答案不是规格允许的值）、`internal_error`，以及被拒绝的请求的 `invalid_request`。
+- `reason` 的格式是 `<代码>: <说明>`，第一个冒号前的代码是固定的，供程序判断。**瞬时**代码（评测客户端在自己的截止时间内重试）：`gate_closed`、`busy`、`service_busy`。其余代码在两集之间的空当里重试也不会消失。`ok` 时为 null，只有答案等过闸门时写 `gate_waited: ...`（见下）。**`unavailable`**（什么都没发给模型；除下面说的等待闸门外立即返回，不到 1 秒）：`busy`（已有一个在线判定在进行，一次只做一个）、`gate_closed`（策略正在推理，或等待的闸门没有及时打开：`policy_inferring`、`robot_quiet`、`episode_imminent`、`unknown_client`；或 `online.pressure_avg10_max` 拒绝时的 `gate_closed: host_pressure: …`）、`cold_start`（vLLM 没在运行：在线判定从不冷启动它）、`vllm_starting`、`no_room`（vLLM 在睡眠，按 GPU 规则此刻不能唤醒）、`wake_failed`、`vllm_failed`（服务已放弃启动 vLLM）、`service_busy`（监督进程正在启动、停止 vLLM 或让它睡眠）、`shutting_down`；以及模型工作时被打断的 `gate_closed ... (the request was cut)`、`vllm_sleeping`、`vllm_stopping`。**`error`**：`timeout`（`timeout_s` 内没有答案，请求被切断）、`model_error`（服务器出错或拒绝）、`invalid_answer`（答案不是规格允许的值）、`internal_error`，以及被拒绝的请求的 `invalid_request`。
 
-**模型什么时候可以回答。** 请求到达时，监督进程当场读会话文件（tick 最多每秒决定一次闸门），只有闸门开着才放行：没有会话处于 `running`，`gpu.lead_s` 内没有片段要开始（`episode_imminent`），也没有无会话作证的策略服务器。客户端在写完 `waiting_reset`（或 `homing`）后立即发请求：闸门没有防抖，这时立刻就是开的。如果闸门关着、但没有会话处于 `running`（`episode_imminent` 窗口、无会话作证的策略服务器、会话文件还没改写），请求会等它打开，每 0.1 秒再问一次，最多等到请求到达后 `timeout_s`；等待期间有会话开始 `running` 就立即结束等待（`gate_closed`），等满仍未打开则返回 `gate_closed: ... (waited N s for it to open)`。策略正在推理时，以及上面列的其他原因，都立即回答。客户端用自己的截止时间（从片段结束算起），在截止前可以对 `gate_closed` 和 `busy` 重试。醒着的 vLLM 直接回答；睡眠中的 vLLM 只在批次唤醒同样的规则下才会被唤醒（约 0.75 秒，最多等 5 秒）：闸门开着，空闲显存够唤醒（`gpu.wake_margin_mib`），策略服务器没有超过 `gpu.policy_budget_mib`。在线判定从不冷启动 vLLM，所以要在策略服务器之前用 `--prewarm` 启动服务。模型工作期间每 0.25 秒读一次闸门：闸门一关（下一集开始了），请求立即被切断，和 worker 的请求一样。放行时最多等监督进程自己的 GPU 操作 0.5 秒。答案进行中，vLLM 不会因为闲置而被放睡；但显存被需要时仍会被放睡或停止，这会打断答案（`vllm_sleeping`）。后台开着时，worker 可能同时在发请求；vLLM 两边都服务（`max_num_seqs` 2），答案可能因此变慢。
+**模型什么时候可以回答。** 请求到达时，监督进程当场读会话文件（tick 最多每秒决定一次闸门），只有闸门开着才放行：没有会话处于 `running`，`gpu.lead_s` 内没有片段要开始（`episode_imminent`），也没有无会话作证的策略服务器。客户端在写完 `waiting_reset`（或 `homing`）后立即发请求：闸门没有防抖，这时立刻就是开的。如果闸门关着、但没有会话处于 `running`（`episode_imminent` 窗口、`robot_quiet` 状态、无会话作证的策略服务器、会话文件还没改写），请求会等它打开，每 0.1 秒再问一次，最多等到请求到达后 `timeout_s`；等待期间有会话开始 `running` 就立即结束等待（`gate_closed`），等满仍未打开则返回 `gate_closed: ... (waited N s for it to open)`。策略正在推理时，以及上面列的其他原因，都立即回答。客户端用自己的截止时间（从片段结束算起），在截止前可以对 `gate_closed` 和 `busy` 重试。醒着的 vLLM 直接回答；睡眠中的 vLLM 只在批次唤醒同样的规则下才会被唤醒（约 0.75 秒，最多等 5 秒）：闸门开着，空闲显存够唤醒（`gpu.wake_margin_mib`），策略服务器没有超过 `gpu.policy_budget_mib`。在线判定从不冷启动 vLLM，所以要在策略服务器之前用 `--prewarm` 启动服务。模型工作期间每 0.25 秒读一次闸门：闸门一关（下一集开始了），请求立即被切断，和 worker 的请求一样。放行时最多等监督进程自己的 GPU 操作 0.5 秒。答案进行中，vLLM 不会因为闲置而被放睡；但显存被需要时仍会被放睡或停止，这会打断答案（`vllm_sleeping`）。后台开着时，worker 可能同时在发请求；vLLM 两边都服务（`max_num_seqs` 2），答案可能因此变慢。
 
 **客户端写什么**（这一侧由策略仓库的客户端实现）。在 rollout 的 `metadata.json` 里写 `eval.agent_label`，要在 `.complete` 之前写（和操作员标签一样：LEVI 只在镜像时读一次元数据）：
 
@@ -397,6 +400,16 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 - **时间。** 唤醒（约 0.75 秒）加一次请求（27B 模型看 10 张图：几秒，这里没测）必须在下一集开始前完成；`reset_wait_s` 太短时会得到 `gate_closed ... (the request was cut)`。
 - 接口除了回环地址、`Host` 检查和拒绝浏览器请求之外没有身份验证：本机任何进程都可以让它判定（它也只能做这件事）。
 - 端口被占用时接口起不来：事件日志和 `last_error` 会写明，`online_judge.ready` 保持 false，客户端会连接被拒。
+
+## 真机控制回路的防护（可选）
+
+机器人的 1 kHz 控制回路和本服务跑在同一台机器上。下面三项设置默认全关（关着时服务的行为与以前完全一样），用来让服务自己的负载离控制回路远一点。它们是在评测期间出现控制回路故障（`communication_constraints_violation`）之后加的；能不能避免这类故障，**还没有在真机上测过**。
+
+- **`gpu.quiet_states`**（默认 `[]`）：机器人在动、但策略没有推理的会话状态，通常是 `["homing"]`。只要有会话（未崩溃）报告其中一个状态，闸门就关闭，代码 `robot_quiet`，`timeshare` 和 `coexist` 下都生效；`manual` 从不关闸门。闸门关闭的所有效果都随之生效：worker 退让，不唤醒睡眠中的 vLLM（唤醒要把权重从主机内存搬回显存），不冷启动，不放行在线判定。因为没有会话在推理，在线判定会像对 `episode_imminent` 那样**等**闸门（最多等到请求到达后 `timeout_s`；进行中的判定会被切断，`gate_closed ... (the request was cut)`）。会话处于 `running` 时闸门仍叫 `policy_inferring`。状态只从会话文件读，从不由别的信号推断；写了评测客户端不会写的状态（客户端写的是 `standby`、`running`、`homing`、`waiting_reset`、`fault`、`stopped`、`finished`）是配置错误。列入 `homing` 会让标注和在线判定推迟一个回位时间；列入 `waiting_reset` 会让两集之间几乎没有窗口。
+- **`vllm.nice`、`vllm.cpus`**（默认 -1 和空：不加前缀，命令就是启动脚本和它的参数）：本服务启动的 vLLM 经 `taskset -c <cpus>` 和/或 `nice -n <n>` 启动，它的引擎进程继承这两项。不设时，vLLM 已经继承监督进程自己的优先级（`resources.nice`，19）和线程上限，但可以跑在所有 CPU 上。`vllm.nice` 是 vLLM 最终的 nice 值：增量按启动时监督进程的 nice 值算出；低于 `resources.nice` 的值会被拒绝（降低 nice 值需要特权）。`vllm.cpus` 只接受 `taskset -c` 的列表写法（`"8-15,24-31"`；十六进制掩码、空项、倒序区间、大于 8191 的 CPU 号都是配置错误）。`levi live doctor` 和启动前的预检在列表里没有一个服务可用的 CPU 时报失败（vLLM 无法运行），部分不可用时警告，缺 `taskset` 或 `nice` 时报失败。本服务没有启动的 vLLM（`manual`、`adopt_external`）不受影响：请自己用 `nice`/`taskset` 启动它。
+- **`online.pressure_avg10_max`**（默认 0：关，什么都不读）和 **`online.pressure_kinds`**（默认 `["cpu", "memory", "io"]`）：所列任一 `/proc/pressure/<kind>`（压力停顿信息，百分比）的 “some avg10” 超过上限时，在线判定不发给模型，直接回答 `unavailable`，原因是 `gate_closed: host_pressure: <kind> some avg10 N% is over online.pressure_avg10_max (M%)`（原因代码 `host_pressure`）；这是瞬时的，客户端在自己的截止时间内重试。只在放行时、闸门之后检查（进行中的判定不会因它被切断），所有 GPU 模式都生效。内核没有这些文件时从不拒绝；设置打开而文件读不到时 `levi live doctor` 会警告。后台标注不受影响。
+
+这些设置在服务启动时读取（改完后 `levi live stop` 再启动）。没有覆盖的：在线判定自己的 HTTP 线程和 worker 仍用平常的优先级（`resources.nice`）；这里也不会把机器人的控制进程绑核（那需要 LEVI 之外的管理员改动）。
 
 ## 保持轻量
 
@@ -607,7 +620,7 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 - **worker 找不到事可做**，而监督进程以为有一批要做（它为镜像不了的片段启动了 worker）：不再每半秒重启一次，监督进程等 2、4、8 …… 秒（最多 `poll_idle_s`）再起下一个，只在每次加倍时写一行 `nothing to do (n in a row); next try in … s`，而不是每次启动都写；原因是数据集的源目录（不存在或为空）时，在它的状态里标 `unavailable`（页面上 `available: false`，带 `unavailable_reason`），目录里有东西之前不再排它。已经镜像的片段不会丢。
 - **永远完不成的片段**（合成失败留下的 raw 采集、客户端写到一半死了）在 `watch.stuck_s` 之后变为 `stuck`：计数、由 `levi live doctor` 列出，只有它再变化才会重新检查。
 - **镜像之后源被替换**（片段删掉后以同一编号重写，或标记之后 `metadata.json` 被替换）：标 `source_changed`；还没标注的会重新镜像；已标注的保留标记（标注的是旧内容）。
-- **`levi live doctor`** 打印服务各进程的 RSS/线程/nice、GPU 占用、vLLM 状态、磁盘和运行缓存大小、队列、FR3 状态、警告（监督进程超预算、主循环 5 分钟没有 tick、进程不在 nice 19、vLLM 开着却没事做（闲置超过 `idle_timeout_s` + 120 秒；预热的、还在载入的、刚被唤醒的都不报）、vLLM 起不来、孤儿 vLLM、GPU 锁不可用、上面的配置检查（vLLM 脚本缺失或不可执行、pid 目录不可写、锁文件建不了、监视根目录不存在、路径指向别的用户的家目录、工作区路径太长放不下核心的 socket）、磁盘不足、复制而非链接、stuck 片段、被替换的源、状态文件过期、某个服务进程占用的打开文件数超过上限的一半：文件描述符泄漏）和提示（vLLM 冷启动 45–70 秒）。
+- **`levi live doctor`** 打印服务各进程的 RSS/线程/nice、GPU 占用、vLLM 状态、磁盘和运行缓存大小、队列、FR3 状态、警告（监督进程超预算、主循环 5 分钟没有 tick、进程不在 nice 19、vLLM 开着却没事做（闲置超过 `idle_timeout_s` + 120 秒；预热的、还在载入的、刚被唤醒的都不报）、vLLM 起不来、孤儿 vLLM、GPU 锁不可用、上面的配置检查（`vllm.cpus` 里没有可用的 CPU 或缺 `taskset`/`nice`、设了 `online.pressure_avg10_max` 却读不到 PSI 文件、vLLM 脚本缺失或不可执行、pid 目录不可写、锁文件建不了、监视根目录不存在、路径指向别的用户的家目录、工作区路径太长放不下核心的 socket）、磁盘不足、复制而非链接、stuck 片段、被替换的源、状态文件过期、某个服务进程占用的打开文件数超过上限的一半：文件描述符泄漏）和提示（vLLM 冷启动 45–70 秒）。
 
 ## 实测
 
