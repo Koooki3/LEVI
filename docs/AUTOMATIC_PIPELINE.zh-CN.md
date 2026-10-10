@@ -266,6 +266,40 @@ initial_state:
 
 **对照片段**（`termination.control_fraction`、`control_seed`：比例和抽取方式，参数待用户确认，HA-23）记在运行 manifest 里：每个封存的片段有 `control`，对照片段还有 `would_stop_step`（检测器本会停下的步，或 `null`）。
 
+## 仅测评策略模式（人工复位）
+
+`reset.strategy: human_assisted` 只测评前向策略：不运行复位策略，由人把场景复原。其余与有复位策略时同一套运行（同一状态机、提前终止、终局判定、封存、回位）；`RESET_ACTIVE`、`RESET_VERIFY`、`RESET_FINALIZE` 永远不会进入。本节取代上文关于 `operator_attested`“以后再做”的说法。
+
+**行为。** 场景不是 `ready`（在 `VERIFY_INITIAL` 或前向片段之后）时，运行进入 `WAIT_HUMAN`（`scene_reset_required` 或 `scene_unknown`）。等待期间没有任何运动令牌。
+
+**两道确认。** 第一道是操作员声明：`resume(command_id, expected_seq, environment_handled=True, health_rechecked=True)`，缺一项确认就拒绝（`confirmations_missing`），同一 command id 只生效一次（`repeated`），序号过时则拒绝（`stale_sequence`）。第二道是系统复核：`PREFLIGHT` 重新检查机器人，`VERIFY_INITIAL` 重新评估场景。只有仲裁给出 `ready` 才开始前向片段；`unknown` 和不可用都回到 `WAIT_HUMAN`。第二道复核没有任何绕过方式。
+
+**谁来核对场景**（`reset.scene_check`）：
+
+| `scene_check` | 由谁 | 说明 |
+| --- | --- | --- |
+| `provider`（默认） | 机器场景提供方 | 人工复位模式下没有可达的提供方就拒绝启动（`E_SCENE_PROVIDER_MISSING`，`cli.scene_provider_problems`），避免在没人能回答时在 `WAIT_HUMAN` 和 `VERIFY_INITIAL` 之间来回 |
+| `operator_attested` | 人（`adapters/human.py` 的 `HumanSceneProvider`，`provider: human`） | 只用于 `human_assisted`，需要初始状态契约 |
+
+`operator_attested` 时，核对先抓取当前相机画面（在 resume 及其预检之后），再发出一道题：请求编号（只能答一次）、契约 `id@version` 和状态、每个谓词的文字、画面。人对每个必需谓词只回答 `true`、`false` 或 `null`（看不清）。结论由回答推出（有必需谓词为假：`reset_required`；有 `null`：`unknown`；全为真：`ready`，仍要经过仲裁，包括证据规则和视角规则）。回答里带结论或“ready”一律拒收。重复回答、回答从未发出、已答过或已撤回的请求，一律丢弃（`scene_answer_unsolicited`，`E_UNSOLICITED`）；格式不对的回答被拒收（`scene_answer_refused`），题目保持有效。超过 `reset.human_scene_timeout_s`（默认 600）无人回答，题目撤回并按不可用处理，运行再次等人。操作员的停止会立即结束等待中的核对。相机或传输出错按不可用处理，绝不放行。本版本的传输只有 `QueueTransport`、`ScriptedTransport`（试运行）和文件协议 `FileTransport`（`questions/<request_id>.json`、`answers/*.json`，都整体写入）；显示题目的页面由后续任务做。
+
+**数据归属。** 人工复位不写 reset rollout、不建 reset 任务目录、不写 reset 会话文件（运行的 `SessionFiles` 只有 forward 角色，实时服务不会多出一个永远 `standby` 的会话）。复位事实都在日志里：`WAIT_HUMAN` 的提交行、操作员的 resume（`authority.principal_kind: operator`、不透明的 `principal_id`、`command_id`）。据此，下一个前向片段在运行清单里得到 `preceded_by` 和 `after_human_resets`（`[{wait_seq, resume_seq, wait_ms, principal_id, reason}]`），在 rollout 元数据里得到 `eval.aeri.preceded_by`（`none`、`reset_policy` 或 `human_reset`，取最近的一次），供训练池区分。
+
+**证据。** 每次场景评估，无论是否被采纳（超时、过期或被拒的消息也算），都保存为 `<run_dir>/evidence/<assessment_id>.json`（提供方没给编号时用请求编号）：C 的结论和原因、提供方的结论、失败和看不清的谓词、谓词结果、引用，以及人工核对时抓取的画面（`evidence/frames/<sha256>.<扩展名>`，按内容寻址）。文件都整体写入（临时文件、fsync、改名、目录 fsync）；写入中被杀留下的临时文件在下次打开时删除。单帧超过 4 MiB 不保存，画面最多用每次运行 256 MiB 预算的 90 %，记录到预算为止，记录里写明跳过了什么。`recorder.pending_card(run_dir)` 只读不写，给出等人时需要的内容：原因、resume 要带的序号、已等待时长和这是第几次等人、上一片段的结果及其 rollout 路径和末帧、初始状态契约（`id@version`、状态：草稿标为“未经用户确认，HA-23”）、谓词文字，以及导致等待的那次评估。
+
+**作业文件。** 两种模式共用 `levi.aeri.job.v1`（`levi/domain/aeri.py` 的 `JobSpec`，快照 `docs/architecture/aeri/v1/job.schema.json`）。`human_assisted` 时可以省略 `policies.reset`、`task.reset_instruction`、`recording.reset_folder`、`reset.enabled`、`reset.max_attempts`、`reset.on_unknown`；写了也会在计划旁列为 `ignored`（`validate`），并且不进计划，`plan_sha256` 不随它们变化。`single_reset_policy` 需要 `policies.reset.max_steps`（`reset.enabled: false` 时除外）。计划还包含解析后的 `rollout_root`（realpath，相对作业文件）、契约文件字节的 sha256、`reset_mode` 和 `scene_check`。策略别名（`single_policy`、`scripted_safe`、`atomic_skills`）只在作业文件里有效；计划、日志和契约里只写代码名。以后改用复位策略时，只需改 `strategy` 并补上 `policies.reset`；前向目录、契约、运行目录布局和指标都不变。
+
+```yaml
+reset:
+  strategy: human_assisted
+  scene_check: operator_attested   # 或 provider（默认）
+  human_scene_timeout_s: 600
+```
+
+**契约版本。** `levi.aeri.run_event.v1` 升到 minor 1：`RunHeader` 新增可选的 `reset_mode` 和 `scene_check`（只写代码名；minor 0 的行带这两个字段会被拒收）。其他契约仍是 minor 0（`aeri.MINORS`）。minor 0 写的日志照常可读；`aeri.header_modes(header, plan)` 优先取 header 的值，没有时从作业计划推断。日志写入方暂时还不填这两个字段。
+
+**已知局限。** 还没有回答场景题的页面（只有协议和 Fake）。契约格式没有文字字段之前，谓词文字就是把名字里的下划线换成空格（HA-23）。人工核对的质量取决于相机给出的画面；仲裁的视角和证据规则同样适用。指标还不区分计划内和计划外的干预（模式矩阵任务）。
+
 ## 命令行（`levi/automatic/cli.py`）
 
 ```

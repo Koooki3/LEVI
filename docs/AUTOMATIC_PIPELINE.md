@@ -680,6 +680,124 @@ run manifest: each sealed episode has `control` and, for a control
 episode, `would_stop_step` (where the detector would have stopped, or
 `null`).
 
+## Policy evaluation only mode (human resets)
+
+`reset.strategy: human_assisted` evaluates the forward policy alone: no
+reset policy runs, a person puts the scene back. Everything else is the
+same run as with a reset policy (the same state machine, early stops, final
+judgement, sealing and home); `RESET_ACTIVE`, `RESET_VERIFY` and
+`RESET_FINALIZE` are never reached. This section supersedes the "later
+task" remarks about `operator_attested` above.
+
+**Behaviour.** A scene that is not `ready` (at `VERIFY_INITIAL` or after a
+forward episode) moves the run to `WAIT_HUMAN` (`scene_reset_required` or
+`scene_unknown`). While it waits nothing holds a motion token.
+
+**Two confirmations.** First the operator's own: `resume(command_id,
+expected_seq, environment_handled=True, health_rechecked=True)`, refused
+when either confirmation is missing (`confirmations_missing`), idempotent
+per command id (`repeated`), refused with a stale sequence
+(`stale_sequence`). Then the system's: `PREFLIGHT` checks the robot again
+and `VERIFY_INITIAL` assesses the scene again. Only a `ready` verdict of
+the arbitration starts the forward episode; `unknown` and unavailable go
+back to `WAIT_HUMAN`. There is no way around the second check.
+
+**Who checks the scene** (`reset.scene_check`):
+
+| `scene_check` | Who | Notes |
+| --- | --- | --- |
+| `provider` (default) | the machine scene provider | a human-assisted launch is refused without a reachable provider (`E_SCENE_PROVIDER_MISSING`, `cli.scene_provider_problems`), so the run can never loop between `WAIT_HUMAN` and `VERIFY_INITIAL` with nobody able to answer |
+| `operator_attested` | a person (`adapters/human.py`, `HumanSceneProvider`, `provider: human`) | `human_assisted` only, with an Initial State Contract |
+
+With `operator_attested` the check captures the current camera frames
+first (after the resume and its preflight), then asks one question: the
+request id (answered once), the contract `id@version` and status, every
+predicate in words, the frames. The person answers each required predicate
+`true`, `false` or `null` ("cannot tell") and nothing else. The decision
+follows from the answers (a false required predicate: `reset_required`; a
+`null`: `unknown`; all true: `ready`, still checked by the arbitration,
+evidence rule and views included). An answer may not carry a decision or a
+"ready": it is refused. A repeated answer, an answer to a request that was
+never asked, already answered or withdrawn is dropped
+(`scene_answer_unsolicited`, `E_UNSOLICITED`); a malformed one is refused
+(`scene_answer_refused`) and the question stays open. A check nobody
+answers within `reset.human_scene_timeout_s` (default 600) is withdrawn
+and counts as unavailable: the run waits for a person again. An operator's
+stop ends a pending check at once. A failing camera or transport is
+unavailable, never a pass. The transports in this version are
+`QueueTransport`, `ScriptedTransport` (dry runs) and the file protocol
+`FileTransport` (`questions/<request_id>.json`, `answers/*.json`, each
+written whole); the page that shows the question is a later task.
+
+**Data ownership.** A human reset writes no reset rollout, no reset task
+folder and no reset session file (the run's `SessionFiles` has the
+forward role only, so the live service never lists a reset session that
+stays `standby`). The facts are in the journal: the `WAIT_HUMAN` commit,
+the operator's resume (`authority.principal_kind: operator`, an opaque
+`principal_id`, the `command_id`). From them the next forward episode
+gets, in the run manifest, `preceded_by` and `after_human_resets`
+(`[{wait_seq, resume_seq, wait_ms, principal_id, reason}]`), and in its
+rollout metadata `eval.aeri.preceded_by` (`none`, `reset_policy` or
+`human_reset`: the most recent of the two), so a training pool can tell
+the episodes apart.
+
+**Evidence.** Every scene assessment, accepted or not (a timeout, a stale
+or refused message included), is kept as
+`<run_dir>/evidence/<assessment_id>.json` (the request id when the
+provider gave none): C's decision and reason, the provider's decision,
+failed and unknown predicates, predicate results, references and the
+frames of a person's check (`evidence/frames/<sha256>.<ext>`,
+content-addressed). Files are written whole (temporary file, fsync,
+rename, fsync of the folder); a temporary file left by a killed writer is
+removed when the next store opens. A frame over 4 MiB is not kept, frames
+stop at 90 % of a 256 MiB budget per run, records at the budget; the
+record says what was skipped. `recorder.pending_card(run_dir)` reads, and
+never writes, what the person needs while the run waits: the reason, the
+sequence a resume must name, how long the run has waited and which wait
+this is, the last episode's result with its rollout path and last frames,
+the Initial State Contract (`id@version`, status: a draft is flagged "not
+confirmed by the user, HA-23"), its predicates in words, and the
+assessment that led to the wait.
+
+**The job file.** Both modes share `levi.aeri.job.v1`
+(`levi/domain/aeri.py`, `JobSpec`, snapshot
+`docs/architecture/aeri/v1/job.schema.json`). With `human_assisted`,
+`policies.reset`, `task.reset_instruction`, `recording.reset_folder`,
+`reset.enabled`, `reset.max_attempts` and `reset.on_unknown` may be left
+out; written anyway they are listed as `ignored` next to the plan
+(`validate`) and left out of the plan, so its `plan_sha256` does not
+change with them. `single_reset_policy` needs `policies.reset.max_steps`
+(unless `reset.enabled: false`). The plan also holds the resolved
+`rollout_root` (realpath, relative to the job file), the sha256 of the
+contract file's bytes, `reset_mode` and `scene_check`. Strategy aliases
+(`single_policy`, `scripted_safe`, `atomic_skills`) are read in the job
+file only; the plan, the journal and the contracts carry the code names.
+Switching a job to a reset policy later means changing `strategy` and
+adding `policies.reset`; the forward folder, contract, run layout and
+metrics stay as they are.
+
+```yaml
+reset:
+  strategy: human_assisted
+  scene_check: operator_attested   # or provider (default)
+  human_scene_timeout_s: 600
+```
+
+**Contract version.** `levi.aeri.run_event.v1` is at minor 1:
+`RunHeader` has the optional `reset_mode` and `scene_check` (code names
+only; a minor-0 line carrying them is refused). The other contracts stay
+at minor 0 (`aeri.MINORS`). A log written at minor 0 reads as before;
+`aeri.header_modes(header, plan)` takes the modes from the header or,
+when it has none, from the job's plan. The journal writer does not fill
+the two fields yet.
+
+**Known limits.** No page answers the scene question yet (the protocol
+and its fakes only). The predicates' readable text is the name with
+spaces until the contract format has a text field (HA-23). A person's
+check is as good as the frames the cameras give; the arbitration's view
+and evidence rules apply to it unchanged. Metrics do not yet tell planned
+from unplanned interventions (the mode-matrix work).
+
 ## Command line (`levi/automatic/cli.py`)
 
 ```

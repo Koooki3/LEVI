@@ -13,9 +13,11 @@ motion authority over anything real.
 Until ``levi automatic`` is wired into ``levi.cli``, run it as
 ``python -m levi.automatic.cli``.
 
-The job file (``levi.aeri.job.v1``) uses the same strict YAML subset as the
-Initial State Contract (``scene_assessment.parse_document``); it is a draft
-like the contract (HA-23)::
+The job file (``levi.aeri.job.v1``, checked by ``aeri.JobSpec``) uses the
+same strict YAML subset as the Initial State Contract
+(``scene_assessment.parse_document``); it is a draft like the contract
+(HA-23). With ``human_assisted`` the reset policy's keys may be left out
+(written anyway they are ignored and kept out of the plan)::
 
     schema_version: levi.aeri.job.v1
     experiment:
@@ -31,9 +33,11 @@ like the contract (HA-23)::
       initial_state_spec: initial-state.yaml   # relative to this file
     termination: {...}           # TerminationConfig fields
     reset:
-      strategy: single_reset_policy   # or human_assisted
+      strategy: single_reset_policy   # or human_assisted (aliases: single_policy)
       max_attempts: 1
       on_unknown: reset               # or wait_human
+      scene_check: provider           # or operator_attested (human_assisted only)
+      human_scene_timeout_s: 600      # operator_attested: then unavailable
     recording:
       rollout_root: /data/rollouts
       group: aeri
