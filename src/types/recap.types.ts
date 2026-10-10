@@ -19,9 +19,34 @@ export interface RecapCheckpoint {
 
 export type RecapThresholdSource = "checkpoint" | "dataset_quantile" | "manual";
 
+/** How advantage labels are made: "rollout" reads each episode's outcome,
+ * "sft" treats every episode as a success (demonstrations), "value_only"
+ * computes V(o_t) without outcomes, advantages or labels. */
+export type RecapDatasetType = "rollout" | "sft" | "value_only";
+
+/** What a run with `dataset_type: "auto"` resolves to now, and why. */
+export interface RecapDatasetTypeChoice {
+  /** The person's dataset-level setting, or "auto" when none is stored. */
+  setting: RecapDatasetType | "auto" | string;
+  dataset_type: RecapDatasetType | string;
+  /** user | manifest | outcomes | fallback | request */
+  source: string;
+  reason: string | null;
+}
+
 /** The dataset's current (latest successful) advantage-label revision. */
 export interface RecapCurrent {
+  /** The result's reference: the value model's name ("models" layout) or an
+   * original per-run revision id ("revisions" layout). */
   revision_id: string;
+  /** The value model (checkpoint) name. */
+  model?: string | null;
+  /** Changes on every recomputation; a read pinned to an older version is
+   * answered 409 ("recomputed"). Equal to the revision id for a per-run
+   * revision. Absent from older backends. */
+  version?: string | null;
+  /** "models": one result per value model; "revisions": one per run. */
+  layout?: "models" | "revisions" | string | null;
   checkpoint: string;
   provider: string;
   created_at: number;
@@ -31,9 +56,11 @@ export interface RecapCurrent {
   threshold_source: RecapThresholdSource | string;
   positive_quantile: number | null;
   lookahead: number;
-  positive_fraction: number;
+  positive_fraction: number | null;
   stale: boolean;
-  dataset_type?: string | null;
+  dataset_type?: RecapDatasetType | string | null;
+  /** False for a values-only result: no advantages, thresholds or labels. */
+  labels?: boolean;
   /** Set when the training data's static-pose filter was applied: only the
    * kept frames are labelled. */
   static_filter?: {
@@ -65,6 +92,8 @@ export interface RecapRevisions {
   current: string | null;
   /** Newest first. Reading or selecting a row never changes current. */
   revisions: RecapRevision[];
+  /** The same list under its newer name (`/api/recap/results`). */
+  results?: RecapRevision[];
 }
 
 export interface RecapComparisonMetric {
@@ -98,9 +127,10 @@ export interface RecapComparison {
     episode: number;
     outcome: string | null;
     frames: number;
-    label_agreement: number;
-    positive_fraction_a: number;
-    positive_fraction_b: number;
+    /** Null when either side is a values-only result. */
+    label_agreement: number | null;
+    positive_fraction_a: number | null;
+    positive_fraction_b: number | null;
     mean_value_a: number;
     mean_value_b: number;
     value_mean_abs_diff: number;
@@ -113,6 +143,32 @@ export interface RecapComparison {
     success_episodes: number;
     failure_episodes: number;
   } | null;
+  /** Shared episodes grouped by saved outcome ("unknown" when the runs saved
+   * none or different ones); absent from older backends. */
+  by_outcome?: RecapOutcomeGroup[];
+  /** Binned counts of the shared frames; absent from older backends. */
+  distribution?: RecapDistribution | null;
+}
+
+export interface RecapOutcomeGroup {
+  outcome: "success" | "failure" | "unknown" | string;
+  episodes: number;
+  frames: number;
+  /** Mean of the episodes' mean V. */
+  mean_value_a: number;
+  mean_value_b: number;
+  /** Frame-weighted; null when either side has no labels. */
+  label_agreement: number | null;
+  positive_fraction_a: number | null;
+  positive_fraction_b: number | null;
+}
+
+export interface RecapDistribution {
+  bins: number;
+  /** V of A and of B on common bin edges (edges has bins + 1 entries). */
+  value: { edges: number[]; a: number[]; b: number[] };
+  /** |B − A| per shared frame. */
+  abs_diff: { edges: number[]; counts: number[] };
 }
 
 export type RecapJobState =
@@ -142,11 +198,14 @@ export interface RecapStatus {
   worker: { ready: boolean; reason: string | null };
   current: RecapCurrent | null;
   job: RecapJob | null;
+  /** What a run resolves its label rule to; absent from older backends. */
+  dataset_type?: RecapDatasetTypeChoice | null;
 }
 
 export interface RecapRunRequest {
   checkpoint: string;
-  dataset_type?: "sft" | "rollout";
+  /** Omitted by the viewer: the backend decides ("auto"). */
+  dataset_type?: "auto" | RecapDatasetType;
   episodes?: number[] | null;
   lookahead?: number;
   positive_quantile?: number;
@@ -162,7 +221,8 @@ export interface RecapEpisodeSummary {
 
 export interface RecapSummary {
   revision_id: string;
-  threshold: number;
+  version?: string | null;
+  threshold: number | null;
   episodes: Record<string, RecapEpisodeSummary>;
 }
 
@@ -170,8 +230,11 @@ export interface RecapSummary {
 export interface RecapEpisode {
   episode_index: number;
   revision_id: string;
+  version?: string | null;
+  /** False for a values-only result: `advantage` and `positive` are empty. */
+  labels?: boolean;
   fps: number;
-  threshold: number;
+  threshold: number | null;
   frame_index: number[];
   timestamp: number[];
   value: number[];

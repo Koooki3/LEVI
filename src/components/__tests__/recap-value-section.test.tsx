@@ -160,6 +160,7 @@ let episodeHandler: (
   ident: DatasetIdent,
   signal?: AbortSignal,
   rid?: string,
+  version?: string | null,
 ) => Promise<RecapEpisode | null> = async (ep, _ident, _signal, rid) =>
   episode(rid!, ep);
 let compareHandler: (
@@ -167,19 +168,31 @@ let compareHandler: (
   a: string,
   b: string,
   signal?: AbortSignal,
+  versions?: { a?: string | null; b?: string | null },
 ) => Promise<RecapComparison> = async (_ident, a, b) => compare(a, b);
 let summaryHandler: (
   ident: DatasetIdent,
   rid?: string,
 ) => Promise<RecapSummary | null> = async () => null;
 const fetchEpisode = mock(
-  (ep: number, ident: DatasetIdent, signal?: AbortSignal, rid?: string) =>
-    episodeHandler(ep, ident, signal, rid),
+  (
+    ep: number,
+    ident: DatasetIdent,
+    signal?: AbortSignal,
+    rid?: string,
+    version?: string | null,
+  ) => episodeHandler(ep, ident, signal, rid, version),
 );
 const fetchCompare = mock(
-  (ident: DatasetIdent, a: string, b: string, signal?: AbortSignal) =>
-    compareHandler(ident, a, b, signal),
+  (
+    ident: DatasetIdent,
+    a: string,
+    b: string,
+    signal?: AbortSignal,
+    versions?: { a?: string | null; b?: string | null },
+  ) => compareHandler(ident, a, b, signal, versions),
 );
+class RecapRecomputedError extends Error {}
 const run = mock(async (ident: DatasetIdent, request: RecapRunRequest) => {
   void ident;
   void request;
@@ -191,6 +204,7 @@ mock.module("@/context/annotations-context", () => ({
   useAnnotations: () => context,
 }));
 mock.module("@/utils/annotationsClient", () => ({
+  RecapRecomputedError,
   isAnnotateBackendEnabled: () => true,
   fetchRecapStatus: (ident: DatasetIdent) => statusHandler(ident),
   fetchRecapRevisions: (ident: DatasetIdent) => revisionsHandler(ident),
@@ -353,8 +367,14 @@ describe("saved Value model results", () => {
     const [primary, secondary] = selectors(host);
     expect(primary.options[0].textContent).toContain("value-r2-step6000");
     expect(primary.options[0].textContent).toContain("step 6000");
+    expect(primary.options[0].textContent).toContain("computed");
     expect(primary.options[0].textContent).toContain("2026");
-    expect(primary.options[0].textContent).toContain(r2);
+    expect(primary.options[0].textContent).toContain("12 episodes");
+    // The run id moved from the picker into the details.
+    expect(primary.options[0].textContent).not.toContain(r2);
+    expect(
+      host.querySelector(".recap-version-facts.side-a")!.textContent,
+    ).toContain(r2);
     expect(primary.labels?.[0]?.textContent).toBe("Saved result A");
     expect(secondary.labels?.[0]?.textContent).toBe("Compare with result B");
     await focus(primary);
@@ -585,45 +605,68 @@ describe("saved Value model results", () => {
     );
   });
 
-  test("a first SFT calculation explicitly sends the label rule and does not borrow a historical threshold", async () => {
-    statusHandler = async () => ({ ...status(), current: null });
+  test("the compute controls choose no label rule: they show the automatic one and send none", async () => {
+    statusHandler = async () => ({
+      ...status(),
+      current: null,
+      dataset_type: {
+        setting: "auto",
+        dataset_type: "rollout",
+        source: "fallback",
+        reason: "no dataset setting",
+      },
+    });
     revisionsHandler = async () => ({ current: null, revisions: [] });
     const { host } = await render(page());
     await waitFor(() => computePicker(host));
-    const typePicker = host.querySelector<HTMLSelectElement>(
-      ".recap-compute-rule select",
-    )!;
-    await choose(typePicker, "sft");
-    expect(host.textContent).toContain(
-      "every Boolean label is set to positive",
-    );
+    expect(host.querySelector(".recap-compute-rule")).toBeNull();
+    expect(host.textContent).not.toContain("Dataset label rule");
+    const rule = host.querySelector(".recap-label-rule")!.textContent!;
+    expect(rule).toContain("Label rule (decided automatically)");
+    expect(rule).toContain("Policy rollouts");
+    expect(rule).toContain("fell back to policy rollouts");
     await click(button(host, "Compute advantages"));
     expect(run).toHaveBeenCalledTimes(1);
-    expect(run.mock.calls[0][1]).toEqual({
-      checkpoint: "value-r1-step3000",
-      dataset_type: "sft",
-    });
+    expect(run.mock.calls[0][1]).toEqual({ checkpoint: "value-r1-step3000" });
     expect(host.querySelector('[role="progressbar"]')).not.toBeNull();
     expect(host.textContent).toContain("queued");
   });
 
-  test("saved SFT label rules default the compute controls independently of history selection", async () => {
+  test("a dataset set to demonstrations or to values only says what the run will produce", async () => {
     statusHandler = async () => ({
       ...status(),
-      current: revision(r2, { dataset_type: "sft" }),
+      dataset_type: {
+        setting: "sft",
+        dataset_type: "sft",
+        source: "user",
+        reason: "the dataset setting",
+      },
     });
     const { host } = await render(page());
     await loaded(host);
     await click(button(host, "Recompute"));
-    const typePicker = host.querySelector<HTMLSelectElement>(
-      ".recap-compute-rule select",
-    )!;
-    expect(typePicker.value).toBe("sft");
-    await choose(selectors(host)[0], r1);
-    expect(typePicker.value).toBe("sft");
-    await choose(typePicker, "rollout");
+    let rule = host.querySelector(".recap-label-rule")!.textContent!;
+    expect(rule).toContain("Demonstrations (SFT)");
+    expect(rule).toContain("set for this dataset");
+    expect(rule).toContain("every Boolean label is set to positive");
     await click(button(host, "Recompute"));
-    expect(run.mock.calls[0][1].dataset_type).toBe("rollout");
+    expect(run.mock.calls[0][1].dataset_type).toBeUndefined();
+
+    statusHandler = async () => ({
+      ...status(),
+      dataset_type: {
+        setting: "value_only",
+        dataset_type: "value_only",
+        source: "user",
+        reason: "the dataset setting",
+      },
+    });
+    const second = await render(page());
+    await loaded(second.host);
+    await click(button(second.host, "Recompute"));
+    rule = second.host.querySelector(".recap-label-rule")!.textContent!;
+    expect(rule).toContain("Values only (no success/failure labels)");
+    expect(rule).toContain("Only the Value curve is computed");
   });
 
   test("read-only browsing retains history and comparison while hiding compute actions", async () => {
@@ -926,5 +969,329 @@ describe("Value axis", () => {
     expect(host.textContent).toContain("自适应");
     expect(host.textContent).toContain("回报单位");
     expect(host.textContent).toContain("展开 Value 行");
+  });
+});
+
+// "models" layout: one result per value model, keyed by the model's name;
+// recomputing keeps the key and changes the version.
+const modelRow = (
+  model: string,
+  version: string,
+  more: Partial<RecapRevision> = {},
+): RecapRevision =>
+  revision(r2, {
+    revision_id: model,
+    model,
+    checkpoint: model,
+    version,
+    layout: "models",
+    ...more,
+  });
+
+describe("one result per value model", () => {
+  test("per-run results of a model are folded behind a checkbox; a model result hides them", async () => {
+    const older = "20261001-090000";
+    revisionsHandler = async () => ({
+      current: "value-r2-step6000",
+      revisions: [
+        modelRow("value-r2-step6000", "20261010-100000", {
+          created_at: 1790000300,
+          current: true,
+        }),
+        revision(r1, { created_at: 1790000200, current: false }),
+        revision(older, {
+          checkpoint: "value-r1-step3000",
+          created_at: 1790000100,
+          current: false,
+        }),
+        revision("20260930-090000", {
+          checkpoint: "value-r2-step6000",
+          created_at: 1790000000,
+          current: false,
+        }),
+      ],
+    });
+    statusHandler = async () => ({
+      ...status(),
+      current: modelRow("value-r2-step6000", "20261010-100000"),
+    });
+    const { host } = await render(page());
+    await waitFor(() => selectors(host)[0]?.value === "value-r2-step6000", {
+      label: "model result selected",
+    });
+    const ids = () => [...selectors(host)[0].options].map((o) => o.value);
+    // One row per model: the model result and r1's newest run.
+    expect(ids()).toEqual(["value-r2-step6000", r1]);
+    expect(selectors(host)[0].options[1].textContent).toContain(
+      "per-run result",
+    );
+    const box = host.querySelector<HTMLInputElement>(".recap-earlier input")!;
+    expect(host.querySelector(".recap-earlier")!.textContent).toContain(
+      "Show earlier per-run results (2)",
+    );
+    await click(box);
+    expect(ids()).toEqual(["value-r2-step6000", r1, older, "20260930-090000"]);
+    // A selected earlier run stays listed when the checkbox is cleared.
+    await choose(selectors(host)[1], older);
+    await click(box);
+    expect([...selectors(host)[1].options].map((o) => o.value)).toContain(
+      older,
+    );
+    expect(host.textContent).toContain(
+      "One result per value model: recomputing with the same model replaces its result.",
+    );
+  });
+
+  test("recomputing replaces the model's version and keeps both A/B selections", async () => {
+    let version = "20261010-100000";
+    revisionsHandler = async () => ({
+      current: "value-r2-step6000",
+      revisions: [
+        modelRow("value-r2-step6000", version, { current: true }),
+        modelRow("value-r1-step3000", "20261009-100000", {
+          checkpoint: "value-r1-step3000",
+          current: false,
+        }),
+      ],
+    });
+    statusHandler = async () => ({
+      ...status(),
+      current: modelRow("value-r2-step6000", version),
+      job: version.endsWith("100000")
+        ? null
+        : { ...job, status: "succeeded", revision_id: "value-r2-step6000" },
+    });
+    episodeHandler = async (ep, _ident, _signal, rid) =>
+      episode(rid === "value-r1-step3000" ? r1 : r2, ep);
+    const { host } = await render(page());
+    await waitFor(() => selectors(host)[0]?.value === "value-r2-step6000");
+    await choose(selectors(host)[1], "value-r1-step3000");
+    await waitFor(() => host.querySelector(".recap-comparison"));
+    const pinned = fetchEpisode.mock.calls.filter(
+      (call) => call[3] === "value-r2-step6000",
+    );
+    expect(pinned.at(-1)?.[4]).toBe("20261010-100000");
+    expect(fetchCompare.mock.calls.at(-1)?.[4]).toEqual({
+      a: "20261010-100000",
+      b: "20261009-100000",
+    });
+    // Someone recomputes r2 with the same model; the list is read again.
+    version = "20261010-110000";
+    await click(button(host, "Refresh results"));
+    await waitFor(
+      () =>
+        fetchEpisode.mock.calls.some((call) => call[4] === "20261010-110000"),
+      { label: "new version read" },
+    );
+    expect(selectors(host)[0].value).toBe("value-r2-step6000");
+    expect(selectors(host)[1].value).toBe("value-r1-step3000");
+    expect(fetchCompare.mock.calls.at(-1)?.[4]).toEqual({
+      a: "20261010-110000",
+      b: "20261009-100000",
+    });
+  });
+
+  test("a read answered 'recomputed' reloads the list and says so, without an error", async () => {
+    let version = "20261010-100000";
+    let lists = 0;
+    revisionsHandler = async () => {
+      lists += 1;
+      return {
+        current: "value-r2-step6000",
+        revisions: [modelRow("value-r2-step6000", version, { current: true })],
+      };
+    };
+    statusHandler = async () => ({
+      ...status(),
+      current: modelRow("value-r2-step6000", version),
+    });
+    episodeHandler = async (ep, _ident, _signal, _rid, pinned) => {
+      if (pinned === "20261010-100000") {
+        // Recomputed by someone else after the list was read.
+        version = "20261010-110000";
+        throw new RecapRecomputedError("recomputed; reload it");
+      }
+      return episode(r2, ep);
+    };
+    const { host } = await render(page());
+    await waitFor(() => host.querySelector(".recap-line"), {
+      label: "new version drawn",
+    });
+    expect(lists).toBe(2);
+    expect(host.textContent).toContain(
+      "A selected result was recomputed; the newest version is shown.",
+    );
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(fetchEpisode.mock.calls.at(-1)?.[4]).toBe("20261010-110000");
+  });
+
+  test("a list that keeps naming the old version does not loop", async () => {
+    let lists = 0;
+    revisionsHandler = async () => {
+      lists += 1;
+      return {
+        current: "value-r2-step6000",
+        revisions: [
+          modelRow("value-r2-step6000", "20261010-100000", { current: true }),
+        ],
+      };
+    };
+    statusHandler = async () => ({
+      ...status(),
+      current: modelRow("value-r2-step6000", "20261010-100000"),
+    });
+    episodeHandler = async () => {
+      throw new RecapRecomputedError("recomputed");
+    };
+    const { host } = await render(page());
+    await waitFor(() =>
+      host.textContent?.includes("A selected result was recomputed"),
+    );
+    await flush();
+    await flush();
+    expect(lists).toBeLessThanOrEqual(2);
+  });
+});
+
+const valuesOnlyEpisode = (ep = 0): RecapEpisode => ({
+  ...episode(r2, ep),
+  threshold: null,
+  labels: false,
+  advantage: [],
+  positive: [],
+});
+
+describe("values-only results", () => {
+  test("never show advantage or positive/negative wording", async () => {
+    const row = revision(r2, {
+      dataset_type: "value_only",
+      labels: false,
+      threshold: null as unknown as number,
+      positive_fraction: null,
+    });
+    revisionsHandler = async () => ({ current: r2, revisions: [row] });
+    statusHandler = async () => ({ ...status(), current: row });
+    episodeHandler = async (ep) => valuesOnlyEpisode(ep);
+    const { host } = await render(page());
+    await waitFor(() => host.querySelector(".recap-line"));
+    const readout = host.querySelector(".recap-frame-readout.side-a")!;
+    expect(readout.textContent).toContain("values only");
+    expect(readout.textContent).not.toContain("negative");
+    expect(readout.textContent).not.toContain("positive");
+    expect(readout.textContent).not.toContain(" A ");
+    const dot = host.querySelector(".recap-dot.side-a")!;
+    expect(dot.classList.contains("values-only")).toBe(true);
+    expect(dot.classList.contains("neg")).toBe(false);
+    expect(host.querySelectorAll(".tl-seg.adv")).toHaveLength(0);
+    expect(
+      host.querySelector(".recap-advantage-row .recap-track-state")!
+        .textContent,
+    ).toContain("Values only (no success/failure labels)");
+    expect(host.querySelector(".recap-meta")!.textContent).toContain(
+      "Values only (no success/failure labels)",
+    );
+    expect(host.querySelector(".recap-legend")).toBeNull();
+    const facts = host.querySelector(".recap-version-facts")!.textContent!;
+    expect(facts).toContain("Values only: no outcome labels were used");
+    expect(facts).not.toContain("positive frames");
+    expect(selectors(host)[0].options[0].textContent).toContain("values only");
+  });
+});
+
+describe("comparison charts", () => {
+  const charted = (a: string, b: string): RecapComparison => ({
+    ...compare(a, b),
+    by_outcome: [
+      {
+        outcome: "success",
+        episodes: 1,
+        frames: 3,
+        mean_value_a: -0.3,
+        mean_value_b: -0.6,
+        label_agreement: 0,
+        positive_fraction_a: 2 / 3,
+        positive_fraction_b: 1 / 3,
+      },
+    ],
+    distribution: {
+      bins: 2,
+      value: { edges: [-0.8, -0.5, -0.2], a: [1, 2], b: [2, 1] },
+      abs_diff: { edges: [0, 0.2, 0.4], counts: [1, 2] },
+    },
+  });
+
+  test("draws the agreement, outcome, distribution and per-episode charts with tables", async () => {
+    compareHandler = async (_ident, a, b) => charted(a, b);
+    const { host } = await render(page());
+    await loaded(host);
+    await choose(selectors(host)[1], r1);
+    await waitFor(() => host.querySelector(".recap-charts"));
+    const captions = [...host.querySelectorAll(".recap-chart figcaption")].map(
+      (node) => node.textContent,
+    );
+    expect(captions).toEqual([
+      "Label agreement and positive frames by outcome",
+      "Mean Value by outcome",
+      "Value distribution · per shared frame",
+      "Per-frame |B − A| distribution",
+      "Per-episode mean Value difference (B − A)",
+    ]);
+    // Recharts draws real bars at the fallback width in a test DOM.
+    expect(
+      host.querySelectorAll(".recap-chart .recharts-bar-rectangle").length,
+    ).toBeGreaterThan(5);
+    // Charts are hidden from assistive technology; text and tables carry
+    // the numbers, and A/B are named in text.
+    for (const plot of host.querySelectorAll(".recap-chart-plot"))
+      expect(plot.getAttribute("aria-hidden")).toBe("true");
+    const first = host.querySelector(".recap-chart")!;
+    expect(first.querySelector(".recap-chart-summary")!.textContent).toContain(
+      "Success episodes: Label agreement 0.0%",
+    );
+    expect(first.textContent).toContain("A · value-r2-step6000");
+    expect(first.textContent).toContain("B · value-r1-step3000");
+    const table = first.querySelector(".recap-chart-table")!;
+    expect(table.querySelector("summary")!.textContent).toBe("Table view");
+    expect(table.querySelector("table")!.textContent).toContain("66.7%");
+    const histogram = host.querySelectorAll(".recap-chart")[2];
+    expect(histogram.querySelector("tbody")!.textContent).toContain(
+      "-0.800…-0.500",
+    );
+    const perEpisode = host.querySelectorAll(".recap-chart")[4];
+    expect(perEpisode.querySelector("tbody")!.textContent).toContain(
+      "0 · current",
+    );
+    expect(
+      perEpisode.querySelector(".recharts-bar-rectangle .current"),
+    ).not.toBeNull();
+    // Bars carry no written colour: their classes take the design tokens.
+    expect(
+      host.querySelector('.recap-chart .recharts-bar-rectangle [fill^="#"]'),
+    ).toBeNull();
+  });
+
+  test("an older backend without aggregates still gets charts from per-episode rows", async () => {
+    const { host } = await render(page());
+    await loaded(host);
+    await choose(selectors(host)[1], r1);
+    await waitFor(() => host.querySelector(".recap-charts"));
+    const captions = [...host.querySelectorAll(".recap-chart figcaption")].map(
+      (node) => node.textContent,
+    );
+    expect(captions).toContain("Value distribution · per episode (mean Value)");
+    expect(captions).not.toContain("Per-frame |B − A| distribution");
+  });
+
+  test("chart text is translated", async () => {
+    compareHandler = async (_ident, a, b) => charted(a, b);
+    const { host } = await render(page());
+    await loaded(host);
+    await choose(selectors(host)[1], r1);
+    await waitFor(() => host.querySelector(".recap-charts"));
+    await click(host.querySelector("[data-language=zh]"));
+    await flush();
+    expect(host.textContent).toContain("按结局分组的平均价值");
+    expect(host.textContent).toContain("表格视图");
+    expect(host.textContent).not.toContain("Mean Value by outcome");
   });
 });

@@ -802,6 +802,8 @@ export function recapComparisonNoteKey(note: string): string {
       "A saved result has no source fingerprint; identical frame IDs cannot confirm identical source data.",
     coverage_differs:
       "Frame coverage differs; metrics exclude frames absent from either version.",
+    labels_unavailable:
+      "A result has values only (no success/failure labels): label and advantage metrics are left out.",
   };
   return (
     keys[note] ??
@@ -967,4 +969,93 @@ export function recapComparisonWarnings(
       "A selected result is stale; its data or outcome labels have changed since computation.",
     );
   return warnings;
+}
+
+/** Rows of the result pickers: one per value model.
+ *
+ * A "models"-layout result is already one per model (recomputing replaces
+ * it). Results in the original per-run layout (and every row of an older
+ * backend, which names no layout) are folded to the newest run of each
+ * checkpoint, and hidden altogether when that checkpoint also has a model
+ * result. `showEarlier` lists every run again; ids in `keep` (the current
+ * selection and the dataset's current result) are always listed, so a
+ * selection never disappears from its picker. Order is preserved. */
+export function recapResultRows(
+  results: RecapRevisions,
+  options: { showEarlier?: boolean; keep?: readonly string[] } = {},
+): { rows: RecapRevision[]; hidden: number } {
+  const keep = new Set(
+    [...(options.keep ?? []), results.current ?? ""].filter(Boolean),
+  );
+  const modelOf = (row: RecapRevision) => row.model || row.checkpoint;
+  const modelResults = new Set(
+    results.revisions
+      .filter((row) => row.layout === "models")
+      .map((row) => modelOf(row)),
+  );
+  const newestRun = new Map<string, string>();
+  const ordered = [...results.revisions].sort(
+    (a, b) => (b.created_at ?? 0) - (a.created_at ?? 0),
+  );
+  for (const row of ordered)
+    if (row.layout !== "models" && !newestRun.has(modelOf(row)))
+      newestRun.set(modelOf(row), row.revision_id);
+  const rows: RecapRevision[] = [];
+  let hidden = 0;
+  for (const row of results.revisions) {
+    const earlier =
+      row.layout !== "models" &&
+      (modelResults.has(modelOf(row)) ||
+        newestRun.get(modelOf(row)) !== row.revision_id);
+    if (earlier && !options.showEarlier && !keep.has(row.revision_id)) {
+      hidden += 1;
+      continue;
+    }
+    rows.push(row);
+  }
+  return { rows, hidden };
+}
+
+/** True when a result carries no advantage labels (values only). */
+export function recapValuesOnly(
+  row:
+    | { labels?: boolean | null; dataset_type?: string | null }
+    | null
+    | undefined,
+): boolean {
+  return !!row && (row.labels === false || row.dataset_type === "value_only");
+}
+
+/** Catalog key naming a label rule. */
+export function datasetTypeKey(kind: string | null | undefined): string {
+  switch (kind) {
+    case "sft":
+      return "Demonstrations (SFT)";
+    case "value_only":
+      return "Values only (no success/failure labels)";
+    case "rollout":
+      return "Policy rollouts";
+    default:
+      return kind ?? "";
+  }
+}
+
+/** Catalog key explaining where an automatic label rule came from. */
+export function datasetTypeSourceKey(
+  source: string | null | undefined,
+): string {
+  switch (source) {
+    case "user":
+      return "set for this dataset";
+    case "manifest":
+      return "from the export's metadata";
+    case "outcomes":
+      return "episodes have success/failure labels";
+    case "fallback":
+      return "no dataset setting, export metadata or outcome label: fell back to policy rollouts, which needs outcome labels";
+    case "request":
+      return "asked for in the request";
+    default:
+      return source ?? "";
+  }
 }

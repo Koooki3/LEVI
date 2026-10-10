@@ -1,8 +1,18 @@
 "use client";
 
-/** Saved RECAP results are browsed independently of the compute checkpoint.
- * Explicit revision reads never change the dataset's current result. */
-import React, { useCallback, useEffect, useId, useMemo, useState } from "react";
+/** Saved RECAP results are browsed independently of the compute checkpoint:
+ * one result per value model (recomputing replaces it). Explicit result
+ * reads never change the dataset's current result, and every read is pinned
+ * to the version the list showed: a result recomputed meanwhile answers 409
+ * and the section reloads the list instead of mixing versions. */
+import React, {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Badge,
   Button,
@@ -34,13 +44,19 @@ import {
   recapApplies,
   recapComparisonNoteKey,
   recapComparisonWarnings,
+  datasetTypeKey,
+  datasetTypeSourceKey,
+  recapResultRows,
   recapSelection,
+  recapValuesOnly,
   recapView,
   thresholdSourceKey,
   valuePaths,
   type RecapSelection,
 } from "@/components/recap-lanes";
+import { RecapComparisonCharts } from "@/components/recap-compare-charts";
 import {
+  RecapRecomputedError,
   cancelRecapJob,
   fetchRecapCompare,
   fetchRecapEpisode,
@@ -105,13 +121,35 @@ const exact = (value: number | null | undefined) =>
 
 /** The state carries its request identity so even the render before effect
  * cleanup cannot display the previous episode or version. */
+/** A pinned read that found its result recomputed: tell the section, which
+ * reloads the list (and so the version) instead of showing an error. */
+type OnRecomputed = () => void;
+
+/** The latest callback, without restarting the effects that call it. */
+function useLatest<T>(value: T) {
+  const ref = useRef(value);
+  useEffect(() => {
+    ref.current = value;
+  });
+  return ref;
+}
+
 function useEpisodeResult(
   repoId: string,
   episodeId: number,
   revisionId: string,
+  version: string | null | undefined,
   reloadKey: number,
+  onRecomputed: OnRecomputed,
 ) {
-  const key = JSON.stringify([repoId, episodeId, revisionId, reloadKey]);
+  const key = JSON.stringify([
+    repoId,
+    episodeId,
+    revisionId,
+    version ?? null,
+    reloadKey,
+  ]);
+  const recomputed = useLatest(onRecomputed);
   const [result, setResult] = useState<{
     key: string;
     data: RecapEpisode | null | undefined;
@@ -121,16 +159,26 @@ function useEpisodeResult(
     if (!revisionId) return;
     const controller = new AbortController();
     setResult({ key, data: undefined, error: null });
-    fetchRecapEpisode(episodeId, { repoId }, controller.signal, revisionId)
+    fetchRecapEpisode(
+      episodeId,
+      { repoId },
+      controller.signal,
+      revisionId,
+      version,
+    )
       .then((data) => {
         if (!controller.signal.aborted) setResult({ key, data, error: null });
       })
       .catch((error) => {
-        if (!controller.signal.aborted && !isAbort(error))
-          setResult({ key, data: null, error: message(error) });
+        if (controller.signal.aborted || isAbort(error)) return;
+        if (error instanceof RecapRecomputedError) {
+          recomputed.current();
+          return; // stays "loading" until the list brings the new version
+        }
+        setResult({ key, data: null, error: message(error) });
       });
     return () => controller.abort();
-  }, [repoId, episodeId, revisionId, key]);
+  }, [repoId, episodeId, revisionId, version, key, recomputed]);
   return !revisionId
     ? { data: null, error: null }
     : result.key === key
@@ -141,10 +189,22 @@ function useEpisodeResult(
 function useComparison(
   repoId: string,
   selection: RecapSelection,
+  versions: { a?: string | null; b?: string | null },
   reloadKey: number,
+  onRecomputed: OnRecomputed,
 ) {
   const { primary, comparison } = selection;
-  const key = JSON.stringify([repoId, primary, comparison, reloadKey]);
+  const versionA = versions.a ?? null;
+  const versionB = versions.b ?? null;
+  const key = JSON.stringify([
+    repoId,
+    primary,
+    comparison,
+    versionA,
+    versionB,
+    reloadKey,
+  ]);
+  const recomputed = useLatest(onRecomputed);
   const [result, setResult] = useState<{
     key: string;
     data: RecapComparison | null | undefined;
@@ -154,16 +214,23 @@ function useComparison(
     if (!primary || !comparison) return;
     const controller = new AbortController();
     setResult({ key, data: undefined, error: null });
-    fetchRecapCompare({ repoId }, primary, comparison, controller.signal)
+    fetchRecapCompare({ repoId }, primary, comparison, controller.signal, {
+      a: versionA,
+      b: versionB,
+    })
       .then((data) => {
         if (!controller.signal.aborted) setResult({ key, data, error: null });
       })
       .catch((error) => {
-        if (!controller.signal.aborted && !isAbort(error))
-          setResult({ key, data: null, error: message(error) });
+        if (controller.signal.aborted || isAbort(error)) return;
+        if (error instanceof RecapRecomputedError) {
+          recomputed.current();
+          return;
+        }
+        setResult({ key, data: null, error: message(error) });
       });
     return () => controller.abort();
-  }, [repoId, primary, comparison, key]);
+  }, [repoId, primary, comparison, versionA, versionB, key, recomputed]);
   return !primary || !comparison
     ? { data: null, error: null }
     : result.key === key
@@ -180,9 +247,12 @@ type DatasetRange = ReturnType<typeof useDatasetRange>;
 function useDatasetRange(
   repoId: string,
   revisionId: string,
+  version: string | null | undefined,
   reloadKey: number,
+  onRecomputed: OnRecomputed,
 ): { range: ValueDomain | null; state: "loading" | "ready" | "failed" } {
-  const key = JSON.stringify([repoId, revisionId, reloadKey]);
+  const key = JSON.stringify([repoId, revisionId, version ?? null, reloadKey]);
+  const recomputed = useLatest(onRecomputed);
   const [result, setResult] = useState<{
     key: string;
     range: ValueDomain | null;
@@ -191,7 +261,7 @@ function useDatasetRange(
   useEffect(() => {
     if (!revisionId) return;
     const controller = new AbortController();
-    fetchRecapSummary({ repoId }, controller.signal, revisionId)
+    fetchRecapSummary({ repoId }, controller.signal, revisionId, version)
       .then((summary) => {
         if (!controller.signal.aborted)
           setResult({
@@ -200,12 +270,16 @@ function useDatasetRange(
             failed: false,
           });
       })
-      .catch(() => {
-        if (!controller.signal.aborted)
-          setResult({ key, range: null, failed: true });
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof RecapRecomputedError) {
+          recomputed.current();
+          return;
+        }
+        setResult({ key, range: null, failed: true });
       });
     return () => controller.abort();
-  }, [repoId, revisionId, key]);
+  }, [repoId, revisionId, version, key, recomputed]);
   return useMemo(
     () =>
       !revisionId
@@ -244,24 +318,52 @@ function RevisionFacts({
   side: "A" | "B";
 }) {
   const { t } = useLocale();
+  const valuesOnly = recapValuesOnly(revision);
   return (
     <div className={"recap-version-facts side-" + side.toLowerCase()}>
       <strong>
         {side} · {revision.checkpoint || revision.revision_id}
       </strong>
-      <code>{revision.revision_id}</code>
+      {revision.layout === "models" ? (
+        <span>
+          {t("Result version")} <code>{revision.version}</code>
+        </span>
+      ) : (
+        <span>
+          {t("Per-run result")} <code>{revision.revision_id}</code>
+        </span>
+      )}
       <span>
-        {t("threshold")} {exact(revision.threshold)} ·{" "}
-        {t(thresholdSourceKey(revision.threshold_source))}
+        {t("Label rule")}:{" "}
+        {t(datasetTypeKey(revision.dataset_type ?? "rollout"))}
       </span>
-      <span>
-        {t("Return range")} [{exact(revision.return_min)},{" "}
-        {exact(revision.return_max)}] · {t("lookahead")} {revision.lookahead}
-      </span>
+      {valuesOnly ? (
+        <span>
+          {t(
+            "Values only: no outcome labels were used, so there are no advantages, threshold or positive/negative labels.",
+          )}
+        </span>
+      ) : (
+        <>
+          <span>
+            {t("threshold")} {exact(revision.threshold)} ·{" "}
+            {t(thresholdSourceKey(revision.threshold_source))}
+          </span>
+          <span>
+            {t("Return range")} [{exact(revision.return_min)},{" "}
+            {exact(revision.return_max)}] · {t("lookahead")}{" "}
+            {revision.lookahead}
+          </span>
+        </>
+      )}
       <span>
         {t("Saved result coverage")}: {revision.episodes} {t("episodes")} ·{" "}
-        {revision.frames} {t("frames")} · {percent(revision.positive_fraction)}{" "}
-        {t("positive frames")}
+        {revision.frames} {t("frames")}
+        {!valuesOnly &&
+          " · " +
+            percent(revision.positive_fraction) +
+            " " +
+            t("positive frames")}
       </span>
       <span>
         {t("Discount factor")} {exact(revision.gamma)} · {t("Failure penalty")}{" "}
@@ -378,6 +480,7 @@ function ComparisonSummary({
         <p>{t("These versions have no commonly labelled frames.")}</p>
       ) : (
         <>
+          <RecapComparisonCharts data={data} episodeId={episodeId} />
           <div
             className="recap-table-scroll"
             tabIndex={0}
@@ -455,10 +558,12 @@ function ComparisonSummary({
                 " " +
                 t("shared frames") +
                 " · " +
-                t("Label agreement") +
-                " " +
-                percent(ep.label_agreement) +
-                " · " +
+                (ep.label_agreement == null
+                  ? ""
+                  : t("Label agreement") +
+                    " " +
+                    percent(ep.label_agreement) +
+                    " · ") +
                 t("Value mean absolute difference") +
                 " " +
                 number(ep.value_mean_abs_diff)
@@ -483,9 +588,10 @@ function AdvantageTrack({
   stateNote?: string | null;
 }) {
   const { t } = useLocale();
+  const valuesOnly = !!data && recapValuesOnly(data);
   const runs = useMemo(
     () =>
-      data
+      data && !recapValuesOnly(data) && data.threshold != null
         ? advantageRuns(
             data.frame_index,
             data.positive,
@@ -515,7 +621,9 @@ function AdvantageTrack({
         ? t("Loading…")
         : !data || data.timestamp.length === 0
           ? t("No advantage labels for this episode")
-          : null);
+          : valuesOnly
+            ? t("Values only (no success/failure labels): no advantage labels")
+            : null);
   return (
     <div className={"tl-row recap-advantage-row side-" + side.toLowerCase()}>
       <div className="label">
@@ -816,10 +924,13 @@ function ValueTrack({
                     " " +
                     formatSigned(series[frame], 1)
                   : "") +
-                " · A " +
-                formatSigned(data.advantage[frame], 4) +
-                " · " +
-                t(data.positive[frame] ? "positive" : "negative")}
+                // A values-only result has no advantage or label at all.
+                (recapValuesOnly(data)
+                  ? " · " + t("values only")
+                  : " · A " +
+                    formatSigned(data.advantage[frame], 4) +
+                    " · " +
+                    t(data.positive[frame] ? "positive" : "negative"))}
       </output>
     );
   };
@@ -911,7 +1022,11 @@ function ValueTrack({
                   "recap-dot side-" +
                   side.toLowerCase() +
                   " " +
-                  (data.positive[frame] ? "pos" : "neg")
+                  (recapValuesOnly(data)
+                    ? "values-only"
+                    : data.positive[frame]
+                      ? "pos"
+                      : "neg")
                 }
                 style={{
                   left:
@@ -1053,11 +1168,22 @@ function DatasetRecapSection({
   const [job, setJob] = useState<RecapJob | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [checkpoint, setCheckpoint] = useState("");
-  const [datasetType, setDatasetType] = useState<"sft" | "rollout">("rollout");
-  const [datasetTypeChosen, setDatasetTypeChosen] = useState(false);
   const [showControls, setShowControls] = useState(false);
   const [starting, setStarting] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [showEarlier, setShowEarlier] = useState(false);
+  // Set when a pinned read found its result recomputed by someone else.
+  const [recomputedNotice, setRecomputedNotice] = useState(false);
+  const lastAutoReload = useRef(0);
+  const onRecomputed = useCallback(() => {
+    setRecomputedNotice(true);
+    // One automatic reload per few seconds: a list that still names the old
+    // version must not turn into a request loop.
+    const now = Date.now();
+    if (now - lastAutoReload.current < 3000) return;
+    lastAutoReload.current = now;
+    setReloadKey((key) => key + 1);
+  }, []);
   const [axisMode, setAxisMode] = useState<AxisMode>(() =>
     readAxisMode(safeStorage()),
   );
@@ -1142,31 +1268,62 @@ function DatasetRecapSection({
   const secondary = results?.revisions.find(
     (row) => row.revision_id === selection.comparison,
   );
+  // One row per value model; earlier per-run results only on request.
+  const listed = useMemo(
+    () =>
+      results
+        ? recapResultRows(results, {
+            showEarlier,
+            keep: [selection.primary, selection.comparison],
+          })
+        : { rows: [], hidden: 0 },
+    [results, showEarlier, selection.primary, selection.comparison],
+  );
   const episodeA = useEpisodeResult(
     repoId,
     episodeId,
     selection.primary,
+    primary?.version,
     reloadKey,
+    onRecomputed,
   );
   const episodeB = useEpisodeResult(
     repoId,
     episodeId,
     selection.comparison,
+    secondary?.version,
     reloadKey,
+    onRecomputed,
   );
-  const comparison = useComparison(repoId, selection, reloadKey);
-  const datasetA = useDatasetRange(repoId, selection.primary, reloadKey);
-  const datasetB = useDatasetRange(repoId, selection.comparison, reloadKey);
+  const comparison = useComparison(
+    repoId,
+    selection,
+    { a: primary?.version, b: secondary?.version },
+    reloadKey,
+    onRecomputed,
+  );
+  const datasetA = useDatasetRange(
+    repoId,
+    selection.primary,
+    primary?.version,
+    reloadKey,
+    onRecomputed,
+  );
+  const datasetB = useDatasetRange(
+    repoId,
+    selection.comparison,
+    secondary?.version,
+    reloadKey,
+    onRecomputed,
+  );
 
   const readyCheckpoints = useMemo(
     () => (status?.checkpoints ?? []).filter((c) => c.ready),
     [status],
   );
-  useEffect(() => {
-    const savedType = status?.current?.dataset_type;
-    if (!datasetTypeChosen && (savedType === "sft" || savedType === "rollout"))
-      setDatasetType(savedType);
-  }, [status, datasetTypeChosen]);
+  // The label rule is decided by the backend ("auto"): the dataset setting,
+  // the export's metadata or the outcome labels. Shown, never chosen here.
+  const labelRule = status?.dataset_type ?? null;
   useEffect(() => {
     if (!status) return;
     setCheckpoint((selected) => {
@@ -1219,15 +1376,14 @@ function DatasetRecapSection({
     setRunError(null);
     setStarting(true);
     try {
-      setJob(
-        await runRecap({ repoId }, { checkpoint, dataset_type: datasetType }),
-      );
+      // No dataset_type: the backend resolves "auto" itself.
+      setJob(await runRecap({ repoId }, { checkpoint }));
     } catch (error) {
       setRunError(message(error));
     } finally {
       setStarting(false);
     }
-  }, [repoId, checkpoint, datasetType, readOnly, starting]);
+  }, [repoId, checkpoint, readOnly, starting]);
   const cancelRun = useCallback(async () => {
     if (!job || readOnly) return;
     try {
@@ -1272,17 +1428,23 @@ function DatasetRecapSection({
       ? (status?.checkpoints ?? []).filter((c) => !c.ready)
       : [];
 
+  // Model · step · when computed · coverage. The version id stays in the
+  // details below; a per-run (original layout) result says so.
   const revisionLabel = (row: RecapRevision) =>
     [
       row.checkpoint || row.revision_id,
       row.step != null ? t("step") + " " + row.step : "",
       row.created_at != null && Number.isFinite(row.created_at)
-        ? new Date(row.created_at * 1000).toLocaleString(
+        ? t("computed") +
+          " " +
+          new Date(row.created_at * 1000).toLocaleString(
             language === "zh" ? "zh-CN" : "en",
             { hour12: false },
           )
         : "",
-      row.revision_id,
+      row.episodes != null ? row.episodes + " " + t("episodes") : "",
+      recapValuesOnly(row) ? t("values only") : "",
+      row.layout === "models" ? "" : t("per-run result"),
       row.current ? t("Current result") : "",
     ]
       .filter(Boolean)
@@ -1343,19 +1505,6 @@ function DatasetRecapSection({
           </option>
         ))}
       </Select>
-      <label className="recap-compute-rule">
-        <span>{t("Dataset label rule")}</span>
-        <Select
-          value={datasetType}
-          onChange={(e) => {
-            setDatasetType(e.target.value as "sft" | "rollout");
-            setDatasetTypeChosen(true);
-          }}
-        >
-          <option value="rollout">{t("Policy rollouts")}</option>
-          <option value="sft">{t("Demonstrations (SFT)")}</option>
-        </Select>
-      </label>
       <Button
         size="sm"
         variant="primary"
@@ -1391,11 +1540,15 @@ function DatasetRecapSection({
           {primary
             ? primary.checkpoint +
               " · " +
-              percent(
-                episodeA.data ? positiveFraction(episodeA.data.positive) : null,
-              ) +
-              " " +
-              t("positive frames")
+              (recapValuesOnly(primary)
+                ? t("Values only (no success/failure labels)")
+                : percent(
+                    episodeA.data
+                      ? positiveFraction(episodeA.data.positive)
+                      : null,
+                  ) +
+                  " " +
+                  t("positive frames"))
             : statusError
               ? t("Value model unavailable")
               : !status
@@ -1406,7 +1559,7 @@ function DatasetRecapSection({
                   : t("RECAP advantage labels")}
         </span>
         <span className="recap-head-right">
-          {hasResults && (
+          {hasResults && !recapValuesOnly(primary) && (
             <span className="recap-legend">
               <span className="recap-swatch pos" />
               {t("positive")}
@@ -1454,6 +1607,18 @@ function DatasetRecapSection({
           </Button>
         </div>
       )}
+      {recomputedNotice && (
+        <div className="recap-note" role="status">
+          {t("A selected result was recomputed; the newest version is shown.")}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setRecomputedNotice(false)}
+          >
+            {t("Close")}
+          </Button>
+        </div>
+      )}
       {job?.status === "cancelled" && (
         <div className="recap-note">{t("Advantage computation cancelled")}</div>
       )}
@@ -1462,11 +1627,21 @@ function DatasetRecapSection({
           {computeBlocked}
         </div>
       )}
-      {control === "compute" && datasetType === "sft" && (
-        <div className="recap-note">
-          {t(
-            "SFT advantages are computed, but every Boolean label is set to positive.",
-          )}
+      {control === "compute" && labelRule && (
+        <div className="recap-note recap-label-rule" role="note">
+          {t("Label rule (decided automatically)")}:{" "}
+          <strong>{t(datasetTypeKey(labelRule.dataset_type))}</strong> ·{" "}
+          {t(datasetTypeSourceKey(labelRule.source))}
+          {labelRule.dataset_type === "sft" &&
+            " · " +
+              t(
+                "SFT advantages are computed, but every Boolean label is set to positive.",
+              )}
+          {labelRule.dataset_type === "value_only" &&
+            " · " +
+              t(
+                "Only the Value curve is computed: no advantages or positive/negative labels.",
+              )}
         </div>
       )}
       {notReady.map((c) => (
@@ -1491,7 +1666,7 @@ function DatasetRecapSection({
                   }))
                 }
               >
-                {results?.revisions.map((row) => (
+                {listed.rows.map((row) => (
                   <option key={row.revision_id} value={row.revision_id}>
                     {revisionLabel(row)}
                   </option>
@@ -1511,7 +1686,7 @@ function DatasetRecapSection({
                 disabled={(results?.revisions.length ?? 0) < 2}
               >
                 <option value="">{t("No comparison")}</option>
-                {results?.revisions
+                {listed.rows
                   .filter((row) => row.revision_id !== selection.primary)
                   .map((row) => (
                     <option key={row.revision_id} value={row.revision_id}>
@@ -1527,8 +1702,23 @@ function DatasetRecapSection({
             >
               {t("Refresh results")}
             </Button>
+            {(listed.hidden > 0 || showEarlier) && (
+              <label className="recap-earlier">
+                <input
+                  type="checkbox"
+                  className="ds-focus"
+                  checked={showEarlier}
+                  onChange={(e) => setShowEarlier(e.target.checked)}
+                />
+                {t("Show earlier per-run results")}
+                {listed.hidden > 0 && " (" + listed.hidden + ")"}
+              </label>
+            )}
           </div>
           <p className="recap-note" id={versionsHintId}>
+            {t(
+              "One result per value model: recomputing with the same model replaces its result.",
+            )}{" "}
             {t(
               "Browsing saved results does not change the checkpoint used for computation.",
             )}{" "}

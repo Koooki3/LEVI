@@ -768,21 +768,57 @@ export async function fetchRecapStatus(
   return response.json() as Promise<RecapStatus>;
 }
 
-/** Saved results: a read-only list, including historical checkpoints. */
+/** A read pinned to a result version that has been recomputed since (the
+ * backend answers 409). The viewer reloads the result list and shows the
+ * new version. */
+export class RecapRecomputedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RecapRecomputedError";
+  }
+}
+
+async function recapReadError(
+  response: Response,
+  what: string,
+  pinned: boolean,
+): Promise<Error> {
+  const text = await responseErrorMessage(response, what);
+  return pinned && response.status === 409
+    ? new RecapRecomputedError(text)
+    : new Error(text);
+}
+
+/** Saved results, one row per value model (and one per run for results in
+ * the original per-run layout): a read-only list. Asks `/api/recap/results`
+ * and falls back to its older name `/revisions` on a backend without it. */
 export async function fetchRecapRevisions(
   ident: DatasetIdent,
   signal?: AbortSignal,
 ): Promise<RecapRevisions> {
-  const response = await annotationFetch(
-    buildUrl("/api/recap/revisions", ident),
-    {
+  let response = await annotationFetch(buildUrl("/api/recap/results", ident), {
+    cache: "no-store",
+    signal,
+  });
+  if (response.status === 404 || response.status === 405)
+    response = await annotationFetch(buildUrl("/api/recap/revisions", ident), {
       cache: "no-store",
       signal,
-    },
-  );
+    });
   if (!response.ok)
-    throw new Error(await responseErrorMessage(response, "RECAP revisions"));
-  return response.json() as Promise<RecapRevisions>;
+    throw new Error(await responseErrorMessage(response, "RECAP results"));
+  const data = (await response.json()) as RecapRevisions;
+  return {
+    ...data,
+    revisions: data.revisions ?? data.results ?? [],
+  };
+}
+
+/** Versions the reader saw, so a result recomputed since is reported as
+ * {@link RecapRecomputedError} instead of silently mixing versions. */
+export interface RecapPinnedVersions {
+  a?: string | null;
+  b?: string | null;
 }
 
 export async function fetchRecapCompare(
@@ -790,13 +826,20 @@ export async function fetchRecapCompare(
   revisionA: string,
   revisionB: string,
   signal?: AbortSignal,
+  versions: RecapPinnedVersions = {},
 ): Promise<RecapComparison> {
   const url = new URL(buildUrl("/api/recap/compare", ident));
   url.searchParams.set("a", revisionA);
   url.searchParams.set("b", revisionB);
+  if (versions.a) url.searchParams.set("version_a", versions.a);
+  if (versions.b) url.searchParams.set("version_b", versions.b);
   const response = await annotationFetch(url, { cache: "no-store", signal });
   if (!response.ok)
-    throw new Error(await responseErrorMessage(response, "RECAP comparison"));
+    throw await recapReadError(
+      response,
+      "RECAP comparison",
+      !!(versions.a || versions.b),
+    );
   return response.json() as Promise<RecapComparison>;
 }
 
@@ -811,6 +854,8 @@ export async function runRecap(
     body: JSON.stringify({
       repo_id: ident.repoId || null,
       checkpoint: request.checkpoint,
+      // Omitted unless asked for: the backend resolves "auto" from the
+      // dataset setting, the export's metadata or the outcome labels.
       ...(request.dataset_type ? { dataset_type: request.dataset_type } : {}),
       episodes: request.episodes ?? null,
       lookahead: request.lookahead ?? 10,
@@ -859,10 +904,12 @@ function optionalUrl(
   path: string,
   ident: DatasetIdent,
   revisionId?: string,
+  version?: string | null,
 ): string {
   const url = new URL(buildUrl(path, ident));
   url.searchParams.set("optional", "true");
   if (revisionId) url.searchParams.set("revision_id", revisionId);
+  if (revisionId && version) url.searchParams.set("version", version);
   return url.toString();
 }
 
@@ -872,15 +919,20 @@ export async function fetchRecapSummary(
   ident: DatasetIdent,
   signal?: AbortSignal,
   revisionId?: string,
+  version?: string | null,
 ): Promise<RecapSummary | null> {
   if (!ENV_URL) return null;
   const response = await annotationFetch(
-    optionalUrl("/api/recap/summary", ident, revisionId),
+    optionalUrl("/api/recap/summary", ident, revisionId, version),
     { cache: "no-store", signal },
   );
   if (response.status === 404) return null;
   if (!response.ok)
-    throw new Error(await responseErrorMessage(response, "RECAP summary"));
+    throw await recapReadError(
+      response,
+      "RECAP summary",
+      !!(revisionId && version),
+    );
   return (await response.json()) as RecapSummary | null;
 }
 
@@ -891,15 +943,20 @@ export async function fetchRecapEpisode(
   ident: DatasetIdent,
   signal?: AbortSignal,
   revisionId?: string,
+  version?: string | null,
 ): Promise<RecapEpisode | null> {
   if (!ENV_URL) return null;
   const response = await annotationFetch(
-    optionalUrl(`/api/recap/episodes/${episodeId}`, ident, revisionId),
+    optionalUrl(`/api/recap/episodes/${episodeId}`, ident, revisionId, version),
     { cache: "no-store", signal },
   );
   if (response.status === 404) return null;
   if (!response.ok)
-    throw new Error(await responseErrorMessage(response, "RECAP episode"));
+    throw await recapReadError(
+      response,
+      "RECAP episode",
+      !!(revisionId && version),
+    );
   return (await response.json()) as RecapEpisode | null;
 }
 

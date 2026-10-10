@@ -1905,12 +1905,118 @@
 .annotations-skin .recap-compute {
   flex-wrap: wrap;
 }
-.annotations-skin .recap-compute-rule {
-  display: flex;
+.annotations-skin .recap-earlier {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: var(--ds-text-caption-size);
   color: var(--ds-text-secondary);
+}
+/* Comparison charts: A matches the solid curve (--dv-4), B the dashed one
+   (--dv-7). Recharts draws with fill="currentColor"; the class sets color. */
+.annotations-skin .recap-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 12px;
+  margin: 8px 0;
+}
+.annotations-skin .recap-chart {
+  margin: 0;
+  padding: 8px;
+  min-width: 0;
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-1);
+}
+.annotations-skin .recap-chart figcaption {
+  color: var(--ds-text-primary);
+  font-weight: 600;
+}
+.annotations-skin .recap-chart .recap-chart-summary,
+.annotations-skin .recap-chart .recap-chart-note {
+  margin: 4px 0;
+}
+.annotations-skin .recap-chart-plot {
+  width: 100%;
+  overflow: hidden;
+}
+.annotations-skin .recap-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 4px 0;
+}
+.annotations-skin .recap-chart-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.annotations-skin .recap-chart-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+}
+.annotations-skin .recap-chart-swatch.side-a {
+  background: var(--dv-4);
+}
+.annotations-skin .recap-chart-swatch.side-b {
+  background: var(--dv-7);
+  outline: 1px dashed var(--ds-text-secondary);
+  outline-offset: 1px;
+}
+.annotations-skin .recap-chart-swatch.agree {
+  background: var(--ds-text-secondary);
+}
+.annotations-skin .recap-chart .recap-bar-a {
+  color: var(--dv-4);
+}
+.annotations-skin .recap-chart .recap-bar-b {
+  color: var(--dv-7);
+}
+.annotations-skin .recap-chart .recap-bar-b .recharts-rectangle {
+  stroke: var(--ds-text-secondary);
+  stroke-dasharray: 3 2;
+  stroke-width: 1;
+}
+.annotations-skin .recap-chart .recap-bar-agree,
+.annotations-skin .recap-chart .recap-bar-diff {
+  color: var(--ds-text-secondary);
+}
+.annotations-skin .recap-chart .recap-bar-episodes .higher-b {
+  fill: var(--dv-7);
+}
+.annotations-skin .recap-chart .recap-bar-episodes .higher-a {
+  fill: var(--dv-4);
+}
+.annotations-skin .recap-chart .recap-bar-episodes .current {
+  stroke: var(--ds-text-primary);
+  stroke-width: 2;
+}
+.annotations-skin .recap-chart .recharts-cartesian-grid line {
+  stroke: var(--ds-separator);
+}
+.annotations-skin .recap-chart .recharts-cartesian-axis-line {
+  stroke: var(--ds-separator-strong);
+}
+.annotations-skin .recap-chart .recharts-cartesian-axis-tick-value,
+.annotations-skin .recap-chart .recharts-label-list text {
+  fill: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.annotations-skin .recap-chart .recap-chart-zero line {
+  stroke: var(--ds-text-tertiary);
+}
+.annotations-skin .recap-chart-table summary {
+  cursor: pointer;
+  font-weight: 400;
+}
+.annotations-skin .recap-chart-table summary:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
 }
 .annotations-skin .recap-axis {
   position: absolute;
@@ -1947,6 +2053,11 @@
 }
 .annotations-skin .recap-dot.neg {
   box-shadow: 0 0 0 2px var(--dv-negative);
+}
+/* A values-only result has no label: a neutral ring, never positive or
+   negative. */
+.annotations-skin .recap-dot.values-only {
+  box-shadow: 0 0 0 2px var(--ds-separator-strong);
 }
 .annotations-skin .recap-readout {
   position: absolute;

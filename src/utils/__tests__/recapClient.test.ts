@@ -15,6 +15,7 @@ import {
   fetchRecapRevisions,
   fetchRecapStatus,
   fetchRecapSummary,
+  RecapRecomputedError,
   runRecap,
 } from "@/utils/annotationsClient";
 
@@ -69,7 +70,7 @@ afterAll(() => {
 });
 
 describe("RECAP client", () => {
-  test("saved revisions are a read-only uncached request with cancellation", async () => {
+  test("saved results are a read-only uncached request with cancellation", async () => {
     const payload = { current: "20261009-120000", revisions: [] };
     respond(200, payload);
     const controller = new AbortController();
@@ -77,11 +78,83 @@ describe("RECAP client", () => {
       payload,
     );
     expect(new URL(calls[0].url).pathname).toBe(
-      "/api/annotation/recap/revisions",
+      "/api/annotation/recap/results",
     );
     expect(calls[0].init?.method).toBeUndefined();
     expect(calls[0].init?.cache).toBe("no-store");
     expect(calls[0].init?.signal).toBe(controller.signal);
+  });
+
+  test("an older backend without /results is asked under the old name", async () => {
+    const payload = { current: null, revisions: [{ revision_id: "x" }] };
+    let n = 0;
+    globals.fetch = mock((input: string | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      n += 1;
+      return Promise.resolve(
+        n === 1
+          ? new Response('{"detail":"Not Found"}', { status: 404 })
+          : new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    }) as unknown as typeof fetch;
+    expect((await fetchRecapRevisions(ident)).revisions).toEqual(
+      payload.revisions,
+    );
+    expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+      "/api/annotation/recap/results",
+      "/api/annotation/recap/revisions",
+    ]);
+  });
+
+  test("a list sent only under the new name 'results' still fills revisions", async () => {
+    respond(200, { current: null, results: [{ revision_id: "m" }] });
+    expect((await fetchRecapRevisions(ident)).revisions).toEqual([
+      { revision_id: "m" } as never,
+    ]);
+  });
+
+  test("pinned reads send their version and turn 409 into 'recomputed'", async () => {
+    respond(200, null);
+    await fetchRecapEpisode(3, ident, undefined, "model-a", "20261010-1000");
+    await fetchRecapSummary(ident, undefined, "model-a", "20261010-1000");
+    for (const call of calls)
+      expect(new URL(call.url).searchParams.get("version")).toBe(
+        "20261010-1000",
+      );
+    calls = [];
+    respond(200, { frames: { shared: 0 } });
+    await fetchRecapCompare(ident, "model-a", "model-b", undefined, {
+      a: "20261010-1000",
+      b: "20261009-1000",
+    });
+    const url = new URL(calls[0].url);
+    expect(url.searchParams.get("version_a")).toBe("20261010-1000");
+    expect(url.searchParams.get("version_b")).toBe("20261009-1000");
+    respond(409, { detail: "The model-a result was recomputed; reload it" });
+    for (const read of [
+      () => fetchRecapEpisode(3, ident, undefined, "model-a", "20261010-1000"),
+      () => fetchRecapSummary(ident, undefined, "model-a", "20261010-1000"),
+      () =>
+        fetchRecapCompare(ident, "model-a", "model-b", undefined, {
+          a: "20261010-1000",
+        }),
+    ]) {
+      const error = await read().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(RecapRecomputedError);
+      expect((error as Error).message).toContain("recomputed");
+    }
+    // Unpinned, a 409 is an ordinary refusal (e.g. different sources).
+    const plain = await fetchRecapCompare(ident, "a", "b").catch(
+      (e: unknown) => e,
+    );
+    expect(plain).not.toBeInstanceOf(RecapRecomputedError);
+  });
+
+  test("a computation without a label rule sends none: the backend decides", async () => {
+    respond(200, job);
+    await runRecap(ident, { checkpoint: "value-r2" });
+    const body = JSON.parse(String(calls[0].init?.body));
+    expect("dataset_type" in body).toBe(false);
   });
 
   test("comparison carries both explicit revisions and surfaces refused pairings", async () => {
