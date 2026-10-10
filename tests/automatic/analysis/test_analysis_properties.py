@@ -102,3 +102,48 @@ def test_failure_mode_counts_add_up():
         assert sum(v["k"] for v in arm["by_stop_reason"].values()) == arm["failures"]
         assert sum(v["k"] for v in arm["by_failure_mode"].values()) == arm["failures"]
     assert sum(a["trials"] for a in out["arms"].values()) == 300
+
+
+def test_large_samples_switch_to_log_space_and_stay_exact_enough():
+    import time
+
+    import analysis_reference as ref
+
+    from levi.automatic.analysis._core import AnalysisInputError
+
+    # McNemar with 2001 discordant pairs: log-space path against exact fractions.
+    out = paired.mcnemar_counts(950, 1051)
+    assert out["exact"] == pytest.approx(
+        float(ref.mcnemar_exact_p(950, 1051)), rel=1e-9
+    )
+    # Fisher with 4200 trials: log-space path against R-style float sums.
+    got = proportions.fisher_exact(1000, 2100, 1080, 2100)["p_value"]
+    assert got == pytest.approx(ref.fisher_p_float(1000, 2100, 1080, 2100), rel=1e-7)
+    # 100 000 pairs: the whole McNemar result, power caveat included, is quick.
+    rng = np.random.Generator(np.random.PCG64(1))
+    pairs = list(
+        zip(rng.integers(0, 2, 100_000), rng.integers(0, 2, 100_000), strict=True)
+    )
+    started = time.perf_counter()
+    big = paired.mcnemar(pairs, design_difference=0.05)
+    assert time.perf_counter() - started < 30
+    assert big["exploratory"] is False
+    assert proportions.boschloo_exact(10, 400, 20, 400)["available"] is False
+    with pytest.raises(AnalysisInputError):
+        continuous.mann_whitney(["a", "b"], [1.0])
+    with pytest.raises(AnalysisInputError):
+        paired.mcnemar([(1,)])
+
+
+def test_unpaired_comparisons_use_the_power_rule():
+    small = proportions.fisher_exact(4, 10, 8, 10, design_difference=0.3)
+    assert small["exploratory"] is True
+    assert any(c["code"] == "underpowered" for c in small["caveats"])
+    big = proportions.newcombe_independent(120, 300, 170, 300, design_difference=0.2)
+    assert big["exploratory"] is False and big["min_detectable_difference"] <= 0.2
+    pvals = proportions.fisher_pvalues(9, 7)
+    for k1 in range(10):
+        for k2 in range(8):
+            assert proportions.fisher_exact(k1, 9, k2, 7)["p_value"] == pytest.approx(
+                pvals[k1, k2]
+            )

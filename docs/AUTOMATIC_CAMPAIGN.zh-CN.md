@@ -25,11 +25,11 @@
 | 问题 | 函数 | 方法 | 适用条件 | 局限 |
 | --- | --- | --- | --- | --- |
 | 单组成功率 | `proportion` | Wilson 得分区间（主区间）和 Clopper–Pearson 精确区间 | 总是 | Clopper–Pearson 偏保守（覆盖率至少 95%，往往更高） |
-| 同一组布局卡上的两组 | `mcnemar` | McNemar 精确条件检验、mid-p 版本和渐近统计量 | 成对试验（同一张卡、同一轮） | 只用不一致对；不一致对少于 10 时渐近值不可靠 |
+| 同一组布局卡上的两组 | `mcnemar` | McNemar 精确条件检验、mid-p 版本和渐近统计量 | 成对试验（同一张卡、同一轮） | 只用不一致对；不一致对少于 10 时渐近值不可靠；超过 2000 个不一致对时在对数空间求和 |
 | | `newcombe_paired` | Newcombe 成对得分区间（方法 10），估计 p_B − p_A | 成对试验 | 由 Wilson 区间组合而成，不是精确区间 |
 | | `paired_bootstrap` | 按对重抽样，对均值（或中位数）差做 bootstrap；默认百分位法，可选 BCa | 成对的二元或连续结果 | 少于约 30 对时偏宽松；BCa 需要刀切法 |
-| 两个独立组 | `fisher_exact` | Fisher 精确检验（双侧：累加不比观测表更可能的所有表） | 不成对试验（复位策略模式、偏离的卡） | 以两个边际为条件，偏保守 |
-| | `boschloo_exact` | Boschloo 无条件检验（以 Fisher p 值为统计量，在公共成功率的网格上取最大并局部细化） | 不成对试验，功效高于 Fisher | 最大值是数值求得的 |
+| 两个独立组 | `fisher_exact` | Fisher 精确检验（双侧：累加不比观测表更可能的所有表） | 不成对试验（复位策略模式、偏离的卡） | 以两个边际为条件，偏保守；总数超过 4000 时在对数空间求和 |
+| | `boschloo_exact` | Boschloo 无条件检验（以 Fisher p 值为统计量，在公共成功率的网格上取最大并局部细化） | 不成对试验，功效高于 Fisher | 最大值是数值求得的；每组超过 300 次时拒绝计算 |
 | | `newcombe_independent`、`agresti_caffo` | Newcombe 混合得分区间（方法 10）；Agresti–Caffo 加二法区间作对照 | 不成对试验 | 近似区间 |
 | | `posterior_prob_greater` | 均匀先验 Beta(1, 1) 下的 P(p_B > p_A)，精确计算 | 只作描述 | 不是检验 |
 | 两组以上 | `cochran_q`、`friedman` | 按区组计算的 Cochran Q（二元）和 Friedman 秩检验（连续）；p 值由区组内置换组标签求得 | 每个区组内每组各跑一次 | 只是总体检验：说明组间有差异，不说明哪两组 |

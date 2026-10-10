@@ -53,11 +53,11 @@ the full discrete distribution, not from a normal approximation.
 | Question | Function | Method | Use when | Limits |
 | --- | --- | --- | --- | --- |
 | One arm's success rate | `proportion` | Wilson score interval (primary) and Clopper–Pearson exact interval | Always | Clopper–Pearson is conservative (coverage at least 95 %, often more) |
-| Two arms on the same layout cards | `mcnemar` | McNemar exact conditional test, its mid-p version and the asymptotic statistic | Paired trials (same card, same round) | Uses only discordant pairs; the asymptotic value is unreliable below 10 of them |
+| Two arms on the same layout cards | `mcnemar` | McNemar exact conditional test, its mid-p version and the asymptotic statistic | Paired trials (same card, same round) | Uses only discordant pairs; the asymptotic value is unreliable below 10 of them; above 2000 discordant pairs the exact sums run in log space |
 | | `newcombe_paired` | Newcombe's paired score interval (method 10) for p_B − p_A | Paired trials | Built from Wilson intervals; not an exact interval |
 | | `paired_bootstrap` | Bootstrap of the mean (or median) difference, resampling pairs; percentile, or BCa on request | Paired binary or continuous outcomes | Liberal below about 30 pairs; BCa needs a jackknife |
-| Two independent arms | `fisher_exact` | Fisher's exact test (two-sided by summing tables no more likely than the observed one) | Unpaired trials (reset-policy mode, deviated cards) | Conditional on both margins; conservative |
-| | `boschloo_exact` | Boschloo's unconditional test (Fisher's p-value as statistic, maximised over the common rate on a grid with local refinement) | Unpaired trials, more power than Fisher | The maximum is numerical |
+| Two independent arms | `fisher_exact` | Fisher's exact test (two-sided by summing tables no more likely than the observed one) | Unpaired trials (reset-policy mode, deviated cards) | Conditional on both margins; conservative; above 4000 trials the sums run in log space |
+| | `boschloo_exact` | Boschloo's unconditional test (Fisher's p-value as statistic, maximised over the common rate on a grid with local refinement) | Unpaired trials, more power than Fisher | The maximum is numerical; refused above 300 trials per arm |
 | | `newcombe_independent`, `agresti_caffo` | Newcombe's hybrid score interval (method 10); Agresti–Caffo add-two interval for comparison | Unpaired trials | Approximate intervals |
 | | `posterior_prob_greater` | P(p_B > p_A) under uniform Beta(1, 1) priors, computed exactly | Descriptive only | Not a test |
 | More than two arms | `cochran_q`, `friedman` | Cochran's Q (binary) and Friedman's rank test (continuous) per block; p-value by permuting arms within blocks | Every arm ran once per block | Omnibus only: says whether arms differ, not which |

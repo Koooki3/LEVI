@@ -23,6 +23,8 @@ from ._core import caveat, result
 from .proportions import wilson_bounds
 
 MODULE = "paired"
+# Discordant pairs up to which McNemar's p-value is summed in exact integers.
+EXACT_INTEGER_MAX = 2000
 
 
 def _cells(pairs) -> tuple[int, int, int, int, int]:
@@ -42,10 +44,17 @@ def mcnemar_counts(only_a: int, only_b: int) -> dict:
     if m == 0:
         return {"exact": 1.0, "mid_p": 1.0, "asymptotic": 1.0, "statistic": 0.0}
     low = min(only_a, only_b)
-    total = 2**m
-    tail = sum(math.comb(m, j) for j in range(low + 1))
-    exact = min(1.0, 2 * tail / total)
-    mid = min(1.0, (2 * tail - math.comb(m, low)) / total)
+    if m <= EXACT_INTEGER_MAX:
+        total = 2**m
+        tail = sum(math.comb(m, j) for j in range(low + 1))
+        exact = min(1.0, 2 * tail / total)
+        mid = min(1.0, (2 * tail - math.comb(m, low)) / total)
+    else:
+        # Big-integer sums grow quadratically; use the log-space binomial.
+        cdf = _core.binom_cdf(low, m, 0.5)
+        point = float(np.exp(_core.log_binom_pmf(np.array([low]), m, 0.5))[0])
+        exact = min(1.0, 2 * cdf)
+        mid = min(1.0, 2 * cdf - point)
     stat = (only_a - only_b) ** 2 / m
     return {
         "exact": exact,

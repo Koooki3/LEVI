@@ -113,10 +113,16 @@ def check_count(k, n) -> tuple[int, int]:
 def clean_floats(values, name: str = "values") -> tuple[np.ndarray, int]:
     """A 1-D float array without NaN, and how many NaN were dropped.
     Infinite values raise: they are a bug upstream, not a measurement."""
-    arr = np.asarray(list(values) if not isinstance(values, np.ndarray) else values)
-    if arr.dtype == object:
-        arr = np.array([np.nan if v is None else v for v in arr.tolist()], dtype=float)
-    arr = np.asarray(arr, dtype=float).reshape(-1)
+    try:
+        raw = values if isinstance(values, np.ndarray) else list(values)
+        arr = np.asarray(raw)
+        if arr.dtype == object:
+            arr = np.array(
+                [np.nan if v is None else v for v in arr.tolist()], dtype=float
+            )
+        arr = np.asarray(arr, dtype=float).reshape(-1)
+    except (TypeError, ValueError) as exc:
+        raise AnalysisInputError(f"{name} must hold numbers or None") from exc
     nan = np.isnan(arr)
     if np.isinf(arr).any():
         raise AnalysisInputError(f"{name} contains an infinite value")
@@ -126,9 +132,14 @@ def clean_floats(values, name: str = "values") -> tuple[np.ndarray, int]:
 def clean_pairs(pairs, name: str = "pairs") -> tuple[np.ndarray, np.ndarray, int]:
     """Paired values ``[(a, b), ...]``: two float arrays with every pair that
     has a NaN or None on either side removed, and the count removed."""
-    rows = list(pairs)
-    a = np.array([np.nan if r[0] is None else r[0] for r in rows], dtype=float)
-    b = np.array([np.nan if r[1] is None else r[1] for r in rows], dtype=float)
+    try:
+        rows = list(pairs)
+        a = np.array([np.nan if r[0] is None else r[0] for r in rows], dtype=float)
+        b = np.array([np.nan if r[1] is None else r[1] for r in rows], dtype=float)
+    except (TypeError, ValueError, IndexError) as exc:
+        raise AnalysisInputError(
+            f"{name} must be (a, b) pairs of numbers or None"
+        ) from exc
     if np.isinf(a).any() or np.isinf(b).any():
         raise AnalysisInputError(f"{name} contains an infinite value")
     keep = ~(np.isnan(a) | np.isnan(b))
@@ -210,23 +221,28 @@ def chi2_sf(x: float, df: int) -> float:
     return min(1.0, total)
 
 
+def log_comb_row(n: int, upto: int) -> np.ndarray:
+    """``log C(n, j)`` for ``j = 0..upto`` as a cumulative sum of
+    ``log((n - i + 1) / i)``: vectorised, no Python loop over j."""
+    i = np.arange(1, upto + 1, dtype=float)
+    return np.concatenate([[0.0], np.cumsum(np.log((n - i + 1) / i))])
+
+
 def log_binom_pmf(k: np.ndarray, n: int, p: float) -> np.ndarray:
     """log P(X = k) for X ~ Binomial(n, p), elementwise; -inf off support."""
     k = np.asarray(k, dtype=float)
     out = np.full(k.shape, -np.inf)
     ok = (k >= 0) & (k <= n)
     kk = k[ok]
-    lc = (
-        math.lgamma(n + 1)
-        - np.vectorize(math.lgamma, otypes=[float])(kk + 1)
-        - np.vectorize(math.lgamma, otypes=[float])(n - kk + 1)
-    )
     if p <= 0:
         out[ok] = np.where(kk == 0, 0.0, -np.inf)
-    elif p >= 1:
+        return out
+    if p >= 1:
         out[ok] = np.where(kk == n, 0.0, -np.inf)
-    else:
-        out[ok] = lc + kk * math.log(p) + (n - kk) * math.log1p(-p)
+        return out
+    row = log_comb_row(n, n)
+    lc = row[kk.astype(np.int64)]
+    out[ok] = lc + kk * math.log(p) + (n - kk) * math.log1p(-p)
     return out
 
 

@@ -164,27 +164,80 @@ def fisher_pvalues(n1: int, n2: int, *, two_sided: str = "minlike") -> np.ndarra
     return out
 
 
-def fisher_exact(k1, n1, k2, n2, *, two_sided: str = "minlike") -> dict:
+# Above this many trials in total the margin sums run in log space.
+EXACT_INTEGER_MAX = 4000
+
+
+def fisher_margin(
+    k1: int, n1: int, k2: int, n2: int, two_sided: str
+) -> tuple[float, float, float]:
+    """``(two-sided p, P(X <= k1), P(X >= k1))`` from the observed margin
+    only: exact integers up to ``EXACT_INTEGER_MAX`` trials, beyond that
+    log-space hypergeometric terms with a 1e-7 relative tie tolerance."""
+    total = k1 + k2
+    lo = max(0, total - n2)
+    if n1 + n2 <= EXACT_INTEGER_MAX:
+        xs, ws = _fisher_weights(n1, n2, total)
+        denom = math.comb(n1 + n2, total)
+        i = k1 - lo
+        less = sum(ws[: i + 1]) / denom
+        greater = sum(ws[i:]) / denom
+        if two_sided == "minlike":
+            p = sum(w for w in ws if w <= ws[i]) / denom
+        else:
+            p = 2 * min(less, greater)
+        return min(1.0, p), less, greater
+    xs = np.arange(lo, min(n1, total) + 1)
+    r1, r2 = _core.log_comb_row(n1, n1), _core.log_comb_row(n2, n2)
+    logw = r1[xs] + r2[total - xs]
+    probs = np.exp(logw - logw.max())
+    probs = probs / probs.sum()
+    i = k1 - lo
+    less = float(probs[: i + 1].sum())
+    greater = float(probs[i:].sum())
+    if two_sided == "minlike":
+        p = float(probs[probs <= probs[i] * (1 + 1e-7)].sum())
+    else:
+        p = 2 * min(less, greater)
+    return min(1.0, p), min(1.0, less), min(1.0, greater)
+
+
+def _two_arm_assess(k1, n1, k2, n2, design_difference):
+    from . import power  # power imports this module
+
+    pooled = (k1 + k2) / (n1 + n2)
+    exploratory, caveats, mdd = power.assess(
+        min(n1, n2), pooled, design="unpaired", design_difference=design_difference
+    )
+    return exploratory, [_unpaired_caveat(), *caveats], mdd
+
+
+def fisher_exact(
+    k1,
+    n1,
+    k2,
+    n2,
+    *,
+    two_sided: str = "minlike",
+    design_difference: float | None = None,
+) -> dict:
     """Fisher's exact test for two independent arms (``k`` successes of
     ``n`` each). Reports the two-sided p-value and both one-sided ones."""
     k1, n1 = check_count(k1, n1)
     k2, n2 = check_count(k2, n2)
+    if two_sided not in ("minlike", "doubling"):
+        raise AnalysisInputError("two_sided must be 'minlike' or 'doubling'")
     if n1 == 0 or n2 == 0:
         return _unavailable_two("fisher_exact", ["fisher1922"], "an arm has no trials")
-    total = k1 + k2
-    xs, ws = _fisher_weights(n1, n2, total)
-    denom = math.comb(n1 + n2, total)
-    i = k1 - xs.start
-    p = float(fisher_pvalues(n1, n2, two_sided=two_sided)[k1, k2])
-    less = sum(ws[: i + 1]) / denom
-    greater = sum(ws[i:]) / denom
+    p, less, greater = fisher_margin(k1, n1, k2, n2, two_sided)
+    exploratory, caveats, mdd = _two_arm_assess(k1, n1, k2, n2, design_difference)
     return result(
         "test",
         f"fisher_exact_{two_sided}",
         MODULE,
         references=["fisher1922"],
-        exploratory=True,
-        caveats=[_unpaired_caveat()],
+        exploratory=exploratory,
+        caveats=caveats,
         available=True,
         k1=k1,
         n1=n1,
@@ -193,10 +246,16 @@ def fisher_exact(k1, n1, k2, n2, *, two_sided: str = "minlike") -> dict:
         p_value=p,
         p_arm1_lower=less,
         p_arm1_higher=greater,
+        min_detectable_difference=mdd,
     )
 
 
-def boschloo_exact(k1, n1, k2, n2, *, grid: int = 1000) -> dict:
+BOSCHLOO_MAX_N = 300
+
+
+def boschloo_exact(
+    k1, n1, k2, n2, *, grid: int = 1000, design_difference: float | None = None
+) -> dict:
     """Boschloo's unconditional test: the p-value is the largest, over the
     common success probability ``pi``, of the probability of a table whose
     two-sided Fisher p-value is at most the observed one. The maximum is
@@ -207,6 +266,12 @@ def boschloo_exact(k1, n1, k2, n2, *, grid: int = 1000) -> dict:
     if n1 == 0 or n2 == 0:
         return _unavailable_two(
             "boschloo_exact", ["boschloo1970"], "an arm has no trials"
+        )
+    if max(n1, n2) > BOSCHLOO_MAX_N:
+        return _unavailable_two(
+            "boschloo_exact",
+            ["boschloo1970"],
+            f"more than {BOSCHLOO_MAX_N} trials in an arm: use fisher_exact",
         )
     pvals = fisher_pvalues(n1, n2)
     region = (pvals <= pvals[k1, k2]).astype(float)
@@ -232,13 +297,20 @@ def boschloo_exact(k1, n1, k2, n2, *, grid: int = 1000) -> dict:
             a = c
     best_value = max(best_value, size((a + b) / 2))
     p = min(1.0, best_value)
+    exploratory, caveats, mdd = _two_arm_assess(k1, n1, k2, n2, design_difference)
     return result(
         "test",
         "boschloo_exact",
         MODULE,
         references=["boschloo1970", "fisher1922"],
-        exploratory=True,
-        caveats=[_unpaired_caveat()],
+        exploratory=exploratory,
+        caveats=caveats
+        + [
+            caveat(
+                "numerical_maximum", "the maximum over the nuisance rate is numerical"
+            )
+        ],
+        min_detectable_difference=mdd,
         available=True,
         k1=k1,
         n1=n1,
@@ -250,7 +322,15 @@ def boschloo_exact(k1, n1, k2, n2, *, grid: int = 1000) -> dict:
     )
 
 
-def newcombe_independent(k1, n1, k2, n2, *, level: float = _core.DEFAULT_LEVEL) -> dict:
+def newcombe_independent(
+    k1,
+    n1,
+    k2,
+    n2,
+    *,
+    level: float = _core.DEFAULT_LEVEL,
+    design_difference: float | None = None,
+) -> dict:
     """Newcombe's hybrid score interval (his method 10) for ``p1 - p2``
     built from the two Wilson intervals."""
     k1, n1 = check_count(k1, n1)
@@ -267,13 +347,15 @@ def newcombe_independent(k1, n1, k2, n2, *, level: float = _core.DEFAULT_LEVEL) 
     d = p1 - p2
     low = d - math.sqrt((p1 - l1) ** 2 + (u2 - p2) ** 2)
     high = d + math.sqrt((u1 - p1) ** 2 + (p2 - l2) ** 2)
+    exploratory, caveats, mdd = _two_arm_assess(k1, n1, k2, n2, design_difference)
     return result(
         "estimate",
         "newcombe_hybrid_score",
         MODULE,
         references=["newcombe1998independent", "wilson1927"],
-        exploratory=True,
-        caveats=[_unpaired_caveat()],
+        exploratory=exploratory,
+        caveats=caveats,
+        min_detectable_difference=mdd,
         available=True,
         k1=k1,
         n1=n1,
