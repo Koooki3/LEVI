@@ -36,7 +36,16 @@ def main(argv=None) -> int:
         help="check that the packet scan equals the frame scan on given videos",
     )
     c.add_argument("paths", nargs="+", help="video files, or folders searched for .mp4")
+    d = sub.add_parser(
+        "pixel-compare",
+        help="check that LEVI_PIXEL_STATS=histogram equals the float method on given videos",
+    )
+    d.add_argument("paths", nargs="+", help="video files, or folders searched for .mp4")
     args = parser.parse_args(argv)
+    if args.command == "pixel-compare":
+        result = bench.compare_pixels(args.paths)
+        print(bench.dumps(result))
+        return 0 if result["all_within_tolerance"] else 1
     if args.command == "pts-compare":
         result = bench.compare_scans(args.paths)
         print(bench.dumps(result))

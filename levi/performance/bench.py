@@ -21,6 +21,8 @@ import tempfile
 import time
 from pathlib import Path
 
+import numpy as np
+
 SCHEMA = "levi.performance.bench.v1"
 MAX_CORES = 4  # a real robot may be running on this machine
 
@@ -132,10 +134,97 @@ def case_pts(video, repeat):
     }
 
 
-def case_pixels(video, repeat):
+@contextlib.contextmanager
+def _pixel_method(method):
     from levi.conversion import media
 
-    return timed(lambda: media.inspect(Path(video), pixels=True), repeat)
+    before = os.environ.get(media.STATS_SETTING)
+    os.environ[media.STATS_SETTING] = method
+    try:
+        yield
+    finally:
+        if before is None:
+            os.environ.pop(media.STATS_SETTING, None)
+        else:
+            os.environ[media.STATS_SETTING] = before
+
+
+PIXEL_TOLERANCE = 1e-9
+
+
+def _stats_gap(a, b):
+    """Largest absolute difference between two ``inspect`` statistics."""
+    return max(
+        abs(x - y)
+        for key in ("min", "max", "mean", "std", "count")
+        for x, y in zip(
+            np.asarray(a[key], dtype=float).ravel(),
+            np.asarray(b[key], dtype=float).ravel(),
+            strict=True,
+        )
+    )
+
+
+def case_pixels(video, repeat):
+    """Conversion pixel statistics by both methods: time, and the largest
+    difference between their results."""
+    from levi.conversion import media
+
+    path, found, times = Path(video), {}, {}
+    for method in ("float", "histogram"):
+        with _pixel_method(method):
+            times[method] = timed(lambda: media.inspect(path, pixels=True), repeat)
+            found[method] = media.inspect(path, pixels=True)["stats"]
+    gap = _stats_gap(found["float"], found["histogram"])
+    return {
+        "methods": times,
+        "speedup": round(
+            times["float"]["median_s"] / times["histogram"]["median_s"], 2
+        ),
+        "max_abs_diff": gap,
+        "within_tolerance": gap <= PIXEL_TOLERANCE,
+    }
+
+
+def compare_pixels(paths) -> dict:
+    """Read-only, per video: the two methods' statistics and times (PRF-05:
+    required on the real videos before ``histogram`` may become the default)."""
+    from levi.conversion import media
+
+    files = []
+    for entry in map(Path, paths):
+        files += sorted(entry.rglob("*.mp4")) if entry.is_dir() else [entry]
+    rows = []
+    for path in files:
+        row = {"file": path.name, "within_tolerance": False, "error": None}
+        try:
+            found, took = {}, {}
+            for method in ("float", "histogram"):
+                with _pixel_method(method):
+                    start = time.perf_counter()
+                    found[method] = media.inspect(path, pixels=True)
+                    took[method] = round(time.perf_counter() - start, 3)
+            gap = _stats_gap(found["float"]["stats"], found["histogram"]["stats"])
+            same = all(
+                found["float"][k] == found["histogram"][k]
+                for k in ("frames", "span", "first_hash")
+            )
+            row.update(
+                max_abs_diff=gap,
+                seconds=took,
+                within_tolerance=gap <= PIXEL_TOLERANCE and same,
+            )
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            row["error"] = type(error).__name__
+        rows.append(row)
+    return {
+        "schema": "levi.performance.pixel_compare.v1",
+        "tolerance": PIXEL_TOLERANCE,
+        "files": len(rows),
+        "all_within_tolerance": bool(rows) and all(r["within_tolerance"] for r in rows),
+        "different": [r["file"] for r in rows if not r["within_tolerance"]],
+        "rows": rows,
+    }
 
 
 def compare_scans(paths) -> dict:

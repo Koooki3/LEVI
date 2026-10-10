@@ -170,7 +170,7 @@ def test_the_benchmark_reports_numbers_and_removes_its_scratch(tmp_path):
     for case in (
         out["cases"]["hash"],
         out["cases"]["pts"]["scans"]["packet"],
-        out["cases"]["pixels"],
+        out["cases"]["pixels"]["methods"]["float"],
     ):
         assert (
             case["runs"] == 2
