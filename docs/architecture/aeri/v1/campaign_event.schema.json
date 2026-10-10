@@ -1,0 +1,579 @@
+{
+  "$defs": {
+    "CampaignAck": {
+      "additionalProperties": false,
+      "properties": {
+        "detail_code": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "Detail Code",
+          "type": "string"
+        },
+        "executed": {
+          "enum": [
+            "yes",
+            "no",
+            "unknown"
+          ],
+          "title": "Executed",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "policy_host",
+            "run_launcher",
+            "reporter",
+            "none"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "executed",
+        "source",
+        "detail_code"
+      ],
+      "title": "CampaignAck",
+      "type": "object"
+    },
+    "CampaignAction": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "default": 1,
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "idempotency_key": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_:-]{0,200}$",
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "none",
+            "policy_stop",
+            "policy_start",
+            "launch_run",
+            "report"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "non_idempotent": {
+          "title": "Non Idempotent",
+          "type": "boolean"
+        },
+        "params_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Params Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "idempotency_key",
+        "non_idempotent",
+        "params_sha256"
+      ],
+      "title": "CampaignAction",
+      "type": "object"
+    },
+    "CampaignAuthority": {
+      "additionalProperties": false,
+      "properties": {
+        "command_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command Id"
+        },
+        "principal_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Principal Id",
+          "type": "string"
+        },
+        "principal_kind": {
+          "enum": [
+            "conductor",
+            "operator",
+            "recovery"
+          ],
+          "title": "Principal Kind",
+          "type": "string"
+        },
+        "process": {
+          "$ref": "#/$defs/ProcessIdentity"
+        },
+        "session_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "principal_kind",
+        "principal_id",
+        "session_id",
+        "process"
+      ],
+      "title": "CampaignAuthority",
+      "type": "object"
+    },
+    "CampaignHeader": {
+      "additionalProperties": false,
+      "properties": {
+        "arms": {
+          "items": {
+            "pattern": "^[A-H]$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 2,
+          "title": "Arms",
+          "type": "array"
+        },
+        "campaign_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Campaign Sha256",
+          "type": "string"
+        },
+        "conclusion_level": {
+          "enum": [
+            "confirmatory_eligible",
+            "exploratory"
+          ],
+          "title": "Conclusion Level",
+          "type": "string"
+        },
+        "levi_commit": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{7,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Levi Commit"
+        },
+        "robot": {
+          "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+          "title": "Robot",
+          "type": "string"
+        },
+        "schedule_kind": {
+          "enum": [
+            "counterbalanced_segments",
+            "randomized_blocks",
+            "latin_square",
+            "interleaved",
+            "blocked"
+          ],
+          "title": "Schedule Kind",
+          "type": "string"
+        },
+        "segments": {
+          "maximum": 100000,
+          "minimum": 1,
+          "title": "Segments",
+          "type": "integer"
+        },
+        "settings_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Settings Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "campaign_sha256",
+        "settings_sha256",
+        "robot",
+        "arms",
+        "segments",
+        "schedule_kind",
+        "conclusion_level"
+      ],
+      "title": "CampaignHeader",
+      "type": "object"
+    },
+    "Note": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "default": "",
+          "maxLength": 300,
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "title": "Note",
+      "type": "object"
+    },
+    "ProcessIdentity": {
+      "additionalProperties": false,
+      "description": "What makes a PID this process (as ``levi.children.identity``).",
+      "properties": {
+        "boot_id": {
+          "pattern": "^[A-Za-z0-9._-]{1,128}$",
+          "title": "Boot Id",
+          "type": "string"
+        },
+        "pid": {
+          "maximum": 2147483647,
+          "minimum": 1,
+          "title": "Pid",
+          "type": "integer"
+        },
+        "start_ticks": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Start Ticks",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pid",
+        "start_ticks",
+        "boot_id"
+      ],
+      "title": "ProcessIdentity",
+      "type": "object"
+    },
+    "SegmentCounts": {
+      "additionalProperties": false,
+      "description": "What a sealed segment's child run reported.",
+      "properties": {
+        "episodes_complete": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Episodes Complete",
+          "type": "integer"
+        },
+        "faults": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Faults",
+          "type": "integer"
+        },
+        "unplanned_interventions": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Unplanned Interventions",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "episodes_complete",
+        "faults",
+        "unplanned_interventions"
+      ],
+      "title": "SegmentCounts",
+      "type": "object"
+    }
+  },
+  "$id": "levi.aeri.campaign_event.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One line of a campaign's journal (append-only, hash-chained).",
+  "properties": {
+    "ack": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CampaignAck"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "action": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CampaignAction"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "authority": {
+      "$ref": "#/$defs/CampaignAuthority"
+    },
+    "campaign_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "title": "Campaign Id",
+      "type": "string"
+    },
+    "clock_domain": {
+      "pattern": "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9._-]{1,128}$",
+      "title": "Clock Domain",
+      "type": "string"
+    },
+    "control_epoch": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "title": "Control Epoch",
+      "type": "integer"
+    },
+    "counts": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SegmentCounts"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "emitted_wall_ns": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "title": "Emitted Wall Ns",
+      "type": "integer"
+    },
+    "from_state": {
+      "anyOf": [
+        {
+          "enum": [
+            "DRAFT",
+            "PLANNED",
+            "SEGMENT_PREPARE",
+            "POLICY_STOP",
+            "POLICY_START",
+            "POLICY_READY",
+            "ENV_CONFIRM",
+            "ARM_RUNNING",
+            "SEGMENT_SEALED",
+            "ANALYZING",
+            "REPORTED",
+            "PAUSED",
+            "WAIT_HUMAN",
+            "FAULT_LOCKED",
+            "ABORTED"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "From State"
+    },
+    "header": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CampaignHeader"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "minor": {
+      "maximum": 0,
+      "minimum": 0,
+      "title": "Minor",
+      "type": "integer"
+    },
+    "mono_ns": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "title": "Mono Ns",
+      "type": "integer"
+    },
+    "note": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Note"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "prev_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Prev Sha256",
+      "type": "string"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "enum": [
+            "plan_frozen",
+            "segment_started",
+            "robot_free",
+            "policy_stopped",
+            "same_arm_kept",
+            "policy_started",
+            "policy_ready",
+            "run_launched",
+            "run_completed",
+            "campaign_complete",
+            "report_written",
+            "pause_at_boundary",
+            "operator_resume",
+            "operator_abort",
+            "child_fault",
+            "child_crashed",
+            "child_missing",
+            "listener_mismatch",
+            "policy_not_ready",
+            "policy_stop_failed",
+            "policy_start_failed",
+            "launch_failed",
+            "foreign_run",
+            "stop_rule_faults",
+            "stop_rule_interventions",
+            "recovery_ambiguous",
+            "conductor_restarted"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
+    "record": {
+      "enum": [
+        "campaign_header",
+        "prepared",
+        "acknowledged",
+        "committed",
+        "aborted",
+        "note"
+      ],
+      "title": "Record",
+      "type": "string"
+    },
+    "run_id": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Run Id"
+    },
+    "schema": {
+      "const": "levi.aeri.campaign_event.v1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "segment": {
+      "anyOf": [
+        {
+          "maximum": 100000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Segment"
+    },
+    "sequence_no": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "title": "Sequence No",
+      "type": "integer"
+    },
+    "to_state": {
+      "anyOf": [
+        {
+          "enum": [
+            "DRAFT",
+            "PLANNED",
+            "SEGMENT_PREPARE",
+            "POLICY_STOP",
+            "POLICY_START",
+            "POLICY_READY",
+            "ENV_CONFIRM",
+            "ARM_RUNNING",
+            "SEGMENT_SEALED",
+            "ANALYZING",
+            "REPORTED",
+            "PAUSED",
+            "WAIT_HUMAN",
+            "FAULT_LOCKED",
+            "ABORTED"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "To State"
+    },
+    "transaction_id": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}:tx[0-9]{1,19}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Transaction Id"
+    }
+  },
+  "required": [
+    "schema",
+    "minor",
+    "campaign_id",
+    "emitted_wall_ns",
+    "sequence_no",
+    "record",
+    "authority",
+    "control_epoch",
+    "mono_ns",
+    "clock_domain",
+    "prev_sha256"
+  ],
+  "title": "CampaignEvent",
+  "type": "object",
+  "x-levi-major": 1,
+  "x-levi-minor": 0,
+  "x-levi-non-idempotent-actions": [
+    "launch_run"
+  ]
+}

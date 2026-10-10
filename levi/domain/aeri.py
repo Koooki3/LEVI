@@ -1417,6 +1417,258 @@ def header_modes(header, plan: Mapping | None = None) -> dict:
     return found
 
 
+# --- levi.aeri.campaign_event.v1 (a campaign's journal, C only) ---------------------
+#
+# One line of a multi-arm campaign's journal (design X3 §1.6): the same
+# transaction protocol as the run event (prepared -> acknowledged ->
+# committed / aborted, hash-chained), over the campaign's own states. Kept
+# in its own registry (``CAMPAIGN_SCHEMAS``): it is not one of the five
+# messages between A, B and C, and a run header does not list it.
+
+CAMPAIGN_SCHEMAS = {"campaign_event": "levi.aeri.campaign_event.v1"}
+CAMPAIGN_MINORS = {"campaign_event": 0}
+CAMPAIGN_STATES = (
+    "DRAFT",
+    "PLANNED",
+    "SEGMENT_PREPARE",
+    "POLICY_STOP",
+    "POLICY_START",
+    "POLICY_READY",
+    "ENV_CONFIRM",
+    "ARM_RUNNING",
+    "SEGMENT_SEALED",
+    "ANALYZING",
+    "REPORTED",
+    "PAUSED",
+    "WAIT_HUMAN",
+    "FAULT_LOCKED",
+    "ABORTED",
+)
+# States that belong to one segment: a transaction into one names it.
+CAMPAIGN_SEGMENT_STATES = (
+    "SEGMENT_PREPARE",
+    "POLICY_STOP",
+    "POLICY_START",
+    "POLICY_READY",
+    "ENV_CONFIRM",
+    "ARM_RUNNING",
+    "SEGMENT_SEALED",
+)
+CAMPAIGN_RECORDS = (
+    "campaign_header",
+    "prepared",
+    "acknowledged",
+    "committed",
+    "aborted",
+    "note",
+)
+CAMPAIGN_REASONS = (
+    "plan_frozen",
+    "segment_started",
+    "robot_free",
+    "policy_stopped",
+    "same_arm_kept",
+    "policy_started",
+    "policy_ready",
+    "run_launched",
+    "run_completed",
+    "campaign_complete",
+    "report_written",
+    "pause_at_boundary",
+    "operator_resume",
+    "operator_abort",
+    "child_fault",
+    "child_crashed",
+    "child_missing",
+    "listener_mismatch",
+    "policy_not_ready",
+    "policy_stop_failed",
+    "policy_start_failed",
+    "launch_failed",
+    "foreign_run",
+    "stop_rule_faults",
+    "stop_rule_interventions",
+    "recovery_ambiguous",
+    "conductor_restarted",
+)
+CAMPAIGN_ACTION_KINDS = ("none", "policy_stop", "policy_start", "launch_run", "report")
+# Starting a child run is never repeated by itself: a later attempt is a
+# new attempt number, after the previous one was closed without a commit.
+CAMPAIGN_NON_IDEMPOTENT = ("launch_run",)
+CAMPAIGN_SCHEDULE_KINDS = (
+    "counterbalanced_segments",
+    "randomized_blocks",
+    "latin_square",
+    "interleaved",
+    "blocked",
+)
+
+CampaignId = Annotated[
+    str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+]
+CampaignTx = Annotated[
+    str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}:tx[0-9]{1,19}$")
+]
+CampaignKey = Annotated[
+    str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_:-]{0,200}$")
+]
+ArmLetter = Annotated[str, StringConstraints(pattern=r"^[A-H]$")]
+CampaignState = Literal[CAMPAIGN_STATES]
+
+
+def campaign_key(campaign_id, segment, to_state, attempt=1) -> str:
+    """``idempotency_key`` of a campaign transaction:
+    ``<id>:s<NN>:<state entered>`` (``<id>:<state>`` outside a segment),
+    ``:a<n>`` added from the second attempt of a non-idempotent action."""
+    base = (
+        f"{campaign_id}:{to_state}"
+        if segment is None
+        else f"{campaign_id}:s{segment:02d}:{to_state}"
+    )
+    return base if attempt == 1 else f"{base}:a{attempt}"
+
+
+class CampaignAuthority(Part):
+    principal_kind: Literal["conductor", "operator", "recovery"]
+    # Opaque: never a name or an e-mail address.
+    principal_id: Id
+    session_id: Id
+    process: ProcessIdentity
+    command_id: Id | None = None
+
+
+class CampaignAction(Part):
+    kind: Literal[CAMPAIGN_ACTION_KINDS]
+    idempotency_key: CampaignKey
+    non_idempotent: bool
+    attempt: Annotated[int, Field(ge=1, le=1000)] = 1
+    params_sha256: Sha256
+
+    @model_validator(mode="after")
+    def _consistent(self):
+        if (self.kind in CAMPAIGN_NON_IDEMPOTENT) != self.non_idempotent:
+            _bad(f"{self.kind}: non_idempotent is set exactly for launch_run")
+        if self.attempt > 1 and not self.non_idempotent:
+            _bad("only a non-idempotent action has attempts")
+        return self
+
+
+class CampaignAck(Part):
+    executed: Literal["yes", "no", "unknown"]
+    source: Literal["policy_host", "run_launcher", "reporter", "none"]
+    detail_code: Name
+
+
+class SegmentCounts(Part):
+    """What a sealed segment's child run reported."""
+
+    episodes_complete: Count
+    faults: Count
+    unplanned_interventions: Count
+
+
+class CampaignHeader(Part):
+    campaign_sha256: Sha256
+    settings_sha256: Sha256
+    robot: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,31}$")]
+    arms: Annotated[list[ArmLetter], Field(min_length=2, max_length=8)]
+    segments: Annotated[int, Field(ge=1, le=100_000)]
+    schedule_kind: Literal[CAMPAIGN_SCHEDULE_KINDS]
+    conclusion_level: Literal["confirmatory_eligible", "exploratory"]
+    levi_commit: (
+        Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{7,64}$")] | None
+    ) = None
+
+
+class CampaignEvent(AeriContract):
+    """One line of a campaign's journal (append-only, hash-chained)."""
+
+    schema_id: Literal["levi.aeri.campaign_event.v1"] = Field(alias="schema")
+    minor: Annotated[int, Field(ge=0, le=CAMPAIGN_MINORS["campaign_event"])]
+    campaign_id: CampaignId
+    # CLOCK_REALTIME, for audit only.
+    emitted_wall_ns: Ns
+    sequence_no: Count
+    record: Literal[CAMPAIGN_RECORDS]
+    # ``<campaign_id>:tx<sequence_no of its prepared line>``.
+    transaction_id: CampaignTx | None = None
+    segment: Annotated[int, Field(ge=1, le=100_000)] | None = None
+    from_state: CampaignState | None = None
+    to_state: CampaignState | None = None
+    reason: Literal[CAMPAIGN_REASONS] | None = None
+    authority: CampaignAuthority
+    control_epoch: Count
+    action: CampaignAction | None = None
+    ack: CampaignAck | None = None
+    # The child run (one AERI run) a transaction is about.
+    run_id: JobId | None = None
+    counts: SegmentCounts | None = None
+    mono_ns: Ns
+    clock_domain: ClockDomain
+    prev_sha256: Sha256
+    note: Note | None = None
+    header: CampaignHeader | None = None
+
+    @model_validator(mode="after")
+    def _consistent(self):
+        record = self.record
+        header = record == "campaign_header"
+        if header != (self.sequence_no == 0):
+            _bad("the campaign header is line 0, and only it")
+        if header != (self.header is not None):
+            _bad("header is set exactly on the campaign header")
+        if header and self.prev_sha256 != "0" * 64:
+            _bad("the campaign header chains to zeros")
+        if header and self.transaction_id is not None:
+            _bad("the campaign header has no transaction")
+        if record not in ("campaign_header", "note") and self.transaction_id is None:
+            _bad(f"a {record} record names its transaction")
+        if self.transaction_id is not None:
+            campaign, _, number = self.transaction_id.rpartition(":tx")
+            if campaign != self.campaign_id:
+                _bad("the transaction belongs to another campaign")
+            if record == "prepared" and int(number) != self.sequence_no:
+                _bad("a transaction is named after its prepared line")
+        if record in ("prepared", "committed"):
+            if self.from_state is None or self.to_state is None:
+                _bad(f"a {record} record names from_state and to_state")
+            if self.reason is None:
+                _bad(f"a {record} record gives a reason")
+            if self.to_state in CAMPAIGN_SEGMENT_STATES and self.segment is None:
+                _bad(f"a move into {self.to_state} names its segment")
+        if (record == "prepared") != (self.action is not None):
+            _bad("action is set exactly on a prepared record")
+        if self.action is not None:
+            expected = campaign_key(
+                self.campaign_id, self.segment, self.to_state, self.action.attempt
+            )
+            if self.action.idempotency_key != expected:
+                _bad(f"idempotency_key is {expected}")
+            if self.action.kind == "launch_run" and (
+                self.to_state != "ARM_RUNNING" or self.run_id is None
+            ):
+                _bad("launch_run moves into ARM_RUNNING and names the child run")
+        if (record == "acknowledged") != (self.ack is not None):
+            _bad("ack is set exactly on an acknowledged record")
+        if (record == "note") != (self.note is not None):
+            _bad("note is set exactly on a note record")
+        if self.run_id is not None:
+            if self.segment is None:
+                _bad("a child run belongs to a segment")
+            if not self.run_id.startswith(f"{self.campaign_id}__"):
+                _bad("a child run id starts with <campaign_id>__")
+        if self.counts is not None and not (
+            record == "committed" and self.to_state == "SEGMENT_SEALED"
+        ):
+            _bad("counts only on a committed move into SEGMENT_SEALED")
+        return self
+
+
+CAMPAIGN_ADAPTERS: dict[str, TypeAdapter] = {
+    "campaign_event": TypeAdapter(CampaignEvent),
+}
+
+
 # --- the contracts as one validator each -------------------------------------------
 
 JudgementMessage = Annotated[
@@ -1613,6 +1865,12 @@ def parse(raw: bytes | str, contract: str, *, specs=None):
     ``BUILTIN_SPECS``) also checks every predicate name against the spec the
     judgement or scene assessment cites (``E_SPEC_MISMATCH``)."""
     name = _contract_name(contract)
+    return validate(_decode(raw), name, specs=specs)
+
+
+def _decode(raw):
+    """The JSON value in ``raw`` (size, duplicate keys and non-finite
+    numbers refused)."""
     if isinstance(raw, str):
         raw = raw.encode("utf-8")
     if not isinstance(raw, (bytes, bytearray)):
@@ -1620,7 +1878,7 @@ def parse(raw: bytes | str, contract: str, *, specs=None):
     if len(raw) > MAX_BYTES:
         raise AeriError("E_TOO_LARGE", f"{len(raw)} bytes is over {MAX_BYTES}")
     try:
-        value = json.loads(
+        return json.loads(
             bytes(raw).decode("utf-8"),
             object_pairs_hook=_pairs,
             parse_constant=_constant,
@@ -1630,7 +1888,34 @@ def parse(raw: bytes | str, contract: str, *, specs=None):
         raise
     except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise AeriError("E_JSON", f"not JSON: {type(exc).__name__}") from None
-    return validate(value, name, specs=specs)
+
+
+def validate_campaign_event(value: Any) -> CampaignEvent:
+    """A decoded campaign journal line, checked like ``validate`` checks a
+    message (schema id, minor, strict validation, cross-field rules)."""
+    schema = CAMPAIGN_SCHEMAS["campaign_event"]
+    if not isinstance(value, dict):
+        raise AeriError("E_SCHEMA", "a message is a JSON object")
+    if value.get("schema") != schema:
+        raise AeriError(
+            "E_SCHEMA", f"schema {str(value.get('schema'))[:60]!r} is not {schema}"
+        )
+    minor = value.get("minor")
+    newest = CAMPAIGN_MINORS["campaign_event"]
+    if type(minor) is int and minor > newest:
+        raise AeriError(
+            "E_SCHEMA_TOO_NEW",
+            f"minor {minor} is newer than {newest}, the newest this reader knows",
+        )
+    try:
+        return CAMPAIGN_ADAPTERS["campaign_event"].validate_python(value, strict=True)
+    except ValidationError as exc:
+        raise _translate(exc) from None
+
+
+def parse_campaign_event(raw: bytes | str) -> CampaignEvent:
+    """One campaign journal line from its bytes (as ``parse``)."""
+    return validate_campaign_event(_decode(raw))
 
 
 def dump(message) -> bytes:
@@ -1753,15 +2038,32 @@ def schema_documents() -> dict[str, dict]:
     return out
 
 
+def campaign_schema_documents() -> dict[str, dict]:
+    """The JSON Schema of the campaign journal line (its own registry,
+    ``CAMPAIGN_SCHEMAS``)."""
+    return {
+        name: {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": schema_id,
+            "x-levi-major": MAJOR,
+            "x-levi-minor": CAMPAIGN_MINORS[name],
+            "x-levi-non-idempotent-actions": list(CAMPAIGN_NON_IDEMPOTENT),
+            **CAMPAIGN_ADAPTERS[name].json_schema(by_alias=True),
+        }
+        for name, schema_id in CAMPAIGN_SCHEMAS.items()
+    }
+
+
 def render_schema(document: dict) -> str:
     return json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
 def snapshot_texts() -> dict[str, str]:
     """``{relative path: text}`` of every committed schema file."""
+    documents = {**schema_documents(), **campaign_schema_documents()}
     return {
         f"{SNAPSHOT_DIR}/{name}.schema.json": render_schema(document)
-        for name, document in schema_documents().items()
+        for name, document in documents.items()
     }
 
 
@@ -1957,6 +2259,19 @@ def check_against_base(
     ref, shallow history) is a problem, never a pass. A snapshot missing at
     the base is a new contract (a note). A breaking difference is a problem
     once ``RELEASED``, a note before."""
+    return _against_base(root, base, schema_documents())
+
+
+def check_campaign_against_base(
+    root: Path, base: str | None = None
+) -> tuple[list[str], list[str]]:
+    """``check_against_base`` for the campaign journal's schema
+    (``CAMPAIGN_SCHEMAS``): a separate call, so the five messages and the
+    job file keep their own report."""
+    return _against_base(root, base, campaign_schema_documents())
+
+
+def _against_base(root, base, documents) -> tuple[list[str], list[str]]:
     root = Path(root)
     try:
         base = resolve_base(root, base)
@@ -1973,7 +2288,7 @@ def check_against_base(
     commit = found.stdout.strip()
     where = f"{base} ({commit[:12]})"
     problems, notes = [], []
-    for name, document in schema_documents().items():
+    for name, document in documents.items():
         relative = f"{SNAPSHOT_DIR}/{name}.schema.json"
         listed = _git(root, "ls-tree", "--name-only", commit, "--", relative)
         if listed.returncode != 0:
