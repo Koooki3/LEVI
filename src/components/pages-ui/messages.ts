@@ -62,6 +62,20 @@ const KNOWN: Known[] = [
     fix: "Start both services with `uv run levi serve`, then try again.",
   },
   {
+    // src/utils/backendProxy.ts: the page was opened under a host name the
+    // bridge does not answer to (421), seen as the proxy's own sentence or
+    // as a status a file read reports.
+    re: /^(?:Request blocked: this LEVI page does not answer to the address|Cannot read the local dataset .+: the LEVI file service answered 421\.$|Failed to fetch JSON .+: 421\b|HTTP 421$)/,
+    why: "Request blocked: LEVI was opened under an address that is not on its list of allowed host names.",
+    fix: "Open LEVI as http://127.0.0.1:7860 (or localhost, on any port), or add this address to LEVI_UI_ALLOWED_HOSTS in .env and restart LEVI.",
+  },
+  {
+    // src/utils/backendProxy.ts: a write that did not come from the page (403).
+    re: /^Request blocked: writes through the web UI must come from the LEVI page itself/,
+    why: "Request blocked: LEVI accepts changes only from its own page.",
+    fix: "Reload this LEVI page and try again. Scripts make changes through the levi command line, not through the web page.",
+  },
+  {
     re: /^Path must remain inside the configured workspace/,
     why: "This folder is outside the LEVI workspace, the only place datasets can be registered from.",
     fix: "Enter a path inside the workspace shown on this page, or copy the dataset into it first.",
