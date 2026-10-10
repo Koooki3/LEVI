@@ -759,3 +759,127 @@ def test_accept_breaking_needs_write():
     with pytest.raises(SystemExit) as caught:
         main(["--accept-breaking"])
     assert caught.value.code == 2
+
+
+# --- second review (each test failed before its fix) -----------------------------------
+
+
+def test_an_undecided_online_success_maps_to_unknown():
+    # anchored.undecided() turns a success with an undecided veto (or a
+    # disputed exemption, or a missing input) into undecided: the online
+    # judgement can say outcome=success, undecided=true (X1 §2.2: unknown).
+    message = f.judgement(
+        decision="unknown",
+        unknown_reason="model_undecided",
+        legacy_c5=_c5("supported", "success", True),
+    )
+    assert aeri.validate(message, "judgement").decision == "unknown"
+
+
+def _prepared(**action):
+    base = f.run_event()
+    merged = {**base["action"], **action}
+    merged["idempotency_key"] = aeri.action_key(
+        f.RUN, base["episode_id"], merged["kind"], merged.get("step")
+    )
+    return {**base, "action": merged}
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        {"kind": "home", "non_idempotent": True},
+        {"kind": "policy_steps", "non_idempotent": True, "step": None},
+        {"kind": "home", "non_idempotent": False, "step": 3},
+        {"kind": "hold", "non_idempotent": True},
+    ],
+)
+def test_physical_actions_need_a_step_and_are_never_idempotent(action):
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.validate(_prepared(**action), "run_event")
+    assert caught.value.code == "E_INCONSISTENT"
+
+
+def test_the_idempotency_key_is_derived_from_run_episode_action_and_step():
+    good = _prepared(kind="home", non_idempotent=True, step=3)
+    assert aeri.validate(good, "run_event").action.step == 3
+    forged = {**good, "action": {**good["action"], "idempotency_key": f.SHA}}
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.validate(forged, "run_event")
+    assert caught.value.code == "E_INCONSISTENT"
+    retry = _prepared(kind="home", non_idempotent=True, step=4, retry_of=f"{f.RUN}:tx2")
+    assert aeri.validate(retry, "run_event").action.retry_of == f"{f.RUN}:tx2"
+    # Only a physical action is retried.
+    with pytest.raises(aeri.AeriError):
+        aeri.validate(_prepared(kind="none", retry_of=f"{f.RUN}:tx2"), "run_event")
+
+
+def _clone_detached(tmp_path, source):
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", "-q", str(source), str(clone)], check=True, capture_output=True
+    )
+    _git(clone, "checkout", "-q", "--detach")
+    for branch in _git(
+        clone, "for-each-ref", "--format=%(refname:short)", "refs/heads/"
+    ).split():
+        _git(clone, "branch", "-q", "-D", branch)
+    return clone
+
+
+def test_base_is_local_main_when_there_is_one(tmp_path, monkeypatch):
+    monkeypatch.delenv("LEVI_CONTRACT_BASE", raising=False)
+    root = _repo(tmp_path, aeri.snapshot_texts())
+    assert aeri.resolve_base(root) == "main"
+    assert aeri.check_against_base(root) == ([], [])
+
+
+def test_base_falls_back_to_origin_main_in_a_detached_checkout(tmp_path, monkeypatch):
+    # GitHub Actions: pull request, tag or branch push -- no local main.
+    monkeypatch.delenv("LEVI_CONTRACT_BASE", raising=False)
+    clone = _clone_detached(tmp_path, _repo(tmp_path / "src", aeri.snapshot_texts()))
+    assert _git(clone, "for-each-ref", "refs/heads/") == ""
+    assert aeri.resolve_base(clone) == "origin/main"
+    assert aeri.check_against_base(clone) == ([], [])
+
+
+def test_base_in_a_source_tree_without_git_fails_with_a_fix(tmp_path, monkeypatch):
+    monkeypatch.delenv("LEVI_CONTRACT_BASE", raising=False)
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    problems, _ = aeri.check_against_base(tree)
+    assert problems and "--base" in problems[0] and "LEVI_CONTRACT_BASE" in problems[0]
+
+
+def test_base_order_is_flag_then_environment_then_main_then_origin(
+    tmp_path, monkeypatch
+):
+    root = _repo(tmp_path, aeri.snapshot_texts())
+    _git(root, "branch", "-q", "trunk", "main")
+    monkeypatch.setenv("LEVI_CONTRACT_BASE", "trunk")
+    assert aeri.resolve_base(root) == "trunk"
+    assert aeri.resolve_base(root, "main") == "main"
+    # A named base that does not resolve fails; it never falls back.
+    monkeypatch.setenv("LEVI_CONTRACT_BASE", "nope")
+    problems, _ = aeri.check_against_base(root)
+    assert problems and "nope" in problems[0]
+    problems, _ = aeri.check_against_base(root, "also-nope")
+    assert problems and "also-nope" in problems[0]
+    monkeypatch.delenv("LEVI_CONTRACT_BASE")
+    _git(root, "branch", "-q", "-m", "main", "old-main")
+    problems, _ = aeri.check_against_base(root)
+    assert problems and "main" in problems[0] and "origin/main" in problems[0]
+
+
+def test_unreadable_base_is_not_reported_as_a_contract_difference(capsys, monkeypatch):
+    from levi.domain.schema_catalog import main
+
+    assert main(["--base", "no-such-branch-anywhere"]) == 1
+    out = capsys.readouterr().out
+    assert "cannot read the base" in out
+    assert "in a way v1 does not allow" not in out
+
+
+def test_ci_compares_with_origin_main():
+    workflow = (ROOT / ".github/workflows/test.yml").read_text()
+    assert "levi dev check-contracts --base origin/main" in workflow

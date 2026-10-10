@@ -24,9 +24,10 @@ state change) or ``aborted``. A ``none`` action needs no acknowledgement; a
 real action is committed only after ``executed: yes``. One transaction is
 open at a time.
 
-Reading back: only a last line that has no newline, cannot be decoded as
-JSON or does not chain to the line before is torn (a crash): it is ignored.
-A whole, chained line that fails the contract (a newer minor, an unknown
+Reading back: only a last line that has no newline, or that cannot be
+decoded as JSON, is torn (a crash): it is ignored. A whole line that decodes
+but does not chain to the line before (an edit: a crash never leaves one),
+or a whole, chained line that fails the contract (a newer minor, an unknown
 field, a broken rule) is kept and makes the journal corrupt, like any bad
 line before the last; a corrupt journal is never written to or cut again,
 and its ``effective_state`` is FAULT_LOCKED.
@@ -39,10 +40,13 @@ the crash is valid. A corrupt journal reports ``FAULT_LOCKED``
 (``journal_corrupt``) and writes nothing. Leaving ``FAULT_LOCKED`` is an
 operator's command, not this module's.
 
-Idempotency: transaction ids are unique; a non-idempotent action whose
-``idempotency_key`` (run, episode, kind, step: no control epoch) was ever
-prepared is refused, in every later epoch and after any recovery (the FR3
-server cannot deduplicate, so it is never sent twice); ``by_command`` finds
+Idempotency: transaction ids are unique; a physical action (home, policy
+steps) is non-idempotent and carries a ``step`` the orchestrator assigns,
+increasing per (episode, kind); its ``idempotency_key`` (run, episode,
+kind, step: no control epoch) is refused once prepared, in every later epoch
+and after any recovery (the FR3 server cannot deduplicate, so it is never
+sent twice). A retry after ``executed: no`` is a new logical command: a new
+step and ``retry_of`` naming the closed transaction that did not run; ``by_command`` finds
 what an operator command already did; ``expected_seq`` is a compare-and-set
 on the next line number.
 
@@ -112,13 +116,8 @@ def line_sha(line: bytes) -> str:
     return hashlib.sha256(line).hexdigest()
 
 
-def action_key(run_id, episode_id, kind, step) -> str:
-    """``idempotency_key`` of an action: one value per (run, episode, kind,
-    step). The control epoch is deliberately left out: recovery always
-    raises it, and a non-idempotent action prepared before a crash must stay
-    refused after it."""
-    text = json.dumps([run_id, episode_id, kind, step])
-    return hashlib.sha256(text.encode()).hexdigest()
+# sha256(run, episode, kind, step); the contract checks every prepared line.
+action_key = aeri.action_key
 
 
 def params_sha(params) -> str:
@@ -182,6 +181,11 @@ class Replay:
     transactions: set = field(default_factory=set)
     attempted: dict = field(default_factory=dict)  # idempotency key -> tx id
     commands: dict = field(default_factory=dict)  # command id -> [sequence_no]
+    # (episode_id, kind) -> highest step of a non-idempotent action prepared
+    last_step: dict = field(default_factory=dict)
+    # tx id -> the physical action's prepared event and its acknowledgement
+    physical: dict = field(default_factory=dict)
+    closed: set = field(default_factory=set)  # tx ids committed or aborted
     last_mono: dict = field(default_factory=dict)  # clock domain -> mono_ns
 
     @property
@@ -221,6 +225,15 @@ class Replay:
                     "a non-idempotent action is never repeated: tried in "
                     f"{self.attempted[action.idempotency_key]}"
                 )
+            if action.non_idempotent:
+                last = self.last_step.get((event.episode_id, action.kind))
+                if last is not None and action.step <= last:
+                    refuse(
+                        f"step {action.step} of {action.kind}: steps only go up "
+                        f"(last {last})"
+                    )
+            if action.retry_of is not None:
+                self._check_retry(event)
             return
         if record == "note":
             return
@@ -248,6 +261,23 @@ class Replay:
                         f"{tx} was not executed ({self.open_ack.ack.executed}): abort it"
                     )
 
+    def _check_retry(self, event: aeri.RunEvent) -> None:
+        """A retry names a closed transaction of the same action and episode
+        that the controller reported as not executed."""
+        before = self.physical.get(event.action.retry_of)
+        if before is None:
+            refuse(f"retry_of {event.action.retry_of}: no such physical action")
+        prepared, ack = before
+        if (prepared.episode_id, prepared.action.kind) != (
+            event.episode_id,
+            event.action.kind,
+        ):
+            refuse("a retry repeats the same action of the same episode")
+        if prepared.transaction_id not in self.closed:
+            refuse("a retry follows a closed transaction")
+        if ack is None or ack.ack.executed != "no":
+            refuse("only an action reported as not executed (executed: no) is retried")
+
     @staticmethod
     def _check_leaving_fault(event: aeri.RunEvent) -> None:
         """Out of FAULT_LOCKED only by an operator's command, and only to
@@ -272,16 +302,25 @@ class Replay:
         elif record == "prepared":
             self.open_tx, self.open_ack = event, None
             self.transactions.add(event.transaction_id)
+            action = event.action
+            if action.non_idempotent:
+                self.last_step[(event.episode_id, action.kind)] = action.step
+                self.physical[event.transaction_id] = (event, None)
             self.attempted.setdefault(
                 event.action.idempotency_key, event.transaction_id
             )
         elif record == "acknowledged":
             self.open_ack = event
+            tx = event.transaction_id
+            if tx in self.physical:
+                self.physical[tx] = (self.physical[tx][0], event)
         elif record == "committed":
             self.state = event.to_state
             self.open_tx = self.open_ack = None
+            self.closed.add(event.transaction_id)
         elif record == "aborted":
             self.open_tx = self.open_ack = None
+            self.closed.add(event.transaction_id)
         self.control_epoch = max(self.control_epoch, event.control_epoch)
         self.last_mono[event.clock_domain] = event.mono_ns
         command = event.authority.command_id
@@ -324,21 +363,23 @@ def scan(path: Path) -> Scan:
     offset = 0
     for index, line in enumerate(whole):
         last = index == len(whole) - 1 and not tail
-        # Torn means a crash: the line cannot be decoded, or it does not
-        # chain to the line before. Only the very last line may be torn.
+        # Torn means a crash: a last line without its newline (the tail), or
+        # a last line that cannot be decoded. A whole line that decodes but
+        # does not chain is an edit, never a crash artefact: corrupt.
         try:
             raw = json.loads(line)
-            torn = None if isinstance(raw, dict) else "not a JSON object"
         except (ValueError, RecursionError):
-            torn = "not JSON"
-        if torn is None and raw.get("prev_sha256") != previous:
-            torn = "the hash chain is broken"
-        if torn is not None:
             if last:
                 result.torn = data[offset:]
             else:
-                result.corrupt = f"line {index}: {torn}"
-                result.corrupt_code = "E_CHAIN"
+                result.corrupt, result.corrupt_code = (
+                    f"line {index}: not JSON",
+                    "E_JSON",
+                )
+            return result
+        if not isinstance(raw, dict) or raw.get("prev_sha256") != previous:
+            result.corrupt = f"line {index}: the hash chain is broken"
+            result.corrupt_code = "E_CHAIN"
             return result
         # A whole, chained line that fails the contract or the rules was
         # written that way (a newer writer, an edit): it is kept, and the
@@ -582,11 +623,13 @@ class Journal:
 
     @property
     def state(self) -> str:
-        return self._replay.state
+        """FAULT_LOCKED for a corrupt journal, whatever its readable lines
+        say; otherwise the state its last commit set."""
+        return "FAULT_LOCKED" if self.corrupt else self._replay.state
 
     @property
     def completed(self) -> bool:
-        return self._replay.completed
+        return self.corrupt is None and self._replay.completed
 
     @property
     def control_epoch(self) -> int:
@@ -716,6 +759,7 @@ class Journal:
         policy_epoch: int | None = None,
         evidence_ids=(),
         expected_seq: int | None = None,
+        retry_of: str | None = None,
     ):
         """Open a transaction from the current state (synced on return:
         only now may the caller act)."""
@@ -738,6 +782,8 @@ class Journal:
                 "idempotency_key": action_key(self.run_id, episode_id, kind, step),
                 "non_idempotent": non_idempotent,
                 "params_sha256": params_sha(params),
+                "step": step,
+                "retry_of": retry_of,
             },
         )
 

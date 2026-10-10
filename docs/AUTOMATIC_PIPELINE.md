@@ -71,8 +71,9 @@ its goal verification exactly: `verified` is `success`, `contradicted` is
 `failure`, `undecided` and `unavailable` are `unknown` (not judged is never
 counted as a failure). When a judgement carries the online judgement's own
 values (`legacy_c5`), they must agree with the decision: an undecided answer
-is `unknown` / `model_undecided`, a decided success `confirmed`, a decided
-failure `rejected`. The run event has no field for operator labels, and its
+is `unknown` / `model_undecided` whatever its outcome (a success with an
+undecided veto, a disputed exemption or a missing input is undecided), a
+decided success `confirmed`, a decided failure `rejected`. The run event has no field for operator labels, and its
 states are the 13 AERI states only. These cross-field rules are not
 expressible in JSON Schema, so the snapshots cannot see them change: the
 `E_INCONSISTENT` fixtures guard them.
@@ -105,13 +106,19 @@ the older `docs/architecture/contracts.json`:
 
 1. `docs/architecture/aeri/v1/<contract>.schema.json` against the models,
    byte for byte, spelling out every breaking difference;
-2. the models against the snapshots **at `git merge-base HEAD main`**
-   (`--base` picks another branch). A breaking change committed together
-   with its rewritten snapshot passes the first check; this one catches it.
-   A base that cannot be read (no git, not the top of a checkout, unknown
-   branch, history too shallow for a merge base) fails the check instead of
-   passing it, so CI must fetch `main` with its history. A snapshot missing
-   at the base is a new contract.
+2. the models against the snapshots **at `git merge-base HEAD <base>`**. The
+   base is `--base <ref>` if given, else the `LEVI_CONTRACT_BASE`
+   environment variable, else a local `main`, else `origin/main`; a named
+   ref that does not resolve is not replaced by another. A breaking change
+   committed together with its rewritten snapshot passes the first check;
+   this one catches it, on the branch before the merge (on `main` itself it
+   compares `main` with `main`). A base that cannot be read (no git, a
+   source tree outside a checkout, no such ref, history too shallow for a
+   merge base) fails the check instead of passing it, and says how to fix
+   it. CI runs `levi dev check-contracts --base origin/main` with the full
+   history fetched (`actions/checkout` leaves no local `main` on pull
+   requests and tag pushes). A snapshot missing at the base is a new
+   contract.
 
 `aeri.RELEASED` is `False` while v1 is not released: until then a breaking
 difference against the base is printed as a note and does not fail. Set it
@@ -155,22 +162,43 @@ else is `aborted`. A `none` action needs no acknowledgement. One transaction
 is open at a time, `from_state` is the current state, the control epoch
 never goes back, and nothing is prepared after `COMPLETED`.
 
-**Idempotency.** Transaction ids are unique. An action's `idempotency_key`
-is `sha256(run_id, episode_id, kind, step)`, deliberately without the control
-epoch: a non-idempotent action (a home, a reset start, policy steps) whose key
-was ever prepared is refused for good, in every later epoch and after any
-recovery (the FR3 server cannot deduplicate a command). `by_command(command_id)` returns
-what an operator command already did, and `expected_seq=` makes an append a
+**Idempotency: rules for the orchestrator.** Transaction ids are unique.
+
+- A **physical action** (`home`, `policy_steps`, a reset start included) is
+  always `non_idempotent: true`; the contract refuses anything else.
+- Every non-idempotent action carries a **`step`**, assigned by the
+  orchestrator and **increasing per (episode, action kind)**. `step: null` on
+  a non-idempotent action is refused by the contract; a step that is not
+  higher than the last one prepared for that episode and kind is refused by
+  the journal (even one never used).
+- `idempotency_key = sha256(run_id, episode_id, kind, step)` (helper
+  `aeri.action_key`), deliberately **without the control epoch**; the
+  contract checks it on every prepared line. A key once prepared is refused
+  for good, in every later epoch and after any recovery: the FR3 server
+  cannot deduplicate a command, so a physical action is never sent twice.
+- Two legitimate actions of the same kind in one episode (a second home)
+  simply use the next step.
+- **Retry after `executed: no`**: the controller reported that the action did
+  not run, the transaction was aborted. A retry is a new logical command: a
+  new (higher) step and `retry_of: <transaction id>` naming that closed
+  transaction, of the same kind and episode. `retry_of` pointing at an
+  action whose outcome was `yes`, `unknown` or never acknowledged is
+  refused; an `unknown` outcome goes to `FAULT_LOCKED`, never to a retry.
+
+`by_command(command_id)` returns what an operator command already did, and `expected_seq=` makes an append a
 compare-and-set on the next line number.
 
-**Reading back.** Only a last line that has no newline, cannot be decoded as
-JSON or does not chain to the line before is **torn** (a crash): it is
-ignored and, when a writer reopens the journal, set aside in `torn/`. A whole,
-chained line that fails the contract (a newer `minor`, an unknown field, a
-broken rule), a bad line anywhere before the last, or lines that break the
-transaction rules (an edited file) make the journal **corrupt**: nothing is
-cut, it opens read-only, is never written again, and its `effective_state`
-is `FAULT_LOCKED`.
+**Reading back.** Only a last line that has no newline, or that cannot be
+decoded as JSON, is **torn** (a crash: each line is one write followed by
+fsync, so a crash leaves at most a line without its newline): it is ignored
+and, when a writer reopens the journal, set aside in `torn/`. A whole line
+that decodes but does not chain to the line before (an edit, which a crash
+never produces; this is stricter than design note X1 §5), a whole chained
+line that fails the contract (a newer `minor`, an unknown field, a broken
+rule), a bad line anywhere before the last, or lines that break the
+transaction rules make the journal **corrupt**: nothing is cut, it opens
+read-only, is never written again, and both `Journal.state` and
+`Scan.effective_state` say `FAULT_LOCKED`.
 
 **Recovery.** `Journal.open(...)` then `recover(authority=<recovery
 principal>)` after any restart. It never replays or sends anything:

@@ -44,9 +44,10 @@ def main(arguments):
     )
     parser.add_argument(
         "--base",
-        default="main",
-        help="Branch whose AERI snapshots (at the merge base with HEAD) the "
-        "models are compared with (default: main); unreadable means failure",
+        default=None,
+        help="Ref whose AERI snapshots (at the merge base with HEAD) the models "
+        "are compared with; default: $LEVI_CONTRACT_BASE, else local main, "
+        "else origin/main. Unreadable means failure",
     )
     args = parser.parse_args(arguments)
     from . import aeri
@@ -81,7 +82,14 @@ def main(arguments):
         print("Contract snapshot drift. Run: uv run levi dev check-contracts --write")
         return 1
     if against:
-        print("AERI contracts differ from the base branch in a way v1 does not allow")
+        if any(line.startswith("cannot read the base") for line in against):
+            print(
+                "The base branch's AERI snapshots could not be read: nothing compared"
+            )
+        else:
+            print(
+                "AERI contracts differ from the base branch in a way v1 does not allow"
+            )
         return 1
     print(
         "Contract snapshot matches Python schemas; this is not full architecture acceptance."

@@ -49,7 +49,9 @@ jobs:
         run: uv sync --locked --group dev --extra agent
       - run: bun install --frozen-lockfile
       - run: bun run validate
-      - run: uv run --no-sync levi dev check-contracts
+      # Compare the AERI schemas with main's (actions/checkout leaves no local
+      # main on pull requests and tag pushes); needs the full history.
+      - run: uv run --no-sync levi dev check-contracts --base origin/main
       - run: uv run --no-sync ruff check .
       - id: pytest
         run: >-

@@ -40,6 +40,7 @@
     },
     "Action": {
       "additionalProperties": false,
+      "description": "One action of a transaction. A physical action (``PHYSICAL_KINDS``)\nis non-idempotent; a non-idempotent action has a ``step``, assigned by\nthe orchestrator, increasing per (episode, kind): the same step is never\nprepared twice. A retry after ``executed: no`` is a new logical command:\na new step, with ``retry_of`` naming the transaction that did not run.",
       "properties": {
         "idempotency_key": {
           "pattern": "^[0-9a-f]{64}$",
@@ -72,6 +73,33 @@
           "pattern": "^[0-9a-f]{64}$",
           "title": "Params Sha256",
           "type": "string"
+        },
+        "retry_of": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}:tx[0-9]{1,19}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry Of"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step"
         }
       },
       "required": [

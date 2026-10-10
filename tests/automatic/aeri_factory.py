@@ -7,6 +7,8 @@ import copy
 import json
 from pathlib import Path
 
+from levi.domain import aeri
+
 RUN = "r20261010-a"
 CLOCK = "host-mono:0f0e0d0c-0b0a-4908-8706-050403020100"
 OTHER_CLOCK = "robot:fr3-0"
@@ -353,7 +355,7 @@ def run_event(record="prepared", **over):
             episode_role="forward",
             action={
                 "kind": "hold",
-                "idempotency_key": SHA,
+                "idempotency_key": aeri.action_key(RUN, EPISODE, "hold", None),
                 "non_idempotent": False,
                 "params_sha256": SHA,
             },

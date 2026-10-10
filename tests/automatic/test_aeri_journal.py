@@ -210,7 +210,7 @@ def test_transaction_rules(tmp_path):
         control_epoch=1,
         action={
             "kind": "none",
-            "idempotency_key": "0" * 64,
+            "idempotency_key": J.action_key(RUN, None, "none", None),
             "non_idempotent": False,
             "params_sha256": "0" * 64,
         },
@@ -220,6 +220,8 @@ def test_transaction_rules(tmp_path):
         "FORWARD_ACTIVE",
         "scene_ready",
         kind="policy_steps",
+        non_idempotent=True,
+        step=0,
         authority=who(),
         control_epoch=2,
         episode_id=EPISODE,
@@ -576,18 +578,52 @@ def test_truncation_then_recovery_is_consistent(tmp_path):
         assert [p.read_bytes() for p in kept] == ([torn] if torn else []), size
 
 
-def test_last_line_with_a_broken_chain_is_set_aside(tmp_path):
+def test_a_whole_last_line_with_a_broken_chain_is_corrupt_not_torn(tmp_path):
+    # A crash leaves a line without its newline, never a whole decodable
+    # line that does not chain: that is an edit, and nothing is cut.
     raw = sample(tmp_path, complete=False)
     lines = raw.split(b"\n")[:-1]
     event = json.loads(lines[-1])
     event["prev_sha256"] = "f" * 64
     forged = json.dumps(event, sort_keys=True, separators=(",", ":")).encode()
-    (tmp_path / J.JOURNAL).write_bytes(b"\n".join([*lines[:-1], forged]) + b"\n")
+    damaged = b"\n".join([*lines[:-1], forged]) + b"\n"
+    (tmp_path / J.JOURNAL).write_bytes(damaged)
     found = J.Journal.read(tmp_path)
-    assert found.corrupt is None and found.torn == forged + b"\n"
+    assert found.corrupt and found.corrupt_code == "E_CHAIN" and found.torn == b""
     with J.Journal.open(tmp_path, plan_sha256=PLAN) as journal:
-        assert journal.next_seq == len(lines) - 1
-    assert (tmp_path / J.JOURNAL).read_bytes() == b"\n".join(lines[:-1]) + b"\n"
+        assert journal.corrupt
+    assert (tmp_path / J.JOURNAL).read_bytes() == damaged
+
+
+def test_an_edited_second_to_last_line_does_not_drop_the_completed_commit(tmp_path):
+    # The review's case: the prepared COMPLETED line is edited (still valid,
+    # still chained to its predecessor); the committed line after it no
+    # longer chains. It used to be cut as torn, losing COMPLETED.
+    raw = sample(tmp_path)
+    lines = raw.split(b"\n")[:-1]
+    event = json.loads(lines[-2])
+    event["emitted_wall_ns"] += 1
+    lines[-2] = json.dumps(event, sort_keys=True, separators=(",", ":")).encode()
+    damaged = b"\n".join(lines) + b"\n"
+    (tmp_path / J.JOURNAL).write_bytes(damaged)
+    found = J.Journal.read(tmp_path)
+    assert found.corrupt and found.torn == b""
+    assert found.effective_state == "FAULT_LOCKED"
+    with J.Journal.open(tmp_path, plan_sha256=PLAN) as journal:
+        assert journal.state == "FAULT_LOCKED"
+        assert journal.recover(authority=who("recovery")).reason == "journal_corrupt"
+    assert (tmp_path / J.JOURNAL).read_bytes() == damaged
+    assert not (tmp_path / J.TORN).exists()
+
+
+def test_a_corrupt_journal_reports_fault_locked_as_its_state(tmp_path):
+    raw = sample(tmp_path, complete=False)
+    lines = raw.split(b"\n")[:-1]
+    lines[2] = b"{not json"
+    (tmp_path / J.JOURNAL).write_bytes(b"\n".join(lines) + b"\n")
+    with J.Journal.open(tmp_path, plan_sha256=PLAN) as journal:
+        assert journal.state == "FAULT_LOCKED"
+        assert not journal.completed
 
 
 @pytest.mark.parametrize("damage", ["flip", "garbage"])
@@ -720,7 +756,12 @@ def test_only_an_operator_command_leaves_fault_locked(tmp_path):
     with J.Journal.open(tmp_path, plan_sha256=PLAN) as journal:
         journal.recover(authority=who("recovery"))
         epoch = journal.control_epoch + 1
-        motion = {"kind": "policy_steps", "control_epoch": epoch}
+        motion = {
+            "kind": "policy_steps",
+            "non_idempotent": True,
+            "step": 5,
+            "control_epoch": epoch,
+        }
         _refused(
             "E_PROTOCOL",
             journal.prepare,
@@ -821,3 +862,113 @@ def test_a_whole_chained_last_line_failing_the_contract_is_corrupt_not_torn(
 def test_effective_state_of_a_sound_journal_is_its_state(tmp_path):
     sample(tmp_path, complete=False)
     assert J.Journal.read(tmp_path).effective_state == "FORWARD_ACTIVE"
+
+
+# --- physical actions: steps and retries (rule decided for T-C-06) -------------
+
+
+def _home(journal, step, **extra):
+    return journal.prepare(
+        "ROBOT_HOME",
+        "goal_verified",
+        kind="home",
+        non_idempotent=True,
+        step=step,
+        authority=who(),
+        control_epoch=journal.control_epoch or 1,
+        episode_id=EPISODE,
+        episode_role="forward",
+        **extra,
+    )
+
+
+def _back(journal):
+    journal.prepare(
+        "FORWARD_FINALIZE",
+        "goal_verified",
+        kind="none",
+        authority=who(),
+        control_epoch=journal.control_epoch,
+    )
+    journal.commit(authority=who())
+
+
+def test_a_physical_action_without_a_step_is_refused(tmp_path):
+    journal = new(tmp_path)
+    for kind in ("home", "policy_steps"):
+        _refused(
+            "E_CONTRACT",
+            journal.prepare,
+            "ROBOT_HOME",
+            "goal_verified",
+            kind=kind,
+            non_idempotent=True,
+            step=None,
+            authority=who(),
+            control_epoch=1,
+            episode_id=EPISODE,
+            episode_role="forward",
+        )
+    # A home or policy steps can never be declared idempotent.
+    _refused(
+        "E_CONTRACT",
+        journal.prepare,
+        "ROBOT_HOME",
+        "goal_verified",
+        kind="home",
+        non_idempotent=False,
+        step=0,
+        authority=who(),
+        control_epoch=1,
+    )
+    journal.close()
+
+
+def test_two_homes_of_one_episode_need_two_steps(tmp_path):
+    # The review's first case: a second, legitimate home in the same episode
+    # (after a new epoch). With steps assigned in order it is accepted.
+    journal = new(tmp_path)
+    _home(journal, 0)
+    journal.acknowledge("yes", "robot_server", "ok", authority=who())
+    journal.commit(authority=who())
+    _back(journal)
+    journal.prepare(
+        "ROBOT_HOME",
+        "goal_verified",
+        kind="home",
+        non_idempotent=True,
+        step=1,
+        authority=who(),
+        control_epoch=journal.control_epoch + 1,
+        episode_id=EPISODE,
+        episode_role="forward",
+    )
+    journal.abort(authority=who())
+    # Steps only go up per (episode, action): a used step is refused, and so
+    # is a lower one that was never used.
+    _refused("E_PROTOCOL", _home, journal, 0)
+    _refused("E_PROTOCOL", _home, journal, 1)
+    _home(journal, 3)
+    journal.abort(authority=who())
+    _refused("E_PROTOCOL", _home, journal, 2)
+    journal.close()
+
+
+def test_a_home_not_executed_is_retried_as_a_new_command(tmp_path):
+    # The review's second case: the controller said ``executed: no``; the
+    # retry is a new logical command with a new step and ``retry_of``.
+    journal = new(tmp_path)
+    first = _home(journal, 0)
+    journal.acknowledge("no", "robot_server", "refused", authority=who())
+    journal.abort(authority=who())
+    _refused("E_PROTOCOL", _home, journal, 0, retry_of=first.transaction_id)
+    retry = _home(journal, 1, retry_of=first.transaction_id)
+    assert retry.action.retry_of == first.transaction_id
+    assert retry.action.step == 1
+    journal.acknowledge("unknown", "robot_server", "timeout", authority=who())
+    journal.abort(authority=who())
+    # Only a command known not to have run may be retried.
+    _refused("E_PROTOCOL", _home, journal, 2, retry_of=retry.transaction_id)
+    _refused("E_PROTOCOL", _home, journal, 2, retry_of=f"{RUN}:tx999")
+    journal.close()
+    assert_sound(tmp_path)

@@ -41,7 +41,7 @@
 
 **三种结果，互不混用。** `decision: confirmed | rejected`；`decision: unknown`（看过证据仍定不了，必须给 `unknown_reason`）；`kind: unavailable`（根本没有判定：门关、忙、超时、模型出错……）。“unknown”和“unavailable”都不算成功。只有 `gate_closed`、`busy` 和带 `retry_after_ms` 的 `admission_rejected` 可以标为可重试。
 
-**一致性规则（节选）。** `confirmed` 至少要有一个 required 谓词，且全部为真，没有 confirmed 或 undecided 的否决项；`rejected` 要有一个为假的 required 谓词或一个 confirmed 否决项。场景只有在所有 required 谓词都为真时才是 `ready`；`failed_predicates` 和 `unknown_predicates` 必须恰好列出为假和读不出的 required 谓词。`valid_until_ns` 晚于 `produced_ns`，且最多晚 `MAX_RESULT_VALIDITY_MS`（30 秒）；租约最长 `MAX_LEASE_MS`（10 分钟）。片段 ID 的格式是 `<run_id>.<forward|reset>.<NNNN>`，必须属于消息所在的运行。策略端点只能是回环地址，且不能是 5000、5001、5100、7470、8000 端口。片段结果严格跟随目标核实：`verified` 是 `success`，`contradicted` 是 `failure`，`undecided` 和 `unavailable` 是 `unknown`（没判出来的永远不算失败）。判定里带了在线判定的原值（`legacy_c5`）时，必须与 decision 一致：未定的回答是 `unknown` / `model_undecided`，已定的成功是 `confirmed`，已定的失败是 `rejected`。运行事件里没有操作员标签的字段，状态只能是 AERI 的 13 个状态。这些跨字段规则无法写进 JSON Schema，快照看不到它们的变化，由 `E_INCONSISTENT` 夹具把守。
+**一致性规则（节选）。** `confirmed` 至少要有一个 required 谓词，且全部为真，没有 confirmed 或 undecided 的否决项；`rejected` 要有一个为假的 required 谓词或一个 confirmed 否决项。场景只有在所有 required 谓词都为真时才是 `ready`；`failed_predicates` 和 `unknown_predicates` 必须恰好列出为假和读不出的 required 谓词。`valid_until_ns` 晚于 `produced_ns`，且最多晚 `MAX_RESULT_VALIDITY_MS`（30 秒）；租约最长 `MAX_LEASE_MS`（10 分钟）。片段 ID 的格式是 `<run_id>.<forward|reset>.<NNNN>`，必须属于消息所在的运行。策略端点只能是回环地址，且不能是 5000、5001、5100、7470、8000 端口。片段结果严格跟随目标核实：`verified` 是 `success`，`contradicted` 是 `failure`，`undecided` 和 `unavailable` 是 `unknown`（没判出来的永远不算失败）。判定里带了在线判定的原值（`legacy_c5`）时，必须与 decision 一致：未定的回答不论 outcome 是什么都是 `unknown` / `model_undecided`（带未决否决项、有争议的豁免或缺少输入的成功也算未定），已定的成功是 `confirmed`，已定的失败是 `rejected`。运行事件里没有操作员标签的字段，状态只能是 AERI 的 13 个状态。这些跨字段规则无法写进 JSON Schema，快照看不到它们的变化，由 `E_INCONSISTENT` 夹具把守。
 
 **时钟。** 一条消息里所有 `*_ns` 字段共用它的 `clock_domain`，本机单调时钟写作 `host-mono:<boot_id>`。`aeri.check_fresh(message)`（判定、场景评估或租约）读取的是**消费方自己的时钟**（`time.monotonic_ns()` 和本机时钟域；测试可以同时传 `now_ns` 和 `local`，不能只传一个）：时钟域不同抛 `E_CLOCK_DOMAIN`（无法比较，按已过期处理）；`produced_ns`/`granted_ns` 比这个时钟超前 `FUTURE_TOLERANCE_NS`（100 毫秒）以上抛 `E_FUTURE`；有效期已过抛 `E_EXPIRED`。它只是必要条件，不是充分条件：运行、片段、代次、请求这几道围栏另外要做。动作块应答里的 `received_ns` 由接收方用自己的时钟填写，从不由服务端填写，只作审计；动作块是否赶上截止时间由 `aeri.check_deadline(deadline)` 按接收方的时钟判断（硬截止已过抛 `E_EXPIRED`，软截止返回 `False`）。
 
@@ -49,7 +49,7 @@
 
 ## Schema 快照
 
-模型是唯一来源。`uv run levi dev check-contracts` 除了原有的 `docs/architecture/contracts.json`，还检查两件事：① `docs/architecture/aeri/v1/<contract>.schema.json` 与模型逐字节一致，并逐条列出破坏性差异；② 模型与 **`git merge-base HEAD main` 处**的快照比较（`--base` 可换成别的分支）。把破坏性改动连同重写后的快照一起提交，能通过第一项，第二项会把它抓出来。基线读不到（没有 git、不在检出根目录、分支不存在、历史太浅算不出 merge base）时检查失败，不会放行，所以 CI 必须连同历史取到 `main`。基线上没有的快照算新契约。
+模型是唯一来源。`uv run levi dev check-contracts` 除了原有的 `docs/architecture/contracts.json`，还检查两件事：① `docs/architecture/aeri/v1/<contract>.schema.json` 与模型逐字节一致，并逐条列出破坏性差异；② 模型与 **`git merge-base HEAD <基线>` 处**的快照比较。基线依次取：`--base <ref>`，环境变量 `LEVI_CONTRACT_BASE`，本地 `main`，`origin/main`；显式指定的 ref 解析不到时不会换成别的。把破坏性改动连同重写后的快照一起提交，能通过第一项，第二项会在合并前的分支上把它抓出来（在 `main` 上跑等于 `main` 和自己比）。基线读不到（没有 git、不在检出里的源码树、ref 不存在、历史太浅算不出 merge base）时检查失败，不会放行，并给出修法。CI 运行 `levi dev check-contracts --base origin/main`，并取完整历史（`actions/checkout` 在 PR 和标签推送时不建本地 `main`）。基线上没有的快照算新契约。
 
 v1 未发布期间 `aeri.RELEASED` 为 `False`：此时与基线相比的破坏性差异只打印为提示，不判失败。v1 发布时把它设为 `True`，从此这类差异一律失败，破坏性改动必须升主版本。
 
@@ -72,9 +72,17 @@ v1 未发布期间 `aeri.RELEASED` 为 `False`：此时与基线相比的破坏�
 
 **事务。** `prepared` 落盘之后调用方才能动作；`acknowledged` 记录控制器报告的结果（`yes`、`no`、`unknown`：只说明执行与否，不说明目标是否达成）；只有 `committed` 才改变状态。真实动作只有在 `executed: yes` 之后才能提交，其他情况一律 `aborted`。`none` 动作不需要确认。同一时刻只能有一个未结束的事务，`from_state` 必须等于当前状态，控制代次（control epoch）不能倒退，`COMPLETED` 之后不能再开事务。
 
-**幂等。** 事务 ID 唯一。动作的 `idempotency_key` 是 `sha256(run_id, episode_id, kind, step)`，有意不含控制代次：不幂等的动作（Home、启动复位、策略步）只要它的键出现过一次，就永远拒绝再次准备，之后任何代次、任何恢复之后都一样（FR3 服务端无法对命令去重）。`by_command(command_id)` 返回某条操作员命令已经做过的事；`expected_seq=` 让追加成为对下一行号的比较并设置（compare-and-set）。
+**幂等：编排器必须遵守的规则。** 事务 ID 唯一。
 
-**读回。** 只有没有换行、无法按 JSON 解码、或与上一行哈希链对不上的末行才算**撕裂**（崩溃造成）：它被忽略，写者重新打开日志时把它挪到 `torn/`。完整且链接正确、却不符合契约的行（`minor` 更新、有未知字段、违反规则），末行之前任何一行坏掉，或违反事务规则的行（文件被改过），都使日志成为**损坏**状态：什么都不截掉，只能只读打开，再也不写，`effective_state` 为 `FAULT_LOCKED`。
+- **物理动作**（`home`、`policy_steps`，包括启动复位）一律 `non_idempotent: true`，否则契约拒收。
+- 每个不幂等动作都带 **`step`**，由编排器分配，**按（片段，动作种类）单调递增**。不幂等动作的 `step: null` 被契约拒收；不高于该片段、该种类上一次准备过的 step（即使从没用过）被日志拒收。
+- `idempotency_key = sha256(run_id, episode_id, kind, step)`（辅助函数 `aeri.action_key`），有意**不含控制代次**；契约在每个 prepared 行上核对它。一个键只要准备过，之后任何代次、任何恢复之后都永远拒绝：FR3 服务端无法对命令去重，所以物理动作永不重发。
+- 同一片段里两次合法的同种动作（第二次 Home）直接用下一个 step。
+- **`executed: no` 之后的重试**：控制器报告动作没有执行，事务已 abort。重试是新的逻辑命令：用新的（更高的）step，并用 `retry_of: <事务 ID>` 指向那个已关闭的、同种类同片段的事务。`retry_of` 指向结果为 `yes`、`unknown` 或从未确认的动作时被拒；结果为 `unknown` 的动作转 `FAULT_LOCKED`，不重试。
+
+`by_command(command_id)` 返回某条操作员命令已经做过的事；`expected_seq=` 让追加成为对下一行号的比较并设置（compare-and-set）。
+
+**读回。** 只有没有换行、或无法按 JSON 解码的末行才算**撕裂**（崩溃造成：每行一次 write 加 fsync，崩溃最多留下一行没有换行的残行）：它被忽略，写者重新打开日志时把它挪到 `torn/`。能解码但与上一行哈希链对不上的完整行（这是改动，崩溃不会产生；比设计稿 X1 §5 的字面更严）、完整且链接正确却不符合契约的行（`minor` 更新、有未知字段、违反规则）、末行之前任何一行坏掉、或违反事务规则的行，都使日志成为**损坏**状态：什么都不截掉，只能只读打开，再也不写，`Journal.state` 和 `Scan.effective_state` 都是 `FAULT_LOCKED`。
 
 **恢复。** 任何重启之后先 `Journal.open(...)`，再 `recover(authority=<recovery 主体>)`。恢复从不重放、从不发送任何东西：
 

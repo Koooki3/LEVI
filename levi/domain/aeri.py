@@ -30,8 +30,10 @@ produced: gate closed, busy, timeout, model error...). Neither kind of "not
 known" is ever a success.
 """
 
+import hashlib
 import json
 import math
+import os
 import re
 import subprocess
 import time
@@ -228,6 +230,8 @@ STOP_REASONS = (
     "watchdog_timeout",
     "orchestrator_crash",
 )
+# Actions that move the robot: never idempotent, always with a step.
+PHYSICAL_KINDS = ("policy_steps", "home")
 ACTION_KINDS = (
     "none",
     "policy_steps",
@@ -605,8 +609,9 @@ def _check_legacy(message):
     if message.provider not in ("vlm", "rule"):
         _bad("legacy_c5 comes from a vlm or rule provider")
     if c5.undecided:
-        if c5.outcome == "success":
-            _bad("the online judgement never reports an undecided success")
+        # Whatever the outcome: anchored.undecided() also makes a success
+        # with an undecided veto, a disputed exemption or a missing input
+        # undecided (X1 §2.2: unknown / model_undecided).
         if message.decision != "unknown" or message.unknown_reason != "model_undecided":
             _bad("an undecided online judgement maps to unknown (model_undecided)")
     elif c5.outcome == "success" and message.decision != "confirmed":
@@ -907,14 +912,38 @@ class Authority(Part):
     command_id: Id | None = None
 
 
+def action_key(run_id, episode_id, kind, step) -> str:
+    """``idempotency_key`` of an action: sha256 of (run, episode, kind,
+    step). No control epoch: recovery always raises it, and a physical
+    action prepared before a crash must stay refused after it."""
+    text = json.dumps([run_id, episode_id, kind, step])
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
 class Action(Part):
+    """One action of a transaction. A physical action (``PHYSICAL_KINDS``)
+    is non-idempotent; a non-idempotent action has a ``step``, assigned by
+    the orchestrator, increasing per (episode, kind): the same step is never
+    prepared twice. A retry after ``executed: no`` is a new logical command:
+    a new step, with ``retry_of`` naming the transaction that did not run."""
+
     kind: Literal[ACTION_KINDS]
-    # sha256(run_id, episode_id, control_epoch, kind, step): recognises an
-    # action already tried. A non-idempotent action seen once is never sent
-    # again.
+    # action_key(run_id, episode_id, kind, step): checked by the run event.
     idempotency_key: Sha256
     non_idempotent: bool
     params_sha256: Sha256
+    step: Count | None = None
+    retry_of: TransactionId | None = None
+
+    @model_validator(mode="after")
+    def _consistent(self):
+        if self.kind in PHYSICAL_KINDS and not self.non_idempotent:
+            _bad(f"{self.kind} moves the robot: it is never idempotent")
+        if self.non_idempotent and self.step is None:
+            _bad("a non-idempotent action has a step assigned by the orchestrator")
+        if self.retry_of is not None and not self.non_idempotent:
+            _bad("only a non-idempotent action is retried")
+        return self
 
 
 class Ack(Part):
@@ -1039,6 +1068,10 @@ class RunEvent(Envelope):
                 _bad(f"a {record} record gives a reason")
         if (record == "prepared") != (self.action is not None):
             _bad("action is set exactly on a prepared record")
+        if self.action is not None and self.action.idempotency_key != action_key(
+            self.run_id, self.episode_id, self.action.kind, self.action.step
+        ):
+            _bad("idempotency_key is action_key(run_id, episode_id, kind, step)")
         if (record == "acknowledged") != (self.ack is not None):
             _bad("ack is set exactly on an acknowledged record")
         if (record == "note") != (self.note is not None):
@@ -1539,30 +1572,66 @@ def _git(root: Path, *args) -> subprocess.CompletedProcess:
     )
 
 
-def check_against_base(root: Path, base: str = "main") -> tuple[list[str], list[str]]:
-    """``(problems, notes)``: the current models against the snapshots at
-    ``git merge-base HEAD <base>``. The same-tree check cannot see a breaking
-    change committed together with its snapshot; this one can.
+BASE_ENV = "LEVI_CONTRACT_BASE"
+DEFAULT_BASES = ("main", "origin/main")
+_BASE_FIX = (
+    "pass --base <ref> or set LEVI_CONTRACT_BASE (in CI: --base origin/main, "
+    "with the full history fetched)"
+)
 
-    A base that cannot be read (no git, not the top of a checkout, unknown
+
+class BaseUnavailable(ValueError):
+    """The base branch's snapshots cannot be read: the check fails."""
+
+
+def resolve_base(root: Path, base: str | None = None) -> str:
+    """The ref to compare with: ``base`` (``--base``), else
+    ``$LEVI_CONTRACT_BASE``, else local ``main``, else ``origin/main``. A
+    named ref that does not resolve is not replaced by another one."""
+    root = Path(root)
+    try:
+        top = _git(root, "rev-parse", "--show-toplevel")
+    except OSError as exc:
+        raise BaseUnavailable(f"git is unavailable ({exc}); {_BASE_FIX}") from None
+    if top.returncode != 0 or Path(top.stdout.strip()).resolve() != root.resolve():
+        raise BaseUnavailable(f"{root} is not the top of a git checkout; {_BASE_FIX}")
+    named = base or os.environ.get(BASE_ENV) or None
+    candidates = (named,) if named else DEFAULT_BASES
+    for ref in candidates:
+        if (
+            _git(
+                root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"
+            ).returncode
+            == 0
+        ):
+            return ref
+    raise BaseUnavailable(f"no {' or '.join(candidates)} in {root}; {_BASE_FIX}")
+
+
+def check_against_base(
+    root: Path, base: str | None = None
+) -> tuple[list[str], list[str]]:
+    """``(problems, notes)``: the current models against the snapshots at
+    ``git merge-base HEAD <base>`` (``resolve_base`` picks the base). The
+    same-tree check cannot see a breaking change committed together with its
+    snapshot; this one can, before the merge (on main itself it compares
+    main with main).
+
+    A base that cannot be read (no git, not the top of a checkout, no such
     ref, shallow history) is a problem, never a pass. A snapshot missing at
     the base is a new contract (a note). A breaking difference is a problem
     once ``RELEASED``, a note before."""
     root = Path(root)
     try:
-        top = _git(root, "rev-parse", "--show-toplevel")
-    except OSError as exc:
-        return [f"cannot read the base snapshots: git is unavailable ({exc})"], []
-    if top.returncode != 0 or Path(top.stdout.strip()).resolve() != root.resolve():
-        return [
-            f"cannot read the base snapshots: {root} is not the top of a git checkout"
-        ], []
+        base = resolve_base(root, base)
+    except BaseUnavailable as exc:
+        return [f"cannot read the base snapshots: {exc}"], []
     found = _git(root, "merge-base", "HEAD", base)
     if found.returncode != 0:
         detail = (found.stderr.strip() or "no common ancestor").splitlines()[0]
         message = (
             f"cannot read the base snapshots: `git merge-base HEAD {base}` failed "
-            f"({detail}); fetch {base} with its history"
+            f"({detail}); fetch {base} with its history, or {_BASE_FIX}"
         )
         return [message], []
     commit = found.stdout.strip()
