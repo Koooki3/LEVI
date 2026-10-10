@@ -61,6 +61,30 @@
    "reference_status": null,
    "where": ["levi/events/contracts.py", "levi/events/signal_profiles.py"],
    "notes": "An existing core dependency."
+  },
+  {
+   "key": "videoseek",
+   "name": "VideoSeek (long-horizon video agent with tool-guided seeking)",
+   "kind": "paper",
+   "use": "adopt-idea",
+   "source": "https://github.com/jylins/videoseek",
+   "version": "paper arXiv:2603.20185 (CVPR 2026); the repository is not used",
+   "licenses": {"code": "MIT (LICENSE file)", "weights": "N/A (no released artifact of this kind); agent calls an external LLM API", "data": "N/A (no released artifact of this kind)"},
+   "shipped": false,
+   "code_copied": false,
+   "redistributable": "n/a: no part of it is shipped",
+   "citation": {
+    "authors": "Jingyang Lin, Jialian Wu, Jiang Liu, Ximeng Sun, Ze Wang, Xiaodong Yu, Jiebo Luo, Zicheng Liu, Emad Barsoum",
+    "year": 2026,
+    "title": "VideoSeek: Long-Horizon Video Agent with Tool-Guided Seeking",
+    "venue": "CVPR 2026",
+    "arxiv": "2603.20185",
+    "doi": null
+   },
+   "reference_key": "lin2026videoseek",
+   "reference_status": "VERIFIED",
+   "where": ["levi/events/sampling.py"],
+   "notes": "Its overview, skim and focus tools (look at the whole video, then at chosen stretches) named the evidence planner's tiers. VideoSeek is a question-driven agent that chooses where to look itself; LEVI's planner is a fixed, model-free rule over a frame budget. No code was read into or copied from the repository."
   }
  ]
 }

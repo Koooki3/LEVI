@@ -1,7 +1,10 @@
 """Share a refinement's frame budget among windows, greedily, in tiers.
 
-The engineering version of the design note's Overview -> Skim -> Focus:
-no model decides where to look; LEVI does, by a fixed rule, within the
+The engineering version of the design note's Overview -> Skim -> Focus
+(an idea from VideoSeek: Lin et al. 2026, "VideoSeek: Long-Horizon Video
+Agent with Tool-Guided Seeking", CVPR 2026, arXiv:2603.20185; only the idea,
+see ``third_party.json``): no model decides where to look; LEVI does, by a
+fixed rule, within the
 plan's frame cap (``workflow.max_evidence_frames``, less the coarse frames
 already read) and the model's image limit:
 

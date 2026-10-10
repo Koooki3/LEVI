@@ -730,6 +730,37 @@ def test_an_external_agent_reads_candidates_as_text_and_where_to_refine(lab):
     assert refined["total"] <= refined["cap"]
 
 
+def test_events_candidates_answers_with_text_fields_only(lab):
+    """It stays a read capability because it returns no picture and no path:
+    exactly these fields, every value a number, a short name or prose."""
+    wb, repo, _ = lab
+    agent, run = external_run(wb, repo, event_intelligence=ON)
+    invoke(wb, agent, "runs.prepare", {"run_id": run["id"]})
+    value = invoke(wb, agent, "events.candidates", {"run_id": run["id"], "episode": 0})
+    assert set(value) <= {
+        "episode",
+        "candidates",
+        "merged",
+        "suggested_around_seconds",
+        "frames_left",
+        "reading",
+        "error_code",
+        "error",
+    }
+    for row in value["candidates"]:
+        assert set(row) == {
+            "id",
+            "event_type",
+            "actor_id",
+            "at",
+            "window",
+            "salience",
+        }
+    text = json.dumps(value)
+    for marker in ("/", "\\", ".png", ".jpg", ".mp4", ".parquet", "sha256", "artifact"):
+        assert marker not in text, marker
+
+
 def test_without_media_egress_the_candidates_are_readable_but_frames_are_not(lab):
     """Candidates come from the recorded signals, not the cameras, so they
     are text an agent may read; every frame stays behind the plan's media
