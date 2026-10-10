@@ -613,3 +613,93 @@ def test_constant_and_negative_data_lay_out():
         for r in scene.items
         if isinstance(r, fs.Rect) and r.role == "bar"
     )
+
+
+def test_data_outside_a_fixed_axis_is_refused_not_clipped():
+    spec = fx.grouped_bar()
+    narrow = replace(spec.panels[0], y_axis=replace(spec.panels[0].y_axis, max=0.5))
+    with pytest.raises(ValueError, match="outside the axis range"):
+        fs.layout(replace(spec, panels=(narrow,)))
+    step = fx.step_curve()  # the cap line at 300 must fit too
+    short = replace(step.panels[0], x_axis=fs.Axis(label="step", min=0, max=250))
+    with pytest.raises(ValueError, match="outside the axis range"):
+        fs.layout(replace(step, panels=(short,)))
+
+
+def test_crowded_and_degenerate_figures_still_lay_out():
+    long_names = tuple(
+        f"A very long category name number {i} that must wrap" for i in range(12)
+    )
+    series = tuple(
+        fs.Series(
+            f"Arm {i} with a long legend name",
+            tuple(fs.Point(c, 0.1 * (i + 1), 0.0, 0.9) for c in range(12)),
+        )
+        for i in range(fs.MAX_SERIES)
+    )
+    crowded = fs.FigureSpec(
+        id="crowded",
+        kind="grouped_bar",
+        title="A title that is long enough to need more than one line on a page of this width, "
+        * 2,
+        summary="s " * 120,
+        panels=(
+            fs.Panel(
+                x_axis=fs.Axis(kind="category", categories=long_names),
+                y_axis=fs.Axis(label="rate", min=0, max=1),
+                series=series,
+            ),
+        ),
+        notes=("note " * 80,),
+    )
+    scene = fs.layout(crowded)
+    _bounds_ok(scene)
+    assert len([i for i in scene.items if i.role == "title"]) >= 2
+    assert any(
+        i.s.endswith("...")
+        for i in scene.items
+        if isinstance(i, fs.Label) and i.role == "tick-label"
+    )
+    one = fs.FigureSpec(  # single-point series of every curve kind
+        id="one",
+        kind="step_curve",
+        title="t",
+        summary="",
+        panels=(
+            fs.Panel(
+                fs.Axis(label="x"),
+                fs.Axis(label="y"),
+                (fs.Series("s", (fs.Point(1, 2),)),),
+            ),
+        ),
+    )
+    _bounds_ok(fs.layout(one))
+    zeros = replace(
+        fx.stacked_bar(),
+        panels=(
+            replace(
+                fx.stacked_bar().panels[0],
+                series=(fs.Series("none", tuple(fs.Point(c, 0) for c in range(3))),),
+            ),
+        ),
+    )
+    _bounds_ok(fs.layout(zeros))  # nothing stacked: an empty plot, not a crash
+    many_rows = replace(
+        fx.forest(),
+        panels=(
+            replace(
+                fx.forest().panels[0],
+                y_axis=fs.Axis(
+                    kind="category", categories=tuple(f"row {i}" for i in range(15))
+                ),
+                series=(
+                    fs.Series(
+                        "s", tuple(fs.Point(0.1 * i, i, -0.2, 1.8) for i in range(15))
+                    ),
+                ),
+            ),
+        ),
+    )
+    scene = fs.layout(many_rows)
+    _bounds_ok(scene)
+    assert scene.height > fs.layout(fx.forest()).height  # the page grows with the rows

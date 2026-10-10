@@ -1382,6 +1382,13 @@ def _draw_panel(
             xs = _scale_for(panel.x_axis, x_lo, x_hi, target)
     if panel.y_axis.kind == "linear":
         ys = _scale_for(panel.y_axis, y_lo, y_hi, 6)
+    # data must lie inside a fixed axis range: never clip a value silently
+    for name, sc, lo, hi in (("x", xs, x_lo, x_hi), ("y", ys, y_lo, y_hi)):
+        if sc is not None and (lo < sc.lo - 1e-9 or hi > sc.hi + 1e-9):
+            raise ValueError(
+                f"figure {spec.id!r}: panel {pi} {name} data [{num(lo)}, {num(hi)}] "
+                f"lies outside the axis range [{num(sc.lo)}, {num(sc.hi)}]"
+            )
 
     # --- margins
     ylabel = R(panel.y_axis.label)
