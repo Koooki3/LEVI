@@ -39,6 +39,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
 from . import (
@@ -836,3 +837,22 @@ def stats_export(
             "Cache-Control": "no-store",
         },
     )
+
+
+def setup_status():
+    """``GET /api/levi/setup/status``: the setup wizard's read-only status
+    probes (ports from the kernel table, GPU, GPU locks, the live service's
+    status file, CPU/memory/pressure, ROS alarm counts, the FR3 health file,
+    disks, the diagnostics recorder, the real-robot quiet guard). Sampled
+    only when asked, at most every few seconds; nothing is connected to,
+    locked or written (``levi/setup/probes.py``, docs/SETUP_WIZARD.md)."""
+    from levi.setup import probes
+
+    return probes.status()
+
+
+# Outside this router's ``/api/levi/live`` prefix, so the route is added with
+# its full path (``include_router`` keeps a route's own path).
+router.routes.append(
+    APIRoute("/api/levi/setup/status", setup_status, methods=["GET"], tags=["Setup"])
+)

@@ -62,3 +62,24 @@ levi setup recipes excerpt --doc setup.md --section 1 --block 1 --pick 4 6  # �
 ```
 
 两条命令都只读这两个文件。漂移后是否更新配方文件由人决定（手册另有维护流程）。
+
+## 状态探针
+
+`GET /api/levi/setup/status`（LEVI API 的普通本机鉴权：网页界面令牌；LEVI Agent 凭据会被拒绝）返回本机的一次只读采样。每一部分都有 `state`；读不到的部分标 `unknown`（附 `detail`），不影响其他部分。
+
+| 部分 | 来源 | 从不 |
+| --- | --- | --- |
+| `ports` | `/proc/net/tcp` 和 `tcp6` 中 5000、5001、5100、7470、7860、7861、7880–7882、8000、8100（以及实时服务配置里的策略、vLLM、判定端口）的 LISTEN 行；所属进程从 `/proc/<pid>/fd` 找（只限同一用户，找不到时 `owner_known: false`），只给短进程名 | 连接任何端口，包括 LEVI 自己的 |
+| `gpu` | `nvidia-smi --query-gpu` 和 `--query-compute-apps`；进程按它或它的父进程监听的端口命名，否则为 `other` | 创建 CUDA 上下文 |
+| `gpu_locks` | `/proc/locks` 按锁文件的设备号和 inode 匹配（`LEVI_GPU_LOCK_FILE`、实时服务的 `gpu.lock_file`）：`held`（附持有者）、`free`、`absent` | 加锁 |
+| `live` | 实时服务的 `status.json`：是否存活、vLLM 睡/醒、GPU 门、准入决定、`labelling_paused` | 请求 vLLM 或实时核心 |
+| `host` | `/proc/loadavg`、`/proc/stat`（两次采样之间的忙碌百分比）、`/proc/meminfo`（内存、swap）、`/proc/pressure/{cpu,memory,io}` | |
+| `ros` | 最近 12 个 `ros2_control_node_*.log`（每个只读最后 256 KiB）近一小时内的计数：`comm_violation`、`cartesian_reflex`、`motion_generator`、`reflex_other`、`overrun`、`overrun_warn`、`error` | 运行 ROS |
+| `fr3_health` | 实时服务的 `fr3.health_file`，读法与实时页相同（`ok`、`red`、`offline`、`missing`）；没有配置时为 `unknown` | |
+| `disks` | 产品工作区、实时工作区、其 rollout 根目录和临时目录的剩余空间，只给标签 | 返回路径 |
+| `recorder` | 诊断记录器在 `LEVI_FR3_RECORDER_DIR`（或其下 `data/`）里的 `recorder.pid`（与进程启动时间核对）和 `status.json`：`running`、`stopped`、`unknown` | 启动或停止它 |
+| `guard` | 真机静默守卫：机器人侧进程（`ros2_control_node`、`franka_server`、`run_robotiq_client`、`policy_server`、`serve_policy`，按命令名识别，从不返回命令行本身）、压力 avg10 超过 CPU 25%、内存 5%、I/O 50% 或 swap 超过 50%、实时服务的门（`robot_quiet`）、`gpu.quiet_states`、`online.pressure_avg10_max`、产品正在运行的作业。`quiet` 为 `true`、`false` 或 `null`（无法判断）。FR3 健康文件显示手臂控制器已激活时，如果还有产品作业、swap 在用或主机压力过高，就给出 `banner` 黄色提示 | |
+
+ROS 日志目录取 `LEVI_ROS_LOG_DIR`，其次 `ROS_LOG_DIR`，再次 `~/.ros/log`。记录器目录取 `LEVI_FR3_RECORDER_DIR`（未设置时记录器显示 `unknown`）。
+
+**采样。** 后台从不采样。请求到来时才采样；2 秒内的下一个请求拿同一份结果（`cached: true`、`age_s`），并发请求等同一次采样，不各自再采。开销大的部分有更长的间隔和上限：查找套接字所属进程的全量扫描最多每 30 秒一次（已知所属进程只做低成本复核），机器人进程扫描每 5 秒，ROS 日志每 5 秒（文件没变就不重读），磁盘每 10 秒；最多扫描 4096 个进程、每个进程 4096 个文件描述符；`nvidia-smi` 超时 4 秒。返回内容不含命令行、环境变量、令牌或路径。
