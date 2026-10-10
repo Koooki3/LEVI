@@ -259,6 +259,10 @@ def test_resume_and_stop_with_typed_confirmation(
     assert not any(inbox.iterdir())
     terminal("yes", "no", "resume r-cmd")
     assert as_json(capsys, "resume", "--run", "r-cmd")[0] == 2
+    # Review CL3 M15: exactly `resume <run_id>`, nothing shorter or longer.
+    for typed in ("resume", "resume r-cmd now", "resume  r-cmd", "RESUME r-cmd"):
+        terminal("yes", "yes", typed)
+        assert as_json(capsys, "resume", "--run", "r-cmd")[0] == 2
     assert not any(inbox.iterdir())
     # Both confirmations and the typed command: one resume.
     from levi.automatic.journal import Journal

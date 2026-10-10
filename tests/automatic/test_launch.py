@@ -609,3 +609,115 @@ def test_a_second_start_of_a_run_is_refused(job, fake_systemd):
     assert runner.serve(run_dir, found.plan_sha256).state == "COMPLETED"
     again = runner.serve(run_dir, found.plan_sha256)
     assert again.code in ("E_RUN_EXISTS",) and again.exit_code == 2
+
+
+# --- review CL3 -------------------------------------------------------------------------------------
+
+
+def test_the_core_key_is_made_once_under_concurrent_first_use(tmp_path):
+    """Review CL3 P2-3: two first uses at once both get the same key."""
+    failures = []
+    for n in range(300):
+        folder = tmp_path / f"home-{n}"
+        barrier = threading.Barrier(2)
+        keys = []
+
+        def first_use(folder=folder, barrier=barrier, keys=keys):
+            barrier.wait()
+            try:
+                keys.append(launch.core_key(folder))
+            except launch.LaunchRefused as exc:
+                failures.append(exc.code)
+
+        threads = [threading.Thread(target=first_use) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(10)
+        assert len(keys) != 2 or keys[0] == keys[1]
+    assert failures == []
+
+
+def test_launch_refuses_a_real_mode_whatever_the_plan_says(
+    job, fake_systemd, monkeypatch
+):
+    """Review CL3 M01: launch() refuses a real mode itself, even when a
+    (broken) plan calls it launchable."""
+    real_plan = launch.plan
+
+    def broken(request, **kw):
+        found = real_plan(request, **kw)
+        found.launchable, found.refusals = True, []
+        found.checks = [c for c in found.checks if c["code"] != "E_NO_ROBOT_ADAPTER"]
+        return found
+
+    monkeypatch.setattr(launch, "plan", broken)
+    found = broken(request(job, "assisted"))
+    with pytest.raises(launch.LaunchRefused) as caught:
+        launch.launch(
+            request(job, "assisted"),
+            plan_sha256=found.plan_sha256,
+            launch_token=found.launch_token,
+        )
+    assert caught.value.code == "E_NO_ROBOT_ADAPTER"
+    assert (
+        calls(fake_systemd) == []
+        and not (Path(found.run_dir or "/nonexistent")).exists()
+    )
+
+
+def test_the_token_is_compared_in_constant_time(job, fake_systemd, monkeypatch):
+    """Review CL3 M06: the MAC comparison is hmac.compare_digest."""
+    import hmac
+
+    used = []
+    real = hmac.compare_digest
+
+    def spy(a, b):
+        used.append(True)
+        return real(a, b)
+
+    monkeypatch.setattr(launch.hmac, "compare_digest", spy)
+    launched(job, backend="systemd")
+    assert used
+
+
+def test_a_same_size_same_time_rewrite_is_refused(job, fake_systemd):
+    """Review CL3 M07/X15: bytes that change without changing the plan, the
+    size or the modification time still invalidate the token."""
+    job.write_text(job.read_text() + "# note aaaa\n")
+    found = launch.plan(request(job))
+    info = job.stat()
+    job.write_bytes(job.read_bytes().replace(b"# note aaaa", b"# note bbbb"))
+    os.utime(job, ns=(info.st_atime_ns, info.st_mtime_ns))
+    assert launch.plan(request(job)).plan_sha256 == found.plan_sha256
+    with pytest.raises(launch.LaunchRefused) as caught:
+        launch.launch(
+            request(job), plan_sha256=found.plan_sha256, launch_token=found.launch_token
+        )
+    assert caught.value.code == "E_PLAN_CHANGED"
+
+
+def test_a_metadata_change_alone_invalidates_the_token(job, fake_systemd):
+    """Review CL3 M07: the change time is bound too (same bytes and mtime)."""
+    found = launch.plan(request(job))
+    time.sleep(0.01)
+    os.chmod(job, stat.S_IMODE(job.stat().st_mode))
+    with pytest.raises(launch.LaunchRefused) as caught:
+        launch.launch(
+            request(job), plan_sha256=found.plan_sha256, launch_token=found.launch_token
+        )
+    assert caught.value.code == "E_PLAN_CHANGED"
+
+
+def test_a_job_swapped_for_a_link_to_a_copy_is_refused(job, fake_systemd):
+    found = launch.plan(request(job))
+    twin = job.with_name("twin.yaml")
+    twin.write_bytes(job.read_bytes())
+    job.unlink()
+    job.symlink_to(twin)
+    with pytest.raises(launch.LaunchRefused) as caught:
+        launch.launch(
+            request(job), plan_sha256=found.plan_sha256, launch_token=found.launch_token
+        )
+    assert caught.value.code == "E_PLAN_CHANGED"
