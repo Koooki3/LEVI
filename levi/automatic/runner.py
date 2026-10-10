@@ -40,12 +40,11 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import cli, launch
+from . import cli, control, launch
 from .journal import JournalBusy, JournalError
 
 EXIT_OK, EXIT_PROBLEM, EXIT_REFUSED = 0, 1, 2
 HOLD = ("WAIT_HUMAN", "FAULT_LOCKED", "COMPLETED")
-SIGTERM_PRINCIPAL = "system:sigterm"
 # How often the main loop looks at the state while the run waits.
 WAIT_S = 0.2
 
@@ -283,6 +282,11 @@ def serve(
         for number in (signal.SIGTERM, signal.SIGINT):
             previous[number] = signal.signal(number, on_signal)
     try:
+        try:
+            runner.pump = control.CommandPump(runner)
+        except (OSError, control.CommandError) as exc:
+            return runner.finish(EXIT_PROBLEM, "E_CONTROL", str(exc))
+        runner.pump.start()
         return runner.drive(deadline_s)
     finally:
         for number, handler in previous.items():
