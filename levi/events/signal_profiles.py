@@ -102,6 +102,8 @@ class SignalProfile(Contract):
     schema_version: Literal["levi.signal_profile.v1"] = SCHEMA
     origin: Literal["inferred", "declared", "resolved"] = "declared"
     channels: list[ChannelSpec] = Field(default_factory=list, max_length=512)
+    # Inferred channels a declaration replaced (``resolve``).
+    overridden: list[ChannelSpec] = Field(default_factory=list, max_length=512)
 
     @model_validator(mode="after")
     def unique(self):
@@ -109,6 +111,18 @@ class SignalProfile(Contract):
         if len(keys) != len(set(keys)):
             raise ValueError("A (feature, index) appears twice in the profile")
         return self
+
+
+class SignalProfileWarning(UserWarning):
+    """A declaration replaced inferred channels at other indices."""
+
+
+def _slot(channel):
+    """What a channel stands for, within its feature: one slot per actor and
+    axis for positions and rotations, per actor and kind for grippers."""
+    if channel.role == "gripper":
+        return (channel.feature, channel.actor_id, "gripper", channel.kind)
+    return (channel.feature, channel.actor_id, channel.role, channel.axis)
 
 
 def actor_of(name):
@@ -184,10 +198,22 @@ def infer(info):
 
 def resolve(info, declared=None):
     """The inferred profile with ``declared`` (a ``SignalProfile`` or its JSON
-    form) laid over it: a declared channel replaces the inferred one at the
-    same (feature, index) or adds one; ``role="ignore"`` removes it. A
-    declared channel must name a float vector column the dataset has and an
-    index inside it."""
+    form) laid over it. Declarations win:
+
+    - a declared channel replaces the inferred one at the same (feature,
+      index), or adds one; ``role="ignore"`` removes it;
+    - an inferred channel standing for the same thing in the same feature at
+      another index (same actor and axis for a position or rotation, same
+      actor and kind for a gripper) is dropped, recorded in ``overridden``
+      and reported with a ``SignalProfileWarning``;
+    - declared channels come first, so a reader that takes one channel per
+      role (``positions``, the change-point gripper) takes the declared one.
+
+    A declared channel must name a float vector column the dataset has and an
+    index inside it; a declaration that names one axis of one actor twice is
+    refused."""
+    import warnings
+
     from ..agent.signals import vector_columns
 
     inferred = infer(info)
@@ -201,8 +227,17 @@ def resolve(info, declared=None):
         key: int(((info.get("features") or {}).get(key) or {}).get("shape", [0])[0])
         for key in columns
     }
-    by_key = {c.key: c for c in inferred.channels}
-    order = [c.key for c in inferred.channels]
+    seen = {}
+    for channel in declared.channels:
+        if channel.role in {"position", "rotation"}:
+            slot = (channel.actor_id, channel.role, channel.axis)
+            if slot in seen:
+                raise ValueError(
+                    f"The declaration names the {channel.role} {channel.axis} of "
+                    f"{channel.actor_id!r} twice"
+                )
+            seen[slot] = channel
+    chosen = []
     for channel in declared.channels:
         if channel.feature not in columns:
             raise ValueError(
@@ -214,6 +249,11 @@ def resolve(info, declared=None):
                 f"Declared index {channel.index} is outside {channel.feature!r}"
             )
         names = columns[channel.feature]
+        if names and len(names) != shapes[channel.feature]:
+            raise ValueError(
+                f"{channel.feature!r} declares {len(names)} names for "
+                f"{shapes[channel.feature]} dimensions"
+            )
         if names and channel.dimension and names[channel.index] != channel.dimension:
             raise ValueError(
                 f"Declared dimension {channel.dimension!r} is not dimension "
@@ -221,12 +261,33 @@ def resolve(info, declared=None):
             )
         if channel.dimension is None and names:
             channel = channel.model_copy(update={"dimension": names[channel.index]})
-        if channel.key not in by_key:
-            order.append(channel.key)
-        by_key[channel.key] = channel
+        chosen.append(channel)
+    declared_keys = {c.key for c in chosen}
+    declared_slots = {_slot(c) for c in chosen if c.role != "ignore"}
+    kept, overridden = [], []
+    for channel in inferred.channels:
+        if channel.key in declared_keys:
+            continue
+        if _slot(channel) in declared_slots:
+            overridden.append(channel)
+        else:
+            kept.append(channel)
+    if overridden:
+        warnings.warn(
+            "The signal profile declaration replaces inferred channels: "
+            + ", ".join(
+                f"{c.feature}[{c.index}] {c.dimension or ''} ({c.role})".replace(
+                    "  ", " "
+                )
+                for c in overridden
+            ),
+            SignalProfileWarning,
+            stacklevel=2,
+        )
     return SignalProfile(
         origin="resolved",
-        channels=[by_key[k] for k in order if by_key[k].role != "ignore"],
+        channels=[c for c in chosen if c.role != "ignore"] + kept,
+        overridden=overridden,
     )
 
 

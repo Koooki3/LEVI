@@ -28,7 +28,7 @@
 一份声明（`levi.signal_profile.v1`）列出若干通道，每个通道有 `role`（`gripper`、`position`、`rotation`，声明里还可以写 `ignore`）、`feature` 和 `index`（以及维度名 `dimension`）、`actor_id`、`kind`（`action` 为 `commanded`，其余为 `measured`）、`units`、`frame`、`axis`、夹爪的 `open_level`（`high` 或 `low`）和可选的 `valid_range`。
 
 - `infer(info)` 按信号行一直用的规则读 `meta/info.json`：名字匹配 `grip|finger|claw|jaw` 的浮点向量维度是夹爪；名为 `x`/`y`/`z` 的是位置（每列每个轴取第一个）；`rx`/`ry`/`rz` 或 `roll`/`pitch`/`yaw` 是姿态。名字里带 `left`、`right`、`arm_N`、`robot_N` 的维度归该执行器，其余归 `arm_0`。**名字说明不了夹爪哪一端是张开**，所以推断出的 `open_level` 总是空的，读取器退回“片段开头的电平就是张开”的规则；片段开头夹爪已闭合时，这条规则会把整段读反。
-- 声明可以纠正这一点。`resolve(info, declared)` 把声明逐通道叠加到推断结果上：声明的通道替换同一 (feature, index) 上推断出的通道，或者新增一个通道；`role: "ignore"` 删除名字误导出的通道。声明里写了数据集没有的列、超出范围的序号或对不上的维度名，一律拒绝。
+- 声明可以纠正这一点，而且**声明总是优先**。`resolve(info, declared)` 把声明叠加到推断结果上：声明的通道替换同一 (feature, index) 上推断出的通道，或者新增一个通道；`role: "ignore"` 删除名字误导出的通道。同一 feature 里另一个序号上、含义相同的推断通道（位置和姿态看执行器和轴，夹爪看执行器和 measured/commanded）会被删掉，记入声明结果的 `overridden`，并发出 `SignalProfileWarning`（是告警而不是报错：替换推断本来就是声明的用途）。声明的通道排在最前，按角色只取一个通道的读取器取到的是声明的那个。声明里写了数据集没有的列、超出范围的序号、对不上的维度名，或者把同一执行器的同一个轴写了两次，一律拒绝；维度名个数与 shape 不符的列也拒绝。
 - `from_action_contract(contract, feature)` 把已登记的动作契约（`levi.counterfactual`，见 [COUNTERFACTUAL.zh-CN.md](COUNTERFACTUAL.zh-CN.md)）转成声明：维度顺序、单位、坐标系，以及夹爪哪个值是张开（`fr3-robotiq`：1.0 为张开，即 `high`）。
 - 数据集可以在 `meta/levi_signal_profile.json` 里自带声明，`for_dataset(root)` 会读取它。LEVI 从不写这个文件。
 - `open_levels(profile)` 把声明的张开端整理成 `levi.agent.signals.summarize(open_levels=...)` 接受的形式。

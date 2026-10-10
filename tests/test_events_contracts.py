@@ -398,3 +398,87 @@ def test_facts_skip_rows_without_a_timestamp():
     kinds = [(o.kind, round(o.time_s, 1)) for o in found if "gripper" in o.kind]
     assert kinds == [("gripper_open", 2.0)]
     assert all(np.isfinite(o.time_s) for o in found)
+
+
+# --- declarations win over inference -----------------------------------------------
+
+EIGHT = ["x", "y", "z", "ee_x", "ee_y", "ee_z", "grip_cmd", "finger_width"]
+EIGHT_DECLARED = {
+    "channels": [
+        *[
+            {"role": "position", "feature": "observation.state", "index": i,
+             "axis": a, "units": "m"}
+            for i, a in zip((3, 4, 5), "xyz", strict=True)
+        ],
+        {"role": "gripper", "feature": "observation.state", "index": 7,
+         "open_level": "high"},
+    ]
+}  # fmt: skip
+
+
+def test_declared_channels_win_where_the_index_differs():
+    from levi.events import change_points
+    from levi.events.signal_profiles import SignalProfileWarning, grippers
+
+    with pytest.warns(SignalProfileWarning, match="grip_cmd"):
+        p = resolve(info(EIGHT), EIGHT_DECLARED)
+    assert positions(p) == {"arm_0": ("observation.state", [3, 4, 5])}
+    assert [(c.index, c.open_level) for c in grippers(p)] == [(7, "high")]
+    # The inferred channels the declaration replaced are recorded.
+    assert sorted(c.index for c in p.overridden) == [0, 1, 2, 6]
+    rows = [
+        [0, 0, 0, 0.1 * np.sin(i / 10), 0, 0.2, 1.0, 0.08 if i < 50 else 0.0]
+        for i in range(100)
+    ]
+    names, _, sources = change_points.features(table(rows), info(EIGHT), p)["arm_0"]
+    assert "observation.state.finger_width" in names
+    assert "observation.state.grip_cmd" not in names
+    assert [s.index for s in sources[0]] == [3, 4, 5]
+
+
+def test_a_declaration_that_names_one_axis_twice_is_refused():
+    declared = {
+        "channels": [
+            {
+                "role": "position",
+                "feature": "observation.state",
+                "index": 0,
+                "axis": "x",
+            },
+            {
+                "role": "position",
+                "feature": "observation.state",
+                "index": 3,
+                "axis": "x",
+            },
+        ]
+    }
+    with pytest.raises(ValueError, match="twice"):
+        resolve(info(EIGHT), declared)
+
+
+def test_a_declaration_matching_the_inference_warns_nothing():
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        p = resolve(
+            info(FR3, FR3), from_action_contract(FR3_ROBOTIQ, "observation.state")
+        )
+    assert p.overridden == []
+    # The command's inferred channels (another feature) stay.
+    assert any(c.feature == "action" and c.role == "gripper" for c in p.channels)
+
+
+def test_names_shorter_than_the_shape_are_refused_clearly():
+    meta = info(["x", "y", "z", "gripper"])
+    meta["features"]["observation.state"]["shape"] = [6]
+    with pytest.raises(ValueError, match="names"):
+        resolve(
+            meta,
+            {
+                "channels": [
+                    {"role": "gripper", "feature": "observation.state", "index": 5}
+                ]
+            },
+        )
