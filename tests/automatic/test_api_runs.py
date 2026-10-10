@@ -132,6 +132,14 @@ def test_a_real_mode_is_501_even_with_a_valid_plan(
         response = post_run(client, plan, job_id, request_id=f"req-{mode}")
         assert response.status_code == 501, mode
         assert response.json()["detail"]["code"] == "no_robot_adapter"
+    # After a restart the server no longer remembers the plan's mode: the
+    # job's own mode is tried, and it is still refused.
+    api._PLANS.clear()
+    api._MEMO.items.clear()
+    plan = plan_of(client, job_id, "shadow")
+    api._PLANS.clear()
+    again = post_run(client, plan, job_id, request_id="req-after-restart")
+    assert again.status_code == 501
     assert calls(fake_systemd) == []
 
 
