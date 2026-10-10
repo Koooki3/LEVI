@@ -497,7 +497,7 @@ def cmd_run(args) -> int:
     try:
         with no_network():
             result = DryRun(job, folder, episodes=args.episodes, scenes=scenes).run()
-    except JobError as exc:
+    except (JobError, ConfigError) as exc:
         _print({"ok": False, "error": str(exc)}, args.json, str(exc))
         return EXIT_REFUSED
     finally:

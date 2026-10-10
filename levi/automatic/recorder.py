@@ -62,6 +62,7 @@ import json
 import os
 import re
 import socket
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -268,10 +269,32 @@ class RolloutRecorder:
     # ---------------------------------------------------------- the episode
 
     def open(self, *, task_folder: str, episode_id: str, number: int) -> Rollout:
+        # Only what this call created is cleaned up after a failure.
+        fresh = self._entry(episode_id) is None
         try:
             return self._open(task_folder, episode_id, number)
-        except OSError as exc:
-            raise RecorderError(f"open {episode_id}: {exc}") from None
+        except (OSError, RecorderError) as exc:
+            if fresh:
+                self._open_failed(episode_id, number)
+            if isinstance(exc, OSError):
+                raise RecorderError(f"open {episode_id}: {exc}") from None
+            raise
+
+    def _open_failed(self, episode_id: str, number: int) -> None:
+        """An episode that could not open: what it left is ``incomplete``
+        (best effort; a restart's ``recover`` finishes the job)."""
+        entry = self._entry(episode_id)
+        if entry is None or entry["state"] not in ("opening", "open"):
+            return
+        try:
+            path = self.root / self.group / entry["task_folder"] / entry["demo"]
+            if path.is_dir():
+                entry["demo"] = self._abandon(path, number, "open_failed").name
+            self.rollouts.pop(f"{entry['task_folder']}/demo_{number:04d}", None)
+            entry.update(state="incomplete", abort_reason="open_failed")
+            self._save_manifest()
+        except (OSError, RecorderError):
+            pass
 
     def _open(self, task_folder, episode_id, number) -> Rollout:
         run_id, role, found = aeri.episode_parts(episode_id)
@@ -540,11 +563,16 @@ class RolloutRecorder:
             if entry["episode_id"] in sealed and (path / MARKER).exists():
                 entry["state"] = "complete"
                 continue
+            number = aeri.episode_parts(entry["episode_id"])[2]
             if path.is_dir():
-                number = aeri.episode_parts(entry["episode_id"])[2]
                 target = self._abandon(path, number, "orchestrator_crash")
                 renamed.append(str(target))
                 entry["demo"] = target.name
+            else:
+                # Renamed by an abort the crash kept out of the manifest.
+                found = sorted(folder.glob(f"incomplete_{number:04d}*"))
+                if found:
+                    entry["demo"] = found[-1].name
             entry["state"] = "incomplete"
             entry["abort_reason"] = "orchestrator_crash"
         self._save_manifest()
@@ -590,6 +618,9 @@ class SessionFiles:
         self.started = wall()
         self._waiting: dict = {}
         self.last: dict = {}
+        # ``write`` (the orchestrator, under its state lock) and
+        # ``heartbeat`` (any thread) never interleave.
+        self._lock = threading.Lock()
 
     def path(self, role: str) -> Path:
         return self.root / SESSION_DIR / f"{self.group}__{self.folders[role]}.json"
@@ -606,6 +637,10 @@ class SessionFiles:
         reason: str = "",
         episode_id: str | None = None,
     ) -> dict:
+        with self._lock:
+            return self._write(state, control_epoch, stopped, reason, episode_id)
+
+    def _write(self, state, control_epoch, stopped, reason, episode_id) -> dict:
         files = legacy_live.legacy_sessions(state, stopped=stopped)
         now = self.wall()
         written = {}
@@ -646,7 +681,7 @@ class SessionFiles:
             assert body["state"] in legacy_live.LEGACY_STATES
             path = self.path(role)
             path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = path.with_name(f".{path.name}.tmp")
+            temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
             with temporary.open("w") as handle:
                 json.dump(body, handle)
                 handle.flush()
@@ -659,9 +694,12 @@ class SessionFiles:
     def heartbeat(self) -> None:
         """Rewrite the last state with a fresh ``updated_at`` (the live
         reader calls a session stale after 10 s without one and a dead pid)."""
-        if self.last:
-            self.write(
-                self.last["state"],
-                control_epoch=self.last["control_epoch"],
-                stopped=self.last["stopped"],
-            )
+        with self._lock:
+            if self.last:
+                self._write(
+                    self.last["state"],
+                    self.last["control_epoch"],
+                    self.last["stopped"],
+                    "",
+                    None,
+                )

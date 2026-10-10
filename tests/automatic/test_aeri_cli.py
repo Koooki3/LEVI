@@ -289,3 +289,10 @@ def test_the_module_runs_as_a_command(job):
         check=False,
     )
     assert proc.returncode == 0 and proc.stdout.startswith("valid: run r-cli")
+
+
+def test_a_bad_episode_override_is_refused_not_raised(job, capsys):
+    code, found = as_json(
+        capsys, "run", "--config", str(job), "--dry-run", "--episodes", "-1"
+    )
+    assert code == 2 and "episodes" in found["error"]

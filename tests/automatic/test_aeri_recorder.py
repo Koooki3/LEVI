@@ -310,3 +310,67 @@ def test_a_failing_session_write_never_stops_the_run(tmp_path):
     r.orch.listener = broken
     assert r.orch.run() == "COMPLETED"
     assert r.orch.note_counts["session_write_failed"] > 0
+
+
+# --- self-audit regressions ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("op, name", [("mkdir", "demo_0001"), ("write", "events.csv")])
+def test_an_episode_that_cannot_open_is_left_incomplete_not_opening(tmp_path, op, name):
+    r = build_run(tmp_path, io_hook=Disk(op, name, 0))
+    assert r.orch.run() == "FAULT_LOCKED"
+    assert committed(r.orch)[-1][1:] == ("FAULT_LOCKED", "recorder_failed")
+    manifest = json.loads((r.directory / MANIFEST).read_text())
+    (entry,) = manifest["episodes"]
+    assert entry["state"] == "incomplete" and entry["abort_reason"] == "open_failed"
+    assert not demo(tmp_path, "forward").exists()
+    assert r.robot.motions == []
+
+
+def test_a_taken_number_never_abandons_the_other_folder(tmp_path):
+    rec = RolloutRecorder(tmp_path, run_id=RUN, run_dir=tmp_path / "run", group=GROUP)
+    first = rec.open(task_folder="f", episode_id=f"{RUN}.forward.0001", number=1)
+    with pytest.raises(RecorderError):
+        rec.open(task_folder="f", episode_id=f"{RUN}.forward.0001", number=1)
+    assert first.path.is_dir() and first.state == "open"
+
+
+def test_recover_finds_a_folder_an_abort_renamed_before_the_manifest(tmp_path):
+    rec = RolloutRecorder(tmp_path, run_id=RUN, run_dir=tmp_path / "run", group=GROUP)
+    rollout = rec.open(task_folder="f", episode_id=f"{RUN}.forward.0001", number=1)
+    rollout.handle.close()
+    rollout.handle = None
+    rollout.path.rename(rollout.path.with_name("incomplete_0001"))  # the crash
+    again = RolloutRecorder(tmp_path, run_id=RUN, run_dir=tmp_path / "run", group=GROUP)
+    assert again.recover(set()) == []
+    (entry,) = json.loads((tmp_path / "run" / MANIFEST).read_text())["episodes"]
+    assert (entry["state"], entry["demo"]) == ("incomplete", "incomplete_0001")
+
+
+def test_heartbeats_from_another_thread_never_tear_a_session_file(tmp_path):
+    import threading
+
+    files = SessionFiles(tmp_path, run_id=RUN, group=GROUP, folders=FOLDERS)
+    files.write("FORWARD_ACTIVE", control_epoch=1)
+    stop = threading.Event()
+    seen = []
+
+    def beat():
+        while not stop.is_set():
+            files.heartbeat()
+
+    def read():
+        while not stop.is_set():
+            for role in ("forward", "reset"):
+                seen.append(json.loads(files.path(role).read_text())["state"])
+
+    threads = [threading.Thread(target=beat), threading.Thread(target=read)]
+    for thread in threads:
+        thread.start()
+    for n in range(200):
+        files.write("FORWARD_ACTIVE" if n % 2 else "SCENE_ASSESS", control_epoch=n)
+    stop.set()
+    for thread in threads:
+        thread.join()
+    assert seen and set(seen) <= {"running", "standby", "waiting_reset"}
+    assert not list((tmp_path / ".eval_sessions").glob(".*.tmp"))
