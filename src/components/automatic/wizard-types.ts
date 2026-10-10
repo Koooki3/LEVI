@@ -113,6 +113,11 @@ export type CampaignArmInput = {
   role: "candidate" | "reference";
 };
 
+/** How a campaign is carried out (not in the contract's table; the backend
+ * default is `guided`): the person's own legacy client, or a rehearsal on
+ * fakes. */
+export type CampaignExecutionMode = "guided" | "dry_run";
+
 export type CampaignPlanRequest = {
   job_id: string;
   arms: CampaignArmInput[];
@@ -120,6 +125,7 @@ export type CampaignPlanRequest = {
   schedule: { kind: ScheduleKind; segment_trials: number; seed: number };
   primary: { metric: "success"; label_basis: string; alpha: number };
   preregistered: boolean;
+  execution_mode?: CampaignExecutionMode;
 };
 
 export type PowerRow = Record<string, number | string | null>;
@@ -141,14 +147,35 @@ export type CampaignPlan = {
   plan_sha256?: string;
 };
 
+/** The kinds of to-do the page knows. The server may add others: anything
+ * else is shown as text with a disabled button (see `isKnownTodo`). */
+export type KnownTodoKind =
+  | "switch_policy"
+  | "place_cards"
+  | "segment_done"
+  | "recover_run";
+
 export type CampaignTodo = {
-  kind: "switch_policy" | "place_cards" | "recover_run" | null;
-  // The contract leaves the rest of the todo open ("..."): these are the
-  // fields the page reads when present.
+  kind: KnownTodoKind | (string & {}) | null;
+  // The contract leaves the rest of the todo open ("..."); these are the
+  // fields api.py puts in it, read when present.
   challenge?: string;
+  segment?: number;
   arm_code?: string;
   cards?: string[];
   detail?: string;
+  /** switch_policy: the checkpoint folder name and its config. */
+  checkpoint?: string;
+  config?: string;
+  /** place_cards, segment_done (guided): the legacy client's command,
+   * rendered by the server, and the note it carries. */
+  command?: string;
+  eval_note?: string;
+  /** segment_done: what the client has written so far. */
+  progress?: { done: number; planned: number };
+  pending_cards?: { key: string; candidate_card: string | null }[];
+  /** recover_run: why the campaign waits (a code). */
+  reason?: string | null;
 };
 
 export type CampaignArmProgress = {
@@ -158,11 +185,22 @@ export type CampaignArmProgress = {
   remaining: number;
   deviated: number;
   discarded: number;
+  /** Guided: episodes whose layout card nobody confirmed yet. */
+  unconfirmed?: number;
 };
 
 export type CampaignSnapshot = {
   id: string;
   state: string;
+  execution_mode?: CampaignExecutionMode | (string & {});
+  /** Whether the campaign's controller process runs. */
+  controller?: { alive: boolean };
+  /** How many times the results were looked at before the end. */
+  peeks?: number;
+  wait_reason?: string | null;
+  /** Dry run: the run of the current segment. */
+  child_run_id?: string;
+  updated_at?: number | null;
   arms: CampaignArmProgress[];
   segment: { no: number; total: number; arm_code: string };
   todo: CampaignTodo | null;
@@ -181,3 +219,13 @@ export type CampaignReport = {
 };
 
 export type CommandResult = { result: string; code?: string };
+
+/** An episode of the legacy client whose layout card waits for a person
+ * (`GET .../cards`); `candidate_card` is a suggestion, never taken as given. */
+export type PendingCardEpisode = {
+  key: string;
+  segment: number;
+  run_id: string;
+  number: number;
+  candidate_card: string | null;
+};

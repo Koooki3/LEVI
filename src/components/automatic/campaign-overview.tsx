@@ -5,28 +5,43 @@
 // rate; revealing them is a deliberate act that counts as a peek.
 import Link from "next/link";
 import { useRef, useState } from "react";
-import { EyeOff, Pause, Play } from "lucide-react";
+import { EyeOff, Link2, Pause, Play } from "lucide-react";
 import { Badge, Button, Progress, Table } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Note, RequestProblem } from "@/components/pages-ui/feedback";
+import { CampaignCards } from "./campaign-cards";
 import { CampaignTodoCard } from "./campaign-todo";
 import {
   STATE_TONE,
   formatEta,
+  reasonKey,
+  stateKey,
   viewOf,
   type CampaignView,
 } from "./campaign-logic";
 import { usePolled } from "./campaign-poll";
 import { PhraseConfirm } from "./wizard-confirm";
 import { wizardApi, type WizardApi } from "./wizard-api";
+import { codeKey, failureText } from "./wizard-errors";
 import { IntentKeys } from "./wizard-logic";
 
 type OverviewApi = Pick<
   WizardApi,
-  "getCampaign" | "confirmCampaign" | "campaignCommand"
+  | "getCampaign"
+  | "confirmCampaign"
+  | "campaignCommand"
+  | "attachCampaign"
+  | "getCampaignCards"
+  | "confirmCampaignCard"
 >;
 
-function ArmsTable({ view }: { view: CampaignView }) {
+function ArmsTable({
+  view,
+  showCards,
+}: {
+  view: CampaignView;
+  showCards: boolean;
+}) {
   const { t } = useLocale();
   return (
     <Table caption={t("automatic.campaign.arms.title")} density="compact">
@@ -38,6 +53,9 @@ function ArmsTable({ view }: { view: CampaignView }) {
           <th scope="col">{t("automatic.campaign.arms.remaining")}</th>
           <th scope="col">{t("automatic.campaign.arms.deviated")}</th>
           <th scope="col">{t("automatic.campaign.arms.discarded")}</th>
+          {showCards && (
+            <th scope="col">{t("automatic.campaign.arms.unconfirmed")}</th>
+          )}
         </tr>
       </thead>
       <tbody>
@@ -66,6 +84,7 @@ function ArmsTable({ view }: { view: CampaignView }) {
             <td className="ds-num">{arm.remaining}</td>
             <td className="ds-num">{arm.deviated}</td>
             <td className="ds-num">{arm.discarded}</td>
+            {showCards && <td className="ds-num">{arm.unconfirmed}</td>}
           </tr>
         ))}
       </tbody>
@@ -103,11 +122,33 @@ export function CampaignOverview({
         keys.current.idFor(intent),
       );
       if (result.result === "refused")
-        setProblem(result.code ?? t("automatic.campaign.refused"));
+        setProblem(
+          t(
+            (result.code ? codeKey(result.code) : null) ??
+              "automatic.campaign.refused",
+          ),
+        );
       keys.current.release(intent);
       refresh();
     } catch (e) {
-      setProblem(e instanceof Error ? e.message : String(e));
+      setProblem(failureText(e, t));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const attach = async () => {
+    if (busy) return;
+    const intent = `attach:${campaignId}`;
+    setBusy("attach");
+    setProblem(null);
+    try {
+      await api.attachCampaign(campaignId, keys.current.idFor(intent));
+      keys.current.release(intent);
+      refresh();
+    } catch (e) {
+      setProblem(failureText(e, t));
+      keys.current.release(intent);
     } finally {
       setBusy(null);
     }
@@ -130,7 +171,18 @@ export function CampaignOverview({
       <header className="pg-head">
         <h1>{t("automatic.campaign.title")}</h1>
         <div className="pg-head-actions">
-          <Badge tone={STATE_TONE[view.state] ?? "neutral"}>{view.state}</Badge>
+          {view.executionMode && (
+            <Badge tone={view.executionMode === "dry_run" ? "warning" : "info"}>
+              {t(
+                view.executionMode === "dry_run"
+                  ? "automatic.campaign.mode.dry_run"
+                  : "automatic.campaign.mode.guided",
+              )}
+            </Badge>
+          )}
+          <Badge tone={STATE_TONE[view.state] ?? "neutral"}>
+            {t(stateKey(view.state))}
+          </Badge>
         </div>
       </header>
       <p className="pg-pool-muted">
@@ -142,6 +194,50 @@ export function CampaignOverview({
           </span>
         )}
       </p>
+
+      {view.canAttach && (
+        <Note tone="warning" role="alert">
+          <strong>{t("automatic.campaign.controller.down")}</strong>{" "}
+          {t("automatic.campaign.controller.down_body")}
+          <div className="pg-row">
+            <Button
+              icon={Link2}
+              loading={busy === "attach"}
+              disabled={busy !== null}
+              onClick={() => void attach()}
+            >
+              {t("automatic.campaign.controller.attach")}
+            </Button>
+          </div>
+        </Note>
+      )}
+
+      {view.peeks > 0 && (
+        <Note tone="warning" role="status">
+          <strong>{t("automatic.campaign.peeked.title")}</strong>{" "}
+          {t("automatic.campaign.peeked.body").replace(
+            "{n}",
+            String(view.peeks),
+          )}
+        </Note>
+      )}
+
+      {view.waitReason && view.todo?.kind !== "recover_run" && (
+        <p className="pg-pool-hint">
+          {t("automatic.campaign.wait_reason").replace(
+            "{reason}",
+            t(reasonKey(view.waitReason)),
+          )}
+        </p>
+      )}
+
+      {view.childRunId && view.executionMode === "dry_run" && (
+        <p>
+          <Link href={`/automatic/runs/${encodeURIComponent(view.childRunId)}`}>
+            {t("automatic.campaign.child_run")}
+          </Link>
+        </p>
+      )}
 
       {view.fused && (
         <Note tone="warning" role="alert">
@@ -167,8 +263,18 @@ export function CampaignOverview({
           key={`${view.todo.kind}:${view.todo.challenge ?? ""}`}
           campaignId={campaignId}
           todo={view.todo}
+          controllerDown={view.controllerDown}
           api={api}
           onDone={refresh}
+        />
+      )}
+
+      {view.executionMode === "guided" && view.state !== "DRAFT" && (
+        <CampaignCards
+          campaignId={campaignId}
+          knownCards={view.todo?.cards ?? []}
+          unconfirmed={view.arms.reduce((n, a) => n + a.unconfirmed, 0)}
+          api={api}
         />
       )}
 
@@ -196,7 +302,7 @@ export function CampaignOverview({
             .replace("{done}", String(view.done))
             .replace("{total}", String(view.total))}
         />
-        <ArmsTable view={view} />
+        <ArmsTable view={view} showCards={view.executionMode === "guided"} />
       </section>
 
       <section className="aw-panel" aria-labelledby="ac-safety">
@@ -218,7 +324,7 @@ export function CampaignOverview({
             <Button
               icon={Play}
               loading={busy === "resume"}
-              disabled={!view.canResume || busy !== null}
+              disabled={!view.canResume || view.controllerDown || busy !== null}
               onClick={() => void run("resume")}
             >
               {t("automatic.campaign.resume")}
@@ -227,17 +333,25 @@ export function CampaignOverview({
             <Button
               icon={Pause}
               loading={busy === "pause"}
-              disabled={!view.canPause || busy !== null}
+              disabled={!view.canPause || view.controllerDown || busy !== null}
               onClick={() => void run("pause")}
             >
               {t("automatic.campaign.pause")}
             </Button>
           )}
-          {!view.paused && !view.canPause && !view.finished && (
+          {view.controllerDown && !view.finished && (
             <span className="pg-pool-hint">
-              {t("automatic.campaign.pause_later")}
+              {t("automatic.campaign.controller.needed")}
             </span>
           )}
+          {!view.controllerDown &&
+            !view.paused &&
+            !view.canPause &&
+            !view.finished && (
+              <span className="pg-pool-hint">
+                {t("automatic.campaign.pause_later")}
+              </span>
+            )}
           {view.reportReady && (
             <Link
               className="ds-btn ds-btn--primary ds-btn--md"

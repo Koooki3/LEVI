@@ -303,38 +303,40 @@ export function StepSettings({
         checked={form.allowEarlyStop}
         onChange={(event) => setForm({ allowEarlyStop: event.target.checked })}
       />
-      <RadioGroup legend={t("automatic.wizard.settings.mode")}>
-        <div className="aw-modes">
-          {names.map((name) => {
-            const entry = modes[name];
-            const available = Boolean(entry?.available);
-            return (
-              <div key={name}>
-                <Radio
-                  name="aw-exec-mode"
-                  label={
-                    name === "dry_run"
-                      ? t("automatic.wizard.settings.mode_dry_run")
-                      : EXECUTION_MODE_LABEL[name as ExecutionMode]
-                        ? t(EXECUTION_MODE_LABEL[name as ExecutionMode])
-                        : name
-                  }
-                  checked={form.executionMode === name}
-                  disabled={!available}
-                  onChange={() => setForm({ executionMode: name })}
-                />
-                {!available && (
-                  <p className="aw-mode__reason">
-                    {entry?.reason ??
-                      t("automatic.wizard.settings.mode_unavailable")}
-                  </p>
-                )}
-              </div>
-            );
-          })}
-        </div>
-        <Note tone="info">{t("automatic.wizard.settings.mode_note")}</Note>
-      </RadioGroup>
+      {form.mode === "single" && (
+        <RadioGroup legend={t("automatic.wizard.settings.mode")}>
+          <div className="aw-modes">
+            {names.map((name) => {
+              const entry = modes[name];
+              const available = Boolean(entry?.available);
+              return (
+                <div key={name}>
+                  <Radio
+                    name="aw-exec-mode"
+                    label={
+                      name === "dry_run"
+                        ? t("automatic.wizard.settings.mode_dry_run")
+                        : EXECUTION_MODE_LABEL[name as ExecutionMode]
+                          ? t(EXECUTION_MODE_LABEL[name as ExecutionMode])
+                          : name
+                    }
+                    checked={form.executionMode === name}
+                    disabled={!available}
+                    onChange={() => setForm({ executionMode: name })}
+                  />
+                  {!available && (
+                    <p className="aw-mode__reason">
+                      {entry?.reason ??
+                        t("automatic.wizard.settings.mode_unavailable")}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <Note tone="info">{t("automatic.wizard.settings.mode_note")}</Note>
+        </RadioGroup>
+      )}
     </div>
   );
 }

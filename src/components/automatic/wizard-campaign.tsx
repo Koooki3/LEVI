@@ -8,6 +8,8 @@ import {
   Badge,
   Field,
   Input,
+  Radio,
+  RadioGroup,
   Select,
   Skeleton,
   Switch,
@@ -126,6 +128,7 @@ export function WizardCampaignConfirm({
     form.labelBasis,
     form.alpha,
     form.preregistered,
+    form.campaignMode,
   ]);
 
   const runPlan = useCallback(async () => {
@@ -280,6 +283,32 @@ export function WizardCampaignConfirm({
       {schedule?.exploratory && (
         <Note tone="warning">{t("automatic.wizard.campaign.exploratory")}</Note>
       )}
+      <RadioGroup legend={t("automatic.wizard.campaign.mode")}>
+        <div className="aw-modes">
+          <div>
+            <Radio
+              name="aw-campaign-mode"
+              label={t("automatic.wizard.campaign.mode_guided")}
+              checked={form.campaignMode === "guided"}
+              onChange={() => setForm({ campaignMode: "guided" })}
+            />
+            <p className="aw-mode__reason">
+              {t("automatic.wizard.campaign.mode_guided_note")}
+            </p>
+          </div>
+          <div>
+            <Radio
+              name="aw-campaign-mode"
+              label={t("automatic.wizard.campaign.mode_dry_run")}
+              checked={form.campaignMode === "dry_run"}
+              onChange={() => setForm({ campaignMode: "dry_run" })}
+            />
+            <p className="aw-mode__reason">
+              {t("automatic.wizard.campaign.mode_dry_run_note")}
+            </p>
+          </div>
+        </div>
+      </RadioGroup>
       <Switch
         label={t("automatic.wizard.campaign.prereg")}
         description={t("automatic.wizard.campaign.prereg_note")}

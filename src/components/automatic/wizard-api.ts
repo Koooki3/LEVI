@@ -12,6 +12,7 @@ import type {
   CommandResult,
   JobCreate,
   LaunchPlan,
+  PendingCardEpisode,
   PoliciesResponse,
   SetupStep,
 } from "./wizard-types";
@@ -205,13 +206,46 @@ export const getCampaign = (id: string) =>
 export const confirmCampaign = (
   id: string,
   commandId: string,
-  kind: "switch_policy" | "env",
+  kind: "switch_policy" | "env" | "segment_done",
   challenge: string,
+  options?: Record<string, boolean>,
 ) =>
   apiRequest<CommandResult>(
     "POST",
     `${AUTO}/campaigns/${encodeURIComponent(id)}/confirm`,
-    { command_id: commandId, kind, challenge },
+    {
+      command_id: commandId,
+      kind,
+      challenge,
+      ...(options && Object.keys(options).length ? { options } : {}),
+    },
+  );
+
+/** Start a controller for a campaign whose controller is gone (202). */
+export const attachCampaign = (id: string, requestId: string) =>
+  apiRequest<{ campaign_id: string }>(
+    "POST",
+    `${AUTO}/campaigns/${encodeURIComponent(id)}/attach`,
+    { request_id: requestId },
+  );
+
+export const getCampaignCards = (id: string) =>
+  apiRequest<{ pending: PendingCardEpisode[] }>(
+    "GET",
+    `${AUTO}/campaigns/${encodeURIComponent(id)}/cards`,
+  );
+
+/** Say which layout card an episode had (`card` null: no card / it deviated). */
+export const confirmCampaignCard = (
+  id: string,
+  commandId: string,
+  episodeKey: string,
+  card: string | null,
+) =>
+  apiRequest<CommandResult>(
+    "POST",
+    `${AUTO}/campaigns/${encodeURIComponent(id)}/cards`,
+    { command_id: commandId, episode_key: episodeKey, card },
   );
 
 export const campaignCommand = (
@@ -283,6 +317,9 @@ export const wizardApi = {
   getCampaign,
   listCampaigns,
   confirmCampaign,
+  attachCampaign,
+  getCampaignCards,
+  confirmCampaignCard,
   campaignCommand,
   getCampaignReport,
   getReportFileJson,

@@ -401,6 +401,33 @@ describe("the wizard, a multi-model plan", () => {
       .calls[0][0] as { arms: unknown[]; job_id: string };
     expect(planned.job_id).toBe("job-1");
     expect(planned.arms.length).toBe(2);
+    // Guided is the default way to carry a campaign out; the rehearsal on
+    // fakes is a choice, and the plan follows it.
+    expect((planned as { execution_mode?: string }).execution_mode).toBe(
+      "guided",
+    );
+    const modes = host.querySelectorAll<HTMLInputElement>(
+      'input[name="aw-campaign-mode"]',
+    );
+    expect(modes.length).toBe(2);
+    expect(modes[0].checked).toBe(true);
+    await click(modes[1]);
+    await waitFor(
+      () =>
+        (api.planCampaign as ReturnType<typeof mock>).mock.calls.length === 2,
+      { timeoutMs: 4000, label: "the plan for the rehearsal" },
+    );
+    expect(
+      (
+        (api.planCampaign as ReturnType<typeof mock>).mock.calls[1][0] as {
+          execution_mode?: string;
+        }
+      ).execution_mode,
+    ).toBe("dry_run");
+    await waitFor(() => host.querySelector(".aw-phrase input"), {
+      timeoutMs: 4000,
+      label: "the second plan",
+    });
 
     expect(buttonNamed(host, "Start the campaign")!.disabled).toBe(true);
     await type(host.querySelector(".aw-phrase input")!, "start-campaign");
@@ -408,6 +435,9 @@ describe("the wizard, a multi-model plan", () => {
     await flush(10);
     const start = (api.startCampaign as ReturnType<typeof mock>).mock.calls[0];
     expect(start[1]).toBe("c".repeat(64));
+    expect((start[0] as { execution_mode?: string }).execution_mode).toBe(
+      "dry_run",
+    );
     expect(go).toEqual(["/automatic/campaigns/camp-1"]);
   });
 });

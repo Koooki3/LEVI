@@ -6,6 +6,7 @@ import { newRequestId } from "./wizard-api";
 import type {
   Capabilities,
   CampaignArmInput,
+  CampaignExecutionMode,
   CampaignPlanRequest,
   JobCreate,
   PolicyCheckpoint,
@@ -43,6 +44,8 @@ export type WizardForm = {
   labelBasis: string;
   alpha: string;
   preregistered: boolean;
+  /** Campaign: who carries it out (the person's legacy client, or fakes). */
+  campaignMode: CampaignExecutionMode;
 };
 
 export const HUMAN_RESET = "human";
@@ -124,6 +127,7 @@ export function defaultForm(capabilities?: Capabilities | null): WizardForm {
     labelBasis: "operator_label",
     alpha: "0.05",
     preregistered: true,
+    campaignMode: "guided",
   };
 }
 
@@ -371,6 +375,7 @@ export function buildCampaignRequest(
       alpha: fractionNumber(form.alpha) ?? 0.05,
     },
     preregistered: form.preregistered,
+    execution_mode: form.campaignMode,
   };
 }
 

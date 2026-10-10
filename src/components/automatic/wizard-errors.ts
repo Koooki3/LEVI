@@ -18,6 +18,19 @@ const CODE_KEYS: Record<string, string> = {
   token_expired: "automatic.wizard.error.plan_stale",
   token_invalid: "automatic.wizard.error.plan_stale",
   network: "automatic.wizard.error.network",
+  controller_down: "automatic.campaign.error.controller_down",
+  controller_alive: "automatic.campaign.error.controller_alive",
+  not_waiting: "automatic.campaign.error.not_waiting",
+  stale_sequence: "automatic.campaign.error.stale_sequence",
+  robot_busy: "automatic.campaign.error.robot_busy",
+  campaign_ended: "automatic.campaign.error.campaign_ended",
+  not_started: "automatic.campaign.error.not_started",
+  not_guided: "automatic.campaign.error.not_guided",
+  episode_unknown: "automatic.campaign.error.episode_unknown",
+  card_unknown: "automatic.campaign.error.card_unknown",
+  card_invalid: "automatic.campaign.error.card_invalid",
+  busy: "automatic.campaign.error.busy",
+  person_only: "automatic.campaign.error.person_only",
 };
 
 /** Field paths of the job -> the name the form uses for them. */
