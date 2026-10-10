@@ -164,10 +164,16 @@ def publish(
     target = folder / rid
     per_episode: dict[str, Any] = {}
     rlinf_parts = []
-    frames = positives = 0
+    frames, positives = 0, None
     for ep in sorted(episodes):
         cols = episodes[ep]
         n = len(cols["value"])
+        labelled = cols.get("positive") is not None
+        positive_column = (
+            pa.array(np.asarray(cols["positive"], bool))
+            if labelled
+            else pa.nulls(n, pa.bool_())
+        )
         table = pa.table(
             {
                 "episode_index": pa.array(np.full(n, ep, dtype=np.int64)),
@@ -178,7 +184,7 @@ def publish(
                 "reward_sum": pa.array(np.asarray(cols["reward_sum"], np.float32)),
                 "return": pa.array(np.asarray(cols["return"], np.float32)),
                 "advantage": pa.array(np.asarray(cols["advantage"], np.float32)),
-                "positive": pa.array(np.asarray(cols["positive"], bool)),
+                "positive": positive_column,
             },
             schema=EPISODE_SCHEMA,
         )
@@ -202,18 +208,27 @@ def publish(
                         np.asarray(cols["num_valid_rewards"], np.int64)
                     ),
                     "dataset_name": pa.array([dataset_name] * n, pa.string()),
-                    "advantage": pa.array(np.asarray(cols["positive"], bool)),
+                    "advantage": positive_column,
                 },
                 schema=RLINF_SCHEMA,
             )
         )
-        positive = int(np.count_nonzero(cols["positive"]))
         frames += n
-        positives += positive
+        # A value-only result (no outcomes, so no returns) has no labels:
+        # its fractions are null, never 0 (that would read as "all negative").
+        positive = int(np.count_nonzero(cols["positive"])) if labelled else None
+        if labelled:
+            positives = (positives or 0) + positive
         per_episode[str(ep)] = {
-            "positive_fraction": positive / n if n else 0.0,
-            "mean_advantage": float(np.mean(cols["advantage"])) if n else 0.0,
+            "positive_fraction": (positive / n if n else 0.0) if labelled else None,
+            "mean_advantage": (float(np.mean(cols["advantage"])) if n else 0.0)
+            if labelled
+            else None,
             "mean_value": float(np.mean(cols["value"])) if n else 0.0,
+            # The curve's range (the viewer's dataset-wide value axis); older
+            # results lack both keys and readers must treat them as optional.
+            "min_value": float(np.min(cols["value"])) if n else None,
+            "max_value": float(np.max(cols["value"])) if n else None,
             "frames": n,
         }
     write_table(
@@ -228,7 +243,9 @@ def publish(
         "episodes": len(episodes),
         "episode_indices": sorted(int(e) for e in episodes),
         "frames": frames,
-        "positive_fraction": positives / frames if frames else 0.0,
+        "positive_fraction": None
+        if positives is None
+        else (positives / frames if frames else 0.0),
         "created_at": time.time(),
     }
     write_json(

@@ -100,8 +100,9 @@ def _metrics(a: np.ndarray, b: np.ndarray) -> dict[str, Any]:
     }
 
 
-def _join(table_a, table_b):
-    """Align common original frame indices, then verify their timestamps."""
+def _join(table_a, table_b, labels: bool = True):
+    """Align common original frame indices, then verify their timestamps.
+    ``labels=False`` (a value-only side) joins the values alone."""
     fa = table_a["frame_index"].to_numpy(zero_copy_only=False)
     fb = table_b["frame_index"].to_numpy(zero_copy_only=False)
     if len(np.unique(fa)) != len(fa) or len(np.unique(fb)) != len(fb):
@@ -119,17 +120,20 @@ def _join(table_a, table_b):
         raise jobs.RecapError(
             409, "Shared frame timestamps differ between these revisions"
         )
+    numeric = ("value", "advantage") if labels else ("value",)
     result = {
         key: (col(table_a, key, ia), col(table_b, key, ib))
-        for key in ("value", "advantage", "positive")
+        for key in (*numeric, "positive")
+        if labels or key != "positive"
     }
-    for key in ("value", "advantage"):
+    for key in numeric:
         result[key] = tuple(np.asarray(v, dtype=np.float64) for v in result[key])
         if any(not np.all(np.isfinite(v)) for v in result[key]):
             raise jobs.RecapError(
                 409, "A published revision contains non-finite values"
             )
-    result["positive"] = tuple(v.astype(bool) for v in result["positive"])
+    if labels:
+        result["positive"] = tuple(v.astype(bool) for v in result["positive"])
     return common, result
 
 
@@ -170,7 +174,10 @@ def compare_payload(repo_id: str, rid_a: str, rid_b: str) -> dict[str, Any]:
     set_b = {int(e) for e in rec_b.get("episode_indices") or []}
     shared = sorted(set_a & set_b)
     rows = []
-    pooled = {"value": ([], []), "advantage": ([], []), "positive": ([], [])}
+    labelled = jobs.has_labels(rec_a) and jobs.has_labels(rec_b)
+    pooled = {"value": ([], [])}
+    if labelled:
+        pooled.update(advantage=([], []), positive=([], []))
     mean_a, mean_b, outcomes = [], [], []
     saved_a, saved_b = rec_a.get("outcomes") or {}, rec_b.get("outcomes") or {}
     outcome_changes = False
@@ -179,12 +186,11 @@ def compare_payload(repo_id: str, rid_a: str, rid_b: str) -> dict[str, Any]:
         table_b = store.read_episode(ds.name, ep, rec_b["revision_id"])
         if table_a is None or table_b is None:
             raise jobs.RecapError(409, f"A published revision is missing episode {ep}")
-        common, joined = _join(table_a, table_b)
+        common, joined = _join(table_a, table_b, labelled)
         n = len(common)
         if not n:
             continue
         va, vb = joined["value"]
-        pa, pb = joined["positive"]
         for key in pooled:
             pooled[key][0].append(joined[key][0])
             pooled[key][1].append(joined[key][1])
@@ -194,14 +200,15 @@ def compare_payload(repo_id: str, rid_a: str, rid_b: str) -> dict[str, Any]:
         mean_a.append(float(va.mean()))
         mean_b.append(float(vb.mean()))
         outcomes.append(outcome)
+        pa, pb = joined["positive"] if labelled else (None, None)
         rows.append(
             {
                 "episode": ep,
                 "outcome": outcome,
                 "frames": n,
-                "label_agreement": float((pa == pb).mean()),
-                "positive_fraction_a": float(pa.mean()),
-                "positive_fraction_b": float(pb.mean()),
+                "label_agreement": float((pa == pb).mean()) if labelled else None,
+                "positive_fraction_a": float(pa.mean()) if labelled else None,
+                "positive_fraction_b": float(pb.mean()) if labelled else None,
                 "mean_value_a": float(va.mean()),
                 "mean_value_b": float(vb.mean()),
                 "value_mean_abs_diff": float(np.abs(va - vb).mean()),
@@ -265,21 +272,13 @@ def compare_payload(repo_id: str, rid_a: str, rid_b: str) -> dict[str, Any]:
         )
         return result
     value_a, value_b = (np.concatenate(p) for p in pooled["value"])
-    adv_a, adv_b = (np.concatenate(p) for p in pooled["advantage"])
-    pos_a, pos_b = (np.concatenate(p) for p in pooled["positive"])
-    result["labels"] = {
-        "agreement": float((pos_a == pos_b).mean()),
-        "positive_a_only": int((pos_a & ~pos_b).sum()),
-        "positive_b_only": int((pos_b & ~pos_a).sum()),
-        "both_positive": int((pos_a & pos_b).sum()),
-        "both_negative": int((~pos_a & ~pos_b).sum()),
-        "positive_fraction_a": float(pos_a.mean()),
-        "positive_fraction_b": float(pos_b.mean()),
-    }
-    result["value"], result["advantage"] = (
-        _metrics(value_a, value_b),
-        _metrics(adv_a, adv_b),
-    )
+    result["value"] = _metrics(value_a, value_b)
+    if labelled:
+        _label_metrics(result, pooled)
+    else:
+        # A value-only side has no advantages, labels or return range.
+        notes.append("labels_unavailable")
+        result.update(labels=None, advantage=None)
     raw_a, raw_b = _return_units(value_a, rec_a), _return_units(value_b, rec_b)
     result["value_return_units"] = (
         _metrics(raw_a, raw_b) if raw_a is not None and raw_b is not None else None
@@ -299,3 +298,18 @@ def compare_payload(repo_id: str, rid_a: str, rid_b: str) -> dict[str, Any]:
         }
     )
     return result
+
+
+def _label_metrics(result: dict[str, Any], pooled) -> None:
+    adv_a, adv_b = (np.concatenate(p) for p in pooled["advantage"])
+    pos_a, pos_b = (np.concatenate(p) for p in pooled["positive"])
+    result["labels"] = {
+        "agreement": float((pos_a == pos_b).mean()),
+        "positive_a_only": int((pos_a & ~pos_b).sum()),
+        "positive_b_only": int((pos_b & ~pos_a).sum()),
+        "both_positive": int((pos_a & pos_b).sum()),
+        "both_negative": int((~pos_a & ~pos_b).sum()),
+        "positive_fraction_a": float(pos_a.mean()),
+        "positive_fraction_b": float(pos_b.mean()),
+    }
+    result["advantage"] = _metrics(adv_a, adv_b)

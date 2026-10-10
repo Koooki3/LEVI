@@ -8,7 +8,8 @@ levi recap inspect <n>                      strict key check (worker, CPU)
 levi recap base import <folder> [--name] [--official repo] [--sha256-file f] [--weights] [--label TEXT]
 levi recap base list
 levi recap threshold <repo_id> <repo_id> … [--positive-quantile q] [--set <checkpoint> --provenance-text TEXT]
-levi recap run <repo_id> --checkpoint <n> [--episodes 0,3] [--threshold X] [--static-filter auto|on|off]
+levi recap run <repo_id> --checkpoint <n> [--episodes 0,3] [--threshold X] [--dataset-type auto|rollout|sft] [--static-filter auto|on|off]
+levi recap settings <repo_id> [--dataset-type auto|rollout|sft]
 levi recap show <repo_id> [--episode N]
 """
 
@@ -200,13 +201,32 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--lookahead", type=int)
     run.add_argument("--positive-quantile", type=float)
     run.add_argument("--threshold", type=float)
-    run.add_argument("--sft", action="store_true", help="demonstrations: all success")
+    run.add_argument(
+        "--dataset-type",
+        dest="dataset_type",
+        choices=["auto", "rollout", "sft"],
+        default=None,
+        help="rollout (default): outcomes from labels; sft: demonstrations, all "
+        "success; auto: the dataset setting, the export's metadata or the "
+        "outcomes, values only when there are none",
+    )
+    run.add_argument("--sft", action="store_true", help="same as --dataset-type sft")
     run.add_argument(
         "--static-filter",
         choices=["auto", "on", "off"],
         default="auto",
         help="the training data's static-pose filter (auto: raw-capture views "
         "when the checkpoint names one)",
+    )
+    settings = sub.add_parser(
+        "settings", help="a dataset's RECAP type (shown, or set with --dataset-type)"
+    )
+    settings.add_argument("repo_id")
+    settings.add_argument(
+        "--dataset-type",
+        dest="dataset_type",
+        choices=["auto", "rollout", "sft"],
+        help="store it for the dataset (auto removes the setting)",
     )
     show = sub.add_parser("show", help="the current labels of a dataset")
     show.add_argument("repo_id")
@@ -287,6 +307,14 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "run":
             return _run(args)
+        if args.command == "settings":
+            from . import jobs
+
+            if args.dataset_type is None:
+                _print(jobs.dataset_type_payload(args.repo_id))
+            else:
+                _print(jobs.set_dataset_type(args.repo_id, args.dataset_type))
+            return 0
         if args.command == "show":
             from . import jobs
 
@@ -313,6 +341,12 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
+def _dataset_type(args) -> str:
+    if args.sft and args.dataset_type not in (None, "sft"):
+        raise ValueError("--sft contradicts --dataset-type " + args.dataset_type)
+    return "sft" if args.sft else args.dataset_type or "rollout"
+
+
 def _run(args) -> int:
     from . import jobs
 
@@ -328,7 +362,7 @@ def _run(args) -> int:
         lookahead=args.lookahead,
         positive_quantile=args.positive_quantile,
         threshold=args.threshold,
-        dataset_type="sft" if args.sft else "rollout",
+        dataset_type=_dataset_type(args),
         static_filter=args.static_filter,
         watch=False,
     )

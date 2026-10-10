@@ -521,6 +521,15 @@ def build(
                 f"{operation} needs RECAP advantage labels on {ds.name}; "
                 "run `levi recap run` first"
             )
+        if recap.get("dataset_type") == "value_only":
+            # No outcomes, so no returns or advantages: a null label must
+            # never be read as negative (or, for demonstrations, positive).
+            raise ManifestError(
+                f"{operation} needs RECAP advantage labels, but the RECAP result "
+                f"on {ds.name} has values only (the dataset has no outcomes); "
+                "set its dataset type (levi recap settings) or label outcomes "
+                "and recompute"
+            )
         if stale and not allow_stale:
             raise ManifestError(
                 "The RECAP labels are stale ("
@@ -581,7 +590,9 @@ def build(
                 ):
                     i = where.get(int(f))
                     if i is not None:
-                        value[i], adv[i], positive[i] = v, a, bool(p)
+                        # A value-only result stores null labels, NaN advantages.
+                        value[i], adv[i] = v, np.nan if a is None else a
+                        positive[i] = None if p is None else bool(p)
 
         spans = _subtasks(folder, ep)
         sub_id: list[str | None] = [None] * n

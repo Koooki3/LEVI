@@ -122,6 +122,16 @@ From the page (VALUE MODEL → Compute advantages), from a terminal (`uv run lev
 
 Returns need each episode's outcome, with the export's priority: a human label, then the capture's `levi_outcome`, then an RLinf-format RECAP dataset's per-episode `is_success` in `meta/episodes.jsonl`. Episodes without one are left out and listed (`skipped_episodes` in the summary); naming them explicitly is refused. `dataset_type: sft` treats every episode as a success and, as in RLinf, labels every frame positive.
 
+#### Dataset type: `auto`, the dataset setting and values only
+
+The value V(o_t) does not read outcomes; returns, advantages and labels do. The dataset type is therefore a property of the data, not of a model or a run. `dataset_type` (API `run`, `levi recap run --dataset-type`) is `rollout` (the default, unchanged), `sft` or `auto`. `auto` resolves, in order, to: the dataset setting (`source: user`); the type a LEVI `recap_value` export wrote into `meta/levi_recap.json` (`manifest`); `rollout` when any episode has an outcome (`outcomes`); otherwise **values only** (`value_only`, `no_outcomes`). A values-only result stores V(o_t) and leaves advantages, the threshold, the return range and every label null (`labels: false` in `status.current` and the episode payload; `positive_fraction` and `mean_advantage` null in the summary). Unlabelled rollouts are therefore never turned into all-positive demonstrations. Training manifests that need labels (`advantage_positive_mask`, `advantage_weighted`) refuse a values-only result; other operations carry its values with null labels. `levi recap threshold` refuses it too, and a comparison with a values-only side compares values only (`labels_unavailable`).
+
+The dataset setting is stored in `recap_values/<name>/dataset.json`: `levi recap settings local/<name> [--dataset-type auto|rollout|sft]`, or `GET/POST /api/recap/settings` (`{"repo_id", "dataset_type"}`; `auto` removes the setting). `GET /api/recap/status` reports it as `dataset_type: {setting, dataset_type, source}`, and each result records `dataset_type`, `dataset_type_source` and the requested type (`request.dataset_type_requested`).
+
+Each episode in `summary.json` carries `mean_value`, `min_value` and `max_value` (the range of its value curve). Results computed before this field existed lack the last two keys; readers treat them as optional.
+
+数据集类型（中文）：价值 V(o_t) 不读结局，回报、优势和布尔标签才需要结局，所以“数据标签规则”属于数据集，不属于模型或某次计算。`dataset_type` 取 `rollout`（默认，行为不变）、`sft` 或 `auto`。`auto` 依次取：数据集设置（`user`）、LEVI `recap_value` 导出在 `meta/levi_recap.json` 写的类型（`manifest`）、任一片段有结局时为 `rollout`（`outcomes`），否则为**仅价值**（`value_only`）：只保存 V(o_t)，优势、阈值、回报范围和所有标签都为空（`labels: false`），因此未标注的策略 rollout 不会被当成全正的示范数据。需要标签的训练清单操作（`advantage_positive_mask`、`advantage_weighted`）和 `levi recap threshold` 拒绝仅价值结果；对比时只比较价值（`labels_unavailable`）。数据集设置存在 `recap_values/<名称>/dataset.json`，用 `levi recap settings` 或 `GET/POST /api/recap/settings` 查看和修改（`auto` 即删除设置）。`summary.json` 每个片段另有 `min_value`、`max_value`（价值曲线的最小、最大值），旧结果没有这两项，读取时按可选处理。
+
 ### Advantage and threshold
 
 RLinf's formula (`compute_advantages.py`, commit 807e5fd), per episode of n frames with lookahead N:

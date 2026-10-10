@@ -11,6 +11,7 @@ own Python (no Torch); ``rlinf`` runs it in integrations/recap_value/.venv.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import signal
@@ -145,6 +146,91 @@ def dataset(repo_id: str) -> Dataset:
     labels = outcomes.read_labels(resolve(catalog.STATE, name, "annotations"))
     human = {ep: v["outcome"] for ep, v in labels.items()}
     return Dataset(repo_id, name, root, info, rows, tasks, human)
+
+
+# ---------------------------------------------------------------- dataset type
+
+# What a run may ask for, and what it resolves to. "auto" decides from the
+# data; "value_only" is never asked for: it is what "auto" gives a dataset
+# without any outcome, so unlabelled rollouts are never silently turned into
+# all-positive demonstrations.
+REQUESTED_TYPES = ("auto", "rollout", "sft")
+RESOLVED_TYPES = ("rollout", "sft", "value_only")
+SETTINGS_SCHEMA = "levi.recap_value.dataset.v1"
+
+
+def _settings_path(name: str) -> Path:
+    return store.root(name) / "dataset.json"
+
+
+def dataset_setting(name: str) -> dict[str, Any] | None:
+    """The person's dataset-level choice (``rollout`` / ``sft``), if any."""
+    value = store.load_json(_settings_path(name))
+    if isinstance(value, dict) and value.get("dataset_type") in ("rollout", "sft"):
+        return value
+    return None
+
+
+def _manifest_type(ds: Dataset) -> str | None:
+    """The type a LEVI ``recap_value`` export wrote into its own metadata."""
+    value = catalog.read(ds.root / "meta/levi_recap.json", {})
+    kind = value.get("dataset_type") if isinstance(value, dict) else None
+    return kind if kind in ("rollout", "sft") else None
+
+
+def resolve_dataset_type(ds: Dataset, requested: str = "auto") -> dict[str, Any]:
+    """``{"dataset_type", "source"}`` for a run.
+
+    An explicit ``rollout`` / ``sft`` is used as asked (``request``). ``auto``
+    takes, in order: the dataset setting (``user``), the export's own
+    ``meta/levi_recap.json`` (``manifest``), ``rollout`` when any episode has
+    an outcome (``outcomes``), else ``value_only`` (``no_outcomes``): values
+    only, no advantage labels."""
+    if requested not in REQUESTED_TYPES:
+        raise RecapError(400, "dataset_type is auto, rollout or sft")
+    if requested != "auto":
+        return {"dataset_type": requested, "source": "request"}
+    setting = dataset_setting(ds.name)
+    if setting:
+        return {"dataset_type": setting["dataset_type"], "source": "user"}
+    kind = _manifest_type(ds)
+    if kind:
+        return {"dataset_type": kind, "source": "manifest"}
+    if any(ds.outcome(ep) is not None for ep in ds.rows):
+        return {"dataset_type": "rollout", "source": "outcomes"}
+    return {"dataset_type": "value_only", "source": "no_outcomes"}
+
+
+def dataset_type_payload(repo_id: str) -> dict[str, Any]:
+    """The setting and what ``auto`` resolves to now (read-only)."""
+    ds = dataset(repo_id)
+    setting = dataset_setting(ds.name)
+    return {
+        "setting": setting["dataset_type"] if setting else "auto",
+        **resolve_dataset_type(ds, "auto"),
+    }
+
+
+def set_dataset_type(repo_id: str, dataset_type: str) -> dict[str, Any]:
+    """Store the dataset-level type; ``auto`` removes the setting."""
+    ds = dataset(repo_id)
+    if dataset_type not in REQUESTED_TYPES:
+        raise RecapError(400, "dataset_type is auto, rollout or sft")
+    with store.locked(ds.name):
+        path = _settings_path(ds.name)
+        if dataset_type == "auto":
+            path.unlink(missing_ok=True)
+        else:
+            store.write_json(
+                path,
+                {
+                    "schema": SETTINGS_SCHEMA,
+                    "dataset_type": dataset_type,
+                    "source": "user",
+                    "updated_at": time.time(),
+                },
+            )
+    return dataset_type_payload(repo_id)
 
 
 # ---------------------------------------------------------------- records
@@ -422,8 +508,8 @@ def start(
         raise RecapError(400, str(exc)) from exc
     if manifest.provider == "rlinf":
         _refuse_rlinf(folder, manifest, ds)
-    if dataset_type not in ("rollout", "sft"):
-        raise RecapError(400, "dataset_type is rollout or sft")
+    kind = resolve_dataset_type(ds, dataset_type)
+    resolved = kind["dataset_type"]
     if threshold is not None and not np.isfinite(threshold):
         raise RecapError(400, "threshold must be a finite number")
     known = sorted(ds.rows)
@@ -438,11 +524,15 @@ def start(
             raise RecapError(400, "episodes is empty")
     else:
         chosen = known
-    success: dict[int, bool] = {}
+    success: dict[int, bool | None] = {}
     skipped: dict[str, str] = {}
     for ep in chosen:
-        if dataset_type == "sft":
+        if resolved == "sft":
             success[ep] = True
+            continue
+        if resolved == "value_only":
+            # No outcome anywhere: V(o_t) does not read it, labels need it.
+            success[ep] = None
             continue
         outcome = ds.outcome(ep)
         if outcome is None:
@@ -458,8 +548,8 @@ def start(
     if not success:
         raise RecapError(
             400,
-            "No episode has a success/failure label; label outcomes first or run "
-            "with dataset_type sft",
+            "No episode has a success/failure label; label outcomes first, run "
+            "with dataset_type auto (values only) or sft (demonstrations)",
         )
     lengths = {}
     for ep in success:
@@ -486,7 +576,9 @@ def start(
             else manifest.positive_quantile
         ),
         "threshold": threshold,
-        "dataset_type": dataset_type,
+        "dataset_type": resolved,
+        "dataset_type_requested": dataset_type,
+        "dataset_type_source": kind["source"],
         "static_filter": static_filter,
     }
     if request["lookahead"] < 1:
@@ -558,7 +650,7 @@ def start(
             "revision_id": None,
             "created_at": time.time(),
             "request": request,
-            "success": {str(k): v for k, v in success.items()},
+            "success": {str(k): v for k, v in success.items() if v is not None},
             "skipped_episodes": skipped,
             "static_filter": filtering,
             "plan_path": str(plan_path),
@@ -816,15 +908,19 @@ def cancel(job: dict[str, Any]) -> dict[str, Any]:
     if job.get("status") in FINISHED:
         _forget(_key(job))
         return job
-    process = _PROCESSES.get(_key(job))
-    if process is not None and process.poll() is None:
-        _stop(process, grace=5.0)
+    # Record the cancellation before stopping the worker: the watch thread
+    # collects as soon as the process exits, and would otherwise report the
+    # killed worker as "exited without a result" (failed) first.
     with store.locked(job["name"]):
         current = _read(job["name"], job["id"]) or job
         if current.get("status") in ACTIVE:
             current.update(status="cancelled", finished_at=time.time())
             _save(current)
         job = current
+    process = _PROCESSES.get(_key(job))
+    stopping = job.get("status") == "cancelled" and process is not None
+    if stopping and process.poll() is None:
+        _stop(process, grace=5.0)
     _forget(_key(job))
     return job
 
@@ -852,6 +948,8 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     chunk = int(info.get("chunks_size") or 1000)
     request = job["request"]
     sft = request["dataset_type"] == "sft"
+    # Values only: no outcomes, so no returns, advantages or labels.
+    value_only = request["dataset_type"] == "value_only"
     lookahead = int(request["lookahead"])
     gamma = float(manifest.gamma)
     total = int(sum(len(e.get("keep", ())) or e["length"] for e in plan["episodes"]))
@@ -898,6 +996,21 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(
                 f"episode {ep}: values outside [{manifest.v_min}, {manifest.v_max}]"
             )
+        if value_only:
+            blank = np.full(len(frames), np.nan)
+            per_episode[ep] = {
+                "frame_index": frames,
+                "timestamp": timestamps,
+                "value": values,
+                "value_next": blank,
+                "reward_sum": blank,
+                "reward_sum_raw": blank,
+                "return": blank,
+                "advantage": blank,
+                "num_valid_rewards": np.zeros(len(frames), dtype=np.int64),
+                "positive": None,
+            }
+            continue
         returns, rewards = advantage.episode_rewards(
             len(frames), bool(item["success"]), gamma, float(manifest.failure_reward)
         )
@@ -908,6 +1021,8 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
             "return": returns,
             "reward": rewards,
         }
+    if value_only:
+        return _publish_values_only(job, plan, manifest, result, per_episode)
     ret_min, ret_max = manifest.return_min, manifest.return_max
     range_source = "checkpoint"
     if ret_min is None or ret_max is None:
@@ -944,10 +1059,62 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     for cols in per_episode.values():
         cols["positive"] = advantage.label(cols["advantage"], threshold, sft=sft)
     _set_stage(job, "saving", 0, total)
+    meta = {
+        **_common_meta(job, plan, manifest, result),
+        "threshold": threshold,
+        "threshold_source": source,
+        "positive_quantile": request["positive_quantile"],
+        "lookahead": lookahead,
+        "gamma": gamma,
+        "failure_reward": float(manifest.failure_reward),
+        "return_min": float(ret_min),
+        "return_max": float(ret_max),
+        "return_range_source": range_source,
+        "outcomes": {
+            str(k): ("success" if v else "failure") for k, v in job["success"].items()
+        },
+        "threshold_provenance": (
+            manifest.provenance.get("unified_threshold")
+            if source == "checkpoint"
+            else None
+        ),
+    }
+    return store.publish(
+        job["name"], per_episode, meta, dataset_name=plan["dataset"]["name"]
+    )
+
+
+def _publish_values_only(job, plan, manifest, result, per_episode):
+    """Publish V(o_t) alone: no threshold, return range or labels."""
+    request = job["request"]
+    _set_stage(job, "saving", 0, sum(len(c["value"]) for c in per_episode.values()))
+    meta = {
+        **_common_meta(job, plan, manifest, result),
+        "threshold": None,
+        "threshold_source": None,
+        "positive_quantile": request["positive_quantile"],
+        "lookahead": int(request["lookahead"]),
+        "gamma": float(manifest.gamma),
+        "failure_reward": float(manifest.failure_reward),
+        "return_min": None,
+        "return_max": None,
+        "return_range_source": None,
+        "outcomes": {},
+        "threshold_provenance": None,
+        "labels": False,
+    }
+    return store.publish(
+        job["name"], per_episode, meta, dataset_name=plan["dataset"]["name"]
+    )
+
+
+def _common_meta(job, plan, manifest, result) -> dict[str, Any]:
+    request = job["request"]
+    root = Path(plan["dataset"]["root"])
     ds_fingerprint = catalog.read(root / "meta/levi_view.json", {}).get(
         "source_fingerprint"
     )
-    meta = {
+    return {
         "checkpoint": {
             "name": manifest.name,
             "sha256": manifest.sha256,
@@ -958,21 +1125,11 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         "repo_id": job["repo_id"],
         "request": request,
         "dataset_type": request["dataset_type"],
-        "threshold": threshold,
-        "threshold_source": source,
-        "positive_quantile": request["positive_quantile"],
-        "lookahead": lookahead,
-        "gamma": gamma,
-        "failure_reward": float(manifest.failure_reward),
-        "return_min": float(ret_min),
-        "return_max": float(ret_max),
-        "return_range_source": range_source,
+        "dataset_type_source": request.get("dataset_type_source", "request"),
+        "labels": True,
         "fingerprint": {
             "source_fingerprint": ds_fingerprint,
             "dataset_revision": dataset_revision(root),
-        },
-        "outcomes": {
-            str(k): ("success" if v else "failure") for k, v in job["success"].items()
         },
         "skipped_episodes": job.get("skipped_episodes", {}),
         "static_filter": {
@@ -981,17 +1138,9 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         "worker": result.get("provenance", {}),
         "base_models": plan["checkpoint"].get("base_models"),
         "dev_only_base_models": plan["checkpoint"].get("dev_only_base_models", []),
-        "threshold_provenance": (
-            manifest.provenance.get("unified_threshold")
-            if source == "checkpoint"
-            else None
-        ),
         "fps": float(plan["dataset"]["fps"]),
         "levi_commit": _levi_commit(),
     }
-    return store.publish(
-        job["name"], per_episode, meta, dataset_name=plan["dataset"]["name"]
-    )
 
 
 # ---------------------------------------------------------------- reading
@@ -1007,12 +1156,22 @@ def stale_reasons(ds: Dataset, record: dict[str, Any]) -> list[str]:
             reasons.append("the capture changed since the labels were computed")
     elif then.get("dataset_revision") != now.get("dataset_revision"):
         reasons.append("the dataset changed since the labels were computed")
-    if record.get("dataset_type") != "sft":
+    if record.get("dataset_type") not in ("sft", "value_only"):
         for ep, outcome in (record.get("outcomes") or {}).items():
             if ds.outcome(int(ep)) != outcome:
                 reasons.append(f"episode {ep}'s outcome label changed")
                 break
     return reasons
+
+
+def has_labels(record: dict[str, Any]) -> bool:
+    """False for a value-only result (no advantages, thresholds or labels)."""
+    return record.get("dataset_type") != "value_only"
+
+
+def _floats(values) -> list[float | None]:
+    """JSON-safe: a value-only result stores NaN advantages."""
+    return [None if v is None or math.isnan(v) else float(v) for v in values]
 
 
 def current(ds: Dataset) -> dict[str, Any] | None:
@@ -1033,6 +1192,7 @@ def current(ds: Dataset) -> dict[str, Any] | None:
         "lookahead": record["lookahead"],
         "positive_fraction": record["positive_fraction"],
         "dataset_type": record.get("dataset_type", "rollout"),
+        "labels": has_labels(record),
         "stale": bool(reasons),
         # Frames labelled / frames in the labelled episodes when the
         # training static filter was applied (else null).
@@ -1061,11 +1221,17 @@ def status(repo_id: str, *, reconcile: bool = True) -> dict[str, Any]:
     else:
         rows = jobs(ds.name)
         job = rows[-1] if rows else None
+    setting = dataset_setting(ds.name)
     return {
         "checkpoints": checkpoints.listing(),
         "worker": worker_state(),
         "current": current(ds),
         "job": public(job) if job else None,
+        # What "auto" resolves to now, and the person's setting.
+        "dataset_type": {
+            "setting": setting["dataset_type"] if setting else "auto",
+            **resolve_dataset_type(ds, "auto"),
+        },
     }
 
 
@@ -1101,8 +1267,10 @@ def episode_payload(
         "frame_index": columns["frame_index"],
         "timestamp": columns["timestamp"],
         "value": [float(v) for v in columns["value"]],
-        "advantage": [float(v) for v in columns["advantage"]],
+        # Null for a value-only result (no outcome, so no advantage labels).
+        "advantage": _floats(columns["advantage"]),
         "positive": columns["positive"],
+        "labels": has_labels(record),
         # With the training static filter only kept frames are listed: the
         # frame indices skip over the dropped (unlabelled) ones.
         "static_filter": bool((record.get("static_filter") or {}).get("applied")),
@@ -1126,6 +1294,8 @@ def episode_digest(repo_id: str, episode: int) -> dict[str, Any]:
     positive = full["positive"]
     times = full["timestamp"]
     runs, start = [], 0
+    if not full["labels"]:
+        positive = []  # values only: no runs of labels
     for i in range(1, len(positive) + 1):
         if i == len(positive) or positive[i] != positive[start]:
             chunk = full["advantage"][start:i]
@@ -1145,12 +1315,15 @@ def episode_digest(repo_id: str, episode: int) -> dict[str, Any]:
         "episode_index": episode,
         "revision_id": full["revision_id"],
         "threshold": full["threshold"],
-        "frames": len(positive),
-        "positive_fraction": sum(positive) / len(positive) if positive else 0.0,
+        "frames": len(times),
+        "labels": full["labels"],
+        "positive_fraction": (sum(positive) / len(positive) if positive else 0.0)
+        if full["labels"]
+        else None,
         "runs": runs,
         "value_samples": [
             {"time": round(times[i], 3), "value": round(full["value"][i], 4)}
-            for i in range(0, len(positive), step)
+            for i in range(0, len(times), step)
         ],
     }
 
@@ -1176,6 +1349,12 @@ def unified_threshold(
         record = store.revision(ds.name, rid) if rid else None
         if not record:
             raise RecapError(400, f"{repo_id} has no computed revision")
+        if not has_labels(record):
+            raise RecapError(
+                400,
+                f"{repo_id} has values only (no outcomes, so no advantages); "
+                "set its dataset type or label outcomes and recompute",
+            )
         table = pq.read_table(
             store.root(ds.name) / "revisions" / rid / "advantages.parquet",
             columns=["advantage_continuous"],
