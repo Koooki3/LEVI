@@ -92,7 +92,12 @@ def early_stop(episodes, *, level: float = _core.DEFAULT_LEVEL) -> dict:
     ``complete`` (True only when it ran to its end and its control record
     is sealed; anything else is left out and counted, never assumed), for
     treated episodes ``early_stop`` (bool), and optionally ``slot`` (the
-    layout slot, for pairing) and ``saved_steps``."""
+    layout slot), ``round`` and ``saved_steps``.
+
+    Arms are paired by ``(slot, round)``: the same card in the same round.
+    A failed control without a slot, or whose key the other arm lacks, is
+    counted in ``unpaired``; two failed controls of one arm with the same
+    key raise ``AnalysisInputError`` (nothing is silently overwritten)."""
     z = _core.z_of(_core.check_level(level))
     arms: dict = defaultdict(list)
     for row in episodes:
@@ -100,7 +105,8 @@ def early_stop(episodes, *, level: float = _core.DEFAULT_LEVEL) -> dict:
             raise AnalysisInputError("every episode needs an arm")
         arms[str(row["arm"])].append(row)
     out = {}
-    slots: dict = defaultdict(dict)
+    keyed: dict = defaultdict(dict)
+    keyless: dict = defaultdict(int)
     for arm, rows in sorted(arms.items()):
         controls = [r for r in rows if r.get("control")]
         failed = [
@@ -147,8 +153,16 @@ def early_stop(episodes, *, level: float = _core.DEFAULT_LEVEL) -> dict:
             }
         rate["left_out_incomplete"] = left_out
         for r in failed:
-            if r.get("slot") is not None:
-                slots[r["slot"]][arm] = 1 if r.get("would_stop") else 0
+            if r.get("slot") is None:
+                keyless[arm] += 1
+                continue
+            key = (r["slot"], r.get("round"))
+            if key in keyed[arm]:
+                raise AnalysisInputError(
+                    f"arm {arm!r} has two failed control episodes for slot "
+                    f"{key[0]!r} in round {key[1]!r}"
+                )
+            keyed[arm][key] = 1 if r.get("would_stop") else 0
         out[arm] = {
             "episodes": len(rows),
             "controls": len(controls),
@@ -162,21 +176,33 @@ def early_stop(episodes, *, level: float = _core.DEFAULT_LEVEL) -> dict:
             },
         }
     comparisons = {}
+    unpaired = {}
     names = sorted(arms)
     for i, first in enumerate(names):
         for second in names[i + 1 :]:
-            pairs = [
-                (v[first], v[second])
-                for v in slots.values()
-                if first in v and second in v
-            ]
-            if pairs:
-                comparisons[f"{first}|{second}"] = paired.mcnemar(pairs)
+            label = f"{first}|{second}"
+            a, b = keyed[first], keyed[second]
+            common = sorted(set(a) & set(b), key=repr)
+            unpaired[label] = keyless[first] + keyless[second] + len(set(a) ^ set(b))
+            if common:
+                comparisons[label] = paired.mcnemar([(a[k], b[k]) for k in common])
             else:
-                comparisons[f"{first}|{second}"] = {
-                    "status": "unavailable",
-                    "reason": "no slot with failed controls in both arms",
-                }
+                comparisons[label] = result(
+                    "test",
+                    "mcnemar",
+                    MODULE,
+                    references=["mcnemar1947"],
+                    exploratory=True,
+                    caveats=[
+                        caveat(
+                            "empty",
+                            "no (slot, round) with failed controls in both arms",
+                        )
+                    ],
+                    available=False,
+                    status="unavailable",
+                    n_pairs=0,
+                )
     return result(
         "summary",
         "early_stop",
@@ -192,4 +218,5 @@ def early_stop(episodes, *, level: float = _core.DEFAULT_LEVEL) -> dict:
         level=level,
         arms=out,
         paired_false_early_stop=comparisons,
+        unpaired=unpaired,
     )

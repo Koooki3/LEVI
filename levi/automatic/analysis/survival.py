@@ -260,11 +260,49 @@ def rmst(
         raise AnalysisInputError(f"unknown reference arm {reference!r}")
     resamples = min(_core.check_resamples(resamples), 20_000)
     data = {}
+    dropped = 0
     for name in names:
-        t, e, _ = _clean(*groups[name])
-        if len(t) == 0:
-            raise AnalysisInputError(f"arm {name!r} has no episodes")
+        t, e, d = _clean(*groups[name])
+        dropped += d
         data[name] = (t, e)
+    caveats = [
+        COMPETING,
+        caveat("no_power_model", "secondary metric: treated as exploratory"),
+    ]
+    if dropped:
+        caveats.append(
+            caveat(
+                "dropped_missing",
+                f"{dropped} episodes without time or event",
+                count=dropped,
+            )
+        )
+    empty = [name for name in names if len(data[name][0]) == 0]
+    if empty:
+        return result(
+            "estimate",
+            "rmst",
+            MODULE,
+            references=["royston2013rmst"],
+            exploratory=True,
+            caveats=caveats
+            + [caveat("empty", f"arms without episodes: {', '.join(map(str, empty))}")],
+            available=False,
+            tau=float(tau),
+            dropped=dropped,
+            arms=None,
+            differences=None,
+        )
+    short = [name for name in names if float(data[name][0].max()) < tau]
+    if short:
+        caveats.append(
+            caveat(
+                "tau_beyond_follow_up",
+                "tau lies beyond the last observed time of some arms; their "
+                "Kaplan-Meier curves are carried flat to tau",
+                arms=[str(n) for n in short],
+            )
+        )
     rng = _core.generator(seed)
     boots = {}
     for name in names:
@@ -298,11 +336,9 @@ def rmst(
         MODULE,
         references=["royston2013rmst", "kaplan1958", "efron1979bootstrap"],
         exploratory=True,
-        caveats=[
-            COMPETING,
-            caveat("no_power_model", "secondary metric: treated as exploratory"),
-        ],
+        caveats=caveats,
         available=True,
+        dropped=dropped,
         tau=float(tau),
         level=level,
         seed=seed,

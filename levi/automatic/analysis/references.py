@@ -217,13 +217,6 @@ REFERENCES: dict[str, dict] = {
         "venue": "BMC Medical Research Methodology 13, article 152",
         "id": "doi:10.1186/1471-2288-13-152",
     },
-    "tri_lbm2025": {
-        "authors": "TRI LBM Team et al.",
-        "year": 2025,
-        "title": "A Careful Examination of Large Behavior Models for Multitask Dexterous Manipulation",
-        "venue": "arXiv preprint",
-        "id": "arXiv:2507.05331",
-    },
     "wilcoxon1945": {
         "authors": "Wilcoxon",
         "year": 1945,

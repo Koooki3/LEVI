@@ -60,20 +60,39 @@ def cohen_kappa(rater_a, rater_b) -> dict:
     kept = [(x, y) for x, y in pairs if x is not None and y is not None]
     dropped = len(pairs) - len(kept)
     n = len(kept)
-    if n == 0:
-        return {
-            "n": 0,
-            "dropped": dropped,
-            "observed": None,
-            "expected": None,
-            "kappa": None,
-        }
-    po = sum(x == y for x, y in kept) / n
-    ca = Counter(x for x, _ in kept)
-    cb = Counter(y for _, y in kept)
-    pe = sum(ca[c] * cb[c] for c in set(ca) | set(cb)) / (n * n)
-    kappa = None if pe == 1 else (po - pe) / (1 - pe)
-    return {"n": n, "dropped": dropped, "observed": po, "expected": pe, "kappa": kappa}
+    po = pe = kappa = None
+    caveats = [
+        caveat(
+            "kappa_prevalence",
+            "kappa depends on the category rates; read it with the agreement rate",
+        )
+    ]
+    if n:
+        po = sum(x == y for x, y in kept) / n
+        ca = Counter(x for x, _ in kept)
+        cb = Counter(y for _, y in kept)
+        pe = sum(ca[c] * cb[c] for c in set(ca) | set(cb)) / (n * n)
+        kappa = None if pe == 1 else (po - pe) / (1 - pe)
+    else:
+        caveats.append(caveat("empty", "no pair with both labels"))
+    if dropped:
+        caveats.append(
+            caveat("dropped_missing", f"{dropped} pairs dropped", count=dropped)
+        )
+    return result(
+        "estimate",
+        "cohen_kappa",
+        MODULE,
+        references=["cohen1960kappa", "feinstein1990kappa"],
+        exploratory=True,
+        caveats=caveats,
+        available=n > 0 and kappa is not None,
+        n=n,
+        dropped=dropped,
+        observed=po,
+        expected=pe,
+        kappa=kappa,
+    )
 
 
 def agreement(pairs, *, level: float = _core.DEFAULT_LEVEL) -> dict:
@@ -182,7 +201,7 @@ def misjudgement_by_arm(arms: dict, *, seed: int, permutations: int = 20_000) ->
             "test",
             "misjudgement_by_arm",
             MODULE,
-            references=["cohen1960kappa"],
+            references=[],
             exploratory=True,
             caveats=caveats
             + [caveat("too_small", "needs judged episodes in at least two arms")],
@@ -204,7 +223,7 @@ def misjudgement_by_arm(arms: dict, *, seed: int, permutations: int = 20_000) ->
         "test",
         "misjudgement_by_arm",
         MODULE,
-        references=["cohen1960kappa"],
+        references=[],
         exploratory=True,
         caveats=caveats,
         available=True,

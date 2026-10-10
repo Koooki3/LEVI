@@ -16,7 +16,10 @@ from statistics import NormalDist
 import numpy as np
 
 SCHEMA_VERSION = "levi.aeri.analysis.v1"
-IMPLEMENTATION_VERSION = 1
+# Version 2: the exploratory rule uses planned values only (no post-hoc
+# power); results record the numpy version and the bit generator.
+IMPLEMENTATION_VERSION = 2
+BIT_GENERATOR = "PCG64"
 DEFAULT_LEVEL = 0.95
 DEFAULT_ALPHA = 0.05
 # Upper bounds that keep a call's work and memory bounded whatever the input.
@@ -57,6 +60,11 @@ def result(
         "references": list(references),
         "exploratory": bool(exploratory),
         "caveats": list(caveats or []),
+        # Bit-identical results hold only for the same numpy version: the
+        # random streams of Generator methods may change between versions.
+        "numpy_version": np.__version__,
+        "algorithm_version": IMPLEMENTATION_VERSION,
+        "bit_generator": BIT_GENERATOR,
     }
     out.update({k: jsonable(v) for k, v in fields.items()})
     return out

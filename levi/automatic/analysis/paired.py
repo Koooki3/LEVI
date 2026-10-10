@@ -25,6 +25,16 @@ from .proportions import wilson_bounds
 MODULE = "paired"
 # Discordant pairs up to which McNemar's p-value is summed in exact integers.
 EXACT_INTEGER_MAX = 2000
+SMALL_SAMPLE = 30
+# Measured with this library (levi2 review fixes, 2026-10-10): 1000 data
+# sets of 30 pairs each, 2000 resamples, seed 20261010; Monte Carlo SE about
+# 0.007.
+COVERAGE_NOTE = (
+    "simulated coverage of the nominal 95% interval with 30 pairs (1000 data "
+    "sets, 2000 resamples): percentile 0.93 for normal differences, 0.91 for "
+    "exponential (skewed) differences, 0.95 for binary pairs; BCa 0.94, 0.92 "
+    "and 0.94"
+)
 
 
 def _cells(pairs) -> tuple[int, int, int, int, int]:
@@ -69,14 +79,38 @@ def mcnemar(
     *,
     alpha: float = _core.DEFAULT_ALPHA,
     design_difference: float | None = None,
+    design_baseline: float | None = None,
 ) -> dict:
-    """McNemar's tests on paired 0/1 outcomes ``[(a, b), ...]`` (A first)."""
+    """McNemar's tests on paired 0/1 outcomes ``[(a, b), ...]`` (A first).
+    ``design_difference`` and ``design_baseline`` are planned values fixed
+    before the first trial; they alone decide ``exploratory``."""
     alpha = _core.check_alpha(alpha)
     e, f, g, h, dropped = _cells(pairs)
     n = e + f + g + h
-    pooled = (2 * e + f + g) / (2 * n) if n else None
-    exploratory, caveats, mdd = power.assess(
-        n, pooled, design="paired", design_difference=design_difference, alpha=alpha
+    if n == 0:
+        return result(
+            "test",
+            "mcnemar",
+            MODULE,
+            references=["mcnemar1947"],
+            exploratory=True,
+            caveats=[caveat("empty", "no complete pairs")],
+            available=False,
+            n_pairs=0,
+            dropped=dropped,
+            cells={"both": 0, "only_a": 0, "only_b": 0, "neither": 0},
+            p_exact=None,
+            p_mid=None,
+            p_asymptotic=None,
+            chi_square=None,
+            alpha=alpha,
+        )
+    exploratory, caveats, mdd, basis = power.assess(
+        n,
+        design="paired",
+        design_difference=design_difference,
+        design_baseline=design_baseline,
+        alpha=alpha,
     )
     if dropped:
         caveats.append(
@@ -113,6 +147,7 @@ def mcnemar(
         chi_square=p["statistic"],
         alpha=alpha,
         min_detectable_difference=mdd,
+        power_basis=basis,
     )
 
 
@@ -147,6 +182,7 @@ def newcombe_paired(
     *,
     level: float = _core.DEFAULT_LEVEL,
     design_difference: float | None = None,
+    design_baseline: float | None = None,
 ) -> dict:
     """Newcombe's paired interval for ``p_B - p_A``."""
     level = _core.check_level(level)
@@ -170,11 +206,11 @@ def newcombe_paired(
     # Newcombe's theta is first-minus-second; with B as the first
     # classification it is p_B - p_A: e = both, f = only B, g = only A.
     low, high = newcombe_paired_bounds(e, g, f, h, _core.z_of(level))
-    exploratory, caveats, mdd = power.assess(
+    exploratory, caveats, mdd, basis = power.assess(
         n,
-        (2 * e + f + g) / (2 * n),
         design="paired",
         design_difference=design_difference,
+        design_baseline=design_baseline,
     )
     if dropped:
         caveats.append(
@@ -197,6 +233,7 @@ def newcombe_paired(
         low=low,
         high=high,
         min_detectable_difference=mdd,
+        power_basis=basis,
     )
 
 
@@ -210,9 +247,15 @@ def paired_bootstrap(
     method: str = "percentile",
     binary: bool = True,
     design_difference: float | None = None,
+    design_baseline: float | None = None,
 ) -> dict:
     """Bootstrap interval of ``statistic(b - a)`` resampling whole pairs.
-    For 0/1 outcomes (``binary``) the mean difference is ``p_B - p_A``."""
+    For 0/1 outcomes (``binary``) the mean difference is ``p_B - p_A``.
+
+    The percentile interval is liberal in small samples (``coverage_note``
+    gives the simulated coverage); a sample whose differences all take one
+    value gives a zero-width interval, flagged ``degenerate_bootstrap``:
+    use McNemar's test and Newcombe's interval for such binary data."""
     level = _core.check_level(level)
     seed = _core.check_seed(seed)
     if binary:
@@ -240,10 +283,13 @@ def paired_bootstrap(
     capped = _core.check_resamples(resamples)
     reps = resampling.bootstrap_distribution(diffs, statistic, capped, seed)
     low, high, notes = resampling.interval(diffs, reps, statistic, level, method)
+    basis = None
     if binary:
-        pooled = float((a.sum() + b.sum()) / (2 * n))
-        exploratory, caveats, mdd = power.assess(
-            n, pooled, design="paired", design_difference=design_difference
+        exploratory, caveats, mdd, basis = power.assess(
+            n,
+            design="paired",
+            design_difference=design_difference,
+            design_baseline=design_baseline,
         )
     else:
         exploratory, mdd = True, None
@@ -253,9 +299,22 @@ def paired_bootstrap(
     caveats += notes
     if capped < int(resamples):
         caveats.append(caveat("resamples_capped", f"resamples capped at {capped}"))
-    if n < 10:
+    if np.unique(diffs).size == 1 or float(np.var(reps)) == 0.0:
         caveats.append(
-            caveat("small_sample", "bootstrap intervals are unreliable below 10 pairs")
+            caveat(
+                "degenerate_bootstrap",
+                "every difference takes one value: the bootstrap interval has zero "
+                "width and cannot be trusted; use an exact method (McNemar's test, "
+                "Newcombe's interval) instead",
+            )
+        )
+    if n < SMALL_SAMPLE:
+        caveats.append(
+            caveat(
+                "small_sample",
+                f"below {SMALL_SAMPLE} pairs the percentile bootstrap covers less "
+                "than its nominal level (see coverage_note)",
+            )
         )
     if dropped:
         caveats.append(
@@ -282,6 +341,8 @@ def paired_bootstrap(
         low=low,
         high=high,
         min_detectable_difference=mdd,
+        power_basis=basis,
+        coverage_note=COVERAGE_NOTE,
     )
 
 

@@ -131,8 +131,7 @@ def test_rmst_hand_computed_and_difference_interval():
     )
     with pytest.raises(AnalysisInputError):
         sv.rmst({"A": (TIMES, EVENTS)}, tau=0, seed=0)
-    with pytest.raises(AnalysisInputError):
-        sv.rmst({"A": ([], [])}, tau=3, seed=0)
+    assert sv.rmst({"A": ([], [])}, tau=3, seed=0)["available"] is False
 
 
 def test_km_and_rmst_scale_to_large_arms():

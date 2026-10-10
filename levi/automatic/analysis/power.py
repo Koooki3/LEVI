@@ -281,48 +281,88 @@ def power_table(
     )
 
 
+BASELINE_GRID = tuple(round(0.05 * i, 2) for i in range(1, 20))
+
+
+def _planned_power(
+    n, baseline, delta, *, design, rho, alpha, reject, region
+) -> float | None:
+    p1 = baseline + delta
+    if p1 > 1 + 1e-12:
+        return None
+    p1 = min(1.0, p1)
+    try:
+        if n > EXACT_POWER_MAX_N:
+            return approximate_power(
+                n, baseline, p1, design=design, rho=rho, alpha=alpha
+            )
+        if design == "paired":
+            return power_paired(n, baseline, p1, rho=rho, reject=reject)
+        return power_unpaired(n, baseline, p1, region=region)
+    except AnalysisInputError:
+        return None
+
+
 def assess(
     n: int,
-    baseline: float | None,
     *,
     design: str,
     design_difference: float | None,
+    design_baseline: float | None = None,
     alpha: float = _core.DEFAULT_ALPHA,
     rho: float = 0.0,
-) -> tuple[bool, list[dict], float | None]:
-    """``(exploratory, caveats, mdd)`` for a two-arm success comparison.
+) -> tuple[bool, list[dict], float | None, dict]:
+    """``(exploratory, caveats, mdd, basis)`` for a two-arm success
+    comparison, from planned values only.
 
-    A comparison is confirmatory only when the caller states the difference
-    the study was designed to detect (``design_difference``, fixed before
-    the first trial) and the exact power at that difference is at least
-    0.8 with this ``n``. Every result also says the smallest difference this
-    ``n`` can detect at the observed pooled rate."""
+    The observed outcomes never enter: power computed at the observed rate
+    is post-hoc power, and it would let the same pre-registered design turn
+    confirmatory just because the results came out extreme. A comparison is
+    confirmatory only when the caller states the difference the study was
+    designed to detect (``design_difference``, fixed before the first
+    trial) and the exact power at that difference reaches 0.8 with this
+    ``n`` at the planned baseline success rate (``design_baseline``); with
+    no planned baseline the least favourable baseline on a 0.05 grid
+    decides. The reported smallest detectable difference is the design
+    table's value for this ``n`` at the planned baseline (0.5 when none is
+    planned)."""
     caveats = []
+    if design not in ("paired", "unpaired"):
+        raise AnalysisInputError("design must be 'paired' or 'unpaired'")
+    basis = {
+        "basis": "planned",
+        "difference": None if design_difference is None else float(design_difference),
+        "baseline": None if design_baseline is None else float(design_baseline),
+        "detectable_at_baseline": 0.5
+        if design_baseline is None
+        else float(design_baseline),
+        "min_power": None,
+    }
     if n < 1:
-        return True, [caveat("empty", "no usable trials")], None
+        return True, [caveat("empty", "no usable trials")], None, basis
+    if design_baseline is not None and not 0 < float(design_baseline) < 1:
+        raise AnalysisInputError("design_baseline must be strictly between 0 and 1")
     if n > EXACT_POWER_MAX_N:
         caveats.append(
             caveat(
                 "power_approximate",
-                f"n above {EXACT_POWER_MAX_N}: the detectable difference uses a normal approximation",
+                f"n above {EXACT_POWER_MAX_N}: power uses a normal approximation, "
+                "which can understate the detectable difference by about 0.01 (optimistic)",
             )
         )
-    # Fisher and McNemar are symmetric in success/failure: measure the
-    # difference in the direction with more room.
-    base = 0.5 if baseline is None else float(baseline)
-    base = min(0.5, max(0.05, min(base, 1 - base)))
-    mdd = min_detectable_difference(n, base, design=design, rho=rho, alpha=alpha)
+    mdd_base = basis["detectable_at_baseline"]
+    mdd = min_detectable_difference(n, mdd_base, design=design, rho=rho, alpha=alpha)
     caveats.append(
         caveat(
             "detectable_difference",
             (
                 f"with n={n} the design detects a difference of about {mdd:.2f} "
-                "with 80% power"
+                f"with 80% power at a planned baseline of {mdd_base:.2f}"
                 if mdd is not None
                 else f"with n={n} no difference is detectable with 80% power"
             ),
             n=n,
-            baseline=round(base, 3),
+            baseline=mdd_base,
             min_detectable_difference=mdd,
         )
     )
@@ -333,17 +373,59 @@ def assess(
                 "no pre-specified design difference: the result is exploratory",
             )
         )
-        return True, caveats, mdd
+        return True, caveats, mdd, basis
     target = float(design_difference)
     if not 0 < target <= 1:
         raise AnalysisInputError("design_difference must be in (0, 1]")
-    if mdd is None or mdd > target + 1e-12:
+    reject = region = None
+    if n <= EXACT_POWER_MAX_N:
+        if design == "paired":
+            reject = mcnemar_reject(n, alpha)
+        else:
+            region = (fisher_pvalues(n, n) <= alpha).astype(float)
+    baselines = (
+        [float(design_baseline)] if design_baseline is not None else list(BASELINE_GRID)
+    )
+    powers = [
+        p
+        for b in baselines
+        if (
+            p := _planned_power(
+                n,
+                b,
+                target,
+                design=design,
+                rho=rho,
+                alpha=alpha,
+                reject=reject,
+                region=region,
+            )
+        )
+        is not None
+    ]
+    if not powers:
+        caveats.append(
+            caveat(
+                "infeasible_design",
+                "the planned difference does not fit the planned baseline",
+            )
+        )
+        return True, caveats, mdd, basis
+    basis["min_power"] = min(powers)
+    if design_baseline is None:
+        caveats.append(
+            caveat(
+                "baseline_not_planned",
+                "no planned baseline: the least favourable baseline on a 0.05 grid decides",
+            )
+        )
+    if min(powers) < 0.8:
         caveats.append(
             caveat(
                 "underpowered",
-                f"n={n} cannot detect the design difference {target:.2f} with 80% power",
+                f"n={n} has {min(powers):.2f} power for the design difference {target:.2f}",
                 design_difference=target,
             )
         )
-        return True, caveats, mdd
-    return False, caveats, mdd
+        return True, caveats, mdd, basis
+    return False, caveats, mdd, basis

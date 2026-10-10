@@ -89,7 +89,7 @@ def test_adjustment_edges():
     with pytest.raises(AnalysisInputError):
         multiple.holm([float("inf")])
     assert multiple.benjamini_hochberg([0.01])["exploratory"] is True
-    assert multiple.holm([0.01])["exploratory"] is False
+    assert multiple.holm([0.01], exploratory=[False])["exploratory"] is False
 
 
 def test_cochran_q_with_two_arms_equals_mcnemar_chi_square():

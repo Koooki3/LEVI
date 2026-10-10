@@ -202,14 +202,18 @@ def fisher_margin(
     return min(1.0, p), min(1.0, less), min(1.0, greater)
 
 
-def _two_arm_assess(k1, n1, k2, n2, design_difference):
+def _two_arm_assess(n1, n2, design_difference, design_baseline):
+    """Planned-value power rule (see ``power.assess``); the outcomes are
+    never used. The smaller arm sets ``n``."""
     from . import power  # power imports this module
 
-    pooled = (k1 + k2) / (n1 + n2)
-    exploratory, caveats, mdd = power.assess(
-        min(n1, n2), pooled, design="unpaired", design_difference=design_difference
+    exploratory, caveats, mdd, basis = power.assess(
+        min(n1, n2),
+        design="unpaired",
+        design_difference=design_difference,
+        design_baseline=design_baseline,
     )
-    return exploratory, [_unpaired_caveat(), *caveats], mdd
+    return exploratory, [_unpaired_caveat(), *caveats], mdd, basis
 
 
 def fisher_exact(
@@ -220,6 +224,7 @@ def fisher_exact(
     *,
     two_sided: str = "minlike",
     design_difference: float | None = None,
+    design_baseline: float | None = None,
 ) -> dict:
     """Fisher's exact test for two independent arms (``k`` successes of
     ``n`` each). Reports the two-sided p-value and both one-sided ones."""
@@ -230,7 +235,9 @@ def fisher_exact(
     if n1 == 0 or n2 == 0:
         return _unavailable_two("fisher_exact", ["fisher1922"], "an arm has no trials")
     p, less, greater = fisher_margin(k1, n1, k2, n2, two_sided)
-    exploratory, caveats, mdd = _two_arm_assess(k1, n1, k2, n2, design_difference)
+    exploratory, caveats, mdd, basis = _two_arm_assess(
+        n1, n2, design_difference, design_baseline
+    )
     return result(
         "test",
         f"fisher_exact_{two_sided}",
@@ -247,6 +254,7 @@ def fisher_exact(
         p_arm1_lower=less,
         p_arm1_higher=greater,
         min_detectable_difference=mdd,
+        power_basis=basis,
     )
 
 
@@ -254,7 +262,14 @@ BOSCHLOO_MAX_N = 300
 
 
 def boschloo_exact(
-    k1, n1, k2, n2, *, grid: int = 1000, design_difference: float | None = None
+    k1,
+    n1,
+    k2,
+    n2,
+    *,
+    grid: int = 1000,
+    design_difference: float | None = None,
+    design_baseline: float | None = None,
 ) -> dict:
     """Boschloo's unconditional test: the p-value is the largest, over the
     common success probability ``pi``, of the probability of a table whose
@@ -297,7 +312,9 @@ def boschloo_exact(
             a = c
     best_value = max(best_value, size((a + b) / 2))
     p = min(1.0, best_value)
-    exploratory, caveats, mdd = _two_arm_assess(k1, n1, k2, n2, design_difference)
+    exploratory, caveats, mdd, basis = _two_arm_assess(
+        n1, n2, design_difference, design_baseline
+    )
     return result(
         "test",
         "boschloo_exact",
@@ -311,6 +328,7 @@ def boschloo_exact(
             )
         ],
         min_detectable_difference=mdd,
+        power_basis=basis,
         available=True,
         k1=k1,
         n1=n1,
@@ -330,6 +348,7 @@ def newcombe_independent(
     *,
     level: float = _core.DEFAULT_LEVEL,
     design_difference: float | None = None,
+    design_baseline: float | None = None,
 ) -> dict:
     """Newcombe's hybrid score interval (his method 10) for ``p1 - p2``
     built from the two Wilson intervals."""
@@ -347,7 +366,9 @@ def newcombe_independent(
     d = p1 - p2
     low = d - math.sqrt((p1 - l1) ** 2 + (u2 - p2) ** 2)
     high = d + math.sqrt((u1 - p1) ** 2 + (p2 - l2) ** 2)
-    exploratory, caveats, mdd = _two_arm_assess(k1, n1, k2, n2, design_difference)
+    exploratory, caveats, mdd, basis = _two_arm_assess(
+        n1, n2, design_difference, design_baseline
+    )
     return result(
         "estimate",
         "newcombe_hybrid_score",
@@ -356,6 +377,7 @@ def newcombe_independent(
         exploratory=exploratory,
         caveats=caveats,
         min_detectable_difference=mdd,
+        power_basis=basis,
         available=True,
         k1=k1,
         n1=n1,
@@ -424,7 +446,7 @@ def posterior_prob_greater(k_a, n_a, k_b, n_b) -> dict:
         "estimate",
         "beta_posterior_prob_greater",
         MODULE,
-        references=["kressgazit2024", "tri_lbm2025"],
+        references=["kressgazit2024"],
         exploratory=True,
         caveats=[
             caveat(

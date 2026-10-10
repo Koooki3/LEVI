@@ -148,8 +148,8 @@ def test_large_n_uses_the_normal_approximation_and_stays_close_to_exact():
     exact_u = power.min_detectable_difference(200, 0.5, design="unpaired")
     approx_u = power.min_detectable_difference(201, 0.5, design="unpaired")
     assert abs(exact_u - approx_u) <= 0.02
-    _, caveats, mdd = power.assess(
-        100_000, 0.5, design="paired", design_difference=0.05
+    _, caveats, mdd, _ = power.assess(
+        100_000, design="paired", design_difference=0.05, design_baseline=0.5
     )
     assert mdd is not None and mdd <= 0.02
     assert any(c["code"] == "power_approximate" for c in caveats)
@@ -173,7 +173,8 @@ def test_edges_and_bad_input():
         power.power_paired(10, 0.1, 0.9, rho=0.9)  # unattainable correlation
     with pytest.raises(AnalysisInputError):
         power.power_table(ns=[0])
-    exploratory, caveats, mdd = power.assess(
-        0, None, design="paired", design_difference=None
+    exploratory, caveats, mdd, basis = power.assess(
+        0, design="paired", design_difference=None
     )
+    assert basis["basis"] == "planned"
     assert exploratory and mdd is None and caveats[0]["code"] == "empty"

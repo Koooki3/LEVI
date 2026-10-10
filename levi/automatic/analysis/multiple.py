@@ -11,8 +11,9 @@ Their p-values come from permuting the arm labels within each block
 (fixed seed, at most 10^5 draws); the chi-square approximation is reported
 beside it for reference only.
 
-Multiplicity (input: a list of p-values, output: adjusted p-values and
-decisions):
+Multiplicity (input: a list of p-values and, optionally, each test's
+``exploratory`` flag; output: adjusted p-values and decisions; the family
+is confirmatory only when every test in it was):
 
 - Holm (1979, Scandinavian Journal of Statistics 6(2):65-70): strong
   family-wise error control under any dependence; the default for the
@@ -49,7 +50,7 @@ def _pvalues(pvalues) -> tuple[np.ndarray, list[int], int]:
     return vals, keep, len(raw)
 
 
-def _adjusted(method: str, refs, applicability: str, pvalues, alpha, fn) -> dict:
+def _adjusted(method: str, refs, applicability: str, pvalues, alpha, fn, flags) -> dict:
     alpha = _core.check_alpha(alpha)
     vals, keep, total = _pvalues(pvalues)
     adjusted = [None] * total
@@ -60,6 +61,23 @@ def _adjusted(method: str, refs, applicability: str, pvalues, alpha, fn) -> dict
             adjusted[slot] = float(a)
             reject[slot] = bool(a <= alpha)
     caveats = [caveat("applicability", applicability)]
+    # An adjustment adds no power: the family is confirmatory only when
+    # every test in it was (and BH, a screen, never is).
+    if flags is None:
+        family_exploratory = True
+        caveats.append(
+            caveat(
+                "inherits_exploratory",
+                "the tests' exploratory status was not given: the family is exploratory",
+            )
+        )
+    else:
+        flags = list(flags)
+        if len(flags) != total:
+            raise AnalysisInputError("exploratory needs one flag per p-value")
+        family_exploratory = method == "benjamini_hochberg" or any(
+            flags[i] is not False for i in keep
+        )
     dropped = total - len(vals)
     if dropped:
         caveats.append(
@@ -74,7 +92,7 @@ def _adjusted(method: str, refs, applicability: str, pvalues, alpha, fn) -> dict
         method,
         MODULE,
         references=refs,
-        exploratory=method == "benjamini_hochberg",
+        exploratory=family_exploratory,
         caveats=caveats,
         alpha=alpha,
         family_size=len(vals),
@@ -102,7 +120,7 @@ def _bh(p: np.ndarray) -> np.ndarray:
     return out
 
 
-def holm(pvalues, *, alpha: float = _core.DEFAULT_ALPHA) -> dict:
+def holm(pvalues, *, alpha: float = _core.DEFAULT_ALPHA, exploratory=None) -> dict:
     """Holm's step-down adjusted p-values; ``reject`` at ``alpha``."""
     return _adjusted(
         "holm",
@@ -111,10 +129,13 @@ def holm(pvalues, *, alpha: float = _core.DEFAULT_ALPHA) -> dict:
         pvalues,
         alpha,
         _holm,
+        exploratory,
     )
 
 
-def bonferroni(pvalues, *, alpha: float = _core.DEFAULT_ALPHA) -> dict:
+def bonferroni(
+    pvalues, *, alpha: float = _core.DEFAULT_ALPHA, exploratory=None
+) -> dict:
     """Bonferroni-adjusted p-values ``min(1, m p)``."""
     return _adjusted(
         "bonferroni",
@@ -123,10 +144,13 @@ def bonferroni(pvalues, *, alpha: float = _core.DEFAULT_ALPHA) -> dict:
         pvalues,
         alpha,
         lambda p: np.minimum(1.0, p * len(p)),
+        exploratory,
     )
 
 
-def benjamini_hochberg(pvalues, *, alpha: float = _core.DEFAULT_ALPHA) -> dict:
+def benjamini_hochberg(
+    pvalues, *, alpha: float = _core.DEFAULT_ALPHA, exploratory=None
+) -> dict:
     """Benjamini-Hochberg adjusted p-values (q-values) at FDR ``alpha``."""
     return _adjusted(
         "benjamini_hochberg",
@@ -135,6 +159,7 @@ def benjamini_hochberg(pvalues, *, alpha: float = _core.DEFAULT_ALPHA) -> dict:
         pvalues,
         alpha,
         _bh,
+        exploratory,
     )
 
 
