@@ -1145,11 +1145,95 @@ describe("one result per value model", () => {
     };
     const { host } = await render(page());
     await waitFor(() =>
-      host.textContent?.includes("A selected result was recomputed"),
+      host.textContent?.includes("Result could not be loaded: recomputed"),
     );
     await flush();
     await flush();
-    expect(lists).toBeLessThanOrEqual(2);
+    expect(lists).toBe(2);
+    expect(host.textContent).not.toContain("A selected result was recomputed");
+  });
+});
+
+describe("refusals of pinned reads", () => {
+  const pinnedRows = () => ({
+    current: "value-r2-step6000",
+    revisions: [
+      modelRow("value-r2-step6000", "20261010-100000", { current: true }),
+      modelRow("value-r1-step3000", "20261009-100000", {
+        checkpoint: "value-r1-step3000",
+        current: false,
+      }),
+    ],
+  });
+
+  test("another 409 (a changed source) shows its own text and reloads nothing", async () => {
+    let lists = 0;
+    revisionsHandler = async () => {
+      lists += 1;
+      return pinnedRows();
+    };
+    statusHandler = async () => ({
+      ...status(),
+      current: modelRow("value-r2-step6000", "20261010-100000"),
+    });
+    compareHandler = async () => {
+      throw new Error(
+        "The dataset changed between these revisions; recompute both on the same source",
+      );
+    };
+    const { host } = await render(page());
+    await waitFor(() => selectors(host)[0]?.value === "value-r2-step6000");
+    await choose(selectors(host)[1], "value-r1-step3000");
+    await waitFor(() =>
+      host.textContent?.includes("Could not compare these results"),
+    );
+    expect(host.textContent).toContain(
+      "The dataset changed between these revisions",
+    );
+    expect(host.textContent).not.toContain("was recomputed");
+    expect(host.textContent).not.toContain("Loading dataset comparison");
+    expect(lists).toBe(1);
+  });
+
+  test("'recomputed' with a list that still names the same version shows the refusal, even when answers are slow", async () => {
+    // Every answer arrives "after" the 3 s window (the clock jumps 4 s per
+    // reading), the case that used to reload again and again.
+    const realNow = Date.now;
+    let clock = realNow();
+    Date.now = () => (clock += 4000);
+    try {
+      let lists = 0;
+      revisionsHandler = async () => {
+        lists += 1;
+        return pinnedRows();
+      };
+      statusHandler = async () => ({
+        ...status(),
+        current: modelRow("value-r2-step6000", "20261010-100000"),
+      });
+      compareHandler = async () => {
+        throw new RecapRecomputedError(
+          "The value-r2-step6000 result was recomputed; reload it",
+        );
+      };
+      const { host } = await render(page());
+      await waitFor(() => selectors(host)[0]?.value === "value-r2-step6000");
+      await choose(selectors(host)[1], "value-r1-step3000");
+      await waitFor(
+        () => host.textContent?.includes("Could not compare these results"),
+        { label: "refusal shown" },
+      );
+      expect(host.textContent).toContain("result was recomputed; reload it");
+      for (let i = 0; i < 5; i += 1) await flush();
+      // One reload to look for a new version, then no more.
+      expect(lists).toBe(2);
+      expect(fetchCompare.mock.calls.length).toBe(2);
+      expect(host.textContent).not.toContain(
+        "A selected result was recomputed; the newest version is shown.",
+      );
+    } finally {
+      Date.now = realNow;
+    }
   });
 });
 

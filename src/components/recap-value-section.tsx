@@ -81,6 +81,8 @@ import {
 } from "@/types/recap.types";
 
 const POLL_MS = 1500;
+/** Shortest gap between two automatic reloads after "recomputed". */
+const RELOAD_GAP_MS = 3000;
 const PLOT_W = 1000;
 const PLOT_H = 100;
 
@@ -119,8 +121,6 @@ const number = (value: number | null | undefined, digits = 4) =>
 const exact = (value: number | null | undefined) =>
   value == null || !Number.isFinite(value) ? "—" : String(value);
 
-/** The state carries its request identity so even the render before effect
- * cleanup cannot display the previous episode or version. */
 /** A pinned read that found its result recomputed: tell the section, which
  * reloads the list (and so the version) instead of showing an error. */
 type OnRecomputed = () => void;
@@ -134,6 +134,31 @@ function useLatest<T>(value: T) {
   return ref;
 }
 
+/** Decides what a "recomputed" refusal of a pinned read does: the first one
+ * asks the section to reload the list (true: stay loading); if the reloaded
+ * list still names the same version (the same target answers "recomputed"
+ * again after a reload), the refusal is shown as an error instead (false),
+ * so a stale list can never turn into a reload loop. */
+function useRecomputedGuard(onRecomputed: OnRecomputed) {
+  const latest = useLatest(onRecomputed);
+  const seen = useRef<{ target: string; reloadKey: number } | null>(null);
+  return useCallback(
+    (target: string, reloadKey: number) => {
+      const last = seen.current;
+      if (last && last.target === target && last.reloadKey !== reloadKey) {
+        seen.current = null; // a manual refresh gets one more try
+        return false;
+      }
+      seen.current = { target, reloadKey };
+      latest.current();
+      return true;
+    },
+    [latest],
+  );
+}
+
+/** The state carries its request identity so even the render before effect
+ * cleanup cannot display the previous episode or version. */
 function useEpisodeResult(
   repoId: string,
   episodeId: number,
@@ -149,7 +174,7 @@ function useEpisodeResult(
     version ?? null,
     reloadKey,
   ]);
-  const recomputed = useLatest(onRecomputed);
+  const recomputed = useRecomputedGuard(onRecomputed);
   const [result, setResult] = useState<{
     key: string;
     data: RecapEpisode | null | undefined;
@@ -171,14 +196,16 @@ function useEpisodeResult(
       })
       .catch((error) => {
         if (controller.signal.aborted || isAbort(error)) return;
-        if (error instanceof RecapRecomputedError) {
-          recomputed.current();
-          return; // stays "loading" until the list brings the new version
-        }
+        // Stays "loading" until the reloaded list brings the new version.
+        if (
+          error instanceof RecapRecomputedError &&
+          recomputed(JSON.stringify([revisionId, version]), reloadKey)
+        )
+          return;
         setResult({ key, data: null, error: message(error) });
       });
     return () => controller.abort();
-  }, [repoId, episodeId, revisionId, version, key, recomputed]);
+  }, [repoId, episodeId, revisionId, version, reloadKey, key, recomputed]);
   return !revisionId
     ? { data: null, error: null }
     : result.key === key
@@ -204,7 +231,7 @@ function useComparison(
     versionB,
     reloadKey,
   ]);
-  const recomputed = useLatest(onRecomputed);
+  const recomputed = useRecomputedGuard(onRecomputed);
   const [result, setResult] = useState<{
     key: string;
     data: RecapComparison | null | undefined;
@@ -223,14 +250,27 @@ function useComparison(
       })
       .catch((error) => {
         if (controller.signal.aborted || isAbort(error)) return;
-        if (error instanceof RecapRecomputedError) {
-          recomputed.current();
+        if (
+          error instanceof RecapRecomputedError &&
+          recomputed(
+            JSON.stringify([primary, versionA, comparison, versionB]),
+            reloadKey,
+          )
+        )
           return;
-        }
         setResult({ key, data: null, error: message(error) });
       });
     return () => controller.abort();
-  }, [repoId, primary, comparison, versionA, versionB, key, recomputed]);
+  }, [
+    repoId,
+    primary,
+    comparison,
+    versionA,
+    versionB,
+    reloadKey,
+    key,
+    recomputed,
+  ]);
   return !primary || !comparison
     ? { data: null, error: null }
     : result.key === key
@@ -252,7 +292,7 @@ function useDatasetRange(
   onRecomputed: OnRecomputed,
 ): { range: ValueDomain | null; state: "loading" | "ready" | "failed" } {
   const key = JSON.stringify([repoId, revisionId, version ?? null, reloadKey]);
-  const recomputed = useLatest(onRecomputed);
+  const recomputed = useRecomputedGuard(onRecomputed);
   const [result, setResult] = useState<{
     key: string;
     range: ValueDomain | null;
@@ -272,14 +312,15 @@ function useDatasetRange(
       })
       .catch((error) => {
         if (controller.signal.aborted) return;
-        if (error instanceof RecapRecomputedError) {
-          recomputed.current();
+        if (
+          error instanceof RecapRecomputedError &&
+          recomputed(JSON.stringify([revisionId, version]), reloadKey)
+        )
           return;
-        }
         setResult({ key, range: null, failed: true });
       });
     return () => controller.abort();
-  }, [repoId, revisionId, version, key, recomputed]);
+  }, [repoId, revisionId, version, reloadKey, key, recomputed]);
   return useMemo(
     () =>
       !revisionId
@@ -1172,18 +1213,35 @@ function DatasetRecapSection({
   const [starting, setStarting] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [showEarlier, setShowEarlier] = useState(false);
-  // Set when a pinned read found its result recomputed by someone else.
+  // Set when a pinned read found its result recomputed and the reloaded
+  // list did bring a new version.
   const [recomputedNotice, setRecomputedNotice] = useState(false);
-  const lastAutoReload = useRef(0);
+  const lastAutoReload = useRef(-Infinity);
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shownVersions = useRef<string>("");
+  const pendingFrom = useRef<string | null>(null);
   const onRecomputed = useCallback(() => {
-    setRecomputedNotice(true);
-    // One automatic reload per few seconds: a list that still names the old
-    // version must not turn into a request loop.
-    const now = Date.now();
-    if (now - lastAutoReload.current < 3000) return;
-    lastAutoReload.current = now;
-    setReloadKey((key) => key + 1);
+    // Versions on screen when the refusal came: the notice appears only if
+    // the reload changes them.
+    pendingFrom.current ??= shownVersions.current;
+    if (reloadTimer.current) return; // a reload is already scheduled
+    // At most one automatic reload per RELOAD_GAP_MS; a request inside the
+    // gap is deferred to its end, never dropped.
+    const fire = () => {
+      reloadTimer.current = null;
+      lastAutoReload.current = Date.now();
+      setReloadKey((key) => key + 1);
+    };
+    const wait = lastAutoReload.current + RELOAD_GAP_MS - Date.now();
+    if (wait <= 0) fire();
+    else reloadTimer.current = setTimeout(fire, wait);
   }, []);
+  useEffect(
+    () => () => {
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
+    },
+    [],
+  );
   const [axisMode, setAxisMode] = useState<AxisMode>(() =>
     readAxisMode(safeStorage()),
   );
@@ -1268,6 +1326,14 @@ function DatasetRecapSection({
   const secondary = results?.revisions.find(
     (row) => row.revision_id === selection.comparison,
   );
+  const versionsKey = JSON.stringify([primary?.version, secondary?.version]);
+  useEffect(() => {
+    shownVersions.current = versionsKey;
+    if (pendingFrom.current != null && pendingFrom.current !== versionsKey) {
+      pendingFrom.current = null;
+      setRecomputedNotice(true);
+    }
+  }, [versionsKey]);
   // One row per value model; earlier per-run results only on request.
   const listed = useMemo(
     () =>

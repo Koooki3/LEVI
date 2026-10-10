@@ -130,7 +130,10 @@ describe("RECAP client", () => {
     const url = new URL(calls[0].url);
     expect(url.searchParams.get("version_a")).toBe("20261010-1000");
     expect(url.searchParams.get("version_b")).toBe("20261009-1000");
-    respond(409, { detail: "The model-a result was recomputed; reload it" });
+    respond(409, {
+      detail: "The model-a result was recomputed; reload it",
+      code: "recomputed",
+    });
     for (const read of [
       () => fetchRecapEpisode(3, ident, undefined, "model-a", "20261010-1000"),
       () => fetchRecapSummary(ident, undefined, "model-a", "20261010-1000"),
@@ -148,6 +151,31 @@ describe("RECAP client", () => {
       (e: unknown) => e,
     );
     expect(plain).not.toBeInstanceOf(RecapRecomputedError);
+  });
+
+  test("a pinned read refused for another reason is an ordinary error with its own text", async () => {
+    for (const detail of [
+      "The dataset changed between these revisions; recompute both on the same source",
+      "A published revision is missing episode 4",
+      "Shared frame timestamps differ between these revisions",
+    ]) {
+      respond(409, { detail });
+      const error = await fetchRecapCompare(ident, "m-a", "m-b", undefined, {
+        a: "20261010-1000",
+        b: "20261009-1000",
+      }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(RecapRecomputedError);
+      expect((error as Error).message).toBe(detail);
+      const episode = await fetchRecapEpisode(
+        1,
+        ident,
+        undefined,
+        "m-a",
+        "20261010-1000",
+      ).catch((e: unknown) => e);
+      expect(episode).not.toBeInstanceOf(RecapRecomputedError);
+    }
   });
 
   test("a computation without a label rule sends none: the backend decides", async () => {

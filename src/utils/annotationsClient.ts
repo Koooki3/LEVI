@@ -768,9 +768,10 @@ export async function fetchRecapStatus(
   return response.json() as Promise<RecapStatus>;
 }
 
-/** A read pinned to a result version that has been recomputed since (the
- * backend answers 409). The viewer reloads the result list and shows the
- * new version. */
+/** A read pinned to a result version that has been recomputed since: the
+ * backend answers 409 with `code: "recomputed"`. The viewer reloads the
+ * result list and shows the new version. Any other refusal (a changed
+ * source, a missing episode, ...) stays an ordinary `Error`. */
 export class RecapRecomputedError extends Error {
   constructor(message: string) {
     super(message);
@@ -778,13 +779,26 @@ export class RecapRecomputedError extends Error {
   }
 }
 
+/** The machine-readable code the backend gives "recomputed" refusals. */
+export const RECAP_RECOMPUTED_CODE = "recomputed";
+
 async function recapReadError(
   response: Response,
   what: string,
   pinned: boolean,
 ): Promise<Error> {
-  const text = await responseErrorMessage(response, what);
-  return pinned && response.status === 409
+  const body = await response.text().catch(() => "");
+  let code: unknown;
+  try {
+    code = (JSON.parse(body) as { code?: unknown } | null)?.code;
+  } catch {
+    code = undefined; // a non-JSON proxy error
+  }
+  const text = await responseErrorMessage(
+    new Response(body, { status: response.status }),
+    what,
+  );
+  return pinned && response.status === 409 && code === RECAP_RECOMPUTED_CODE
     ? new RecapRecomputedError(text)
     : new Error(text);
 }
