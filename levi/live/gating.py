@@ -128,6 +128,17 @@ def _message(gate, run=False) -> str:
             )
         )
     why = gate.get("reason") or gate.get("code") or "gate closed"
+    if gate.get("code") == "yield":
+        return (
+            "The live service's background labelling is yielding the GPU "
+            f"({why})"
+            + (
+                ": the run stopped here and continues by itself once the gate "
+                "has stayed open"
+                if run
+                else ": try again when it has resumed"
+            )
+        )
     if run:
         return (
             f"The robot evaluation is inferring on the GPU ({why}): the run "

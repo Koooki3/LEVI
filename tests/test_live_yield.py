@@ -19,6 +19,13 @@ from levi.live import config as live_config
 from levi.live import controller, gating, gpumgr, jsonio
 
 
+@pytest.fixture(autouse=True)
+def rules_on(live):
+    """The shared fixture of test_live_gpu.py switches the rules off; here
+    they are the subject."""
+    live[0].gpu.yield_.enabled = True
+
+
 def session(state, group="g", task="t", crashed=False):
     return SimpleNamespace(state=state, group=group, task_folder=task, crashed=crashed)
 
@@ -402,3 +409,29 @@ def test_the_idle_service_never_asks_nvidia_smi(ctl):
     t = time.time()
     ctl.tick(t)  # nothing to label
     assert calls == []
+
+
+def test_a_cold_start_in_progress_is_given_up_when_a_reason_appears(ctl):
+    ctl.rollouts.write(0)
+    t = time.time()
+    assert step(ctl, t) == "ok"  # the start begins
+    assert ctl.vllm.mine() and ctl.vllm.state == "starting"
+    ctl.vllm.poll = lambda: "starting"  # (the fake server answers within a second)
+    ctl.machine.ports = {8000}
+    assert step(ctl, t + 1) == "yield"
+    assert not ctl.vllm.mine() and ctl.vllm.state == "stopped"
+    assert not ctl.lock.held
+
+
+def test_a_persons_run_is_told_why_when_the_labelling_yields():
+    gate = {
+        "open": False,
+        "code": "yield",
+        "reason": "labelling yields: x",
+        "updated_at": time.time(),
+    }
+    from levi.live import gating as g
+
+    assert "yielding the GPU" in g._message(gate)
+    assert "continues by itself" in g._message(gate, run=True)
+    assert "inferring" in g._message({**gate, "code": "policy_inferring"})

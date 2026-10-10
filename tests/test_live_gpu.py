@@ -285,6 +285,10 @@ def live(tmp_path, serve, demo_template):
     c.watch.backlog = "process"
     c.watch.settle_s = 0.0
     c.gpu.mode = "timeshare"
+    # These tests are about the timeshare gate beside a running evaluation;
+    # the yield rules (which pause the labelling for the whole deployment)
+    # are tested in test_live_yield.py.
+    c.gpu.yield_.enabled = False
     c.gpu.lock_file = str(tmp_path / "gpu.lock")
     c.gpu.settle_s = 20.0
     c.gpu.standby_min_s = 0.0  # (the tests of that wait set it themselves)

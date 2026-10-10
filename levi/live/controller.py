@@ -671,7 +671,13 @@ class Controller:
         if self.yield_state.active:
             # Never start or wake the model while yielding. One that is awake
             # still follows the ordinary sleep rules (its memory may be wanted).
-            if mine and state == "ready":
+            if mine and state == "starting":
+                # A cold start is 45-70 s of heavy GPU load: it does not go on
+                # under a deployment or beside somebody else's job.
+                self.preempt(
+                    "yield", "labelling yields the GPU: " + (self.yield_text() or "")
+                )
+            elif mine and state == "ready":
                 self._resident_step(now, want, state, mode, profile)
             self.decision = gpumgr.Decision(
                 False, "labelling yields the GPU: " + (self.yield_text() or ""), "yield"
