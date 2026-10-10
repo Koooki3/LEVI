@@ -199,7 +199,8 @@ class _FakeProvider:
     "future": True, "other_clock": True, "minor": 1, "control_key": True,
     "contradict": True, "bad_predicate": True, "episode_id", "request_id",
     "run_id", "target", "unknown_reason", "submit_unavailable": code,
-    "observed_through_step", "observed_before_ns"}``."""
+    "observed_through_step", "observed_before_ns"}``; scenes also take
+    ``"evidence": n`` (frame references) and ``"contract_id"``."""
 
     schema = ""
 
@@ -390,7 +391,7 @@ class FakeSceneAssessor(_FakeProvider):
             "episode_id": spec.get("episode_id", request["episode_id"]),
             "target": spec.get("target", request["target"]),
             "decision": decision,
-            "contract_id": SCENE_CONTRACT[0],
+            "contract_id": spec.get("contract_id", SCENE_CONTRACT[0]),
             "contract_version": SCENE_CONTRACT[1],
             "predicate_results": results,
             "failed_predicates": [r["name"] for r in results if r["value"] is False],
@@ -400,7 +401,11 @@ class FakeSceneAssessor(_FakeProvider):
                 if decision == "unknown"
                 else None
             ),
-            "evidence_refs": [],
+            # ``evidence``: how many frame references the assessment cites.
+            "evidence_refs": [
+                {"kind": "frame", "ref": f"side:{i}", "sha256": None, "step": None}
+                for i in range(int(spec.get("evidence", 0)))
+            ],
             "observed_ns": times["observed"],
             "produced_ns": times["produced"],
             "valid_until_ns": times["until"],

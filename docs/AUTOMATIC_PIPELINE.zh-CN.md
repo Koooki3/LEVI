@@ -154,6 +154,48 @@ VERIFY_INITIAL / SCENE_ASSESS -> RESET_ACTIVE -> RESET_VERIFY -> RESET_FINALIZE
 
 默认值没有在任何数据上标定过。
 
+## 复位仲裁（`scene_assessment.py`、`reset_manager.py`）
+
+**只有证据足够的 `ready` 场景才能跳过复位。** 场景评估只是提供方的说法；`scene_assessment.arbitrate` 按任务的**初始状态契约**（Initial State Contract，`RunConfig.initial_state`）读它：
+
+| 评估 | 结论 |
+| --- | --- |
+| `ready`，契约的每个必需谓词都读为真，且（`require_visible_evidence` 时）至少有 `min_evidence_refs` 个帧或片段证据引用 | `ready`：开始下一个前向片段 |
+| `ready`，但漏了或没读出某个必需谓词 | `unknown`（记 `scene_missing_predicate`） |
+| `ready`，但可见证据不够 | `unknown`（记 `scene_insufficient_evidence`） |
+| 评估的是另一份契约 | `unavailable`（记 `scene_contract_mismatch`） |
+| `reset_required`、`unknown`、unavailable | 原样 |
+
+不配契约（`initial_state = None`，默认）时沿用提供方的结论，和以前一样。**契约文件格式是草案（HA-23）：** 下面是能承载流水线文档 §6.1 的最小格式，等用户确认。
+
+```yaml
+initial_state:
+  id: stack-plates-initial
+  version: "1"
+  status: draft            # 用户确认前为 draft（HA-23）
+  robot:
+    home_pose: fr3_safe_home
+    gripper: open
+  predicates:
+    required: [object_at_source, gripper_open]
+    optional: []
+  observations:
+    preferred: [side, wrist]
+    require_visible_evidence: true
+    min_evidence_refs: 1
+```
+
+用 `scene_assessment.load_contract(text)` 读取。读取器只接受严格的 YAML 子集（不新增依赖）：用空格缩进的块映射、标量列表（`- a` 或 `[a, b]`）、带引号或不带引号的标量、`true`/`false`/`null`、有限数字和 `#` 注释；拒绝制表符、锚点、别名、标签、块标量、流式映射、多文档、重复键以及未知键。以 `{` 开头的文档按 JSON 读。谓词名用场景提供方的名字：契约把 `(id, version)` 和这些名字登记给 `aeri.parse`。
+
+**场景不是 ready 时怎么办**由复位策略决定（`RunConfig.reset_strategy`，`reset_manager.py`）：
+
+| 策略 | 场景不是 ready |
+| --- | --- |
+| `single_reset_policy`（默认） | `reset_required` 运行复位策略；`on_scene_unknown = "reset"` 时 `unknown`/`unavailable` 也运行，否则转人工；两个前向片段之间最多 `max_reset_attempts` 次复位，之后转人工 |
+| `human_assisted` | 一律转人工（不运行复位策略） |
+
+`atomic_skill_sequence` 和 `scripted_safe_reset`（流水线文档 §6.4）在 v1 中被拒绝。`reset_manager.check_plan` 拒绝在 `ready` 以外的场景上开始前向片段的策略，`check_after` 拒绝在复位到达上限、被停止或失去策略之后还继续的策略。复位到达上限时先封存（保留失败的 rollout，结果为 `failure` / `horizon_exhausted`），再 Home，然后转人工；Home 失败则锁定运行（`home_failed`），在操作员恢复之前什么都不再动；恢复要经过 `PREFLIGHT` 和一次新的初始状态检查。同一个命令 ID 重复恢复只恢复一次。
+
 ## 提供方适配层（`levi/automatic/adapters/`）
 
 **Fake 提供方（`events.py`）。** `FakeEventStream`、`FakeGoalVerifier` 和 `FakeSceneAssessor` 交出契约字节，由 `aeri.parse` 读取；脚本可设定结论（`confirmed`、`rejected`、`unknown`、`ready`、`reset_required`）、提交或收取时的 unavailable 码、延迟、已过期/未来/其他时钟域的有效期、更新的 minor、控制键、互相矛盾的谓词、未登记的谓词、其他片段或请求。`make_request` 拒绝任何带操作员或评测字段、或机器人命令的请求。

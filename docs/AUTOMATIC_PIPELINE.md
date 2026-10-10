@@ -435,6 +435,69 @@ must cover the candidate (`observed_from_step` at or before it).
 
 The defaults are not calibrated on any data.
 
+## Reset arbitration (`scene_assessment.py`, `reset_manager.py`)
+
+**Only a `ready` scene with enough evidence skips a reset.** A scene
+assessment is the provider's claim; `scene_assessment.arbitrate` reads it
+against the task's **Initial State Contract** (`RunConfig.initial_state`):
+
+| Assessment | Verdict |
+| --- | --- |
+| `ready`, every required predicate of the contract read true, at least `min_evidence_refs` frame or clip references (when `require_visible_evidence`) | `ready`: the next forward episode starts |
+| `ready` that leaves out or does not read a required predicate | `unknown` (`scene_missing_predicate` note) |
+| `ready` with too little visible evidence | `unknown` (`scene_insufficient_evidence` note) |
+| an assessment of another contract | `unavailable` (`scene_contract_mismatch` note) |
+| `reset_required`, `unknown`, unavailable | as they are |
+
+Without a contract (`initial_state = None`, the default) the provider's
+decision stands, as before. **The contract file is a draft (HA-23):** its
+format below is the smallest one that carries pipeline §6.1 and waits for
+the user's confirmation.
+
+```yaml
+initial_state:
+  id: stack-plates-initial
+  version: "1"
+  status: draft            # draft until the user confirms (HA-23)
+  robot:
+    home_pose: fr3_safe_home
+    gripper: open
+  predicates:
+    required: [object_at_source, gripper_open]
+    optional: []
+  observations:
+    preferred: [side, wrist]
+    require_visible_evidence: true
+    min_evidence_refs: 1
+```
+
+`scene_assessment.load_contract(text)` reads it. The reader takes a strict
+YAML subset (no new dependency): block mappings indented by spaces, lists
+of scalars (`- a` or `[a, b]`), quoted or plain scalars, `true`/`false`/
+`null`, finite numbers and `#` comments; tabs, anchors, aliases, tags,
+block scalars, flow mappings, several documents and duplicate keys are
+refused, and unknown keys too. A document that starts with `{` is read as
+JSON. The predicate names are the scene provider's: the contract
+registers `(id, version)` with exactly these names for `aeri.parse`.
+
+**What happens when the scene is not ready** is the reset strategy's choice
+(`RunConfig.reset_strategy`, `reset_manager.py`):
+
+| Strategy | Not ready |
+| --- | --- |
+| `single_reset_policy` (default) | `reset_required` runs the reset policy; `unknown`/`unavailable` too with `on_scene_unknown = "reset"`, else a person; at most `max_reset_attempts` resets between two forward episodes, then a person |
+| `human_assisted` | always a person (no reset policy runs) |
+
+`atomic_skill_sequence` and `scripted_safe_reset` (pipeline §6.4) are
+refused in v1. `reset_manager.check_plan` refuses a strategy that would
+start a forward episode on any scene but `ready`, and `check_after` one that
+would go on after a reset that reached its horizon, was stopped or lost its
+policy. A reset at its horizon is sealed (the failed rollout is kept, its
+result `failure` / `horizon_exhausted`), homed, and waits for a person; a
+failed home locks the run (`home_failed`) and nothing moves again until an
+operator's resume, which leads through `PREFLIGHT` and a fresh
+initial-state check. A repeated resume (same command id) resumes once.
+
 ## Provider adapters (`levi/automatic/adapters/`)
 
 **Fake providers (`events.py`).** `FakeEventStream`, `FakeGoalVerifier` and

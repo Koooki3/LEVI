@@ -51,9 +51,9 @@ collected without waiting; a chunk is waited for at most its deadline. The
 final judgement and scene assessments are waited for (the policy is
 quiesced by then), each with its own timeout.
 
-Not here yet (later tasks): the reset strategy beyond "one reset policy,
-``max_reset_attempts``" (T-C-08), the recorder layer that writes real
-rollout folders (T-C-10), metrics (T-C-11), the CLI (T-C-16).
+Whether a scene may skip a reset is decided by the Initial State Contract
+(``scene_assessment.arbitrate``) and what to do otherwise by the reset
+strategy (``reset_manager``), both T-C-08.
 """
 
 import threading
@@ -63,6 +63,8 @@ from dataclasses import dataclass, field
 
 from levi.domain import aeri
 
+from . import reset_manager as rm
+from . import scene_assessment as sa
 from . import state_machine as sm
 from .adapters import events as ev
 from .journal import Journal, JournalRefused, process_identity
@@ -141,6 +143,11 @@ class RunConfig:
     action_dims: int = 7
     termination: TerminationConfig = field(default_factory=TerminationConfig)
     specs: dict = field(default_factory=lambda: dict(ev.SPECS))
+    # T-C-08: how a scene that is not ready is put back (reset_manager), and
+    # the task's Initial State Contract (scene_assessment; None: the scene
+    # provider's decision stands, the behaviour before T-C-08).
+    reset_strategy: str = "single_reset_policy"
+    initial_state: sa.InitialStateContract | None = None
     principal_id: str = "aeri-orchestrator"
     session_id: str = "s-aeri"
 
@@ -174,6 +181,23 @@ class RunConfig:
                 raise ConfigError(f"{name} is true or false")
         if not isinstance(self.termination, TerminationConfig):
             raise ConfigError("termination is a TerminationConfig")
+        if self.initial_state is not None and not isinstance(
+            self.initial_state, sa.InitialStateContract
+        ):
+            raise ConfigError("initial_state is an InitialStateContract or None")
+        try:
+            self.strategy()
+        except rm.StrategyError as exc:
+            raise ConfigError(str(exc)) from None
+
+    def strategy(self):
+        """The reset strategy these settings describe."""
+        return rm.strategy_for(
+            self.reset_strategy,
+            enabled=self.reset_enabled,
+            max_attempts=self.max_reset_attempts,
+            on_unknown=self.on_scene_unknown,
+        )
 
 
 @dataclass
@@ -249,6 +273,9 @@ class Orchestrator:
         self.clock = clock
         self.fence = fence
         self.crash_hook = crash_hook
+        self.strategy = config.strategy()
+        contract = config.initial_state
+        self._specs = {**config.specs, **(contract.spec() if contract else {})}
         self.notes: list = []  # (code, detail), the latest MEMORY_NOTES
         self.note_counts: Counter = Counter()
         self._pending: dict = {}  # code -> [count, first detail]
@@ -872,25 +899,16 @@ class Orchestrator:
         if self._scene_violations >= self.config.scene_violation_limit:
             self._to_human("contract_violation_limit")
             return
-        if decision == "ready":
+        # Only a ready scene skips a reset; the strategy decides the rest.
+        plan = rm.check_plan(self.strategy, decision, self._reset_attempts)
+        if plan.action == rm.FORWARD:
             self._reset_attempts = 0
-            self._start("forward", "scene_ready")
-            return
-        reason = (
-            "scene_reset_required" if decision == "reset_required" else "scene_unknown"
-        )
-        may_reset = (
-            self.config.reset_enabled
-            and self._reset_attempts < self.config.max_reset_attempts
-            and (
-                decision == "reset_required" or self.config.on_scene_unknown == "reset"
-            )
-        )
-        if may_reset:
+            self._start("forward", plan.reason)
+        elif plan.action == rm.RESET:
             self._reset_attempts += 1
-            self._start("reset", reason)
+            self._start("reset", plan.reason)
         else:
-            self._to_human(reason)
+            self._to_human(plan.reason)
 
     def _stop_before_start(self) -> bool:
         operator = self._operator()
@@ -922,7 +940,7 @@ class Orchestrator:
                 self._note("scene_timeout", request_id)
                 return "unavailable"
         try:
-            message = aeri.parse(raw, "scene", specs=self.config.specs)
+            message = aeri.parse(raw, "scene", specs=self._specs)
         except aeri.AeriError as exc:
             self._scene_violations += 1
             self._note("contract_violation", f"scene: {exc}")
@@ -941,7 +959,14 @@ class Orchestrator:
         except aeri.AeriError as exc:
             self._note("scene_dropped_stale", f"{request_id}: {exc.code}")
             return "unavailable"
-        return message.decision
+        verdict = sa.arbitrate(message, self.config.initial_state)
+        if verdict.reason != "provider":
+            # A ready claim that does not meet the contract: never a skip.
+            self._note(
+                f"scene_{verdict.reason}",
+                f"{request_id}: {message.decision} -> {verdict.decision}",
+            )
+        return verdict.decision
 
     # --- episodes ------------------------------------------------------------------------
 
@@ -1562,12 +1587,9 @@ class Orchestrator:
                 },
             }
 
-        retry = (
-            outcome in ("scene_reset_required", "scene_unknown")
-            and self._reset_attempts < self.config.max_reset_attempts
-            and self._operator() is None
+        to = rm.check_after(
+            self.strategy, outcome, self._reset_attempts, self._operator() is not None
         )
-        to = "VERIFY_INITIAL" if outcome == "reset_verified" or retry else "WAIT_HUMAN"
         operator = self._stays_put(ctx, reason, auth)
         if operator is not None:
             home["done"] = "not_attempted"
