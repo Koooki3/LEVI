@@ -133,6 +133,7 @@ export function SegmentedControl({
   label,
   size = "md",
   className,
+  describedBy,
 }: {
   options: SegmentOption[];
   value: string;
@@ -140,6 +141,8 @@ export function SegmentedControl({
   label: string;
   size?: "sm" | "md";
   className?: string;
+  /** Id of text that explains the group, e.g. why an option is disabled. */
+  describedBy?: string;
 }) {
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
   const current = selectedIndex(
@@ -165,6 +168,7 @@ export function SegmentedControl({
     <div
       role="radiogroup"
       aria-label={label}
+      aria-describedby={describedBy}
       className={cx("ds-segmented", `ds-segmented--${size}`, className)}
       onKeyDown={onKeyDown}
     >

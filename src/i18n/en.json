@@ -2697,6 +2697,8 @@
   "B − A": "B − A",
   "No frame labelled by both results at the playhead": "No frame labelled by both results at the playhead",
   "Showing the adaptive axis instead.": "Showing the adaptive axis instead.",
+  "The dataset range could not be read.": "The dataset range could not be read.",
+  "Loading the dataset range…": "Loading the dataset range…",
   "Dataset range needs per-episode minima and maxima, which this result does not store.": "Dataset range needs per-episode minima and maxima, which this result does not store.",
   "Return units need the return range of every shown result.": "Return units need the return range of every shown result.",
   "Current result": "Current result",

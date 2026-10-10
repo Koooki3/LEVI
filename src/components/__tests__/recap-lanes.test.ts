@@ -963,3 +963,77 @@ describe("remembered axis mode", () => {
     expect(saveAxisMode("return", null)).toBe(false);
   });
 });
+
+describe("quantisation noise in return units (review I-1)", () => {
+  // 201 bins over [-1, 0]: one bin is 0.005 of V; the return range is 799.
+  const rev = { return_min: -799, return_max: 0, value_support: null };
+  const wiggle = [-0.3, -0.295, -0.3, -0.295];
+  const share = (plan: ReturnType<typeof planValueAxis>) => {
+    const ys = plan.a.map((v) => valueToY(v, 100, plan.domain));
+    return Math.max(...ys) - Math.min(...ys);
+  };
+
+  test("one quantisation step fills the same share of the axis in either unit", () => {
+    const normalized = planValueAxis({
+      mode: "adaptive",
+      a: wiggle,
+      revA: rev,
+    });
+    const returns = planValueAxis({ mode: "return", a: wiggle, revA: rev });
+    expect(returns.scale).toBe(799);
+    expect(normalized.scale).toBe(1);
+    expect(share(normalized)).toBeLessThan(15);
+    expect(Math.abs(share(returns) - share(normalized))).toBeLessThan(1);
+  });
+
+  test("the wider return range of two shown results sets the scale", () => {
+    const plan = planValueAxis({
+      mode: "return",
+      a: wiggle,
+      b: wiggle,
+      revA: rev,
+      revB: { return_min: -1000, return_max: 0, value_support: null },
+    });
+    expect(plan.scale).toBe(1000);
+  });
+
+  test("a flat curve keeps the minimum span in return units", () => {
+    const plan = planValueAxis({ mode: "return", a: [-0.5, -0.5], revA: rev });
+    expect(plan.domain.hi - plan.domain.lo).toBeGreaterThanOrEqual(
+      MIN_AXIS_SPAN * 799 - 1e-6,
+    );
+  });
+
+  test("the difference axis does not blow a one-step difference up to full height", () => {
+    const oneStepV = [0.005, 0.005];
+    const oneStepReturn = oneStepV.map((v) => v * 799);
+    const inV = diffDomain(oneStepV, "adaptive");
+    const inReturn = diffDomain(oneStepReturn, "adaptive", 799);
+    expect(inReturn.hi / 799).toBeCloseTo(inV.hi, 9);
+    expect(0.005 / inV.hi).toBeLessThan(0.25);
+  });
+
+  test("the support margin scales too", () => {
+    const d = valueDomain([[-799, -799]], {
+      mode: "adaptive",
+      support: { lo: -799, hi: 0 },
+      scale: 799,
+    });
+    expect(d.lo).toBeCloseTo(-799 - 0.02 * 799, 6);
+  });
+});
+
+describe("dataset range reads the summary fields the store writes", () => {
+  test("episodes.<n>.min_value / max_value, null entries are skipped", () => {
+    const summary = {
+      revision_id: "r",
+      threshold: 0,
+      episodes: {
+        "0": { mean_value: -0.5, frames: 3, min_value: -0.8, max_value: -0.3 },
+        "1": { mean_value: -0.5, frames: 0, min_value: null, max_value: null },
+        "2": { mean_value: -0.4, frames: 3, min_value: -0.6, max_value: -0.1 },
+      },
+    } as unknown as RecapSummary;
+    expect(datasetValueRange(summary)).toEqual({ lo: -0.8, hi: -0.1 });
+  });
+});

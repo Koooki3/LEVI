@@ -175,30 +175,49 @@ function useComparison(
  * axis. Null while loading, when the result stores no per-episode minima and
  * maxima, or when the summary cannot be read: that mode is then unavailable
  * rather than guessed. */
+type DatasetRange = ReturnType<typeof useDatasetRange>;
+
 function useDatasetRange(
   repoId: string,
   revisionId: string,
   reloadKey: number,
-): ValueDomain | null {
+): { range: ValueDomain | null; state: "loading" | "ready" | "failed" } {
   const key = JSON.stringify([repoId, revisionId, reloadKey]);
   const [result, setResult] = useState<{
     key: string;
     range: ValueDomain | null;
-  }>({ key: "", range: null });
+    failed: boolean;
+  }>({ key: "", range: null, failed: false });
   useEffect(() => {
     if (!revisionId) return;
     const controller = new AbortController();
     fetchRecapSummary({ repoId }, controller.signal, revisionId)
       .then((summary) => {
         if (!controller.signal.aborted)
-          setResult({ key, range: datasetValueRange(summary) });
+          setResult({
+            key,
+            range: datasetValueRange(summary),
+            failed: false,
+          });
       })
       .catch(() => {
-        if (!controller.signal.aborted) setResult({ key, range: null });
+        if (!controller.signal.aborted)
+          setResult({ key, range: null, failed: true });
       });
     return () => controller.abort();
   }, [repoId, revisionId, key]);
-  return revisionId && result.key === key ? result.range : null;
+  return useMemo(
+    () =>
+      !revisionId
+        ? { range: null, state: "ready" as const }
+        : result.key !== key
+          ? { range: null, state: "loading" as const }
+          : {
+              range: result.range,
+              state: result.failed ? ("failed" as const) : ("ready" as const),
+            },
+    [revisionId, result, key],
+  );
 }
 
 function Hint({
@@ -677,8 +696,8 @@ function ValueTrack({
   comparisonState: "loading" | "error" | "ready";
   revisionA?: RecapRevision;
   revisionB?: RecapRevision;
-  datasetA: ValueDomain | null;
-  datasetB: ValueDomain | null;
+  datasetA: DatasetRange;
+  datasetB: DatasetRange;
   axisMode: AxisMode;
   onAxisMode: (mode: AxisMode) => void;
 }) {
@@ -694,8 +713,8 @@ function ValueTrack({
         b: showB ? dataB?.value : null,
         revA: revisionA,
         revB: showB ? revisionB : null,
-        datasetA,
-        datasetB: showB ? datasetB : null,
+        datasetA: datasetA.range,
+        datasetB: showB ? datasetB.range : null,
       }),
     [axisMode, dataA, dataB, showB, revisionA, revisionB, datasetA, datasetB],
   );
@@ -743,8 +762,8 @@ function ValueTrack({
     [showB, dataA, dataB, plan],
   );
   const diffAxis = useMemo(
-    () => (diff ? diffDomain(diff.value, plan.mode) : null),
-    [diff, plan.mode],
+    () => (diff ? diffDomain(diff.value, plan.mode, plan.scale) : null),
+    [diff, plan.mode, plan.scale],
   );
   const diffTicks = useMemo(
     () => (diffAxis ? niceTicks(diffAxis, 3) : { ticks: [], step: 0 }),
@@ -765,7 +784,11 @@ function ValueTrack({
         : [],
     [diff, diffAxis, props.duration],
   );
-  const readout = (data: RecapEpisode | null | undefined, side: "A" | "B") => {
+  const readout = (
+    data: RecapEpisode | null | undefined,
+    side: "A" | "B",
+    series: readonly number[] | null,
+  ) => {
     const frame = data
       ? labelledFrameAtTime(data.timestamp, data.fps, props.currentTime)
       : -1;
@@ -787,6 +810,12 @@ function ValueTrack({
               ? t("No labelled frame at the playhead")
               : "V " +
                 formatSigned(data.value[frame], 3) +
+                (plan.units === "return" && series
+                  ? " · " +
+                    t("original return") +
+                    " " +
+                    formatSigned(series[frame], 1)
+                  : "") +
                 " · A " +
                 formatSigned(data.advantage[frame], 4) +
                 " · " +
@@ -806,11 +835,24 @@ function ValueTrack({
         B − A ·{" "}
         {i < 0
           ? t("No frame labelled by both results at the playhead")
-          : "Δ " + formatSigned(diff.value[i], plan.units === "return" ? 2 : 3)}
+          : "Δ " +
+            formatSigned(diff.value[i], plan.units === "return" ? 2 : 3) +
+            (plan.units === "return" ? " " + t("original return") : "")}
       </output>
     );
   };
-  const requestedBlocked = plan.unavailable[axisMode];
+  // Why a mode cannot be used. The dataset range says whether it is still
+  // being read, could not be read, or is simply not stored by that result.
+  const datasetStates = [datasetA.state, showB ? datasetB.state : "ready"];
+  const reasons: Partial<Record<AxisMode, string>> = { ...plan.unavailable };
+  if (reasons.dataset && datasetStates.includes("failed"))
+    reasons.dataset = "The dataset range could not be read.";
+  else if (reasons.dataset && datasetStates.includes("loading"))
+    reasons.dataset = "Loading the dataset range…";
+  const requestedBlocked = reasons[axisMode];
+  const reasonText = AXIS_MODES.filter((mode) => reasons[mode])
+    .map((mode) => t(AXIS_LABEL[mode]) + ": " + t(reasons[mode]!))
+    .join(" ");
   const unit = plan.units === "return" ? t("original return") : "V";
   const rangeText =
     formatTick(domain.lo, step) + "…" + formatTick(domain.hi, step);
@@ -924,6 +966,7 @@ function ValueTrack({
       <div className="recap-axis-controls">
         <SegmentedControl
           label={t("Value axis")}
+          describedBy={reasonText ? reasonId : undefined}
           size="sm"
           value={plan.mode}
           onChange={(next) => onAxisMode(next as AxisMode)}
@@ -941,23 +984,16 @@ function ValueTrack({
         >
           {t(expanded ? "Collapse value rows" : "Expand value rows")}
         </Button>
-        <span className="ds-sr-only" id={reasonId}>
-          {AXIS_MODES.filter((mode) => plan.unavailable[mode])
-            .map(
-              (mode) => t(AXIS_LABEL[mode]) + ": " + t(plan.unavailable[mode]!),
-            )
-            .join(" ")}
-        </span>
-        {requestedBlocked && (
-          <span className="recap-axis-note" role="status">
-            {t(AXIS_LABEL[axisMode])} · {t(requestedBlocked)}{" "}
-            {t("Showing the adaptive axis instead.")}
+        {reasonText && (
+          <span className="recap-axis-note" id={reasonId}>
+            {reasonText}
+            {requestedBlocked && " " + t("Showing the adaptive axis instead.")}
           </span>
         )}
       </div>
       <div className="recap-frame-readouts">
-        {readout(dataA, "A")}
-        {comparing && readout(dataB, "B")}
+        {readout(dataA, "A", plan.a)}
+        {comparing && readout(dataB, "B", plan.b)}
         {diffReadout()}
         <span>
           {t(

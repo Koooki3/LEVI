@@ -755,9 +755,15 @@ describe("Value axis", () => {
     const { host } = await render(page());
     await loaded(host);
     expect(radio(host, "Dataset range").disabled).toBe(true);
-    expect(host.querySelector(".ds-sr-only")?.textContent).toContain(
-      "per-episode minima and maxima",
-    );
+    // the reason is visible text, and the control group points at it
+    const note = host.querySelector<HTMLElement>(".recap-axis-note")!;
+    expect(note.textContent).toContain("per-episode minima and maxima");
+    expect(note.id).not.toBe("");
+    expect(
+      host
+        .querySelector('[role="radiogroup"][aria-label="Value axis"]')!
+        .getAttribute("aria-describedby"),
+    ).toBe(note.id);
     // revisions carry return ranges, so return units are available
     expect(radio(host, "Return units").disabled).toBe(false);
   });
@@ -775,6 +781,48 @@ describe("Value axis", () => {
     const labels = axisLabels(host);
     expect(labels).toContain("−0.8");
     expect(labels).toContain("−0.2");
+  });
+
+  test("while the summary loads or fails the reason says so, not 'not stored'", async () => {
+    const pending = deferred<RecapSummary | null>();
+    summaryHandler = () => pending.promise;
+    const { host } = await render(page());
+    await loaded(host);
+    expect(host.querySelector(".recap-axis-note")?.textContent).toContain(
+      "Loading the dataset range…",
+    );
+    await act(async () => pending.resolve(null));
+    await waitFor(() =>
+      host
+        .querySelector(".recap-axis-note")
+        ?.textContent?.includes("per-episode minima"),
+    );
+    summaryHandler = async () => {
+      throw new Error("summary down");
+    };
+    await click(button(host, "Refresh results"));
+    await waitFor(() =>
+      host
+        .querySelector(".recap-axis-note")
+        ?.textContent?.includes("could not be read"),
+    );
+    expect(host.querySelector(".recap-axis-note")?.textContent).not.toContain(
+      "does not store",
+    );
+  });
+
+  test("with every mode available there is no reason text and no dangling description", async () => {
+    summaryHandler = async (_ident, rid) =>
+      summaryWithRange(rid ?? r2, -0.9, -0.1);
+    const { host } = await render(page());
+    await loaded(host);
+    await waitFor(() => !radio(host, "Dataset range").disabled);
+    expect(host.querySelector(".recap-axis-note")).toBeNull();
+    expect(
+      host
+        .querySelector('[role="radiogroup"][aria-label="Value axis"]')!
+        .hasAttribute("aria-describedby"),
+    ).toBe(false);
   });
 
   test("a remembered mode that the data cannot serve falls back with an explanation", async () => {
@@ -796,6 +844,31 @@ describe("Value axis", () => {
     expect(host.querySelector(".recap-frame-readouts")!.textContent).toContain(
       "original return",
     );
+  });
+
+  test("return units label every reading with its unit, A, B and the difference alike", async () => {
+    const { host } = await render(page());
+    await loaded(host);
+    await choose(selectors(host)[1], r1);
+    await waitFor(() => host.querySelector(".recap-diff-line"));
+    await click(radio(host, "Return units"));
+    // first frame: r2 V=-0.4 on -799…0 is -319.6; r1 V=-0.8 on -1000…0 is -800
+    const a = host.querySelector(".recap-frame-readout.side-a")!.textContent!;
+    const b = host.querySelector(".recap-frame-readout.side-b")!.textContent!;
+    const d = host.querySelector(
+      ".recap-frame-readout.side-diff",
+    )!.textContent!;
+    expect(a).toContain("original return -319.6");
+    expect(b).toContain("original return -800.0");
+    expect(d).toContain("Δ -480.40 original return");
+    // in normalized units the readings carry no return label
+    await click(radio(host, "Adaptive"));
+    expect(
+      host.querySelector(".recap-frame-readout.side-a")!.textContent,
+    ).not.toContain("original return");
+    expect(
+      host.querySelector(".recap-frame-readout.side-diff")!.textContent,
+    ).not.toContain("original return");
   });
 
   test("a constant curve draws a flat line mid-plot, not a broken one", async () => {

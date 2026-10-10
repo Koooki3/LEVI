@@ -2697,6 +2697,8 @@
   "B − A": "B − A",
   "No frame labelled by both results at the playhead": "播放位置没有两个结果都标注的帧",
   "Showing the adaptive axis instead.": "已改用自适应纵轴。",
+  "The dataset range could not be read.": "读取不到数据集范围。",
+  "Loading the dataset range…": "正在读取数据集范围…",
   "Dataset range needs per-episode minima and maxima, which this result does not store.": "数据集范围需要每个片段的最小值和最大值，这个结果没有保存它们。",
   "Return units need the return range of every shown result.": "回报单位需要所显示的每个结果都有回报范围。",
   "Current result": "当前默认结果",

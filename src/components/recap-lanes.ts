@@ -331,14 +331,19 @@ export function seriesExtent(
 
 /** Pad a data range, widen it to the minimum span around its centre, and move
  * it (keeping its span where it can) inside `bounds`. */
-function framed(extent: ValueDomain, bounds: ValueDomain | null): ValueDomain {
+function framed(
+  extent: ValueDomain,
+  bounds: ValueDomain | null,
+  scale = 1,
+): ValueDomain {
   let { lo, hi } = extent;
-  if (hi - lo < MIN_AXIS_SPAN) {
+  const minSpan = MIN_AXIS_SPAN * scale;
+  if (hi - lo < minSpan) {
     const centre = (lo + hi) / 2;
-    lo = centre - MIN_AXIS_SPAN / 2;
-    hi = centre + MIN_AXIS_SPAN / 2;
+    lo = centre - minSpan / 2;
+    hi = centre + minSpan / 2;
   }
-  const pad = Math.max((hi - lo) * AXIS_PAD_FRACTION, AXIS_PAD_FLOOR);
+  const pad = Math.max((hi - lo) * AXIS_PAD_FRACTION, AXIS_PAD_FLOOR * scale);
   lo -= pad;
   hi += pad;
   if (bounds) {
@@ -363,6 +368,11 @@ export interface ValueDomainOptions {
   /** Dataset-wide range for `dataset` mode; without it that mode behaves as
    * `adaptive`. */
   datasetRange?: ValueDomain | null;
+  /** How many axis units one unit of normalized V spans (1 for V; the return
+   * range for return units). The minimum span, padding floor and support
+   * margin are defined on V and scale with it, so the same quantisation noise
+   * fills the same share of the axis in either unit. */
+  scale?: number;
 }
 
 /** The vertical range for the curves to be drawn (A and, when comparing, B on
@@ -373,10 +383,11 @@ export function valueDomain(
   options: ValueDomainOptions,
 ): ValueDomain {
   const support = options.support ?? FIXED_VALUE_DOMAIN;
+  const scale = options.scale && options.scale > 0 ? options.scale : 1;
   if (options.mode === "fixed") return { ...FIXED_VALUE_DOMAIN };
   const bounds: ValueDomain = {
-    lo: support.lo - SUPPORT_MARGIN,
-    hi: support.hi + SUPPORT_MARGIN,
+    lo: support.lo - SUPPORT_MARGIN * scale,
+    hi: support.hi + SUPPORT_MARGIN * scale,
   };
   const own = seriesExtent(series);
   const wide =
@@ -388,7 +399,7 @@ export function valueDomain(
           }
         : options.datasetRange
       : own;
-  return wide ? framed(wide, bounds) : { ...bounds };
+  return wide ? framed(wide, bounds, scale) : { ...bounds };
 }
 
 /** Percentile (0..1, nearest rank) of a list; NaN when empty. */
@@ -463,6 +474,8 @@ export interface AxisPlan {
   a: number[];
   b: number[] | null;
   units: "normalized" | "return";
+  /** Axis units per unit of normalized V (see `ValueDomainOptions.scale`). */
+  scale: number;
   /** Values that get a solid reference line when inside the domain. */
   refs: number[];
 }
@@ -505,6 +518,10 @@ export function planValueAxis(input: AxisInputs): AxisPlan {
     y ? { lo: Math.min(x.lo, y.lo), hi: Math.max(x.hi, y.hi) } : x;
 
   if (mode === "return" && spanA) {
+    const scale = Math.max(
+      spanA.max - spanA.min,
+      spanB ? spanB.max - spanB.min : 0,
+    );
     const a = toReturnUnits(input.a ?? [], spanA.min, spanA.max);
     const b =
       comparing && spanB
@@ -528,10 +545,15 @@ export function planValueAxis(input: AxisInputs): AxisPlan {
     return {
       mode,
       unavailable,
-      domain: valueDomain([a, b], { mode, support }),
+      domain: valueDomain([a, b], {
+        mode,
+        support,
+        scale,
+      }),
       a,
       b,
       units: "return",
+      scale,
       refs: [0],
     };
   }
@@ -553,6 +575,7 @@ export function planValueAxis(input: AxisInputs): AxisPlan {
     a,
     b,
     units: "normalized",
+    scale: 1,
     refs: [0, -1],
   };
 }
@@ -647,11 +670,15 @@ export function valueDiff(a: FrameSeries, b: FrameSeries) {
 export function diffDomain(
   values: readonly number[],
   mode: AxisMode,
+  scale = 1,
 ): ValueDomain {
   if (mode === "fixed") return { lo: -1, hi: 1 };
   const extent = seriesExtent([values]);
   const reach = extent ? Math.max(Math.abs(extent.lo), Math.abs(extent.hi)) : 0;
-  const half = Math.max(reach * (1 + AXIS_PAD_FRACTION), MIN_AXIS_SPAN / 2);
+  const half = Math.max(
+    reach * (1 + AXIS_PAD_FRACTION),
+    (MIN_AXIS_SPAN * (scale > 0 ? scale : 1)) / 2,
+  );
   return { lo: -half, hi: half };
 }
 
