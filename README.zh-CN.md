@@ -127,7 +127,7 @@ LEVI 会对照目录检查任务规格，并在运行前等你批准。每个任
 | **Agent 与模型** | [Agents](docs/AGENTS.md) · [本地模型](docs/OLLAMA.zh-CN.md) · [English](docs/OLLAMA.md) · [vLLM](docs/VLLM.zh-CN.md) · [English](docs/VLLM.md) · [崩溃恢复](docs/SUPERVISION.md) · [Pilot](docs/PILOT.zh-CN.md) · [English](docs/PILOT.md) · [内置知识](docs/KNOWLEDGE.md) |
 | **开发用技能** | [Codex 与 Claude Code 使用 Skill Loom](docs/SKILL_LOOM.zh-CN.md) · [English](docs/SKILL_LOOM.md) |
 | **标注方法** | [实时标注服务](docs/LIVE.zh-CN.md) · [English](docs/LIVE.md) · [锚定复核](docs/ANCHORED_REVIEW.md) · [SAM3](docs/SAM3.md) · [快速分割](docs/SEGMENTATION.md) · [评测记录](docs/EVALUATION.md) |
-| **参考** | [API](docs/API.md) · [验证](docs/VALIDATION.md) · [架构进度](docs/architecture/IMPLEMENTATION_STATUS.md) · [上游](docs/UPSTREAM.md) · [发布](docs/RELEASING.md) · [变更记录](CHANGELOG.md) · [第三方声明](THIRD_PARTY_NOTICES.md) · [参考文献与引用](docs/REFERENCES.md) |
+| **参考** | [API](docs/API.md) · [验证](docs/VALIDATION.md) · [架构进度](docs/architecture/IMPLEMENTATION_STATUS.md) · [自动测评契约与运行日志](docs/AUTOMATIC_PIPELINE.zh-CN.md) · [English](docs/AUTOMATIC_PIPELINE.md) · [上游](docs/UPSTREAM.md) · [发布](docs/RELEASING.md) · [变更记录](CHANGELOG.md) · [第三方声明](THIRD_PARTY_NOTICES.md) · [参考文献与引用](docs/REFERENCES.md) |
 
 **报告**页显示一份实时技术报告，目录由 `LEVI_REPORT_DIR` 指定（只读，可以在工作区之外）；见 [API](docs/API.md#technical-report--技术报告)。
 
