@@ -600,7 +600,9 @@ service (`watch.exclude`) so the forward spec never labels a reset.
 
 **Media.** A `MediaSink` (`open`, `frame`, `finish`, `abort`) writes the
 capture format (videos, pose and gripper CSVs) and reports its facts. The
-default `NullMedia` writes no video.
+default `NullMedia` writes no video. The recorder itself seals a camera
+whose frame did not change for `stall_limit` (10) observations as stalled,
+so the live service rejects that rollout, as it does the client's.
 
 ## Metrics (`levi/automatic/metrics.py`)
 
@@ -667,8 +669,25 @@ at its horizon, a failed home, e-stop or FR3 fault, recorder write and seal
 failures, restarts at every stage of every transaction and under SIGKILL,
 a double resume), and 150 seeded random runs with crashes and resumes.
 
-**Not yet:** the reset strategy beyond one reset policy and
-`max_reset_attempts`, recorder files that `criteria.check` accepts and the
-run manifest, renaming unsealed rollouts after a restart, metrics, the CLI
-and the real FR3 adapter.
+**End to end** (`test_aeri_e2e.py`, the whole fake world of
+`aeri_world.py`: orchestrator, recorder layer, manifest, session files, an
+Initial State Contract): N rounds of forward -> home -> scene -> reset ->
+next, every rollout read back with `levi.live.criteria`; a seeded run
+writes the same bytes twice (journal, rollouts, manifest, session files,
+with the wall clock and the process identity taken out) and another seed
+other bytes; the orchestrator dies at every stage of every transaction of
+a two-round run (every site counted) and a new one takes over: always
+`FAULT_LOCKED` (or `COMPLETED`), nothing replayed, every home sent once,
+the disk agreeing with the journal, both session files `fault`, and on
+every ninth site an operator's resume finishes the run without reusing a
+folder; a child process is SIGKILLed at each stage of the seal and just
+before and after `.complete`. The fault list (the 12 rows a fake can
+test: wrong success, unknown, judge timeout, flapping events, a late
+forward chunk in a reset, a crashed policy server, camera stall, no policy
+resources, a reset at its horizon, a full disk, a restart, a double
+resume) asserts for each row the final state, the recorded degradation and
+that no motion ran or was even tried without a token.
+
+**Not yet:** the real FR3 adapter, a real run command, the
+`/automatic` page; `atomic_skill_sequence` and `scripted_safe_reset`.
 

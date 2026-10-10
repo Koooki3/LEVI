@@ -243,7 +243,7 @@ initial_state:
 
 **会话文件（C2）。** `SessionFiles(root, run_id=, group=, folders=)` 作为编排器的 `listener`：每次提交状态后重写两个角色文件（`<root>/.eval_sessions/<group>__<task_folder>.json`），只用客户端的 7 个状态（见上表）、ISO 时间、`levi.reset_wait_s: null`，前向文件写 `levi.mode: unattended`，复位文件写 `levi.enabled: false`，另有 `episode_role` 和 `aeri{run_id, state, control_epoch}`。会话写失败只记一条 note（`session_write_failed`），不会停止运行。`heartbeat()` 重写最后的状态（后台实时标注服务读端在 10 秒没有更新且进程不在时判定会话崩溃）。请用 `watch.exclude` 把复位目录排除在后台实时标注之外，免得前向规格去标注复位片段。
 
-**媒体。** `MediaSink`（`open`、`frame`、`finish`、`abort`）负责写采集格式（视频、位姿和夹爪 CSV）并报告事实。默认的 `NullMedia` 不写视频。
+**媒体。** `MediaSink`（`open`、`frame`、`finish`、`abort`）负责写采集格式（视频、位姿和夹爪 CSV）并报告事实。默认的 `NullMedia` 不写视频。某个相机的帧连续 `stall_limit`（10）次观测没有变化时，录制层自己把它封存为停滞，后台实时标注服务因此会拒收该 rollout，与客户端的 rollout 一样。
 
 ## 指标（`levi/automatic/metrics.py`）
 
@@ -266,5 +266,7 @@ initial_state:
 
 **测试**（`tests/automatic/test_aeri_*.py`）：状态表与围栏；各个 Fake；C5 映射表与 C2 门控如实性；裁决器；编排器在设计的故障清单上的行为（错误成功、Unknown、判定超时或离线、事件抖动、复位阶段迟到的前向动作块、策略服务崩溃、相机停滞、没有策略资源、复位到达上限、Home 失败、急停或 FR3 故障、录制器写盘和封存失败、每个事务每个阶段的重启以及 SIGKILL、两次 Resume），以及 150 次带崩溃和恢复的固定种子随机运行。
 
-**尚未实现：** 单一复位策略加 `max_reset_attempts` 之外的复位策略、`criteria.check` 能接收的录制文件和运行 manifest、重启后给未封存 rollout 改名、指标、命令行和真实 FR3 适配层。
+**端到端**（`test_aeri_e2e.py`，用 `aeri_world.py` 的完整 Fake 环境：编排器、录制层、manifest、会话文件、初始状态契约）：N 轮“前向 -> Home -> 场景 -> 复位 -> 下一轮”，每个 rollout 都用 `levi.live.criteria` 读回；固定种子的运行两次写出相同字节（日志、rollout、manifest、会话文件，去掉墙钟时间和进程身份），换种子则不同；两轮运行里每个事务的每个阶段都让编排器崩溃一次（崩溃点逐一计数），再由新进程接管：结果总是 `FAULT_LOCKED`（或 `COMPLETED`），不重放任何动作，每次 Home 只发一次，磁盘与日志一致，两个会话文件都是 `fault`；每第九个崩溃点由操作员恢复并跑完，不复用任何目录；另有子进程在封存事务的每个阶段以及 `.complete` 前后被 SIGKILL。故障清单（Fake 能测的 12 行：错误成功、Unknown、判定超时、事件抖动、复位中迟到的前向动作块、策略服务崩溃、相机停滞、没有策略资源、复位到达上限、磁盘写满、重启、两次 Resume）对每一行断言最终状态、记录的降级原因，以及没有任何动作在无令牌时执行或尝试。
+
+**尚未实现：** 真实 FR3 适配层、真机运行命令、`/automatic` 页面；`atomic_skill_sequence` 和 `scripted_safe_reset`。
 

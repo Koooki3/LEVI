@@ -51,7 +51,9 @@ service with ``watch.exclude`` so the forward spec never labels a reset.
 **Media.** A ``MediaSink`` writes the capture format (videos, pose and
 gripper CSVs) and reports its facts; the default ``NullMedia`` writes no
 video (an honest ``video_frames_match_csv: true`` with no videos). The
-AERI layer itself writes ``aeri_steps.csv`` (one row per committed step).
+AERI layer itself writes ``aeri_steps.csv`` (one row per committed step)
+and marks a camera stalled when its frame did not change for
+``stall_limit`` observations.
 """
 
 import csv
@@ -137,6 +139,9 @@ class Rollout:
     errors: list = field(default_factory=list)
     started_wall: float = 0.0
     handle: object = field(default=None, repr=False)
+    # Per camera: (last frame value, observations it has not changed).
+    frames: dict = field(default_factory=dict, repr=False)
+    stalled: set = field(default_factory=set)
 
     @property
     def complete_marker(self) -> bool:
@@ -173,8 +178,13 @@ class RolloutRecorder:
         media: MediaSink | None = None,
         wall: Callable[[], float] = time.time,
         io_hook: Callable[[str, Path], None] | None = None,
+        stall_limit: int = 10,
     ):
         self.root = Path(root)
+        # A camera whose frame did not change for this many observations is
+        # sealed as stalled (``cameras.stall_detection``): the live service
+        # then rejects the rollout, as it does the client's.
+        self.stall_limit = stall_limit
         self.run_id = run_id
         self.run_dir = Path(run_dir)
         self.group = group
@@ -376,6 +386,12 @@ class RolloutRecorder:
     def stage(self, rollout: Rollout, obs) -> None:
         self._check_open(rollout)
         rollout.staged = obs
+        for camera, value in sorted((obs.get("frames") or {}).items()):
+            last, same = rollout.frames.get(camera, (None, 0))
+            same = same + 1 if value == last else 0
+            rollout.frames[camera] = (value, same)
+            if same >= self.stall_limit:
+                rollout.stalled.add(camera)
         try:
             self.media.frame(rollout.path, rollout.steps, obs)
         except OSError as exc:
@@ -421,7 +437,8 @@ class RolloutRecorder:
         os.fsync(handle.fileno())
         handle.close()
         rollout.handle = None
-        media = self.media.finish(rollout.path, rollout.steps)
+        media = dict(self.media.finish(rollout.path, rollout.steps))
+        media["stalled"] = sorted(set(media.get("stalled", [])) | rollout.stalled)
         now = self.wall()
         self._durable(
             rollout.path / "events.csv",
