@@ -4,9 +4,11 @@
 
 **Status: library only.** This page will describe how the automatic
 evaluation pipeline (AERI) compares several policies (arms) on one task.
-Only the statistical methods exist so far: `levi/automatic/analysis/`, pure
-functions that no command, page or API calls yet. The campaign plan,
-schedule, report and page are later work and get their own sections here.
+Two parts exist so far, and no command, page or API calls them yet: the
+statistical methods (`levi/automatic/analysis/`, pure functions) and the
+figure writers that draw their results for the web page and for a paper
+(see [Figures](#figures)). The campaign plan, schedule, report and page are
+later work and get their own sections here.
 
 ## Statistical methods
 
@@ -161,3 +163,82 @@ All entries were checked against their DOI or arXiv record (2026-10-10).
 - Wilcoxon 1945, "Individual Comparisons by Ranking Methods", Biometrics Bulletin 1(6), doi:10.2307/3001968.
 - Williams 1949, "Experimental Designs Balanced for the Estimation of Residual Effects of Treatments", Australian Journal of Scientific Research A 2(2), doi:10.1071/CH9490149.
 - Wilson 1927, "Probable Inference, the Law of Succession, and Statistical Inference", JASA 22(158), doi:10.1080/01621459.1927.10502953.
+
+## Figures
+
+A figure is a `FigureSpec`: a plain, versioned description (schema
+`levi.aeri.figure_spec.v1`) with no drawing code in it. The analysis code
+produces one spec per figure; the web page maps the same JSON onto Recharts,
+and the two writers here turn it into files:
+
+| Function | Output |
+| --- | --- |
+| `svgplot.render_svg(spec, lang=None, embed_spec=False, width=640)` | SVG text (UTF-8) |
+| `pdfplot.render_pdf(spec, lang=None, width=640)` | One-page vector PDF (bytes) |
+| `svgplot.write_svg`, `pdfplot.write_pdf` | The same, written atomically (`.partial`, then rename) |
+| `figspec.table(spec)`, `table_csv`, `table_html` | The accessible table: every number in the figure |
+
+Pure standard library: no matplotlib, no Pillow, nothing to install. Output is
+deterministic: no clock, no random ids, no `/ID` or dates in the PDF, so the
+same spec gives the same bytes and two campaign reports can be compared with
+`diff`.
+
+### Figure kinds
+
+| `kind` | Meaning | Axes |
+| --- | --- | --- |
+| `grouped_bar` | Success rate per arm with an interval | category x, linear y |
+| `forest` | Paired differences, one row per comparison, reference line at 0 | linear x, category y |
+| `step_curve` | Time to success: a staircase per arm, optional band | linear x, linear y |
+| `stacked_bar` | Failure modes stacked per arm | category x, linear y |
+| `early_stop` | Early-stop saving and error rate; one to four panels | category x, linear y |
+| `drift_lines` | Per-round rate per arm with intervals; the reference arm is heavier | linear or category x, linear y |
+
+A `Point` is `x`, `y`, an optional interval `lo`/`hi` on the value axis (`y`;
+`x` in a forest plot) and an optional short `label` such as `8/20`. Titles,
+summaries, axis labels, series names and notes can be given in English and
+Chinese (`{"en": ..., "zh-CN": ...}`); a missing language falls back to
+English. `validate()` refuses what cannot be drawn truthfully: unknown kinds,
+non-finite numbers, an interval that does not contain its value, a category
+index out of range, a series that goes backwards in x, negative stacked
+values, and **data outside a fixed axis range** (a value is never clipped
+silently).
+
+### Reading a figure without colour
+
+* The palette has eight colours that stay at least 15 CIELAB units apart under
+  protan, deutan and tritan simulation, ordered so that neighbours also differ
+  in grayscale (tested).
+* Every series also has its own marker shape, line style and, for bars, a
+  hatch, so a black-and-white copy still reads. The reference arm
+  (`emphasis=True`) is drawn heavier.
+* Arm names are always printed (legend, tick labels), never left to colour.
+* Axis ticks use 1, 2 or 5 times a power of ten; a constant series gets a
+  readable window, and an interval is always drawn.
+* The SVG carries `<title>` and `<desc>` (the title and the one-sentence
+  summary) and, with `embed_spec=True`, the spec itself in `<metadata>`.
+  Put `table_html(spec)` next to the figure in a page so that screen-reader
+  users get the numbers.
+
+### Language limits
+
+SVG text is live text in a generic font family (a CJK family is added when the
+text needs one). The PDF uses the standard Helvetica and Helvetica-Bold fonts
+(nothing is embedded; every reader has them), so it is **Latin only**: a string
+that Windows-1252 cannot encode is replaced by its English form, and by `?` if
+there is none. Write Chinese figures as SVG, or give every text an English form.
+There is no PNG writer; PNG export stays in the web page (the browser draws the
+SVG), and a command-line PNG is made only if a converter such as
+`rsvg-convert` is on the PATH.
+
+### Checking the PDF
+
+`pdfplot.verify_pdf(data)` re-reads a file with its own small parser: header,
+cross-reference offsets, trailer, page tree, stream length, fonts and end
+marker, and returns the page size and every string shown. The tests also run
+`pdftotext` and `pdfinfo` (poppler) when they are installed. A human should open
+one generated PDF in a normal viewer once per release to check how it looks:
+the tests prove the structure and the text, not the visual layout.
+
+Golden SVG files live in `tests/automatic/analysis/test_fig_golden/`; after an
+intended change, regenerate them with `LEVI_UPDATE_GOLDEN=1` and read the diff.

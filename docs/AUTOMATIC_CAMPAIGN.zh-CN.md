@@ -2,7 +2,7 @@
 
 [English](AUTOMATIC_CAMPAIGN.md)
 
-**状态：只有库。** 本页将说明自动测评流水线（AERI）怎样在同一个任务上比较多个策略（组）。目前只有统计方法：`levi/automatic/analysis/`，一组纯函数，还没有任何命令、页面或 API 调用它。评测计划、时间表、报告和页面是后续工作，届时在本页另写章节。
+**状态：只有库。** 本页将说明自动测评流水线（AERI）怎样在同一个任务上比较多个策略（组）。目前有两部分，都还没有任何命令、页面或 API 调用：统计方法（`levi/automatic/analysis/`，一组纯函数），以及把统计结果画给网页和论文的图表写出器（见[图表](#图表)）。评测计划、时间表、报告和页面是后续工作，届时在本页另写章节。
 
 ## 统计方法
 
@@ -59,3 +59,47 @@
 ### 参考文献
 
 各条都按 DOI 或 arXiv 记录核对过（2026-10-10）。书目信息与英文版相同，见 [English](AUTOMATIC_CAMPAIGN.md#references)：Agarwal 等 2021；Agresti 与 Caffo 2000；Balasubramanian 等 2015；Benjamini 与 Hochberg 1995；Boschloo 1970；Brown 等 2001；Cliff 1993；Clopper 与 Pearson 1934；Cochran 1950；Cohen 1960；Connor 1987；Dunn 1961；Efron 1979、1987；Fagerland 等 2013；Feinstein 与 Cicchetti 1990；Fisher 1922；Friedman 1937；Hodges 与 Lehmann 1963；Holm 1979；Kaplan 与 Meier 1958；Kress-Gazit 等 2024；Mann 1945；Mann 与 Whitney 1947；Mantel 1966；McNemar 1947；Newcombe 1998a、1998b；Rogan 与 Gladen 1978；Royston 与 Parmar 2013；Wilcoxon 1945；Williams 1949；Wilson 1927。
+
+## 图表
+
+一张图就是一个 `FigureSpec`：一份带版本的纯数据描述（schema 为 `levi.aeri.figure_spec.v1`），里面没有绘图代码。分析代码每张图生成一份 spec；网页把同一份 JSON 映射到 Recharts，这里的两个写出器把它变成文件：
+
+| 函数 | 输出 |
+| --- | --- |
+| `svgplot.render_svg(spec, lang=None, embed_spec=False, width=640)` | SVG 文本（UTF-8） |
+| `pdfplot.render_pdf(spec, lang=None, width=640)` | 单页矢量 PDF（字节） |
+| `svgplot.write_svg`、`pdfplot.write_pdf` | 同上，原子写入（先写 `.partial` 再改名） |
+| `figspec.table(spec)`、`table_csv`、`table_html` | 可访问表格：图里的每个数字 |
+
+纯标准库，没有 matplotlib、Pillow，也不用安装任何东西。输出是确定的：没有时钟、没有随机 id，PDF 里没有 `/ID` 和日期，所以同一份 spec 得到同样的字节，两份 campaign 报告可以直接 `diff`。
+
+### 图的类型
+
+| `kind` | 含义 | 坐标轴 |
+| --- | --- | --- |
+| `grouped_bar` | 各组成功率，带区间 | x 为类别轴，y 为数值轴 |
+| `forest` | 成对差值，一行一个比较，0 处画参考线 | x 为数值轴，y 为类别轴 |
+| `step_curve` | 到成功所需时间：每组一条阶梯曲线，可带区间带 | x、y 都是数值轴 |
+| `stacked_bar` | 失败模式按组堆叠 | x 为类别轴，y 为数值轴 |
+| `early_stop` | 早停节省和误终止率；1 到 4 个子图 | x 为类别轴，y 为数值轴 |
+| `drift_lines` | 各组按轮的成功率，带区间；参照组画得更粗 | x 为数值轴或类别轴，y 为数值轴 |
+
+`Point` 有 `x`、`y`，可选的区间 `lo`/`hi`（落在数值轴上：一般是 `y`，森林图是 `x`），以及可选的短标注 `label`，例如 `8/20`。标题、摘要、轴名、系列名和注释都可以写中英两种（`{"en": ..., "zh-CN": ...}`），缺哪种语言就退回英文。`validate()` 拒绝不能如实画出的输入：未知类型、非有限数、不包含其值的区间、越界的类别序号、x 倒退的系列、负的堆叠值，以及**落在固定坐标轴范围之外的数据**（数据不会被悄悄裁掉）。
+
+### 不靠颜色也能读
+
+* 调色板有八种颜色，在红色盲、绿色盲、蓝色盲模拟下两两至少相差 15 个 CIELAB 单位，排列顺序还让相邻两色的灰度也不同（有测试）。
+* 每个系列另有各自的标记形状、线型，柱状图还有各自的斜线填充，所以黑白打印也读得出。参照组（`emphasis=True`）画得更粗。
+* 组名始终用文字印出（图例、刻度），不只靠颜色。
+* 坐标刻度取 1、2、5 乘以 10 的幂；常数序列会得到一个看得清的窗口；区间一定画出。
+* SVG 带 `<title>` 和 `<desc>`（标题和一句话摘要）；`embed_spec=True` 时把 spec 本身放进 `<metadata>`。网页里请把 `table_html(spec)` 放在图旁边，读屏用户才能拿到数字。
+
+### 语言限制
+
+SVG 文字是真文字，用通用字体族（文字需要时加上 CJK 字体族）。PDF 用标准的 Helvetica 和 Helvetica-Bold（不嵌入字体，任何阅读器都有），所以**只支持拉丁字符**：Windows-1252 编不出的字符串会换成英文形式，没有英文形式就显示 `?`。中文图请出 SVG，或者给每段文字都写上英文形式。本模块不写 PNG；PNG 导出留在网页里（浏览器画 SVG），命令行只在 PATH 上有 `rsvg-convert` 之类的转换器时才生成 PNG。
+
+### 检查 PDF
+
+`pdfplot.verify_pdf(data)` 用自带的小解析器重新读一遍文件：文件头、交叉引用偏移、trailer、页面树、流长度、字体和结束标记，并返回页面大小和所有显示出来的字符串。机器上装了 poppler 时，测试还会跑 `pdftotext` 和 `pdfinfo`。每个版本请人用普通阅读器打开一份生成的 PDF 看一次观感：测试证明的是结构和文字，不是视觉排版。
+
+SVG 黄金文件在 `tests/automatic/analysis/test_fig_golden/`；有意修改之后，用 `LEVI_UPDATE_GOLDEN=1` 重新生成，并检查差异。
