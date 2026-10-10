@@ -30,6 +30,11 @@ from dataclasses import dataclass, field
 import numpy as np
 
 REQUIRED, CANDIDATES, UNCERTAIN = "required", "candidates", "uncertain"
+# The candidate readers and this planner, as an on plan freezes them
+# (``candidates.algorithm``). Raise it with any change to how candidates are
+# found, merged or ordered or how windows are chosen that its constants do
+# not show: an approved plan must then be approved again.
+PLANNER_VERSION = "levi.events.evidence_planner.v1"
 # Most entries of one list in a plan's summary (the counts stay exact).
 SUMMARY_ROWS = 32
 

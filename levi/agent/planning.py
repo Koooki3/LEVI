@@ -146,6 +146,8 @@ def material(run):
             "files",
             "skill_fingerprints",
             *(["runtime_binding"] if run.get("runtime_binding") else []),
+            # Only a plan with event intelligence on has it (see attach).
+            *(["event_algorithm"] if run.get("event_algorithm") else []),
         )
     } | (
         # The approved plan covers the harness parameters it runs with; the
@@ -237,6 +239,14 @@ def attach(run):
         k: digest(v)
         for k, v in skills(TaskContext.model_validate(run["context"])).items()
     }
+    if flow.event_intelligence is not None:
+        # The candidate readers' constants and the planner's version are
+        # approved with the plan (in its digest; require() compares them).
+        from levi.events.candidates import algorithm
+
+        run["event_algorithm"] = algorithm()
+    else:
+        run.pop("event_algorithm", None)
     run["plan"] = {
         "schema": "levi.harness.plan.v1",
         "revision": 1,
@@ -368,6 +378,15 @@ def require(wb, run, *, bulk=False):
         or plan["approval"]["digest"] != plan["digest"]
     ):
         raise Conflict("Execution contract changed; plan must be approved again")
+    if (run["context"].get("workflow") or {}).get("event_intelligence") or run.get(
+        "event_algorithm"
+    ):
+        from levi.events.candidates import algorithm
+
+        if run.get("event_algorithm") != algorithm():
+            raise Conflict(
+                "The event candidate algorithm changed; create and approve a new plan"
+            )
     if (
         wb.store.head(run["dataset_key"]) != run["base_revision"]
         or annotation_digest(wb.store.state, run["dataset_key"]) != run["base_content"]

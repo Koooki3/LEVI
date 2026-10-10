@@ -551,6 +551,42 @@ def test_changing_the_block_after_approval_needs_a_new_approval(lab):
         require(wb, wb.store.get("runs", plain["id"]))
 
 
+def test_the_candidate_algorithm_is_frozen_with_an_on_plan(lab, monkeypatch):
+    """Review A3, I-3: the constants that decide which candidates exist and
+    how they are ordered (and the planner's version) are part of what an on
+    plan approves; changing one voids the approval. An off plan carries no
+    such record, so its digest is untouched (snapshot test)."""
+    from levi.agent.planning import require
+    from levi.events import candidates, change_points, sampling
+
+    wb, repo, _ = lab
+    run = approve(wb, wb.plan(temporal(repo, event_intelligence=ON))["id"], 1, "h")
+    algorithm = run["event_algorithm"]
+    assert algorithm["version"] == sampling.PLANNER_VERSION
+    assert algorithm["constants"]["candidates.PRIORITY"] == candidates.PRIORITY
+    assert len(algorithm["sha256"]) == 64
+    assert "event_algorithm" in material(run)
+    require(wb, run)
+    plain = approve(wb, wb.plan(temporal(repo))["id"], 1, "h")
+    assert "event_algorithm" not in plain and "event_algorithm" not in material(plain)
+    for module, name, value in (
+        (candidates, "PRIORITY", {**candidates.PRIORITY, "gripper": 0.95}),
+        (change_points, "MIN_SECONDS", 0.4),
+        (sampling, "PLANNER_VERSION", "levi.events.evidence_planner.v0"),
+    ):
+        with monkeypatch.context() as patch:
+            patch.setattr(module, name, value)
+            with pytest.raises(Conflict, match="candidate algorithm changed"):
+                require(wb, wb.store.get("runs", run["id"]))
+            require(wb, wb.store.get("runs", plain["id"]))
+    require(wb, wb.store.get("runs", run["id"]))
+    executed = run_once(wb, temporal(repo, event_intelligence=ON))
+    provenance = wb.store.get("changes", executed["changes"])["provenance"]
+    assert (
+        provenance["event_intelligence"]["algorithm"]["sha256"] == algorithm["sha256"]
+    )
+
+
 def test_a_stored_plan_from_before_the_block_still_runs(lab):
     """An approved, not yet executed plan written by the old code: its
     stored context has no key; require() accepts it and the run does not

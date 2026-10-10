@@ -179,6 +179,51 @@ def read(
     return merge(found, merge_seconds)
 
 
+def algorithm():
+    """What decides an episode's candidates and the windows taken, as an on
+    plan freezes it: the planner's version and the readers' constants, with
+    the SHA-256 of their canonical JSON. ``planning.require`` compares it
+    with the running code: a change voids the approval. Settings a plan
+    names itself (``sources``, ``merge_seconds``, the change-point penalty,
+    ``max_windows``) are in the plan already; the defaults here are the
+    readers' own."""
+    import hashlib
+    import json
+
+    from ..agent import signals
+    from . import change_points, gripper, motion, sampling
+
+    constants = {
+        "candidates.PRIORITY": dict(PRIORITY),
+        "candidates.SOURCES": list(SOURCES),
+        "candidates.MERGE_SECONDS": MERGE_SECONDS,
+        "change_points.PENALTY": change_points.PENALTY,
+        "change_points.MIN_SECONDS": change_points.MIN_SECONDS,
+        "change_points.MAX_PER_MINUTE": change_points.MAX_PER_MINUTE,
+        "change_points.MAX_ROWS": change_points.MAX_ROWS,
+        "change_points.RAISE": change_points.RAISE,
+        "change_points.MAX_RAISES": change_points.MAX_RAISES,
+        "gripper.LOW": gripper.LOW,
+        "gripper.HIGH": gripper.HIGH,
+        "gripper.START_SAMPLES": gripper.START_SAMPLES,
+        "motion.STILL": motion.STILL,
+        "motion.STILL_SECONDS": motion.STILL_SECONDS,
+        "motion.EVEN": motion.EVEN,
+        "signals.TURN": signals.TURN,
+    }
+    version = sampling.PLANNER_VERSION
+    canonical = json.dumps(
+        {"version": version, "constants": constants},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return {
+        "version": version,
+        "constants": constants,
+        "sha256": hashlib.sha256(canonical.encode()).hexdigest(),
+    }
+
+
 def proposed(candidates):
     """The kept candidates (status ``proposed``), in the order given."""
     return [c for c in candidates if c.status == "proposed"]
