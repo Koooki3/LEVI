@@ -132,6 +132,9 @@ app.include_router(live_router)
 from .automatic.api import router as automatic_router
 
 app.include_router(automatic_router)
+from .automatic.campaign.api import router as campaign_router
+
+app.include_router(campaign_router)
 from .dataset_api import router as dataset_router
 
 app.include_router(dataset_router)
