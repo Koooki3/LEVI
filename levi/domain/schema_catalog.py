@@ -74,6 +74,8 @@ def main(arguments):
         return 0
     problems = aeri.check_snapshots(root)
     against, notes = aeri.check_against_base(root, args.base)
+    more, more_notes = aeri.check_campaign_against_base(root, args.base)
+    against, notes = against + more, notes + more_notes
     for line in notes:
         print(f"note: {line}")
     for line in problems + against:
