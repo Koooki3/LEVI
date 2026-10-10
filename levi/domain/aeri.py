@@ -33,6 +33,8 @@ known" is ever a success.
 import json
 import math
 import re
+import subprocess
+import time
 import unicodedata
 from collections.abc import Mapping
 from pathlib import Path
@@ -162,8 +164,23 @@ ADMISSION_CODES = (
     "shutting_down",
     "broker_unavailable",
 )
-# Robot motion and learner ports a policy endpoint may never name.
-ROBOT_PORTS = (5000, 5001, 5100, 7470)
+# Ports a policy endpoint may never name: the real robot servers (5000,
+# 5001), the tunnel to the second robot (5100), the learner (7470) and the
+# real robot's policy server (8000).
+ROBOT_PORTS = (5000, 5001, 5100, 7470, 8000)
+# The longest a judgement or scene assessment may stay valid after it was
+# produced, and the longest lease; a producer cannot keep a result "fresh"
+# by writing a far-away expiry.
+MAX_RESULT_VALIDITY_MS = 30_000
+MAX_LEASE_MS = 600_000
+# How far ahead of the consumer's own clock a ``produced_ns``/``granted_ns``
+# may be (same host, same monotonic clock: only scheduling jitter).
+FUTURE_TOLERANCE_NS = 100_000_000
+# v1 is not released yet: a change that is breaking against the base
+# branch's snapshot is reported but does not fail ``check-contracts``. Set
+# True when v1 is released; from then on such a change fails, and
+# ``--write --accept-breaking`` is refused.
+RELEASED = False
 AERI_STATES = (
     "PREFLIGHT",
     "VERIFY_INITIAL",
@@ -243,6 +260,7 @@ ERROR_CODES = (
     "E_STALE_EPOCH",
     "E_EXPIRED",
     "E_CLOCK_DOMAIN",
+    "E_FUTURE",
     "E_UNSOLICITED",
 )
 # Predicate names each judgement spec / initial-state contract declares,
@@ -363,6 +381,8 @@ def _check_times(observed_ns, produced_ns, valid_until_ns):
         _bad("produced before the evidence it reads")
     if valid_until_ns <= produced_ns:
         _bad("valid_until_ns must be later than produced_ns")
+    if valid_until_ns - produced_ns > MAX_RESULT_VALIDITY_MS * 1_000_000:
+        _bad(f"a result stays valid at most {MAX_RESULT_VALIDITY_MS} ms")
 
 
 # --- shared parts -----------------------------------------------------------------
@@ -573,7 +593,26 @@ class Judgement(Envelope):
             and "confirmed" not in vetoes
         ):
             _bad("rejected needs a false required predicate or a confirmed veto")
+        if self.legacy_c5 is not None:
+            _check_legacy(self)
         return self
+
+
+def _check_legacy(message):
+    """The online judgement's values (C5) mapped as the design says: an
+    undecided answer is ``unknown`` (model_undecided), never a rejection."""
+    c5 = message.legacy_c5
+    if message.provider not in ("vlm", "rule"):
+        _bad("legacy_c5 comes from a vlm or rule provider")
+    if c5.undecided:
+        if c5.outcome == "success":
+            _bad("the online judgement never reports an undecided success")
+        if message.decision != "unknown" or message.unknown_reason != "model_undecided":
+            _bad("an undecided online judgement maps to unknown (model_undecided)")
+    elif c5.outcome == "success" and message.decision != "confirmed":
+        _bad("a decided online success maps to confirmed")
+    elif c5.outcome == "failure" and message.decision != "rejected":
+        _bad("a decided online failure maps to rejected")
 
 
 # --- levi.aeri.scene.v1 (A -> C) --------------------------------------------------
@@ -697,6 +736,8 @@ class ResourceLease(_Runtime):
     def _consistent(self):
         if self.expires_ns <= self.granted_ns:
             _bad("a lease expires after it is granted")
+        if self.expires_ns - self.granted_ns > MAX_LEASE_MS * 1_000_000:
+            _bad(f"a lease lasts at most {MAX_LEASE_MS} ms")
         return self
 
 
@@ -745,7 +786,7 @@ class Endpoint(Part):
     @model_validator(mode="after")
     def _consistent(self):
         if self.port in ROBOT_PORTS:
-            _bad(f"port {self.port} is a robot or learner port")
+            _bad(f"port {self.port} is a robot, learner or robot policy port")
         return self
 
 
@@ -820,7 +861,14 @@ class ChunkResponse(_Runtime):
     prefix_conditioning_applied: Literal["none", "soft_guidance"]
     model_version: ModelVersion
     timing: Timing
-    received_ns: Ns
+    received_ns: Ns = Field(
+        description=(
+            "Filled by the receiving side (C's adapter) from its own clock when "
+            "it collects the response, never by the server. Audit only: a "
+            "deadline is judged with check_deadline on the receiver's clock, "
+            "never with this field."
+        )
+    )
     clock_domain: ClockDomain
 
     @model_validator(mode="after")
@@ -899,9 +947,23 @@ class EpisodeResult(Part):
 
     @model_validator(mode="after")
     def _consistent(self):
-        if (self.task_outcome == "success") != (self.goal_verification == "verified"):
-            _bad("success exactly when the goal was verified")
+        # Not judged (undecided, unavailable) is unknown: never a success,
+        # and never a failure either.
+        expected = OUTCOME_OF_VERIFICATION[self.goal_verification]
+        if self.task_outcome != expected:
+            _bad(
+                f"goal_verification {self.goal_verification} means task_outcome "
+                f"{expected}"
+            )
         return self
+
+
+OUTCOME_OF_VERIFICATION = {
+    "verified": "success",
+    "contradicted": "failure",
+    "undecided": "unknown",
+    "unavailable": "unknown",
+}
 
 
 class Note(Part):
@@ -1049,14 +1111,27 @@ def _float(text):
     return value
 
 
-_SEPARATORS = re.compile(r"[\s\-]+")
+_SEPARATORS = re.compile(r"[\s\-./:]+")
+_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _COMPACT_KEYS = frozenset(key.replace("_", "") for key in CONTROL_KEYS)
+# Combining marks and format characters (zero-width space, soft hyphen...).
+_INVISIBLE = ("Mn", "Me", "Cf")
+
+
+def normal_key(key: str) -> str:
+    """A key as the control-key rules read it: compatibility forms folded,
+    invisible and combining characters dropped, camelCase split, case
+    folded, spaces, hyphens, dots, slashes and colons read as underscores."""
+    text = unicodedata.normalize("NFKD", key)
+    text = "".join(c for c in text if unicodedata.category(c) not in _INVISIBLE)
+    text = _CAMEL.sub("_", unicodedata.normalize("NFKC", text))
+    return _SEPARATORS.sub("_", text.casefold())
 
 
 def is_control_key(key: str) -> bool:
-    """Whether ``key`` names a robot or reset command (NFKC, case folded;
-    spaces and hyphens read as underscores; camelCase caught too)."""
-    folded = _SEPARATORS.sub("_", unicodedata.normalize("NFKC", key).casefold())
+    """Whether ``key`` names a robot or reset command (see ``normal_key``;
+    also matched with the underscores removed)."""
+    folded = normal_key(key)
     return (
         folded in CONTROL_KEYS
         or folded.replace("_", "") in _COMPACT_KEYS
@@ -1220,15 +1295,58 @@ def host_clock_domain() -> str:
     return f"host-mono:{boot}"
 
 
-def check_fresh(valid_until_ns: int, clock_domain: str, *, now_ns: int, local: str):
-    """Refuse a result that has expired or whose clock cannot be compared
-    with ours (another clock domain counts as expired)."""
-    if clock_domain != local:
+def _now(now_ns, local):
+    """The consumer's own clock: this host's monotonic clock and its domain.
+    Tests may pass both; callers in production pass neither."""
+    if (now_ns is None) != (local is None):
+        raise ValueError("pass both now_ns and local, or neither")
+    if now_ns is None:
+        return time.monotonic_ns(), host_clock_domain()
+    return now_ns, local
+
+
+def _span(message) -> tuple[int, int]:
+    if isinstance(message, Judgement | SceneAssessment):
+        return message.produced_ns, message.valid_until_ns
+    if isinstance(message, ResourceLease):
+        return message.granted_ns, message.expires_ns
+    raise TypeError(f"{type(message).__name__} carries no validity span")
+
+
+def check_fresh(message, *, now_ns: int | None = None, local: str | None = None):
+    """Refuse a judgement, scene assessment or lease that cannot be used now:
+    another clock domain (cannot be compared: counts as expired,
+    ``E_CLOCK_DOMAIN``), produced or granted more than
+    ``FUTURE_TOLERANCE_NS`` ahead of our clock (``E_FUTURE``), or expired
+    (``E_EXPIRED``). ``now`` is read from the consumer's own monotonic clock,
+    never from a field the producer wrote. A necessary check, not a
+    sufficient one: the run, episode, epoch and request fences come on top."""
+    now_ns, local = _now(now_ns, local)
+    if message.clock_domain != local:
         raise AeriError(
-            "E_CLOCK_DOMAIN", f"{clock_domain} cannot be compared with {local}"
+            "E_CLOCK_DOMAIN", f"{message.clock_domain} cannot be compared with {local}"
         )
-    if now_ns >= valid_until_ns:
-        raise AeriError("E_EXPIRED", "valid_until_ns has passed")
+    start, until = _span(message)
+    if start > now_ns + FUTURE_TOLERANCE_NS:
+        raise AeriError("E_FUTURE", "produced later than our own clock reads")
+    if now_ns >= until:
+        raise AeriError("E_EXPIRED", "the validity has passed")
+
+
+def check_deadline(deadline, *, now_ns: int | None = None, local: str | None = None):
+    """Whether a result collected now meets ``deadline``, judged on the
+    receiver's own clock (never on a time the producer reported). A hard
+    deadline that has passed raises ``E_EXPIRED``; a soft one returns False."""
+    now_ns, local = _now(now_ns, local)
+    if deadline.clock_domain != local:
+        raise AeriError(
+            "E_CLOCK_DOMAIN", f"{deadline.clock_domain} cannot be compared with {local}"
+        )
+    if now_ns <= deadline.due_ns:
+        return True
+    if deadline.hardness == "hard":
+        raise AeriError("E_EXPIRED", "the hard deadline has passed")
+    return False
 
 
 # --- schema snapshots and compatibility ---------------------------------------------
@@ -1254,6 +1372,12 @@ def schema_documents() -> dict[str, dict]:
         }
         if name in ("judgement", "scene", "runtime"):
             document["x-levi-retryable-codes"] = list(RETRYABLE_CODES)
+            document["x-levi-future-tolerance-ns"] = FUTURE_TOLERANCE_NS
+        if name in ("judgement", "scene"):
+            document["x-levi-max-result-validity-ms"] = MAX_RESULT_VALIDITY_MS
+        if name == "runtime":
+            document["x-levi-max-lease-ms"] = MAX_LEASE_MS
+            document["x-levi-forbidden-ports"] = list(ROBOT_PORTS)
         if name == "event":
             document["x-levi-registered-event-types"] = list(EVENT_TYPES)
         out[name] = {**document, **body}
@@ -1404,3 +1528,67 @@ def write_snapshots(root: Path, *, accept_breaking: bool = False) -> list[str]:
         if not path.is_file() or path.read_text() != text:
             path.write_text(text)
     return []
+
+
+# --- comparison with the base branch -----------------------------------------------
+
+
+def _git(root: Path, *args) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", "-C", str(root), *args], capture_output=True, text=True, check=False
+    )
+
+
+def check_against_base(root: Path, base: str = "main") -> tuple[list[str], list[str]]:
+    """``(problems, notes)``: the current models against the snapshots at
+    ``git merge-base HEAD <base>``. The same-tree check cannot see a breaking
+    change committed together with its snapshot; this one can.
+
+    A base that cannot be read (no git, not the top of a checkout, unknown
+    ref, shallow history) is a problem, never a pass. A snapshot missing at
+    the base is a new contract (a note). A breaking difference is a problem
+    once ``RELEASED``, a note before."""
+    root = Path(root)
+    try:
+        top = _git(root, "rev-parse", "--show-toplevel")
+    except OSError as exc:
+        return [f"cannot read the base snapshots: git is unavailable ({exc})"], []
+    if top.returncode != 0 or Path(top.stdout.strip()).resolve() != root.resolve():
+        return [
+            f"cannot read the base snapshots: {root} is not the top of a git checkout"
+        ], []
+    found = _git(root, "merge-base", "HEAD", base)
+    if found.returncode != 0:
+        detail = (found.stderr.strip() or "no common ancestor").splitlines()[0]
+        message = (
+            f"cannot read the base snapshots: `git merge-base HEAD {base}` failed "
+            f"({detail}); fetch {base} with its history"
+        )
+        return [message], []
+    commit = found.stdout.strip()
+    where = f"{base} ({commit[:12]})"
+    problems, notes = [], []
+    for name, document in schema_documents().items():
+        relative = f"{SNAPSHOT_DIR}/{name}.schema.json"
+        listed = _git(root, "ls-tree", "--name-only", commit, "--", relative)
+        if listed.returncode != 0:
+            problems.append(f"{relative}: cannot list it at {where}")
+            continue
+        if not listed.stdout.strip():
+            notes.append(f"{relative}: new since {where}")
+            continue
+        shown = _git(root, "show", f"{commit}:{relative}")
+        try:
+            old = json.loads(shown.stdout) if shown.returncode == 0 else None
+        except ValueError:
+            old = None
+        if not isinstance(old, dict):
+            problems.append(f"{relative}: unreadable at {where}")
+            continue
+        for change in breaking_changes(old, document):
+            line = f"{relative}: breaking against {where}: {change}"
+            if RELEASED:
+                problems.append(line)
+            else:
+                notes.append(f"{line} (allowed: v{MAJOR} is not released)")
+    return problems, notes

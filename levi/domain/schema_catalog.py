@@ -32,17 +32,31 @@ def main(arguments):
     parser.add_argument(
         "--write",
         action="store_true",
-        help="Regenerate the repository-owned schema snapshot",
+        help="Regenerate the repository-owned schema snapshots (contracts.json "
+        "and the AERI schemas together: nothing is written when the AERI "
+        "change is refused)",
     )
     parser.add_argument(
         "--accept-breaking",
         action="store_true",
         help="With --write: also rewrite AERI schemas whose change is breaking "
-        "within their major version (only before that version is released)",
+        "within their major version; only before that version is released",
+    )
+    parser.add_argument(
+        "--base",
+        default="main",
+        help="Branch whose AERI snapshots (at the merge base with HEAD) the "
+        "models are compared with (default: main); unreadable means failure",
     )
     args = parser.parse_args(arguments)
     from . import aeri
 
+    if args.accept_breaking and not args.write:
+        parser.error("--accept-breaking only goes with --write")
+    if args.accept_breaking and aeri.RELEASED:
+        parser.error(
+            f"AERI v{aeri.MAJOR} is released: a breaking change needs a new major"
+        )
     root = Path(__file__).resolve().parents[2]
     destination = root / "docs/architecture/contracts.json"
     expected = render()
@@ -58,10 +72,16 @@ def main(arguments):
         print(f"Updated docs/architecture/contracts.json and {aeri.SNAPSHOT_DIR}/")
         return 0
     problems = aeri.check_snapshots(root)
-    for line in problems:
+    against, notes = aeri.check_against_base(root, args.base)
+    for line in notes:
+        print(f"note: {line}")
+    for line in problems + against:
         print(line)
     if problems or not destination.exists() or destination.read_text() != expected:
         print("Contract snapshot drift. Run: uv run levi dev check-contracts --write")
+        return 1
+    if against:
+        print("AERI contracts differ from the base branch in a way v1 does not allow")
         return 1
     print(
         "Contract snapshot matches Python schemas; this is not full architecture acceptance."

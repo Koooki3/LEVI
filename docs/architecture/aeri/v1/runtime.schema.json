@@ -333,6 +333,7 @@
           "type": "string"
         },
         "received_ns": {
+          "description": "Filled by the receiving side (C's adapter) from its own clock when it collects the response, never by the server. Audit only: a deadline is judged with check_deadline on the receiver's clock, never with this field.",
           "maximum": 9223372036854775807,
           "minimum": 0,
           "title": "Received Ns",
@@ -1270,7 +1271,16 @@
     "cmd_",
     "force_"
   ],
+  "x-levi-forbidden-ports": [
+    5000,
+    5001,
+    5100,
+    7470,
+    8000
+  ],
+  "x-levi-future-tolerance-ns": 100000000,
   "x-levi-major": 1,
+  "x-levi-max-lease-ms": 600000,
   "x-levi-minor": 0,
   "x-levi-retryable-codes": [
     "gate_closed",

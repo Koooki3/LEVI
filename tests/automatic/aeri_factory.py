@@ -247,7 +247,7 @@ def runtime(kind, **over):
             "action_contract": "fr3-robotiq@1",
             "action_dims": 7,
             "action_horizon": 10,
-            "endpoint": {"host": "127.0.0.1", "port": 8000},
+            "endpoint": {"host": "127.0.0.1", "port": 8010},
             "policy_epoch": 2,
         },
         "chunk_request": {
@@ -594,6 +594,24 @@ def fixture_cases() -> dict[str, dict[str, list]]:
             ),
             ("unavailable-unknown-code", "E_SCHEMA", _text(unavailable(code="sleepy"))),
             ("kind-missing", "E_SCHEMA", _without(valid, "kind")),
+            (
+                "legacy-undecided-but-confirmed",
+                "E_INCONSISTENT",
+                _text(
+                    judgement(
+                        legacy_c5={
+                            "reading": "unknown",
+                            "outcome": "failure",
+                            "undecided": True,
+                        }
+                    )
+                ),
+            ),
+            (
+                "valid-for-ever",
+                "E_INCONSISTENT",
+                _text(judgement(valid_until_ns=2**63 - 1)),
+            ),
         ],
     }
 
@@ -717,6 +735,20 @@ def fixture_cases() -> dict[str, dict[str, list]]:
                 _text(runtime("lease", expires_ns=8_000_000_000)),
             ),
             (
+                "policy-server-port-8000",
+                "E_INCONSISTENT",
+                _text(
+                    runtime(
+                        "policy_handle", endpoint={"host": "127.0.0.1", "port": 8000}
+                    )
+                ),
+            ),
+            (
+                "lease-too-long",
+                "E_INCONSISTENT",
+                _text(runtime("lease", expires_ns=8_000_000_000 + 600_000_000_001)),
+            ),
+            (
                 "unknown-kind",
                 "E_SCHEMA",
                 _text({**runtime("quiesce_ack"), "kind": "stop"}),
@@ -776,6 +808,20 @@ def fixture_cases() -> dict[str, dict[str, list]]:
                 "result-on-wrong-transition",
                 "E_INCONSISTENT",
                 _text(run_event("committed", from_state="FORWARD_ACTIVE")),
+            ),
+            (
+                "undecided-counted-as-failure",
+                "E_INCONSISTENT",
+                _text(
+                    run_event(
+                        "committed",
+                        episode_result={
+                            **run_event("committed")["episode_result"],
+                            "task_outcome": "failure",
+                            "goal_verification": "undecided",
+                        },
+                    )
+                ),
             ),
             (
                 "operator-label-in-result",

@@ -38,7 +38,7 @@ with an `AeriError` whose `code` says why:
 | `E_JSON` | not JSON |
 | `E_DUPLICATE_KEY` | a key appears twice in one object |
 | `E_NONFINITE` | `NaN`, `Infinity`, or a number that overflows (`1e400`) |
-| `E_CONTROL_FIELD` | a robot or reset command key anywhere in an A or B message (`robot_stop`, `execute_reset`, `go_home`, `resume`, `command`, any `robot_`/`execute_`/`cmd_`/`force_` prefix…), after Unicode NFKC normalisation and case folding |
+| `E_CONTROL_FIELD` | a robot or reset command key anywhere in an A or B message (`robot_stop`, `execute_reset`, `go_home`, `resume`, `command`, any `robot_`/`execute_`/`cmd_`/`force_` prefix…), after Unicode normalisation: compatibility forms folded, zero-width, soft-hyphen and combining characters dropped, camelCase split, case folded, and spaces, `-`, `.`, `/`, `:` read as `_` (so `robotStop`, `robot.stop`, `ｒｏｂｏｔ＿ｓｔｏｐ` are all caught) |
 | `E_SCHEMA` | wrong schema id, wrong type (strict: `true` is not `1`, `"1"` is not `1`), missing field, value out of range |
 | `E_SCHEMA_TOO_NEW` | a newer `minor` than this reader knows (fail closed) |
 | `E_UNKNOWN_FIELD` | a field the contract does not define, at any depth |
@@ -62,18 +62,35 @@ predicate, all true, and no confirmed or undecided veto; `rejected` needs a
 false required predicate or a confirmed veto. A scene is `ready` only when
 every required predicate is true; `failed_predicates` and
 `unknown_predicates` must list exactly the required predicates that are
-false or unreadable. `valid_until_ns` is later than `produced_ns`. An
-episode id is `<run_id>.<forward|reset>.<NNNN>` and must belong to the
-message's run. A policy endpoint is loopback only and never a robot port. An
-episode result is `success` exactly when the goal was verified. The run
-event has no field for operator labels, and its states are the 13 AERI
-states only.
+false or unreadable. `valid_until_ns` is later than `produced_ns` and at
+most `MAX_RESULT_VALIDITY_MS` (30 s) after it; a lease lasts at most
+`MAX_LEASE_MS` (10 min). An episode id is `<run_id>.<forward|reset>.<NNNN>`
+and must belong to the message's run. A policy endpoint is loopback only and
+never names port 5000, 5001, 5100, 7470 or 8000. An episode result follows
+its goal verification exactly: `verified` is `success`, `contradicted` is
+`failure`, `undecided` and `unavailable` are `unknown` (not judged is never
+counted as a failure). When a judgement carries the online judgement's own
+values (`legacy_c5`), they must agree with the decision: an undecided answer
+is `unknown` / `model_undecided`, a decided success `confirmed`, a decided
+failure `rejected`. The run event has no field for operator labels, and its
+states are the 13 AERI states only. These cross-field rules are not
+expressible in JSON Schema, so the snapshots cannot see them change: the
+`E_INCONSISTENT` fixtures guard them.
 
 **Clocks.** All `*_ns` fields of a message share its `clock_domain`, written
-`host-mono:<boot_id>` for this machine's monotonic clock. Results from
-another clock domain cannot be compared and count as expired:
-`aeri.check_fresh(valid_until_ns, clock_domain, now_ns=..., local=...)`
-raises `E_CLOCK_DOMAIN` or `E_EXPIRED`.
+`host-mono:<boot_id>` for this machine's monotonic clock.
+`aeri.check_fresh(message)` (a judgement, scene assessment or lease) reads
+**the consumer's own clock** (`time.monotonic_ns()` and this host's domain;
+tests may pass both `now_ns` and `local`, never one alone) and raises
+`E_CLOCK_DOMAIN` for another clock domain (it cannot be compared, so it
+counts as expired), `E_FUTURE` when `produced_ns`/`granted_ns` is more than
+`FUTURE_TOLERANCE_NS` (100 ms) ahead of that clock, and `E_EXPIRED` once the
+validity has passed. It is a necessary check, not a sufficient one: the run,
+episode, epoch and request fences come on top. A chunk response's
+`received_ns` is filled by the receiving side from its own clock, never by
+the server, and is for audit only: whether a chunk met its deadline is
+decided by `aeri.check_deadline(deadline)` on the receiver's clock (a passed
+hard deadline raises `E_EXPIRED`, a soft one returns `False`).
 
 **Versions.** A consumer accepts every `minor` up to its own and refuses a
 newer one. A minor version may add optional fields, register event types,
@@ -83,13 +100,32 @@ a shorter control-key list) needs a new major version.
 
 ## Schema snapshots
 
-The models are the source. `uv run levi dev check-contracts` also checks
-`docs/architecture/aeri/v1/<contract>.schema.json` byte for byte and spells
-out every breaking difference. `uv run levi dev check-contracts --write`
-rewrites them, but refuses a change that is breaking within v1 unless
-`--accept-breaking` is given (only before v1 is released). The control-key
-list and the retryable codes are part of each snapshot (`x-levi-*`), so a
-change to them shows up in review.
+The models are the source. `uv run levi dev check-contracts` checks, besides
+the older `docs/architecture/contracts.json`:
+
+1. `docs/architecture/aeri/v1/<contract>.schema.json` against the models,
+   byte for byte, spelling out every breaking difference;
+2. the models against the snapshots **at `git merge-base HEAD main`**
+   (`--base` picks another branch). A breaking change committed together
+   with its rewritten snapshot passes the first check; this one catches it.
+   A base that cannot be read (no git, not the top of a checkout, unknown
+   branch, history too shallow for a merge base) fails the check instead of
+   passing it, so CI must fetch `main` with its history. A snapshot missing
+   at the base is a new contract.
+
+`aeri.RELEASED` is `False` while v1 is not released: until then a breaking
+difference against the base is printed as a note and does not fail. Set it
+to `True` when v1 is released; from then on it fails, and a breaking change
+needs a new major version.
+
+`uv run levi dev check-contracts --write` rewrites the snapshots (the AERI
+schemas and `contracts.json` together: nothing is written when the AERI part
+is refused). It refuses a change that is breaking within v1 unless
+`--accept-breaking` is given; that flag is only for the time before v1 is
+released (it is refused once `RELEASED` is set, and refused without
+`--write`). The control-key list, the retryable codes, the forbidden ports
+and the validity limits are part of each snapshot (`x-levi-*`), so a change
+to them shows up in review.
 
 Fixtures for every contract are in `tests/automatic/fixtures/<contract>/`
 (`valid/`, and `invalid/` named `<case>.<ERROR_CODE>.json`); they are
@@ -120,17 +156,21 @@ is open at a time, `from_state` is the current state, the control epoch
 never goes back, and nothing is prepared after `COMPLETED`.
 
 **Idempotency.** Transaction ids are unique. An action's `idempotency_key`
-is `sha256(run_id, episode_id, control_epoch, kind, step)`; a
-non-idempotent action whose key was ever prepared is refused for good (the
-FR3 server cannot deduplicate a command). `by_command(command_id)` returns
+is `sha256(run_id, episode_id, kind, step)`, deliberately without the control
+epoch: a non-idempotent action (a home, a reset start, policy steps) whose key
+was ever prepared is refused for good, in every later epoch and after any
+recovery (the FR3 server cannot deduplicate a command). `by_command(command_id)` returns
 what an operator command already did, and `expected_seq=` makes an append a
 compare-and-set on the next line number.
 
-**Reading back.** A torn last line (no newline, bad JSON or a broken chain)
-is ignored and, when a writer reopens the journal, set aside in `torn/`. A
-bad line anywhere before the last, or whole chained lines that break the
-transaction rules (an edited file), make the journal **corrupt**: it opens
-read-only and is never written again.
+**Reading back.** Only a last line that has no newline, cannot be decoded as
+JSON or does not chain to the line before is **torn** (a crash): it is
+ignored and, when a writer reopens the journal, set aside in `torn/`. A whole,
+chained line that fails the contract (a newer `minor`, an unknown field, a
+broken rule), a bad line anywhere before the last, or lines that break the
+transaction rules (an edited file) make the journal **corrupt**: nothing is
+cut, it opens read-only, is never written again, and its `effective_state`
+is `FAULT_LOCKED`.
 
 **Recovery.** `Journal.open(...)` then `recover(authority=<recovery
 principal>)` after any restart. It never replays or sends anything:
@@ -144,8 +184,11 @@ principal>)` after any restart. It never replays or sends anything:
   epoch moves the run to `FAULT_LOCKED` / `recovery_ambiguous`. The new
   epoch voids every motion token issued before the crash.
 
-Leaving `FAULT_LOCKED` takes an operator's command (not part of this
-foundation). Tests kill a child process with SIGKILL at each crash point
+Leaving `FAULT_LOCKED` takes an operator's command: the journal accepts a
+transaction out of it only from an operator with a `command_id`, only to
+`PREFLIGHT`, and with a `none` action (a recovery may only re-enter
+`FAULT_LOCKED`). A commit must keep the reason, episode and policy epoch it
+prepared. Tests kill a child process with SIGKILL at each crash point
 (`before_prepared`, `after_prepared`, `after_execute`,
 `after_acknowledged`, `after_committed`) and cut the file at every byte;
 recovery is consistent in every case and the stand-in robot command is

@@ -16,7 +16,7 @@
  "action_horizon": 10,
  "endpoint": {
   "host": "127.0.0.1",
-  "port": 8010
+  "port": 8000
  },
  "policy_epoch": 2
 }

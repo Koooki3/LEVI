@@ -649,7 +649,9 @@
     "cmd_",
     "force_"
   ],
+  "x-levi-future-tolerance-ns": 100000000,
   "x-levi-major": 1,
+  "x-levi-max-result-validity-ms": 30000,
   "x-levi-minor": 0,
   "x-levi-retryable-codes": [
     "gate_closed",

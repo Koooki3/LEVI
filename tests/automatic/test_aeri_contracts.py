@@ -236,7 +236,9 @@ def test_confirmed_needs_a_required_predicate():
 
 def test_rejected_by_a_confirmed_veto_alone():
     message = f.judgement(
-        decision="rejected", vetoes=[{"id": "human_hand", "state": "confirmed"}]
+        decision="rejected",
+        vetoes=[{"id": "human_hand", "state": "confirmed"}],
+        legacy_c5=None,
     )
     assert aeri.validate(message, "judgement").decision == "rejected"
 
@@ -245,6 +247,7 @@ def test_unknown_stands_with_any_predicates():
     message = f.unknown_judgement(
         unknown_reason="conflicting_predicates",
         predicate_results=f.predicates(object_state=True, stable=False),
+        legacy_c5=None,
     )
     assert aeri.validate(message, "judgement").decision == "unknown"
 
@@ -338,14 +341,14 @@ def test_specs_check_predicate_names():
 
 
 def test_freshness_across_clock_domains_counts_as_expired():
-    aeri.check_fresh(10, f.CLOCK, now_ns=9, local=f.CLOCK)
-    for until, domain, code in (
-        (10, f.OTHER_CLOCK, "E_CLOCK_DOMAIN"),
-        (10, f.CLOCK, "E_EXPIRED"),
-    ):
-        with pytest.raises(aeri.AeriError) as caught:
-            aeri.check_fresh(until, domain, now_ns=10, local=f.CLOCK)
-        assert caught.value.code == code
+    message = aeri.validate(f.judgement(), "judgement")
+    now = message.produced_ns
+    aeri.check_fresh(message, now_ns=now, local=f.CLOCK)
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.check_fresh(message, now_ns=now, local=f.OTHER_CLOCK)
+    assert caught.value.code == "E_CLOCK_DOMAIN"
+    with pytest.raises(ValueError):
+        aeri.check_fresh(message, now_ns=now)  # both or neither
     assert aeri.host_clock_domain().startswith("host-mono:")
 
 
@@ -466,3 +469,293 @@ def test_check_contracts_command_passes_and_leaves_the_old_snapshot(capsys):
     assert main([]) == 0
     assert "matches" in capsys.readouterr().out
     assert (ROOT / "docs/architecture/contracts.json").read_text() == before
+
+
+# --- review fixes (each test failed before its fix) -------------------------------------
+
+
+def _result(**over):
+    base = f.run_event("committed")["episode_result"]
+    return f.run_event("committed", episode_result={**base, **over})
+
+
+@pytest.mark.parametrize(
+    ("outcome", "verification", "ok"),
+    [
+        ("success", "verified", True),
+        ("failure", "contradicted", True),
+        ("unknown", "undecided", True),
+        ("unknown", "unavailable", True),
+        ("failure", "undecided", False),
+        ("failure", "unavailable", False),
+        ("unknown", "contradicted", False),
+        ("unknown", "verified", False),
+        ("success", "undecided", False),
+    ],
+)
+def test_episode_result_never_counts_not_known_as_failure(outcome, verification, ok):
+    message = _result(task_outcome=outcome, goal_verification=verification)
+    if ok:
+        aeri.validate(message, "run_event")
+    else:
+        with pytest.raises(aeri.AeriError) as caught:
+            aeri.validate(message, "run_event")
+        assert caught.value.code == "E_INCONSISTENT"
+
+
+def _c5(reading, outcome, undecided):
+    return {"reading": reading, "outcome": outcome, "undecided": undecided}
+
+
+@pytest.mark.parametrize(
+    ("legacy", "fields", "ok"),
+    [
+        (_c5("supported", "success", False), {}, True),
+        (
+            _c5("contradicted", "failure", False),
+            {
+                "decision": "rejected",
+                "predicate_results": f.predicates(object_state=False, stable=True),
+            },
+            True,
+        ),
+        (
+            _c5("unknown", "failure", True),
+            {"decision": "unknown", "unknown_reason": "model_undecided"},
+            True,
+        ),
+        # Contradictions between the online judgement's values and the decision.
+        (_c5("unknown", "failure", True), {}, False),
+        (
+            _c5("unknown", "failure", True),
+            {"decision": "unknown", "unknown_reason": "occluded"},
+            False,
+        ),
+        (_c5("contradicted", "failure", False), {}, False),
+        (
+            _c5("supported", "success", False),
+            {"decision": "unknown", "unknown_reason": "model_undecided"},
+            False,
+        ),
+        (_c5("supported", "success", True), {}, False),
+        (_c5("supported", "success", False), {"provider": "fake"}, False),
+    ],
+)
+def test_legacy_c5_values_must_agree_with_the_decision(legacy, fields, ok):
+    message = f.judgement(legacy_c5=legacy, **fields)
+    if ok:
+        aeri.validate(message, "judgement")
+    else:
+        with pytest.raises(aeri.AeriError) as caught:
+            aeri.validate(message, "judgement")
+        assert caught.value.code == "E_INCONSISTENT"
+
+
+def test_validity_and_lease_spans_are_bounded():
+    produced = f.judgement()["produced_ns"]
+    limit = aeri.MAX_RESULT_VALIDITY_MS * 1_000_000
+    aeri.validate(f.judgement(valid_until_ns=produced + limit), "judgement")
+    for message, contract in (
+        (f.judgement(valid_until_ns=produced + limit + 1), "judgement"),
+        (f.judgement(valid_until_ns=aeri.INT64_MAX), "judgement"),
+        (f.scene(valid_until_ns=aeri.INT64_MAX), "scene"),
+        (f.runtime("lease", expires_ns=aeri.INT64_MAX), "runtime"),
+        (
+            f.runtime(
+                "lease",
+                expires_ns=8_000_000_000 + aeri.MAX_LEASE_MS * 1_000_000 + 1,
+            ),
+            "runtime",
+        ),
+    ):
+        with pytest.raises(aeri.AeriError) as caught:
+            aeri.validate(message, contract)
+        assert caught.value.code == "E_INCONSISTENT"
+    documents = aeri.schema_documents()
+    assert documents["judgement"]["x-levi-max-result-validity-ms"] == 30_000
+    assert documents["runtime"]["x-levi-max-lease-ms"] == aeri.MAX_LEASE_MS
+
+
+def test_check_fresh_refuses_results_from_the_future():
+    message = aeri.validate(f.judgement(), "judgement")
+    now = message.produced_ns
+    aeri.check_fresh(message, now_ns=now, local=f.CLOCK)
+    aeri.check_fresh(message, now_ns=now - aeri.FUTURE_TOLERANCE_NS, local=f.CLOCK)
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.check_fresh(
+            message, now_ns=now - aeri.FUTURE_TOLERANCE_NS - 1, local=f.CLOCK
+        )
+    assert caught.value.code == "E_FUTURE"
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.check_fresh(message, now_ns=message.valid_until_ns, local=f.CLOCK)
+    assert caught.value.code == "E_EXPIRED"
+    lease = aeri.validate(f.runtime("lease"), "runtime")
+    aeri.check_fresh(lease, now_ns=lease.granted_ns, local=f.CLOCK)
+    with pytest.raises(aeri.AeriError):
+        aeri.check_fresh(lease, now_ns=lease.expires_ns, local=f.CLOCK)
+
+
+def test_check_fresh_reads_this_hosts_clock_by_default():
+    import time as _time
+
+    now = _time.monotonic_ns()
+    message = aeri.validate(
+        f.judgement(
+            clock_domain=aeri.host_clock_domain(),
+            observed_through_ns=now - 1000,
+            produced_ns=now,
+            valid_until_ns=now + 10_000_000_000,
+        ),
+        "judgement",
+    )
+    aeri.check_fresh(message)
+    # Another domain (here the fixtures') counts as expired.
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.check_fresh(aeri.validate(f.judgement(), "judgement"))
+    assert caught.value.code == "E_CLOCK_DOMAIN"
+
+
+def test_chunk_deadline_is_judged_by_the_receivers_clock():
+    response = aeri.validate(f.runtime("chunk_response"), "runtime")
+    request = aeri.validate(f.runtime("chunk_request"), "runtime")
+    due = request.deadline.due_ns
+    # received_ns says it arrived in time; C's own clock says it did not.
+    assert response.received_ns <= due
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.check_deadline(request.deadline, now_ns=due + 1, local=f.CLOCK)
+    assert caught.value.code == "E_EXPIRED"
+    aeri.check_deadline(request.deadline, now_ns=due, local=f.CLOCK)
+    schema = aeri.schema_documents()["runtime"]["$defs"]["ChunkResponse"]
+    assert "receiving side" in schema["properties"]["received_ns"]["description"]
+
+
+@pytest.mark.parametrize("port", [8000, 5000, 5001, 5100, 7470])
+def test_robot_and_policy_server_ports_are_refused(port):
+    message = f.runtime("policy_handle", endpoint={"host": "127.0.0.1", "port": port})
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.validate(message, "runtime")
+    assert caught.value.code == "E_INCONSISTENT"
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "robot.stop",
+        "robot/stop",
+        "robot:stop",
+        "robotMove",
+        "executeAnything",
+        "cmdHome",
+        "forceStop",
+        "robot\u200bstop",
+        "r̵obot_stop",
+        "ROBOT­STOP",
+    ],
+)
+def test_control_key_spellings_report_the_control_code(key):
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.validate({**f.event(), key: True}, "event")
+    assert caught.value.code == "E_CONTROL_FIELD", key
+
+
+def test_no_contract_has_a_free_form_object():
+    def walk(node, path="$"):
+        if isinstance(node, dict):
+            if node.get("type") == "object" or "properties" in node:
+                assert node.get("additionalProperties") is False, path
+            assert "patternProperties" not in node, path
+            for key, value in node.items():
+                yield from walk(value, f"{path}.{key}")
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                yield from walk(value, f"{path}[{index}]")
+        yield path
+
+    for document in aeri.schema_documents().values():
+        list(walk(document))
+
+
+# --- snapshots against the base branch ------------------------------------------------
+
+
+def _git(root, *args):
+    return subprocess.run(
+        ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+    ).stdout
+
+
+def _repo(tmp_path, texts):
+    root = tmp_path / "repo"
+    root.mkdir(parents=True)
+    _git(root, "init", "-q", "-b", "main")
+    for relative, text in texts.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    _git(root, "add", "-A")
+    _git(
+        root,
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-q",
+        "-m",
+        "base",
+    )
+    _git(root, "checkout", "-q", "-b", "feature")
+    return root
+
+
+def _shrunk_judgement():
+    """The judgement snapshot as if the base had one more decision value:
+    the current models then drop it (a breaking change against the base)."""
+    texts = aeri.snapshot_texts()
+    relative = f"{aeri.SNAPSHOT_DIR}/judgement.schema.json"
+    document = json.loads(texts[relative])
+    document["$defs"]["Judgement"]["properties"]["decision"]["enum"].append("probably")
+    return {**texts, relative: aeri.render_schema(document)}
+
+
+def test_breaking_change_against_the_base_branch_is_reported(tmp_path, monkeypatch):
+    root = _repo(tmp_path, _shrunk_judgement())
+    # The feature branch commits snapshots that match its models (as
+    # --write --accept-breaking would): the same-tree check passes...
+    for relative, text in aeri.snapshot_texts().items():
+        (root / relative).write_text(text)
+    assert aeri.check_snapshots(root) == []
+    # ...the comparison with the base does not, once v1 is released.
+    monkeypatch.setattr(aeri, "RELEASED", True)
+    problems, notes = aeri.check_against_base(root, "main")
+    assert any("judgement.schema.json" in p and "probably" in p for p in problems)
+    monkeypatch.setattr(aeri, "RELEASED", False)
+    problems, notes = aeri.check_against_base(root, "main")
+    assert problems == [] and any("probably" in n for n in notes)
+
+
+def test_compatible_or_new_snapshots_pass_against_the_base(tmp_path, monkeypatch):
+    monkeypatch.setattr(aeri, "RELEASED", True)
+    root = _repo(tmp_path, aeri.snapshot_texts())
+    assert aeri.check_against_base(root, "main") == ([], [])
+    empty = _repo(tmp_path / "x", {"README": "no contracts yet\n"})
+    problems, notes = aeri.check_against_base(empty, "main")
+    assert problems == [] and all("new" in n for n in notes) and len(notes) == 5
+
+
+def test_an_unreadable_base_fails_instead_of_passing(tmp_path):
+    root = _repo(tmp_path, aeri.snapshot_texts())
+    problems, _ = aeri.check_against_base(root, "no-such-branch")
+    assert problems and "no-such-branch" in problems[0]
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    problems, _ = aeri.check_against_base(plain, "main")
+    assert problems
+
+
+def test_accept_breaking_needs_write():
+    from levi.domain.schema_catalog import main
+
+    with pytest.raises(SystemExit) as caught:
+        main(["--accept-breaking"])
+    assert caught.value.code == 2
