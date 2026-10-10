@@ -585,6 +585,10 @@ def start(
         raise RecapError(400, "lookahead must be at least 1")
     if not 0 < request["positive_quantile"] < 1:
         raise RecapError(400, "positive_quantile must lie strictly between 0 and 1")
+    try:
+        writing = store.layout()
+    except ValueError as exc:
+        raise RecapError(400, str(exc)) from exc
     with _LOCK, store.locked(ds.name):
         running = active(ds.name)
         if running is not None:
@@ -592,6 +596,8 @@ def start(
                 409,
                 f"A RECAP value job ({running['id']}) is already running for this dataset",
             )
+        if writing == store.MODELS and episodes is not None:
+            _refuse_unmergeable(ds, manifest, request, filtering)
         base = store.root(ds.name)
         job_id = naming.timestamp_id(_jobs_dir(ds.name), ".json")
         plan_path = base / "plans" / f"{job_id}.json"
@@ -878,6 +884,7 @@ def collect(job: dict[str, Any]) -> dict[str, Any]:
                 job.update(
                     status="succeeded",
                     revision_id=revision["revision_id"],
+                    version=revision.get("version"),
                     progress={
                         "stage": "saving",
                         "done": revision["frames"],
@@ -923,6 +930,68 @@ def cancel(job: dict[str, Any]) -> dict[str, Any]:
         _stop(process, grace=5.0)
     _forget(_key(job))
     return job
+
+
+# ---------------------------------------------------------------- merging
+
+
+def _refuse_unmergeable(
+    ds: Dataset,
+    manifest: checkpoints.Manifest,
+    request: dict[str, Any],
+    filtering: dict[str, Any],
+) -> None:
+    """Before a subset run starts (and spends GPU time), refuse it when its
+    episodes could not be merged into the model's stored result: a parameter
+    known now differs, or the threshold or return range would come from this
+    subset's own statistics. ``store.publish_model`` checks the full
+    signature again when the values arrive."""
+    old = (
+        store.revision(ds.name, manifest.name)
+        if store.head(ds.name, manifest.name)
+        else None
+    )
+    if not old or old.get("layout") != store.MODELS:
+        return
+    expected: dict[str, Any] = {
+        "provider": manifest.provider,
+        "checkpoint_sha256": manifest.sha256,
+        "precision": manifest.precision,
+        "value_support": [manifest.num_bins, manifest.v_min, manifest.v_max],
+        "dataset_type": request["dataset_type"],
+        "lookahead": request["lookahead"],
+        "gamma": float(manifest.gamma),
+        "failure_reward": float(manifest.failure_reward),
+        "static_filter": {
+            k: filtering.get(k) for k in ("mode", "applied", "rule", "params")
+        },
+    }
+    if request["dataset_type"] != "value_only":
+        if request["threshold"] is not None:
+            expected["threshold"] = float(request["threshold"])
+        elif manifest.unified_threshold is not None:
+            expected["threshold"] = float(manifest.unified_threshold)
+        else:
+            expected["threshold"] = "a quantile of this subset's advantages"
+        if manifest.return_min is not None and manifest.return_max is not None:
+            expected["return_min"] = float(manifest.return_min)
+            expected["return_max"] = float(manifest.return_max)
+        else:
+            expected["return_min"] = "this subset's returns"
+    stored = store.signature(old)
+    fingerprint = ds.fingerprint()
+    expected["fingerprint"] = {
+        "source_fingerprint": fingerprint.get("source_fingerprint"),
+        "dataset_revision": fingerprint.get("dataset_revision"),
+    }
+    differs = [key for key, value in expected.items() if stored.get(key) != value]
+    if differs:
+        raise RecapError(
+            409,
+            f"The stored {manifest.name} result on this dataset was computed with "
+            f"different parameters ({', '.join(differs)}); recompute the whole "
+            "dataset instead of a subset",
+        )
 
 
 # ---------------------------------------------------------------- publish
@@ -1080,7 +1149,11 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         ),
     }
     return store.publish(
-        job["name"], per_episode, meta, dataset_name=plan["dataset"]["name"]
+        job["name"],
+        per_episode,
+        meta,
+        dataset_name=plan["dataset"]["name"],
+        subset=request["episodes"] is not None,
     )
 
 
@@ -1104,7 +1177,11 @@ def _publish_values_only(job, plan, manifest, result, per_episode):
         "labels": False,
     }
     return store.publish(
-        job["name"], per_episode, meta, dataset_name=plan["dataset"]["name"]
+        job["name"],
+        per_episode,
+        meta,
+        dataset_name=plan["dataset"]["name"],
+        subset=request["episodes"] is not None,
     )
 
 
@@ -1181,6 +1258,9 @@ def current(ds: Dataset) -> dict[str, Any] | None:
     reasons = stale_reasons(ds, record)
     return {
         "revision_id": record["revision_id"],
+        "model": record.get("model"),
+        "version": record["version"],
+        "layout": record["layout"],
         "checkpoint": record["checkpoint"]["name"],
         "provider": record["provider"],
         "created_at": record["created_at"],
@@ -1235,11 +1315,25 @@ def status(repo_id: str, *, reconcile: bool = True) -> dict[str, Any]:
     }
 
 
-def _published(name: str, revision_id: str | None) -> dict[str, Any]:
-    """The revision a read asks for: ``revision_id``, else the current one."""
-    if revision_id is not None and not naming.is_timestamp_id(revision_id):
-        raise RecapError(400, f"{revision_id!r} is not a revision id")
+def _published(
+    name: str, revision_id: str | None, version: str | None = None
+) -> dict[str, Any]:
+    """The result a read asks for: ``revision_id`` (a value model's name or
+    an original-layout revision id), else the current one. ``version`` pins
+    the version the reader saw: a result recomputed since answers 409."""
+    if revision_id is not None and not (
+        naming.is_timestamp_id(revision_id) or store.is_model_name(revision_id)
+    ):
+        raise RecapError(400, f"{revision_id!r} is not a revision id or model name")
+    if version is not None and not naming.is_timestamp_id(version):
+        raise RecapError(400, f"{version!r} is not a result version")
     record = store.revision(name, revision_id)
+    if record and version is not None and record["version"] != version:
+        raise RecapError(
+            409,
+            f"The {record['revision_id']} result was recomputed (version "
+            f"{record['version']}, not {version}); reload it",
+        )
     if not record:
         raise RecapError(
             404,
@@ -1251,17 +1345,27 @@ def _published(name: str, revision_id: str | None) -> dict[str, Any]:
 
 
 def episode_payload(
-    repo_id: str, episode: int, revision_id: str | None = None
+    repo_id: str,
+    episode: int,
+    revision_id: str | None = None,
+    version: str | None = None,
 ) -> dict[str, Any]:
     ds = dataset(repo_id)
-    record = _published(ds.name, revision_id)
-    table = store.read_episode(ds.name, episode, record["revision_id"])
+    record = _published(ds.name, revision_id, version)
+    # Read inside the version just resolved: a recomputation switching the
+    # head meanwhile leaves this version on disk for the grace period.
+    table = store.read_episode(
+        ds.name, episode, record["revision_id"], record["version"]
+    )
     if table is None:
         raise RecapError(404, f"No advantage labels for episode {episode}")
     columns = table.to_pydict()
     return {
         "episode_index": episode,
         "revision_id": record["revision_id"],
+        "model": record.get("model"),
+        "version": record["version"],
+        "computed_at": record.get("created_at"),
         "fps": float(record.get("fps") or ds.fps),
         "threshold": record["threshold"],
         "frame_index": columns["frame_index"],
@@ -1278,10 +1382,12 @@ def episode_payload(
     }
 
 
-def summary_payload(repo_id: str, revision_id: str | None = None) -> dict[str, Any]:
+def summary_payload(
+    repo_id: str, revision_id: str | None = None, version: str | None = None
+) -> dict[str, Any]:
     ds = dataset(repo_id)
-    record = _published(ds.name, revision_id)
-    value = store.summary(ds.name, record["revision_id"])
+    record = _published(ds.name, revision_id, version)
+    value = store.summary(ds.name, record["revision_id"], record["version"])
     if not value:
         raise RecapError(404, "No advantage labels for this dataset yet")
     return value
@@ -1345,8 +1451,8 @@ def unified_threshold(
     parts, rows, keys = [], [], set()
     for repo_id in repo_ids:
         ds = dataset(repo_id)
-        rid = store.current_id(ds.name)
-        record = store.revision(ds.name, rid) if rid else None
+        record = store.revision(ds.name)
+        rid = record["revision_id"] if record else None
         if not record:
             raise RecapError(400, f"{repo_id} has no computed revision")
         if not has_labels(record):
@@ -1356,7 +1462,7 @@ def unified_threshold(
                 "set its dataset type or label outcomes and recompute",
             )
         table = pq.read_table(
-            store.root(ds.name) / "revisions" / rid / "advantages.parquet",
+            store.advantages_path(ds.name, rid, record["version"]),
             columns=["advantage_continuous"],
         )
         scores = table.column("advantage_continuous").to_numpy()
@@ -1374,6 +1480,7 @@ def unified_threshold(
             {
                 "repo_id": repo_id,
                 "revision_id": rid,
+                "version": record["version"],
                 "dataset_type": record.get("dataset_type"),
                 "frames": len(scores),
                 "positive_quantile": record.get("positive_quantile"),

@@ -32,6 +32,9 @@ def _brief(ds: jobs.Dataset, record: dict[str, Any], current: str | None):
     manifest = checkpoint.get("manifest") or {}
     return {
         "revision_id": record["revision_id"],
+        "model": record.get("model"),
+        "version": record.get("version"),
+        "layout": record.get("layout"),
         "checkpoint": checkpoint.get("name"),
         "step": manifest.get("step"),
         "provider": record.get("provider"),
@@ -62,16 +65,15 @@ def _brief(ds: jobs.Dataset, record: dict[str, Any], current: str | None):
 
 
 def revisions_payload(repo_id: str) -> dict[str, Any]:
-    """Published revisions, newest first; browsing never changes current."""
+    """Published results, newest computation first: one per value model
+    (``layout: models``), then any original-layout revisions. Browsing
+    never changes current. ``results`` is the same list under its new name."""
     ds = jobs.dataset(repo_id)
     current = store.current_id(ds.name)
-    records = (
-        store.revision(ds.name, rid) for rid in reversed(store.revisions(ds.name))
-    )
-    return {
-        "current": current,
-        "revisions": [_brief(ds, record, current) for record in records if record],
-    }
+    records = [store.revision(ds.name, ref) for ref in store.results(ds.name)]
+    rows = [_brief(ds, record, current) for record in records if record]
+    rows.sort(key=lambda r: (r.get("created_at") or 0, r["revision_id"]), reverse=True)
+    return {"current": current, "revisions": rows, "results": rows}
 
 
 def _pearson(a: np.ndarray, b: np.ndarray) -> float | None:
@@ -156,11 +158,20 @@ def _return_units(values, record):
     return (values + 1.0) * (hi - lo) + lo
 
 
-def compare_payload(repo_id: str, rid_a: str, rid_b: str) -> dict[str, Any]:
-    """Compare two revisions on common frames; reject different source data."""
+def compare_payload(
+    repo_id: str,
+    rid_a: str,
+    rid_b: str,
+    version_a: str | None = None,
+    version_b: str | None = None,
+) -> dict[str, Any]:
+    """Compare two results on common frames; reject different source data.
+    Both versions are fixed once, at the start, and every episode is read
+    from them (``version_a``/``version_b`` pin what the reader saw: 409 if
+    recomputed since)."""
     ds = jobs.dataset(repo_id)
-    rec_a = jobs._published(ds.name, rid_a)
-    rec_b = jobs._published(ds.name, rid_b)
+    rec_a = jobs._published(ds.name, rid_a, version_a)
+    rec_b = jobs._published(ds.name, rid_b, version_b)
     if rid_a == rid_b:
         raise jobs.RecapError(400, "Choose two different revisions to compare")
     fp_a, fp_b = _fingerprint(rec_a), _fingerprint(rec_b)
@@ -182,8 +193,12 @@ def compare_payload(repo_id: str, rid_a: str, rid_b: str) -> dict[str, Any]:
     saved_a, saved_b = rec_a.get("outcomes") or {}, rec_b.get("outcomes") or {}
     outcome_changes = False
     for ep in shared:
-        table_a = store.read_episode(ds.name, ep, rec_a["revision_id"])
-        table_b = store.read_episode(ds.name, ep, rec_b["revision_id"])
+        table_a = store.read_episode(
+            ds.name, ep, rec_a["revision_id"], rec_a["version"]
+        )
+        table_b = store.read_episode(
+            ds.name, ep, rec_b["revision_id"], rec_b["version"]
+        )
         if table_a is None or table_b is None:
             raise jobs.RecapError(409, f"A published revision is missing episode {ep}")
         common, joined = _join(table_a, table_b, labelled)

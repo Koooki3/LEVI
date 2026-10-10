@@ -3131,13 +3131,17 @@ def _recap_optional(call, optional: bool):
 
 @app.get("/api/recap/summary")
 def recap_summary(
-    repo_id: str, optional: bool = False, revision_id: str | None = None
+    repo_id: str,
+    optional: bool = False,
+    revision_id: str | None = None,
+    version: str | None = None,
 ) -> JSONResponse:
     from levi.recap import jobs as recap_jobs
 
     return JSONResponse(
         _recap_optional(
-            lambda: recap_jobs.summary_payload(repo_id, revision_id), optional
+            lambda: recap_jobs.summary_payload(repo_id, revision_id, version),
+            optional,
         )
     )
 
@@ -3148,21 +3152,26 @@ def recap_episode(
     repo_id: str,
     optional: bool = False,
     revision_id: str | None = None,
+    version: str | None = None,
 ) -> JSONResponse:
     from levi.recap import jobs as recap_jobs
 
     return JSONResponse(
         _recap_optional(
-            lambda: recap_jobs.episode_payload(repo_id, episode_index, revision_id),
+            lambda: recap_jobs.episode_payload(
+                repo_id, episode_index, revision_id, version
+            ),
             optional,
         )
     )
 
 
-# Every published revision of the dataset (one per run, so one per value-model
-# version), and a side-by-side comparison of two of them. Read-only: which
-# revision is "current" is only changed by running again.
+# Every published result of the dataset (one per value model in the "models"
+# layout; one per run in the original "revisions" layout), and a side-by-side
+# comparison of two of them. Read-only: which result is "current" is only
+# changed by running again. /results is the new name of /revisions.
 @app.get("/api/recap/revisions")
+@app.get("/api/recap/results")
 def recap_revisions(repo_id: str) -> JSONResponse:
     from levi.recap import compare
 
@@ -3170,10 +3179,20 @@ def recap_revisions(repo_id: str) -> JSONResponse:
 
 
 @app.get("/api/recap/compare")
-def recap_compare(repo_id: str, a: str, b: str) -> JSONResponse:
+def recap_compare(
+    repo_id: str,
+    a: str,
+    b: str,
+    version_a: str | None = None,
+    version_b: str | None = None,
+) -> JSONResponse:
     from levi.recap import compare
 
-    return JSONResponse(_recap_call(lambda: compare.compare_payload(repo_id, a, b)))
+    return JSONResponse(
+        _recap_call(
+            lambda: compare.compare_payload(repo_id, a, b, version_a, version_b)
+        )
+    )
 
 
 # --- Anchored review: per-event evidence of the newest anchored review ------
