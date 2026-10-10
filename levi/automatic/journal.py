@@ -844,9 +844,19 @@ class Journal:
 
     # ---------------------------------------------------------- recovery
 
-    def recover(self, *, authority: dict) -> Recovery:
+    def recover(
+        self,
+        *,
+        authority: dict,
+        episode_id: str | None = None,
+        episode_role: str | None = None,
+        episode_result: dict | None = None,
+    ) -> Recovery:
         """Make the journal safe after a restart (see the module text).
-        ``authority`` must be a ``recovery`` principal."""
+        ``authority`` must be a ``recovery`` principal. The orchestrator may
+        pass the result of the episode the crash cut short (task_outcome
+        unknown, stop_reason orchestrator_crash): it goes on the committed
+        move to FAULT_LOCKED, which then names that episode."""
         if self.corrupt is not None:
             return Recovery(
                 "FAULT_LOCKED", "journal_corrupt", None, detail=self.corrupt
@@ -880,9 +890,11 @@ class Journal:
                 authority=authority,
                 control_epoch=epoch,
                 params={"previous_state": previous},
+                episode_id=episode_id if episode_result is not None else None,
+                episode_role=episode_role if episode_result is not None else None,
             )
         )
-        written.append(self.commit(authority=authority))
+        written.append(self.commit(authority=authority, episode_result=episode_result))
         return Recovery(
             "FAULT_LOCKED",
             "recovery_ambiguous",

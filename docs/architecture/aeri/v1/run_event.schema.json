@@ -245,7 +245,9 @@
             "safety_stop",
             "policy_error",
             "watchdog_timeout",
-            "orchestrator_crash"
+            "orchestrator_crash",
+            "recorder_failed",
+            "home_failed"
           ],
           "title": "Stop Reason",
           "type": "string"
@@ -583,6 +585,7 @@
             "journal_corrupt",
             "preflight_passed",
             "preflight_failed",
+            "robot_home_reached",
             "scene_ready",
             "scene_reset_required",
             "scene_unknown",
