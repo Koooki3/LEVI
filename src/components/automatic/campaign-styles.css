@@ -32,3 +32,195 @@
 .ac-unblind[open] > summary {
   margin-bottom: var(--ds-space-3);
 }
+
+/* ── Report ─────────────────────────────────────────────────────────── */
+.ac-basis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-3);
+  align-items: flex-end;
+  margin: var(--ds-space-4) 0;
+}
+.ac-figures {
+  display: grid;
+  gap: var(--ds-space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+}
+.ac-figure {
+  margin: 0;
+  padding: var(--ds-space-3);
+  min-width: 0;
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-1);
+}
+.ac-figure figcaption {
+  color: var(--ds-text-primary);
+  font-weight: var(--ds-weight-semibold);
+}
+.ac-fig-summary,
+.ac-fig-notes {
+  margin: var(--ds-space-1) 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+}
+.ac-fig-notes {
+  padding-left: var(--ds-space-4);
+}
+.ac-plots {
+  display: grid;
+  gap: var(--ds-space-3);
+}
+.ac-plot {
+  width: 100%;
+  overflow: hidden;
+}
+.ac-plot-title {
+  margin: var(--ds-space-2) 0 0;
+  font-size: var(--ds-text-callout-size);
+}
+.ac-axis-label {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.ac-axis-label--x {
+  text-align: right;
+}
+
+/* Series colours: the data palette in its fixed order. Recharts draws with
+   currentColor, so the class only sets `color`. Each series also has its own
+   marker shape and (for lines) dash, and its name is in the legend. */
+.ac-s0 {
+  color: var(--ds-data-1);
+}
+.ac-s1 {
+  color: var(--ds-data-2);
+}
+.ac-s2 {
+  color: var(--ds-data-3);
+}
+.ac-s3 {
+  color: var(--ds-data-4);
+}
+.ac-s4 {
+  color: var(--ds-data-5);
+}
+.ac-s5 {
+  color: var(--ds-data-6);
+}
+.ac-s6 {
+  color: var(--ds-data-7);
+}
+.ac-s7 {
+  color: var(--ds-data-8);
+}
+.ac-figure .recharts-bar-rectangle path {
+  stroke: var(--ds-surface-1);
+  stroke-width: 1;
+}
+.ac-figure .recharts-errorBar line {
+  stroke: var(--ds-text-primary);
+}
+.ac-figure .recharts-cartesian-grid line {
+  stroke: var(--ds-separator);
+}
+.ac-figure .recharts-cartesian-axis-line {
+  stroke: var(--ds-separator-strong);
+}
+.ac-figure .recharts-cartesian-axis-tick-value,
+.ac-figure .recharts-label-list text {
+  fill: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.ac-figure .ac-ref line {
+  stroke: var(--ds-text-tertiary);
+  stroke-dasharray: 4 3;
+}
+.ac-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-1) var(--ds-space-4);
+  margin: var(--ds-space-2) 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--ds-text-caption-size);
+}
+.ac-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ac-legend li span {
+  color: var(--ds-text-primary);
+}
+.ac-legend li.ac-emph span {
+  font-weight: var(--ds-weight-semibold);
+}
+.ac-table-scroll {
+  overflow-x: auto;
+}
+.ac-table-scroll:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+.ac-data,
+.ac-heat {
+  border-collapse: collapse;
+  font-size: var(--ds-text-callout-size);
+}
+.ac-data caption,
+.ac-heat caption {
+  text-align: left;
+  color: var(--ds-text-secondary);
+  padding-bottom: var(--ds-space-1);
+}
+.ac-data th,
+.ac-data td,
+.ac-heat th,
+.ac-heat td {
+  border-bottom: 1px solid var(--ds-separator);
+  padding: var(--ds-space-1) var(--ds-space-3);
+  text-align: left;
+}
+.ac-heat__cell {
+  text-align: center;
+  background: color-mix(
+    in srgb,
+    var(--ds-data-1) calc(var(--ac-share, 0%) * 0.6),
+    var(--ds-surface-1)
+  );
+  color: var(--ds-text-primary);
+}
+.ac-heat__cell strong {
+  display: block;
+}
+.ac-fig-table summary {
+  cursor: pointer;
+}
+.ac-fig-table summary:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+.ac-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2) var(--ds-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ac-files a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+}
+.ac-manifest pre {
+  max-height: 360px;
+  overflow: auto;
+}
+.ac-summary {
+  max-width: 80ch;
+}
