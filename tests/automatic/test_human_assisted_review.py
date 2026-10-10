@@ -6,6 +6,7 @@ missed."""
 import dataclasses
 import hashlib
 import json
+import os
 import threading
 
 import pytest
@@ -166,6 +167,20 @@ def test_an_answer_to_another_request_never_takes_the_open_one(tmp_path):
     assert rig.scene.collect(ticket, timeout_ns=10**9) is not None
 
 
+def test_with_two_questions_open_each_answer_goes_to_its_own(tmp_path):
+    transport = human.QueueTransport()
+    rig = person_run(tmp_path, transport)
+    first = rig.scene.submit(request(1))
+    second = rig.scene.submit(request(2))
+    transport.answer(second.request_id, {**YES, "gripper_open": False})
+    found = rig.scene.collect(second, timeout_ns=10**9)
+    assert json.loads(found)["decision"] == "reset_required"
+    assert codes(rig.scene) == []
+    assert rig.scene.collect(first, timeout_ns=10**9) is None  # still unanswered
+    transport.answer(first.request_id, YES)
+    assert json.loads(rig.scene.collect(first, timeout_ns=10**9))["decision"] == "ready"
+
+
 # --- I1: the question shows the frames it asks about -----------------------------------------
 
 
@@ -287,11 +302,17 @@ def test_run_config_needs_a_contract_for_a_persons_check():
 def test_every_evidence_file_is_synced_before_its_rename_and_the_folder_after(
     tmp_path, monkeypatch
 ):
+    import stat
+
     calls = []
     real_fsync, real_replace = rec.os.fsync, rec.os.replace
-    monkeypatch.setattr(
-        rec.os, "fsync", lambda fd: (calls.append("fsync"), real_fsync(fd))[1]
-    )
+
+    def fsync(fd):
+        kind = "file" if stat.S_ISREG(os.fstat(fd).st_mode) else "folder"
+        calls.append(f"fsync {kind}")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(rec.os, "fsync", fsync)
     monkeypatch.setattr(
         rec.os,
         "replace",
@@ -308,7 +329,7 @@ def test_every_evidence_file_is_synced_before_its_rename_and_the_folder_after(
     assert len(renames) == 2  # the frame, then the record
     for index in renames:
         name = calls[index].split()[1]
-        assert calls[index - 1] == "fsync", calls
+        assert calls[index - 1] == "fsync file", calls
         folder = "frames" if name != "q-1.json" else "evidence"
         assert f"dir {folder}" in calls[index + 1 :], calls
 
@@ -354,8 +375,6 @@ def test_no_motion_token_when_a_stop_leaves_the_arm_where_it_is(tmp_path):
 
 
 def test_the_file_transport_reads_no_link_and_no_fifo(tmp_path):
-    import os
-
     root = tmp_path / "scene"
     transport = human.FileTransport(root)
     transport.reachable()
