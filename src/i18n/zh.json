@@ -2704,7 +2704,6 @@
   "Current result": "当前默认结果",
   "Advantage computation progress": "优势计算进度",
   "Value-model checkpoint for computation": "用于计算的价值模型检查点",
-  "Dataset label rule": "数据标签规则",
   "Policy rollouts": "策略 rollout",
   "Demonstrations (SFT)": "示范数据（SFT）",
   "Could not load saved results": "历史结果列表加载失败",
@@ -2827,8 +2826,6 @@
   "Per-frame |B − A| distribution": "逐帧 |B − A| 分布",
   "Per-episode mean Value difference (B − A)": "逐片段平均价值差（B − A）",
   "episodes with the largest differences": "个差值最大的片段",
-  "B higher in": "B 更高的片段数",
-  "A higher in": "A 更高的片段数",
   "Bars above zero: B's mean Value is higher on that episode; below zero: A's. The current episode is outlined.": "柱在 0 以上：该片段 B 的平均价值更高；在 0 以下：A 更高。当前片段带描边。",
   "current": "当前",
   "Comparison charts": "对比统计图",
@@ -2847,5 +2844,6 @@
   "Label rule now": "当前标签规则",
   "Label rule for this dataset": "该数据集的标签规则",
   "Automatic (recommended)": "自动判定（推荐）",
-  "Save label rule": "保存标签规则"
+  "Save label rule": "保存标签规则",
+  "Of {total} episodes: B higher in {b}, A higher in {a}, equal in {same}.": "共 {total} 个片段：B 更高 {b} 个，A 更高 {a} 个，相同 {same} 个。"
 }

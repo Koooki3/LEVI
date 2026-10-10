@@ -2704,7 +2704,6 @@
   "Current result": "Current result",
   "Advantage computation progress": "Advantage computation progress",
   "Value-model checkpoint for computation": "Value-model checkpoint for computation",
-  "Dataset label rule": "Dataset label rule",
   "Policy rollouts": "Policy rollouts",
   "Demonstrations (SFT)": "Demonstrations (SFT)",
   "Could not load saved results": "Could not load saved results",
@@ -2827,8 +2826,6 @@
   "Per-frame |B − A| distribution": "Per-frame |B − A| distribution",
   "Per-episode mean Value difference (B − A)": "Per-episode mean Value difference (B − A)",
   "episodes with the largest differences": "episodes with the largest differences",
-  "B higher in": "B higher in",
-  "A higher in": "A higher in",
   "Bars above zero: B's mean Value is higher on that episode; below zero: A's. The current episode is outlined.": "Bars above zero: B's mean Value is higher on that episode; below zero: A's. The current episode is outlined.",
   "current": "current",
   "Comparison charts": "Comparison charts",
@@ -2847,5 +2844,6 @@
   "Label rule now": "Label rule now",
   "Label rule for this dataset": "Label rule for this dataset",
   "Automatic (recommended)": "Automatic (recommended)",
-  "Save label rule": "Save label rule"
+  "Save label rule": "Save label rule",
+  "Of {total} episodes: B higher in {b}, A higher in {a}, equal in {same}.": "Of {total} episodes: B higher in {b}, A higher in {a}, equal in {same}."
 }

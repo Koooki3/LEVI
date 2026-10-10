@@ -160,6 +160,18 @@ describe("comparison chart data", () => {
     expect(small.rows).toHaveLength(5);
   });
 
+  test("the per-episode counts cover every episode, not only the bars drawn", () => {
+    // 200 episodes: 120 where B is higher, 70 where A is, 10 equal; only
+    // the 60 largest differences are drawn.
+    const rows = Array.from({ length: 200 }, (_, i) =>
+      row(i, null, -0.5, i < 120 ? -0.4 - i * 0.0001 : i < 190 ? -0.6 : -0.5),
+    );
+    const bars = episodeDiffBars(comparison(rows), null);
+    expect(bars.rows).toHaveLength(EPISODE_BAR_LIMIT);
+    expect(bars.counts).toEqual({ higherB: 120, higherA: 70, equal: 10 });
+    expect(bars.total).toBe(200);
+  });
+
   test("chart numbers never print a negative zero", () => {
     expect(chartNumber(-0.0001, 2)).toBe("0.00");
     expect(chartNumber(-0.25, 2)).toBe("-0.25");

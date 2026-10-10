@@ -232,12 +232,17 @@ export const EPISODE_BAR_LIMIT = 60;
 
 /** Per-episode mean-V differences, largest first by sign. Past `limit`
  * episodes only the `limit` largest |B − A| are kept (the current episode is
- * always kept); `total` says how many there were. */
+ * always kept); `total` and `counts` describe every episode. */
 export function episodeDiffBars(
   data: RecapComparison,
   currentEpisode: number | null,
   limit = EPISODE_BAR_LIMIT,
-): { rows: EpisodeDiffBar[]; total: number } {
+): {
+  rows: EpisodeDiffBar[];
+  total: number;
+  /** Over every episode, not only the bars kept. */
+  counts: { higherB: number; higherA: number; equal: number };
+} {
   const all = data.per_episode
     .filter((row) => finite(row.mean_value_a) && finite(row.mean_value_b))
     .map((row) => ({
@@ -256,9 +261,15 @@ export function episodeDiffBars(
     if (current && !kept.includes(current))
       kept = [...kept.slice(0, -1), current];
   }
+  const counts = { higherB: 0, higherA: 0, equal: 0 };
+  for (const row of all)
+    if (row.diff > 0) counts.higherB += 1;
+    else if (row.diff < 0) counts.higherA += 1;
+    else counts.equal += 1;
   return {
     rows: [...kept].sort((x, y) => y.diff - x.diff || x.episode - y.episode),
     total: all.length,
+    counts,
   };
 }
 

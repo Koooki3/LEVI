@@ -469,7 +469,6 @@ export function RecapComparisonCharts({
 
   if (episodes.rows.length) {
     const caption = t("Per-episode mean Value difference (B − A)");
-    const higherB = episodes.rows.filter((row) => row.diff > 0).length;
     figures.push(
       <figure className="recap-chart" key="episodes">
         <figcaption>
@@ -483,17 +482,13 @@ export function RecapComparisonCharts({
               t("episodes with the largest differences")}
         </figcaption>
         <Plot
-          summary={
-            t("B higher in") +
-            " " +
-            higherB +
-            ", " +
-            t("A higher in") +
-            " " +
-            (episodes.rows.length - higherB) +
-            " " +
-            t("episodes")
-          }
+          summary={t(
+            "Of {total} episodes: B higher in {b}, A higher in {a}, equal in {same}.",
+          )
+            .replace("{total}", String(episodes.total))
+            .replace("{b}", String(episodes.counts.higherB))
+            .replace("{a}", String(episodes.counts.higherA))
+            .replace("{same}", String(episodes.counts.equal))}
         >
           {(width) => (
             <BarChart

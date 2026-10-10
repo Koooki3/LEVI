@@ -1511,6 +1511,9 @@ describe("comparison charts", () => {
     expect(
       perEpisode.querySelector(".recharts-bar-rectangle .current"),
     ).not.toBeNull();
+    expect(perEpisode.querySelector(".recap-chart-summary")!.textContent).toBe(
+      "Of 1 episodes: B higher in 0, A higher in 1, equal in 0.",
+    );
     // Bars carry no written colour: their classes take the design tokens.
     expect(
       host.querySelector('.recap-chart .recharts-bar-rectangle [fill^="#"]'),
@@ -1538,6 +1541,11 @@ describe("comparison charts", () => {
     await click(host.querySelector("[data-language=zh]"));
     await flush();
     expect(host.textContent).toContain("按结局分组的平均价值");
+    expect(
+      host
+        .querySelectorAll(".recap-chart")[4]
+        .querySelector(".recap-chart-summary")!.textContent,
+    ).toBe("共 1 个片段：B 更高 0 个，A 更高 1 个，相同 0 个。");
     expect(host.textContent).toContain("表格视图");
     expect(host.textContent).not.toContain("Mean Value by outcome");
   });
