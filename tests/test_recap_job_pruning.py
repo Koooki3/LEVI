@@ -131,3 +131,23 @@ def test_a_crash_after_publishing_is_cleaned_by_the_next_pass(client):
     jobs.prune_job_files(name)
     assert not files["plan"].exists() and not files["values"].exists()
     assert files["record"].exists()
+
+
+def test_a_record_whose_worker_still_runs_is_never_aged_out(client):
+    """Even with nothing kept: deleting it would let the next job reuse its
+    id while the old worker still writes ``results/<id>.json``."""
+    import os
+
+    name = "prune-alive"
+    job_id = "20261001-0300"
+    files = _record(name, job_id, "cancelled", 1)
+    record = json.loads(files["record"].read_text())
+    record["pid"] = os.getpid()  # a live process stands in for the worker
+    store.write_json(files["record"], record)
+    report = jobs.prune_job_files(name, keep=0)
+    assert report["removed_records"] == []
+    assert files["record"].exists() and files["plan"].exists()
+    # Once the worker is gone the record ages out as usual.
+    record["pid"] = 2**22 + 12345
+    store.write_json(files["record"], record)
+    assert jobs.prune_job_files(name, keep=0)["removed_records"] == [job_id]
