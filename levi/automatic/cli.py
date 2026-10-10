@@ -364,7 +364,21 @@ class DryRun:
     """One dry run on the fakes in ``folder``. ``robot`` is a ``FakeRobot``:
     nothing real ever receives a command."""
 
-    def __init__(self, job: dict, folder: Path, *, episodes=None, scenes=()):
+    def __init__(
+        self,
+        job: dict,
+        folder: Path,
+        *,
+        episodes=None,
+        scenes=(),
+        restore: bool = False,
+        crash_hook=None,
+    ):
+        """``restore``: take over the run already in ``folder`` after its
+        runner stopped (``Orchestrator.restore``: the journal's recovery,
+        FAULT_LOCKED unless completed, nothing replayed); the fake clock
+        then starts after the journal's last time. ``crash_hook``: the
+        orchestrator's crash points (tests)."""
         import random
 
         from . import state_machine as sm
@@ -378,6 +392,11 @@ class DryRun:
         self.folder = Path(folder)
         self.directory = self.folder / ".aeri" / "runs" / cfg.run_id
         clock = fake.FakeClock()
+        if restore:
+            # The journal refuses a clock that goes back within its domain.
+            seen = [e.mono_ns for e in Journal.read(self.directory).events]
+            if seen:
+                clock = fake.FakeClock(start_ns=max(seen) + 1_000_000_000)
         fence = sm.MotionFence()
         contract = job["contract"]
         evidence = contract.min_evidence_refs if contract else 0
@@ -431,10 +450,12 @@ class DryRun:
             folders=session_folders(cfg),
             texts=job["texts"],
         )
-        self.orch = Orchestrator.create(
+        build = Orchestrator.restore if restore else Orchestrator.create
+        self.orch = build(
             self.directory,
             cfg,
             plan=job["plan"],
+            crash_hook=crash_hook,
             robot=self.robot,
             policy=fake.FakePolicy(clock, rng=random.Random(job["seed"])),
             recorder=self.recorder,
