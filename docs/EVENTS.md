@@ -57,7 +57,7 @@ Guards against over-cutting, each tested:
 | --- | --- |
 | Penalty per change: `penalty * (d + 1) * log(n)` for `d` features, `n` rows | `penalty = 0.5` (calibrated, below) |
 | Shortest segment | `min_seconds = 0.5` |
-| Most change points per minute of episode; past it the penalty is raised by 1.5x until the result fits (`capped` says so) | `max_per_minute = 30` (set beforehand, not tuned) |
+| Most change points per minute of episode; past it the penalty is raised by 1.5x until the result fits; when equally strong changes would all vanish at once, exactly the strongest that fit are kept, ties broken by time (`capped` says so) | `max_per_minute = 30` (set beforehand, not tuned) |
 
 On pure noise scaled the same way the default penalty gives well under one change point per minute; twice the penalty gives none (tested).
 

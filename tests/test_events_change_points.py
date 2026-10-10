@@ -3,6 +3,7 @@ noise and smooth motion are not over-cut, the result is the exact optimum,
 and odd tables (NaN, constants, very short, uneven timestamps) do not break
 it."""
 
+import math
 from itertools import pairwise
 
 import numpy as np
@@ -126,15 +127,27 @@ def test_minimum_segment_length_holds():
     assert min(b - a for a, b in pairwise(edges)) >= 5
 
 
-def test_the_cap_raises_the_penalty_and_says_so():
+def test_the_cap_keeps_exactly_the_strongest():
     times = np.arange(600) / 10  # one minute
-    x = 5.0 * np.repeat(np.arange(60) % 2, 10)  # 59 clean steps
+    x = 5.0 * np.repeat(np.arange(60) % 2, 10)  # 59 equally strong steps
     free = cp.detect(times, x[:, None], max_per_minute=1000)
     assert len(free.rows) == 59
-    capped = cp.detect(times, x[:, None], max_per_minute=10)
-    assert len(capped.rows) <= 10
-    assert capped.capped
-    assert capped.penalty > cp.PENALTY
+    for cap in (10, 30, 58):
+        capped = cp.detect(times, x[:, None], max_per_minute=cap)
+        # Exactly the cap, not none: equal strength ties break by time.
+        assert capped.rows == free.rows[:cap]
+        assert capped.capped
+        # The penalty and beta reported are the ones the rows came from.
+        assert capped.beta == pytest.approx(capped.penalty * 2 * math.log(600))
+
+
+def test_the_cap_prefers_stronger_changes():
+    times = np.arange(600) / 10
+    x = np.repeat(np.arange(60) % 2, 10).astype(float) * 5.0
+    x[300:] *= 3  # the second half's steps are three times as large
+    capped = cp.detect(times, x[:, None], max_per_minute=20)
+    assert len(capped.rows) == 20
+    assert all(r >= 300 for r in capped.rows)
 
 
 def test_uneven_timestamps_do_not_make_a_change_out_of_a_gap():

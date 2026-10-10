@@ -22,7 +22,9 @@ Guards against over-cutting, each tested:
   evidence per change);
 - no segment is shorter than ``min_seconds``;
 - at most ``max_per_minute`` change points per minute of episode: past it the
-  penalty is raised until the result fits, and the result says so (``capped``).
+  penalty is raised until the result fits, keeping exactly the strongest
+  ``limit`` when equally strong changes would all vanish at once; the result
+  says so (``capped``).
 
 Speeds use the recorded timestamps (``events.motion``), so a dropped frame is
 not a jump. Rows with a missing value are filled from their neighbours;
@@ -183,23 +185,34 @@ def detect(
     empty = Result([], [], penalty, 0.0, min_size, names)
     if n < 2 * min_size or d == 0 or len(finite_t) < 2:
         return empty
-    minutes = max(float(finite_t[-1] - finite_t[0]), dt) / 60
-    limit = max(1, math.floor(max_per_minute * minutes))
+    # The episode lasts from its first sample to one step past its last.
+    minutes = max(float(finite_t[-1] - finite_t[0]) + dt, dt) / 60
+    limit = max(1, math.floor(max_per_minute * minutes + 1e-9))
+    beta = penalty * (d + 1) * math.log(n)
+    rows = segment(x, beta, min_size)
+    if len(rows) <= limit:
+        return Result(rows, gains(x, rows), penalty, beta, min_size, names)
+    # Over the cap: raise the penalty until the count fits. Equally strong
+    # changes vanish together, so a raise can jump from too many to too few;
+    # then the strongest ``limit`` of the last result over the cap are kept
+    # (ties broken by time, earliest first).
+    over = (rows, penalty, beta)
     effective = penalty
-    capped = False
-    for _ in range(MAX_RAISES + 1):
+    for _ in range(MAX_RAISES):
+        effective *= RAISE
         beta = effective * (d + 1) * math.log(n)
         rows = segment(x, beta, min_size)
-        if len(rows) <= limit:
+        if len(rows) == limit:
+            return Result(rows, gains(x, rows), effective, beta, min_size, names, True)
+        if len(rows) < limit:
             break
-        effective *= RAISE
-        capped = True
-    else:
-        # Still too many after every raise: keep the strongest.
-        saved = gains(x, rows)
-        keep = sorted(range(len(rows)), key=lambda i: -saved[i])[:limit]
-        rows = sorted(rows[i] for i in keep)
-    return Result(rows, gains(x, rows), effective, beta, min_size, names, capped)
+        over = (rows, effective, beta)
+    rows, effective, beta = over
+    saved = gains(x, rows)
+    top = max(saved) or 1.0
+    order = sorted(range(len(rows)), key=lambda i: (-round(saved[i] / top, 9), rows[i]))
+    rows = sorted(rows[i] for i in order[:limit])
+    return Result(rows, gains(x, rows), effective, beta, min_size, names, True)
 
 
 # --- features of one actor ----------------------------------------------------
