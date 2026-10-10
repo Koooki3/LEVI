@@ -11,11 +11,13 @@ import { Badge, Button, Progress, useConfirm } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { automaticApi, newRequestId } from "./api";
 import { errorText } from "./launch-panel";
-import { resultDone, resultKey } from "./run-logic";
+import { PendingCard } from "./pending-card";
+import { isBlind, mergeCard, resultDone, resultKey } from "./run-logic";
 import { ModeChips, Note, StateGraph, stateName } from "./run-parts";
 import { useRunEvents, useRunMetrics, useRunSnapshot } from "./run-poll";
 import { RunMetrics } from "./run-metrics";
 import { RunTimeline } from "./run-timeline";
+import type { PendingCard as PendingCardData } from "./types";
 
 export function RunWindow({ runId }: { runId: string }) {
   const { t } = useLocale();
@@ -24,13 +26,14 @@ export function RunWindow({ runId }: { runId: string }) {
   const events = useRunEvents(runId, snapshot?.seq);
   const metrics = useRunMetrics(runId, snapshot?.seq);
   const { confirm, dialog } = useConfirm();
+  const [posted, setPosted] = useState<PendingCardData | null>(null);
   const [stopping, setStopping] = useState(false);
   const [notice, setNotice] = useState("");
   const stopId = useRef("");
   const busy = useRef(false);
 
-  // Batch 3 adds the pending card and with it the blind-label rule.
-  const blind = false;
+  const card = mergeCard(snapshot?.pending_card ?? null, posted);
+  const blind = isBlind(card);
 
   const stop = async () => {
     if (!snapshot || busy.current) return;
@@ -175,6 +178,16 @@ export function RunWindow({ runId }: { runId: string }) {
               <dd>{snapshot.counters.faults}</dd>
             </dl>
           </section>
+
+          {card && (
+            <PendingCard
+              runId={runId}
+              card={card}
+              challenge={snapshot.challenge}
+              onLabelled={setPosted}
+              onChanged={poll.refresh}
+            />
+          )}
 
           <section className="ar-section" aria-labelledby="ar-graph-title">
             <h2 id="ar-graph-title">{t("automatic.run.graph")}</h2>

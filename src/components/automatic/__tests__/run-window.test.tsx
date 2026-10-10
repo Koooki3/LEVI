@@ -6,8 +6,8 @@ import {
   waitFor,
 } from "@/components/ds/__tests__/dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { mockFetch, snapshot } from "./fixtures";
-import type { RunSnapshot } from "../types";
+import { card, mockFetch, snapshot } from "./fixtures";
+import type { PendingCard, RunSnapshot } from "../types";
 
 mock.module("next/link", () => ({
   default: ({ children, ...props }: Record<string, unknown>) => (
@@ -91,6 +91,60 @@ describe("the run window", () => {
     expect(host.querySelector("[data-status=disabled]")).toBeNull();
     expect(host.textContent).toContain("Reset policy");
   });
+  test("while the last episode is unlabelled, neither the verdict, the ending nor the early-stop events show", async () => {
+    open(snapshot({ pending_card: card() }));
+    const { host } = await render(<RunWindow runId="run-1" />);
+    await waitFor(() => host.textContent?.includes("You are needed"));
+    await waitFor(() => host.querySelector(".ar-timeline li:nth-child(2)"));
+    const text = host.textContent ?? "";
+    expect(text).not.toContain("early stop");
+    expect(text).not.toContain("early_stop");
+    expect(text).not.toContain("goal_verified");
+    expect(text).not.toContain("Automatic verdict");
+    expect(text).not.toContain("rollout says");
+    expect(text).toContain("The automatic verdict is hidden");
+    expect(text).toContain("hidden until you label");
+    // The agreement group is withheld from the metrics too.
+    await waitFor(() => host.querySelector(".ds-table"));
+    expect(host.querySelector(".ds-table")!.textContent).not.toContain(
+      "agreement",
+    );
+  });
+  test("labelling posts the value and shows the revealed card the server returns", async () => {
+    const revealed: PendingCard = card({
+      operator_label: {
+        current: "failure",
+        automatic_verdict: "success",
+        hidden_until_labelled: false,
+      },
+    });
+    const m = open(snapshot({ pending_card: card() }), {
+      "POST runs/run-1/labels": () => ({
+        label: "failure",
+        revealed: true,
+        card: revealed,
+      }),
+    });
+    const { host } = await render(<RunWindow runId="run-1" />);
+    await waitFor(() => button(host, "Failure"));
+    await click(button(host, "Failure")!);
+    await waitFor(() => host.textContent?.includes("Automatic verdict"));
+    const post = m.calls.find((c) => c.path === "runs/run-1/labels")!;
+    expect(post.body).toEqual({ episode_id: "ep-0007", value: "failure" });
+    expect(host.textContent).toContain("success");
+    expect(host.textContent).toContain("early stop by the detector");
+  });
+  test("a draft contract is flagged as not confirmed, with each condition in words", async () => {
+    open(snapshot({ pending_card: card() }));
+    const { host } = await render(<RunWindow runId="run-1" />);
+    await waitFor(() => host.textContent?.includes("You are needed"));
+    expect(host.textContent).toContain("Not confirmed by a user");
+    expect(host.textContent).toContain("the plate is on the rack");
+    expect(host.querySelector("img")?.getAttribute("src")).toContain(
+      "/frames/",
+    );
+    expect(host.textContent).toContain("manual reset no. 2");
+  });
   test("a run that has not written yet (404) is shown as starting", async () => {
     const m = mockFetch({});
     restore = m.restore;
@@ -110,5 +164,100 @@ describe("the run window", () => {
     const stops = m.calls.filter((c) => c.path === "runs/run-1/stop");
     expect(stops.length).toBe(1);
     expect(stops[0].body).toMatchObject({ confirm: "stop" });
+  });
+});
+
+describe("the resume dialog", () => {
+  async function opened(
+    resume: (body: unknown) => unknown,
+    snap = snapshot({ pending_card: card() }),
+  ) {
+    const m = open(snap, { "POST runs/run-1/resume": resume });
+    const view = await render(<RunWindow runId="run-1" />);
+    await waitFor(() => button(view.host, "Resume the run…"));
+    await click(button(view.host, "Resume the run…")!);
+    const dialog = (await waitFor(() =>
+      document.querySelector("[role=dialog]"),
+    )) as HTMLElement;
+    return { ...view, m, dialog };
+  }
+  const tick = async (dialog: HTMLElement) => {
+    for (const box of Array.from(
+      dialog.querySelectorAll("input[type=checkbox]"),
+    ))
+      await click(box);
+  };
+
+  test("needs both confirmations before it can be sent", async () => {
+    const { dialog, m } = await opened(() => ({ result: "applied" }));
+    const confirm = button(dialog, "Confirm and resume")!;
+    expect(confirm.disabled).toBe(true);
+    await click(dialog.querySelectorAll("input[type=checkbox]")[0]);
+    expect(button(dialog, "Confirm and resume")!.disabled).toBe(true);
+    expect(m.calls.some((c) => c.path === "runs/run-1/resume")).toBe(false);
+  });
+  test("a double press sends one command; the body carries the card's sequence and the challenge", async () => {
+    let release: (v: unknown) => void = () => {};
+    const gate = new Promise((resolve) => (release = resolve));
+    const { dialog, m } = await opened(() => gate);
+    await tick(dialog);
+    const confirm = button(dialog, "Confirm and resume")!;
+    await click(confirm);
+    await click(confirm);
+    release({ result: "applied" });
+    await flush();
+    const sent = m.calls.filter((c) => c.path === "runs/run-1/resume");
+    expect(sent.length).toBe(1);
+    expect(sent[0].body).toMatchObject({
+      expected_seq: 41,
+      environment_handled: true,
+      health_rechecked: true,
+      challenge: "chal-1",
+    });
+  });
+  test("a stale sequence is explained and the retry is a new command", async () => {
+    const { dialog, m } = await opened(() => ({
+      result: "refused",
+      code: "stale_sequence",
+    }));
+    await tick(dialog);
+    await click(button(dialog, "Confirm and resume")!);
+    await waitFor(() => dialog.textContent?.includes("The run moved on"));
+    await click(button(dialog, "Confirm and resume")!);
+    await flush();
+    const ids = m.calls
+      .filter((c) => c.path === "runs/run-1/resume")
+      .map((c) => (c.body as { command_id: string }).command_id);
+    expect(ids.length).toBe(2);
+    expect(ids[0]).not.toBe(ids[1]);
+  });
+  test("a lost answer is retried with the same command id", async () => {
+    let n = 0;
+    const { dialog, m } = await opened(() => {
+      n += 1;
+      if (n === 1) throw new Error("network");
+      return { result: "repeated" };
+    });
+    await tick(dialog);
+    await click(button(dialog, "Confirm and resume")!);
+    await flush();
+    await click(button(dialog, "Confirm and resume")!);
+    await flush();
+    const ids = m.calls
+      .filter((c) => c.path === "runs/run-1/resume")
+      .map((c) => (c.body as { command_id: string }).command_id);
+    expect(ids.length).toBe(2);
+    expect(ids[0]).toBe(ids[1]);
+  });
+  test("missing confirmations from the server are shown in words", async () => {
+    const { dialog } = await opened(() => ({
+      result: "refused",
+      code: "confirmations_missing",
+    }));
+    await tick(dialog);
+    await click(button(dialog, "Confirm and resume")!);
+    await waitFor(() =>
+      dialog.textContent?.includes("Both confirmations are needed"),
+    );
   });
 });
