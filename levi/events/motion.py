@@ -1,10 +1,12 @@
 """Speed and stillness of an arm, on the recorded timestamps.
 
-A step's speed is its distance over the time it took. Where a table is
-evenly sampled (a step within 0.1% of ``1 / fps``) the step is multiplied by
-``fps`` exactly, as the signal lines always did, so an even table reads as
-before to the last bit; where frames were dropped or the clock jittered, the
-step's own time is used, so a gap is not read as one fast frame.
+A step's speed is its distance over the time it took. On an evenly sampled
+table (``uneven`` says which are not) every step is multiplied by ``fps``,
+exactly as the signal lines always did, so an even table reads as before to
+the last bit -- also a long one stored as float32, as LeRobot and LEVI store
+timestamps. On an uneven one (dropped frames, a jittery clock) each step's own
+time is used, so a gap is not read as one fast frame; a step whose time does
+not advance (a repeated timestamp) counts as one frame, as before.
 """
 
 import numpy as np
@@ -12,22 +14,41 @@ import numpy as np
 # Still: speed below this share of the episode's fast speed (its 95th
 # percentile), for at least STILL_SECONDS.
 STILL, STILL_SECONDS = 0.1, 0.5
-# A step within this share of 1 / fps counts as one nominal frame.
-NOMINAL = 1e-3
+# A table is evenly sampled when every row is within this share of a frame
+# of ``timestamp[0] + row / fps`` (or within float32 resolution there).
+EVEN = 0.01
+
+
+def uneven(times, fps):
+    """The timestamps (as float64) when they are not evenly sampled at
+    ``fps``, else None. None too when there is nothing to go by: fewer than
+    two rows, no rate, a non-finite or a decreasing timestamp -- readers
+    then keep their frame-count behaviour."""
+    times = np.asarray(times, dtype=float)
+    if len(times) < 2 or not fps or fps <= 0 or not np.isfinite(times).all():
+        return None
+    if np.any(np.diff(times) < 0):
+        return None
+    drift = times - times[0] - np.arange(len(times)) / fps
+    # A float32 timestamp is off by up to one unit in its last place; four
+    # cover the start's error and the row's.
+    resolution = 4 * np.spacing(np.abs(times).astype(np.float32)).astype(float)
+    tolerance = np.maximum(EVEN / fps, resolution)
+    return None if np.all(np.abs(drift) <= tolerance) else times
 
 
 def speeds(times, positions, fps):
     """Speed of each step between rows (one fewer than rows); NaN where a
-    step is not finite or its time is not positive."""
-    times = np.asarray(times, dtype=float)
+    step is not finite."""
     step = np.diff(positions, axis=0)
     ok = np.isfinite(step).all(axis=1)
     distance = np.linalg.norm(np.nan_to_num(step), axis=1)
-    dt = np.diff(times)
+    timed = uneven(times, fps)
+    if timed is None:
+        return np.where(ok, distance * fps, np.nan)
+    dt = np.diff(timed)
     with np.errstate(divide="ignore", invalid="ignore"):
-        nominal = np.abs(dt * fps - 1) <= NOMINAL
-        rate = np.where(nominal, fps, 1 / dt)
-    rate = np.where(np.isfinite(dt) & (dt > 0), rate, np.nan)
+        rate = np.where(dt > 0, 1 / dt, fps)
     return np.where(ok, distance * rate, np.nan)
 
 

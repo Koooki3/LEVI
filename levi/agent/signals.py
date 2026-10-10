@@ -81,16 +81,20 @@ def _clip(items):
     return items
 
 
-def gripper_events(times, values, bounds=None, open_level="auto"):
+def gripper_events(times, values, bounds=None, open_level="auto", start="first"):
     """Close/open crossings of one gripper dimension.
 
     Crossings are found on the episode's own range, so a grasp on a wide
     object that never nears the gripper's minimum still counts. Unless
-    ``open_level`` says which end is open, the level the episode starts at
-    is taken as "open" (a robot starts an episode with an empty hand), read
-    from its first few samples so one stray first sample does not turn the
-    episode upside down; an episode that starts holding something reads
-    right only with a declared ``open_level``. With the dataset's range
+    ``open_level`` says which end is open, the level of the episode's first
+    sample is taken as "open" (a robot starts an episode with an empty
+    hand): an episode that starts holding something reads upside down, and
+    only a declared ``open_level`` reads it right. ``start="robust"`` reads
+    the starting level from the first three samples instead, so one stale
+    first sample does not turn the episode upside down -- but neither does
+    a real close-and-open in the first frames read right then, which is why
+    it is not the default (a policy that closes for the first second of a
+    rollout and then opens is a recorded case). With the dataset's range
     (``bounds``) a continuous channel also says how far it closed, as a
     share of that range -- a gripper stopped well above fully closed is
     usually holding something. The crossings are ``events.gripper``'s, the
@@ -103,7 +107,7 @@ def gripper_events(times, values, bounds=None, open_level="auto"):
         open_level=open_level,
         # Jitter of a gripper that never moved is no grasp.
         min_travel=0.2,
-        start="robust",
+        start=start,
     )
     if channel is None:
         return []
@@ -181,11 +185,12 @@ def still_spans(times, positions, fps):
     return motion.still_spans(times, positions, fps)
 
 
-def summarize(table, info, stats=None, open_levels=None):
+def summarize(table, info, stats=None, open_levels=None, start="first"):
     """Signal lines and machine-readable events for one episode's table.
     ``open_levels`` may declare which end of a gripper channel is open
     (``{"observation.state.gripper": "high" | "low"}``); undeclared channels
-    take the level the episode starts at."""
+    take the level the episode starts at, read from its first sample or,
+    with ``start="robust"``, its first three (see ``gripper_events``)."""
     columns = vector_columns(info)
     fps = float(info.get("fps") or 0) or None
     times = table["timestamp"].to_numpy(dtype=float)
@@ -221,6 +226,7 @@ def summarize(table, info, stats=None, open_levels=None):
                 matrix[:, d],
                 bounds,
                 (open_levels or {}).get(f"{key}.{name}", "auto"),
+                start,
             )
             if key == "action":
                 commands[name] = found

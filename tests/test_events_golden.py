@@ -21,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from levi.agent import anchored
 from levi.agent.anchored import ViewSpec, crossings, uneven_times, view_rows
@@ -140,6 +141,7 @@ def test_signals_and_crossings_corpus_is_unchanged():
     if os.environ.get("LEVI_EVENTS_GOLDEN") == "write":
         FIXTURE.parent.mkdir(parents=True, exist_ok=True)
         FIXTURE.write_text(text)
+        pytest.fail("fixture rewritten; rerun without LEVI_EVENTS_GOLDEN")
     assert FIXTURE.read_text() == text
 
 
@@ -180,6 +182,7 @@ def test_view_rows_of_every_shipped_spec_on_an_even_table():
     text = json.dumps(observed, sort_keys=True, indent=1) + "\n"
     if os.environ.get("LEVI_EVENTS_GOLDEN") == "write":
         path.write_text(text)
+        pytest.fail("fixture rewritten; rerun without LEVI_EVENTS_GOLDEN")
     assert path.read_text() == text
 
 
@@ -239,20 +242,99 @@ def test_a_declared_open_level_reads_an_initially_closed_gripper():
 SPIKE = np.array([0.0] + [1.0] * 4 + [0.0] * 4 + [1.0] * 3)
 
 
-def test_a_stray_first_sample_no_longer_flips_the_signal_lines():
-    # T-A-03: the start is the median of the first three samples, so one
-    # stray first sample neither sets the polarity nor makes an event.
-    # (Before: close 0.1, open 0.5, close 0.9 -- upside down.)
+def test_a_stray_first_sample_flips_the_signal_lines_current_behavior():
+    # The default reads the starting level from the first sample, as main
+    # does: one stray first sample turns the episode upside down.
     times = np.arange(len(SPIKE)) / 10
     assert gripper_events(times, SPIKE) == [
+        {"t": 0.1, "kind": "close"},
+        {"t": 0.5, "kind": "open"},
+        {"t": 0.9, "kind": "close"},
+    ]
+
+
+def test_a_robust_start_is_an_explicit_choice():
+    # start="robust": the median of the first three samples sets the start,
+    # so a stray first sample neither sets the polarity nor makes an event.
+    times = np.arange(len(SPIKE)) / 10
+    assert gripper_events(times, SPIKE, start="robust") == [
         {"t": 0.5, "kind": "close"},
         {"t": 0.9, "kind": "open"},
     ]
-    # A stray first sample on a declared channel makes no event either.
-    assert gripper_events(times, SPIKE, open_level="high") == [
+    assert gripper_events(times, SPIKE, open_level="high", start="robust") == [
         {"t": 0.5, "kind": "close"},
         {"t": 0.9, "kind": "open"},
     ]
+    out = summarize(_table([[v] for v in SPIKE]), _info(["gripper"]), start="robust")
+    assert out["lines"] == ["gripper (observation.state.gripper): close 0.5, open 0.9"]
+
+
+def _close_at_the_start():
+    """The shape of a recorded policy rollout (a live eggplant pick, 10 fps,
+    200 rows): open for one row, closed for 0.8 s, open, then two grasps
+    (1 = open), the arm lowest at each close; the command leads by a row."""
+    grip = np.ones(200)
+    for a, b in ((1, 9), (41, 137), (165, 197)):
+        grip[a:b] = 0.0
+    knots = [(0, 0.233), (41, 0.065), (90, 0.266), (137, 0.16), (165, 0.078)]
+    knots += [(197, 0.14), (199, 0.14)]
+    z = np.interp(np.arange(200), *zip(*knots, strict=True))
+    state = np.stack([np.full(200, 0.5), np.zeros(200), z, grip], axis=1)
+    action = state.copy()
+    action[:-1, 3] = grip[1:]
+    action[0, 3] = 0.0
+    names = ["x", "y", "z", "gripper"]
+    info = {
+        "fps": 10,
+        "features": {
+            "observation.state": {"dtype": "float32", "shape": [4], "names": names},
+            "action": {"dtype": "float32", "shape": [4], "names": names},
+        },
+    }
+    table = pd.DataFrame(
+        {
+            "timestamp": np.arange(200) / 10,
+            "observation.state": list(state),
+            "action": list(action),
+        }
+    )
+    return table, info
+
+
+# summarize(*_close_at_the_start()) at main d68f656, verbatim. (Its command
+# line is upside down -- the command starts closed -- a separate defect.)
+MAIN_CLOSE_AT_THE_START = [
+    (
+        "gripper (observation.state.gripper): "
+        "close 0.1, open 0.9, close 4.1, open 13.7, close 16.5, open 19.7"
+    ),
+    (
+        "gripper command (action.gripper): "
+        "close 0.8, open 4.0, close 13.6, open 16.4, close 19.6"
+    ),
+    (
+        "height (observation.state.z): start 0.233@0.0, low 0.065@4.1, "
+        "high 0.266@9.0, low 0.078@16.5, end 0.14@19.9"
+    ),
+]
+
+
+def test_a_close_and_open_at_the_start_reads_as_main_reads_it():
+    """Review A1, important 1: with the first-three-samples start this
+    episode read upside down (the grasp at 4.1 s as an open). The default
+    reads it as main d68f656 does -- every line below is main's output."""
+    table, info = _close_at_the_start()
+    assert summarize(table, info)["lines"] == MAIN_CLOSE_AT_THE_START
+    # The robust start reads the 0.8 s close as a stale first sample and
+    # the whole state channel upside down; the command (one row earlier,
+    # closed from its first row) is then reversed the same way, so it looks
+    # followed and gets no line.
+    robust = summarize(table, info, start="robust")["lines"]
+    assert robust[0] == (
+        "gripper (observation.state.gripper): "
+        "close 0.9, open 4.1, close 13.7, open 16.5, close 19.7"
+    )
+    assert not any(line.startswith("gripper command") for line in robust)
 
 
 def test_anchored_spike_first_sample_sets_the_initial_state_current_behavior():
@@ -318,13 +400,31 @@ def test_speed_on_an_even_table_is_the_step_times_the_rate_to_the_bit():
         assert np.array_equal(speeds(t32, positions, fps), expected)
 
 
-def test_speed_is_unknown_where_time_does_not_advance():
+def test_a_repeated_timestamp_counts_as_one_frame():
     from levi.events.motion import speeds
 
     times = np.array([0.0, 0.1, 0.1, 0.3])
     positions = np.array([[0.0], [0.1], [0.2], [0.4]])
     out = speeds(times, positions, 10.0)
-    assert out[0] == 0.1 * 10 and np.isnan(out[1]) and out[2] == 0.2 / 0.2
+    assert out.tolist() == [0.1 / 0.1, 0.1 * 10, 0.2 / 0.2]
+    # So a rest with a repeated timestamp in it is not cut there.
+    times = np.round(np.r_[np.arange(10) / 10, 0.9, np.arange(10, 20) / 10], 6)
+    x = np.r_[np.zeros(11), np.linspace(0.1, 1.0, 10)]
+    rest = still_spans(times, np.stack([x, 0 * x, 0 * x], axis=1), 10)
+    assert rest == [(0.0, 0.9)]
+
+
+def test_speed_on_a_long_float32_table_is_the_step_times_the_rate_to_the_bit():
+    from levi.events.motion import speeds, uneven
+
+    rng = np.random.default_rng(11)
+    for fps, seconds in ((30.0, 900), (60.0, 600), (200.0, 300)):
+        n = int(fps * seconds)
+        times = (np.arange(n) / fps).astype(np.float32).astype(float)
+        assert uneven(times, fps) is None
+        positions = np.cumsum(rng.normal(0, 0.01, (n, 3)), axis=0)
+        expected = np.linalg.norm(np.diff(positions, axis=0), axis=1) * fps
+        assert np.array_equal(speeds(times, positions, fps), expected)
 
 
 def test_view_rows_ignore_dropped_frames_current_behavior():

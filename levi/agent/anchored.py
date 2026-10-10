@@ -43,7 +43,7 @@ from typing import Any, Literal
 import numpy as np
 from pydantic import Field, model_validator
 
-from ..events import gripper
+from ..events import gripper, motion
 
 # Hysteresis on the gripper channel's range, shared with signals.py.
 from ..events.gripper import HIGH, LOW  # noqa: F401
@@ -558,24 +558,13 @@ def view_offsets(view, fps):
     return [round(s * fps) for s in view.offsets_seconds]
 
 
-# A table is evenly sampled when every row is within this share of a frame
-# of ``timestamp[0] + row / fps``.
-EVEN = 0.01
-
-
 def uneven_times(times, fps):
     """The table's timestamps when they are not evenly sampled at ``fps``
-    (dropped frames, a jittery clock), else None. Only then do views given
-    in seconds look up rows by timestamp; LEVI's own conversions are always
-    even (``timestamp = frame_index / fps``), and so read as they always
-    did."""
-    times = np.asarray(times, dtype=float)
-    if len(times) < 2 or not fps or fps <= 0 or not np.isfinite(times).all():
-        return None
-    if np.any(np.diff(times) < 0):
-        return None
-    drift = times - times[0] - np.arange(len(times)) / fps
-    return None if np.all(np.abs(drift) <= EVEN / fps) else times
+    (dropped frames, a jittery clock), else None (``events.motion.uneven``).
+    Only then do views given in seconds look up rows by timestamp; LEVI's
+    own conversions are always even (``timestamp = frame_index / fps``), and
+    so read as they always did."""
+    return motion.uneven(times, fps)
 
 
 # --- judging ---------------------------------------------------------------

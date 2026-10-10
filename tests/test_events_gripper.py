@@ -149,18 +149,21 @@ def test_both_readers_match_their_former_copies_on_random_channels():
         assert [(e["t"], e["kind"]) for e in legacy] == [
             (float(times[i]), kind) for i, kind in (first.crossings if first else [])
         ]
-        # The signal lines (robust start) differ only where the first sample
+        # The signal lines read as the former copy did by default; the
+        # explicit robust start differs only where the first sample
         # disagrees with the next two.
+        assert gripper_events(times, values.copy(), bounds) == legacy
+        robust = gripper_events(times, values.copy(), bounds, start="robust")
         if _robust_start_agrees(values):
-            assert gripper_events(times, values.copy(), bounds) == legacy
+            assert robust == legacy
         else:
             changed += 1
         for level in ("high", "low"):
             assert crossings(values.copy(), bounds, level) == _legacy_crossings(
                 values.copy(), bounds, level
             )
-    # Random channels jump around from the first sample; recorded ones rarely do.
-    assert 0 < changed < 3000 * 0.3
+    # The robust branch was exercised.
+    assert changed > 0
 
 
 def test_the_range_source_decides_a_wide_grasp():
