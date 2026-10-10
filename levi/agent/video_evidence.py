@@ -23,9 +23,11 @@ MEMO_ENTRIES = 16
 
 
 def scan_mode(value=None):
-    """``frame`` (default: decode-order frame timestamps) or ``packet``
-    (container packet timestamps, much faster). Anything else is refused."""
-    mode = (value or os.environ.get(SCAN_SETTING) or "frame").strip().lower()
+    """``packet`` (default: container packet timestamps, about 7 times faster;
+    it steps aside to the frame scan whenever the packets are not one-to-one
+    with the frames) or ``frame`` (the original decode-order frame timestamps,
+    kept as the switch back). Anything else is refused."""
+    mode = (value or os.environ.get(SCAN_SETTING) or "packet").strip().lower()
     if mode not in SCANS:
         raise ValueError(f"{SCAN_SETTING} must be one of {', '.join(SCANS)}: {mode!r}")
     return mode
@@ -129,8 +131,8 @@ def frame_index(path, cache, checksum=None, mode=None):
 
     ``checksum`` is the file's SHA-256 when the caller has just computed it (a
     second pass over the file would only repeat it). The cache file records the
-    scan only for ``packet`` (the default keeps the original layout) and is
-    used only for the scan asked for."""
+    scan only for ``packet`` (the ``frame`` scan keeps the original layout) and
+    is used only for the scan asked for."""
     checksum = checksum or file_hash(path)
     mode = scan_mode(mode)
     if cache.is_file():

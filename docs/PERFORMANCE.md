@@ -58,8 +58,8 @@ to the evidence (`*--video-index.json`, keyed by the file's SHA-256).
 
 | `LEVI_PTS_SCAN` | Meaning |
 | --- | --- |
-| `frame` (default) | The original scan: `ffprobe` decodes every frame and reports its best-effort timestamp. |
-| `packet` | Read the container's packet timestamps instead (no decoding): 4 to 80 times faster on measured synthetic video, the same list for ordinary files (B-frames, variable frame rate). It trusts the container, so it steps aside whenever the container's packets are not one-to-one with the frames shown: a packet flagged discard (`D`) or corrupt (`C`), which an MP4 edit list or a start before zero produces; a negative timestamp; anything ffprobe reports on stderr (truncated or damaged files); a packet without a timestamp; no packets; times that are not strictly increasing. Then the frame scan runs, and a warning with the file name and the reason is logged. The cache file then also records `"scan": "packet"`, and a cache written by the other scan is not used. |
+| `frame` | The original scan: `ffprobe` decodes every frame and reports its best-effort timestamp. Set `LEVI_PTS_SCAN=frame` to go back to it. |
+| `packet` (default) | Read the container's packet timestamps instead (no decoding): 4 to 80 times faster on measured synthetic video, the same list for ordinary files (B-frames, variable frame rate). It trusts the container, so it steps aside whenever the container's packets are not one-to-one with the frames shown: a packet flagged discard (`D`) or corrupt (`C`), which an MP4 edit list or a start before zero produces; a negative timestamp; anything ffprobe reports on stderr (truncated or damaged files); a packet without a timestamp; no packets; times that are not strictly increasing. Then the frame scan runs, and a warning with the file name and the reason is logged. The cache file then also records `"scan": "packet"`, and a cache written by the other scan is not used. |
 
 Any other value is refused. In both modes a video's list is kept in memory by
 content hash (16 videos), so a v3 file shared by many episodes is scanned once
@@ -68,8 +68,11 @@ passed to the scan instead of being computed again). Nothing about the checks
 changes: every cache is still tied to the source hash and the later time
 mismatch tolerance still applies.
 
-`packet` becomes the default only after the two scans have been compared on the
-real development videos:
+`packet` became the default after the two scans were compared on the real
+development videos (2026-10-10: 1,520 files, 278,952 frames, every list
+identical, 7 times faster; see the results below). A cache written before the
+switch has no `"scan"` key, so it counts as a frame-scan cache: the first read
+rescans once and rewrites it in the packet layout. To repeat the comparison:
 
 ```
 python -m levi.performance pts-compare <video or folder> [...] [--cores 4]
@@ -78,6 +81,16 @@ python -m levi.performance pts-compare <video or folder> [...] [--cores 4]
 Both compare commands pin themselves to at most 4 CPUs at low priority (`--cores`, 0 leaves the process alone). `pts-compare` also lists, for each file, why the packets could not be used.
 
 prints one row per file and exits 1 if any list differs or a file cannot be scanned.
+
+Measured on 1,520 H.264 640x480 files from the development sets and the live
+mirror (1,400 distinct contents; B-frames, many of them with a variable frame
+rate): the packet list equalled the frame list value for value in all of them,
+the frame count equalled what OpenCV decodes in all of them, no file needed the
+fallback, and the packet scan took a median 21 ms against 148 ms (about 7
+times; the page cache was warm, so a cold disk is not covered). The development
+data holds no edit-list, negative-timestamp or damaged video, no other codec and
+no shared v3 video file; those cases rest on the synthetic fixtures in
+`tests/test_pts_scan.py`, and on the fallback to the frame scan.
 
 ## How often a source video is hashed
 
@@ -99,12 +112,17 @@ up in `meta/stats.json` and the training normalisation.
 
 | `LEVI_PIXEL_STATS` | Meaning |
 | --- | --- |
-| `float` (default) | The original method: each frame is converted to float64 and summed. |
-| `histogram` | Count how often each 8-bit value occurs per channel (3 x 256 integers), then compute the four statistics once from the counts. The sums are exact integers and the variance has no cancellation. About 11 to 17 times faster per frame; min, max, mean and count equal the float method's to about 1e-11 or better. The standard deviation is compared as a variance: the float method computes it as `mean(x^2) - mean(x)^2`, which cancels when a channel is constant or nearly so, and its square root then turns a 1e-12 error into noise up to about 1e-6 (a constant 720p channel gives 2e-6 instead of 0). The histogram result is exact. Frames that are not 8-bit use the float method. |
+| `float` | The original method: each frame is converted to float64 and summed. Set `LEVI_PIXEL_STATS=float` to go back to it. |
+| `histogram` (default) | Count how often each 8-bit value occurs per channel (3 x 256 integers), then compute the four statistics once from the counts. The sums are exact integers and the variance has no cancellation. About 11 to 17 times faster per frame; min, max, mean and count equal the float method's to about 1e-11 or better. The standard deviation is compared as a variance: the float method computes it as `mean(x^2) - mean(x)^2`, which cancels when a channel is constant or nearly so, and its square root then turns a 1e-12 error into noise up to about 1e-6 (a constant 720p channel gives 2e-6 instead of 0). The histogram result is exact. Frames that are not 8-bit use the float method. |
 
-Any other value is refused. The default stays `float` because the last digits
-of `meta/stats.json` change with the method. Before `histogram` becomes the
-default, compare the two on the real videos (the command exits 1 if any file is
+Any other value is refused. `histogram` became the default after the two methods
+were compared on 61 real development videos (2026-10-10): the largest
+difference in min, max, mean or count was 9e-13, in variance 1.2e-12 (the std
+difference itself 1.6e-12), and the histogram method ran a median 23 times
+faster (3.5 to 30 times). The last digits of `meta/stats.json` therefore differ
+from a file written by the float method, by far less than the training
+normalisation can feel; for a constant channel the new value is the exact one.
+To repeat the comparison (the command exits 1 if any file is
 off by more than 1e-9 in min, max, mean or count, or in the variance (std
 squared), or differs in frame count, span or first-frame hash; the std difference
 itself is reported but not judged):

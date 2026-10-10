@@ -75,16 +75,28 @@ def test_histogram_statistics_equal_the_float_ones_element_by_element(
         assert np.abs(a - b).max() <= TOLERANCE, key
 
 
-def test_the_default_is_the_float_method_and_never_builds_histograms(
-    videos, monkeypatch
-):
+def test_the_default_is_the_histogram_method(videos, monkeypatch):
     monkeypatch.delenv("LEVI_PIXEL_STATS", raising=False)
+    assert media.stats_method() == "histogram"
+    calls = []
+    real = media.PixelHistogram.add
+    monkeypatch.setattr(
+        media.PixelHistogram,
+        "add",
+        lambda self, frame: calls.append(1) or real(self, frame),
+    )
+    assert media.inspect(videos["flat"], pixels=True)["stats"]["count"] == [20]
+    assert len(calls) == 20
+    assert "stats" not in media.inspect(videos["flat"])  # no pixels asked, none counted
+
+
+def test_float_is_still_selectable_and_never_builds_histograms(videos, monkeypatch):
+    monkeypatch.setenv("LEVI_PIXEL_STATS", "float")
     assert media.stats_method() == "float"
     monkeypatch.setattr(
         media.PixelHistogram, "add", lambda self, frame: pytest.fail("histogram used")
     )
     assert media.inspect(videos["flat"], pixels=True)["stats"]["count"] == [20]
-    assert "stats" not in media.inspect(videos["flat"])  # no pixels asked, none counted
 
 
 def test_an_unknown_method_is_refused(monkeypatch):
