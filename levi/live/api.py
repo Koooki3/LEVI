@@ -811,6 +811,9 @@ def _service_call(action, **body):
     from . import service_control
 
     try:
+        # Switched off: nothing is read or written (not even the product's
+        # list of live workspaces it was shown).
+        service_control.check_enabled()
         op, created = action(_service_target(), **body)
     except service_control.Refused as exc:
         raise HTTPException(exc.status, exc.public()) from exc

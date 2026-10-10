@@ -5,7 +5,9 @@ Fakes only: a fake ``systemctl`` (a script that records its arguments and
 answers from a state file), a synthetic ``/proc`` (socket, lock, cgroup and
 process tables), a fake ``nvidia-smi`` answer and fake evaluation-session
 files. No live service, no systemd unit, no GPU, no real port is touched; the
-only real processes are this test's own and a ``sleep`` it starts and stops."""
+only real processes are this test's own and the ``sleep`` children it starts
+as stand-in supervisors (never the test process itself: a classification gone
+wrong must not let a stop signal pytest)."""
 
 import fcntl
 import json
@@ -24,6 +26,8 @@ UI = {"x-levi-ui-token": "test-ui-token"}
 AGENT = {"Authorization": "Bearer test-scoped-token"}
 OTHER_BEARER = {"Authorization": "Bearer hf_not_a_levi_credential", **UI}
 UNIT = "levi-live.service"
+LIVE_ARGV = "/x/levi live start --auto-approve --prewarm"
+SERVICE_CMDLINE = ("/x/python", "/x/levi", "live", "start", "--prewarm")
 FAKE = r"""#!{python}
 import json, os, sys, time
 from pathlib import Path
@@ -53,6 +57,8 @@ if verb == "show":
     print("ExecStart={{ path=/x/levi ; argv[]=" + argv + " ; ignore_errors=no ; start_time=[n/a] }}")
 elif verb == "start":
     state["active"] = state.get("after_start", "active")
+    state["sub"] = state.get("after_start_sub", "running")
+    state["restarts"] = state.get("restarts", 0) + state.get("after_start_restarts", 0)
     record = state.get("on_start_pidfile")
     if record:
         Path(record["path"]).write_text(json.dumps(record["value"]))
@@ -80,7 +86,7 @@ class Systemctl:
         self.path = root / "systemctl"
         self.path.write_text(FAKE.format(python=sys.executable))
         self.path.chmod(0o755)
-        self.set(load="loaded", active="inactive")
+        self.set(load="loaded", active="inactive", argv=LIVE_ARGV)
 
     def set(self, **state):
         current = jsonio.read(self.dir / "state.json") or {}
@@ -123,13 +129,20 @@ class Proc:
         (self.root / "locks").write_text("".join(self.locks))
 
     def process(
-        self, pid, *, ppid=1, name="proc", cgroup="/user.slice/session-2.scope"
+        self,
+        pid,
+        *,
+        ppid=1,
+        name="proc",
+        cgroup="/user.slice/session-2.scope",
+        cmdline=None,
     ):
         folder = self.root / str(pid)
         (folder / "fd").mkdir(parents=True, exist_ok=True)
         (folder / "stat").write_text(f"{pid} ({name}) S {ppid} {pid} {pid} 0 -1\n")
         (folder / "comm").write_text(name + "\n")
         (folder / "cgroup").write_text(f"0::{cgroup}\n")
+        (folder / "cmdline").write_text("".join(a + "\0" for a in cmdline or (name,)))
         return folder
 
     def listen(self, port, inode, pid=None):
@@ -183,17 +196,42 @@ class World:
         monkeypatch.setattr(service_control, "sleep", lambda s: time.sleep(0.01))
         monkeypatch.setattr(service_control, "SETTLE_S", 0.3)
         monkeypatch.setattr(service_control, "OPERATIONS", service_control.Operations())
+        # Every look is fresh in these tests (the cache has its own test).
+        monkeypatch.setattr(service_control, "PROBE_CACHE_S", 0.0, raising=False)
+        if hasattr(service_control, "Probe"):
+            monkeypatch.setattr(service_control, "GPU_PROBE", service_control.Probe())
+            monkeypatch.setattr(service_control, "PORT_PROBE", service_control.Probe())
+        self.children = []
 
-    def running(self, pid=None, *, by_unit=True, cgroup=None):
-        """The supervisor's pid record in the live home (this test process
-        by default, whose identity is real)."""
-        pid = pid or os.getpid()
+    def child(self):
+        """A real process standing in for a supervisor: its identity (start
+        time, boot) is real, everything else about it is synthetic."""
+        child = subprocess.Popen(["sleep", "60"])
+        self.children.append(child)
+        return child.pid
+
+    def close(self):
+        for child in self.children:
+            if child.poll() is None:
+                child.kill()
+            child.wait()
+
+    def record(self, pid):
+        return {"pid": pid, "identity": gpumgr.identity(pid)}
+
+    def running(self, pid=None, *, by_unit=True, cgroup=None, cmdline=SERVICE_CMDLINE):
+        """The supervisor's pid record in the live home: a ``sleep`` child
+        by default, whose identity is real."""
+        pid = pid or self.child()
         jsonio.write(
             self.home / "live.pid",
             {"pid": pid, "identity": gpumgr.identity(pid), "started_at": time.time()},
         )
         self.proc.process(
-            pid, name="levi", cgroup=cgroup or "/user.slice/session-2.scope"
+            pid,
+            name="levi",
+            cgroup=cgroup or "/user.slice/session-2.scope",
+            cmdline=cmdline,
         )
         if by_unit:
             self.systemctl.set(active="active", sub="running", main_pid=pid)
@@ -222,7 +260,10 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setenv("LEVI_LIVE_SERVICE_CONTROL", "1")
     w = World(tmp_path, monkeypatch)
     yield w
-    assert service_control.OPERATIONS.wait_idle(20)
+    try:
+        assert service_control.OPERATIONS.wait_idle(20)
+    finally:
+        w.close()
 
 
 @pytest.fixture
@@ -260,6 +301,7 @@ def test_not_running_unit_installed_ports_free(world):
         "alive": False,
         "started_by": None,
         "cgroup_unit": None,
+        "name": None,
         "started_at": None,
     }
     assert seen["unit"]["installed"] and seen["unit"]["state"] == "inactive"
@@ -450,7 +492,7 @@ def test_a_start_runs_systemctl_start_and_nothing_else(http, world):
     world.systemctl.set(
         on_start_pidfile={
             "path": str(world.home / "live.pid"),
-            "value": {"pid": os.getpid(), "identity": gpumgr.identity(os.getpid())},
+            "value": world.record(world.child()),
         }
     )
     answer = http.post("/api/levi/live/service/start", json=start_body(), headers=UI)
@@ -763,7 +805,8 @@ def test_a_terminal_service_gets_the_signal_levi_live_stop_sends(http, world):
 
 
 def test_a_terminal_record_whose_process_changed_is_not_signalled(world, monkeypatch):
-    world.running(by_unit=False)
+    # os.kill is replaced below: no child here (its cleanup needs os.kill).
+    world.running(os.getpid(), by_unit=False)
     jsonio.write(
         world.home / "live.pid",
         {"pid": os.getpid(), "identity": {"start_ticks": "1", "boot": "x"}},
@@ -898,21 +941,331 @@ def test_a_terminal_start_racing_the_unit_is_not_reported_as_the_units(
 ):
     """Between the preflight and systemctl a terminal start took the live
     home: the operation says so instead of claiming that pid."""
+    pid = world.child()
     world.systemctl.set(
         on_start_pidfile={
             "path": str(world.home / "live.pid"),
-            "value": {"pid": os.getpid(), "identity": gpumgr.identity(os.getpid())},
+            "value": world.record(pid),
         }
     )
     real = service_control.unit_state
     # The unit's MainPID is not the holder, and the holder is not in its cgroup.
     monkeypatch.setattr(
-        service_control, "unit_state", lambda unit: {**real(unit), "main_pid": None}
+        service_control,
+        "unit_state",
+        lambda unit, **kw: {**real(unit, **kw), "main_pid": None},
     )
-    world.proc.process(os.getpid(), name="levi")
+    world.proc.process(pid, name="levi", cmdline=SERVICE_CMDLINE)
     op, _ = service_control.start(
         world.target(), request_id="req-race-0001", confirm="start-live"
     )
     assert service_control.OPERATIONS.wait_idle(10)
     assert op.state == "failed" and op.result == "start_failed"
     assert "terminal" in op.detail
+
+
+# --- review fixes (review-CL10) ----------------------------------------------------------
+
+
+def test_i1_unknown_sessions_count_as_an_evaluation(http, world, monkeypatch):
+    """No live workspace found (or no rollout roots): whether an evaluation
+    runs cannot be told, so a stop needs the phrase, as during one."""
+    world.running(by_unit=True)
+    world.systemctl.set(on_stop_remove=str(world.home / "live.pid"))
+    world.session("running")
+    monkeypatch.setattr(api, "_workspace", lambda: None)
+    seen = http.get("/api/levi/live/service", headers=UI).json()
+    assert seen["evaluation"]["active"] is None
+    assert seen["needs_confirmation"]["stop"] == ["evaluation_unknown"]
+    answer = http.post("/api/levi/live/service/stop", json=stop_body(), headers=UI)
+    assert answer.status_code == 409
+    assert answer.json()["detail"]["code"] == "evaluation_unknown"
+    assert "stop" not in world.systemctl.verbs()
+    answer = http.post(
+        "/api/levi/live/service/stop",
+        json=stop_body(
+            request_id="req-stop-0002", force_phrase=service_control.FORCE_PHRASE
+        ),
+        headers=UI,
+    )
+    assert answer.status_code == 202
+
+
+def test_i1_no_rollout_roots_is_unknown_too(world):
+    world.running(by_unit=True)
+    (world.ws / "live.toml").write_text("[watch]\nroots = []\n")
+    seen = service_control.status(world.target())
+    assert seen["evaluation"]["active"] is None
+    assert "evaluation_unknown" in seen["needs_confirmation"]["stop"]
+
+
+def test_i2_a_unit_in_a_restart_loop_is_a_failed_start(http, world):
+    world.systemctl.set(
+        after_start="activating", after_start_sub="auto-restart", after_start_restarts=2
+    )
+    op = http.post("/api/levi/live/service/start", json=start_body(), headers=UI).json()
+    done = wait_op(http, op["operation_id"])
+    assert done["state"] == "failed" and done["result"] == "flapping", done
+    assert "journalctl" in done["detail"]
+    # And the page says so instead of "already running".
+    seen = http.get("/api/levi/live/service", headers=UI).json()
+    assert seen["unit"]["flapping"] is True
+    assert "unit_flapping" in seen["refusals"]
+
+
+def test_i2_a_restart_counted_during_the_start_is_a_failure(http, world):
+    world.systemctl.set(after_start="active", after_start_restarts=1)
+    op = http.post("/api/levi/live/service/start", json=start_body(), headers=UI).json()
+    done = wait_op(http, op["operation_id"])
+    assert done["state"] == "failed" and done["result"] == "flapping", done
+
+
+def test_i3_a_levi_live_once_is_never_stopped(http, world):
+    pid = world.running(
+        by_unit=False,
+        cmdline=("/x/python", "-m", "levi.live", "once", "--workspace", "/w"),
+    )
+    seen = http.get("/api/levi/live/service", headers=UI).json()
+    assert seen["holder"]["started_by"] == "terminal_once"
+    answer = http.post("/api/levi/live/service/stop", json=stop_body(), headers=UI)
+    assert answer.status_code == 409
+    detail = answer.json()["detail"]
+    assert detail["code"] == "once_instance" and f"pid {pid}" in detail["message"]
+    # Not even with the phrase.
+    answer = http.post(
+        "/api/levi/live/service/stop",
+        json=stop_body(
+            request_id="req-stop-0002", force_phrase=service_control.FORCE_PHRASE
+        ),
+        headers=UI,
+    )
+    assert answer.status_code == 409
+    assert gpumgr.same_process(pid, gpumgr.identity(pid))  # still running
+    # A start is refused as well, naming it.
+    answer = http.post("/api/levi/live/service/start", json=start_body(), headers=UI)
+    assert answer.json()["detail"]["code"] == "once_instance"
+
+
+def test_i3_a_holder_that_is_not_levi_live_start_is_not_signalled(http, world):
+    pid = world.running(by_unit=False, cmdline=("/x/python", "something-else"))
+    seen = http.get("/api/levi/live/service", headers=UI).json()
+    assert seen["holder"]["started_by"] == "other"
+    answer = http.post("/api/levi/live/service/stop", json=stop_body(), headers=UI)
+    assert answer.status_code == 409
+    assert answer.json()["detail"]["code"] == "holder_unidentified"
+    assert gpumgr.same_process(pid, gpumgr.identity(pid))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "levi-product",
+        "levi-product.service",
+        "levi-live-levi-product.service",
+        "other.service",
+        "levi-livex.service",
+        "-H host.service",
+    ],
+)
+def test_i4_the_unit_must_be_a_levi_live_unit(world, monkeypatch, name):
+    monkeypatch.setenv("LEVI_LIVE_UNIT", name)
+    assert service_control.unit_name()[1] == "unit_name_invalid"
+
+
+def test_i4_good_names(monkeypatch):
+    for name, want in (
+        ("levi-live", "levi-live.service"),
+        ("levi-live-cold", "levi-live-cold.service"),
+        ("levi-live@ws2.service", "levi-live@ws2.service"),
+    ):
+        monkeypatch.setenv("LEVI_LIVE_UNIT", name)
+        assert service_control.unit_name() == (want, None)
+
+
+def test_i4_the_product_cannot_stop_itself(http, world, monkeypatch):
+    world.running(by_unit=True)
+    monkeypatch.setenv("LEVI_LIVE_UNIT", "levi-product")
+    answer = http.post("/api/levi/live/service/stop", json=stop_body(), headers=UI)
+    assert answer.status_code == 412
+    assert answer.json()["detail"]["code"] == "unit_name_invalid"
+    assert "stop" not in world.systemctl.verbs()
+
+
+def test_i4_the_unit_this_core_runs_in_is_refused(http, world, monkeypatch):
+    world.proc.process(
+        os.getpid(), name="python", cgroup=unit_cgroup("levi-live-x.service")
+    )
+    monkeypatch.setenv("LEVI_LIVE_UNIT", "levi-live-x")
+    assert service_control.unit_name() == (None, "unit_is_self")
+    answer = http.post("/api/levi/live/service/start", json=start_body(), headers=UI)
+    assert answer.status_code == 412
+    assert answer.json()["detail"]["code"] == "unit_is_self"
+
+
+def test_i4_a_unit_that_does_not_run_levi_live_start_is_refused(http, world):
+    world.running(by_unit=True)
+    world.systemctl.set(argv="/x/levi serve")
+    seen = http.get("/api/levi/live/service", headers=UI).json()
+    assert "unit_not_live" in seen["refusals"]
+    for url, body in (("stop", stop_body()), ("start", start_body())):
+        answer = http.post(f"/api/levi/live/service/{url}", json=body, headers=UI)
+        assert answer.status_code == 412, url
+        assert answer.json()["detail"]["code"] == "unit_not_live"
+    assert [v for v in world.systemctl.verbs() if v != "show"] == []
+
+
+def test_i5_a_hanging_nvidia_smi_does_not_block_the_status(world, monkeypatch):
+    release = threading.Event()
+    calls = []
+
+    def hanging():
+        calls.append(1)
+        release.wait(10)
+        return []
+
+    monkeypatch.setattr(service_control, "gpu_processes", hanging)
+    monkeypatch.setattr(service_control, "PROBE_TIMEOUT_S", 0.3)
+    try:
+        began = time.monotonic()
+        results = []
+        threads = [
+            threading.Thread(
+                target=lambda: results.append(service_control.status(world.target()))
+            )
+            for _ in range(5)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(10)
+        assert time.monotonic() - began < 3
+        assert len(results) == 5
+        assert all(r["gpu"]["state"] == "unknown" for r in results)
+        assert all(r["gpu"]["others"] is None for r in results)
+        assert len(calls) == 1  # one nvidia-smi at a time
+    finally:
+        release.set()
+
+
+def test_i5_a_slow_proc_scan_answers_unknown_and_refuses_the_start(world, monkeypatch):
+    release = threading.Event()
+    real = service_control.scan_ports
+
+    def slow(wanted):
+        release.wait(10)
+        return real(wanted)
+
+    monkeypatch.setattr(service_control, "scan_ports", slow)
+    monkeypatch.setattr(service_control, "PROBE_TIMEOUT_S", 0.3)
+    try:
+        seen = service_control.status(world.target())
+        assert {r["state"] for r in seen["ports"]} == {"unknown"}
+        assert "ports_unknown" in seen["refusals"]
+        with pytest.raises(service_control.Refused) as caught:
+            service_control.start(
+                world.target(), request_id="req-scan-0001", confirm="start-live"
+            )
+        assert caught.value.code == "ports_unknown" and caught.value.status == 503
+    finally:
+        release.set()
+
+
+def test_i5_the_status_reuses_a_fresh_look_but_a_start_looks_again(world, monkeypatch):
+    calls = []
+
+    def counted():
+        calls.append(1)
+        return []
+
+    monkeypatch.setattr(service_control, "gpu_processes", counted)
+    monkeypatch.setattr(service_control, "PROBE_CACHE_S", 30.0)
+    for _ in range(3):
+        service_control.status(world.target())
+    assert len(calls) == 1
+    service_control.start(
+        world.target(), request_id="req-fresh-0001", confirm="start-live"
+    )
+    assert len(calls) == 2
+
+
+def test_s1_the_live_services_own_core_does_not_stop_it(http, world, monkeypatch):
+    world.running(by_unit=True)
+    monkeypatch.setattr(api, "_own", lambda: world.ws)
+    answer = http.post("/api/levi/live/service/stop", json=stop_body(), headers=UI)
+    assert answer.status_code == 409
+    assert answer.json()["detail"]["code"] == "served_by_live_service"
+    assert "stop" not in world.systemctl.verbs()
+
+
+def test_s1_the_signal_rechecks_the_identity(world, monkeypatch):
+    pid = os.getpid()  # os.kill is replaced: nothing can be signalled
+    killed = []
+    monkeypatch.setattr(service_control.os, "kill", lambda *a: killed.append(a))
+    ok, result, _ = service_control._signal_stop(
+        {"pid": pid, "identity": {"start_ticks": "1", "boot": "other"}}
+    )
+    assert killed == [] and ok and result == "stopped"
+
+
+def test_s3_the_same_request_during_the_preflight_is_the_same_operation(
+    world, monkeypatch
+):
+    real = service_control.discover
+    entered = threading.Event()
+
+    def slow(target, **kwargs):
+        entered.set()
+        time.sleep(0.4)
+        return real(target, **kwargs)
+
+    monkeypatch.setattr(service_control, "discover", slow)
+    world.proc.process(4242, name="python3")
+    world.proc.listen(7881, 777, pid=4242)  # the preflight will refuse
+    target = world.target()
+    first = {}
+
+    def click():
+        try:
+            service_control.start(
+                target, request_id="req-dup-0001", confirm="start-live"
+            )
+        except service_control.Refused as exc:
+            first["code"] = exc.code
+
+    thread = threading.Thread(target=click)
+    thread.start()
+    entered.wait(5)
+    op, created = service_control.start(
+        target, request_id="req-dup-0001", confirm="start-live"
+    )
+    assert created is False and op.state == "preparing"
+    assert service_control.operation(op.id)["state"] == "preparing"
+    thread.join(5)
+    assert first["code"] == "port_foreign"
+    row = service_control.operation(op.id)
+    assert row["state"] == "refused" and row["result"] == "port_foreign"
+    # The same request again gets the same answer.
+    with pytest.raises(service_control.Refused) as caught:
+        service_control.start(target, request_id="req-dup-0001", confirm="start-live")
+    assert caught.value.code == "port_foreign"
+
+
+def test_s4_refusals_before_the_preflight_are_audited(http, world, monkeypatch):
+    http.post("/api/levi/live/service/start", json=start_body(confirm=""), headers=UI)
+    http.post(
+        "/api/levi/live/service/start", json=start_body(request_id="x"), headers=UI
+    )
+    codes = [r.get("code") for r in world.audit()]
+    assert codes == ["confirm_required", "request_id_invalid"]
+    monkeypatch.delenv("LEVI_LIVE_SERVICE_CONTROL")
+    http.post("/api/levi/live/service/start", json=start_body(), headers=UI)
+    assert len(world.audit()) == 2  # switched off: nothing is written
+
+
+def test_s5_switched_off_the_routes_touch_nothing(http, world, monkeypatch):
+    monkeypatch.delenv("LEVI_LIVE_SERVICE_CONTROL")
+    for route, body in (("start", start_body()), ("stop", stop_body())):
+        answer = http.post(f"/api/levi/live/service/{route}", json=body, headers=UI)
+        assert answer.status_code == 403
+    assert not (world.product / "pool").exists()
+    assert world.systemctl.calls() == []

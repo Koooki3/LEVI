@@ -55,6 +55,7 @@ import fcntl
 import os
 import re
 import secrets
+import shutil
 import signal
 import subprocess
 import threading
@@ -70,7 +71,10 @@ from .controller import Instance
 ENV_UNIT = "LEVI_LIVE_UNIT"
 ENV_ENABLED = "LEVI_LIVE_SERVICE_CONTROL"
 DEFAULT_UNIT = "levi-live.service"
-UNIT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9@._:-]{0,120}\.service$")
+# ``levi-live.service`` or a variant of it (``levi-live-cold.service``,
+# ``levi-live@x.service``): never another unit, never the product's own.
+UNIT_NAME = re.compile(r"^levi-live(?:[-@_.:][A-Za-z0-9@._:-]{0,100})?\.service$")
+FORBIDDEN_IN_UNIT = "levi-product"
 REQUEST_ID = re.compile(r"^[A-Za-z0-9._:-]{8,80}$")
 
 # The fixed words a request carries to say it means it.
@@ -78,9 +82,18 @@ START_CONFIRM = "start-live"
 STOP_CONFIRM = "stop-live"
 FORCE_PHRASE = "stop live during evaluation"
 
-SYSTEMCTL = "systemctl"
+# Resolved once from the system folders, not from PATH (``levi`` puts its own
+# tool folders first).
+SYSTEMCTL = shutil.which("systemctl", path="/usr/bin:/bin") or "/usr/bin/systemctl"
 PROC = Path("/proc")
 SHOW_TIMEOUT_S = 10.0
+# The status route answers within about this much: a slower systemctl,
+# nvidia-smi or /proc scan is shown as unknown.
+SHOW_STATUS_TIMEOUT_S = 3.0
+PROBE_TIMEOUT_S = 3.0
+# How long the status route reuses the last nvidia-smi answer and /proc scan
+# (a start or a stop always looks again).
+PROBE_CACHE_S = 3.0
 START_TIMEOUT_S = 60.0
 # The unit's TimeoutStopSec is 180 s; systemctl waits for the stop job.
 STOP_TIMEOUT_S = 210.0
@@ -89,7 +102,6 @@ SETTLE_S = 30.0
 # A terminal-started service: how long ``levi live stop`` waits too.
 SIGNAL_STOP_S = 150.0
 POLL_S = 0.5
-GPU_CACHE_S = 3.0
 
 AUDIT = "service-control.jsonl"
 AUDIT_MAX_BYTES = 256 * 1024
@@ -114,6 +126,7 @@ class Refused(Exception):
         self.code = code
         self.message = message
         self.extra = extra
+        self.audited = False
 
     def public(self) -> dict:
         return {"code": self.code, "message": self.message, **self.extra}
@@ -147,14 +160,18 @@ def enabled() -> bool:
 
 def unit_name() -> tuple:
     """``(name, problem)``: the unit ``LEVI_LIVE_UNIT`` names (``.service``
-    added when left out), and ``unit_name_invalid`` for one that is not a
-    plain unit name (it is passed to systemctl as one argument, never to a
-    shell, but a name like ``-H host`` must not become an option)."""
+    added when left out). ``unit_name_invalid`` for anything but a
+    ``levi-live*.service`` name or one that names ``levi-product`` (the page
+    must never stop the product LEVI itself; the name is passed to systemctl
+    as one argument, never to a shell); ``unit_is_self`` for the unit this
+    process runs in."""
     name = (os.environ.get(ENV_UNIT) or DEFAULT_UNIT).strip()
     if name and not name.endswith(".service"):
         name += ".service"
-    if not UNIT_NAME.fullmatch(name):
+    if not UNIT_NAME.fullmatch(name) or FORBIDDEN_IN_UNIT in name:
         return None, "unit_name_invalid"
+    if cgroup_unit(os.getpid()) == name:
+        return None, "unit_is_self"
     return name, None
 
 
@@ -278,9 +295,28 @@ def exec_argv(value: str) -> list:
     return found.group(1).split() if found else []
 
 
-def unit_state(unit) -> dict:
+def live_verb(argv) -> str | None:
+    """The ``levi live`` subcommand a command line runs (``start``,
+    ``once``…), None when it is not ``levi live``."""
+    for i, token in enumerate(argv[:-1]):
+        if token in ("live", "levi.live"):
+            return argv[i + 1]
+    return None
+
+
+def cmdline(pid, proc=None) -> list | None:
+    try:
+        raw = ((proc or PROC) / str(pid) / "cmdline").read_bytes()
+    except OSError:
+        return None
+    return [a.decode(errors="replace") for a in raw.split(b"\0") if a] or None
+
+
+def unit_state(unit, timeout=SHOW_TIMEOUT_S) -> dict:
     """What systemd says of the unit. Never raises: a systemd that cannot be
-    asked gives ``problem``."""
+    asked gives ``problem``. ``runs_live``: its ``ExecStart`` is ``levi
+    live start``; ``flapping``: it is waiting to be started again after a
+    crash (``auto-restart``)."""
     out = {
         "name": unit,
         "installed": False,
@@ -291,12 +327,14 @@ def unit_state(unit) -> dict:
         "exec_main_status": None,
         "n_restarts": None,
         "ui": False,
+        "runs_live": False,
+        "flapping": False,
         "workspace": None,
         "problem": None,
     }
     try:
         code, text, err = systemctl(
-            "show", unit, "--property=" + ",".join(SHOW), timeout=SHOW_TIMEOUT_S
+            "show", unit, "--property=" + ",".join(SHOW), timeout=timeout
         )
     except SystemdError as exc:
         out["problem"] = exc.code
@@ -323,6 +361,8 @@ def unit_state(unit) -> dict:
         exec_main_status=_number(values.get("ExecMainStatus")),
         n_restarts=_number(values.get("NRestarts")),
         ui="--ui" in argv and "--no-ui" not in argv,
+        runs_live=live_verb(argv) == "start",
+        flapping=values.get("SubState") == "auto-restart",
         workspace=workspace,
     )
     return out
@@ -405,17 +445,9 @@ def lock_holders(lock_file, proc=None) -> list:
     return same or inode_only
 
 
-_gpu_cache: dict = {}
-_gpu_lock = threading.Lock()
-
-
 def gpu_processes() -> list | None:
     """Compute processes on the GPU (``nvidia-smi``, read-only), None when
-    they cannot be read. Cached for ``GPU_CACHE_S`` (the page polls)."""
-    with _gpu_lock:
-        cached = _gpu_cache.get("value")
-        if cached and time.monotonic() - cached[0] < GPU_CACHE_S:
-            return cached[1]
+    they cannot be read."""
     failed = []
 
     def runner(*args, **kwargs):
@@ -426,10 +458,65 @@ def gpu_processes() -> list | None:
             raise
 
     rows = gpumgr.gpu_holders(runner)
-    value = None if failed else rows
-    with _gpu_lock:
-        _gpu_cache["value"] = (time.monotonic(), value)
-    return value
+    return None if failed else rows
+
+
+def scan_ports(wanted) -> tuple:
+    """``({port: inodes}, {inode: pid})`` for the ``wanted`` ports: the
+    kernel's socket table and a walk over every visible ``/proc/<pid>/fd``."""
+    table = {p: i for p, i in listening().items() if p in wanted}
+    return table, socket_owners(set().union(*table.values()) if table else set())
+
+
+class Probe:
+    """One slow look (nvidia-smi, the /proc walk) shared by every caller:
+    at most one runs at a time (in a thread of its own), its answer is
+    reused for ``max_age`` seconds, and a caller waits at most ``timeout``
+    seconds, after which it gets ``(False, None)`` (shown as unknown) while
+    the look goes on for the next caller."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.result = None  # (key, started, ok, value)
+        self.thread = None
+
+    def _run(self, fn, key, started):
+        try:
+            ok, value = True, fn()
+        except Exception:  # noqa: BLE001 - an unreadable look is unknown
+            ok, value = False, None
+        with self.lock:
+            self.result = (key, started, ok, value)
+            self.thread = None
+
+    def get(self, fn, *, key=None, max_age=0.0, timeout=None) -> tuple:
+        timeout = PROBE_TIMEOUT_S if timeout is None else timeout
+        need = time.monotonic() - max_age
+        deadline = time.monotonic() + timeout
+        while True:
+            with self.lock:
+                found = self.result
+                if found and found[0] == key and found[1] >= need:
+                    return found[2], found[3]
+                if self.thread is None:
+                    self.thread = threading.Thread(
+                        target=self._run,
+                        args=(fn, key, time.monotonic()),
+                        name="live-service-probe",
+                        daemon=True,
+                    )
+                    self.thread.start()
+                thread = self.thread
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return False, None
+            thread.join(left)
+            if thread.is_alive():
+                return False, None
+
+
+GPU_PROBE = Probe()
+PORT_PROBE = Probe()
 
 
 # --- discovery ------------------------------------------------------------------------
@@ -468,7 +555,7 @@ def _ours(pid, holder_pid, unit, proc=None) -> bool:
     return bool(unit) and cgroup_unit(pid, proc) == unit
 
 
-def ports(target, holder_pid) -> list:
+def ports(target, holder_pid, max_age=0.0) -> list:
     c = target.config
     wanted = [
         (c.service.core_port, "core"),
@@ -476,16 +563,16 @@ def ports(target, holder_pid) -> list:
         (c.vllm.port, "vllm"),
         (c.service.ui_port, "ui"),
     ]
-    table = listening()
-    inodes = set()
-    for port, _ in wanted:
-        inodes |= table.get(port, set())
-    owners = socket_owners(inodes)
+    key = tuple(sorted(p for p, _ in wanted))
+    ok, scan = PORT_PROBE.get(lambda: scan_ports(key), key=key, max_age=max_age)
+    table, owners = scan if ok else ({}, {})
     rows = []
     for port, role in wanted:
         held = table.get(port)
         row = {"port": port, "role": role, "state": "free", "pid": None, "name": None}
-        if held:
+        if not ok:
+            row["state"] = "unknown"
+        elif held:
             pids = sorted({owners[i] for i in held if i in owners})
             mine = [p for p in pids if _ours(p, holder_pid, target.unit)]
             if pids and len(mine) == len(pids):
@@ -499,7 +586,7 @@ def ports(target, holder_pid) -> list:
     return rows
 
 
-def gpu(target, holder_pid, alive_status) -> dict:
+def gpu(target, holder_pid, alive_status, max_age=0.0) -> dict:
     lock_file = target.config.gpu.lock_file
     lock = {
         "configured": bool(lock_file),
@@ -517,9 +604,10 @@ def gpu(target, holder_pid, alive_status) -> dict:
                 lock.update(state="live", pid=mine[0])
             else:
                 lock.update(state="other", pid=pids[0], name=comm(pids[0]))
-    found = gpu_processes()
+    ok, found = GPU_PROBE.get(lambda: gpu_processes(), max_age=max_age)
+    state = "ok" if ok and found is not None else "unreadable" if ok else "unknown"
     others = None
-    if found is not None:
+    if state == "ok":
         others = [
             {"pid": r["pid"], "name": r.get("name"), "memory_mib": r.get("memory_mib")}
             for r in found
@@ -528,10 +616,16 @@ def gpu(target, holder_pid, alive_status) -> dict:
     vllm = "stopped"
     if alive_status:
         vllm = ((alive_status.get("gpu") or {}).get("vllm_state")) or None
-    return {"lock": lock, "others": others, "vllm_state": vllm}
+    return {"state": state, "lock": lock, "others": others, "vllm_state": vllm}
 
 
 def evaluation(target) -> dict:
+    """The evaluation sessions running, homing or waiting for their reset.
+    ``active`` is None when it cannot be told (no live workspace found, or
+    no rollout roots in its configuration): a stop then treats it as an
+    evaluation in progress."""
+    if target.workspace is None or not target.config.watch.roots:
+        return {"active": None, "count": None, "sessions": []}
     found = sessions.read_sessions(target.config.watch.roots)
     active = [s for s in found.values() if s.active()]
     return {
@@ -557,13 +651,31 @@ def _check(code, level, message):
     return {"code": code, "level": level, "message": message}
 
 
-def discover(target) -> dict:
+def classify(record, unit, target) -> str:
+    """Who holds the live home: ``unit`` (the unit's ``MainPID`` or in its
+    cgroup), ``terminal`` (a resident ``levi live start`` started from a
+    terminal), ``terminal_once`` (a ``levi live once`` batch: possibly
+    another session's GPU window) or ``other`` (cannot be told)."""
+    pid = record["pid"]
+    if (unit.get("main_pid") and unit["main_pid"] == pid) or (
+        target.unit and cgroup_unit(pid) == target.unit
+    ):
+        return "unit"
+    verb = live_verb(cmdline(pid) or [])
+    return {"start": "terminal", "once": "terminal_once"}.get(verb, "other")
+
+
+def discover(target, fresh=False) -> dict:
     """Everything the page shows and a start or stop decides on. Reads only:
     systemd's view of the unit, the live home's pid record, the kernel's
     socket, lock and cgroup tables, ``nvidia-smi``, the status file and the
-    evaluation sessions' files."""
+    evaluation sessions' files. ``fresh`` (a start or a stop): nothing
+    cached, the longer systemctl timeout."""
+    max_age = 0.0 if fresh else PROBE_CACHE_S
     if target.unit:
-        unit = unit_state(target.unit)
+        unit = unit_state(
+            target.unit, timeout=SHOW_TIMEOUT_S if fresh else SHOW_STATUS_TIMEOUT_S
+        )
     else:
         unit = {"name": None, "installed": False, "state": None, "problem": None}
     record = holder(target)
@@ -572,12 +684,7 @@ def discover(target) -> dict:
     cgroup = None
     if record:
         cgroup = cgroup_unit(holder_pid)
-        if (unit.get("main_pid") and unit["main_pid"] == holder_pid) or (
-            target.unit and cgroup == target.unit
-        ):
-            started_by = "unit"
-        else:
-            started_by = "terminal"
+        started_by = classify(record, unit, target)
     status = jsonio.read(target.config.status_file)
     alive_status = (
         status
@@ -591,10 +698,11 @@ def discover(target) -> dict:
             "alive": bool(record),
             "started_by": started_by,
             "cgroup_unit": cgroup,
+            "name": comm(holder_pid) if record else None,
             "started_at": (record or {}).get("started_at"),
         },
-        "ports": ports(target, holder_pid),
-        "gpu": gpu(target, holder_pid, alive_status),
+        "ports": ports(target, holder_pid, max_age),
+        "gpu": gpu(target, holder_pid, alive_status, max_age),
         "evaluation": evaluation(target),
     }
 
@@ -602,12 +710,16 @@ def discover(target) -> dict:
 # --- what may be done ------------------------------------------------------------
 
 
-def start_checks(target, seen) -> list:
-    """The preflight of a start, as checks: ``refuse`` (a start would be
-    refused), ``confirm`` (a start needs the request's confirmation),
-    ``warn`` and ``ok``."""
-    out = []
-    unit, held = seen["unit"], seen["holder"]
+UNIT_PROBLEMS = {
+    "unit_name_invalid": f"{ENV_UNIT} must name a levi-live*.service unit, never levi-product",
+    "unit_is_self": f"{ENV_UNIT} names the unit this LEVI itself runs in",
+}
+
+
+def _unit_checks(target, seen, out) -> None:
+    """Refusals shared by a start and a stop: the page is the live service's
+    own core; the unit is not one this page may drive."""
+    unit = seen["unit"]
     if target.served_by_live:
         out.append(
             _check(
@@ -618,18 +730,14 @@ def start_checks(target, seen) -> list:
         )
     if target.unit_problem:
         out.append(
-            _check(
-                target.unit_problem,
-                "refuse",
-                f"{ENV_UNIT} is not a plain systemd service name",
-            )
+            _check(target.unit_problem, "refuse", UNIT_PROBLEMS[target.unit_problem])
         )
     elif unit.get("problem"):
         out.append(
             _check(
                 unit["problem"],
                 "refuse",
-                "systemd's user instance cannot be asked: start the service from a terminal",
+                "systemd's user instance cannot be asked: use `levi live` in a terminal",
             )
         )
     elif not unit.get("installed"):
@@ -637,9 +745,49 @@ def start_checks(target, seen) -> list:
             _check(
                 "unit_not_installed",
                 "refuse",
-                f"The unit {target.unit} is not installed (docs/SUPERVISION.md): start the service from a terminal",
+                f"The unit {target.unit} is not installed (docs/SUPERVISION.md): use `levi live` in a terminal",
             )
         )
+    elif not unit.get("runs_live"):
+        out.append(
+            _check(
+                "unit_not_live",
+                "refuse",
+                f"The unit {target.unit} does not run `levi live start`",
+            )
+        )
+
+
+def _holder_checks(held, out) -> None:
+    """A holder of the live home that is not a resident live service is
+    never signalled: a ``levi live once`` (possibly another session's GPU
+    window) or a process that cannot be told."""
+    who = f"pid {held['pid']} ({held.get('name') or '?'})"
+    if held["started_by"] == "terminal_once":
+        out.append(
+            _check(
+                "once_instance",
+                "refuse",
+                f"The live home is held by a `levi live once` batch, {who}: it is not the service and is left alone",
+            )
+        )
+    elif held["started_by"] == "other":
+        out.append(
+            _check(
+                "holder_unidentified",
+                "refuse",
+                f"The live home is held by {who}, which is not `levi live start`: it is left alone",
+            )
+        )
+
+
+def start_checks(target, seen) -> list:
+    """The preflight of a start, as checks: ``refuse`` (a start would be
+    refused), ``confirm`` (a start needs the request's confirmation),
+    ``warn`` and ``ok``."""
+    out = []
+    unit, held = seen["unit"], seen["holder"]
+    _unit_checks(target, seen, out)
     if target.workspace is None:
         out.append(
             _check(
@@ -649,7 +797,9 @@ def start_checks(target, seen) -> list:
             )
         )
     if held["alive"]:
-        if held["started_by"] == "terminal":
+        if held["started_by"] in ("terminal_once", "other"):
+            _holder_checks(held, out)
+        elif held["started_by"] == "terminal":
             out.append(
                 _check(
                     "terminal_instance",
@@ -661,6 +811,15 @@ def start_checks(target, seen) -> list:
             out.append(
                 _check("already_running", "refuse", "The live service already runs")
             )
+    elif unit.get("flapping"):
+        out.append(
+            _check(
+                "unit_flapping",
+                "refuse",
+                f"The unit keeps failing and is restarted by systemd ({unit.get('n_restarts')} restarts): "
+                f"see journalctl --user -u {target.unit}, then stop it",
+            )
+        )
     elif unit.get("state") in RUNNING_STATES:
         out.append(
             _check(
@@ -677,6 +836,14 @@ def start_checks(target, seen) -> list:
                 "unit_failed",
                 "confirm",
                 "The unit failed last time: a start resets it first (reset_failed)",
+            )
+        )
+    if any(row["state"] == "unknown" for row in seen["ports"]):
+        out.append(
+            _check(
+                "ports_unknown",
+                "refuse",
+                "Who listens on the service's ports could not be read in time: try again",
             )
         )
     for row in seen["ports"]:
@@ -749,17 +916,23 @@ def start_checks(target, seen) -> list:
 def stop_checks(target, seen) -> list:
     out = []
     unit, held = seen["unit"], seen["holder"]
-    if target.served_by_live:
+    running = held["alive"] or unit.get("state") in (*RUNNING_STATES, "deactivating")
+    if not running:
+        out.append(_check("not_running", "refuse", "The live service is not running"))
+        return out
+    _unit_checks(target, seen, out)
+    if held["alive"]:
+        _holder_checks(held, out)
+    if seen["evaluation"]["active"] is None:
         out.append(
             _check(
-                "served_by_live_service",
-                "refuse",
-                "This page is served by the live service itself: start and stop it from the product LEVI",
+                "evaluation_unknown",
+                "confirm",
+                "Whether an evaluation session is running cannot be told (no live workspace or no rollout roots "
+                "known): stopping during one ends the online judgement and the automatic labels",
             )
         )
-    if not held["alive"] and unit.get("state") not in (*RUNNING_STATES, "deactivating"):
-        out.append(_check("not_running", "refuse", "The live service is not running"))
-    if seen["evaluation"]["active"]:
+    elif seen["evaluation"]["active"]:
         out.append(
             _check(
                 "evaluation_active",
@@ -838,12 +1011,15 @@ class Operation:
     id: str
     action: str
     request_id: str
-    state: str = "running"  # running, done, failed
+    # preparing (the preflight runs), refused, running, done, failed
+    state: str = "preparing"
     result: str | None = None
     detail: str = ""
     method: str | None = None
     started_at: float = field(default_factory=time.time)
     ended_at: float | None = None
+    # The preflight's refusal, given again to the same request id.
+    refusal: "Refused | None" = None
 
     def public(self) -> dict:
         return {
@@ -910,37 +1086,50 @@ class Operations:
                         "request_reused",
                         "This request id was used for another action",
                     )
+                if old.refusal is not None:
+                    raise old.refusal
                 return old, False
             if self.active is not None:
                 raise Busy(self.active.id)
             handle = _flock(target.config.home)
             op = Operation(secrets.token_hex(8), action, request_id)
             self.active = op
+            # Known from now on: the same request id during the preflight
+            # gets this operation, and GET …/operations/{id} finds it.
+            self.ops[op.id] = op
+            self.by_request[request_id] = op
+            while len(self.ops) > MAX_OPS:
+                gone = self.ops.popitem(last=False)[1]
+                self.by_request.pop(gone.request_id, None)
         try:
             method, work = prepare()
         except BaseException as exc:
+            refused = isinstance(exc, Refused)
             with self.lock:
+                op.state = "refused" if refused else "failed"
+                op.result = exc.code if refused else "error"
+                op.detail = scrub(exc.message if refused else type(exc).__name__)
+                op.refusal = exc if refused else None
+                op.ended_at = time.time()
                 self.active = None
             handle.close()
-            if isinstance(exc, Refused):
+            if refused:
                 audit(
                     target,
                     {
                         "action": action,
                         "phase": "refused",
                         "request_id": request_id,
+                        "operation_id": op.id,
                         "code": exc.code,
                         "detail": exc.message,
                     },
                 )
+                exc.audited = True
             raise
-        op.method = method
         with self.lock:
-            self.ops[op.id] = op
-            self.by_request[request_id] = op
-            while len(self.ops) > MAX_OPS:
-                gone = self.ops.popitem(last=False)[1]
-                self.by_request.pop(gone.request_id, None)
+            op.method = method
+            op.state = "running"
         audit(
             target,
             {
@@ -1032,9 +1221,12 @@ def _refuse_on(checks, confirmed: set):
         "unit_not_installed": 412,
         "no_live_workspace": 412,
         "not_writable": 412,
+        "unit_is_self": 412,
+        "unit_not_live": 412,
         "systemd_unavailable": 503,
         "systemd_timeout": 503,
         "permission_denied": 503,
+        "ports_unknown": 503,
     }
     for c in checks:
         if c["level"] == "refuse":
@@ -1045,13 +1237,26 @@ def _refuse_on(checks, confirmed: set):
             raise Refused(409, code, c["message"])
 
 
-def _settle(target, unit) -> tuple:
+def _settle(target, unit, restarts_before) -> tuple:
     """After ``systemctl start``: wait (bounded) until the supervisor holds
-    its instance lock, or the unit gave up."""
+    its instance lock, or the unit gave up, or systemd restarts it in a loop
+    (``auto-restart``, or more restarts than before the start): that is a
+    failed start, not one in progress."""
     deadline = time.monotonic() + SETTLE_S
     while True:
         record = holder(target)
         state = unit_state(unit)
+        restarts = state.get("n_restarts") or 0
+        if state.get("flapping") or restarts > (restarts_before or 0):
+            return (
+                False,
+                "flapping",
+                (
+                    f"the unit fails and systemd restarts it ({state.get('state')}/"
+                    f"{state.get('sub_state')}, {restarts} restarts); "
+                    f"see journalctl --user -u {unit}"
+                ),
+            )
         if record:
             pid = record["pid"]
             if state.get("main_pid") == pid or cgroup_unit(pid) == unit:
@@ -1074,17 +1279,53 @@ def _settle(target, unit) -> tuple:
         sleep(POLL_S)
 
 
+def check_enabled() -> None:
+    """403 ``disabled`` unless ``LEVI_LIVE_SERVICE_CONTROL`` is on: checked
+    before anything is read or written."""
+    if not enabled():
+        raise Refused(
+            403,
+            "disabled",
+            f"Starting and stopping from the page is off ({ENV_ENABLED})",
+        )
+
+
+def _submit(target, action, request_id, confirm, word, prepare):
+    """The checks every start and stop makes before its preflight, then the
+    operation. Every refusal but ``disabled`` is audited."""
+    check_enabled()
+    try:
+        if confirm != word:
+            raise Refused(400, "confirm_required", f'confirm must be "{word}"')
+        request_id = _request_id(request_id)
+        return OPERATIONS.submit(target, action, request_id, prepare)
+    except Refused as exc:
+        if not exc.audited:
+            audit(
+                target,
+                {
+                    "action": action,
+                    "phase": "refused",
+                    "request_id": request_id if isinstance(request_id, str) else None,
+                    "code": exc.code,
+                    "detail": exc.message,
+                    **(
+                        {"operation_id": exc.extra["operation_id"]}
+                        if exc.extra.get("operation_id")
+                        else {}
+                    ),
+                },
+            )
+            exc.audited = True
+        raise
+
+
 def start(target, *, request_id, confirm, confirm_gpu_shared=False, reset_failed=False):
     """``POST …/service/start``: ``(operation, created)``."""
-    if not enabled():
-        raise Refused(403, "disabled", f"Starting from the page is off ({ENV_ENABLED})")
-    if confirm != START_CONFIRM:
-        raise Refused(400, "confirm_required", f'confirm must be "{START_CONFIRM}"')
-    request_id = _request_id(request_id)
     unit = target.unit
 
     def prepare():
-        seen = discover(target)
+        seen = discover(target, fresh=True)
         confirmed = set()
         if confirm_gpu_shared:
             confirmed.add("gpu_shared")
@@ -1092,20 +1333,23 @@ def start(target, *, request_id, confirm, confirm_gpu_shared=False, reset_failed
             confirmed.add("unit_failed")
         _refuse_on(start_checks(target, seen), confirmed)
         failed = seen["unit"].get("state") == "failed"
+        restarts = seen["unit"].get("n_restarts") or 0
 
         def work():
+            before = restarts
             if failed:
                 code, _, err = systemctl("reset-failed", unit, timeout=SHOW_TIMEOUT_S)
                 if code != 0:
                     return False, "reset_failed_failed", err
+                before = unit_state(unit).get("n_restarts") or 0
             code, _, err = systemctl("start", unit, timeout=START_TIMEOUT_S)
             if code != 0:
                 return False, "start_failed", err
-            return _settle(target, unit)
+            return _settle(target, unit, before)
 
         return "systemctl", work
 
-    return OPERATIONS.submit(target, "start", request_id, prepare)
+    return _submit(target, "start", request_id, confirm, START_CONFIRM, prepare)
 
 
 def _signal_stop(record) -> tuple:
@@ -1133,24 +1377,30 @@ def _signal_stop(record) -> tuple:
 
 
 def stop(target, *, request_id, confirm, force_phrase=""):
-    """``POST …/service/stop``: ``(operation, created)``."""
-    if not enabled():
-        raise Refused(403, "disabled", f"Stopping from the page is off ({ENV_ENABLED})")
-    if confirm != STOP_CONFIRM:
-        raise Refused(400, "confirm_required", f'confirm must be "{STOP_CONFIRM}"')
-    request_id = _request_id(request_id)
+    """``POST …/service/stop``: ``(operation, created)``. Only the unit, or a
+    resident ``levi live start`` from a terminal, is ever stopped."""
     unit = target.unit
 
     def prepare():
-        seen = discover(target)
-        confirmed = {"evaluation_active"} if force_phrase == FORCE_PHRASE else set()
+        seen = discover(target, fresh=True)
+        confirmed = (
+            {"evaluation_active", "evaluation_unknown"}
+            if force_phrase == FORCE_PHRASE
+            else set()
+        )
         _refuse_on(stop_checks(target, seen), confirmed)
         record = holder(target)
         by_unit = bool(unit) and (
             seen["holder"]["started_by"] == "unit"
             or seen["unit"].get("state") in (*RUNNING_STATES, "deactivating")
         )
-        terminal = record if seen["holder"]["started_by"] == "terminal" else None
+        terminal = (
+            record
+            if record
+            and seen["holder"]["started_by"] == "terminal"
+            and record["pid"] == seen["holder"]["pid"]
+            else None
+        )
 
         def work():
             outcome = (True, "stopped", "")
@@ -1176,7 +1426,7 @@ def stop(target, *, request_id, confirm, force_phrase=""):
         )
         return method or "none", work
 
-    return OPERATIONS.submit(target, "stop", request_id, prepare)
+    return _submit(target, "stop", request_id, confirm, STOP_CONFIRM, prepare)
 
 
 def operation(operation_id) -> dict:
