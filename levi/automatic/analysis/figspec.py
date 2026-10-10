@@ -1302,6 +1302,9 @@ class Poly:
     role: str = "poly"
     ref: tuple[int, int, int] | None = None
     refs: tuple[tuple[int, int, int], ...] = ()  # points a band stands for
+    # one (x_start, x_end) page span per entry of ``refs``: where the band
+    # shows that point's interval (``validate_render`` measures it there)
+    spans: tuple[tuple[float, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1748,26 +1751,73 @@ def layout(
     return scene
 
 
-def validate_render(spec: FigureSpec, scene: Scene) -> None:
-    """Raise ``ValueError`` if an interval of the spec has no mark in the
-    scene: the figure must not drop what the table still lists."""
-    style = STYLE[spec.kind]
-    drawn: set[tuple[int, int, int]] = set()
+def _cross_section(points: Sequence[tuple[float, float]], x: float) -> float:
+    """Vertical extent of a closed polygon on the line ``X = x`` (0 when the
+    line misses it)."""
+    ys = []
+    n = len(points)
+    for i in range(n):
+        (x1, y1), (x2, y2) = points[i], points[(i + 1) % n]
+        if (x1 <= x < x2) or (x2 <= x < x1):
+            ys.append(y1 + (y2 - y1) * (x - x1) / (x2 - x1))
+    return max(ys) - min(ys) if len(ys) >= 2 else 0.0
+
+
+RENDER_TOLERANCE = 0.01  # points: a drawn interval may differ this much
+
+
+def _drawn_extents(scene: Scene, style: str) -> dict[tuple[int, int, int], list]:
+    """For each point, the extents (along the value axis, in page points) of
+    the interval marks drawn for it. A band counts only where it has width:
+    a zero-width span gives 0."""
+    out: dict[tuple[int, int, int], list] = {}
     for it in scene.items:
-        if it.role in ("ci", "band"):
-            ref = getattr(it, "ref", None)
-            drawn.update(getattr(it, "refs", ()) or ([ref] if ref else []))
+        if it.role == "ci" and isinstance(it, Line) and it.ref:
+            ext = abs(it.x2 - it.x1) if style == "forest" else abs(it.y2 - it.y1)
+            out.setdefault(it.ref, []).append(ext)
+        elif it.role == "band" and isinstance(it, Poly):
+            refs = it.refs or ((it.ref,) if it.ref else ())
+            for k, ref in enumerate(refs):
+                ext = 0.0
+                if k < len(it.spans):
+                    xa, xb = it.spans[k]
+                    if xb - xa > 0:
+                        ext = _cross_section(it.points, (xa + xb) / 2)
+                out.setdefault(ref, []).append(ext)
+    return out
+
+
+def validate_render(spec: FigureSpec, scene: Scene) -> None:
+    """Raise ``ValueError`` if an interval of the spec has no visible mark in
+    the scene: the figure must not drop what the table still lists. A mark is
+    visible when it spans the interval on the page (within
+    ``RENDER_TOLERANCE``); a band of zero width, or an error bar collapsed to
+    a point, does not count unless the interval itself is a single value."""
+    style = STYLE[spec.kind]
+    drawn = _drawn_extents(scene, style)
     lost = []
-    for pi, panel in enumerate(spec.panels):
+    for pi, (panel, g) in enumerate(zip(spec.panels, scene.panels, strict=True)):
+        axis = g.x if style == "forest" else g.y
         for si, s in enumerate(panel.series):
             for pj, p in enumerate(s.points):
-                kind = effective_interval(style, s, p)[2]
-                if kind in ("given", "zero") and (pi, si, pj) not in drawn:
-                    lost.append(f"panel {pi} series {si} point {pj}")
+                lo, hi, kind = effective_interval(style, s, p)
+                if kind not in ("given", "zero"):
+                    continue
+                marks = drawn.get((pi, si, pj))
+                want = abs(axis.px(hi) - axis.px(lo))
+                if not marks:
+                    lost.append(f"panel {pi} series {si} point {pj} (no mark)")
+                elif want > 1e-9 and not any(
+                    abs(m - want) <= RENDER_TOLERANCE for m in marks
+                ):
+                    lost.append(
+                        f"panel {pi} series {si} point {pj} "
+                        f"(drawn {max(marks):.2f} pt of {want:.2f} pt)"
+                    )
     if lost:
         raise ValueError(
             f"figure {spec.id!r}: the interval of {', '.join(lost[:5])}"
-            f"{' and more' if len(lost) > 5 else ''} was not drawn"
+            f"{' and more' if len(lost) > 5 else ''} was not drawn visibly"
         )
 
 
@@ -2375,52 +2425,72 @@ def _step_path(pts: Sequence[tuple[float, float]]) -> list[tuple[float, float]]:
     return out
 
 
+def _band_path(xs: Sequence[float], vals: Sequence[float]) -> list[tuple[float, float]]:
+    """One edge of a step band: value ``vals[i]`` held from ``xs[i]`` to
+    ``xs[i + 1]`` (``len(xs) == len(vals) + 1``)."""
+    out: list[tuple[float, float]] = []
+    for i, v in enumerate(vals):
+        out.append((xs[i], v))
+        out.append((xs[i + 1], v))
+    return out
+
+
 def _step(items: list[Item], panel: Panel, pi: int, g: PanelGeometry) -> None:
     """Interval bands first (all series), then the curves, markers and labels,
-    so no band ever covers another series' curve. Consecutive points that have
-    an interval share a band; a point with an interval on its own gets an
-    error bar; a point without one breaks the band."""
+    so no band ever covers another series' curve.
+
+    A point's value holds from its x to the next point's x, and so does its
+    interval: consecutive points that have one share a band, each point's part
+    reaching to the next point (whether or not that one has an interval). A
+    point with an interval and nothing to its right on the curve (the last
+    point, or a next point at the same x) gets an error bar instead, so every
+    interval, the curve's end included, is visible."""
     bands: list[Item] = []
     front: list[Item] = []
     for si, s in enumerate(panel.series):
         st = g.styles[si]
         pts = [(g.x.px(p.x), g.y.px(p.y)) for p in s.points]
         eff = [effective_interval("step", s, p) for p in s.points]
+        n = len(pts)
+        has = [kind in ("given", "zero") for _lo, _hi, kind in eff]
+        banded = [has[j] and j + 1 < n and pts[j + 1][0] > pts[j][0] for j in range(n)]
         runs: list[list[int]] = []
         run: list[int] = []
-        for pj, (_lo, _hi, kind) in enumerate(eff):
-            if kind in ("given", "zero"):
+        for pj in range(n):
+            if banded[pj]:
                 run.append(pj)
-            elif run:
-                runs.append(run)
-                run = []
+            else:
+                if run:
+                    runs.append(run)
+                    run = []
+                if has[pj]:  # an interval with no width to its right
+                    x = pts[pj][0]
+                    y1, y2 = g.y.px(eff[pj][0]), g.y.px(eff[pj][1])
+                    ref = (pi, si, pj)
+                    front.append(
+                        Line(
+                            x, y1, x, y2, stroke=st.color, width=1.4, role="ci", ref=ref
+                        )
+                    )
+                    for yy in (y1, y2):
+                        front.append(
+                            Line(
+                                x - 3,
+                                yy,
+                                x + 3,
+                                yy,
+                                stroke=st.color,
+                                width=1.4,
+                                role="ci-cap",
+                                ref=ref,
+                            )
+                        )
         if run:
             runs.append(run)
         for run in runs:
-            if len(run) == 1:
-                pj = run[0]
-                x = pts[pj][0]
-                y1, y2 = g.y.px(eff[pj][0]), g.y.px(eff[pj][1])
-                ref = (pi, si, pj)
-                front.append(
-                    Line(x, y1, x, y2, stroke=st.color, width=1.4, role="ci", ref=ref)
-                )
-                for yy in (y1, y2):
-                    front.append(
-                        Line(
-                            x - 3,
-                            yy,
-                            x + 3,
-                            yy,
-                            stroke=st.color,
-                            width=1.4,
-                            role="ci-cap",
-                            ref=ref,
-                        )
-                    )
-                continue
-            up = _step_path([(pts[j][0], g.y.px(eff[j][1])) for j in run])
-            dn = _step_path([(pts[j][0], g.y.px(eff[j][0])) for j in run])
+            xs = [pts[j][0] for j in run] + [pts[run[-1] + 1][0]]
+            up = _band_path(xs, [g.y.px(eff[j][1]) for j in run])
+            dn = _band_path(xs, [g.y.px(eff[j][0]) for j in run])
             bands.append(
                 Poly(
                     tuple(up + dn[::-1]),
@@ -2430,6 +2500,7 @@ def _step(items: list[Item], panel: Panel, pi: int, g: PanelGeometry) -> None:
                     role="band",
                     ref=(pi, si, run[0]),
                     refs=tuple((pi, si, j) for j in run),
+                    spans=tuple((xs[k], xs[k + 1]) for k in range(len(run))),
                 )
             )
         front.append(
