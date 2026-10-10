@@ -259,3 +259,27 @@ def test_a_pause_request_is_kept_until_taken(journal):
     journal.move("PLANNED", "plan_frozen", authority=who())
     journal.move("PAUSED", "pause_at_boundary", authority=who())
     assert journal.replay.pending_pause is None
+
+
+def test_b2_only_an_operators_command_launches_a_child_run(journal):
+    to_env_confirm(journal)
+    refused(launch, journal, authority=who())  # the conductor itself
+    refused(launch, journal, authority=who("operator"))  # no command id
+    launch(journal)
+    assert journal.state == "ARM_RUNNING"
+
+
+def test_t2_an_edited_middle_line_breaks_the_hash_chain(tmp_path, plan):
+    folder = tmp_path / "c"
+    with CampaignJournal.create(folder, plan=plan, authority=who()) as journal:
+        journal.move("PLANNED", "plan_frozen", authority=who())
+        journal.move("SEGMENT_PREPARE", "segment_started", authority=who(), segment=1)
+    path = folder / "journal.jsonl"
+    lines = path.read_bytes().split(b"\n")
+    # Valid and meaningful on its own: only the chain shows the edit.
+    import re
+
+    lines[1] = re.sub(rb'"emitted_wall_ns":\d+', b'"emitted_wall_ns":1', lines[1])
+    path.write_bytes(b"\n".join(lines))
+    found = CampaignJournal.read(folder)
+    assert found.corrupt and "hash chain" in found.corrupt

@@ -184,6 +184,8 @@ campaign:
 
 其他可选键：`primary`（`comparison: [B, A]`、`alpha`、`label_basis`、`preregistered`；`sequential: step` 是预留项，会被拒绝）、`control`、`blinding`（`operator: arm_codes` 时操作员看到 X1、X2… 而不是组号）、`treatment_includes_reset`；每组还可以写 `policy_reset`、`versions` 和 `group`（rollout 分组，默认取检查点目录名）。
 
+设计稿（X3 §1.1）把各组写成列表（`- id: A`）；作业文件里要写成上面这样的映射，卡片也一样。写成列表会被拒绝，错误信息会提示改用映射。
+
 **会被拒绝的计划**（各带错误码）：
 
 | 错误码 | 情形 |
@@ -229,7 +231,7 @@ cards:
 | `interleaved` | 总是 A、B、… | 1 | 只能探索性 |
 | `blocked` | 先跑完 A 的所有段，再跑 B，… | 5 | 只能探索性 |
 
-“可作确证性”是必要条件，不是充分条件：报告生成器还要核对其他条件（预注册、漂移检查）。卡片从按种子洗过的牌堆里发，同一轮内不重复，各卡使用次数大致相同。相邻两段是同一组时，正在运行的策略继续使用，所以时间表的 `switches` 是真正需要启动策略的次数。所有随机选择都是按 `sha256(种子, 用途, 项)` 排序：同一个种子在任何进程、任何机器上得到同一张时间表（用不同的哈希种子测过）。
+“可作确证性”是必要条件，不是充分条件：报告生成器还要核对其他条件（预注册、漂移检查）。它还要求轮数构成完整周期：只有轮数是设计行数的整数倍时（Williams 设计在组数 k 为偶数时 k 行、奇数时 2k 行；拉丁方 k 行），时间表的 `balanced_cycles` 才为真，否则位置和残留效应不平衡，等级降为 `exploratory`。平衡只在轮内成立：上一轮最后一组和下一轮第一组之间不受平衡约束（两组时可能跨轮连跑同一组，此时沿用正在运行的策略）。卡片从按种子洗过的牌堆里发，同一轮内不重复，各卡使用次数大致相同。相邻两段是同一组时，正在运行的策略继续使用，所以时间表的 `switches` 是真正需要启动策略的次数。所有随机选择都是按 `sha256(种子, 用途, 项)` 排序：同一个种子在任何进程、任何机器上得到同一张时间表（用不同的哈希种子测过）。
 
 ## 状态机与恢复
 
@@ -244,7 +246,7 @@ DRAFT -> PLANNED -> { SEGMENT_PREPARE -> POLICY_STOP -> POLICY_START -> POLICY_R
 
 campaign 的文件在 `$LEVI_AERI_HOME/campaigns/<id>/`（`LEVI_AERI_HOME` 默认 `~/.levi-aeri`）：`journal.jsonl`、`plan.json`（计划，每次打开都按日志头的 `campaign_sha256` 核对）、`state.json`（派生，从不读回）和 `torn/`。
 
-**日志。** 每行是一条 `levi.aeri.campaign_event.v1` 消息，沿用运行日志的事务协议（prepared，在任何副作用之前落盘 -> acknowledged -> committed 或 aborted），哈希链，只有一个写入者（对目录加 `flock`）。这个契约放在单独的登记表里（`aeri.CAMPAIGN_SCHEMAS`，minor 0），所以运行日志头和五种消息都不变；快照是 `docs/architecture/aeri/v1/campaign_event.schema.json`，`aeri.check_campaign_against_base` 把它和基线分支比较（`levi dev check-contracts` 暂时还没调用它）。事务的幂等键是 `<id>:s<NN>:<进入的状态>`（不属于某段时是 `<id>:<状态>`）。回放会拒绝：表里不允许的转移；没有操作员命令就离开 `WAIT_HUMAN`/`FAULT_LOCKED`/`PAUSED` 或进入 `ABORTED`；恢复做等待以外的事；还有段没封存就进入 `ANALYZING`；在段边界以外暂停。
+**日志。** 每行是一条 `levi.aeri.campaign_event.v1` 消息，沿用运行日志的事务协议（prepared，在任何副作用之前落盘 -> acknowledged -> committed 或 aborted），哈希链，只有一个写入者（对目录加 `flock`）。这个契约放在单独的登记表里（`aeri.CAMPAIGN_SCHEMAS`，minor 0），所以运行日志头和五种消息都不变；快照是 `docs/architecture/aeri/v1/campaign_event.schema.json`，`aeri.check_campaign_against_base` 把它和基线分支比较（`levi dev check-contracts` 暂时还没调用它）。事务的幂等键是 `<id>:s<NN>:<进入的状态>`（不属于某段时是 `<id>:<状态>`）。回放会拒绝：没有操作员命令的子运行启动；表里不允许的转移；没有操作员命令就离开 `WAIT_HUMAN`/`FAULT_LOCKED`/`PAUSED` 或进入 `ABORTED`；恢复做等待以外的事；还有段没封存就进入 `ANALYZING`；在段边界以外暂停。
 
 | 步骤 | 做什么 | 断电后 |
 | --- | --- | --- |
@@ -253,20 +255,20 @@ campaign 的文件在 `$LEVI_AERI_HOME/campaigns/<id>/`（`LEVI_AERI_HOME` 默�
 | `POLICY_START` | 按启动配方 `systemd-run --user --unit=levi-policy-<id>-<arm>` | `FAULT_LOCKED` |
 | `POLICY_READY` | 只做被动检查（见下）；600 秒内没就绪就 `WAIT_HUMAN` | 等人 |
 | `ENV_CONFIRM` | 问操作员：机械臂静止、卡片已摆好 | 重新问（新的问题） |
-| `ARM_RUNNING` | 启动子运行（唯一的非幂等动作），然后观察它 | 启动事务悬空则 `FAULT_LOCKED`，否则 `WAIT_HUMAN`；绝不自动再启动 |
-| `SEGMENT_SEALED` | 记下子运行报告的计数；检查停止规则和待生效的暂停 | 等人 |
+| `ARM_RUNNING` | 启动前再核对一次子作业文件和它的计划，然后启动子运行（唯一的非幂等动作，只能凭操作员命令，并把预期的 `plan_sha256` 交给启动器核对），之后观察它 | 启动事务悬空则 `FAULT_LOCKED`，否则 `WAIT_HUMAN`；绝不自动再启动 |
+| `SEGMENT_SEALED` | 记下子运行报告的计数（完整片段少于本段计划数时进入 `WAIT_HUMAN`，原因 `segment_short`，直到有人带 `accept_short_segment: true` 恢复）；检查停止规则和待生效的暂停 | 等人 |
 
 **人的答复**（`Confirmations`）：每道题带一个随机 nonce，只有针对这道题、nonce 一致、命令号没用过的答复才算数（其余丢弃并记一条备注）。确认场景需要 `arm_still` 和 `layout_ready` 两项。在等待状态下，`resume` 走到下一个安全的位置：下一个要准备的段；子运行已经启动（或可能已经启动）时观察它；所有段都封存后进入 `ANALYZING`。`relaunch` 只在启动从未得到确认、而且这个运行确实不存在时，才重新准备这一段；已确认启动过的运行绝不再次启动。`abort` 结束 campaign。由停止规则引起的等待，恢复时必须带 `override_stop_rule: true`。
 
-**停止规则**（`campaign.stop_rules`）：连续 `consecutive_faults` 段的子运行故障或崩溃，或某组的非计划介入超过 `unplanned_interventions_per_arm`，campaign 就停下等人，从不跳过一个组。子运行自己的计划内等待（比如等人复位场景）不算故障。
+**停止规则**（`campaign.stop_rules`）：两次封存之间累计 `consecutive_faults` 次子运行故障或崩溃（恢复后已封存的段清零计数；同一子运行恢复后再次故障会再计一次），或某组的非计划介入超过 `unplanned_interventions_per_arm`，campaign 就停下等人，从不跳过一个组。子运行自己的计划内等待（比如等人复位场景）不算故障。
 
 **一台机器人只跑一个 campaign。** 指挥进程在存活期间持有 `$LEVI_AERI_HOME/campaign-<robot>.lock`（`flock`）；同一台机器人上的第二个 campaign 会以 `E_BUSY` 被拒，并给出持有者。
 
 **策略切换**（`switch.SystemdPolicyHost`）。就绪靠读，不靠问：单元处于 active，而且策略端口上的每个监听进程都属于这个单元的 cgroup，命令行里有本组的配置名（整词匹配：普通配置名是 CFG 配置名的前缀）和检查点，这些都从 `/proc/net/tcp{,6}`、`/proc/<pid>/fd`、`cgroup` 和 `cmdline` 读取。后端从不连接策略端口，真正的握手在子运行的 PREFLIGHT 里做。监听者不属于本 campaign（例如在终端里手动起的策略服务）、读不到属主、或者跑的是别的配置，campaign 都会锁定（`FAULT_LOCKED`）。没有启动配方时什么都不启动。
 
-**恢复。** `Conductor.attach(id, job_dir)` 先拿机器人锁，再打开日志（损坏的日志以 `E_CORRUPT` 拒绝，什么也不写），核对子作业文件，中止悬空的事务，然后进入 `FAULT_LOCKED`（悬空事务有副作用时）或 `WAIT_HUMAN`。原本就在等人、在问人（`ENV_CONFIRM`）或在分析的 campaign 留在原处。人答复之前什么都不动。测试在一个完整 campaign 的每一行日志写入之前和之后各杀一次指挥进程，核对每次恢复都停在等人的位置，而且每个子运行恰好启动一次。
+**恢复。** `Conductor.attach(id, job_dir)` 先拿机器人锁，再打开日志（损坏的日志以 `E_CORRUPT` 拒绝，什么也不写），核对子作业文件（每次启动前指挥进程还会再核对该段的文件和计划，变了就 `FAULT_LOCKED`，原因 `plan_changed`），中止悬空的事务，然后进入 `FAULT_LOCKED`（悬空事务有副作用时）或 `WAIT_HUMAN`。原本就在等人、在问人（`ENV_CONFIRM`）或在分析的 campaign 留在原处。人答复之前什么都不动。测试在一个完整 campaign 的每一行日志写入之前和之后各杀一次指挥进程，核对每次恢复都停在等人的位置，而且每个子运行恰好启动一次。
 
-**集成用的接口：** `PolicyHost`（`stop`、`start`、`passive_ready`）、`RunLauncher`（`launch`、`status`、`robot_busy`）、`Confirmations`（`ask`、`take`、`withdraw`、`pause_requested`）、`SessionWriter`（`waiting_reset`、`release`）和 `ChildPlanner`（`plan`）。
+**集成用的接口：** `PolicyHost`（`stop`、`start`、`passive_ready`）、`RunLauncher`（`launch(job_path, run_id, expected_plan_sha256)`、`status`、`robot_busy`）、`Confirmations`（`ask`、`take`、`withdraw`、`pause_requested`）、`SessionWriter`（`waiting_reset`、`release`）和 `ChildPlanner`（`plan`）。
 
 **还没有做：** 命令和页面（T-CP-08、T-CP-09），试验台账和补跑 `<id>__<arm>__s<NN>r2`（T-CP-05），真实的启动配方（T-SU），报告（T-CP-06）。
 

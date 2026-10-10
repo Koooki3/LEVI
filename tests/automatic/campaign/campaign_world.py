@@ -102,9 +102,11 @@ class FakeLauncher:
         self.result = result
         self.trials = trials
         self.busy = busy
+        self.expected = {}
 
-    def launch(self, job_path, run_id):
+    def launch(self, job_path, run_id, expected_plan_sha256):
         assert Path(job_path).is_file(), job_path
+        self.expected[run_id] = expected_plan_sha256
         if self.result == "yes":
             _append(self.world.launch_log, {"run_id": run_id})
         return LaunchResult(

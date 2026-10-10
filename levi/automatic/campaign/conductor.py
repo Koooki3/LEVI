@@ -175,7 +175,13 @@ class PolicyHost(Protocol):
 
 
 class RunLauncher(Protocol):
-    def launch(self, job_path: Path, run_id: str) -> LaunchResult: ...
+    def launch(
+        self, job_path: Path, run_id: str, expected_plan_sha256: str
+    ) -> LaunchResult:
+        """Start the child run; the real launcher refuses a job file whose
+        plan does not hash to ``expected_plan_sha256``."""
+        ...
+
     def status(self, run_id: str) -> ChildStatus: ...
     def robot_busy(self) -> str | None: ...
 
@@ -257,6 +263,7 @@ class Conductor:
         confirmations: Confirmations,
         session: SessionWriter | None = None,
         reporter=None,
+        planner=None,
         principal_id: str = "conductor",
         ready_timeout_s: float = DEFAULT_READY_TIMEOUT_S,
         clock=time.monotonic,
@@ -270,6 +277,7 @@ class Conductor:
         self.confirmations = confirmations
         self.session = session or NoSession()
         self.reporter = reporter
+        self.planner = planner
         self.principal_id = principal_id
         self.session_id = f"conductor-{os.getpid()}-{time.time_ns()}"
         self.ready_timeout_s = ready_timeout_s
@@ -304,7 +312,7 @@ class Conductor:
         except BaseException:
             lock.close()
             raise
-        return cls(journal, lock, job_dir, **deps)
+        return cls(journal, lock, job_dir, planner=planner, **deps)
 
     @classmethod
     def attach(cls, campaign_id: str, job_dir, *, home=None, planner=None, **deps):
@@ -329,7 +337,7 @@ class Conductor:
             if journal.corrupt is not None:
                 raise ConductorError("E_CORRUPT", journal.corrupt)
             spec.verify_children(journal.plan(), job_dir, planner)
-            conductor = cls(journal, lock, job_dir, **deps)
+            conductor = cls(journal, lock, job_dir, planner=planner, **deps)
             conductor.recover()
             return conductor
         except BaseException:
@@ -671,6 +679,13 @@ class Conductor:
             return blocked
         child = self._children[segment]
         run_id = child["run_id"]
+        # The file may have changed while the person was asked (hours):
+        # check it, and its plan, right before the launch (review CPB1 B1).
+        try:
+            spec.verify_children({"children": [child]}, self.job_dir, self.planner)
+        except spec.CampaignError as exc:
+            self.journal.note("plan_changed", exc.detail, authority=self._auth())
+            return self._to_human("FAULT_LOCKED", "plan_changed", segment)
         if self.launcher.status(run_id).state != "absent":
             return self._to_human("FAULT_LOCKED", "foreign_run", segment)
         attempt = len(self.replay.launches.get(segment) or []) + 1
@@ -685,7 +700,9 @@ class Conductor:
             params={"file": child["file"], "plan_sha256": child["plan_sha256"]},
         )
         result = _guarded(
-            lambda: self.launcher.launch(self.job_dir / child["file"], run_id),
+            lambda: self.launcher.launch(
+                self.job_dir / child["file"], run_id, child["plan_sha256"]
+            ),
             LaunchResult,
         )
         who = self._auth()
@@ -705,6 +722,11 @@ class Conductor:
         if status.state in ("running", "wait_human"):
             return self._waiting(f"child run {status.state}")
         if status.state == "completed":
+            planned = self._children[segment]["trials"]
+            short = status.episodes_complete < planned
+            if short and segment not in self.replay.accepted_short:
+                # No rerun yet (T-CP-05): a person decides (review CPB1 N1).
+                return self._to_human("WAIT_HUMAN", "segment_short", segment)
             self.journal.prepare(
                 "SEGMENT_SEALED",
                 "run_completed",
@@ -724,20 +746,17 @@ class Conductor:
         if status.state == "absent":
             return self._to_human("WAIT_HUMAN", "child_missing", segment)
         reason = "child_fault" if status.state == "fault_locked" else "child_crashed"
-        if self._faults_in_a_row(segment) >= self._rules()["consecutive_faults"]:
+        if self._faults_in_a_row() >= self._rules()["consecutive_faults"]:
             reason = "stop_rule_faults"
         return self._to_human("WAIT_HUMAN", reason, segment)
 
     def _rules(self) -> dict:
         return self.plan["campaign"]["stop_rules"]
 
-    def _faults_in_a_row(self, segment: int) -> int:
-        faults = self.replay.fault_segments | {segment}
-        count = 0
-        while segment in faults:
-            count += 1
-            segment -= 1
-        return count
+    def _faults_in_a_row(self) -> int:
+        """Child faults since the last sealed segment, this one included: a
+        segment recovered and sealed does not count (review CPB1 N4)."""
+        return self.replay.faults_since_seal + 1
 
     def _in_segment_sealed(self) -> Outcome:
         segment = self.replay.segment
@@ -831,9 +850,16 @@ class Conductor:
         run_id = None
         if target == "ARM_RUNNING":
             run_id = self.replay.launched(segment).run_id
+        resumed = "operator_resume"
+        if (
+            reason == "segment_short"
+            and target == "ARM_RUNNING"
+            and answer.checks.get("accept_short_segment") is True
+        ):
+            resumed = "operator_accept_short"
         self.journal.move(
             target,
-            "operator_resume",
+            resumed,
             authority=operator,
             segment=segment,
             run_id=run_id,

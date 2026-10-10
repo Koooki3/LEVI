@@ -196,3 +196,25 @@ def test_every_campaign_test_module_installs_the_guards():
         text = path.read_text()
         assert "import aeri_home_fixture, guard_fixture" in text, path.name
     assert not (Path(__file__).parent / "conftest.py").exists()
+
+
+@pytest.mark.parametrize(
+    "kind, arms, trials, segment, balanced",
+    [
+        ("counterbalanced_segments", "AB", 6, 2, False),  # 3 rounds, 2 rows
+        ("counterbalanced_segments", "AB", 8, 2, True),
+        ("counterbalanced_segments", "ABCD", 4, 2, False),  # 2 rounds, 4 rows
+        ("counterbalanced_segments", "ABC", 12, 2, True),  # 6 rounds, 6 rows
+        ("latin_square", "ABC", 6, 2, True),
+        ("latin_square", "ABC", 4, 2, False),
+        ("randomized_blocks", "ABC", 5, 1, True),
+    ],
+)
+def test_n2_only_whole_cycles_are_confirmatory_eligible(
+    kind, arms, trials, segment, balanced
+):
+    built = sched.build("c", kind, arms, trials, segment, seed=3)
+    assert built.balanced_cycles is balanced
+    assert built.to_json()["balanced_cycles"] is balanced
+    expected = "confirmatory_eligible" if balanced else "exploratory"
+    assert built.conclusion_level == expected

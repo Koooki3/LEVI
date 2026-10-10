@@ -192,7 +192,24 @@ class Schedule:
     segments: tuple
 
     @property
+    def balanced_cycles(self) -> bool:
+        """Whether the rounds make whole cycles of the design's rows (a
+        Williams design has k rows for even k, 2k for odd k; a Latin square
+        k): only then are positions and first-order carryover within rounds
+        balanced. Random blocks need no cycle."""
+        k = len(self.arms)
+        if self.kind == "counterbalanced_segments":
+            return len(self.rounds) % len(williams_rows(k)) == 0
+        if self.kind == "latin_square":
+            return len(self.rounds) % k == 0
+        return self.kind in CONFIRMATORY_KINDS
+
+    @property
     def conclusion_level(self) -> str:
+        """Exploratory unless the kind allows confirmatory conclusions and
+        the rounds make whole cycles (``balanced_cycles``)."""
+        if not self.balanced_cycles:
+            return "exploratory"
         return conclusion_level(self.kind)
 
     @property
@@ -235,6 +252,7 @@ class Schedule:
             "trials_per_arm": self.trials_per_arm,
             "segment_trials": self.segment_trials,
             "conclusion_level": self.conclusion_level,
+            "balanced_cycles": self.balanced_cycles,
             "switches": self.switches,
             "rounds": [list(slots) for slots in self.rounds],
             "segments": [

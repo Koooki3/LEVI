@@ -386,3 +386,35 @@ def test_written_job_files_read_back_as_themselves():
         spec.to_yaml({"task": {"instruction": "two\nlines"}})
     with pytest.raises(spec.CampaignError):
         spec.to_yaml({"x": [{"a": 1}]})
+
+
+def test_t4_the_campaign_sha256_covers_children_block_cards_and_settings(tmp_path):
+    value = plan(tmp_path).to_json()
+    base = spec.campaign_sha256(value)
+    for path, new in [
+        (("children", 0, "plan_sha256"), "0" * 64),
+        (("children", 0, "file_sha256"), "0" * 64),
+        (("campaign", "trials_per_arm"), 99),
+        (("campaign", "arms", "B", "policy_forward", "config"), "x"),
+        (("cards", "c01", "params", "x_cm"), 77),
+        (("layouts_sha256",), "0" * 64),
+        (("settings_sha256",), "0" * 64),
+        (("robot",), "other"),
+        (("schedule", "seed"), 1234),
+    ]:
+        changed = copy.deepcopy(value)
+        part = changed
+        for key in path[:-1]:
+            part = part[key]
+        part[path[-1]] = new
+        assert spec.campaign_sha256(changed) != base, path
+
+
+def test_n8_a_list_of_arms_says_to_key_them_by_id(tmp_path):
+    arms = "    - id: A\n      role: reference\n"
+    path = write_job(tmp_path / "job")
+    text = path.read_text()
+    path.write_text(text[: text.index("  arms:\n") + len("  arms:\n")] + arms)
+    with pytest.raises(spec.CampaignError) as caught:
+        spec.plan_campaign(path, job_root=tmp_path / "jobs", planner=FakePlanner())
+    assert "keyed by" in caught.value.detail

@@ -146,7 +146,10 @@ class Replay:
     commands: dict = field(default_factory=dict)  # command id -> [sequence_no]
     sealed: dict = field(default_factory=dict)  # segment -> counts dict
     launches: dict = field(default_factory=dict)  # segment -> [Launch]
-    fault_segments: set = field(default_factory=set)
+    # Child faults since the last sealed segment (a recovered, sealed
+    # segment does not count towards faults in a row).
+    faults_since_seal: int = 0
+    accepted_short: set = field(default_factory=set)
     wait_reason: str | None = None  # why it waits (last move into a human state)
     last_reason: str | None = None  # the reason of the last commit
     serving: int | None = None  # the segment whose policy was found ready
@@ -230,6 +233,8 @@ class Replay:
         if to == "ANALYZING" and len(self.sealed) != self.segments:
             refuse("ANALYZING needs every segment sealed")
         self._check_segment(event)
+        if action.kind == "launch_run" and not operator:
+            refuse("only an operator's command starts a child run")
         if action.non_idempotent:
             if action.idempotency_key in self.attempted:
                 refuse(
@@ -322,6 +327,9 @@ class Replay:
         if to == "SEGMENT_SEALED":
             counts = event.counts.model_dump() if event.counts else {}
             self.sealed[event.segment] = counts
+            self.faults_since_seal = 0
+        if event.reason == "operator_accept_short":
+            self.accepted_short.add(event.segment)
         if to == "ENV_CONFIRM":
             self.serving = event.segment
         if to == "POLICY_START" and event.reason == "policy_stopped":
@@ -329,8 +337,8 @@ class Replay:
         if to in HUMAN_STATES or to in TERMINAL:
             self.wait_reason = event.reason
             self.serving = None
-            if event.reason in FAULT_REASONS and event.segment is not None:
-                self.fault_segments.add(event.segment)
+            if event.reason in FAULT_REASONS:
+                self.faults_since_seal += 1
         if to == "PAUSED" or to in TERMINAL:
             self.pending_pause = None
         self.open_tx = self.open_ack = None

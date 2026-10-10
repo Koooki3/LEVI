@@ -407,6 +407,10 @@ letters), `treatment_includes_reset`, and per arm `policy_reset`,
 `versions` and `group` (the rollout group; default: the checkpoint folder
 name).
 
+The design draft (X3 §1.1) writes the arms as a list (`- id: A`); a job
+file writes them as the mapping above, and the cards likewise. A list is
+refused with a message that says so.
+
 **Refused plans** (each with its code):
 
 | Code | When |
@@ -475,7 +479,14 @@ segment, in the same order:
 | `blocked` | all segments of A, then all of B, ... | 5 | exploratory only |
 
 "Confirmatory eligible" is necessary, not sufficient: the report generator
-adds the other conditions (preregistration, drift checks). Cards are dealt
+adds the other conditions (preregistration, drift checks). It also needs
+whole cycles: the schedule's `balanced_cycles` is true only when the number
+of rounds is a multiple of the design's rows (a Williams design has k rows
+for an even number of arms k, 2k for an odd one; a Latin square k);
+otherwise positions and carryover are not balanced and the level is
+`exploratory`. The balance holds within rounds: the last arm of one round
+and the first arm of the next are not balanced (two arms may run back to
+back across rounds, which keeps the policy). Cards are dealt
 from a seeded deck, distinct within a round and used about equally often.
 Consecutive segments of the same arm keep the running policy, so the
 schedule's `switches` counts real policy starts. Every random choice is a
@@ -510,7 +521,8 @@ are unchanged; its snapshot is
 `aeri.check_campaign_against_base` compares it with the base branch
 (`levi dev check-contracts` does not call it yet). The idempotency key of a
 transaction is `<id>:s<NN>:<state entered>` (`<id>:<state>` outside a
-segment). The replay refuses a move the table does not allow, a leave of
+segment). The replay refuses a child launch without an operator's command, a move
+the table does not allow, a leave of
 `WAIT_HUMAN`/`FAULT_LOCKED`/`PAUSED` or an `ABORTED` without an operator's
 command, a recovery that does anything but wait, `ANALYZING` before every
 segment is sealed, and a pause anywhere but at a boundary.
@@ -522,8 +534,8 @@ segment is sealed, and a pause anywhere but at a boundary.
 | `POLICY_START` | `systemd-run --user --unit=levi-policy-<id>-<arm>` from the launch recipe | `FAULT_LOCKED` |
 | `POLICY_READY` | passive check only (below); not ready within 600 s: `WAIT_HUMAN` | waits for a person |
 | `ENV_CONFIRM` | asks the operator: arm still, cards laid out | asks again (new question) |
-| `ARM_RUNNING` | launches the child run (the one non-idempotent action), then watches it | `FAULT_LOCKED` if the launch was dangling, otherwise `WAIT_HUMAN`; never launched again by itself |
-| `SEGMENT_SEALED` | records the child's counts; applies the stop rules and a pending pause | waits for a person |
+| `ARM_RUNNING` | checks the child file and its plan again, then launches the child run (the one non-idempotent action, only under an operator's command, with the expected `plan_sha256` for the launcher to check), then watches it | `FAULT_LOCKED` if the launch was dangling, otherwise `WAIT_HUMAN`; never launched again by itself |
+| `SEGMENT_SEALED` | records the child's counts (fewer complete episodes than the segment holds: `WAIT_HUMAN`, `segment_short`, until a person resumes with `accept_short_segment: true`); applies the stop rules and a pending pause | waits for a person |
 
 **A person's answers** (`Confirmations`): each question carries a random
 nonce, and an answer counts only for that question with that nonce and an
@@ -536,8 +548,10 @@ never acknowledged and the run is not there; a run acknowledged as started
 is never started again. `abort` ends the campaign. A wait caused by a stop
 rule needs `override_stop_rule: true`.
 
-**Stop rules** (`campaign.stop_rules`): child runs that faulted or crashed
-in `consecutive_faults` segments in a row, or an arm whose unplanned
+**Stop rules** (`campaign.stop_rules`): `consecutive_faults` child faults or
+crashes with no segment sealed in between (a segment recovered and sealed
+resets the count; the same child faulting again after a resume counts
+again), or an arm whose unplanned
 interventions pass `unplanned_interventions_per_arm`, make the campaign
 wait for a person. It never skips an arm. A child run's own planned wait
 (for example a person resetting the scene) is not a fault.
@@ -558,7 +572,9 @@ campaign (`FAULT_LOCKED`). Without a launch recipe nothing is started.
 
 **Recovery.** `Conductor.attach(id, job_dir)` takes the robot lock, opens
 the journal (a corrupt one is refused, `E_CORRUPT`, and nothing is
-written), checks the child files, aborts a dangling transaction and moves
+written), checks the child files (the conductor checks the segment's file
+and plan once more right before each launch: a change is `FAULT_LOCKED`,
+`plan_changed`), aborts a dangling transaction and moves
 to `FAULT_LOCKED` (it had a side effect) or `WAIT_HUMAN`. A campaign that
 was waiting for a person, asking one (`ENV_CONFIRM`) or analysing stays
 there. Nothing moves until a person answers. The tests kill a conductor
@@ -567,7 +583,8 @@ that each recovery stops at a person and that every child run is started
 exactly once.
 
 **Interfaces for the integration:** `PolicyHost` (`stop`, `start`,
-`passive_ready`), `RunLauncher` (`launch`, `status`, `robot_busy`),
+`passive_ready`), `RunLauncher` (`launch(job_path, run_id,
+expected_plan_sha256)`, `status`, `robot_busy`),
 `Confirmations` (`ask`, `take`, `withdraw`, `pause_requested`),
 `SessionWriter` (`waiting_reset`, `release`) and `ChildPlanner` (`plan`).
 

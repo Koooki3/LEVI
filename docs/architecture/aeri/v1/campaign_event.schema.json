@@ -452,7 +452,10 @@
             "stop_rule_faults",
             "stop_rule_interventions",
             "recovery_ambiguous",
-            "conductor_restarted"
+            "conductor_restarted",
+            "plan_changed",
+            "segment_short",
+            "operator_accept_short"
           ],
           "type": "string"
         },

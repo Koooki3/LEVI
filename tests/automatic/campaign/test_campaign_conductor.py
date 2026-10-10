@@ -245,16 +245,16 @@ def test_faults_in_a_row_stop_the_campaign_until_a_person_overrides(tmp_path):
     world = World(tmp_path / "world")
     person = Person(auto=False)
     conductor, found, _ = start(tmp_path, world=world, confirmations=person)
-    one, two = found.children[0].run_id, found.children[1].run_id
+    one = found.children[0].run_id
     scene = lambda r: person.answer(r, "confirm", arm_still=True, layout_ready=True)
     world.set_status(one, "crashed")
     person.queue.append(scene)
     conductor.run()
     assert conductor.state == "WAIT_HUMAN"
     assert conductor.replay.wait_reason == "child_crashed"
-    world.set_status(one, "completed", episodes_complete=1)
-    world.set_status(two, "fault_locked", faults=1)
-    person.queue += [lambda r: person.answer(r, "resume"), scene]
+    # Resumed, the same child faults again before any segment is sealed.
+    world.set_status(one, "fault_locked", faults=1)
+    person.queue.append(lambda r: person.answer(r, "resume"))
     conductor.run()
     assert conductor.state == "WAIT_HUMAN"
     assert conductor.replay.wait_reason == "stop_rule_faults"
@@ -264,7 +264,7 @@ def test_faults_in_a_row_stop_the_campaign_until_a_person_overrides(tmp_path):
         e.note and e.note.code == "stop_rule_needs_override"
         for e in conductor.journal.events
     )
-    world.set_status(two, "completed", episodes_complete=2)
+    world.set_status(one, "completed", episodes_complete=2)
     person.auto = True
     conductor.run()
     assert conductor.state == "ANALYZING"
@@ -609,4 +609,141 @@ def test_an_answered_question_is_withdrawn(tmp_path):
     conductor.run()
     asked = {r.request_id for r in person.asked if r.kind == "env_confirm"}
     assert asked <= {r.request_id for r in person.withdrawn}
+    conductor.close()
+
+
+# --- review CPB1 ------------------------------------------------------------------------
+
+
+def to_scene(conductor):
+    """Run to ENV_CONFIRM with a silent person; return the person."""
+    conductor.run()
+    assert conductor.state == "ENV_CONFIRM"
+    return conductor.confirmations
+
+
+def confirm(person):
+    person.queue.append(
+        lambda r: person.answer(r, "confirm", arm_still=True, layout_ready=True)
+    )
+
+
+def test_b1_a_child_file_changed_during_the_scene_check_is_not_launched(tmp_path):
+    world = World(tmp_path / "world")
+    conductor, found, _ = start(tmp_path, world=world, confirmations=Person(auto=False))
+    person = to_scene(conductor)
+    child = found.directory / found.children[0].file
+    child.write_text(child.read_text().replace("episodes: 2", "episodes: 99"))
+    confirm(person)
+    conductor.run()
+    assert conductor.state == "FAULT_LOCKED"
+    assert conductor.replay.wait_reason == "plan_changed"
+    assert world.launches() == []
+    conductor.close()
+
+
+def test_b1_a_child_whose_plan_changed_is_not_launched(tmp_path):
+    world = World(tmp_path / "world")
+    planner = FakePlanner()
+    found = planned(tmp_path)
+    conductor = Conductor.create(
+        found.directory,
+        planner=planner,
+        **deps(world, confirmations=Person(auto=False)),
+    )
+    person = to_scene(conductor)
+    planner.plan = lambda path: ("0" * 64, {})  # a file the child reads changed
+    confirm(person)
+    conductor.run()
+    assert conductor.state == "FAULT_LOCKED" and world.launches() == []
+    conductor.close()
+
+
+def test_b1_the_launcher_gets_the_expected_plan_sha256(tmp_path):
+    world = World(tmp_path / "world")
+    launcher = FakeLauncher(world)
+    conductor, found, _ = start(tmp_path, world=world, launcher=launcher)
+    conductor.run()
+    first = min(found.children, key=lambda c: c.segment)
+    assert launcher.expected[first.run_id] == first.plan_sha256
+    conductor.close()
+
+
+def test_t3_a_policy_lost_while_the_operator_confirms_blocks_the_launch(tmp_path):
+    world = World(tmp_path / "world")
+    host = FakeHost(world)
+    conductor, _, _ = start(
+        tmp_path, world=world, host=host, confirmations=Person(auto=False)
+    )
+    person = to_scene(conductor)
+    host.ready = "not_ready"
+    confirm(person)
+    conductor.run()
+    assert conductor.state == "WAIT_HUMAN"
+    assert conductor.replay.wait_reason == "policy_not_ready"
+    assert world.launches() == []
+    conductor.close()
+
+
+def test_t5_an_unknown_launch_comes_back_only_through_relaunch(tmp_path):
+    world = World(tmp_path / "world")
+    launcher = FakeLauncher(world, result="unknown")
+    conductor, found, _ = start(
+        tmp_path, world=world, launcher=launcher, confirmations=Person(auto=False)
+    )
+    person = to_scene(conductor)
+    confirm(person)
+    conductor.run()
+    assert conductor.replay.wait_reason == "launch_failed"
+    person.queue.append(lambda r: person.answer(r, "resume"))
+    conductor.run()
+    # A plain resume watches the run that may exist; it is not there.
+    assert conductor.replay.wait_reason == "child_missing"
+    assert conductor.resume_target(relaunch=False) == ("ARM_RUNNING", 1)
+    assert conductor.resume_target(relaunch=True) == ("SEGMENT_PREPARE", 1)
+    launcher.result = "yes"
+    person.queue.append(lambda r: person.answer(r, "relaunch"))
+    confirm(person)
+    conductor.run(max_steps=20)
+    assert world.launches()[:1] == [found.children[0].run_id]
+    conductor.close()
+
+
+def test_n1_a_short_segment_waits_for_a_person(tmp_path):
+    world = World(tmp_path / "world")
+    person = Person(auto=False)
+    conductor, found, _ = start(tmp_path, world=world, confirmations=person)
+    first = found.children[0].run_id
+    world.set_status(first, "completed", episodes_complete=1)
+    to_scene(conductor)
+    confirm(person)
+    conductor.run()
+    assert conductor.state == "WAIT_HUMAN"
+    assert conductor.replay.wait_reason == "segment_short"
+    assert 1 not in conductor.replay.sealed
+    person.queue.append(lambda r: person.answer(r, "resume"))
+    conductor.run()
+    assert conductor.replay.wait_reason == "segment_short"  # still short
+    person.queue.append(lambda r: person.answer(r, "resume", accept_short_segment=True))
+    conductor.run()
+    assert conductor.replay.sealed[1]["episodes_complete"] == 1
+    conductor.close()
+
+
+def test_n4_a_recovered_segment_does_not_count_as_a_fault_in_a_row(tmp_path):
+    world = World(tmp_path / "world")
+    person = Person(auto=False, override=False)
+    conductor, found, _ = start(tmp_path, world=world, confirmations=person)
+    one, two = found.children[0].run_id, found.children[1].run_id
+    world.set_status(one, "crashed")
+    to_scene(conductor)
+    confirm(person)
+    conductor.run()
+    assert conductor.replay.wait_reason == "child_crashed"
+    world.set_status(one, "completed", episodes_complete=2)
+    world.set_status(two, "fault_locked", faults=1)
+    person.queue.append(lambda r: person.answer(r, "resume"))
+    confirm(person)
+    conductor.run()
+    assert conductor.replay.wait_reason == "child_fault"  # not a stop rule
     conductor.close()

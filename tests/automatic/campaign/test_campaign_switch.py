@@ -394,3 +394,12 @@ def test_a_unit_serving_the_wrong_config_locks_the_campaign(tmp_path, proc):
     conductor.run()
     assert conductor.state == "FAULT_LOCKED" and world.launches() == []
     conductor.close()
+
+
+def test_t1_a_hand_started_server_with_the_same_config_is_not_ready(proc):
+    systemd = FakeSystemd(proc)
+    host = host_for(proc, systemd)
+    a = arm()
+    systemd.units[a.unit] = proc.spawn(["sleep"])  # the unit is active
+    proc.spawn(recipe(a), port=8000)  # same command line, outside the unit
+    assert host.passive_ready(a).status == "mismatch"

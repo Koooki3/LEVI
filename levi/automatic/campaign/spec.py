@@ -575,7 +575,13 @@ def load(path) -> CampaignSpec:
             "E_CAMPAIGN_JOB", f"{path}: {exc.strerror or exc}"
         ) from None
     except sa.ContractError as exc:
-        raise CampaignError("E_CAMPAIGN_JOB", f"{path}: {exc}") from None
+        hint = ""
+        if "lists of mappings" in str(exc):
+            hint = (
+                "; write campaign.arms as a mapping keyed by arm id (A: ..., B: ...) "
+                "and layout cards keyed by card id, not as a list of `- id:` items"
+            )
+        raise CampaignError("E_CAMPAIGN_JOB", f"{path}: {exc}{hint}") from None
     if "campaign" not in raw:
         raise CampaignError("E_CAMPAIGN_SCHEMA", "the job file has no campaign block")
     block_raw = raw.pop("campaign")

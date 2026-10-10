@@ -1490,6 +1490,13 @@ CAMPAIGN_REASONS = (
     "stop_rule_interventions",
     "recovery_ambiguous",
     "conductor_restarted",
+    # A child job file or its plan changed after planning (checked again
+    # right before the launch).
+    "plan_changed",
+    # A child run completed with fewer complete episodes than its segment
+    # holds; sealed only after a person accepts it.
+    "segment_short",
+    "operator_accept_short",
 )
 CAMPAIGN_ACTION_KINDS = ("none", "policy_stop", "policy_start", "launch_run", "report")
 # Starting a child run is never repeated by itself: a later attempt is a
