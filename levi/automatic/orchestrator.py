@@ -101,6 +101,9 @@ IMPORTANT_NOTES = frozenset(
 URGENT_KINDS = frozenset({"hold", "policy_quiesce"})
 # How long stop() tries for the state lock before it only registers the stop.
 STOP_LOCK_WAIT_S = 0.05
+# A person's scene check is collected in slices this long (a stop is seen
+# between two).
+HUMAN_SLICE_NS = 500_000_000
 
 
 class ConfigError(ValueError):
@@ -1012,15 +1015,18 @@ class Orchestrator:
             episode_id=episode_id,
             target=target,
         )
-        got = self.scene.submit(request)
-        if isinstance(got, bytes | bytearray):
-            raw = bytes(got)
-        else:
-            raw = self.scene.collect(got, timeout_ns=self.config.scene_wait_ns)
-            if raw is None:
-                self.scene.cancel(got, "timeout")
-                self._note("scene_timeout", request_id)
-                return "unavailable"
+        try:
+            got = self.scene.submit(request)
+            if isinstance(got, bytes | bytearray):
+                raw = bytes(got)
+            else:
+                raw, why = self._collect_scene(got)
+                if raw is None:
+                    self.scene.cancel(got, why)
+                    self._note(f"scene_{why}", request_id)
+                    return "unavailable"
+        finally:
+            self._scene_notes()
         try:
             message = aeri.parse(raw, "scene", specs=self._specs)
         except aeri.AeriError as exc:
@@ -1056,6 +1062,34 @@ class Orchestrator:
                 f"{request_id}: {message.decision} -> {verdict.decision}",
             )
         return verdict.decision
+
+    def _collect_scene(self, ticket) -> tuple:
+        """``(raw, None)``, or ``(None, why)`` (``timeout``, or
+        ``stopped``). A person's check (``operator_attested``) may take
+        minutes: it is collected in slices, and an operator's stop ends the
+        wait at once (the stop then takes effect before anything starts)."""
+        wait = self.config.scene_wait_ns
+        if self.config.scene_check != "operator_attested":
+            raw = self.scene.collect(ticket, timeout_ns=wait)
+            return (raw, None) if raw is not None else (None, "timeout")
+        start = self._now()
+        while True:
+            left = wait - (self._now() - start)
+            if left <= 0:
+                return None, "timeout"
+            raw = self.scene.collect(ticket, timeout_ns=min(left, HUMAN_SLICE_NS))
+            if raw is not None:
+                return raw, None
+            if self._operator() is not None:
+                return None, "stopped"
+
+    def _scene_notes(self) -> None:
+        """Notes a provider keeps (a person's dropped or refused answers)."""
+        drain = getattr(self.scene, "drain_notes", None)
+        if drain is None:
+            return
+        for code, detail in drain():
+            self._note(code, detail)
 
     # --- episodes ------------------------------------------------------------------------
 

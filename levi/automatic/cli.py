@@ -388,6 +388,33 @@ class DryRun:
             group=job["group"],
             texts=job["texts"],
         )
+        if cfg.scene_check == "operator_attested":
+            # A scripted person answers on frames the dry run makes up.
+            from .adapters import human
+
+            shots = {"n": 0}
+
+            def capture():
+                shots["n"] += 1
+                views = (contract.preferred_views if contract else ()) or ("side",)
+                return {v: f"dry-run frame {v} {shots['n']}".encode() for v in views}
+
+            self.scene = human.HumanSceneProvider(
+                contract,
+                capture,
+                human.ScriptedTransport(scenes),
+                clock,
+                cfg.run_id,
+                wait=clock.advance,
+            )
+        else:
+            self.scene = ev.FakeSceneAssessor(
+                [{**ready, "decision": d} for d in scenes],
+                clock,
+                cfg.run_id,
+                default=ready,
+                **scene_kw,
+            )
         self.sessions = SessionFiles(
             self.folder,
             run_id=cfg.run_id,
@@ -412,13 +439,7 @@ class DryRun:
             verifier=ev.FakeGoalVerifier(
                 [], clock, cfg.run_id, default={"decision": "confirmed"}
             ),
-            scene=ev.FakeSceneAssessor(
-                [{**ready, "decision": d} for d in scenes],
-                clock,
-                cfg.run_id,
-                default=ready,
-                **scene_kw,
-            ),
+            scene=self.scene,
             clock=clock,
             fence=fence,
             listener=self.sessions,

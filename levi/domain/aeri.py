@@ -1366,11 +1366,17 @@ class JobSpec(AeriContract):
                 )
         if not self.human_assisted and self.forward_folder == self.reset_folder:
             _bad("recording: forward and reset need their own folders")
-        if self.reset.scene_check == "operator_attested" and not self.human_assisted:
-            _bad(
-                "reset.scene_check operator_attested belongs to the strategy "
-                "human_assisted (a person attests the scene they put back)"
-            )
+        if self.reset.scene_check == "operator_attested":
+            if not self.human_assisted:
+                _bad(
+                    "reset.scene_check operator_attested belongs to the strategy "
+                    "human_assisted (a person attests the scene they put back)"
+                )
+            if self.task.initial_state_spec is None:
+                _bad(
+                    "reset.scene_check operator_attested needs "
+                    "task.initial_state_spec: the person answers its predicates"
+                )
         return self
 
 
