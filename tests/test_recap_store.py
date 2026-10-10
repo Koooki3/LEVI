@@ -461,3 +461,59 @@ def test_comparison_pins_both_versions(recap_models):
         params={"repo_id": repo, "a": "fake-a", "b": "fake-b"},
     )
     assert fresh.status_code == 200, fresh.text
+
+
+# ---------------------------------------------------------------- clear
+
+
+def test_clear_is_a_dry_run_until_apply_and_covers_both_layouts(
+    client, monkeypatch, tmp_path, capsys
+):
+    from levi.recap.cli import main
+
+    ckpt = tmp_path / "ckpt"
+    monkeypatch.setenv("LEVI_RECAP_VALUE_CHECKPOINT_DIR", str(ckpt))
+    checkpoints.import_checkpoint(None, "keep-me", provider="fake")
+    monkeypatch.delenv("LEVI_RECAP_STORE_LAYOUT", raising=False)
+    rid = store.publish("ds", {0: _episode(8)}, _meta(), dataset_name="ds")[
+        "revision_id"
+    ]
+    _publish({0: (8, 0.1)})
+    store.write_json(store.root("ds") / "dataset.json", {"dataset_type": "sft"})
+    (store.root("ds") / "jobs").mkdir()
+    (store.root("ds") / "jobs" / "20261010-0000.json").write_text("{}")
+    assert main(["clear"]) == 1  # neither names nor --all
+    assert "--all" in capsys.readouterr().err
+    assert main(["clear", "ds"]) == 0
+    dry = json.loads(capsys.readouterr().out)
+    assert dry["applied"] is False and dry["bytes"] > 0
+    kinds = {(i["kind"], i["ref"]) for i in dry["datasets"][0]["items"]}
+    assert kinds == {("model_result", "r1"), ("revision", rid), ("current", None)}
+    assert store.results("ds") == ["r1", rid]  # nothing deleted
+    # A live job refuses it.
+    real_running = jobs._running
+    monkeypatch.setattr(jobs, "_running", lambda name: ["20261010-0001"])
+    with pytest.raises(jobs.RecapError) as busy:
+        jobs.clear(["ds"], apply=True)
+    assert busy.value.status == 409 and store.results("ds") == ["r1", rid]
+    monkeypatch.setattr(jobs, "_running", real_running)
+    assert main(["clear", "ds", "--apply"]) == 0
+    capsys.readouterr()
+    folder = store.root("ds")
+    assert store.results("ds") == [] and store.current_ref("ds") is None
+    assert not (folder / "models").exists() and not (folder / "revisions").exists()
+    assert (folder / "dataset.json").is_file()  # the setting stays
+    assert (folder / "jobs").is_dir()  # only with --include-jobs
+    log = [
+        json.loads(line) for line in (folder / "cleared.jsonl").read_text().splitlines()
+    ]
+    assert {i["ref"] for i in log[0]["items"]} == {"r1", rid, None}
+    assert (ckpt / "keep-me" / "manifest.json").is_file()  # checkpoints untouched
+    report = jobs.clear(["ds"], include_jobs=True, apply=True)
+    assert [i["kind"] for i in report["datasets"][0]["items"]] == ["jobs"]
+    assert not (folder / "jobs").exists()
+    with pytest.raises(jobs.RecapError) as missing:
+        jobs.clear(["no-such-folder"])
+    assert missing.value.status == 404
+    with pytest.raises(jobs.RecapError):
+        jobs.clear(["../outside"])

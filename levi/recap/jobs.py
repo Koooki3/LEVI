@@ -10,10 +10,12 @@ own Python (no Torch); ``rlinf`` runs it in integrations/recap_value/.venv.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -1514,3 +1516,162 @@ def unified_threshold(
         "checkpoint_sha256": next(iter(keys))[0],
         "datasets": rows,
     }
+
+
+# ---------------------------------------------------------------- clearing
+
+
+def _running(name: str) -> list[str]:
+    """Jobs of a dataset whose worker is alive (read-only: never publishes)."""
+    return [
+        job["id"] for job in jobs(name) if job.get("status") in ACTIVE and _alive(job)
+    ]
+
+
+def _size(path: Path) -> int:
+    if path.is_file():
+        return path.stat().st_size
+    total = 0
+    for item in path.rglob("*"):
+        try:
+            if item.is_file() and not item.is_symlink():
+                total += item.stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def _clear_items(name: str, include_jobs: bool) -> list[dict[str, Any]]:
+    folder = store.root(name)
+    items: list[dict[str, Any]] = []
+    for model in sorted(p.name for p in (folder / store.MODELS).glob("*")):
+        path = folder / store.MODELS / model
+        record = store.revision(name, model) if store.head(name, model) else None
+        items.append(
+            {
+                "kind": "model_result",
+                "ref": model,
+                "version": record["version"] if record else None,
+                "episodes": record.get("episodes") if record else None,
+                "path": path,
+            }
+        )
+    legacy = folder / store.LEGACY
+    for rid in sorted(p.name for p in legacy.glob("*")) if legacy.is_dir() else []:
+        record = store.revision(name, rid) if naming.is_timestamp_id(rid) else None
+        items.append(
+            {
+                "kind": "revision",
+                "ref": rid,
+                "version": rid if record else None,
+                "episodes": record.get("episodes") if record else None,
+                "path": legacy / rid,
+            }
+        )
+    if (folder / "current.json").is_file():
+        items.append({"kind": "current", "ref": None, "path": folder / "current.json"})
+    if include_jobs:
+        for sub in ("jobs", "plans", "results"):
+            if (folder / sub).is_dir():
+                items.append({"kind": sub, "ref": None, "path": folder / sub})
+    for item in items:
+        item["bytes"] = _size(item["path"])
+    return items
+
+
+def clear(
+    names: list[str] | None = None,
+    *,
+    include_jobs: bool = False,
+    apply: bool = False,
+) -> dict[str, Any]:
+    """Remove RECAP results (both layouts) and ``current.json``; with
+    ``include_jobs`` also the job records, plans and worker outputs.
+
+    A dry run (the default) only lists what would go and its size. ``names``
+    are ``local/<name>`` ids or folder names under ``recap_values`` (results
+    of a dataset no longer registered can be cleared too); ``None`` means
+    every folder. A dataset with a live job is refused. Checkpoints,
+    datasets and the dataset setting (``dataset.json``) are never touched.
+    Each applied clearing appends what it removed to the folder's
+    ``cleared.jsonl``."""
+    base = catalog.STATE / "recap_values"
+    if names is None:
+        names = (
+            sorted(p.name for p in base.iterdir() if p.is_dir())
+            if base.is_dir()
+            else []
+        )
+    resolved = []
+    for value in names:
+        if value.startswith("local/"):
+            try:
+                value = catalog.resolve_name(value)
+            except ValueError as exc:
+                raise RecapError(400, str(exc)) from exc
+        try:
+            folder = store.root(value)
+        except ValueError as exc:
+            raise RecapError(400, str(exc)) from exc
+        if not folder.is_dir():
+            raise RecapError(404, f"No RECAP results folder for {value}")
+        resolved.append(value)
+    busy = {name: ids for name in resolved if (ids := _running(name))}
+    if busy:
+        raise RecapError(
+            409,
+            "RECAP value jobs are running ("
+            + "; ".join(f"{n}: {', '.join(i)}" for n, i in busy.items())
+            + "); wait for them or cancel them first",
+        )
+    report: dict[str, Any] = {"applied": apply, "datasets": [], "bytes": 0}
+    for name in resolved:
+        with store.locked(name):
+            if apply and _running(name):
+                raise RecapError(409, f"A RECAP value job started on {name}")
+            items = _clear_items(name, include_jobs)
+            if apply and items:
+                for item in items:
+                    path = item["path"]
+                    if path.is_dir():
+                        shutil.rmtree(path)
+                    else:
+                        path.unlink(missing_ok=True)
+                for empty in (store.MODELS, store.LEGACY):
+                    with contextlib.suppress(OSError):
+                        (store.root(name) / empty).rmdir()
+                with (store.root(name) / "cleared.jsonl").open("a") as log:
+                    log.write(
+                        json.dumps(
+                            {
+                                "cleared_at": time.time(),
+                                "items": [
+                                    {k: v for k, v in i.items() if k != "path"}
+                                    | {
+                                        "path": str(
+                                            i["path"].relative_to(store.root(name))
+                                        )
+                                    }
+                                    for i in items
+                                ],
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+        size = sum(i["bytes"] for i in items)
+        report["bytes"] += size
+        report["datasets"].append(
+            {
+                "name": name,
+                "bytes": size,
+                "items": [
+                    {
+                        **{k: v for k, v in i.items() if k != "path"},
+                        "path": str(i["path"].relative_to(base)),
+                    }
+                    for i in items
+                ],
+            }
+        )
+    return report

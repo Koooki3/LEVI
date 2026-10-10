@@ -10,6 +10,7 @@ levi recap base list
 levi recap threshold <repo_id> <repo_id> … [--positive-quantile q] [--set <checkpoint> --provenance-text TEXT]
 levi recap run <repo_id> --checkpoint <n> [--episodes 0,3] [--threshold X] [--dataset-type auto|rollout|sft] [--static-filter auto|on|off]
 levi recap settings <repo_id> [--dataset-type auto|rollout|sft]
+levi recap clear [<repo_id or folder> …] [--all] [--include-jobs] [--apply]
 levi recap show <repo_id> [--model <checkpoint>|--revision <id>] [--episode N]
 """
 
@@ -228,6 +229,22 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["auto", "rollout", "sft"],
         help="store it for the dataset (auto removes the setting)",
     )
+    clear = sub.add_parser(
+        "clear",
+        help="remove RECAP results (a dry run unless --apply)",
+        description="Lists, or with --apply removes, the RECAP results of the "
+        "named datasets (local/<name> or a folder under recap_values, also of "
+        "an unregistered dataset), in both storage layouts, and current.json. "
+        "Refused while a job runs. Never touches checkpoints or datasets.",
+    )
+    clear.add_argument("names", nargs="*")
+    clear.add_argument("--all", action="store_true", help="every dataset's results")
+    clear.add_argument(
+        "--include-jobs",
+        action="store_true",
+        help="also the job records, plans and worker outputs",
+    )
+    clear.add_argument("--apply", action="store_true", help="really delete")
     show = sub.add_parser("show", help="the current labels of a dataset")
     show.add_argument("repo_id")
     show.add_argument("--episode", type=int)
@@ -321,6 +338,20 @@ def main(argv: list[str] | None = None) -> int:
                 _print(jobs.dataset_type_payload(args.repo_id))
             else:
                 _print(jobs.set_dataset_type(args.repo_id, args.dataset_type))
+            return 0
+        if args.command == "clear":
+            from . import jobs
+
+            if bool(args.names) == bool(args.all):
+                raise ValueError("name the datasets, or pass --all")
+            report = jobs.clear(
+                None if args.all else args.names,
+                include_jobs=args.include_jobs,
+                apply=args.apply,
+            )
+            _print(report)
+            if not args.apply:
+                print("dry run: nothing was deleted (add --apply)", file=sys.stderr)
             return 0
         if args.command == "show":
             from . import jobs
