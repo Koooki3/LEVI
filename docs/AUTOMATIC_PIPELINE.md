@@ -651,17 +651,18 @@ read the interval, not the rate.
 | early termination | confusion of early stops (`goal_verified`) against the truth; precision (early stops truly successful / early stops), recall (early stops / truly successful episodes the detector could have stopped: an early stop or the horizon, not an episode a person, a fault or the policy ended), **false early stop rate from the control group only** (pipeline §5.5: control episodes, run to their horizon with the stop withheld, in which the detector would have stopped, among those that truly failed, ran to their horizon, were sealed and carry their control record; the others are counted apart in `left_out` (`cut_short`: ended by a person, a fault or the policy; `not_recorded`: no seal or no control record); `available: false` and no number without them), the treatment group's early stops truly failed / truly failed episodes as `treatment_false_early_stop_lower_bound` (the stop hid what came after it), saved steps (`max_steps` minus the steps run, summed over early stops), control episodes apart, agreement of the verdict with the truth and false successes |
 | reset | resets, `autonomous_reset_success_rate`, scene decisions and skips; skip accuracy (a skip on a truly ready scene or a reset on a scene that truly needed one / labelled decisions), wrong-skip rate, unneeded-reset rate, reset durations |
 | automation | interventions (moves into `WAIT_HUMAN` or `FAULT_LOCKED`) by reason, resumes, longest run of forward episodes without one, the time people waited (only when the clock domain did not change) |
-| turnaround | from episode k's home reached (`ROBOT_HOME -> SCENE_ASSESS` committed) to episode k+1's `FORWARD_ACTIVE` committed, split by the state the run was in: `scene_ms` (`SCENE_ASSESS`), `reset_policy_ms` (`RESET_*`), `human_reset_ms` (`WAIT_HUMAN`, `FAULT_LOCKED`), `verify_ms` (`PREFLIGHT`, `VERIFY_INITIAL`); the parts add up to `turnaround_ms`. `with_person` is the share of turnarounds a person was needed in. A window across a clock-domain change is `unmeasured`; the one after the last episode is `no_next_episode`; one the run is still in is `open` |
-| per valid episode | `time_per_valid_episode_ms` (the journal's span, summed per clock domain, / forward episodes sealed complete) and `human_minutes_per_valid_episode` (minutes in `WAIT_HUMAN`/`FAULT_LOCKED` closed by a resume or an operator's stop / the same count; a wait the run is still in is `open_waits`); `value` is null with no valid episode |
+| turnaround | from episode k's home reached (`ROBOT_HOME -> SCENE_ASSESS` committed) to episode k+1's `FORWARD_ACTIVE` committed, split by the state the run was in: `scene_ms` (`SCENE_ASSESS`), `reset_policy_ms` (`RESET_*`), `human_reset_ms` (`WAIT_HUMAN`, `FAULT_LOCKED`), `verify_ms` (`PREFLIGHT`, `VERIFY_INITIAL`); the parts add up to `turnaround_ms`. `with_person` is the share of turnarounds a person was needed in. A window across a clock-domain change is `unmeasured`; the one after the last episode is `no_next_episode`; one the run is still in is `open`. An episode that ended without its home reached (`ROBOT_HOME -> WAIT_HUMAN` after an operator's stop where the arm stands, `ROBOT_HOME -> FAULT_LOCKED` after a failed home) starts no window: `turnaround_unmeasured` counts every left-out turnaround by reason (`clock_domain_changed`, `not_homed:<state>:<reason>`) |
+| per valid episode | `time_per_valid_episode_ms` (the journal's span on the monotonic clock, summed per clock domain, / forward episodes sealed complete; the downtime between a crash and the restart is not in it: `downtime_excluded: true`) and `human_minutes_per_valid_episode` (minutes in `WAIT_HUMAN`/`FAULT_LOCKED` closed by a resume or an operator's stop / the same count; a wait the run is still in is `open_waits`; a fault during a planned wait makes the rest of it unplanned); `value` is null with no valid episode |
 | scene decisions by a person | with `scene_check: operator_attested` a person answered the scene checks: those decisions are listed in `scene_decisions_by_human` and left out of the reset group's skip accuracy, which is a machine provider's |
 
 **Comparable across reset modes** (design X2 §1.2). The report head names
 `reset_mode` (`single_reset_policy`, or `human_assisted`: policy evaluation
 only, a person resets the scene) and `scene_check` (`provider` or
 `operator_attested`), and `mode_source` says where each came from: the
-caller, the run header (contract minor 1), the manifest, the journal (a
-reset episode means the reset policy), a default (`provider`), or
-`unknown`. `comparable` lists the fields that mean the same in both modes;
+caller, the run header (contract minor 1), the manifest (a forward
+episode a person reset the scene for: `episodes[*].preceded_by:
+human_reset` or a non-empty `after_human_resets`), the journal (a reset
+episode means the reset policy), a default (`provider`), or `unknown`. `comparable` lists the fields that mean the same in both modes;
 compare runs of different modes on those only (`mode_specific` lists the
 rest). In `human_assisted`, a scene check (`VERIFY_INITIAL`/`SCENE_ASSESS`)
 sending the run to `WAIT_HUMAN` for `scene_reset_required`/`scene_unknown`
@@ -867,7 +868,9 @@ in that mode, when a cell lacks its reason, or when a marker is wrong: no
 capability, an unknown one, no mode, a claim on an `n/a` cell. A test's
 mode is its `reset_mode` parameter (the fixture in `tests/conftest.py`
 runs it once per mode) or, for a test written for one mode, `modes=(...)`
-on the marker. Counter-example tests prove each failure.
+on the marker. A test that never runs (a skip, or a `skipif`/`xfail` whose
+condition holds, as pytest evaluates it) covers nothing. Counter-example
+tests prove each failure.
 
 **Adding a capability** (a transition, a reason path, a metrics key, a
 subcommand; later an API route or a job key):

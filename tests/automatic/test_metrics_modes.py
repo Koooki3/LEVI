@@ -196,6 +196,8 @@ def test_time_and_person_minutes_per_valid_episode():
     assert found == {
         "span_ms": 95_300,
         "clock_domains": 1,
+        "downtime_excluded": True,
+        "basis": "monotonic span per clock domain, summed; restarts' downtime excluded",
         "valid_episodes": 3,
         "value": 31_766.7,
     }
@@ -223,6 +225,8 @@ def test_empty_one_episode_and_a_run_left_waiting_never_divide_by_zero():
     assert empty["time_per_valid_episode_ms"] == {
         "span_ms": 0,
         "clock_domains": 0,
+        "downtime_excluded": True,
+        "basis": "monotonic span per clock domain, summed; restarts' downtime excluded",
         "valid_episodes": 0,
         "value": None,
     }
@@ -270,11 +274,67 @@ def test_a_restart_on_another_clock_is_unmeasured_not_guessed():
     )
     found = M.turnaround(j.events)
     assert found["n"] == 0 and found["unmeasured"] == 1
+    assert found["turnaround_unmeasured"] == {
+        "n": 1,
+        "by_reason": {"clock_domain_changed": 1},
+    }
     person = M.automation(j.events, "human_assisted")["person_ms"]
-    assert person["unmeasured"] == 1 and person["total"] == 0
+    # The planned wait spans the restart (unmeasured); the recovery's lock
+    # from 10 to the resume at 5000 is on one clock (unplanned).
+    assert person["unmeasured"] == 1
+    assert (person["planned"], person["unplanned"]) == (0, 4990)
     span = M.time_per_valid_episode(j.events, M.episodes(j.events))
-    # 0..1500 on the first clock, 10..5400 on the second.
+    # 0..1500 on the first clock, 10..5400 on the second: the downtime
+    # between the two processes is not counted.
     assert span["span_ms"] == 1500 + 5390 and span["clock_domains"] == 2
+    assert span["downtime_excluded"] is True
+
+
+def test_a_fault_while_waiting_is_unplanned_time():
+    """A person resets the scene (planned, 4 s), a fault comes in while
+    they do (unplanned from then on, 5 s until the resume)."""
+    j = Journal()
+    j.move(0, "PREFLIGHT", "VERIFY_INITIAL", "preflight_passed")
+    j.move(300, "VERIFY_INITIAL", "WAIT_HUMAN", "scene_reset_required")
+    j.move(4300, "WAIT_HUMAN", "FAULT_LOCKED", "safety_stop")
+    j.move(9300, "FAULT_LOCKED", "PREFLIGHT", "human_resumed")
+    found = M.automation(j.events, "human_assisted")
+    assert (found["planned"], found["unplanned"]) == (1, 1)
+    assert found["person_ms"] == {
+        "planned": 4000,
+        "unplanned": 5000,
+        "total": 9000,
+        "unmeasured": 0,
+        "open_waits": 0,
+    }
+    # Unknown mode: all of it unplanned.
+    assert M.automation(j.events)["person_ms"]["unplanned"] == 9000
+    # The fault arrives while the person waits, the run is restarted on
+    # another clock: the planned stretch is unmeasurable, the rest is not.
+    j.events[-2].clock_domain = j.events[-1].clock_domain = "host-mono:other"
+    found = M.automation(j.events, "human_assisted")["person_ms"]
+    assert (found["planned"], found["unplanned"], found["unmeasured"]) == (0, 5000, 1)
+
+
+@pytest.mark.parametrize(
+    "to, reason",
+    [("WAIT_HUMAN", "operator_stop"), ("FAULT_LOCKED", "home_failed")],
+)
+def test_an_episode_ended_before_its_home_leaves_no_turnaround(to, reason):
+    j = Journal()
+    j.move(0, "PREFLIGHT", "VERIFY_INITIAL", "preflight_passed")
+    j.forward(0, 1)
+    j.events.pop()  # no ROBOT_HOME -> SCENE_ASSESS: the home was never reached
+    j.move(1200, "ROBOT_HOME", to, reason)
+    j.move(5200, to, "PREFLIGHT", "human_resumed")
+    j.move(5300, "PREFLIGHT", "VERIFY_INITIAL", "preflight_passed")
+    j.forward(5600, 2)
+    found = M.report(j.events, reset_mode="human_assisted")["turnaround"]
+    assert found["n"] == 0 and found["unmeasured"] == 0
+    assert found["turnaround_unmeasured"] == {
+        "n": 1,
+        "by_reason": {f"not_homed:{to}:{reason}": 1},
+    }
 
 
 def test_a_stop_while_waiting_closes_the_wait():
@@ -313,6 +373,24 @@ def test_the_mode_comes_from_the_caller_the_header_the_manifest_or_the_journal()
     found = M.mode_of(j.events, manifest={"after_human_resets": [{"wait_seq": 5}]})
     assert found["reset_mode"] == "human_assisted"
     assert found["source"]["reset_mode"] == "manifest"
+    # The recorder's shape (T-CL-02): per forward episode.
+    for entry in (
+        {"preceded_by": "human_reset", "after_human_resets": []},
+        {"preceded_by": "none", "after_human_resets": [{"wait_seq": 5}]},
+    ):
+        manifest = {"episodes": [{"episode_id": ep(1), "preceded_by": "none"}, entry]}
+        found = M.mode_of(j.events, manifest=manifest)
+        assert (found["reset_mode"], found["source"]["reset_mode"]) == (
+            "human_assisted",
+            "manifest",
+        )
+    for manifest in (
+        {"episodes": [{"preceded_by": "none", "after_human_resets": []}]},
+        {"episodes": [{"preceded_by": "reset_policy"}]},
+        {"episodes": "garbage", "after_human_resets": {"wait_seq": 5}},
+        {"episodes": [None, 3]},
+    ):
+        assert M.mode_of(j.events, manifest=manifest)["reset_mode"] is None, manifest
     assert M.mode_of(j.events)["reset_mode"] is None
     with_reset = Journal()
     with_reset.move(0, "PREFLIGHT", "VERIFY_INITIAL", "preflight_passed")

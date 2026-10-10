@@ -17,7 +17,7 @@ of the registration guard (``tests/automatic/test_mode_matrix_guard.py``),
 and so is a ``same``/``differs`` cell no collected test covers in that mode.
 A test says what it covers with ``@pytest.mark.mode_matrix("<capability>",
 ...)``; its mode comes from the parametrised ``reset_mode`` fixture
-(``tests/automatic/conftest.py``) or, for a test written for one mode,
+(``tests/conftest.py``) or, for a test written for one mode,
 from ``modes=("<mode>", ...)`` on the marker. ``audit`` is the guard's
 logic, kept here so it can be tested against a deliberately broken
 registry.
@@ -329,12 +329,14 @@ def audit(items, *, matrix=None, enumerated=None) -> list:
     """Every way the registry fails (empty: it holds). ``items``: the
     collected tests carrying a ``mode_matrix`` marker, as
     ``{"nodeid", "marks": [{"args": [...], "modes": [...] | None}],
-    "reset_mode": <its parameter> | None, "uses_reset_mode": bool}``;
+    "reset_mode": <its parameter> | None, "uses_reset_mode": bool,
+    "skipped": <why it never runs> | None}``;
     ``enumerated``: the capabilities found in the code (default: ``SOURCES``).
 
     (a) every capability the code has is in the matrix (and none the code no
     longer has); (b) every ``same``/``differs`` cell is covered by at least
-    one collected test in that mode; (c) every cell is well formed, ``n/a``
+    one collected test in that mode that runs (a test skipped or expected
+    to fail unconditionally covers nothing); (c) every cell is well formed, ``n/a``
     with its reason. A marker naming no capability or an unknown one, a test
     saying no mode, and a test claiming a mode where the cell is ``n/a`` are
     failures too."""
@@ -350,8 +352,10 @@ def audit(items, *, matrix=None, enumerated=None) -> list:
         for c in sorted(set(matrix) - enumerated)
     ]
     coverage: dict = {}
+    idle: dict = {}  # covered by tests that never run
     for item in items:
         node = item.get("nodeid", "?")
+        target = idle if item.get("skipped") else coverage
         modes, found = covered(item)
         problems += [f"{node}: {p}" for p in found]
         for mark in item.get("marks", []):
@@ -371,7 +375,7 @@ def audit(items, *, matrix=None, enumerated=None) -> list:
                             f"{node}: covers {capability} in {mode}, where it is n/a"
                         )
                     else:
-                        coverage.setdefault((capability, mode), []).append(node)
+                        target.setdefault((capability, mode), []).append(node)
     for capability, cells in sorted(matrix.items()):
         if not isinstance(cells, dict):
             continue
@@ -379,8 +383,10 @@ def audit(items, *, matrix=None, enumerated=None) -> list:
             if kind(cells.get(mode)) in (SAME, "differs") and not coverage.get(
                 (capability, mode)
             ):
+                skipped = idle.get((capability, mode))
                 problems.append(
                     f"{capability} [{mode}]: no collected test covers it in this mode"
+                    + (f" (only skipped: {', '.join(skipped)})" if skipped else "")
                 )
     return problems
 

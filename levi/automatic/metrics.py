@@ -70,12 +70,19 @@ those only (``mode_specific`` lists the rest):
   ``FAULT_LOCKED``) and ``verify_ms`` (``PREFLIGHT``, ``VERIFY_INITIAL``);
   the parts add up to the whole. A window across a restart with another
   clock domain is ``unmeasured``; one the run ended in is ``no_next_episode``
-  or ``open``;
-- ``time_per_valid_episode_ms`` = the journal's span (per clock domain,
-  summed) / forward episodes sealed complete;
+  or ``open``. An episode that ended without its home reached
+  (``ROBOT_HOME -> WAIT_HUMAN/FAULT_LOCKED``: a stop where the arm stands, a
+  failed home) starts no window; ``turnaround_unmeasured`` counts both kinds
+  of left-out turnaround by reason;
+- ``time_per_valid_episode_ms`` = the journal's span on the monotonic clock
+  (per clock domain, summed: the downtime between a crash and the restart
+  is not counted, ``downtime_excluded: true``) / forward episodes sealed
+  complete;
 - ``human_minutes_per_valid_episode`` = minutes in ``WAIT_HUMAN`` or
   ``FAULT_LOCKED`` closed by a resume or an operator's stop / forward
-  episodes sealed complete (a wait the run still is in is ``open_waits``);
+  episodes sealed complete (a wait the run still is in is ``open_waits``).
+  A fault during a planned wait splits it: the time before the fault is
+  planned, the time after it unplanned;
 - ``scene_decisions_by_human``: with ``scene_check: operator_attested`` a
   person answered the scene checks; those decisions are listed here and
   left out of the reset group's skip accuracy (a machine-provider rate).
@@ -614,8 +621,15 @@ def automation(events, reset_mode: str | None = None) -> dict:
                 current_unplanned = 0
             if entered is None:
                 entered = (event.mono_ns, event.clock_domain)
-            if opened is None:
-                opened = (event.mono_ns, event.clock_domain, found)
+            if opened is not None:
+                # A new intervention during a wait (a fault while a person
+                # resets the scene): the time so far stays with the first
+                # one's kind, what follows belongs to the new one's.
+                if opened[1] == event.clock_domain:
+                    person[opened[2]] += (event.mono_ns - opened[0]) // 1_000_000
+                else:
+                    person_unmeasured += 1
+            opened = (event.mono_ns, event.clock_domain, found)
         elif _sealed_forward(event):
             current += 1
             current_unplanned += 1
@@ -686,10 +700,19 @@ def turnaround(events) -> dict:
     """Episode k's home reached to episode k+1's start, split by state (see
     the module text)."""
     done, unmeasured, no_next = [], 0, 0
+    not_homed: list = []
     window = None
     for event in events:
         if event.record != "committed" or event.to_state is None:
             continue
+        if (
+            window is None
+            and event.from_state == "ROBOT_HOME"
+            and event.to_state in PERSON_STATES
+        ):
+            # The episode ended without its home reached (an operator's stop
+            # where the arm stands, a failed home, a fault): no window starts.
+            not_homed.append(f"{event.to_state}:{event.reason}")
         if window is not None:
             part = TURNAROUND_PARTS.get(window["state"])
             if part is None or event.clock_domain != window["domain"]:
@@ -725,6 +748,15 @@ def turnaround(events) -> dict:
         "unmeasured": unmeasured,
         "no_next_episode": no_next,
         "open": int(window is not None),
+        # Turnarounds left out, by why: a window across a restart on another
+        # clock, or an episode whose home was never reached.
+        "turnaround_unmeasured": {
+            "n": unmeasured + len(not_homed),
+            "by_reason": _count(
+                [*["clock_domain_changed"] * unmeasured]
+                + [f"not_homed:{r}" for r in not_homed]
+            ),
+        },
     }
 
 
@@ -756,6 +788,11 @@ def time_per_valid_episode(events, records) -> dict:
     return {
         "span_ms": span,
         "clock_domains": domains,
+        # The span is measured on the monotonic clock, one stretch per
+        # process (clock domain), summed: the downtime between a crash and
+        # the restart is not in it.
+        "downtime_excluded": True,
+        "basis": "monotonic span per clock domain, summed; restarts' downtime excluded",
         "valid_episodes": valid,
         "value": round(span / valid, 1) if valid else None,
     }
@@ -790,6 +827,33 @@ def _header(events):
     return None
 
 
+def human_resets_in(manifest: dict) -> bool:
+    """Whether the run manifest records a forward episode a person reset
+    the scene for. The recorder (T-CL-02) writes it per episode
+    (``episodes[*].after_human_resets`` non-empty, ``preceded_by:
+    human_reset``); a manifest-level ``after_human_resets`` list is read
+    too. A minor-0 manifest has neither."""
+    if not isinstance(manifest, dict):
+        return False
+    if (
+        isinstance(manifest.get("after_human_resets"), list)
+        and (manifest["after_human_resets"])
+    ):
+        return True
+    entries = manifest.get("episodes")
+    return isinstance(entries, list) and any(
+        isinstance(entry, dict)
+        and (
+            entry.get("preceded_by") == "human_reset"
+            or (
+                isinstance(entry.get("after_human_resets"), list)
+                and bool(entry["after_human_resets"])
+            )
+        )
+        for entry in entries
+    )
+
+
 def mode_of(
     events,
     *,
@@ -801,8 +865,9 @@ def mode_of(
     caller (``argument``), the run header (contract minor 1), the manifest,
     the journal, a default, or ``unknown``. A minor-0 journal has neither
     in its header: a reset episode in the journal means the reset policy;
-    the manifest's ``after_human_resets`` means human_assisted; else the
-    mode is unknown (every intervention then counts as unplanned)."""
+    a person's reset in the manifest (``human_resets_in``) means
+    human_assisted; else the mode is unknown (every intervention then
+    counts as unplanned)."""
     for name, value, allowed in (
         ("reset_mode", reset_mode, RESET_MODES),
         ("scene_check", scene_check, SCENE_CHECKS),
@@ -820,7 +885,7 @@ def mode_of(
         reset_mode, source["reset_mode"] = manifest["reset_mode"], "manifest"
     elif any(e.record == "committed" and e.to_state == "RESET_ACTIVE" for e in events):
         reset_mode, source["reset_mode"] = "single_reset_policy", "journal"
-    elif manifest.get("after_human_resets"):
+    elif human_resets_in(manifest):
         reset_mode, source["reset_mode"] = "human_assisted", "manifest"
     else:
         source["reset_mode"] = "unknown"

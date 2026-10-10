@@ -35,6 +35,26 @@ def _modes(mark):
     return list(value) if isinstance(value, list | tuple) else value
 
 
+def never_runs(item) -> str | None:
+    """Why a test never runs (it covers nothing): a skip, a skipif whose
+    condition holds, an xfail whose condition holds (unconditional xfail
+    included: a test expected to fail shows no behaviour). Evaluated as
+    pytest evaluates them at setup. A ``pytest.skip()`` inside the test
+    body cannot be seen at collection."""
+    from _pytest.skipping import evaluate_skip_marks, evaluate_xfail_marks
+
+    try:
+        skipped = evaluate_skip_marks(item)
+        xfailed = evaluate_xfail_marks(item)
+    except Exception as exc:  # noqa: BLE001 - a broken condition never counts
+        return f"condition not evaluable: {exc}"
+    if skipped is not None:
+        return f"skip: {skipped.reason}"
+    if xfailed is not None:
+        return f"xfail: {xfailed.reason}"
+    return None
+
+
 def pytest_collection_modifyitems(session, config, items):
     path = os.environ.get(DUMP_ENV)
     if not path:
@@ -54,6 +74,7 @@ def pytest_collection_modifyitems(session, config, items):
                 "marks": marks,
                 "reset_mode": callspec.params.get("reset_mode") if callspec else None,
                 "uses_reset_mode": "reset_mode" in getattr(item, "fixturenames", ()),
+                "skipped": never_runs(item),
             }
         )
     with open(path, "w", encoding="utf-8") as handle:
@@ -188,3 +209,61 @@ def test_a_wrong_marker_fails_the_guard(bad, expected):
 def test_a_capability_the_code_dropped_fails_the_guard():
     found = check(enumerated={"cap:shared"})
     assert "cap:reset: in MODE_MATRIX but no longer in the code" in found
+
+
+def test_a_test_that_never_runs_covers_nothing():
+    skipped = {**item("cap:shared", mode=modes.HUMAN), "skipped": "skip: later"}
+    found = check(items=[COVERED[0], skipped, COVERED[2]])
+    assert found == [
+        (
+            "cap:shared [human_assisted]: no collected test covers it in this mode"
+            " (only skipped: t.py::x)"
+        )
+    ]
+    # Skipped as well as running: the running one covers it.
+    assert check(items=[*COVERED, skipped]) == []
+
+
+def test_skip_and_xfail_markers_are_read_as_pytest_reads_them(pytester):
+    items = pytester.getitems(
+        """
+        import pytest
+
+        def test_runs(): pass
+
+        @pytest.mark.skip(reason="later")
+        def test_skip(): pass
+
+        @pytest.mark.skipif(True, reason="always")
+        def test_skipif_true(): pass
+
+        @pytest.mark.skipif(False, reason="never")
+        def test_skipif_false(): pass
+
+        @pytest.mark.skipif("1 + 1 == 2", reason="a string condition")
+        def test_skipif_string(): pass
+
+        @pytest.mark.xfail
+        def test_xfail(): pass
+
+        @pytest.mark.xfail(False, reason="never")
+        def test_xfail_false(): pass
+
+        @pytest.mark.parametrize(
+            "x", [1, pytest.param(2, marks=pytest.mark.skip(reason="one param"))]
+        )
+        def test_param(x): pass
+        """
+    )
+    found = {i.name: never_runs(i) for i in items}
+    runs = {n for n, why in found.items() if why is None}
+    assert runs == {
+        "test_runs",
+        "test_skipif_false",
+        "test_xfail_false",
+        "test_param[1]",
+    }
+    assert found["test_skip"] == "skip: later"
+    assert found["test_skipif_string"].startswith("skip:")
+    assert found["test_xfail"].startswith("xfail:")
+    assert found["test_param[2]"] == "skip: one param"
