@@ -169,14 +169,22 @@ All entries were checked against their DOI or arXiv record (2026-10-10).
 A figure is a `FigureSpec`: a plain, versioned description (schema
 `levi.aeri.figure_spec.v1`) with no drawing code in it. The analysis code
 produces one spec per figure; the web page maps the same JSON onto Recharts,
-and the two writers here turn it into files:
+and the two writers here turn it into SVG and PDF:
 
 | Function | Output |
 | --- | --- |
 | `svgplot.render_svg(spec, lang=None, embed_spec=False, width=640)` | SVG text (UTF-8) |
 | `pdfplot.render_pdf(spec, lang=None, width=640)` | One-page vector PDF (bytes) |
-| `svgplot.write_svg`, `pdfplot.write_pdf` | The same, written atomically (`.partial`, then rename) |
+| `levi.automatic.figure_files.write_figure(spec, path_stem, formats=("svg", "pdf"), lang=None, embed_spec=False, strict=False)` | `<path_stem>.svg` and/or `.pdf` on disk; returns one record per format for a report manifest |
 | `figspec.table(spec)`, `table_csv`, `table_html` | The accessible table: every number in the figure |
+
+The analysis package never touches files (it only returns text and bytes);
+`write_figure` lives outside it. It renders every format first, so a figure
+that cannot be drawn writes nothing, then writes each file through a
+temporary file in the same folder, `fsync`, rename and `fsync` of the folder:
+a crash leaves the old file or the new one, never half a file. Each record
+has `path`, `bytes` and `sha256`; the PDF record adds the substitution report
+described under "Language limits". The folder must exist.
 
 Pure standard library: no matplotlib, no Pillow, nothing to install. Output is
 deterministic: no clock, no random ids, no `/ID` or dates in the PDF, so the
@@ -210,21 +218,30 @@ A matrix cell carries its count in `Point.value`; `value` is for
 
 ### Intervals are never lost quietly
 
-* A step curve draws an interval band for each run of consecutive points
-  that have one; a point with an interval on its own (including a one-point
-  curve) gets an error bar; a point without one breaks the band. All bands
-  are drawn first, then all curves, so a band never hides another arm's curve.
+* On a step curve a point's interval holds, like its value, from the point
+  to the next point; consecutive points with intervals share one band, and
+  the band reaches the next point even when that point has no interval. A
+  point with an interval and nothing to its right (the curve's last point,
+  a one-point curve, or a next point at the same x) gets an error bar, so
+  the end of the curve shows its interval too. A point without an interval
+  breaks the band. All bands are drawn first, then all curves, so a band
+  never hides another arm's curve.
 * A point that lacks an interval in a series that has intervals elsewhere is
   marked `interval unavailable` in the table, and the figure says how many
   points that is.
-* **At x = 0 a step curve with no interval means no uncertainty** (the
-  Kaplan-Meier output has none before the first event): the value is its own
-  interval, the table says `no uncertainty at 0`, and nothing is reported as
-  missing.
-* After drawing, `validate_render(spec, scene)` checks that every interval
-  of the spec has a mark in the scene and raises `ValueError` otherwise;
-  `layout()` calls it, so a drawing function that skips intervals cannot
-  produce a figure.
+* **At x = 0 a step curve with no interval means no uncertainty**: the
+  Kaplan-Meier result has no row at t = 0, so the adapter adds the start
+  point (0, 0) without an interval (see "Interface with the analysis
+  library"). The value is its own interval, the table says
+  `no uncertainty at 0`, and nothing is reported as missing.
+* After drawing, `validate_render(spec, scene)` measures every interval of
+  the spec on the page: an error bar must span it, and a band must have
+  width at that point and span it there (within 0.01 pt). A missing mark, a
+  band of zero width or an error bar collapsed to a point raises
+  `ValueError`, unless the interval is a single value (for example the
+  Kaplan-Meier interval [0, 0] once every episode succeeded). `layout()`
+  calls it, so a drawing function that loses an interval cannot produce a
+  figure.
 * An estimate outside its interval (legitimate for a bootstrap percentile or
   BCa interval, or a median) is kept, flagged `estimate outside interval` in
   the table and counted under the figure. `warnings(spec)` lists these and
@@ -271,17 +288,23 @@ nothing is replaced silently. For each text that Windows-1252 cannot show, the
 PDF uses, in this order: a form in another language that fits (English); a
 transliteration of statistics symbols (`Δ` to `Delta`, `−` to `-`, `α` to
 `alpha`, `≥` to `>=`, ...); `?` marks, or `[n/a]` when nothing readable is
-left. `pdfplot.render_pdf_report(spec, lang, strict=False)` returns the bytes
-and `substitutions`, a list of `{"text", "to", "reason"}` records
-(`transliterated`, `fallback_en`, `unencodable`), plus the language the title
-is really in (also written to the PDF `/Lang`); its `manifest()` gives
-`{"pdf": "ok" | "lossy(n)", ...}` for a report manifest. `strict=True` raises
-`LossyTextError` instead. `write_pdf` returns the same list. Write Chinese
-figures as SVG, or give every text an English form.
+left. A series name with nothing readable left becomes `Series 1`,
+`Series 2`, ... (its legend position) instead, so the arms can still be told
+apart. `pdfplot.render_pdf_report(spec, lang, strict=False)` returns the
+bytes and `substitutions`, a list of `{"text", "to", "reason"}` records
+(`transliterated`, `fallback_en`, `unencodable`, `numbered`), plus the
+language the title is really in (also written to the PDF `/Lang`); its
+`manifest()` gives `{"pdf": "ok" | "lossy(n)", ...}` for a report manifest.
+`strict=True` raises `LossyTextError` instead. `render_pdf` returns only the
+bytes, so a report generator uses `render_pdf_report` or `write_figure`
+(whose PDF record carries the same report) and writes the substitutions into
+its manifest. Write Chinese figures as SVG, or give every text an English
+form.
 
 Titles, summaries and notes are cut to 300, 600 and 400 characters (3, 4 and 6
-lines each), and legend names, panel titles, axis labels, reference-line and
-point labels to short limits; `Scene.truncated` names what was cut. Layout time
+lines each), legend names to 60, panel titles to 80, reference-line labels
+to 40, point labels to 40 and axis labels to 100 characters; `Scene.truncated`
+names what was cut. The table keeps the full text. Layout time
 is linear in the text length.
 There is no PNG writer; PNG export stays in the web page (the browser draws the
 SVG), and a command-line PNG is made only if a converter such as
@@ -305,17 +328,25 @@ intended change, regenerate them with `LEVI_UPDATE_GOLDEN=1` and read the diff.
 ### Interface with the analysis library
 
 The figure side only needs plain numbers. The report generator (T-CP-06)
-writes the adapter from the analysis results to `FigureSpec`; this is the
-agreement it must follow (`tests/automatic/analysis/test_figadapter.py` has a
-runnable minimal example; the input shape there, `estimate`/`low`/`high` with
-`None` when unavailable, is **assumed** from the analysis task and must be
-checked against the library's real output):
+writes the adapter from the analysis results to `FigureSpec`;
+`tests/automatic/analysis/test_figadapter.py` is a runnable example that
+calls the library and maps its real output. The keys differ by function:
 
-* A group with no data becomes a series with `unavailable=True`; it is never
-  dropped.
+| Analysis result | Keys | Figure |
+| --- | --- | --- |
+| `proportion(k, n)` | `rate`, `wilson.low`, `wilson.high`, `k`, `n`; `available: false` with `rate` and `wilson` set to `None` when `n = 0` | `grouped_bar`: `Point(0, rate, wilson.low, wilson.high, "k/n")` |
+| `paired_bootstrap`, `unpaired_bootstrap` | `estimate`, `low`, `high`; `None` and `available: false` without pairs | `forest`: `Point(estimate, row, low, high)` |
+| `newcombe_paired` | `difference`, `low`, `high` | `forest`: `Point(difference, row, low, high)` |
+| `kaplan_meier` | `steps[]`, one row per event time: `time`, `survival`, `incidence` (= 1 - S), `low`, `high` (on S(t)); no row at t = 0; `available: false` and no steps without episodes | `step_curve`: `Point(0, 0)` without an interval, then `Point(time, incidence, 1 - high, 1 - low)` per step |
+
+* A group with no data (`available: false`) becomes a series with
+  `unavailable=True`; it is never dropped. In a forest plot an unavailable
+  comparison keeps its row without a point and gets a note.
 * Kaplan-Meier intervals are on S(t); the time-to-success figure shows
-  1 - S(t), so the adapter plots `1 - S` with the interval `[1 - high, 1 - low]`.
-  The library has no interval at t = 0; leave `lo`/`hi` empty there (see above).
+  1 - S(t), so the interval flips to `[1 - high, 1 - low]`. Between events
+  0 < S < 1 always has an interval; once S reaches 0 the interval is
+  [0, 0] and the figure shows [1, 1] as a single value. The library has no
+  row at t = 0: the adapter adds (0, 0) without an interval (see above).
 * Pass a bootstrap interval as it is. If it excludes the point estimate the
   figure warns and keeps it; do not clip or re-centre it.
 * Rates are fractions in 0..1 (use `fmt="percent"`); counts go in the point
