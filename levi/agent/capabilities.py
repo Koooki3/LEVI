@@ -455,6 +455,10 @@ class EvidenceChanges(RunRef):
     top_k: int | None = Field(default=None, ge=1, le=20)
 
 
+class EventCandidatesRef(RunRef):
+    episode: int = Field(ge=0)
+
+
 from .objects import ObjectRequest
 
 SPECS = {
@@ -619,6 +623,15 @@ SPECS = {
         (
             "Rank an episode's coarse intervals by how much the picture "
             "changes; refine the top ones first"
+        ),
+    ),
+    "events.candidates": (
+        EventCandidatesRef,
+        "read",
+        (
+            "Read where an episode's recorded signals changed (event "
+            "candidates, text only) and the instants to refine first, when "
+            "the plan approved event intelligence"
         ),
     ),
     "supervision.pending": (
@@ -1246,6 +1259,10 @@ def _invoke(
         from .observations import changes
 
         return changes(workbench, run, args.episode, args.top_k)
+    if name == "events.candidates":
+        from .observations import event_focus
+
+        return event_focus(workbench, run, args.episode)
     if name == "supervision.pending":
         from .supervision import pending
 

@@ -3,10 +3,57 @@
 import time
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_serializer, model_validator
 
 from .schema import Contract
 from .store import Conflict, annotation_digest, digest
+
+# Where an event candidate may come from: the episode's recorded signals
+# (``levi.events``). Gripper crossings, height turns, the edges of still
+# spans, penalised change points.
+EVENT_SOURCES = ("gripper", "height", "still", "change_point")
+
+
+class EventIntelligence(Contract):
+    """What a temporal plan lets LEVI do with event candidates (``workflow.
+    event_intelligence``; docs/EVENTS.md).
+
+    ``candidates``: before the boundary refinement, read event candidates
+    from the episode's recorded signals and add the windows around the most
+    salient ones to the refinement's frames, within the plan's frame cap and
+    the model's image limit (``levi.events.sampling``). The model's prompt,
+    its number of requests and the coarse pass are unchanged; a candidate is
+    a place to look, never a boundary. Every value below is frozen in the
+    plan, so changing one needs a new approval.
+
+    Omitted, ``None`` and ``{"mode": "off"}`` all mean off and are stored
+    the same way: as no key at all, so a plan without event intelligence
+    freezes exactly what it froze before this block existed.
+    """
+
+    mode: Literal["off", "candidates"] = "off"
+    sources: list[Literal["gripper", "height", "still", "change_point"]] = Field(
+        default_factory=lambda: list(EVENT_SOURCES), min_length=1, max_length=4
+    )
+    # Candidate windows added to one episode's refinement, at most.
+    max_windows: int = Field(default=4, ge=1, le=16)
+    # Candidates of different sources closer than this are one candidate.
+    merge_seconds: float = Field(default=0.5, ge=0, le=5)
+    # The change-point penalty (levi.events.change_points.PENALTY, chosen on
+    # development gold labels).
+    change_point_penalty: float = Field(default=0.75, gt=0, le=100)
+    # How the frames are shared: whole windows in priority order, a window
+    # that does not fit is skipped (never thinned).
+    planner: Literal["greedy"] = "greedy"
+    # A model asking for more evidence on its own: not available; the frames
+    # a run reads are decided by LEVI and this plan.
+    active_evidence: Literal[False] = False
+
+    @model_validator(mode="after")
+    def distinct(self):
+        if len(set(self.sources)) != len(self.sources):
+            raise ValueError("event_intelligence.sources must be distinct")
+        return self
 
 
 class SubtaskDefinition(Contract):
@@ -47,9 +94,29 @@ class Workflow(Contract):
     # of on evenly spread samples -- a built-in spec's id ({"spec": "<id>"})
     # or a whole spec, resolved and frozen here (see ``anchored.py``).
     anchored: dict[str, Any] | None = None
+    # Temporal: event candidates from the recorded signals choose extra
+    # refinement windows (see ``EventIntelligence``). Off leaves no key.
+    event_intelligence: EventIntelligence | None = None
+
+    @model_serializer(mode="wrap")
+    def _frozen(self, handler):
+        out = handler(self)
+        if out.get("event_intelligence") is None:
+            out.pop("event_intelligence", None)
+        return out
 
     @model_validator(mode="after")
     def unique(self):
+        if (
+            self.event_intelligence is not None
+            and self.event_intelligence.mode == "off"
+        ):
+            self.event_intelligence = None
+        if self.event_intelligence is not None and self.kind != "temporal":
+            raise ValueError(
+                "Event intelligence chooses refinement frames; it is for "
+                "temporal workflows"
+            )
         if self.anchored is not None:
             if self.kind != "review":
                 raise ValueError("An anchored review is a review workflow")
@@ -234,7 +301,46 @@ def attach(run):
             "cross-camera identity inference",
         ],
     }
+    if flow.event_intelligence is not None:
+        # Only a plan that turns it on carries these keys: a plan without it
+        # looks exactly as it did before they existed.
+        events = _event_estimate(flow, len(run["context"].get("cameras") or []))
+        run["plan"]["estimate"]["basis"] += events.pop("basis")
+        run["plan"]["estimate"]["event_intelligence"] = events
+        run["plan"]["event_intelligence"] = flow.event_intelligence.model_dump()
     return run
+
+
+def _event_estimate(flow, cameras):
+    """What event candidates add to a temporal plan's cost, for the person
+    approving it: frames, never requests."""
+    import math
+
+    events = flow.event_intelligence
+    # The refinement samples a window at half the boundary tolerance at its
+    # finest (``observations.refine_spacings``), from window before to after.
+    per_window = (
+        math.floor(
+            2 * flow.boundary_window_seconds / (flow.boundary_tolerance_seconds / 2)
+            + 1e-9
+        )
+        + 1
+    )
+    most = min(
+        events.max_windows * per_window * max(1, cameras), flow.max_evidence_frames
+    )
+    return {
+        "basis": (
+            f"; event intelligence adds up to {events.max_windows} signal "
+            "candidate windows per episode to that refinement (more frames in "
+            "the same request, within max_evidence_frames; no extra request)"
+        ),
+        "extra_requests": 0,
+        "max_windows_per_episode": events.max_windows,
+        "frames_per_window": per_window * max(1, cameras),
+        "max_extra_frames_per_episode": most,
+        "frames_cap": flow.max_evidence_frames,
+    }
 
 
 def require(wb, run, *, bulk=False):

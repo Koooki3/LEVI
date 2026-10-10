@@ -2,7 +2,7 @@
 
 [中文](EVENTS.zh-CN.md)
 
-`levi.events` reads what a robot's recorded signals say happened, and when. **Today it is a library only**: nothing in a plan, a run, the interface, the API or the CLI calls it yet, and the signal lines an agent reads (`levi.agent.signals`) and anchored reviews (`levi.agent.anchored`) behave as before. The modules are pure functions over numpy arrays and pydantic records: no model, no Torch, no files written.
+`levi.events` reads what a robot's recorded signals say happened, and when. **Only a temporal plan that turns it on uses it** ([below](#in-a-plan-event-intelligence)): there its candidates choose extra frames for the boundary refinement. Nothing else calls it: a plan without it, the interface and the CLI behave as before, as do the signal lines an agent reads (`levi.agent.signals`) and anchored reviews (`levi.agent.anchored`). The modules are pure functions over numpy arrays and pydantic records: no model, no Torch, no files written.
 
 | Module | What it holds |
 | --- | --- |
@@ -15,6 +15,9 @@
 | `calibrate` | The script that chose the change-point penalty on development gold labels. |
 | `third_party.json`, `third_party` | The structured record of outside sources this package uses, and the rules it keeps. |
 | `boundary_metrics` | Boundary Recall at several tolerances, false candidates per minute, boundary MAE/P90, Segment F1 at several IoU thresholds. |
+| `candidates` | Every source's candidates of one episode, merged and in evidence priority. |
+| `sampling` | The evidence planner: a refinement's frames shared among windows, greedily, in tiers. |
+| `ablation` | The equal-budget comparison of runs with and without event candidates (scaffolding; no model call). |
 
 ## Records
 
@@ -91,6 +94,47 @@ python -m levi.events.calibrate --root <workspace> \
 | Report | 0.75 | 20.1 | 0.17 | 0.42 | 0.44 | 11.1 | 0.78 / 1.91 |
 
 What this says: about half the reference boundaries have a change point within 0.5 s, a fifth to a quarter within 0.2 s. On the report set false candidates rise by half, so change points alone are a weak boundary signal -- they are meant to order evidence gathering, together with the other sources, not to segment. Small sets: differences of 0.01-0.02 are within noise.
+
+## In a plan: event intelligence
+
+A temporal plan may set `workflow.event_intelligence`; anything else refuses it. Omitted, `null` and `{"mode": "off"}` all mean off and are stored as no key at all, so a plan without it freezes, caches and estimates exactly what it did before the block existed (a test compares six representative plans with a snapshot taken on main, byte for byte). `{"mode": "candidates"}` turns it on; the plan then freezes every setting with its value:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `sources` | `gripper`, `height`, `still`, `change_point` | Which readers give candidates. |
+| `max_windows` | 4 (1-16) | Candidate windows one episode's refinement may add. |
+| `merge_seconds` | 0.5 | Candidates closer than this to a stronger one are merged into it. |
+| `change_point_penalty` | 0.75 | The change-point penalty (calibrated above). |
+| `planner` | `greedy` | The only planner: whole windows in priority order, a window that does not fit is skipped. |
+| `active_evidence` | `false` | A model asking for more evidence by itself: not available, and `true` is refused. |
+
+Changing any of them, or turning the block on or off, changes the plan's digest: the plan must be approved again. The model cache fingerprints the plan's context, so a run never reuses an answer made under other settings. The plan's estimate keeps its request count and adds `estimate.event_intelligence` (`extra_requests: 0`, the frames one window adds, the most extra frames per episode, the frame cap) and a sentence to its basis; `plan.event_intelligence` repeats the settings for the person approving it.
+
+**In a run LEVI executes.** After the coarse request, LEVI reads the episode's candidates from the run's snapshot (once per episode; the run event `event_candidates` counts them) and plans the refinement's frames (`levi.events.sampling`), within the plan's frame cap less the coarse frames, and the model's image limit:
+
+1. the draft's own boundaries (and its boundary candidates): never dropped; when they alone do not fit, the refinement coarsens or is split in batches exactly as before;
+2. candidate windows, most salient first, at most `max_windows`;
+3. the published change windows (`evidence.refine_top_k`), as before.
+
+A window is whole or skipped (never thinned); one whose frames are all chosen already costs nothing and is recorded as covered. Window frames are computed with the arithmetic of `observations.frame_scope` (tested), so the planned count is the count the run is held to. The plan is recorded per refinement (run event `event_evidence_plan`: what each tier added, what was skipped and why), in the episode's shard and in the change set's provenance (`event_intelligence`: the settings and each episode's plans). A long draft refined in several batches gets no candidate windows, as it gets no change windows.
+
+What does not change: the coarse pass, the number of requests (candidates add frames to the refinement request, never a request; `Budget.max_calls` still stops the run), the prompt (the model's request states the workflow without `event_intelligence`, and the candidates are never shown as findings), validation, and everything after. Signals that cannot be read (no vector columns, an unreadable declaration) leave the run to its pictures: the `event_candidates` event names the error, and the refinement is planned without candidates.
+
+**For an external agent.** `runs.prepare` returns `events_first` (per episode, the candidate instants whose windows fit what the frame cap has left, at the spacing `evidence.refine` uses) and `events_policy`. `events.candidates` (`run_id`, `episode`; the episode must be prepared) lists the kept candidates (`id`, `event_type`, `actor_id`, `at`, `window`, `salience`), how many were merged, the same `suggested_around_seconds` and the frames left. It is text only and reads no frame: candidates come from the recorded state and action columns, not the cameras, so it needs no media authorisation, while every frame still does (`evidence.refine` and `evidence.read` are refused without it). A plan without event intelligence refuses it.
+
+### Candidates
+
+`candidates.read(table, info, profile, stats, episode_index, sources, merge_seconds, change_point_penalty)` turns the readers' output into `EventCandidate`s: gripper crossings (`gripper_open`, `gripper_close`), height turns (`height_low`, `height_high`), the start and end of each still span (`still_start`, `still_end`) and change points. Each source has a fixed priority -- gripper 0.9, change point 0.7 times its own salience, height 0.5, still 0.3 -- set by hand, not tuned on any gold set. Candidates within `merge_seconds` of a stronger one are merged into it: it keeps its time, takes their sources and its window grows to cover theirs; the merged ones stay in the list with status `merged`. Ties go to more distinct sources, then the earlier, then the id. The result is the kept candidates in priority order, then the merged ones; the order does not depend on the input order (tested).
+
+### Pending GPU window
+
+Whether event candidates make annotation better at the same frame budget needs the local model, so it is not measured yet. To run when the GPU is free (holding the GPU lock), on development episodes only (never a frozen or held-out set; tune nothing on a test set):
+
+1. Two temporal runs of the same episodes with the same model, decoding, budget and frame cap, one with `event_intelligence: {"mode": "candidates"}` and one without (and optionally one with `max_windows` 2), plus the usual no-LEVI control.
+2. `python -m levi.events.ablation plan --spec <spec.json>`: where each arm's refinement would look and how many reference boundaries it covers, model-free (the spec format is in the module's docstring).
+3. `python -m levi.events.ablation score --reference <ref.json> --durations <durations.json> --arm off=<a.json> --arm candidates=<b.json>`: boundary scores at 0.1/0.2/0.5 s and segment F1 per arm, and each arm's difference from `off`.
+
+The command line refuses any input path naming a frozen or held-out set and writes only to stdout or `--out`. Also pending: the requests' token cost per arm (more refinement images per request) and wall time.
 
 ## Third-party sources
 

@@ -548,6 +548,9 @@ class Workbench:
                 try:
                     from . import observations
 
+                    # How each refinement's frames were shared, when the plan
+                    # turned event intelligence on (None otherwise).
+                    event_plans = None
                     if context.workflow.get("anchored"):
                         # One narrow question per recorded robot event
                         # instead of one look at evenly spread samples.
@@ -577,7 +580,9 @@ class Workbench:
                             directory / "evidence",
                             spacing=fitted["step_seconds"] if fitted else None,
                         )
-                        summary["workflow"] = context.workflow
+                        summary["workflow"] = observations.model_workflow(
+                            context.workflow
+                        )
                         if fitted:
                             # Where the coarse pass really sampled: the ranking of
                             # changed intervals rebuilds it from here.
@@ -630,6 +635,30 @@ class Workbench:
                             + len(json.dumps(summary, ensure_ascii=False)),
                             costs,
                         )
+                        found = None
+                        if observations.event_settings(run) is not None:
+                            # Read once per episode; the windows of the most
+                            # salient join the refinement (never the prompt).
+                            found = observations.event_candidates(
+                                self, self.store.get("runs", id), episode
+                            )
+                            event_plans = []
+                            self.store.event(
+                                id,
+                                "event_candidates",
+                                episode=episode,
+                                proposed=sum(
+                                    1
+                                    for c in found["candidates"]
+                                    if c["status"] == "proposed"
+                                ),
+                                merged=sum(
+                                    1
+                                    for c in found["candidates"]
+                                    if c["status"] == "merged"
+                                ),
+                                error=found["error"],
+                            )
                         try:
                             batches = observations.plan_refinement(
                                 self,
@@ -638,6 +667,7 @@ class Workbench:
                                 output.proposals,
                                 limit,
                                 len(evidence),
+                                candidates=found["candidates"] if found else None,
                             )
                         except observations.ContextOverflow as exc:
                             # The coarse draft already passed validation; one
@@ -662,6 +692,18 @@ class Workbench:
                                     episode=episode,
                                     around=batch.windows,
                                 )
+                            if event_plans is not None:
+                                event_plans.append(
+                                    {"batch": number, "plan": batch.plan}
+                                )
+                                if batch.plan:
+                                    self.store.event(
+                                        id,
+                                        "event_evidence_plan",
+                                        episode=episode,
+                                        batch=number,
+                                        **batch.plan,
+                                    )
                             if batch.spacing != finest or len(batches) > 1:
                                 self.store.event(
                                     id,
@@ -681,7 +723,7 @@ class Workbench:
                                 batch.spacing,
                             )
                             refined_summary.update(
-                                workflow=context.workflow,
+                                workflow=observations.model_workflow(context.workflow),
                                 candidate_draft=output.model_dump(),
                                 phase="boundary_refinement",
                             )
@@ -732,7 +774,16 @@ class Workbench:
                     self.store.put(
                         "shards",
                         f"{id}:{episode}",
-                        {"output": output.model_dump(), "usage": usage},
+                        {
+                            "output": output.model_dump(),
+                            "usage": usage,
+                            # Only a plan with event intelligence has it.
+                            **(
+                                {"event_plan": event_plans}
+                                if event_plans is not None
+                                else {}
+                            ),
+                        },
                     )
                     self.store.mutate(
                         "runs",
@@ -1231,6 +1282,7 @@ class Workbench:
                 "teacher_grant": run["context"].get("teacher_grant"),
                 "reviewer_type": None,
                 "coverage": "sampled",
+                **_event_provenance(self.store, run),
             },
         ).model_dump()
         self.store.put("changes", change["id"], change)
@@ -1531,6 +1583,31 @@ class Workbench:
         return result
 
 
+def _event_provenance(store, run):
+    """``{"event_intelligence": ...}`` for a change set's provenance: the
+    settings the plan approved and, per completed episode, how its
+    refinement's frames were shared. Empty for a plan without it, so that
+    provenance is what it was before the block existed."""
+    settings = (run["context"].get("workflow") or {}).get("event_intelligence")
+    if not settings:
+        return {}
+    episodes = {}
+    for ep in run["completed"]:
+        try:
+            shard = store.get("shards", f"{run['id']}:{ep}")
+        except KeyError:
+            continue
+        if "event_plan" in shard:
+            episodes[str(ep)] = shard["event_plan"]
+    return {
+        "event_intelligence": {
+            "schema": "levi.event_evidence.v1",
+            "settings": settings,
+            "episodes": episodes,
+        }
+    }
+
+
 def _skill_version(name):
     """The ``metadata.version`` a skill declares in its front matter."""
     import re
@@ -1676,6 +1753,23 @@ def prepare_evidence(wb, id, *, episodes=None):
                 f"({run['harness']['sources'].get('evidence.refine_top_k')}): call "
                 "evidence.refine with these around_seconds before proposing; they "
                 "are the coarse intervals where the picture changed most."
+            )
+        if (run["context"]["workflow"] or {}).get(
+            "event_intelligence"
+        ) and ctx.workflow["kind"] == "temporal":
+            from .observations import event_focus
+
+            run = wb.store.get("runs", id)
+            value["events_first"] = {
+                str(ep): event_focus(wb, run, ep)["suggested_around_seconds"]
+                for ep in selected
+            }
+            value["events_policy"] = (
+                "This plan approved event intelligence: these are the instants "
+                "where the robot's recorded signals changed most, within what "
+                "the frame cap has left. Refine around them (evidence.refine) "
+                "before proposing; events.candidates lists every candidate. A "
+                "candidate is a place to look, never a boundary by itself."
             )
         width = (
             (run.get("harness") or {})
