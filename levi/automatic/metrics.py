@@ -46,6 +46,39 @@ are reported apart):
   wrong-skip rate = skips on a scene that needed a reset / labelled skips;
 - interventions = moves into ``WAIT_HUMAN`` or ``FAULT_LOCKED``; the
   longest run without one counts forward episodes sealed complete.
+
+**Comparable across reset modes (T-CL-05, design X2 §1.2).** A run's
+``reset_mode`` (``single_reset_policy`` or ``human_assisted``, "policy
+evaluation only") and ``scene_check`` (``provider`` or ``operator_attested``)
+head the report, with where each came from (``mode_source``: the caller, the
+run header, the manifest, the journal, or unknown). ``comparable`` lists the
+fields that mean the same in both modes; compare runs of different modes on
+those only (``mode_specific`` lists the rest):
+
+- an intervention is *planned* in ``human_assisted`` when a scene check
+  (``VERIFY_INITIAL``/``SCENE_ASSESS``) sends the run to ``WAIT_HUMAN`` for
+  ``scene_reset_required``/``scene_unknown``: that is how the mode resets.
+  Everything else is *unplanned* (``FAULT_LOCKED``, a reset policy out of
+  attempts, a failed preflight, an operator's stop...). An unknown mode
+  counts every intervention as unplanned (never flatters). The runs without
+  a person count unplanned interventions (``longest_run_without_unplanned``,
+  comparable); ``longest_run_without_any_human`` counts every one;
+- ``turnaround`` runs from episode k's home reached (``ROBOT_HOME ->
+  SCENE_ASSESS`` committed) to episode k+1's ``FORWARD_ACTIVE`` committed,
+  split by the state the run was in: ``scene_ms`` (``SCENE_ASSESS``),
+  ``reset_policy_ms`` (``RESET_*``), ``human_reset_ms`` (``WAIT_HUMAN``,
+  ``FAULT_LOCKED``) and ``verify_ms`` (``PREFLIGHT``, ``VERIFY_INITIAL``);
+  the parts add up to the whole. A window across a restart with another
+  clock domain is ``unmeasured``; one the run ended in is ``no_next_episode``
+  or ``open``;
+- ``time_per_valid_episode_ms`` = the journal's span (per clock domain,
+  summed) / forward episodes sealed complete;
+- ``human_minutes_per_valid_episode`` = minutes in ``WAIT_HUMAN`` or
+  ``FAULT_LOCKED`` closed by a resume or an operator's stop / forward
+  episodes sealed complete (a wait the run still is in is ``open_waits``);
+- ``scene_decisions_by_human``: with ``scene_check: operator_attested`` a
+  person answered the scene checks; those decisions are listed here and
+  left out of the reset group's skip accuracy (a machine-provider rate).
 """
 
 import fcntl
@@ -72,6 +105,47 @@ SUBJECTS = {
 }
 TRUTH = ("adjudicated_then_operator", "adjudicated")
 LABEL_SCHEMA = "levi.aeri.label.v1"
+RESET_MODES = ("single_reset_policy", "human_assisted")  # = modes.RESET_MODES
+SCENE_CHECKS = ("provider", "operator_attested")
+# A scene check sending the run to a person: the human_assisted mode's reset.
+SCENE_STATES = frozenset({"VERIFY_INITIAL", "SCENE_ASSESS"})
+PLANNED_REASONS = frozenset({"scene_reset_required", "scene_unknown"})
+PERSON_STATES = frozenset({"WAIT_HUMAN", "FAULT_LOCKED"})
+# Where a turnaround's time went, by the state the run was in.
+TURNAROUND_PARTS = {
+    "SCENE_ASSESS": "scene_ms",
+    "RESET_ACTIVE": "reset_policy_ms",
+    "RESET_VERIFY": "reset_policy_ms",
+    "RESET_FINALIZE": "reset_policy_ms",
+    "WAIT_HUMAN": "human_reset_ms",
+    "FAULT_LOCKED": "human_reset_ms",
+    "PREFLIGHT": "verify_ms",
+    "VERIFY_INITIAL": "verify_ms",
+}
+PARTS = ("scene_ms", "reset_policy_ms", "human_reset_ms", "verify_ms")
+# Fields that mean the same in both reset modes (design X2 §1.2).
+COMPARABLE = (
+    "autonomous",
+    "early_termination",
+    "turnaround.turnaround_ms",
+    "turnaround.scene_ms",
+    "turnaround.verify_ms",
+    "turnaround.with_person",
+    "time_per_valid_episode_ms",
+    "human_minutes_per_valid_episode",
+    "automation.unplanned",
+    "automation.longest_run_without_unplanned",
+)
+MODE_SPECIFIC = (
+    "reset",
+    "turnaround.reset_policy_ms",
+    "turnaround.human_reset_ms",
+    "automation.interventions",
+    "automation.planned",
+    "automation.longest_run_without_intervention",
+    "automation.longest_run_without_any_human",
+    "scene_decisions_by_human",
+)
 # An opaque principal id: no names, no addresses.
 PRINCIPAL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
 
@@ -438,10 +512,15 @@ def early_termination(records, truth: dict, *, max_steps: int | None = None) -> 
     }
 
 
-def reset(records, decisions, scene_truth: dict, events=()) -> dict:
+def reset(
+    records, decisions, scene_truth: dict, events=(), *, by_human: bool = False
+) -> dict:
+    """``by_human``: a person answered the scene checks (``scene_check:
+    operator_attested``); the skip accuracy is a machine provider's, so
+    those decisions are left out of it (``scene_decisions_by_human``)."""
     resets = [r for r in records if r.role == "reset"]
     succeeded = sum(r.scene_reset == "succeeded" for r in resets)
-    labelled = [(e, s) for e, s in decisions if e in scene_truth]
+    labelled = [] if by_human else [(e, s) for e, s in decisions if e in scene_truth]
     correct = sum(
         (s and scene_truth[e] == "ready")
         or (not s and scene_truth[e] == "reset_required")
@@ -485,30 +564,61 @@ def _reset_durations(events) -> list:
     return out
 
 
-def automation(events) -> dict:
+def intervention_kind(event, reset_mode: str | None) -> str:
+    """``planned`` or ``unplanned`` for a committed move into ``WAIT_HUMAN``
+    or ``FAULT_LOCKED`` (see the module text)."""
+    if (
+        reset_mode == "human_assisted"
+        and event.to_state == "WAIT_HUMAN"
+        and event.from_state in SCENE_STATES
+        and event.reason in PLANNED_REASONS
+    ):
+        return "planned"
+    return "unplanned"
+
+
+def _sealed_forward(event) -> bool:
+    return (
+        (event.from_state, event.to_state) == ("FORWARD_FINALIZE", "ROBOT_HOME")
+        and event.episode_result is not None
+        and event.episode_result.rollout.sealed == "complete"
+    )
+
+
+def automation(events, reset_mode: str | None = None) -> dict:
+    """``reset_mode`` splits the interventions into planned and unplanned;
+    None (unknown) makes every one unplanned."""
     interventions = []
+    kinds = {"planned": [], "unplanned": []}
     longest = current = 0
+    longest_unplanned = current_unplanned = 0
     resumed = 0
     waited_ms, unmeasured = 0, 0
     entered = None
+    # Waits closed by a resume or an operator's stop, by the kind of the
+    # move that started them (T-CL-05).
+    person = {"planned": 0, "unplanned": 0}
+    person_unmeasured = 0
+    opened = None  # (mono_ns, clock_domain, kind) of the wait the run is in
     for event in events:
         if event.record != "committed":
             continue
-        if (
-            event.to_state in ("WAIT_HUMAN", "FAULT_LOCKED")
-            and event.from_state != event.to_state
-        ):
+        if event.to_state in PERSON_STATES and event.from_state != event.to_state:
             interventions.append(event.reason)
+            found = intervention_kind(event, reset_mode)
+            kinds[found].append(event.reason)
             longest = max(longest, current)
             current = 0
+            if found == "unplanned":
+                longest_unplanned = max(longest_unplanned, current_unplanned)
+                current_unplanned = 0
             if entered is None:
                 entered = (event.mono_ns, event.clock_domain)
-        elif (
-            (event.from_state, event.to_state) == ("FORWARD_FINALIZE", "ROBOT_HOME")
-            and event.episode_result is not None
-            and event.episode_result.rollout.sealed == "complete"
-        ):
+            if opened is None:
+                opened = (event.mono_ns, event.clock_domain, found)
+        elif _sealed_forward(event):
             current += 1
+            current_unplanned += 1
         elif event.reason == "human_resumed":
             resumed += 1
             if entered is not None:
@@ -517,7 +627,17 @@ def automation(events) -> dict:
                 else:
                     unmeasured += 1  # a restart in between: clocks differ
             entered = None
+        if opened is not None and (
+            event.reason == "human_resumed"
+            or (event.from_state == "WAIT_HUMAN" and event.to_state == "COMPLETED")
+        ):
+            if opened[1] == event.clock_domain:
+                person[opened[2]] += (event.mono_ns - opened[0]) // 1_000_000
+            else:
+                person_unmeasured += 1
+            opened = None
     longest = max(longest, current)
+    longest_unplanned = max(longest_unplanned, current_unplanned)
     return {
         "interventions": len(interventions),
         "by_reason": _count(interventions),
@@ -526,7 +646,194 @@ def automation(events) -> dict:
         "current_run_without_intervention": current,
         "human_wait_ms": waited_ms,
         "human_waits_unmeasured": unmeasured,
+        "reset_mode": reset_mode,
+        "planned": len(kinds["planned"]),
+        "unplanned": len(kinds["unplanned"]),
+        "planned_by_reason": _count(kinds["planned"]),
+        "unplanned_by_reason": _count(kinds["unplanned"]),
+        "unplanned_share": share(len(kinds["unplanned"]), len(interventions)),
+        "longest_run_without_unplanned": longest_unplanned,
+        "current_run_without_unplanned": current_unplanned,
+        # Every intervention, planned or not (= longest_run_without_intervention).
+        "longest_run_without_any_human": longest,
+        "person_ms": {
+            "planned": person["planned"],
+            "unplanned": person["unplanned"],
+            "total": person["planned"] + person["unplanned"],
+            "unmeasured": person_unmeasured,
+            "open_waits": int(opened is not None),
+        },
     }
+
+
+# --- comparable across reset modes (T-CL-05) -------------------------------------------------------
+
+
+def _spread(values) -> dict:
+    values = list(values)
+    if not values:
+        return {"n": 0, "total": None, "mean": None, "p50": None, "max": None}
+    return {
+        "n": len(values),
+        "total": sum(values),
+        "mean": round(sum(values) / len(values), 1),
+        "p50": quantile(values, 0.5),
+        "max": max(values),
+    }
+
+
+def turnaround(events) -> dict:
+    """Episode k's home reached to episode k+1's start, split by state (see
+    the module text)."""
+    done, unmeasured, no_next = [], 0, 0
+    window = None
+    for event in events:
+        if event.record != "committed" or event.to_state is None:
+            continue
+        if window is not None:
+            part = TURNAROUND_PARTS.get(window["state"])
+            if part is None or event.clock_domain != window["domain"]:
+                window["broken"] = True
+            else:
+                window[part] += (event.mono_ns - window["since"]) // 1_000_000
+            window["state"], window["since"] = event.to_state, event.mono_ns
+            window["domain"] = event.clock_domain
+            window["person"] |= event.to_state in PERSON_STATES
+            if event.to_state == "FORWARD_ACTIVE":
+                if window["broken"]:
+                    unmeasured += 1
+                else:
+                    done.append(window)
+                window = None
+            elif event.to_state == "COMPLETED":
+                no_next += 1
+                window = None
+        elif (event.from_state, event.to_state) == ("ROBOT_HOME", "SCENE_ASSESS"):
+            window = {
+                "state": "SCENE_ASSESS",
+                "since": event.mono_ns,
+                "domain": event.clock_domain,
+                "broken": False,
+                "person": False,
+                **{part: 0 for part in PARTS},
+            }
+    return {
+        "n": len(done),
+        "turnaround_ms": _spread(sum(w[p] for p in PARTS) for w in done),
+        **{part: _spread(w[part] for w in done) for part in PARTS},
+        "with_person": share(sum(w["person"] for w in done), len(done)),
+        "unmeasured": unmeasured,
+        "no_next_episode": no_next,
+        "open": int(window is not None),
+    }
+
+
+def _span_ms(events) -> tuple[int, int]:
+    """The journal's span in ms, summed over runs of one clock domain (a
+    restart starts a new one: the time between processes is not counted),
+    and how many such runs there were."""
+    total, domains = 0, 0
+    first = last = domain = None
+    for event in events:
+        if event.clock_domain != domain:
+            if first is not None:
+                total += (last - first) // 1_000_000
+            first, domain = event.mono_ns, event.clock_domain
+            domains += 1
+        last = event.mono_ns
+    if first is not None:
+        total += (last - first) // 1_000_000
+    return total, domains
+
+
+def _valid(records) -> int:
+    return sum(r.role == "forward" and r.sealed == "complete" for r in records)
+
+
+def time_per_valid_episode(events, records) -> dict:
+    span, domains = _span_ms(events)
+    valid = _valid(records)
+    return {
+        "span_ms": span,
+        "clock_domains": domains,
+        "valid_episodes": valid,
+        "value": round(span / valid, 1) if valid else None,
+    }
+
+
+def human_minutes(person: dict, records) -> dict:
+    valid = _valid(records)
+    return {
+        "person_ms": person["total"],
+        "valid_episodes": valid,
+        "value": round(person["total"] / 60_000 / valid, 4) if valid else None,
+        "open_waits": person["open_waits"],
+        "unmeasured": person["unmeasured"],
+    }
+
+
+def scene_by_human(decisions, scene_check: str | None) -> dict:
+    by_human = scene_check == "operator_attested"
+    found = list(decisions) if by_human else []
+    return {
+        "scene_check": scene_check,
+        "decisions": len(found),
+        "skipped": sum(s for _, s in found),
+        "note": "a person's scene decisions; never in the automatic skip accuracy",
+    }
+
+
+def _header(events):
+    for event in events:
+        if event.record == "run_header":
+            return getattr(event, "header", None)
+    return None
+
+
+def mode_of(
+    events,
+    *,
+    manifest: dict | None = None,
+    reset_mode: str | None = None,
+    scene_check: str | None = None,
+) -> dict:
+    """The run's reset mode and scene check, and where each came from: the
+    caller (``argument``), the run header (contract minor 1), the manifest,
+    the journal, a default, or ``unknown``. A minor-0 journal has neither
+    in its header: a reset episode in the journal means the reset policy;
+    the manifest's ``after_human_resets`` means human_assisted; else the
+    mode is unknown (every intervention then counts as unplanned)."""
+    for name, value, allowed in (
+        ("reset_mode", reset_mode, RESET_MODES),
+        ("scene_check", scene_check, SCENE_CHECKS),
+    ):
+        if value is not None and value not in allowed:
+            raise ValueError(f"{name} is one of {', '.join(allowed)}")
+    header = _header(events)
+    manifest = manifest if isinstance(manifest, dict) else {}
+    source = {}
+    if reset_mode is not None:
+        source["reset_mode"] = "argument"
+    elif getattr(header, "reset_mode", None) in RESET_MODES:
+        reset_mode, source["reset_mode"] = header.reset_mode, "run_header"
+    elif manifest.get("reset_mode") in RESET_MODES:
+        reset_mode, source["reset_mode"] = manifest["reset_mode"], "manifest"
+    elif any(e.record == "committed" and e.to_state == "RESET_ACTIVE" for e in events):
+        reset_mode, source["reset_mode"] = "single_reset_policy", "journal"
+    elif manifest.get("after_human_resets"):
+        reset_mode, source["reset_mode"] = "human_assisted", "manifest"
+    else:
+        source["reset_mode"] = "unknown"
+    if scene_check is not None:
+        source["scene_check"] = "argument"
+    elif getattr(header, "scene_check", None) in SCENE_CHECKS:
+        scene_check, source["scene_check"] = header.scene_check, "run_header"
+    elif manifest.get("scene_check") in SCENE_CHECKS:
+        scene_check, source["scene_check"] = manifest["scene_check"], "manifest"
+    else:
+        # Before contract minor 1 only machine providers existed.
+        scene_check, source["scene_check"] = "provider", "default"
+    return {"reset_mode": reset_mode, "scene_check": scene_check, "source": source}
 
 
 def _count(values) -> dict:
@@ -544,11 +851,22 @@ def report(
     termination=None,
     max_steps: int | None = None,
     truth: str = TRUTH[0],
+    reset_mode: str | None = None,
+    scene_check: str | None = None,
 ) -> dict:
-    """All three groups for one run, with where the truth came from."""
+    """All groups for one run, with where the truth and the reset mode came
+    from. ``reset_mode``/``scene_check``: the run's, when the caller knows
+    them (its job plan); otherwise read from the run (``mode_of``)."""
+    events = list(events)
     records = episodes(events, manifest=manifest, termination=termination)
     outcome_truth = labels.truth("task_outcome", truth) if labels else {}
     scene_truth = labels.truth("initial_state", truth) if labels else {}
+    mode = mode_of(
+        events, manifest=manifest, reset_mode=reset_mode, scene_check=scene_check
+    )
+    decisions = scene_decisions(events)
+    by_human = mode["scene_check"] == "operator_attested"
+    run_automation = automation(events, mode["reset_mode"])
     return {
         "schema": "levi.aeri.metrics.v1",
         "truth": truth,
@@ -557,10 +875,21 @@ def report(
             "initial_state": len(scene_truth),
         },
         "note": "autonomous_* rates are the run's own verdicts, not ground truth",
+        "reset_mode": mode["reset_mode"],
+        "scene_check": mode["scene_check"],
+        "mode_source": mode["source"],
+        "comparable": list(COMPARABLE),
+        "mode_specific": list(MODE_SPECIFIC),
         "autonomous": autonomous(records),
         "early_termination": early_termination(
             records, outcome_truth, max_steps=max_steps
         ),
-        "reset": reset(records, scene_decisions(events), scene_truth, events),
-        "automation": automation(events),
+        "reset": reset(records, decisions, scene_truth, events, by_human=by_human),
+        "automation": run_automation,
+        "turnaround": turnaround(events),
+        "time_per_valid_episode_ms": time_per_valid_episode(events, records),
+        "human_minutes_per_valid_episode": human_minutes(
+            run_automation["person_ms"], records
+        ),
+        "scene_decisions_by_human": scene_by_human(decisions, mode["scene_check"]),
     }
