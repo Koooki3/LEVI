@@ -584,10 +584,19 @@ class Journal:
         plan_sha256: str | None,
         clock: Callable[[], int] = time.monotonic_ns,
         clock_domain: str | None = None,
+        reset_mode: str | None = None,
+        scene_check: str | None = None,
+        authority: dict | None = None,
     ) -> "Journal":
         """Take over an existing journal as its writer: a torn last line is
         set aside, the plan hash must match (``None`` skips that check, for
-        recovery tools). A corrupt journal opens read-only (``corrupt``)."""
+        recovery tools). A corrupt journal opens read-only (``corrupt``).
+
+        ``reset_mode``/``scene_check``: the configuration's; one the header
+        names differently refuses the open (``E_PLAN``; the header is never
+        rewritten) and, with an ``authority``, leaves a
+        ``run_header_mismatch`` note. A header without them (run_event
+        minor 0) or a caller that gives none is not checked."""
         directory = Path(directory)
         if not (directory / JOURNAL).is_file():
             raise JournalRefused("E_EMPTY", f"{directory} has no journal")
@@ -603,12 +612,41 @@ class Journal:
                         "E_PLAN", "the plan changed since the run started"
                     )
                 cls._cut_torn(directory, result)
-            return cls(
+            journal = cls(
                 directory, lock, result, clock, clock_domain or aeri.host_clock_domain()
             )
         except BaseException:
             lock.close()
             raise
+        try:
+            if journal.corrupt is None:
+                journal._check_modes(
+                    {"reset_mode": reset_mode, "scene_check": scene_check}, authority
+                )
+            return journal
+        except BaseException:
+            journal.close()
+            raise
+
+    def _check_modes(self, given: dict, authority: dict | None) -> None:
+        """Refuse a configuration whose modes differ from the header's."""
+        header = self._events[0].header
+        problems = []
+        for name, value in given.items():
+            said = getattr(header, name, None)
+            if value is not None and said is not None and value != said:
+                problems.append(f"{name}: the run header says {said}, not {value}")
+        if not problems:
+            return
+        detail = "; ".join(problems)
+        if authority is not None:
+            # On record for whoever looks at the run; a refused note (a
+            # broken writer, a clock that went back) does not hide the refusal.
+            with contextlib.suppress(JournalError):
+                self.note("run_header_mismatch", detail[:300], authority=authority)
+        raise JournalRefused(
+            "E_PLAN", f"the configuration does not match the run header: {detail}"
+        )
 
     @staticmethod
     def read(directory: Path) -> Scan:
