@@ -10,7 +10,7 @@ All notable changes to LEVI. Versions follow the git tags (`v0.2.0`, `v0.3.0`; p
 
 ### Performance
 
-- **`DiskBudget`: a cache folder with a hard size limit (library only, not used by any code path yet).** `levi/performance/budget.py` keeps a folder inside byte and entry limits that cover data being written too (writers reserve room first; `open_file` stops at the reserve), with LRU eviction, an idle TTL, version invalidation, read leases (a leased entry is never evicted or replaced), atomic writes that fail on an `fsync` error, an exclusive `flock` for threads and processes, recovery after a crash (a writer's liveness is its held lock, so a live writer is never reclaimed) and a refusal (`BudgetRejected`) instead of a crash when the disk is full. See [Performance baseline](docs/PERFORMANCE.md#cache-folder-with-a-hard-size-limit-diskbudget).
+- **`DiskBudget`: a cache folder with a hard size limit (library only, not used by any code path yet).** `levi/performance/budget.py` keeps a folder inside byte and entry limits that cover data being written too (writers reserve room first; `open_file` stops at the reserve), with LRU eviction, an idle TTL, version invalidation, read leases (a leased entry is never evicted or replaced), atomic writes that fail on an `fsync` error, an exclusive `flock` for threads and processes, recovery after a crash (a writer's liveness is its held lock, so a live writer is never reclaimed) and a refusal (`BudgetRejected`) instead of a crash when the disk is full, and `claim_abandoned`/`is_abandoned` for an outside cleaner that reclaims a whole cache nobody uses any more. See [Performance baseline](docs/PERFORMANCE.md#cache-folder-with-a-hard-size-limit-diskbudget).
 
 ### Documentation
 

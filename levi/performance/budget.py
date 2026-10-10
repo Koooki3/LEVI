@@ -50,8 +50,14 @@ Limits of the design. Cost grows with the number of entries (every write and rea
 folder): fine for thousands of entries (one per episode), not for one per frame. Raw writes
 into the scratch folder are not metered while they happen (use ``open_file``/``charge`` when
 the size is not known). ``min_free_bytes`` is the only guard against other users of the same
-disk. A child created by ``fork`` while a lock is held inherits it: do not fork inside the
-``with`` blocks of this class.
+disk. Local file systems only (it relies on ``flock`` and ``rename``). Creating an instance scans the whole
+folder once (``recover=True``); short-lived processes can pass ``recover=False`` and leave ``maintain()`` to one
+long-lived process. A forked child drops its copies of lock descriptors at once, so it never keeps a lease or a
+writer alive.
+
+Idle time is enforced when the cache is used (any call, or ``maintain()``). A cache that nobody opens any more is
+not touched by this class; ``claim_abandoned``/``is_abandoned`` let an outside cleaner find out safely whether the
+whole folder can be reclaimed.
 """
 
 from __future__ import annotations
@@ -78,11 +84,12 @@ DEFAULT_CAP_GB = 20
 DEFAULT_TTL_S = 14 * 24 * 3600
 DEFAULT_STALE_GRACE_S = 7 * 24 * 3600
 DEFAULT_HOUSEKEEPING_S = 600
-META_ALLOWANCE = 256  # bytes every reservation adds for the entry's ``.meta`` file
+META_ALLOWANCE = 256  # a typical ``.meta`` size: only used to size defaults, reservations use the real size
+META_MAX = 4096  # longest ``.meta`` accepted (key and version are stored whole)
 
 BUDGET_DIR = ".budget"
 META_NAME = ".meta"
-_ENTRY = re.compile(r"^([0-9a-f]{32})\.([0-9a-f]{8})\.([0-9a-f]{20})\.([0-9a-f]+)$")
+_ENTRY = re.compile(r"^([0-9a-f]{32})\.([0-9a-f]{16})\.([0-9a-f]{20})\.([0-9a-f]+)$")
 _FULL = {errno.ENOSPC, errno.EDQUOT}
 
 
@@ -124,7 +131,12 @@ def key_hash(key: str) -> str:
 
 
 def version_hash(version: str) -> str:
-    return hashlib.sha256(version.encode("utf-8")).hexdigest()[:8]
+    return hashlib.sha256(version.encode("utf-8")).hexdigest()[:16]
+
+
+def meta_bytes(key: str, version: str) -> bytes:
+    """The content of an entry's ``.meta``: the whole key and version string, UTF-8."""
+    return json.dumps({"key": key, "version": version}, ensure_ascii=False).encode("utf-8")
 
 
 def _free_bytes(path: Path) -> int:
@@ -176,6 +188,31 @@ def _fsync_tree(path: Path) -> None:
         _fsync(Path(dirpath), directory=True)
 
 
+_open_fds: set[int] = set()  # descriptors that carry a lock, closed in a forked child (see _after_fork)
+
+
+def _track(fd: int) -> int:
+    _open_fds.add(fd)
+    return fd
+
+
+def _untrack_close(fd: int) -> None:
+    _open_fds.discard(fd)
+    os.close(fd)
+
+
+def _after_fork_in_child() -> None:
+    """A child must not inherit a lock: the lock would stay held until the child exits. Closing the child's copy
+    of the descriptor does not release the parent's lock."""
+    for fd in list(_open_fds):
+        with contextlib.suppress(OSError):
+            os.close(fd)
+    _open_fds.clear()
+
+
+os.register_at_fork(after_in_child=_after_fork_in_child)
+
+
 class Lease:
     """A shared read lock on one committed entry. While it is held the entry is not evicted, replaced or deleted
     by ``DiskBudget``. ``path`` is the entry folder; ``close()`` (or ``with``) releases it."""
@@ -190,7 +227,7 @@ class Lease:
     def close(self) -> None:
         fd, self._fd = self._fd, -1
         if fd >= 0:
-            os.close(fd)  # closing the descriptor releases the flock
+            _untrack_close(fd)  # closing the descriptor releases the flock
 
     def __enter__(self) -> Self:
         return self
@@ -228,11 +265,12 @@ class _Metered:
 class _Writer:
     """One reservation plus its scratch folder. The lock file ``w/<id>.lock`` is held exclusively until ``close``."""
 
-    def __init__(self, budget: DiskBudget, key: str, version: str, reserve: int):
+    def __init__(self, budget: DiskBudget, key: str, version: str, reserve: int, meta: bytes):
         self.budget = budget
         self.key = key
         self.version = version
         self.reserve = reserve  # payload bytes asked for
+        self.meta = meta  # what ``.meta`` will hold; its size is part of the reservation
         self.id = f"{os.getpid()}-{uuid.uuid4().hex}"
         self.container = budget._w / self.id
         self.path = self.container / "p"
@@ -243,7 +281,7 @@ class _Writer:
 
     @property
     def allowed(self) -> int:
-        return self.reserve + META_ALLOWANCE
+        return self.reserve + len(self.meta)
 
     def charge_bytes(self, n: int) -> None:
         with self._mutex:
@@ -260,7 +298,7 @@ class _Writer:
         with contextlib.suppress(OSError):
             self.lock_path.unlink()
         if self.fd >= 0:
-            os.close(self.fd)
+            _untrack_close(self.fd)
             self.fd = -1
 
 
@@ -348,13 +386,13 @@ class DiskBudget:
             while True:
                 self._ensure_dirs()
                 try:
-                    fd = os.open(self.root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+                    fd = _track(os.open(self.root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)))
                 except OSError as exc:
                     raise BudgetRejected("unavailable", f"{self.root}: {exc}") from exc
                 try:
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
-                    os.close(fd)
+                    _untrack_close(fd)
                     fd = -1
                     if time.monotonic() >= deadline:
                         raise BudgetRejected("lock_timeout", str(self.root)) from None
@@ -368,12 +406,12 @@ class DiskBudget:
                     same = False
                 if same:
                     break
-                os.close(fd)
+                _untrack_close(fd)
                 fd = -1
             yield ctx
         finally:
             if fd >= 0:
-                os.close(fd)  # closing the descriptor releases the flock
+                _untrack_close(fd)  # closing the descriptor releases the flock
             for path in ctx.trash:
                 _remove(path)
 
@@ -389,7 +427,7 @@ class DiskBudget:
             raise BudgetRejected("unavailable", f"{self.root}: {exc}") from exc
         for e in it:
             m = _ENTRY.match(e.name)
-            if not m:
+            if not m or not e.is_dir(follow_symlinks=False):  # a plain file with an entry's name is not ours
                 continue
             try:
                 st = e.stat(follow_symlinks=False)
@@ -446,7 +484,20 @@ class DiskBudget:
                     os.unlink(e.path)
             finally:
                 os.close(fd)
+        # scratch folders nobody has a record for (the record was deleted from outside)
+        records = {e.name for e in os.scandir(self._w) if e.name.endswith(".lock")}
+        for e in list(os.scandir(self._w)):
+            if not e.name.endswith(".lock") and f"{e.name}.lock" not in records:
+                _remove(Path(e.path))
         return out
+
+    def _trash_bytes(self) -> int:
+        """Bytes still on disk in the trash (entries renamed away whose removal has not finished)."""
+        total = 0
+        for e in os.scandir(self._trash):
+            with contextlib.suppress(ValueError, IndexError):
+                total += int(e.name.rsplit(".", 1)[1], 16)
+        return total
 
     # ---------------------------------------------------------------- removal
 
@@ -463,7 +514,7 @@ class DiskBudget:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 return False
-            trash = self._trash / uuid.uuid4().hex
+            trash = self._trash / f"{uuid.uuid4().hex}.{entry.size:x}"
             try:
                 os.rename(entry.path, trash)
             except FileNotFoundError:
@@ -519,7 +570,7 @@ class DiskBudget:
             entries,
             key=lambda e: (not (e.dead or (first is not None and e.key_hash == first)), e.mtime_ns, e.name),
         )
-        total = sum(e.size for e in entries) + reserved + need
+        total = sum(e.size for e in entries) + reserved + need + self._trash_bytes()
         count = len(entries) + reserved_n + need_n
 
         def fits() -> bool:
@@ -535,10 +586,13 @@ class DiskBudget:
             left_count -= 1
         if floor_check and self.min_free_bytes:
             free = _free_bytes(self.root)
-            if free + sum(e.size for e in victims) - need < self.min_free_bytes:
+            # other writers have reserved bytes they may not have written yet: leave those free too
+            back = sum(e.size for e in victims)
+            if free + back - reserved - need < self.min_free_bytes:
                 raise BudgetRejected(
                     "no_space",
-                    f"free {free} + reclaimable {sum(e.size for e in victims)} - {need} < floor {self.min_free_bytes}",
+                    f"free {free} + reclaimable {back} - others' reservations {reserved} - {need} < floor "
+                    f"{self.min_free_bytes}",
                 )
         for e in order:
             if fits():
@@ -552,10 +606,13 @@ class DiskBudget:
     def _begin(self, key: str, version: str, reserve: int) -> _Writer:
         if reserve < 0:
             raise ValueError("reserve must not be negative")
-        need = reserve + META_ALLOWANCE
+        meta = meta_bytes(key, version)
+        if len(meta) > META_MAX:
+            raise BudgetRejected("too_large", f"key and version take {len(meta)} bytes > {META_MAX}")
+        need = reserve + len(meta)
         if need > self.max_bytes:
             raise BudgetRejected("too_large", f"{need} bytes > limit {self.max_bytes}")
-        w = _Writer(self, key, version, reserve)
+        w = _Writer(self, key, version, reserve, meta)
         with self._lock() as ctx:
             entries = self._scan()
             self._housekeep(ctx, entries)
@@ -572,7 +629,7 @@ class DiskBudget:
                 floor_check=True,
             )
             # register: the lock file first (and held), then the data folder
-            w.fd = os.open(w.lock_path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+            w.fd = _track(os.open(w.lock_path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600))
             try:
                 fcntl.flock(w.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 os.write(w.fd, json.dumps({"reserved": need, "pid": os.getpid()}).encode())
@@ -589,8 +646,7 @@ class DiskBudget:
     def _commit(self, w: _Writer) -> Entry:
         if not w.path.is_dir():
             raise BudgetRejected("no_output" if w.container.is_dir() else "reclaimed", "scratch folder is gone")
-        meta = {"key": w.key[:100], "version": w.version[:50]}
-        (w.path / META_NAME).write_text(json.dumps(meta), "utf-8")
+        (w.path / META_NAME).write_bytes(w.meta)
         size = _tree_size(w.path)
         if size > w.allowed:
             raise BudgetRejected("too_large", f"{size} bytes written > reserved {w.allowed}")
@@ -613,11 +669,18 @@ class DiskBudget:
             self._hook("commit:before_rename")
             os.rename(w.path, dest)
             self._hook("commit:after_rename")
-            if self.durable:
-                _fsync(self.root, directory=True)
             ns = int(now * 1e9)
             for p in (dest / META_NAME, dest):
                 os.utime(p, ns=(ns, ns))
+            if self.durable:
+                try:
+                    _fsync(self.root, directory=True)
+                except OSError:  # not known to be durable: do not leave it visible while reporting failure
+                    trash = self._trash / f"{uuid.uuid4().hex}.{size:x}"
+                    with contextlib.suppress(OSError):
+                        os.rename(dest, trash)
+                        ctx.trash.append(trash)
+                    raise
             return Entry(dest.name, dest, size, ns, kh, vh, gen, False, False, False, w.key, w.version)
 
     @contextlib.contextmanager
@@ -699,7 +762,7 @@ class DiskBudget:
                 self._try_delete(e, ctx)
                 return None
             try:
-                fd = os.open(e.path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+                fd = _track(os.open(e.path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)))
             except OSError:
                 return None
             try:
@@ -708,17 +771,17 @@ class DiskBudget:
                 try:
                     os.utime(e.path / META_NAME, ns=(ns, ns))
                 except FileNotFoundError:  # deleted in place by another tool: not a valid entry any more
-                    os.close(fd)
+                    _untrack_close(fd)
                     fd = -1
                     self._try_delete(e, ctx)
                     return None
                 os.utime(e.path, ns=(ns, ns))
             except BlockingIOError:
-                os.close(fd)
+                _untrack_close(fd)
                 return None
             except BaseException:
                 if fd >= 0:
-                    os.close(fd)
+                    _untrack_close(fd)
                 raise
             return Lease(e.path, fd)
 
@@ -773,6 +836,7 @@ class DiskBudget:
         with self._lock():
             entries = self._scan()
             writers = self._live_writers()
+            trash = self._trash_bytes()
         return {
             "bytes": sum(e.size for e in entries),
             "entries": len(entries),
@@ -782,12 +846,13 @@ class DiskBudget:
             "expired": sum(e.expired for e in entries),
             "writers": len(writers),
             "reserved_bytes": sum(r for _, r in writers),
+            "trash_bytes": trash,
         }
 
     # --------------------------------------------------------------- maintain
 
     def _resize(self, e: Entry, actual: int) -> bool:
-        """Rename an unleased entry to the name that carries its real size."""
+        """Rename an unleased entry that has grown to the name that carries its real size."""
         new = e.path.with_name(f"{e.key_hash}.{e.version_hash}.{e.generation}.{actual:x}")
         try:
             fd = os.open(e.path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
@@ -818,7 +883,9 @@ class DiskBudget:
                 except (BudgetRejected, OSError):
                     counts["damaged"] += self._try_delete(e, ctx)
                     continue
-                if actual != e.size:
+                if actual < e.size:  # entries never shrink: part of it was deleted from outside
+                    counts["damaged"] += self._try_delete(e, ctx)
+                elif actual > e.size:
                     resized += self._resize(e, actual)
             counts["resized"] = resized
             entries = self._scan()
@@ -827,3 +894,74 @@ class DiskBudget:
                 self._reclaim(ctx, entries, sum(r for _, r in others), len(others), 0, 0)
             counts["pruned"] = len(entries) - len(self._scan())
             return counts
+
+
+# ------------------------------------------------------------- abandoned caches
+
+
+def _idle_enough(root: Path, idle_s: float, now: float) -> bool:
+    if not (root / BUDGET_DIR).is_dir():
+        return False  # not a cache this class manages
+    w = root / BUDGET_DIR / "w"
+    if w.is_dir():
+        for e in os.scandir(w):
+            if not e.name.endswith(".lock"):
+                continue
+            try:
+                fd = os.open(e.path, os.O_RDWR)
+            except OSError:
+                continue
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return False  # a live writer
+            finally:
+                os.close(fd)
+    newest = root.stat().st_mtime
+    for e in os.scandir(root):
+        if e.name.startswith(".") or not e.is_dir(follow_symlinks=False):
+            continue
+        try:
+            fd = os.open(e.path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        except OSError:
+            continue
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False  # somebody is reading it
+        finally:
+            os.close(fd)
+        newest = max(newest, e.stat(follow_symlinks=False).st_mtime)
+        with contextlib.suppress(OSError):
+            newest = max(newest, os.stat(os.path.join(e.path, META_NAME)).st_mtime)
+    return now - newest > idle_s
+
+
+@contextlib.contextmanager
+def claim_abandoned(root: str | os.PathLike[str], idle_s: float, *, now: float | None = None) -> Iterator[bool]:
+    """For an outside cleaner that wants to remove a whole cache: yields ``True`` while holding the cache's lock
+    when the folder is a ``DiskBudget`` cache that is safe to reclaim, ``False`` otherwise. Safe means: the lock
+    could be taken, no writer is alive, no entry is leased, and nothing in it (the folder, every entry folder, every
+    ``.meta``) was touched for ``idle_s`` seconds. Inside the ``with`` block nobody else can change the cache;
+    rename the folder to a sibling name (one ``rename``) and delete that. A ``DiskBudget`` that uses the cache
+    afterwards recreates it."""
+    root = Path(root)
+    fd = -1
+    ok = False
+    try:
+        try:
+            fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            ok = _idle_enough(root, idle_s, time.time() if now is None else now)
+        except OSError:  # includes BlockingIOError: in use
+            ok = False
+        yield ok
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def is_abandoned(root: str | os.PathLike[str], idle_s: float, *, now: float | None = None) -> bool:
+    """``claim_abandoned`` without keeping the lock: a hint, not a guarantee, by the time you act on it."""
+    with claim_abandoned(root, idle_s, now=now) as ok:
+        return ok

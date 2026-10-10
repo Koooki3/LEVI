@@ -254,7 +254,7 @@ def test_reservations_count_against_the_limit(tmp_path):
     put_many(b, clock, "a", size=500)
     with b.writing("w1", reserve=1500):
         st = b.stats()
-        assert st["writers"] == 1 and st["reserved_bytes"] == 1500 + B.META_ALLOWANCE
+        assert st["writers"] == 1 and st["reserved_bytes"] == 1500 + len(B.meta_bytes("w1", ""))
         with pytest.raises(BudgetRejected) as err, b.writing("w2", reserve=1500):
             raise AssertionError
         assert err.value.reason == "busy"
@@ -275,7 +275,7 @@ def test_a_writer_makes_room_before_it_writes(tmp_path):
 def test_an_unsized_writer_gets_a_quarter_of_the_budget(tmp_path):
     b, _ = make(tmp_path, max_bytes=10_000)
     with b.writing("w"):
-        assert b.stats()["reserved_bytes"] == (10_000 - B.META_ALLOWANCE) // 4 + B.META_ALLOWANCE
+        assert b.stats()["reserved_bytes"] == (10_000 - B.META_ALLOWANCE) // 4 + len(B.meta_bytes("w", ""))
 
 
 def _bounded_writer(root, i, rounds):
@@ -294,14 +294,15 @@ def test_many_processes_never_exceed_the_limit_on_disk(tmp_path):
     procs = [ctx.Process(target=_bounded_writer, args=(str(root), i, 25)) for i in range(8)]
     for p in procs:
         p.start()
+    mon = DiskBudget(root, max_bytes=6000, durable=False)
     peak = 0
     while any(p.is_alive() for p in procs):
-        # a rename between two directories can be counted twice by a walk: only a value seen three times counts
-        peak = max(peak, min(du(root) for _ in range(3)))
+        with mon._lock():  # every rename and delete happens under this lock: no walk can count a file twice
+            peak = max(peak, du(root))
     for p in procs:
         p.join(60)
         assert p.exitcode == 0
-    assert peak <= 6000 + 256, peak
+    assert peak <= 6000 + 256, peak  # the reserve plus a few bytes of writer records
     b = DiskBudget(root, max_bytes=6000, durable=False)
     assert b.stats()["bytes"] <= 6000
     assert_consistent(b)
@@ -920,3 +921,208 @@ def test_the_limit_is_never_exceeded_by_a_series(tmp_path):
         clock.tick()
         b.put(f"k{rnd.randrange(30)}", b"x" * rnd.randrange(1, 900))
         assert b.stats()["bytes"] <= 4000
+
+
+# ----------------------------------------------- second review: N1-N12
+
+
+def test_meta_is_reserved_at_its_real_size_for_long_and_non_ascii_keys(tmp_path):
+    b, _ = make(tmp_path, max_bytes=100_000)
+    key = "中" * 100
+    b.put(key, b"x" * 10)
+    assert b.read(key) == b"x" * 10
+    b.put("k" * 200, b"y")
+    b.put("k", b"z", version="版本" * 25)
+    e = {e.key: e for e in b.entries()}
+    assert key in e and "k" * 200 in e  # stored whole, not truncated
+    with b.writing(key, reserve=1000) as tmp, b.open_file(tmp / "f") as f:  # fills the reserve exactly
+        f.write(b"x" * 1000)
+    assert b.stats()["entries"] == 3
+
+
+def test_a_key_too_long_for_meta_is_refused_cleanly(tmp_path):
+    b, _ = make(tmp_path, max_bytes=100_000)
+    with pytest.raises(BudgetRejected) as err:
+        b.put("k" * (B.META_MAX + 1), b"x")
+    assert err.value.reason == "too_large" and scratch_left(b) == []
+
+
+def test_concurrent_reservations_respect_the_free_space_floor(tmp_path, monkeypatch):
+    b, _ = make(tmp_path, max_bytes=100_000, min_free_bytes=5000)
+    monkeypatch.setattr(B, "_free_bytes", lambda path: 10_000)  # nothing has been written yet
+    with b.writing("w1", reserve=4000):
+        with pytest.raises(BudgetRejected) as err, b.writing("w2", reserve=4000):
+            raise AssertionError("the floor would be broken once both write")
+        assert err.value.reason == "no_space"
+        with b.writing("w3", reserve=800):  # 10000 - 4000 - 800 >= 5000
+            pass
+
+
+def test_an_entry_that_lost_files_from_outside_is_damaged_not_resized(tmp_path):
+    b, _ = make(tmp_path)
+    make_dir_entry(b, "k", n=5)
+    entry = b.entries()[0].path
+    (entry / "3.png").unlink()  # a tool that deletes the oldest files; .meta survives
+    assert b.maintain()["damaged"] == 1
+    assert b.get("k") is None and b.stats()["entries"] == 0
+
+
+def test_trash_not_yet_removed_counts_against_the_limit(tmp_path):
+    b, clock = make(tmp_path, housekeeping_s=10**9)
+    put_many(b, clock, "ab")
+    ghost = b.root / ".budget" / "trash" / f"deadbeef.{900:x}"  # a deletion whose rmtree has not finished
+    ghost.mkdir()
+    (ghost / "f").write_bytes(b"x" * 900)
+    assert b.stats()["trash_bytes"] == 900
+    b.put("c", b"x" * P)  # 2 x 1027 + 900 + 1027 > 3500: one entry has to go
+    assert b.stats()["entries"] == 2
+    assert b.read("a") is None
+
+
+def test_a_failing_fsync_of_the_folder_after_the_rename_leaves_nothing_visible(tmp_path, monkeypatch):
+    b, _ = make(tmp_path, durable=True)
+    root_ino = os.stat(b.root).st_ino
+    real = os.fsync
+
+    def fail_on_root(fd):
+        if os.fstat(fd).st_ino == root_ino:
+            raise OSError(errno.EIO, "Input/output error")
+        real(fd)
+
+    monkeypatch.setattr(os, "fsync", fail_on_root)
+    with pytest.raises(OSError) as err:
+        b.put("k", b"data")
+    monkeypatch.undo()
+    assert err.value.errno == errno.EIO
+    assert b.read("k") is None and b.stats()["entries"] == 0
+
+
+def test_scratch_folders_without_a_record_are_removed(tmp_path):
+    b, _ = make(tmp_path)
+    orphan = b.root / ".budget" / "w" / "999-abc" / "p"
+    orphan.mkdir(parents=True)
+    (orphan / "f").write_bytes(b"x")
+    b.maintain()
+    assert scratch_left(b) == []
+
+
+def test_a_plain_file_with_an_entry_name_is_not_an_entry(tmp_path):
+    b, _ = make(tmp_path)
+    (b.root / f"{'a' * 32}.{'b' * 16}.{'c' * 20}.ffffff").write_bytes(b"")
+    assert b.stats()["entries"] == 0 and b.stats()["bytes"] == 0
+    b.put("k", b"1")  # not blocked by a phantom of 16 MB
+
+
+def test_the_version_hash_is_wide_enough(tmp_path):
+    import hashlib
+
+    # two version strings whose sha256 agrees on the first 8 hex characters (found by search)
+    a, c = "v58213", "v67279"
+    h = lambda v: hashlib.sha256(v.encode()).hexdigest()
+    assert h(a)[:8] == h(c)[:8] and h(a)[:16] != h(c)[:16]
+    assert len(B.version_hash("x")) == 16
+    b, _ = make(tmp_path)
+    b.put("k", b"old", version=a)
+    assert b.read("k", version=c) is None
+
+
+def test_a_lease_is_not_inherited_by_a_forked_child(tmp_path):
+    b, _ = make(tmp_path)
+    b.put("k", b"1")
+    lease = b.get("k")
+    child = multiprocessing.get_context("fork").Process(target=time.sleep, args=(30,))
+    child.start()
+    try:
+        lease.close()
+        gone = 0
+        for _ in range(100):  # the child drops its copy of the descriptor right after the fork
+            gone = b.discard("k")
+            if gone:
+                break
+            time.sleep(0.02)
+        assert gone == 1  # the sleeping child holds no lease
+    finally:
+        child.terminate()
+        child.join()
+
+
+def test_a_writer_record_is_not_inherited_by_a_forked_child(tmp_path):
+    b, _ = make(tmp_path)
+    ctx = multiprocessing.get_context("fork")
+    child = ctx.Process(target=time.sleep, args=(30,))
+    try:
+        with b.writing("k", reserve=10) as tmp:
+            child.start()  # forked while the writer is live
+            (tmp / "f").write_bytes(b"1")
+        assert b.stats()["writers"] == 0  # the finished writer is not kept alive by the child
+    finally:
+        child.terminate()
+        child.join()
+
+
+def test_reading_can_be_refused_too(tmp_path):
+    b, _ = make(tmp_path, lock_timeout_s=0.2)
+    with b._lock(), pytest.raises(BudgetRejected) as err:
+        b.read("k")
+    assert err.value.reason == "lock_timeout"
+
+
+# ---------------------------------------------------------- abandoned caches
+
+
+def test_a_cache_nobody_has_touched_is_abandoned(tmp_path):
+    b, _ = make(tmp_path, clock=time.time)
+    b.put("k", b"1")
+    now = time.time()
+    assert not B.is_abandoned(b.root, 3600, now=now)
+    assert B.is_abandoned(b.root, 3600, now=now + 7200)
+    assert not B.is_abandoned(tmp_path / "nowhere", 1)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert not B.is_abandoned(plain, 0, now=time.time() + 10)  # not a DiskBudget folder
+
+
+def test_an_abandoned_cache_with_a_live_writer_lease_or_user_is_not_reclaimable(tmp_path):
+    b, _ = make(tmp_path, clock=time.time)
+    b.put("k", b"1")
+    later = time.time() + 7200
+    with b.writing("w", reserve=10):
+        assert not B.is_abandoned(b.root, 3600, now=later)
+    lease = b.get("k")
+    later = time.time() + 7200
+    assert not B.is_abandoned(b.root, 3600, now=later)
+    lease.close()
+    with b._lock():  # another process is in the middle of an operation
+        assert not B.is_abandoned(b.root, 3600, now=later)
+    assert B.is_abandoned(b.root, 3600, now=later)
+
+
+def test_a_dead_writer_does_not_keep_a_cache_alive(tmp_path):
+    root = tmp_path / "cache"
+    started = tmp_path / "started"
+    DiskBudget(root, max_bytes=100_000, durable=False)
+    child = multiprocessing.get_context("fork").Process(target=_write_slowly, args=(str(root), str(started)))
+    child.start()
+    wait_for(started)
+    later = time.time() + 7200
+    assert not B.is_abandoned(root, 3600, now=later)
+    os.kill(child.pid, signal.SIGKILL)
+    child.join()
+    assert B.is_abandoned(root, 3600, now=later)
+
+
+def test_claim_abandoned_holds_the_lock_while_the_cleaner_renames_the_folder(tmp_path):
+    import shutil
+
+    b, _ = make(tmp_path, clock=time.time, lock_timeout_s=0.2)
+    b.put("k", b"1")
+    with B.claim_abandoned(b.root, 3600, now=time.time() + 7200) as ok:
+        assert ok
+        with pytest.raises(BudgetRejected) as err:  # nobody else gets in meanwhile
+            b.put("x", b"1")
+        assert err.value.reason == "lock_timeout"
+        gone = tmp_path / "cache.reclaimed"
+        os.rename(b.root, gone)
+    shutil.rmtree(gone)
+    b.put("x", b"1")  # the next use simply recreates the cache
+    assert b.read("x") == b"1" and b.read("k") is None
