@@ -1,0 +1,14 @@
+{
+ "schema": "levi.aeri.judgement.v1",
+ "minor": 0,
+ "run_id": "r20261010-a",
+ "emitted_wall_ns": 1791600000000000000,
+ "kind": "unavailable",
+ "request_id": "req-10",
+ "code": "timeout",
+ "retryable": true,
+ "retry_after_ms": null,
+ "detail": "policy inferring",
+ "produced_ns": 6000000000,
+ "clock_domain": "host-mono:0f0e0d0c-0b0a-4908-8706-050403020100"
+}

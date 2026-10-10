@@ -23,6 +23,8 @@ Standard library only.
 """
 
 import fnmatch
+import hashlib
+import math
 import os
 import re
 import shutil
@@ -51,6 +53,7 @@ def dataset_name(group: str, task: str) -> str:
 ROOT_MARK = "__at__"  # <name>__at__<root mark>: the same task under another root
 MARK_MAX = 20  # characters of the root's last folder name kept in a mark
 NAME_MAX = 140  # what the live API accepts of a dataset name
+GENERATION_MARK = "__generation_"
 
 
 def root_mark(root) -> str:
@@ -72,6 +75,90 @@ def same_root(a, b) -> bool:
         return str(a) == str(b)
 
 
+def _same_task(state, root, group, task) -> bool:
+    """Match the whole source identity before reusing a dataset name.
+
+    Old states can omit root/group/task fields: a recorded source supplies
+    them. Without a source or generation fields, the legacy candidate name
+    still identifies the task; a successor must carry explicit identity.
+    """
+    if not same_root(state.get("root"), root):
+        return False
+    for key, expected in (("group", group), ("task_folder", task)):
+        if state.get(key) not in (None, "", expected):
+            return False
+    source = state.get("source")
+    if source:
+        if not isinstance(source, str):
+            return False
+        source = Path(source)
+        return (
+            source.name == task
+            and source.parent.name == group
+            and same_root(source.parent.parent, root)
+        )
+    if state.get("generation_base") or "generation" in state:
+        return state.get("group") == group and state.get("task_folder") == task
+    return True
+
+
+def _same_claim(owner, root, group, task) -> bool:
+    if isinstance(owner, tuple) and len(owner) == 3:
+        return same_root(owner[0], root) and owner[1:] == (group, task)
+    # Callers predating task identities supplied only the claimed root.
+    return same_root(owner, root)
+
+
+def generation_name(base: str, generation: int) -> str:
+    """A stable successor name, confined to the live API's name length."""
+    suffix = f"{GENERATION_MARK}{generation:06d}"
+    if len(base) + len(suffix) > NAME_MAX:
+        digest = hashlib.sha256(base.encode()).hexdigest()[:6]
+        base = f"{base[: NAME_MAX - len(suffix) - 7]}-{digest}"
+    return f"{base}{suffix}"
+
+
+def _timestamp(value) -> float | None:
+    from .sessions import parse_time
+
+    value = parse_time(value)
+    return value if value is not None and math.isfinite(value) and value > 0 else None
+
+
+def _generation(state) -> int:
+    value = state.get("generation", 1)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 1
+
+
+def _latest_generation(config, name, state, root, group, task):
+    """Find this legacy name's successors, never another root's lineage."""
+    states = [(name, state)]
+    prefix = generation_name(name, 2).rsplit(GENERATION_MARK, 1)[0]
+    for path in datasets_dir(config).glob(f"{prefix}{GENERATION_MARK}*.json"):
+        if path.is_symlink():
+            continue
+        successor = load_state(config, path.stem)
+        if (
+            successor
+            and successor.get("generation_base") == name
+            and successor.get("root")
+            and same_root(successor["root"], root)
+            and successor.get("group") == group
+            and successor.get("task_folder") == task
+        ):
+            states.append((path.stem, successor))
+    active = [item for item in states if not item[1].get("archived")]
+    if active:
+        return max(active, key=lambda item: _generation(item[1]))
+    return max(
+        states,
+        key=lambda item: (
+            _timestamp(item[1].get("archived_at")) or 0,
+            _generation(item[1]),
+        ),
+    )
+
+
 def resolve_name(config, root, group: str, task: str, claimed=None) -> str:
     """The dataset a ``(root, group, task)`` is, by name.
 
@@ -80,11 +167,12 @@ def resolve_name(config, root, group: str, task: str, claimed=None) -> str:
     and capture. The plain name stays with the root whose state already holds
     it (names already in use are never changed or moved); another root gets
     ``<name>__at__<root mark>``, and ``-<hash of the root>`` after that when two
-    roots share a last folder name. A state that already belongs to this root
-    is always found again, whichever candidate it sits under, so a restart
-    resolves the same way. ``claimed`` (``{name: root}``) is the names taken
-    earlier in one scan by roots that have no state yet."""
-    import hashlib
+    roots share a last folder name. A state that already belongs to this
+    root, group and task is found again, whichever candidate it sits under,
+    so a restart resolves the same way. ``claimed`` maps names to task
+    identities for tasks that have no state yet (older callers supplied only
+    roots). After removal, an active successor wins; otherwise the latest
+    archived name is returned."""
 
     base = dataset_name(group, task)
     short = base[: NAME_MAX - len(ROOT_MARK) - MARK_MAX - 8]
@@ -93,13 +181,50 @@ def resolve_name(config, root, group: str, task: str, claimed=None) -> str:
     candidates = [base, mark, f"{mark}-{digest}"]
     states = [(name, load_state(config, name)) for name in candidates]
     for name, state in states:
-        if state is not None and same_root(state.get("root"), root):
-            return name
+        if state is not None and _same_task(state, root, group, task):
+            return _latest_generation(config, name, state, root, group, task)[0]
     for name, state in states:
         owner = (claimed or {}).get(name)
-        if state is None and (owner is None or same_root(owner, root)):
+        if state is None and (owner is None or _same_claim(owner, root, group, task)):
             return name
-    return candidates[-1]
+    # Long task names can share root-marked candidates, and a literal task
+    # name can occupy a generated name. Never fall back to an occupied state.
+    identity = f"{os.path.realpath(str(root))}\0{group}\0{task}"
+    digest = hashlib.sha256(identity.encode()).hexdigest()[:12]
+    fallback = f"{mark[: NAME_MAX - 13]}-{digest}"
+    number = 1
+    while True:
+        suffix = f"-{number}" if number > 1 else ""
+        name = f"{fallback[: NAME_MAX - len(suffix)]}{suffix}"
+        state = load_state(config, name)
+        if state is not None and _same_task(state, root, group, task):
+            return _latest_generation(config, name, state, root, group, task)[0]
+        owner = (claimed or {}).get(name)
+        if state is None and (owner is None or _same_claim(owner, root, group, task)):
+            return name
+        number += 1
+
+
+def _finished_at(demo: Path) -> float | None:
+    """Completion time, unaffected by later edits to a marked demo's files.
+
+    Older captures without a marker use their recorded stopped_at. An
+    unparseable timestamp is insufficient to bring back an archived task.
+    """
+    marker = demo / criteria.MARKER
+    if marker.is_symlink():
+        return None
+    try:
+        return _timestamp(marker.stat().st_mtime)
+    except FileNotFoundError:
+        metadata = jsonio.read(demo / "metadata.json") or {}
+        return (
+            _timestamp(metadata.get("stopped_at"))
+            if isinstance(metadata, dict)
+            else None
+        )
+    except OSError:
+        return None
 
 
 def datasets_dir(config) -> Path:
@@ -183,12 +308,16 @@ def load_state(config, name: str):
     return None
 
 
-def list_states(config) -> dict:
+def list_states(config, *, include_archived=False) -> dict:
     try:
         names = sorted(p.stem for p in datasets_dir(config).glob("*.json"))
     except OSError:
         return {}
-    return {n: s for n in names if (s := load_state(config, n))}
+    return {
+        n: s
+        for n in names
+        if (s := load_state(config, n)) and (include_archived or not s.get("archived"))
+    }
 
 
 def counts(state: dict) -> dict:
@@ -203,8 +332,10 @@ def counts(state: dict) -> dict:
         "rejected": 0,
         "stuck": 0,
     }
+    if state.get("archived"):
+        return out
     for row in (state.get("demos") or {}).values():
-        if row.get("excluded"):
+        if row.get("excluded") or row.get("deleted"):
             continue
         key = row.get("state")
         if key in out:
@@ -217,12 +348,15 @@ def counts(state: dict) -> dict:
 def waiting_demos(state: dict, max_attempts: int) -> list:
     """The mirrored demos still to label: not out of attempts and not
     excluded by a person."""
+    if state.get("archived"):
+        return []
     return [
         d
         for d, row in (state.get("demos") or {}).items()
         if row.get("state") == "mirrored"
         and row.get("attempts", 0) < max_attempts
         and not row.get("excluded")
+        and not row.get("deleted")
     ]
 
 
@@ -254,8 +388,8 @@ class Scanner:
         self._tasks: dict = {}
         self._mtimes: dict = {}
         self._aborts: dict = {}
-        self._names: dict = {}  # (root, group, task) -> dataset name, once chosen
-        self._claimed: dict = {}  # name -> root, for roots that have no state yet
+        self._names: dict = {}  # (root, group, task) -> current generation's name
+        self._claimed: dict = {}  # name -> task identity, before its state exists
         self.epoch = None
         self.errors: list = []
 
@@ -281,20 +415,37 @@ class Scanner:
             return []
 
     def name_of(self, key) -> str:
-        """The dataset name of ``(root, group, task)``, chosen once per
-        scanner (``resolve_name``) so it cannot change under a running scan."""
+        """Keep a chosen name while its state still belongs to this task;
+        removal can move it to its independently stored successor."""
         name = self._names.get(key)
-        if name is None:
+        state = load_state(self.config, name) if name is not None else None
+        if name is None or (
+            state and (state.get("archived") or not _same_task(state, *key))
+        ):
             root, group, task = key
             name = resolve_name(self.config, root, group, task, self._claimed)
-            self._names[key] = name
-            self._claimed.setdefault(name, root)
+            self._remember_name(key, name)
         return name
+
+    def _remember_name(self, key, name):
+        if self._names.get(key) != name:
+            self._tasks.pop(key, None)
+            self._mtimes.pop(key, None)
+        self._names[key] = name
+        self._claimed[name] = key
 
     def known_name(self, key) -> str:
         """``name_of`` for a reader (status, fault lookups): the chosen name
         if there is one, else what ``resolve_name`` says, without taking it."""
-        return self._names.get(key) or resolve_name(self.config, *key)
+        name = self._names.get(key)
+        state = load_state(self.config, name) if name is not None else None
+        if (
+            name
+            and not (state or {}).get("archived")
+            and (state is None or _same_task(state, *key))
+        ):
+            return name
+        return resolve_name(self.config, *key)
 
     def tasks(self):
         """(root, group, task_folder, path) for every selected task folder."""
@@ -327,6 +478,10 @@ class Scanner:
             if found is not None:
                 result.append(found)
         for key in list(self._tasks):
+            if (load_state(self.config, self.known_name(key)) or {}).get("archived"):
+                self._tasks.pop(key, None)
+                self._mtimes.pop(key, None)
+                continue
             if key not in seen:
                 self._tasks[key].available = False
                 result.append(self._tasks[key])
@@ -351,14 +506,78 @@ class Scanner:
             cutoff = min(cutoff, session.started_at)
         return cutoff
 
+    def _successor(self, key, path, state, now):
+        """Only a newly completed demo can create the next isolated state.
+
+        Keep the predecessor's lock through creation. Two scanners therefore
+        choose the same successor, and deletion cannot move its cutoff while
+        this scan is selecting the new generation.
+        """
+        predecessor = state["name"]
+        with jsonio.locked(state_path(self.config, predecessor)):
+            name = resolve_name(self.config, *key, self._claimed)
+            latest = load_state(self.config, name)
+            if not latest or not latest.get("archived"):
+                return name, latest
+            if name != predecessor:
+                return None
+            archived_at = _timestamp(latest.get("archived_at"))
+            if archived_at is None:
+                return None
+            cutoff = max(archived_at, _timestamp(latest.get("archive_cutoff")) or 0)
+            found = False
+            for entry in self._subdirs(path):
+                if criteria.kind_of(entry.name) != "demo":
+                    continue
+                finished_at = _finished_at(Path(entry.path))
+                if finished_at is None or finished_at <= cutoff:
+                    continue
+                if criteria.check(
+                    entry.path,
+                    now=now,
+                    legacy_quiet_s=60.0,
+                    settle_s=self.config.watch.settle_s,
+                ).ok:
+                    found = True
+                    break
+            if not found:
+                return None
+            base = latest.get("generation_base") or name
+            generation = _generation(latest) + 1
+            while True:
+                successor = generation_name(base, generation)
+                target = state_path(self.config, successor)
+                with jsonio.locked(target):
+                    if not target.exists():
+                        value = empty_state(self.config, key, cutoff, successor)
+                        value.update(
+                            generation_base=base,
+                            generation=generation,
+                            previous_generation=name,
+                            archive_cutoff=cutoff,
+                        )
+                        jsonio.write(target, value, indent=1)
+                        return successor, value
+                # A literal task name can also look like a generated name.
+                # Never replace its state; the next suffix remains stable.
+                generation += 1
+
     def _scan_task(self, key, path, session, now):
         name = self.name_of(key)
+        state = load_state(self.config, name)
         if self.config.watch.require_session and not (session and session.levi_enabled):
             return None
         if session is not None and session.levi_enabled is False:
             # The operator answered "no" to background annotation.
-            return self._tasks.get(key)
-        state = load_state(self.config, name)
+            return None if (state or {}).get("archived") else self._tasks.get(key)
+        if (state or {}).get("archived"):
+            self._tasks.pop(key, None)
+            self._mtimes.pop(key, None)
+            successor = self._successor(key, path, state, now)
+            if successor is None:
+                return None
+            name, state = successor
+            self._remember_name(key, name)
         known = (state or {}).get("demos") or {}
         stamp = os.stat(path).st_mtime_ns
         previous = self._tasks.get(key)
@@ -377,6 +596,7 @@ class Scanner:
             # A state keeps the cutoff it was created with, but asking for the
             # backlog later reaches back to the beginning.
             cutoff = self._cutoff(session)
+        archive_cutoff = _timestamp((state or {}).get("archive_cutoff"))
         w = self.config.watch
         try:
             entries = [e for e in os.scandir(path)]
@@ -389,6 +609,16 @@ class Scanner:
             kind = criteria.kind_of(entry.name)
             if kind is None or not entry.is_dir(follow_symlinks=False):
                 continue
+            if archive_cutoff is not None:
+                finished_at = _finished_at(Path(entry.path))
+                if finished_at is not None and finished_at <= archive_cutoff:
+                    scan.backlog += kind == "demo"
+                    continue
+                if (
+                    finished_at is None
+                    and criteria.newest_mtime(entry.path) <= archive_cutoff
+                ):
+                    continue
             if kind == "discarded":
                 scan.discarded += 1
                 continue
@@ -406,6 +636,8 @@ class Scanner:
                 continue
             row = known.get(entry.name)
             if row is not None:
+                if row.get("deleted"):
+                    continue
                 if row.get("state") != "stuck":
                     continue
                 mark = criteria.newest_mtime(entry.path)
@@ -417,6 +649,8 @@ class Scanner:
                 mtime = entry.stat().st_mtime
             except OSError:
                 continue
+            if archive_cutoff is not None and finished_at is not None:
+                mtime = finished_at
             if mtime < cutoff:
                 scan.backlog += 1
                 continue
@@ -426,6 +660,14 @@ class Scanner:
                 legacy_quiet_s=60.0,
                 settle_s=w.settle_s,
             )
+            if (
+                archive_cutoff is not None
+                and done.state in ("complete", "rejected")
+                and finished_at is None
+            ):
+                # A changed file mtime is not proof of a new completion.
+                scan.backlog += 1
+                continue
             if done.ok:
                 scan.ready.append(entry.name)
             elif done.state == "rejected":
@@ -470,6 +712,8 @@ class Scanner:
         def change(value):
             if not value:
                 value = empty_state(self.config, key, cutoff, name)
+            if value.get("archived"):
+                return value
             for demo, reason, at, label in rejected:
                 value["demos"].setdefault(
                     demo,
@@ -582,13 +826,13 @@ def verify_sources(config, name: str) -> list:
     different file than the one linked; returns the newly flagged demos. A
     source that is gone is not a change (the mirror keeps its own copy)."""
     state = load_state(config, name)
-    if not state:
+    if not state or state.get("archived"):
         return []
     source = Path(state["source"])
     changed = []
     for demo, row in (state.get("demos") or {}).items():
         sig = row.get("sig")
-        if not sig or row.get("source_changed"):
+        if not sig or row.get("source_changed") or row.get("deleted"):
             continue
         now = source_signature(source / demo)
         if any(v is not None for v in now.values()) and now != sig:
@@ -596,6 +840,8 @@ def verify_sources(config, name: str) -> list:
     if changed:
 
         def flag(value):
+            if value.get("archived"):
+                return value
             for demo in changed:
                 value["demos"][demo]["source_changed"] = time.time()
             return value
@@ -622,6 +868,8 @@ def set_available(config, name: str, reason: str | None) -> None:
     again; the queue skips an unavailable dataset until its source returns."""
 
     def change(value):
+        if value.get("archived"):
+            return value
         if reason is None:
             value.pop("unavailable", None)
         else:
@@ -636,6 +884,8 @@ def is_available(config, name: str, state=None) -> bool:
     """False while a dataset is marked unavailable and its source has not come
     back (which clears the mark)."""
     state = state if state is not None else load_state(config, name)
+    if (state or {}).get("archived"):
+        return False
     if not (state or {}).get("unavailable"):
         return True
     if source_problem(state) is None:
@@ -649,7 +899,7 @@ def refresh_changed(config, name: str) -> list:
     annotated yet; one that already carries annotations keeps its flag (what
     was annotated is the old content, a person decides)."""
     state = load_state(config, name)
-    if not state:
+    if not state or state.get("archived"):
         return []
     capture, source = Path(state["capture"]), Path(state["source"])
     again = [
@@ -659,6 +909,7 @@ def refresh_changed(config, name: str) -> list:
         and row.get("state") == "mirrored"
         # Left as it is: a person took it out, and its mirror is kept.
         and not row.get("excluded")
+        and not row.get("deleted")
     ]
     done = []
     for demo in again:
@@ -669,10 +920,9 @@ def refresh_changed(config, name: str) -> list:
         # of a removed episode is left exactly as it is. A removal waits for
         # this (a few hard links) rather than the other way round.
         with jsonio.locked(state_path(config, name)):
-            row = (
-                (jsonio.read(state_path(config, name)) or {}).get("demos") or {}
-            ).get(demo) or {}
-            if row.get("excluded"):
+            value = jsonio.read(state_path(config, name)) or {}
+            row = (value.get("demos") or {}).get(demo) or {}
+            if value.get("archived") or row.get("excluded") or row.get("deleted"):
                 continue
             shutil.rmtree(capture / demo, ignore_errors=True)
             if (
@@ -682,6 +932,8 @@ def refresh_changed(config, name: str) -> list:
                 done.append(demo)
 
     def clear(value):
+        if value.get("archived"):
+            return value
         for demo in done:
             row = value["demos"][demo]
             row.pop("source_changed", None)
@@ -723,6 +975,21 @@ def write_task_text(capture: Path, text: str):
 def mirror_dataset(config, state: dict, names, *, now: float | None = None) -> dict:
     """Mirror ``names`` (finished demos of one task) and record them in the
     dataset's state. Returns ``{demo: result}``."""
+    path = state_path(config, state["name"])
+    with jsonio.locked(path):
+        latest = jsonio.read(path) or state
+        if latest.get("archived"):
+            return {}
+        names = [
+            demo
+            for demo in names
+            if not ((latest.get("demos") or {}).get(demo) or {}).get("deleted")
+        ]
+        return _mirror_dataset(config, latest, names, now=now)
+
+
+def _mirror_dataset(config, state: dict, names, *, now: float | None = None) -> dict:
+    """Mirror and write while ``mirror_dataset`` holds the state lock."""
     now = time.time() if now is None else now
     name = state["name"]
     capture = Path(state["capture"])
@@ -730,6 +997,11 @@ def mirror_dataset(config, state: dict, names, *, now: float | None = None) -> d
     clear_partials(capture)
     results = {}
     for demo in names:
+        archive_cutoff = _timestamp(state.get("archive_cutoff"))
+        if archive_cutoff is not None:
+            finished_at = _finished_at(source / demo)
+            if finished_at is None or finished_at <= archive_cutoff:
+                continue
         result = mirror_demo(source / demo, capture, now=now)
         results[demo] = result
     text = task_text(source, source / names[0] if names else None)
@@ -775,5 +1047,5 @@ def mirror_dataset(config, state: dict, names, *, now: float | None = None) -> d
                 }
         return value
 
-    jsonio.update(state_path(config, name), change, default=dict)
+    jsonio.write(state_path(config, name), change(state), indent=1)
     return results

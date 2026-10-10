@@ -258,6 +258,36 @@ describe("Tabs and SegmentedControl", () => {
     expect(radios()[0].getAttribute("aria-checked")).toBe("true");
   });
 
+  test("segmented control points to the text that explains it, and by default to nothing", async () => {
+    const { host } = await render(
+      <>
+        <SegmentedControl
+          label="With reason"
+          value="a"
+          onChange={() => undefined}
+          describedBy="why"
+          options={[
+            { value: "a", label: "A" },
+            { value: "b", label: "B", disabled: true },
+          ]}
+        />
+        <SegmentedControl
+          label="Plain"
+          value="a"
+          onChange={() => undefined}
+          options={[{ value: "a", label: "A" }]}
+        />
+        <p id="why">B needs data</p>
+      </>,
+    );
+    const [described, plain] = Array.from(
+      host.querySelectorAll('[role="radiogroup"]'),
+    );
+    expect(described.getAttribute("aria-describedby")).toBe("why");
+    expect(host.querySelector("#why")?.textContent).toBe("B needs data");
+    expect(plain.hasAttribute("aria-describedby")).toBe(false);
+  });
+
   test("theme picker offers system, light and dark", async () => {
     const onChange = mock((value: string) => value);
     const { host } = await render(

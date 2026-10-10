@@ -10,9 +10,12 @@ own Python (no Torch); ``rlinf`` runs it in integrations/recap_value/.venv.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import math
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -28,13 +31,18 @@ import pyarrow.parquet as pq
 from .. import catalog, children, naming, paths
 from ..revision import dataset_revision
 from ..versions import is_dataset_v2
-from . import advantage, checkpoints, store
+from . import advantage, checkpoints, signature, store
 
 ACTIVE = {"queued", "running"}
 FINISHED = {"succeeded", "failed", "cancelled"}
 PLAN_SCHEMA = "levi.recap_value.plan.v1"
 WORKER_PROJECT = paths.PROJECT / "integrations" / "recap_value"
 LOG_TAIL_BYTES = 4000
+# Finished job records kept per dataset (newest first); older ones are
+# removed with their files. A succeeded job's plan and worker output are
+# removed as soon as its result is published; a failed or cancelled job keeps
+# them (diagnosis) until its record ages out.
+KEEP_JOB_RECORDS = 20
 PUBLIC_JOB_KEYS = (
     "id",
     "repo_id",
@@ -53,12 +61,26 @@ _LOCK = threading.RLock()
 
 
 class RecapError(Exception):
-    """A refusal with the HTTP status the backend answers with."""
+    """A refusal with the HTTP status the backend answers with. ``code`` is a
+    stable machine-readable name (``recomputed``: a read pinned to a version
+    that was replaced since) answered beside ``detail`` with ``extra``."""
 
-    def __init__(self, status: int, detail: str):
+    def __init__(
+        self,
+        status: int,
+        detail: str,
+        *,
+        code: str | None = None,
+        extra: dict[str, Any] | None = None,
+    ):
         super().__init__(detail)
         self.status = status
         self.detail = detail
+        self.code = code
+        self.extra = extra or {}
+
+    def body(self) -> dict[str, Any]:
+        return {"detail": self.detail, "code": self.code, **self.extra}
 
 
 # ---------------------------------------------------------------- dataset
@@ -145,6 +167,114 @@ def dataset(repo_id: str) -> Dataset:
     labels = outcomes.read_labels(resolve(catalog.STATE, name, "annotations"))
     human = {ep: v["outcome"] for ep, v in labels.items()}
     return Dataset(repo_id, name, root, info, rows, tasks, human)
+
+
+# ---------------------------------------------------------------- dataset type
+
+# What a run may ask for, and what it resolves to. "auto" (the default)
+# decides from the dataset setting, the export's metadata or the outcomes and
+# otherwise falls back to the old default "rollout"; "value_only" (values, no
+# labels) is asked for or set, so unlabelled rollouts are never silently
+# turned into all-positive demonstrations.
+REQUESTED_TYPES = ("auto", "rollout", "sft", "value_only")
+SETTING_TYPES = ("rollout", "sft", "value_only")
+RESOLVED_TYPES = ("rollout", "sft", "value_only")
+SETTINGS_SCHEMA = "levi.recap_value.dataset.v1"
+
+
+def _settings_path(name: str) -> Path:
+    return store.root(name) / "dataset.json"
+
+
+def dataset_setting(name: str) -> dict[str, Any] | None:
+    """The person's dataset-level choice (``rollout`` / ``sft``), if any."""
+    value = store.load_json(_settings_path(name))
+    if isinstance(value, dict) and value.get("dataset_type") in SETTING_TYPES:
+        return value
+    return None
+
+
+def _manifest_type(ds: Dataset) -> str | None:
+    """The type a LEVI ``recap_value`` export wrote into its own metadata."""
+    value = catalog.read(ds.root / "meta/levi_recap.json", {})
+    kind = value.get("dataset_type") if isinstance(value, dict) else None
+    return kind if kind in ("rollout", "sft") else None
+
+
+def resolve_dataset_type(ds: Dataset, requested: str = "auto") -> dict[str, Any]:
+    """``{"dataset_type", "source", "reason"}`` for a run.
+
+    An explicit type is used as asked (``request``). ``auto`` takes, in
+    order: the dataset setting (``user``), the export's own
+    ``meta/levi_recap.json`` (``manifest``), ``rollout`` when any episode has
+    an outcome (``outcomes``), else the old default ``rollout``
+    (``fallback``; it refuses a dataset without outcomes as before)."""
+    if requested not in REQUESTED_TYPES:
+        raise RecapError(400, "dataset_type is auto, rollout, sft or value_only")
+    if requested != "auto":
+        return {
+            "dataset_type": requested,
+            "source": "request",
+            "reason": "asked for in the request",
+        }
+    setting = dataset_setting(ds.name)
+    if setting:
+        return {
+            "dataset_type": setting["dataset_type"],
+            "source": "user",
+            "reason": "the dataset setting (recap_values/<name>/dataset.json)",
+        }
+    kind = _manifest_type(ds)
+    if kind:
+        return {
+            "dataset_type": kind,
+            "source": "manifest",
+            "reason": "the export's meta/levi_recap.json",
+        }
+    if any(ds.outcome(ep) is not None for ep in ds.rows):
+        return {
+            "dataset_type": "rollout",
+            "source": "outcomes",
+            "reason": "episodes have success/failure labels",
+        }
+    return {
+        "dataset_type": "rollout",
+        "source": "fallback",
+        "reason": "no dataset setting, export metadata or outcome label: "
+        "fell back to rollout (the old default)",
+    }
+
+
+def dataset_type_payload(repo_id: str) -> dict[str, Any]:
+    """The setting and what ``auto`` resolves to now (read-only)."""
+    ds = dataset(repo_id)
+    setting = dataset_setting(ds.name)
+    return {
+        "setting": setting["dataset_type"] if setting else "auto",
+        **resolve_dataset_type(ds, "auto"),
+    }
+
+
+def set_dataset_type(repo_id: str, dataset_type: str) -> dict[str, Any]:
+    """Store the dataset-level type; ``auto`` removes the setting."""
+    ds = dataset(repo_id)
+    if dataset_type not in REQUESTED_TYPES:
+        raise RecapError(400, "dataset_type is auto, rollout, sft or value_only")
+    with store.locked(ds.name):
+        path = _settings_path(ds.name)
+        if dataset_type == "auto":
+            path.unlink(missing_ok=True)
+        else:
+            store.write_json(
+                path,
+                {
+                    "schema": SETTINGS_SCHEMA,
+                    "dataset_type": dataset_type,
+                    "source": "user",
+                    "updated_at": time.time(),
+                },
+            )
+    return dataset_type_payload(repo_id)
 
 
 # ---------------------------------------------------------------- records
@@ -402,7 +532,7 @@ def start(
     lookahead: int | None = None,
     positive_quantile: float | None = None,
     threshold: float | None = None,
-    dataset_type: str = "rollout",
+    dataset_type: str = "auto",
     static_filter: str = "auto",
     watch: bool = True,
 ) -> dict[str, Any]:
@@ -422,8 +552,8 @@ def start(
         raise RecapError(400, str(exc)) from exc
     if manifest.provider == "rlinf":
         _refuse_rlinf(folder, manifest, ds)
-    if dataset_type not in ("rollout", "sft"):
-        raise RecapError(400, "dataset_type is rollout or sft")
+    kind = resolve_dataset_type(ds, dataset_type)
+    resolved = kind["dataset_type"]
     if threshold is not None and not np.isfinite(threshold):
         raise RecapError(400, "threshold must be a finite number")
     known = sorted(ds.rows)
@@ -438,11 +568,15 @@ def start(
             raise RecapError(400, "episodes is empty")
     else:
         chosen = known
-    success: dict[int, bool] = {}
+    success: dict[int, bool | None] = {}
     skipped: dict[str, str] = {}
     for ep in chosen:
-        if dataset_type == "sft":
+        if resolved == "sft":
             success[ep] = True
+            continue
+        if resolved == "value_only":
+            # No outcome anywhere: V(o_t) does not read it, labels need it.
+            success[ep] = None
             continue
         outcome = ds.outcome(ep)
         if outcome is None:
@@ -458,8 +592,14 @@ def start(
     if not success:
         raise RecapError(
             400,
-            "No episode has a success/failure label; label outcomes first or run "
-            "with dataset_type sft",
+            "No episode has a success/failure label; label outcomes first, run "
+            "with dataset_type value_only (values, no labels) or sft "
+            "(demonstrations), or set the dataset's type"
+            + (
+                f" (dataset_type auto {kind['reason']})"
+                if kind["source"] == "fallback"
+                else ""
+            ),
         )
     lengths = {}
     for ep in success:
@@ -486,13 +626,20 @@ def start(
             else manifest.positive_quantile
         ),
         "threshold": threshold,
-        "dataset_type": dataset_type,
+        "dataset_type": resolved,
+        "dataset_type_requested": dataset_type,
+        "dataset_type_source": kind["source"],
+        "dataset_type_reason": kind["reason"],
         "static_filter": static_filter,
     }
     if request["lookahead"] < 1:
         raise RecapError(400, "lookahead must be at least 1")
     if not 0 < request["positive_quantile"] < 1:
         raise RecapError(400, "positive_quantile must lie strictly between 0 and 1")
+    try:
+        writing = store.layout()
+    except ValueError as exc:
+        raise RecapError(400, str(exc)) from exc
     with _LOCK, store.locked(ds.name):
         running = active(ds.name)
         if running is not None:
@@ -500,6 +647,8 @@ def start(
                 409,
                 f"A RECAP value job ({running['id']}) is already running for this dataset",
             )
+        if writing == store.MODELS and episodes is not None:
+            _refuse_unmergeable(ds, manifest, request, filtering, folder)
         base = store.root(ds.name)
         job_id = naming.timestamp_id(_jobs_dir(ds.name), ".json")
         plan_path = base / "plans" / f"{job_id}.json"
@@ -543,6 +692,9 @@ def start(
             "static_filter": filtering,
             "batch_size": _batch_size(),
             "device": _device() if manifest.provider == "rlinf" else "cpu",
+            # The storage layout is fixed when the job starts: a restart with
+            # another LEVI_RECAP_STORE_LAYOUT must not move its result.
+            "layout": writing,
         }
         catalog.atomic(plan_path, plan)
         job = {
@@ -558,7 +710,7 @@ def start(
             "revision_id": None,
             "created_at": time.time(),
             "request": request,
-            "success": {str(k): v for k, v in success.items()},
+            "success": {str(k): v for k, v in success.items() if v is not None},
             "skipped_episodes": skipped,
             "static_filter": filtering,
             "plan_path": str(plan_path),
@@ -786,6 +938,7 @@ def collect(job: dict[str, Any]) -> dict[str, Any]:
                 job.update(
                     status="succeeded",
                     revision_id=revision["revision_id"],
+                    version=revision.get("version"),
                     progress={
                         "stage": "saving",
                         "done": revision["frames"],
@@ -808,25 +961,190 @@ def collect(job: dict[str, Any]) -> dict[str, Any]:
                 finished_at=time.time(),
             )
         _save(job)
+        # Only after the result is published and the job record says so: a
+        # crash before this line leaves the files for the next pass.
+        prune_job_files(name)
     _forget(_key(job))
     return job
+
+
+def _job_files(name: str, job_id: str) -> list[Path]:
+    """Files a job left in ``plans/``, ``results/`` and ``jobs/``, found by
+    name inside the dataset folder (never through paths in the record)."""
+    base = store.root(name)
+    found = [base / "plans" / f"{job_id}.json"]
+    results = base / "results"
+    if results.is_dir():
+        found += [
+            p
+            for p in results.iterdir()
+            if p.name.startswith((f"{job_id}.", f".{job_id}."))
+        ]
+    jobs_dir = _jobs_dir(name)
+    found += [jobs_dir / f"{job_id}.progress.json", jobs_dir / f"{job_id}.log"]
+    return found
+
+
+def _unlink(path: Path) -> int:
+    """Remove one regular file; the bytes freed (0 if absent). A symbolic
+    link is removed as a link (its target is left alone), nothing is
+    removed through a symlinked folder, and an OS error only skips the file:
+    pruning never fails the job that triggered it."""
+    try:
+        if path.parent.is_symlink():
+            return 0
+        if path.is_symlink():
+            path.unlink()
+            return 0
+        if not path.is_file():
+            return 0
+        size = path.stat().st_size
+        path.unlink()
+        return size
+    except OSError:
+        return 0
+
+
+def prune_job_files(name: str, keep: int | None = None) -> dict[str, Any]:
+    """Bound ``jobs/``, ``plans/`` and ``results/`` of one dataset.
+
+    Succeeded jobs lose their plan, worker output and progress file (the
+    published result holds everything a reader needs); the newest ``keep``
+    finished records stay, older finished ones are removed with all their
+    files (record last, so a crash leaves nothing unreferenced). Active jobs
+    are never touched. Callers hold ``store.locked(name)``: ``start`` writes
+    a plan and its record under the same lock."""
+    keep = KEEP_JOB_RECORDS if keep is None else max(0, int(keep))
+    if store.root(name).is_symlink():
+        return {"removed_records": [], "bytes": 0}
+    finished = [j for j in jobs(name) if j.get("status") in FINISHED]
+    # A finished record whose worker still runs (cancelled from a process
+    # that had no handle on it) keeps its record: removing it would let the
+    # next job reuse the id while the old worker still writes its output.
+    old = [j for j in finished[: max(0, len(finished) - keep)] if not _alive(j)]
+    removed: list[str] = []
+    freed = 0
+    for job in old:
+        for path in _job_files(name, job["id"]):
+            freed += _unlink(path)
+        freed += _unlink(job_path(name, job["id"]))
+        removed.append(job["id"])
+    gone = {j["id"] for j in old}
+    for job in finished:
+        if job["id"] in gone or job.get("status") != "succeeded":
+            continue
+        for path in _job_files(name, job["id"]):
+            if path.suffix != ".log":
+                freed += _unlink(path)
+    return {"removed_records": removed, "bytes": freed}
 
 
 def cancel(job: dict[str, Any]) -> dict[str, Any]:
     if job.get("status") in FINISHED:
         _forget(_key(job))
         return job
-    process = _PROCESSES.get(_key(job))
-    if process is not None and process.poll() is None:
-        _stop(process, grace=5.0)
+    # Record the cancellation before stopping the worker: the watch thread
+    # collects as soon as the process exits, and would otherwise report the
+    # killed worker as "exited without a result" (failed) first.
     with store.locked(job["name"]):
         current = _read(job["name"], job["id"]) or job
         if current.get("status") in ACTIVE:
             current.update(status="cancelled", finished_at=time.time())
             _save(current)
         job = current
+    process = _PROCESSES.get(_key(job))
+    stopping = job.get("status") == "cancelled" and process is not None
+    if stopping and process.poll() is None:
+        _stop(process, grace=5.0)
     _forget(_key(job))
     return job
+
+
+# ---------------------------------------------------------------- merging
+
+
+def _refuse_unmergeable(
+    ds: Dataset,
+    manifest: checkpoints.Manifest,
+    request: dict[str, Any],
+    filtering: dict[str, Any],
+    folder: Path | None = None,
+) -> None:
+    """Before a subset run starts (and spends GPU time), refuse it when its
+    episodes could not be merged into the model's stored result. The meta
+    this run will publish is assembled from what is known now and compared
+    with the same ``signature`` the publication checks; only the worker's
+    software versions are left to the publication (they are known once the
+    worker reports them). A threshold or return range that would come from
+    this subset's own statistics never matches."""
+    if not store.head(ds.name, manifest.name):
+        return
+    old = store.revision(ds.name, manifest.name)
+    if not old or old.get("layout") != store.MODELS:
+        return
+    value_only = request["dataset_type"] == "value_only"
+    if value_only:
+        threshold = source = ret_min = ret_max = range_source = None
+    else:
+        if request["threshold"] is not None:
+            threshold, source = float(request["threshold"]), "manual"
+        elif manifest.unified_threshold is not None:
+            threshold, source = float(manifest.unified_threshold), "checkpoint"
+        else:
+            threshold = "a quantile of this subset's advantages"
+            source = "dataset_quantile"
+        if manifest.return_min is not None and manifest.return_max is not None:
+            ret_min, ret_max = float(manifest.return_min), float(manifest.return_max)
+            range_source = "checkpoint"
+        else:
+            ret_min = ret_max = "this subset's returns"
+            range_source = "dataset"
+    fingerprint = ds.fingerprint()
+    expected = {
+        "provider": manifest.provider,
+        "checkpoint": {
+            "name": manifest.name,
+            "sha256": manifest.sha256,
+            "manifest": manifest.public(),
+        },
+        "dataset_type": request["dataset_type"],
+        "labels": not value_only,
+        "fingerprint": {
+            "source_fingerprint": fingerprint.get("source_fingerprint"),
+            "dataset_revision": fingerprint.get("dataset_revision"),
+        },
+        "static_filter": {k: v for k, v in filtering.items() if k != "skipped"},
+        "base_models": checkpoints.base_models_status(folder, manifest)
+        if manifest.provider == "rlinf" and folder is not None
+        else None,
+        "fps": float(ds.fps),
+        "compute_version": advantage.RECAP_COMPUTE_VERSION,
+        **_run_parameters(manifest, request, threshold, source),
+        "return_min": ret_min,
+        "return_max": ret_max,
+        "return_range_source": range_source,
+    }
+    differs = signature.differences(old, expected, worker=False)
+    if differs:
+        raise RecapError(
+            409,
+            f"The stored {manifest.name} result on this dataset was computed with "
+            f"different settings ({', '.join(differs)}); recompute the whole "
+            "dataset instead of a subset",
+        )
+
+
+def _run_parameters(manifest, request, threshold, source) -> dict[str, Any]:
+    """The run parameters a result records (shared by the publication and
+    the subset pre-check, so both see the same values)."""
+    return {
+        "threshold": threshold,
+        "threshold_source": source,
+        "positive_quantile": request["positive_quantile"],
+        "lookahead": int(request["lookahead"]),
+        "gamma": float(manifest.gamma),
+        "failure_reward": float(manifest.failure_reward),
+    }
 
 
 # ---------------------------------------------------------------- publish
@@ -852,6 +1170,8 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     chunk = int(info.get("chunks_size") or 1000)
     request = job["request"]
     sft = request["dataset_type"] == "sft"
+    # Values only: no outcomes, so no returns, advantages or labels.
+    value_only = request["dataset_type"] == "value_only"
     lookahead = int(request["lookahead"])
     gamma = float(manifest.gamma)
     total = int(sum(len(e.get("keep", ())) or e["length"] for e in plan["episodes"]))
@@ -898,6 +1218,22 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(
                 f"episode {ep}: values outside [{manifest.v_min}, {manifest.v_max}]"
             )
+        if value_only:
+            blank = np.full(len(frames), np.nan)
+            per_episode[ep] = {
+                "frame_index": frames,
+                "timestamp": timestamps,
+                "value": values,
+                "value_next": blank,
+                "reward_sum": blank,
+                "reward_sum_raw": blank,
+                "return": blank,
+                "advantage": blank,
+                "num_valid_rewards": np.zeros(len(frames), dtype=np.int64),
+                "positive": None,
+                "episode_frames": n,
+            }
+            continue
         returns, rewards = advantage.episode_rewards(
             len(frames), bool(item["success"]), gamma, float(manifest.failure_reward)
         )
@@ -907,7 +1243,10 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
             "value": values,
             "return": returns,
             "reward": rewards,
+            "episode_frames": n,
         }
+    if value_only:
+        return _publish_values_only(job, plan, manifest, result, per_episode)
     ret_min, ret_max = manifest.return_min, manifest.return_max
     range_source = "checkpoint"
     if ret_min is None or ret_max is None:
@@ -944,10 +1283,62 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     for cols in per_episode.values():
         cols["positive"] = advantage.label(cols["advantage"], threshold, sft=sft)
     _set_stage(job, "saving", 0, total)
+    meta = {
+        **_common_meta(job, plan, manifest, result),
+        **_run_parameters(manifest, request, threshold, source),
+        "return_min": float(ret_min),
+        "return_max": float(ret_max),
+        "return_range_source": range_source,
+        "outcomes": {
+            str(k): ("success" if v else "failure") for k, v in job["success"].items()
+        },
+        "threshold_provenance": (
+            manifest.provenance.get("unified_threshold")
+            if source == "checkpoint"
+            else None
+        ),
+    }
+    return store.publish(
+        job["name"],
+        per_episode,
+        meta,
+        dataset_name=plan["dataset"]["name"],
+        subset=request["episodes"] is not None,
+        layout=plan.get("layout"),
+    )
+
+
+def _publish_values_only(job, plan, manifest, result, per_episode):
+    """Publish V(o_t) alone: no threshold, return range or labels."""
+    request = job["request"]
+    _set_stage(job, "saving", 0, sum(len(c["value"]) for c in per_episode.values()))
+    meta = {
+        **_common_meta(job, plan, manifest, result),
+        **_run_parameters(manifest, request, None, None),
+        "return_min": None,
+        "return_max": None,
+        "return_range_source": None,
+        "outcomes": {},
+        "threshold_provenance": None,
+        "labels": False,
+    }
+    return store.publish(
+        job["name"],
+        per_episode,
+        meta,
+        dataset_name=plan["dataset"]["name"],
+        subset=request["episodes"] is not None,
+        layout=plan.get("layout"),
+    )
+
+
+def _common_meta(job, plan, manifest, result) -> dict[str, Any]:
+    request = job["request"]
+    root = Path(plan["dataset"]["root"])
     ds_fingerprint = catalog.read(root / "meta/levi_view.json", {}).get(
         "source_fingerprint"
     )
-    meta = {
+    return {
         "checkpoint": {
             "name": manifest.name,
             "sha256": manifest.sha256,
@@ -958,21 +1349,12 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         "repo_id": job["repo_id"],
         "request": request,
         "dataset_type": request["dataset_type"],
-        "threshold": threshold,
-        "threshold_source": source,
-        "positive_quantile": request["positive_quantile"],
-        "lookahead": lookahead,
-        "gamma": gamma,
-        "failure_reward": float(manifest.failure_reward),
-        "return_min": float(ret_min),
-        "return_max": float(ret_max),
-        "return_range_source": range_source,
+        "dataset_type_source": request.get("dataset_type_source", "request"),
+        "dataset_type_reason": request.get("dataset_type_reason"),
+        "labels": True,
         "fingerprint": {
             "source_fingerprint": ds_fingerprint,
             "dataset_revision": dataset_revision(root),
-        },
-        "outcomes": {
-            str(k): ("success" if v else "failure") for k, v in job["success"].items()
         },
         "skipped_episodes": job.get("skipped_episodes", {}),
         "static_filter": {
@@ -981,17 +1363,10 @@ def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         "worker": result.get("provenance", {}),
         "base_models": plan["checkpoint"].get("base_models"),
         "dev_only_base_models": plan["checkpoint"].get("dev_only_base_models", []),
-        "threshold_provenance": (
-            manifest.provenance.get("unified_threshold")
-            if source == "checkpoint"
-            else None
-        ),
         "fps": float(plan["dataset"]["fps"]),
+        "compute_version": advantage.RECAP_COMPUTE_VERSION,
         "levi_commit": _levi_commit(),
     }
-    return store.publish(
-        job["name"], per_episode, meta, dataset_name=plan["dataset"]["name"]
-    )
 
 
 # ---------------------------------------------------------------- reading
@@ -1007,12 +1382,22 @@ def stale_reasons(ds: Dataset, record: dict[str, Any]) -> list[str]:
             reasons.append("the capture changed since the labels were computed")
     elif then.get("dataset_revision") != now.get("dataset_revision"):
         reasons.append("the dataset changed since the labels were computed")
-    if record.get("dataset_type") != "sft":
+    if record.get("dataset_type") not in ("sft", "value_only"):
         for ep, outcome in (record.get("outcomes") or {}).items():
             if ds.outcome(int(ep)) != outcome:
                 reasons.append(f"episode {ep}'s outcome label changed")
                 break
     return reasons
+
+
+def has_labels(record: dict[str, Any]) -> bool:
+    """False for a value-only result (no advantages, thresholds or labels)."""
+    return record.get("dataset_type") != "value_only"
+
+
+def _floats(values) -> list[float | None]:
+    """JSON-safe: a value-only result stores NaN advantages."""
+    return [None if v is None or math.isnan(v) else float(v) for v in values]
 
 
 def current(ds: Dataset) -> dict[str, Any] | None:
@@ -1022,6 +1407,9 @@ def current(ds: Dataset) -> dict[str, Any] | None:
     reasons = stale_reasons(ds, record)
     return {
         "revision_id": record["revision_id"],
+        "model": record.get("model"),
+        "version": record["version"],
+        "layout": record["layout"],
         "checkpoint": record["checkpoint"]["name"],
         "provider": record["provider"],
         "created_at": record["created_at"],
@@ -1032,6 +1420,8 @@ def current(ds: Dataset) -> dict[str, Any] | None:
         "positive_quantile": record["positive_quantile"],
         "lookahead": record["lookahead"],
         "positive_fraction": record["positive_fraction"],
+        "dataset_type": record.get("dataset_type", "rollout"),
+        "labels": has_labels(record),
         "stale": bool(reasons),
         # Frames labelled / frames in the labelled episodes when the
         # training static filter was applied (else null).
@@ -1060,33 +1450,94 @@ def status(repo_id: str, *, reconcile: bool = True) -> dict[str, Any]:
     else:
         rows = jobs(ds.name)
         job = rows[-1] if rows else None
+    setting = dataset_setting(ds.name)
     return {
         "checkpoints": checkpoints.listing(),
         "worker": worker_state(),
         "current": current(ds),
         "job": public(job) if job else None,
+        # What "auto" resolves to now, and the person's setting.
+        "dataset_type": {
+            "setting": setting["dataset_type"] if setting else "auto",
+            **resolve_dataset_type(ds, "auto"),
+        },
+        # The layout a run started now publishes in (models: recomputing
+        # replaces the model's result; revisions: it adds one per run).
+        "layout": _write_layout(),
     }
 
 
-def episode_payload(repo_id: str, episode: int) -> dict[str, Any]:
-    ds = dataset(repo_id)
-    record = store.revision(ds.name)
+def _write_layout() -> str | None:
+    try:
+        return store.layout()
+    except ValueError:
+        return None  # a misconfigured LEVI_RECAP_STORE_LAYOUT: runs refuse
+
+
+def _published(
+    name: str, revision_id: str | None, version: str | None = None
+) -> dict[str, Any]:
+    """The result a read asks for: ``revision_id`` (a value model's name or
+    an original-layout revision id), else the current one. ``version`` pins
+    the version the reader saw: a result recomputed since answers 409."""
+    if revision_id is not None and not (
+        naming.is_timestamp_id(revision_id) or store.is_model_name(revision_id)
+    ):
+        raise RecapError(400, f"{revision_id!r} is not a revision id or model name")
+    if version is not None and not naming.is_timestamp_id(version):
+        raise RecapError(400, f"{version!r} is not a result version")
+    record = store.revision(name, revision_id)
+    if record and version is not None and record["version"] != version:
+        raise RecapError(
+            409,
+            f"The {record['revision_id']} result was recomputed (version "
+            f"{record['version']}, not {version}); reload it",
+            code="recomputed",
+            extra={"revision_id": record["revision_id"], "version": record["version"]},
+        )
     if not record:
-        raise RecapError(404, "No advantage labels for this dataset yet")
-    table = store.read_episode(ds.name, episode, record["revision_id"])
+        raise RecapError(
+            404,
+            "No advantage labels for this dataset yet"
+            if revision_id is None
+            else f"No revision {revision_id} for this dataset",
+        )
+    return record
+
+
+def episode_payload(
+    repo_id: str,
+    episode: int,
+    revision_id: str | None = None,
+    version: str | None = None,
+) -> dict[str, Any]:
+    ds = dataset(repo_id)
+    record = _published(ds.name, revision_id, version)
+    # Read inside the version just resolved: a recomputation switching the
+    # head meanwhile leaves this version on disk for the grace period.
+    table = store.read_episode(
+        ds.name, episode, record["revision_id"], record["version"]
+    )
     if table is None:
         raise RecapError(404, f"No advantage labels for episode {episode}")
     columns = table.to_pydict()
     return {
         "episode_index": episode,
         "revision_id": record["revision_id"],
+        "model": record.get("model"),
+        "version": record["version"],
+        "computed_at": record.get("created_at"),
         "fps": float(record.get("fps") or ds.fps),
         "threshold": record["threshold"],
         "frame_index": columns["frame_index"],
         "timestamp": columns["timestamp"],
         "value": [float(v) for v in columns["value"]],
-        "advantage": [float(v) for v in columns["advantage"]],
-        "positive": columns["positive"],
+        # Empty for a value-only result (no outcome, so no advantages or
+        # labels): a viewer shows "no advantage labels", never a row of nulls
+        # drawn as negative.
+        "advantage": _floats(columns["advantage"]) if has_labels(record) else [],
+        "positive": columns["positive"] if has_labels(record) else [],
+        "labels": has_labels(record),
         # With the training static filter only kept frames are listed: the
         # frame indices skip over the dropped (unlabelled) ones.
         "static_filter": bool((record.get("static_filter") or {}).get("applied")),
@@ -1094,9 +1545,12 @@ def episode_payload(repo_id: str, episode: int) -> dict[str, Any]:
     }
 
 
-def summary_payload(repo_id: str) -> dict[str, Any]:
+def summary_payload(
+    repo_id: str, revision_id: str | None = None, version: str | None = None
+) -> dict[str, Any]:
     ds = dataset(repo_id)
-    value = store.summary(ds.name)
+    record = _published(ds.name, revision_id, version)
+    value = store.summary(ds.name, record["revision_id"], record["version"])
     if not value:
         raise RecapError(404, "No advantage labels for this dataset yet")
     return value
@@ -1109,6 +1563,8 @@ def episode_digest(repo_id: str, episode: int) -> dict[str, Any]:
     positive = full["positive"]
     times = full["timestamp"]
     runs, start = [], 0
+    if not full["labels"]:
+        positive = []  # values only: no runs of labels
     for i in range(1, len(positive) + 1):
         if i == len(positive) or positive[i] != positive[start]:
             chunk = full["advantage"][start:i]
@@ -1128,12 +1584,15 @@ def episode_digest(repo_id: str, episode: int) -> dict[str, Any]:
         "episode_index": episode,
         "revision_id": full["revision_id"],
         "threshold": full["threshold"],
-        "frames": len(positive),
-        "positive_fraction": sum(positive) / len(positive) if positive else 0.0,
+        "frames": len(times),
+        "labels": full["labels"],
+        "positive_fraction": (sum(positive) / len(positive) if positive else 0.0)
+        if full["labels"]
+        else None,
         "runs": runs,
         "value_samples": [
             {"time": round(times[i], 3), "value": round(full["value"][i], 4)}
-            for i in range(0, len(positive), step)
+            for i in range(0, len(times), step)
         ],
     }
 
@@ -1155,12 +1614,18 @@ def unified_threshold(
     parts, rows, keys = [], [], set()
     for repo_id in repo_ids:
         ds = dataset(repo_id)
-        rid = store.current_id(ds.name)
-        record = store.revision(ds.name, rid) if rid else None
+        record = store.revision(ds.name)
+        rid = record["revision_id"] if record else None
         if not record:
             raise RecapError(400, f"{repo_id} has no computed revision")
+        if not has_labels(record):
+            raise RecapError(
+                400,
+                f"{repo_id} has values only (no outcomes, so no advantages); "
+                "set its dataset type or label outcomes and recompute",
+            )
         table = pq.read_table(
-            store.root(ds.name) / "revisions" / rid / "advantages.parquet",
+            store.advantages_path(ds.name, rid, record["version"]),
             columns=["advantage_continuous"],
         )
         scores = table.column("advantage_continuous").to_numpy()
@@ -1178,6 +1643,7 @@ def unified_threshold(
             {
                 "repo_id": repo_id,
                 "revision_id": rid,
+                "version": record["version"],
                 "dataset_type": record.get("dataset_type"),
                 "frames": len(scores),
                 "positive_quantile": record.get("positive_quantile"),
@@ -1211,3 +1677,214 @@ def unified_threshold(
         "checkpoint_sha256": next(iter(keys))[0],
         "datasets": rows,
     }
+
+
+# ---------------------------------------------------------------- clearing
+
+
+def _running(name: str) -> list[str]:
+    """Jobs of a dataset whose worker is alive (read-only: never publishes)."""
+    return [
+        job["id"] for job in jobs(name) if job.get("status") in ACTIVE and _alive(job)
+    ]
+
+
+def _size(path: Path) -> int:
+    if path.is_file():
+        return path.stat().st_size
+    total = 0
+    for item in path.rglob("*"):
+        try:
+            if item.is_file() and not item.is_symlink():
+                total += item.stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def _clear_items(name: str, include_jobs: bool) -> list[dict[str, Any]]:
+    folder = store.root(name)
+    items: list[dict[str, Any]] = []
+    for model in sorted(p.name for p in (folder / store.MODELS).glob("*")):
+        path = folder / store.MODELS / model
+        record = store.revision(name, model) if store.head(name, model) else None
+        items.append(
+            {
+                "kind": "model_result",
+                "ref": model,
+                "version": record["version"] if record else None,
+                "episodes": record.get("episodes") if record else None,
+                "path": path,
+            }
+        )
+    legacy = folder / store.LEGACY
+    for rid in sorted(p.name for p in legacy.glob("*")) if legacy.is_dir() else []:
+        record = store.revision(name, rid) if naming.is_timestamp_id(rid) else None
+        items.append(
+            {
+                "kind": "revision",
+                "ref": rid,
+                "version": rid if record else None,
+                "episodes": record.get("episodes") if record else None,
+                "path": legacy / rid,
+            }
+        )
+    if (folder / "current.json").is_file():
+        items.append({"kind": "current", "ref": None, "path": folder / "current.json"})
+    if include_jobs:
+        for sub in ("jobs", "plans", "results"):
+            if (folder / sub).is_dir():
+                items.append({"kind": sub, "ref": None, "path": folder / sub})
+    for item in items:
+        item["bytes"] = _size(item["path"])
+    return items
+
+
+def _symlinks(name: str, items: list[dict[str, Any]]) -> list[str]:
+    """Symbolic links on the way to anything ``clear`` would remove (the
+    dataset folder itself, ``models``/``revisions``, an item): deleting
+    through one would reach data outside ``recap_values``."""
+    folder = store.root(name)
+    found: list[str] = []
+    if folder.is_symlink():
+        return ["."]
+    for item in items:
+        path = item["path"]
+        relative = path.relative_to(folder)
+        step = folder
+        for part in relative.parts:
+            step = step / part
+            label = str(step.relative_to(folder))
+            if step.is_symlink() and label not in found:
+                found.append(label)
+                break
+    return found
+
+
+def clear(
+    names: list[str] | None = None,
+    *,
+    include_jobs: bool = False,
+    apply: bool = False,
+) -> dict[str, Any]:
+    """Remove RECAP results (both layouts) and ``current.json``; with
+    ``include_jobs`` also the job records, plans and worker outputs.
+
+    A dry run (the default) only lists what would go and its size, and
+    writes nothing (no lock is taken). ``names`` are ``local/<name>`` ids or
+    folder names under ``recap_values`` (results of a dataset no longer
+    registered can be cleared too); ``None`` means every folder. Refused
+    while a job of the dataset runs, and when a symbolic link lies on the
+    way to anything it would remove. Checkpoints, datasets and the dataset
+    setting (``dataset.json``) are never touched. Each removed item is
+    appended to the folder's ``cleared.jsonl`` as soon as it is gone (a
+    failure is logged too)."""
+    base = catalog.STATE / "recap_values"
+    if names is None:
+        names = (
+            sorted(p.name for p in base.iterdir() if p.is_dir() and not p.is_symlink())
+            if base.is_dir()
+            else []
+        )
+    resolved = []
+    for value in names:
+        if value.startswith("local/"):
+            try:
+                value = catalog.resolve_name(value)
+            except ValueError as exc:
+                raise RecapError(400, str(exc)) from exc
+        try:
+            folder = store.root(value)
+        except ValueError as exc:
+            raise RecapError(400, str(exc)) from exc
+        if not folder.is_dir():
+            raise RecapError(404, f"No RECAP results folder for {value}")
+        resolved.append(value)
+    busy = {name: ids for name in resolved if (ids := _running(name))}
+    if busy:
+        raise RecapError(
+            409,
+            "RECAP value jobs are running ("
+            + "; ".join(f"{n}: {', '.join(i)}" for n, i in busy.items())
+            + "); wait for them or cancel them first",
+        )
+    plans = {}
+    for name in resolved:
+        links = _symlinks(name, [])
+        items = [] if links else _clear_items(name, include_jobs)
+        plans[name] = (items, links or _symlinks(name, items))
+    if apply:
+        linked = {n: links for n, (_, links) in plans.items() if links}
+        if linked:
+            raise RecapError(
+                409,
+                "Symbolic links in the RECAP results folders ("
+                + "; ".join(f"{n}: {', '.join(links)}" for n, links in linked.items())
+                + "); nothing was removed — move the data back or remove the "
+                "links by hand",
+            )
+    report: dict[str, Any] = {"applied": apply, "datasets": [], "bytes": 0}
+    for name in resolved:
+        items, links = plans[name]
+        if apply:
+            with store.locked(name):
+                if _running(name):
+                    raise RecapError(409, f"A RECAP value job started on {name}")
+                items = _clear_items(name, include_jobs)
+                links = _symlinks(name, items)
+                if links:
+                    raise RecapError(
+                        409, f"Symbolic links appeared in {name}: {', '.join(links)}"
+                    )
+                _remove(name, items)
+        size = sum(i["bytes"] for i in items)
+        report["bytes"] += size
+        report["datasets"].append(
+            {
+                "name": name,
+                "bytes": size,
+                "symlinks": links,
+                "items": [
+                    {
+                        **{k: v for k, v in i.items() if k != "path"},
+                        "path": str(i["path"].relative_to(base)),
+                    }
+                    for i in items
+                ],
+            }
+        )
+    return report
+
+
+def _remove(name: str, items: list[dict[str, Any]]) -> None:
+    """Delete one item after another, logging each as soon as it is gone."""
+    folder = store.root(name)
+    with (folder / "cleared.jsonl").open("a") as log:
+
+        def note(entry: dict[str, Any]) -> None:
+            log.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            log.flush()
+            os.fsync(log.fileno())
+
+        for item in items:
+            path = item["path"]
+            entry = {k: v for k, v in item.items() if k != "path"}
+            entry["path"] = str(path.relative_to(folder))
+            try:
+                if path.is_symlink():
+                    raise OSError(f"{entry['path']} became a symbolic link")
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink(missing_ok=True)
+            except OSError as exc:
+                note({**entry, "failed_at": time.time(), "error": str(exc)})
+                raise RecapError(
+                    500,
+                    f"{name} was partly cleared: {entry['path']} failed ({exc}); "
+                    "see cleared.jsonl",
+                ) from exc
+            note({**entry, "cleared_at": time.time()})
+    for empty in (store.MODELS, store.LEGACY):
+        with contextlib.suppress(OSError):
+            (folder / empty).rmdir()

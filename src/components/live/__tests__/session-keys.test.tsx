@@ -40,4 +40,14 @@ describe("a list of sessions never repeats a key", () => {
     }
     expect(errors.filter((e) => String(e[0]).includes("same key"))).toEqual([]);
   });
+
+  test("session identity remains stable across filtering and deletion", () => {
+    const first = { ...session(), root: "/captures-a", session_id: "first" };
+    const second = { ...session(), root: "/captures-a", session_id: "second" };
+    const anotherRoot = { ...second, root: "/captures-b" };
+    const keys = sessionKeys([first, second, anotherRoot]);
+    expect(new Set(keys).size).toBe(3);
+    expect(sessionKeys([second])[0]).toBe(keys[1]);
+    expect(sessionKeys([anotherRoot])[0]).toBe(keys[2]);
+  });
 });

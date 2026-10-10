@@ -3017,11 +3017,29 @@ class RecapRunRequest(BaseModel):
     positive_quantile: float | None = Field(default=None, gt=0, lt=1)
     threshold: float | None = None
     # "sft": demonstrations, every episode a success and every frame positive
-    # (RLinf's dataset type); the default reads each episode's outcome.
-    dataset_type: Literal["rollout", "sft"] = "rollout"
+    # (RLinf's dataset type); "rollout" reads each episode's outcome;
+    # "value_only" computes values without labels; "auto" (the default) takes
+    # the dataset setting, the export's metadata or the outcomes, else
+    # falls back to "rollout".
+    dataset_type: Literal["auto", "rollout", "sft", "value_only"] = "auto"
     # The training-data static-pose filter (docs/RECAP.md): "auto" applies it
     # when the checkpoint names one and the dataset is a raw-capture view.
     static_filter: Literal["auto", "on", "off"] = "auto"
+
+
+class _RecapCoded(Exception):
+    """A RECAP refusal with a stable ``code`` (see RecapError)."""
+
+    def __init__(self, error):
+        super().__init__(error.detail)
+        self.error = error
+
+
+@app.exception_handler(_RecapCoded)
+def _recap_coded(_request: Request, exc: _RecapCoded) -> JSONResponse:
+    # {"detail": <text>, "code": "recomputed", "revision_id", "version"}:
+    # detail stays a string for older clients.
+    return JSONResponse(exc.error.body(), status_code=exc.error.status)
 
 
 def _recap_call(call):
@@ -3030,6 +3048,8 @@ def _recap_call(call):
     try:
         return call()
     except RecapError as exc:
+        if exc.code:
+            raise _RecapCoded(exc) from exc
         raise HTTPException(exc.status, exc.detail) from exc
 
 
@@ -3043,6 +3063,30 @@ def _recap_job(job_id: str, repo_id: str | None) -> dict[str, Any]:
     if job is None:
         raise HTTPException(404, "RECAP value job not found")
     return job
+
+
+class RecapSettingsRequest(BaseModel):
+    repo_id: str
+    # "auto" removes the setting (the type is then inferred from the data).
+    dataset_type: Literal["auto", "rollout", "sft", "value_only"]
+
+
+@app.get("/api/recap/settings")
+def recap_settings(repo_id: str) -> JSONResponse:
+    from levi.recap import jobs as recap_jobs
+
+    return JSONResponse(_recap_call(lambda: recap_jobs.dataset_type_payload(repo_id)))
+
+
+@app.post("/api/recap/settings")
+def recap_set_settings(request: RecapSettingsRequest) -> JSONResponse:
+    from levi.recap import jobs as recap_jobs
+
+    return JSONResponse(
+        _recap_call(
+            lambda: recap_jobs.set_dataset_type(request.repo_id, request.dataset_type)
+        )
+    )
 
 
 @app.get("/api/recap/status")
@@ -3100,27 +3144,73 @@ def _recap_optional(call, optional: bool):
     except RecapError as exc:
         if optional and exc.status == 404:
             return None
+        if exc.code:
+            raise _RecapCoded(exc) from exc
         raise HTTPException(exc.status, exc.detail) from exc
 
 
 @app.get("/api/recap/summary")
-def recap_summary(repo_id: str, optional: bool = False) -> JSONResponse:
-    from levi.recap import jobs as recap_jobs
-
-    return JSONResponse(
-        _recap_optional(lambda: recap_jobs.summary_payload(repo_id), optional)
-    )
-
-
-@app.get("/api/recap/episodes/{episode_index}")
-def recap_episode(
-    episode_index: int, repo_id: str, optional: bool = False
+def recap_summary(
+    repo_id: str,
+    optional: bool = False,
+    revision_id: str | None = None,
+    version: str | None = None,
 ) -> JSONResponse:
     from levi.recap import jobs as recap_jobs
 
     return JSONResponse(
         _recap_optional(
-            lambda: recap_jobs.episode_payload(repo_id, episode_index), optional
+            lambda: recap_jobs.summary_payload(repo_id, revision_id, version),
+            optional,
+        )
+    )
+
+
+@app.get("/api/recap/episodes/{episode_index}")
+def recap_episode(
+    episode_index: int,
+    repo_id: str,
+    optional: bool = False,
+    revision_id: str | None = None,
+    version: str | None = None,
+) -> JSONResponse:
+    from levi.recap import jobs as recap_jobs
+
+    return JSONResponse(
+        _recap_optional(
+            lambda: recap_jobs.episode_payload(
+                repo_id, episode_index, revision_id, version
+            ),
+            optional,
+        )
+    )
+
+
+# Every published result of the dataset (one per value model in the "models"
+# layout; one per run in the original "revisions" layout), and a side-by-side
+# comparison of two of them. Read-only: which result is "current" is only
+# changed by running again. /results is the new name of /revisions.
+@app.get("/api/recap/revisions")
+@app.get("/api/recap/results")
+def recap_revisions(repo_id: str) -> JSONResponse:
+    from levi.recap import compare
+
+    return JSONResponse(_recap_call(lambda: compare.revisions_payload(repo_id)))
+
+
+@app.get("/api/recap/compare")
+def recap_compare(
+    repo_id: str,
+    a: str,
+    b: str,
+    version_a: str | None = None,
+    version_b: str | None = None,
+) -> JSONResponse:
+    from levi.recap import compare
+
+    return JSONResponse(
+        _recap_call(
+            lambda: compare.compare_payload(repo_id, a, b, version_a, version_b)
         )
     )
 

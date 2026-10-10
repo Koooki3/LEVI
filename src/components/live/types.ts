@@ -30,6 +30,7 @@ export interface SessionFr3 {
 }
 
 export interface LiveSession {
+  root?: string;
   group: string;
   task_folder: string;
   dataset?: string;
@@ -60,6 +61,9 @@ export interface LiveSession {
   session_id?: string;
   run_id?: string;
   started_at?: number | null;
+  updated_at?: number | null;
+  viewer_url?: string | null;
+  view_status?: string | null;
   policy?: { config?: string | null; checkpoint?: string | null };
   reset_wait_s?: number | null;
   /** Epoch seconds when it began waiting for the reset (supervisor's view). */
@@ -70,6 +74,14 @@ export interface LiveSession {
 }
 
 export interface DatasetRow {
+  group?: string | null;
+  task_folder?: string | null;
+  task_text?: string | null;
+  viewer_url?: string | null;
+  view_status?: string | null;
+  first_episode_index?: number | null;
+  updated_at?: number | null;
+  last_seen_at?: number | null;
   episodes: number;
   pending: number;
   annotating: number;

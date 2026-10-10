@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/Koooki3/skill-loom",
+  "commit": "34efa6e539e2d1da829d05652d6c0df1c1433a7a",
+  "version": "0.1.1",
+  "upstream_path": "skills/skill-lifecycle",
+  "license": "MIT",
+  "local_changes": "Added LICENSE and this provenance record; upstream skill instructions and references are unchanged.",
+  "files": {
+    "LICENSE": "a83ce20df22f41888c3d1a7be203d69083a423dcbea7114cba45c3aeff80b7f9",
+    "SKILL.md": "a92fbd56da5beea7bb7844074f9fa030b4da00eb0d45ffc94810f04336a0833c",
+    "references/validation.md": "e166e736c53b77fffdfbd4e53364d5ece8d44d2cf05b99fbb298e64175476f47",
+    "references/workspace.md": "bf11f462f96e900e693479de9a48997d3683a44ccee38983470b04ff7d87d069"
+  }
+}

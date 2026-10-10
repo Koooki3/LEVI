@@ -187,9 +187,12 @@ def test_every_read_route_answers_from_the_live_workspace(client, env, product):
 
     status = client.get("/api/levi/live/status").json()
     assert status["enabled"] and status["service"]["datasets"][NAME]["pending"] == 2
-    assert client.get("/api/levi/live/datasets").json()["datasets"] == {
-        NAME: {"pending": 2, "done": 0}
-    }
+    summaries = client.get("/api/levi/live/datasets").json()["datasets"]
+    assert set(summaries) == {NAME}
+    assert (summaries[NAME]["pending"], summaries[NAME]["done"]) == (2, 0)
+    assert summaries[NAME]["task_folder"] == "stack_the_plates"
+    assert summaries[NAME]["view_status"] == "pending"
+    assert summaries[NAME]["viewer_url"] is None
     detail = client.get(f"/api/levi/live/datasets/{NAME}").json()
     assert detail["total_demos"] == 2 and detail["embedded"] is True
     # The live workspace's catalog, not the product's same-named dataset.

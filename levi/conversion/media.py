@@ -3,6 +3,7 @@
 import functools
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -78,8 +79,63 @@ def decode(path: Path):
         cap.release()
 
 
+STATS_SETTING = "LEVI_PIXEL_STATS"
+STATS_METHODS = ("float", "histogram")
+# cv2.calcHist counts in float32, exact up to 2**24 pixels per channel.
+EXACT_HIST_PIXELS = 1 << 24
+
+
+def stats_method(value=None) -> str:
+    """``float`` (default: the original per-frame float64 accumulation) or
+    ``histogram`` (integer counts, exact sums). Anything else is refused."""
+    method = (value or os.environ.get(STATS_SETTING) or "float").strip().lower()
+    if method not in STATS_METHODS:
+        raise ValueError(
+            f"{STATS_SETTING} must be one of {', '.join(STATS_METHODS)}: {method!r}"
+        )
+    return method
+
+
+class PixelHistogram:
+    """Per-channel counts of the 8-bit values of every decoded frame.
+
+    The statistics ``inspect`` reports are functions of these 3 x 256 counts,
+    so they are computed once, from integers: the sums are exact and the
+    variance has no cancellation (the float method subtracts two nearly equal
+    numbers). Channels are kept in the frame's BGR order and reported as RGB."""
+
+    def __init__(self):
+        self.counts = np.zeros((3, 256), dtype=np.int64)
+
+    def add(self, frame):
+        if frame.shape[0] * frame.shape[1] <= EXACT_HIST_PIXELS:
+            for c in range(3):
+                hist = cv2.calcHist([frame], [c], None, [256], [0, 256])
+                self.counts[c] += np.rint(hist.ravel()).astype(np.int64)
+        else:
+            for c in range(3):
+                self.counts[c] += np.bincount(frame[:, :, c].ravel(), minlength=256)
+
+    def result(self):
+        """``(lo, hi, mean, std, pixels)``: per RGB channel, values in [0, 1]."""
+        lo, hi, mean, std = [], [], [], []
+        for counts in self.counts[::-1].tolist():
+            n = sum(counts)
+            s1 = sum(v * c for v, c in enumerate(counts))
+            s2 = sum(v * v * c for v, c in enumerate(counts))
+            seen = [v for v, c in enumerate(counts) if c]
+            lo.append(seen[0] / 255)
+            hi.append(seen[-1] / 255)
+            mean.append(s1 / (255 * n))
+            # Exact integer numerator: n * sum(v^2) - (sum v)^2 >= 0.
+            std.append(((s2 * n - s1 * s1) / (n * n * 255 * 255)) ** 0.5)
+        return np.array(lo), np.array(hi), np.array(mean), np.array(std), n
+
+
 def inspect(path: Path, pixels=False):
     info = probe(path)
+    method = stats_method() if pixels else None
+    histogram = None
     first = None
     count = 0
     span = 0.0
@@ -92,9 +148,13 @@ def inspect(path: Path, pixels=False):
         if first is None:
             first = thumb
             info["first_hash"] = hashlib.sha256(frame.tobytes()).hexdigest()
+            if method == "histogram" and frame.dtype == np.uint8:
+                histogram = PixelHistogram()
         span = max(span, float(np.abs(thumb - first).mean()))
         count += 1
-        if pixels:
+        if histogram is not None:
+            histogram.add(frame)
+        elif pixels:
             rgb = frame[:, :, ::-1].reshape(-1, 3).astype(np.float64) / 255
             lo = np.minimum(lo, rgb.min(0))
             hi = np.maximum(hi, rgb.max(0))
@@ -109,13 +169,17 @@ def inspect(path: Path, pixels=False):
         )
     info.update(frames=count, span=span)
     if pixels:
-        mean = total / pixel_count
         shape = lambda x: np.asarray(x).reshape(3, 1, 1).tolist()
+        if histogram is not None:
+            lo, hi, mean, std, _ = histogram.result()
+        else:
+            mean = total / pixel_count
+            std = np.sqrt(np.maximum(0, squares / pixel_count - mean**2))
         info["stats"] = {
             "min": shape(lo),
             "max": shape(hi),
             "mean": shape(mean),
-            "std": shape(np.sqrt(np.maximum(0, squares / pixel_count - mean**2))),
+            "std": shape(std),
             "count": [count],
         }
     return info

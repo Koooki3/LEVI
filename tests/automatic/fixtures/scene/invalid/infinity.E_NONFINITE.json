@@ -1,0 +1,48 @@
+{
+ "schema": "levi.aeri.scene.v1",
+ "minor": 0,
+ "run_id": "r20261010-a",
+ "emitted_wall_ns": 1791600000000000000,
+ "kind": "scene",
+ "assessment_id": "sa-2",
+ "request_id": "req-11",
+ "episode_id": "r20261010-a.forward.0004",
+ "target": "initial_state",
+ "decision": "ready",
+ "contract_id": "plates-initial",
+ "contract_version": "1",
+ "predicate_results": [
+  {
+   "name": "plates_separated",
+   "value": true,
+   "required": true,
+   "evidence_refs": []
+  },
+  {
+   "name": "gripper_empty",
+   "value": true,
+   "required": true,
+   "evidence_refs": []
+  }
+ ],
+ "failed_predicates": [],
+ "unknown_predicates": [],
+ "unknown_reason": null,
+ "evidence_refs": [
+  {
+   "kind": "frame",
+   "ref": "top@0"
+  }
+ ],
+ "observed_ns": Infinity, "z": 7000000000,
+ "produced_ns": 7500000000,
+ "valid_until_ns": 9500000000,
+ "clock_domain": "host-mono:0f0e0d0c-0b0a-4908-8706-050403020100",
+ "provider": "fake",
+ "model_name": null,
+ "model_digest": null,
+ "confidence_kind": "none",
+ "calibrated_probability": null,
+ "calibration_ref": null,
+ "cost": null
+}

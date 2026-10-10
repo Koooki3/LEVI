@@ -1,0 +1,566 @@
+{
+  "$defs": {
+    "Cost": {
+      "additionalProperties": false,
+      "properties": {
+        "completion_tokens": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completion Tokens"
+        },
+        "elapsed_ms": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Elapsed Ms",
+          "type": "integer"
+        },
+        "prompt_tokens": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt Tokens"
+        }
+      },
+      "required": [
+        "elapsed_ms"
+      ],
+      "title": "Cost",
+      "type": "object"
+    },
+    "EvidenceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "frame",
+            "signal",
+            "clip",
+            "event",
+            "judgement"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "ref": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Ref",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step"
+        }
+      },
+      "required": [
+        "kind",
+        "ref"
+      ],
+      "title": "EvidenceRef",
+      "type": "object"
+    },
+    "PredicateResult": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "maxItems": 32,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "name",
+        "value",
+        "required"
+      ],
+      "title": "PredicateResult",
+      "type": "object"
+    },
+    "SceneAssessment": {
+      "additionalProperties": false,
+      "description": "Whether the scene is ready. ``failed_predicates`` and\n``unknown_predicates`` repeat the required predicates that are false or\nunreadable. There is no recommended action: C decides on a reset.",
+      "properties": {
+        "assessment_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Assessment Id",
+          "type": "string"
+        },
+        "calibrated_probability": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Calibrated Probability"
+        },
+        "calibration_ref": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Calibration Ref"
+        },
+        "clock_domain": {
+          "pattern": "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9._-]{1,128}$",
+          "title": "Clock Domain",
+          "type": "string"
+        },
+        "confidence_kind": {
+          "enum": [
+            "none",
+            "ordinal",
+            "calibrated"
+          ],
+          "title": "Confidence Kind",
+          "type": "string"
+        },
+        "contract_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Contract Id",
+          "type": "string"
+        },
+        "contract_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "cost": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Cost"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "decision": {
+          "enum": [
+            "ready",
+            "reset_required",
+            "unknown"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "emitted_wall_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Emitted Wall Ns",
+          "type": "integer"
+        },
+        "episode_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\\.(?:forward|reset)\\.[0-9]{4,6}$",
+          "title": "Episode Id",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "maxItems": 32,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "failed_predicates": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Failed Predicates",
+          "type": "array"
+        },
+        "kind": {
+          "const": "scene",
+          "title": "Kind",
+          "type": "string"
+        },
+        "minor": {
+          "maximum": 0,
+          "minimum": 0,
+          "title": "Minor",
+          "type": "integer"
+        },
+        "model_digest": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Digest"
+        },
+        "model_name": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Name"
+        },
+        "observed_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Observed Ns",
+          "type": "integer"
+        },
+        "predicate_results": {
+          "items": {
+            "$ref": "#/$defs/PredicateResult"
+          },
+          "maxItems": 32,
+          "title": "Predicate Results",
+          "type": "array"
+        },
+        "produced_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Produced Ns",
+          "type": "integer"
+        },
+        "provider": {
+          "enum": [
+            "vlm",
+            "rule",
+            "human",
+            "fake"
+          ],
+          "title": "Provider",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema": {
+          "const": "levi.aeri.scene.v1",
+          "title": "Schema",
+          "type": "string"
+        },
+        "target": {
+          "enum": [
+            "initial_state",
+            "post_reset",
+            "post_forward"
+          ],
+          "title": "Target",
+          "type": "string"
+        },
+        "unknown_predicates": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Unknown Predicates",
+          "type": "array"
+        },
+        "unknown_reason": {
+          "anyOf": [
+            {
+              "enum": [
+                "insufficient_evidence",
+                "occluded",
+                "conflicting_predicates",
+                "model_undecided",
+                "out_of_scope",
+                "stale_inputs"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unknown Reason"
+        },
+        "valid_until_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Valid Until Ns",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "minor",
+        "run_id",
+        "emitted_wall_ns",
+        "schema",
+        "kind",
+        "assessment_id",
+        "request_id",
+        "episode_id",
+        "target",
+        "decision",
+        "contract_id",
+        "contract_version",
+        "predicate_results",
+        "failed_predicates",
+        "unknown_predicates",
+        "evidence_refs",
+        "observed_ns",
+        "produced_ns",
+        "valid_until_ns",
+        "clock_domain",
+        "provider",
+        "confidence_kind"
+      ],
+      "title": "SceneAssessment",
+      "type": "object"
+    },
+    "SceneUnavailable": {
+      "additionalProperties": false,
+      "properties": {
+        "clock_domain": {
+          "pattern": "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9._-]{1,128}$",
+          "title": "Clock Domain",
+          "type": "string"
+        },
+        "code": {
+          "enum": [
+            "gate_closed",
+            "busy",
+            "admission_rejected",
+            "cold_start",
+            "no_room",
+            "shutting_down",
+            "timeout",
+            "model_error",
+            "invalid_answer",
+            "provider_error",
+            "cancelled",
+            "stale",
+            "contract_violation",
+            "not_supported"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "default": "",
+          "maxLength": 300,
+          "title": "Detail",
+          "type": "string"
+        },
+        "emitted_wall_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Emitted Wall Ns",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "unavailable",
+          "title": "Kind",
+          "type": "string"
+        },
+        "minor": {
+          "maximum": 0,
+          "minimum": 0,
+          "title": "Minor",
+          "type": "integer"
+        },
+        "produced_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Produced Ns",
+          "type": "integer"
+        },
+        "request_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "retry_after_ms": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry After Ms"
+        },
+        "retryable": {
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema": {
+          "const": "levi.aeri.scene.v1",
+          "title": "Schema",
+          "type": "string"
+        }
+      },
+      "required": [
+        "minor",
+        "run_id",
+        "emitted_wall_ns",
+        "kind",
+        "request_id",
+        "retryable",
+        "produced_ns",
+        "clock_domain",
+        "schema",
+        "code"
+      ],
+      "title": "SceneUnavailable",
+      "type": "object"
+    }
+  },
+  "$id": "levi.aeri.scene.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "discriminator": {
+    "mapping": {
+      "scene": "#/$defs/SceneAssessment",
+      "unavailable": "#/$defs/SceneUnavailable"
+    },
+    "propertyName": "kind"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/SceneAssessment"
+    },
+    {
+      "$ref": "#/$defs/SceneUnavailable"
+    }
+  ],
+  "x-levi-control-keys": [
+    "robot_stop",
+    "stop_robot",
+    "execute_reset",
+    "start_reset",
+    "go_home",
+    "home_robot",
+    "halt",
+    "estop",
+    "e_stop",
+    "clearerr",
+    "clear_error",
+    "jointreset",
+    "resume",
+    "override",
+    "command",
+    "action_request"
+  ],
+  "x-levi-control-prefixes": [
+    "robot_",
+    "execute_",
+    "cmd_",
+    "force_"
+  ],
+  "x-levi-future-tolerance-ns": 100000000,
+  "x-levi-major": 1,
+  "x-levi-max-result-validity-ms": 30000,
+  "x-levi-minor": 0,
+  "x-levi-retryable-codes": [
+    "gate_closed",
+    "busy",
+    "admission_rejected"
+  ]
+}

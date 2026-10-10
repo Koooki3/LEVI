@@ -18,9 +18,9 @@ reading the removals made there; ``levi/pool/exclusions.py``, at most
 ``MAX_REMEMBERED``; ``levi pool live-workspaces list|forget``). Nothing is
 ever written into the live workspace by a GET.
 
-The only routes that change anything take an episode out of a dataset and put
-it back (``exclusion.py``; a soft delete that keeps every file). They are a
-person's action: the UI token of the LEVI serving the page is required (the
+Write routes offer soft exclusion/restoration, session and pipeline removal,
+and CPU-only viewer preparation. They are a person's action: the UI token
+of the LEVI serving the page is required (the
 same check as every other write of the page), a LEVI Agent credential is
 refused, and there is no capability an agent or the automatic approver could
 call instead. On the product LEVI the change is made by its own process on
@@ -43,9 +43,11 @@ from pydantic import BaseModel, Field
 
 from . import (
     auto,
+    catalogue,
     exclusion,
     jsonio,
     locate,
+    management,
     mirror,
     resumer,
     sessions,
@@ -110,6 +112,33 @@ def _linked_id(workspace: Path, name: str) -> str | None:
     from levi import links
 
     return links.product_id(workspace, name)
+
+
+def _browse(config, name, session_id=None):
+    info = catalogue.browse_info(config, name, session_id)
+    info["view_status"] = {
+        "missing": "pending",
+        "queued": "building",
+        "failed": "error",
+    }.get(info.get("view_status"), info.get("view_status"))
+    source_name = (info.get("repo_id") or "local/" + name).removeprefix("local/")
+    repo = (
+        _linked_id(config.workspace, source_name)
+        if _embedded(config.workspace)
+        else info.get("repo_id")
+    )
+    index = info.get("first_episode_index")
+    url = None
+    if repo and index is not None and info.get("view_status") == "ready":
+        org, dataset = repo.split("/", 1)
+        url = f"/{quote(org, safe='')}/{quote(dataset, safe='')}/episode_{index}"
+        if session_id:
+            url += "?live_session=" + quote(session_id, safe="")
+    return {
+        **{k: v for k, v in info.items() if k != "repo_id"},
+        "linked_repo_id": repo if _embedded(config.workspace) else None,
+        "viewer_url": url,
+    }
 
 
 def _embedded(root: Path) -> bool:
@@ -212,6 +241,10 @@ def status():
         return _disabled()
     now = time.time()
     value = jsonio.read(config.status_file)
+    if value:
+        value = {**value, "datasets": _dataset_summaries(config, value)}
+    else:
+        value = {"datasets": _dataset_summaries(config, {})}
     alive = _alive(value, now)
     faults = []
     for name, row in ((value or {}).get("datasets") or {}).items():
@@ -251,9 +284,21 @@ def sessions_view():
         for r in ((jsonio.read(config.status_file) or {}).get("sessions") or [])
     }
     rows = []
-    for (_root, group, task), session in sorted(found.items())[:64]:
+    for (_root, group, task), session in sorted(found.items()):
+        if management.session_deleted(config, session):
+            continue
         row = session.public()
         row["dataset"] = mirror.resolve_name(config, _root, group, task)
+        if management.archived(config, row["dataset"]):
+            row["dataset"] = None
+        if row["dataset"]:
+            row.update(
+                _browse(config, row["dataset"], session.run_id or session.session_id)
+            )
+            viewed = (
+                mirror.load_state(config, row["dataset"]).get("catalogue") or {}
+            ).get("updated_at")
+            row["updated_at"] = max(session.updated_at or 0, viewed or 0) or None
         row["fault"] = session.fault
         row["waiting_reset_since"] = (
             (session.waiting_reset_since or since.get((_root, group, task)))
@@ -276,7 +321,43 @@ def datasets_view():
     if config is None:
         return _disabled()
     value = jsonio.read(config.status_file) or {}
-    return {"enabled": True, "datasets": value.get("datasets") or {}}
+    return {"enabled": True, "datasets": _dataset_summaries(config, value)}
+
+
+def _dataset_summaries(config, value):
+    rows = {}
+    states = mirror.list_states(config)
+    for name in sorted(set(states) | set(value.get("datasets") or {})):
+        if management.archived(config, name):
+            continue
+        state = states.get(name) or {}
+        rows[name] = {
+            **((value.get("datasets") or {}).get(name) or {}),
+            **{
+                k: state.get(k)
+                for k in (
+                    "group",
+                    "task_folder",
+                    "task_text",
+                    "last_seen_at",
+                    "last_processed_at",
+                    "current",
+                )
+            },
+            **(
+                {
+                    **mirror.counts(state),
+                    "episodes": sum(mirror.counts(state).values()),
+                    "pending": mirror.counts(state)["mirrored"],
+                }
+                if state
+                else {}
+            ),
+            **_browse(config, name),
+            "updated_at": (state.get("catalogue") or {}).get("updated_at")
+            or state.get("last_seen_at"),
+        }
+    return rows
 
 
 def _demo_row(name, row):
@@ -346,10 +427,10 @@ def dataset_view(name: str):
     if not DATASET.fullmatch(name):
         raise HTTPException(404, "Unknown live dataset")
     state = mirror.load_state(config, name)
-    if not state:
+    if not state or management.is_archived(state):
         raise HTTPException(404, "Unknown live dataset")
     demos = state.get("demos") or {}
-    names = sorted(demos, reverse=True)
+    names = sorted((d for d in demos if not demos[d].get("deleted")), reverse=True)
     # Removed episodes (``exclusion.py``) are listed apart, so the list a
     # person works with and every number on the page leave them out.
     kept = [d for d in names if not exclusion.is_excluded(demos[d])]
@@ -372,6 +453,7 @@ def dataset_view(name: str):
         # Where this LEVI opens the dataset when it is not the live workspace
         # itself: its read-only link (``levi/links.py``), if it has one.
         "linked_repo_id": _linked_id(config.workspace, name),
+        **_browse(config, name),
         **where,
         "group": state.get("group"),
         "task_folder": state.get("task_folder"),
@@ -460,7 +542,11 @@ def _live_config(name: str):
     config = _config()
     if config is None:
         raise HTTPException(404, "No live workspace is set up for this LEVI")
-    if not DATASET.fullmatch(name) or not mirror.load_state(config, name):
+    if (
+        not DATASET.fullmatch(name)
+        or not mirror.load_state(config, name)
+        or management.archived(config, name)
+    ):
         raise HTTPException(404, "Unknown live dataset")
     # Before writing: the state file and the audit log must really lie inside
     # the live workspace (a ``live/`` linked to elsewhere is refused).
@@ -476,6 +562,111 @@ def _live_config(name: str):
                 409, "The live workspace's state lies outside it; nothing was changed"
             )
     return config
+
+
+class SessionIdentity(BaseModel):
+    root: str = Field(min_length=1, max_length=4096)
+    group: str = Field(min_length=1, max_length=200)
+    task_folder: str = Field(min_length=1, max_length=200)
+    session_id: str = Field(default="", max_length=160)
+
+
+class SessionDeletion(SessionIdentity):
+    confirmation: str = Field(min_length=1, max_length=64)
+
+
+class PipelineSelection(BaseModel):
+    delete_files: bool = False
+
+
+class PipelineDeletion(PipelineSelection):
+    confirmation: str = Field(min_length=1, max_length=64)
+
+
+def _manage(config, fn, *args, **kwargs):
+    from levi import dataset_management
+
+    try:
+        return fn(config, *args, **kwargs)
+    except dataset_management.ManagementError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+
+
+@router.post("/sessions/deletion-plan")
+def session_deletion_plan(body: SessionIdentity, request: Request):
+    _person(request)
+    config = _config()
+    if config is None:
+        raise HTTPException(404, "No live workspace is configured")
+    return _manage(config, management.session_plan, body.model_dump())
+
+
+@router.delete("/sessions")
+def remove_session(body: SessionDeletion, request: Request):
+    from levi.dataset_management import audit
+
+    _person(request)
+    config = _config()
+    if config is None:
+        raise HTTPException(404, "No live workspace is configured")
+    result = _manage(
+        config,
+        management.delete_session,
+        body.model_dump(exclude={"confirmation"}),
+        body.confirmation,
+    )
+    audit(
+        config.workspace,
+        {
+            "tool": "live.session.delete",
+            "identity": result.get("identity"),
+            "via": _via(config),
+        },
+    )
+    return result
+
+
+@router.post("/datasets/{name}/deletion-plan")
+def pipeline_deletion_plan(name: str, body: PipelineSelection, request: Request):
+    _person(request)
+    return _manage(
+        _live_config(name),
+        management.dataset_plan,
+        name,
+        delete_files=body.delete_files,
+    )
+
+
+@router.delete("/datasets/{name}")
+def remove_pipeline(name: str, body: PipelineDeletion, request: Request):
+    from levi.dataset_management import audit
+
+    _person(request)
+    config = _live_config(name)
+    result = _manage(
+        config,
+        management.delete_dataset,
+        name,
+        body.confirmation,
+        delete_files=body.delete_files,
+    )
+    audit(
+        config.workspace,
+        {
+            "tool": "live.pipeline.delete",
+            "dataset": name,
+            "delete_files": body.delete_files,
+            "via": _via(config),
+        },
+    )
+    return result
+
+
+@router.post("/datasets/{name}/prepare")
+def prepare_dataset(name: str, request: Request):
+    _person(request)
+    config = _live_config(name)
+    return _manage(config, catalogue.prepare, name)
 
 
 def _demo_names(demos):

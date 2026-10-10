@@ -64,6 +64,7 @@ export interface LinkedWorkspace {
 }
 
 export interface CatalogEntry {
+  local_file_management?: boolean;
   id: string;
   name: string;
   path: string;

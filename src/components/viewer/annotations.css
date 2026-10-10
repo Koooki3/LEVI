@@ -1690,7 +1690,9 @@
    strength; no text, so no padding. */
 .annotations-skin .tl-seg.adv {
   padding: 0;
+  border: 0;
   border-radius: 1px;
+  cursor: pointer;
 }
 .annotations-skin .tl-seg.adv.pos {
   background: var(--dv-positive);
@@ -1722,26 +1724,340 @@
   stroke-width: 1;
   stroke-dasharray: 3 3;
 }
+.annotations-skin .recap-ref {
+  stroke: var(--ds-text-secondary);
+  stroke-width: 1;
+  opacity: 0.7;
+}
+.annotations-skin .recap-diff-line {
+  fill: none;
+  stroke: var(--ds-text-primary);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.annotations-skin .recap-value-row.expanded {
+  height: 144px;
+}
+.annotations-skin .recap-value-row.expanded .track {
+  height: 140px;
+}
+.annotations-skin .recap-axis-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 4px 11px 0;
+}
+.annotations-skin .recap-axis-note {
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+}
+.annotations-skin .recap-frame-readout.side-diff {
+  border-left-color: var(--ds-text-primary);
+  border-left-style: dotted;
+}
 .annotations-skin .recap-line {
   fill: none;
   stroke: var(--dv-4);
   stroke-width: 1.5;
   stroke-linejoin: round;
 }
+.annotations-skin .recap-line.comparison {
+  stroke: var(--dv-7);
+  stroke-dasharray: 6 4;
+}
+.annotations-skin .recap-dot.side-b {
+  background: var(--dv-7);
+  border-radius: 1px;
+}
+.annotations-skin .recap-version-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+  padding: 8px 11px;
+}
+.annotations-skin .recap-version-controls .ds-field {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+.annotations-skin .recap-version-controls .ds-select {
+  display: block;
+  width: 100%;
+}
+.annotations-skin .recap-version-controls select {
+  text-overflow: ellipsis;
+}
+.annotations-skin .recap-version-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 8px;
+  margin: 4px 11px 8px;
+}
+.annotations-skin .recap-version-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 8px;
+  border: 1px solid var(--ds-separator);
+  border-left: 3px solid var(--dv-4);
+  border-radius: var(--ds-radius-sm);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+  overflow-wrap: anywhere;
+}
+.annotations-skin .recap-version-facts strong,
+.annotations-skin .recap-version-facts code {
+  width: 100%;
+  color: var(--ds-text-primary);
+}
+.annotations-skin .recap-version-facts.side-b {
+  border-left-color: var(--dv-7);
+  border-left-style: dashed;
+}
+.annotations-skin .recap-comparison {
+  margin: 8px 11px;
+  padding: 8px;
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.annotations-skin .recap-comparison summary {
+  color: var(--ds-text-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+.annotations-skin .recap-comparison summary:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 3px;
+}
+.annotations-skin .recap-comparison p {
+  margin: 8px 0;
+}
+.annotations-skin .recap-warnings {
+  padding-left: 20px;
+  color: var(--ds-warning);
+}
+.annotations-skin .recap-warnings li {
+  margin: 4px 0;
+}
+.annotations-skin .recap-table-scroll {
+  overflow-x: auto;
+}
+.annotations-skin .recap-table-scroll:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+.annotations-skin .recap-comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.annotations-skin .recap-comparison-table caption {
+  text-align: left;
+  margin: 6px 0;
+  font-weight: 600;
+}
+.annotations-skin .recap-comparison-table th,
+.annotations-skin .recap-comparison-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--ds-separator);
+  text-align: right;
+  white-space: nowrap;
+}
+.annotations-skin .recap-comparison-table th:first-child {
+  text-align: left;
+}
+.annotations-skin .recap-comparison-labels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 8px 16px;
+  margin: 10px 0;
+}
+.annotations-skin .recap-comparison-labels dd {
+  margin: 3px 0 0;
+  font-family: var(--ds-font-mono);
+  color: var(--ds-text-primary);
+}
+.annotations-skin .recap-track-state {
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+}
+.annotations-skin .recap-frame-readouts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 4px 11px 8px;
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+}
+.annotations-skin .recap-frame-readout {
+  border-left: 3px solid var(--dv-4);
+  padding-left: 5px;
+  font-family: var(--ds-font-mono);
+}
+.annotations-skin .recap-frame-readout.side-b {
+  border-left-color: var(--dv-7);
+  border-left-style: dashed;
+}
+.annotations-skin .recap-compute {
+  flex-wrap: wrap;
+}
+.annotations-skin .recap-label-settings summary {
+  color: var(--ds-text-primary);
+  cursor: pointer;
+}
+.annotations-skin .recap-label-settings summary:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+.annotations-skin .recap-label-settings p {
+  margin: 6px 0;
+}
+.annotations-skin .recap-label-settings-controls {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.annotations-skin .recap-label-settings-error {
+  display: block;
+  margin-top: 6px;
+  color: var(--ds-danger);
+}
+.annotations-skin .recap-earlier {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+}
+/* Comparison charts: A matches the solid curve (--dv-4), B the dashed one
+   (--dv-7). Recharts draws with fill="currentColor"; the class sets color. */
+.annotations-skin .recap-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 12px;
+  margin: 8px 0;
+}
+.annotations-skin .recap-chart {
+  margin: 0;
+  padding: 8px;
+  min-width: 0;
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-1);
+}
+.annotations-skin .recap-chart figcaption {
+  color: var(--ds-text-primary);
+  font-weight: 600;
+}
+.annotations-skin .recap-chart .recap-chart-summary,
+.annotations-skin .recap-chart .recap-chart-note {
+  margin: 4px 0;
+}
+.annotations-skin .recap-chart-plot {
+  width: 100%;
+  overflow: hidden;
+}
+.annotations-skin .recap-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 4px 0;
+}
+.annotations-skin .recap-chart-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.annotations-skin .recap-chart-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+}
+.annotations-skin .recap-chart-swatch.side-a {
+  background: var(--dv-4);
+}
+.annotations-skin .recap-chart-swatch.side-b {
+  background: var(--dv-7);
+  outline: 1px dashed var(--ds-text-secondary);
+  outline-offset: 1px;
+}
+.annotations-skin .recap-chart-swatch.agree {
+  background: var(--ds-text-secondary);
+}
+.annotations-skin .recap-chart .recap-bar-a {
+  color: var(--dv-4);
+}
+.annotations-skin .recap-chart .recap-bar-b {
+  color: var(--dv-7);
+}
+.annotations-skin .recap-chart .recap-bar-b .recharts-rectangle {
+  stroke: var(--ds-text-secondary);
+  stroke-dasharray: 3 2;
+  stroke-width: 1;
+}
+.annotations-skin .recap-chart .recap-bar-agree,
+.annotations-skin .recap-chart .recap-bar-diff {
+  color: var(--ds-text-secondary);
+}
+.annotations-skin .recap-chart .recap-bar-episodes .higher-b {
+  fill: var(--dv-7);
+}
+.annotations-skin .recap-chart .recap-bar-episodes .higher-a {
+  fill: var(--dv-4);
+}
+.annotations-skin .recap-chart .recap-bar-episodes .current {
+  stroke: var(--ds-text-primary);
+  stroke-width: 2;
+}
+.annotations-skin .recap-chart .recharts-cartesian-grid line {
+  stroke: var(--ds-separator);
+}
+.annotations-skin .recap-chart .recharts-cartesian-axis-line {
+  stroke: var(--ds-separator-strong);
+}
+.annotations-skin .recap-chart .recharts-cartesian-axis-tick-value,
+.annotations-skin .recap-chart .recharts-label-list text {
+  fill: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.annotations-skin .recap-chart .recap-chart-zero line {
+  stroke: var(--ds-text-tertiary);
+}
+.annotations-skin .recap-chart-table summary {
+  cursor: pointer;
+  font-weight: 400;
+}
+.annotations-skin .recap-chart-table summary:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
 .annotations-skin .recap-axis {
   position: absolute;
   left: 3px;
+  transform: translateY(-50%);
+  padding: 0 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ds-surface-1) 70%, transparent);
   font-family: var(--ds-font-mono);
   font-size: var(--ds-text-caption-size);
   line-height: 14px;
   color: var(--ds-text-secondary);
   pointer-events: none;
 }
-.annotations-skin .recap-axis.top {
-  top: 1px;
+.annotations-skin .recap-axis.edge-top {
+  transform: none;
 }
-.annotations-skin .recap-axis.bottom {
-  bottom: 1px;
+.annotations-skin .recap-axis.edge-bottom {
+  transform: translateY(-100%);
 }
 .annotations-skin .recap-dot {
   position: absolute;
@@ -1759,6 +2075,11 @@
 }
 .annotations-skin .recap-dot.neg {
   box-shadow: 0 0 0 2px var(--dv-negative);
+}
+/* A values-only result has no label: a neutral ring, never positive or
+   negative. */
+.annotations-skin .recap-dot.values-only {
+  box-shadow: 0 0 0 2px var(--ds-separator-strong);
 }
 .annotations-skin .recap-readout {
   position: absolute;

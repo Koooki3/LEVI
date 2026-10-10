@@ -18,6 +18,8 @@ import { roundTo2 } from "@/components/viewer/time-format";
 import { isTextEntry } from "@/components/viewer/text-entry";
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useFlaggedEpisodes } from "@/context/flagged-episodes-context";
+import { EpisodeManagement } from "@/components/viewer/episode-management";
+import { episodeHref } from "@/components/viewer/use-local-episodes";
 
 import type {
   DatasetDisplayInfo,
@@ -188,6 +190,8 @@ interface SidebarProps {
   onOutcomeChange?: (episode: number, outcome: EpisodeOutcome | null) => void;
   /** Per-episode positive-advantage fraction from the RECAP value model. */
   recapFractions?: Record<string, number>;
+  localDatasetName?: string;
+  liveSession?: string | null;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -213,6 +217,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   humanOutcomes,
   onOutcomeChange,
   recapFractions,
+  localDatasetName,
+  liveSession,
 }) => {
   const [mobileVisible, setMobileVisible] = useState(false);
   const sidebarId = useId();
@@ -328,7 +334,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             </button>
           ) : (
             <Link
-              href={`./episode_${episode}`}
+              href={episodeHref(episode, liveSession)}
               className="vw-episode-link ds-focus"
               data-roving=""
               tabIndex={episode === entryEpisode ? 0 : -1}
@@ -386,6 +392,15 @@ const Sidebar: React.FC<SidebarProps> = ({
           <dt>{t("FPS")}</dt>
           <dd>{roundTo2(datasetInfo.fps)}</dd>
         </dl>
+
+        {localDatasetName && (
+          <EpisodeManagement
+            name={localDatasetName}
+            episodeIds={displayEpisodes}
+            currentEpisode={episodeId}
+            session={liveSession}
+          />
+        )}
 
         {tasks.length > 1 && onTaskFilterChange && (
           <div className="vw-sidebar-section">

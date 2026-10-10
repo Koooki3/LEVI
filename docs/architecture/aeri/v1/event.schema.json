@@ -1,0 +1,352 @@
+{
+  "$defs": {
+    "Detector": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "title": "Detector",
+      "type": "object"
+    },
+    "EvidenceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "frame",
+            "signal",
+            "clip",
+            "event",
+            "judgement"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "ref": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Ref",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step"
+        }
+      },
+      "required": [
+        "kind",
+        "ref"
+      ],
+      "title": "EvidenceRef",
+      "type": "object"
+    },
+    "SignalRef": {
+      "additionalProperties": false,
+      "properties": {
+        "dimension": {
+          "anyOf": [
+            {
+              "maximum": 4096,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dimension"
+        },
+        "feature": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Feature",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "measured",
+            "commanded"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "units": {
+          "anyOf": [
+            {
+              "maxLength": 32,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Units"
+        }
+      },
+      "required": [
+        "feature",
+        "kind"
+      ],
+      "title": "SignalRef",
+      "type": "object"
+    }
+  },
+  "$id": "levi.aeri.event.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "An event candidate. ``candidate`` is never ``verified``: there is no\nsuch status. ``salience`` is an evidence priority, not a probability.",
+  "properties": {
+    "actor_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+      "title": "Actor Id",
+      "type": "string"
+    },
+    "clock_domain": {
+      "pattern": "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9._-]{1,128}$",
+      "title": "Clock Domain",
+      "type": "string"
+    },
+    "detector": {
+      "$ref": "#/$defs/Detector"
+    },
+    "emitted_wall_ns": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "title": "Emitted Wall Ns",
+      "type": "integer"
+    },
+    "episode_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\\.(?:forward|reset)\\.[0-9]{4,6}$",
+      "title": "Episode Id",
+      "type": "string"
+    },
+    "episode_role": {
+      "enum": [
+        "forward",
+        "reset"
+      ],
+      "title": "Episode Role",
+      "type": "string"
+    },
+    "event_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "pattern": "^[a-z][a-z0-9_]{1,63}$",
+      "title": "Event Type",
+      "type": "string"
+    },
+    "evidence_refs": {
+      "items": {
+        "$ref": "#/$defs/EvidenceRef"
+      },
+      "maxItems": 32,
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "minor": {
+      "maximum": 0,
+      "minimum": 0,
+      "title": "Minor",
+      "type": "integer"
+    },
+    "observed_ns": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "title": "Observed Ns",
+      "type": "integer"
+    },
+    "priority": {
+      "enum": [
+        "routine",
+        "goal_candidate",
+        "safety_relevant"
+      ],
+      "title": "Priority",
+      "type": "string"
+    },
+    "retracts": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Retracts"
+    },
+    "run_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "salience": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Salience"
+    },
+    "schema": {
+      "const": "levi.aeri.event.v1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "seq": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "title": "Seq",
+      "type": "integer"
+    },
+    "signal_refs": {
+      "items": {
+        "$ref": "#/$defs/SignalRef"
+      },
+      "maxItems": 16,
+      "title": "Signal Refs",
+      "type": "array"
+    },
+    "status": {
+      "enum": [
+        "candidate",
+        "retracted"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "step": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "title": "Step",
+      "type": "integer"
+    },
+    "window_steps": {
+      "anyOf": [
+        {
+          "items": {
+            "maximum": 9223372036854775807,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Window Steps"
+    }
+  },
+  "required": [
+    "minor",
+    "run_id",
+    "emitted_wall_ns",
+    "schema",
+    "event_id",
+    "episode_id",
+    "episode_role",
+    "seq",
+    "event_type",
+    "status",
+    "priority",
+    "actor_id",
+    "step",
+    "observed_ns",
+    "clock_domain",
+    "detector"
+  ],
+  "title": "EventProposal",
+  "type": "object",
+  "x-levi-control-keys": [
+    "robot_stop",
+    "stop_robot",
+    "execute_reset",
+    "start_reset",
+    "go_home",
+    "home_robot",
+    "halt",
+    "estop",
+    "e_stop",
+    "clearerr",
+    "clear_error",
+    "jointreset",
+    "resume",
+    "override",
+    "command",
+    "action_request"
+  ],
+  "x-levi-control-prefixes": [
+    "robot_",
+    "execute_",
+    "cmd_",
+    "force_"
+  ],
+  "x-levi-major": 1,
+  "x-levi-minor": 0,
+  "x-levi-registered-event-types": [
+    "gripper_close",
+    "gripper_open",
+    "motion_start",
+    "motion_stop",
+    "height_turn",
+    "object_settled",
+    "object_lifted",
+    "contact_change",
+    "visual_change"
+  ]
+}

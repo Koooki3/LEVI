@@ -17,7 +17,17 @@ from live_helpers import Rollouts
 from test_live_gpu import Machine, live, serve, wait_for  # noqa: F401  (fixtures)
 
 from levi.agent import anchored
-from levi.live import api, controller, criteria, fakevlm, generic, mirror, online, stats
+from levi.live import (
+    api,
+    controller,
+    criteria,
+    fakevlm,
+    generic,
+    gpumgr,
+    mirror,
+    online,
+    stats,
+)
 from levi.live import config as live_config
 
 SPEC = "generic-final.v1.json"
@@ -973,7 +983,9 @@ def test_the_agent_label_reader_gives_the_worker_s_verdict_shape():
     assert criteria.agent_label({"eval": {}}) is None
 
 
-@pytest.mark.parametrize("bad", ["nan", "inf", "-inf", float("nan"), float("inf"), 1e400])
+@pytest.mark.parametrize(
+    "bad", ["nan", "inf", "-inf", float("nan"), float("inf"), 1e400]
+)
 def test_a_non_finite_number_in_the_label_never_reaches_the_state_file(bad):
     # Strict JSON refuses NaN/Infinity: a client's odd number must not stall the mirror.
     label = relayed(started_at=bad, completed_at=bad, elapsed_s=bad)
@@ -1285,3 +1297,211 @@ def test_a_cut_asked_before_the_request_is_sent_is_not_lost(tmp_path, monkeypatc
     assert body["reason"].startswith("vllm_sleeping")
     assert ask.calls == [] and gpu.done == 1
     assert not list((judge.config.live_dir / online.TMP_DIR).glob("*/*.jpg"))
+
+
+# --- optional protection: a quiet robot and host pressure ---------------------------------
+
+
+def test_a_quiet_state_makes_the_judgement_wait_and_running_ends_it(tmp_path, rollouts):
+    c = cfg(tmp_path)
+    c.gpu.mode = "timeshare"
+    c.gpu.quiet_states = ["homing"]
+    ctl = controller.Controller(c, log=lambda *a: None)
+    try:
+        now = time.time()
+        ctl.vllm.mine = lambda: True
+        ctl.vllm.state = "ready"
+        # Homing is quiet: not admitted, but waited for (no session infers).
+        rollouts.session("homing")
+        ok, code, why = ctl.online_admit(now)
+        assert (ok, code) == (False, "gate_pending") and why.startswith("robot_quiet:")
+        gate = json.loads((c.live_dir / "gate.json").read_text())
+        assert gate["code"] == "robot_quiet" and gate["open"] is False
+        # The policy infers: closed at once, as before.
+        rollouts.session("running")
+        ok, code, why = ctl.online_admit(now)
+        assert (ok, code) == (False, "gate_closed") and "policy_inferring" in why
+        # Homing over: admitted.
+        rollouts.session("waiting_reset")
+        assert ctl.online_admit(now) == (True, None, None)
+        # A judgement in progress is cut when the robot starts homing.
+        rollouts.session("homing")
+        ok, code, why = ctl.online_check(now)
+        assert (ok, code) == (False, "gate_closed") and "robot_quiet" in why
+        ctl.online_done()
+    finally:
+        ctl.vllm.mine = lambda: False
+        ctl.shutdown()
+
+
+def test_without_quiet_states_homing_admits_as_before(tmp_path, rollouts):
+    c = cfg(tmp_path)
+    c.gpu.mode = "timeshare"
+    ctl = controller.Controller(c, log=lambda *a: None)
+    try:
+        ctl.vllm.mine = lambda: True
+        ctl.vllm.state = "ready"
+        rollouts.session("homing")
+        assert ctl.online_admit(time.time()) == (True, None, None)
+        ctl.online_done()
+    finally:
+        ctl.vllm.mine = lambda: False
+        ctl.shutdown()
+
+
+def test_a_quiet_wait_that_runs_out_is_unavailable_gate_closed(tmp_path):
+    class Quiet(Gpu):
+        def online_admit(self, now):
+            return False, "gate_pending", "robot_quiet: g/t is homing"
+
+    ask = Ask()
+    judge = judge_with(cfg(tmp_path, timeout_s=1.0), Quiet(), ask)
+    code, body = post(judge, request())
+    assert code == 200 and body["status"] == "unavailable"
+    assert body["reason"].startswith("gate_closed: robot_quiet")
+    assert "waited" in body["reason"] and ask.calls == []
+
+
+def psi(folder, **avg10):
+    folder.mkdir(parents=True, exist_ok=True)
+    for kind, value in avg10.items():
+        (folder / kind).write_text(
+            f"some avg10={value:.2f} avg60=1.00 avg300=0.50 total=12345\n"
+            "full avg10=0.00 avg60=0.00 avg300=0.00 total=0\n"
+        )
+    return folder
+
+
+def test_host_pressure_is_read_from_the_psi_files(tmp_path):
+    root = psi(tmp_path / "pressure", cpu=31.5, memory=0.25)
+    found = gpumgr.host_pressure(["cpu", "memory", "io"], root=root)
+    assert found == {"cpu": 31.5, "memory": 0.25}  # io: no file, left out
+    (root / "io").write_text("garbage\n")
+    assert "io" not in gpumgr.host_pressure(["io"], root=root)
+
+
+def test_host_pressure_is_off_by_default_and_reads_nothing(tmp_path):
+    c = cfg(tmp_path)
+    calls = []
+    assert (
+        gpumgr.pressure_over(c.online, reader=lambda kinds: calls.append(kinds)) is None
+    )
+    assert calls == []
+
+
+def test_host_pressure_over_the_limit_refuses_an_online_judgement(
+    tmp_path, rollouts, monkeypatch
+):
+    root = psi(tmp_path / "pressure", cpu=42.0, memory=1.0, io=3.0)
+    real = gpumgr.host_pressure
+    monkeypatch.setattr(gpumgr, "host_pressure", lambda kinds: real(kinds, root=root))
+    c = cfg(tmp_path, pressure_avg10_max=20.0)
+    c.gpu.mode = "timeshare"
+    ctl = controller.Controller(c, log=lambda *a: None)
+    try:
+        ctl.vllm.mine = lambda: True
+        ctl.vllm.state = "ready"
+        rollouts.session("waiting_reset")
+        now = time.time()
+        ok, code, why = ctl.online_admit(now)
+        assert (ok, code) == (False, "gate_closed")
+        assert why.startswith("host_pressure:") and "cpu some avg10 42%" in why
+        assert not ctl._online_busy
+        # Only the kinds asked for count.
+        c.online.pressure_kinds = ["memory", "io"]
+        assert ctl.online_admit(now) == (True, None, None)
+        ctl.online_done()
+        # Pressure that falls under the limit admits again.
+        c.online.pressure_kinds = ["cpu"]
+        psi(root, cpu=5.0)
+        assert ctl.online_admit(now) == (True, None, None)
+        ctl.online_done()
+        # A kernel without PSI never refuses.
+        for f in root.iterdir():
+            f.unlink()
+        assert ctl.online_admit(now) == (True, None, None)
+        ctl.online_done()
+    finally:
+        ctl.vllm.mine = lambda: False
+        ctl.shutdown()
+
+
+@pytest.mark.parametrize(
+    "over, words",
+    [
+        ({"pressure_avg10_max": -1.0}, "pressure_avg10_max must be 0"),
+        ({"pressure_avg10_max": 101.0}, "pressure_avg10_max must be 0"),
+        ({"pressure_kinds": ["cpu", "gpu"]}, "unknown kind"),
+        ({"pressure_kinds": [], "pressure_avg10_max": 10.0}, "is empty"),
+    ],
+)
+def test_a_wrong_pressure_setting_is_an_error(tmp_path, over, words):
+    with pytest.raises(ValueError, match=words):
+        cfg(tmp_path, **over)
+
+
+def test_the_doctor_says_when_pressure_cannot_be_read(tmp_path, monkeypatch):
+    c = cfg(tmp_path, pressure_avg10_max=20.0)
+    monkeypatch.setattr(live_config.os, "access", lambda path, mode: False)
+    found = [
+        x
+        for x in live_config.checks(c, watching=False)
+        if x["key"] == "online.pressure_avg10_max"
+    ]
+    assert [x["level"] for x in found] == ["warn"] and "PSI" in found[0]["message"]
+
+
+def test_a_judgement_is_cut_end_to_end_when_the_robot_starts_homing(tmp_path, rollouts):
+    c = cfg(tmp_path)
+    c.gpu.mode = "timeshare"
+    c.gpu.quiet_states = ["homing"]
+    ctl = controller.Controller(c, log=lambda *a: None)
+
+    class HomingAsk(Ask):
+        def __call__(self, spec, folder, names):
+            rollouts.session("homing")  # the robot starts homing meanwhile
+            return super().__call__(spec, folder, names)
+
+    ask = HomingAsk(hold=scaled(10))
+    try:
+        ctl.vllm.mine = lambda: True
+        ctl.vllm.state = "ready"
+        rollouts.session("waiting_reset")
+        judge = judge_with(c, ctl, ask)
+        began = time.monotonic()
+        code, body = post(judge, request())
+        ask.release.set()
+        assert code == 200 and time.monotonic() - began < 1.5
+        assert body["status"] == "unavailable"
+        assert body["reason"].startswith("gate_closed: robot_quiet")
+        assert body["reason"].endswith("(the request was cut)")
+        assert len(ask.calls) == 1 and not ctl._online_busy
+    finally:
+        ctl.vllm.mine = lambda: False
+        ctl.shutdown()
+
+
+def test_a_stopped_vllm_is_cold_start_even_under_host_pressure(
+    tmp_path, rollouts, monkeypatch
+):
+    monkeypatch.setattr(gpumgr, "host_pressure", lambda kinds: {"cpu": 90.0})
+    c = cfg(tmp_path, pressure_avg10_max=20.0)
+    c.gpu.mode = "timeshare"
+    ctl = controller.Controller(c, log=lambda *a: None)
+    try:
+        rollouts.session("waiting_reset")
+        ok, code, _ = ctl.online_admit(time.time())
+        assert (ok, code) == (False, "cold_start")
+        ctl.vllm.mine = lambda: True
+        ctl.vllm.state = "starting"
+        assert ctl.online_admit(time.time())[1] == "vllm_starting"
+        # Asleep: pressure stops the wake (a wake is heavy work too).
+        ctl.vllm.state = "asleep"
+        woke = []
+        ctl.vllm.wake = lambda timeout=60.0: woke.append(timeout) or True
+        ok, code, why = ctl.online_admit(time.time())
+        assert (ok, code) == (False, "gate_closed") and why.startswith("host_pressure")
+        assert woke == []
+    finally:
+        ctl.vllm.mine = lambda: False
+        ctl.shutdown()

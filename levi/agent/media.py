@@ -276,6 +276,7 @@ def sample(context, root, episode, artifact_dir, *, frame_indices=None):
                 backend().inside(relative, root),
                 artifact_dir
                 / f"episode_{episode:06d}--{quote(camera, safe='._-')}--video-index.json",
+                checksum=video_sha,
             )
         try:
             for position in positions:

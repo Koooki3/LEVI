@@ -8,8 +8,10 @@ levi recap inspect <n>                      strict key check (worker, CPU)
 levi recap base import <folder> [--name] [--official repo] [--sha256-file f] [--weights] [--label TEXT]
 levi recap base list
 levi recap threshold <repo_id> <repo_id> … [--positive-quantile q] [--set <checkpoint> --provenance-text TEXT]
-levi recap run <repo_id> --checkpoint <n> [--episodes 0,3] [--threshold X] [--static-filter auto|on|off]
-levi recap show <repo_id> [--episode N]
+levi recap run <repo_id> --checkpoint <n> [--episodes 0,3] [--threshold X] [--dataset-type auto|rollout|sft|value_only] [--static-filter auto|on|off]
+levi recap settings <repo_id> [--dataset-type auto|rollout|sft|value_only]
+levi recap clear [<repo_id or folder> …] [--all] [--include-jobs] [--apply]
+levi recap show <repo_id> [--model <checkpoint>|--revision <id>] [--episode N]
 """
 
 from __future__ import annotations
@@ -200,7 +202,16 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--lookahead", type=int)
     run.add_argument("--positive-quantile", type=float)
     run.add_argument("--threshold", type=float)
-    run.add_argument("--sft", action="store_true", help="demonstrations: all success")
+    run.add_argument(
+        "--dataset-type",
+        dest="dataset_type",
+        choices=["auto", "rollout", "sft", "value_only"],
+        default=None,
+        help="auto (default): the dataset setting, the export's metadata or "
+        "the outcomes, else rollout; rollout: outcomes from labels; sft: "
+        "demonstrations, all success; value_only: values without labels",
+    )
+    run.add_argument("--sft", action="store_true", help="same as --dataset-type sft")
     run.add_argument(
         "--static-filter",
         choices=["auto", "on", "off"],
@@ -208,9 +219,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="the training data's static-pose filter (auto: raw-capture views "
         "when the checkpoint names one)",
     )
+    settings = sub.add_parser(
+        "settings", help="a dataset's RECAP type (shown, or set with --dataset-type)"
+    )
+    settings.add_argument("repo_id")
+    settings.add_argument(
+        "--dataset-type",
+        dest="dataset_type",
+        choices=["auto", "rollout", "sft", "value_only"],
+        help="store it for the dataset (auto removes the setting)",
+    )
+    clear = sub.add_parser(
+        "clear",
+        help="remove RECAP results (a dry run unless --apply)",
+        description="Lists, or with --apply removes, the RECAP results of the "
+        "named datasets (local/<name> or a folder under recap_values, also of "
+        "an unregistered dataset), in both storage layouts, and current.json. "
+        "Refused while a job runs. Never touches checkpoints or datasets.",
+    )
+    clear.add_argument("names", nargs="*")
+    clear.add_argument("--all", action="store_true", help="every dataset's results")
+    clear.add_argument(
+        "--include-jobs",
+        action="store_true",
+        help="also the job records, plans and worker outputs",
+    )
+    clear.add_argument("--apply", action="store_true", help="really delete")
     show = sub.add_parser("show", help="the current labels of a dataset")
     show.add_argument("repo_id")
     show.add_argument("--episode", type=int)
+    show.add_argument(
+        "--model",
+        "--revision",
+        dest="result",
+        help="a value model's result, or an original-layout revision id "
+        "(default: the current result)",
+    )
     return parser
 
 
@@ -287,6 +331,28 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "run":
             return _run(args)
+        if args.command == "settings":
+            from . import jobs
+
+            if args.dataset_type is None:
+                _print(jobs.dataset_type_payload(args.repo_id))
+            else:
+                _print(jobs.set_dataset_type(args.repo_id, args.dataset_type))
+            return 0
+        if args.command == "clear":
+            from . import jobs
+
+            if bool(args.names) == bool(args.all):
+                raise ValueError("name the datasets, or pass --all")
+            report = jobs.clear(
+                None if args.all else args.names,
+                include_jobs=args.include_jobs,
+                apply=args.apply,
+            )
+            _print(report)
+            if not args.apply:
+                print("dry run: nothing was deleted (add --apply)", file=sys.stderr)
+            return 0
         if args.command == "show":
             from . import jobs
 
@@ -294,11 +360,11 @@ def main(argv: list[str] | None = None) -> int:
                 _print(
                     {
                         "status": jobs.status(args.repo_id)["current"],
-                        "summary": jobs.summary_payload(args.repo_id),
+                        "summary": jobs.summary_payload(args.repo_id, args.result),
                     }
                 )
             else:
-                _print(jobs.episode_payload(args.repo_id, args.episode))
+                _print(jobs.episode_payload(args.repo_id, args.episode, args.result))
             return 0
     except Exception as exc:  # a readable line, not a traceback
         from .jobs import RecapError
@@ -311,6 +377,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {detail}", file=sys.stderr)
         return 1
     return 2
+
+
+def _dataset_type(args) -> str:
+    if args.sft and args.dataset_type not in (None, "sft"):
+        raise ValueError("--sft contradicts --dataset-type " + args.dataset_type)
+    return "sft" if args.sft else args.dataset_type or "auto"
 
 
 def _run(args) -> int:
@@ -328,7 +400,7 @@ def _run(args) -> int:
         lookahead=args.lookahead,
         positive_quantile=args.positive_quantile,
         threshold=args.threshold,
-        dataset_type="sft" if args.sft else "rollout",
+        dataset_type=_dataset_type(args),
         static_filter=args.static_filter,
         watch=False,
     )

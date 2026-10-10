@@ -1,0 +1,56 @@
+{
+ "schema": "levi.aeri.judgement.v1",
+ "minor": 0,
+ "run_id": "r20261010-a",
+ "emitted_wall_ns": 1791600000000000000,
+ "kind": "judgement",
+ "judgement_id": "j-8",
+ "request_id": "req-8",
+ "episode_id": "r20261010-a.forward.0003",
+ "episode_role": "forward",
+ "target": "forward_goal",
+ "subgoal": null,
+ "event_ids": [
+  "ev-17"
+ ],
+ "decision": "confirmed",
+ "unknown_reason": null,
+ "predicate_results": [
+  {
+   "name": "object_state",
+   "value": true,
+   "required": true,
+   "evidence_refs": []
+  },
+  {
+   "name": "stable",
+   "value": true,
+   "required": true,
+   "evidence_refs": []
+  }
+ ],
+ "vetoes": [],
+ "observed_from_step": 100,
+ "observed_through_step": 130,
+ "observed_through_ns": 5100000000,
+ "produced_ns": 5900000000,
+ "valid_until_ns": 6900000000,
+ "clock_domain": "host-mono:0f0e0d0c-0b0a-4908-8706-050403020100",
+ "spec_id": "generic-final",
+ "spec_version": "1",
+ "provider": "vlm",
+ "model_name": "qwen3.8-27b-int4",
+ "model_digest": null,
+ "confidence_kind": "none",
+ "calibrated_probability": null,
+ "calibration_ref": null,
+ "cost": {
+  "elapsed_ms": 800,
+  "prompt_tokens": 1200,
+  "completion_tokens": 40
+ },
+ "legacy_c5": {
+  "reading": "supported",
+  "outcome": "success",
+  "undecided": false
+ 

@@ -50,6 +50,7 @@ curl -X POST -H "x-levi-ui-token: $(cat "$LEVI_WORKSPACE/outputs/LEVI/workbench/
 - **学到的静默窗口**：用一个在负载换新 checkpoint 重启后仍不变的签名，记录每个负载何时出现、何时离开；负载离开后，等待其重启间隔 90 分位数的 1.5 倍再使用 GPU（60–1800 s；见到的重启次数不够时用默认值 `LEVI_GPU_QUIET_SECONDS=300`）。
 - **服务运行期间**，守护每 15 s 采样一次（模型驻留显存时每 2 s），受保护的负载一出现就卸载模型——这样被打断的请求记为抢占，不算模型失败——窗口过后**自动恢复**所有被 GPU 挡住的 run。
 - `uv run levi agent gpu`（或 `gpu.status` 能力）显示判决、原因、见过的负载及各自学到的窗口。
+- **请求之间复用判决**：同一组模型服务的 `free` 判决复用 10 s。`shared`（按策略共存）判决默认**不复用**，因为共享依赖会变化的负载；设置 `LEVI_GPU_SHARED_REUSE_SECONDS`（默认 `0` 即关闭，上限 3 s；更大的值会被截为 3 并给出警告）可开启一个很短的复用窗口，每个请求省两次 `nvidia-smi`。窗口内新出现的繁忙负载最迟在该秒数后被发现；`busy`、`cooling`、`unknown` 永不复用，守护（请求或监视线程）一旦看到其中任何一种，所有复用窗口立即作废。
 - 已与他人约定共享 GPU 时，设置 `LEVI_GPU_SHARING=allow` 关闭守护。
 - `LEVI_GPU_LOCK_FILE` 是另一套需要主动开启的机制，只用于快速分割作业：标注和蒸馏运行期间持有这个 `flock` 锁文件，因此会排在同样遵守它的其他工具之后。守护进程不读取它，本地模型请求也不会占用它。见[快速分割](SEGMENTATION.md#settings--设置)。
 

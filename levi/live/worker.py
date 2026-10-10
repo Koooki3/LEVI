@@ -40,10 +40,18 @@ import time
 from pathlib import Path
 
 from . import auto as approver_log
+from . import catalogue, exclusion, generic, gpumgr, jsonio, judge, mirror, stats
 from . import config as live_config
-from . import exclusion, generic, gpumgr, jsonio, judge, mirror, stats
 
-OK, NEED_MODEL, AWAIT_HUMAN, ERROR, PREEMPTED, NOTHING = 0, 10, 11, 12, 13, 14
+OK, NEED_MODEL, AWAIT_HUMAN, ERROR, PREEMPTED, NOTHING, DATASET_BUSY = (
+    0,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+)
 SIDE = "observation.images.view1"
 WRIST = "observation.images.hand"
 RUN_DONE = {"succeeded", "partially_succeeded", "failed", "cancelled"}
@@ -267,40 +275,16 @@ class Worker:
     # --- the dataset --------------------------------------------------------------
 
     def register_and_build(self):
-        """Register the capture and bring its browsing view up to date."""
-        from levi import catalog, views
-        from levi.conversion.engine import fingerprint
-
-        state = self.state()
-        capture = Path(state["capture"])
-        options = {"workers": self.config.resources.view_workers}
-        entry = views.request(capture, options)
-        deadline = time.time() + 3600
-        while True:
-            entry = catalog.datasets().get(entry["name"]) or entry
-            view = Path(entry["view"]) if entry.get("view") else None
-            ready = (
-                entry.get("view_status") == "ready"
-                and view is not None
-                and views.is_view(view)
-                and catalog.read(view / "meta/levi_view.json", {}).get(
-                    "source_fingerprint"
-                )
-                == fingerprint(capture)
-            )
-            if ready:
-                break
-            if entry.get("view_status") == "failed":
-                raise RuntimeError(
-                    "view build failed: " + str(entry.get("view_error"))[:300]
-                )
-            if time.time() > deadline:
-                raise RuntimeError("view build did not finish in an hour")
-            self.check_stop()
-            self.heartbeat("view")
-            time.sleep(1.0)
-            if entry.get("view_status") == "building" and not self._job_alive(entry):
-                entry = views.request(capture, options)
+        """Use the same CPU catalogue path as the model-independent intake."""
+        entry = catalogue.ensure_dataset(
+            self.config,
+            self.name,
+            allow_current=True,
+            check_stop=self.check_stop,
+            heartbeat=lambda _: self.heartbeat("view"),
+        )
+        if entry is None:
+            raise RuntimeError("the browsing view is still changing; retry later")
         self.entry = entry
         self.repo_id = entry["id"]
         if self.config.pipeline.temporal:
@@ -329,25 +313,9 @@ class Worker:
             )
 
     def episode_map(self, entry):
-        """``{demo: episode_index}`` and ``{demo: seconds}`` from the view."""
-        view = Path(entry["view"])
-        self.view = view
-        fps = float(jsonio.read(view / "meta/info.json", {}).get("fps") or 10.0)
-        rows = {}
-        for line in (view / "meta/episodes.jsonl").read_text().splitlines():
-            if line.strip():
-                row = json.loads(line)
-                demo = str(row.get("source_demo") or "").split("/")[-1]
-                rows[demo] = (
-                    int(row["episode_index"]),
-                    max(0.0, (row.get("length", 1) - 1) / fps),
-                )
-        excluded = jsonio.read(view / "meta/levi_view.json", {}).get("excluded") or {}
-        return (
-            {d: r[0] for d, r in rows.items()},
-            {d: r[1] for d, r in rows.items()},
-            {str(k).split("/")[-1]: v for k, v in excluded.items()},
-        )
+        """Map demos using published source provenance, shared with intake."""
+        self.view = Path(entry.get("view") or entry["path"])
+        return catalogue.episode_map(entry)
 
     def human_annotated(self, episode):
         """Whether a person (or an earlier commit this service lost track of)
@@ -1099,11 +1067,28 @@ class Worker:
     # --- the whole batch ------------------------------------------------------------------------
 
     def run(self):
+        # A view rebuild or deletion must not renumber this batch's inputs.
+        # A CPU catalogue process may have won the lock just before spawn:
+        # leave rather than blocking the GPU worker while it builds the view.
+        with catalogue.dataset_lock(self.config, self.name) as acquired:
+            if not acquired:
+                return DATASET_BUSY
+            try:
+                return self._run()
+            finally:
+                from levi import jobs
+
+                jobs.stop_workers()
+                jobs.wait_idle(10.0)
+
+    def _run(self):
         if not self.config.pipeline.background:
             # The supervisor starts no worker then; one started by hand does
             # nothing either (``pipeline.background = false``).
             return NOTHING
         state = self.state()
+        if state.get("archived"):
+            return NOTHING
         batch = state.get("current")
         if batch is None:
             demos = self.start_batch()
@@ -1125,10 +1110,12 @@ class Worker:
         # the plan is still unapproved or the draft uncommitted.
         self.update(lambda v: (v.pop("awaiting", None), v)[1])
         self.guard_human(batch)
+        # Browsing is CPU-only: model absence must not leave an unviewable
+        # current batch behind. Provider binding comes after its view exists.
+        entry = self.register_and_build()
         if not self.model_ready():
             raise NeedModel("the vLLM server is not answering")
         self.ensure_provider()
-        entry = self.register_and_build()
         index, lengths, excluded = self.episode_map(entry)
         self.lengths = lengths
         batch["demos"] = self.filter_demos(batch["demos"], index, excluded, batch)
@@ -1213,7 +1200,7 @@ class Worker:
         def change_state(value):
             for demo in demos:
                 row = value["demos"].setdefault(demo, {})
-                if row.get("excluded"):
+                if value.get("archived") or row.get("excluded") or row.get("deleted"):
                     # A person took it out after the batch was chosen (the
                     # API refuses once it is saved as the batch): leave it.
                     continue
@@ -1286,7 +1273,13 @@ def main(argv=None) -> int:
     awaiting = None
     try:
         code = worker.run()
-        worker.log("batch finished" if code == OK else "nothing to do")
+        worker.log(
+            "batch finished"
+            if code == OK
+            else "dataset busy"
+            if code == DATASET_BUSY
+            else "nothing to do"
+        )
     except Stop:
         worker.log("stopping: pausing the current run")
         batch = (mirror.load_state(config, args.dataset) or {}).get("current") or {}

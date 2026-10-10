@@ -1,0 +1,37 @@
+{
+ "schema": "levi.aeri.run_event.v1",
+ "minor": 0,
+ "run_id": "r20261010-a",
+ "emitted_wall_ns": 1791600000000000000,
+ "sequence_no": 41,
+ "record": "prepared",
+ "transaction_id": "r20261010-a:tx41",
+ "authority": {
+  "principal_kind": "orchestrator",
+  "principal_id": "orch-1",
+  "session_id": "s-1",
+  "process": {
+   "pid": 4242,
+   "start_ticks": 123456,
+   "boot_id": "0f0e0d0c"
+  },
+  "command_id": null
+ },
+ "mono_ns": 9000000000,
+ "clock_domain": "host-mono:0f0e0d0c-0b0a-4908-8706-050403020100",
+ "prev_sha256": "abababababababababababababababababababababababababababababababab",
+ "from_state": "FORWARD_ACTIVE",
+ "to_state": "FORWARD_STOPPING",
+ "reason": "goal_verified",
+ "episode_id": "r20261010-a.forward.0003",
+ "episode_role": "forward",
+ "action": {
+  "kind": "hold",
+  "idempotency_key": "776589ce88fbd49124a802e80dda952203b63aecba21fada77bd35dc3d84fa2c",
+  "non_idempotent": false,
+  "params_sha256": "abababababababababababababababababababababababababababababababab"
+ },
+ "evidence_ids": [
+  "j-8"
+ ]
+}

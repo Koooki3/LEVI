@@ -1,0 +1,17 @@
+{
+ "schema": "levi.aeri.runtime.v1",
+ "minor": 0,
+ "run_id": "r20261010-a",
+ "emitted_wall_ns": 1791600000000000000,
+ "kind": "workload_spec",
+ "workload_id": "w-1",
+ "workload_class": "judge_critical",
+ "requester": "c",
+ "episode_id": "r20261010-a.forward.0003",
+ "device_preference": "gpu",
+ "memory_estimate_mib": null,
+ "memory_source": "unknown",
+ "duration_p99_ms": 1500,
+ "duration_source": "measured",
+ "preemptibility": "request_boundary"
+}

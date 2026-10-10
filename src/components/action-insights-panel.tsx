@@ -1,5 +1,6 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
+import { DataLoadNotice } from "@/components/viewer/data-notice";
 import { CircleCheck, Flag, Maximize2, Minimize2 } from "lucide-react";
 import {
   Button,
@@ -1825,6 +1826,13 @@ function ActionInsightsPanel({
           loading={crossEpisodeLoading}
           progress={crossEpisodeProgress}
           data={crossEpisodeData}
+        />
+      )}
+
+      {mode === "dataset" && crossEpisodeData?.skippedTooLarge && (
+        <DataLoadNotice
+          message={crossEpisodeData.skippedTooLarge.message}
+          skippedEpisodes={crossEpisodeData.skippedTooLarge.episodes}
         />
       )}
 

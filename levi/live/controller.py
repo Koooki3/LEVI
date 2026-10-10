@@ -34,6 +34,7 @@ from pathlib import Path
 
 from . import (
     auto,
+    catalogue,
     exclusion,
     gating,
     gpumgr,
@@ -169,13 +170,15 @@ class Controller:
         self.worker = None
         self.worker_dataset = None
         self.worker_started = 0.0
+        self.catalogue = None
+        self._catalogue_at = 0.0
         self.backoff: dict = {}
         self.failures: dict = {}
         # Datasets waiting for a person (plan not approved, draft not
         # committed): remembered in the dataset state across restarts.
         self.awaiting: dict = {}
         for name, state in mirror.list_states(config).items():
-            if isinstance(state.get("awaiting"), dict):
+            if not state.get("archived") and isinstance(state.get("awaiting"), dict):
                 self.awaiting[name] = {**state["awaiting"], "at": 0.0}
         self.policy_changed_at: float | None = None
         self.gate = gpumgr.Gate(True, "open", "no evaluation")
@@ -290,7 +293,7 @@ class Controller:
 
     # --- the work queue ---------------------------------------------------------------
 
-    def _queue(self, now) -> list:
+    def _queue(self, now, *, include_busy=False) -> list:
         """Dataset names with something to label, longest-waiting first.
         Empty while the background labelling is off: nothing is labelled."""
         if not self.config.pipeline.background:
@@ -301,9 +304,17 @@ class Controller:
         names = []
         for name in set(states) | set(scans):
             state = states.get(name) or {}
+            if state.get("archived"):
+                continue
             scan = scans.get(name)
             todo = mirror.waiting_demos(state, p.max_attempts)
             if not (state.get("current") or todo or (scan and scan.ready)):
+                continue
+            if (
+                not include_busy
+                and name != self.worker_dataset
+                and catalogue.busy(self.config, name)
+            ):
                 continue
             if self.backoff.get(name, 0) > now:
                 continue
@@ -776,41 +787,103 @@ class Controller:
             self._stop_vllm()
         self.idle_since = None
 
-    # --- background labelling off ------------------------------------------------------------
+    # --- model-independent intake -----------------------------------------------------------
 
     def _take_in(self, now):
-        """``pipeline.background = false``: mirror what is finished, with its
-        operator label and the online judgement the client relayed, and mark
-        it done (``online.take_in``). No worker, no model request."""
+        """Mirror finished rollouts independently of model/GPU admission.
+
+        A labelling batch or view build owns the same management lock: new
+        arrivals wait for that stable snapshot before being linked in. With
+        background labelling off, only the relayed online result is taken in.
+        """
         c = self.config
         for task in self.tasks:
             if not task.available or not task.ready:
                 continue
-            state = mirror.load_state(c, task.name)
-            if state is None or not mirror.is_available(c, task.name, state):
-                continue
-            names = list(task.ready[: c.watch.batch_max_episodes])
-            before = {
-                d: (row or {}).get("state")
-                for d, row in (state.get("demos") or {}).items()
-            }
-            try:
-                results = mirror.mirror_dataset(c, state, names, now=now)
-            except Exception as exc:  # noqa: BLE001 - one task must not stop the service
-                self.event(f"{task.name}: mirroring failed: {exc}", "error")
-                continue
-            task.ready = [d for d in task.ready if d not in names]
-            fresh = [
-                d
-                for d, r in results.items()
-                if r["status"] in ("mirrored", "exists") and before.get(d) != "mirrored"
-            ]
-            taken = online.take_in(c, task.name, fresh, now) if fresh else []
-            if taken:
-                self.event(
-                    f"{task.name}: {len(taken)} episode(s) taken in "
-                    "(background labelling is off)"
+            with catalogue.dataset_lock(c, task.name) as acquired:
+                if not acquired:
+                    continue
+                state = mirror.load_state(c, task.name)
+                if not state or state.get("archived") or state.get("current"):
+                    continue
+                if not mirror.is_available(c, task.name, state):
+                    continue
+                names = [
+                    d
+                    for d in task.ready
+                    if not ((state.get("demos") or {}).get(d) or {}).get("deleted")
+                ][: c.watch.batch_max_episodes]
+                if not names:
+                    continue
+                before = {
+                    d: (row or {}).get("state")
+                    for d, row in (state.get("demos") or {}).items()
+                }
+                try:
+                    results = mirror.mirror_dataset(c, state, names, now=now)
+                except Exception as exc:  # noqa: BLE001 - one task must not stop the service
+                    self.event(f"{task.name}: mirroring failed: {exc}", "error")
+                    continue
+                task.ready = [d for d in task.ready if d not in names]
+                fresh = [
+                    d
+                    for d, r in results.items()
+                    if r["status"] in ("mirrored", "exists")
+                    and before.get(d) != "mirrored"
+                ]
+                taken = (
+                    online.take_in(c, task.name, fresh, now)
+                    if fresh and not c.pipeline.background
+                    else []
                 )
+                if taken:
+                    self.event(
+                        f"{task.name}: {len(taken)} episode(s) taken in "
+                        "(background labelling is off)"
+                    )
+
+    # --- CPU-only dataset catalogue ---------------------------------------------------------
+
+    def _catalogue_step(self, now):
+        """Poll/start one bounded CPU reconciliation process; never inspect here."""
+        from levi import children
+
+        c = self.config
+        state_dir = c.workspace / "outputs/LEVI/workbench"
+        if self.catalogue is not None:
+            code = self.catalogue.poll()
+            if code is None:
+                return
+            children.untrack(self.catalogue.pid, state=state_dir)
+            self.catalogue = None
+            self._catalogue_at = now
+            if code:
+                self.event("dataset catalogue pass failed; see catalogue.log", "error")
+        # The worker prepares its own view. Avoid spawning a competing pass
+        # before its child has written current or taken the dataset lock.
+        if self.worker is not None or self._orphan_running():
+            return
+        if now - self._catalogue_at < max(15.0, c.service.poll_idle_s):
+            return
+        if not catalogue.names(c):
+            return
+        self.catalogue, _ = catalogue._start(c, popen=self.popen, reap=False)
+        self._catalogue_at = now
+
+    def _stop_catalogue(self):
+        proc = self.catalogue
+        if proc is None:
+            return
+        from levi import children
+
+        children.untrack(
+            proc.pid,
+            grace=15.0,
+            state=self.config.workspace / "outputs/LEVI/workbench",
+        )
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=2.0)
+        self.catalogue = None
 
     # --- the online judgement ----------------------------------------------------------------
 
@@ -910,6 +983,9 @@ class Controller:
                 return False, code, f"{gate.code}: {gate.reason}"
             if not self.vllm.mine():
                 if (mode == "manual" or c.vllm.adopt_external) and self.vllm.external():
+                    pressed = self._pressed()
+                    if pressed:
+                        return pressed
                     self._online_external_at = time.time()
                     self._online_external_ok = True
                     self._online_busy = True
@@ -935,6 +1011,11 @@ class Controller:
                         "judgement (start the service with --prewarm)"
                     ),
                 )
+            # After the answers that will not pass by retrying (cold_start,
+            # vllm_starting), before a wake (heavy work too).
+            pressed = self._pressed()
+            if pressed:
+                return pressed
             if state == "asleep":
                 woken = self._online_wake(now, mode)
                 if woken is not None:
@@ -944,6 +1025,16 @@ class Controller:
             return True, None, None
         finally:
             self._gpu_mutex.release()
+
+    def _pressed(self):
+        """Optional (``online.pressure_avg10_max``, off by default): a host
+        already under CPU/memory/IO pressure gets no model request on top.
+        ``(False, "gate_closed", ...)``, transient: the client retries within
+        its deadline; None when admission may go on."""
+        pressed = gpumgr.pressure_over(self.config.online)
+        if pressed:
+            return False, "gate_closed", f"host_pressure: {pressed}"
+        return None
 
     def _online_wake(self, now, mode):
         """Wake a sleeping vLLM for an online judgement if the GPU rules allow
@@ -1142,6 +1233,10 @@ class Controller:
         elif code == 14:
             self.failures.pop(name, None)
             self._nothing_to_do(name, now)
+        elif code == 15:
+            # Catalogue/removal won the lock after the queue was sampled.
+            # This is still pending work, not an empty batch or a failure.
+            self.event(f"{name}: dataset is busy; retry when preparation finishes")
         elif code == 13:
             self.event(f"batch for {name} paused")
         elif code == 11:
@@ -1270,11 +1365,24 @@ class Controller:
                 f"service vouches for: {self.gate.reason}"
             )
             since = self._gate_code_since[1]
+        elif (
+            code_now == "robot_quiet"
+            and now - self._gate_code_since[1] >= c.gpu.quiet_pause_s
+        ):
+            code = "robot_quiet"
+            reason = (
+                f"the gate has been closed for {now - self._gate_code_since[1]:.0f} s "
+                f"by gpu.quiet_states: {self.gate.reason} (a client stuck in that "
+                "state, or a state that should not be quiet?)"
+            )
+            since = self._gate_code_since[1]
         if code is None:
             self._paused = None
             return
         if self._paused is None or self._paused["code"] != code:
             self._paused = {"code": code, "since": since or now}
+            if code == "robot_quiet":
+                self.event(f"labelling paused (robot_quiet): {reason}", "error")
         self._paused["reason"] = str(reason)[:300]
 
     LONG_BLOCKS = ("vram", "lock", "lock_unavailable", "external_busy", "gpu_not_free")
@@ -1413,11 +1521,14 @@ class Controller:
         full = now - self._scan_at >= interval or not self.tasks
         self._refresh(now, full)
         self._poll_worker(now)
-        queue = self._queue(now)
+        self._take_in(now)
+        self._catalogue_step(now)
+        # Preparation temporarily owns the dataset, but pending annotation
+        # still needs model/gate admission and must not look idle to the GPU.
+        queue = self._queue(now, include_busy=True)
+        preparing = self.catalogue is not None or catalogue.running(c)
         orphan = self._orphan_running()
         want = bool(queue) and not orphan
-        if not c.pipeline.background:
-            self._take_in(now)
         prewarm = (
             self.config.vllm.prewarm and self.worker is None and not self.vllm.mine()
         )
@@ -1427,8 +1538,17 @@ class Controller:
             self._update_paused(now, wanted)
             self._write_gate(now)
             self._police_worker(now)
-            if self.worker is None and want and ready and not orphan and self.gate.open:
-                self._spawn(queue[0], now)
+            if (
+                self.worker is None
+                and want
+                and ready
+                and not orphan
+                and not preparing
+                and self.gate.open
+            ):
+                runnable = self._queue(now)
+                if runnable:
+                    self._spawn(runnable[0], now)
             self._release_if_idle(now, bool(queue) or orphan or self._online_busy)
         waiting = any(t.waiting for t in self.tasks)
         if self.worker is not None or orphan:
@@ -1538,12 +1658,16 @@ class Controller:
         rows = {}
         for name in sorted(set(states) | set(scans)):
             state = states.get(name) or {}
+            if state.get("archived"):
+                continue
             scan = scans.get(name)
             counts = mirror.counts(state) if state else {}
             ready = len(scan.ready) if scan else 0
             current = state.get("current")
             demos = [
-                d for d in (state.get("demos") or {}).values() if not d.get("excluded")
+                d
+                for d in (state.get("demos") or {}).values()
+                if not d.get("excluded") and not d.get("deleted")
             ]
             row = {
                 "review_runs_open": exclusion.open_review_count(state),
@@ -1764,8 +1888,11 @@ class Controller:
         while self.running:
             wait = self.tick()
             if once:
-                busy = self.worker is not None or self._orphan_running()
-                queue = self._queue(time.time())
+                preparing = self.catalogue is not None or catalogue.running(self.config)
+                busy = self.worker is not None or preparing or self._orphan_running()
+                # A pending batch temporarily owned by the CPU catalogue is
+                # still work. Otherwise --once could exit before it is labelled.
+                queue = self._queue(time.time(), include_busy=True)
                 if not busy and not queue and self.state in ("idle", "active"):
                     waiting = any(t.waiting for t in self.tasks)
                     idle_rounds += 1
@@ -1773,10 +1900,20 @@ class Controller:
                         break
                 else:
                     idle_rounds = 0
-                if self.state == "gpu_wait" and (
-                    not self.gate.open
-                    or self.decision.code
-                    in ("manual", "lock", "lock_unavailable", "vram", "external_busy")
+                if (
+                    not preparing
+                    and self.state == "gpu_wait"
+                    and (
+                        not self.gate.open
+                        or self.decision.code
+                        in (
+                            "manual",
+                            "lock",
+                            "lock_unavailable",
+                            "vram",
+                            "external_busy",
+                        )
+                    )
                 ):
                     break
             if max_seconds and time.time() - started > max_seconds:
@@ -1790,6 +1927,7 @@ class Controller:
         self.wake.set()
         self.stop_online()
         self._stop_worker(grace=30.0)
+        self._stop_catalogue()
         if self.vllm.mine():
             self._stop_vllm()
         self.lock.release()

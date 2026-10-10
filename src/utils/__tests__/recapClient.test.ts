@@ -9,11 +9,16 @@ import {
 } from "bun:test";
 import {
   cancelRecapJob,
+  fetchRecapCompare,
   fetchRecapEpisode,
   fetchRecapJob,
+  fetchRecapRevisions,
   fetchRecapStatus,
   fetchRecapSummary,
+  RecapRecomputedError,
+  fetchRecapSettings,
   runRecap,
+  saveRecapSettings,
 } from "@/utils/annotationsClient";
 
 const globals = globalThis as unknown as {
@@ -67,6 +72,196 @@ afterAll(() => {
 });
 
 describe("RECAP client", () => {
+  test("saved results are a read-only uncached request with cancellation", async () => {
+    const payload = { current: "20261009-120000", revisions: [] };
+    respond(200, payload);
+    const controller = new AbortController();
+    expect(await fetchRecapRevisions(ident, controller.signal)).toEqual(
+      payload,
+    );
+    expect(new URL(calls[0].url).pathname).toBe(
+      "/api/annotation/recap/results",
+    );
+    expect(calls[0].init?.method).toBeUndefined();
+    expect(calls[0].init?.cache).toBe("no-store");
+    expect(calls[0].init?.signal).toBe(controller.signal);
+  });
+
+  test("an older backend without /results is asked under the old name", async () => {
+    const payload = { current: null, revisions: [{ revision_id: "x" }] };
+    let n = 0;
+    globals.fetch = mock((input: string | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      n += 1;
+      return Promise.resolve(
+        n === 1
+          ? new Response('{"detail":"Not Found"}', { status: 404 })
+          : new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    }) as unknown as typeof fetch;
+    expect((await fetchRecapRevisions(ident)).revisions).toEqual(
+      payload.revisions,
+    );
+    expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+      "/api/annotation/recap/results",
+      "/api/annotation/recap/revisions",
+    ]);
+  });
+
+  test("a list sent only under the new name 'results' still fills revisions", async () => {
+    respond(200, { current: null, results: [{ revision_id: "m" }] });
+    expect((await fetchRecapRevisions(ident)).revisions).toEqual([
+      { revision_id: "m" } as never,
+    ]);
+  });
+
+  test("pinned reads send their version and turn 409 into 'recomputed'", async () => {
+    respond(200, null);
+    await fetchRecapEpisode(3, ident, undefined, "model-a", "20261010-1000");
+    await fetchRecapSummary(ident, undefined, "model-a", "20261010-1000");
+    for (const call of calls)
+      expect(new URL(call.url).searchParams.get("version")).toBe(
+        "20261010-1000",
+      );
+    calls = [];
+    respond(200, { frames: { shared: 0 } });
+    await fetchRecapCompare(ident, "model-a", "model-b", undefined, {
+      a: "20261010-1000",
+      b: "20261009-1000",
+    });
+    const url = new URL(calls[0].url);
+    expect(url.searchParams.get("version_a")).toBe("20261010-1000");
+    expect(url.searchParams.get("version_b")).toBe("20261009-1000");
+    respond(409, {
+      detail: "The model-a result was recomputed; reload it",
+      code: "recomputed",
+    });
+    for (const read of [
+      () => fetchRecapEpisode(3, ident, undefined, "model-a", "20261010-1000"),
+      () => fetchRecapSummary(ident, undefined, "model-a", "20261010-1000"),
+      () =>
+        fetchRecapCompare(ident, "model-a", "model-b", undefined, {
+          a: "20261010-1000",
+        }),
+    ]) {
+      const error = await read().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(RecapRecomputedError);
+      expect((error as Error).message).toContain("recomputed");
+    }
+    // Unpinned, a 409 is an ordinary refusal (e.g. different sources).
+    const plain = await fetchRecapCompare(ident, "a", "b").catch(
+      (e: unknown) => e,
+    );
+    expect(plain).not.toBeInstanceOf(RecapRecomputedError);
+  });
+
+  test("a pinned read refused for another reason is an ordinary error with its own text", async () => {
+    for (const detail of [
+      "The dataset changed between these revisions; recompute both on the same source",
+      "A published revision is missing episode 4",
+      "Shared frame timestamps differ between these revisions",
+    ]) {
+      respond(409, { detail });
+      const error = await fetchRecapCompare(ident, "m-a", "m-b", undefined, {
+        a: "20261010-1000",
+        b: "20261009-1000",
+      }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(RecapRecomputedError);
+      expect((error as Error).message).toBe(detail);
+      const episode = await fetchRecapEpisode(
+        1,
+        ident,
+        undefined,
+        "m-a",
+        "20261010-1000",
+      ).catch((e: unknown) => e);
+      expect(episode).not.toBeInstanceOf(RecapRecomputedError);
+    }
+  });
+
+  test("the dataset label rule is read and stored through /recap/settings", async () => {
+    const choice = {
+      setting: "sft",
+      dataset_type: "sft",
+      source: "user",
+      reason: "the dataset setting",
+    };
+    respond(200, choice);
+    expect(await fetchRecapSettings(ident)).toEqual(choice);
+    const read = new URL(calls[0].url);
+    expect(read.pathname).toBe("/api/annotation/recap/settings");
+    expect(read.searchParams.get("repo_id")).toBe("local/plates");
+    expect(calls[0].init?.method).toBeUndefined();
+    await saveRecapSettings(ident, "auto");
+    expect(new URL(calls[1].url).pathname).toBe(
+      "/api/annotation/recap/settings",
+    );
+    expect(calls[1].init?.method).toBe("POST");
+    expect(JSON.parse(String(calls[1].init?.body))).toEqual({
+      repo_id: "local/plates",
+      dataset_type: "auto",
+    });
+    respond(400, {
+      detail: "dataset_type is auto, rollout, sft or value_only",
+    });
+    await expect(saveRecapSettings(ident, "sft")).rejects.toThrow(
+      "dataset_type is auto",
+    );
+  });
+
+  test("a computation without a label rule sends none: the backend decides", async () => {
+    respond(200, job);
+    await runRecap(ident, { checkpoint: "value-r2" });
+    const body = JSON.parse(String(calls[0].init?.body));
+    expect("dataset_type" in body).toBe(false);
+  });
+
+  test("comparison carries both explicit revisions and surfaces refused pairings", async () => {
+    respond(200, { dataset: "plates", frames: { shared: 5 } });
+    const controller = new AbortController();
+    await fetchRecapCompare(
+      ident,
+      "20261008-120000",
+      "20261009-120000",
+      controller.signal,
+    );
+    const url = new URL(calls[0].url);
+    expect(url.pathname).toBe("/api/annotation/recap/compare");
+    expect(url.searchParams.get("repo_id")).toBe("local/plates");
+    expect(url.searchParams.get("a")).toBe("20261008-120000");
+    expect(url.searchParams.get("b")).toBe("20261009-120000");
+    expect(calls[0].init?.signal).toBe(controller.signal);
+    expect(calls[0].init?.method).toBeUndefined();
+    respond(409, { detail: "Dataset sources differ between revisions" });
+    await expect(fetchRecapCompare(ident, "a", "b")).rejects.toThrow(
+      "Dataset sources differ between revisions",
+    );
+  });
+
+  test("historical summary and episode keep source revision and result revision separate", async () => {
+    respond(200, null);
+    const source = { ...ident, revision: "source-version" };
+    const controller = new AbortController();
+    await fetchRecapSummary(source, controller.signal, "20261008-120000");
+    await fetchRecapEpisode(5, source, controller.signal, "20261008-120000");
+    for (const call of calls) {
+      const url = new URL(call.url);
+      expect(url.searchParams.get("revision_id")).toBe("20261008-120000");
+      expect(url.searchParams.get("revision")).toBe("source-version");
+      expect(url.searchParams.get("optional")).toBe("true");
+      expect(call.init?.signal).toBe(controller.signal);
+    }
+  });
+
+  test("an SFT computation sends its label rule without adding a manual threshold", async () => {
+    respond(200, job);
+    await runRecap(ident, { checkpoint: "value-r2", dataset_type: "sft" });
+    const body = JSON.parse(String(calls[0].init?.body));
+    expect(body.dataset_type).toBe("sft");
+    expect(body.checkpoint).toBe("value-r2");
+    expect(body.threshold).toBeNull();
+  });
   test("status goes through the annotation proxy with repo_id", async () => {
     respond(200, {
       checkpoints: [],

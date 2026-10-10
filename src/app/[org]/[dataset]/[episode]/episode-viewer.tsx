@@ -16,6 +16,7 @@ import {
 import { IconButton, Kbd, Tabs } from "@/components/ds";
 import { AnalysisTab } from "@/components/viewer/analysis-tab";
 import { EpisodeLoadError } from "@/components/viewer/load-error";
+import { DataLoadNotice } from "@/components/viewer/data-notice";
 import { InspectorLayout } from "@/components/viewer/inspector";
 import {
   useViewerTabs,
@@ -55,6 +56,10 @@ import {
 } from "@/components/linked-dataset-notice";
 import { RawCaptureNotice } from "@/components/raw-capture-notice";
 import { DatasetUpdateNotice } from "@/components/dataset-update-notice";
+import {
+  episodeHref,
+  useLocalEpisodes,
+} from "@/components/viewer/use-local-episodes";
 import {
   AnnotationsProvider,
   useAnnotations,
@@ -190,6 +195,13 @@ export default function EpisodeViewer({
   const requestIdRef = useRef(0);
   const [authRevision, setAuthRevision] = useState(0);
   const legacyRouter = useRouter();
+  const liveSession = useSearchParams().get("live_session");
+  const localEpisodes = useLocalEpisodes(
+    org,
+    dataset,
+    liveSession,
+    authRevision,
+  );
   // Local datasets were once addressed by a hash (`/local/<hash>`); the
   // catalog keeps those as aliases of the current name. Redirect, carrying
   // this browser's flagged episodes over once.
@@ -223,14 +235,33 @@ export default function EpisodeViewer({
   }, []);
 
   useEffect(() => {
+    const requestId = ++requestIdRef.current;
+    setError(null);
+    setData(null);
+    if (org === "local") {
+      if (localEpisodes.loading) return;
+      if (localEpisodes.error) {
+        setError(localEpisodes.error);
+        setData(null);
+        return;
+      }
+      if (!localEpisodes.indices?.length) {
+        setError("No episodes remain in this selection.");
+        setData(null);
+        return;
+      }
+      if (!localEpisodes.indices.includes(episodeId)) {
+        legacyRouter.replace(
+          episodeHref(localEpisodes.indices[0], liveSession),
+        );
+        return;
+      }
+    }
     if (Number.isNaN(episodeId)) {
       setError("Invalid episode id.");
       setData(null);
       return;
     }
-    const requestId = ++requestIdRef.current;
-    setError(null);
-    setData(null);
     getEpisodeDataSafe(org, dataset, episodeId)
       .then(({ data: loaded, error: loadError }) => {
         if (requestIdRef.current !== requestId) return;
@@ -247,8 +278,27 @@ export default function EpisodeViewer({
         setError(message || "Unknown error");
         setData(null);
       });
-  }, [org, dataset, episodeId, authRevision]);
+    return () => {
+      if (requestIdRef.current === requestId) requestIdRef.current += 1;
+    };
+  }, [
+    org,
+    dataset,
+    episodeId,
+    authRevision,
+    localEpisodes.loading,
+    localEpisodes.error,
+    localEpisodes.indices,
+    legacyRouter,
+    liveSession,
+  ]);
 
+  if (org === "local" && localEpisodes.loading)
+    return (
+      <div className="vw-root ds-root relative">
+        <Loading />
+      </div>
+    );
   if (error) {
     return (
       <EpisodeLoadError
@@ -277,7 +327,13 @@ export default function EpisodeViewer({
             >
               <AnnotationsProvider>
                 <EpisodeBootstrap data={data!} />
-                <EpisodeViewerInner data={data!} org={org} dataset={dataset} />
+                <EpisodeViewerInner
+                  data={data!}
+                  org={org}
+                  dataset={dataset}
+                  localEpisodeIndices={localEpisodes.indices}
+                  liveSession={liveSession}
+                />
                 <DatasetUpdateNotice />
               </AnnotationsProvider>
             </FlaggedEpisodesProvider>
@@ -312,10 +368,14 @@ function EpisodeViewerInner({
   data,
   org,
   dataset,
+  localEpisodeIndices,
+  liveSession,
 }: {
   data: EpisodeData;
   org?: string;
   dataset?: string;
+  localEpisodeIndices?: number[] | null;
+  liveSession?: string | null;
 }) {
   const {
     datasetInfo,
@@ -329,7 +389,7 @@ function EpisodeViewerInner({
   const { t } = useLocale();
   // A live evaluation workspace's dataset, linked read-only: the viewer reads
   // it and offers nothing that writes.
-  const { linked } = useDatasetSource();
+  const { linked, entry } = useDatasetSource();
   const [videosReady, setVideosReady] = useState(!videosInfo.length);
   const [chartsReady, setChartsReady] = useState(false);
 
@@ -826,12 +886,14 @@ function EpisodeViewerInner({
   // the declared range as a fallback preserves browsing for datasets whose
   // metadata does not expose an episode table.
   const availableEpisodes = useMemo(() => {
+    if (localEpisodeIndices !== null && localEpisodeIndices !== undefined)
+      return localEpisodeIndices;
     if (!taskIndex) return episodes;
     const observed = Object.keys(taskIndex.episodeTasks)
       .map(Number)
       .filter((episode) => Number.isInteger(episode) && episode >= 0);
     return [...new Set([...episodes, ...observed])].sort((a, b) => a - b);
-  }, [episodes, taskIndex]);
+  }, [episodes, taskIndex, localEpisodeIndices]);
 
   // Episode list, narrowed to the selected task on multi-task datasets.
   const visibleEpisodes = useMemo(() => {
@@ -864,7 +926,7 @@ function EpisodeViewerInner({
       visibleEpisodes.length > 0 &&
       !visibleEpisodes.includes(episodeId)
     ) {
-      router.replace(`./episode_${visibleEpisodes[0]}`);
+      router.replace(episodeHref(visibleEpisodes[0], liveSession));
     }
   }, [
     episodeId,
@@ -873,6 +935,7 @@ function EpisodeViewerInner({
     taskIndex,
     taskIndexLoaded,
     visibleEpisodes,
+    liveSession,
   ]);
 
   // Pagination state. Lazily computed from the CURRENT episode's position
@@ -983,7 +1046,7 @@ function EpisodeViewerInner({
       setUrdfEpisode(nextEp);
       urdfChangerRef.current?.(nextEp);
     } else {
-      router.push(`./episode_${nextEp}`);
+      router.push(episodeHref(nextEp, liveSession));
     }
   };
 
@@ -1133,6 +1196,12 @@ function EpisodeViewerInner({
         {showsEpisodeList(activeTab) && (
           <Sidebar
             datasetInfo={datasetInfo}
+            localDatasetName={
+              org === "local" && entry?.local_file_management
+                ? dataset
+                : undefined
+            }
+            liveSession={liveSession}
             paginatedEpisodes={paginatedEpisodes}
             allVisibleEpisodes={visibleEpisodes}
             episodeId={activeTab === "urdf" ? urdfEpisode : episodeId}
@@ -1162,7 +1231,7 @@ function EpisodeViewerInner({
                     urdfChangerRef.current?.(ep);
                   }
                 : activeTab === "annotations"
-                  ? (ep) => router.push(`./episode_${ep}`)
+                  ? (ep) => router.push(episodeHref(ep, liveSession))
                   : undefined
             }
           />
@@ -1228,6 +1297,10 @@ function EpisodeViewerInner({
                         ))}
                     </div>
                   </section>
+                )}
+
+                {data.dataNotice && (
+                  <DataLoadNotice message={data.dataNotice} />
                 )}
 
                 {/* Graph */}

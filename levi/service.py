@@ -129,6 +129,9 @@ app.include_router(inference_router)
 from .live.api import router as live_router
 
 app.include_router(live_router)
+from .dataset_api import router as dataset_router
+
+app.include_router(dataset_router)
 from .pool.api import router as pool_router
 
 app.include_router(pool_router)
@@ -351,7 +354,12 @@ def _entry(item: dict) -> dict:
     item = with_base(item)
     root = item.get("view") if item.get("kind") == "raw" else item.get("path")
     live = dataset_revision(Path(root)) if root and Path(root).exists() else None
-    return {**item, "format": describe(item), "revision": live}
+    return {
+        **item,
+        "format": describe(item),
+        "revision": live,
+        "local_file_management": True,
+    }
 
 
 @app.get("/api/levi/catalog/{name}")

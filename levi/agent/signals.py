@@ -25,16 +25,17 @@ from pathlib import Path
 
 import numpy as np
 
+from ..events import gripper, motion
+
+# Hysteresis on the gripper channel's range, shared with the other readers.
+from ..events.gripper import HIGH, LOW  # noqa: F401
+from ..events.motion import STILL, STILL_SECONDS  # noqa: F401
+
 GRIPPER = re.compile(r"grip|finger|claw|jaw", re.IGNORECASE)
 AXIS = re.compile(r"^(?:.*[_.\s-])?(?:pos(?:ition)?[_.\s-]?)?([xyz])$", re.IGNORECASE)
-# Hysteresis on the channel's range: a change counts once it crosses both.
-LOW, HIGH = 0.35, 0.65
 # A turn in height counts when the arm comes back by this share of the
 # episode's height range.
 TURN = 0.15
-# Still: speed below this share of the episode's fast speed, for at least
-# STILL_SECONDS.
-STILL, STILL_SECONDS = 0.1, 0.5
 MAX_ITEMS = 24
 
 
@@ -80,53 +81,54 @@ def _clip(items):
     return items
 
 
-def gripper_events(times, values, bounds=None):
+def gripper_events(times, values, bounds=None, open_level="auto", start="first"):
     """Close/open crossings of one gripper dimension.
 
     Crossings are found on the episode's own range, so a grasp on a wide
-    object that never nears the gripper's minimum still counts. The level
-    the episode starts at is taken as "open" (a robot starts an episode with
-    an empty hand). With the dataset's range (``bounds``) a continuous
-    channel also says how far it closed, as a share of that range -- a
-    gripper stopped well above fully closed is usually holding something."""
-    finite = np.isfinite(values)
-    if finite.sum() < 2:
-        return []
-    lo, hi = np.nanmin(values), np.nanmax(values)
-    if hi - lo <= 1e-9:
-        return []
-    if bounds and np.isfinite(bounds).all() and bounds[1] - bounds[0] > 1e-9:
+    object that never nears the gripper's minimum still counts. Unless
+    ``open_level`` says which end is open, the level of the episode's first
+    sample is taken as "open" (a robot starts an episode with an empty
+    hand): an episode that starts holding something reads upside down, and
+    only a declared ``open_level`` reads it right. ``start="robust"`` reads
+    the starting level from the first three samples instead, so one stale
+    first sample does not turn the episode upside down -- but neither does
+    a real close-and-open in the first frames read right then, which is why
+    it is not the default (a policy that closes for the first second of a
+    rollout and then opens is a recorded case). With the dataset's range
+    (``bounds``) a continuous channel also says how far it closed, as a
+    share of that range -- a gripper stopped well above fully closed is
+    usually holding something. The crossings are ``events.gripper``'s, the
+    kernel anchored reviews use too, on the episode's range rather than the
+    dataset's."""
+    channel = gripper.read(
+        values,
+        bounds,
+        range_source="episode",
+        open_level=open_level,
         # Jitter of a gripper that never moved is no grasp.
-        if (hi - lo) < 0.2 * (bounds[1] - bounds[0]):
-            return []
-    else:
-        bounds = None
-    u = np.where(finite, (values - lo) / (hi - lo), np.nan)
-    flip = u[np.argmax(finite)] < 0.5
-    if flip:
-        u = 1 - u
+        min_travel=0.2,
+        start=start,
+    )
+    if channel is None:
+        return []
+    u, bounds = channel.u, channel.bounds
+    flip = channel.open_level == "low"
+    finite = np.isfinite(values)
     # An open/closed flag (only the dataset's two extremes) has no "how far".
     binary = bounds is None or np.all(
         np.isin(np.round(values[finite], 6), np.round(bounds, 6))
     )
     events = []
-    state = "open"
-    for i, x in enumerate(u):
-        if np.isnan(x):
-            continue
-        if state == "open" and x < LOW:
-            state = "closed"
+    for i, kind in channel.crossings:
+        event = {"t": float(times[i]), "kind": kind}
+        if kind == "close" and bounds and not binary:
+            # How far it closed: the bottom of the fall that crossed.
             j = i
             while j + 1 < len(u) and not np.isnan(u[j + 1]) and u[j + 1] < u[j] - 1e-6:
                 j += 1
-            event = {"t": float(times[i]), "kind": "close"}
-            if bounds and not binary:
-                share = (values[j] - bounds[0]) / (bounds[1] - bounds[0])
-                event["level"] = float(np.clip(1 - share if flip else share, 0, 1))
-            events.append(event)
-        elif state == "closed" and x > HIGH:
-            state = "open"
-            events.append({"t": float(times[i]), "kind": "open"})
+            share = (values[j] - bounds[0]) / (bounds[1] - bounds[0])
+            event["level"] = float(np.clip(1 - share if flip else share, 0, 1))
+        events.append(event)
     return events
 
 
@@ -178,33 +180,17 @@ def turns(times, values):
 
 
 def still_spans(times, positions, fps):
-    step = np.diff(positions, axis=0)
-    ok = np.isfinite(step).all(axis=1)
-    speed = np.where(ok, np.linalg.norm(np.nan_to_num(step), axis=1) * fps, np.nan)
-    if not np.isfinite(speed).any():
-        return []
-    fast = np.nanpercentile(speed, 95)
-    if fast <= 1e-9:
-        return []
-    # Smoothed over three frames: one noisy sample neither starts nor ends a span.
-    padded = np.concatenate([[speed[0]], speed, [speed[-1]]])
-    smooth = np.convolve(np.nan_to_num(padded, nan=fast), np.ones(3) / 3, "valid")
-    quiet = np.concatenate([[smooth[0] < STILL * fast], smooth < STILL * fast])
-    spans = []
-    start = None
-    for i, q in enumerate([*quiet, False]):
-        if q and start is None:
-            start = i
-        elif not q and start is not None:
-            end = min(i, len(times)) - 1
-            if times[end] - times[start] >= STILL_SECONDS:
-                spans.append((float(times[start]), float(times[end])))
-            start = None
-    return spans
+    """Where the arm stands still, on the recorded timestamps (see
+    ``events.motion``)."""
+    return motion.still_spans(times, positions, fps)
 
 
-def summarize(table, info, stats=None):
-    """Signal lines and machine-readable events for one episode's table."""
+def summarize(table, info, stats=None, open_levels=None, start="first"):
+    """Signal lines and machine-readable events for one episode's table.
+    ``open_levels`` may declare which end of a gripper channel is open
+    (``{"observation.state.gripper": "high" | "low"}``); undeclared channels
+    take the level the episode starts at, read from its first sample or,
+    with ``start="robust"``, its first three (see ``gripper_events``)."""
     columns = vector_columns(info)
     fps = float(info.get("fps") or 0) or None
     times = table["timestamp"].to_numpy(dtype=float)
@@ -235,7 +221,13 @@ def summarize(table, info, stats=None):
                     bounds = (float(s["min"][d]), float(s["max"][d]))
                 except (IndexError, TypeError, ValueError):
                     bounds = None
-            found = gripper_events(times, matrix[:, d], bounds)
+            found = gripper_events(
+                times,
+                matrix[:, d],
+                bounds,
+                (open_levels or {}).get(f"{key}.{name}", "auto"),
+                start,
+            )
             if key == "action":
                 commands[name] = found
                 if grip_done or recorded_gripper:

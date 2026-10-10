@@ -811,7 +811,9 @@ export function nameList(demos: string[], limit = 6): string {
 
 /**
  * A React key for each session of a list. Two sessions can share a model and a
- * task folder (two runs of the same evaluation); the run id tells them apart,
+ * task folder (two runs of the same evaluation); the session id tells them
+ * apart even when a run id is absent, and the source root separates captures.
+ * Older records use their run id,
  * and a repeat of even that (a manual session has none) gets a counter, so no
  * key is used twice and no card is dropped.
  */
@@ -820,11 +822,13 @@ export function sessionKeys(
     group: string;
     task_folder: string;
     run_id?: string;
+    session_id?: string;
+    root?: string;
   }>,
 ): string[] {
   const seen = new Map<string, number>();
   return sessions.map((s) => {
-    const base = `${s.group}/${s.task_folder}/${s.run_id ?? ""}`;
+    const base = `${s.root ? `${s.root}/` : ""}${s.group}/${s.task_folder}/${s.session_id || s.run_id || ""}`;
     const n = seen.get(base) ?? 0;
     seen.set(base, n + 1);
     return n === 0 ? base : `${base}#${n}`;

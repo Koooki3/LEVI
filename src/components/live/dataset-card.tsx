@@ -13,8 +13,8 @@ import {
 import { datasetLinks, type LiveLink } from "./embedding";
 import { EpisodeList } from "./episode-list";
 import { Chip, type Tone } from "./session-panels";
-import { ArrowUpRight, ChevronDown, ChevronUp } from "lucide-react";
-import { Button, Icon, Progress, Skeleton } from "@/components/ds";
+import { Workflow } from "lucide-react";
+import { Progress, Skeleton } from "@/components/ds";
 import { Problem, RequestProblem } from "@/components/pages-ui/feedback";
 import { count, percent } from "./stats-logic";
 import type {
@@ -24,6 +24,9 @@ import type {
   DatasetRow,
 } from "./types";
 import type { DetailEntry } from "./use-live";
+import { LiveRow } from "./live-row";
+import { datasetIdentity } from "./live-filters";
+import { LiveDeleteButton, ViewerAction } from "./management-actions";
 
 const STATE_LABELS: Record<string, [string, Tone]> = {
   idle: ["Idle", ""],
@@ -230,6 +233,8 @@ export function DatasetCard({
   onFilter,
   nowSeconds,
   onChanged,
+  onDeleted,
+  busy = false,
 }: {
   name: string;
   row: DatasetRow;
@@ -243,12 +248,14 @@ export function DatasetCard({
   nowSeconds: number;
   /** An episode was removed or restored: fetch this card's detail again. */
   onChanged: () => void;
+  onDeleted?: () => void;
+  busy?: boolean;
 }) {
   const { t } = useLocale();
   const detail = entry?.data ?? undefined;
   const links = datasetLinks(detail);
   const [stateLabel, stateTone] = STATE_LABELS[row.state ?? ""] ?? [
-    row.state ?? "",
+    row.state ?? t("Idle"),
     "",
   ];
   const seg = segmentSummary(detail?.demos);
@@ -264,13 +271,60 @@ export function DatasetCard({
     ["removed by a person (not counted)", row.excluded],
   ];
   const shownExtras = extras.filter(([, n]) => (n ?? 0) > 0);
-  const title = detail?.group
-    ? `${detail.group} / ${detail.task_folder}`
-    : name.replace("__", " / ");
+  const id = datasetIdentity(name, row);
+  const title = `${id.model} / ${id.task}`;
   return (
-    <article
-      className={`pg-live-card${fault === "current" ? " fault" : ""}`}
-      aria-label={title}
+    <LiveRow
+      title={title}
+      subtitle={row.task_text || detail?.task_text || undefined}
+      icon={Workflow}
+      fault={fault === "current"}
+      open={open}
+      onToggle={onToggle}
+      summary={
+        <>
+          <Chip tone={stateTone}>{t(stateLabel)}</Chip>
+          <span>
+            {row.done} / {row.episodes} {t("Episodes labelled")}
+          </span>
+          {row.pending > 0 && (
+            <span>
+              {row.pending} {t("waiting")}
+            </span>
+          )}
+          {row.failed > 0 && (
+            <Chip tone="fail">
+              {row.failed} {t("failed")}
+            </Chip>
+          )}
+          {fault === "current" && <Chip tone="fail">{t("FR3 fault")}</Chip>}
+        </>
+      }
+      actions={
+        <>
+          <ViewerAction
+            url={row.viewer_url}
+            status={row.view_status}
+            updatedAt={row.updated_at}
+            fallback={links.viewer}
+            dataset={name}
+            onChanged={onDeleted}
+          />
+          <LiveDeleteButton
+            target={{ kind: "dataset", name }}
+            title={title}
+            blocked={
+              busy ||
+              row.annotating > 0 ||
+              row.state === "annotating" ||
+              !!workerPhase
+                ? t("A pipeline with active work cannot be deleted.")
+                : undefined
+            }
+            onChanged={onDeleted}
+          />
+        </>
+      }
     >
       <header>
         <h3>
@@ -397,34 +451,6 @@ export function DatasetCard({
           : t("never")}
       </p>
       <div className="pg-row pg-live-actions">
-        {links.viewer ? (
-          <>
-            <LinkTo
-              className="ds-btn ds-btn--secondary ds-focus"
-              link={links.viewer}
-            >
-              {t("Open in the viewer")}
-              <Icon icon={ArrowUpRight} />
-            </LinkTo>
-            {detail?.linked_repo_id && (
-              <span className="pg-pool-muted">
-                {t(
-                  "Opens read-only in this LEVI; label and review it where the live service keeps it.",
-                )}
-              </span>
-            )}
-          </>
-        ) : (
-          <span className="pg-pool-muted">
-            {!detail
-              ? t("Loading…")
-              : detail.embedded
-                ? t(
-                    "The episodes' viewer and their review are on the live workspace's own page: start the service with `levi live start --ui` to open them.",
-                  )
-                : t("Not registered in LEVI yet: no viewer link.")}
-          </span>
-        )}
         {links.review && (
           <LinkTo
             className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
@@ -433,15 +459,6 @@ export function DatasetCard({
             {t("Conversion & review")}
           </LinkTo>
         )}
-        <Button
-          size="sm"
-          variant="ghost"
-          iconEnd={open ? ChevronUp : ChevronDown}
-          aria-expanded={open}
-          onClick={onToggle}
-        >
-          {open ? t("Hide episodes") : t("Show episodes")}
-        </Button>
       </div>
       {open &&
         (entry?.error && !detail ? (
@@ -453,6 +470,6 @@ export function DatasetCard({
         ) : (
           <EpisodeList dataset={name} detail={detail} onChanged={onChanged} />
         ))}
-    </article>
+    </LiveRow>
   );
 }

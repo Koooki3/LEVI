@@ -25,6 +25,14 @@ PROJECT = Path(__file__).resolve().parents[1]
 VENDORED = PROJECT / "integrations/recap_value/levi_recap_worker/rlinf"
 
 
+@pytest.fixture(autouse=True)
+def _original_layout(monkeypatch):
+    """These tests describe the original one-revision-per-run layout
+    (``LEVI_RECAP_STORE_LAYOUT=revisions``, main's behaviour before the
+    per-model default); tests/test_recap_store.py covers the default."""
+    monkeypatch.setenv("LEVI_RECAP_STORE_LAYOUT", "revisions")
+
+
 # ---------------------------------------------------------------- formula
 
 
@@ -629,6 +637,32 @@ def test_cancel_conflict_and_failure(recap, capture, monkeypatch):
         ]
         is None
     )
+
+
+def test_cancel_wins_over_the_watcher_collecting_the_stopped_worker(
+    recap, capture, monkeypatch
+):
+    """Regression: the watch thread collects as soon as the stopped worker
+    exits; cancel used to record "cancelled" only afterwards, so a cancelled
+    job was reported as failed ("exited without a result") about half the
+    time. The watcher's collect is forced to win the race here."""
+    client, repo = recap, capture["id"]
+    monkeypatch.setenv("LEVI_RECAP_VALUE_FAKE_DELAY_SECONDS", "30")
+    started = client.post("/annotations/api/recap/run", json={**BODY, "repo_id": repo})
+    assert started.status_code == 202, started.text
+    job_id = started.json()["id"]
+    real_stop = jobs._stop
+
+    def stop_then_collect(process, grace=10.0):
+        real_stop(process, grace)
+        jobs.collect(jobs.find(job_id, capture["name"]))
+
+    monkeypatch.setattr(jobs, "_stop", stop_then_collect)
+    cancelled = client.post(
+        f"/annotations/api/recap/jobs/{job_id}/cancel", params={"repo_id": repo}
+    )
+    assert cancelled.json()["status"] == "cancelled"
+    assert finish(client, repo, job_id)["status"] == "cancelled"
 
 
 def test_refusals(recap, capture, monkeypatch, tmp_path):

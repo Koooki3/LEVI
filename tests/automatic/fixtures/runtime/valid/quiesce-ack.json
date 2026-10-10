@@ -1,0 +1,11 @@
+{
+ "schema": "levi.aeri.runtime.v1",
+ "minor": 0,
+ "run_id": "r20261010-a",
+ "emitted_wall_ns": 1791600000000000000,
+ "kind": "quiesce_ack",
+ "handle_id": "h-1",
+ "fenced_epoch": 2,
+ "inflight_cancelled": 1,
+ "ok": true
+}

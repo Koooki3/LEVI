@@ -19,6 +19,14 @@ from levi import catalog
 from levi.recap import advantage, base_models, checkpoints, jobs, static_filter
 
 
+@pytest.fixture(autouse=True)
+def _original_layout(monkeypatch):
+    """These tests describe the original one-revision-per-run layout
+    (``LEVI_RECAP_STORE_LAYOUT=revisions``, main's behaviour before the
+    per-model default); tests/test_recap_store.py covers the default."""
+    monkeypatch.setenv("LEVI_RECAP_STORE_LAYOUT", "revisions")
+
+
 @pytest.fixture
 def store_env(monkeypatch, tmp_path):
     monkeypatch.setenv("LEVI_RECAP_VALUE_CHECKPOINT_DIR", str(tmp_path / "ckpt"))

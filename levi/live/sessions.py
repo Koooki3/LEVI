@@ -114,6 +114,7 @@ class Session:
             "session_id": self.session_id,
             "run_id": self.run_id,
             "started_at": self.started_at,
+            "updated_at": self.updated_at,
             "policy": self.policy,
             "root": self.root,
             "reset_wait_s": self.reset_wait_s,

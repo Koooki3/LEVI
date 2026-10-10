@@ -32,6 +32,11 @@ def _path() -> Path:
     return STATE / "processes.json"
 
 
+def _state_path(state: Path | None = None) -> Path:
+    # Keep the default hook argument-free for existing embedders and tests.
+    return Path(state) / "processes.json" if state is not None else _path()
+
+
 # /proc/<pid>/stat states of an exited process: zombie, and dead (X, x) for
 # the moment it is being reaped.
 EXITED = frozenset("ZXx")
@@ -54,8 +59,8 @@ def identity(pid):
 
 
 @contextlib.contextmanager
-def _locked():
-    path = _path()
+def _locked(state: Path | None = None):
+    path = _state_path(state)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_suffix(".lock").open("a") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
@@ -69,7 +74,9 @@ def _locked():
         os.replace(temporary, path)
 
 
-def track(process, kind: str, label: str = "") -> dict | None:
+def track(
+    process, kind: str, label: str = "", *, state: Path | None = None
+) -> dict | None:
     """Record a process LEVI just started in its own session."""
     who = identity(process.pid)
     if who is None:
@@ -82,28 +89,28 @@ def track(process, kind: str, label: str = "") -> dict | None:
         "owner": {"pid": os.getpid(), "identity": identity(os.getpid())},
         "started_at": time.time(),
     }
-    with _locked() as rows:
+    with _locked(state) as rows:
         rows[:] = [r for r in rows if r["pid"] != process.pid] + [row]
     return row
 
 
-def untrack(pid: int, grace: float = 2.0) -> None:
+def untrack(pid: int, grace: float = 2.0, *, state: Path | None = None) -> None:
     """Forget a finished process -- after stopping whatever it started that is
     still in its group (an adapter's CLI, a bridge), which would otherwise
     outlive it unrecorded."""
-    with _locked() as rows:
+    with _locked(state) as rows:
         row = next((r for r in rows if r["pid"] == pid), None)
     if row:
         terminate(row, grace)
-    with _locked() as rows:
+    with _locked(state) as rows:
         rows[:] = [r for r in rows if r["pid"] != pid]
 
 
-def listed() -> list[dict]:
+def listed(*, state: Path | None = None) -> list[dict]:
     """The recorded processes, each marked with whether it still runs and
     whether its owner does."""
     try:
-        rows = json.loads(_path().read_text())
+        rows = json.loads(_state_path(state).read_text())
     except (OSError, ValueError):
         return []
     return [
@@ -174,28 +181,30 @@ def terminate(row, grace: float = GRACE_SECONDS) -> bool:
     return True
 
 
-def stop_owned(grace: float = GRACE_SECONDS) -> list[dict]:
+def stop_owned(
+    grace: float = GRACE_SECONDS, *, state: Path | None = None
+) -> list[dict]:
     """Terminate every recorded group this process started (service stop)."""
     me = os.getpid()
-    with _locked() as rows:
+    with _locked(state) as rows:
         mine = [r for r in rows if r["owner"]["pid"] == me]
     stopped = [r for r in mine if terminate(r, grace)]
-    with _locked() as rows:
+    with _locked(state) as rows:
         rows[:] = [r for r in rows if r["owner"]["pid"] != me]
     return stopped
 
 
-def reclaim(grace: float = GRACE_SECONDS) -> list[dict]:
+def reclaim(grace: float = GRACE_SECONDS, *, state: Path | None = None) -> list[dict]:
     """Terminate every recorded group whose owner is gone -- left behind by a
     service that was killed rather than stopped -- and forget finished ones."""
-    with _locked() as rows:
+    with _locked(state) as rows:
         snapshot = list(rows)
     orphaned = [
         r for r in snapshot if identity(r["owner"]["pid"]) != r["owner"]["identity"]
     ]
     stopped = [r for r in orphaned if terminate(r, grace)]
     gone = {r["pid"] for r in orphaned}
-    with _locked() as rows:
+    with _locked(state) as rows:
         rows[:] = [
             r
             for r in rows
