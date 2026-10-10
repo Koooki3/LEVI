@@ -167,26 +167,32 @@ def test_a_double_click_resumes_once(tmp_path, fake_systemd):
 
 
 def test_a_resume_processed_again_is_repeated_not_redone(tmp_path, fake_systemd):
-    """A runner that crashed after the resume but before writing its result
-    sees the command again: the orchestrator answers ``repeated``."""
+    """A runner that took a resume never takes it again; the next runner,
+    which sees the command without a result (the first crashed before
+    writing it), gets ``repeated`` from the orchestrator."""
     job = human_job(tmp_path, "r-twice")
     found, run_dir = prepare(
         job, fake_systemd, overrides={"scenes": ["reset_required", "reset_required"]}
     )
-    served = Served(run_dir, found.plan_sha256)
-    wait_until(lambda: state_of(run_dir) == "WAIT_HUMAN")
-    first = send(run_dir, resume_cmd(run_dir))
+    served = runner.Runner(run_dir, found.plan_sha256)
+    assert served.open() is None
+    assert served.orch.run() == "WAIT_HUMAN"
+    first_pump = control.CommandPump(served)
+    control.write_command(run_dir, resume_cmd(run_dir))
+    first_pump.tick()
+    first = control.read_result(run_dir, "resume-1")
     assert first["code"] == "resumed"
-    wait_until(
-        lambda: len([c for c in committed(run_dir) if c[1] == "WAIT_HUMAN"]) == 2
-    )
+    assert served.orch.run() == "WAIT_HUMAN"  # the second scene check
     (run_dir / "control/results/resume-1.json").unlink()
-    again = wait_until(lambda: control.read_result(run_dir, "resume-1"))
+    first_pump.tick()
+    assert control.read_result(run_dir, "resume-1") is None  # not taken twice
+    next_pump = control.CommandPump(served)  # as the next runner's would
+    next_pump.tick()
+    again = control.read_result(run_dir, "resume-1")
     assert again["ok"] and again["code"] == "repeated" and again["repeated"]
     assert again["sequence_no"] == first["sequence_no"]
     assert len([c for c in committed(run_dir) if c[3] == "resume-1"]) == 1
-    send(run_dir, control.command("stop", "stop-1", "op-1"))
-    served.join()
+    served.finish(0, "exited", "")
 
 
 def test_a_stale_expected_seq_is_refused(tmp_path, fake_systemd):
@@ -348,20 +354,27 @@ def test_sigterm_stops_the_run_and_the_runner(
         )
     finally:
         kill_quietly(pid)
-    assert record["exit_code"] == 0 and record["final_state"] == "COMPLETED"
-    assert committed(run_dir)[-1][:3] == ("WAIT_HUMAN", "COMPLETED", "operator_stop")
+    # SIGTERM while the run waits for a person (review CL3 B3): no stop is
+    # registered, the run is not ended; the runner leaves it as it is.
+    assert record["exit_code"] == 0 and record["final_state"] == "WAIT_HUMAN"
+    assert committed(run_dir)[-1][1:3] == ("WAIT_HUMAN", "scene_reset_required")
     results = list((run_dir / "control/results").iterdir())
     assert len(results) == 1
     result = json.loads(results[0].read_text())
-    assert result["principal_id"] == "system:sigterm" and result["code"] == "completed"
+    assert result["principal_id"] == "system:sigterm"
+    assert result["code"] == "exited_without_stop" and result["state"] == "WAIT_HUMAN"
     notes = [
         e.note.detail
         for e in Journal.read(run_dir).events
         if e.record == "note" and e.note.code == "operator_command"
     ]
-    assert any("by system:sigterm: completed" in n for n in notes)
+    assert any("by system:sigterm: exited_without_stop" in n for n in notes)
     audit = (aeri_home / "control.jsonl").read_text()
     assert "system:sigterm" in audit
+    # A person brings it back: attach locks it, nothing was lost.
+    handle = launch.attach(run_dir, backend="foreground", deadline_s=0.3)
+    assert handle.final_state == "FAULT_LOCKED"
+    assert committed(run_dir)[-1][1:3] == ("FAULT_LOCKED", "recovery_ambiguous")
 
 
 def test_a_crashed_runner_is_attached_into_fault_locked_without_motion(
@@ -472,3 +485,325 @@ def test_sigterm_before_an_episode_stops_at_a_person_not_at_the_end(
     found_result = json.loads(stop.read_text())
     assert found_result["principal_id"] == "system:sigterm"
     assert found_result["code"] == "stop_requested"
+
+
+# --- review CL3: no network, the signal handler, SIGTERM mid-episode --------------------------------
+
+ROBOT_PORTS = (5000, 5001, 5100, 8000, 7470)
+# TEST-NET-1 (RFC 5737): never routed. Should the guard ever be missing, an
+# attempt here reaches nothing, least of all a robot port on this machine.
+NOWHERE = "192.0.2.1"
+
+
+def _try_connections() -> list:
+    import socket
+
+    found = []
+    for port in (*ROBOT_PORTS, 80):
+        for attempt in ("create_connection", "connect", "connect_ex"):
+            try:
+                if attempt == "create_connection":
+                    socket.create_connection((NOWHERE, port), timeout=0.05).close()
+                else:
+                    sock = socket.socket()
+                    sock.settimeout(0.05)
+                    try:
+                        getattr(sock, attempt)((NOWHERE, port))
+                    finally:
+                        sock.close()
+                found.append("connected")
+            except Exception as exc:  # noqa: BLE001 - recorded
+                found.append(type(exc).__name__)
+    return found
+
+
+def test_a_launched_dry_run_refuses_every_connection(tmp_path, fake_systemd):
+    """Review CL3 B1: a runner that owns its process (systemd, foreground)
+    drives the dry run under cli.no_network()."""
+    import socket
+
+    job = write_job(tmp_path, name="r-net")
+    found, run_dir = prepare(job, fake_systemd)
+    before = socket.socket.connect
+    seen = []
+
+    def hook(point):
+        if not seen:
+            seen.extend(_try_connections())
+
+    result = runner.serve(run_dir, found.plan_sha256, signals=True, crash_hook=hook)
+    assert result.state == "COMPLETED"
+    assert seen and set(seen) == {"NetworkRefused"}
+    assert socket.socket.connect is before  # given back afterwards
+
+
+NET_CHILD = """
+import json, sys
+from levi.automatic import orchestrator as o, runner
+sys.path.insert(0, sys.argv[4])
+from test_runner import _try_connections
+seen = []
+original = o.Orchestrator._crash
+def crash(self, point):
+    if not seen:
+        seen.extend(_try_connections())
+        open(sys.argv[3], "w").write(json.dumps(seen))
+    return original(self, point)
+o.Orchestrator._crash = crash
+sys.exit(runner.main(["--run-dir", sys.argv[1], "--plan-sha256", sys.argv[2]]))
+"""
+
+
+def child_env():
+    return {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join([str(ROOT), os.environ.get("PYTHONPATH", "")]),
+    }
+
+
+def test_the_runner_command_refuses_every_connection(tmp_path, fake_systemd):
+    job = write_job(tmp_path, name="r-net2")
+    found, run_dir = prepare(job, fake_systemd)
+    out = tmp_path / "seen.json"
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            NET_CHILD,
+            str(run_dir),
+            found.plan_sha256,
+            str(out),
+            str(Path(__file__).parent),
+        ],
+        env=child_env(),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr[-1000:]
+    assert set(json.loads(out.read_text())) == {"NetworkRefused"}
+
+
+def test_the_signal_handler_touches_no_lock(tmp_path, fake_systemd):
+    """Review CL3 B2: the handler runs on the main thread, which may hold
+    the lock of ``wake`` (wait/clear): it only flags ``sigterm``."""
+    job = write_job(tmp_path, name="r-sig")
+    found, run_dir = prepare(job, fake_systemd)
+    served = runner.Runner(run_dir, found.plan_sha256)
+
+    class Untouchable:
+        def __getattr__(self, name):
+            raise AssertionError(f"the signal handler used wake.{name}")
+
+    served.wake = Untouchable()
+    served.on_signal(signal.SIGTERM, None)
+    assert served.sigterm.is_set()
+
+
+def test_a_flood_of_sigterm_ends_a_waiting_runner_within_2_s(tmp_path, fake_systemd):
+    """Review CL3 B2 (the reviewer's reproduction: SIGTERM after SIGTERM
+    while the main thread waits on and clears ``wake``)."""
+    job = human_job(tmp_path, "r-flood")
+    found, run_dir = prepare(
+        job, fake_systemd, overrides={"scenes": ["reset_required"]}
+    )
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "levi.automatic.runner",
+            "--run-dir",
+            str(run_dir),
+            "--plan-sha256",
+            found.plan_sha256,
+        ],
+        env=child_env(),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        wait_until(lambda: state_of(run_dir) == "WAIT_HUMAN")
+        wait_until(lambda: runner_pid(run_dir))
+        started = time.monotonic()
+        sent = 0
+        while proc.poll() is None and sent < 200_000:
+            proc.send_signal(signal.SIGTERM)  # the child is ours: no reused pid
+            sent += 1
+            if time.monotonic() - started > 2.0:
+                break
+        proc.wait(timeout=max(0.1, 2.0 - (time.monotonic() - started)))
+        assert time.monotonic() - started <= 2.0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    assert proc.returncode == 0
+    record = json.loads((run_dir / "runner.json").read_text())
+    assert record["state"] == "exited" and record["final_state"] == "WAIT_HUMAN"
+
+
+MID_EPISODE = r"""
+import json, os, signal, sys, time
+from levi.automatic import orchestrator as o, runner
+sent = {"done": False}
+original = o.Orchestrator._crash
+def crash(self, point):
+    if not sent["done"] and point == "after_committed" and self.state == "FORWARD_ACTIVE":
+        sent["done"] = True
+        with open(sys.argv[3], "w") as handle:
+            json.dump({"seq": len(self.journal.events)}, handle)
+        os.kill(os.getpid(), signal.SIGTERM)
+        time.sleep(0.5)  # the command thread registers the stop meanwhile
+    return original(self, point)
+o.Orchestrator._crash = crash
+r = runner.serve(sys.argv[1], sys.argv[2], signals=True, deadline_s=30)
+print(json.dumps({"exit": r.exit_code, "state": r.state}))
+sys.exit(r.exit_code)
+"""
+
+
+def test_sigterm_mid_episode_stops_at_the_episode_end(tmp_path, fake_systemd):
+    """Review CL3 X1: SIGTERM during a forward episode is a controlled stop
+    by system:sigterm: the episode ends (stopping, finalize, home), the run
+    waits for a person, no new episode starts, the runner exits."""
+    job = write_job(tmp_path, name="r-mid")
+    found, run_dir = prepare(job, fake_systemd, overrides={"episodes": 3})
+    marker = tmp_path / "marker.json"
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            MID_EPISODE,
+            str(run_dir),
+            found.plan_sha256,
+            str(marker),
+        ],
+        env=child_env(),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr[-1000:]
+    assert json.loads(done.stdout.strip().splitlines()[-1])["state"] == "WAIT_HUMAN"
+    seq = json.loads(marker.read_text())["seq"]
+    after = [e for e in Journal.read(run_dir).events[seq:] if e.record == "committed"]
+    assert not [e for e in after if e.to_state == "FORWARD_ACTIVE"]
+    assert (after[-1].to_state, after[-1].reason) == ("WAIT_HUMAN", "operator_stop")
+    results = [
+        json.loads(p.read_text()) for p in (run_dir / "control/results").iterdir()
+    ]
+    assert [(r["principal_id"], r["code"]) for r in results] == [
+        ("system:sigterm", "stop_requested")
+    ]
+    record = json.loads((run_dir / "runner.json").read_text())
+    assert record["state"] == "exited" and record["final_state"] == "WAIT_HUMAN"
+
+
+# --- review CL3: P2 and missing tests ---------------------------------------------------------------
+
+
+def test_the_loop_ending_answers_queued_commands_without_running_them(
+    tmp_path, fake_systemd
+):
+    """Review CL3 P2-2: a resume queued when the main loop is over is not
+    carried out (nothing would drive the run): E_RUNNER_EXITING."""
+    job = human_job(tmp_path, "r-late")
+    found, run_dir = prepare(
+        job, fake_systemd, overrides={"scenes": ["reset_required"]}
+    )
+    served = runner.Runner(run_dir, found.plan_sha256)
+    assert served.open() is None
+    served.orch.run()
+    assert served.orch.state == "WAIT_HUMAN"
+    served.pump = control.CommandPump(served)  # not started: the loop is over
+    control.write_command(run_dir, resume_cmd(run_dir, "resume-late"))
+    result = served.drive(0)
+    found_result = control.read_result(run_dir, "resume-late")
+    assert found_result["code"] == "E_RUNNER_EXITING" and not found_result["ok"]
+    assert result.state == "WAIT_HUMAN"
+    assert not [c for c in committed(run_dir) if c[3] == "resume-late"]
+
+
+def test_a_result_that_cannot_be_written_is_not_redone(
+    tmp_path, fake_systemd, aeri_home, monkeypatch
+):
+    """Review CL3 P2-1: the command is carried out once; writing its result
+    is retried with back-off and given up (audited as failed)."""
+    monkeypatch.setattr(control, "RESULT_RETRY_S", 0.02)
+    _, run_dir, served = waiting_run(tmp_path, fake_systemd, name="r-ro")
+    results = run_dir / "control" / "results"
+    results.chmod(0o500)
+    try:
+        value = control.command(
+            "scene_answer",
+            "answer-x",
+            "op-1",
+            request_id="q-1",
+            predicates={"object_at_source": True},
+        )
+        # Straight into the inbox (write_command would make the folders 0700).
+        data = (json.dumps(value, sort_keys=True) + "\n").encode()
+        control._link_whole(run_dir / "control" / "inbox", "answer-x.json", data)
+        failed = wait_until(
+            lambda: [
+                x
+                for x in map(
+                    json.loads,
+                    (aeri_home / "control.jsonl").read_text().splitlines()
+                    if (aeri_home / "control.jsonl").exists()
+                    else [],
+                )
+                if x.get("phase") == "result_write_failed"
+            ],
+            timeout=20,
+        )
+        time.sleep(0.3)
+    finally:
+        results.chmod(0o700)
+    assert [x["command_id"] for x in failed] == ["answer-x"]
+    notes = [
+        e
+        for e in Journal.read(run_dir).events
+        if e.record == "note"
+        and e.note.code == "operator_command"
+        and "answer-x" in e.note.detail
+    ]
+    assert len(notes) == 1
+    lines = [
+        json.loads(x) for x in (aeri_home / "control.jsonl").read_text().splitlines()
+    ]
+    executed = [
+        x for x in lines if x.get("command_id") == "answer-x" and x["phase"] == "result"
+    ]
+    assert len(executed) == 1
+    assert control.read_result(run_dir, "answer-x") is None
+    send(run_dir, control.command("stop", "stop-x", "op-1"))
+    served.join()
+    # Given up for good: the next tick does not carry it out again.
+    assert (
+        len(
+            [
+                x
+                for x in (aeri_home / "control.jsonl").read_text().splitlines()
+                if "answer-x" in x
+            ]
+        )
+        == 2
+    )
+
+
+def test_a_command_file_named_after_another_id_is_refused(tmp_path, fake_systemd):
+    """Review CL3 M12: the file name is the command id."""
+    _, run_dir, served = waiting_run(tmp_path, fake_systemd, name="r-name")
+    value = control.command("stop", "stop-9", "op-1")
+    (run_dir / "control/inbox/other-1.json").write_text(json.dumps(value))
+    assert (
+        wait_until(lambda: control.read_result(run_dir, "other-1"))["code"] == "invalid"
+    )
+    assert control.read_result(run_dir, "stop-9") is None
+    assert state_of(run_dir) == "WAIT_HUMAN"
+    send(run_dir, control.command("stop", "stop-1", "op-1"))
+    served.join()

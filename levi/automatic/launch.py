@@ -421,26 +421,54 @@ def job_fact(path) -> dict:
 
 def core_key(path=None) -> bytes:
     """The core key (32 random bytes, ``core.key`` 0600 in the home folder),
-    created once. Never printed, never part of any output."""
+    created once. Never printed, never part of any output.
+
+    The first use writes the key to a temporary file (synced) and links it
+    into place, so a reader sees no key or the whole key; when two first
+    uses race, the second links nothing and reads the first one's key (a
+    short wait covers a key file still being read)."""
     folder = ensure_home(path)
     where = folder / KEY_FILE
+    if not where.exists():
+        with contextlib.suppress(FileExistsError):
+            _link_new(where, secrets.token_bytes(32))
+    for _ in range(KEY_READ_TRIES):
+        key = _read_key(where)
+        if len(key) == 32:
+            return key
+        time.sleep(0.01)
+    raise LaunchRefused("E_KEY", f"{where} does not hold a 32-byte key")
+
+
+KEY_READ_TRIES = 50
+
+
+def _link_new(path: Path, data: bytes) -> None:
+    """Put ``data`` at ``path`` (0600) only if nothing is there
+    (``FileExistsError``): written whole and synced, then linked."""
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
+    descriptor = os.open(
+        temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+    )
     try:
-        descriptor = os.open(
-            where, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
-        )
-    except FileExistsError:
-        pass
-    else:
-        try:
-            os.write(descriptor, secrets.token_bytes(32))
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        fsync_dir(folder)
+        os.write(descriptor, data)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    try:
+        os.link(temporary, path)
+    finally:
+        os.unlink(temporary)
+    fsync_dir(path.parent)
+
+
+def _read_key(where: Path) -> bytes:
     try:
         descriptor = os.open(where, os.O_RDONLY | os.O_NOFOLLOW)
     except OSError as exc:
-        raise LaunchRefused("E_KEY", f"the core key cannot be read: {exc.strerror}")
+        raise LaunchRefused(
+            "E_KEY", f"the core key cannot be read: {exc.strerror}"
+        ) from None
     try:
         info = os.fstat(descriptor)
         if (
@@ -451,12 +479,9 @@ def core_key(path=None) -> bytes:
             raise LaunchRefused(
                 "E_KEY", f"{where} must be a regular file of this user, mode 0600"
             )
-        key = os.read(descriptor, 64)
+        return os.read(descriptor, 64)
     finally:
         os.close(descriptor)
-    if len(key) != 32:
-        raise LaunchRefused("E_KEY", f"{where} does not hold a 32-byte key")
-    return key
 
 
 def _mac(key: bytes, digest: str, fact: dict, expires_ns: int) -> str:

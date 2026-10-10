@@ -22,8 +22,13 @@ The run is driven until it needs a person (``WAIT_HUMAN``,
 ``FAULT_LOCKED``) or completes. While it waits the runner stays: operator
 commands reach it through the run folder's command channel
 (``levi/automatic/control.py``), polled every 50 ms. It exits when the run
-completes, on SIGTERM (``systemctl --user stop``) once the run reached a
-person or was sealed, or, for an in-process dry run, at its deadline.
+completes, on SIGTERM (``systemctl --user stop``, Ctrl+C, a logout without
+lingering) or, for an in-process dry run, at its deadline. A SIGTERM while
+the run is under way is a controlled stop by ``system:sigterm`` (the
+episode ends, the run waits for a person); while it already waits for a
+person nothing is stopped and the run is left as it is (``attach`` locks
+it). A runner that owns its process drives the dry run with every socket
+connection refused (``cli.no_network``).
 
 ``--attach`` takes over a run whose runner is gone (``Orchestrator.restore``:
 the journal's recovery moves it to ``FAULT_LOCKED``, ``recovery_ambiguous``,
@@ -47,6 +52,24 @@ EXIT_OK, EXIT_PROBLEM, EXIT_REFUSED = 0, 1, 2
 HOLD = ("WAIT_HUMAN", "FAULT_LOCKED", "COMPLETED")
 # How often the main loop looks at the state while the run waits.
 WAIT_S = 0.2
+
+
+class Flag:
+    """Set once, read from any thread, safe to set from a signal handler:
+    a plain attribute, no lock (a ``threading.Event`` takes its lock in
+    ``set``, so a second signal arriving inside the first ``set`` would wait
+    for a lock its own thread holds)."""
+
+    __slots__ = ("value",)
+
+    def __init__(self):
+        self.value = False
+
+    def set(self) -> None:
+        self.value = True
+
+    def is_set(self) -> bool:
+        return self.value
 
 
 @dataclass
@@ -82,7 +105,7 @@ class Runner:
         self.unit = None
         self.backend = None
         self.wake = threading.Event()
-        self.sigterm = threading.Event()
+        self.sigterm = Flag()
         self.pump = None
         self.identity = None
 
@@ -192,6 +215,14 @@ class Runner:
         self._record("running", state_of_run=self.orch.state)
         return None
 
+    def on_signal(self, signum, frame) -> None:
+        """SIGTERM/SIGINT: only a flag. This runs on the main thread, which
+        may be inside ``wake.wait``/``wake.clear`` holding that event's
+        lock (review CL3 B2), and may hold the orchestrator's re-entrant
+        lock: the command thread reads the flag (within 50 ms) and the main
+        loop looks at it at least every ``WAIT_S``."""
+        self.sigterm.set()  # a plain attribute: no lock to take
+
     # --- the loop ----------------------------------------------------------------------------------
 
     def _motions(self) -> int | None:
@@ -259,29 +290,55 @@ def serve(
     deadline_s: float | None = None,
     path=None,
     crash_hook=None,
+    keep_handlers: bool = False,
 ) -> RunnerResult:
-    """Run the runner of ``run_dir`` in this process. ``signals``: handle
-    SIGTERM and SIGINT (the main thread only) as a stop by
-    ``system:sigterm``."""
+    """Run the runner of ``run_dir`` in this process. ``signals``: the
+    runner owns this process (a systemd unit, ``--foreground``, ``main``):
+    SIGTERM and SIGINT are handled (main thread only), and the dry run is
+    driven under ``cli.no_network()`` (every socket connection refused, as
+    for ``run --dry-run``). Without ``signals`` (``inprocess``: the runner
+    in a thread of another program, such as a service) neither is done: a
+    process-wide guard would cut that program's own connections.
+    ``keep_handlers`` (``main``: the process ends with the runner): SIGTERM
+    and SIGINT stay ignored afterwards instead of getting their old
+    handlers back."""
+    guard = cli.no_network() if signals else contextlib.nullcontext()
+    with guard:
+        return _serve(
+            run_dir,
+            plan_sha256,
+            attach=attach,
+            signals=signals,
+            deadline_s=deadline_s,
+            path=path,
+            crash_hook=crash_hook,
+            keep_handlers=keep_handlers,
+        )
+
+
+def _serve(
+    run_dir,
+    plan_sha256,
+    *,
+    attach,
+    signals,
+    deadline_s,
+    path,
+    crash_hook,
+    keep_handlers,
+):
     runner = Runner(
         run_dir, plan_sha256, attach=attach, path=path, crash_hook=crash_hook
     )
-    refused = runner.open()
-    if refused is not None:
-        return refused
     previous = {}
     if signals:
-
-        def on_signal(signum, frame):
-            # Only flags: the stop itself is registered by the command
-            # thread (the orchestrator's lock is re-entrant, and this
-            # handler runs on the thread that may hold it).
-            runner.sigterm.set()
-            runner.wake.set()
-
+        # Before the runner names itself: from then on a SIGTERM is its.
         for number in (signal.SIGTERM, signal.SIGINT):
-            previous[number] = signal.signal(number, on_signal)
+            previous[number] = signal.signal(number, runner.on_signal)
     try:
+        refused = runner.open()
+        if refused is not None:
+            return refused
         try:
             runner.pump = control.CommandPump(runner)
         except (OSError, control.CommandError) as exc:
@@ -290,7 +347,10 @@ def serve(
         return runner.drive(deadline_s)
     finally:
         for number, handler in previous.items():
-            signal.signal(number, handler)
+            # A process that ends with its runner ignores later signals: the
+            # interpreter's shutdown would otherwise put back the default
+            # action, and a late SIGTERM would kill an exit that is under way.
+            signal.signal(number, signal.SIG_IGN if keep_handlers else handler)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -314,7 +374,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
-    result = serve(args.run_dir, args.plan_sha256, attach=args.attach, signals=True)
+    result = serve(
+        args.run_dir,
+        args.plan_sha256,
+        attach=args.attach,
+        signals=True,
+        keep_handlers=True,
+    )
     if result.exit_code != EXIT_OK:
         print(f"{result.code}: {result.detail}", file=sys.stderr)
     return result.exit_code

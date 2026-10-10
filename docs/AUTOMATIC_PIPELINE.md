@@ -1261,8 +1261,11 @@ levi.automatic.runner --run-dir D --plan-sha256 X`, **without `Restart`**: a
 runner that crashed is brought back by a person (`attach`). It never lives
 in the product's cgroup and is never recorded in the product's
 `processes.json`, so stopping or restarting LEVI does not stop a run.
-`--foreground` runs it in this terminal (Ctrl+C is a stop). A user without
-lingering loses the unit at logout. A launched dry run writes into
+`--foreground` runs it in this terminal. A runner that owns its process
+(systemd or `--foreground`) drives the dry run with every socket connection
+refused (`cli.no_network`, as `run --dry-run` does); the `inprocess` backend
+(the runner in a thread of another program) cannot guard the whole process
+and does not. A launched dry run writes into
 `$LEVI_AERI_HOME/dry-runs/<run_id>/` (or `--keep DIR`), never into the job's
 rollout root.
 
@@ -1272,8 +1275,21 @@ digest is refused before anything is written (exit 2). It names itself in
 (pid, process identity, state); `levi automatic runs` lists the index with
 whether each runner still lives. It drives the run until it needs a person
 or completes, then waits for commands; it exits when the run completes, or
-on SIGTERM (`systemctl --user stop levi-aeri-<run_id>`) once the run reached
-a person or completed: SIGTERM is a stop by `system:sigterm`.
+on SIGTERM.
+
+**SIGTERM and Ctrl+C** (`systemctl --user stop levi-aeri-<run_id>`, Ctrl+C
+under `--foreground`, a logout: with `Linger=no` the user manager stops
+every unit of the user, so a logout is a SIGTERM to the runner). While the
+run is under way (an episode, a scene check, a reset), it is a controlled
+stop by `system:sigterm`: the episode ends at its boundary (stopping,
+finalize, home), the run waits for a person (`WAIT_HUMAN`,
+`operator_stop`), no new episode starts, and the runner exits. While the
+run already holds (`WAIT_HUMAN`, `FAULT_LOCKED`) no stop is registered and
+the run is **not** ended: the runner exits and leaves it as it is (result
+`exited_without_stop`). Only a typed `stop` ends a run. A run left this way
+is brought back with `attach`, which locks it (`FAULT_LOCKED`,
+`recovery_ambiguous`) until a person resumes it. The signal handler only
+sets a flag; the command thread registers the stop.
 
 **The command channel.** `stop`, `resume` and `scene-answer` write
 `<run_dir>/control/inbox/<command_id>.json` (written whole and synced, then
@@ -1286,7 +1302,13 @@ orchestrator answers a resume it already did with `repeated`; another
 command under a used id is `command_used`. A resume names the journal line
 it applies at (`--expected-seq`, default the next one); a stale one is
 `stale_sequence`. Command files survive a crashed runner and are judged by
-the next one. Every command is audited twice: an `operator_command` note in
+the next one. A runner takes each command file once: when its result cannot
+be written (disk full, read-only), the write is retried with back-off and
+then given up (`result_write_failed` in `control.jsonl`, a
+`command_result_lost` note); the command is not carried out again. Commands
+still queued when the runner's loop ends are answered `E_RUNNER_EXITING` and
+not carried out (nothing would drive the run after them): send them again
+with a new id once a runner serves the run. Every command is audited twice: an `operator_command` note in
 the run's journal (who, the command id, the result, when) and a line in
 `$LEVI_AERI_HOME/control.jsonl` (issued and result). Ids, names and files
 are checked before use (the id pattern, no symbolic link, at most 64 KiB,

@@ -57,6 +57,15 @@ FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\.json$")
 NOTE_CODE = "operator_command"
 # Who stops a run when its runner receives SIGTERM (systemctl --user stop).
 SIGTERM_PRINCIPAL = "system:sigterm"
+# States in which a SIGTERM registers no stop: the run already holds (no
+# motion authority); the runner exits and leaves it as it is.
+HOLD_STATES = ("WAIT_HUMAN", "FAULT_LOCKED", "COMPLETED")
+# A result file that cannot be written is tried again after this, doubling
+# each time, at most RESULT_MAX_TRIES times; the command is never redone.
+RESULT_RETRY_S = 0.1
+RESULT_RETRY_MAX_S = 5.0
+RESULT_MAX_TRIES = 6
+EXITING = "E_RUNNER_EXITING"
 COMMON = ("schema", "command_id", "kind", "principal_id", "issued_wall_ns")
 FIELDS = {
     "stop": (),
@@ -287,8 +296,17 @@ def wait_result(run_dir, command_id: str, timeout_s: float) -> dict | None:
 
 class CommandPump(threading.Thread):
     """Polls the inbox and carries out the commands on the runner's
-    orchestrator (``runner.orch``); a SIGTERM the runner flagged becomes a
-    stop by ``system:sigterm``."""
+    orchestrator (``runner.orch``), each once. A SIGTERM the runner flagged
+    becomes a stop by ``system:sigterm`` while the run is under way; while
+    it holds (WAIT_HUMAN, FAULT_LOCKED) nothing is stopped and the runner
+    exits, leaving the run as it is (``exited_without_stop``).
+
+    A result file that cannot be written (disk full, read-only) is retried
+    with back-off and then given up (``result_write_failed`` in the audit);
+    the command itself is never carried out again by this runner. Once the
+    runner's loop is over (``close``), commands still queued are answered
+    ``E_RUNNER_EXITING`` and not carried out: nothing would drive the run
+    after them."""
 
     def __init__(self, runner):
         super().__init__(name=f"aeri-control-{runner.run_id}", daemon=True)
@@ -298,6 +316,12 @@ class CommandPump(threading.Thread):
         self._closed = threading.Event()
         self._tick_lock = threading.Lock()
         self._refused: set = set()
+        # Command files taken by this runner (carried out or refused): never
+        # taken again, whether or not their result could be written.
+        self._handled: set = set()
+        # name -> [result bytes, tries, next try (monotonic)]
+        self._unwritten: dict = {}
+        self._closing = False
         self._sigterm_result: dict | None = None
         # The latest results (bounded: a long run keeps few in memory).
         self.processed: deque = deque(maxlen=256)
@@ -319,10 +343,12 @@ class CommandPump(threading.Thread):
             self._closed.wait(POLL_S)
 
     def close(self) -> None:
-        """Stop polling; the commands already queued get their results."""
+        """Stop polling. Commands still queued are answered
+        ``E_RUNNER_EXITING`` and not carried out."""
         self._closed.set()
         if self.is_alive() and threading.current_thread() is not self:
             self.join(5)
+        self._closing = True
         with contextlib.suppress(Exception):
             self.tick()
 
@@ -336,6 +362,7 @@ class CommandPump(threading.Thread):
                 self._sigterm_result = self._sigterm()
             for name in self._pending():
                 self._take(name)
+            self._retry_results()
 
     def _pending(self) -> list:
         try:
@@ -353,7 +380,9 @@ class CommandPump(threading.Thread):
                         {"phase": "refused", "detail": "not a command file name"}
                     )
                 continue
-            if (self.paths["results"] / name).exists() or name in self._refused:
+            if name in self._handled or name in self._refused:
+                continue
+            if (self.paths["results"] / name).exists():
                 continue
             with contextlib.suppress(OSError):
                 out.append((os.lstat(self.paths["inbox"] / name).st_mtime_ns, name))
@@ -361,6 +390,7 @@ class CommandPump(threading.Thread):
 
     def _take(self, name: str) -> None:
         command_id = name[: -len(".json")]
+        self._handled.add(name)
         try:
             value = validate(_strict(read_file(self.paths["inbox"] / name)))
             if value["command_id"] != command_id:
@@ -375,7 +405,20 @@ class CommandPump(threading.Thread):
                 {"ok": False, "code": "invalid", "detail": detail[:300]},
             )
             return
+        if self._closing:
+            self._finish(value, self._exiting())
+            return
         self._finish(value, self._execute(value))
+
+    def _exiting(self) -> dict:
+        orch = self.runner.orch
+        return {
+            "ok": False,
+            "code": EXITING,
+            "detail": "the runner was exiting: not carried out; send it again "
+            "(a new command id) once a runner serves the run (attach)",
+            "state": orch.state if orch is not None else None,
+        }
 
     # --- doing a command ----------------------------------------------------------------------------
 
@@ -437,12 +480,27 @@ class CommandPump(threading.Thread):
         return {"ok": True, "code": "delivered", "state": orch.state}
 
     def _sigterm(self) -> dict:
+        """SIGTERM: a controlled stop while the run is under way; nothing
+        while it already holds (review CL3 B3: a stopped unit, a Ctrl+C or
+        a logout must not end a run that waits for a person; only a typed
+        ``stop`` does)."""
         value = command(
             "stop",
             f"sigterm-{os.getpid()}-{self.runner.started}",
             SIGTERM_PRINCIPAL,
         )
-        result = self._execute(value)
+        orch = self.runner.orch
+        state = orch.state if orch is not None else None
+        if self._closing or state in HOLD_STATES:
+            result = {
+                "ok": True,
+                "code": "exited_without_stop",
+                "detail": "the run holds: no stop registered, the runner exits "
+                "and leaves the run as it is (attach locks it)",
+                "state": state,
+            }
+        else:
+            result = self._execute(value)
         self._finish(value, result)
         return result
 
@@ -462,8 +520,16 @@ class CommandPump(threading.Thread):
             **result,
         }
         data = (json.dumps(record, sort_keys=True) + "\n").encode()
-        with contextlib.suppress(OSError):
-            _link_whole(self.paths["results"], f"{value['command_id']}.json", data)
+        name = f"{value['command_id']}.json"
+        try:
+            _link_whole(self.paths["results"], name, data)
+        except OSError as exc:
+            self._unwritten[name] = [
+                data,
+                1,
+                time.monotonic() + RESULT_RETRY_S,
+                str(exc),
+            ]
         self.processed.append(record)
         self._note(record)
         self._audit_only(
@@ -476,6 +542,58 @@ class CommandPump(threading.Thread):
                 "state": record["state"],
             }
         )
+
+    def _retry_results(self) -> None:
+        """Write the results that could not be written, with back-off; give
+        up after ``RESULT_MAX_TRIES`` (audited, noted once)."""
+        now = time.monotonic()
+        for name, entry in list(self._unwritten.items()):
+            data, tries, due, error = entry
+            if now < due and not self._closing:
+                continue
+            try:
+                _link_whole(self.paths["results"], name, data)
+            except OSError as exc:
+                tries += 1
+                if tries < RESULT_MAX_TRIES and not self._closing:
+                    delay = min(RESULT_RETRY_MAX_S, RESULT_RETRY_S * 2 ** (tries - 1))
+                    self._unwritten[name] = [data, tries, now + delay, str(exc)]
+                    continue
+                error = str(exc)
+            else:
+                del self._unwritten[name]
+                continue
+            del self._unwritten[name]
+            command_id = name[: -len(".json")]
+            self._audit_only(
+                {
+                    "phase": "result_write_failed",
+                    "command_id": command_id,
+                    "code": "failed",
+                    "detail": f"{tries} tries: {error}"[:300],
+                }
+            )
+            orch = self.runner.orch
+            if orch is not None:
+                with contextlib.suppress(JournalError):
+                    orch.journal.note(
+                        "command_result_lost",
+                        f"{command_id}: its result could not be written ({error})"[
+                            :300
+                        ],
+                        authority=self._authority(None),
+                    )
+
+    def _authority(self, principal) -> dict:
+        return {
+            "principal_kind": "operator" if principal else "orchestrator",
+            "principal_id": principal
+            if principal and ID.fullmatch(principal)
+            else self.runner.orch.config.principal_id,
+            "session_id": self.runner.orch.config.session_id,
+            "process": self._process,
+            "command_id": None,
+        }
 
     def _note(self, record: dict) -> None:
         orch = self.runner.orch
