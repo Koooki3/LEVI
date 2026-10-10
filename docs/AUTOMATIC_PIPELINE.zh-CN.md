@@ -1,8 +1,8 @@
-# 自动测评流水线（AERI）：契约与事务日志
+# 自动测评流水线（AERI）
 
 [English](AUTOMATIC_PIPELINE.md)
 
-**状态：只在 Fake 上运行。** 本页写集成契约（`levi/domain/aeri.py`）、持久化事务日志（`levi/automatic/journal.py`）、状态机与编排器（`levi/automatic/state_machine.py`、`orchestrator.py`）、终止裁决器（`termination.py`）、提供方适配层（`levi/automatic/adapters/`）和进程内 Fake（`integrations/fr3_automatic/fake.py`）。真实机器人适配层、命令和页面都还没有；这里的代码不会让机器人动、不会启动模型、不会开端口，在这里通过的测试都不算真机验证。
+**状态：只在 Fake 上运行。** 本页写集成契约（`levi/domain/aeri.py`）、持久化事务日志（`levi/automatic/journal.py`）、状态机与编排器（`levi/automatic/state_machine.py`、`orchestrator.py`）、终止裁决器（`termination.py`）、复位仲裁（`scene_assessment.py`、`reset_manager.py`）、录制层（`recorder.py`）、指标（`metrics.py`）、命令行（`cli.py`）、提供方适配层（`levi/automatic/adapters/`）和进程内 Fake（`integrations/fr3_automatic/fake.py`）。真实机器人适配层和页面都还没有，命令行只能在 Fake 上试运行；这里的代码不会让机器人动、不会启动模型、不会开端口，在这里通过的测试都不算真机验证。
 
 流水线由三部分组成，彼此只通过带版本的消息交互：
 
@@ -257,6 +257,55 @@ initial_state:
 | 自动化 | 干预次数（进入 `WAIT_HUMAN` 或 `FAULT_LOCKED`）及原因、恢复次数、最长无干预的连续前向片段数、人工等待时间（仅在时钟域没变时计） |
 
 **四类标签，互不混用**（流水线文档 §9.4）。`autonomous_verdict` 就是日志里的片段结果：不在别处写，也绝不称为真值（相应比率都叫 `autonomous_*`）。`posthoc_verdict`、`operator_label` 和 `adjudicated_ground_truth` 存在 `<run_dir>/labels/<kind>.jsonl`，每类一个只追加的文件（每行 fsync），用 `LabelStore.add(kind, episode_id, value, subject=, by=)` 写入。写一类标签从不改动别类的文件；同一类、同一片段、同一主题的第二个标签会被拒绝，除非写明 `supersede=True`，此时追加一行（第一行保留）。`by` 是不透明的主体 ID（不写姓名或邮箱）。主题有 `task_outcome`（`success`/`failure`）和 `initial_state`（`ready`/`reset_required`：开始这个片段之前场景是否需要复位）。比率用的真值：有裁定标签就用裁定标签，否则用操作员标签（`truth="adjudicated"` 只用裁定标签）；没有真值的片段计为 `unlabeled`，不进比率。
+
+## 命令行（`levi/automatic/cli.py`）
+
+```
+python -m levi.automatic.cli doctor   [--config F] [--json]
+python -m levi.automatic.cli validate --config F [--json]
+python -m levi.automatic.cli run      --config F --dry-run [--episodes N] [--scenes S] [--keep DIR] [--json]
+python -m levi.automatic.cli status   --run-dir D [--json]
+python -m levi.automatic.cli report   --run-dir D [--config F] [--truth T] [--format md|json]
+```
+
+（接入 `levi.cli` 之后即 `levi automatic …`。）每个选项的帮助都是中英双语。
+
+- `doctor` 只读：检查契约快照、Fake、作业文件、rollout 根目录是否可写；并说明本版本没有真机适配层（非必需项，退出码仍为 0）。
+- `validate` 读取作业文件，打印计划及其 `plan_sha256`（即日志里的计划哈希）；被拒时退出码 2 并给出原因。
+- `run` **没有 `--dry-run` 一律拒绝**（退出码 2）：本版本不能真机运行。试运行只驱动进程内 Fake，在临时目录里运行（结束后删除；`--keep DIR` 保留在一个新的或空的目录里），绝不写作业里的 `rollout_root`，运行期间拒绝任何 socket 连接。没有任何真实对象拥有运动权限：唯一的机器人是 `FakeRobot`。`--scenes reset_required,ready` 设定 Fake 先给出的场景结论。
+- `status` 不拿锁、不写入地读取运行日志（撕裂的末尾只报告、不截掉；损坏的日志显示 `FAULT_LOCKED`）。
+- `report` 以 Markdown 或 JSON 打印指标（见上）。
+
+**作业文件**（`levi.aeri.job.v1`，与契约一样是草案，HA-23）使用同一个严格 YAML 子集；拒绝未知的节和键，v1 只读取下列内容：
+
+```yaml
+schema_version: levi.aeri.job.v1
+experiment:
+  name: r20261010-a           # 运行 ID（不含点）
+  episodes: 30
+  random_seed: 42
+  execution_mode: shadow      # shadow | assisted | autonomous（只校验）
+policies:
+  forward:
+    max_steps: 120
+  reset:
+    max_steps: 80
+task:
+  instruction: stack the plates
+  reset_instruction: "Reset: stack the plates"
+  initial_state_spec: initial-state.yaml   # 相对本文件
+termination:                  # TerminationConfig 的字段
+  min_steps: 10
+reset:
+  strategy: single_reset_policy   # 也接受 single_policy；或 human_assisted
+  max_attempts: 1
+  on_unknown: reset               # 或 wait_human
+recording:
+  rollout_root: /data/rollouts
+  group: aeri
+  forward_folder: stack_plates__r20261010-a
+  reset_folder: reset_stack_plates__r20261010-a
+```
 
 ## Fake（`integrations/fr3_automatic/fake.py`）
 

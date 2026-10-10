@@ -1,4 +1,4 @@
-# Automatic evaluation pipeline (AERI): contracts and journal
+# Automatic evaluation pipeline (AERI)
 
 [中文](AUTOMATIC_PIPELINE.zh-CN.md)
 
@@ -6,11 +6,14 @@
 contracts (`levi/domain/aeri.py`), the durable journal
 (`levi/automatic/journal.py`), the state machine and orchestrator
 (`levi/automatic/state_machine.py`, `orchestrator.py`), the termination
-arbiter (`termination.py`), the provider adapters
+arbiter (`termination.py`), the reset arbitration (`scene_assessment.py`,
+`reset_manager.py`), the recorder layer (`recorder.py`), the metrics
+(`metrics.py`), the command line (`cli.py`), the provider adapters
 (`levi/automatic/adapters/`) and the in-process fakes
-(`integrations/fr3_automatic/fake.py`). There is no real robot adapter, no
-command and no page yet; nothing here moves a robot, starts a model or opens
-a port, and nothing tested here counts as verified on the robot.
+(`integrations/fr3_automatic/fake.py`). There is no real robot adapter and no
+page yet, and the command line only dry-runs on the fakes; nothing here
+moves a robot, starts a model or opens a port, and nothing tested here
+counts as verified on the robot.
 
 The pipeline joins three parts through versioned messages:
 
@@ -635,6 +638,68 @@ the scene need a reset before the episode that started). The truth for the
 rates is the adjudicated label where there is one, else the operator's
 (`truth="adjudicated"` uses adjudicated labels only); episodes without one
 are counted as `unlabeled` and left out.
+
+## Command line (`levi/automatic/cli.py`)
+
+```
+python -m levi.automatic.cli doctor   [--config F] [--json]
+python -m levi.automatic.cli validate --config F [--json]
+python -m levi.automatic.cli run      --config F --dry-run [--episodes N] [--scenes S] [--keep DIR] [--json]
+python -m levi.automatic.cli status   --run-dir D [--json]
+python -m levi.automatic.cli report   --run-dir D [--config F] [--truth T] [--format md|json]
+```
+
+(`levi automatic …` once it is wired into `levi.cli`.) Every option's help
+is in English and Chinese.
+
+- `doctor` is read-only: the contract snapshots, the fakes, the job file,
+  whether the rollout root is writable. It says that a real robot adapter
+  is not in this version (not required, so the exit code stays 0).
+- `validate` reads the job file and prints the plan and its `plan_sha256`
+  (the journal's plan hash); exit 2 with the reason when it is refused.
+- `run` **refuses without `--dry-run`** (exit 2): there is no real run in
+  this version. A dry run drives the in-process fakes only, in a temporary
+  folder (deleted afterwards; `--keep DIR` keeps it in a new or empty
+  folder), never in the job's `rollout_root`, with every socket connection
+  refused while it lasts. Nothing real has motion authority: the only
+  robot is `FakeRobot`. `--scenes reset_required,ready` sets the first scene
+  decisions of the fake.
+- `status` reads a run's journal without its lock and without writing
+  (a torn tail is reported, not cut; a corrupt journal is `FAULT_LOCKED`).
+- `report` prints the metrics (above) as Markdown or JSON.
+
+**The job file** (`levi.aeri.job.v1`, a draft like the contract, HA-23)
+uses the same strict YAML subset; unknown sections and keys are refused,
+and only these are read in v1:
+
+```yaml
+schema_version: levi.aeri.job.v1
+experiment:
+  name: r20261010-a           # the run id (no dots)
+  episodes: 30
+  random_seed: 42
+  execution_mode: shadow      # shadow | assisted | autonomous (checked only)
+policies:
+  forward:
+    max_steps: 120
+  reset:
+    max_steps: 80
+task:
+  instruction: stack the plates
+  reset_instruction: "Reset: stack the plates"
+  initial_state_spec: initial-state.yaml   # relative to this file
+termination:                  # TerminationConfig fields
+  min_steps: 10
+reset:
+  strategy: single_reset_policy   # single_policy is accepted too; human_assisted
+  max_attempts: 1
+  on_unknown: reset               # or wait_human
+recording:
+  rollout_root: /data/rollouts
+  group: aeri
+  forward_folder: stack_plates__r20261010-a
+  reset_folder: reset_stack_plates__r20261010-a
+```
 
 ## Fakes (`integrations/fr3_automatic/fake.py`)
 

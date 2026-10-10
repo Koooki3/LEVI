@@ -359,28 +359,38 @@ class FakeGoalVerifier(_FakeProvider):
 
 
 class FakeSceneAssessor(_FakeProvider):
-    """Scene assessments against ``SCENE_CONTRACT``."""
+    """Scene assessments against ``SCENE_CONTRACT`` (or the ``contract``
+    and ``predicates`` given: the first predicate is the one a
+    ``reset_required`` or ``unknown`` answer fails or leaves unread)."""
 
     schema = "scene"
 
-    def __init__(self, script, clock, run_id: str, *, default=None):
+    def __init__(
+        self,
+        script,
+        clock,
+        run_id: str,
+        *,
+        default=None,
+        contract=SCENE_CONTRACT,
+        predicates=SCENE_PREDICATES,
+    ):
         super().__init__(
             script, clock, run_id, default=default or {"decision": "ready"}
         )
+        self.contract = tuple(contract)
+        self.predicates = tuple(predicates)
 
     def _answer(self, ticket: Ticket, spec: dict, produced: int) -> bytes:
         request = ticket.request
         decision = spec.get("decision", "ready")
-        values = {
-            "ready": (True, True),
-            "reset_required": (False, True),
-            "unknown": (None, True),
-        }[decision]
+        first = {"ready": True, "reset_required": False, "unknown": None}[decision]
         if spec.get("contradict"):
-            values = (False, True)
+            first = False
+        values = (first,) + (True,) * (len(self.predicates) - 1)
         results = [
             {"name": name, "value": value, "required": True, "evidence_refs": []}
-            for name, value in zip(SCENE_PREDICATES, values, strict=True)
+            for name, value in zip(self.predicates, values, strict=True)
         ]
         times = self._common(ticket, spec, produced)
         message = {
@@ -391,8 +401,8 @@ class FakeSceneAssessor(_FakeProvider):
             "episode_id": spec.get("episode_id", request["episode_id"]),
             "target": spec.get("target", request["target"]),
             "decision": decision,
-            "contract_id": spec.get("contract_id", SCENE_CONTRACT[0]),
-            "contract_version": SCENE_CONTRACT[1],
+            "contract_id": spec.get("contract_id", self.contract[0]),
+            "contract_version": self.contract[1],
             "predicate_results": results,
             "failed_predicates": [r["name"] for r in results if r["value"] is False],
             "unknown_predicates": [r["name"] for r in results if r["value"] is None],
