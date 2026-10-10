@@ -2,7 +2,7 @@
 
 [English](AUTOMATIC_CAMPAIGN.md)
 
-**状态：只有库。** 本页将说明自动测评流水线（AERI）怎样在同一个任务上比较多个策略（组）。目前只有统计方法：`levi/automatic/analysis/`，一组纯函数，还没有任何命令、页面或 API 调用它。评测计划、时间表、报告和页面是后续工作，届时在本页另写章节。
+**状态：只有库。** 本页将说明自动测评流水线（AERI）怎样在同一个任务上比较多个策略（组）。目前有两部分，都还没有任何命令、页面或 API 调用：统计方法（`levi/automatic/analysis/`，一组纯函数），以及把统计结果画给网页和论文的图表写出器（见[图表](#图表)）。评测计划、时间表、报告和页面是后续工作，届时在本页另写章节。
 
 ## 统计方法
 
@@ -59,3 +59,83 @@
 ### 参考文献
 
 各条都按 DOI 或 arXiv 记录核对过（2026-10-10）。书目信息与英文版相同，见 [English](AUTOMATIC_CAMPAIGN.md#references)：Agarwal 等 2021；Agresti 与 Caffo 2000；Balasubramanian 等 2015；Benjamini 与 Hochberg 1995；Boschloo 1970；Brown 等 2001；Cliff 1993；Clopper 与 Pearson 1934；Cochran 1950；Cohen 1960；Connor 1987；Dunn 1961；Efron 1979、1987；Fagerland 等 2013；Feinstein 与 Cicchetti 1990；Fisher 1922；Friedman 1937；Hodges 与 Lehmann 1963；Holm 1979；Kaplan 与 Meier 1958；Kress-Gazit 等 2024；Mann 1945；Mann 与 Whitney 1947；Mantel 1966；McNemar 1947；Newcombe 1998a、1998b；Rogan 与 Gladen 1978；Royston 与 Parmar 2013；Wilcoxon 1945；Williams 1949；Wilson 1927。
+
+## 图表
+
+一张图就是一个 `FigureSpec`：一份带版本的纯数据描述（schema 为 `levi.aeri.figure_spec.v1`），里面没有绘图代码。分析代码每张图生成一份 spec；网页把同一份 JSON 映射到 Recharts，这里的两个写出器把它变成 SVG 和 PDF：
+
+| 函数 | 输出 |
+| --- | --- |
+| `svgplot.render_svg(spec, lang=None, embed_spec=False, width=640)` | SVG 文本（UTF-8） |
+| `pdfplot.render_pdf(spec, lang=None, width=640)` | 单页矢量 PDF（字节） |
+| `levi.automatic.figure_files.write_figure(spec, path_stem, formats=("svg", "pdf"), lang=None, embed_spec=False, strict=False)` | 在磁盘上写出 `<path_stem>.svg` 和/或 `.pdf`；每种格式返回一条记录，供报告 manifest 使用 |
+| `figspec.table(spec)`、`table_csv`、`table_html` | 可访问表格：图里的每个数字 |
+
+分析库本身从不碰文件（只返回文本和字节），`write_figure` 放在库外。它先把所有格式都渲染出来，所以画不出的图一个文件也不写；然后每个文件都经过同目录临时文件、`fsync`、改名、对目录 `fsync`：崩溃只会留下旧文件或新文件，不会留下半个文件。每条记录有 `path`、`bytes` 和 `sha256`；PDF 的记录另带“语言限制”一节说的替换报告。目标目录必须已存在。
+
+纯标准库，没有 matplotlib、Pillow，也不用安装任何东西。输出是确定的：没有时钟、没有随机 id，PDF 里没有 `/ID` 和日期，所以同一份 spec 得到同样的字节，两份 campaign 报告可以直接 `diff`。
+
+### 图的类型
+
+| `kind` | 含义 | 坐标轴 |
+| --- | --- | --- |
+| `grouped_bar` | 各组成功率，带区间 | x 为类别轴，y 为数值轴 |
+| `forest` | 成对差值，一行一个比较，0 处画参考线 | x 为数值轴，y 为类别轴 |
+| `step_curve` | 到成功所需时间：每组一条阶梯曲线，可带区间带 | x、y 都是数值轴 |
+| `stacked_bar` | 失败模式按组堆叠 | x 为类别轴，y 为数值轴 |
+| `early_stop` | 早停节省和误终止率；1 到 4 个子图 | x 为类别轴，y 为数值轴 |
+| `drift_lines` | 各组按轮的成功率，带区间；参照组画得更粗 | x 为数值轴或类别轴，y 为数值轴 |
+| `confusion_matrix` | 判定一致性：每个子图一张矩阵，每格按其占行比例着色，并写出计数和占比 | x、y 都是类别轴 |
+
+`Point` 有 `x`、`y`，可选的区间 `lo`/`hi`（落在数值轴上：一般是 `y`，森林图是 `x`），以及可选的短标注 `label`，例如 `8/20`。标题、摘要、轴名、系列名和注释都可以写中英两种（`{"en": ..., "zh-CN": ...}`），缺哪种语言就退回英文。`validate()` 拒绝不能如实画出的输入：未知类型、非有限数、`lo` 大于 `hi`、越界的类别序号、同一位置给了两个点、x 倒退的系列、负的堆叠值、文字里的控制字符、同一子图里重名的系列，以及堆叠柱上的区间（堆叠柱不支持区间）。绘图时拒绝**落在固定坐标轴范围之外的数据**：数据不会被悄悄裁掉。矩阵格子的计数放在 `Point.value` 里，`value` 只用于 `confusion_matrix`。
+
+### 区间不会被悄悄丢掉
+
+* 阶梯曲线上，一个点的区间和它的值一样，从这个点一直保持到下一个点；连续带区间的点共用一条区间带，即使下一个点没有区间，带子也延伸到它为止。带区间、但右边没有可延伸位置的点（曲线的最后一个点、只有一个点的曲线、下一个点 x 相同）画误差棒，所以曲线终点的区间也看得见。没有区间的点把区间带断开。所有区间带先画、所有曲线后画，区间带不会盖住别的组的曲线。
+* 在别处有区间的系列里，缺区间的点在表格里标 `区间不可用`，图下也会写有多少个这样的点。
+* **阶梯曲线在 x = 0 处没有区间，就表示没有不确定性**：Kaplan-Meier 结果里没有 t = 0 这一行，适配层自己补上不带区间的起点 (0, 0)（见“与分析库的接口”）。该点的值就是它自己的区间，表格写 `起点无不确定性`，也不算缺失。
+* 画完之后，`validate_render(spec, scene)` 在页面上量 spec 里的每个区间：误差棒必须跨满区间；区间带在该点处必须有宽度，并且在那里跨满区间（误差 0.01 pt 以内）。没有标记、区间带宽度为 0、误差棒缩成一个点，都抛 `ValueError`；区间本身只是一个值时除外（例如所有片段都成功后 Kaplan-Meier 区间为 [0, 0]）。`layout()` 会调用它，所以丢了区间的绘图函数产不出图。
+* 估计值落在区间之外（bootstrap 百分位或 BCa 区间、中位数都可能合法地这样）会被保留，表格标 `估计值在区间之外`，图下计数。`warnings(spec)` 以 `estimate_outside_interval:panel0/series1/point0` 这样的代码列出这些情况和不可用项。
+* 没有数据的组是 `unavailable=True`、没有点的系列：它仍有图例项（`Arm D（无数据）`）、表格行和图下计数，但不画任何东西。
+
+### 多个子图
+
+所有子图共用一个图例，由各子图系列的并集生成；系列的颜色、标记、线型和斜线按**名称**决定，与它在子图里的位置无关。
+
+### 不靠颜色也能读
+
+* 调色板有八种颜色，在红色盲、绿色盲、蓝色盲模拟下两两至少相差 15 个 CIELAB 单位，排列顺序还让相邻两色的灰度也不同（有测试）。
+* 每个系列另有各自的标记形状、线型，柱状图还有各自的斜线填充，所以黑白打印也读得出。参照组（`emphasis=True`）画得更粗。
+* 组名始终用文字印出（图例、刻度），不只靠颜色。
+* 坐标刻度取 1、2、5 乘以 10 的幂；常数序列会得到一个看得清的窗口。
+* 颜色保证两两可分，灰度只保证调色板里相邻的两色可分；其余靠斜线、标记和线型。
+* `drift_lines` 里各组左右错开最多 3 pt，免得区间互相重叠；数值型 x 轴上这只是绘图偏移，不改数据。
+* SVG 带 `<title>` 和 `<desc>`（标题和一句话摘要）；`embed_spec=True` 时把 spec 本身放进 `<metadata>`。网页里请把 `table_html(spec)` 放在图旁边，读屏用户才能拿到数字。
+
+### 语言限制
+
+SVG 文字是真文字，用通用字体族（文字需要时加上 CJK 字体族）。PDF 用标准的 Helvetica 和 Helvetica-Bold（不嵌入字体，任何阅读器都有），所以**只支持拉丁字符**，而且不会悄悄替换。对 Windows-1252 显示不了的文字，PDF 依次采用：其他语言里能显示的形式（英文）；统计符号的转写（`Δ` 写作 `Delta`、`−` 写作 `-`、`α` 写作 `alpha`、`≥` 写作 `>=` 等）；`?`，什么都不剩时写 `[n/a]`。系列名什么可读的都不剩时，改写成 `Series 1`、`Series 2`……（按图例顺序），各组仍然分得开。`pdfplot.render_pdf_report(spec, lang, strict=False)` 返回字节和 `substitutions`（一组 `{"text", "to", "reason"}`，原因为 `transliterated`、`fallback_en`、`unencodable`、`numbered`），以及标题实际所用的语言（同时写入 PDF 的 `/Lang`）；它的 `manifest()` 给出写进报告 manifest 的 `{"pdf": "ok" | "lossy(n)", ...}`。`strict=True` 时改为抛 `LossyTextError`。`render_pdf` 只返回字节，所以报告生成器要用 `render_pdf_report` 或 `write_figure`（它的 PDF 记录带同样的报告），并把替换清单写进 manifest。中文图请出 SVG，或者给每段文字都写上英文形式。
+
+标题、摘要和注释分别截到 300、600、400 个字符（最多 3、4、6 行），图例名截到 60、子图标题 80、参考线标注 40、点标注 40、轴名 100 个字符；`Scene.truncated` 列出被截断的部分。表格保留全文。排版时间与文字长度成线性关系。本模块不写 PNG；PNG 导出留在网页里（浏览器画 SVG），命令行只在 PATH 上有 `rsvg-convert` 之类的转换器时才生成 PNG。
+
+### 检查 PDF
+
+`pdfplot.verify_pdf(data)` 用自带的小解析器重新读一遍文件：文件头、交叉引用偏移、trailer、页面树、流长度、字体和结束标记，并返回页面大小和所有显示出来的字符串。机器上装了 poppler 时，测试还会跑 `pdftotext` 和 `pdfinfo`。读取器还会对页面内容分词：只允许本写出器会用到的操作符、操作数个数要对、`q`/`Q` 和 `BT`/`ET` 要配对、文字只能在 `BT`/`ET` 里并且只用已声明的字体；悬空的对象引用是 `PdfError`。每个版本请人用普通阅读器打开一份生成的 PDF 看一次观感：测试证明的是结构和文字，不是视觉排版。
+
+SVG 黄金文件在 `tests/automatic/analysis/test_fig_golden/`；有意修改之后，用 `LEVI_UPDATE_GOLDEN=1` 重新生成，并检查差异。
+
+### 与分析库的接口
+
+图表这一侧只需要普通数字。从分析结果到 `FigureSpec` 的适配层由报告生成器（T-CP-06）来写；`tests/automatic/analysis/test_figadapter.py` 是可运行的示例，直接调用分析库并映射它的真实输出。各函数的键名不同：
+
+| 分析结果 | 键 | 图 |
+| --- | --- | --- |
+| `proportion(k, n)` | `rate`、`wilson.low`、`wilson.high`、`k`、`n`；`n = 0` 时 `available: false`，`rate` 和 `wilson` 为 `None` | `grouped_bar`：`Point(0, rate, wilson.low, wilson.high, "k/n")` |
+| `paired_bootstrap`、`unpaired_bootstrap` | `estimate`、`low`、`high`；没有数据时为 `None`，`available: false` | `forest`：`Point(estimate, 行号, low, high)` |
+| `newcombe_paired` | `difference`、`low`、`high` | `forest`：`Point(difference, 行号, low, high)` |
+| `kaplan_meier` | `steps[]`，每个事件时刻一行：`time`、`survival`、`incidence`（= 1 - S）、`low`、`high`（在 S(t) 上）；没有 t = 0 这一行；没有片段时 `available: false`、没有 steps | `step_curve`：先补不带区间的 `Point(0, 0)`，然后每行 `Point(time, incidence, 1 - high, 1 - low)` |
+
+* 没有数据的组（`available: false`）变成 `unavailable=True` 的系列，绝不丢掉。森林图里不可用的比较保留它的行、不画点，并加一条注释。
+* Kaplan-Meier 的区间在 S(t) 上；到成功所需时间的图画的是 1 - S(t)，所以区间换成 `[1 - high, 1 - low]`。0 < S < 1 时总有区间；S 降到 0 之后区间是 [0, 0]，图上显示为单个值 [1, 1]。分析库没有 t = 0 这一行：适配层补上不带区间的 (0, 0)（见上）。
+* bootstrap 区间原样传入。区间若不含点估计，图会告警并保留，不要裁剪或重新居中。
+* 比率用 0..1 的小数（`fmt="percent"`）；计数放进点的 `label`（`8/20`），矩阵则放进 `value`。
