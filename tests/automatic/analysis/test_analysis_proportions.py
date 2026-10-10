@@ -8,6 +8,7 @@ k = n; hand-computed hypergeometric sums for Fisher's test.
 """
 
 import math
+from itertools import pairwise
 
 import analysis_reference as ref
 import numpy as np
@@ -55,7 +56,9 @@ def test_unrounded_wilson_agrees_with_the_live_page_after_rounding():
 
 def test_proportion_reports_the_live_wilson_interval():
     out = pr.proportion(7, 20)
-    assert [out["wilson"]["low"], out["wilson"]["high"]] == stats.wilson(7, 20, z_of(0.95))
+    assert [out["wilson"]["low"], out["wilson"]["high"]] == stats.wilson(
+        7, 20, z_of(0.95)
+    )
     assert out["schema_version"] == "levi.aeri.analysis.v1"
 
 
@@ -92,7 +95,9 @@ def test_wilson_coverage_is_near_nominal_by_monte_carlo():
     n, p = 30, 0.3
     z = z_of(0.95)
     ks = rng.binomial(n, p, size=20_000)
-    covered = np.mean([lo <= p <= hi for lo, hi in (pr.wilson_bounds(int(k), n, z) for k in ks)])
+    covered = np.mean(
+        [lo <= p <= hi for lo, hi in (pr.wilson_bounds(int(k), n, z) for k in ks)]
+    )
     # Exact coverage at (30, 0.3) is about 0.95; 20k draws give SE ~ 0.0015.
     assert 0.93 <= covered <= 0.97
 
@@ -126,7 +131,9 @@ def test_fisher_matches_a_float_tolerance_implementation_on_every_small_table():
         pvals = pr.fisher_pvalues(n1, n2)
         for a in range(n1 + 1):
             for c in range(n2 + 1):
-                assert pvals[a, c] == pytest.approx(ref.fisher_p_float(a, n1, c, n2), rel=1e-9)
+                assert pvals[a, c] == pytest.approx(
+                    ref.fisher_p_float(a, n1, c, n2), rel=1e-9
+                )
 
 
 def test_fisher_is_symmetric_in_the_arms_and_in_success_failure():
@@ -138,7 +145,9 @@ def test_fisher_is_symmetric_in_the_arms_and_in_success_failure():
 
 def test_boschloo_is_never_larger_than_fisher_and_matches_a_brute_force_maximum():
     n1 = n2 = 5
-    pvals = [[ref.fisher_p_float(a, n1, c, n2) for c in range(n2 + 1)] for a in range(n1 + 1)]
+    pvals = [
+        [ref.fisher_p_float(a, n1, c, n2) for c in range(n2 + 1)] for a in range(n1 + 1)
+    ]
     for k1, k2 in ((5, 1), (4, 0), (3, 1), (2, 2)):
         out = pr.boschloo_exact(k1, n1, k2, n2)
         assert out["p_value"] <= out["fisher_p_value"] + 1e-12
@@ -167,19 +176,31 @@ def test_agresti_caffo_hand_computed():
 
 
 def test_posterior_probability_against_numeric_integration_and_sampling():
-    for k_a, n_a, k_b, n_b in ((10, 20, 14, 20), (3, 10, 3, 10), (0, 5, 5, 5), (25, 30, 20, 30)):
+    for k_a, n_a, k_b, n_b in (
+        (10, 20, 14, 20),
+        (3, 10, 3, 10),
+        (0, 5, 5, 5),
+        (25, 30, 20, 30),
+    ):
         exact = pr.posterior_prob_greater(k_a, n_a, k_b, n_b)["prob_b_greater"]
-        numeric = ref.beta_prob_greater_numeric(1 + k_a, 1 + n_a - k_a, 1 + k_b, 1 + n_b - k_b)
+        numeric = ref.beta_prob_greater_numeric(
+            1 + k_a, 1 + n_a - k_a, 1 + k_b, 1 + n_b - k_b
+        )
         assert exact == pytest.approx(numeric, abs=1e-4)
         rng = np.random.Generator(np.random.PCG64(7))
-        sampled = np.mean(rng.beta(1 + k_b, 1 + n_b - k_b, 200_000) > rng.beta(1 + k_a, 1 + n_a - k_a, 200_000))
+        sampled = np.mean(
+            rng.beta(1 + k_b, 1 + n_b - k_b, 200_000)
+            > rng.beta(1 + k_a, 1 + n_a - k_a, 200_000)
+        )
         assert exact == pytest.approx(sampled, abs=0.005)
     assert pr.posterior_prob_greater(4, 9, 4, 9)["prob_b_greater"] == pytest.approx(0.5)
 
 
 def test_posterior_is_monotone_in_the_successes_of_b():
-    probs = [pr.posterior_prob_greater(10, 20, k, 20)["prob_b_greater"] for k in range(21)]
-    assert all(x < y for x, y in zip(probs, probs[1:], strict=False))
+    probs = [
+        pr.posterior_prob_greater(10, 20, k, 20)["prob_b_greater"] for k in range(21)
+    ]
+    assert all(x < y for x, y in pairwise(probs))
 
 
 def test_two_arm_functions_report_an_empty_arm_as_unavailable():

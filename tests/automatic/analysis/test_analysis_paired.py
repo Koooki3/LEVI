@@ -37,8 +37,8 @@ def test_mcnemar_matches_fagerland_table_6(only_a, only_b, exact, mid, asym):
 
 
 def test_mcnemar_exact_equals_an_exact_fraction_computation():
-    for f in range(0, 15):
-        for g in range(0, 15):
+    for f in range(15):
+        for g in range(15):
             got = paired.mcnemar_counts(f, g)["exact"]
             assert got == pytest.approx(float(ref.mcnemar_exact_p(f, g)), rel=1e-12)
 
@@ -138,7 +138,9 @@ def test_paired_bootstrap_is_deterministic_and_seed_dependent():
     diffs = np.array([0.0] * 17 + [-1.0] * 4 + [1.0] * 9)
     r3 = resampling.bootstrap_distribution(diffs, "mean", 500, 3)
     assert np.array_equal(r3, resampling.bootstrap_distribution(diffs, "mean", 500, 3))
-    assert not np.array_equal(r3, resampling.bootstrap_distribution(diffs, "mean", 500, 4))
+    assert not np.array_equal(
+        r3, resampling.bootstrap_distribution(diffs, "mean", 500, 4)
+    )
 
 
 def test_paired_bootstrap_coverage_by_monte_carlo():
@@ -150,7 +152,9 @@ def test_paired_bootstrap_coverage_by_monte_carlo():
         u = rng.random(n)
         a = (u < pa).astype(int)
         b = ((u < pb) if i % 2 else (rng.random(n) < pb)).astype(int)
-        out = paired.paired_bootstrap(list(zip(a, b, strict=True)), seed=i, resamples=1000)
+        out = paired.paired_bootstrap(
+            list(zip(a, b, strict=True)), seed=i, resamples=1000
+        )
         covered += out["low"] <= pb - pa <= out["high"]
     # Percentile intervals are a little liberal at n = 40.
     assert 0.88 <= covered / trials <= 0.99
@@ -161,7 +165,9 @@ def test_paired_bootstrap_bca_and_percentile_agree_roughly_and_bca_is_named():
     data = list(zip(rng.integers(0, 2, 80), rng.integers(0, 2, 80), strict=True))
     pct = paired.paired_bootstrap(data, seed=1, method="percentile")
     bca = paired.paired_bootstrap(data, seed=1, method="bca")
-    assert bca["method"] == "paired_bootstrap_bca" and "efron1987bca" in bca["references"]
+    assert (
+        bca["method"] == "paired_bootstrap_bca" and "efron1987bca" in bca["references"]
+    )
     assert abs(pct["low"] - bca["low"]) < 0.05 and abs(pct["high"] - bca["high"]) < 0.05
 
 

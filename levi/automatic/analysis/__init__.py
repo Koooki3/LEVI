@@ -13,7 +13,6 @@ See docs/AUTOMATIC_CAMPAIGN.md ("Statistical methods").
 """
 
 from ._core import SCHEMA_VERSION, AnalysisInputError
-from .agreement import agreement, cohen_kappa, misjudgement_by_arm, rogan_gladen
 from .continuous import (
     cliffs_delta,
     hodges_lehmann,
@@ -29,6 +28,7 @@ from .drift import (
     reference_drift,
 )
 from .failures import early_stop, failure_modes
+from .movement import smoothness
 from .multiple import benjamini_hochberg, bonferroni, cochran_q, friedman, holm
 from .paired import mcnemar, newcombe_paired, paired_bootstrap, unpaired_bootstrap
 from .power import min_detectable_difference, power_paired, power_table, power_unpaired
@@ -40,8 +40,8 @@ from .proportions import (
     posterior_prob_greater,
     proportion,
 )
-from .smoothness import smoothness
 from .survival import kaplan_meier, logrank, rmst
+from .verdicts import agreement, cohen_kappa, misjudgement_by_arm, rogan_gladen
 
 __all__ = [
     "SCHEMA_VERSION",

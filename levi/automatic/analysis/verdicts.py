@@ -28,7 +28,7 @@ from levi.live.stats import wilson as _live_wilson
 from . import _core
 from ._core import AnalysisInputError, caveat, result
 
-MODULE = "agreement"
+MODULE = "verdicts"
 PERSON = ("success", "failure")
 VERDICT = ("success", "failure", "undecided", "none")
 

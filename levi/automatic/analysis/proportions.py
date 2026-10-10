@@ -292,6 +292,10 @@ def agresti_caffo(k1, n1, k2, n2, *, level: float = _core.DEFAULT_LEVEL) -> dict
     k1, n1 = check_count(k1, n1)
     k2, n2 = check_count(k2, n2)
     level = _core.check_level(level)
+    if n1 == 0 or n2 == 0:
+        return _unavailable_two(
+            "agresti_caffo_add_two", ["agresti2000addtwo"], "an arm has no trials"
+        )
     z = _core.z_of(level)
     a, b = (k1 + 1) / (n1 + 2), (k2 + 1) / (n2 + 2)
     se = math.sqrt(a * (1 - a) / (n1 + 2) + b * (1 - b) / (n2 + 2))
@@ -309,7 +313,7 @@ def agresti_caffo(k1, n1, k2, n2, *, level: float = _core.DEFAULT_LEVEL) -> dict
         k2=k2,
         n2=n2,
         level=level,
-        difference=(k1 / n1 if n1 else 0.0) - (k2 / n2 if n2 else 0.0),
+        difference=k1 / n1 - k2 / n2,
         adjusted_difference=d,
         low=max(-1.0, d - z * se),
         high=min(1.0, d + z * se),

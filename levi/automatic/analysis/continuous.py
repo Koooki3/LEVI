@@ -42,12 +42,12 @@ HL_BOOTSTRAP_MAX = 400
 
 
 def _two_sided_from_counts(
-    counts: np.ndarray, support: np.ndarray, centre2: int, observed2: int
-):
-    """``P(|2S - centre2| >= |observed2 - centre2|)`` from integer counts
-    over integer (doubled) sums ``support``."""
-    dev = abs(observed2 - centre2)
-    mask = np.abs(2 * support - centre2) >= dev
+    counts: np.ndarray, support: np.ndarray, mean: float, observed: int
+) -> float:
+    """``P(|S - mean| >= |observed - mean|)`` from integer counts over the
+    integer (doubled) sums ``support``; ``mean`` is a multiple of 0.5, so
+    the comparison is exact in floating point."""
+    mask = np.abs(support - mean) >= abs(observed - mean)
     return float(counts[mask].sum() / counts.sum())
 
 
@@ -104,7 +104,7 @@ def wilcoxon_signed_rank(pairs) -> dict:
         doubled = [round(2 * r) for r in ranks]
         counts = signed_rank_null(doubled)
         support = np.arange(len(counts))
-        p = _two_sided_from_counts(counts, support, sum(doubled), round(2 * w_plus))
+        p = _two_sided_from_counts(counts, support, sum(doubled) / 2, round(2 * w_plus))
         mode = "exact"
     else:
         mean = n * (n + 1) / 4
@@ -176,8 +176,8 @@ def mann_whitney(a, b) -> dict:
         doubled = [round(2 * r) for r in ranks]
         counts = rank_sum_null(doubled, nb)
         support = np.arange(len(counts))
-        centre2 = nb * (big_n + 1)
-        p = _two_sided_from_counts(counts, support, centre2, round(2 * rank_b))
+        # The expected doubled rank sum of B is nb (N + 1).
+        p = _two_sided_from_counts(counts, support, nb * (big_n + 1), round(2 * rank_b))
         mode = "exact"
     else:
         ties = _core.tie_sizes(pooled)

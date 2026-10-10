@@ -95,11 +95,21 @@ def power_paired(
         return 0.0
     q = p01 / disc
     pm = _core.binom_pmf(n, disc)
-    power = 0.0
-    for m in range(1, n + 1):
-        if pm[m] == 0:
-            continue
-        power += pm[m] * float(_core.binom_pmf(m, q) @ reject[m, : m + 1])
+    # Conditional rejection probability for every m at once: the
+    # Binomial(m, q) probabilities form a lower-triangular matrix.
+    lf = np.array([math.lgamma(i + 1) for i in range(n + 1)])
+    m = np.arange(n + 1)[:, None]
+    j = np.arange(n + 1)[None, :]
+    valid = j <= m
+    rest = np.where(valid, m - j, 0)
+    if q <= 0:
+        cond_pmf = (j == 0) & valid
+    elif q >= 1:
+        cond_pmf = (j == m) & valid
+    else:
+        logp = lf[m] - lf[j] - lf[rest] + j * math.log(q) + rest * math.log1p(-q)
+        cond_pmf = np.where(valid, np.exp(np.where(valid, logp, 0.0)), 0.0)
+    power = float(pm @ (cond_pmf * reject).sum(axis=1))
     return min(1.0, power)
 
 

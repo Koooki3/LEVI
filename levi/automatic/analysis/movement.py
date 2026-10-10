@@ -23,7 +23,7 @@ import numpy as np
 
 from ._core import AnalysisInputError, caveat, result
 
-MODULE = "smoothness"
+MODULE = "movement"
 
 
 def _positions(positions, rate_hz: float) -> np.ndarray:
