@@ -1,0 +1,288 @@
+{
+ "matrix": {
+  "arbitration:after_reset:operator_stop": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "arbitration:after_reset:policy_error": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "arbitration:after_reset:reset_horizon_exhausted": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "arbitration:after_reset:reset_verified": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "arbitration:after_reset:scene_reset_required": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "arbitration:after_reset:scene_unknown": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "arbitration:after_reset:watchdog_timeout": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "arbitration:plan:ready": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "arbitration:plan:reset_required": {
+   "human_assisted": "differs:asks a person (scene_reset_required)",
+   "single_reset_policy": "differs:runs the reset policy while attempts remain, then asks a person"
+  },
+  "arbitration:plan:unavailable": {
+   "human_assisted": "differs:asks a person (scene_unknown)",
+   "single_reset_policy": "differs:as unknown: never skips the reset"
+  },
+  "arbitration:plan:unknown": {
+   "human_assisted": "differs:asks a person (scene_unknown)",
+   "single_reset_policy": "differs:runs the reset policy, or asks a person with on_unknown wait_human"
+  },
+  "cli:doctor": {
+   "human_assisted": "differs:the launch check fails without a scene provider that can answer",
+   "single_reset_policy": "same"
+  },
+  "cli:report": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "cli:run": {
+   "human_assisted": "differs:a dry-run scene that is not ready ends the run in WAIT_HUMAN",
+   "single_reset_policy": "same"
+  },
+  "cli:status": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "cli:validate": {
+   "human_assisted": "differs:a real run is refused without a scene provider that can answer; --dry-run validates",
+   "single_reset_policy": "same"
+  },
+  "metrics:automation": {
+   "human_assisted": "differs:a scene check sending the run to a person is planned",
+   "single_reset_policy": "differs:every intervention is unplanned"
+  },
+  "metrics:autonomous": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "metrics:comparable": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "metrics:early_termination": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "metrics:human_minutes_per_valid_episode": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "metrics:mode_source": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "metrics:mode_specific": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "metrics:note": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "metrics:reset": {
+   "human_assisted": "differs:no reset episodes: resets and their durations stay 0; skip decisions count forward starts only",
+   "single_reset_policy": "same"
+  },
+  "metrics:reset_mode": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "metrics:scene_check": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "metrics:scene_decisions_by_human": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "metrics:schema": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "metrics:time_per_valid_episode_ms": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "metrics:truth": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "metrics:truth_labels": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "metrics:turnaround": {
+   "human_assisted": "differs:reset_policy_ms is always 0",
+   "single_reset_policy": "differs:human_reset_ms only when the reset policy gave up"
+  },
+  "transition:FAULT_LOCKED->FAULT_LOCKED": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:FAULT_LOCKED->PREFLIGHT": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:FORWARD_ACTIVE->FAULT_LOCKED": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:FORWARD_ACTIVE->FORWARD_STOPPING": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:FORWARD_FINALIZE->FAULT_LOCKED": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:FORWARD_FINALIZE->ROBOT_HOME": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:FORWARD_STOPPING->FAULT_LOCKED": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:FORWARD_STOPPING->FORWARD_FINALIZE": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:PREFLIGHT->FAULT_LOCKED": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:PREFLIGHT->VERIFY_INITIAL": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:PREFLIGHT->WAIT_HUMAN": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:RESET_ACTIVE->FAULT_LOCKED": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "transition:RESET_ACTIVE->RESET_VERIFY": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "transition:RESET_FINALIZE->FAULT_LOCKED": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "transition:RESET_FINALIZE->VERIFY_INITIAL": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "transition:RESET_FINALIZE->WAIT_HUMAN": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "transition:RESET_VERIFY->FAULT_LOCKED": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "transition:RESET_VERIFY->RESET_FINALIZE": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "transition:ROBOT_HOME->FAULT_LOCKED": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:ROBOT_HOME->SCENE_ASSESS": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:ROBOT_HOME->WAIT_HUMAN": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:SCENE_ASSESS->COMPLETED": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:SCENE_ASSESS->FAULT_LOCKED": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:SCENE_ASSESS->FORWARD_ACTIVE": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:SCENE_ASSESS->RESET_ACTIVE": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "transition:SCENE_ASSESS->WAIT_HUMAN": {
+   "human_assisted": "differs:the normal path of a scene that is not ready: a person resets it (a planned intervention)",
+   "single_reset_policy": "differs:only when the reset policy is disabled, out of attempts, or on_unknown is wait_human (an unplanned intervention)"
+  },
+  "transition:VERIFY_INITIAL->COMPLETED": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:VERIFY_INITIAL->FAULT_LOCKED": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:VERIFY_INITIAL->FORWARD_ACTIVE": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:VERIFY_INITIAL->RESET_ACTIVE": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "transition:VERIFY_INITIAL->WAIT_HUMAN": {
+   "human_assisted": "differs:the normal path of a scene that is not ready: a person resets it (a planned intervention)",
+   "single_reset_policy": "differs:only when the reset policy is disabled, out of attempts, or on_unknown is wait_human (an unplanned intervention)"
+  },
+  "transition:WAIT_HUMAN->COMPLETED": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:WAIT_HUMAN->FAULT_LOCKED": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "transition:WAIT_HUMAN->PREFLIGHT": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  }
+ },
+ "modes": [
+  "single_reset_policy",
+  "human_assisted"
+ ],
+ "reset_only_transitions": [
+  "RESET_ACTIVE->FAULT_LOCKED",
+  "RESET_ACTIVE->RESET_VERIFY",
+  "RESET_FINALIZE->FAULT_LOCKED",
+  "RESET_FINALIZE->VERIFY_INITIAL",
+  "RESET_FINALIZE->WAIT_HUMAN",
+  "RESET_VERIFY->FAULT_LOCKED",
+  "RESET_VERIFY->RESET_FINALIZE",
+  "SCENE_ASSESS->RESET_ACTIVE",
+  "VERIFY_INITIAL->RESET_ACTIVE"
+ ],
+ "schema": "levi.aeri.mode_matrix.v1"
+}

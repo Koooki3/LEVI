@@ -63,6 +63,12 @@ def pytest_configure(config):
         "guard in the pytest process, and sets LEVI_TEST_NETGUARD_OFF=1 while "
         "the test runs so the Python processes it starts are unguarded too",
     )
+    config.addinivalue_line(
+        "markers",
+        "mode_matrix(*capabilities, modes=None): the test covers these AERI "
+        "MODE_MATRIX capabilities (levi/automatic/modes.py) in the mode of its "
+        "reset_mode parameter, or in the modes it names with modes=(...)",
+    )
     _NETGUARD_LOG_DIR = tempfile.mkdtemp(prefix="levi-netguard-")
     log = os.path.join(_NETGUARD_LOG_DIR, "blocked.jsonl")
     os.environ[netguard.PORTS_ENV] = ",".join(map(str, PROTECTED_PORTS))
@@ -127,6 +133,13 @@ def _no_protected_ports(request):
             f"connected to a protected service port (refused):\n{lines}",
             pytrace=False,
         )
+
+
+@pytest.fixture(params=("single_reset_policy", "human_assisted"))
+def reset_mode(request):
+    """Each AERI reset mode in turn (levi/automatic/modes.RESET_MODES):
+    with a ``mode_matrix`` marker the test covers its capabilities in both."""
+    return request.param
 
 
 @pytest.fixture
