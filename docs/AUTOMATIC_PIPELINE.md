@@ -777,17 +777,29 @@ manifest, a rollout or a session file: only the label file (and the
 labels' lock file).
 
 **Blind first.** The operator judges before seeing what the run decided.
+The first `success` or `failure` label of an episode reveals its automatic
+verdict; `discarded` and `unclear` reveal nothing. Every operator outcome
+label records, decided under the labels' lock, `verdict_revealed_before`
+(was the verdict already revealed when it was written) and
+`reveals_verdict` (this label revealed it), so the reveal itself is on
+file. Revealed is per episode, not per person: the card shows the verdict
+to whoever looks from then on.
+
 The waiting card (`recorder.pending_card`) has an `operator_label` block
 for the forward episode that ended last: its current label (null when not
-labelled yet), how many labels it has, the values allowed, `ended_by`, and
-the automatic verdict only once a label exists; until then
-`automatic_verdict` is null and `automatic_verdict_hidden` is
-`hidden_until_labelled`, and `agrees` is null. `pending_card(run_dir,
-blind=True)` also hides `task_outcome` and `goal_verification` in
-`last_episode` while that episode is unlabelled; the default keeps
-`last_episode` as before, so a page that wants the operator blind passes
-`blind=True`. `ended_by` stays visible: the operator saw how the episode
-ended. `levi automatic label` never prints the automatic verdict.
+labelled yet), `blind_label` (the first success/failure label), `revealed`,
+`revised_after_reveal`, how many labels it has, the values allowed,
+`ended_by`, and the automatic verdict only once revealed; until then
+`automatic_verdict` and `ended_by` are null, `automatic_verdict_hidden` is
+`hidden_until_labelled`, and `agrees` (the blind label against the
+verdict) is null. The card is blind by default: until the reveal it also
+hides `task_outcome`, `goal_verification` and `stop_reason` in
+`last_episode` (`verdict_hidden`), because an early stop
+(`goal_verified`) is never a failure and so tells the operator what the
+detector decided. `pending_card(run_dir, blind=False)` keeps
+`last_episode` as it was before (the operator_label block still hides the
+verdict). `levi automatic label` prints neither the verdict nor how the
+episode ended.
 
 **How an episode ended** (`ended_by`, from the episode's stop reason in
 the journal): `budget` (`horizon_exhausted`), `early_stop`
@@ -798,21 +810,41 @@ fault, the policy, a watchdog, a crash, no reason).
 verdict is the episode's final judgement in the journal
 (`goal_verification`: `verified` is success, `contradicted` failure,
 `undecided` undecided, `unavailable` none). Only episodes the operator
-called success or failure are compared; `judged` counts those the run
-decided too. Per stratum (`by_ended_by`: `budget`, `early_stop`,
+called success or failure are compared, by their **blind label** (the
+first success/failure label, written before the reveal); a later change
+is kept on file and becomes the current value and the truth, but the
+comparison counts it only in `revised_after_reveal`. Episodes without a
+blind label count by their current value (`discarded`, `unclear`,
+`unlabelled`). `judged` counts the compared episodes the run decided too. Per stratum (`by_ended_by`: `budget`, `early_stop`,
 `operator_stop`, `unknown`) and in `total`: `episodes`, `unlabelled`,
 `discarded`, `unclear`, `operator_decided`, `matrix` (operator ×
-automatic), `judged`, `agree`, `agreement`, `false_success` (the run said
-success where the operator said failure), `missed_success` (the run said
-failure where the operator said success), and `undecided` and `none`
-apart (never counted as agreement). Every share has its Wilson 95 %
-interval; below 10 decided pairs (`min_n`) a stratum gets the interval and
-no point estimate (`rate` null, `small_sample` true). `agreement` is in
-`comparable`: it means the same in both reset modes.
+automatic), `judged`, `agree`, `agreement`,
+`agent_success_operator_failure` (the run said success where the operator
+said failure) and `agent_failure_operator_success` (the reverse), both over
+decided pairs only, `undecided` and `none` apart (never counted as
+agreement), and `revised_after_reveal`. These are not `levi live`'s
+`false_success`/`missed_success`: those count an undecided verdict in their
+denominators (`missed_success` counts it as a miss), these leave it out, so
+the two are not compared number for number. Every share has its Wilson
+95 % interval; below 10 decided pairs (`min_n`) a stratum gets the
+interval and no point estimate (`rate` null, `small_sample` true). `min_n`
+is a display threshold, not a test of significance: at 10 pairs the
+interval is still about 0.45 wide. `agreement` is in `comparable`: it means
+the same in both reset modes.
 
-**Limits.** An episode the detector or the operator ended early is shorter
-than one run to its budget, so only the `budget` stratum's agreement
-carries over to unattended runs; read the other strata on their own. With
+**Reading the strata.** In AERI an early stop is the detector's, and an
+unattended run stops the same way. `budget` is the judge's agreement on
+whole episodes the detector did not stop (selected by the detector, so
+leaning to failures; control episodes are the only budget episodes not
+selected that way). `early_stop` is the detector and the judge together,
+as an unattended AERI run uses them. `operator_stop` episodes were ended by
+a person: they do not carry over to unattended runs. (In `levi live` the
+early end is the operator's key, which is why there only `budget` carries
+over.)
+
+**Limits.** The length of an episode (its video) still shows the operator
+whether it stopped early, so the `early_stop` stratum is not blind to the
+detector's online decision; the card only stops adding to that. With
 the 20-30 episodes of an exploratory check every stratum is small: read
 the interval. The operator label is one person's judgement, not
 adjudicated truth (`adjudicated_ground_truth` overrides it for the rates).
@@ -914,7 +946,8 @@ the Initial State Contract (`id@version`, status: a draft is flagged "not
 confirmed by the user, HA-23"), its predicates in words, and the
 assessment that led to the wait. Its `operator_label` block asks for the
 operator's label of the forward episode that ended last and shows the
-automatic verdict only after that label exists (see "Operator labels and
+automatic verdict only after a success/failure label exists; the card is
+blind by default (see "Operator labels and
 the dual-label comparison").
 
 **The job file.** Both modes share `levi.aeri.job.v1`
@@ -1126,7 +1159,7 @@ English and Chinese.
   first, then asks at a terminal: outside one it is refused (exit 2,
   nothing written); the operator types the value to confirm. The question
   goes to stderr and names the current label, never the automatic
-  verdict; the write checks again that the episode has ended.
+  verdict nor how the episode ended; the write checks again that the episode has ended.
   `--principal` (default `operator`) is an opaque id.
 
 **The job file** (`levi.aeri.job.v1`, a draft like the contract, HA-23)
