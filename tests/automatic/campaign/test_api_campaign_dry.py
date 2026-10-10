@@ -5,10 +5,9 @@ blinding, peeks, pause and resume, the report routes."""
 
 import json
 
+from campaign_guard import aeri_home_fixture, guard_fixture
 from test_api_campaign_common import (
     URL,
-    aeri_home_fixture,
-    guard_fixture,
     wait_for,
     world,
 )
@@ -193,7 +192,13 @@ def test_confirms_are_idempotent_one_time_and_bound_to_the_step(world):
     # The same command again, and the same challenge under another command.
     assert world.confirm(cid, snap["todo"], "c-3").json()["result"] == "repeated"
     again = world.confirm(cid, snap["todo"], "c-4")
-    assert again.status_code == 409 and again.json()["detail"]["code"] == "not_waiting"
+    # Either nothing is asked any more (409) or, in the moment between the
+    # controller taking the answer and withdrawing the question, the used
+    # challenge is refused (200); no second answer is ever written.
+    if again.status_code == 409:
+        assert again.json()["detail"]["code"] == "not_waiting"
+    else:
+        assert again.json() == {"result": "refused", "code": "stale_sequence"}
     run_to_end(world, cid, start=2)
 
 

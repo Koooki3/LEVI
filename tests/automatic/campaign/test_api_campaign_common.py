@@ -130,7 +130,7 @@ class World:
         folder = Path(self.tmp) / "aeri-home" / "campaigns" / campaign_id
         lines = []
         try:
-            for line in (folder / "journal.jsonl").read_text().splitlines()[-12:]:
+            for line in (folder / "journal.jsonl").read_text().splitlines()[-80:]:
                 j = json.loads(line)
                 lines.append(
                     (
@@ -178,7 +178,7 @@ class World:
             "switch_policy": "switch_policy",
             "segment_done": "segment_done",
         }.get(todo["kind"], "env")
-        return self.client.post(
+        answer = self.client.post(
             f"{URL}/{campaign_id}/confirm",
             json={
                 "command_id": command_id,
@@ -187,6 +187,11 @@ class World:
                 **extra,
             },
         )
+        if answer.status_code >= 400:
+            # Shown by pytest when the test fails.
+            print("confirm", command_id, kind, answer.status_code, answer.text)
+            print(self.dump(campaign_id))
+        return answer
 
     def command(self, campaign_id, action, command_id):
         return self.client.post(

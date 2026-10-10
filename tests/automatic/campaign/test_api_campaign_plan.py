@@ -4,10 +4,9 @@ shape (interface contract §4), its refusals and the start's checks."""
 
 import os
 
+from campaign_guard import aeri_home_fixture, guard_fixture
 from test_api_campaign_common import (
     URL,
-    aeri_home_fixture,
-    guard_fixture,
     world,
 )
 

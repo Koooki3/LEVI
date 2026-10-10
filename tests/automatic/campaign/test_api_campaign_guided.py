@@ -7,10 +7,9 @@ anything tries."""
 
 import json
 
+from campaign_guard import aeri_home_fixture, guard_fixture
 from test_api_campaign_common import (
     URL,
-    aeri_home_fixture,
-    guard_fixture,
     wait_for,
     world,
     write_rollout,
@@ -86,8 +85,10 @@ def test_a_guided_campaign_walks_the_to_do_list_to_a_report(world):
             assert todo["arm_code"] == snap["segment"]["arm_code"]
             wrong = world.confirm(cid, todo, f"sw-bad-{number}", kind="env")
             assert wrong.status_code == 409
-            assert (
-                world.confirm(cid, todo, f"sw-{number}").json()["result"] == "applied"
+            answer = world.confirm(cid, todo, f"sw-{number}")
+            assert answer.json().get("result") == "applied", (
+                answer.text,
+                world.dump(cid),
             )
         todo = todo_of(world, cid, "place_cards", number)
         assert todo["cards"] == plan["segments"][number - 1]["cards"]
@@ -129,7 +130,7 @@ def test_a_guided_campaign_walks_the_to_do_list_to_a_report(world):
                 )
                 assert answer.status_code == 200, answer.text
     # The same arm twice in a row is not switched again.
-    assert switches == 3
+    assert switches == 3, world.dump(cid)
     done = world.wait_state(cid, "REPORTED")
     assert {a["done"] for a in done["arms"]} == {4}
     assert {a["unconfirmed"] for a in done["arms"]} <= {0, 2}

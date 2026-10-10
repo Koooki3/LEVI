@@ -2,10 +2,9 @@
 """Guided campaigns, the cases off the main path (T-API-2): a segment the
 person calls done early, card answers, what a dry-run campaign refuses."""
 
+from campaign_guard import aeri_home_fixture, guard_fixture
 from test_api_campaign_common import (
     URL,
-    aeri_home_fixture,
-    guard_fixture,
     wait_for,
     world,
     write_rollout,
@@ -36,9 +35,9 @@ def test_a_segment_called_done_early_waits_for_the_persons_decision(world):
     )
     done = world.confirm(cid, running, "done-1")
     assert done.json()["result"] == "applied", done.text
-    held = world.wait_state(cid, "WAIT_HUMAN")
+    held = world.wait_todo(cid, "recover_run")
+    assert held["state"] == "WAIT_HUMAN"
     assert held["wait_reason"] == "segment_short"
-    assert held["todo"]["kind"] == "recover_run"
     assert held["todo"]["reason"] == "segment_short"
     # Without the person's word the short segment does not count as done.
     accepted = world.confirm(

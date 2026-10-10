@@ -485,7 +485,13 @@ def _todo(c: _Campaign) -> dict | None:
     if segment:
         slots = list(c.plan["schedule"]["segments"][segment - 1]["slots"])
     todo: dict[str, Any] | None = None
-    if state == "POLICY_READY" and c.host == "guided" and arm:
+    serving = A.read_serving(c.folder) or {}
+    if (
+        state == "POLICY_READY"
+        and c.host == "guided"
+        and arm
+        and serving.get("arm") != arm
+    ):
         policy = c.plan["campaign"]["arms"][arm]["policy_forward"]
         name = Path(str(policy["checkpoint_dir"]).rstrip("/")).name
         todo = {
@@ -734,10 +740,15 @@ def resume_campaign(campaign_id: str, body: CommandBody, request: Request):
         c = _locate(campaign_id)
         if _repeated(c, body.command_id):
             return {"result": "repeated", "command_id": body.command_id}
+        if c.state != "PAUSED":
+            raise _fail(409, "not_paused", "The campaign is not paused")
+        _require_controller(c)
+        # The controller asks its question a moment after it paused.
+        _wait_for(c.id, lambda cur: _question(cur, "resume") is not None, APPLY_WAIT_S)
+        c = _locate(campaign_id)
         question = _question(c, "resume")
         if c.state != "PAUSED" or question is None:
             raise _fail(409, "not_paused", "The campaign is not paused")
-        _require_controller(c)
         if not A.write_answer(
             c.folder,
             question=question,

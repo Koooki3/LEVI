@@ -8,10 +8,9 @@ import json
 import shutil
 import threading
 
+from campaign_guard import aeri_home_fixture, guard_fixture
 from test_api_campaign_common import (
     URL,
-    aeri_home_fixture,
-    guard_fixture,
     wait_for,
     world,
 )
