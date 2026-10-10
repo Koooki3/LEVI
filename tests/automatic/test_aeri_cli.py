@@ -279,6 +279,13 @@ def test_every_help_is_bilingual():
         "status",
         "report",
         "label",
+        # Launched runs (T-CL-09).
+        "plan",
+        "runs",
+        "stop",
+        "resume",
+        "scene-answer",
+        "attach",
     }
     for name, command in sub.choices.items():
         for action in command._actions:

@@ -7,9 +7,20 @@ motion authority over anything real.
     levi automatic doctor   [--config F] [--json]
     levi automatic validate --config F [--json]
     levi automatic run      --config F --dry-run [--episodes N] [--scenes S] [--keep DIR] [--json]
+    levi automatic plan     --config F [--mode M] [--episodes N] [--scenes S] [--keep DIR] [--json]
+    levi automatic run      --config F --mode dry_run --detach|--foreground [--expect-plan SHA]
+    levi automatic runs     [--json]
     levi automatic status   --run-dir D [--json]
+    levi automatic stop     --run R | --run-dir D           (typed confirmation at a terminal)
+    levi automatic resume   --run R | --run-dir D           (typed confirmation at a terminal)
+    levi automatic scene-answer --run R --request-id Q --predicates a=true,b=null
+    levi automatic attach   --run R | --run-dir D --detach|--foreground
     levi automatic report   --run-dir D [--config F] [--truth T] [--format json|md]
     levi automatic label    --run-dir D --episode ID --value V [--principal P] [--json]
+
+``plan``, ``run --mode``, ``runs``, ``stop``, ``resume``, ``scene-answer``
+and ``attach`` go through the launch core (``launch.py``), the runner
+(``runner.py``) and the command channel (``control.py``), T-CL-07..09.
 
 Until ``levi automatic`` is wired into ``levi.cli``, run it as
 ``python -m levi.automatic.cli``.
@@ -56,6 +67,7 @@ import shutil
 import socket
 import sys
 import tempfile
+import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -70,6 +82,8 @@ from .termination import TerminationConfig
 
 JOB_SCHEMA = aeri.JOB_SCHEMA
 MODES = aeri.EXECUTION_MODES
+# What ``--mode`` takes: the launch core's dry run and the job's modes.
+MODES_ALL = ("dry_run", *MODES)
 # Configuration aliases of the reset strategies (design X2 §1.1); the plan,
 # the journal and the contracts carry the code names only.
 STRATEGY_ALIASES = aeri.RESET_STRATEGY_ALIASES
@@ -647,6 +661,8 @@ def cmd_validate(args) -> int:
 
 
 def cmd_run(args) -> int:
+    if args.mode is not None:
+        return cmd_run_mode(args)
     if not args.dry_run:
         message = (
             "a real run is not available in this version (no FR3 adapter); "
@@ -701,6 +717,365 @@ def cmd_run(args) -> int:
     )
     _print(result, args.json, text)
     return EXIT_OK if result["state"] in ("COMPLETED", "WAIT_HUMAN") else EXIT_PROBLEM
+
+
+# --- launched runs (T-CL-09) -----------------------------------------------------------------
+
+
+def _refuse(args, message: str, code: int = EXIT_REFUSED) -> int:
+    _print({"ok": False, "error": message}, args.json, message)
+    return code
+
+
+def _request(args, mode, backend="systemd"):
+    from . import launch
+
+    overrides = {}
+    if args.episodes is not None:
+        overrides["episodes"] = args.episodes
+    scenes = [x for x in (args.scenes or "").split(",") if x]
+    if scenes:
+        overrides["scenes"] = scenes
+    return launch.LaunchRequest(
+        job_path=os.path.abspath(args.config),
+        execution_mode=mode,
+        overrides=overrides,
+        entry="cli",
+        backend=backend,
+        keep_dir=os.path.abspath(args.keep) if args.keep else None,
+    )
+
+
+def _plan_text(found) -> str:
+    lines = [
+        (
+            f"plan {found.plan_sha256[:12] if found.plan_sha256 else '(none)'}: run "
+            f"{found.run_id}, {found.execution_mode}, reset {found.reset_mode}, scene "
+            f"check {found.scene_check}, {found.episodes} episodes"
+        ),
+        f"launchable: {'yes' if found.launchable else 'no'}"
+        + (f" ({', '.join(found.refusals)})" if found.refusals else ""),
+    ]
+    for check in found.checks:
+        if not check["ok"]:
+            lines.append(f"{check['severity']}: {check['code']}: {check['detail']}")
+    return "\n".join(lines)
+
+
+def cmd_plan(args) -> int:
+    """The plan of a job file, as ``launch.plan`` gives it (the API gives
+    the same digest)."""
+    from . import launch
+
+    found = launch.plan(_request(args, args.mode))
+    _print(found.public(), args.json, _plan_text(found))
+    return EXIT_OK if found.launchable else EXIT_REFUSED
+
+
+def cmd_run_mode(args) -> int:
+    """``run --mode M --detach|--foreground``: only dry_run launches."""
+    from . import launch
+
+    if args.dry_run:
+        return _refuse(args, "--dry-run and --mode exclude each other / 二者只能选一")
+    if args.mode != launch.DRY_RUN:
+        return _refuse(
+            args,
+            f"E_NO_ROBOT_ADAPTER: {args.mode} needs a real robot adapter, which this "
+            "version does not have; use --mode dry_run / 本版本没有真实机器人适配器",
+        )
+    if args.detach == args.foreground:
+        return _refuse(
+            args, "give one of --detach, --foreground / 选择 --detach 或 --foreground"
+        )
+    backend = "systemd" if args.detach else "foreground"
+    request = _request(args, args.mode, backend)
+    found = launch.plan(request)
+    if args.expect_plan and args.expect_plan != found.plan_sha256:
+        return _refuse(
+            args,
+            f"E_PLAN_CHANGED: the plan is {found.plan_sha256}, not {args.expect_plan} "
+            "/ 计划已变化",
+        )
+    try:
+        handle = launch.launch(
+            request,
+            plan_sha256=found.plan_sha256,
+            launch_token=found.launch_token,
+            wait_s=args.wait if args.detach else 0.0,
+        )
+    except launch.LaunchRefused as exc:
+        return _refuse(args, f"{exc.code}: {exc.detail}")
+    value = {"ok": True, "plan_sha256": found.plan_sha256, **handle.public()}
+    if args.detach:
+        text = (
+            f"started {handle.unit} (run {handle.run_id}, plan "
+            f"{found.plan_sha256[:12]}); run folder {handle.run_dir}"
+        )
+        _print(value, args.json, text)
+        return EXIT_OK
+    value["ok"] = handle.exit_code == EXIT_OK
+    text = f"run {handle.run_id}: {handle.final_state}; run folder {handle.run_dir}"
+    _print(value, args.json, text)
+    return handle.exit_code if handle.exit_code is not None else EXIT_PROBLEM
+
+
+def cmd_runs(args) -> int:
+    from . import launch
+
+    found = launch.runs()
+    lines = [
+        f"{r.get('run_id')}: {r.get('state') or '-'}"
+        f" ({'runner alive' if r.get('runner_alive') else 'no runner'}, "
+        f"{r.get('backend')}) {r.get('run_dir')}"
+        for r in found
+    ]
+    _print({"ok": True, "runs": found}, args.json, "\n".join(lines) or "no runs")
+    return EXIT_OK
+
+
+def _launched(args) -> Path:
+    """The run folder named by ``--run`` (the index) or ``--run-dir``."""
+    from . import launch
+
+    if args.run_dir:
+        run_dir = Path(os.path.abspath(args.run_dir))
+    else:
+        try:
+            run_dir = Path(launch.read_record(launch.index_path(args.run))["run_dir"])
+        except (OSError, ValueError, KeyError, TypeError, launch.LaunchRefused):
+            raise JobError(
+                f"no run {args.run} in the index / 索引里没有该运行"
+            ) from None
+    if not (run_dir / launch.LAUNCH_RECORD).is_file():
+        raise JobError(f"{run_dir} is not a launched run / 不是已启动的运行")
+    return run_dir
+
+
+def _ask(question: str) -> str | None:
+    """One typed answer at the terminal (the question on stderr)."""
+    print(question, end="", file=sys.stderr, flush=True)
+    try:
+        return input().strip()
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+
+NOT_A_TERMINAL = (
+    "this command must be confirmed at a terminal; nothing was written / "
+    "必须在终端里输入确认，未写入任何内容"
+)
+
+
+def _send(args, run_dir: Path, value: dict) -> int:
+    """Queue a confirmed command, wait for the runner's result."""
+    from . import control, launch
+
+    try:
+        queued = control.write_command(run_dir, value)
+    except control.CommandError as exc:
+        return _refuse(args, f"{exc.code}: {exc.detail}")
+    launch.audit(
+        {
+            "at_wall_ns": time.time_ns(),
+            "phase": "issued",
+            "run_dir": str(run_dir),
+            "command_id": value["command_id"],
+            "kind": value["kind"],
+            "principal_id": value["principal_id"],
+            "queued": queued,
+        }
+    )
+    result = control.wait_result(run_dir, value["command_id"], args.wait)
+    if result is None:
+        _print(
+            {"ok": None, "queued": queued, "command_id": value["command_id"]},
+            args.json,
+            f"queued {value['command_id']} ({queued}); no result within {args.wait} s "
+            "/ 已排队，尚无结果",
+        )
+        return EXIT_PROBLEM
+    text = (
+        f"{value['kind']} {value['command_id']}: {result.get('code')} "
+        f"(run {result.get('state')})"
+        + (" [repeated]" if result.get("repeated") else "")
+    )
+    _print(
+        {"ok": bool(result.get("ok")), "queued": queued, "result": result},
+        args.json,
+        text,
+    )
+    return EXIT_OK if result.get("ok") else EXIT_REFUSED
+
+
+def _operator_checks(args):
+    """The run folder, its journal and a live runner, or a refusal text."""
+    from . import control, launch
+
+    if not control.ID.fullmatch(args.principal):
+        return (
+            None,
+            None,
+            "--principal is an opaque id (no names, no addresses) / 只能是不透明 ID",
+        )
+    if args.command_id is not None and not control.ID.fullmatch(args.command_id):
+        return None, None, "--command-id is an opaque id / 命令 ID 格式不对"
+    try:
+        run_dir = _launched(args)
+    except JobError as exc:
+        return None, None, str(exc)
+    scan = Journal.read(run_dir)
+    try:
+        runner_record = launch.read_record(run_dir / launch.RUNNER_RECORD)
+    except (OSError, ValueError):
+        runner_record = None
+    if not launch.runner_alive(runner_record):
+        return (
+            None,
+            None,
+            (
+                "E_NO_RUNNER: no runner serves this run; attach first "
+                "(levi automatic attach) / 没有运行器，先 attach"
+            ),
+        )
+    return run_dir, scan, None
+
+
+def cmd_stop(args) -> int:
+    from . import control
+
+    run_dir, scan, problem = _operator_checks(args)
+    if problem:
+        return _refuse(args, problem)
+    if not sys.stdin.isatty():
+        return _refuse(args, NOT_A_TERMINAL)
+    run_id = scan.events[0].run_id if scan.events else run_dir.name
+    answer = _ask(
+        f"Stop run {run_id} (state {scan.effective_state}): an episode under way is "
+        f"brought to an end first. Type `stop {run_id}` to confirm / 输入 "
+        f"`stop {run_id}` 确认: "
+    )
+    if answer != f"stop {run_id}":
+        return _refuse(args, "not confirmed; nothing was written / 未确认，未写入")
+    value = control.command(
+        "stop", args.command_id or control.new_command_id("stop"), args.principal
+    )
+    return _send(args, run_dir, value)
+
+
+def cmd_resume(args) -> int:
+    from . import control
+
+    run_dir, scan, problem = _operator_checks(args)
+    if problem:
+        return _refuse(args, problem)
+    state = scan.effective_state
+    if state not in ("WAIT_HUMAN", "FAULT_LOCKED"):
+        return _refuse(
+            args,
+            f"not_waiting: run is {state}, not waiting for a person / 运行没有在等人",
+        )
+    if not sys.stdin.isatty():
+        return _refuse(args, NOT_A_TERMINAL)
+    run_id = scan.events[0].run_id
+    expected = args.expected_seq if args.expected_seq is not None else len(scan.events)
+    last = next((e for e in reversed(scan.events) if e.record == "committed"), None)
+    print(
+        f"Run {run_id} waits in {state}"
+        + (f" ({last.reason})" if last is not None else "")
+        + f"; the resume applies at line {expected}. / 运行在 {state} 等待。",
+        file=sys.stderr,
+    )
+    handled = _ask(
+        "The environment was handled (scene put back, workspace clear)? "
+        "Type yes / 环境已处理好？输入 yes: "
+    )
+    health = _ask(
+        "The robot's health was checked again? Type yes / 已重新检查机器人健康？输入 yes: "
+    )
+    answer = _ask(f"Type `resume {run_id}` to confirm / 输入 `resume {run_id}` 确认: ")
+    if handled != "yes" or health != "yes" or answer != f"resume {run_id}":
+        return _refuse(args, "not confirmed; nothing was written / 未确认，未写入")
+    value = control.command(
+        "resume",
+        args.command_id or control.new_command_id("resume"),
+        args.principal,
+        expected_seq=expected,
+        environment_handled=True,
+        health_rechecked=True,
+    )
+    return _send(args, run_dir, value)
+
+
+def _predicates(text: str) -> dict:
+    values = {"true": True, "false": False, "null": None}
+    out = {}
+    for item in (text or "").split(","):
+        name, sep, value = item.strip().partition("=")
+        if not sep or value not in values or not name:
+            raise JobError(
+                "--predicates is name=true|false|null, comma separated / 格式为 名称=true|false|null"
+            )
+        out[name] = values[value]
+    return out
+
+
+def cmd_scene_answer(args) -> int:
+    from . import control
+
+    run_dir, _, problem = _operator_checks(args)
+    if problem:
+        return _refuse(args, problem)
+    try:
+        predicates = _predicates(args.predicates)
+        value = control.command(
+            "scene_answer",
+            args.command_id or control.new_command_id("scene_answer"),
+            args.principal,
+            request_id=args.request_id,
+            predicates=predicates,
+        )
+    except (JobError, control.CommandError) as exc:
+        return _refuse(args, str(exc))
+    if not sys.stdin.isatty():
+        return _refuse(args, NOT_A_TERMINAL)
+    shown = ", ".join(
+        f"{k}={'null' if v is None else str(v).lower()}" for k, v in predicates.items()
+    )
+    answer = _ask(
+        f"Answer {args.request_id}: {shown}. Type `answer {args.request_id}` to "
+        f"confirm / 输入 `answer {args.request_id}` 确认: "
+    )
+    if answer != f"answer {args.request_id}":
+        return _refuse(args, "not confirmed; nothing was written / 未确认，未写入")
+    return _send(args, run_dir, value)
+
+
+def cmd_attach(args) -> int:
+    from . import launch
+
+    if args.detach == args.foreground:
+        return _refuse(
+            args, "give one of --detach, --foreground / 选择 --detach 或 --foreground"
+        )
+    try:
+        run_dir = _launched(args)
+        handle = launch.attach(
+            run_dir,
+            backend="systemd" if args.detach else "foreground",
+            wait_s=args.wait if args.detach else 0.0,
+        )
+    except JobError as exc:
+        return _refuse(args, str(exc))
+    except launch.LaunchRefused as exc:
+        return _refuse(args, f"{exc.code}: {exc.detail}")
+    text = f"attached {handle.unit or 'here'}: run {handle.run_id}" + (
+        f", {handle.final_state}" if handle.final_state else ""
+    )
+    _print({"ok": True, **handle.public()}, args.json, text)
+    if args.detach:
+        return EXIT_OK
+    return handle.exit_code if handle.exit_code is not None else EXIT_PROBLEM
 
 
 def _scan(run_dir: Path):
@@ -909,10 +1284,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="levi automatic",
         description=(
-            "Automatic evaluation pipeline (AERI): check, validate, dry-run on "
-            "fakes, inspect and report runs. No real robot run in this version. / "
-            "自动测评流水线（AERI）：检查、校验、用 Fake 试运行、查看和报告运行。"
-            "本版本不能在真机上运行。"
+            "Automatic evaluation pipeline (AERI): check, validate, plan, dry-run "
+            "on fakes (here, or launched in a systemd user unit), stop, resume, "
+            "attach, inspect and report runs. No real robot run in this version. / "
+            "自动测评流水线（AERI）：检查、校验、计划、用 Fake 试运行（本进程或 "
+            "systemd 用户单元）、停止、恢复、接管、查看和报告运行。本版本不能在真机上运行。"
         ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -954,7 +1330,38 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--dry-run",
         action="store_true",
-        help="required: run on the fakes only / 必填：只在 Fake 上运行",
+        help="run on the fakes here, in a temporary folder / 在本进程用 Fake 试运行（临时目录）",
+    )
+    run.add_argument(
+        "--mode",
+        choices=MODES_ALL,
+        default=None,
+        help="launch a run through the launch core; only dry_run runs in this "
+        "version (other modes exit 2) / 经启动核心启动；本版本只能 dry_run（其他模式退出码 2）",
+    )
+    hosting = run.add_mutually_exclusive_group()
+    hosting.add_argument(
+        "--detach",
+        action="store_true",
+        help="with --mode: run in a systemd user unit (levi-aeri-<run id>) / "
+        "配合 --mode：在 systemd 用户单元里运行",
+    )
+    hosting.add_argument(
+        "--foreground",
+        action="store_true",
+        help="with --mode: run in this terminal / 配合 --mode：在本终端前台运行",
+    )
+    run.add_argument(
+        "--wait",
+        type=float,
+        default=10.0,
+        help="with --detach: seconds to wait for the runner to name itself / "
+        "配合 --detach：等待运行器报到的秒数",
+    )
+    run.add_argument(
+        "--expect-plan",
+        metavar="SHA",
+        help="with --mode: refuse unless the plan is still this one / 配合 --mode：计划摘要不符就拒绝",
     )
     run.add_argument(
         "--episodes",
@@ -975,6 +1382,150 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--json", action="store_true", help=json_help)
     run.set_defaults(func=cmd_run)
+
+    plan = sub.add_parser(
+        "plan",
+        help="the launch plan of a job file, read-only / 只读：作业文件的启动计划",
+        description="What a launch would run, every check and the plan digest "
+        "(the same as the API's for the same file). Writes nothing but the "
+        "core key under LEVI_AERI_HOME, once. Exit 0 when launchable. / "
+        "启动会运行什么、各项检查和计划摘要（与 API 对同一文件算出的相同）；"
+        "除首次创建 LEVI_AERI_HOME 下的核心密钥外不写任何文件；可启动时退出码 0。",
+    )
+    plan.add_argument("--config", required=True, help=config_help)
+    plan.add_argument(
+        "--mode",
+        choices=MODES_ALL,
+        default=None,
+        help="execution mode (default: the job's) / 执行模式（默认取作业文件）",
+    )
+    plan.add_argument(
+        "--episodes",
+        type=int,
+        default=None,
+        help="override the episode count / 覆盖片段数",
+    )
+    plan.add_argument(
+        "--scenes",
+        default="",
+        help="dry run only: scene decisions the fake answers first / 仅试运行：Fake 依次给出的场景结论",
+    )
+    plan.add_argument(
+        "--keep",
+        metavar="DIR",
+        help="dry run only: write the run in this new or empty folder / 仅试运行：运行写在此空目录",
+    )
+    plan.add_argument("--json", action="store_true", help=json_help)
+    plan.set_defaults(func=cmd_plan)
+
+    runs = sub.add_parser(
+        "runs",
+        help="the launched runs (LEVI_AERI_HOME index), read-only / 只读：已启动的运行",
+    )
+    runs.add_argument("--json", action="store_true", help=json_help)
+    runs.set_defaults(func=cmd_runs)
+
+    def which_run(command):
+        group = command.add_mutually_exclusive_group(required=True)
+        group.add_argument("--run", help="run id (from levi automatic runs) / 运行 ID")
+        group.add_argument("--run-dir", help="<root>/.aeri/runs/<run id> / 运行目录")
+
+    def operator_options(command):
+        command.add_argument(
+            "--principal",
+            default="operator",
+            help="opaque id of who gives the command (no names, no addresses) / "
+            "下达命令者的不透明 ID（不写姓名、邮箱）",
+        )
+        command.add_argument(
+            "--command-id",
+            default=None,
+            help="send again with the same id to repeat safely (once only) / "
+            "用同一 ID 重发不会重复执行",
+        )
+        command.add_argument(
+            "--wait",
+            type=float,
+            default=10.0,
+            help="seconds to wait for the runner's result / 等待运行器结果的秒数",
+        )
+        command.add_argument("--json", action="store_true", help=json_help)
+
+    stop = sub.add_parser(
+        "stop",
+        help="stop a launched run (typed confirmation at a terminal) / 停止已启动的运行（须在终端输入确认）",
+        description="Writes a stop to the run's command channel after you type "
+        "`stop <run id>` at a terminal; refused without a terminal. An episode "
+        "under way ends first. / 在终端输入 `stop <运行 ID>` 后写入命令通道；"
+        "没有终端就拒绝。",
+    )
+    which_run(stop)
+    operator_options(stop)
+    stop.set_defaults(func=cmd_stop)
+
+    resume = sub.add_parser(
+        "resume",
+        help="resume a run that waits for a person (typed confirmation) / 恢复等人的运行（须输入确认）",
+        description="Both confirmations (environment handled, health checked "
+        "again) and `resume <run id>` typed at a terminal; refused without a "
+        "terminal. The run then goes through PREFLIGHT and a fresh initial-state "
+        "check. / 须在终端确认两项（环境已处理、健康已复查）并输入 "
+        "`resume <运行 ID>`；之后运行重新经过 PREFLIGHT 和初始状态核对。",
+    )
+    which_run(resume)
+    resume.add_argument(
+        "--expected-seq",
+        type=int,
+        default=None,
+        help="the journal line the resume applies at (default: the next) / 恢复对应的日志行号",
+    )
+    operator_options(resume)
+    resume.set_defaults(func=cmd_resume)
+
+    answer = sub.add_parser(
+        "scene-answer",
+        help="answer a person's scene question (typed confirmation) / 回答人工场景核对题（须输入确认）",
+    )
+    which_run(answer)
+    answer.add_argument(
+        "--request-id", required=True, help="the question's request id / 题目的请求 ID"
+    )
+    answer.add_argument(
+        "--predicates",
+        required=True,
+        help="name=true|false|null, comma separated (null: cannot tell) / "
+        "名称=true|false|null，逗号分隔（null 表示看不清）",
+    )
+    operator_options(answer)
+    answer.set_defaults(func=cmd_scene_answer)
+
+    attach = sub.add_parser(
+        "attach",
+        help="bring back a run whose runner is gone (FAULT_LOCKED) / 接管运行器已退出的运行（进入 FAULT_LOCKED）",
+        description="A new runner restores the run from its journal: it is "
+        "locked (FAULT_LOCKED, recovery_ambiguous), nothing is replayed, and "
+        "only a resume leads on. / 新运行器从日志恢复运行：锁定在 FAULT_LOCKED，"
+        "不重放任何动作，只能由 resume 继续。",
+    )
+    which_run(attach)
+    hosted = attach.add_mutually_exclusive_group()
+    hosted.add_argument(
+        "--detach",
+        action="store_true",
+        help="in a systemd user unit / 在 systemd 用户单元里",
+    )
+    hosted.add_argument(
+        "--foreground", action="store_true", help="in this terminal / 在本终端前台"
+    )
+    attach.add_argument(
+        "--wait",
+        type=float,
+        default=10.0,
+        help="with --detach: seconds to wait for the runner to name itself / "
+        "配合 --detach：等待运行器报到的秒数",
+    )
+    attach.add_argument("--json", action="store_true", help=json_help)
+    attach.set_defaults(func=cmd_attach)
 
     status = sub.add_parser(
         "status",

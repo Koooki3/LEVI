@@ -363,11 +363,17 @@ AERI 改动合并前的独立审查要核对 `MODE_MATRIX` 已更新、两种模
 | `arbitration:plan:reset_required` | 不同：次数未用尽时运行复位策略，之后转人工 | 不同：转人工（scene_reset_required） |
 | `arbitration:plan:unavailable` | 不同：同 unknown：绝不跳过复位 | 不同：转人工（scene_unknown） |
 | `arbitration:plan:unknown` | 不同：运行复位策略；on_unknown 为 wait_human 时转人工 | 不同：转人工（scene_unknown） |
+| `cli:attach` | 相同 | 相同 |
 | `cli:doctor` | 相同 | 不同：没有能作答的场景提供方时，启动检查不通过 |
 | `cli:label` | 相同 | 相同 |
+| `cli:plan` | 相同 | 不同：真实模式还会因为没有能作答的场景提供方被拒绝；试运行的计划相同 |
 | `cli:report` | 相同 | 相同 |
+| `cli:resume` | 相同 | 相同 |
 | `cli:run` | 相同 | 不同：试运行中场景不就绪时，运行停在 WAIT_HUMAN |
+| `cli:runs` | 相同 | 相同 |
+| `cli:scene-answer` | 不同：不会请人核对场景：运行器回复 not_supported | 不同：scene_check 为 operator_attested 时转给人工场景核对；机器提供方时回复 not_supported |
 | `cli:status` | 相同 | 相同 |
+| `cli:stop` | 相同 | 相同 |
 | `cli:validate` | 相同 | 不同：没有能作答的场景提供方时拒绝真机运行；--dry-run 可通过校验 |
 | `metrics:agreement` | 相同 | 相同 |
 | `metrics:automation` | 不同：所有干预都是计划外 | 不同：场景核对把运行交给人，属于计划内干预 |
@@ -432,13 +438,20 @@ levi automatic run      --config F --dry-run [--episodes N] [--scenes S] [--keep
 levi automatic status   --run-dir D [--json]
 levi automatic report   --run-dir D [--config F] [--truth T] [--format md|json]
 levi automatic label    --run-dir D --episode ID --value success|failure|discarded|unclear [--principal P] [--note N] [--json]
+levi automatic plan     --config F [--mode M] [--episodes N] [--scenes S] [--keep DIR] [--json]
+levi automatic run      --config F --mode M --detach|--foreground [--expect-plan SHA] [--wait S]
+levi automatic runs     [--json]
+levi automatic stop     --run R | --run-dir D [--principal P] [--command-id C] [--wait S]
+levi automatic resume   --run R | --run-dir D [--expected-seq N] [--principal P] [--command-id C]
+levi automatic scene-answer --run R --request-id Q --predicates a=true,b=null
+levi automatic attach   --run R | --run-dir D --detach|--foreground
 ```
 
-`levi automatic …` 是同一个命令。每个选项的帮助都是中英双语。
+`levi automatic …` 是同一个命令。每个选项的帮助都是中英双语。`plan`、`run --mode`、`runs`、`stop`、`resume`、`scene-answer`、`attach` 属于已启动的运行，见下文[启动运行](#启动运行launchpyrunnerpycontrolpy)。
 
 - `doctor` 只读：检查契约快照、Fake、作业文件、rollout 根目录是否可写；并说明本版本没有真机适配层（非必需项，退出码仍为 0）。
 - `validate` 读取作业文件，打印计划及其 `plan_sha256`（即日志里的计划哈希）；被拒时退出码 2 并给出原因。不加 `--dry-run` 时按真机运行校验：没有 `task.initial_state_spec` 的作业被拒绝（没有场景能算 ready，前向片段永远开不了；错误信息给出修法），没有场景提供方的人工复位模式也被拒绝（目前真机运行还配不了提供方）。加 `--dry-run` 时同样的作业可以通过，但给出警告；`doctor` 的 `launch` 检查报告同样的结论。
-- `run` **没有 `--dry-run` 一律拒绝**（退出码 2）：本版本不能真机运行。试运行只驱动进程内 Fake，在临时目录里运行（结束后删除；`--keep DIR` 保留在一个新的或空的目录里），绝不写作业里的 `rollout_root`，运行期间拒绝任何 socket 连接。没有任何真实对象拥有运动权限：唯一的机器人是 `FakeRobot`。`--scenes reset_required,ready` 设定 Fake 先给出的场景结论。
+- `run` **没有 `--dry-run` 或 `--mode dry_run` 一律拒绝**（退出码 2）：本版本不能真机运行（`--mode shadow|assisted|autonomous` 也退出码 2）。试运行只驱动进程内 Fake，在临时目录里运行（结束后删除；`--keep DIR` 保留在一个新的或空的目录里），绝不写作业里的 `rollout_root`，运行期间拒绝任何 socket 连接。没有任何真实对象拥有运动权限：唯一的机器人是 `FakeRobot`。`--scenes reset_required,ready` 设定 Fake 先给出的场景结论。
 - `status` 不拿锁、不写入地读取运行日志（撕裂的末尾只报告、不截掉；损坏的日志显示 `FAULT_LOCKED`）。
 - `report` 以 Markdown 或 JSON 打印指标（见上）。
 - `label` 给已结束的前向片段追加操作员标签（见“操作员标签与双标签对比”）。先核对片段，再在终端里确认：不在终端里一律拒绝（退出码 2，不写任何内容）；操作员输入该值才算确认。提示写到 stderr，列出当前标签，从不显示自动判定和片段怎样结束；写入前再核对一次片段已结束。`--principal`（默认 `operator`）是不透明 ID。
@@ -473,6 +486,28 @@ recording:
   forward_folder: stack_plates__r20261010-a
   reset_folder: reset_stack_plates__r20261010-a
 ```
+
+## 启动运行（`launch.py`、`runner.py`、`control.py`）
+
+T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个启动核心：都调用 `launch.plan()` 和 `launch.launch()`，所以同一份作业文件两边算出的 `plan_sha256` 相同（有测试对每个入口断言）。**本版本只有 `dry_run` 能启动**：进程内 Fake，不联网，没有任何真实运动权限。
+
+**计划**（`levi automatic plan --config F [--mode M] --json`，可启动时退出码 0）写明执行模式、复位模式和场景核对方式、角色、适配器、运行目录、初始状态契约（`id@version`、状态、sha256）、是否会让机器人动、每项检查和拒绝原因。`plan_sha256` 是规范化计划的 sha256：作业加载器的计划（键排序、填默认值、rollout 根目录取绝对真实路径、契约文件的字节哈希、去掉复位模式忽略的键），再套上执行模式和允许的覆盖项（`episodes`；试运行 Fake 的 `scenes`）。谁发起、从哪里发起（命令行或 API）、用什么方式承载都不进摘要。不给 `--mode` 和覆盖项时，它就是 `validate` 的摘要。做计划不写任何文件，只在第一次时创建核心密钥。
+
+**检查与拒绝。** `E_NO_ROBOT_ADAPTER`（`dry_run` 之外的任何模式；不论计划怎么说，`launch()` 都再查一次）、`E_JOB_INVALID`、`E_OVERRIDE`、`E_RUN_EXISTS`（运行 ID 就是实验名，只能用一次：运行目录或索引条目已存在）、`E_ROLLOUT_ROOT`、`E_KEEP_DIR`、`E_NO_CONTRACT`、`E_SCENE_PROVIDER_MISSING`（人工复位模式，同前）、`E_ROBOT_BUSY`（另一个运行持有 `$LEVI_AERI_HOME/robot-<适配器>.lock`）和 `E_ROBOT_BUSY_CLIENT`（rollout 根目录下有不属于 AERI 的活评测会话：未结束、未崩溃；只读会话文件，不连任何端口）。后两项只针对真机；试运行的 Fake 机器人是它自己的。草案状态的契约只给警告（`W_CONTRACT_DRAFT`）。API 只能选 `LEVI_AERI_JOB_ROOTS` 下的作业文件（`E_JOB_OUTSIDE_ROOTS`）。
+
+**启动令牌**（防止看过计划后文件被改再启动）：`v1.<到期>.<hmac>`，用核心密钥（`$LEVI_AERI_HOME/core.key`，0600，只生成一次，从不打印）对计划摘要、作业文件身份（设备、inode、大小、修改和变更时间、sha256）和十分钟有效期做 HMAC-SHA256。`launch()` 会重新计划：作业文件被改过甚至只被 touch 过、契约被改过、摘要不同，都返回 `E_PLAN_CHANGED`；过期返回 `E_TOKEN_EXPIRED`。`run --mode M --expect-plan SHA` 在计划不再是你看过的那份时拒绝。
+
+**承载方式。** `run --mode dry_run --detach` 把运行器放进独立的 systemd 用户单元：`systemd-run --user --unit=levi-aeri-<run_id> --collect -p KillMode=control-group -p TimeoutStopSec=120 <python> -m levi.automatic.runner --run-dir D --plan-sha256 X`，**不设 `Restart`**：运行器崩溃后由人 `attach`。它不在产品的 cgroup 里，也从不登记进产品的 `processes.json`，所以停止或重启 LEVI 不会停掉运行。`--foreground` 在本终端前台运行（Ctrl+C 等于停止）。用户没开 linger 时，注销会停掉单元。已启动的试运行写在 `$LEVI_AERI_HOME/dry-runs/<run_id>/`（或 `--keep DIR`），绝不写作业的 rollout 根目录。
+
+**运行器**重新读取作业文件并重算摘要，不一致就在写任何东西之前拒绝（退出码 2）。它把自己写进 `<run_dir>/runner.json` 和索引 `$LEVI_AERI_HOME/runs/<run_id>.json`（pid、进程身份、状态）；`levi automatic runs` 列出索引以及每个运行器是否还活着。它驱动运行直到需要人或完成，然后等待命令；运行完成时退出，或收到 SIGTERM（`systemctl --user stop levi-aeri-<run_id>`）后等运行到达人工等待或完成再退出：SIGTERM 等于 `system:sigterm` 发出的停止。
+
+**命令通道。** `stop`、`resume`、`scene-answer` 写入 `<run_dir>/control/inbox/<command_id>.json`（先完整写入并 fsync，再链接到位：不会出现半条命令，也不会覆盖已有命令；目录 0700）。运行器每 50 ms 轮询一次，调用编排器线程安全的 `stop()`/`resume()`，结果写到 `control/results/<command_id>.json`。同一个命令 ID 只生效一次：同一命令再发（连点、用 `--command-id` 重试）得到 `already_queued` 和第一次的结果；编排器对已执行过的 resume 回复 `repeated`；用过的 ID 换成别的命令返回 `command_used`。resume 写明它对应的日志行（`--expected-seq`，默认下一行），过时返回 `stale_sequence`。运行器崩溃后命令文件还在，由下一个运行器判定。每条命令审计两次：运行日志里一条 `operator_command` 备注（谁、命令 ID、结果、时间），以及 `$LEVI_AERI_HOME/control.jsonl` 里的发出和结果两行。ID、文件名和文件在使用前都要校验（ID 格式、不跟随符号链接、最多 64 KiB、严格 JSON、键必须完全一致）。
+
+**输入确认。** `stop` 要求输入 `stop <run_id>`；`resume` 要求确认两项（环境已处理、健康已复查）并输入 `resume <run_id>`；`scene-answer` 要求输入 `answer <request_id>`。没有终端（标准输入不是 TTY）时一律拒绝且不写任何东西；没有跳过确认的参数。它们还要求运行器活着（`E_NO_RUNNER`：先 attach）。场景答复只转给人工场景核对（`scene_check: operator_attested`）；机器提供方回复 `not_supported`。
+
+**接管。** `levi automatic attach --run R --detach|--foreground` 为运行器已退出的运行启动新运行器：`Orchestrator.restore` 先执行日志恢复，所以运行处于 `FAULT_LOCKED`（`recovery_ambiguous`），不重放任何动作，在操作员 `resume` 让它重新经过 `PREFLIGHT` 和初始状态核对之前，没有任何运动授权。运行器还活着时拒绝（`E_RUNNER_ALIVE`），运行已完成时也拒绝（`E_RUN_COMPLETED`）。这样恢复的试运行，Fake 会从脚本开头重新开始。
+
+**设置。** `LEVI_AERI_HOME`（默认 `~/.levi-aeri`，以 0700 创建）：核心密钥、机器人锁、运行索引、命令审计和已启动的试运行。`LEVI_AERI_JOB_ROOTS`：用 `:` 分隔的目录，API 只能从这些目录里选作业文件（命令行可以用任意路径）。
 
 ## Fake（`integrations/fr3_automatic/fake.py`）
 

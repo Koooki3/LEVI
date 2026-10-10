@@ -1059,11 +1059,17 @@ updated and both modes have tests.
 | `arbitration:plan:reset_required` | differs: runs the reset policy while attempts remain, then asks a person | differs: asks a person (scene_reset_required) |
 | `arbitration:plan:unavailable` | differs: as unknown: never skips the reset | differs: asks a person (scene_unknown) |
 | `arbitration:plan:unknown` | differs: runs the reset policy, or asks a person with on_unknown wait_human | differs: asks a person (scene_unknown) |
+| `cli:attach` | same | same |
 | `cli:doctor` | same | differs: the launch check fails without a scene provider that can answer |
 | `cli:label` | same | same |
+| `cli:plan` | same | differs: a real mode is refused for want of a scene provider that can answer too; a dry run plans the same way |
 | `cli:report` | same | same |
+| `cli:resume` | same | same |
 | `cli:run` | same | differs: a dry-run scene that is not ready ends the run in WAIT_HUMAN |
+| `cli:runs` | same | same |
+| `cli:scene-answer` | differs: no person is asked about the scene: the runner answers not_supported | differs: relayed to the person's scene check with scene_check operator_attested (not_supported with a machine provider) |
 | `cli:status` | same | same |
+| `cli:stop` | same | same |
 | `cli:validate` | same | differs: a real run is refused without a scene provider that can answer; --dry-run validates |
 | `metrics:agreement` | same | same |
 | `metrics:automation` | differs: every intervention is unplanned | differs: a scene check sending the run to a person is planned |
@@ -1128,10 +1134,19 @@ levi automatic run      --config F --dry-run [--episodes N] [--scenes S] [--keep
 levi automatic status   --run-dir D [--json]
 levi automatic report   --run-dir D [--config F] [--truth T] [--format md|json]
 levi automatic label    --run-dir D --episode ID --value success|failure|discarded|unclear [--principal P] [--note N] [--json]
+levi automatic plan     --config F [--mode M] [--episodes N] [--scenes S] [--keep DIR] [--json]
+levi automatic run      --config F --mode M --detach|--foreground [--expect-plan SHA] [--wait S]
+levi automatic runs     [--json]
+levi automatic stop     --run R | --run-dir D [--principal P] [--command-id C] [--wait S]
+levi automatic resume   --run R | --run-dir D [--expected-seq N] [--principal P] [--command-id C]
+levi automatic scene-answer --run R --request-id Q --predicates a=true,b=null
+levi automatic attach   --run R | --run-dir D --detach|--foreground
 ```
 
 `levi automatic …` runs the same command. Every option's help is in
-English and Chinese.
+English and Chinese. `plan`, `run --mode`, `runs`, `stop`, `resume`,
+`scene-answer` and `attach` belong to launched runs: see
+[Launching runs](#launching-runs-launchpy-runnerpy-controlpy) below.
 
 - `doctor` is read-only: the contract snapshots, the fakes, the job file,
   whether the rollout root is writable. It says that a real robot adapter
@@ -1144,8 +1159,9 @@ English and Chinese.
   human-assisted mode without a scene provider (none can be configured for
   a real run yet). With `--dry-run` the same job passes with a warning;
   `doctor` reports the same as its `launch` check.
-- `run` **refuses without `--dry-run`** (exit 2): there is no real run in
-  this version. A dry run drives the in-process fakes only, in a temporary
+- `run` **refuses without `--dry-run` or `--mode dry_run`** (exit 2): there
+  is no real run in this version (`--mode shadow|assisted|autonomous` exits
+  2 too). A dry run drives the in-process fakes only, in a temporary
   folder (deleted afterwards; `--keep DIR` keeps it in a new or empty
   folder), never in the job's `rollout_root`, with every socket connection
   refused while it lasts. Nothing real has motion authority: the only
@@ -1194,6 +1210,110 @@ recording:
   forward_folder: stack_plates__r20261010-a
   reset_folder: reset_stack_plates__r20261010-a
 ```
+
+## Launching runs (`launch.py`, `runner.py`, `control.py`)
+
+T-CL-07..09, design X2 §3–§5. One launch core serves the command line and,
+later, the HTTP API: both call `launch.plan()` and `launch.launch()`, so the
+same job file gives the same `plan_sha256` on both (a test asserts it for
+every entry point). **Only `dry_run` launches in this version**: the
+in-process fakes, no network, no motion authority over anything real.
+
+**The plan** (`levi automatic plan --config F [--mode M] --json`, exit 0
+when launchable). It names the execution mode, the reset mode and scene
+check, the roles, the adapters, the run folder, the Initial State Contract
+(`id@version`, status, sha256), whether it moves the robot, every check and
+the refusals. `plan_sha256` is the sha256 of the normalised plan: the job
+loader's plan (sorted keys, defaults filled in, the rollout root an
+absolute real path, the contract file's byte hash, the keys the reset mode
+ignores left out) with the execution mode and the allowed overrides
+(`episodes`; `scenes` for a dry run's fake) applied. Who asks, from where
+(command line or API) and how the run is hosted are not in it. Without
+`--mode` and overrides it is `validate`'s digest. Planning writes nothing
+but the core key, once.
+
+**Checks and refusals.** `E_NO_ROBOT_ADAPTER` (any mode but `dry_run`;
+`launch()` checks again whatever the plan said), `E_JOB_INVALID`,
+`E_OVERRIDE`, `E_RUN_EXISTS` (the run id is the experiment name and is used
+once: its folder or its index entry exists), `E_ROLLOUT_ROOT`, `E_KEEP_DIR`,
+`E_NO_CONTRACT`, `E_SCENE_PROVIDER_MISSING` (the human-assisted mode, as
+before), `E_ROBOT_BUSY` (another run holds
+`$LEVI_AERI_HOME/robot-<adapter>.lock`) and `E_ROBOT_BUSY_CLIENT` (a live
+evaluation session that is not AERI's under the rollout root: not ended,
+not crashed; read from the session files only, no port). The last two
+apply to the real robot only; a dry run's fake robot is its own. A draft
+contract is a warning (`W_CONTRACT_DRAFT`). For the API, job files must lie
+under `LEVI_AERI_JOB_ROOTS` (`E_JOB_OUTSIDE_ROOTS`).
+
+**The launch token** (against an edit between reading a plan and starting
+it): `v1.<expires>.<hmac>`, an HMAC-SHA256 under the core key
+(`$LEVI_AERI_HOME/core.key`, 0600, made once, never printed) of the plan
+digest, the job file's identity (device, inode, size, modification and
+change times, sha256) and a ten-minute expiry. `launch()` plans again: an
+edited or merely touched job file, an edited contract or another digest is
+`E_PLAN_CHANGED`, an old token `E_TOKEN_EXPIRED`. `run --mode M
+--expect-plan SHA` refuses unless the plan is still the one you read.
+
+**Hosting.** `run --mode dry_run --detach` starts the runner in its own
+systemd user unit: `systemd-run --user --unit=levi-aeri-<run_id> --collect
+-p KillMode=control-group -p TimeoutStopSec=120 <python> -m
+levi.automatic.runner --run-dir D --plan-sha256 X`, **without `Restart`**: a
+runner that crashed is brought back by a person (`attach`). It never lives
+in the product's cgroup and is never recorded in the product's
+`processes.json`, so stopping or restarting LEVI does not stop a run.
+`--foreground` runs it in this terminal (Ctrl+C is a stop). A user without
+lingering loses the unit at logout. A launched dry run writes into
+`$LEVI_AERI_HOME/dry-runs/<run_id>/` (or `--keep DIR`), never into the job's
+rollout root.
+
+**The runner** reads the job file again and recomputes the digest; another
+digest is refused before anything is written (exit 2). It names itself in
+`<run_dir>/runner.json` and in the index `$LEVI_AERI_HOME/runs/<run_id>.json`
+(pid, process identity, state); `levi automatic runs` lists the index with
+whether each runner still lives. It drives the run until it needs a person
+or completes, then waits for commands; it exits when the run completes, or
+on SIGTERM (`systemctl --user stop levi-aeri-<run_id>`) once the run reached
+a person or completed: SIGTERM is a stop by `system:sigterm`.
+
+**The command channel.** `stop`, `resume` and `scene-answer` write
+`<run_dir>/control/inbox/<command_id>.json` (written whole and synced, then
+linked into place: never half a command, never replaced; folders 0700). The
+runner polls every 50 ms, calls the orchestrator's thread-safe
+`stop()`/`resume()` and writes `control/results/<command_id>.json`. A
+command id acts once: the same command again (a second click, a retry with
+`--command-id`) is `already_queued` and gets the first result; the
+orchestrator answers a resume it already did with `repeated`; another
+command under a used id is `command_used`. A resume names the journal line
+it applies at (`--expected-seq`, default the next one); a stale one is
+`stale_sequence`. Command files survive a crashed runner and are judged by
+the next one. Every command is audited twice: an `operator_command` note in
+the run's journal (who, the command id, the result, when) and a line in
+`$LEVI_AERI_HOME/control.jsonl` (issued and result). Ids, names and files
+are checked before use (the id pattern, no symbolic link, at most 64 KiB,
+strict JSON, exact keys).
+
+**Typed confirmation.** `stop` asks you to type `stop <run_id>`; `resume`
+asks for both confirmations (environment handled, health checked again)
+and `resume <run_id>`; `scene-answer` asks for `answer <request_id>`.
+Without a terminal (standard input not a TTY) they refuse and write
+nothing; there is no option that skips the question. They also need a live
+runner (`E_NO_RUNNER`: attach first). A scene answer reaches only a
+person's scene check (`scene_check: operator_attested`); a machine provider
+answers `not_supported`.
+
+**Attach.** `levi automatic attach --run R --detach|--foreground` starts a
+new runner on a run whose runner is gone: `Orchestrator.restore` runs the
+journal's recovery, so the run is `FAULT_LOCKED` (`recovery_ambiguous`),
+nothing is replayed and no motion is authorised until an operator's
+`resume` leads it through `PREFLIGHT` and a fresh initial-state check.
+Refused while a runner of the run lives (`E_RUNNER_ALIVE`) and for a
+completed run (`E_RUN_COMPLETED`). A dry run restored this way starts its
+fakes again from their scripts.
+
+**Settings.** `LEVI_AERI_HOME` (default `~/.levi-aeri`, created 0700): the
+core key, robot locks, run index, command audit and launched dry runs.
+`LEVI_AERI_JOB_ROOTS`: folders separated by `:` under which the API may
+pick job files (the command line takes any path).
 
 ## Fakes (`integrations/fr3_automatic/fake.py`)
 

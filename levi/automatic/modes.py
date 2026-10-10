@@ -215,6 +215,25 @@ MODE_MATRIX: dict = {
     "cli:status": _both(SAME),
     "cli:report": _both(SAME),
     "cli:label": _both(SAME),
+    # Launched runs (T-CL-09: launch.py, runner.py, control.py).
+    "cli:plan": _per(
+        SAME,
+        differs(
+            "a real mode is refused for want of a scene provider that can answer "
+            "too; a dry run plans the same way"
+        ),
+    ),
+    "cli:runs": _both(SAME),
+    "cli:stop": _both(SAME),
+    "cli:resume": _both(SAME),
+    "cli:attach": _both(SAME),
+    "cli:scene-answer": _per(
+        differs("no person is asked about the scene: the runner answers not_supported"),
+        differs(
+            "relayed to the person's scene check with scene_check "
+            "operator_attested (not_supported with a machine provider)"
+        ),
+    ),
 }
 
 
@@ -424,6 +443,17 @@ _WORDS = {
 # The Chinese documentation's wording of every sentence in MODE_MATRIX (a
 # test requires one for each; a missing one would print the English).
 ZH = {
+    "a real mode is refused for want of a scene provider that can answer too; "
+    "a dry run plans the same way": (
+        "真实模式还会因为没有能作答的场景提供方被拒绝；试运行的计划相同"
+    ),
+    "no person is asked about the scene: the runner answers not_supported": (
+        "不会请人核对场景：运行器回复 not_supported"
+    ),
+    "relayed to the person's scene check with scene_check operator_attested "
+    "(not_supported with a machine provider)": (
+        "scene_check 为 operator_attested 时转给人工场景核对；机器提供方时回复 not_supported"
+    ),
     "a dry-run scene that is not ready ends the run in WAIT_HUMAN": (
         "试运行中场景不就绪时，运行停在 WAIT_HUMAN"
     ),

@@ -44,6 +44,10 @@
    "human_assisted": "differs:asks a person (scene_unknown)",
    "single_reset_policy": "differs:runs the reset policy, or asks a person with on_unknown wait_human"
   },
+  "cli:attach": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
   "cli:doctor": {
    "human_assisted": "differs:the launch check fails without a scene provider that can answer",
    "single_reset_policy": "same"
@@ -52,7 +56,15 @@
    "human_assisted": "same",
    "single_reset_policy": "same"
   },
+  "cli:plan": {
+   "human_assisted": "differs:a real mode is refused for want of a scene provider that can answer too; a dry run plans the same way",
+   "single_reset_policy": "same"
+  },
   "cli:report": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "cli:resume": {
    "human_assisted": "same",
    "single_reset_policy": "same"
   },
@@ -60,7 +72,19 @@
    "human_assisted": "differs:a dry-run scene that is not ready ends the run in WAIT_HUMAN",
    "single_reset_policy": "same"
   },
+  "cli:runs": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "cli:scene-answer": {
+   "human_assisted": "differs:relayed to the person's scene check with scene_check operator_attested (not_supported with a machine provider)",
+   "single_reset_policy": "differs:no person is asked about the scene: the runner answers not_supported"
+  },
   "cli:status": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "cli:stop": {
    "human_assisted": "same",
    "single_reset_policy": "same"
   },
