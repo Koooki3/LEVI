@@ -305,9 +305,11 @@ automatically.
   the run itself (`completed`). `stop()` only registers: it does not hold
   the robot itself (that is the next safe point of the loop, or, when an
   adapter hangs, the robot side's watchdog and the token's expiry). A stop
-  stays registered until the run reaches a person on it, where every
-  registered stop is consumed (ids beyond the first are noted as
-  `stop_commands_merged`). Each registration has a generation: a resume
+  stays registered until the run reaches a person, whatever brought it
+  there (`WAIT_HUMAN` by any reason), where every registered stop is
+  consumed (ids beyond the first are noted as `stop_commands_merged`): a
+  stop left behind never blocks the operator's next stop, which ends the
+  run. Each registration has a generation: a resume
   clears only the stops registered before it began (written as a
   `stop_command_lost` note); a stop that arrives during a resume survives
   it and takes effect at the next decision point.
@@ -446,16 +448,24 @@ against the task's **Initial State Contract** (`RunConfig.initial_state`):
 
 | Assessment | Verdict |
 | --- | --- |
-| `ready`, every required predicate of the contract read true, at least `min_evidence_refs` frame or clip references (when `require_visible_evidence`) | `ready`: the next forward episode starts |
+| `ready`, every required predicate of the contract read true, at least `min_evidence_refs` **distinct** frame or clip references (the same reference twice counts once), from **every** preferred view (`require_all_views`, when `require_visible_evidence`) | `ready`: the next forward episode starts |
 | `ready` that leaves out or does not read a required predicate | `unknown` (`scene_missing_predicate` note) |
-| `ready` with too little visible evidence | `unknown` (`scene_insufficient_evidence` note) |
+| `ready` without a reference from every preferred view | `unknown` (`scene_missing_view` note) |
+| `ready` with too few distinct references | `unknown` (`scene_insufficient_evidence` note) |
+| any assessment observed before it was asked for (before the home or the reset's end) | `unavailable` (`scene_dropped_stale` note) |
+| `ready` without a contract | `unknown` (`scene_no_contract` note) |
 | an assessment of another contract | `unavailable` (`scene_contract_mismatch` note) |
 | `reset_required`, `unknown`, unavailable | as they are |
 
-Without a contract (`initial_state = None`, the default) the provider's
-decision stands, as before. **The contract file is a draft (HA-23):** its
-format below is the smallest one that carries pipeline §6.1 and waits for
-the user's confirmation.
+**Without a contract no scene is ready** (`initial_state = None`, the
+default): a `ready` needs a contract and its evidence, so
+`single_reset_policy` runs the reset policy (or asks a person) before every
+forward episode, and `levi automatic validate`/`doctor` say so. **The
+contract file is a draft (HA-23):** its format below is the smallest one
+that carries pipeline §6.1 and waits for the user's confirmation, and so
+does the **view rule**: a reference names its camera view by the text
+before its first `:` (`<view>:<frame>`); the view names come from the
+contract's `observations.preferred`, never from the code.
 
 ```yaml
 initial_state:
@@ -472,6 +482,7 @@ initial_state:
     preferred: [side, wrist]
     require_visible_evidence: true
     min_evidence_refs: 1
+    require_all_views: true   # every preferred view in the evidence (HA-23)
 ```
 
 `scene_assessment.load_contract(text)` reads it. The reader takes a strict
@@ -489,13 +500,21 @@ registers `(id, version)` with exactly these names for `aeri.parse`.
 | Strategy | Not ready |
 | --- | --- |
 | `single_reset_policy` (default) | `reset_required` runs the reset policy; `unknown`/`unavailable` too with `on_scene_unknown = "reset"`, else a person; at most `max_reset_attempts` resets between two forward episodes, then a person |
-| `human_assisted` | always a person (no reset policy runs) |
+| `human_assisted` | always a person (no reset policy runs); the first scene check after the operator's resume that is only `unknown` or `unavailable` (no contract, no evidence) starts the episode on the person's word, recorded as `operator_confirmed_scene` with a `scene_unverified_operator_confirmed` note; a scene that says `reset_required` never does |
 
-`atomic_skill_sequence` and `scripted_safe_reset` (pipeline §6.4) are
-refused in v1. `reset_manager.check_plan` refuses a strategy that would
-start a forward episode on any scene but `ready`, and `check_after` one that
-would go on after a reset that reached its horizon, was stopped or lost its
-policy. A reset at its horizon is sealed (the failed rollout is kept, its
+`human_assisted` is the "policy evaluation only" mode (reset by hand,
+AUT-22); the arbitration takes `human_confirmed` and does not depend on
+`single_reset_policy`. `atomic_skill_sequence` and `scripted_safe_reset`
+(pipeline §6.4) are refused in v1. `reset_manager.check_plan` refuses a
+strategy that would start a forward episode on any scene but `ready`
+(except a person's confirmation as above), and `check_after` one that
+would go on after a reset that reached its horizon, was stopped or lost
+its policy, or retry after a stop. A verified reset always goes on to the
+next scene check, where a stop that arrived late (during the quiesce or the
+reset's scene check) takes effect: the run waits for a person with the
+reset's result as it was, homed first unless `home_after_operator_stop` is
+false. A strategy that breaks a rule hands over to a person
+(`strategy_refused` note), it never locks the run. A reset at its horizon is sealed (the failed rollout is kept, its
 result `failure` / `horizon_exhausted`), homed, and waits for a person; a
 failed home locks the run (`home_failed`) and nothing moves again until an
 operator's resume, which leads through `PREFLIGHT` and a fresh
@@ -619,7 +638,7 @@ read the interval, not the rate.
 | Group | Metrics |
 | --- | --- |
 | autonomous | forward episodes, outcomes, `autonomous_success_rate` (unknown stays in the denominator), stop reasons |
-| early termination | confusion of early stops (`goal_verified`) against the truth; precision (early stops truly successful / early stops), recall (early stops / truly successful episodes), false early stop rate (early stops truly failed / truly failed episodes), saved steps (`max_steps` minus the steps run, summed over early stops), control episodes apart, agreement of the verdict with the truth and false successes |
+| early termination | confusion of early stops (`goal_verified`) against the truth; precision (early stops truly successful / early stops), recall (early stops / truly successful episodes the detector could have stopped: an early stop or the horizon, not an episode a person, a fault or the policy ended), **false early stop rate from the control group only** (pipeline §5.5: control episodes, run to their horizon with the stop withheld, in which the detector would have stopped, among those that truly failed; `available: false` and no number without them), the treatment group's early stops truly failed / truly failed episodes as `treatment_false_early_stop_lower_bound` (the stop hid what came after it), saved steps (`max_steps` minus the steps run, summed over early stops), control episodes apart, agreement of the verdict with the truth and false successes |
 | reset | resets, `autonomous_reset_success_rate`, scene decisions and skips; skip accuracy (a skip on a truly ready scene or a reset on a scene that truly needed one / labelled decisions), wrong-skip rate, unneeded-reset rate, reset durations |
 | automation | interventions (moves into `WAIT_HUMAN` or `FAULT_LOCKED`) by reason, resumes, longest run of forward episodes without one, the time people waited (only when the clock domain did not change) |
 
@@ -639,24 +658,39 @@ rates is the adjudicated label where there is one, else the operator's
 (`truth="adjudicated"` uses adjudicated labels only); episodes without one
 are counted as `unlabeled` and left out.
 
+A label file whose last line was cut short (a crash mid-write) is not lost
+data: before the next label the torn bytes are moved to `labels/torn/` and
+the file is cut back to whole lines, under a lock that also covers the
+check for an earlier label. A whole line that cannot be read makes the
+file unusable until a person looks at it (never skipped).
+
+**Control episodes** (`termination.control_fraction`, `control_seed`: the
+share and the draw, parameters pending the user, HA-23) are recorded in the
+run manifest: each sealed episode has `control` and, for a control
+episode, `would_stop_step` (where the detector would have stopped, or
+`null`).
+
 ## Command line (`levi/automatic/cli.py`)
 
 ```
-python -m levi.automatic.cli doctor   [--config F] [--json]
-python -m levi.automatic.cli validate --config F [--json]
-python -m levi.automatic.cli run      --config F --dry-run [--episodes N] [--scenes S] [--keep DIR] [--json]
-python -m levi.automatic.cli status   --run-dir D [--json]
-python -m levi.automatic.cli report   --run-dir D [--config F] [--truth T] [--format md|json]
+levi automatic doctor   [--config F] [--json]
+levi automatic validate --config F [--json]
+levi automatic run      --config F --dry-run [--episodes N] [--scenes S] [--keep DIR] [--json]
+levi automatic status   --run-dir D [--json]
+levi automatic report   --run-dir D [--config F] [--truth T] [--format md|json]
 ```
 
-(`levi automatic …` once it is wired into `levi.cli`.) Every option's help
-is in English and Chinese.
+`levi automatic …` runs the same command. Every option's help is in
+English and Chinese.
 
 - `doctor` is read-only: the contract snapshots, the fakes, the job file,
   whether the rollout root is writable. It says that a real robot adapter
   is not in this version (not required, so the exit code stays 0).
 - `validate` reads the job file and prints the plan and its `plan_sha256`
-  (the journal's plan hash); exit 2 with the reason when it is refused.
+  (the journal's plan hash); exit 2 with the reason when it is refused. A
+  job without `task.initial_state_spec` gets a warning (`doctor` too): no
+  scene can be ready, so `single_reset_policy` resets before every forward
+  episode, and `human_assisted` starts each one on a person's word.
 - `run` **refuses without `--dry-run`** (exit 2): there is no real run in
   this version. A dry run drives the in-process fakes only, in a temporary
   folder (deleted afterwards; `--keep DIR` keeps it in a new or empty

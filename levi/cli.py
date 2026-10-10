@@ -303,6 +303,10 @@ def main():
 
         sys.argv.pop(1)
         return clean()
+    if len(sys.argv) > 1 and sys.argv[1] == "automatic":
+        from .automatic.cli import main as automatic
+
+        raise SystemExit(automatic(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "live":
         from .live.cli import main as live
 
@@ -345,7 +349,7 @@ def main():
             "model: checkpoints and advantage labels), export (training manifests: which "
             "frames enter a learner's loss, with what weight), sample (DROID test "
             "samples: `levi sample fetch droid` downloads one), namespace (isolated experiments over one dataset), pool (training pool: "
-            "scan read-only pool roots, recipes, merged exports), live (background annotation service for robot rollouts), docs (check or regenerate the documentation). Each takes its own "
+            "scan read-only pool roots, recipes, merged exports), live (background annotation service for robot rollouts), automatic (automatic evaluation pipeline: checks, dry runs on fakes, status, report), docs (check or regenerate the documentation). Each takes its own "
             "--help."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -214,7 +214,28 @@ def load_job(path) -> dict:
         "texts": texts,
         "plan": plan,
         "plan_sha256": digest,
+        "warnings": _warnings(config, contract),
     }
+
+
+def _warnings(config, contract) -> list:
+    """What the operator must know before a real run (review C3, I3)."""
+    if contract is not None:
+        return []
+    if config.reset_strategy == "single_reset_policy":
+        text = (
+            "no task.initial_state_spec: without an Initial State Contract no "
+            "scene counts as ready, so the reset policy runs before every "
+            "forward episode (or the run waits for a person); a real run "
+            "needs a contract to skip resets"
+        )
+    else:
+        text = (
+            "no task.initial_state_spec: scene checks are recorded as unknown; "
+            "each forward episode starts only on an operator's confirmation "
+            "(operator_confirmed_scene)"
+        )
+    return [text]
 
 
 def _fields(config) -> dict:
@@ -331,7 +352,10 @@ class DryRun:
         try:
             state = self.orch.run()
             events = self.orch.journal.events
-            manifest = json.loads((self.directory / MANIFEST).read_text())
+            try:
+                manifest = json.loads((self.directory / MANIFEST).read_text())
+            except FileNotFoundError:
+                manifest = None  # no episode was opened
         finally:
             self.orch.close()
             self.recorder.close()
@@ -421,6 +445,8 @@ def cmd_doctor(args) -> int:
         try:
             job = load_job(args.config)
             check("job file", True, f"plan {job['plan_sha256'][:12]}")
+            for warning in job["warnings"]:
+                check("initial state contract", False, warning, required=False)
             root = job["rollout_root"]
             if root is None:
                 check(
@@ -459,10 +485,10 @@ def cmd_validate(args) -> int:
     text = (
         f"valid: run {job['config'].run_id}, {job['config'].episodes} episodes, "
         f"reset strategy {job['config'].reset_strategy}, contract "
-        f"{job['contract'].key if job['contract'] else 'none (provider decides)'}, "
+        f"{job['contract'].key if job['contract'] else 'none (no scene is ready)'}, "
         f"plan {job['plan_sha256'][:12]}"
-    )
-    _print({"ok": True, "plan": plan}, args.json, text)
+    ) + "".join(f"\nwarning: {w}" for w in job["warnings"])
+    _print({"ok": True, "plan": plan, "warnings": job["warnings"]}, args.json, text)
     return EXIT_OK
 
 
@@ -481,8 +507,8 @@ def cmd_run(args) -> int:
         return EXIT_REFUSED
     if args.keep:
         folder = Path(args.keep)
-        if folder.exists() and any(folder.iterdir()):
-            message = f"{folder} is not empty"
+        if folder.exists() and (not folder.is_dir() or any(folder.iterdir())):
+            message = f"{folder} is not an empty folder"
             _print({"ok": False, "error": message}, args.json, message)
             return EXIT_REFUSED
         folder.mkdir(parents=True, exist_ok=True)
@@ -500,10 +526,15 @@ def cmd_run(args) -> int:
     except (JobError, ConfigError) as exc:
         _print({"ok": False, "error": str(exc)}, args.json, str(exc))
         return EXIT_REFUSED
+    except Exception as exc:  # noqa: BLE001 - a dry run reports, never a traceback
+        message = f"the dry run failed: {type(exc).__name__}: {exc}"
+        _print({"ok": False, "error": message}, args.json, message)
+        return EXIT_PROBLEM
     finally:
         if not args.keep:
             shutil.rmtree(folder, ignore_errors=True)
     result["dry_run"] = True
+    result["warnings"] = job["warnings"]
     result["kept"] = str(folder) if args.keep else None
     auto = result["metrics"]["autonomous"]
     text = (
