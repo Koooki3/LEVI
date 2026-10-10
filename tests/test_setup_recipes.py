@@ -302,7 +302,13 @@ def test_policy_server_may_be_executable_with_a_confirm_record():
         ui="execute",
         kind="policy_server",
         confirm={"required": True, "decision": "user allowed it, 2026-10-10"},
-        touches={"gpu": True, "listens": [8000]},
+        touches={
+            "gpu": True,
+            "listens": [8000],
+            "robot": False,
+            "moves": False,
+            "commands_robot": False,
+        },
     )
     b = book(item)
     assert b.problems == []
@@ -543,3 +549,128 @@ def test_check_never_writes(files):
         "recipes.toml",
         "setup.md",
     ]
+
+
+# ------------------------------------------------------------------ review fixes
+
+MODEL_ONLY = {"robot": False, "moves": False, "commands_robot": False, "gpu": True}
+CONFIRMED = {"required": True, "decision": "user allowed it, 2026-10-10"}
+
+
+def test_a_recipe_whose_requirement_was_refused_is_left_out_transitively():
+    b = book(
+        recipe("R-X", risk=4, ui="execute", touches={"moves": True}),  # refused
+        recipe("R-Y", risk=2, ui="execute", requires=["R-X"]),
+        recipe("R-Z", requires=["R-Y"]),  # depends on a recipe that is now out
+        recipe("R-OK"),
+    )
+    assert [r.id for r in b.recipes] == ["R-OK"]
+    texts = {i: t for i, t in reversed(b.problems)}
+    assert "R-X" in texts["R-Y"] and "R-Y" in texts["R-Z"]
+
+
+def test_a_requires_cycle_is_left_out_with_its_dependents():
+    b = book(
+        recipe("C1", requires=["C2"]),
+        recipe("C2", requires=["C1"]),
+        recipe("C3", requires=["C1"]),
+        recipe("R-OK", requires=["R-BASE"]),
+        recipe("R-BASE"),
+    )
+    assert sorted(r.id for r in b.recipes) == ["R-BASE", "R-OK"]
+    texts = " | ".join(f"{i}: {t}" for i, t in b.problems)
+    assert "cycle" in texts and "C3:" in texts
+
+
+def test_an_unknown_requirement_leaves_the_recipe_out():
+    b = book(recipe("R-C", requires=["R-NONE"]))
+    assert b.recipes == []
+    assert any("R-NONE" in t for _, t in b.problems)
+
+
+@pytest.mark.parametrize(
+    "touches, problem",
+    [
+        (None, "must declare touches"),
+        ({"gpu": True}, "must declare touches"),
+        ({"robot": False, "moves": False, "gpu": True}, "commands_robot"),
+        ({**MODEL_ONLY, "listens": [8000, 5000]}, "5000"),
+        ({**MODEL_ONLY, "listens": [7470]}, "7470"),
+        ({**MODEL_ONLY, "connects": [5000]}, "connects"),
+        ({**MODEL_ONLY, "robot": True}, "only load a model"),
+    ],
+)
+def test_a_policy_server_must_declare_model_only_touches(touches, problem):
+    for ui in ("execute", "copy"):
+        fields = {"risk": 3, "ui": ui, "kind": "policy_server", "confirm": CONFIRMED}
+        if touches is not None:
+            fields["touches"] = touches
+        b = book(recipe("R-D", section="5", **fields))
+        assert b.recipes == [], (ui, touches)
+        assert any(problem in t for _, t in b.problems), b.problems
+
+
+def test_a_declared_model_only_policy_server_passes():
+    b = book(
+        recipe(
+            "R-D",
+            section="5",
+            risk=3,
+            ui="execute",
+            kind="policy_server",
+            confirm=CONFIRMED,
+            touches={**MODEL_ONLY, "listens": [8000]},
+        )
+    )
+    assert b.problems == [] and b.recipes[0].executable
+
+
+@pytest.mark.parametrize(
+    "touches, problem",
+    [
+        ({"robot": True}, "touches.robot"),
+        ({"listens": [5000]}, "robot-side port"),
+        ({"listens": [8000]}, "robot-side port"),
+    ],
+)
+def test_any_executable_recipe_stays_off_the_robot(touches, problem):
+    b = book(recipe("R-P", risk=2, ui="execute", touches=touches))
+    assert b.recipes == []
+    assert any(problem in t for _, t in b.problems), b.problems
+
+
+def test_a_byte_order_mark_does_not_hide_the_first_section(tmp_path):
+    guide = "## 1. First\n\n```bash\necho one\n```\n"
+    item = recipe("R-1", guide=guide, section="1")
+    path = tmp_path / "setup.md"
+    path.write_bytes(b"\xef\xbb\xbf" + guide.encode())
+    (finding,) = R.check(book(item), R._read_doc(str(path)))
+    assert finding.status == "ok"
+    (finding,) = R.check(book(item), "﻿" + guide)
+    assert finding.status == "ok"
+
+
+def test_line_numbers_count_newlines_only():
+    guide = "## 1. One\n\nnote still the same line\n\n```bash\necho x\n```\n"
+    (sec,) = R.parse_guide(guide).by_number("1")
+    assert sec.blocks[0].first == 6
+
+
+def test_a_year_is_not_a_section_number():
+    g = R.parse_guide("## 2026 notes\n\n## 3.1 Real\n")
+    assert [s.number for s in g.sections if s.number] == ["3.1"]
+
+
+def test_prose_around_a_block_is_covered_by_the_context_hash():
+    item = recipe("R-A")
+    g = R.parse_guide(GUIDE)
+    (sec,) = g.by_number("2.2")
+    item["source"]["context_sha256"] = R.excerpt(sec, None).sha256
+    assert one(GUIDE, item).status == "ok"
+    now = GUIDE.replace("Some text.", "Some text. Never run this while X runs.")
+    finding = one(now, item)
+    assert finding.status == "drift"
+    assert any("around" in r for r in finding.reasons)
+    # Without the context hash, only the excerpt counts (as before).
+    plain = recipe("R-A")
+    assert one(now, plain).status == "ok"

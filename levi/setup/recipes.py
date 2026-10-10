@@ -58,7 +58,7 @@ UI_MODES = ("native", "execute", "copy", "link")
 # SSH tunnel to the second robot, the policy server and the real learner).
 NEVER_CONNECT = frozenset({5000, 5001, 5100, 7470, 8000})
 ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-SECTION = re.compile(r"^\d+(?:\.\d+)*$")
+SECTION = re.compile(r"^\d{1,3}(?:\.\d{1,3})*$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 MAX_RECIPES = 500
 MAX_FILE_BYTES = 2 << 20
@@ -71,7 +71,9 @@ ENV_DOC = "LEVI_SETUP_DOC"
 
 
 HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
-NUMBERED = re.compile(r"^(\d+(?:\.\d+)*)\.?[ \t]+(.*)$")
+# A section number has components of at most three digits: "## 2026 notes"
+# is a title, not section 2026.
+NUMBERED = re.compile(r"^(\d{1,3}(?:\.\d{1,3})*)\.?[ \t]+(.*)$")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 
 
@@ -112,7 +114,7 @@ class Guide:
 def parse_guide(text: str) -> Guide:
     """Split a Markdown guide into headed sections and their fenced blocks.
     Headings inside a code block are code, not headings."""
-    lines = text.splitlines()
+    lines = split_lines(text.removeprefix("\ufeff"))
     sections = [Section(None, "", 0)]  # text before the first heading
     problems = []
     fence = None  # (char, length, opening line)
@@ -151,6 +153,16 @@ def parse_guide(text: str) -> Guide:
             "after it would be read as code"
         )
     return Guide(sections, problems)
+
+
+def split_lines(text: str) -> list:
+    """Lines as an editor and ``wc -l`` count them: split at newlines only
+    (``str.splitlines`` also splits at U+2028, form feeds and others), a
+    trailing carriage return dropped."""
+    lines = [line.removesuffix("\r") for line in text.split("\n")]
+    if lines and lines[-1] == "":
+        lines.pop()
+    return lines
 
 
 def normalise(lines) -> str:
@@ -246,6 +258,9 @@ class Source:
     pick: tuple | None = None  # 1-based inclusive line range inside the block
     lines: tuple | None = None  # where it was when recorded (reference only)
     text: str | None = None  # the recorded excerpt, to show a difference
+    # The whole section body (prose around the block included): when set, a
+    # change of the surrounding text, a new warning for instance, is drift.
+    context_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -266,6 +281,9 @@ class Recipe:
     connects: tuple = ()
     confirm: dict | None = None
     note: str = ""
+    # The touches keys the file wrote down (a policy server must declare
+    # robot, moves and commands_robot itself, not inherit the defaults).
+    declared: tuple = ()
 
     @property
     def executable(self) -> bool:
@@ -368,7 +386,9 @@ KNOWN = {
     "id", "title", "risk", "ui", "source", "kind", "requires", "preconditions",
     "touches", "confirm", "note",
 }  # fmt: skip
-KNOWN_SOURCE = {"section", "heading", "block", "pick", "lines", "sha256", "text"}
+KNOWN_SOURCE = {
+    "section", "heading", "block", "pick", "lines", "sha256", "text", "context_sha256",
+}  # fmt: skip
 KNOWN_TOUCHES = {"robot", "gpu", "moves", "commands_robot", "listens", "connects"}
 
 
@@ -417,8 +437,13 @@ def parse_recipe(raw: dict) -> Recipe:
     if text is not None:
         if not isinstance(text, str):
             raise FieldError("source.text must be text")
-        if digest(normalise(text.splitlines())) != sha:
+        if digest(normalise(split_lines(text))) != sha:
             raise FieldError("source.text does not have the recorded source.sha256")
+    context = src.get("context_sha256")
+    if context is not None and (
+        not isinstance(context, str) or not SHA256.match(context)
+    ):
+        raise FieldError("source.context_sha256 must be 64 lowercase hex digits")
     touches = raw.get("touches") or {}
     if not isinstance(touches, dict):
         raise FieldError("touches must be a table")
@@ -446,6 +471,7 @@ def parse_recipe(raw: dict) -> Recipe:
             pick=_pair(src.get("pick"), "source.pick"),
             lines=_pair(src.get("lines"), "source.lines"),
             text=text,
+            context_sha256=context,
         ),
         requires=_strings(raw.get("requires"), "requires"),
         preconditions=_strings(raw.get("preconditions"), "preconditions"),
@@ -457,6 +483,7 @@ def parse_recipe(raw: dict) -> Recipe:
         connects=_ports(touches.get("connects"), "touches.connects"),
         confirm=dict(confirm) if confirm is not None else None,
         note=note,
+        declared=tuple(sorted(touches)) if "touches" in raw else (),
     )
 
 
@@ -466,7 +493,10 @@ def safety_problems(recipe: Recipe) -> list:
     Class 3 and 4 recipes are never run by the interface and are not
     ``native`` either (nothing about them is LEVI reading a file). The one
     exception is a class 3 policy server that only loads a model: it may be
-    ``execute``, with an explicit ``confirm`` record."""
+    ``execute``, with an explicit ``confirm`` record. Any policy server
+    (whatever its ``ui``) must write down ``touches.robot``, ``moves`` and
+    ``commands_robot`` as false itself, connect to nothing and listen on no
+    robot-side port; any executable recipe stays off the robot."""
     out = []
     if recipe.moves and recipe.risk != 4:
         out.append("touches.moves is true, so risk must be 4")
@@ -507,6 +537,44 @@ def safety_problems(recipe: Recipe) -> list:
                 )
     if recipe.ui == "execute" and recipe.risk in (1, 2) and recipe.moves:
         out.append("an executable recipe cannot move the robot")
+    if recipe.kind == "policy_server":
+        out += _model_only_problems(recipe)
+    if recipe.ui == "execute":
+        if recipe.robot:
+            out.append("an executable recipe must have touches.robot = false")
+        allowed = {8000} if recipe.kind == "policy_server" else set()
+        listened = sorted(set(recipe.listens) & (NEVER_CONNECT - allowed))
+        if listened:
+            out.append(f"an executable recipe listens on robot-side port(s) {listened}")
+    return out
+
+
+MODEL_ONLY_KEYS = ("robot", "moves", "commands_robot")
+
+
+def _model_only_problems(recipe: Recipe) -> list:
+    """A policy server only loads a model (the user's decision for the D
+    step): said explicitly, not inherited from defaults."""
+    out = []
+    absent = [k for k in MODEL_ONLY_KEYS if k not in recipe.declared]
+    if absent:
+        out.append(
+            "a policy server must declare touches "
+            + ", ".join(f"{k} = false" for k in MODEL_ONLY_KEYS)
+            + f" (missing: {', '.join(absent)})"
+        )
+    if recipe.robot or recipe.moves or recipe.commands_robot:
+        out.append(
+            "a policy server must only load a model: touches.robot, moves and "
+            "commands_robot must be false"
+        )
+    if recipe.connects:
+        out.append(
+            f"a policy server connects to nothing (touches.connects {list(recipe.connects)})"
+        )
+    listened = sorted(set(recipe.listens) & (NEVER_CONNECT - {8000}))
+    if listened:
+        out.append(f"a policy server cannot listen on robot-side port(s) {listened}")
     return out
 
 
@@ -566,20 +634,34 @@ def from_data(data, path="") -> Book:
             problems += [(recipe.id, text) for text in unsafe]
             continue
         recipes.append(recipe)
-    known = {r.id for r in recipes}
-    kept = []
-    for recipe in recipes:
-        missing = [x for x in recipe.requires if x not in known]
-        if missing:
-            problems.append(
-                (
-                    recipe.id,
-                    f"requires unknown or refused recipe(s) {', '.join(missing)}",
-                )
-            )
-        kept.append(recipe)
+    # A recipe whose requirement is unknown, refused or itself left out is
+    # left out too (to a fixed point), and so is every recipe on a cycle: a
+    # wizard must never offer a step whose prerequisites cannot be met.
+    kept = list(recipes)
     for cycle in _cycles(kept):
         problems.append((cycle[0], "requires form a cycle: " + " -> ".join(cycle)))
+    on_cycle = {node for cycle in _cycles(kept) for node in cycle}
+    problems += [(rid, "left out: on a requires cycle") for rid in sorted(on_cycle)]
+    kept = [r for r in kept if r.id not in on_cycle]
+    while True:
+        known = {r.id for r in kept}
+        dropped = []
+        for recipe in kept:
+            missing = [x for x in recipe.requires if x not in known]
+            if missing:
+                dropped.append(recipe)
+                problems.append(
+                    (
+                        recipe.id,
+                        (
+                            "left out: requires unknown, refused or left-out "
+                            f"recipe(s) {', '.join(missing)}"
+                        ),
+                    )
+                )
+        if not dropped:
+            break
+        kept = [r for r in kept if r not in dropped]
     return Book(kept, problems, path)
 
 
@@ -726,14 +808,21 @@ def check_recipe(guide: Guide, recipe: Recipe) -> Finding:
             if source.text is not None:
                 finding.diff = "\n".join(
                     difflib.unified_diff(
-                        normalise(source.text.splitlines()).splitlines(),
-                        found.text.splitlines(),
+                        normalise(split_lines(source.text)).split("\n"),
+                        found.text.split("\n"),
                         "recorded",
                         "guide now",
                         lineterm="",
                     )
                 )
         return finding
+    if source.context_sha256:
+        around = excerpt(section, None)
+        if around is None or around.sha256 != source.context_sha256:
+            reasons.append(
+                f"the text around the excerpt in section {source.section} changed "
+                "(a new warning or condition, perhaps): review it"
+            )
     if reasons:
         return Finding(recipe.id, "drift", reasons, lines_now)
     shifted = bool(source.lines and tuple(source.lines) != lines_now)
@@ -756,7 +845,8 @@ def _paths(args):
 
 def _read_doc(doc: str) -> str:
     try:
-        return Path(doc).expanduser().read_text(encoding="utf-8")
+        # utf-8-sig: a byte order mark must not hide the first heading.
+        return Path(doc).expanduser().read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError) as exc:
         raise RecipeError(f"cannot read the guide: {exc}") from exc
 
@@ -824,6 +914,7 @@ def main(argv=None) -> int:
                         "pick": list(pick) if pick else None,
                         "lines": [found.first, found.last],
                         "sha256": found.sha256,
+                        "context_sha256": excerpt(sections[0], None).sha256,
                         "text": found.text,
                     },
                     ensure_ascii=False,
