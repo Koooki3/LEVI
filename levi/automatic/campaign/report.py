@@ -57,6 +57,7 @@ from levi.automatic.analysis.references import REFERENCES
 from levi.automatic.figure_files import write_durable, write_figure
 
 from . import ledger as L
+from . import subtasks as S
 
 SCHEMA = "levi.aeri.campaign_report.v1"
 MANIFEST_SCHEMA = "levi.aeri.campaign_report_manifest.v1"
@@ -2503,6 +2504,7 @@ def write_report(
     resamples: int = 10_000,
     now: float | None = None,
     pdf: bool = True,
+    subtasks: dict | None = None,
 ) -> dict:
     """Write ``<report_root>/<basis>/`` and return its manifest.
 
@@ -2510,9 +2512,13 @@ def write_report(
     with ``blinded=True``) only progress is written (``progress.json``, a
     progress summary and the manifest: counts, deviated, discarded,
     coverage); no analysis, table, figure or conclusion exists until then.
-    ``runs``: one ``read_aeri_run`` record per child run; ``site``: device
-    facts, of which only ``SITE_FIELDS`` are written unless
-    ``include_site_details``. Free texts are scrubbed first
+    ``subtasks``: the live service's time segments of the campaign's
+    episodes (``subtasks.load``); when some valid trial has them, a
+    "Subtask analysis (automatic annotation, unreviewed)" section, a table
+    and ``data/subtasks.json`` are added, otherwise nothing changes (never
+    in a progress-only report). ``runs``: one ``read_aeri_run`` record per
+    child run; ``site``: device facts, of which only ``SITE_FIELDS`` are
+    written unless ``include_site_details``. Free texts are scrubbed first
     (``clean_inputs``). Nothing outside ``<report_root>/<basis>`` and its
     lock file is written."""
     if not isinstance(campaign_state, str) or not campaign_state:
@@ -2559,6 +2565,12 @@ def write_report(
     ]
     level = analysis["conclusion_level"]["level"]
     texts = {lang: summary(analysis, lang) for lang in LANGS}
+    extra = S.analyse(ledger, basis, subtasks) if subtasks else None
+    if extra is not None:
+        texts = {
+            lang: S.splice(text, S.section(extra, lang, fmt))
+            for lang, text in texts.items()
+        }
     # Only what a person typed is masked, never the arm ids: a one-letter
     # arm would otherwise hide that letter everywhere.
     mask = [info.campaign_id, info.task]
@@ -2566,6 +2578,8 @@ def write_report(
         check_naming(text, basis, lang)
         check_wording(text, confirmatory=level == "confirmatory", mask=mask)
     table_data = tables(analysis)
+    if extra is not None:
+        table_data["subtasks"] = S.text_table(extra, fmt)
     for header, _ in table_data.values():
         check_naming(" ".join(header), basis)
     specs = figure_specs(analysis)
@@ -2624,6 +2638,8 @@ def write_report(
             table_csv(["episode_id", "arm", "kind", "value"], label_rows),
         )
         put("data/analysis.json", _json_bytes(analysis))
+        if extra is not None:
+            put("data/subtasks.json", _json_bytes(extra))
         return {"figures": figures, "skipped": skipped}
 
     return _publish(
