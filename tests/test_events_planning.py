@@ -364,6 +364,59 @@ def test_an_on_run_refines_around_the_signal_events_with_the_same_requests(lab):
     assert provenance["episodes"]["0"][0]["plan"]["accepted"]
 
 
+def test_the_model_cache_key_carries_the_block_only_when_it_is_on(lab, monkeypatch):
+    """Measured on real runs: the fingerprint a model answer is cached under
+    includes the plan's context (so on and off never share an answer) and
+    the request summary, whose workflow never names the block."""
+    from levi.agent import runtime
+
+    wb, repo, _ = lab
+    seen = []
+    original = runtime.digest
+
+    def track(value):
+        if isinstance(value, dict) and {"evidence", "config", "context"} <= set(value):
+            seen.append(value)
+        return original(value)
+
+    monkeypatch.setattr(runtime, "digest", track)
+    run_once(wb, temporal(repo))
+    off = list(seen)
+    seen.clear()
+    run_once(wb, temporal(repo, event_intelligence=ON))
+    on = list(seen)
+    assert len(off) == len(on) == 2
+    for value in off:
+        assert "event_intelligence" not in value["context"]["workflow"]
+    for value in on:
+        assert (
+            value["context"]["workflow"]["event_intelligence"]["mode"] == "candidates"
+        )
+    for value in off + on:
+        assert "event_intelligence" not in value["summary"]["workflow"]
+    # Same snapshot, same draft: the coarse requests differ only by the plan.
+    assert off[0]["summary"] == on[0]["summary"]
+    assert off[0]["evidence"] == on[0]["evidence"]
+    assert original(off[0]) != original(on[0])
+
+
+def test_the_same_episode_gets_the_same_plan_again(lab):
+    """Candidates and the plan are rebuilt from the snapshot, so a resumed
+    or repeated run reads the same frames (and its cached answers stay
+    valid)."""
+
+    def plans(run):
+        return [
+            {k: v for k, v in e.items() if k not in {"seq", "time"}}
+            for e in events_of(wb, run, "event_evidence_plan")
+        ]
+
+    wb, repo, _ = lab
+    first = run_once(wb, temporal(repo, event_intelligence=ON))
+    second = run_once(wb, temporal(repo, event_intelligence=ON))
+    assert plans(first) and plans(first) == plans(second)
+
+
 def test_an_off_run_reads_no_candidates_and_records_nothing_new(lab):
     wb, repo, provider = lab
     run = run_once(wb, temporal(repo))
