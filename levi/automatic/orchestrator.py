@@ -256,7 +256,13 @@ class Orchestrator:
         self._suppressed = 0
         self._lock = threading.RLock()
         self._process = process_identity()
-        self._stop_command: str | None = None
+        # Stops not yet consumed: command id -> registration generation.
+        # Guarded by its own small lock, never held across an adapter call.
+        self._stop_lock = threading.Lock()
+        self._stops: dict[str, int] = {}
+        self._stop_gen = 0
+        # Stop ids consumed since the last resume (``repeated`` if sent again).
+        self._consumed_stops: set = set()
         self._violation_hold = False
         self._scene_violations = 0
         self._reset_attempts = 0
@@ -549,9 +555,24 @@ class Orchestrator:
             if found is not None and ctx is not None:
                 ctx.result_written = True
             self._crash("after_committed")
+            if reason == "operator_stop" and to in ("WAIT_HUMAN", "COMPLETED"):
+                self._consume_stops(auth.get("command_id"))
             if urgent:
                 self._flush_notes()
             return TxResult("yes", detail, prepared)
+
+    def _consume_stops(self, command_id: str | None) -> None:
+        """The run reached a person on an operator's stop: every stop
+        registered so far took effect. The extra ids are noted."""
+        with self._stop_lock:
+            taken = sorted(self._stops, key=self._stops.get)
+            self._stops.clear()
+            self._consumed_stops.update(taken)
+            if command_id:
+                self._consumed_stops.add(command_id)
+        extra = [c for c in taken if c != command_id]
+        if extra:
+            self._note("stop_commands_merged", ", ".join(extra)[:300])
 
     def _fault(self, reason: str, *, guard: bool = False, hold: bool = True) -> None:
         """Lock the run. An episode still open gets its result (unknown,
@@ -679,6 +700,9 @@ class Orchestrator:
         """WAIT_HUMAN or FAULT_LOCKED -> PREFLIGHT. Repeating a command
         returns its first result; a stale ``expected_seq`` is refused."""
         with self._lock:
+            with self._stop_lock:
+                # Stops registered from now on are later than this resume.
+                generation = self._stop_gen
             prior = self.journal.by_command(command_id)
             if prior:
                 if prior[0].reason == "human_resumed":
@@ -709,11 +733,18 @@ class Orchestrator:
             except Exception as exc:
                 self._contain(exc)
                 raise
-            if self._stop_command is not None:
-                # A stop that never took effect (the run locked or waited
+            with self._stop_lock:
+                # Only the stops registered before this resume began are
+                # overridden by it; a later stop stays and takes effect at
+                # the next decision point.
+                lost = sorted(c for c, g in self._stops.items() if g <= generation)
+                for command in lost:
+                    del self._stops[command]
+                self._consumed_stops.clear()
+            if lost:
+                # Stops that never took effect (the run locked or waited
                 # first): kept in the journal, then cleared by the resume.
-                self._note("stop_command_lost", self._stop_command)
-            self._stop_command = None
+                self._note("stop_command_lost", ", ".join(lost)[:300])
             self._violation_hold = False
             self._scene_violations = 0
             self._reset_attempts = 0
@@ -723,43 +754,55 @@ class Orchestrator:
 
     def stop(self, command_id: str) -> CommandResult:
         """An operator's stop. Never waits for an adapter: the stop is
-        registered at once (an atomic flag the loop reads at every step and
+        registered at once (the loop reads the registry at every step and
         before every episode) and ``stop_requested`` is returned; only when
         the run is waiting for a person and the state lock is free within
         ``STOP_LOCK_WAIT_S`` does it end the run here (``completed``).
 
-        A command id is used once: the same stop again returns
-        ``repeated``; an id another command (a resume) used is refused
-        (``command_used``): send the stop again with a new id."""
+        A stop stays registered until the run reaches a person on it; a
+        resume clears only the stops registered before the resume began.
+        The same stop again (pending, or taken effect since the last resume)
+        returns ``repeated`` and changes nothing; an id another command used
+        is refused (``command_used``): send the stop again with a new id."""
+        with self._stop_lock:
+            if command_id in self._stops:
+                return CommandResult(True, "stop_requested", self.state, True)
+            if command_id in self._consumed_stops:
+                return CommandResult(True, "repeated", self.state, True)
         prior = self.journal.by_command(command_id)
         if prior:
-            if all(event.reason == "operator_stop" for event in prior):
-                return CommandResult(
-                    True, "repeated", self.state, True, prior[0].sequence_no
-                )
             return CommandResult(False, "command_used", self.state)
-        if self._stop_command == command_id:
-            return CommandResult(True, "stop_requested", self.state, True)
         if self.state in ("FAULT_LOCKED", "COMPLETED"):
             return CommandResult(False, "not_running", self.state)
-        self._stop_command = command_id  # registered: the loop sees it now
+        with self._stop_lock:
+            self._stop_gen += 1
+            self._stops[command_id] = self._stop_gen  # the loop sees it now
         if not self._lock.acquire(timeout=STOP_LOCK_WAIT_S):
             return CommandResult(True, "stop_requested", self.state)
         try:
-            if self.state == "WAIT_HUMAN" and not self.halted:
+            if (
+                self.state == "WAIT_HUMAN"
+                and not self.halted
+                and self._first_stop() == command_id
+            ):
                 found = self._guarded(
                     self._tx,
                     "COMPLETED",
                     "operator_stop",
                     authority=self._auth("operator", command_id),
                 )
-                self._stop_command = None
                 return CommandResult(
                     True, "completed", self.state, False, found.prepared.sequence_no
                 )
             return CommandResult(True, "stop_requested", self.state)
         finally:
             self._lock.release()
+
+    def _first_stop(self) -> str | None:
+        with self._stop_lock:
+            if not self._stops:
+                return None
+            return min(self._stops, key=self._stops.get)
 
     # --- the loop -----------------------------------------------------------------------
 
@@ -791,7 +834,8 @@ class Orchestrator:
                 self._fault("watchdog_timeout")
 
     def _operator(self) -> dict | None:
-        command = self._stop_command
+        """The authority of the oldest stop not yet consumed, if any."""
+        command = self._first_stop()
         if command is None:
             return None
         return self._auth("operator", command)

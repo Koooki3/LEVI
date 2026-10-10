@@ -295,12 +295,19 @@ automatically.
   come from any thread. One re-entrant state lock serialises every "read the
   state, check, prepare, commit", so no transaction is prepared from a state
   other than the one it was checked against. `stop()` never waits for it:
-  it registers the stop at once (a flag the loop reads at every step and
-  before every episode) and returns `stop_requested`, even while an adapter
-  call inside a transaction is slow or hung; only in `WAIT_HUMAN`, with the
-  lock free within 50 ms, does it end the run itself (`completed`). A stop
-  still pending when an operator resumes is written as a
-  `stop_command_lost` note.
+  it registers the stop at once (in a registry the loop reads at every step
+  and before every episode, under its own small lock) and returns
+  `stop_requested`, even while an adapter call inside a transaction is slow
+  or hung; only in `WAIT_HUMAN`, with the lock free within 50 ms, does it end
+  the run itself (`completed`). `stop()` only registers: it does not hold
+  the robot itself (that is the next safe point of the loop, or, when an
+  adapter hangs, the robot side's watchdog and the token's expiry). A stop
+  stays registered until the run reaches a person on it, where every
+  registered stop is consumed (ids beyond the first are noted as
+  `stop_commands_merged`). Each registration has a generation: a resume
+  clears only the stops registered before it began (written as a
+  `stop_command_lost` note); a stop that arrives during a resume survives
+  it and takes effect at the next decision point.
 - **Exceptions.** Any exception escaping the loop (an adapter, the journal)
   revokes the motion token first, then holds the robot, closes an open
   transaction as `executed: unknown`, moves the run to `FAULT_LOCKED`
@@ -375,9 +382,12 @@ automatically.
   environment_handled=True, health_rechecked=True)` moves `WAIT_HUMAN` or
   `FAULT_LOCKED` to `PREFLIGHT`; repeating a command returns its first
   result (a command id another command used is refused), a stale
-  `expected_seq` is refused. `stop(command_id)` likewise: the same stop
-  again is `repeated`; an id a resume used is refused (`command_used`), and
-  the stop must be sent again with a new id. `stop(command_id)` stops the
+  `expected_seq` is refused. `stop(command_id)`: the same stop again, while
+  pending (`stop_requested`, repeated) or after it took effect and before
+  the next resume (`repeated`), changes nothing, so it never ends a run that
+  is already waiting for a person; an id a resume used, or a stop id used
+  before the last resume, is refused (`command_used`), and the stop must be
+  sent again with a new id. `stop(command_id)` stops the
   current episode in a controlled way and waits at the next decision point;
   in `WAIT_HUMAN` it ends the run (`COMPLETED`).
 - **AERI state on the client's session file (C2).** See
