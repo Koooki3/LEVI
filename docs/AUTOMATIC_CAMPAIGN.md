@@ -647,7 +647,9 @@ folder is built beside the old one under a per-basis lock
 (`.<basis>.lock`) and swapped in whole: a reader sees the old report or the
 new one, and a failed write leaves the old one as it was. A writer killed
 halfway leaves a `.<basis>.tmp-*` folder that the next write of that basis
-removes. The same ledger, labels, campaign information and seed give the
+removes; one killed between moving the old folder aside and moving the new
+one in leaves no `<basis>` folder for that moment, and the next write puts
+the old one back before it starts. The same ledger, labels, campaign information and seed give the
 same bytes (the manifest's `generated_at` aside; pass `now` to fix it).
 `.tex` tables use `tabular` and `\hline` only; `fmt` formats every printed
 number. A CSV text cell that a spreadsheet would run as a formula starts

@@ -308,7 +308,7 @@ def test_the_report_holds_no_site_details_or_personal_data(campaign, tmp_path):
         **{
             **first.__dict__,
             "layout_fidelity": "deviated",
-            "layout_reason": "cup moved, told someone@example.org, see /home/someone/x.png",
+            "layout_reason": "cup moved, told someone@example.org (photo /home/someone/x.png)",
         }
     )
     led = L.derive(lay, facts)
@@ -730,3 +730,45 @@ def test_bad_campaign_information_is_refused(campaign):
         }
     )
     assert parsed.comparison == ("B", "A") and parsed.preregistered is True
+
+
+def test_a_crash_between_the_two_renames_gets_the_old_report_back(campaign, tmp_path):
+    lay, led = campaign
+    root = tmp_path / "report"
+    R.write_report(root, led, info(), "operator_label", layout=lay, now=0)
+    summary = (root / "operator_label/summary.en.md").read_bytes()
+    # The old report was moved aside and the process died before the new
+    # one moved in.
+    (root / "operator_label").rename(root / ".operator_label.old-77-1")
+    (root / ".operator_label.tmp-77-2").mkdir()
+    R._recover(root, "operator_label")
+    assert (root / "operator_label/summary.en.md").read_bytes() == summary
+    assert sorted(p.name for p in root.iterdir() if p.is_dir()) == ["operator_label"]
+
+
+def test_an_arm_that_has_not_run_yet_still_gives_a_report(tmp_path):
+    lay = fx.layout(per_arm=10, segment_trials=5)
+    facts = {run: fs for run, fs in fx.synthetic_facts(lay).items() if "__A__" in run}
+    led = L.derive(lay, facts)
+    manifest = R.write_report(
+        tmp_path, led, info(), "operator_label", layout=lay, now=0
+    )
+    a = json.loads((tmp_path / "operator_label/data/analysis.json").read_text())
+    assert a["success"]["B"]["available"] is False
+    assert a["comparisons"][0]["n_pairs"] == 0
+    text = (tmp_path / "operator_label/summary.en.md").read_text()
+    assert "- B: no labelled trials." in text
+    assert "No comparison of B with A" in text
+    assert "f1-success" in manifest["figures"]
+    spec = json.loads((tmp_path / "operator_label/figures/f1-success.json").read_text())
+    assert [bool(s.get("unavailable")) for s in spec["panels"][0]["series"]] == [
+        False,
+        True,
+    ]
+
+
+def test_paths_inside_free_text_are_scrubbed():
+    text = "see (/home/someone/a b.png), ~/x and 10/30 or k/n; ip 10.0.0.2:22"
+    out = R.scrub({"note": text})["note"]
+    assert "/home/someone" not in out and "~/x" not in out and "10.0.0.2" not in out
+    assert "10/30" in out and "k/n" in out

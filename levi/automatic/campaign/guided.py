@@ -476,8 +476,8 @@ def collect_segment(
         first_seen[fact.run_id] = min(
             first_seen.get(fact.run_id, "~"), fact.started_at or "~"
         )
-    for run in facts:
-        facts[run].sort(key=lambda f: (f.number, f.episode_id))
+    for found in facts.values():
+        found.sort(key=lambda f: (f.number, f.episode_id))
     runs = sorted(facts, key=lambda r: (first_seen[r], r))
     bound = L.CampaignLayout(
         layout.campaign_id,

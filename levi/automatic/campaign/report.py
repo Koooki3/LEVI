@@ -2004,7 +2004,7 @@ def tables(analysis: dict) -> dict:
 
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b")
-ABS_PATH = re.compile(r"(?:(?<=\s)|^)(?:~|/)[^\s\"']*")
+ABS_PATH = re.compile(r"(?<![\w.~/-])(?:~/|/)[^\s\"'()\[\]{}<>,;]+")
 URL = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+", re.IGNORECASE)
 # Keys never written: names and addresses of people.
 PERSON_KEYS = frozenset(
@@ -2126,6 +2126,22 @@ def _json_bytes(value) -> bytes:
     ).encode("utf-8")
 
 
+def _recover(report_root: Path, basis: str) -> None:
+    """Under the basis lock: what an earlier writer left. A crash between
+    moving the old report aside and moving the new one in leaves no
+    ``<basis>`` folder and an ``.old-*`` one: put the old one back. Every
+    other leftover (half-built ``.tmp-*`` folders, a second ``.old-*``) is
+    removed."""
+    target = report_root / basis
+    olds = sorted(report_root.glob(f".{basis}.old-*"))
+    if not target.exists() and olds:
+        os.replace(max(olds, key=lambda p: p.stat().st_mtime_ns), target)
+        _fsync_dir(report_root)
+    for stale in report_root.glob(f".{basis}.*-*"):
+        if stale.is_dir():
+            shutil.rmtree(stale, ignore_errors=True)
+
+
 def _fsync_dir(folder: Path) -> None:
     try:
         fd = os.open(folder, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
@@ -2196,9 +2212,7 @@ def write_report(
 
     target = report_root / basis
     with _locked(report_root / f".{basis}.lock"):
-        for stale in report_root.glob(f".{basis}.*-*"):
-            if stale.is_dir():
-                shutil.rmtree(stale, ignore_errors=True)
+        _recover(report_root, basis)
         work = report_root / f".{basis}.tmp-{os.getpid()}-{time.time_ns()}"
         work.mkdir(parents=True)
         try:
