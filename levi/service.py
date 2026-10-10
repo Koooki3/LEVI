@@ -129,6 +129,9 @@ app.include_router(inference_router)
 from .live.api import router as live_router
 
 app.include_router(live_router)
+from .automatic.api import router as automatic_router
+
+app.include_router(automatic_router)
 from .dataset_api import router as dataset_router
 
 app.include_router(dataset_router)
