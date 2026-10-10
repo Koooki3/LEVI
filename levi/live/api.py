@@ -769,6 +769,83 @@ def _scope(dataset, session, since):
     return dataset or None, session or None, since
 
 
+@router.get("/service")
+def service_view():
+    """How the live service runs and whether the page may start or stop it
+    (``service_control.py``). Reads only: no lock, no port, no vLLM request."""
+    from . import service_control
+
+    return service_control.status(_service_target())
+
+
+class ServiceStart(BaseModel):
+    request_id: str = Field(min_length=1, max_length=80)
+    confirm: str = Field("", max_length=64)
+    confirm_gpu_shared: bool = False
+    reset_failed: bool = False
+
+
+class ServiceStop(BaseModel):
+    request_id: str = Field(min_length=1, max_length=80)
+    confirm: str = Field("", max_length=64)
+    force_phrase: str = Field("", max_length=64)
+
+
+def _service_target():
+    from . import service_control
+
+    config = _config()
+    if config is None:
+        config = live_config.Config()
+        config.service.home = str(locate.home())
+        return service_control.Target(config, None, product_workspace=_own())
+    return service_control.Target(
+        config,
+        config.workspace,
+        served_by_live=not _embedded(config.workspace),
+        product_workspace=_own(),
+    )
+
+
+def _service_call(action, **body):
+    from . import service_control
+
+    try:
+        op, created = action(_service_target(), **body)
+    except service_control.Refused as exc:
+        raise HTTPException(exc.status, exc.public()) from exc
+    return {**op.public(), "created": created}
+
+
+@router.post("/service/start", status_code=202)
+def service_start(body: ServiceStart, request: Request):
+    """Start the live service through its systemd user unit (a person's
+    action: the UI token, never an agent credential)."""
+    from . import service_control
+
+    _person(request)
+    return _service_call(service_control.start, **body.model_dump())
+
+
+@router.post("/service/stop", status_code=202)
+def service_stop(body: ServiceStop, request: Request):
+    """Stop the live service (a person's action)."""
+    from . import service_control
+
+    _person(request)
+    return _service_call(service_control.stop, **body.model_dump())
+
+
+@router.get("/service/operations/{operation_id}")
+def service_operation(operation_id: str):
+    from . import service_control
+
+    try:
+        return service_control.operation(operation_id)
+    except service_control.Refused as exc:
+        raise HTTPException(exc.status, exc.public()) from exc
+
+
 @router.get("/stats")
 def stats_view(
     dataset: str | None = None,

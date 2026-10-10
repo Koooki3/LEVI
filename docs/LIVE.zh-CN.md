@@ -468,6 +468,26 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 
 **只有一个训练池：产品 LEVI 的。** 两个 LEVI 的训练池内容不同，是因为训练池按工作区存放：索引、扫描摘要、配方、导出作业和本体规则都在 `<工作区>/pool/` 下（`levi/pool/settings.py`），每个工作区各自扫描、扫描时间也不同。原因不在设置：实时核心从同一个检出启动，读同一个 `.env`（`levi/paths.py` 在每个进程里读 `<检出>/.env`），所以 `LEVI_POOL_ROOTS`、`LEVI_EXPORT_ROOTS`、`LEVI_POOL_HELDOUT` 相同。人工标签也不同：扫描读取池根下各工作区以及自己工作区的人工成败标签（`scanner.scan`），所以实时工作区的训练池看不到产品工作区的标签（除非产品工作区在池根下），产品的训练池看得到。因此实时工作区自己的页面（现在只在 `--ui` 时才有）不再提供训练池：导航里没有“训练池”，那里的 `/pool` 指向产品 LEVI。排除只要发生在产品训练池会读取的实时工作区里，就会作用到产品训练池。训练池读取：上次扫描找到的工作区、产品实时页面当前显示的实时工作区，以及该页面以前显示过的所有实时工作区（记在 `<产品工作区>/pool/live_workspaces.json`，只增不减；已不存在的目录跳过；`levi/pool/exclusions.py`）。所以不在池根下的实时工作区也算数，页面改为显示另一个实时工作区之后，之前的排除仍然有效。产品从没显示过、扫描也没找到的实时工作区不会被读。这个列表由产品 LEVI 自己的 `GET /api/levi/live/*` 路由在第一次找到某个实时工作区时写入（这是 GET 唯一的写操作，只写产品自己的 `.state/pool/live_workspaces.json`，绝不写实时工作区）。列表最多 20 条：超出后新的实时工作区不再加入（页面显示它期间仍会读取），实时页面和日志会提示。`levi pool live-workspaces list` 列出列表（以及当前显示的工作区）；`levi pool live-workspaces forget <路径>` 停止读取某一个，不删除任何数据，页面再次显示该工作区时它会重新加入。状态文件在训练池被查询时读取，文件没变就用缓存。
 
+## 在页面上启动和停止实时服务
+
+产品 LEVI 可以替人启动和停止实时服务（`levi/live/service_control.py`）。这个功能默认**关闭**，要在产品 LEVI 的环境里设置 `LEVI_LIVE_SERVICE_CONTROL=1` 才打开；关闭时 `GET /api/levi/live/service` 仍然显示服务的运行情况，启动和停止路由回答 403 `disabled`。`levi live` 本身的行为不变。
+
+**怎样启动。** 只通过 systemd 用户单元，产品核心从不当它的父进程：核心以固定参数、不经 shell 执行 `systemctl --user start <单元>`，单元名取 `LEVI_LIVE_UNIT`（默认 `levi-live.service`，即[崩溃恢复](SUPERVISION.md)安装的单元；没写 `.service` 会自动补上；不是普通单元名的一律拒绝）。产品 LEVI 运行在 `KillMode=control-group` 的 `levi-product.service` 里：由它的核心派生的 `levi live start --daemon` 会落在产品的 cgroup 里（`start_new_session` 只换会话，不换 cgroup），产品下次重启时连同 vLLM 一起被杀掉。没装单元时页面不能启动服务，照旧在终端里启动。单元带 `--prewarm`，所以从页面启动会马上冷启动 vLLM。
+
+**怎样停止。** 由单元运行的服务：`systemctl --user stop <单元>`（它的 `ExecStop` 就是 `levi live stop`）。从终端启动的服务：先核对 pid 记录的身份（pid、启动时间、boot），再发 `levi live stop` 发的同一个 SIGTERM，等待有上限（150 秒，与 `levi live stop` 相同）。
+
+**能分辨什么**（`GET /api/levi/live/service`，只读：不取锁、不连接端口、不请求 vLLM）。实时 home 实例锁的持有者（`<home>/live.pid`）是单元的 `MainPID` 或在单元的 cgroup 里（`started_by: "unit"`），否则是 `"terminal"`。服务的每个端口（核心 7881、在线判定 7882、vLLM 8100、查看器 7880）分为 `free`、`ours`（监督进程、它启动的进程或单元 cgroup 里的任何进程持有）和 `foreign`（本用户能看到时给出持有者的 pid 和进程名），从 `/proc/net/tcp*` 和 `/proc/<pid>/fd` 读取。GPU 锁的持有者读 `/proc/locks`，计算进程读 `nvidia-smi --query-compute-apps`（不算服务自己的 vLLM），vLLM 状态读状态文件。
+
+**启动前**，下面任何一项都会拒绝（`refusals`）：页面是实时服务自己的核心（`served_by_live_service`）、`LEVI_LIVE_UNIT` 不是单元名（`unit_name_invalid`）、问不到 systemd（`systemd_unavailable`）、单元没装（`unit_not_installed`）、不知道实时工作区（`no_live_workspace`）、服务已在运行（`already_running`）或由终端运行（`terminal_instance`；先停掉它：与它并存的单元会启动失败，并被 systemd 反复重启）、单元正在停止（`unit_busy`）、端口被别人占用（`port_foreign`；查看器端口只在单元带 `--ui` 时才算）、实时 home、实时工作区或本 LEVI 的工作区不可写（`not_writable`）。有两项需要请求明确确认：GPU 上有其他计算进程，或读不到 GPU 上在跑什么（`gpu_shared`：带 `confirm_gpu_shared: true`）；单元上次失败了（`unit_failed`：带 `reset_failed: true`，先执行 `systemctl --user reset-failed`）。只提示不拒绝的：GPU 锁被别人持有（服务照常启动，vLLM 等锁），单元的 `--workspace` 与页面显示的工作区不同。
+
+**停止前**：没有在运行的服务（`not_running`）；有处于 `running`、`homing` 或 `waiting_reset` 的评测会话时拒绝（`evaluation_active`），除非请求在 `force_phrase` 里带固定短语 `stop live during evaluation`。这样停掉后在线判定和自动标签停止，客户端退回手动标注。
+
+**同一时间一个操作，一次点击只生效一次。** 每次启动或停止都要占操作位：核心内的一把锁，加上 `<home>/ui-op.lock` 上的 `flock`（另一个显示同一实时 home 的核心）。已有操作在进行时，新的请求得到 423 和进行中操作的编号；同一个 `request_id` 拿回同一个操作（`created: false`），所以连点只生效一次。操作在后台执行：回答是 202 和操作编号，`GET …/service/operations/{id}` 查结果（保存在核心内存里，最近 50 个）。`systemctl` 没有回应时，启动 60 秒、停止 210 秒（单元的 `TimeoutStopSec` 是 180 秒）后中断，操作以 `systemd_timeout` 失败。
+
+**审计。** 每次启动和停止写入 `<实时工作区>/live/service-control.jsonl`：`accepted` 和 `finished` 两行（或一行 `refused`），含时间、`"actor": "person"`、`"via": "product"`、请求和操作编号、方式（`systemctl`、`signal`）、结果和一段去掉了目录的简短说明。不含路径、令牌或密钥。文件到 256 KiB 时轮转，保留一个旧文件。不知道实时工作区时的拒绝写在实时 home 的 `service-control.jsonl`。
+
+**谁可以做。** 启动和停止只能由人做：要带产品 LEVI 的界面令牌，任何 `Bearer` 凭据都返回 403（agent 永远不能启停服务，也没有对应的能力）。界面令牌就是同一用户的 `human.key`：同一用户的进程技术上能读到它，只靠 agent 规则约束 agent 不去读。还没做的：页面上的按钮（后续改动）；停止目前只对评测会话拒绝，还不对自动测评流水线的运行拒绝。
+
 ## 排除片段（可恢复）
 
 人可以在实时页面把一个片段从实时数据集里拿掉（机器人出了意外、复位没做好、某一条没人想标）：片段详情里的**删除片段（可恢复）**，每个片段前的复选框加**删除所选（n）**用于批量，确认框会写清后果，原因可选。卡片上的**已排除（n）**列出被排除的片段（带原因和时间），**恢复**（或**恢复所选**）把它们放回来。
@@ -590,7 +610,7 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 
 ## HTTP API（`/api/levi/live/*`）
 
-实时工作区的核心和产品 LEVI 的核心都提供这些路由，后者读取它找到的实时工作区（见[在产品 LEVI 里查看实时评测](#在产品-levi-里查看实时评测)）。找不到时所有 GET 回答 `{"enabled": false, "reason"}`（`not_configured`、`not_live` 或 `product_workspace`），POST 回答 404。GET 路由不改任何东西，任何路由都不返回令牌。唯一会改东西的是排除和恢复片段的路由（见[上文](#排除片段可恢复)）。
+实时工作区的核心和产品 LEVI 的核心都提供这些路由，后者读取它找到的实时工作区（见[在产品 LEVI 里查看实时评测](#在产品-levi-里查看实时评测)）。找不到时所有 GET 回答 `{"enabled": false, "reason"}`（`not_configured`、`not_live` 或 `product_workspace`），POST 回答 404。GET 路由不改任何东西，任何路由都不返回令牌。会改东西的是排除和恢复片段（见[上文](#排除片段可恢复)）、删除会话和流水线，以及启动和停止服务（见[上文](#在页面上启动和停止实时服务)）的路由。
 
 | 路由 | 回答 |
 | --- | --- |
@@ -604,6 +624,10 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 | `POST /datasets/{name}/exclude` | 请求体 `{"demos": ["demo_0003", …], "reason": "…"?}`（1 到 500 个名字，原因最长 300 字符）。排除这些片段（要么全部成功，要么都不改）。回答 `{"enabled", "dataset", "changed": [...], "unchanged": [...]（本来就已排除）, "counts", "excluded_count", "review_runs_open", "review_hidden": [...]（片段已全部排除、不计入的待复核运行）}`。404：数据集或片段不存在（会点名），或不是实时工作区；409：片段在进行中的批次里（“being labelled …”），或从未纳入数据集（被拒收、卡住）；401/403：不是人在操作（见上）。 |
 | `POST /datasets/{name}/restore` | 请求体 `{"demos": [...]}`。把已排除的片段放回来；回答同上（`review_hidden` 是恢复之后仍不计入的运行）；没排除的片段在 `unchanged` 里。片段不存在返回 404。 |
 | `POST /datasets/{name}/demos/{demo}/exclude`、`…/restore` | 对单个片段做同样的事（前者可带可选请求体 `{"reason"}`）。 |
+| `GET /service` | 服务的运行情况，只读：`enabled`（`LEVI_LIVE_SERVICE_CONTROL`）、`served_by_live_service`、`workspace_found`、`workspace_name`；`unit`（`name`、`installed`、`load_state`、`state`、`sub_state`、`main_pid`、`exec_main_status`、`n_restarts`、`ui`、`problem`）；`holder`（`pid`、`alive`、`started_by`：`unit`/`terminal`/null、`cgroup_unit`、`started_at`）；`ports`（每项 `port`、`role`：`core`/`online`/`vllm`/`ui`、`state`：`free`/`ours`/`foreign`、`pid`、`name`）；`gpu`（`lock`：`configured`、`state`：`disabled`/`free`/`live`/`other`、`pid`、`name`；`others`：其他计算进程，读不到时为 null；`vllm_state`）；`evaluation`（`active`、`count`、`sessions`）；`start_checks`/`stop_checks`（每项 `code`、`level`：`refuse`/`confirm`/`warn`、`message`）；`can_start`、`can_stop`、`refusals`、`needs_confirmation`（`start`、`stop`）；`operation`（进行中的操作或 null）；`confirm`（`start`、`stop`、`force_phrase`）。 |
+| `POST /service/start` | 请求体 `{"request_id", "confirm": "start-live", "confirm_gpu_shared"?, "reset_failed"?}`，`request_id` 为 8 到 80 个字母、数字、点、下划线、冒号或连字符。202：`{"operation_id", "action", "request_id", "state": "running", "method": "systemctl", "created", …}`。400 `confirm_required`/`request_id_invalid`；403 `disabled` 或不是人在操作；409 `already_running`、`terminal_instance`、`unit_busy`、`unit_failed`、`port_foreign`、`gpu_shared_unconfirmed`、`served_by_live_service`、`request_reused`；412 `unit_not_installed`、`unit_name_invalid`、`no_live_workspace`、`not_writable`；423 `busy`（带进行中的 `operation_id`）；503 `systemd_unavailable`。错误详情是 `{"code", "message", …}`。 |
+| `POST /service/stop` | 请求体 `{"request_id", "confirm": "stop-live", "force_phrase"?}`。202 同上（`method`：`systemctl`、`signal` 或两者）。409 `not_running`、`evaluation_active`；400、403、423 同上。 |
+| `GET /service/operations/{id}` | `{"operation_id", "action", "request_id", "state": "running"/"done"/"failed", "result"（`started`、`starting`、`stopped`、`start_failed`、`stop_failed`、`stop_incomplete`、`systemd_timeout` 等）, "detail", "method", "started_at", "ended_at"}`；未知编号返回 404。 |
 
 在实时工作区自己的页面（`live_ui`）上用 `repo_id`（`local/<名字>`）链接到查看器；判定对应的运行也在那里按 `run_id` 打开。产品 LEVI 自己的查看器里没有实时数据集。
 
