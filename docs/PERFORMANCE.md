@@ -115,3 +115,39 @@ python -m levi.performance pixel-compare <video or folder> [...] [--cores 4]
 
 `bench --case pixels` times both methods on a synthetic video and reports the
 speed-up and the largest difference.
+
+## Cache folder with a hard size limit (`DiskBudget`)
+
+`levi.performance.budget.DiskBudget` keeps one cache folder inside a byte limit (and optionally an entry limit) by itself. It exists because a cache that only grows eventually fills the disk: evidence for the 300 curated episodes is about 7 GB, for the 1,616 robotiq episodes about 40 GB, and three schema versions of that 120 GB, while the disk has room for none of the worst cases next to everything else (measured unit cost: about 25 MB per episode, from the clean-up audit). The limit is therefore enforced when an entry is written, not by a cleaner that may run too late.
+
+It is a library only. **Nothing in LEVI uses it yet**; it changes no behaviour and has no setting. It is standard library only and imports no other LEVI module.
+
+```python
+from levi.performance.budget import DiskBudget, BudgetRejected
+
+cache = DiskBudget.from_cap_gb("lab/perf-cache/evidence", 20, version="schema-3")   # 20 GiB
+cache.put("episode-17", png_bytes)              # evicts the least recently used entries if needed
+cache.read("episode-17")                        # bytes or None; a hit counts as a use
+with cache.writing("episode-18") as tmp:        # a file or a whole directory, renamed in place at the end
+    tmp.mkdir()
+    ...
+try:
+    cache.put("x", data)
+except BudgetRejected as why:                   # why.reason: too_large | no_space | no_output | lock_timeout
+    ...                                         # the caller carries on without the cache
+```
+
+| Behaviour | Detail |
+| --- | --- |
+| Limits | `max_bytes` (hard) and `max_entries`. A write that does not fit evicts entries until it does, or is refused (`too_large`) before anything is evicted if it could never fit. Units are GiB (2**30), the unit of `cap_gb` in the janitor's quota table. |
+| LRU | An entry's modification time is its last use; `get` and `read` touch it. This is the same clock the janitor's `lru_cap` finder ranks by, so the two never disagree about what is oldest. |
+| TTL | An entry idle for more than `ttl_s` (default 14 days, the janitor's `perf-cache` age) is expired: never returned, dropped on the next write or `maintain()`. `put(..., ttl_s=)` sets one entry's own. |
+| Versions | Every entry is written under a version string (a schema, model or prompt version). Entries of any other version are stale: never returned, evicted before valid ones, deleted when idle for `stale_grace_s` (default 7 days) or at once by `purge_stale()`. Writing the same key under the new version replaces the old entry. |
+| Atomic writes | Data goes to `.tmp-<pid>-<random>` and is renamed into place after `fsync`; a reader sees the whole entry or none. An entry is a file or a directory. |
+| Crash safety | The folder is the truth; `.budget.index.json` only remembers the original key, version string and per-entry TTL. If it is missing, corrupt or disagrees with the folder it is rebuilt from the folder. On open, scratch names (`.tmp-*`, `.trash-*`) of dead processes (or older than an hour) are removed. A deleted entry is renamed to `.trash-*` first, so a crash mid-delete never leaves a half-empty entry that looks valid. |
+| Concurrency | Every change runs under an exclusive `flock` on `.budget.lock`. Threads and processes exclude each other; the kernel releases the lock when a process dies, even by SIGKILL. |
+| Disk full | `ENOSPC` or `EDQUOT` while writing, or less than `min_free_bytes` left on the disk after the write, is `BudgetRejected("no_space")`; nothing partial is left. |
+
+Limits of the design. Bytes of writes still in progress count only when they are committed, so the folder can briefly exceed its limit by what is being written. `min_free_bytes` is the only protection against other users of the same disk. Names that are not `<32 hex>.<8 hex>` (dot files, foreign files) are not managed.
+
+**Relation to the janitor.** The janitor (`janitor.py`, outside this repository) is the safety net: its `perf-cache` entry has the same 20 GB cap and 14-day age and sees each cache entry (`<kind>/<entry>`) as a unit. `DiskBudget` is the first line: it enforces the limit at write time, in the product workspace as well, which the janitor never touches. If the janitor deletes an entry, `DiskBudget` simply sees it gone; if the janitor ranks entries, it ranks by the same modification time.

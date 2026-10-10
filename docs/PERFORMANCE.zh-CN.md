@@ -71,3 +71,39 @@ python -m levi.performance pixel-compare <视频或文件夹> [...] [--cores 4]
 ```
 
 `bench --case pixels` 在合成视频上给两种方法计时，并报告加速比和最大差值。
+
+## 有硬上限的缓存目录（`DiskBudget`）
+
+`levi.performance.budget.DiskBudget` 让一个缓存目录自己守住字节上限（可选再加条目数上限）。原因是只增不减的缓存迟早写满磁盘：300 个策展片段的证据约 7 GB，1,616 个 robotiq 片段约 40 GB，三个 schema 版本就是 120 GB（单价来自清理审计的实测，约每个片段 25 MB）。所以上限在写入那一刻执行，而不是靠一个可能来得太晚的清理器。
+
+它只是一个库。**LEVI 里目前没有任何地方使用它**，不改变任何行为，也没有设置项。只用标准库，不导入 LEVI 的其他模块。
+
+```python
+from levi.performance.budget import DiskBudget, BudgetRejected
+
+cache = DiskBudget.from_cap_gb("lab/perf-cache/evidence", 20, version="schema-3")   # 20 GiB
+cache.put("episode-17", png_bytes)              # 需要时淘汰最久未使用的条目
+cache.read("episode-17")                        # 返回字节或 None；命中算一次使用
+with cache.writing("episode-18") as tmp:        # 一个文件或整个目录，结束时原子改名到位
+    tmp.mkdir()
+    ...
+try:
+    cache.put("x", data)
+except BudgetRejected as why:                   # why.reason：too_large | no_space | no_output | lock_timeout
+    ...                                         # 调用方不用缓存继续往下走
+```
+
+| 行为 | 说明 |
+| --- | --- |
+| 上限 | `max_bytes`（硬上限）和 `max_entries`。放不下的写入会淘汰条目直到放得下；如果无论如何都放不下，会在淘汰任何东西之前就被拒绝（`too_large`）。单位是 GiB（2**30），与 janitor 配额表里 `cap_gb` 的单位一致。 |
+| LRU | 条目的修改时间就是它最后一次使用的时间，`get` 和 `read` 会刷新。janitor 的 `lru_cap` 查找器按同一个时钟排序，所以两者对“谁最旧”不会有分歧。 |
+| TTL | 闲置超过 `ttl_s`（默认 14 天，即 janitor `perf-cache` 的期限）的条目视为过期：不会被返回，在下一次写入或 `maintain()` 时删除。`put(..., ttl_s=)` 可给单个条目设自己的期限。 |
+| 版本 | 每个条目都带版本字符串（schema、模型或提示词版本）写入。其他版本的条目是过期版本：不会被返回，先于有效条目被淘汰，闲置超过 `stale_grace_s`（默认 7 天）后删除，或由 `purge_stale()` 立即删除。用新版本写同一个键，会替换旧条目。 |
+| 原子写入 | 数据先写入 `.tmp-<pid>-<随机串>`，`fsync` 后改名到位；读者要么看到完整条目，要么看不到。条目可以是文件，也可以是目录。 |
+| 崩溃安全 | 以目录本身为准；`.budget.index.json` 只记原始键、版本字符串和单个条目的 TTL。它缺失、损坏或与目录不符时，会按目录重建。打开时，已死进程（或超过一小时）留下的 `.tmp-*`、`.trash-*` 会被清除。删除条目时先改名为 `.trash-*`，所以删到一半崩溃不会留下看起来有效的残缺条目。 |
+| 并发 | 所有改动都在 `.budget.lock` 的独占 `flock` 下进行。线程之间、进程之间互斥；进程死亡（包括 SIGKILL）时内核会释放锁。 |
+| 磁盘满 | 写入时遇到 `ENOSPC` 或 `EDQUOT`，或写入后磁盘剩余空间少于 `min_free_bytes`，会得到 `BudgetRejected("no_space")`，不会留下残缺文件。 |
+
+设计的局限：正在进行的写入只在提交时才计入，所以目录可能短暂超出上限，超出量不超过正在写的数据。`min_free_bytes` 是防范同一磁盘上其他使用者的唯一手段。名字不是 `<32 位十六进制>.<8 位十六进制>` 的文件（点开头的文件、外来文件）不归它管。
+
+**与 janitor 的关系。** janitor（`janitor.py`，不在本仓库内）是兜底：它的 `perf-cache` 条目有相同的 20 GB 上限和 14 天期限，把每个缓存条目（`<类别>/<条目>`）当作一个整体。`DiskBudget` 是第一道防线：在写入时就执行上限，产品工作区里也是如此，而那里 janitor 从不碰。janitor 删掉某个条目，`DiskBudget` 只会看到它不见了；janitor 排序时用的是同一个修改时间。
