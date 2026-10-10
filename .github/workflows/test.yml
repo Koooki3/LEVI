@@ -32,6 +32,10 @@ jobs:
     steps:
       # Node 24 releases (the Node 20 runtime is deprecated on the runners).
       - uses: actions/checkout@v7
+        with:
+          # `levi dev check-contracts` compares the AERI contract snapshots with the
+          # ones on main (merge-base), which needs the full history.
+          fetch-depth: 0
       # setup-uv publishes no floating major tag since v8; pin the release.
       - uses: astral-sh/setup-uv@v10.2.0
       - uses: oven-sh/setup-bun@v2.2.0
