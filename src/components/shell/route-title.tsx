@@ -35,6 +35,8 @@ export function routePageName(pathname: string | null): string | null {
       return "Training pool";
     case "live":
       return "Live evaluation";
+    case "automatic":
+      return "liveService.navAutomatic";
     case "design":
       return "Design system";
     default:

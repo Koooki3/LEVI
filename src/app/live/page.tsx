@@ -37,6 +37,7 @@ import {
   commandsIn,
 } from "@/components/live/command-text";
 import { disabledText } from "@/components/live/embedding";
+import { LiveServiceBlock } from "@/components/live/live-service-block";
 import { StatsPanel } from "@/components/live/stats-panel";
 import { LiveSummaryBar, liveSummary } from "@/components/live/live-summary";
 import { useDatasetDetails, useLivePoll } from "@/components/live/use-live";
@@ -202,22 +203,25 @@ export default function LivePage() {
       {alive && <BlockedRunsNote status={status} />}
 
       {status?.enabled === false ? (
-        <div role="status">
-          <EmptyState
-            icon={Radio}
-            title={t(disabledText(status.reason).title)}
-            description={
-              <CommandText text={t(disabledText(status.reason).body)} />
-            }
-            action={
-              commandsIn(disabledText(status.reason).body)[0] ? (
-                <CopyCommandButton
-                  command={commandsIn(disabledText(status.reason).body)[0]}
-                />
-              ) : undefined
-            }
-          />
-        </div>
+        <>
+          <div role="status">
+            <EmptyState
+              icon={Radio}
+              title={t(disabledText(status.reason).title)}
+              description={
+                <CommandText text={t(disabledText(status.reason).body)} />
+              }
+              action={
+                commandsIn(disabledText(status.reason).body)[0] ? (
+                  <CopyCommandButton
+                    command={commandsIn(disabledText(status.reason).body)[0]}
+                  />
+                ) : undefined
+              }
+            />
+          </div>
+          <LiveServiceBlock />
+        </>
       ) : (
         <>
           {(coreDown || serviceDown) && (
@@ -318,6 +322,7 @@ export default function LivePage() {
                 <Fr3Panel fr3={fr3} />
               </div>
               <div className="pg-live-slot o4">
+                <LiveServiceBlock />
                 <ServicePanel status={status} alive={alive} now={now} />
               </div>
             </aside>

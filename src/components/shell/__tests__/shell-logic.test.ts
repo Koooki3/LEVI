@@ -121,6 +121,7 @@ describe("global shortcuts", () => {
 describe("navigation and commands", () => {
   test("pages follow the live and pool offers, in navigation order", () => {
     expect(navPages({ live: false, pool: true }).map((p) => p.href)).toEqual([
+      "/automatic",
       "/explore",
       "/workbench",
       "/pool",
@@ -129,6 +130,7 @@ describe("navigation and commands", () => {
     ]);
     expect(navPages({ live: true, pool: false }).map((p) => p.href)).toEqual([
       "/live",
+      "/automatic",
       "/explore",
       "/workbench",
       "/guide",

@@ -42,6 +42,11 @@ export function navPages(options: { live: boolean; pool: boolean }): NavPage[] {
     });
   pages.push(
     {
+      href: "/automatic",
+      label: "liveService.navAutomatic",
+      keywords: ["automatic", "aeri", "evaluation", "自动测评", "自动评测"],
+    },
+    {
       href: "/explore",
       label: "Explore",
       keywords: ["datasets", "browse", "探索", "数据集"],
