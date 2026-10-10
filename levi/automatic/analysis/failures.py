@@ -89,7 +89,8 @@ def failure_modes(trials, *, level: float = _core.DEFAULT_LEVEL) -> dict:
 def early_stop(episodes, *, level: float = _core.DEFAULT_LEVEL) -> dict:
     """``episodes``: mappings with ``arm``, ``control`` (bool), ``truth``
     (``success``/``failure``/None), for controls ``would_stop`` (bool) and
-    ``complete`` (ran to its end and its control record is sealed), for
+    ``complete`` (True only when it ran to its end and its control record
+    is sealed; anything else is left out and counted, never assumed), for
     treated episodes ``early_stop`` (bool), and optionally ``slot`` (the
     layout slot, for pairing) and ``saved_steps``."""
     z = _core.z_of(_core.check_level(level))
@@ -105,12 +106,12 @@ def early_stop(episodes, *, level: float = _core.DEFAULT_LEVEL) -> dict:
         failed = [
             r
             for r in controls
-            if r.get("truth") == "failure" and r.get("complete", True)
+            if r.get("truth") == "failure" and r.get("complete") is True
         ]
         left_out = sum(
             1
             for r in controls
-            if r.get("truth") == "failure" and not r.get("complete", True)
+            if r.get("truth") == "failure" and r.get("complete") is not True
         )
         treated = [
             r

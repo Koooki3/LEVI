@@ -155,6 +155,7 @@ def test_early_stop_uses_only_failed_complete_controls():
             "control": True,
             "truth": "failure",
             "would_stop": True,
+            "complete": True,
             "slot": 1,
         },
         {
@@ -162,6 +163,7 @@ def test_early_stop_uses_only_failed_complete_controls():
             "control": True,
             "truth": "failure",
             "would_stop": False,
+            "complete": True,
             "slot": 2,
         },
         {
@@ -199,6 +201,7 @@ def test_early_stop_uses_only_failed_complete_controls():
             "control": True,
             "truth": "failure",
             "would_stop": False,
+            "complete": True,
             "slot": 1,
         },
         {
@@ -206,6 +209,7 @@ def test_early_stop_uses_only_failed_complete_controls():
             "control": True,
             "truth": "failure",
             "would_stop": False,
+            "complete": True,
             "slot": 2,
         },
         {"arm": "C", "control": False, "truth": "success", "early_stop": True},
@@ -214,6 +218,13 @@ def test_early_stop_uses_only_failed_complete_controls():
     rate = out["arms"]["A"]["false_early_stop_rate"]
     assert rate["status"] == "available" and (rate["k"], rate["n"]) == (1, 2)
     assert rate["left_out_incomplete"] == 1
+    # Completeness is never assumed: a failed control without it is left out.
+    unknown = failures.early_stop(
+        [{"arm": "A", "control": True, "truth": "failure", "would_stop": True}]
+    )
+    unknown_rate = unknown["arms"]["A"]["false_early_stop_rate"]
+    assert unknown_rate["status"] == "unavailable"
+    assert unknown_rate["left_out_incomplete"] == 1
     assert out["arms"]["A"]["treated_false_early_stop_lower_bound"][
         "rate"
     ] == pytest.approx(0.5)
