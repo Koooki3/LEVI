@@ -116,7 +116,7 @@ describe("parseHost", () => {
 });
 
 describe("allowedHosts / hostAllowed", () => {
-  test("loopback on 7860 by default", () => {
+  test("loopback names on any port; nothing else by default", () => {
     const allowed = allowedHosts({});
     for (const host of [
       "127.0.0.1:7860",
@@ -124,55 +124,89 @@ describe("allowedHosts / hostAllowed", () => {
       "LOCALHOST:7860",
       "[::1]:7860",
       "[0:0:0:0:0:0:0:1]:7860",
+      // VS Code or ssh -L forwarding to another local port.
+      "localhost:9000",
+      "127.0.0.1:47123",
+      "[::1]:8080",
+      "127.0.0.1",
     ])
       expect(hostAllowed(host, allowed)).toBe(true);
     for (const host of [
       "evil.example:7860",
       "127.0.0.1.evil.example:7860",
+      "localhost.evil.example:7860",
       "0.0.0.0:7860",
       "192.168.1.20:7860",
-      "127.0.0.1:7861",
-      "localhost:9000",
-      "127.0.0.1",
+      "localhost.:7860",
       "",
     ])
       expect(hostAllowed(host, allowed)).toBe(false);
     expect(hostAllowed(null, allowed)).toBe(false);
   });
 
-  test("follows the page's own port and the launcher's address", () => {
+  test("the launcher's own address is answered on its port only", () => {
     const allowed = allowedHosts({
-      PORT: "7870",
       LEVI_FRONTEND_URL: "http://192.168.1.20:7870",
     });
-    expect(hostAllowed("localhost:7870", allowed)).toBe(true);
     expect(hostAllowed("192.168.1.20:7870", allowed)).toBe(true);
-    expect(hostAllowed("localhost:7860", allowed)).toBe(false);
     expect(hostAllowed("192.168.1.20:7860", allowed)).toBe(false);
   });
 
   test("LEVI_UI_ALLOWED_HOSTS adds names, with or without a port", () => {
     const allowed = allowedHosts({
-      LEVI_UI_ALLOWED_HOSTS: "levi.lab, localhost:9000  bad@host,,",
+      LEVI_UI_ALLOWED_HOSTS: "levi.lab, gpu-box:9000  bad@host,,",
     });
     expect(hostAllowed("levi.lab", allowed)).toBe(true);
     expect(hostAllowed("LEVI.LAB:8443", allowed)).toBe(true);
-    expect(hostAllowed("localhost:9000", allowed)).toBe(true);
-    expect(hostAllowed("localhost:9001", allowed)).toBe(false);
+    expect(hostAllowed("gpu-box:9000", allowed)).toBe(true);
+    expect(hostAllowed("gpu-box:9001", allowed)).toBe(false);
     expect(hostAllowed("host", allowed)).toBe(false);
   });
 
-  test("a Hugging Face Space answers to its own host", () => {
-    const allowed = allowedHosts({ SPACE_HOST: "owner-levi.hf.space" });
-    expect(hostAllowed("owner-levi.hf.space", allowed)).toBe(true);
-    expect(hostAllowed("other.hf.space", allowed)).toBe(false);
+  test("a Host without a port matches an entry on 80 or 443", () => {
+    const allowed = allowedHosts({
+      LEVI_UI_ALLOWED_HOSTS: "levi.example:443 plain.example:80",
+    });
+    expect(hostAllowed("levi.example", allowed)).toBe(true);
+    expect(hostAllowed("plain.example", allowed)).toBe(true);
+    expect(hostAllowed("levi.example:8443", allowed)).toBe(false);
+  });
+
+  test("wildcards are not supported and are reported", () => {
+    const warn = mock(() => {});
+    const realWarn = console.warn;
+    console.warn = warn;
+    try {
+      for (const entry of ["*", "*.lab", "localhost:*", "https://levi.lab"]) {
+        const allowed = allowedHosts({ LEVI_UI_ALLOWED_HOSTS: entry });
+        for (const host of ["evil.example:7860", "x.lab:7860", "levi.lab"])
+          expect(hostAllowed(host, allowed)).toBe(false);
+      }
+      const messages = warn.mock.calls.map((call) => String(call[0]));
+      expect(messages.some((m) => m.includes("not supported"))).toBe(true);
+      expect(messages.some((m) => m.includes("*.lab"))).toBe(true);
+    } finally {
+      console.warn = realWarn;
+    }
+  });
+
+  test("a Hugging Face Space answers to its own host and port", () => {
+    const bare = allowedHosts({ SPACE_HOST: "owner-levi.hf.space" });
+    expect(hostAllowed("owner-levi.hf.space", bare)).toBe(true);
+    expect(hostAllowed("other.hf.space", bare)).toBe(false);
+    const withPort = allowedHosts({ SPACE_HOST: "owner-levi.hf.space:7860" });
+    expect(hostAllowed("owner-levi.hf.space:7860", withPort)).toBe(true);
+    expect(hostAllowed("owner-levi.hf.space:9999", withPort)).toBe(false);
   });
 });
 
 describe("writeAllowed", () => {
   const allowed = allowedHosts({});
-  const check = (headers: Record<string, string>) =>
-    writeAllowed(new Headers(headers), allowed);
+  const check = (
+    headers: Record<string, string>,
+    host = "127.0.0.1:7860",
+    list = allowed,
+  ) => writeAllowed(new Headers(headers), list, host);
 
   test("the page's own writes pass", () => {
     expect(
@@ -182,8 +216,13 @@ describe("writeAllowed", () => {
       }),
     ).toBe(true);
     // Older browsers without Fetch Metadata still send Origin on a write.
-    expect(check({ origin: "http://localhost:7860" })).toBe(true);
-    expect(check({ origin: "http://[::1]:7860" })).toBe(true);
+    expect(check({ origin: "http://localhost:7860" }, "localhost:7860")).toBe(
+      true,
+    );
+    expect(check({ origin: "http://[::1]:7860" }, "[::1]:7860")).toBe(true);
+    expect(check({ origin: "http://localhost:9000" }, "localhost:9000")).toBe(
+      true,
+    );
     // A browser that sends Fetch Metadata but omits Origin.
     expect(check({ "sec-fetch-site": "same-origin" })).toBe(true);
   });
@@ -203,8 +242,10 @@ describe("writeAllowed", () => {
     for (const origin of [
       "http://evil.example:7860",
       "http://127.0.0.1.evil.example:7860",
+      // Another local web app: a loopback name, but not this page.
       "http://localhost:3000",
       "http://127.0.0.1:7880",
+      "http://localhost:7860",
       "null",
       "file://",
       "not a url",
@@ -212,6 +253,13 @@ describe("writeAllowed", () => {
       expect(check({ origin })).toBe(false);
       expect(check({ origin, "sec-fetch-site": "same-origin" })).toBe(false);
     }
+  });
+
+  test("a reverse proxy's public name passes when it is listed", () => {
+    const listed = allowedHosts({ LEVI_UI_ALLOWED_HOSTS: "levi.example" });
+    const origin = { origin: "https://levi.example" };
+    expect(check(origin, "127.0.0.1:7860", listed)).toBe(true);
+    expect(check(origin, "127.0.0.1:7860", allowed)).toBe(false);
   });
 });
 
@@ -332,15 +380,32 @@ describe("backendProxy", () => {
     expect(sent.get("content-type")).toBe("application/json");
   });
 
-  test("a frontend fetch through ssh -L on another local port needs the setting", async () => {
-    const headers = {
+  test("forwarding to another local port works; another name needs the setting", async () => {
+    const local = {
       host: "localhost:9000",
       origin: "http://localhost:9000",
       "sec-fetch-site": "same-origin",
     };
-    expect((await call("POST", headers)).status).toBe(421);
-    process.env.LEVI_UI_ALLOWED_HOSTS = "localhost:9000";
-    expect((await call("POST", headers)).status).toBe(200);
+    expect((await call("POST", local)).status).toBe(200);
+    const lan = {
+      host: "gpu-box.lan:7860",
+      origin: "http://gpu-box.lan:7860",
+      "sec-fetch-site": "same-origin",
+    };
+    expect((await call("POST", lan)).status).toBe(421);
+    process.env.LEVI_UI_ALLOWED_HOSTS = "gpu-box.lan";
+    expect((await call("POST", lan)).status).toBe(200);
+  });
+
+  test("the annotation route is guarded the same way", async () => {
+    const response = await call(
+      "GET",
+      { host: "evil.example:7860" },
+      ["datasets"],
+      true,
+    );
+    expect(response.status).toBe(421);
+    expect(forwarded).toHaveLength(0);
   });
 
   test("path traversal is still refused after the checks", async () => {

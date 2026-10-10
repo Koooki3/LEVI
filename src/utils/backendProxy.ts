@@ -6,18 +6,20 @@ import { uiToken } from "./serviceToken";
  *
  * The bridge adds the operator's UI token to every request it forwards, so
  * whoever reaches it acts as the person at the keyboard. It therefore answers
- * only requests that are addressed to this page by a name the operator uses
- * (the Host check: a DNS-rebinding page arrives under its own name), and it
- * takes a write only from the LEVI page itself (the same-origin check: another
- * site, another local web app or a bare script sends no matching Origin).
- * A process running as the same user can still forge both headers or read
- * the key file; the operating-system account stays the real boundary.
+ * only requests addressed to this page by a loopback name or a name the
+ * operator listed (the Host check: a DNS-rebinding page arrives under its own
+ * name), and it takes a write only from the LEVI page itself (the same-origin
+ * check: another site, another local web app or a bare script sends no
+ * matching Origin). This guards against web pages, not against local
+ * programs: any process on this machine that can reach the port can forge
+ * both headers, and one running as this user can read the key file anyway.
  * Scripts write through the `levi` CLI or a scoped agent token instead
  * (docs/API.md, "Trust boundary of the web bridge").
  */
 
-const LOOPBACK = ["127.0.0.1", "localhost", "[::1]"];
-const DEFAULT_PORT = "7860";
+// Loopback literals are answered on any port: a forwarded port (VS Code,
+// ssh -L) changes the port, while a DNS-rebinding page needs its own name.
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const HOST_SYNTAX =
   /^(\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::(\d{1,5}))?$/i;
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -25,6 +27,7 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const FORWARDED_COOKIE = "hf_access_token";
 
 export type HostPort = { name: string; port: string };
+/** Names other than loopback: `exact` holds "name:port", `anyPort` names. */
 export type AllowedHosts = { exact: Set<string>; anyPort: Set<string> };
 
 function validPort(value: string): string | null {
@@ -37,8 +40,9 @@ function validPort(value: string): string | null {
 /** A `Host`-style value (`name[:port]`) in canonical form, or null.
  *
  * Names are lower-cased and IP literals normalised by the URL parser
- * (`[0:0::1]` is `[::1]`); anything with user info, a path, a trailing dot
- * or characters outside a host name is refused. `port` is "" when absent.
+ * (`[0:0::1]` is `[::1]`); anything with user info, a path, a trailing dot,
+ * a wildcard or characters outside a host name is refused. `port` is ""
+ * when absent.
  */
 export function parseHost(value: string | null | undefined): HostPort | null {
   if (!value) return null;
@@ -74,44 +78,55 @@ function urlHost(value: string | undefined): HostPort | null {
   }
 }
 
-/** The names this page answers to.
+const reported = new Set<string>();
+
+/** Say once per entry why a `LEVI_UI_ALLOWED_HOSTS` entry is not used. */
+function reportIgnored(entry: string): void {
+  if (reported.has(entry)) return;
+  reported.add(entry);
+  const why = entry.includes("*")
+    ? "wildcards are not supported; list each name"
+    : "not a host name; write name or name:port, without a scheme or path";
+  console.warn(`[LEVI] LEVI_UI_ALLOWED_HOSTS: ignored "${entry}" (${why}).`);
+}
+
+/** The names this page answers to besides loopback.
  *
- * Loopback (`127.0.0.1`, `localhost`, `[::1]`) on the page's own port (`PORT`,
- * which `next start` sets, and the port of `LEVI_FRONTEND_URL`, which the
- * launcher sets; 7860 when neither is known), the launcher's own address,
- * a Hugging Face Space's `SPACE_HOST`, and `LEVI_UI_ALLOWED_HOSTS`: names
- * separated by commas or spaces, `name:port` for one port, a bare name for
- * any port. Malformed entries are ignored.
+ * The launcher's own address (`LEVI_FRONTEND_URL`, on its port), a Hugging
+ * Face Space's `SPACE_HOST` (on its port when it names one), and
+ * `LEVI_UI_ALLOWED_HOSTS`: names separated by commas or spaces, `name:port`
+ * for one port, a bare name for any port. Wildcards and malformed entries
+ * are ignored, with a warning in the page's log.
  */
 export function allowedHosts(
   env: Record<string, string | undefined> = process.env,
 ): AllowedHosts {
   const exact = new Set<string>();
   const anyPort = new Set<string>();
-  const frontend = urlHost(env.LEVI_FRONTEND_URL);
-  const ports = new Set<string>();
-  const ownPort = env.PORT ? validPort(env.PORT) : null;
-  if (ownPort) ports.add(ownPort);
-  if (frontend) ports.add(frontend.port);
-  if (!ports.size) ports.add(DEFAULT_PORT);
-  for (const name of LOOPBACK)
-    for (const port of ports) exact.add(`${name}:${port}`);
-  if (frontend) exact.add(`${frontend.name}:${frontend.port}`);
-  const space = parseHost(env.SPACE_HOST);
-  if (space && !space.port) anyPort.add(space.name);
-  for (const entry of (env.LEVI_UI_ALLOWED_HOSTS || "").split(/[\s,]+/)) {
-    const host = parseHost(entry);
-    if (!host) continue;
+  const add = (host: HostPort) => {
     if (host.port) exact.add(`${host.name}:${host.port}`);
     else anyPort.add(host.name);
+  };
+  const frontend = urlHost(env.LEVI_FRONTEND_URL);
+  if (frontend) add(frontend);
+  const space = parseHost(env.SPACE_HOST);
+  if (space) add(space);
+  for (const entry of (env.LEVI_UI_ALLOWED_HOSTS || "").split(/[\s,]+/)) {
+    if (!entry) continue;
+    const host = parseHost(entry);
+    if (host) add(host);
+    else reportIgnored(entry);
   }
   return { exact, anyPort };
 }
 
-function permitted(host: HostPort, allowed: AllowedHosts): boolean {
+/** A listed (non-loopback) name; a Host without a port is on 80 or 443. */
+function listed(host: HostPort, allowed: AllowedHosts): boolean {
+  if (allowed.anyPort.has(host.name)) return true;
+  if (host.port) return allowed.exact.has(`${host.name}:${host.port}`);
   return (
-    allowed.anyPort.has(host.name) ||
-    allowed.exact.has(`${host.name}:${host.port || "80"}`)
+    allowed.exact.has(`${host.name}:80`) ||
+    allowed.exact.has(`${host.name}:443`)
   );
 }
 
@@ -121,30 +136,40 @@ export function hostAllowed(
   allowed: AllowedHosts = allowedHosts(),
 ): boolean {
   const parsed = parseHost(host);
-  return parsed !== null && permitted(parsed, allowed);
+  return (
+    parsed !== null && (LOOPBACK.has(parsed.name) || listed(parsed, allowed))
+  );
 }
 
 /** Whether a write comes from the LEVI page itself.
  *
  * A browser marks its own same-origin requests with `Sec-Fetch-Site:
  * same-origin` and sends `Origin` on every write. Any other fetch site
- * (`cross-site`, `same-site`, `none`) is refused, an `Origin` must be one of
- * the page's own names, and a request with neither header (a script) is
- * refused.
+ * (`cross-site`, `same-site`, `none`) is refused. An `Origin` must be the
+ * request's own host and port, or a listed name (a reverse proxy's public
+ * name); a loopback Origin on another port is another local web app. A
+ * request with neither header (a script) is refused.
  */
 export function writeAllowed(
   headers: Headers,
   allowed: AllowedHosts = allowedHosts(),
+  host: string | null = headers.get("host"),
 ): boolean {
   const site = headers.get("sec-fetch-site");
   if (site !== null && site.trim().toLowerCase() !== "same-origin")
     return false;
   const origin = headers.get("origin");
-  if (origin !== null) {
-    const parsed = urlHost(origin);
-    return parsed !== null && permitted(parsed, allowed);
-  }
-  return site !== null;
+  if (origin === null) return site !== null;
+  const from = urlHost(origin);
+  if (!from) return false;
+  const to = parseHost(host);
+  if (
+    to &&
+    from.name === to.name &&
+    (to.port ? from.port === to.port : ["80", "443"].includes(from.port))
+  )
+    return true;
+  return !LOOPBACK.has(from.name) && listed(from, allowed);
 }
 
 /** The core's cookie alone, from the browser's `Cookie` header. */
@@ -168,19 +193,19 @@ export async function backendProxy(
     return Response.json(
       {
         detail:
-          "This LEVI page does not answer to that host name. Open it as http://127.0.0.1:<port>, or add the name to LEVI_UI_ALLOWED_HOSTS.",
+          "Request blocked: this LEVI page does not answer to the address it was opened under. Open it as http://127.0.0.1:7860 (or localhost), or add the name to LEVI_UI_ALLOWED_HOSTS.",
       },
       { status: 421 },
     );
   }
   if (
     !SAFE_METHODS.has(request.method) &&
-    !writeAllowed(request.headers, allowed)
+    !writeAllowed(request.headers, allowed, request.headers.get("host"))
   ) {
     return Response.json(
       {
         detail:
-          "Writes through the web UI must come from the LEVI page itself. Scripts use the levi CLI or a scoped agent token.",
+          "Request blocked: writes through the web UI must come from the LEVI page itself. Scripts use the levi CLI or a scoped agent token.",
       },
       { status: 403 },
     );
