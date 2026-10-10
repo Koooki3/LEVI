@@ -137,14 +137,14 @@ The **Report** page shows a live technical report from a folder you name with `L
 
 DROID raw folders are a browse-and-annotate input, not a supported training conversion; see [Conversion](docs/CONVERSION.md#droid-raw-browsing-view) and the optional test sample in [Workspace](docs/WORKSPACE.md#droid-test-sample) (`uv run levi sample fetch droid` downloads 500 episodes, about 11.6 GiB, and browsing them needs `--extra droid`; nothing is downloaded unless you ask or set `LEVI_DROID_SAMPLE=on`).
 
-LEVI is a single-user local workbench with file access. Hugging Face sign-in controls Hub access, not LEVI permissions. Never commit credentials or `.env`; put any shared deployment behind an authenticated reverse proxy and set `LEVI_SECURE_COOKIES=1` for HTTPS or Space embeds. Hub upload is an explicit API action; conversion and saving never upload.
+LEVI is a single-user local workbench with file access. Hugging Face sign-in controls Hub access, not LEVI permissions. Never commit credentials or `.env`; put any shared deployment behind an authenticated reverse proxy and set `LEVI_SECURE_COOKIES=1` for HTTPS or Space embeds. The web page answers `127.0.0.1`, `localhost` and `[::1]` on any port; a reverse proxy, LAN address or host name must be listed in `LEVI_UI_ALLOWED_HOSTS` (e.g. `LEVI_UI_ALLOWED_HOSTS=levi.example.org`), and changes are accepted only from LEVI's own page, so scripts use the `levi` CLI. This guards against other web pages, not against programs on this machine ([Trust boundary of the web bridge](docs/API.md#trust-boundary-of-the-web-bridge--网页桥接的信任边界)). Hub upload is an explicit API action; conversion and saving never upload.
 
 ```bash
 docker build -t levi:local .
 docker run --rm -p 127.0.0.1:7860:7860 -v "$HOME/levi-data:/workspace" levi:local
 ```
 
-The image installs the core only; see the status below.
+Mapping another local port (`-p 127.0.0.1:8080:7860`) works as is; publishing on a LAN address or name needs `-e LEVI_UI_ALLOWED_HOSTS=<name>`. The image installs the core only; see the status below.
 
 ## Status and limits
 
