@@ -74,36 +74,44 @@ python -m levi.performance pixel-compare <视频或文件夹> [...] [--cores 4]
 
 ## 有硬上限的缓存目录（`DiskBudget`）
 
-`levi.performance.budget.DiskBudget` 让一个缓存目录自己守住字节上限（可选再加条目数上限）。原因是只增不减的缓存迟早写满磁盘：300 个策展片段的证据约 7 GB，1,616 个 robotiq 片段约 40 GB，三个 schema 版本就是 120 GB（单价来自清理审计的实测，约每个片段 25 MB）。所以上限在写入那一刻执行，而不是靠一个可能来得太晚的清理器。
+`levi.performance.budget.DiskBudget` 让一个缓存目录自己守住字节上限（可选再加条目数上限）。原因是只增不减的缓存迟早写满磁盘：几百个片段的证据是几 GB，几千个是几十 GB，而每出现一个新的 schema、模型或提示词版本，就又是一份。上限在写入时由写入者自己执行，而不是靠一个可能来得太晚的清理器。
 
 它只是一个库。**LEVI 里目前没有任何地方使用它**，不改变任何行为，也没有设置项。只用标准库，不导入 LEVI 的其他模块。
 
 ```python
 from levi.performance.budget import DiskBudget, BudgetRejected
 
-cache = DiskBudget.from_cap_gb("lab/perf-cache/evidence", 20, version="schema-3")   # 20 GiB
-cache.put("episode-17", png_bytes)              # 需要时淘汰最久未使用的条目
-cache.read("episode-17")                        # 返回字节或 None；命中算一次使用
-with cache.writing("episode-18") as tmp:        # 一个文件或整个目录，结束时原子改名到位
-    tmp.mkdir()
-    ...
+cache = DiskBudget.from_cap_gb("/path/to/evidence-cache", 20, version="schema-3")   # 20 GiB
+cache.put("episode-17", png_bytes)                  # 先预留空间，需要时淘汰最久未使用的条目
+cache.read("episode-17")                            # 返回字节或 None；命中算一次使用
+
+with cache.writing("episode-18", reserve=40_000_000) as tmp:    # 一个空目录，往里写
+    with cache.open_file(tmp / "0001.png") as f:                # 写到预留量就停
+        f.write(frame)
+# 正常退出时，目录被改名成为条目
+
+with cache.get("episode-18") as lease:              # 读租约：持有期间条目不会被改动或删除
+    first = (lease.path / "0001.png").read_bytes()
+
 try:
     cache.put("x", data)
-except BudgetRejected as why:                   # why.reason：too_large | no_space | no_output | lock_timeout
-    ...                                         # 调用方不用缓存继续往下走
+except BudgetRejected as why:       # why.reason：too_large | busy | no_space | no_output | reclaimed | unavailable | lock_timeout
+    ...                             # 调用方不用缓存继续往下走
 ```
 
 | 行为 | 说明 |
 | --- | --- |
-| 上限 | `max_bytes`（硬上限）和 `max_entries`。放不下的写入会淘汰条目直到放得下；如果无论如何都放不下，会在淘汰任何东西之前就被拒绝（`too_large`）。单位是 GiB（2**30），与 janitor 配额表里 `cap_gb` 的单位一致。 |
-| LRU | 条目的修改时间就是它最后一次使用的时间，`get` 和 `read` 会刷新。janitor 的 `lru_cap` 查找器按同一个时钟排序，所以两者对“谁最旧”不会有分歧。 |
-| TTL | 闲置超过 `ttl_s`（默认 14 天，即 janitor `perf-cache` 的期限）的条目视为过期：不会被返回，在下一次写入或 `maintain()` 时删除。`put(..., ttl_s=)` 可给单个条目设自己的期限。 |
-| 版本 | 每个条目都带版本字符串（schema、模型或提示词版本）写入。其他版本的条目是过期版本：不会被返回，先于有效条目被淘汰，闲置超过 `stale_grace_s`（默认 7 天）后删除，或由 `purge_stale()` 立即删除。用新版本写同一个键，会替换旧条目。 |
-| 原子写入 | 数据先写入 `.tmp-<pid>-<随机串>`，`fsync` 后改名到位；读者要么看到完整条目，要么看不到。条目可以是文件，也可以是目录。 |
-| 崩溃安全 | 以目录本身为准；`.budget.index.json` 只记原始键、版本字符串和单个条目的 TTL。它缺失、损坏或与目录不符时，会按目录重建。打开时，已死进程（或超过一小时）留下的 `.tmp-*`、`.trash-*` 会被清除。删除条目时先改名为 `.trash-*`，所以删到一半崩溃不会留下看起来有效的残缺条目。 |
-| 并发 | 所有改动都在 `.budget.lock` 的独占 `flock` 下进行。线程之间、进程之间互斥；进程死亡（包括 SIGKILL）时内核会释放锁。 |
-| 磁盘满 | 写入时遇到 `ENOSPC` 或 `EDQUOT`，或写入后磁盘剩余空间少于 `min_free_bytes`，会得到 `BudgetRejected("no_space")`，不会留下残缺文件。 |
+| 上限也管正在写的数据 | 写入者先申请空间再写：`put` 预留 `len(data)`，`writing(reserve=N)` 预留 `N`（默认预算的四分之一）。已提交的条目加上所有存活的预留不会超过 `max_bytes`，所以会淘汰最久未使用的条目来腾地方；腾不出来的写入在写任何数据之前就被拒绝（`too_large`：永远放不下；`busy`：其余空间被别的写入者的预留或读者的租约占着）。每个条目还有一个很小的 `.meta` 文件，预留里已包含 256 字节给它。通过 `open_file` 写的字节到预留量就停；直接往目录里写的内容在提交时测量（也可随时用 `charge(tmp)` 测），超出就拒绝。所以不论有多少进程在写，磁盘上这个目录最多是 `max_bytes` 加每个存活写入者几百字节的记账文件。不用 `open_file` 或 `charge` 的写入者如果无视自己的预留，在提交之前仍能占用磁盘空间。 |
+| 条目 | 条目是一个目录，名为 `<键哈希>.<版本哈希>.<代>.<大小>`，里面是内容和 `.meta`。名字里带着记账需要的信息，所以没有会与目录不一致的索引。条目提交后不可修改；重写同一个键会生成新的一代，旧的一代在没人读时立即删除。`put`/`read` 在条目里使用一个文件 `data`。 |
+| LRU | 条目最后一次使用的时间，是它的目录和其中 `.meta` 文件的修改时间；`get`、`read` 会同时刷新两者，所以只看文件时间的工具也能看到使用。 |
+| TTL | 闲置超过 `ttl_s`（默认 14 天）的条目视为过期：不会被返回，在下一次整理或需要腾地方时删除。 |
+| 版本 | 每个条目都带版本字符串（schema、模型或提示词版本）写入。其他版本的条目是过期版本：不会被返回，先于有效条目被淘汰，闲置超过 `stale_grace_s`（默认 7 天）后删除，或由 `purge_stale()` 立即删除。 |
+| 读租约 | `get` 返回 `Lease`（条目上的共享 `flock`）。有租约的条目不会被本类淘汰、替换或删除；如果租约占得太多导致写入放不下，写入会以 `busy` 被拒绝。用 `close()` 或 `with` 释放租约，被垃圾回收时也会释放。以其他方式拿到的路径只是个提示。 |
+| 原子写入 | 数据先写入 `.budget/w` 下的私有目录，`fsync`（`durable=True`，默认）后一次改名到位。读者要么看到完整条目，要么看不到。`fsync` 失败会中止提交（`ENOSPC`、`EDQUOT` 报为 `no_space`，其他错误原样抛出）；不支持对目录 `fsync` 的文件系统则忽略这一步。 |
+| 崩溃安全 | 每个写入者活着的时候，在 `.budget/w` 下对自己的记录持有一把独占 `flock`。能拿到这把锁，就说明写入者已死（包括被 SIGKILL；与 pid 复用、文件时间、时钟都无关），它的记录和数据会被回收；存活的写入者无论写多久都不会被回收。删除条目时先改名进 `.budget/trash`，所以删到一半崩溃不会留下看起来有效的残缺条目；缺 `.meta` 的条目（被其他工具原地删了一半）会被丢弃。整理在创建对象时、`maintain()` 中、以及读写过程中至多每 `housekeeping_s`（默认 10 分钟）一次，所以长期运行的进程也会回收死去的写入者。`maintain()` 还会校正条目大小，并按当前上限修剪。 |
+| 并发 | 所有改动都在缓存目录本身的独占 `flock` 下进行。线程之间、进程之间互斥；进程死亡时内核释放锁。没有可供清理器删除的锁文件。不要在本类的 `with` 块里 `fork`（子进程会继承锁）。 |
+| 磁盘满 | 写入时遇到 `ENOSPC` 或 `EDQUOT` 为 `BudgetRejected("no_space")`；预留后磁盘剩余空间会低于 `min_free_bytes` 也是（只在写入前检查一次，并计入淘汰能还回的空间）。不会留下残缺文件。目录或其隐藏子目录被删掉后，下一次调用会重建；脚手架目录被删的写入者得到 `BudgetRejected("reclaimed")`。 |
 
-设计的局限：正在进行的写入只在提交时才计入，所以目录可能短暂超出上限，超出量不超过正在写的数据。`min_free_bytes` 是防范同一磁盘上其他使用者的唯一手段。名字不是 `<32 位十六进制>.<8 位十六进制>` 的文件（点开头的文件、外来文件）不归它管。
+规模。每次写和读都会列出缓存目录，每个条目一次 `stat`，所以开销随条目数增长：几千个（每个片段一个条目）没问题，每帧一个条目不行。请保持条目粒度粗。
 
-**与 janitor 的关系。** janitor（`janitor.py`，不在本仓库内）是兜底：它的 `perf-cache` 条目有相同的 20 GB 上限和 14 天期限，把每个缓存条目（`<类别>/<条目>`）当作一个整体。`DiskBudget` 是第一道防线：在写入时就执行上限，产品工作区里也是如此，而那里 janitor 从不碰。janitor 删掉某个条目，`DiskBudget` 只会看到它不见了；janitor 排序时用的是同一个修改时间。
+**从外部清理这个目录。** 定时清理脚本仍可作为兜底，前提是遵守两条：跳过以 `.` 开头的名字（那是记账用的 `.budget`），并把整个条目目录当作一个整体。由于最后一次使用既记在条目目录上，也记在条目内的文件上，按条目内最新文件时间排序的脚本看到的顺序与本类一致。脚本删掉整个条目时，本类只会发现它不见了；只删了一半时，缺失的 `.meta` 会被发现，剩余部分被清掉。

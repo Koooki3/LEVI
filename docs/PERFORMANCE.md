@@ -118,36 +118,44 @@ speed-up and the largest difference.
 
 ## Cache folder with a hard size limit (`DiskBudget`)
 
-`levi.performance.budget.DiskBudget` keeps one cache folder inside a byte limit (and optionally an entry limit) by itself. It exists because a cache that only grows eventually fills the disk: evidence for the 300 curated episodes is about 7 GB, for the 1,616 robotiq episodes about 40 GB, and three schema versions of that 120 GB, while the disk has room for none of the worst cases next to everything else (measured unit cost: about 25 MB per episode, from the clean-up audit). The limit is therefore enforced when an entry is written, not by a cleaner that may run too late.
+`levi.performance.budget.DiskBudget` keeps one cache folder inside a byte limit (and optionally an entry limit) by itself. It exists because a cache that only grows eventually fills the disk: evidence for a few hundred episodes is some GB, for a few thousand tens of GB, and every new schema, model or prompt version starts a second copy. The limit is enforced when an entry is written, by the process that writes it, not by a cleaner that may run too late.
 
-It is a library only. **Nothing in LEVI uses it yet**; it changes no behaviour and has no setting. It is standard library only and imports no other LEVI module.
+It is a library only. **Nothing in LEVI uses it yet**; it changes no behaviour and has no setting. It uses only the standard library and imports no other LEVI module.
 
 ```python
 from levi.performance.budget import DiskBudget, BudgetRejected
 
-cache = DiskBudget.from_cap_gb("lab/perf-cache/evidence", 20, version="schema-3")   # 20 GiB
-cache.put("episode-17", png_bytes)              # evicts the least recently used entries if needed
-cache.read("episode-17")                        # bytes or None; a hit counts as a use
-with cache.writing("episode-18") as tmp:        # a file or a whole directory, renamed in place at the end
-    tmp.mkdir()
-    ...
+cache = DiskBudget.from_cap_gb("/path/to/evidence-cache", 20, version="schema-3")   # 20 GiB
+cache.put("episode-17", png_bytes)                  # reserves room first, evicts the least recently used if needed
+cache.read("episode-17")                            # bytes or None; a hit counts as a use
+
+with cache.writing("episode-18", reserve=40_000_000) as tmp:    # an empty folder to fill
+    with cache.open_file(tmp / "0001.png") as f:                # stops at the reserve
+        f.write(frame)
+# a clean exit renames the folder into place as the entry
+
+with cache.get("episode-18") as lease:              # a read lease: the entry cannot change or go while held
+    first = (lease.path / "0001.png").read_bytes()
+
 try:
     cache.put("x", data)
-except BudgetRejected as why:                   # why.reason: too_large | no_space | no_output | lock_timeout
-    ...                                         # the caller carries on without the cache
+except BudgetRejected as why:       # why.reason: too_large | busy | no_space | no_output | reclaimed | unavailable | lock_timeout
+    ...                             # the caller carries on without the cache
 ```
 
 | Behaviour | Detail |
 | --- | --- |
-| Limits | `max_bytes` (hard) and `max_entries`. A write that does not fit evicts entries until it does, or is refused (`too_large`) before anything is evicted if it could never fit. Units are GiB (2**30), the unit of `cap_gb` in the janitor's quota table. |
-| LRU | An entry's modification time is its last use; `get` and `read` touch it. This is the same clock the janitor's `lru_cap` finder ranks by, so the two never disagree about what is oldest. |
-| TTL | An entry idle for more than `ttl_s` (default 14 days, the janitor's `perf-cache` age) is expired: never returned, dropped on the next write or `maintain()`. `put(..., ttl_s=)` sets one entry's own. |
-| Versions | Every entry is written under a version string (a schema, model or prompt version). Entries of any other version are stale: never returned, evicted before valid ones, deleted when idle for `stale_grace_s` (default 7 days) or at once by `purge_stale()`. Writing the same key under the new version replaces the old entry. |
-| Atomic writes | Data goes to `.tmp-<pid>-<random>` and is renamed into place after `fsync`; a reader sees the whole entry or none. An entry is a file or a directory. |
-| Crash safety | The folder is the truth; `.budget.index.json` only remembers the original key, version string and per-entry TTL. If it is missing, corrupt or disagrees with the folder it is rebuilt from the folder. On open, scratch names (`.tmp-*`, `.trash-*`) of dead processes (or older than an hour) are removed. A deleted entry is renamed to `.trash-*` first, so a crash mid-delete never leaves a half-empty entry that looks valid. |
-| Concurrency | Every change runs under an exclusive `flock` on `.budget.lock`. Threads and processes exclude each other; the kernel releases the lock when a process dies, even by SIGKILL. |
-| Disk full | `ENOSPC` or `EDQUOT` while writing, or less than `min_free_bytes` left on the disk after the write, is `BudgetRejected("no_space")`; nothing partial is left. |
+| Limit covers data being written | A writer asks for room before it writes: `put` reserves `len(data)`, `writing(reserve=N)` reserves `N` (default a quarter of the budget). Committed entries plus all live reservations never exceed `max_bytes`, so least recently used entries are evicted to make the room, and a write that cannot be given room is refused before any data is written (`too_large`: could never fit; `busy`: other writers' reservations or readers' leases hold the rest). Each entry also costs a small `.meta` file; a reservation includes 256 bytes for it. Bytes written through `open_file` stop at the reserve; anything written to the folder directly is measured at commit (and on demand by `charge(tmp)`) and refused if it is over. On the disk the folder therefore holds at most `max_bytes` plus a few hundred bytes of bookkeeping per live writer, however many processes write. Without `open_file` or `charge`, a writer that ignores its reserve can use disk space until it commits. |
+| Entries | An entry is a folder named `<key hash>.<version hash>.<generation>.<size>` holding the payload and `.meta`. The name carries what the accounting needs, so there is no index that could disagree with the folder. Entries are immutable once committed; rewriting a key creates a new generation and removes the old one as soon as nobody reads it. `put`/`read` use one file, `data`, in the entry. |
+| LRU | An entry's last use is the modification time of its folder and of its `.meta` file; `get` and `read` refresh both, so a tool that looks only at files also sees the use. |
+| TTL | An entry idle for more than `ttl_s` (default 14 days) is expired: never returned, dropped by the next housekeeping or when room is needed. |
+| Versions | Every entry is written under a version string (a schema, model or prompt version). Entries of any other version are stale: never returned, evicted before valid ones, deleted when idle for `stale_grace_s` (default 7 days) or at once by `purge_stale()`. |
+| Read leases | `get` returns a `Lease` (shared `flock` on the entry). A leased entry is never evicted, replaced or deleted by this class; if the leases hold so much that a write cannot fit, the write is refused as `busy`. Release a lease with `close()` or `with`; one that is garbage collected is released too. A path obtained any other way is only a hint. |
+| Atomic writes | Data goes to a private folder under `.budget/w` and is renamed into place once, after an `fsync` (`durable=True`, default). A reader sees the whole entry or none. A failing `fsync` aborts the commit (`ENOSPC` and `EDQUOT` as `no_space`, anything else is raised); a directory that does not support `fsync` is ignored. |
+| Crash safety | Every writer holds an exclusive `flock` on its record under `.budget/w` while it lives. A record whose lock can be taken belongs to a dead writer (also after SIGKILL; pid reuse, file times and the clock do not matter) and is reclaimed with its data; a live writer is never reclaimed, however long it takes. Deleting an entry renames it into `.budget/trash` first, so a crash mid-delete never leaves a half-empty entry that looks valid; an entry whose `.meta` is missing (deleted in place by another tool) is dropped. Housekeeping runs when the object is created, in `maintain()`, and at most every `housekeeping_s` (default 10 minutes) during writes and reads, so a long-running process reclaims dead writers too. `maintain()` also corrects entry sizes and prunes to the current limits. |
+| Concurrency | Every change runs under an exclusive `flock` on the cache folder itself. Threads and processes exclude each other; the kernel drops the lock when a process dies. There is no lock file for a cleaner to delete. Do not `fork` inside the `with` blocks of this class (the child would inherit the lock). |
+| Disk full | `ENOSPC` or `EDQUOT` while writing is `BudgetRejected("no_space")`, and so is a reservation that would leave less than `min_free_bytes` free on the disk (checked once, before anything is written, counting what eviction gives back). Nothing partial is left. If the folder or its hidden subfolder is removed, the next call recreates it; a writer whose scratch folder was removed gets `BudgetRejected("reclaimed")`. |
 
-Limits of the design. Bytes of writes still in progress count only when they are committed, so the folder can briefly exceed its limit by what is being written. `min_free_bytes` is the only protection against other users of the same disk. Names that are not `<32 hex>.<8 hex>` (dot files, foreign files) are not managed.
+Scale. Every write and read lists the cache folder and every entry costs one `stat`, so cost grows with the number of entries: fine for thousands (one entry per episode), not for one entry per frame. Keep entries coarse.
 
-**Relation to the janitor.** The janitor (`janitor.py`, outside this repository) is the safety net: its `perf-cache` entry has the same 20 GB cap and 14-day age and sees each cache entry (`<kind>/<entry>`) as a unit. `DiskBudget` is the first line: it enforces the limit at write time, in the product workspace as well, which the janitor never touches. If the janitor deletes an entry, `DiskBudget` simply sees it gone; if the janitor ranks entries, it ranks by the same modification time.
+**Cleaning the folder from outside.** A scheduled clean-up script may still work on the folder as a safety net, if it follows two rules: skip names that start with `.` (they are the bookkeeping, `.budget`), and treat a whole entry folder as one unit. Because the last use is recorded in files inside the entry as well as on the entry folder, a script that ranks entries by the newest file time sees the same order. If it deletes an entry, this class simply finds it gone; if it deletes part of one, the missing `.meta` is noticed and the rest removed.
