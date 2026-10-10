@@ -584,18 +584,18 @@ def nice_scale(
 
 
 def tick_label(v: float, sc: Scale, fmt: str = "plain") -> str:
+    """A tick's text: fixed decimals matched to the step, a percent sign for
+    ``percent``, and compact ``g`` notation for huge values. Never ``-0``."""
     if fmt == "percent":
-        d = max(0, sc.decimals - 2)
-        s = f"{v * 100:.{d}f}%"
-    elif abs(v) >= 1e9 or sc.step < 1e-6:
-        s = f"{v:.6g}"
+        s = f"{v * 100:.{max(0, sc.decimals - 2)}f}%"
+    elif abs(v) >= 1e9 or sc.decimals > 12:
+        sig = 2 if v == 0 else max(2, math.floor(math.log10(abs(v) / sc.step)) + 2)
+        s = f"{v:.{sig}g}"
     else:
         s = f"{v:.{sc.decimals}f}"
-    return (
-        s.replace("-0%", "0%")
-        if s.startswith("-0") and float(s.rstrip("%") or 0) == 0
-        else s
-    )
+    if s.startswith("-") and not any(c in "123456789" for c in s):
+        s = s[1:]
+    return s
 
 
 # --------------------------------------------------------------------------
@@ -852,63 +852,60 @@ def text_width(s: str, size: float, bold: bool = False) -> float:
     return total * size / 1000.0 * (1.06 if bold else 1.0)
 
 
+_NO_LINE_START = set("，。、；：！？）》」』”’,.;:!?)]}%")
+
+
 def wrap(
-    s: str, size: float, max_w: float, bold: bool = False, max_lines: int | None = None
+    s: str,
+    size: float,
+    max_w: float,
+    bold: bool = False,
+    max_lines: int | None = None,
 ) -> list[str]:
-    """Greedy word wrap; CJK text breaks between any two characters. A word
-    longer than the line is broken by character. Too many lines end in ``...``."""
-    tokens: list[str] = []
-    cur = ""
+    """Greedy word wrap. Lines break at spaces and between any two CJK
+    characters (but not before closing punctuation). A word wider than the
+    line is broken by character. Too many lines end in ``...``."""
+    units: list[str] = []
     for ch in s:
         if ch == " ":
-            if cur:
-                tokens.append(cur)
-                cur = ""
+            units.append(" ")
         elif _is_wide(ch):
-            if cur:
-                tokens.append(cur)
-                cur = ""
-            tokens.append(ch + "\0")  # "\0" marks: no space before the next token
+            units.append(ch)
+        elif units and units[-1] != " " and not _is_wide(units[-1][0]):
+            units[-1] += ch
         else:
-            cur += ch
-    if cur:
-        tokens.append(cur)
+            units.append(ch)
+
+    def w(t: str) -> float:
+        return text_width(t, size, bold)
+
     lines: list[str] = []
-    line = ""
-    for tok in tokens:
-        glue = tok.endswith("\0")
-        tok = tok.rstrip("\0")
-        sep = "" if (not line or line_glue(line)) else " "
-        trial = line + sep + tok
-        if not line or text_width(trial, size, bold) <= max_w:
-            line = trial
-        else:
-            lines.append(line)
-            line = tok
-        # a single token wider than the line: break it
-        while text_width(line, size, bold) > max_w and len(line) > 1:
-            cut = len(line)
-            while cut > 1 and text_width(line[:cut], size, bold) > max_w:
+    cur = ""
+    for u in units:
+        if u == " ":
+            if cur and not cur.endswith(" "):
+                cur += " "
+            continue
+        if cur.strip() and w(cur + u) > max_w and u[0] not in _NO_LINE_START:
+            lines.append(cur.rstrip())
+            cur = ""
+        cur += u
+        while w(cur) > max_w and len(cur) > 1:  # one unit wider than the line
+            cut = len(cur) - 1
+            while cut > 1 and w(cur[:cut]) > max_w:
                 cut -= 1
-            lines.append(line[:cut])
-            line = line[cut:]
-        if glue:
-            line += "\0"
-    if line:
-        lines.append(line)
-    lines = [ln.replace("\0", "") for ln in lines] or [""]
+            lines.append(cur[:cut])
+            cur = cur[cut:]
+    if cur.strip() or not lines:
+        lines.append(cur.rstrip())
     if max_lines is not None and len(lines) > max_lines:
         kept = lines[:max_lines]
         last = kept[-1]
-        while last and text_width(last + "...", size, bold) > max_w:
+        while last and w(last + "...") > max_w:
             last = last[:-1]
         kept[-1] = last.rstrip() + "..."
         lines = kept
     return lines
-
-
-def line_glue(line: str) -> bool:
-    return line.endswith("\0")
 
 
 # --------------------------------------------------------------------------
