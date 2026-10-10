@@ -219,11 +219,25 @@ def test_an_assessment_of_another_contract_is_unavailable():
         ("reset_required", 0, "wait_human", "reset", "scene_reset_required"),
     ],
 )
+@pytest.mark.mode_matrix(
+    "arbitration:plan:ready",
+    "arbitration:plan:reset_required",
+    "arbitration:plan:unknown",
+    "arbitration:plan:unavailable",
+    modes=("single_reset_policy",),
+)
 def test_single_reset_policy_plans(decision, attempts, on_unknown, action, reason):
     strategy = rm.SingleResetPolicy(True, 1, on_unknown)
     assert rm.check_plan(strategy, decision, attempts) == rm.ResetPlan(action, reason)
 
 
+@pytest.mark.mode_matrix(
+    "arbitration:plan:ready",
+    "arbitration:plan:reset_required",
+    "arbitration:plan:unknown",
+    "arbitration:plan:unavailable",
+    modes=("single_reset_policy", "human_assisted"),
+)
 def test_a_disabled_reset_policy_and_human_assisted_always_ask_a_person():
     for strategy in (rm.SingleResetPolicy(enabled=False), rm.HumanAssistedReset()):
         for decision in ("reset_required", "unknown", "unavailable"):
@@ -231,6 +245,14 @@ def test_a_disabled_reset_policy_and_human_assisted_always_ask_a_person():
         assert rm.check_plan(strategy, "ready", 0).action == "forward"
 
 
+@pytest.mark.mode_matrix(
+    "arbitration:after_reset:reset_verified",
+    "arbitration:after_reset:scene_unknown",
+    "arbitration:after_reset:reset_horizon_exhausted",
+    "arbitration:after_reset:operator_stop",
+    "arbitration:after_reset:policy_error",
+    modes=("single_reset_policy",),
+)
 def test_after_a_reset_only_a_verified_or_retryable_scene_is_checked_again():
     s = rm.SingleResetPolicy(max_attempts=2)
     assert rm.check_after(s, "reset_verified", 1, False) == "VERIFY_INITIAL"
@@ -342,6 +364,13 @@ def test_unknown_never_skips_the_reset(tmp_path, decision):
     assert r.robot.motions == []
 
 
+@pytest.mark.mode_matrix(
+    "transition:VERIFY_INITIAL->WAIT_HUMAN",
+    "transition:WAIT_HUMAN->PREFLIGHT",
+    "transition:PREFLIGHT->VERIFY_INITIAL",
+    "transition:VERIFY_INITIAL->FORWARD_ACTIVE",
+    modes=("human_assisted",),
+)
 def test_human_assisted_never_runs_a_reset_policy_and_resumes_through_a_fresh_check(
     tmp_path,
 ):
@@ -373,6 +402,9 @@ def test_human_assisted_never_runs_a_reset_policy_and_resumes_through_a_fresh_ch
     check_invariants(r)
 
 
+@pytest.mark.mode_matrix(
+    "transition:RESET_FINALIZE->WAIT_HUMAN", modes=("single_reset_policy",)
+)
 def test_a_reset_at_its_horizon_keeps_its_failed_rollout_and_waits(tmp_path):
     clock = fake.FakeClock()
     r = build(

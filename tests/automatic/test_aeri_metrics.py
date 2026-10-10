@@ -214,6 +214,13 @@ def test_label_kinds_are_kept_apart_and_never_overwritten(tmp_path):
 # --- real run journals ----------------------------------------------------------------------------
 
 
+@pytest.mark.mode_matrix(
+    "metrics:autonomous",
+    "metrics:early_termination",
+    "metrics:reset",
+    "metrics:automation",
+    modes=("single_reset_policy",),
+)
 def test_metrics_of_a_run_with_a_reset_and_two_early_stops(tmp_path):
     clock = fake.FakeClock()
     cfg = config(
@@ -264,6 +271,7 @@ def test_metrics_of_a_run_with_a_reset_and_two_early_stops(tmp_path):
     json.dumps(found)  # serialisable as it is
 
 
+@pytest.mark.mode_matrix("metrics:automation", modes=("single_reset_policy",))
 def test_interventions_and_the_human_wait_are_counted(tmp_path):
     cfg = config(
         episodes=1, forward_folder=FOLDERS["forward"], reset_folder=FOLDERS["reset"]

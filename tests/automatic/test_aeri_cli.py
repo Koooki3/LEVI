@@ -92,6 +92,7 @@ def as_json(capsys, *argv):
 # --- validate ----------------------------------------------------------------------------------
 
 
+@pytest.mark.mode_matrix("cli:validate", modes=("single_reset_policy",))
 def test_validate_prints_a_stable_plan(job, capsys):
     code, found = as_json(capsys, "validate", "--config", str(job))
     assert code == 0 and found["ok"]
@@ -183,6 +184,9 @@ def test_no_network_refuses_every_connection_and_restores():
     assert (socket.socket.connect, socket.create_connection) == before
 
 
+@pytest.mark.mode_matrix(
+    "cli:run", "cli:status", "cli:report", modes=("single_reset_policy",)
+)
 def test_a_kept_dry_run_can_be_inspected_and_reported(job, capsys, tmp_path):
     keep = tmp_path / "kept"
     code, found = as_json(
@@ -243,6 +247,7 @@ def test_status_is_read_only_even_on_a_torn_or_corrupt_journal(job, capsys, tmp_
 # --- doctor and help -----------------------------------------------------------------------------------
 
 
+@pytest.mark.mode_matrix("cli:doctor", modes=("single_reset_policy",))
 def test_doctor_reads_only_and_says_a_real_run_is_not_available(job, capsys):
     before = sorted(p.name for p in job.parent.rglob("*"))
     code, found = as_json(capsys, "doctor", "--config", str(job))

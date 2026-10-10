@@ -13,6 +13,7 @@ from test_aeri_orchestrator import no_network  # noqa: F401
 from test_aeri_recorder import FOLDERS, build_run
 
 from levi.automatic import metrics as M
+from levi.automatic import modes
 from levi.automatic.adapters import events as ev
 from levi.automatic.recorder import MANIFEST
 
@@ -425,7 +426,10 @@ def two_episodes(tmp_path, reset_mode):
     )
 
 
-@pytest.mark.parametrize("reset_mode", M.RESET_MODES)
+METRICS = sorted(c for c in modes.MODE_MATRIX if c.startswith("metrics:"))
+
+
+@pytest.mark.mode_matrix(*METRICS)
 def test_both_modes_against_hand_computed_values(tmp_path, reset_mode):
     r, found = two_episodes(tmp_path, reset_mode)
     human = reset_mode == "human_assisted"
@@ -455,10 +459,19 @@ def test_both_modes_against_hand_computed_values(tmp_path, reset_mode):
     assert found["reset"]["resets"] == (0 if human else 1)
     assert found["scene_decisions_by_human"]["decisions"] == 0
     assert found["autonomous"]["forward_episodes"] == 2
+    assert found["early_termination"]["early_stops"] == 2
+    assert found["scene_check"] == "provider"
+    assert found["mode_source"]["scene_check"] == "default"
+    assert found["comparable"] == list(M.COMPARABLE)
+    assert found["mode_specific"] == list(M.MODE_SPECIFIC)
+    assert found["schema"] == "levi.aeri.metrics.v1"
+    assert found["truth"] == M.TRUTH[0] and found["truth_labels"]["task_outcome"] == 0
+    assert "not ground truth" in found["note"]
+    assert {f"metrics:{k}" for k in found} == set(METRICS)
     json.dumps(found)
 
 
-@pytest.mark.parametrize("reset_mode", M.RESET_MODES)
+@pytest.mark.mode_matrix("metrics:reset_mode", "metrics:mode_source")
 def test_the_mode_of_a_run_without_a_header_field_is_inferred(tmp_path, reset_mode):
     r, _ = two_episodes(tmp_path, reset_mode)
     found = M.report(r.orch.journal.events)  # no mode passed (old callers)
