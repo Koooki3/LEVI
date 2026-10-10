@@ -16,7 +16,13 @@ The modules, in the order data flows through them:
   ``meta/info.json`` with the signal lines' rules, overridable by a
   declaration.
 - ``facts``: the signal facts of one episode, per channel and actor.
+- ``change_points``: penalised change points of each actor's speed,
+  gripper level and rotation speed, as event candidates; ``calibrate`` is
+  the script that chose their penalty on development gold labels.
+- ``boundary_metrics``: boundary recall at several tolerances, false
+  candidates per minute, boundary MAE/P90 and segment F1 by IoU.
 
 Pure functions over numpy arrays and pydantic records: no model, no Torch,
-no files written. See docs/EVENTS.md.
+no files written (``calibrate`` writes only the report it is asked for).
+See docs/EVENTS.md.
 """

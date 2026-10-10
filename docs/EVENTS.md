@@ -11,6 +11,8 @@
 | `contracts` | `SignalObservation` and `EventCandidate`, the records the readers produce. |
 | `signal_profiles` | What each recorded channel means: role, actor, units, frame, which end of a gripper is open. |
 | `facts` | The signal facts of one episode as `SignalObservation`s, per channel and actor. |
+| `change_points` | Penalised change points of each actor's speed, gripper level and rotation speed, as `EventCandidate`s. |
+| `calibrate` | The script that chose the change-point penalty on development gold labels. |
 | `boundary_metrics` | Boundary Recall at several tolerances, false candidates per minute, boundary MAE/P90, Segment F1 at several IoU thresholds. |
 
 ## Records
@@ -41,3 +43,37 @@ A profile (`levi.signal_profile.v1`) lists channels with a `role` (`gripper`, `p
 - `boundaries(segments)` turns contiguous segments into their inner boundaries.
 
 `levi.agent.evaluation.temporal` (one tolerance, identity-matched rows) and `levi.harness.grading` (one IoU) are unchanged.
+
+## Change points
+
+`change_points.candidates(table, info, profile)` returns `EventCandidate`s of type `change_point` for every actor. Per actor it builds a multi-dimensional series from the profile -- the speed of its position (on the recorded timestamps, so a dropped frame is not a jump), its gripper level (a measured channel before a commanded one) and the speed of its rotation (unwrapped; degrees when the profile says `deg`) -- scales each feature to a robust spread (the larger of a quarter of its 1-99% range and its noise from first differences; a feature with no spread is left out; missing values are filled from their neighbours) and finds the exact penalised segmentation with a piecewise-constant mean and squared-error cost (optimal partitioning with pruning, the PELT family; Truong, Oudre and Vayatis 2020, arXiv:1801.00718, describe it and implement it in `ruptures`, BSD-2-Clause). LEVI does not depend on `ruptures`; the numpy implementation is checked against unpruned optimal partitioning in the tests.
+
+A change point says the signals' level changed, not what happened: it is a candidate for evidence, never a subtask boundary by itself. `salience` is `gain / (gain + beta)` (the cost the change saves against the penalty): an ordering, not a probability.
+
+Guards against over-cutting, each tested:
+
+| Guard | Default |
+| --- | --- |
+| Penalty per change: `penalty * (d + 1) * log(n)` for `d` features, `n` rows | `penalty = 0.5` (calibrated, below) |
+| Shortest segment | `min_seconds = 0.5` |
+| Most change points per minute of episode; past it the penalty is raised by 1.5x until the result fits (`capped` says so) | `max_per_minute = 30` (set beforehand, not tuned) |
+
+On pure noise scaled the same way the default penalty gives well under one change point per minute; twice the penalty gives none (tested).
+
+### Calibration
+
+`python -m levi.events.calibrate --root <dir> --gold <dir> ... --report-gold <dir> ...` scores candidates of raw robot captures against reference segments (the segments' inner boundaries at the capture's timestamps) for a grid of penalties, and picks the largest penalty whose F1 at 0.5 s is within 0.01 of the best (of near-equal settings, the one that cuts least). It refuses any folder whose path contains `frozen`, `heldout` or `held-out`, reads only pose and gripper CSVs (never video) and writes nothing but `--out`. The report records every episode's source and the SHA-256 of the files it read.
+
+Run of 2026-10-10 (penalties 0.1 to 8):
+
+- Calibration: screws development gold labels (12 episodes, a locked set) and the plates diagnostic set (15 episodes, read from a copy whose frame counts matched the gold labels): 27 episodes, 10.1 minutes, 36.2 reference boundaries per minute. Test sets (frozen and held-out families) were not read.
+- Report (not used for the choice): generic v2 pilot gold labels, 7 of 9 episodes; the 2 sourced from the robotiq demonstration collection were excluded (that collection is reserved until the scale-up phase).
+
+| Set | Penalty | Candidates/min | Recall@0.2 s | Recall@0.5 s | F1@0.5 s | False/min@0.5 s | Nearest MAE / P90 (s) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Calibration | 0.2 (best F1) | 24.2 | 0.25 | 0.48 | 0.58 | 6.6 | 0.58 / 1.53 |
+| Calibration | **0.5 (chosen)** | 24.1 | 0.23 | 0.48 | 0.57 | 6.8 | 0.59 / 1.52 |
+| Calibration | 2.0 | 15.3 | 0.19 | 0.37 | 0.52 | 2.0 | 0.95 / 2.38 |
+| Report | 0.5 | 23.3 | 0.20 | 0.46 | 0.44 | 13.3 | 0.72 / 1.87 |
+
+What this says: F1 is flat from 0.1 to 1 because the per-minute cap binds there (the reference annotations are denser than the cap); about half the reference boundaries have a change point within 0.5 s, a quarter within 0.2 s. On the report set false candidates double, so change points alone are a weak boundary signal -- they are meant to order evidence gathering, together with the other sources, not to segment. Small sets: differences of 0.01-0.02 are within noise.
