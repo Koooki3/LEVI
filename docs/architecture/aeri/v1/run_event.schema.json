@@ -385,6 +385,38 @@
           "pattern": "^[0-9a-f]{64}$",
           "title": "Plan Sha256",
           "type": "string"
+        },
+        "reset_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "single_reset_policy",
+                "human_assisted"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reset Mode"
+        },
+        "scene_check": {
+          "anyOf": [
+            {
+              "enum": [
+                "provider",
+                "operator_attested"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scene Check"
         }
       },
       "required": [
@@ -530,7 +562,7 @@
       "default": null
     },
     "minor": {
-      "maximum": 0,
+      "maximum": 1,
       "minimum": 0,
       "title": "Minor",
       "type": "integer"
@@ -693,5 +725,5 @@
   "x-levi-control-keys": [],
   "x-levi-control-prefixes": [],
   "x-levi-major": 1,
-  "x-levi-minor": 0
+  "x-levi-minor": 1
 }

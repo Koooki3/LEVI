@@ -150,6 +150,12 @@ class RunConfig:
     initial_state: sa.InitialStateContract | None = None
     principal_id: str = "aeri-orchestrator"
     session_id: str = "s-aeri"
+    # Who assesses the scene (design X2 §1.2): the machine provider, or
+    # (human_assisted only) a person answering every required predicate on
+    # a frame captured for the check (``adapters.human``); their check
+    # waits up to ``human_scene_timeout_ns``, then counts as unavailable.
+    scene_check: str = "provider"
+    human_scene_timeout_ns: int = 600_000_000_000
 
     def __post_init__(self):
         if type(self.episodes) is not int or self.episodes < 0:
@@ -164,6 +170,7 @@ class RunConfig:
             "judge_request_timeout_ns",
             "final_judge_timeout_ns",
             "scene_timeout_ns",
+            "human_scene_timeout_ns",
             "scene_violation_limit",
             "home_timeout_ns",
             "note_lines_per_episode",
@@ -189,6 +196,22 @@ class RunConfig:
             self.strategy()
         except rm.StrategyError as exc:
             raise ConfigError(str(exc)) from None
+        if self.scene_check not in aeri.SCENE_CHECKS:
+            raise ConfigError(f"scene_check is one of {', '.join(aeri.SCENE_CHECKS)}")
+        if (
+            self.scene_check == "operator_attested"
+            and self.reset_strategy != "human_assisted"
+        ):
+            raise ConfigError(
+                "scene_check operator_attested belongs to the human_assisted strategy"
+            )
+
+    @property
+    def scene_wait_ns(self) -> int:
+        """How long one scene check is waited for."""
+        if self.scene_check == "operator_attested":
+            return self.human_scene_timeout_ns
+        return self.scene_timeout_ns
 
     def strategy(self):
         """The reset strategy these settings describe."""
@@ -993,7 +1016,7 @@ class Orchestrator:
         if isinstance(got, bytes | bytearray):
             raw = bytes(got)
         else:
-            raw = self.scene.collect(got, timeout_ns=self.config.scene_timeout_ns)
+            raw = self.scene.collect(got, timeout_ns=self.config.scene_wait_ns)
             if raw is None:
                 self.scene.cancel(got, "timeout")
                 self._note("scene_timeout", request_id)

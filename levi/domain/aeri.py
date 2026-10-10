@@ -55,8 +55,21 @@ from pydantic_core import PydanticCustomError
 from .contracts import Contract
 
 MAJOR = 1
-# The minor version this code writes and the newest it reads. Readers of
-# persisted records accept every older minor of the same major.
+# The minor version this code writes and the newest it reads, per contract
+# (X1 §3: a minor adds optional fields only). Readers of persisted records
+# accept every older minor of the same major.
+#
+# run_event minor 1 (T-CL-06): the run header's optional ``reset_mode`` and
+# ``scene_check``; a minor-0 header has neither (None: read them from the
+# job's plan, ``header_modes``).
+MINORS = {
+    "event": 0,
+    "judgement": 0,
+    "scene": 0,
+    "runtime": 0,
+    "run_event": 1,
+}
+# The minor of the A and B messages (event, judgement, scene, runtime).
 MINOR = 0
 MAX_BYTES = 256 * 1024
 MAX_TEXT = 2000
@@ -1025,18 +1038,28 @@ class ContractVersion(Part):
     minor: Annotated[int, Field(ge=0)]
 
 
+RESET_MODES = ("single_reset_policy", "human_assisted")
+SCENE_CHECKS = ("provider", "operator_attested")
+
+
 class RunHeader(Part):
     plan_sha256: Sha256
     contracts: Annotated[list[ContractVersion], Field(min_length=1, max_length=16)]
     levi_commit: (
         Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{7,64}$")] | None
     ) = None
+    # run_event minor 1: how the scene is put back and who checks it (code
+    # names only, never a configuration alias). None in a minor-0 header:
+    # a reader takes them from the job's plan (``header_modes``).
+    reset_mode: Literal[RESET_MODES] | None = None
+    scene_check: Literal[SCENE_CHECKS] | None = None
 
 
 class RunEvent(Envelope):
     """One line of a run's state journal (append-only, hash-chained)."""
 
     schema_id: Literal["levi.aeri.run_event.v1"] = Field(alias="schema")
+    minor: Annotated[int, Field(ge=0, le=MINORS["run_event"])]
     # From 0 per run, +1 per line, no gaps.
     sequence_no: Count
     record: Literal[RECORDS]
@@ -1073,6 +1096,13 @@ class RunEvent(Envelope):
             _bad("the run header chains to zeros")
         if record == "run_header" and self.transaction_id is not None:
             _bad("the run header has no transaction")
+        if (
+            self.header is not None
+            and self.minor < 1
+            and (self.header.reset_mode, self.header.scene_check) != (None, None)
+        ):
+            # A minor-0 writer cannot know these fields (X1 §3).
+            _bad("reset_mode and scene_check came with run_event minor 1")
         if record not in ("run_header", "note") and self.transaction_id is None:
             _bad(f"a {record} record names its transaction")
         if self.transaction_id is not None:
@@ -1118,6 +1148,267 @@ class RunEvent(Envelope):
             if faulted and self.episode_result.task_outcome != "unknown":
                 _bad("an episode that ended in FAULT_LOCKED has task_outcome unknown")
         return self
+
+
+# --- levi.aeri.job.v1 (the job file, configuration) -----------------------------------
+#
+# Not a message between A, B and C: the operator's job file, read through the
+# strict YAML subset of ``levi.automatic.scene_assessment.parse_document``
+# and checked here (T-CL-06). Strategy aliases live in this layer only; the
+# plan, the journal and every contract carry the code names.
+
+JOB_SCHEMA = "levi.aeri.job.v1"
+JOB_MINOR = 0
+EXECUTION_MODES = ("shadow", "assisted", "autonomous")
+# Planned reset strategies (pipeline §6.4): named, refused in v1.
+LATER_STRATEGIES = ("scripted_safe_reset", "atomic_skill_sequence")
+RESET_STRATEGY_ALIASES = {
+    "single_policy": "single_reset_policy",
+    "scripted_safe": "scripted_safe_reset",
+    "atomic_skills": "atomic_skill_sequence",
+}
+RESET_STRATEGY_NAMES = (
+    *RESET_MODES,
+    *LATER_STRATEGIES,
+    *RESET_STRATEGY_ALIASES,
+)
+DEFAULT_HUMAN_SCENE_TIMEOUT_S = 600
+# Why a key of the job file is ignored (written, but not read: it is left
+# out of the plan and of its digest).
+IGNORED_HUMAN = "strategy human_assisted"
+IGNORED_PROVIDER = "scene_check provider"
+# The reset policy's keys: human_assisted runs no reset policy.
+HUMAN_IGNORED_KEYS = (
+    "policies.reset",
+    "task.reset_instruction",
+    "recording.reset_folder",
+    "reset.enabled",
+    "reset.max_attempts",
+    "reset.on_unknown",
+)
+# Configuration schemas with a snapshot (not messages: no envelope).
+CONFIG_SCHEMAS = {"job": JOB_SCHEMA}
+
+JobId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$")]
+JobFolder = Annotated[
+    str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+]
+JobText = Annotated[str, StringConstraints(min_length=1, max_length=MAX_TEXT)]
+JobPath = Annotated[str, StringConstraints(min_length=1, max_length=4096)]
+
+
+def _sections_present(value, names):
+    """``key: `` with nothing under it is an empty section (YAML null)."""
+    if isinstance(value, dict):
+        value = dict(value)
+        for name in names:
+            if name in value and value[name] is None:
+                value[name] = {}
+    return value
+
+
+class JobExperiment(Part):
+    name: JobId
+    episodes: Annotated[int, Field(ge=0, le=100_000)] = 1
+    random_seed: Annotated[int, Field(ge=-INT64_MAX, le=INT64_MAX)] = 0
+    # Checked only in v1 (no real robot adapter).
+    execution_mode: Literal[EXECUTION_MODES] = "shadow"
+
+
+class JobPolicy(Part):
+    max_steps: Annotated[int, Field(ge=1, le=1_000_000)] | None = None
+
+
+class JobPolicies(Part):
+    forward: JobPolicy | None = None
+    # Required by single_reset_policy (unless reset.enabled is false);
+    # ignored by human_assisted.
+    reset: JobPolicy | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _empty(cls, value):
+        # ``forward:`` alone is an empty block; ``reset:`` alone too, but a
+        # reset policy still needs its max_steps (``JobSpec``).
+        return _sections_present(value, ("forward", "reset"))
+
+
+class JobTask(Part):
+    instruction: JobText | None = None
+    reset_instruction: JobText | None = None
+    # Relative to the job file.
+    initial_state_spec: JobPath | None = None
+
+
+class JobReset(Part):
+    # A code name or an alias (``RESET_STRATEGY_ALIASES``).
+    strategy: Literal[RESET_STRATEGY_NAMES] = "single_reset_policy"
+    enabled: bool | None = None
+    max_attempts: Annotated[int, Field(ge=0, le=100)] | None = None
+    on_unknown: Literal["reset", "wait_human"] | None = None
+    # Who assesses the scene: the machine provider, or (human_assisted
+    # only) a person answering each required predicate on a frame the
+    # system has just captured (design X2 §1.2).
+    scene_check: Literal[SCENE_CHECKS] = "provider"
+    # operator_attested: an unanswered check is Unavailable(timeout).
+    human_scene_timeout_s: Annotated[int, Field(ge=1, le=86_400)] | None = None
+
+
+class JobRecording(Part):
+    # Relative to the job file.
+    rollout_root: JobPath | None = None
+    group: JobFolder = "aeri"
+    forward_folder: JobFolder | None = None
+    reset_folder: JobFolder | None = None
+
+
+StepCount = Annotated[int, Field(ge=0, le=1_000_000)]
+
+
+class JobTermination(Part):
+    """``levi.automatic.termination.TerminationConfig`` as the job file
+    writes it (a key left out keeps the default there; the field list is
+    pinned to that class by a test)."""
+
+    allow_early_stop: bool | None = None
+    min_steps: StepCount | None = None
+    settle_steps: StepCount | None = None
+    cooldown_steps: StepCount | None = None
+    max_requests: StepCount | None = None
+    confirmations: StepCount | None = None
+    on_unknown: Name | None = None
+    control_fraction: Unit | None = None
+    control_seed: Label | None = None
+    goal_event_types: (
+        Annotated[
+            list[Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{1,63}$")]],
+            Field(max_length=32),
+        ]
+        | None
+    ) = None
+    violation_limit: StepCount | None = None
+
+
+class JobSpec(AeriContract):
+    """The job file. Both reset modes share it (design X2 §1.3); only
+    ``human_assisted`` may leave out the reset policy, the reset
+    instruction, the reset folder and the reset attempts: written anyway,
+    they are ignored (``ignored``) and kept out of the plan.
+    ``termination`` holds ``TerminationConfig`` fields (their values are
+    checked there too)."""
+
+    schema_version: Literal["levi.aeri.job.v1"]
+    experiment: JobExperiment
+    policies: JobPolicies = Field(default_factory=JobPolicies)
+    task: JobTask = Field(default_factory=JobTask)
+    termination: JobTermination = Field(default_factory=JobTermination)
+    reset: JobReset = Field(default_factory=JobReset)
+    recording: JobRecording = Field(default_factory=JobRecording)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _empty(cls, value):
+        return _sections_present(
+            value,
+            ("experiment", "policies", "task", "termination", "reset", "recording"),
+        )
+
+    @property
+    def reset_strategy(self) -> str:
+        """The code name (aliases resolved)."""
+        name = self.reset.strategy
+        return RESET_STRATEGY_ALIASES.get(name, name)
+
+    @property
+    def human_assisted(self) -> bool:
+        return self.reset_strategy == "human_assisted"
+
+    @property
+    def forward_folder(self) -> str:
+        return self.recording.forward_folder or f"forward__{self.experiment.name}"
+
+    @property
+    def reset_folder(self) -> str:
+        return self.recording.reset_folder or f"reset__{self.experiment.name}"
+
+    @property
+    def human_scene_timeout_s(self) -> int:
+        found = self.reset.human_scene_timeout_s
+        return DEFAULT_HUMAN_SCENE_TIMEOUT_S if found is None else found
+
+    def ignored(self) -> dict[str, str]:
+        """``{dotted key: why}`` of what the file says and the run never
+        reads."""
+        out = {}
+        if self.human_assisted:
+            for key in HUMAN_IGNORED_KEYS:
+                section, name = key.split(".")
+                if getattr(getattr(self, section), name) is not None:
+                    out[key] = IGNORED_HUMAN
+        if (
+            self.reset.scene_check == "provider"
+            and self.reset.human_scene_timeout_s is not None
+        ):
+            out["reset.human_scene_timeout_s"] = IGNORED_PROVIDER
+        return out
+
+    @model_validator(mode="after")
+    def _consistent(self):
+        if (
+            self.reset_strategy == "single_reset_policy"
+            and self.reset.enabled is not False
+        ):
+            policy = self.policies.reset
+            if policy is None or policy.max_steps is None:
+                _bad(
+                    "policies.reset.max_steps is required by the reset strategy "
+                    "single_reset_policy (human_assisted runs no reset policy)"
+                )
+        if not self.human_assisted and self.forward_folder == self.reset_folder:
+            _bad("recording: forward and reset need their own folders")
+        if self.reset.scene_check == "operator_attested" and not self.human_assisted:
+            _bad(
+                "reset.scene_check operator_attested belongs to the strategy "
+                "human_assisted (a person attests the scene they put back)"
+            )
+        return self
+
+
+JOB_ADAPTER = TypeAdapter(JobSpec)
+
+
+def parse_job(value: Any) -> JobSpec:
+    """A decoded job file as ``JobSpec``; ``AeriError`` otherwise (the same
+    codes as the contracts: ``E_UNKNOWN_FIELD``, ``E_SCHEMA``,
+    ``E_INCONSISTENT``)."""
+    if not isinstance(value, dict):
+        raise AeriError("E_SCHEMA", "a job file is a mapping")
+    if value.get("schema_version") != JOB_SCHEMA:
+        raise AeriError("E_SCHEMA", f"schema_version must be {JOB_SCHEMA}")
+    try:
+        return JOB_ADAPTER.validate_python(value, strict=True)
+    except ValidationError as exc:
+        raise _translate(exc) from None
+
+
+def header_modes(header, plan: Mapping | None = None) -> dict:
+    """``{"reset_mode", "scene_check"}`` of a run: from its run header
+    (run_event minor >= 1), else from the job's plan (a minor-0 header
+    has neither field); None when neither says."""
+    plan = plan or {}
+    found = {
+        "reset_mode": getattr(header, "reset_mode", None),
+        "scene_check": getattr(header, "scene_check", None),
+    }
+    if found["reset_mode"] is None:
+        found["reset_mode"] = plan.get("reset_mode") or (plan.get("run") or {}).get(
+            "reset_strategy"
+        )
+    if found["scene_check"] is None:
+        found["scene_check"] = plan.get("scene_check") or (
+            "provider" if found["reset_mode"] else None
+        )
+    return found
 
 
 # --- the contracts as one validator each -------------------------------------------
@@ -1294,10 +1585,10 @@ def validate(value: Any, contract: str, *, specs=None):
             f"schema {str(value.get('schema'))[:60]!r} is not {SCHEMAS[name]}",
         )
     minor = value.get("minor")
-    if type(minor) is int and minor > MINOR:
+    if type(minor) is int and minor > MINORS[name]:
         raise AeriError(
             "E_SCHEMA_TOO_NEW",
-            f"minor {minor} is newer than {MINOR}, the newest this reader knows",
+            f"minor {minor} is newer than {MINORS[name]}, the newest this reader knows",
         )
     try:
         message = ADAPTERS[name].validate_python(value, strict=True)
@@ -1423,7 +1714,7 @@ def schema_documents() -> dict[str, dict]:
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "$id": schema_id,
             "x-levi-major": MAJOR,
-            "x-levi-minor": MINOR,
+            "x-levi-minor": MINORS[name],
             "x-levi-control-keys": list(CONTROL_KEYS)
             if name in CONTROL_SCANNED
             else [],
@@ -1442,6 +1733,17 @@ def schema_documents() -> dict[str, dict]:
         if name == "event":
             document["x-levi-registered-event-types"] = list(EVENT_TYPES)
         out[name] = {**document, **body}
+    # The job file (configuration, not a message): its snapshot is checked
+    # the same way.
+    out["job"] = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": JOB_SCHEMA,
+        "x-levi-major": MAJOR,
+        "x-levi-minor": JOB_MINOR,
+        "x-levi-reset-strategy-aliases": dict(sorted(RESET_STRATEGY_ALIASES.items())),
+        "x-levi-ignored-by-human-assisted": list(HUMAN_IGNORED_KEYS),
+        **JOB_ADAPTER.json_schema(by_alias=True),
+    }
     return out
 
 

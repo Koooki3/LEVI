@@ -740,7 +740,8 @@ def test_compatible_or_new_snapshots_pass_against_the_base(tmp_path, monkeypatch
     assert aeri.check_against_base(root, "main") == ([], [])
     empty = _repo(tmp_path / "x", {"README": "no contracts yet\n"})
     problems, notes = aeri.check_against_base(empty, "main")
-    assert problems == [] and all("new" in n for n in notes) and len(notes) == 5
+    assert problems == [] and all("new" in n for n in notes)
+    assert len(notes) == len(aeri.schema_documents())  # the five contracts, the job
 
 
 def test_an_unreadable_base_fails_instead_of_passing(tmp_path):

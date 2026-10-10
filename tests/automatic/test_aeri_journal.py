@@ -837,7 +837,7 @@ def test_a_whole_chained_last_line_failing_the_contract_is_corrupt_not_torn(
     lines = raw.split(b"\n")[:-1]
     event = json.loads(lines[-1])
     if edit == "minor":
-        event["minor"] = 1  # a newer writer
+        event["minor"] = aeri.MINORS["run_event"] + 1  # a newer writer
     elif edit == "unknown_field":
         event["added_in_a_later_minor"] = 1
     else:

@@ -1,6 +1,6 @@
 {
  "schema": "levi.aeri.run_event.v1",
- "minor": 1,
+ "minor": 2,
  "run_id": "r20261010-a",
  "emitted_wall_ns": 1791600000000000000,
  "sequence_no": 41,

@@ -63,9 +63,11 @@ from .orchestrator import ConfigError, Orchestrator, RunConfig
 from .recorder import MANIFEST, RolloutRecorder, SessionFiles
 from .termination import TerminationConfig
 
-JOB_SCHEMA = "levi.aeri.job.v1"
-MODES = ("shadow", "assisted", "autonomous")
-STRATEGY_ALIASES = {"single_policy": "single_reset_policy"}
+JOB_SCHEMA = aeri.JOB_SCHEMA
+MODES = aeri.EXECUTION_MODES
+# Configuration aliases of the reset strategies (design X2 §1.1); the plan,
+# the journal and the contracts carry the code names only.
+STRATEGY_ALIASES = aeri.RESET_STRATEGY_ALIASES
 FAKE = (
     Path(__file__).resolve().parents[2] / "integrations" / "fr3_automatic" / "fake.py"
 )
@@ -73,24 +75,6 @@ CONTRACTS = (
     Path(__file__).resolve().parents[2] / "docs" / "architecture" / "aeri" / "v1"
 )
 EXIT_OK, EXIT_PROBLEM, EXIT_REFUSED = 0, 1, 2
-
-_TOP = {
-    "schema_version",
-    "experiment",
-    "policies",
-    "task",
-    "termination",
-    "reset",
-    "recording",
-}
-_SECTIONS = {
-    "experiment": {"name", "episodes", "random_seed", "execution_mode"},
-    "policies": {"forward", "reset"},
-    "task": {"instruction", "reset_instruction", "initial_state_spec"},
-    "reset": {"strategy", "max_attempts", "on_unknown", "enabled"},
-    "recording": {"rollout_root", "group", "forward_folder", "reset_folder"},
-    "termination": set(TerminationConfig.__dataclass_fields__),
-}
 
 
 class JobError(ValueError):
@@ -100,120 +84,142 @@ class JobError(ValueError):
 # --- the job file ---------------------------------------------------------------------------
 
 
-def _section(job, name):
-    value = job.get(name) or {}
-    if not isinstance(value, dict):
-        raise JobError(f"{name}: a mapping")
-    unknown = sorted(set(value) - _SECTIONS[name])
-    if unknown:
-        raise JobError(f"{name}: unknown key(s) {', '.join(unknown)}")
-    return value
+# RunConfig fields a human_assisted run never reads: left out of its plan, so
+# the digest does not change with them (design X2 §1.3, G1).
+RESET_POLICY_FIELDS = (
+    "reset_folder",
+    "reset_max_steps",
+    "reset_enabled",
+    "max_reset_attempts",
+    "on_scene_unknown",
+)
+
+
+def _relative(path: Path, value: str) -> Path:
+    found = Path(value)
+    return found if found.is_absolute() else path.parent / found
 
 
 def load_job(path) -> dict:
-    """The job as ``{"config": RunConfig, "contract", "seed", "mode",
-    "recording", "texts", "plan_sha256"}``; ``JobError`` says what is
-    wrong."""
+    """The job as ``{"config": RunConfig, "spec": JobSpec, "contract",
+    "seed", "mode", "group", "rollout_root", "texts", "plan",
+    "plan_sha256", "ignored", "warnings"}``; ``JobError`` says what is
+    wrong.
+
+    The plan (and its digest) holds what the run reads, with defaults
+    filled in: the rollout root resolved (``realpath``, relative to the job
+    file), the Initial State Contract with the sha256 of its file's bytes,
+    and none of the keys the reset mode ignores (``ignored`` lists those)."""
     path = Path(path)
     try:
-        job = sa.parse_document(path.read_text())
+        raw = sa.parse_document(path.read_text())
     except OSError as exc:
         raise JobError(f"{path}: {exc.strerror or exc}") from None
     except sa.ContractError as exc:
         raise JobError(f"{path}: {exc}") from None
-    if job.get("schema_version") != JOB_SCHEMA:
-        raise JobError(f"schema_version must be {JOB_SCHEMA}")
-    unknown = sorted(set(job) - _TOP)
-    if unknown:
-        raise JobError(f"unknown section(s) {', '.join(unknown)}")
-    experiment = _section(job, "experiment")
-    task = _section(job, "task")
-    reset = _section(job, "reset")
-    recording = _section(job, "recording")
-    termination = _section(job, "termination")
-    policies = _section(job, "policies")
-    run_id = experiment.get("name")
-    if not isinstance(run_id, str) or not sa.LABEL.match(run_id) or "." in run_id:
-        raise JobError("experiment.name: an id (letters, digits, _ : -), no dots")
-    mode = experiment.get("execution_mode", "shadow")
-    if mode not in MODES:
-        raise JobError(f"experiment.execution_mode: one of {', '.join(MODES)}")
-    seed = experiment.get("random_seed", 0)
-    if type(seed) is not int:
-        raise JobError("experiment.random_seed: a whole number")
-    contract = None
-    if task.get("initial_state_spec") is not None:
-        spec = Path(str(task["initial_state_spec"]))
-        spec = spec if spec.is_absolute() else path.parent / spec
+    try:
+        spec = aeri.parse_job(raw)
+    except aeri.AeriError as exc:
+        raise JobError(exc.detail) from None
+    run_id = spec.experiment.name
+    contract, contract_sha = None, None
+    if spec.task.initial_state_spec is not None:
+        where = _relative(path, spec.task.initial_state_spec)
         try:
-            contract = sa.load_contract(spec.read_text())
+            data = where.read_bytes()
+            contract = sa.load_contract(data.decode("utf-8"))
         except OSError as exc:
             raise JobError(f"task.initial_state_spec: {exc.strerror or exc}") from None
+        except UnicodeDecodeError:
+            raise JobError("task.initial_state_spec: not UTF-8 text") from None
         except sa.ContractError as exc:
             raise JobError(f"task.initial_state_spec: {exc}") from None
+        contract_sha = hashlib.sha256(data).hexdigest()
+    human = spec.human_assisted
     steps = {}
-    for role in ("forward", "reset"):
-        value = policies.get(role) or {}
-        if not isinstance(value, dict) or set(value) - {"max_steps"}:
-            raise JobError(f"policies.{role}: only max_steps is read in v1")
-        if "max_steps" in value:
-            steps[f"{role}_max_steps"] = value["max_steps"]
-    group = recording.get("group", "aeri")
-    folders = {
-        "forward_folder": recording.get("forward_folder", f"forward__{run_id}"),
-        "reset_folder": recording.get("reset_folder", f"reset__{run_id}"),
-    }
-    for key, value in [("group", group), *folders.items()]:
-        if not isinstance(value, str) or not sa.LABEL.match(value):
-            raise JobError(f"recording.{key}: a folder name")
-    if folders["forward_folder"] == folders["reset_folder"]:
-        raise JobError("recording: forward and reset need their own folders")
-    strategy = reset.get("strategy", "single_reset_policy")
+    if spec.policies.forward and spec.policies.forward.max_steps is not None:
+        steps["forward_max_steps"] = spec.policies.forward.max_steps
+    if not human and spec.policies.reset and spec.policies.reset.max_steps is not None:
+        steps["reset_max_steps"] = spec.policies.reset.max_steps
+    folders = {"forward_folder": spec.forward_folder}
+    reset = {}
+    if not human:
+        folders["reset_folder"] = spec.reset_folder
+        reset = {
+            key: value
+            for key, value in (
+                ("reset_enabled", spec.reset.enabled),
+                ("max_reset_attempts", spec.reset.max_attempts),
+                ("on_scene_unknown", spec.reset.on_unknown),
+            )
+            if value is not None
+        }
+    attested = spec.reset.scene_check == "operator_attested"
     try:
-        term = TerminationConfig(**termination)
+        given = spec.termination.model_dump(exclude_none=True)
+        if "goal_event_types" in given:
+            given["goal_event_types"] = tuple(given["goal_event_types"])
+        term = TerminationConfig(**given)
         config = RunConfig(
             run_id=run_id,
             plan_sha256="0" * 64,
-            episodes=experiment.get("episodes", 1),
-            reset_strategy=STRATEGY_ALIASES.get(strategy, strategy),
-            reset_enabled=reset.get("enabled", True),
-            max_reset_attempts=reset.get("max_attempts", 1),
-            on_scene_unknown=reset.get("on_unknown", "reset"),
+            episodes=spec.experiment.episodes,
+            reset_strategy=spec.reset_strategy,
+            scene_check=spec.reset.scene_check,
+            human_scene_timeout_ns=spec.human_scene_timeout_s * 1_000_000_000,
             initial_state=contract,
             termination=term,
             **folders,
+            **reset,
             **steps,
         )
     except (ConfigError, TypeError, ValueError) as exc:
         raise JobError(str(exc)) from None
-    texts = {
-        "forward": str(task.get("instruction") or folders["forward_folder"]),
-        "reset": str(task.get("reset_instruction") or folders["reset_folder"]),
-    }
+    texts = {"forward": spec.task.instruction or spec.forward_folder}
+    if not human:
+        texts["reset"] = spec.task.reset_instruction or spec.reset_folder
+    root = spec.recording.rollout_root
+    root = os.path.realpath(_relative(path, root)) if root is not None else None
+    run = _plain(config)
+    if human:
+        for name in RESET_POLICY_FIELDS:
+            run.pop(name)
+    if not attested:
+        run.pop("human_scene_timeout_ns")
+    described = None
+    if contract is not None:
+        described = {**contract.describe(), "sha256": contract_sha}
     plan = {
         "schema_version": JOB_SCHEMA,
-        "run": _plain(config),
-        "contract": contract.describe() if contract else None,
-        "mode": mode,
-        "seed": seed,
-        "recording": {"group": group, **folders},
+        "run": run,
+        "contract": described,
+        "mode": spec.experiment.execution_mode,
+        "seed": spec.experiment.random_seed,
+        "reset_mode": spec.reset_strategy,
+        "scene_check": spec.reset.scene_check,
+        "recording": {
+            "group": spec.recording.group,
+            "rollout_root": root,
+            **folders,
+        },
         "texts": texts,
     }
     digest = hashlib.sha256(
         json.dumps(plan, sort_keys=True, default=str).encode()
     ).hexdigest()
     config = RunConfig(**{**_fields(config), "plan_sha256": digest})
-    root = recording.get("rollout_root")
     return {
         "config": config,
+        "spec": spec,
         "contract": contract,
-        "seed": seed,
-        "mode": mode,
-        "group": group,
-        "rollout_root": str(root) if root is not None else None,
+        "seed": spec.experiment.random_seed,
+        "mode": spec.experiment.execution_mode,
+        "group": spec.recording.group,
+        "rollout_root": root,
         "texts": texts,
         "plan": plan,
         "plan_sha256": digest,
+        "ignored": spec.ignored(),
         "warnings": _warnings(config, contract),
     }
 
@@ -440,7 +446,7 @@ def cmd_doctor(args) -> int:
     check("python", sys.version_info >= (3, 11), sys.version.split()[0])
     missing = [
         name
-        for name in aeri.SCHEMAS
+        for name in (*aeri.SCHEMAS, *aeri.CONFIG_SCHEMAS)
         if not (CONTRACTS / f"{name}.schema.json").is_file()
     ]
     check(
@@ -507,13 +513,25 @@ def cmd_validate(args) -> int:
         message = "; ".join(problems)
         _print({"ok": False, "error": message}, args.json, f"refused: {message}")
         return EXIT_REFUSED
-    plan = {**job["plan"], "plan_sha256": job["plan_sha256"]}
+    # ``ignored`` is shown with the plan, never part of its digest.
+    plan = {
+        **job["plan"],
+        "plan_sha256": job["plan_sha256"],
+        "ignored": job["ignored"],
+    }
     text = (
-        f"valid: run {job['config'].run_id}, {job['config'].episodes} episodes, "
-        f"reset strategy {job['config'].reset_strategy}, contract "
-        f"{job['contract'].key if job['contract'] else 'none (no scene is ever ready)'}, "
-        f"plan {job['plan_sha256'][:12]}"
-    ) + "".join(f"\nwarning: {w}" for w in job["warnings"])
+        (
+            f"valid: run {job['config'].run_id}, {job['config'].episodes} episodes, "
+            f"reset strategy {job['config'].reset_strategy}, scene check "
+            f"{job['config'].scene_check}, contract "
+            f"{job['contract'].key if job['contract'] else 'none (no scene is ever ready)'}, "
+            f"plan {job['plan_sha256'][:12]}"
+        )
+        + "".join(f"\nwarning: {w}" for w in job["warnings"])
+        + "".join(
+            f"\nignored: {k} ({why})" for k, why in sorted(job["ignored"].items())
+        )
+    )
     _print({"ok": True, "plan": plan, "warnings": job["warnings"]}, args.json, text)
     return EXIT_OK
 

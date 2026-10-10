@@ -1,0 +1,493 @@
+{
+  "$defs": {
+    "JobExperiment": {
+      "additionalProperties": false,
+      "properties": {
+        "episodes": {
+          "default": 1,
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Episodes",
+          "type": "integer"
+        },
+        "execution_mode": {
+          "default": "shadow",
+          "enum": [
+            "shadow",
+            "assisted",
+            "autonomous"
+          ],
+          "title": "Execution Mode",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "random_seed": {
+          "default": 0,
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775807,
+          "title": "Random Seed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "JobExperiment",
+      "type": "object"
+    },
+    "JobPolicies": {
+      "additionalProperties": false,
+      "properties": {
+        "forward": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JobPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JobPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "JobPolicies",
+      "type": "object"
+    },
+    "JobPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "max_steps": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Steps"
+        }
+      },
+      "title": "JobPolicy",
+      "type": "object"
+    },
+    "JobRecording": {
+      "additionalProperties": false,
+      "properties": {
+        "forward_folder": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Forward Folder"
+        },
+        "group": {
+          "default": "aeri",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Group",
+          "type": "string"
+        },
+        "reset_folder": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reset Folder"
+        },
+        "rollout_root": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rollout Root"
+        }
+      },
+      "title": "JobRecording",
+      "type": "object"
+    },
+    "JobReset": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enabled"
+        },
+        "human_scene_timeout_s": {
+          "anyOf": [
+            {
+              "maximum": 86400,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Human Scene Timeout S"
+        },
+        "max_attempts": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Attempts"
+        },
+        "on_unknown": {
+          "anyOf": [
+            {
+              "enum": [
+                "reset",
+                "wait_human"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Unknown"
+        },
+        "scene_check": {
+          "default": "provider",
+          "enum": [
+            "provider",
+            "operator_attested"
+          ],
+          "title": "Scene Check",
+          "type": "string"
+        },
+        "strategy": {
+          "default": "single_reset_policy",
+          "enum": [
+            "single_reset_policy",
+            "human_assisted",
+            "scripted_safe_reset",
+            "atomic_skill_sequence",
+            "single_policy",
+            "scripted_safe",
+            "atomic_skills"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        }
+      },
+      "title": "JobReset",
+      "type": "object"
+    },
+    "JobTask": {
+      "additionalProperties": false,
+      "properties": {
+        "initial_state_spec": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Initial State Spec"
+        },
+        "instruction": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Instruction"
+        },
+        "reset_instruction": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reset Instruction"
+        }
+      },
+      "title": "JobTask",
+      "type": "object"
+    },
+    "JobTermination": {
+      "additionalProperties": false,
+      "description": "``levi.automatic.termination.TerminationConfig`` as the job file\nwrites it (a key left out keeps the default there; the field list is\npinned to that class by a test).",
+      "properties": {
+        "allow_early_stop": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allow Early Stop"
+        },
+        "confirmations": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confirmations"
+        },
+        "control_fraction": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Control Fraction"
+        },
+        "control_seed": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Control Seed"
+        },
+        "cooldown_steps": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cooldown Steps"
+        },
+        "goal_event_types": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                "type": "string"
+              },
+              "maxItems": 32,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Goal Event Types"
+        },
+        "max_requests": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Requests"
+        },
+        "min_steps": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Steps"
+        },
+        "on_unknown": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Unknown"
+        },
+        "settle_steps": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Settle Steps"
+        },
+        "violation_limit": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Violation Limit"
+        }
+      },
+      "title": "JobTermination",
+      "type": "object"
+    }
+  },
+  "$id": "levi.aeri.job.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The job file. Both reset modes share it (design X2 §1.3); only\n``human_assisted`` may leave out the reset policy, the reset\ninstruction, the reset folder and the reset attempts: written anyway,\nthey are ignored (``ignored``) and kept out of the plan.\n``termination`` holds ``TerminationConfig`` fields (their values are\nchecked there too).",
+  "properties": {
+    "experiment": {
+      "$ref": "#/$defs/JobExperiment"
+    },
+    "policies": {
+      "$ref": "#/$defs/JobPolicies"
+    },
+    "recording": {
+      "$ref": "#/$defs/JobRecording"
+    },
+    "reset": {
+      "$ref": "#/$defs/JobReset"
+    },
+    "schema_version": {
+      "const": "levi.aeri.job.v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "task": {
+      "$ref": "#/$defs/JobTask"
+    },
+    "termination": {
+      "$ref": "#/$defs/JobTermination"
+    }
+  },
+  "required": [
+    "schema_version",
+    "experiment"
+  ],
+  "title": "JobSpec",
+  "type": "object",
+  "x-levi-ignored-by-human-assisted": [
+    "policies.reset",
+    "task.reset_instruction",
+    "recording.reset_folder",
+    "reset.enabled",
+    "reset.max_attempts",
+    "reset.on_unknown"
+  ],
+  "x-levi-major": 1,
+  "x-levi-minor": 0,
+  "x-levi-reset-strategy-aliases": {
+    "atomic_skills": "atomic_skill_sequence",
+    "scripted_safe": "scripted_safe_reset",
+    "single_policy": "single_reset_policy"
+  }
+}

@@ -399,6 +399,19 @@ def run_event(record="prepared", **over):
     return base
 
 
+def run_header_minor_1(**header):
+    """A run header of run_event minor 1 (reset mode and scene check)."""
+    line = run_event("run_header", minor=1)
+    line["header"] = {
+        **line["header"],
+        "contracts": [{"schema": "levi.aeri.run_event.v1", "minor": 1}],
+        "reset_mode": "human_assisted",
+        "scene_check": "operator_attested",
+        **header,
+    }
+    return line
+
+
 # --- committed fixtures ---------------------------------------------------------------
 
 
@@ -463,7 +476,11 @@ def _common_invalid(name, valid, int_field, text_field, list_field, list_item):
             "E_SCHEMA",
             _text({**valid, "schema": f"levi.aeri.{name}.v2"}),
         ),
-        ("minor-too-new", "E_SCHEMA_TOO_NEW", _text({**valid, "minor": 1})),
+        (
+            "minor-too-new",
+            "E_SCHEMA_TOO_NEW",
+            _text({**valid, "minor": aeri.MINORS[name] + 1}),
+        ),
         ("string-too-long", "E_SCHEMA", _text(big)),
         ("list-too-long", "E_SCHEMA", _text(long_list)),
         ("not-json", "E_JSON", _text(valid)[:-3]),
@@ -769,7 +786,10 @@ def fixture_cases() -> dict[str, dict[str, list]]:
                 "committed",
                 "note",
             )
-        ],
+        ]
+        # run_event minor 1 (T-CL-06): the header names the reset mode and
+        # the scene check; the minor-0 header above has neither.
+        + [("run-header-minor-1", _text(run_header_minor_1()))],
         "invalid": _common_invalid(
             "run_event", valid, "control_epoch", "transaction_id", "evidence_ids", "j-1"
         )
@@ -777,6 +797,17 @@ def fixture_cases() -> dict[str, dict[str, list]]:
             # The run event is C's own record: not scanned for control keys,
             # but an undeclared key is still refused.
             ("robot-stop-key", "E_UNKNOWN_FIELD", _text({**valid, "robot_stop": True})),
+            (
+                # A minor-0 writer cannot know the fields of minor 1.
+                "header-modes-in-minor-0",
+                "E_INCONSISTENT",
+                _text({**run_header_minor_1(), "minor": 0}),
+            ),
+            (
+                "header-reset-mode-alias",
+                "E_SCHEMA",
+                _text(run_header_minor_1(reset_mode="single_policy")),
+            ),
             (
                 "prepared-without-action",
                 "E_INCONSISTENT",
