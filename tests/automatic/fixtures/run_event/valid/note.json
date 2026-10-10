@@ -1,0 +1,28 @@
+{
+ "schema": "levi.aeri.run_event.v1",
+ "minor": 0,
+ "run_id": "r20261010-a",
+ "emitted_wall_ns": 1791600000000000000,
+ "sequence_no": 44,
+ "record": "note",
+ "transaction_id": null,
+ "authority": {
+  "principal_kind": "orchestrator",
+  "principal_id": "orch-1",
+  "session_id": "s-1",
+  "process": {
+   "pid": 4242,
+   "start_ticks": 123456,
+   "boot_id": "0f0e0d0c"
+  },
+  "command_id": null
+ },
+ "control_epoch": 12,
+ "mono_ns": 9000000000,
+ "clock_domain": "host-mono:0f0e0d0c-0b0a-4908-8706-050403020100",
+ "prev_sha256": "abababababababababababababababababababababababababababababababab",
+ "note": {
+  "code": "judgement_dropped_stale",
+  "detail": "j-7 after expiry"
+ }
+}

@@ -1,0 +1,13 @@
+{
+ "schema": "levi.aeri.runtime.v1",
+ "minor": 0,
+ "run_id": "r20261010-a",
+ "emitted_wall_ns": 1791600000000000000,
+ "kind": "admission_rejected",
+ "workload_id": "w-2",
+ "code": "policy_priority",
+ "retryable": true,
+ "retry_after_ms": 250,
+ "legacy_code": "policy_inferring",
+ "detail": "the policy is inferring"
+}

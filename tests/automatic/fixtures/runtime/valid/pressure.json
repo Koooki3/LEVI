@@ -1,0 +1,17 @@
+{
+ "schema": "levi.aeri.runtime.v1",
+ "minor": 0,
+ "run_id": "r20261010-a",
+ "emitted_wall_ns": 1791600000000000000,
+ "kind": "pressure",
+ "observed_ns": 8000000000,
+ "clock_domain": "host-mono:0f0e0d0c-0b0a-4908-8706-050403020100",
+ "source": "fake",
+ "free_mib": 9000,
+ "policy_mib": null,
+ "vllm_state": "asleep",
+ "gate_open": true,
+ "gate_code": null,
+ "policy_server_seen": false,
+ "age_ms": 120
+}

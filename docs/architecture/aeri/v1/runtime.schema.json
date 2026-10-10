@@ -1,0 +1,1280 @@
+{
+  "$defs": {
+    "AdmissionRejected": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "policy_priority",
+            "episode_imminent",
+            "unknown_client",
+            "busy",
+            "no_memory",
+            "deadline_infeasible",
+            "cold_start_forbidden",
+            "evaluation_active",
+            "standby_settling",
+            "shutting_down",
+            "broker_unavailable"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "default": "",
+          "maxLength": 300,
+          "title": "Detail",
+          "type": "string"
+        },
+        "emitted_wall_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Emitted Wall Ns",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "admission_rejected",
+          "title": "Kind",
+          "type": "string"
+        },
+        "legacy_code": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Legacy Code"
+        },
+        "minor": {
+          "maximum": 0,
+          "minimum": 0,
+          "title": "Minor",
+          "type": "integer"
+        },
+        "retry_after_ms": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry After Ms"
+        },
+        "retryable": {
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema": {
+          "const": "levi.aeri.runtime.v1",
+          "title": "Schema",
+          "type": "string"
+        },
+        "workload_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Workload Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "minor",
+        "run_id",
+        "emitted_wall_ns",
+        "schema",
+        "kind",
+        "workload_id",
+        "code",
+        "retryable"
+      ],
+      "title": "AdmissionRejected",
+      "type": "object"
+    },
+    "Checkpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Config",
+          "type": "string"
+        },
+        "dir_name": {
+          "pattern": "^[^/\\x00]{1,200}$",
+          "title": "Dir Name",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        }
+      },
+      "required": [
+        "config",
+        "dir_name"
+      ],
+      "title": "Checkpoint",
+      "type": "object"
+    },
+    "ChunkRequest": {
+      "additionalProperties": false,
+      "description": "The observation itself travels out of band; only its step is here.\nThe serving path has no hard prefix option: real-time chunking is soft\nguidance.",
+      "properties": {
+        "action_start_index": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Action Start Index",
+          "type": "integer"
+        },
+        "clock_domain": {
+          "pattern": "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9._-]{1,128}$",
+          "title": "Clock Domain",
+          "type": "string"
+        },
+        "committed_prefix_steps": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Committed Prefix Steps",
+          "type": "integer"
+        },
+        "deadline": {
+          "$ref": "#/$defs/Deadline"
+        },
+        "emitted_wall_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Emitted Wall Ns",
+          "type": "integer"
+        },
+        "episode_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\\.(?:forward|reset)\\.[0-9]{4,6}$",
+          "title": "Episode Id",
+          "type": "string"
+        },
+        "handle_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Handle Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "chunk_request",
+          "title": "Kind",
+          "type": "string"
+        },
+        "minor": {
+          "maximum": 0,
+          "minimum": 0,
+          "title": "Minor",
+          "type": "integer"
+        },
+        "obs_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Obs Ns",
+          "type": "integer"
+        },
+        "obs_step": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Obs Step",
+          "type": "integer"
+        },
+        "policy_epoch": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Policy Epoch",
+          "type": "integer"
+        },
+        "prefix_conditioning": {
+          "enum": [
+            "none",
+            "soft_guidance"
+          ],
+          "title": "Prefix Conditioning",
+          "type": "string"
+        },
+        "previous_chunk_ref": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Previous Chunk Ref"
+        },
+        "request_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema": {
+          "const": "levi.aeri.runtime.v1",
+          "title": "Schema",
+          "type": "string"
+        }
+      },
+      "required": [
+        "minor",
+        "run_id",
+        "emitted_wall_ns",
+        "schema",
+        "kind",
+        "request_id",
+        "episode_id",
+        "handle_id",
+        "policy_epoch",
+        "obs_step",
+        "obs_ns",
+        "clock_domain",
+        "action_start_index",
+        "committed_prefix_steps",
+        "prefix_conditioning",
+        "deadline"
+      ],
+      "title": "ChunkRequest",
+      "type": "object"
+    },
+    "ChunkResponse": {
+      "additionalProperties": false,
+      "description": "Does not promise that a prefix equals the actions already executed:\nC uses ``valid_from_action_index`` only, and clamps every action itself.",
+      "properties": {
+        "action_contract": {
+          "pattern": "^[a-z0-9][a-z0-9_.-]{0,62}@[0-9]{1,6}$",
+          "title": "Action Contract",
+          "type": "string"
+        },
+        "actions": {
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "type": "array"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "title": "Actions",
+          "type": "array"
+        },
+        "clock_domain": {
+          "pattern": "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9._-]{1,128}$",
+          "title": "Clock Domain",
+          "type": "string"
+        },
+        "emitted_wall_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Emitted Wall Ns",
+          "type": "integer"
+        },
+        "episode_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\\.(?:forward|reset)\\.[0-9]{4,6}$",
+          "title": "Episode Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "chunk_response",
+          "title": "Kind",
+          "type": "string"
+        },
+        "minor": {
+          "maximum": 0,
+          "minimum": 0,
+          "title": "Minor",
+          "type": "integer"
+        },
+        "model_version": {
+          "$ref": "#/$defs/ModelVersion"
+        },
+        "policy_epoch": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Policy Epoch",
+          "type": "integer"
+        },
+        "prefix_conditioning_applied": {
+          "enum": [
+            "none",
+            "soft_guidance"
+          ],
+          "title": "Prefix Conditioning Applied",
+          "type": "string"
+        },
+        "received_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Received Ns",
+          "type": "integer"
+        },
+        "request_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema": {
+          "const": "levi.aeri.runtime.v1",
+          "title": "Schema",
+          "type": "string"
+        },
+        "timing": {
+          "$ref": "#/$defs/Timing"
+        },
+        "valid_from_action_index": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Valid From Action Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "minor",
+        "run_id",
+        "emitted_wall_ns",
+        "schema",
+        "kind",
+        "request_id",
+        "episode_id",
+        "policy_epoch",
+        "action_contract",
+        "actions",
+        "valid_from_action_index",
+        "prefix_conditioning_applied",
+        "model_version",
+        "timing",
+        "received_ns",
+        "clock_domain"
+      ],
+      "title": "ChunkResponse",
+      "type": "object"
+    },
+    "Deadline": {
+      "additionalProperties": false,
+      "properties": {
+        "budget_ms": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Budget Ms",
+          "type": "integer"
+        },
+        "clock_domain": {
+          "pattern": "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9._-]{1,128}$",
+          "title": "Clock Domain",
+          "type": "string"
+        },
+        "due_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Due Ns",
+          "type": "integer"
+        },
+        "hardness": {
+          "enum": [
+            "hard",
+            "soft"
+          ],
+          "title": "Hardness",
+          "type": "string"
+        }
+      },
+      "required": [
+        "due_ns",
+        "clock_domain",
+        "budget_ms",
+        "hardness"
+      ],
+      "title": "Deadline",
+      "type": "object"
+    },
+    "Endpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "enum": [
+            "127.0.0.1",
+            "::1",
+            "localhost"
+          ],
+          "title": "Host",
+          "type": "string"
+        },
+        "port": {
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "host",
+        "port"
+      ],
+      "title": "Endpoint",
+      "type": "object"
+    },
+    "ModelVersion": {
+      "additionalProperties": false,
+      "properties": {
+        "checkpoint_dir_name": {
+          "pattern": "^[^/\\x00]{1,200}$",
+          "title": "Checkpoint Dir Name",
+          "type": "string"
+        },
+        "config": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Config",
+          "type": "string"
+        }
+      },
+      "required": [
+        "config",
+        "checkpoint_dir_name"
+      ],
+      "title": "ModelVersion",
+      "type": "object"
+    },
+    "PolicyHandle": {
+      "additionalProperties": false,
+      "properties": {
+        "action_contract": {
+          "pattern": "^[a-z0-9][a-z0-9_.-]{0,62}@[0-9]{1,6}$",
+          "title": "Action Contract",
+          "type": "string"
+        },
+        "action_dims": {
+          "maximum": 64,
+          "minimum": 1,
+          "title": "Action Dims",
+          "type": "integer"
+        },
+        "action_horizon": {
+          "maximum": 64,
+          "minimum": 1,
+          "title": "Action Horizon",
+          "type": "integer"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/Checkpoint"
+        },
+        "emitted_wall_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Emitted Wall Ns",
+          "type": "integer"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/Endpoint"
+        },
+        "handle_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Handle Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "policy_handle",
+          "title": "Kind",
+          "type": "string"
+        },
+        "minor": {
+          "maximum": 0,
+          "minimum": 0,
+          "title": "Minor",
+          "type": "integer"
+        },
+        "policy_epoch": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Policy Epoch",
+          "type": "integer"
+        },
+        "role": {
+          "enum": [
+            "forward",
+            "reset"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema": {
+          "const": "levi.aeri.runtime.v1",
+          "title": "Schema",
+          "type": "string"
+        }
+      },
+      "required": [
+        "minor",
+        "run_id",
+        "emitted_wall_ns",
+        "schema",
+        "kind",
+        "handle_id",
+        "role",
+        "checkpoint",
+        "action_contract",
+        "action_dims",
+        "action_horizon",
+        "endpoint",
+        "policy_epoch"
+      ],
+      "title": "PolicyHandle",
+      "type": "object"
+    },
+    "QuiesceAck": {
+      "additionalProperties": false,
+      "properties": {
+        "emitted_wall_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Emitted Wall Ns",
+          "type": "integer"
+        },
+        "fenced_epoch": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Fenced Epoch",
+          "type": "integer"
+        },
+        "handle_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Handle Id",
+          "type": "string"
+        },
+        "inflight_cancelled": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Inflight Cancelled",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "quiesce_ack",
+          "title": "Kind",
+          "type": "string"
+        },
+        "minor": {
+          "maximum": 0,
+          "minimum": 0,
+          "title": "Minor",
+          "type": "integer"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema": {
+          "const": "levi.aeri.runtime.v1",
+          "title": "Schema",
+          "type": "string"
+        }
+      },
+      "required": [
+        "minor",
+        "run_id",
+        "emitted_wall_ns",
+        "schema",
+        "kind",
+        "handle_id",
+        "fenced_epoch",
+        "inflight_cancelled",
+        "ok"
+      ],
+      "title": "QuiesceAck",
+      "type": "object"
+    },
+    "ResourceLease": {
+      "additionalProperties": false,
+      "description": "Renewal or re-grant raises ``lease_epoch``; results under an older\nepoch, or after expiry or revocation, are void.",
+      "properties": {
+        "clock_domain": {
+          "pattern": "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9._-]{1,128}$",
+          "title": "Clock Domain",
+          "type": "string"
+        },
+        "device": {
+          "enum": [
+            "gpu",
+            "cpu"
+          ],
+          "title": "Device",
+          "type": "string"
+        },
+        "emitted_wall_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Emitted Wall Ns",
+          "type": "integer"
+        },
+        "expires_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Expires Ns",
+          "type": "integer"
+        },
+        "granted_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Granted Ns",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "lease",
+          "title": "Kind",
+          "type": "string"
+        },
+        "lease_epoch": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Lease Epoch",
+          "type": "integer"
+        },
+        "lease_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Lease Id",
+          "type": "string"
+        },
+        "memory_reserved_mib": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Reserved Mib"
+        },
+        "minor": {
+          "maximum": 0,
+          "minimum": 0,
+          "title": "Minor",
+          "type": "integer"
+        },
+        "revocable": {
+          "title": "Revocable",
+          "type": "boolean"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema": {
+          "const": "levi.aeri.runtime.v1",
+          "title": "Schema",
+          "type": "string"
+        },
+        "workload_class": {
+          "enum": [
+            "policy_realtime",
+            "judge_critical",
+            "vision_light",
+            "background_annotation",
+            "batch"
+          ],
+          "title": "Workload Class",
+          "type": "string"
+        },
+        "workload_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Workload Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "minor",
+        "run_id",
+        "emitted_wall_ns",
+        "schema",
+        "kind",
+        "lease_id",
+        "lease_epoch",
+        "workload_id",
+        "workload_class",
+        "device",
+        "granted_ns",
+        "expires_ns",
+        "clock_domain",
+        "revocable"
+      ],
+      "title": "ResourceLease",
+      "type": "object"
+    },
+    "ResourcePressure": {
+      "additionalProperties": false,
+      "properties": {
+        "age_ms": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Age Ms",
+          "type": "integer"
+        },
+        "clock_domain": {
+          "pattern": "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9._-]{1,128}$",
+          "title": "Clock Domain",
+          "type": "string"
+        },
+        "emitted_wall_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Emitted Wall Ns",
+          "type": "integer"
+        },
+        "free_mib": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Free Mib"
+        },
+        "gate_code": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gate Code"
+        },
+        "gate_open": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gate Open"
+        },
+        "kind": {
+          "const": "pressure",
+          "title": "Kind",
+          "type": "string"
+        },
+        "minor": {
+          "maximum": 0,
+          "minimum": 0,
+          "title": "Minor",
+          "type": "integer"
+        },
+        "observed_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Observed Ns",
+          "type": "integer"
+        },
+        "policy_mib": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Policy Mib"
+        },
+        "policy_server_seen": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Policy Server Seen"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema": {
+          "const": "levi.aeri.runtime.v1",
+          "title": "Schema",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "c4",
+            "broker",
+            "fake"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "vllm_state": {
+          "enum": [
+            "absent",
+            "starting",
+            "awake",
+            "asleep",
+            "unknown"
+          ],
+          "title": "Vllm State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "minor",
+        "run_id",
+        "emitted_wall_ns",
+        "schema",
+        "kind",
+        "observed_ns",
+        "clock_domain",
+        "source",
+        "vllm_state",
+        "age_ms"
+      ],
+      "title": "ResourcePressure",
+      "type": "object"
+    },
+    "RuntimeUnavailable": {
+      "additionalProperties": false,
+      "properties": {
+        "clock_domain": {
+          "pattern": "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9._-]{1,128}$",
+          "title": "Clock Domain",
+          "type": "string"
+        },
+        "code": {
+          "enum": [
+            "gate_closed",
+            "busy",
+            "admission_rejected",
+            "cold_start",
+            "no_room",
+            "shutting_down",
+            "timeout",
+            "model_error",
+            "invalid_answer",
+            "provider_error",
+            "cancelled",
+            "stale",
+            "contract_violation",
+            "not_supported",
+            "epoch_fenced",
+            "server_error"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "default": "",
+          "maxLength": 300,
+          "title": "Detail",
+          "type": "string"
+        },
+        "emitted_wall_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Emitted Wall Ns",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "unavailable",
+          "title": "Kind",
+          "type": "string"
+        },
+        "minor": {
+          "maximum": 0,
+          "minimum": 0,
+          "title": "Minor",
+          "type": "integer"
+        },
+        "produced_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Produced Ns",
+          "type": "integer"
+        },
+        "request_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "retry_after_ms": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry After Ms"
+        },
+        "retryable": {
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema": {
+          "const": "levi.aeri.runtime.v1",
+          "title": "Schema",
+          "type": "string"
+        }
+      },
+      "required": [
+        "minor",
+        "run_id",
+        "emitted_wall_ns",
+        "kind",
+        "request_id",
+        "retryable",
+        "produced_ns",
+        "clock_domain",
+        "schema",
+        "code"
+      ],
+      "title": "RuntimeUnavailable",
+      "type": "object"
+    },
+    "Timing": {
+      "additionalProperties": false,
+      "properties": {
+        "infer_ms": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Infer Ms"
+        },
+        "queued_ms": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Queued Ms"
+        },
+        "total_ms": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Total Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total_ms"
+      ],
+      "title": "Timing",
+      "type": "object"
+    },
+    "WorkloadSpec": {
+      "additionalProperties": false,
+      "description": "No free priority number: the priority follows from the class.",
+      "properties": {
+        "device_preference": {
+          "enum": [
+            "gpu",
+            "cpu",
+            "any"
+          ],
+          "title": "Device Preference",
+          "type": "string"
+        },
+        "duration_p99_ms": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration P99 Ms"
+        },
+        "duration_source": {
+          "enum": [
+            "measured",
+            "declared",
+            "unknown"
+          ],
+          "title": "Duration Source",
+          "type": "string"
+        },
+        "emitted_wall_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Emitted Wall Ns",
+          "type": "integer"
+        },
+        "episode_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\\.(?:forward|reset)\\.[0-9]{4,6}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Episode Id"
+        },
+        "kind": {
+          "const": "workload_spec",
+          "title": "Kind",
+          "type": "string"
+        },
+        "memory_estimate_mib": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Estimate Mib"
+        },
+        "memory_source": {
+          "enum": [
+            "measured",
+            "declared",
+            "unknown"
+          ],
+          "title": "Memory Source",
+          "type": "string"
+        },
+        "minor": {
+          "maximum": 0,
+          "minimum": 0,
+          "title": "Minor",
+          "type": "integer"
+        },
+        "preemptibility": {
+          "enum": [
+            "none",
+            "request_boundary",
+            "cooperative"
+          ],
+          "title": "Preemptibility",
+          "type": "string"
+        },
+        "requester": {
+          "enum": [
+            "a",
+            "b",
+            "c",
+            "live"
+          ],
+          "title": "Requester",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema": {
+          "const": "levi.aeri.runtime.v1",
+          "title": "Schema",
+          "type": "string"
+        },
+        "workload_class": {
+          "enum": [
+            "policy_realtime",
+            "judge_critical",
+            "vision_light",
+            "background_annotation",
+            "batch"
+          ],
+          "title": "Workload Class",
+          "type": "string"
+        },
+        "workload_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Workload Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "minor",
+        "run_id",
+        "emitted_wall_ns",
+        "schema",
+        "kind",
+        "workload_id",
+        "workload_class",
+        "requester",
+        "device_preference",
+        "memory_source",
+        "duration_source",
+        "preemptibility"
+      ],
+      "title": "WorkloadSpec",
+      "type": "object"
+    }
+  },
+  "$id": "levi.aeri.runtime.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "discriminator": {
+    "mapping": {
+      "admission_rejected": "#/$defs/AdmissionRejected",
+      "chunk_request": "#/$defs/ChunkRequest",
+      "chunk_response": "#/$defs/ChunkResponse",
+      "lease": "#/$defs/ResourceLease",
+      "policy_handle": "#/$defs/PolicyHandle",
+      "pressure": "#/$defs/ResourcePressure",
+      "quiesce_ack": "#/$defs/QuiesceAck",
+      "unavailable": "#/$defs/RuntimeUnavailable",
+      "workload_spec": "#/$defs/WorkloadSpec"
+    },
+    "propertyName": "kind"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/WorkloadSpec"
+    },
+    {
+      "$ref": "#/$defs/ResourceLease"
+    },
+    {
+      "$ref": "#/$defs/AdmissionRejected"
+    },
+    {
+      "$ref": "#/$defs/ResourcePressure"
+    },
+    {
+      "$ref": "#/$defs/PolicyHandle"
+    },
+    {
+      "$ref": "#/$defs/ChunkRequest"
+    },
+    {
+      "$ref": "#/$defs/ChunkResponse"
+    },
+    {
+      "$ref": "#/$defs/QuiesceAck"
+    },
+    {
+      "$ref": "#/$defs/RuntimeUnavailable"
+    }
+  ],
+  "x-levi-control-keys": [
+    "robot_stop",
+    "stop_robot",
+    "execute_reset",
+    "start_reset",
+    "go_home",
+    "home_robot",
+    "halt",
+    "estop",
+    "e_stop",
+    "clearerr",
+    "clear_error",
+    "jointreset",
+    "resume",
+    "override",
+    "command",
+    "action_request"
+  ],
+  "x-levi-control-prefixes": [
+    "robot_",
+    "execute_",
+    "cmd_",
+    "force_"
+  ],
+  "x-levi-major": 1,
+  "x-levi-minor": 0,
+  "x-levi-retryable-codes": [
+    "gate_closed",
+    "busy",
+    "admission_rejected"
+  ]
+}

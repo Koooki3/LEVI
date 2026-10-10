@@ -1,0 +1,43 @@
+{
+ "schema": "levi.aeri.event.v1",
+ "minor": 0,
+ "run_id": "r20261010-a",
+ "emitted_wall_ns": 1791600000000000000,
+ "event_id": "ev-17",
+ "episode_id": "r20261010-a.forward.0003",
+ "episode_role": "forward",
+ "seq": 4,
+ "event_type": "gripper_open",
+ "status": "candidate",
+ "retracts": null,
+ "priority": "goal_candidate",
+ "actor_id": "arm_0",
+ "step": 120,
+ "window_steps": [
+  115,
+  125
+ ],
+ "observed_ns": 5000000000,
+ "clock_domain": "host-mono:0f0e0d0c-0b0a-4908-8706-050403020100",
+ "signal_refs": [
+  {
+   "feature": "gripper_state",
+   "dimension": 0,
+   "kind": "measured",
+   "units": "m"
+  }
+ ],
+ "evidence_refs": [
+  {
+   "kind": "frame",
+   "ref": "side@120",
+   "step": 120
+  }
+ ],
+ "salience": 0.8,
+ "detector": {
+  "name": "gripper-crossing",
+  "version": "1"
+ },
+ "robot_stop": true
+}

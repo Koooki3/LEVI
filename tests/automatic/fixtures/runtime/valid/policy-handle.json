@@ -1,0 +1,22 @@
+{
+ "schema": "levi.aeri.runtime.v1",
+ "minor": 0,
+ "run_id": "r20261010-a",
+ "emitted_wall_ns": 1791600000000000000,
+ "kind": "policy_handle",
+ "handle_id": "h-1",
+ "role": "forward",
+ "checkpoint": {
+  "config": "pi05_fr3_all_state",
+  "dir_name": "pi05_fr3_all_step49999",
+  "sha256": null
+ },
+ "action_contract": "fr3-robotiq@1",
+ "action_dims": 7,
+ "action_horizon": 10,
+ "endpoint": {
+  "host": "127.0.0.1",
+  "port": 8000
+ },
+ "policy_epoch": 2
+}

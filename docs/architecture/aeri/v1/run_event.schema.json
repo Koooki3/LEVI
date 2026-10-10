@@ -1,0 +1,665 @@
+{
+  "$defs": {
+    "Ack": {
+      "additionalProperties": false,
+      "description": "That the controller received or executed the action, not that its\ngoal was reached.",
+      "properties": {
+        "detail_code": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "Detail Code",
+          "type": "string"
+        },
+        "executed": {
+          "enum": [
+            "yes",
+            "no",
+            "unknown"
+          ],
+          "title": "Executed",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "robot_server",
+            "policy_adapter",
+            "recorder",
+            "broker",
+            "none"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "executed",
+        "source",
+        "detail_code"
+      ],
+      "title": "Ack",
+      "type": "object"
+    },
+    "Action": {
+      "additionalProperties": false,
+      "properties": {
+        "idempotency_key": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "none",
+            "policy_steps",
+            "hold",
+            "home",
+            "recorder_open",
+            "recorder_seal",
+            "recorder_abort",
+            "policy_acquire",
+            "policy_quiesce",
+            "judge_request",
+            "scene_request",
+            "notify"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "non_idempotent": {
+          "title": "Non Idempotent",
+          "type": "boolean"
+        },
+        "params_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Params Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "idempotency_key",
+        "non_idempotent",
+        "params_sha256"
+      ],
+      "title": "Action",
+      "type": "object"
+    },
+    "Authority": {
+      "additionalProperties": false,
+      "properties": {
+        "command_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command Id"
+        },
+        "principal_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Principal Id",
+          "type": "string"
+        },
+        "principal_kind": {
+          "enum": [
+            "orchestrator",
+            "operator",
+            "safety_guard",
+            "recovery"
+          ],
+          "title": "Principal Kind",
+          "type": "string"
+        },
+        "process": {
+          "$ref": "#/$defs/ProcessIdentity"
+        },
+        "session_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "principal_kind",
+        "principal_id",
+        "session_id",
+        "process"
+      ],
+      "title": "Authority",
+      "type": "object"
+    },
+    "ContractVersion": {
+      "additionalProperties": false,
+      "properties": {
+        "minor": {
+          "minimum": 0,
+          "title": "Minor",
+          "type": "integer"
+        },
+        "schema": {
+          "enum": [
+            "levi.aeri.event.v1",
+            "levi.aeri.judgement.v1",
+            "levi.aeri.scene.v1",
+            "levi.aeri.runtime.v1",
+            "levi.aeri.run_event.v1"
+          ],
+          "title": "Schema",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "minor"
+      ],
+      "title": "ContractVersion",
+      "type": "object"
+    },
+    "EpisodeResult": {
+      "additionalProperties": false,
+      "description": "The autonomous verdict only: operator labels, later review and\nadjudicated truth never go into a run event.",
+      "properties": {
+        "goal_verification": {
+          "enum": [
+            "verified",
+            "contradicted",
+            "undecided",
+            "unavailable"
+          ],
+          "title": "Goal Verification",
+          "type": "string"
+        },
+        "judgement_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Judgement Ids",
+          "type": "array"
+        },
+        "label_kind": {
+          "const": "autonomous_verdict",
+          "title": "Label Kind",
+          "type": "string"
+        },
+        "robot_home": {
+          "enum": [
+            "succeeded",
+            "failed",
+            "not_attempted"
+          ],
+          "title": "Robot Home",
+          "type": "string"
+        },
+        "rollout": {
+          "$ref": "#/$defs/RolloutRef"
+        },
+        "scene_reset": {
+          "enum": [
+            "skipped",
+            "succeeded",
+            "failed",
+            "unknown"
+          ],
+          "title": "Scene Reset",
+          "type": "string"
+        },
+        "stop_reason": {
+          "enum": [
+            "goal_verified",
+            "horizon_exhausted",
+            "operator_stop",
+            "safety_stop",
+            "policy_error",
+            "watchdog_timeout",
+            "orchestrator_crash"
+          ],
+          "title": "Stop Reason",
+          "type": "string"
+        },
+        "task_outcome": {
+          "enum": [
+            "success",
+            "failure",
+            "unknown"
+          ],
+          "title": "Task Outcome",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_outcome",
+        "stop_reason",
+        "goal_verification",
+        "robot_home",
+        "scene_reset",
+        "label_kind",
+        "rollout"
+      ],
+      "title": "EpisodeResult",
+      "type": "object"
+    },
+    "Note": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "default": "",
+          "maxLength": 300,
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "title": "Note",
+      "type": "object"
+    },
+    "ProcessIdentity": {
+      "additionalProperties": false,
+      "description": "What makes a PID this process (as ``levi.children.identity``).",
+      "properties": {
+        "boot_id": {
+          "pattern": "^[A-Za-z0-9._-]{1,128}$",
+          "title": "Boot Id",
+          "type": "string"
+        },
+        "pid": {
+          "maximum": 2147483647,
+          "minimum": 1,
+          "title": "Pid",
+          "type": "integer"
+        },
+        "start_ticks": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Start Ticks",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pid",
+        "start_ticks",
+        "boot_id"
+      ],
+      "title": "ProcessIdentity",
+      "type": "object"
+    },
+    "RolloutRef": {
+      "additionalProperties": false,
+      "properties": {
+        "demo": {
+          "pattern": "^demo_[0-9]{4,6}$",
+          "title": "Demo",
+          "type": "string"
+        },
+        "sealed": {
+          "enum": [
+            "complete",
+            "incomplete",
+            "discarded"
+          ],
+          "title": "Sealed",
+          "type": "string"
+        },
+        "task_folder": {
+          "pattern": "^[^/\\x00]{1,200}$",
+          "title": "Task Folder",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_folder",
+        "demo",
+        "sealed"
+      ],
+      "title": "RolloutRef",
+      "type": "object"
+    },
+    "RunHeader": {
+      "additionalProperties": false,
+      "properties": {
+        "contracts": {
+          "items": {
+            "$ref": "#/$defs/ContractVersion"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Contracts",
+          "type": "array"
+        },
+        "levi_commit": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{7,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Levi Commit"
+        },
+        "plan_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Plan Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan_sha256",
+        "contracts"
+      ],
+      "title": "RunHeader",
+      "type": "object"
+    }
+  },
+  "$id": "levi.aeri.run_event.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One line of a run's state journal (append-only, hash-chained).",
+  "properties": {
+    "ack": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ack"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "action": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Action"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "authority": {
+      "$ref": "#/$defs/Authority"
+    },
+    "clock_domain": {
+      "pattern": "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9._-]{1,128}$",
+      "title": "Clock Domain",
+      "type": "string"
+    },
+    "control_epoch": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "title": "Control Epoch",
+      "type": "integer"
+    },
+    "emitted_wall_ns": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "title": "Emitted Wall Ns",
+      "type": "integer"
+    },
+    "episode_id": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\\.(?:forward|reset)\\.[0-9]{4,6}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Episode Id"
+    },
+    "episode_result": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EpisodeResult"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "episode_role": {
+      "anyOf": [
+        {
+          "enum": [
+            "forward",
+            "reset"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Episode Role"
+    },
+    "evidence_ids": {
+      "items": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+        "type": "string"
+      },
+      "maxItems": 64,
+      "title": "Evidence Ids",
+      "type": "array"
+    },
+    "from_state": {
+      "anyOf": [
+        {
+          "enum": [
+            "PREFLIGHT",
+            "VERIFY_INITIAL",
+            "FORWARD_ACTIVE",
+            "FORWARD_STOPPING",
+            "FORWARD_FINALIZE",
+            "ROBOT_HOME",
+            "SCENE_ASSESS",
+            "RESET_ACTIVE",
+            "RESET_VERIFY",
+            "RESET_FINALIZE",
+            "WAIT_HUMAN",
+            "FAULT_LOCKED",
+            "COMPLETED"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "From State"
+    },
+    "header": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RunHeader"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "minor": {
+      "maximum": 0,
+      "minimum": 0,
+      "title": "Minor",
+      "type": "integer"
+    },
+    "mono_ns": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "title": "Mono Ns",
+      "type": "integer"
+    },
+    "note": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Note"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "policy_epoch": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Policy Epoch"
+    },
+    "prev_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Prev Sha256",
+      "type": "string"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "enum": [
+            "goal_verified",
+            "horizon_exhausted",
+            "operator_stop",
+            "safety_stop",
+            "policy_error",
+            "watchdog_timeout",
+            "recovery_ambiguous",
+            "journal_corrupt",
+            "preflight_failed",
+            "scene_ready",
+            "scene_reset_required",
+            "scene_unknown",
+            "reset_horizon_exhausted",
+            "reset_verified",
+            "home_failed",
+            "recorder_failed",
+            "human_resumed",
+            "run_completed",
+            "contract_violation_limit"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
+    "record": {
+      "enum": [
+        "run_header",
+        "prepared",
+        "acknowledged",
+        "committed",
+        "aborted",
+        "note"
+      ],
+      "title": "Record",
+      "type": "string"
+    },
+    "run_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema": {
+      "const": "levi.aeri.run_event.v1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "sequence_no": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "title": "Sequence No",
+      "type": "integer"
+    },
+    "to_state": {
+      "anyOf": [
+        {
+          "enum": [
+            "PREFLIGHT",
+            "VERIFY_INITIAL",
+            "FORWARD_ACTIVE",
+            "FORWARD_STOPPING",
+            "FORWARD_FINALIZE",
+            "ROBOT_HOME",
+            "SCENE_ASSESS",
+            "RESET_ACTIVE",
+            "RESET_VERIFY",
+            "RESET_FINALIZE",
+            "WAIT_HUMAN",
+            "FAULT_LOCKED",
+            "COMPLETED"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "To State"
+    },
+    "transaction_id": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}:tx[0-9]{1,19}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Transaction Id"
+    }
+  },
+  "required": [
+    "minor",
+    "run_id",
+    "emitted_wall_ns",
+    "schema",
+    "sequence_no",
+    "record",
+    "authority",
+    "control_epoch",
+    "mono_ns",
+    "clock_domain",
+    "prev_sha256"
+  ],
+  "title": "RunEvent",
+  "type": "object",
+  "x-levi-control-keys": [],
+  "x-levi-control-prefixes": [],
+  "x-levi-major": 1,
+  "x-levi-minor": 0
+}

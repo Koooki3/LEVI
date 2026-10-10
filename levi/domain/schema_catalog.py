@@ -34,17 +34,33 @@ def main(arguments):
         action="store_true",
         help="Regenerate the repository-owned schema snapshot",
     )
-    args = parser.parse_args(arguments)
-    destination = (
-        Path(__file__).resolve().parents[2] / "docs/architecture/contracts.json"
+    parser.add_argument(
+        "--accept-breaking",
+        action="store_true",
+        help="With --write: also rewrite AERI schemas whose change is breaking "
+        "within their major version (only before that version is released)",
     )
+    args = parser.parse_args(arguments)
+    from . import aeri
+
+    root = Path(__file__).resolve().parents[2]
+    destination = root / "docs/architecture/contracts.json"
     expected = render()
     if args.write:
+        refusals = aeri.write_snapshots(root, accept_breaking=args.accept_breaking)
+        for line in refusals:
+            print(line)
+        if refusals:
+            print("Nothing written: a breaking change needs a new major version")
+            return 1
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(expected)
-        print("Updated docs/architecture/contracts.json")
+        print(f"Updated docs/architecture/contracts.json and {aeri.SNAPSHOT_DIR}/")
         return 0
-    if not destination.exists() or destination.read_text() != expected:
+    problems = aeri.check_snapshots(root)
+    for line in problems:
+        print(line)
+    if problems or not destination.exists() or destination.read_text() != expected:
         print("Contract snapshot drift. Run: uv run levi dev check-contracts --write")
         return 1
     print(

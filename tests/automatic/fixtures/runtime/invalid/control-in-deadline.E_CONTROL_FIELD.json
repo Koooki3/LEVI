@@ -1,0 +1,25 @@
+{
+ "schema": "levi.aeri.runtime.v1",
+ "minor": 0,
+ "run_id": "r20261010-a",
+ "emitted_wall_ns": 1791600000000000000,
+ "kind": "chunk_request",
+ "request_id": "c-40",
+ "episode_id": "r20261010-a.forward.0003",
+ "handle_id": "h-1",
+ "policy_epoch": 2,
+ "obs_step": 40,
+ "obs_ns": 8000000000,
+ "clock_domain": "host-mono:0f0e0d0c-0b0a-4908-8706-050403020100",
+ "action_start_index": 40,
+ "committed_prefix_steps": 2,
+ "previous_chunk_ref": "c-32",
+ "prefix_conditioning": "soft_guidance",
+ "deadline": {
+  "due_ns": 8100000000,
+  "clock_domain": "host-mono:0f0e0d0c-0b0a-4908-8706-050403020100",
+  "budget_ms": 100,
+  "hardness": "hard",
+  "override": 1
+ }
+}

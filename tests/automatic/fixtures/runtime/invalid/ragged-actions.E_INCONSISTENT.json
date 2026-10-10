@@ -1,0 +1,43 @@
+{
+ "schema": "levi.aeri.runtime.v1",
+ "minor": 0,
+ "run_id": "r20261010-a",
+ "emitted_wall_ns": 1791600000000000000,
+ "kind": "chunk_response",
+ "request_id": "c-40",
+ "episode_id": "r20261010-a.forward.0003",
+ "policy_epoch": 2,
+ "action_contract": "fr3-robotiq@1",
+ "actions": [
+  [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ]
+ ],
+ "valid_from_action_index": 42,
+ "prefix_conditioning_applied": "soft_guidance",
+ "model_version": {
+  "config": "pi05_fr3_all_state",
+  "checkpoint_dir_name": "pi05_fr3_all_step49999"
+ },
+ "timing": {
+  "queued_ms": 2,
+  "infer_ms": 61,
+  "total_ms": 70
+ },
+ "received_ns": 8070000000,
+ "clock_domain": "host-mono:0f0e0d0c-0b0a-4908-8706-050403020100"
+}

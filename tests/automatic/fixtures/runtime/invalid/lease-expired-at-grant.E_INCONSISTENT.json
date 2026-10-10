@@ -1,0 +1,17 @@
+{
+ "schema": "levi.aeri.runtime.v1",
+ "minor": 0,
+ "run_id": "r20261010-a",
+ "emitted_wall_ns": 1791600000000000000,
+ "kind": "lease",
+ "lease_id": "l-1",
+ "lease_epoch": 3,
+ "workload_id": "w-1",
+ "workload_class": "judge_critical",
+ "device": "gpu",
+ "memory_reserved_mib": null,
+ "granted_ns": 8000000000,
+ "expires_ns": 8000000000,
+ "clock_domain": "host-mono:0f0e0d0c-0b0a-4908-8706-050403020100",
+ "revocable": true
+}

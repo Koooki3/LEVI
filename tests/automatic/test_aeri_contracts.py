@@ -1,0 +1,468 @@
+"""AERI integration contracts v1 (levi/domain/aeri.py): strict parsing,
+control keys, consistency rules, schema snapshots and compatibility."""
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Literal
+
+import aeri_factory as f
+import pytest
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from levi.domain import aeri
+
+ROOT = Path(__file__).resolve().parents[2]
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
+def _fixtures(group):
+    return sorted(FIXTURES.glob(f"*/{group}/*.json"))
+
+
+def _expect(path):
+    return path.name.rsplit(".", 2)[1]
+
+
+# --- pydantic behaviour the design relies on (X1 marked it unverified) ---------------
+
+
+class _Lax(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    n: int
+    k: Literal["a", "b"]
+
+
+class _Strict(_Lax):
+    model_config = ConfigDict(strict=True)
+
+
+def test_lax_pydantic_coerces_bool_and_text_to_int_strict_refuses():
+    assert _Lax.model_validate({"n": True, "k": "a"}).n == 1
+    assert _Lax.model_validate({"n": "1", "k": "a"}).n == 1
+    for value in (True, "1", 1.0):
+        with pytest.raises(ValidationError):
+            _Strict.model_validate({"n": value, "k": "a"})
+
+
+def test_model_validate_json_keeps_the_last_duplicate_key_silently():
+    # The reason parse() decodes with its own duplicate check.
+    assert _Strict.model_validate_json('{"n": 1, "n": 2, "k": "a"}').n == 2
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.parse('{"schema": "x", "schema": "y"}', "event")
+    assert caught.value.code == "E_DUPLICATE_KEY"
+
+
+def test_aeri_contracts_are_strict_and_closed():
+    for model in (aeri.EventProposal, aeri.Judgement, aeri.RunEvent, aeri.Deadline):
+        config = model.model_config
+        assert config["strict"] and config["extra"] == "forbid"
+        assert config["allow_inf_nan"] is False and config["frozen"]
+    # The shared base contract is unchanged (strict only on AERI models).
+    from levi.domain.contracts import Contract
+
+    assert "strict" not in Contract.model_config
+
+
+# --- fixtures ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path", _fixtures("valid"), ids=lambda p: p.parent.parent.name + "/" + p.stem
+)
+def test_valid_fixture_parses_and_round_trips(path):
+    contract = path.parent.parent.name
+    message = aeri.parse(path.read_bytes(), contract)
+    again = aeri.parse(aeri.dump(message), contract)
+    assert again == message
+    assert aeri.dump(again) == aeri.dump(message)
+
+
+@pytest.mark.parametrize(
+    "path", _fixtures("invalid"), ids=lambda p: p.parent.parent.name + "/" + p.stem
+)
+def test_invalid_fixture_is_refused_with_its_code(path):
+    contract = path.parent.parent.name
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.parse(path.read_bytes(), contract)
+    assert caught.value.code == _expect(path), str(caught.value)
+
+
+def test_every_contract_has_enough_fixtures():
+    for contract in aeri.SCHEMAS:
+        valid = list((FIXTURES / contract / "valid").glob("*.json"))
+        invalid = list((FIXTURES / contract / "invalid").glob("*.json"))
+        assert len(valid) >= 2 and len(invalid) >= 12, contract
+        codes = {_expect(p) for p in invalid}
+        assert {
+            "E_SCHEMA",
+            "E_UNKNOWN_FIELD",
+            "E_DUPLICATE_KEY",
+            "E_NONFINITE",
+        } <= codes
+        if contract in aeri.CONTROL_SCANNED:
+            assert "E_CONTROL_FIELD" in codes, contract
+
+
+def test_committed_fixtures_match_the_factory(tmp_path):
+    f.write_fixtures(tmp_path)
+    made = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*.json")}
+    committed = {
+        p.relative_to(FIXTURES): p.read_bytes() for p in FIXTURES.rglob("*.json")
+    }
+    assert made == committed
+
+
+# --- parse ------------------------------------------------------------------------
+
+
+def test_oversized_message_is_refused_before_decoding():
+    raw = json.dumps({**f.event(), "padding": "y" * aeri.MAX_BYTES}).encode()
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.parse(raw, "event")
+    assert caught.value.code == "E_TOO_LARGE"
+
+
+def test_parse_accepts_the_schema_id_and_refuses_an_unknown_contract():
+    raw = json.dumps(f.event())
+    assert aeri.parse(raw, "levi.aeri.event.v1").event_id == "ev-17"
+    with pytest.raises(ValueError):
+        aeri.parse(raw, "levi.aeri.nothing.v1")
+    # The caller says what it expects: an event is not a judgement.
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.parse(raw, "judgement")
+    assert caught.value.code == "E_SCHEMA"
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "robot_stop",
+        "ROBOT_STOP",
+        "Robot-Stop",
+        "robot stop",
+        "robotStop",
+        "ｒｏｂｏｔ＿ｓｔｏｐ",
+        "Execute_Reset",
+        "eStop",
+        "e_stop",
+        "go_home",
+        "jointreset",
+        "clearErr",
+        "resume",
+        "command",
+        "cmd_pose",
+        "force_open",
+        "execute_anything",
+    ],
+)
+def test_control_keys_are_refused_anywhere(key):
+    assert aeri.is_control_key(key)
+    nested = f.judgement(
+        predicate_results=[
+            {"name": "stable", "value": True, "required": True, key: True}
+        ]
+    )
+    for message in ({**f.judgement(), key: True}, nested):
+        with pytest.raises(aeri.AeriError) as caught:
+            aeri.validate(message, "judgement")
+        assert caught.value.code == "E_CONTROL_FIELD"
+
+
+def test_no_declared_field_of_an_a_or_b_contract_looks_like_a_control_key():
+    def names(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "properties":
+                    yield from value
+                yield from names(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from names(value)
+
+    documents = aeri.schema_documents()
+    for contract in aeri.CONTROL_SCANNED:
+        flagged = [n for n in names(documents[contract]) if aeri.is_control_key(n)]
+        assert flagged == [], contract
+    # The run event is C's own record: its ``robot_home`` result field would
+    # trip the prefix rule, which is why it is not scanned.
+    assert "robot_home" in set(names(documents["run_event"]))
+
+
+def test_operator_keys_are_found_for_requests_to_a():
+    request = {"episode": {"Operator_Outcome": "success"}, "images": [{"label": 1}]}
+    assert aeri.operator_keys(request) == [
+        "$.episode.Operator_Outcome",
+        "$.images[0].label",
+    ]
+    assert aeri.operator_keys({"episode_id": "x", "images": []}) == []
+
+
+def test_python_infinity_in_nested_actions_is_refused():
+    message = f.runtime("chunk_response")
+    message["actions"][1][2] = float("inf")
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.validate(message, "runtime")
+    assert caught.value.code == "E_NONFINITE"
+
+
+def test_int_beyond_int64_is_refused():
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.validate(f.event(observed_ns=2**63), "event")
+    assert caught.value.code == "E_SCHEMA"
+
+
+# --- consistency rules ----------------------------------------------------------------
+
+
+def test_unknown_and_unavailable_are_distinct_and_never_success():
+    unknown = aeri.validate(f.unknown_judgement(), "judgement")
+    missing = aeri.validate(f.unavailable(), "judgement")
+    assert isinstance(unknown, aeri.Judgement) and unknown.decision == "unknown"
+    assert isinstance(missing, aeri.JudgementUnavailable)
+    assert not hasattr(missing, "decision")
+
+
+def test_confirmed_needs_a_required_predicate():
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.validate(f.judgement(predicate_results=[]), "judgement")
+    assert caught.value.code == "E_INCONSISTENT"
+    optional = [{"name": "stable", "value": True, "required": False}]
+    with pytest.raises(aeri.AeriError):
+        aeri.validate(f.judgement(predicate_results=optional), "judgement")
+
+
+def test_rejected_by_a_confirmed_veto_alone():
+    message = f.judgement(
+        decision="rejected", vetoes=[{"id": "human_hand", "state": "confirmed"}]
+    )
+    assert aeri.validate(message, "judgement").decision == "rejected"
+
+
+def test_unknown_stands_with_any_predicates():
+    message = f.unknown_judgement(
+        unknown_reason="conflicting_predicates",
+        predicate_results=f.predicates(object_state=True, stable=False),
+    )
+    assert aeri.validate(message, "judgement").decision == "unknown"
+
+
+def test_calibrated_confidence_carries_probability_and_reference():
+    message = f.judgement(
+        confidence_kind="calibrated",
+        calibrated_probability=0.9,
+        calibration_ref="cal-1",
+    )
+    assert aeri.validate(message, "judgement").calibrated_probability == 0.9
+    with pytest.raises(aeri.AeriError):
+        aeri.validate(f.judgement(calibrated_probability=0.9), "judgement")
+
+
+def test_admission_rejected_unavailable_retryable_only_with_retry_after():
+    bad = f.unavailable(code="admission_rejected", retryable=True)
+    with pytest.raises(aeri.AeriError):
+        aeri.validate(bad, "judgement")
+    good = f.unavailable(code="admission_rejected", retryable=True, retry_after_ms=50)
+    assert aeri.validate(good, "judgement").retry_after_ms == 50
+    with pytest.raises(aeri.AeriError):
+        aeri.validate(f.unavailable(retryable=False, retry_after_ms=50), "judgement")
+
+
+def test_runtime_unavailable_has_its_own_codes():
+    assert aeri.validate(f.runtime("unavailable"), "runtime").code == "epoch_fenced"
+    with pytest.raises(aeri.AeriError):
+        aeri.validate(f.unavailable(code="epoch_fenced", retryable=False), "judgement")
+
+
+def test_scene_unknown_allowed_even_when_predicates_pass():
+    message = f.scene(decision="unknown", unknown_reason="stale_inputs")
+    assert aeri.validate(message, "scene").decision == "unknown"
+
+
+def test_workload_estimates_follow_their_source():
+    with pytest.raises(aeri.AeriError):
+        aeri.validate(f.runtime("workload_spec", memory_estimate_mib=100), "runtime")
+    with pytest.raises(aeri.AeriError):
+        aeri.validate(f.runtime("workload_spec", duration_source="unknown"), "runtime")
+
+
+def test_workload_priority_follows_the_class_and_has_no_p0():
+    assert aeri.WORKLOAD_PRIORITY["policy_realtime"] == 1
+    assert min(aeri.WORKLOAD_PRIORITY.values()) == 1
+
+
+def test_run_event_rules():
+    for record in ("run_header", "prepared", "acknowledged", "committed", "note"):
+        aeri.validate(f.run_event(record), "run_event")
+    bad = [
+        f.run_event("acknowledged", ack=None),
+        f.run_event("note", note=None),
+        f.run_event("committed", reason=None),
+        f.run_event("prepared", episode_role=None),
+        f.run_event("prepared", transaction_id="other-run:tx41"),
+        f.run_event("run_header", prev_sha256=f.SHA),
+        f.run_event("acknowledged", action=f.run_event()["action"]),
+    ]
+    for message in bad:
+        with pytest.raises(aeri.AeriError) as caught:
+            aeri.validate(message, "run_event")
+        assert caught.value.code == "E_INCONSISTENT"
+    reset_result = f.run_event(
+        "committed",
+        from_state="RESET_FINALIZE",
+        to_state="VERIFY_INITIAL",
+        reason="reset_verified",
+        episode_id=f.RESET_EPISODE,
+        episode_role="reset",
+    )
+    assert aeri.validate(reset_result, "run_event").episode_result is not None
+
+
+def test_specs_check_predicate_names():
+    message = aeri.validate(f.judgement(), "judgement", specs=aeri.BUILTIN_SPECS)
+    assert message.spec_id == "generic-final"
+    renamed = f.judgement(
+        predicate_results=f.predicates(object_state=True, colour=True)
+    )
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.validate(renamed, "judgement", specs=aeri.BUILTIN_SPECS)
+    assert caught.value.code == "E_SPEC_MISMATCH"
+    # No initial-state contract is registered in v1.
+    with pytest.raises(aeri.AeriError) as caught:
+        aeri.validate(f.scene(), "scene", specs=aeri.BUILTIN_SPECS)
+    assert caught.value.code == "E_SPEC_MISMATCH"
+    # Unavailable results carry no predicates and pass.
+    aeri.validate(f.unavailable(), "judgement", specs=aeri.BUILTIN_SPECS)
+
+
+def test_freshness_across_clock_domains_counts_as_expired():
+    aeri.check_fresh(10, f.CLOCK, now_ns=9, local=f.CLOCK)
+    for until, domain, code in (
+        (10, f.OTHER_CLOCK, "E_CLOCK_DOMAIN"),
+        (10, f.CLOCK, "E_EXPIRED"),
+    ):
+        with pytest.raises(aeri.AeriError) as caught:
+            aeri.check_fresh(until, domain, now_ns=10, local=f.CLOCK)
+        assert caught.value.code == code
+    assert aeri.host_clock_domain().startswith("host-mono:")
+
+
+def test_episode_ids_parse_from_the_right():
+    assert aeri.episode_parts("r.1.forward.0003") == ("r.1", "forward", 3)
+
+
+# --- schema snapshots ---------------------------------------------------------------
+
+
+def test_committed_schemas_match_the_models():
+    assert aeri.check_snapshots(ROOT) == []
+
+
+def test_schema_rendering_is_stable_across_processes():
+    code = (
+        "from levi.domain import aeri; import sys; "
+        "sys.stdout.write(''.join(aeri.snapshot_texts().values()))"
+    )
+    outputs = set()
+    for seed in ("0", "1", "12345"):
+        path = os.pathsep.join(filter(None, [os.environ.get("PYTHONPATH"), str(ROOT)]))
+        env = {**os.environ, "PYTHONHASHSEED": seed, "PYTHONPATH": path}
+        outputs.add(
+            subprocess.run(
+                [sys.executable, "-c", code],
+                env=env,
+                capture_output=True,
+                check=True,
+                text=True,
+            ).stdout
+        )
+    assert len(outputs) == 1
+
+
+def _copy_snapshots(tmp_path):
+    for relative, text in aeri.snapshot_texts().items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    return tmp_path / aeri.SNAPSHOT_DIR
+
+
+def test_drift_and_breaking_changes_are_detected(tmp_path):
+    folder = _copy_snapshots(tmp_path)
+    path = folder / "judgement.schema.json"
+    document = json.loads(path.read_text())
+    judgement = document["$defs"]["Judgement"]
+    judgement["properties"]["decision"]["enum"].append("probably")
+    judgement["properties"]["old_field"] = {"type": "string"}
+    judgement["required"].remove("spec_id")
+    path.write_text(aeri.render_schema(document))
+    problems = aeri.check_snapshots(tmp_path)
+    assert problems[0] == f"{aeri.SNAPSHOT_DIR}/judgement.schema.json is out of date"
+    text = "\n".join(problems)
+    assert "Judgement.properties.decision.enum" in text
+    assert "Judgement.properties.old_field: removed" in text
+    assert "Judgement.required" in text
+    # The models are the source: rewriting from them would be a breaking
+    # change for this snapshot, so it is refused without the explicit flag.
+    assert aeri.write_snapshots(tmp_path)
+    assert path.read_text() == aeri.render_schema(document)
+    assert aeri.write_snapshots(tmp_path, accept_breaking=True) == []
+    assert aeri.check_snapshots(tmp_path) == []
+
+
+def test_missing_and_stray_snapshots_are_reported(tmp_path):
+    folder = _copy_snapshots(tmp_path)
+    (folder / "scene.schema.json").unlink()
+    (folder / "old.schema.json").write_text("{}")
+    problems = aeri.check_snapshots(tmp_path)
+    assert f"{aeri.SNAPSHOT_DIR}/scene.schema.json is missing" in problems
+    assert (
+        f"{aeri.SNAPSHOT_DIR}/old.schema.json is not a contract of this version"
+        in problems
+    )
+    # A missing file is written; nothing breaking stops it.
+    assert aeri.write_snapshots(tmp_path) == []
+    assert (folder / "scene.schema.json").is_file()
+
+
+def test_breaking_change_rules():
+    base = {
+        "type": "object",
+        "properties": {"a": {"type": "string", "maxLength": 10}},
+        "required": ["a"],
+        "x-levi-control-keys": ["halt", "estop"],
+    }
+
+    def changed(**edit):
+        new = json.loads(json.dumps(base))
+        for key, value in edit.items():
+            new[key] = value
+        return aeri.breaking_changes(base, new)
+
+    # Compatible: a new optional property, a looser bound, a longer
+    # control-key list, a new description.
+    assert (
+        changed(properties={"a": base["properties"]["a"], "b": {"type": "integer"}})
+        == []
+    )
+    assert changed(properties={"a": {"type": "string", "maxLength": 20}}) == []
+    assert changed(**{"x-levi-control-keys": ["halt", "estop", "go_home"]}) == []
+    assert changed(description="now documented") == []
+    # Breaking: required grows, a bound tightens, a type changes, a control
+    # key is dropped, a property disappears.
+    assert changed(required=["a", "b"])
+    assert changed(properties={"a": {"type": "string", "maxLength": 5}})
+    assert changed(properties={"a": {"type": "integer", "maxLength": 10}})
+    assert changed(**{"x-levi-control-keys": ["halt"]})
+    assert changed(properties={})
+
+
+def test_check_contracts_command_passes_and_leaves_the_old_snapshot(capsys):
+    from levi.domain.schema_catalog import main
+
+    before = (ROOT / "docs/architecture/contracts.json").read_text()
+    assert main([]) == 0
+    assert "matches" in capsys.readouterr().out
+    assert (ROOT / "docs/architecture/contracts.json").read_text() == before
