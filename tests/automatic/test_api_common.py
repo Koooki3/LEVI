@@ -43,6 +43,10 @@ def client(roots, monkeypatch):
     monkeypatch.setattr(api, "LAUNCH_BACKEND", "inprocess")
     monkeypatch.setattr(api, "LAUNCH_DEADLINE_S", 5.0)
     api._POLICY_CACHE.update(key=None, at=0.0, report=None)
+    api._MEMO.items.clear()
+    api._OPERATIONS.clear()
+    api._PLANS.clear()
+    api._CHALLENGES.by_run.clear()
     app = FastAPI()
     app.include_router(api.router)
     with TestClient(app, headers=REQ) as test_client:
@@ -68,6 +72,18 @@ def write_job(
         )
     )
     return path
+
+
+def make_checkpoint(root, name, *, role=None, config="pi05_fr3_all_state"):
+    folder = root / name
+    (folder / "params").mkdir(parents=True)
+    (folder / "assets").mkdir()
+    (folder / "norm_stats.json").write_text("{}")
+    version = {"config": config}
+    if role:
+        version["policy_role"] = role
+    (folder / "VERSION.json").write_text(json.dumps(version))
+    return folder
 
 
 def job_id_of(client, name: str) -> str:
@@ -129,6 +145,7 @@ __all__ = [
     "client",
     "home",
     "job_id_of",
+    "make_checkpoint",
     "os",
     "plan_and_launch",
     "roots",

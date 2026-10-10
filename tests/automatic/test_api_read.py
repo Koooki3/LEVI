@@ -11,6 +11,7 @@ from test_api_common import (
     client,
     home,
     job_id_of,
+    make_checkpoint,
     roots,
     write_job,
 )
@@ -56,18 +57,6 @@ def test_capabilities_say_only_a_dry_run_launches(client):
     assert body["reset_modes"] == ["single_reset_policy", "human_assisted"]
     assert body["scene_checks"] == ["provider", "operator_attested"]
     assert set(body["defaults"]) == {"max_steps", "episodes", "reset_wait_s"}
-
-
-def make_checkpoint(root, name, *, role=None, config="pi05_fr3_all_state"):
-    folder = root / name
-    (folder / "params").mkdir(parents=True)
-    (folder / "assets").mkdir()
-    (folder / "norm_stats.json").write_text("{}")
-    version = {"config": config}
-    if role:
-        version["policy_role"] = role
-    (folder / "VERSION.json").write_text(json.dumps(version))
-    return folder
 
 
 def test_policies_without_a_root_offer_human_reset_only(client):

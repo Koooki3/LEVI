@@ -56,7 +56,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from levi.domain import aeri
 
-from . import cli, launch, metrics, policies
+from . import cli, jobs_wizard, launch, metrics, policies
 from .journal import Journal, JournalError, read_plan
 from .recorder import EVIDENCE, FRAMES, MANIFEST, pending_card
 
@@ -591,6 +591,82 @@ def list_jobs():
         "jobs": out,
         "truncated": len(items) > MAX_JOBS_SHOWN,
     }
+
+
+def _audit(phase: str, **fields) -> None:
+    launch.audit(
+        {
+            "at_wall_ns": time.time_ns(),
+            "phase": phase,
+            "principal_id": PRINCIPAL,
+            **fields,
+        }
+    )
+
+
+def _form_error(exc: jobs_wizard.FormError) -> HTTPException:
+    extra = {"errors": exc.errors} if exc.errors else {}
+    return _fail(exc.status, exc.code, exc.message, **extra)
+
+
+@router.post("/jobs", status_code=201)
+def create_job(body: dict[str, Any], request: Request):
+    """Write the wizard's form as a **new** job file under the first job
+    root (``wizard/``); never overwrites. The checkpoints must be ones the
+    policy discovery found."""
+    _person(request)
+    try:
+        form = jobs_wizard.parse_form(body)
+    except jobs_wizard.FormError as exc:
+        raise _form_error(exc) from None
+    again = _MEMO.get("jobs", form.request_id, body)
+    if again is not None:
+        return again
+    roots = launch.job_roots()
+    if not roots:
+        raise _fail(
+            503, "no_job_root", "Set LEVI_AERI_JOB_ROOTS: no folder to write jobs in"
+        )
+    forward, reset = checkpoint_ids("forward"), checkpoint_ids("reset")
+    errors = []
+    chosen = [("policy_forward", form.policy_forward, forward)]
+    if form.policy_reset is not None:
+        chosen.append(("policy_reset", form.policy_reset, reset))
+    for field, policy, known in chosen:
+        if policy.checkpoint_id not in known:
+            errors.append(
+                {
+                    "field": f"{field}.checkpoint_id",
+                    "message": "not a checkpoint the discovery found for this role"
+                    + ("" if policy_root() else f" ({POLICY_ROOT_ENV} is not set)"),
+                }
+            )
+    if errors:
+        raise _fail(422, "job_invalid", "The form is not valid", errors=errors)
+    with _operation("jobs"):
+        try:
+            relative = jobs_wizard.write_job(
+                roots[0],
+                form,
+                {
+                    "id": form.policy_forward.checkpoint_id,
+                    "config": forward[form.policy_forward.checkpoint_id].config,
+                },
+                (
+                    {
+                        "id": form.policy_reset.checkpoint_id,
+                        "config": reset[form.policy_reset.checkpoint_id].config,
+                    }
+                    if form.policy_reset
+                    else None
+                ),
+            )
+        except jobs_wizard.FormError as exc:
+            raise _form_error(exc) from None
+    answer = {"id": job_id_of(str(roots[0]), relative), "name": form.name}
+    _MEMO.put("jobs", form.request_id, body, answer)
+    _audit("api_job_created", job=relative)
+    return answer
 
 
 # --- the plan ----------------------------------------------------------------------------------
