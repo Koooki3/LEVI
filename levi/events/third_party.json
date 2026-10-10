@@ -1,0 +1,66 @@
+{
+ "schema_version": "levi.third_party_registry.v1",
+ "scope": "levi/events",
+ "checked_on": "2026-10-10",
+ "about": "Every outside source levi.events depends on or borrows from: where it comes from, which version, under which licence, whether LEVI ships any of it and whether that may be redistributed. A source whose code licence is non-commercial, missing or unverified may only be used as an idea (use = adopt-idea), never copied or shipped. THIRD_PARTY_NOTICES.md remains the release inventory; this file is the structured record for this package, checked by tests/test_events_third_party.py.",
+ "components": [
+  {
+   "key": "ruptures",
+   "name": "ruptures (offline change point detection)",
+   "kind": "library+paper",
+   "use": "adopt-idea",
+   "source": "https://github.com/deepcharles/ruptures",
+   "version": "1.1.10 on PyPI at the check (not installed, not a dependency)",
+   "licenses": {"code": "BSD-2-Clause", "weights": "n/a", "data": "n/a"},
+   "shipped": false,
+   "code_copied": false,
+   "redistributable": "n/a: no part of it is shipped",
+   "citation": {
+    "authors": "Charles Truong, Laurent Oudre, Nicolas Vayatis",
+    "year": 2020,
+    "title": "Selective review of offline change point detection methods",
+    "venue": "Signal Processing 167:107299",
+    "arxiv": "1801.00718",
+    "doi": "10.1016/j.sigpro.2019.107299"
+   },
+   "reference_key": "truong2020ruptures",
+   "reference_status": "VERIFIED",
+   "where": ["levi/events/change_points.py"],
+   "notes": "The penalised segmentation (optimal partitioning with pruning, squared-error cost) is an independent numpy implementation of the method family the review describes; no code was read into or copied from the library."
+  },
+  {
+   "key": "numpy",
+   "name": "NumPy",
+   "kind": "library",
+   "use": "dependency",
+   "source": "https://pypi.org/project/numpy/2.4.6/",
+   "version": "2.4.6 (locked; pyproject numpy>=2,<3)",
+   "licenses": {"code": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0", "weights": "n/a", "data": "n/a"},
+   "shipped": false,
+   "code_copied": false,
+   "redistributable": "yes under its licences; installed, not vendored (see THIRD_PARTY_NOTICES.md)",
+   "citation": null,
+   "reference_key": null,
+   "reference_status": null,
+   "where": ["levi/events/gripper.py", "levi/events/motion.py", "levi/events/change_points.py", "levi/events/boundary_metrics.py"],
+   "notes": "An existing core dependency; levi.events adds no new one."
+  },
+  {
+   "key": "pydantic",
+   "name": "pydantic",
+   "kind": "library",
+   "use": "dependency",
+   "source": "https://pypi.org/project/pydantic/2.13.5/",
+   "version": "2.13.5 (locked; pyproject pydantic>=2.10,<3)",
+   "licenses": {"code": "MIT", "weights": "n/a", "data": "n/a"},
+   "shipped": false,
+   "code_copied": false,
+   "redistributable": "yes under its licence; installed, not vendored (see THIRD_PARTY_NOTICES.md)",
+   "citation": null,
+   "reference_key": null,
+   "reference_status": null,
+   "where": ["levi/events/contracts.py", "levi/events/signal_profiles.py"],
+   "notes": "An existing core dependency."
+  }
+ ]
+}

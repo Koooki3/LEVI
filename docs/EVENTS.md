@@ -13,6 +13,7 @@
 | `facts` | The signal facts of one episode as `SignalObservation`s, per channel and actor. |
 | `change_points` | Penalised change points of each actor's speed, gripper level and rotation speed, as `EventCandidate`s. |
 | `calibrate` | The script that chose the change-point penalty on development gold labels. |
+| `third_party.json`, `third_party` | The structured record of outside sources this package uses, and the rules it keeps. |
 | `boundary_metrics` | Boundary Recall at several tolerances, false candidates per minute, boundary MAE/P90, Segment F1 at several IoU thresholds. |
 
 ## Records
@@ -77,3 +78,7 @@ Run of 2026-10-10 (penalties 0.1 to 8):
 | Report | 0.5 | 23.3 | 0.20 | 0.46 | 0.44 | 13.3 | 0.72 / 1.87 |
 
 What this says: F1 is flat from 0.1 to 1 because the per-minute cap binds there (the reference annotations are denser than the cap); about half the reference boundaries have a change point within 0.5 s, a quarter within 0.2 s. On the report set false candidates double, so change points alone are a weak boundary signal -- they are meant to order evidence gathering, together with the other sources, not to segment. Small sets: differences of 0.01-0.02 are within noise.
+
+## Third-party sources
+
+`levi/events/third_party.json` (`levi.third_party_registry.v1`) records every outside source this package depends on or borrows from: `source`, `version`, `licenses` (code, weights, data), `use` (`dependency`, `adopt-idea`, `adapt-code`, `vendored`), whether any of it is `shipped` or `code_copied`, whether it is `redistributable`, a `citation` with its checked `reference_key`, and `where` it is used. `levi.events.third_party.problems` enforces, in the test suite: a source whose code licence is non-commercial, missing or unverified may only be an idea (nothing copied or shipped); a citation needs a verified reference; a dependency must be declared in `pyproject.toml`; every arXiv number a `levi/events` module mentions must belong to a registered source. Today it lists `ruptures` (an idea, BSD-2-Clause, not installed) and the existing core dependencies NumPy and pydantic: this package adds no dependency. [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) remains the release inventory.

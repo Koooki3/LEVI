@@ -21,6 +21,8 @@ The modules, in the order data flows through them:
   the script that chose their penalty on development gold labels.
 - ``boundary_metrics``: boundary recall at several tolerances, false
   candidates per minute, boundary MAE/P90 and segment F1 by IoU.
+- ``third_party``: the structured record of outside sources this package
+  uses (``third_party.json``) and the rules it keeps.
 
 Pure functions over numpy arrays and pydantic records: no model, no Torch,
 no files written (``calibrate`` writes only the report it is asked for).
