@@ -152,11 +152,13 @@ def dataset(repo_id: str) -> Dataset:
 
 # ---------------------------------------------------------------- dataset type
 
-# What a run may ask for, and what it resolves to. "auto" decides from the
-# data; "value_only" is never asked for: it is what "auto" gives a dataset
-# without any outcome, so unlabelled rollouts are never silently turned into
-# all-positive demonstrations.
-REQUESTED_TYPES = ("auto", "rollout", "sft")
+# What a run may ask for, and what it resolves to. "auto" (the default)
+# decides from the dataset setting, the export's metadata or the outcomes and
+# otherwise falls back to the old default "rollout"; "value_only" (values, no
+# labels) is asked for or set, so unlabelled rollouts are never silently
+# turned into all-positive demonstrations.
+REQUESTED_TYPES = ("auto", "rollout", "sft", "value_only")
+SETTING_TYPES = ("rollout", "sft", "value_only")
 RESOLVED_TYPES = ("rollout", "sft", "value_only")
 SETTINGS_SCHEMA = "levi.recap_value.dataset.v1"
 
@@ -168,7 +170,7 @@ def _settings_path(name: str) -> Path:
 def dataset_setting(name: str) -> dict[str, Any] | None:
     """The person's dataset-level choice (``rollout`` / ``sft``), if any."""
     value = store.load_json(_settings_path(name))
-    if isinstance(value, dict) and value.get("dataset_type") in ("rollout", "sft"):
+    if isinstance(value, dict) and value.get("dataset_type") in SETTING_TYPES:
         return value
     return None
 
@@ -181,26 +183,47 @@ def _manifest_type(ds: Dataset) -> str | None:
 
 
 def resolve_dataset_type(ds: Dataset, requested: str = "auto") -> dict[str, Any]:
-    """``{"dataset_type", "source"}`` for a run.
+    """``{"dataset_type", "source", "reason"}`` for a run.
 
-    An explicit ``rollout`` / ``sft`` is used as asked (``request``). ``auto``
-    takes, in order: the dataset setting (``user``), the export's own
+    An explicit type is used as asked (``request``). ``auto`` takes, in
+    order: the dataset setting (``user``), the export's own
     ``meta/levi_recap.json`` (``manifest``), ``rollout`` when any episode has
-    an outcome (``outcomes``), else ``value_only`` (``no_outcomes``): values
-    only, no advantage labels."""
+    an outcome (``outcomes``), else the old default ``rollout``
+    (``fallback``; it refuses a dataset without outcomes as before)."""
     if requested not in REQUESTED_TYPES:
-        raise RecapError(400, "dataset_type is auto, rollout or sft")
+        raise RecapError(400, "dataset_type is auto, rollout, sft or value_only")
     if requested != "auto":
-        return {"dataset_type": requested, "source": "request"}
+        return {
+            "dataset_type": requested,
+            "source": "request",
+            "reason": "asked for in the request",
+        }
     setting = dataset_setting(ds.name)
     if setting:
-        return {"dataset_type": setting["dataset_type"], "source": "user"}
+        return {
+            "dataset_type": setting["dataset_type"],
+            "source": "user",
+            "reason": "the dataset setting (recap_values/<name>/dataset.json)",
+        }
     kind = _manifest_type(ds)
     if kind:
-        return {"dataset_type": kind, "source": "manifest"}
+        return {
+            "dataset_type": kind,
+            "source": "manifest",
+            "reason": "the export's meta/levi_recap.json",
+        }
     if any(ds.outcome(ep) is not None for ep in ds.rows):
-        return {"dataset_type": "rollout", "source": "outcomes"}
-    return {"dataset_type": "value_only", "source": "no_outcomes"}
+        return {
+            "dataset_type": "rollout",
+            "source": "outcomes",
+            "reason": "episodes have success/failure labels",
+        }
+    return {
+        "dataset_type": "rollout",
+        "source": "fallback",
+        "reason": "no dataset setting, export metadata or outcome label: "
+        "fell back to rollout (the old default)",
+    }
 
 
 def dataset_type_payload(repo_id: str) -> dict[str, Any]:
@@ -217,7 +240,7 @@ def set_dataset_type(repo_id: str, dataset_type: str) -> dict[str, Any]:
     """Store the dataset-level type; ``auto`` removes the setting."""
     ds = dataset(repo_id)
     if dataset_type not in REQUESTED_TYPES:
-        raise RecapError(400, "dataset_type is auto, rollout or sft")
+        raise RecapError(400, "dataset_type is auto, rollout, sft or value_only")
     with store.locked(ds.name):
         path = _settings_path(ds.name)
         if dataset_type == "auto":
@@ -490,7 +513,7 @@ def start(
     lookahead: int | None = None,
     positive_quantile: float | None = None,
     threshold: float | None = None,
-    dataset_type: str = "rollout",
+    dataset_type: str = "auto",
     static_filter: str = "auto",
     watch: bool = True,
 ) -> dict[str, Any]:
@@ -551,7 +574,13 @@ def start(
         raise RecapError(
             400,
             "No episode has a success/failure label; label outcomes first, run "
-            "with dataset_type auto (values only) or sft (demonstrations)",
+            "with dataset_type value_only (values, no labels) or sft "
+            "(demonstrations), or set the dataset's type"
+            + (
+                f" (dataset_type auto {kind['reason']})"
+                if kind["source"] == "fallback"
+                else ""
+            ),
         )
     lengths = {}
     for ep in success:
@@ -581,6 +610,7 @@ def start(
         "dataset_type": resolved,
         "dataset_type_requested": dataset_type,
         "dataset_type_source": kind["source"],
+        "dataset_type_reason": kind["reason"],
         "static_filter": static_filter,
     }
     if request["lookahead"] < 1:
@@ -1221,6 +1251,7 @@ def _common_meta(job, plan, manifest, result) -> dict[str, Any]:
         "request": request,
         "dataset_type": request["dataset_type"],
         "dataset_type_source": request.get("dataset_type_source", "request"),
+        "dataset_type_reason": request.get("dataset_type_reason"),
         "labels": True,
         "fingerprint": {
             "source_fingerprint": ds_fingerprint,
@@ -1389,9 +1420,11 @@ def episode_payload(
         "frame_index": columns["frame_index"],
         "timestamp": columns["timestamp"],
         "value": [float(v) for v in columns["value"]],
-        # Null for a value-only result (no outcome, so no advantage labels).
-        "advantage": _floats(columns["advantage"]),
-        "positive": columns["positive"],
+        # Empty for a value-only result (no outcome, so no advantages or
+        # labels): a viewer shows "no advantage labels", never a row of nulls
+        # drawn as negative.
+        "advantage": _floats(columns["advantage"]) if has_labels(record) else [],
+        "positive": columns["positive"] if has_labels(record) else [],
         "labels": has_labels(record),
         # With the training static filter only kept frames are listed: the
         # frame indices skip over the dropped (unlabelled) ones.

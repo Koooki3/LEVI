@@ -435,6 +435,15 @@ def _tables(ep: int, cols: dict[str, Any], dataset_name: str):
     return table, rlinf, row
 
 
+def _rlinf_table(parts: list[pa.Table], labelled: bool) -> pa.Table:
+    """RLinf's advantages table; a values-only result leaves out the label
+    column (a trainer reading it must not take a missing label for False)."""
+    table = pa.concat_tables(parts) if parts else RLINF_SCHEMA.empty_table()
+    if not labelled and "advantage" in table.column_names:
+        table = table.drop(["advantage"])
+    return table
+
+
 def _positive_fraction(per_episode: dict[str, dict[str, Any]]) -> float | None:
     labelled = [r for r in per_episode.values() if r["positive_fraction"] is not None]
     if not labelled:
@@ -490,7 +499,7 @@ def _publish_revision(
         per_episode[str(ep)] = row
     write_table(
         target / "advantages.parquet",
-        pa.concat_tables(rlinf_parts) if rlinf_parts else RLINF_SCHEMA.empty_table(),
+        _rlinf_table(rlinf_parts, _positive_fraction(per_episode) is not None),
     )
     record = {
         "schema": SCHEMA,
@@ -614,13 +623,17 @@ def publish_model(
                     pc.is_in(previous["episode_index"], pa.array(carried, pa.int64()))
                 )
             )
-        rlinf_table = (
-            pa.concat_tables(parts).sort_by(
+        labelled = meta.get("dataset_type") != "value_only"
+        if not labelled:
+            parts = [
+                p.drop(["advantage"]) if "advantage" in p.column_names else p
+                for p in parts
+            ]
+        rlinf_table = _rlinf_table(parts, labelled)
+        if parts:
+            rlinf_table = rlinf_table.sort_by(
                 [("episode_index", "ascending"), ("frame_index", "ascending")]
             )
-            if parts
-            else RLINF_SCHEMA.empty_table()
-        )
         _durable_table(target / "advantages.parquet", rlinf_table)
         indices = sorted({*episodes, *carried})
         outcomes = {

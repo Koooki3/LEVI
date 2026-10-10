@@ -3017,10 +3017,11 @@ class RecapRunRequest(BaseModel):
     positive_quantile: float | None = Field(default=None, gt=0, lt=1)
     threshold: float | None = None
     # "sft": demonstrations, every episode a success and every frame positive
-    # (RLinf's dataset type); "rollout" (the default) reads each episode's
-    # outcome; "auto" takes the dataset setting, the export's metadata or the
-    # outcomes, and computes values only when there are none.
-    dataset_type: Literal["auto", "rollout", "sft"] = "rollout"
+    # (RLinf's dataset type); "rollout" reads each episode's outcome;
+    # "value_only" computes values without labels; "auto" (the default) takes
+    # the dataset setting, the export's metadata or the outcomes, else
+    # falls back to "rollout".
+    dataset_type: Literal["auto", "rollout", "sft", "value_only"] = "auto"
     # The training-data static-pose filter (docs/RECAP.md): "auto" applies it
     # when the checkpoint names one and the dataset is a raw-capture view.
     static_filter: Literal["auto", "on", "off"] = "auto"
@@ -3050,7 +3051,7 @@ def _recap_job(job_id: str, repo_id: str | None) -> dict[str, Any]:
 class RecapSettingsRequest(BaseModel):
     repo_id: str
     # "auto" removes the setting (the type is then inferred from the data).
-    dataset_type: Literal["auto", "rollout", "sft"]
+    dataset_type: Literal["auto", "rollout", "sft", "value_only"]
 
 
 @app.get("/api/recap/settings")

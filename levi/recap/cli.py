@@ -8,8 +8,8 @@ levi recap inspect <n>                      strict key check (worker, CPU)
 levi recap base import <folder> [--name] [--official repo] [--sha256-file f] [--weights] [--label TEXT]
 levi recap base list
 levi recap threshold <repo_id> <repo_id> … [--positive-quantile q] [--set <checkpoint> --provenance-text TEXT]
-levi recap run <repo_id> --checkpoint <n> [--episodes 0,3] [--threshold X] [--dataset-type auto|rollout|sft] [--static-filter auto|on|off]
-levi recap settings <repo_id> [--dataset-type auto|rollout|sft]
+levi recap run <repo_id> --checkpoint <n> [--episodes 0,3] [--threshold X] [--dataset-type auto|rollout|sft|value_only] [--static-filter auto|on|off]
+levi recap settings <repo_id> [--dataset-type auto|rollout|sft|value_only]
 levi recap clear [<repo_id or folder> …] [--all] [--include-jobs] [--apply]
 levi recap show <repo_id> [--model <checkpoint>|--revision <id>] [--episode N]
 """
@@ -205,11 +205,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--dataset-type",
         dest="dataset_type",
-        choices=["auto", "rollout", "sft"],
+        choices=["auto", "rollout", "sft", "value_only"],
         default=None,
-        help="rollout (default): outcomes from labels; sft: demonstrations, all "
-        "success; auto: the dataset setting, the export's metadata or the "
-        "outcomes, values only when there are none",
+        help="auto (default): the dataset setting, the export's metadata or "
+        "the outcomes, else rollout; rollout: outcomes from labels; sft: "
+        "demonstrations, all success; value_only: values without labels",
     )
     run.add_argument("--sft", action="store_true", help="same as --dataset-type sft")
     run.add_argument(
@@ -226,7 +226,7 @@ def build_parser() -> argparse.ArgumentParser:
     settings.add_argument(
         "--dataset-type",
         dest="dataset_type",
-        choices=["auto", "rollout", "sft"],
+        choices=["auto", "rollout", "sft", "value_only"],
         help="store it for the dataset (auto removes the setting)",
     )
     clear = sub.add_parser(
@@ -382,7 +382,7 @@ def main(argv: list[str] | None = None) -> int:
 def _dataset_type(args) -> str:
     if args.sft and args.dataset_type not in (None, "sft"):
         raise ValueError("--sft contradicts --dataset-type " + args.dataset_type)
-    return "sft" if args.sft else args.dataset_type or "rollout"
+    return "sft" if args.sft else args.dataset_type or "auto"
 
 
 def _run(args) -> int:

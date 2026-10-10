@@ -22,47 +22,44 @@ def _dataset(tmp_path, rows, *, recap_meta=None):
     return jobs.Dataset("local/ds", "ds", root, {"fps": 10}, rows, {})
 
 
+def _kind(ds, requested="auto"):
+    found = jobs.resolve_dataset_type(ds, requested)
+    assert found["reason"]  # always recorded with the result
+    return found["dataset_type"], found["source"]
+
+
 def test_auto_resolution_order(client, tmp_path):
     labelled = _dataset(tmp_path, {0: {"levi_outcome": "failure"}, 1: {}})
-    assert jobs.resolve_dataset_type(labelled) == {
-        "dataset_type": "rollout",
-        "source": "outcomes",
-    }
+    assert _kind(labelled) == ("rollout", "outcomes")
     # An RLinf-format is_success and a human label count as outcomes too.
-    assert jobs.resolve_dataset_type(
-        _dataset(tmp_path, {0: {"is_success": False}})
-    ) == {"dataset_type": "rollout", "source": "outcomes"}
+    assert _kind(_dataset(tmp_path, {0: {"is_success": False}})) == (
+        "rollout",
+        "outcomes",
+    )
     human = _dataset(tmp_path, {0: {}})
     human.human[0] = "success"
-    assert jobs.resolve_dataset_type(human)["dataset_type"] == "rollout"
-    # No outcome anywhere: values only, never "every episode a success".
+    assert _kind(human)[0] == "rollout"
+    # Nothing to decide from: the old default (rollout), never "every episode
+    # a success"; values only must be asked for.
     bare = _dataset(tmp_path, {0: {}, 1: {"levi_outcome": "unknown"}})
-    assert jobs.resolve_dataset_type(bare) == {
-        "dataset_type": "value_only",
-        "source": "no_outcomes",
-    }
+    assert _kind(bare) == ("rollout", "fallback")
+    assert "no dataset setting" in jobs.resolve_dataset_type(bare)["reason"]
     # A LEVI recap_value export says what it is.
     exported = _dataset(tmp_path, {0: {}}, recap_meta={"dataset_type": "sft"})
-    assert jobs.resolve_dataset_type(exported) == {
-        "dataset_type": "sft",
-        "source": "manifest",
-    }
+    assert _kind(exported) == ("sft", "manifest")
     # The person's dataset setting wins over the metadata ...
     store.write_json(store.root("ds") / "dataset.json", {"dataset_type": "rollout"})
-    assert jobs.resolve_dataset_type(exported) == {
-        "dataset_type": "rollout",
-        "source": "user",
-    }
-    # ... and an explicit request over everything.
-    assert jobs.resolve_dataset_type(exported, "sft") == {
-        "dataset_type": "sft",
-        "source": "request",
-    }
-    # A broken or unknown setting is ignored, not trusted.
+    assert _kind(exported) == ("rollout", "user")
     store.write_json(store.root("ds") / "dataset.json", {"dataset_type": "value_only"})
-    assert jobs.resolve_dataset_type(exported)["source"] == "manifest"
+    assert _kind(exported) == ("value_only", "user")
+    # ... and an explicit request over everything.
+    assert _kind(exported, "sft") == ("sft", "request")
+    assert _kind(exported, "value_only") == ("value_only", "request")
+    # A broken or unknown setting is ignored, not trusted.
+    store.write_json(store.root("ds") / "dataset.json", {"dataset_type": "bogus"})
+    assert _kind(exported) == ("sft", "manifest")
     with pytest.raises(jobs.RecapError) as refused:
-        jobs.resolve_dataset_type(exported, "value_only")
+        jobs.resolve_dataset_type(exported, "bogus")
     assert refused.value.status == 400
 
 
@@ -87,19 +84,83 @@ def unlabelled(client, monkeypatch, tmp_path):
     assert not jobs.wait_idle(60)
 
 
-def test_no_outcomes_give_values_only_never_positive_labels(unlabelled):
+def test_default_is_auto_and_falls_back_to_rollout(unlabelled):
+    """Decision I2 (a): the API and CLI default is auto; with nothing to
+    decide from it falls back to the old default, which refuses as before."""
     client, entry = unlabelled
     repo_id = entry["id"]
-    # The old default (rollout) still refuses, exactly as before.
-    old = client.post("/annotations/api/recap/run", json={**BODY, "repo_id": repo_id})
+    body = {k: v for k, v in BODY.items() if k != "dataset_type"}
+    old = client.post("/annotations/api/recap/run", json={**body, "repo_id": repo_id})
     assert old.status_code == 400 and "label outcomes first" in old.json()["detail"]
+    assert "fell back to rollout" in old.json()["detail"]
     status = client.get("/annotations/api/recap/status", params={"repo_id": repo_id})
-    assert status.json()["dataset_type"] == {
-        "setting": "auto",
-        "dataset_type": "value_only",
-        "source": "no_outcomes",
-    }
-    job = run(client, repo_id, dataset_type="auto")
+    found = status.json()["dataset_type"]
+    assert (found["setting"], found["dataset_type"], found["source"]) == (
+        "auto",
+        "rollout",
+        "fallback",
+    )
+
+
+def test_default_follows_the_dataset_setting(unlabelled, capsys):
+    from levi.recap.cli import main
+
+    client, entry = unlabelled
+    repo_id = entry["id"]
+    client.post(
+        "/annotations/api/recap/settings",
+        json={"repo_id": repo_id, "dataset_type": "sft"},
+    )
+    # No dataset_type in the request: the setting decides (it used to be
+    # ignored under the rollout default).
+    body = {k: v for k, v in BODY.items() if k != "dataset_type"}
+    started = client.post(
+        "/annotations/api/recap/run", json={**body, "repo_id": repo_id}
+    )
+    assert started.status_code == 202, started.text
+    from test_recap_value import finish
+
+    assert finish(client, repo_id, started.json()["id"])["status"] == "succeeded"
+    record = store.revision(entry["name"])
+    assert record["dataset_type"] == "sft" and record["dataset_type_source"] == "user"
+    assert record["dataset_type_reason"]
+    # The CLI default is auto too.
+    client.post(
+        "/annotations/api/recap/settings",
+        json={"repo_id": repo_id, "dataset_type": "value_only"},
+    )
+    assert main(["run", repo_id, "--checkpoint", "fake-a"]) == 0
+    capsys.readouterr()
+    assert store.revision(entry["name"])["dataset_type"] == "value_only"
+
+
+def test_default_on_labelled_data_is_the_old_rollout(client, monkeypatch, tmp_path):
+    from test_formats import capture_fixture
+    from test_views import register_raw
+
+    monkeypatch.setenv("LEVI_RECAP_VALUE_CHECKPOINT_DIR", str(tmp_path / "ckpt"))
+    monkeypatch.setenv("LEVI_RECAP_VALUE_WORKER_PYTHON", str(tmp_path / "no-python"))
+    checkpoints.import_checkpoint(None, "fake-a", provider="fake")
+    entry = register_raw(client, capture_fixture(tmp_path / "plates"))
+    body = {k: v for k, v in BODY.items() if k != "dataset_type"}
+    started = client.post(
+        "/annotations/api/recap/run", json={**body, "repo_id": entry["id"]}
+    )
+    from test_recap_value import finish
+
+    assert finish(client, entry["id"], started.json()["id"])["status"] == "succeeded"
+    record = store.revision(entry["name"])
+    assert record["dataset_type"] == "rollout"
+    assert record["dataset_type_source"] == "outcomes"
+    assert record["request"]["dataset_type_requested"] == "auto"
+    assert record["outcomes"] == {"0": "success", "1": "failure"}
+    assert not jobs.wait_idle(60)
+
+
+def test_values_only_never_positive_labels(unlabelled):
+    client, entry = unlabelled
+    repo_id = entry["id"]
+    job = run(client, repo_id, dataset_type="value_only")
     assert job["status"] == "succeeded", job
     current = client.get(
         "/annotations/api/recap/status", params={"repo_id": repo_id}
@@ -112,7 +173,9 @@ def test_no_outcomes_give_values_only_never_positive_labels(unlabelled):
     ).json()
     assert ep["labels"] is False and ep["threshold"] is None
     assert len(ep["value"]) == 30 and all(-1 <= v <= 0 for v in ep["value"])
-    assert ep["positive"] == [None] * 30 and ep["advantage"] == [None] * 30
+    # Decision I3: empty, never a row of nulls that today's viewer would draw
+    # as "negative advantage" everywhere.
+    assert ep["positive"] == [] and ep["advantage"] == []
     summary = client.get(
         "/annotations/api/recap/summary", params={"repo_id": repo_id}
     ).json()
@@ -128,9 +191,16 @@ def test_no_outcomes_give_values_only_never_positive_labels(unlabelled):
         assert row["max_value"] == pytest.approx(max(values))
         assert row["min_value"] <= row["mean_value"] <= row["max_value"]
     record = store.revision(entry["name"])
-    assert record["request"]["dataset_type_requested"] == "auto"
-    assert record["dataset_type_source"] == "no_outcomes"
+    assert record["request"]["dataset_type_requested"] == "value_only"
+    assert record["dataset_type_source"] == "request"
     assert record["outcomes"] == {} and record["return_min"] is None
+    # RLinf's advantages table carries no label column a trainer could read
+    # as False.
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(store.advantages_path(entry["name"]))
+    assert "advantage" not in table.column_names
+    assert "value_current" in table.column_names
     # An agent's digest has values but no runs of labels.
     digest = jobs.episode_digest(repo_id, 0)
     assert digest["labels"] is False and digest["runs"] == []
@@ -140,27 +210,27 @@ def test_no_outcomes_give_values_only_never_positive_labels(unlabelled):
         jobs.unified_threshold([repo_id])
 
 
-def test_dataset_setting_route_cli_and_sft_run(unlabelled, capsys):
+def test_dataset_setting_route_and_cli(unlabelled, capsys):
     from levi.recap.cli import main
 
     client, entry = unlabelled
     repo_id = entry["id"]
     got = client.get("/annotations/api/recap/settings", params={"repo_id": repo_id})
-    assert got.json() == {
-        "setting": "auto",
-        "dataset_type": "value_only",
-        "source": "no_outcomes",
-    }
+    assert (got.json()["setting"], got.json()["source"]) == ("auto", "fallback")
     bad = client.post(
         "/annotations/api/recap/settings",
-        json={"repo_id": repo_id, "dataset_type": "value_only"},
+        json={"repo_id": repo_id, "dataset_type": "bogus"},
     )
     assert bad.status_code == 422
     saved = client.post(
         "/annotations/api/recap/settings",
         json={"repo_id": repo_id, "dataset_type": "sft"},
     ).json()
-    assert saved == {"setting": "sft", "dataset_type": "sft", "source": "user"}
+    assert (saved["setting"], saved["dataset_type"], saved["source"]) == (
+        "sft",
+        "sft",
+        "user",
+    )
     on_disk = json.loads((store.root(entry["name"]) / "dataset.json").read_text())
     assert on_disk["dataset_type"] == "sft" and on_disk["source"] == "user"
     job = run(client, repo_id, dataset_type="auto")
@@ -173,7 +243,7 @@ def test_dataset_setting_route_cli_and_sft_run(unlabelled, capsys):
     assert main(["settings", repo_id]) == 0
     assert json.loads(capsys.readouterr().out)["setting"] == "sft"
     assert main(["settings", repo_id, "--dataset-type", "auto"]) == 0
-    assert json.loads(capsys.readouterr().out)["dataset_type"] == "value_only"
+    assert json.loads(capsys.readouterr().out)["source"] == "fallback"
     assert not (store.root(entry["name"]) / "dataset.json").exists()
     assert (
         main(
@@ -191,7 +261,8 @@ def test_dataset_setting_route_cli_and_sft_run(unlabelled, capsys):
     )
     assert "contradicts" in capsys.readouterr().err
     assert (
-        main(["run", repo_id, "--checkpoint", "fake-a", "--dataset-type", "auto"]) == 0
+        main(["run", repo_id, "--checkpoint", "fake-a", "--dataset-type", "value_only"])
+        == 0
     )
     capsys.readouterr()
     assert store.revision(entry["name"])["dataset_type"] == "value_only"
