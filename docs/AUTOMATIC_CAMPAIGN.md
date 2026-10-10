@@ -766,6 +766,10 @@ vLLM model, settings digests, judge spec, initial-state contract, feature
 switches, Python and numpy), each scrubbed; everything, people's names and
 addresses excepted, only with `include_site_details=True`.
 
+### Subtask analysis (optional, automatic annotation)
+
+`write_report(..., subtasks=records)` takes the live service's time segments of the campaign's episodes (`subtasks.load(<workspace>/live)`, from `live/analysis.jsonl`, see [Evaluation analysis](LIVE.md#evaluation-analysis)). Episodes are matched by `<rollout group>/<task folder>/<folder name>`, the id a legacy-client episode has in the ledger; an episode of another source has none and is not matched. When some valid trial has time segments, the report gets a section "Subtask analysis (automatic annotation, unreviewed)" (in both languages, before the closing line), `tables/subtasks.csv` and `.tex`, and `data/subtasks.json` (schema `levi.aeri.campaign_subtasks.v1`): per arm, the share of valid trials that reached each subtask (the subtask or a later one), the median and quartile duration of each subtask in seconds, and, for the trials that failed on the report's label basis, how many last completed each subtask (`none`: nothing). It warns when time segments cover less than 80 % of an arm's valid trials or fewer than 5 failed trials have them. The time segments are the background model's output and no person has reviewed them: none of these numbers enters the success rates, the comparisons or the conclusion level, and the section says so. Without matching time segments nothing is added and the report is byte-for-byte the same; a progress-only (running or blinded) report never has the section. A subtask id that holds a path, an address or a serial-like number is printed as `other`; the report's naming, wording and scrubbing checks cover the section. The campaign controller does not pass `subtasks` yet; call `write_report` with it to include the analysis.
+
 ## Guided legacy-client campaign
 
 Until a real AERI robot adapter exists, a campaign can run on the legacy

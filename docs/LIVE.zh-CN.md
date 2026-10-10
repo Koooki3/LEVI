@@ -673,6 +673,7 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 | `<工作区>/live/queue.json` | 每个数据集的标注模式（`auto`、`history`、`paused`、`off`），原子写入；见[后台标注队列与避让规则](#后台标注队列与避让规则) |
 | `<工作区>/live/gate.jsonl` | 闸门的每一次变化（轮转；见“历史与统计”） |
 | `<工作区>/live/stats.jsonl` | 每个已标片段一条记录（轮转；见“历史与统计”） |
+| `<工作区>/live/analysis.jsonl` | 每个已标注片段一行：标签和时间片段放在一起，只追加（见[评测分析](#评测分析)） |
 | `<工作区>/live/online.jsonl` | 每个在线判定请求一行，不存图像（轮转；见[在线判定](#在线判定接口-c5)）；`live/online-tmp/` 只在模型读取期间存放请求的图像 |
 | `<工作区>/live/reports/` | 每个结束的评测会话一份报告：`<数据集>__<会话>.md`、`.zh-CN.md`、`.json`（见“统计与报告”） |
 | `<工作区>/live/logs/` | `live.log`、`worker.log`、`ui.log`、`vllm-launch.log`（轮转） |
@@ -748,6 +749,35 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 
 **回填。** `levi live stats backfill [--dataset X] [--dry-run] [--json]` 为数据集状态里是 `done` 或 `failed`、但没有记录的片段（在 `stats.jsonl` 出现之前标注的）补记录。它重建还留得下来的内容：片段的各个时刻、尝试次数、时间片段数和判定来自数据集状态；模型请求、token 和耗时来自工作区存储里的运行日志（只读方式打开）；时间片段标签来自已提交的变更集。记录带 `backfilled: true`，`at` 是它所描述的那个时刻。被人排除的片段也会回填，带 `excluded: true`（开销是真的，记录保留，统计默认不计入）。数据集名可能带根标记（`<group>__<task>__at__<root>`）：`--dataset` 要写成 `levi live status` 显示的名字。没有任何文件保存的内容保持 `null`：当时生效的设置（标注指南、模型配置、模型）、门控等待、vLLM 唤醒耗时、批次、片段时长，以及批次的请求开销校准（`probe`）。不估算，也不拿今天的配置充数。它从不改动已有的行，已经有记录的片段会跳过，所以运行两次不会多出东西。存在但读不了的存储（被锁、损坏）算失败，不算空日志：该片段会跳过并报告（退出码 1，dry-run 里写 “READ FAILED”），之后再运行就能补上；完全没有日志的片段照常回填，模型字段为 null。`--dry-run` 列出每个片段，以及 schema 里每个字段的取值来源（或“没有记录”），什么也不写。
 
+## 评测分析
+
+要把一次评测的结果（例如某个检查点叠盘子成功率低）和各子任务的表现放在一起看，两类记录得在同一处。`live/analysis.jsonl` 就是这个地方：只追加的文件，schema 是 `levi.live.analysis.v1`，每个标注完成的片段（时间片段已提交，和/或已有自动判定）一行。片段重新标注只会多一行；读取方取每个 `(dataset, demo)` 最新的一行，跳过损坏或写了一半的行，缺的字段读作 `null`（`levi.live.analysis.read`、`latest`）。一行包含：
+
+| 字段 | 含义 |
+| --- | --- |
+| `dataset`、`group`、`task`、`demo`、`episode_index`、`session` | 实时数据集、它的 rollout 组（检查点）、任务文件夹、片段和评测会话 |
+| `labelled_at`、`at` | 标注完成（提交）的纪元秒；这一行写入的纪元秒 |
+| `operator` | 操作员标签（`{outcome, by}`），即真值；没有则 `null` |
+| `online` | 客户端转交的在线判定（`{status, outcome, undecided, timing}`）；没有则 `null` |
+| `agent` | 后台判定（`{outcome, undecided, rule, source, review: "auto", reviewed: false}`）：始终是自动、未复核的 |
+| `segments` | `{count, items: [{id, start, end, duration, outcome}], sequence, missing, duplicated}`：按时间排序的已提交时间片段；`missing` 是内置阶段（`approach`、`grasp`、`transport`、`place`、`retreat`）中在已到达的最靠后阶段之前缺的；`duplicated` 是出现多次的 id（重新抓取算重复，不算错误）；标注没有产生时间片段时为 `null` |
+| `spec`、`capability` | 用到的标注指南和释放复核规格文件；这次运行的出处（LEVI 版本、计划、规格、事件智能模式），由写入方给出，是不超过 4 KB 的不透明对象，没有则 `null` |
+| `signature` | 内容（不含时间）的哈希，没有变化的片段不会重复写入 |
+
+写入是在 `flock` 下做一次 `O_APPEND` 写，再 `fsync`；上一次写了一半的末行，下一次写入会先把它收尾。`levi.live.analysis.sync(config)` 补写缺失或有变化的行，读取数据集状态文件、`stats.jsonl` 和运行存储（只读）；它是幂等的，两个进程同时调用也安全，遇到暂时读不到变更集的片段就跳过（以后再调用会补上）。当前版本里实时服务不会自己调用它：`levi live analysis` 会先运行它（`--no-sync` 只读已有内容），所以评测之后运行这条命令即可。
+
+`levi live analysis [--group G] [--task T] [--since ISO] [--stages a,b,c] [--format md|json] [--lang en|zh] [--sync|--no-sync] [--out PATH]` 和只读的 `GET /api/levi/live/analysis?group=&task=&since=&stages=` 按检查点和任务（以及合计）给出：
+
+- **覆盖率**：片段数，以及有操作员标签、有后台判定、有时间片段的各占多少。
+- **成功率**：按操作员标签算，附 Wilson 95 % 区间和样本小标记（有标签的片段少于 10 个）；后台判定的成功率另列，标为自动、未复核。
+- **一致率**：后台判定对操作员标签，口径就是 `stats.agreement`（`pairs`、`judged`、`agree`、`rate`、`false_success`、`missed_success`、`undecided`、`no_agent`）。
+- **子任务漏斗**：有时间片段的片段中到达每个子任务（该子任务或更靠后的子任务）的占比，以及本身含有该子任务的个数；别的词表按 id 首次出现的顺序列出。**时长**：每个子任务的时间片段数、中位数和四分位数（秒）。**序列**：有缺环、有重复的片段各多少。
+- **失败落点**：对操作员标为失败的片段，取最后一个没有被标为失败的时间片段（“最后完成”），按子任务计数（`none`：没有完成任何子任务）。只有后台判为失败（没有操作员成败标签）的片段另计。
+- **未计入的片段**：提前中止（其中的机械臂故障）、作废、标注失败、被人移除、尚未标注、已标注但记录还没写。
+- **警告**，而不是结论：片段少于 10 个，操作员、后台或时间片段的覆盖率低于 80 %，没有操作员标签，带时间片段的失败片段少于 5 个，有记录待写。
+
+凡来自后台标注的数字都带 `review: "auto"`（JSON）或“自动、未复核”（文字）。所有数字由代码从记录算出，不含模型生成的文字。被人移除的片段和已归档的数据集不计入。这个路由不写任何东西，也不返回路径、令牌或密钥。多模型评测报告可以加上同样的分组分析，见[报告产物](AUTOMATIC_CAMPAIGN.zh-CN.md#报告产物)。
+
 ## 状态文件（接口 C4）
 
 `~/.levi-live/status.json`，每 `heartbeat_s`（4 秒，≤ 5 秒）原子重写。评测客户端只有在**全部**满足时才认为服务可用：`schema` 以 `levi.live.status.` 开头；`updated_at`（纪元秒）不到 15 秒；`pid` 存活；`accepts_sessions` 为真；`state` 是 `idle active annotating gpu_wait` 之一；`watch_roots`（绝对路径）中有一个等于或包含客户端的 `--rollout-root`（或被它包含）。否则客户端退回手动标注。`accepts_sessions` 在 `starting` 以及 `stopped`/`error` 时为假；`gpu_wait`（有活在等模型：闸门关闭、vLLM 正在启动或在睡眠）算可用。 `gpu.free_mib` 是最近一次 `nvidia-smi` 的读数，**只在不到 30 秒内才给出**，否则为 `null`（睡眠中的 vLLM 有意不去探测，睡下之前的读数，例如 2254 MiB，不是现在的空闲显存）；`gpu.free_mib_at` 是读数的时间。`gpu.idle_since` 是 vLLM 开始闲置的时间（有活、正在载入或本就该常驻时为 `null`），`gpu.prewarm` 说明它是否以预热方式启动；`levi live doctor` 会读这两个字段。`attention` 在服务放弃启动 vLLM、需要人（`levi live resume`）时设置，此时标注暂停，但不改变 `accepts_sessions` 和 `state`。**`labelling_paused`** 为 `null`，或在“没有标注、且原因不会自己消失”时为 `{code, reason, since}`：`vllm_failed`（放弃启动 vLLM，`levi live resume`）、`vllm_error`（启动失败、正在退避）、`insufficient_vram`（空闲显存连最短上下文也装不下）、`policy_large`（策略服务器占用超过 `gpu.policy_budget_mib`：改用 `.22`；立即报告，按服务器的显存判断，不管闸门或评测在做什么，是一次稳定的暂停）、`unknown_client`（没有会话为之作证的策略服务器让闸门关了 `gpu.unknown_client_pause_s` 以上）、`robot_quiet`（`gpu.quiet_states` 让闸门关了 `gpu.quiet_pause_s` 以上：客户端卡在那个状态，或列了不该列的状态；同时记一条 `error` 事件），以及持续 `gpu.blocked_pause_s` 之后的 `vram`（睡眠的 vLLM 唤不醒，或启动没有足够显存）、`lock`（别的 agent 持有 GPU 锁）、`external_busy`（`vllm.port` 上有别人的 vLLM）和 `gpu_not_free`（vLLM 已停但它的进程仍占着显存，所以锁保留）。策略推理时闸门关闭、策略服务器还在加载，都是正常等待，不设置它；它也不改变 `accepts_sessions`。`loop_at` 是主循环上次 tick 的时间（`updated_at` 来自单独的心跳线程，循环卡住时它仍然新鲜；`levi live doctor` 在 `loop_at` 超过 5 分钟时告警）。`frontend` 说明服务启动的页面/核心 API 是否真的起来（`levi live start --daemon` 失败时打印原因并以退出码 2 返回，标注继续运行）。新增字段：数据集行的 `stuck`、`source_changed`、`review_runs_open`、`awaiting`，会话的 `root`、`reset_wait_s`、`waiting_reset_since`、`label_mode`（`dual_label`、`unattended` 或 null），顶层的 `pipeline`（`temporal`、`anchored`、`anchored_spec`），闸门代码 `episode_imminent`，决策代码 `evaluation_active`、`standby_settling`、`prewarm_waiting_for_policy`、`gpu_not_free`，以及顶层的 `online_judge`（`null`，或启用在线判定时的 `{url, spec, spec_version, ready}`，见[在线判定](#在线判定接口-c5)；只是新增，其他字段不变，所以上面客户端的可用性检查不受影响）。完整 JSON 形状见 [LIVE.md](LIVE.md#status-file-interface-c4)。
@@ -769,6 +799,7 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 | `GET /datasets/{name}` | 数据集详情：`repo_id`（实时工作区目录里登记后的数据集 id，否则 null）、`linked_repo_id`（本 LEVI 不是实时工作区且关联了它时，本 LEVI 里打开它用的 id `local/live.<名字>`，否则 null）、`embedded` 和 `live_ui`（同 `/status`）、任务文本、各状态计数（被排除的片段不计入）、`total_demos`（数据集里的片段数）、片段列表（最新在前，≤ 200；每项有 `excluded`（null）、状态、集序号、`run_id`、尝试次数、时间片段数、提交时间、自动判定 `verdict`：`outcome/events/valid_events/undecided/spec/review: "auto"/evaluated: false`，另有 `rule/place_outcome/closes_after_last_valid/min_valid`，默认规则下为空；最终状态判定还有 `final_reading/start_check`，其他判定没有这两个键；以及 `spec_version`）、`excluded_count` 和 `excluded_demos`（被排除的片段，行的格式相同，带 `excluded: {at, by: "person", reason}`，最新在前，全部列出，不在 200 处截断）、`incomplete`（含按原因计数）、进行中的批次、上一批、`last_error`；每个片段另有 `operator_label`（`{outcome, by, source}` 或 null）和 `agreement`（`yes`、`no`、`undecided`、`no_agent` 或 null），整个数据集有 `agreement`（覆盖全部保留的片段，不只是列出的 200 个）和 `pipeline`（`{"temporal"}`）。未知名字返回 404。 |
 | `GET /stats?dataset=&session=&since=&limit=100&offset=0&include_excluded=false` | `{"enabled", "schema": "levi.live.stats.v1", "generated_at", "scope", "datasets": [有记录的数据集名], "summary": {…各项聚合，见“统计与报告”}, "sessions": [每个（数据集，会话）一行，最新在前，≤ 200], "sessions_total", "episodes": {"total", "offset", "limit", "rows": [每个片段一行，最新在前，limit ≤ 500]}}`。`dataset` 和 `session` 只能是普通名字（否则 400）；`since` 是纪元秒。不含路径、令牌或密钥。 |
 | `GET /stats/export?format=csv\|json\|md&dataset=&session=&since=&lang=en\|zh&include_excluded=false` | 同样的统计，作为下载（`Content-Disposition: attachment`）：`csv` 每个片段一行（以 `=`、`+`、`-`、`@`、制表符或回车开头的文本单元格前面会加一个撇号，电子表格不会把它当公式执行），`json` 含全部片段的完整数据，`md` 一份可读报告。 |
+| `GET /analysis?group=&task=&since=&stages=` | `{"enabled", "schema": "levi.live.analysis.summary.v1", "review": "auto", "scope", "stages", "cells": [ {"group", "task", "episodes", "coverage", "success", "background_success", "agreement", "funnel", "durations", "sequence", "landing", "missing", "warnings"} ], "all"}`，见[评测分析](#评测分析)。只读；`since` 是 ISO 时间或纪元秒，`stages` 是逗号分隔的列表（其他取值：400）。不含路径、令牌或密钥。 |
 | `GET /audit?limit=50` | 自动批准主体的审计记录，最新在前，≤ 100 条，每条含 `tool`、`decision: allowed/refused`、`run_id` 等。人排除或恢复片段的行是 `principal: "local-human"`、`actor: "person"`、`tool: "episode.exclude"` 或 `"episode.restore"`、`dataset`、`demo`、可选的 `reason`、可选的 `via: "product"`（在产品 LEVI 页面上操作）、`decision: "completed"`。 |
 | `POST /datasets/{name}/exclude` | 请求体 `{"demos": ["demo_0003", …], "reason": "…"?}`（1 到 500 个名字，原因最长 300 字符）。排除这些片段（要么全部成功，要么都不改）。回答 `{"enabled", "dataset", "changed": [...], "unchanged": [...]（本来就已排除）, "counts", "excluded_count", "review_runs_open", "review_hidden": [...]（片段已全部排除、不计入的待复核运行）}`。404：数据集或片段不存在（会点名），或不是实时工作区；409：片段在进行中的批次里（“being labelled …”），或从未纳入数据集（被拒收、卡住）；401/403：不是人在操作（见上）。 |
 | `POST /datasets/{name}/restore` | 请求体 `{"demos": [...]}`。把已排除的片段放回来；回答同上（`review_hidden` 是恢复之后仍不计入的运行）；没排除的片段在 `unchanged` 里。片段不存在返回 404。 |
