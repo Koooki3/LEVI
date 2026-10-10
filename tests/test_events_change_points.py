@@ -102,7 +102,7 @@ def test_steps_are_found_where_they_are():
 def test_noise_alone_is_rarely_cut():
     # Scaled as the features are. At the calibrated penalty pure noise makes
     # well under one change point per minute; at twice it, none.
-    counts = {0.5: [], 1.0: []}
+    counts = {cp.PENALTY: [], 2 * cp.PENALTY: []}
     for seed in range(20):
         x = np.random.default_rng(seed).normal(0, 1, (600, 2))
         scaled = np.stack([cp.scale(x[:, 0]), cp.scale(x[:, 1])], axis=1)
@@ -110,9 +110,8 @@ def test_noise_alone_is_rarely_cut():
             found.append(
                 len(cp.detect(np.arange(600) / 10, scaled, penalty=penalty).rows)
             )
-    assert cp.PENALTY == 0.5
-    assert np.mean(counts[0.5]) <= 1 and max(counts[0.5]) <= 3
-    assert max(counts[1.0]) == 0
+    assert np.mean(counts[cp.PENALTY]) <= 1 and max(counts[cp.PENALTY]) <= 3
+    assert max(counts[2 * cp.PENALTY]) == 0
     # A heavy-tailed noise does not make dozens either.
     t = np.random.default_rng(9).standard_t(3, size=600)
     assert len(cp.detect(np.arange(600) / 10, cp.scale(t)[:, None]).rows) <= 3
@@ -444,3 +443,110 @@ def test_binning_still_finds_steps_at_their_rows():
     assert all(r % result.bin_rows == 0 for r in result.rows)
     # A short table is not binned.
     assert cp.detect(np.arange(300) / 10, cp.scale(x[:300])[:, None]).bin_rows == 1
+
+
+def _dev_gold(folder, source, frames, **extra):
+    import json
+
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "G00.json").write_text(
+        json.dumps(
+            {
+                "source": source,
+                "frames": frames,
+                "segments": [
+                    {"start_n": 0, "end_n": 40},
+                    {"start_n": 40, "end_n": frames - 1},
+                ],
+                **extra,
+            }
+        )
+    )
+    return folder
+
+
+def test_calibration_refuses_a_source_mapped_into_a_test_set(tmp_path):
+    from levi.events import calibrate
+
+    frames = _capture(tmp_path / "eval" / "screws_frozen60" / "demo_0001")
+    gold = _dev_gold(tmp_path / "dev", "captures/demo_0001", frames)
+    with pytest.raises(SystemExit, match="refused"):
+        calibrate.main(
+            ["--root", str(tmp_path), "--gold", str(gold),
+             "--map", "captures/=eval/screws_frozen60/"]
+        )  # fmt: skip
+
+
+def test_calibration_refuses_a_source_on_an_exclusion_list(tmp_path, monkeypatch):
+    import json
+
+    from levi.events import calibrate
+
+    frames = _capture(tmp_path / "captures" / "demo_0001")
+    gold = _dev_gold(tmp_path / "dev", "captures/demo_0001", frames)
+    monkeypatch.delenv("LEVI_POOL_HELDOUT", raising=False)
+    # Listed by path (relative to the root) ...
+    listed = tmp_path / "lists" / "set-v1.json"
+    listed.parent.mkdir()
+    listed.write_text(json.dumps({"episodes": [{"path": "captures/demo_0001"}]}))
+    with pytest.raises(SystemExit, match="set-v1"):
+        calibrate.main(
+            ["--root", str(tmp_path), "--gold", str(gold),
+             "--exclusion-list", str(listed)]
+        )  # fmt: skip
+    # ... by a video's sha256 (a renamed copy) ...
+    (tmp_path / "captures" / "demo_0001" / "side_camera.mp4").write_bytes(b"video")
+    from levi.pool.heldout import sha256
+
+    digest = sha256(tmp_path / "captures" / "demo_0001" / "side_camera.mp4")
+    listed.write_text(
+        json.dumps(
+            {"episodes": [{"path": "/elsewhere/demo_9", "sha256": {"side": digest}}]}
+        )
+    )
+    with pytest.raises(SystemExit, match="set-v1"):
+        calibrate.main(
+            ["--root", str(tmp_path), "--gold", str(gold),
+             "--exclusion-list", str(listed)]
+        )  # fmt: skip
+    # ... and through LEVI_POOL_HELDOUT.
+    monkeypatch.setenv("LEVI_POOL_HELDOUT", str(listed))
+    with pytest.raises(SystemExit, match="set-v1"):
+        calibrate.main(["--root", str(tmp_path), "--gold", str(gold)])
+
+
+def test_calibration_records_its_guards_and_skips_void_episodes(tmp_path, monkeypatch):
+    import json
+
+    from levi.events import calibrate
+
+    monkeypatch.delenv("LEVI_POOL_HELDOUT", raising=False)
+    frames = _capture(tmp_path / "captures" / "demo_0001")
+    gold = _dev_gold(tmp_path / "dev", "captures/demo_0001", frames)
+    void = _dev_gold(
+        tmp_path / "pilot", "captures/demo_0001", frames, episode_success="void"
+    )
+    listed = tmp_path / "other-v1.json"
+    listed.write_text(json.dumps({"episodes": [{"path": "captures/demo_9999"}]}))
+    out = tmp_path / "r.json"
+    calibrate.main(
+        ["--root", str(tmp_path), "--gold", str(gold), "--report-gold", str(void),
+         "--exclusion-list", str(listed), "--penalties", "0.5", "--out", str(out)]
+    )  # fmt: skip
+    report = json.loads(out.read_text())
+    guards = report["guards"]
+    assert "frozen" in guards["refuse"]
+    assert guards["exclusion_lists"][0]["sha256"] == calibrate._sha256(listed)
+    assert report["report"]["episodes"] == []
+    assert report["report"]["skipped"][0]["reason"] == "void episode"
+
+
+def test_the_choice_respects_the_noise_floor():
+    from levi.events.calibrate import NOISE_PER_MINUTE, choose, noise_rate
+
+    sweep = {"0.3": {"f1@0.5": 0.62}, "0.75": {"f1@0.5": 0.60}, "2": {"f1@0.5": 0.5}}
+    noise = {0.3: 5.0, 0.75: 0.2, 2.0: 0.0}
+    assert choose(sweep, [0.3, 0.75, 2.0], noise) == 0.75
+    assert choose(sweep, [0.3, 0.75, 2.0]) == 0.3
+    assert noise_rate(cp.PENALTY) <= NOISE_PER_MINUTE
+    assert noise_rate(0.1) > NOISE_PER_MINUTE

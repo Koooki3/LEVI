@@ -42,7 +42,7 @@ import numpy as np
 from . import motion
 
 # Calibrated on development gold only (docs/EVENTS.md, "Calibration").
-PENALTY = 0.5
+PENALTY = 0.75
 MIN_SECONDS = 0.5
 MAX_PER_MINUTE = 30.0
 # A longer series is averaged over blocks of rows to at most this many

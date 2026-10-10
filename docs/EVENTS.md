@@ -55,7 +55,7 @@ Guards against over-cutting, each tested:
 
 | Guard | Default |
 | --- | --- |
-| Penalty per change: `penalty * (d + 1) * log(n)` for `d` features, `n` rows | `penalty = 0.5` (calibrated, below) |
+| Penalty per change: `penalty * (d + 1) * log(n)` for `d` features, `n` rows | `penalty = 0.75` (calibrated, below) |
 | Shortest segment (in rows, from the median sampling step) | `min_seconds = 0.5` |
 | Longest series searched row by row; a longer one is averaged over blocks of `ceil(n / 3000)` rows first (each block mean times the square root of its length, so the penalty keeps its meaning), change points then fall on block starts and `bin_rows` says so. The search is quadratic in the worst case; 18,000 rows of noise (30 Hz, 10 minutes) take well under 2 s (tested) | `MAX_ROWS = 3000` |
 | Most change points per minute of episode; past it the penalty is raised by 1.5x until the result fits; when equally strong changes would all vanish at once, exactly the strongest that fit are kept, ties broken by time (`capped` says so) | `max_per_minute = 30` (set beforehand, not tuned) |
@@ -64,21 +64,33 @@ On pure noise scaled the same way the default penalty gives well under one chang
 
 ### Calibration
 
-`python -m levi.events.calibrate --root <dir> --gold <dir> ... --report-gold <dir> ...` scores candidates of raw robot captures against reference segments (the segments' inner boundaries at the capture's timestamps) for a grid of penalties, and picks the largest penalty whose F1 at 0.5 s is within 0.01 of the best (of near-equal settings, the one that cuts least). It refuses any folder whose path contains `frozen`, `heldout` or `held-out`, reads only pose and gripper CSVs (never video) and writes nothing but `--out`. The report records every episode's source and the SHA-256 of the files it read.
+`python -m levi.events.calibrate --root <dir> --gold <dir> ... --report-gold <dir> ... [--exclusion-list <list.json> ...]` scores candidates of raw robot captures against reference segments (the segments' inner boundaries at the capture's timestamps) for a grid of penalties. It picks the largest penalty whose F1 at 0.5 s is within 0.01 of the best (of near-equal settings, the one that cuts least), among the penalties that make at most one change point per minute on pure noise (synthetic, `noise_rate`): dense reference annotations would otherwise pull the penalty down to where noise is cut (0.3 gives 5.8 per minute on noise).
 
-Run of 2026-10-10 (penalties 0.1 to 8):
+It never reads a test set, and refuses the whole run rather than skip an episode when a gold folder's path, an episode's source path (after `--map`) or the folder it resolves to contains `frozen`, `heldout` or `held-out`, or when the source is on an exclusion list (`--exclusion-list` files and the `LEVI_POOL_HELDOUT` lists, in the training pool's held-out format) by path or by the sha256 of one of its videos (videos are hashed, never decoded). It reads only pose and gripper CSVs, skips void episodes (`episode_success: "void"`), writes nothing but `--out`, and records every episode's source with the SHA-256 of the files it read, the refuse patterns, the SHA-256 of each exclusion list and the noise rate of each penalty.
+
+Run of 2026-10-10 (penalties 0.1 to 8), with the screws and plates frozen test set lists and the generic v2 frozen test family list as exclusion lists:
+
+```
+python -m levi.events.calibrate --root <workspace> \
+  --gold <gold>/screws-devgold --gold <gold>/diag15 --report-gold <gold>/generic-pilot \
+  --map <plates source>=<plates copy> --exclude-source data_collection_robotiq \
+  --exclusion-list <gold>/frozen/screws-frozen-v1.json \
+  --exclusion-list <gold>/frozen/plates-frozen-v1.json \
+  --exclusion-list <gold>/frozen/generic-frozen-v1.heldout.json \
+  --penalties 0.1,0.2,0.3,0.5,0.75,1,1.5,2,3,4,6,8
+```
 
 - Calibration: screws development gold labels (12 episodes, a locked set) and the plates diagnostic set (15 episodes, read from a copy whose frame counts matched the gold labels): 27 episodes, 10.1 minutes, 36.2 reference boundaries per minute. Test sets (frozen and held-out families) were not read.
-- Report (not used for the choice): generic v2 pilot gold labels, 7 of 9 episodes; the 2 sourced from the robotiq demonstration collection were excluded (that collection is reserved until the scale-up phase).
+- Report (not used for the choice): generic v2 pilot gold labels, 6 of 9 episodes: one void episode (a human hand in view) and the 2 sourced from the robotiq demonstration collection (reserved until the scale-up phase) were left out. Four of the six come from the pools left over after the frozen and held-out splits (in no blind set): report only, never tune on them.
 
 | Set | Penalty | Candidates/min | Recall@0.2 s | Recall@0.5 s | F1@0.5 s | False/min@0.5 s | Nearest MAE / P90 (s) |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Calibration | 0.2 (best F1) | 24.2 | 0.25 | 0.48 | 0.58 | 6.6 | 0.58 / 1.53 |
-| Calibration | **0.5 (chosen)** | 24.1 | 0.23 | 0.48 | 0.57 | 6.8 | 0.59 / 1.52 |
+| Calibration | 0.2 (best F1; 18.7/min on noise) | 28.3 | 0.29 | 0.56 | 0.62 | 8.1 | 0.48 / 1.12 |
+| Calibration | **0.75 (chosen)** | 26.6 | 0.27 | 0.52 | 0.60 | 7.7 | 0.52 / 1.33 |
 | Calibration | 2.0 | 15.3 | 0.19 | 0.37 | 0.52 | 2.0 | 0.95 / 2.38 |
-| Report | 0.5 | 23.3 | 0.20 | 0.46 | 0.44 | 13.3 | 0.72 / 1.87 |
+| Report | 0.75 | 20.1 | 0.17 | 0.42 | 0.44 | 11.1 | 0.78 / 1.91 |
 
-What this says: F1 is flat from 0.1 to 1 because the per-minute cap binds there (the reference annotations are denser than the cap); about half the reference boundaries have a change point within 0.5 s, a quarter within 0.2 s. On the report set false candidates double, so change points alone are a weak boundary signal -- they are meant to order evidence gathering, together with the other sources, not to segment. Small sets: differences of 0.01-0.02 are within noise.
+What this says: about half the reference boundaries have a change point within 0.5 s, a fifth to a quarter within 0.2 s. On the report set false candidates rise by half, so change points alone are a weak boundary signal -- they are meant to order evidence gathering, together with the other sources, not to segment. Small sets: differences of 0.01-0.02 are within noise.
 
 ## Third-party sources
 

@@ -12,15 +12,30 @@ Reads, never writes (except ``--out``):
   ``MANIFEST.json`` contributes only the episodes it lists (a locked set).
   The penalty is chosen on these: the largest one whose F1 at the 0.5 s
   tolerance is within ``SLACK`` of the best (of near-equal settings, the one
-  that cuts least).
+  that cuts least), among the penalties that make at most
+  ``NOISE_PER_MINUTE`` change points per minute on pure noise (``noise_rate``,
+  synthetic) -- dense reference annotations would otherwise pull the penalty
+  down to where noise is cut.
 - ``--report-gold``: folders scored with the chosen penalty but never used to
   choose it -- the number to report.
 - the capture's ``end_effector_pose.csv`` and ``gripper_state.csv`` (through
   ``levi.conversion.raw.load``, which checks their alignment); never video.
 
-A folder whose name contains a ``--refuse`` pattern (by default ``frozen``,
-``heldout`` and ``held-out``) is refused outright: test sets are not for
-calibration. ``--exclude-source`` skips episodes whose source path contains
+Test sets are not for calibration, and the run is refused outright -- not
+the episode skipped -- when:
+
+- a gold folder's path contains a ``--refuse`` pattern (by default
+  ``frozen``, ``heldout`` and ``held-out``);
+- an episode's source path (after ``--map``) or the folder it resolves to
+  contains such a pattern;
+- the source is on an exclusion list -- ``--exclusion-list`` files and the
+  ``LEVI_POOL_HELDOUT`` lists, in the training pool's held-out format
+  (``{"episodes": [{"path", "sha256": {...}}]}``, ``path`` absolute or
+  relative to ``--root``) -- by path or by the sha256 of one of its videos
+  (the videos are hashed, never decoded).
+
+Void episodes (``episode_success == "void"``) are skipped. The report records
+the refuse patterns and the sha256 of every exclusion list used. ``--exclude-source`` skips episodes whose source path contains
 the text. ``--map OLD=NEW`` rewrites a source path prefix (a copy of the
 capture somewhere else).
 
@@ -45,6 +60,11 @@ TOLERANCES = (0.2, 0.5, 1.0)
 PENALTIES = (0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0)
 CHOOSE_AT = "0.5"
 SLACK = 0.01
+# Noise floor: a penalty is eligible only if pure Gaussian noise (one
+# feature, scaled as the features are, 10 Hz, one minute, NOISE_SEEDS seeds)
+# makes at most NOISE_PER_MINUTE change points per minute on average.
+NOISE_PER_MINUTE = 1.0
+NOISE_SEEDS = 20
 NAMES = ["x", "y", "z", "rx", "ry", "rz", "gripper"]
 INFO = {
     "fps": 10,
@@ -64,16 +84,72 @@ def _sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+class Guard:
+    """Refuses a run that would read a test set (see the module docstring)."""
+
+    def __init__(self, root, refuse=REFUSE, lists=()):
+        from ..pool import heldout
+
+        self.root = Path(root)
+        self.refuse = tuple(refuse)
+        self.lists = [Path(p) for p in lists]
+        self.paths, self.digests = {}, {}
+        for file in self.lists:
+            for entry in heldout.load([file]):
+                path = Path(entry["path"])
+                path = path if path.is_absolute() else self.root / path
+                self.paths[str(path.resolve())] = entry["set"]
+                for digest in entry["sha256"].values():
+                    self.digests[str(digest).lower()] = entry["set"]
+
+    def record(self):
+        return {
+            "refuse": list(self.refuse),
+            "exclusion_lists": [
+                {"path": str(p), "sha256": _sha256(p)} for p in self.lists
+            ],
+        }
+
+    def _hit(self, text):
+        lowered = str(text).lower()
+        return next((p for p in self.refuse if p in lowered), None)
+
+    def folder(self, folder):
+        folder = Path(folder).resolve()
+        if self._hit(folder):
+            raise SystemExit(f"refused: {folder} looks like a test set ({self.refuse})")
+
+    def source(self, source, demo):
+        resolved = Path(demo).resolve()
+        for text in (source, resolved):
+            if self._hit(text):
+                raise SystemExit(
+                    f"refused: source {text} looks like a test set ({self.refuse})"
+                )
+        if str(resolved) in self.paths:
+            raise SystemExit(
+                f"refused: source {source} is on the exclusion list "
+                f"{self.paths[str(resolved)]}"
+            )
+        if self.digests and resolved.is_dir():
+            from ..pool.heldout import sha256
+
+            for video in sorted(resolved.glob("*.mp4")):
+                found = self.digests.get(sha256(video))
+                if found:
+                    raise SystemExit(
+                        f"refused: {video.name} of {source} is on the exclusion "
+                        f"list {found}"
+                    )
+
+
 def gold_files(folder, refuse=REFUSE):
     folder = Path(folder)
-    lowered = folder.resolve().name.lower()
-    if any(p in lowered for p in refuse) or any(
-        p in part.lower() for part in folder.resolve().parts for p in refuse
-    ):
-        raise SystemExit(f"refused: {folder} looks like a test set ({refuse})")
+    Guard(folder, refuse).folder(folder)
     manifest = folder / "MANIFEST.json"
     if manifest.is_file():
         listed = json.loads(manifest.read_text()).get("episodes") or {}
+        # A listed episode whose file is missing is skipped by load_episode.
         return [folder / f"{name}.json" for name in sorted(listed)]
     return sorted(p for p in folder.glob("*.json") if p.name != "MANIFEST.json")
 
@@ -93,16 +169,22 @@ def capture_table(demo):
     return pd.DataFrame({"timestamp": times, "observation.state": list(state)}), times
 
 
-def load_episode(path, root, mapping, exclude):
-    """``(record, None)`` or ``(None, reason)``."""
+def load_episode(path, root, mapping, exclude, guard=None):
+    """``(record, None)`` or ``(None, reason)``; a source the ``guard``
+    refuses ends the run."""
+    if not Path(path).is_file():
+        return None, "gold file missing"
     gold = json.loads(Path(path).read_text())
+    if gold.get("episode_success") == "void":
+        return None, "void episode"
     source = gold.get("source") or ""
     for old, new in mapping:
         if source.startswith(old):
             source = new + source[len(old) :]
+    demo = Path(root) / source
+    (guard or Guard(root)).source(source, demo)
     if any(text in source for text in exclude):
         return None, "excluded source"
-    demo = Path(root) / source
     if not demo.is_dir():
         return None, "source missing"
     try:
@@ -147,11 +229,12 @@ def _profile():
     return resolve(INFO, PROFILE)
 
 
-def collect(folders, root, mapping, exclude, refuse):
+def collect(folders, root, mapping, exclude, refuse, guard=None):
+    guard = guard or Guard(root, refuse)
     episodes, skipped = [], []
     for folder in folders:
         for path in gold_files(folder, refuse):
-            record, reason = load_episode(path, root, mapping, exclude)
+            record, reason = load_episode(path, root, mapping, exclude, guard)
             if record is None:
                 skipped.append({"gold": str(path), "reason": reason})
             else:
@@ -171,12 +254,28 @@ def _summary(scores):
     }
 
 
-def choose(sweep, penalties):
+def noise_rate(penalty, seeds=NOISE_SEEDS):
+    """Mean change points per minute on pure noise at ``penalty``: what the
+    detector cuts where nothing happens. Synthetic; reads no data."""
+    counts = []
+    for seed in range(seeds):
+        x = change_points.scale(np.random.default_rng(seed).normal(0, 1, 600))
+        found = change_points.detect(np.arange(600) / 10, x[:, None], penalty=penalty)
+        counts.append(len(found.rows))
+    return float(np.mean(counts))
+
+
+def choose(sweep, penalties, noise=None):
     """The largest penalty whose F1 at ``CHOOSE_AT`` is within ``SLACK`` of
-    the best."""
-    f1 = {p: sweep[f"{p:g}"][f"f1@{CHOOSE_AT}"] or 0.0 for p in penalties}
+    the best, among the penalties that clear the noise floor (``noise``:
+    penalty -> change points per minute on pure noise; all clear when None
+    or when none does)."""
+    eligible = [
+        p for p in penalties if noise is None or noise[p] <= NOISE_PER_MINUTE
+    ] or list(penalties)
+    f1 = {p: sweep[f"{p:g}"][f"f1@{CHOOSE_AT}"] or 0.0 for p in eligible}
     best = max(f1.values())
-    return max(p for p in penalties if f1[p] >= best - SLACK)
+    return max(p for p in eligible if f1[p] >= best - SLACK)
 
 
 def main(argv=None):
@@ -187,26 +286,40 @@ def main(argv=None):
     parser.add_argument("--map", action="append", default=[])
     parser.add_argument("--exclude-source", action="append", default=[])
     parser.add_argument("--refuse", action="append", default=list(REFUSE))
+    parser.add_argument(
+        "--exclusion-list",
+        action="append",
+        default=[],
+        help="held-out list (training pool format); LEVI_POOL_HELDOUT is added",
+    )
     parser.add_argument("--penalties", default=",".join(f"{p:g}" for p in PENALTIES))
     parser.add_argument("--out")
     args = parser.parse_args(argv)
     mapping = [tuple(m.split("=", 1)) for m in args.map]
     penalties = [float(p) for p in args.penalties.split(",") if p.strip()]
+    from ..pool import settings
+
+    lists = [*args.exclusion_list, *map(str, settings.heldout_files())]
+    guard = Guard(args.root, args.refuse, lists)
     calib, skipped = collect(
-        args.gold, args.root, mapping, args.exclude_source, args.refuse
+        args.gold, args.root, mapping, args.exclude_source, args.refuse, guard
     )
     report, skipped_report = collect(
-        args.report_gold, args.root, mapping, args.exclude_source, args.refuse
+        args.report_gold, args.root, mapping, args.exclude_source, args.refuse, guard
     )
     if not calib:
         raise SystemExit("no calibration episode could be read")
     sweep = {f"{p:g}": _summary(score(calib, p)) for p in penalties}
-    chosen = choose(sweep, penalties)
+    noise = {p: noise_rate(p) for p in penalties}
+    chosen = choose(sweep, penalties, noise)
     out = {
         "schema_version": "levi.change_point_calibration.v1",
         "chosen_penalty": chosen,
         "chosen_by": f"largest penalty with F1 at {CHOOSE_AT} s within {SLACK} "
-        "of the best on the calibration set",
+        "of the best on the calibration set, among penalties making at most "
+        f"{NOISE_PER_MINUTE:g} change points per minute on pure noise",
+        "noise_per_minute": {f"{p:g}": noise[p] for p in penalties},
+        "guards": guard.record(),
         "parameters": {
             "min_seconds": change_points.MIN_SECONDS,
             "max_per_minute": change_points.MAX_PER_MINUTE,
@@ -223,7 +336,7 @@ def main(argv=None):
         },
         "report": None,
     }
-    if report:
+    if args.report_gold:
         out["report"] = {
             "folders": args.report_gold,
             "episodes": [
@@ -231,8 +344,10 @@ def main(argv=None):
                 for e in report
             ],
             "skipped": skipped_report,
-            "at_chosen": _summary(score(report, chosen)),
-            "sweep": {f"{p:g}": _summary(score(report, p)) for p in penalties},
+            "at_chosen": _summary(score(report, chosen)) if report else None,
+            "sweep": {f"{p:g}": _summary(score(report, p)) for p in penalties}
+            if report
+            else {},
         }
     text = json.dumps(out, indent=1)
     if args.out:
