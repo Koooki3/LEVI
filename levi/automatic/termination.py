@@ -128,6 +128,8 @@ class TerminationArbiter:
         self.role = role
         self.target = target
         self.control = config.is_control(episode_id)
+        # The candidate step at which a withheld stop would have happened.
+        self.would_stop_step: int | None = None
         self.stage = "idle"  # idle | candidate | evidence | stop_requested
         self.candidate: Candidate | None = None
         self.outstanding: dict[str, Candidate] = {}  # request id -> candidate
@@ -334,6 +336,8 @@ class TerminationArbiter:
         if self.consecutive < self.config.confirmations:
             return verdict
         if self.control or not self.config.allow_early_stop:
+            if self.would_stop_step is None:
+                self.would_stop_step = candidate.step
             verdict.notes.append(
                 Note(
                     "early_stop_withheld",

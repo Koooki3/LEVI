@@ -296,6 +296,9 @@ class Orchestrator:
         self._violation_hold = False
         self._scene_violations = 0
         self._reset_attempts = 0
+        # The first scene check after an operator's resume: the person
+        # confirmed the environment (human-assisted reset strategy).
+        self._human_confirmed = False
         self._last_forward: str | None = None
         self.halted: str | None = None
         self.ctx: Episode | None = None
@@ -622,7 +625,10 @@ class Orchestrator:
                 ctx.result_written = True
             self._crash("after_committed")
             self._tell(to, reason, ctx.episode_id if ctx else None)
-            if reason == "operator_stop" and to in ("WAIT_HUMAN", "COMPLETED"):
+            # The run reached a person: every stop registered so far took
+            # effect, whatever reason brought it there (review C3 sugg. 1:
+            # a stop left behind would block the operator's next stop).
+            if to == "WAIT_HUMAN" or (to == "COMPLETED" and reason == "operator_stop"):
                 self._consume_stops(auth.get("command_id"))
             if urgent:
                 self._flush_notes()
@@ -815,6 +821,7 @@ class Orchestrator:
             self._violation_hold = False
             self._scene_violations = 0
             self._reset_attempts = 0
+            self._human_confirmed = True
             return CommandResult(
                 True, "resumed", self.state, False, found.prepared.sequence_no
             )
@@ -850,7 +857,7 @@ class Orchestrator:
             if (
                 self.state == "WAIT_HUMAN"
                 and not self.halted
-                and self._first_stop() == command_id
+                and self._registered(command_id)
             ):
                 found = self._guarded(
                     self._tx,
@@ -864,6 +871,10 @@ class Orchestrator:
             return CommandResult(True, "stop_requested", self.state)
         finally:
             self._lock.release()
+
+    def _registered(self, command_id: str) -> bool:
+        with self._stop_lock:
+            return command_id in self._stops
 
     def _first_stop(self) -> str | None:
         with self._stop_lock:
@@ -940,7 +951,18 @@ class Orchestrator:
             self._to_human("contract_violation_limit")
             return
         # Only a ready scene skips a reset; the strategy decides the rest.
-        plan = rm.check_plan(self.strategy, decision, self._reset_attempts)
+        confirmed = self._human_confirmed and self.state == "VERIFY_INITIAL"
+        self._human_confirmed = False
+        try:
+            plan = rm.check_plan(
+                self.strategy, decision, self._reset_attempts, human_confirmed=confirmed
+            )
+        except rm.StrategyError as exc:
+            self._note("strategy_refused", str(exc))
+            plan = rm.ResetPlan(rm.WAIT_HUMAN, rm._scene_reason(decision))
+        if plan.reason == "operator_confirmed_scene":
+            # Recorded as it is: the scene was not verified, a person said so.
+            self._note("scene_unverified_operator_confirmed", f"scene {decision}")
         if plan.action == rm.FORWARD:
             self._reset_attempts = 0
             self._start("forward", plan.reason)
@@ -964,6 +986,9 @@ class Orchestrator:
         without a fresh, fenced assessment that says so)."""
         # Unique across restarts: the journal's next line number.
         request_id = f"{episode_id}:scene{self.journal.next_seq}"
+        # After the home or the reset's end: evidence older than this request
+        # shows a scene that may have changed since (review C3, I1).
+        asked_ns = self._now()
         request = ev.make_request(
             request_id=request_id,
             run_id=self.config.run_id,
@@ -998,6 +1023,13 @@ class Orchestrator:
             aeri.check_fresh(message, now_ns=self._now(), local=self.clock.domain)
         except aeri.AeriError as exc:
             self._note("scene_dropped_stale", f"{request_id}: {exc.code}")
+            return "unavailable"
+        if message.kind == "scene" and message.observed_ns < asked_ns:
+            self._note(
+                "scene_dropped_stale",
+                f"{request_id}: observed {asked_ns - message.observed_ns} ns "
+                "before the request",
+            )
             return "unavailable"
         verdict = sa.arbitrate(message, self.config.initial_state)
         if verdict.reason != "provider":
@@ -1340,7 +1372,17 @@ class Orchestrator:
     def _seal(self, ctx, sealed: dict):
         def act(_):
             try:
-                found = self.recorder.seal(ctx.rollout, {"episode_id": ctx.episode_id})
+                arbiter = ctx.arbiter
+                found = self.recorder.seal(
+                    ctx.rollout,
+                    {
+                        "episode_id": ctx.episode_id,
+                        # Control episodes: where the detector would have
+                        # stopped (the false-early-stop measurement, §5.5).
+                        "control": bool(arbiter and arbiter.control),
+                        "would_stop_step": arbiter.would_stop_step if arbiter else None,
+                    },
+                )
             except Exception as exc:  # noqa: BLE001
                 self._note("recorder_error", f"seal: {exc}")
                 return "no", "recorder", "seal_failed"
@@ -1627,9 +1669,6 @@ class Orchestrator:
                 },
             }
 
-        to = rm.check_after(
-            self.strategy, outcome, self._reset_attempts, self._operator() is not None
-        )
         operator = self._stays_put(ctx, reason, auth)
         if operator is not None:
             home["done"] = "not_attempted"
@@ -1643,6 +1682,17 @@ class Orchestrator:
             self._close_episode()
             self.ctx = None
             return
+        try:
+            to = rm.check_after(
+                self.strategy,
+                outcome,
+                self._reset_attempts,
+                self._operator() is not None,
+            )
+        except rm.StrategyError as exc:
+            # A strategy that breaks the rules hands over to a person.
+            self._note("strategy_refused", str(exc))
+            to = rm.TO_PERSON
         if not self._safe_to_home():
             return
         found = self._tx(

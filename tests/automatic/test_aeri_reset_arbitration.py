@@ -149,15 +149,23 @@ def assessment(clock, **spec):
 @pytest.mark.parametrize(
     "spec, with_contract, decision, reason",
     [
-        ({"decision": "ready"}, False, "ready", "provider"),
+        # Without a contract a ready never skips (review C3, I3).
+        ({"decision": "ready"}, False, "unknown", "no_contract"),
         ({"decision": "ready", "evidence": 2}, True, "ready", "provider"),
+        ({"decision": "ready", "evidence": 1}, True, "unknown", "missing_view"),
+        ({"decision": "ready", "evidence": 0}, True, "unknown", "missing_view"),
         (
-            {"decision": "ready", "evidence": 1},
+            {"decision": "ready", "refs": ["side:0", "side:0", "wrist:0", "wrist:0"]},
             True,
-            "unknown",
-            "insufficient_evidence",
+            "ready",
+            "provider",
         ),
-        ({"decision": "ready"}, True, "unknown", "insufficient_evidence"),
+        (
+            {"decision": "ready", "refs": ["side:0", "wrist:0", "wrist:0"]},
+            True,
+            "ready",
+            "provider",
+        ),
         ({"decision": "unknown", "evidence": 5}, True, "unknown", "provider"),
         ({"decision": "reset_required"}, True, "reset_required", "provider"),
     ],
@@ -236,7 +244,7 @@ def test_after_a_reset_only_a_verified_or_retryable_scene_is_checked_again():
 class Rogue:
     name = "rogue"
 
-    def plan(self, decision, attempts):
+    def plan(self, decision, attempts, **kw):
         return rm.ResetPlan("forward", "scene_ready")
 
     def after_reset(self, outcome, attempts, stop_pending):
@@ -249,7 +257,9 @@ def test_a_strategy_that_would_skip_on_unknown_is_refused():
     with pytest.raises(rm.StrategyError):
         rm.check_after(Rogue(), "reset_horizon_exhausted", 0, False)
     with pytest.raises(rm.StrategyError):
-        rm.check_after(Rogue(), "reset_verified", 0, True)
+        rm.check_after(Rogue(), "scene_unknown", 0, True)
+    # A verified reset goes to the next scene check, where a stop waits.
+    assert rm.check_after(Rogue(), "reset_verified", 0, True) == "VERIFY_INITIAL"
 
 
 @pytest.mark.parametrize("name", ["atomic_skill_sequence", "scripted_safe_reset", "x"])
@@ -293,13 +303,13 @@ def test_a_ready_scene_without_evidence_runs_the_reset_instead_of_skipping(tmp_p
         tmp_path,
         cfg=one(initial_state=contract()),
         clock=clock,
-        scene=scene_of(clock, {"decision": "ready"}),  # no evidence
+        scene=scene_of(clock, {"decision": "ready", "evidence": 0}),  # no evidence
         events=both_roles(clock),
     )
     assert r.orch.run() == "COMPLETED"
     path = committed(r.orch)
     assert path[1] == ("VERIFY_INITIAL", "RESET_ACTIVE", "scene_unknown")
-    assert r.orch.note_counts["scene_insufficient_evidence"] == 1
+    assert r.orch.note_counts["scene_missing_view"] == 1
     check_invariants(r)
 
 

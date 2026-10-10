@@ -73,6 +73,8 @@ def config(**over) -> RunConfig:
         "forward_max_steps": 40,
         "reset_max_steps": 20,
         "termination": termination,
+        # A ready scene skips a reset only under a contract (review C3, I3).
+        "initial_state": ev.FAKE_INITIAL_STATE,
     }
     base.update(over)
     return RunConfig(**base)

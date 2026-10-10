@@ -27,11 +27,14 @@ Its format is the smallest one that carries pipeline §6.1::
         preferred: [side, wrist]
         require_visible_evidence: true
         min_evidence_refs: 1
+        require_all_views: true   # every preferred view in the evidence
 
 The predicate names must be the ones the scene provider reports (its spec
 is ``(id, version)`` with exactly these names). ``robot`` and
 ``observations.preferred`` are carried for the provider and the report; the
-arbitration reads ``predicates`` and the evidence rule.
+arbitration reads ``predicates`` and the evidence rule. A reference names
+its view by the text before its first ``:`` (``VIEW_RULE``, pending
+HA-23); view names come from the contract, never from this code.
 
 The reader takes a strict YAML subset (no new dependency): block mappings
 indented by spaces, ``- item`` and ``[a, b]`` lists of scalars, quoted or
@@ -284,6 +287,8 @@ class InitialStateContract:
     preferred_views: tuple = ()
     require_visible_evidence: bool = True
     min_evidence_refs: int = 1
+    # With ``preferred_views``: every listed view must be in the evidence.
+    require_all_views: bool = True
     home_pose: str | None = None
     gripper: str | None = None
     status: str = "draft"
@@ -302,6 +307,11 @@ class InitialStateContract:
                 raise ContractError("predicates", f"bad predicate name {name!r}")
         if len(set(names)) != len(names):
             raise ContractError("predicates", "a predicate is listed twice")
+        for view in self.preferred_views:
+            if not isinstance(view, str) or not LABEL.match(view) or ":" in view:
+                raise ContractError("observations.preferred", f"bad view name {view!r}")
+        if type(self.require_all_views) is not bool:
+            raise ContractError("observations.require_all_views", "true or false")
         if type(self.require_visible_evidence) is not bool:
             raise ContractError(
                 "observations.require_visible_evidence", "true or false"
@@ -340,6 +350,8 @@ class InitialStateContract:
             "preferred_views": list(self.preferred_views),
             "require_visible_evidence": self.require_visible_evidence,
             "min_evidence_refs": self.min_evidence_refs,
+            "require_all_views": self.require_all_views,
+            "view_rule": VIEW_RULE,
             "robot": {"home_pose": self.home_pose, "gripper": self.gripper},
         }
 
@@ -347,7 +359,12 @@ class InitialStateContract:
 _TOP = {"id", "version", "status", "robot", "predicates", "observations"}
 _ROBOT = {"home_pose", "gripper"}
 _PREDICATES = {"required", "optional"}
-_OBSERVATIONS = {"preferred", "require_visible_evidence", "min_evidence_refs"}
+_OBSERVATIONS = {
+    "preferred",
+    "require_visible_evidence",
+    "min_evidence_refs",
+    "require_all_views",
+}
 
 
 def _mapping(value, where, allowed):
@@ -406,6 +423,7 @@ def contract_from(value: dict) -> InitialStateContract:
         preferred_views=_names(observations.get("preferred"), "observations.preferred"),
         require_visible_evidence=require,
         min_evidence_refs=minimum,
+        require_all_views=observations.get("require_all_views", True),
         home_pose=robot.get("home_pose"),
         gripper=robot.get("gripper"),
         status=status,
@@ -438,21 +456,38 @@ class SceneVerdict:
 
 
 UNAVAILABLE = SceneVerdict("unavailable", "no_assessment")
+# How a reference names its camera view (pending the user's confirmation,
+# HA-23): the text before the first ``:`` of ``ref`` (``<view>:<frame>``);
+# a reference without ``:`` names no view.
+VIEW_RULE = "view = ref up to its first ':' (pending HA-23)"
 
 
-def visible_evidence(message) -> int:
-    """Frame and clip references on the assessment and its predicates."""
+def view_of(ref: str) -> str | None:
+    view, sep, _ = ref.partition(":")
+    return view if sep and view else None
+
+
+def visible_evidence(message, views: tuple = ()) -> tuple[int, set]:
+    """``(count, views)``: distinct frame and clip references on the
+    assessment and its predicates (the same ``(kind, ref)`` twice counts
+    once), and the views they cover. With ``views``, only references of
+    those views count."""
     refs = list(message.evidence_refs)
     for predicate in message.predicate_results:
         refs.extend(predicate.evidence_refs)
-    return sum(1 for ref in refs if ref.kind in VISIBLE)
+    distinct = {(r.kind, r.ref) for r in refs if r.kind in VISIBLE}
+    if views:
+        distinct = {(k, r) for k, r in distinct if view_of(r) in views}
+    covered = {view_of(r) for _, r in distinct} - {None}
+    return len(distinct), covered
 
 
 def arbitrate(message, contract: InitialStateContract | None) -> SceneVerdict:
     """The verdict on a parsed, fenced ``SceneAssessment`` (or an
-    unavailable message). Without a contract the provider's decision stands
-    (the behaviour before T-C-08); with one, a ``ready`` must read every
-    required predicate true and bring the visible evidence it asks for."""
+    unavailable message). Without a contract a ``ready`` is ``unknown``
+    (``no_contract``): it never skips a reset. With one, a ``ready`` must
+    read every required predicate true and bring the visible evidence it
+    asks for: distinct references, from every preferred view."""
     if message is None or getattr(message, "kind", None) != "scene":
         return UNAVAILABLE
     failed = tuple(message.failed_predicates)
@@ -463,6 +498,9 @@ def arbitrate(message, contract: InitialStateContract | None) -> SceneVerdict:
         "unknown": unknown,
     }
     if contract is None:
+        # No contract, no evidence rule: a ready is never enough to skip.
+        if message.decision == "ready":
+            return SceneVerdict("unknown", "no_contract", **base)
         return SceneVerdict(message.decision, "provider", **base)
     if (message.contract_id, message.contract_version) != contract.key:
         return SceneVerdict("unavailable", "contract_mismatch", **base)
@@ -480,9 +518,11 @@ def arbitrate(message, contract: InitialStateContract | None) -> SceneVerdict:
         return SceneVerdict(
             "unknown", "missing_predicate", message.assessment_id, failed, missing
         )
-    if (
-        contract.require_visible_evidence
-        and visible_evidence(message) < contract.min_evidence_refs
-    ):
-        return SceneVerdict("unknown", "insufficient_evidence", **base)
+    if contract.require_visible_evidence:
+        views = tuple(contract.preferred_views)
+        count, covered = visible_evidence(message, views)
+        if views and contract.require_all_views and covered != set(views):
+            return SceneVerdict("unknown", "missing_view", **base)
+        if count < contract.min_evidence_refs:
+            return SceneVerdict("unknown", "insufficient_evidence", **base)
     return SceneVerdict("ready", "provider", **base)

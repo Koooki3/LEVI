@@ -58,11 +58,11 @@ def test_early_termination_against_hand_computed_values():
         ep(6): "success",
         ep(7): "failure",
         ep(8): "failure",
-        ep(9): "failure",
+        ep(9): "success",  # tp != tn, so a swapped denominator shows
         ep(11): "success",
     }
     found = M.early_termination(records, truth, max_steps=40)
-    assert found["confusion"] == {"tp": 3, "fp": 1, "fn": 2, "tn": 3}
+    assert found["confusion"] == {"tp": 3, "fp": 1, "fn": 3, "tn": 2}
     # 3/4, Wilson 95 % [0.301, 0.954]
     assert found["precision"] == {
         "n": 3,
@@ -70,24 +70,28 @@ def test_early_termination_against_hand_computed_values():
         "rate": 0.75,
         "wilson95": [0.301, 0.954],
     }
-    # 3/5, [0.231, 0.882]
-    assert found["recall"] == {"n": 3, "of": 5, "rate": 0.6, "wilson95": [0.231, 0.882]}
-    # 1/4 truly failed episodes stopped early, [0.046, 0.699]
-    assert found["false_early_stop_rate"] == {
+    # 3/6, [0.188, 0.812]
+    assert found["recall"] == {"n": 3, "of": 6, "rate": 0.5, "wilson95": [0.188, 0.812]}
+    # The treatment group's figure is only a lower bound: 1 of 3 truly
+    # failed episodes stopped early, [0.061, 0.792].
+    assert found["treatment_false_early_stop_lower_bound"] == {
         "n": 1,
-        "of": 4,
-        "rate": 0.25,
-        "wilson95": [0.046, 0.699],
+        "of": 3,
+        "rate": 0.333,
+        "wilson95": [0.061, 0.792],
     }
+    # The control episode truly succeeded: no control failure, no rate.
+    assert found["false_early_stop_rate"]["available"] is False
+    assert found["false_early_stop_rate"]["rate"] is None
     # (40-10) + (40-12) + (40-15) + (40-20) = 103 over 4 episodes
     assert found["saved_steps"] == {"total": 103, "mean": 25.75, "episodes": 4}
     assert found["unlabeled"] == 1 and found["labelled"] == 9
     assert found["control"]["episodes"] == 1
     assert found["control"]["true_success"]["rate"] == 1.0
     # Verdicts vs truth (unknown left out): 1,2,3 agree; 4 false success;
-    # 5,6 disagree; 8,9 agree; 11 agrees -> 6 of 9.
+    # 5,6,9 disagree; 8 agrees; 11 agrees -> 5 of 9.
     assert (
-        found["verdict_agreement"]["n"] == 6 and found["verdict_agreement"]["of"] == 9
+        found["verdict_agreement"]["n"] == 5 and found["verdict_agreement"]["of"] == 9
     )
     assert found["false_success"] == 1 and found["unknown_verdicts"] == 1
 

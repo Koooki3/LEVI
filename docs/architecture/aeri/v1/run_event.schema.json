@@ -589,6 +589,7 @@
             "scene_ready",
             "scene_reset_required",
             "scene_unknown",
+            "operator_confirmed_scene",
             "reset_horizon_exhausted",
             "reset_verified",
             "home_failed",

@@ -54,10 +54,14 @@ class ResetPlan:
 class ResetStrategy(Protocol):
     name: str
 
-    def plan(self, decision: str, attempts: int) -> ResetPlan:
+    def plan(
+        self, decision: str, attempts: int, *, human_confirmed: bool = False
+    ) -> ResetPlan:
         """``decision``: the verdict (``ready``, ``reset_required``,
         ``unknown``, ``unavailable``); ``attempts``: resets already run
-        since the last forward episode."""
+        since the last forward episode; ``human_confirmed``: this is the
+        first scene check after an operator's resume (the person confirmed
+        the environment)."""
         ...
 
     def after_reset(self, outcome: str, attempts: int, stop_pending: bool) -> str:
@@ -89,7 +93,9 @@ class SingleResetPolicy:
         if self.on_unknown not in ("reset", "wait_human"):
             raise StrategyError("on_unknown is reset or wait_human")
 
-    def plan(self, decision: str, attempts: int) -> ResetPlan:
+    def plan(
+        self, decision: str, attempts: int, *, human_confirmed: bool = False
+    ) -> ResetPlan:
         if decision == "ready":
             return ResetPlan(FORWARD, "scene_ready")
         reason = _scene_reason(decision)
@@ -102,6 +108,8 @@ class SingleResetPolicy:
 
     def after_reset(self, outcome: str, attempts: int, stop_pending: bool) -> str:
         if outcome == "reset_verified":
+            # Even with a stop pending: the next scene check consumes it
+            # (VERIFY_INITIAL is where a stop waits for a person).
             return VERIFY_AGAIN
         if (
             outcome in RETRYABLE_OUTCOMES
@@ -115,13 +123,22 @@ class SingleResetPolicy:
 @dataclass(frozen=True)
 class HumanAssistedReset:
     """No reset policy: a person puts the scene back whenever it is not
-    ready (pipeline §6.4 ``HumanAssistedReset``)."""
+    ready (pipeline §6.4 ``HumanAssistedReset``; the "policy evaluation
+    only" mode, AUT-22). Right after an operator's resume, a scene that is
+    only ``unknown`` or ``unavailable`` (no contract, no evidence) may
+    start the forward episode on the person's word, recorded as
+    ``operator_confirmed_scene``; a scene that says it needs a reset never
+    does."""
 
     name: str = "human_assisted"
 
-    def plan(self, decision: str, attempts: int) -> ResetPlan:
+    def plan(
+        self, decision: str, attempts: int, *, human_confirmed: bool = False
+    ) -> ResetPlan:
         if decision == "ready":
             return ResetPlan(FORWARD, "scene_ready")
+        if human_confirmed and decision in ("unknown", "unavailable"):
+            return ResetPlan(FORWARD, "operator_confirmed_scene")
         return ResetPlan(WAIT_HUMAN, _scene_reason(decision))
 
     def after_reset(self, outcome: str, attempts: int, stop_pending: bool) -> str:
@@ -143,18 +160,30 @@ def strategy_for(name: str, *, enabled=True, max_attempts=1, on_unknown="reset")
 DECISIONS = ("ready", "reset_required", "unknown", "unavailable")
 
 
-def check_plan(strategy, decision: str, attempts: int) -> ResetPlan:
+def check_plan(
+    strategy, decision: str, attempts: int, *, human_confirmed: bool = False
+) -> ResetPlan:
     """The strategy's plan, refused when it breaks the rules above."""
     if decision not in DECISIONS:
         raise StrategyError(f"unknown scene decision {decision!r}")
-    found = strategy.plan(decision, attempts)
+    found = strategy.plan(decision, attempts, human_confirmed=human_confirmed)
     if found.action not in (FORWARD, RESET, WAIT_HUMAN):
         raise StrategyError(f"{strategy.name}: unknown action {found.action!r}")
-    if found.action == FORWARD and decision != "ready":
+    confirmed_start = (
+        found.action == FORWARD
+        and found.reason == "operator_confirmed_scene"
+        and human_confirmed
+        and decision in ("unknown", "unavailable")
+    )
+    if found.action == FORWARD and decision != "ready" and not confirmed_start:
         raise StrategyError(
             f"{strategy.name} would skip the reset on a {decision} scene"
         )
-    if found.action == FORWARD and found.reason != "scene_ready":
+    if (
+        found.action == FORWARD
+        and not confirmed_start
+        and found.reason != "scene_ready"
+    ):
         raise StrategyError(f"{strategy.name}: a forward start is scene_ready")
     if found.action != FORWARD and found.reason != _scene_reason(decision):
         raise StrategyError(f"{strategy.name}: reason {found.reason!r}")
@@ -165,8 +194,11 @@ def check_after(strategy, outcome: str, attempts: int, stop_pending: bool) -> st
     found = strategy.after_reset(outcome, attempts, stop_pending)
     if found not in (VERIFY_AGAIN, TO_PERSON):
         raise StrategyError(f"{strategy.name}: unknown next state {found!r}")
+    # A verified reset always goes to the next scene check (a pending stop
+    # is consumed there); a retry never goes on past a stop.
     if found == VERIFY_AGAIN and (
-        stop_pending or outcome not in ({"reset_verified"} | RETRYABLE_OUTCOMES)
+        outcome not in ({"reset_verified"} | RETRYABLE_OUTCOMES)
+        or (stop_pending and outcome in RETRYABLE_OUTCOMES)
     ):
         raise StrategyError(f"{strategy.name} would go on after {outcome}")
     return found

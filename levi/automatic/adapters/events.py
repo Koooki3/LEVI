@@ -21,6 +21,8 @@ from typing import ClassVar, Protocol
 
 from levi.domain import aeri
 
+from .. import scene_assessment as sa
+
 GOAL_SPEC = ("generic-final", "1")
 SCENE_CONTRACT = ("fake-initial-state", "1")
 SCENE_PREDICATES = ("object_at_source", "gripper_open")
@@ -29,6 +31,13 @@ SPECS = {
     **aeri.BUILTIN_SPECS,
     SCENE_CONTRACT: frozenset(SCENE_PREDICATES),
 }
+# The contract the fakes answer to (no preferred views, one reference).
+FAKE_INITIAL_STATE = sa.InitialStateContract(
+    contract_id=SCENE_CONTRACT[0],
+    contract_version=SCENE_CONTRACT[1],
+    required=SCENE_PREDICATES,
+    min_evidence_refs=1,
+)
 DEFAULT_DELAY_NS = 300_000_000
 DEFAULT_VALID_MS = 5_000
 
@@ -200,7 +209,9 @@ class _FakeProvider:
     "contradict": True, "bad_predicate": True, "episode_id", "request_id",
     "run_id", "target", "unknown_reason", "submit_unavailable": code,
     "observed_through_step", "observed_before_ns"}``; scenes also take
-    ``"evidence": n`` (frame references) and ``"contract_id"``."""
+    ``"evidence": n`` (frame references, default 2, cycling over the
+    views), ``"refs": [...]`` (the references as given) and
+    ``"contract_id"``."""
 
     schema = ""
 
@@ -374,12 +385,14 @@ class FakeSceneAssessor(_FakeProvider):
         default=None,
         contract=SCENE_CONTRACT,
         predicates=SCENE_PREDICATES,
+        views=("side", "wrist"),
     ):
         super().__init__(
             script, clock, run_id, default=default or {"decision": "ready"}
         )
         self.contract = tuple(contract)
         self.predicates = tuple(predicates)
+        self.views = tuple(views)
 
     def _answer(self, ticket: Ticket, spec: dict, produced: int) -> bytes:
         request = ticket.request
@@ -411,10 +424,15 @@ class FakeSceneAssessor(_FakeProvider):
                 if decision == "unknown"
                 else None
             ),
-            # ``evidence``: how many frame references the assessment cites.
+            # ``refs``: the frame references cited, as given; else
+            # ``evidence`` (default 2) references cycling over ``views``.
             "evidence_refs": [
-                {"kind": "frame", "ref": f"side:{i}", "sha256": None, "step": None}
-                for i in range(int(spec.get("evidence", 0)))
+                {"kind": "frame", "ref": ref, "sha256": None, "step": None}
+                for ref in spec.get("refs")
+                or [
+                    f"{self.views[i % len(self.views)]}:{i}"
+                    for i in range(int(spec.get("evidence", 2)))
+                ]
             ],
             "observed_ns": times["observed"],
             "produced_ns": times["produced"],

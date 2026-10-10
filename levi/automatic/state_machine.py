@@ -138,10 +138,16 @@ def _table() -> dict:
     quiet = ("none", "notify")
     add("PREFLIGHT", "VERIFY_INITIAL", _r({"preflight_passed"}, ORCH, {"none"}))
     for start in ("VERIFY_INITIAL", "SCENE_ASSESS"):
+        # operator_confirmed_scene: only at the first check after an
+        # operator's resume (human-assisted reset), where the person's
+        # confirmation stands in for a scene that could not be verified.
+        starts = {"scene_ready"} | (
+            {"operator_confirmed_scene"} if start == "VERIFY_INITIAL" else set()
+        )
         add(
             start,
             "FORWARD_ACTIVE",
-            _r({"scene_ready"}, ORCH, {"policy_steps"}, role="forward"),
+            _r(starts, ORCH, {"policy_steps"}, role="forward"),
         )
         add(
             start,

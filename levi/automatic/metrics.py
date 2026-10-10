@@ -31,8 +31,14 @@ are reported apart):
 
 - an *early stop* is a forward episode ended by ``goal_verified``;
 - precision = early stops truly successful / early stops;
-- recall = early stops / truly successful episodes;
-- false early stop rate = early stops truly failed / truly failed episodes;
+- recall = early stops / truly successful episodes the detector could have
+  stopped (an early stop or the horizon; not those a person, a fault or the
+  policy ended);
+- false early stop rate = control episodes (no early stop allowed) in which
+  the detector would have stopped, among the control episodes that truly
+  failed (pipeline §5.5); ``available: false`` without such episodes. The
+  treatment group's early stops truly failed / truly failed episodes is
+  reported as a lower bound only (the stop hid what came after it);
 - saved steps = ``forward_max_steps`` minus the steps the episode ran
   (from the run manifest), summed over early stops;
 - skip accuracy = scene decisions that skipped a reset on a truly ready
@@ -42,6 +48,7 @@ are reported apart):
   longest run without one counts forward episodes sealed complete.
 """
 
+import fcntl
 import json
 import os
 import re
@@ -93,19 +100,50 @@ class LabelStore:
     def lines(self, kind: str) -> list:
         if kind not in STORED_KINDS:
             raise LabelRefused(f"{kind} is not a stored label kind")
+        """The whole lines of a kind's file. A last line without its newline
+        (a write cut short) is no label and is ignored; any whole line that
+        cannot be read makes the file unusable (``LabelRefused``): skipping
+        it would hide a person's label."""
         try:
-            text = self.path(kind).read_text()
+            data = self.path(kind).read_bytes()
         except FileNotFoundError:
             return []
         out = []
-        for line in text.splitlines():
+        # What follows the last newline is torn.
+        for number, line in enumerate(data.split(b"\n")[:-1]):
             try:
                 value = json.loads(line)
             except ValueError:
-                continue  # a torn last line
-            if isinstance(value, dict) and value.get("kind") == kind:
-                out.append(value)
+                value = None
+            if not isinstance(value, dict) or value.get("kind") != kind:
+                raise LabelRefused(
+                    f"{self.path(kind)} line {number + 1} is not a {kind} label: "
+                    "a person must look at the file before anything is added"
+                )
+            out.append(value)
         return out
+
+    def _isolate_torn(self, kind: str) -> None:
+        """Move a torn last line aside (``labels/torn/``) and cut the file
+        back to whole lines, so the next label starts on its own line."""
+        path = self.path(kind)
+        try:
+            data = path.read_bytes()
+        except FileNotFoundError:
+            return
+        if not data or data.endswith(b"\n"):
+            return
+        keep = data.rfind(b"\n") + 1
+        folder = self.folder / "torn"
+        folder.mkdir(parents=True, exist_ok=True)
+        with (folder / f"{kind}-{time.time_ns()}.bin").open("wb") as handle:
+            handle.write(data[keep:])
+            handle.flush()
+            os.fsync(handle.fileno())
+        with path.open("r+b") as handle:
+            handle.truncate(keep)
+            handle.flush()
+            os.fsync(handle.fileno())
 
     def add(
         self,
@@ -130,6 +168,15 @@ class LabelStore:
             raise LabelRefused(f"{episode_id!r} is not an episode id") from None
         if not isinstance(by, str) or not PRINCIPAL.match(by):
             raise LabelRefused("by is an opaque principal id (no names, no addresses)")
+        self.folder.mkdir(parents=True, exist_ok=True)
+        # One writer at a time: the check for an earlier label and the
+        # append happen under one lock, so two processes cannot both pass it.
+        with (self.folder / ".lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            self._isolate_torn(kind)
+            return self._add(kind, episode_id, value, subject, by, note, supersede)
+
+    def _add(self, kind, episode_id, value, subject, by, note, supersede) -> dict:
         earlier = [
             line
             for line in self.lines(kind)
@@ -151,7 +198,6 @@ class LabelStore:
             "at_wall_ns": time.time_ns(),
             "supersedes": len(earlier) if earlier else None,
         }
-        self.folder.mkdir(parents=True, exist_ok=True)
         line = (json.dumps(record, sort_keys=True) + "\n").encode()
         descriptor = os.open(
             self.path(kind), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644
@@ -195,24 +241,40 @@ class EpisodeRecord:
     sealed: str
     steps: int | None = None
     control: bool = False
+    # Control episodes: the step at which the detector would have stopped.
+    would_stop_step: int | None = None
 
     @property
     def early_stop(self) -> bool:
         return self.stop_reason == "goal_verified"
 
+    @property
+    def could_stop(self) -> bool:
+        """The detector had the whole episode: it stopped it early or the
+        episode ran to its horizon (not ended by a person, a fault or the
+        policy)."""
+        return self.stop_reason in ("goal_verified", "horizon_exhausted")
+
 
 def episodes(events, *, manifest: dict | None = None, termination=None) -> list:
     """Every episode result the journal committed, with its steps from the
     run manifest and whether it was a control episode."""
-    steps = {
-        e["episode_id"]: e.get("steps") for e in (manifest or {}).get("episodes", [])
-    }
+    entries = {e["episode_id"]: e for e in (manifest or {}).get("episodes", [])}
     out = []
     for event in events:
         if event.record != "committed" or event.episode_result is None:
             continue
         result = event.episode_result
         _, role, _ = aeri.episode_parts(event.episode_id)
+        entry = entries.get(event.episode_id, {})
+        if "control" in entry:  # what the run recorded (manifest)
+            control = role == "forward" and entry["control"] is True
+        else:
+            control = bool(
+                termination is not None
+                and role == "forward"
+                and termination.is_control(event.episode_id)
+            )
         out.append(
             EpisodeRecord(
                 episode_id=event.episode_id,
@@ -222,12 +284,9 @@ def episodes(events, *, manifest: dict | None = None, termination=None) -> list:
                 goal_verification=result.goal_verification,
                 scene_reset=result.scene_reset,
                 sealed=result.rollout.sealed,
-                steps=steps.get(event.episode_id),
-                control=bool(
-                    termination is not None
-                    and role == "forward"
-                    and termination.is_control(event.episode_id)
-                ),
+                steps=entry.get("steps"),
+                control=control,
+                would_stop_step=entry.get("would_stop_step") if control else None,
             )
         )
     return out
@@ -270,13 +329,21 @@ def autonomous(records) -> dict:
 
 
 def early_termination(records, truth: dict, *, max_steps: int | None = None) -> dict:
+    """Early-termination metrics. The false early stop rate comes from the
+    control group only (pipeline §5.5): a stopped episode hides whatever
+    would have gone wrong after the stop, so only episodes run to their
+    horizon with the stop withheld show whether it would have been false.
+    Without labelled control episodes that truly failed it is
+    ``available: false`` and carries no number. The treatment group's own
+    figure is a lower bound and is named so."""
     forward = [r for r in records if r.role == "forward"]
     treated = [r for r in forward if not r.control]
     labelled = [r for r in treated if r.episode_id in truth]
-    tp = sum(r.early_stop and truth[r.episode_id] == "success" for r in labelled)
-    fp = sum(r.early_stop and truth[r.episode_id] == "failure" for r in labelled)
-    fn = sum(not r.early_stop and truth[r.episode_id] == "success" for r in labelled)
-    tn = sum(not r.early_stop and truth[r.episode_id] == "failure" for r in labelled)
+    eligible = [r for r in labelled if r.could_stop]
+    tp = sum(r.early_stop and truth[r.episode_id] == "success" for r in eligible)
+    fp = sum(r.early_stop and truth[r.episode_id] == "failure" for r in eligible)
+    fn = sum(not r.early_stop and truth[r.episode_id] == "success" for r in eligible)
+    tn = sum(not r.early_stop and truth[r.episode_id] == "failure" for r in eligible)
     early = [r for r in treated if r.early_stop]
     saved = [
         max_steps - r.steps
@@ -285,6 +352,25 @@ def early_termination(records, truth: dict, *, max_steps: int | None = None) -> 
     ]
     control = [r for r in forward if r.control]
     control_labelled = [r for r in control if r.episode_id in truth]
+    failed = [r for r in control_labelled if truth[r.episode_id] == "failure"]
+    would = [r for r in control_labelled if r.would_stop_step is not None]
+    if failed:
+        rate = {
+            "available": True,
+            "source": "control",
+            **share(sum(r.would_stop_step is not None for r in failed), len(failed)),
+        }
+    else:
+        rate = {
+            "available": False,
+            "source": "control",
+            "reason": (
+                "no labelled control episode that truly failed"
+                if control_labelled
+                else "no labelled control episodes (termination.control_fraction)"
+            ),
+            **share(0, 0),
+        }
     agree = [
         r
         for r in forward
@@ -294,10 +380,12 @@ def early_termination(records, truth: dict, *, max_steps: int | None = None) -> 
         "early_stops": len(early),
         "labelled": len(labelled),
         "unlabeled": len(treated) - len(labelled),
+        "cut_short": len(labelled) - len(eligible),
         "confusion": {"tp": tp, "fp": fp, "fn": fn, "tn": tn},
         "precision": share(tp, tp + fp),
         "recall": share(tp, tp + fn),
-        "false_early_stop_rate": share(fp, fp + tn),
+        "false_early_stop_rate": rate,
+        "treatment_false_early_stop_lower_bound": share(fp, fp + tn),
         "false_early_stops": fp,
         "saved_steps": {
             "total": sum(saved) if saved else None,
@@ -307,6 +395,10 @@ def early_termination(records, truth: dict, *, max_steps: int | None = None) -> 
         "control": {
             "episodes": len(control),
             "labelled": len(control_labelled),
+            "would_stop": len(would),
+            "would_stop_false": share(
+                sum(truth[r.episode_id] == "failure" for r in would), len(would)
+            ),
             "true_success": share(
                 sum(truth[r.episode_id] == "success" for r in control_labelled),
                 len(control_labelled),

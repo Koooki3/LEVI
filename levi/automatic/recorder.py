@@ -448,12 +448,12 @@ class RolloutRecorder:
             return dict(rollout.sealed)  # idempotent per episode
         self._check_open(rollout)
         try:
-            return self._seal(rollout)
+            return self._seal(rollout, meta or {})
         except OSError as exc:
             rollout.errors.append(f"seal: {exc}")
             raise RecorderError(f"seal {rollout.demo}: {exc}") from None
 
-    def _seal(self, rollout: Rollout) -> dict:
+    def _seal(self, rollout: Rollout, meta: dict) -> dict:
         handle = rollout.handle
         self._io("sync", rollout.path / STEPS)
         handle.flush()
@@ -481,7 +481,15 @@ class RolloutRecorder:
         self._durable(marker, b"")  # last: temporary file, fsync, rename, fsync
         rollout.state = "complete"
         rollout.sealed = {"sealed": "complete", "demo": rollout.demo}
-        self._set(rollout.episode_id, state="complete", steps=rollout.steps)
+        self._set(
+            rollout.episode_id,
+            state="complete",
+            steps=rollout.steps,
+            # The control group (pipeline §5.5): no early stop was allowed;
+            # where the detector would have stopped, if it would have.
+            control=bool(meta.get("control", False)),
+            would_stop_step=meta.get("would_stop_step"),
+        )
         return dict(rollout.sealed)
 
     def _verify(self, rollout: Rollout) -> None:
