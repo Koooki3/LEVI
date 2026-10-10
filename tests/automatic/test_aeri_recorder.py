@@ -45,7 +45,7 @@ class Disk:
                 raise OSError(errno.ENOSPC, "No space left on device")
 
 
-def setup(tmp_path, *, cfg=None, scene=None, events=None, io_hook=None, **kw):
+def build_run(tmp_path, *, cfg=None, scene=None, events=None, io_hook=None, **kw):
     clock = kw.pop("clock", None) or fake.FakeClock()
     directory = Path(tmp_path) / ".aeri" / "runs" / RUN
     recorder = RolloutRecorder(
@@ -104,7 +104,7 @@ def reset_first(clock):
 
 def test_forward_and_reset_rollouts_are_accepted_by_the_live_criteria(tmp_path):
     clock = fake.FakeClock()
-    r = setup(tmp_path, clock=clock, scene=reset_first(clock))
+    r = build_run(tmp_path, clock=clock, scene=reset_first(clock))
     assert r.orch.run() == "COMPLETED"
     forward, reset = demo(tmp_path, "forward"), demo(tmp_path, "reset")
     for path in (forward, reset):
@@ -153,7 +153,7 @@ def test_sealing_twice_returns_the_first_result(tmp_path):
     ],
 )
 def test_a_write_failure_never_leaves_a_complete_marker(tmp_path, op, name, at):
-    r = setup(tmp_path, io_hook=Disk(op, name, at))
+    r = build_run(tmp_path, io_hook=Disk(op, name, at))
     assert r.orch.run() == "FAULT_LOCKED"
     assert committed(r.orch)[-1][1:] == ("FAULT_LOCKED", "recorder_failed")
     assert not demo(tmp_path, "forward").exists()
@@ -171,7 +171,7 @@ def test_an_existing_rollout_number_is_never_overwritten(tmp_path):
     other = demo(tmp_path, "forward")
     other.mkdir(parents=True)
     (other / "metadata.json").write_text('{"keep": true}')
-    r = setup(tmp_path)
+    r = build_run(tmp_path)
     assert r.orch.run() == "FAULT_LOCKED"
     assert committed(r.orch)[-1][1:] == ("FAULT_LOCKED", "recorder_failed")
     assert json.loads((other / "metadata.json").read_text()) == {"keep": True}
@@ -195,7 +195,7 @@ def restart(r, tmp_path):
 
 
 def test_a_crash_after_the_marker_but_before_the_commit_renames_the_rollout(tmp_path):
-    r = setup(tmp_path)
+    r = build_run(tmp_path)
     real = r.recorder.seal
 
     def seal_then_die(rollout, meta):
@@ -221,7 +221,7 @@ def test_a_crash_after_the_marker_but_before_the_commit_renames_the_rollout(tmp_
 
 
 def test_a_crash_mid_episode_renames_the_open_rollout(tmp_path):
-    r = setup(tmp_path, robot={"step_faults": {4: "crash_after_send"}})
+    r = build_run(tmp_path, robot={"step_faults": {4: "crash_after_send"}})
     with pytest.raises(fake.SimulatedCrash):
         r.orch.run()
     assert demo(tmp_path, "forward").is_dir()
@@ -233,7 +233,7 @@ def test_a_crash_mid_episode_renames_the_open_rollout(tmp_path):
 
 def test_a_sealed_and_committed_rollout_survives_a_restart(tmp_path):
     clock = fake.FakeClock()
-    r = setup(
+    r = build_run(
         tmp_path,
         clock=clock,
         cfg=config(
@@ -265,7 +265,7 @@ def gate_config():
 
 def test_session_files_follow_the_run_and_keep_the_gate_truthful(tmp_path):
     clock = fake.FakeClock()
-    r = setup(tmp_path, clock=clock, scene=reset_first(clock))
+    r = build_run(tmp_path, clock=clock, scene=reset_first(clock))
     seen = []
     original = r.listener.write
 
@@ -302,7 +302,7 @@ def test_session_files_follow_the_run_and_keep_the_gate_truthful(tmp_path):
 
 
 def test_a_failing_session_write_never_stops_the_run(tmp_path):
-    r = setup(tmp_path)
+    r = build_run(tmp_path)
 
     def broken(state, info):
         raise OSError(errno.EROFS, "read-only")

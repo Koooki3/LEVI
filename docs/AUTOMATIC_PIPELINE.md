@@ -602,6 +602,38 @@ service (`watch.exclude`) so the forward spec never labels a reset.
 capture format (videos, pose and gripper CSVs) and reports its facts. The
 default `NullMedia` writes no video.
 
+## Metrics (`levi/automatic/metrics.py`)
+
+`metrics.report(events, labels=, manifest=, termination=, max_steps=)`
+reads a run journal (and the run manifest for step counts) and returns
+three groups; every rate is `{"n", "of", "rate", "wilson95"}` with the
+Wilson 95 % interval of the live service's statistics
+(`levi.live.stats.wilson`). With the 20-30 episodes of an exploratory check
+read the interval, not the rate.
+
+| Group | Metrics |
+| --- | --- |
+| autonomous | forward episodes, outcomes, `autonomous_success_rate` (unknown stays in the denominator), stop reasons |
+| early termination | confusion of early stops (`goal_verified`) against the truth; precision (early stops truly successful / early stops), recall (early stops / truly successful episodes), false early stop rate (early stops truly failed / truly failed episodes), saved steps (`max_steps` minus the steps run, summed over early stops), control episodes apart, agreement of the verdict with the truth and false successes |
+| reset | resets, `autonomous_reset_success_rate`, scene decisions and skips; skip accuracy (a skip on a truly ready scene or a reset on a scene that truly needed one / labelled decisions), wrong-skip rate, unneeded-reset rate, reset durations |
+| automation | interventions (moves into `WAIT_HUMAN` or `FAULT_LOCKED`) by reason, resumes, longest run of forward episodes without one, the time people waited (only when the clock domain did not change) |
+
+**Four kinds of label, never mixed** (pipeline §9.4).
+`autonomous_verdict` is the journal's own episode result: never written
+anywhere else, never called ground truth (its rates are `autonomous_*`).
+`posthoc_verdict`, `operator_label` and `adjudicated_ground_truth` live in
+`<run_dir>/labels/<kind>.jsonl`, one append-only file per kind (each line
+synced), written with `LabelStore.add(kind, episode_id, value, subject=,
+by=)`. Adding a label never touches another kind's file; a second label of
+the same kind, episode and subject is refused unless it says
+`supersede=True`, and then it is appended (the first stays). `by` is an
+opaque principal id (no names, no addresses). Subjects: `task_outcome`
+(`success`/`failure`) and `initial_state` (`ready`/`reset_required`: did
+the scene need a reset before the episode that started). The truth for the
+rates is the adjudicated label where there is one, else the operator's
+(`truth="adjudicated"` uses adjudicated labels only); episodes without one
+are counted as `unlabeled` and left out.
+
 ## Fakes (`integrations/fr3_automatic/fake.py`)
 
 `FakeClock` (moves only when advanced), `FakeRobot` (moves only under the
