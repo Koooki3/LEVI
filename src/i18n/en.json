@@ -2797,7 +2797,6 @@
   "Dataset metadata was updated, but some staged files still need cleanup.": "Dataset metadata was updated, but some staged files still need cleanup.",
   "Reload remaining episodes": "Reload remaining episodes",
   "Pipeline removed, but some files still need cleanup.": "Pipeline removed, but some files still need cleanup.",
-<<<<<<< HEAD
   "Result version": "Result version",
   "Per-run result": "Per-run result",
   "Label rule": "Label rule",
@@ -2846,11 +2845,9 @@
   "Label rule for this dataset": "Label rule for this dataset",
   "Automatic (recommended)": "Automatic (recommended)",
   "Save label rule": "Save label rule",
-  "Of {total} episodes: B higher in {b}, A higher in {a}, equal in {same}.": "Of {total} episodes: B higher in {b}, A higher in {a}, equal in {same}."
-=======
+  "Of {total} episodes: B higher in {b}, A higher in {a}, equal in {same}.": "Of {total} episodes: B higher in {b}, A higher in {a}, equal in {same}.",
   "This episode's data is too large to chart": "This episode's data is too large to chart",
   "The data file behind this episode is larger than LEVI reads into memory at once, so the charts are empty. The videos and annotations still work.": "The data file behind this episode is larger than LEVI reads into memory at once, so the charts are empty. The videos and annotations still work.",
   "Some episodes were left out of this analysis": "Some episodes were left out of this analysis",
   "Episodes left out because their data file is too large:": "Episodes left out because their data file is too large:"
->>>>>>> 3d477fc (fix(viewer): say so when v3 data is too large to read, instead of empty charts (review B2 I4, S2, S4))
 }
