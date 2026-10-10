@@ -630,7 +630,8 @@ are what `metrics.LabelStore.truth` reads; its default is unchanged.
 `levi.automatic.campaign.report` turns the ledger and one label basis into
 a report. `analyse(ledger, info, basis, layout=None, seed=None)` returns
 every number in one JSON document (schema `levi.aeri.campaign_report.v1`);
-`write_report(report_root, ledger, info, basis, ...)` writes it out:
+`write_report(report_root, ledger, info, basis, campaign_state=..., ...)`
+writes it out once the campaign has reached `ANALYZING` or `REPORTED`:
 
 ```
 <report_root>/<basis>/
@@ -670,6 +671,19 @@ against the operator per arm and per way the episode ended, with a test of
 a judge error rate that differs between arms; the power table. A
 sensitivity analysis without deviated trials is added when there are any.
 
+**Blind operator labels (CL14).** The judge agreement, the confusion
+matrices (F7) and the test of a judge error rate that differs between arms
+use each episode's first operator label, the one written before the
+automatic verdict was revealed (`operator_blind` in the ledger): an
+operator who changes a label after seeing the verdict must not raise the
+agreement. Success rates keep the current label (corrections of slips
+count). When labels were changed after the reveal, the report counts them
+per arm, repeats the success rates and the primary comparison with the
+first labels only (a sensitivity analysis), lowers a declared `full`
+operator blinding to `partial`, and makes the conclusion exploratory if
+the first labels lead to a different conclusion. The legacy client writes
+`eval.operator_outcome` once, at the key press, so its label is blind.
+
 **Label basis and names.** The summary opens with the basis block:
 basis, label coverage per arm (a warning above 10 percentage points
 between arms), operator blinding, layout control and deviated trials,
@@ -684,12 +698,21 @@ refuses anything else (`check_naming`):
 | `adjudicated_then_operator` | success rate (adjudicated where available, else operator), with how many labels came from each |
 
 **Conclusion level.** Confirmatory only when every condition holds:
-pre-registered primary analysis, the planned number of labelled trials in
-every arm, no peeks, a basis a person reviewed (operator or adjudicated),
-no drift warning, a schedule other than `blocked` or `interleaved`, and the
-library's planned-power rule (the planned difference detectable at 80 %).
-Otherwise every conclusion sentence is marked exploratory, and the summary
-lists the conditions not met. An interval that holds zero says the data
+pre-registered primary analysis; the planned n reached by what the primary
+analysis used (pairs in a paired design, labelled trials per arm
+otherwise); no peeks; a basis a person reviewed (operator or adjudicated);
+no drift warning, and drift checks that actually ran (a reference arm and
+enough rounds: a check that could not run is no pass); a schedule other
+than `blocked` or `interleaved`, both as planned and as the ledger shows
+it (`observed_schedule`: fewer than two rounds or each arm's segments one
+after another is blocked, the same arm order in every round is
+interleaved); the same step budget in every arm; label coverage within 10
+percentage points between arms; the same conclusion with the blind
+operator labels; and the library's planned-power rule (the planned
+difference detectable at 80 %). Only the pre-registered (primary)
+comparison can be confirmatory, and only when Holm rejects it; the other
+comparisons are always exploratory. Otherwise every conclusion sentence is
+marked exploratory, and the summary lists the conditions not met. An interval that holds zero says the data
 cannot tell the arms apart and gives the design's detectable difference;
 it never says the arms are alike. Words that claim more than an interval
 ("significantly outperforms", "proves", "state-of-the-art" and their
@@ -697,19 +720,34 @@ Chinese counterparts) are refused outside a confirmatory sentence
 (`check_wording`; a test scans every template branch). The text comes from
 `templates/` (`sentences.json`, `summary.<lang>.md`); no language model is
 called, and every number in it is formatted from `analysis.json` (tested).
-Post-hoc power is never reported. `blinded=True` writes a summary without
-any per-arm value (for a campaign still running); the other files are
-written as usual, and the overview page decides what to show.
+Post-hoc power is never reported. Tables of differences and times carry a
+`basis` column, and the time-to-success figure names its basis.
 
-**Privacy.** `manifest.json` lists the campaign and settings digests,
+**Running campaigns.** `campaign_state` is required. Before `ANALYZING`, or
+with `blinded=True`, the folder holds progress only: `progress.json`
+(schema `levi.aeri.campaign_progress.v1`: valid, discarded, incomplete,
+deviated, rerun and missing counts, label coverage per arm), a progress
+summary in both languages and the manifest. No analysis.json, table,
+figure, rate, comparison, drift result or conclusion level exists until the
+campaign reaches analysis, so nothing can be read early through a file
+route or a download.
+
+**Privacy.** Every free text is scrubbed before the analysis, so
+analysis.json, tables, figures and summaries come from the same clean
+values: the task, each arm's configuration, versions and unverified items,
+post-hoc failure modes and layout reasons lose paths, e-mail addresses, IP
+and MAC addresses, URLs and serial-like numbers (9 to 14 digits). Digests
+that are not 64 hex digits are dropped. `manifest.json` lists the campaign and settings digests,
 each child run's plan digest, state, LEVI commit and modes, each arm's
 checkpoint name (never its path), configuration, digest status and
 versions, the seed and schedule, peeks, deviated trials, the methods with
 their references, every file's size and SHA-256, PDF text substitutions,
 and `png: skipped(no converter)`. Names and e-mail addresses are never
-written. Camera serial numbers, IP addresses, host names, URLs and local
-paths are dropped (by key, and inside strings) unless
-`include_site_details=True`.
+written. Of the site facts (`site`, and the campaign's `extra`) only a
+fixed list is written (`SITE_FIELDS`: GPU, driver, kernel, openpi version,
+vLLM model, settings digests, judge spec, initial-state contract, feature
+switches, Python and numpy), each scrubbed; everything, people's names and
+addresses excepted, only with `include_site_details=True`.
 
 ## Guided legacy-client campaign
 
@@ -722,9 +760,13 @@ is the data side of this (no command, page or API calls it yet).
 command from the operator guide (`setup.md` §6.3, first code block), read
 with the parser of the setup recipes. It must carry `--levi-mode dual` and
 each of `--eval-num`, `--rollout-group` and `--eval-note` once.
-`render(base, eval_num=, rollout_group=, eval_note=, prompt=None)` replaces
-only those values (and `--prompt` when given) and checks that every other
-character is the guide's own. `segment_commands(base, layout, groups)`
+`render(base, eval_num=, rollout_group=, eval_note=)` replaces only those
+values and checks that every other character is the guide's own. The task
+instruction is no per-segment parameter: it is a shared setting of the
+campaign (`task.prompt`, part of `settings_sha256`), given once as
+`base_command(guide_text, prompt=...)`, saved with the command
+(`to_dict()`) and used by every segment; without it the guide's own
+`--prompt` stays. `segment_commands(base, layout, groups)`
 gives one command per segment: `--eval-num` its card count,
 `--rollout-group` the arm's checkpoint full name, `--eval-note
 "<campaign id> s<NN> <code>"` with the arm's code (`X1`, `X2`, ...; the

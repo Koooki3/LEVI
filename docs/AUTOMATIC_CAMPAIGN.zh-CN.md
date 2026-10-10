@@ -298,7 +298,7 @@ campaign 的文件在 `$LEVI_AERI_HOME/campaigns/<id>/`（`LEVI_AERI_HOME` 默�
 
 ## 报告产物
 
-`levi.automatic.campaign.report` 把台账和一种标签口径做成报告。`analyse(ledger, info, basis, layout=None, seed=None)` 把所有数字放进一个 JSON 文档（schema `levi.aeri.campaign_report.v1`）；`write_report(report_root, ledger, info, basis, ...)` 把它写出来：
+`levi.automatic.campaign.report` 把台账和一种标签口径做成报告。`analyse(ledger, info, basis, layout=None, seed=None)` 把所有数字放进一个 JSON 文档（schema `levi.aeri.campaign_report.v1`）；计划进入 `ANALYZING` 或 `REPORTED` 后，`write_report(report_root, ledger, info, basis, campaign_state=..., ...)` 把它写出来：
 
 ```
 <report_root>/<口径>/
@@ -314,6 +314,8 @@ campaign 的文件在 `$LEVI_AERI_HOME/campaigns/<id>/`（`LEVI_AERI_HOME` 默�
 
 **分析内容。** 每组：成功率及 Wilson、Clopper–Pearson 区间，标签覆盖率。每对组（预注册的比较排第一，B 减 A）：在同一轮、同一张卡上的试验对上做 McNemar 检验、Newcombe 成对区间和成对 bootstrap；由复位策略摆场景时（`layout_source: none`）改用 Fisher 检验和 Newcombe 独立样本区间。Holm 校正整个比较族；三组及以上另做 Cochran Q。两组都成功的对上比较步数（Wilcoxon、Hodges–Lehmann）；时间到成功（Kaplan–Meier、log-rank、到步数上限的 RMST）；失败模式；提前终止（检测器以人工标签为准：有裁定用裁定，否则用操作员标签）；漂移（参照组趋势、组×时间、残留效应）；每组、按片段结束方式分层的自动判定与操作员标签一致性，以及判定器误判率是否因组而异的检验；功效表。有偏离试验时另做一次剔除它们的敏感性分析。
 
+**揭示前的操作员标签（CL14）。** 判定一致性、混淆矩阵（F7）和“判定器误判率是否因组而异”的检验，都用每个片段在自动判定揭示前写下的第一条操作员标签（台账里的 `operator_blind`）：操作员看到判定后改标签，不能抬高一致率。成功率仍用最新标签（包含对手误的纠正）。有标签在揭示后被改动时，报告按组给出改动条数，只用第一条标签把成功率和主比较再算一遍（敏感性分析），把声明的 `full` 盲法降为 `partial`；第一条标签得出不同结论时，结论降为探索性。旧客户端的 `eval.operator_outcome` 在按键时写一次、之后不改，本身就是揭示前标签。
+
 **标签口径与命名。** 摘要开头是口径块：口径、每组标签覆盖率（组间相差超过 10 个百分点时警告）、操作员盲法、布局控制与偏离试验、复位方式和场景检查。比率按口径命名，生成器拒绝其他写法（`check_naming`）：
 
 | 口径 | 比率名称 |
@@ -323,15 +325,17 @@ campaign 的文件在 `$LEVI_AERI_HOME/campaigns/<id>/`（`LEVI_AERI_HOME` 默�
 | `adjudicated_ground_truth` | 真值成功率（唯一可以写“真值”的口径） |
 | `adjudicated_then_operator` | 成功率（裁定优先，否则操作员），并写明两种标签各占几条 |
 
-**结论等级。** 全部条件都满足才算确证性：主分析已预注册；每组带标签的试验数达到计划值；没有中途查看；口径经过人工（操作员或裁定）；没有漂移警告；顺序策略不是 `blocked` 或 `interleaved`；分析库按预设功效判定（预设差值在 80% 功效下可检出）。否则每个结论句都标“探索性”，摘要列出未满足的条件。区间含 0 时写“本次数据不足以区分”，并给出本设计的最小可检出差，从不写两组相当。夸大的措辞（“显著优于”“证明”“state-of-the-art”等）在确证性句子之外一律拒绝（`check_wording`；有测试扫描所有模板分支）。文字来自 `templates/`（`sentences.json`、`summary.<语言>.md`），不调用语言模型，其中每个数字都由 `analysis.json` 格式化而来（有测试）。从不报告事后功效。`blinded=True` 写出不含任何分组数值的摘要（用于仍在进行的计划）；其他文件照常写出，由总览页决定显示什么。
+**结论等级。** 全部条件都满足才算确证性：主分析已预注册；主分析实际用到的数量达到计划值（成对设计按对数，不成对按每组带标签的试验数）；没有中途查看；口径经过人工核实（操作员或裁定）；没有漂移警告，并且漂移检查实际运行（有参照组且轮次足够，没跑成不算通过）；顺序策略不是 `blocked` 或 `interleaved`，计划如此、台账里实际也如此（`observed_schedule`：少于两轮或每组各段连在一起算整组连跑，每轮组序都相同算固定交替）；各组步数上限相同；各组标签覆盖率相差不超过 10 个百分点；只用揭示前的操作员标签时结论不变；分析库按预设功效判定（预设差值在 80% 功效下可检出）。只有预注册的主比较、且 Holm 校正后拒绝时才能写确证性；其余比较一律是探索性的。否则每个结论句都标“探索性”，摘要列出未满足的条件。区间含 0 时写“本次数据不足以区分”，并给出本设计的最小可检出差，从不写两组相当。夸大的措辞（“显著优于”“证明”“state-of-the-art”等）在确证性句子之外一律拒绝（`check_wording`；有测试扫描所有模板分支）。文字来自 `templates/`（`sentences.json`、`summary.<语言>.md`），不调用语言模型，其中每个数字都由 `analysis.json` 格式化而来（有测试）。从不报告事后功效。差值表和时间表带 `basis` 列，时间到成功图写明口径。
 
-**隐私。** `manifest.json` 记录计划和共享设置的摘要、各子运行的计划摘要、状态、LEVI 提交号和模式、各组的检查点名称（从不写路径）、配置、哈希状态和版本、种子与时间表、中途查看次数、偏离试验数、方法及其文献、每个文件的大小和 SHA-256、PDF 文字替换记录，以及 `png: skipped(no converter)`。从不写姓名和邮箱。相机序列号、IP 地址、主机名、URL 和本机路径一律去掉（按键名，也查字符串内容），除非 `include_site_details=True`。
+**进行中的计划。** `campaign_state` 必须给出。进入 `ANALYZING` 之前，或 `blinded=True` 时，目录里只有进度：`progress.json`（schema `levi.aeri.campaign_progress.v1`：有效、作废、不完整、偏离、补跑和缺失计数，各组标签覆盖率）、中英两份进度摘要和 manifest。计划进入分析之前，不存在 analysis.json、表、图、比率、比较、漂移结果或结论等级，所以无法经文件接口或下载提前读到。
+
+**隐私。** 所有自由文本在分析之前先清洗，analysis.json、表、图和摘要都来自同一份干净的值：任务指令、各组的配置、版本和未验证项、后台复核的失败类别、偏离原因，都去掉路径、邮箱、IP 和 MAC 地址、URL 以及形似序列号的数字（9–14 位）。不是 64 位十六进制的摘要一律丢弃。`manifest.json` 记录计划和共享设置的摘要、各子运行的计划摘要、状态、LEVI 提交号和模式、各组的检查点名称（从不写路径）、配置、哈希状态和版本、种子与时间表、中途查看次数、偏离试验数、方法及其文献、每个文件的大小和 SHA-256、PDF 文字替换记录，以及 `png: skipped(no converter)`。从不写姓名和邮箱。现场信息（`site` 和计划的 `extra`）默认只写固定清单（`SITE_FIELDS`：GPU、驱动、内核、openpi 版本、vLLM 模型、设置摘要、判定规格、初始状态契约、特性开关、Python 和 numpy），每项都清洗；其余内容只有 `include_site_details=True` 时才写，人的姓名和邮箱任何时候都不写。
 
 ## 引导式旧客户端
 
 在真正的 AERI 机器人适配器出现之前，评测计划可以用旧评测客户端来跑：每一段由人复制一条命令执行，计划再收集客户端写下的数据。`levi.automatic.campaign.guided` 是其中的数据部分（目前还没有命令、页面或 API 调用它）。
 
-**命令。** `base_command(guide_text)` 从操作手册（`setup.md` §6.3 的第一个代码块）取出双标签评测命令，用的是 setup 配方同一套解析器。命令必须带 `--levi-mode dual`，且 `--eval-num`、`--rollout-group`、`--eval-note` 各出现一次。`render(base, eval_num=, rollout_group=, eval_note=, prompt=None)` 只替换这几个值（给了 `--prompt` 时也替换它），并核对其余每个字符都和手册一致。`segment_commands(base, layout, groups)` 为每一段生成一条命令：`--eval-num` 为本段卡数，`--rollout-group` 为该组检查点全名，`--eval-note "<计划 ID> s<NN> <组码>"` 只写组码（`X1`、`X2`……，备注里从不出现组的真名）。会结束引号、触发展开或转义的值（`"`、`\`、`$`、`` ` ``、`!`、控制字符）一律拒绝。
+**命令。** `base_command(guide_text)` 从操作手册（`setup.md` §6.3 的第一个代码块）取出双标签评测命令，用的是 setup 配方同一套解析器。命令必须带 `--levi-mode dual`，且 `--eval-num`、`--rollout-group`、`--eval-note` 各出现一次。`render(base, eval_num=, rollout_group=, eval_note=)` 只替换这几个值，并核对其余每个字符都和手册一致。任务指令不是每段的参数：它是计划的共享设置（`task.prompt`，计入 `settings_sha256`），在 `base_command(guide_text, prompt=...)` 里给一次，随命令一起保存（`to_dict()`），所有段都用它；不给时保留手册自己的 `--prompt`。`segment_commands(base, layout, groups)` 为每一段生成一条命令：`--eval-num` 为本段卡数，`--rollout-group` 为该组检查点全名，`--eval-note "<计划 ID> s<NN> <组码>"` 只写组码（`X1`、`X2`……，备注里从不出现组的真名）。会结束引号、触发展开或转义的值（`"`、`\`、`$`、`` ` ``、`!`、控制字符）一律拒绝。
 
 **漂移。** 手册里有本机专属的值（相机序列号、回位姿态），所以仓库不存它的副本。评测计划保存规划时用的命令（`BaseCommand.to_dict()`，带 SHA-256）；手册里的命令变了时，`check_drift(saved, guide_text)` 返回 unified diff（章节或代码块不见了也算漂移），`render_checked` 带着这份差异拒绝渲染（`GuideDrift`）：同一个计划的每一段都必须运行同一条命令。有一个测试会在检出目录上方找到维护者自己的手册时实际渲染它，不再匹配时失败并打印差异。
 

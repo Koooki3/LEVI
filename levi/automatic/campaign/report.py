@@ -47,7 +47,7 @@ import os
 import re
 import shutil
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from string import Template
 
@@ -360,17 +360,22 @@ def check_wording(text: str, *, confirmatory: bool, mask=()) -> None:
     same sentence by a 95 % interval. ``mask``: strings the caller supplied
     (ids, task text) that are not the report's wording."""
     for item in sorted({m for m in mask if m}, key=len, reverse=True):
-        text = text.replace(item, "⁣")
+        text = re.sub(rf"(?<!\w){re.escape(item)}(?!\w)", "\u2063", text)
     lowered = text.lower()
     for word in FORBIDDEN:
-        start = lowered.find(word.lower())
-        while start != -1:
+        # Whole words in English ("improves" is not "proves"); Chinese has
+        # no word boundaries, so its phrases match as they are.
+        pattern = (
+            rf"(?<![a-z]){re.escape(word.lower())}(?![a-z])"
+            if word.isascii()
+            else re.escape(word)
+        )
+        for found in re.finditer(pattern, lowered):
             if not confirmatory:
                 raise WordingError(f"{word!r} outside a confirmatory conclusion")
-            rest = SENTENCE_END.split(lowered[start:], maxsplit=1)[0]
+            rest = SENTENCE_END.split(lowered[found.start() :], maxsplit=1)[0]
             if "95% ci [" not in rest:
                 raise WordingError(f"{word!r} is not followed by its interval")
-            start = lowered.find(word.lower(), start + 1)
 
 
 # --------------------------------------------------------------- analysis
@@ -453,6 +458,106 @@ def _safe(fn, *args, **kwargs) -> dict:
         return {"available": False, "error": str(exc)}
 
 
+def observed_schedule(ledger: L.Ledger, arms: list) -> dict:
+    """The order the ledger shows, whatever the plan says: ``blocked``
+    (fewer than two rounds, or every arm's segments one after another),
+    ``interleaved`` (every round in the same arm order), ``incomplete``
+    (an arm missing from a round) or ``balanced``."""
+    first: dict = {}
+    for r in ledger.rows:
+        key = (r.round, r.arm)
+        first[key] = min(first.get(key, r.order_index), r.order_index)
+    rounds = sorted({rnd for rnd, _ in first})
+    orders = [
+        tuple(
+            sorted(
+                (a for a in arms if (rnd, a) in first), key=lambda a: first[(rnd, a)]
+            )
+        )
+        for rnd in rounds
+    ]
+    segments = [
+        (r.segment, r.arm) for r in sorted(ledger.rows, key=lambda r: r.order_index)
+    ]
+    sequence = [
+        arm
+        for i, (_, arm) in enumerate(segments)
+        if i == 0 or segments[i - 1] != segments[i]
+    ]
+    switches = sum(1 for i in range(1, len(sequence)) if sequence[i] != sequence[i - 1])
+    if not rounds or any(len(o) != len(arms) for o in orders):
+        kind = "incomplete"
+    elif len(rounds) < 2 or switches <= len(arms) - 1:
+        kind = "blocked"
+    elif len(set(orders)) == 1:
+        kind = "interleaved"
+    else:
+        kind = "balanced"
+    return {
+        "kind": kind,
+        "rounds": len(rounds),
+        "orders": [list(o) for o in orders],
+        "switches": switches,
+    }
+
+
+def _blind_sensitivity(ledger, valid, arms, basis, primary, paired, revised, design):
+    """The success rates and the primary comparison again with each
+    operator label replaced by its first (blind) value, for the bases that
+    read operator labels. ``agrees`` is False when the primary conclusion
+    changes: an interval that excluded zero no longer does, or the other
+    way round, or the sign flips."""
+    applies = basis in ("operator_label", "adjudicated_then_operator") and bool(
+        sum(revised.values())
+    )
+    out = {"applies": applies, "revised_after_reveal": revised, "agrees": True}
+    if not applies:
+        return out
+
+    def blind_value(r):
+        entry = ledger.labels.get(r.episode_id) or {}
+        adjudicated = entry.get("labels", {}).get("adjudicated_ground_truth")
+        if basis == "adjudicated_then_operator" and adjudicated in L.DECIDED:
+            return adjudicated
+        value = entry.get("operator_blind")
+        return value if value in L.DECIDED else None
+
+    blind = {r.episode_id: (blind_value(r), "operator_blind") for r in valid}
+    out["success"] = {}
+    for arm in arms:
+        vals = [
+            _value(blind[r.episode_id][0])
+            for r in valid
+            if r.arm == arm and blind[r.episode_id][0] is not None
+        ]
+        out["success"][arm] = an.proportion(sum(vals), len(vals))
+    a, b = primary["a"], primary["b"]
+    if paired:
+        pairs, _ = _paired(valid, blind, a, b)
+        est = an.newcombe_paired(pairs, **design)
+        out["primary"] = {
+            "label": primary["label"],
+            "n_pairs": len(pairs),
+            "newcombe": est,
+        }
+    else:
+        sa, sb = out["success"][a], out["success"][b]
+        est = an.newcombe_independent(sb["k"], sb["n"], sa["k"], sa["n"], **design)
+        out["primary"] = {"label": primary["label"], "newcombe": est}
+    main = primary["newcombe"]
+    if main.get("available") and est.get("available"):
+        same_zero = _excludes_zero(main["low"], main["high"]) == _excludes_zero(
+            est["low"], est["high"]
+        )
+        same_sign = (main["difference"] > 0) == (est["difference"] > 0) or (
+            not _excludes_zero(main["low"], main["high"])
+        )
+        out["agrees"] = bool(same_zero and same_sign)
+    else:
+        out["agrees"] = main.get("available") == est.get("available")
+    return out
+
+
 def analyse(
     ledger: L.Ledger,
     info: CampaignInfo,
@@ -495,6 +600,19 @@ def analyse(
     gap = (max(rates) - min(rates)) if rates else None
     counts = L.counts(ledger, layout)
     deviated = sum(c.get("deviated", 0) for c in counts.values())
+    revised = {
+        arm: sum(
+            bool((ledger.labels.get(r.episode_id) or {}).get("revised_after_reveal"))
+            for r in valid
+            if r.arm == arm
+        )
+        for arm in arms
+    }
+    # CL14: an operator label changed after the verdict was shown is no
+    # longer blind; the declared blinding cannot be "full" then.
+    blind_effective = info.operator_blind
+    if sum(revised.values()) and blind_effective == "full":
+        blind_effective = "partial"
     header = {
         "basis": basis,
         "basis_name": dict(BASIS_NAMES[basis]),
@@ -503,7 +621,9 @@ def analyse(
         "coverage_gap": gap,
         "coverage_warning": gap is not None and gap > COVERAGE_GAP,
         "labels_used": used_kinds if basis == "adjudicated_then_operator" else None,
-        "operator_blind": info.operator_blind,
+        "operator_blind": blind_effective,
+        "operator_blind_declared": info.operator_blind,
+        "revised_after_reveal": revised,
         "layout_source": ledger.layout_source,
         "deviated": deviated,
         "reset_mode": info.reset_mode,
@@ -758,8 +878,11 @@ def analyse(
         for r in valid:
             if r.arm != arm or (stratum != "all" and r.ended_by != stratum):
                 continue
-            got = (labels.get(r.episode_id) or {}).get("labels", {})
-            op = got.get("operator_label")
+            entry = labels.get(r.episode_id) or {}
+            got = entry.get("labels", {})
+            # The first label, written before the verdict was revealed
+            # (CL14): a later change towards the verdict is not agreement.
+            op = entry.get("operator_blind")
             verdict = got.get("autonomous_verdict")
             out.append(
                 (
@@ -815,16 +938,40 @@ def analyse(
     }
 
     # --- the conclusion level (design §4.4)
-    reached = bool(planned_n) and all(
-        coverage[arm]["labelled"] >= planned_n for arm in arms
+    blind = _blind_sensitivity(
+        ledger, valid, arms, basis, comparisons[0], paired_design, revised, design
     )
+    # The planned n counts what the primary analysis used: pairs in a paired
+    # design, labelled trials per arm otherwise.
+    if paired_design:
+        reached = bool(planned_n) and comparisons[0]["n_pairs"] >= planned_n
+    else:
+        reached = bool(planned_n) and all(
+            coverage[arm]["labelled"] >= planned_n for arm in arms
+        )
+    observed = observed_schedule(ledger, arms)
+    caps = {
+        arm: sorted({r.max_steps for r in valid if r.arm == arm and r.max_steps})
+        for arm in arms
+    }
     conditions = {
         "preregistered": bool(info.preregistered),
         "sample_size_reached": reached,
         "no_peeks": info.peeks == 0,
         "reviewed_basis": basis in REVIEWED_BASES,
         "no_drift_warning": not warning["warning"],
-        "schedule_allows": info.schedule not in SCHEDULES_EXPLORATORY,
+        # A diagnostic that could not run is no pass.
+        "drift_assessed": bool(
+            reference is not None
+            and (reference.get("trend") or {}).get("available")
+            and interaction.get("available")
+        ),
+        "schedule_allows": info.schedule not in SCHEDULES_EXPLORATORY
+        and observed["kind"] not in SCHEDULES_EXPLORATORY,
+        "same_step_budget": len({tuple(v) for v in caps.values()}) == 1
+        and all(len(v) <= 1 for v in caps.values()),
+        "coverage_balanced": not header["coverage_warning"],
+        "blind_labels_agree": blind["agrees"],
         "powered_design": not holm["exploratory"],
     }
     level = "confirmatory" if all(conditions.values()) else "exploratory"
@@ -848,6 +995,8 @@ def analyse(
         "early_stop": early,
         "drift": drift,
         "agreement": agreement,
+        "agreement_label": "operator_blind (first label, before the verdict was revealed)",
+        "blind_sensitivity": blind,
         "misjudgement": judge,
         "secondary_screen": secondary,
         "power": power,
@@ -855,6 +1004,8 @@ def analyse(
             "level": level,
             "conditions": conditions,
             "schedule": info.schedule,
+            "observed_schedule": observed,
+            "step_budgets": caps,
             "peeks": info.peeks,
             "preregistered": bool(info.preregistered),
             "trials_per_arm": planned_n,
@@ -889,7 +1040,8 @@ def _t(table: dict, key: str, **values) -> str:
 
 
 def _conclusion(c: dict, analysis: dict, table: dict, lang: str) -> list:
-    level = analysis["conclusion_level"]["level"]
+    # Only the pre-registered (primary) comparison can be confirmatory.
+    level = analysis["conclusion_level"]["level"] if c["primary"] else "exploratory"
     prefix = table[f"prefix.{level}"]
     name = analysis["header"]["basis_name"][lang]
     a, b = c["a"], c["b"]
@@ -923,7 +1075,7 @@ def _conclusion(c: dict, analysis: dict, table: dict, lang: str) -> list:
     if _excludes_zero(low, high):
         key = (
             "conclusion.confirmatory_excludes_zero"
-            if level == "confirmatory" and c["holm_reject"]
+            if level == "confirmatory" and c["primary"] and c["holm_reject"]
             else "conclusion.exploratory_excludes_zero"
         )
         if key.startswith("conclusion.exploratory"):
@@ -976,10 +1128,10 @@ def _conclusion(c: dict, analysis: dict, table: dict, lang: str) -> list:
     return lines
 
 
-def summary(analysis: dict, lang: str, *, blinded: bool = False) -> str:
+def summary(analysis: dict, lang: str) -> str:
     """The summary in ``lang`` from the templates; every number formatted
-    from ``analysis``. ``blinded``: no per-arm value at all (the campaign
-    is still running)."""
+    from ``analysis``. Only for a campaign that reached analysis: a
+    running campaign gets ``progress_summary`` (see ``write_report``)."""
     if lang not in LANGS:
         raise ReportError(f"language is one of {LANGS}")
     table = sentences()[lang]
@@ -1008,7 +1160,7 @@ def summary(analysis: dict, lang: str, *, blinded: bool = False) -> str:
                 operator=fmt(header["labels_used"]["operator_label"], "int"),
             )
         )
-    for arm in [] if blinded else analysis["arms"]:
+    for arm in analysis["arms"]:
         cov = header["coverage"][arm]
         basis_lines.append(
             _t(
@@ -1021,11 +1173,35 @@ def summary(analysis: dict, lang: str, *, blinded: bool = False) -> str:
                 unlabelled=fmt(cov["unlabelled"], "int"),
             )
         )
-    if header["coverage_warning"] and not blinded:
+    if header["coverage_warning"]:
         basis_lines.append(
             _t(table, "coverage.warning", gap=fmt(header["coverage_gap"], "pct"))
         )
     basis_lines.append(_t(table, "blind.line", blind=header["operator_blind"]))
+    if header["operator_blind"] != header["operator_blind_declared"]:
+        basis_lines.append(
+            _t(
+                table,
+                "blind.lowered",
+                declared=header["operator_blind_declared"],
+                blind=header["operator_blind"],
+            )
+        )
+    for arm, revised in header["revised_after_reveal"].items():
+        if revised:
+            basis_lines.append(
+                _t(table, "blind.revised", arm=arm, revised=fmt(revised, "int"))
+            )
+    observed = level["observed_schedule"]
+    basis_lines.append(
+        _t(
+            table,
+            "schedule.observed",
+            observed=observed["kind"],
+            rounds=fmt(observed["rounds"], "int"),
+            planned=level["schedule"],
+        )
+    )
     if header["layout_source"] == "card_set":
         basis_lines.append(
             _t(table, "layout.cards", deviated=fmt(header["deviated"], "int"))
@@ -1060,95 +1236,92 @@ def summary(analysis: dict, lang: str, *, blinded: bool = False) -> str:
             )
         )
 
-    if blinded:
-        results = "\n".join(
-            [table["results.blinded"]]
-            + [
-                _t(
-                    table,
-                    "results.blinded_arm",
-                    arm=arm,
-                    valid=fmt(header["coverage"][arm]["valid"], "int"),
-                )
-                for arm in analysis["arms"]
-            ]
-        )
-        comparisons = table["results.blinded"]
-        drift = ""
-        agreement = table["results.blinded"]
-    else:
-        result_lines = []
-        for arm in analysis["arms"]:
-            s = analysis["success"][arm]
-            if not s.get("available"):
-                result_lines.append(_t(table, "results.arm_empty", arm=arm))
-                continue
-            result_lines.append(
-                _t(
-                    table,
-                    "results.arm",
-                    arm=arm,
-                    k=fmt(s["k"], "int"),
-                    n=fmt(s["n"], "int"),
-                    rate=fmt(s["rate"], "pct"),
-                    low=fmt(s["wilson"]["low"], "pct"),
-                    high=fmt(s["wilson"]["high"], "pct"),
-                )
+    result_lines = []
+    for arm in analysis["arms"]:
+        s = analysis["success"][arm]
+        if not s.get("available"):
+            result_lines.append(_t(table, "results.arm_empty", arm=arm))
+            continue
+        result_lines.append(
+            _t(
+                table,
+                "results.arm",
+                arm=arm,
+                k=fmt(s["k"], "int"),
+                n=fmt(s["n"], "int"),
+                rate=fmt(s["rate"], "pct"),
+                low=fmt(s["wilson"]["low"], "pct"),
+                high=fmt(s["wilson"]["high"], "pct"),
             )
-        results = f"{name}\n\n" + "\n".join(result_lines)
-        comp_lines = []
-        for c in analysis["comparisons"]:
-            comp_lines += _conclusion(c, analysis, table, lang)
-        omni = analysis.get("omnibus")
-        if omni and omni.get("available"):
-            comp_lines.append(
-                _t(
-                    table,
-                    "omnibus.line",
-                    prefix=table["prefix.exploratory"],
-                    k=fmt(len(analysis["arms"]), "int"),
-                    p=fmt(omni["p_permutation"], "p"),
-                    blocks=fmt(omni["blocks"], "int"),
-                )
-            )
-        comparisons = "\n".join(comp_lines)
-        warn = analysis["drift"]["warning"]
-        drift = (
-            _t(table, "drift.warning", raised=", ".join(warn["raised_by"]))
-            if warn["warning"]
-            else table["drift.none"]
         )
-        agree_lines = []
-        for arm in analysis["arms"]:
-            for stratum, res in analysis["agreement"][arm].items():
-                label = table[f"stratum.{stratum}"]
-                share = res["agreement"]
-                if not res.get("available") or not share["n"]:
-                    agree_lines.append(
-                        _t(table, "agreement.arm_empty", arm=arm, stratum=label)
-                    )
-                    continue
-                agree_lines.append(
+    results = f"{name}\n\n" + "\n".join(result_lines)
+    comp_lines = []
+    for c in analysis["comparisons"]:
+        comp_lines += _conclusion(c, analysis, table, lang)
+        sens = analysis["blind_sensitivity"]
+        if c["primary"] and sens["applies"]:
+            est = sens["primary"]["newcombe"]
+            if est.get("available"):
+                comp_lines.append(
                     _t(
                         table,
-                        "agreement.arm",
-                        arm=arm,
-                        stratum=label,
-                        agree=fmt(share["k"], "int"),
-                        judged=fmt(share["n"], "int"),
-                        rate=fmt(share["rate"], "pct"),
-                        low=fmt(share["wilson"][0], "pct"),
-                        high=fmt(share["wilson"][1], "pct"),
-                        kappa=fmt(res["kappa"], "stat"),
+                        "blind.sensitivity",
+                        delta=fmt(est["difference"], "diff"),
+                        low=fmt(est["low"], "diff"),
+                        high=fmt(est["high"], "diff"),
                     )
                 )
-        agree_lines.append(table["agreement.carry"])
-        judge = analysis["misjudgement"]
-        if judge.get("warning"):
-            agree_lines.append(
-                _t(table, "agreement.judge_warning", p=fmt(judge["p_value"], "p"))
+    omni = analysis.get("omnibus")
+    if omni and omni.get("available"):
+        comp_lines.append(
+            _t(
+                table,
+                "omnibus.line",
+                prefix=table["prefix.exploratory"],
+                k=fmt(len(analysis["arms"]), "int"),
+                p=fmt(omni["p_permutation"], "p"),
+                blocks=fmt(omni["blocks"], "int"),
             )
-        agreement = "\n".join(agree_lines)
+        )
+    comparisons = "\n".join(comp_lines)
+    warn = analysis["drift"]["warning"]
+    drift = (
+        _t(table, "drift.warning", raised=", ".join(warn["raised_by"]))
+        if warn["warning"]
+        else table["drift.none"]
+    )
+    agree_lines = []
+    for arm in analysis["arms"]:
+        for stratum, res in analysis["agreement"][arm].items():
+            label = table[f"stratum.{stratum}"]
+            share = res["agreement"]
+            if not res.get("available") or not share["n"]:
+                agree_lines.append(
+                    _t(table, "agreement.arm_empty", arm=arm, stratum=label)
+                )
+                continue
+            agree_lines.append(
+                _t(
+                    table,
+                    "agreement.arm",
+                    arm=arm,
+                    stratum=label,
+                    agree=fmt(share["k"], "int"),
+                    judged=fmt(share["n"], "int"),
+                    rate=fmt(share["rate"], "pct"),
+                    low=fmt(share["wilson"][0], "pct"),
+                    high=fmt(share["wilson"][1], "pct"),
+                    kappa=fmt(res["kappa"], "stat"),
+                )
+            )
+    agree_lines.append(table["agreement.carry"])
+    agree_lines.append(table["blind.agreement"])
+    judge = analysis["misjudgement"]
+    if judge.get("warning"):
+        agree_lines.append(
+            _t(table, "agreement.judge_warning", p=fmt(judge["p_value"], "p"))
+        )
+    agreement = "\n".join(agree_lines)
 
     power = analysis["power"]
     if power["mdd_paired"] is None or power["mdd_unpaired"] is None:
@@ -1173,7 +1346,7 @@ def summary(analysis: dict, lang: str, *, blinded: bool = False) -> str:
         ]
     power_lines.append(table["power.note"])
 
-    limits = _limitations(analysis, table, lang, blinded=blinded)
+    limits = _limitations(analysis, table, lang)
     text = Template(summary_template(lang)).substitute(
         title=_t(table, "title", campaign_id=analysis["campaign_id"], basis_name=name),
         level=level_text,
@@ -1189,7 +1362,7 @@ def summary(analysis: dict, lang: str, *, blinded: bool = False) -> str:
     return re.sub(r"\n{3,}", "\n\n", text)
 
 
-def _limitations(analysis: dict, table: dict, lang: str, *, blinded=False) -> list:
+def _limitations(analysis: dict, table: dict, lang: str) -> list:
     header = analysis["header"]
     power = analysis["power"]
     mdd = (
@@ -1209,7 +1382,7 @@ def _limitations(analysis: dict, table: dict, lang: str, *, blinded=False) -> li
     rates = [
         c["coverage"] for c in header["coverage"].values() if c["coverage"] is not None
     ]
-    if rates and not blinded:
+    if rates:
         out.append(
             _t(
                 table,
@@ -1230,8 +1403,6 @@ def _limitations(analysis: dict, table: dict, lang: str, *, blinded=False) -> li
         if warn["warning"]
         else table["drift.none"]
     )
-    if blinded:
-        drift = table["results.blinded"]
     out.append(
         _t(
             table,
@@ -1404,8 +1575,10 @@ def figure_specs(analysis: dict) -> list:
                     kind="step_curve",
                     title={"en": "Time to success", "zh-CN": "时间到成功"},
                     summary={
-                        "en": "Kaplan-Meier share of trials that succeeded by each step.",
-                        "zh-CN": "Kaplan-Meier：到每一步为止成功的试验比例。",
+                        "en": "Kaplan-Meier share of trials that succeeded by each "
+                        f"step; success as in the {name['en']}.",
+                        "zh-CN": "Kaplan-Meier：到每一步为止成功的试验比例；成功按"
+                        f"{name['zh-CN']}的口径。",
                     },
                     panels=(
                         fs.Panel(
@@ -1997,6 +2170,10 @@ def tables(analysis: dict) -> dict:
             ]
         )
     out["drift"] = (["diagnostic", "statistic", "p_value", "warning"], rows)
+    # Tables of differences and times also say which labels they rest on.
+    for key in ("pairwise", "continuous"):
+        header, rows = out[key]
+        out[key] = (header + ["basis"], [row + [name] for row in rows])
     return out
 
 
@@ -2006,6 +2183,9 @@ EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b")
 ABS_PATH = re.compile(r"(?<![\w.~/-])(?:~/|/)[^\s\"'()\[\]{}<>,;]+")
 URL = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+", re.IGNORECASE)
+# Serial-like runs of 9 to 14 digits (camera serials) and MAC addresses.
+SERIAL = re.compile(r"(?<![\w.])\d{9,14}(?![\w.])")
+MAC = re.compile(r"\b[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}\b")
 # Keys never written: names and addresses of people.
 PERSON_KEYS = frozenset(
     {
@@ -2050,6 +2230,8 @@ def scrub(value, *, site_details: bool = False):
             value = URL.sub("[redacted]", value)
             value = IPV4.sub("[redacted]", value)
             value = ABS_PATH.sub("[redacted]", value)
+            value = MAC.sub("[redacted]", value)
+            value = SERIAL.sub("[redacted]", value)
         return value
     return value
 
@@ -2064,6 +2246,8 @@ def _data_rows(ledger: L.Ledger, basis: str) -> tuple[list, list]:
         "outcome",
         "outcome_label_kind",
         *L.LABEL_KINDS,
+        "operator_label_blind",
+        "revised_after_reveal",
         "failure_mode",
     ]
     rows = []
@@ -2082,6 +2266,8 @@ def _data_rows(ledger: L.Ledger, basis: str) -> tuple[list, list]:
                 value,
                 kind,
                 *[labels.get(k) for k in L.LABEL_KINDS],
+                entry.get("operator_blind"),
+                bool(entry.get("revised_after_reveal")),
                 entry.get("failure_mode"),
             ]
         )
@@ -2166,12 +2352,148 @@ def _locked(path: Path):
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+ANALYSED_STATES = frozenset({"ANALYZING", "REPORTED"})
+SHA256_TEXT = re.compile(r"^[0-9a-f]{64}$")
+# Site facts written by default (anything else needs include_site_details).
+SITE_FIELDS = (
+    "gpu",
+    "gpu_driver",
+    "driver",
+    "kernel",
+    "openpi",
+    "vllm_model",
+    "effective_toml_sha256",
+    "judge_spec",
+    "initial_state_contract",
+    "features",
+    "python",
+    "numpy",
+)
+
+
+def _sha_or_none(value):
+    return value if isinstance(value, str) and SHA256_TEXT.fullmatch(value) else None
+
+
+def clean_inputs(ledger: L.Ledger, info: CampaignInfo) -> tuple:
+    """``(ledger, info)`` with every free text a person or a run wrote
+    scrubbed (paths, e-mail addresses, IP and MAC addresses, serial-like
+    numbers, URLs): the task, each arm's configuration, versions and
+    unverified items, post-hoc failure modes and layout reasons. Done
+    before the analysis, so analysis.json, tables, figures and summaries
+    come from the same clean values; digests that are not 64 hex digits
+    are dropped."""
+
+    def clean(text):
+        return scrub(text) if isinstance(text, str) else text
+
+    arms = tuple(
+        replace(
+            a,
+            checkpoint=clean(a.checkpoint),
+            config=clean(a.config),
+            manifest_sha256=_sha_or_none(a.manifest_sha256),
+            versions=clean(a.versions),
+            not_verified=tuple(clean(x) for x in a.not_verified),
+        )
+        for a in info.arms
+    )
+    info = replace(
+        info,
+        task=clean(info.task),
+        arms=arms,
+        campaign_sha256=_sha_or_none(info.campaign_sha256),
+        settings_sha256=_sha_or_none(info.settings_sha256),
+    )
+    labels = {
+        key: {**entry, "failure_mode": clean(entry.get("failure_mode"))}
+        for key, entry in ledger.labels.items()
+    }
+    rows = [replace(r, layout_reason=clean(r.layout_reason)) for r in ledger.rows]
+    return (
+        L.Ledger(
+            ledger.campaign_id,
+            ledger.layout_source,
+            rows,
+            labels,
+            list(ledger.unplanned_runs),
+        ),
+        info,
+    )
+
+
+def progress(ledger: L.Ledger, info: CampaignInfo, basis: str, layout=None) -> dict:
+    """What a running campaign may show: counts (valid, discarded,
+    incomplete, deviated, reruns, missing slots) and label coverage per
+    arm. No rate, comparison or diagnostic."""
+    if basis not in L.LABEL_BASES:
+        raise ReportError(f"label basis is one of {', '.join(L.LABEL_BASES)}")
+    arms = _arm_order(info, ledger)
+    valid = [r for r in ledger.rows if r.status == "valid"]
+    coverage = {}
+    for arm in arms:
+        mine = [r for r in valid if r.arm == arm]
+        labelled = sum(
+            L.label_value(ledger.labels.get(r.episode_id), basis)[0] is not None
+            for r in mine
+        )
+        coverage[arm] = {"valid": len(mine), "labelled": labelled}
+    return {
+        "schema": "levi.aeri.campaign_progress.v1",
+        "campaign_id": info.campaign_id,
+        "basis": basis,
+        "arms": arms,
+        "counts": L.counts(ledger, layout),
+        "coverage": coverage,
+    }
+
+
+def progress_summary(prog: dict, lang: str, state: str) -> str:
+    table = sentences()[lang]
+    lines = [
+        "# " + _t(table, "progress.title", campaign_id=prog["campaign_id"]),
+        "",
+        _t(table, "progress.note", state=state),
+        "",
+    ]
+    for arm in prog["arms"]:
+        c = prog["counts"].get(arm, {})
+        lines.append(
+            _t(
+                table,
+                "counts.arm",
+                arm=arm,
+                valid=fmt(c.get("valid", 0), "int"),
+                discarded=fmt(c.get("discarded", 0), "int"),
+                incomplete=fmt(c.get("incomplete", 0), "int"),
+                reruns=fmt(c.get("from_reruns", 0), "int"),
+                unconfirmed=fmt(c.get("unconfirmed", 0), "int"),
+                missing=fmt(c.get("missing"), "int"),
+            )
+        )
+    lines.append("")
+    for arm in prog["arms"]:
+        cov = prog["coverage"][arm]
+        lines.append(
+            _t(
+                table,
+                "progress.coverage",
+                arm=arm,
+                labelled=fmt(cov["labelled"], "int"),
+                valid=fmt(cov["valid"], "int"),
+                basis=prog["basis"],
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
 def write_report(
     report_root,
     ledger: L.Ledger,
     info: CampaignInfo,
     basis: str,
     *,
+    campaign_state: str,
     layout: L.CampaignLayout | None = None,
     runs=(),
     site: dict | None = None,
@@ -2182,12 +2504,51 @@ def write_report(
     now: float | None = None,
     pdf: bool = True,
 ) -> dict:
-    """Write ``<report_root>/<basis>/`` and return its manifest. ``runs``:
-    one ``read_aeri_run`` record per child run (plan digest, state, LEVI
-    commit, modes); ``site``: the device snapshot and other site facts,
-    scrubbed (see ``scrub``). Nothing outside ``<report_root>/<basis>`` and
-    its lock file is written."""
+    """Write ``<report_root>/<basis>/`` and return its manifest.
+
+    ``campaign_state``: the campaign's state. Before ``ANALYZING`` (or
+    with ``blinded=True``) only progress is written (``progress.json``, a
+    progress summary and the manifest: counts, deviated, discarded,
+    coverage); no analysis, table, figure or conclusion exists until then.
+    ``runs``: one ``read_aeri_run`` record per child run; ``site``: device
+    facts, of which only ``SITE_FIELDS`` are written unless
+    ``include_site_details``. Free texts are scrubbed first
+    (``clean_inputs``). Nothing outside ``<report_root>/<basis>`` and its
+    lock file is written."""
+    if not isinstance(campaign_state, str) or not campaign_state:
+        raise ReportError("campaign_state is the campaign's state")
     report_root = Path(report_root)
+    ledger, info = clean_inputs(ledger, info)
+    gated = blinded or campaign_state not in ANALYSED_STATES
+    if gated:
+        prog = progress(ledger, info, basis, layout)
+        texts = {lang: progress_summary(prog, lang, campaign_state) for lang in LANGS}
+
+        def build(put):
+            put("progress.json", _json_bytes(prog))
+            for lang, text in texts.items():
+                put(f"summary.{lang}.md", text.encode("utf-8"))
+            return {"progress": True, "figures": {}, "skipped": {}}
+
+        return _publish(
+            report_root,
+            basis,
+            build,
+            lambda files, extra: _manifest(
+                None,
+                info,
+                basis,
+                runs=runs,
+                site=site,
+                include_site_details=include_site_details,
+                state=campaign_state,
+                files=files,
+                figures={},
+                skipped={},
+                now=now,
+            ),
+        )
+
     analysis = analyse(
         ledger, info, basis, layout=layout, seed=seed, resamples=resamples
     )
@@ -2197,8 +2558,10 @@ def write_report(
         if a.not_verified
     ]
     level = analysis["conclusion_level"]["level"]
-    texts = {lang: summary(analysis, lang, blinded=blinded) for lang in LANGS}
-    mask = [info.campaign_id, info.task, *analysis["arms"]]
+    texts = {lang: summary(analysis, lang) for lang in LANGS}
+    # Only what a person typed is masked, never the arm ids: a one-letter
+    # arm would otherwise hide that letter everywhere.
+    mask = [info.campaign_id, info.task]
     for lang, text in texts.items():
         check_naming(text, basis, lang)
         check_wording(text, confirmatory=level == "confirmatory", mask=mask)
@@ -2210,13 +2573,91 @@ def write_report(
         if spec is not None:
             check_naming(spec.to_json(), basis)
 
+    def build(put):
+        for lang, text in texts.items():
+            put(f"summary.{lang}.md", text.encode("utf-8"))
+        for name, (header, rows) in table_data.items():
+            put(f"tables/{name}.csv", table_csv(header, rows))
+            if name != "drift":
+                put(f"tables/{name}.tex", table_tex(header, rows))
+        figures, skipped = {}, {}
+        work = put.work
+        (work / "figures").mkdir()
+        for spec, why in specs:
+            if spec is None:
+                skipped[why[0]] = why[1]
+                continue
+            stem = work / "figures" / spec.id
+            records = write_figure(spec, stem, ("svg", "pdf") if pdf else ("svg",))
+            records["svg_zh"] = write_figure(
+                spec, work / "figures" / f"{spec.id}.zh-CN", ("svg",), lang="zh-CN"
+            )["svg"]
+            put(f"figures/{spec.id}.json", spec.to_json().encode("utf-8"))
+            for fmt_name, rec in records.items():
+                rel = str(Path(rec["path"]).relative_to(work))
+                rec = {**rec, "path": rel}
+                put.files[rel] = {"bytes": rec["bytes"], "sha256": rec["sha256"]}
+                records[fmt_name] = rec
+            figures[spec.id] = records
+        header, rows = _data_rows(ledger, basis)
+        put(
+            "data/trials.csv",
+            table_csv(header, [[_csv_value(v) for v in row] for row in rows]),
+        )
+        put("data/trials.parquet", _parquet(header, rows))
+        label_rows = []
+        for r in ledger.rows:
+            entry = ledger.labels.get(r.episode_id) or {}
+            for kind, value in sorted(entry.get("labels", {}).items()):
+                label_rows.append([r.episode_id, r.arm, kind, value])
+            if entry.get("operator_blind") is not None:
+                label_rows.append(
+                    [
+                        r.episode_id,
+                        r.arm,
+                        "operator_label_blind",
+                        entry["operator_blind"],
+                    ]
+                )
+        put(
+            "data/labels.csv",
+            table_csv(["episode_id", "arm", "kind", "value"], label_rows),
+        )
+        put("data/analysis.json", _json_bytes(analysis))
+        return {"figures": figures, "skipped": skipped}
+
+    return _publish(
+        report_root,
+        basis,
+        build,
+        lambda files, extra: _manifest(
+            analysis,
+            info,
+            basis,
+            runs=runs,
+            site=site,
+            include_site_details=include_site_details,
+            state=campaign_state,
+            files=files,
+            figures=extra["figures"],
+            skipped=extra["skipped"],
+            now=now,
+        ),
+    )
+
+
+def _publish(report_root: Path, basis: str, build, make_manifest) -> dict:
+    """Build the folder aside under the basis lock, then swap it in. On any
+    error the half-built folder is removed and the old report stays (or is
+    put back if it was already moved aside)."""
     target = report_root / basis
     with _locked(report_root / f".{basis}.lock"):
         _recover(report_root, basis)
         work = report_root / f".{basis}.tmp-{os.getpid()}-{time.time_ns()}"
         work.mkdir(parents=True)
+        old = None
         try:
-            files = {}
+            files: dict = {}
 
             def put(rel: str, data: bytes) -> None:
                 path = work / rel
@@ -2224,73 +2665,33 @@ def write_report(
                 write_durable(path, data)
                 files[rel] = {"bytes": len(data), "sha256": _sha(data)}
 
-            for lang, text in texts.items():
-                put(f"summary.{lang}.md", text.encode("utf-8"))
-            for name, (header, rows) in table_data.items():
-                put(f"tables/{name}.csv", table_csv(header, rows))
-                if name != "drift":
-                    put(f"tables/{name}.tex", table_tex(header, rows))
-            figures, skipped = {}, {}
-            (work / "figures").mkdir()
-            for spec, why in specs:
-                if spec is None:
-                    skipped[why[0]] = why[1]
-                    continue
-                stem = work / "figures" / spec.id
-                records = write_figure(spec, stem, ("svg", "pdf") if pdf else ("svg",))
-                records["svg_zh"] = write_figure(
-                    spec, work / "figures" / f"{spec.id}.zh-CN", ("svg",), lang="zh-CN"
-                )["svg"]
-                put(f"figures/{spec.id}.json", spec.to_json().encode("utf-8"))
-                for fmt_name, rec in records.items():
-                    rel = str(Path(rec["path"]).relative_to(work))
-                    rec = {**rec, "path": rel}
-                    files[rel] = {"bytes": rec["bytes"], "sha256": rec["sha256"]}
-                    records[fmt_name] = rec
-                figures[spec.id] = records
-            header, rows = _data_rows(ledger, basis)
-            put(
-                "data/trials.csv",
-                table_csv(header, [[_csv_value(v) for v in row] for row in rows]),
-            )
-            put("data/trials.parquet", _parquet(header, rows))
-            label_rows = []
-            for r in ledger.rows:
-                entry = ledger.labels.get(r.episode_id) or {}
-                for kind, value in sorted(entry.get("labels", {}).items()):
-                    label_rows.append([r.episode_id, r.arm, kind, value])
-            put(
-                "data/labels.csv",
-                table_csv(["episode_id", "arm", "kind", "value"], label_rows),
-            )
-            put("data/analysis.json", _json_bytes(analysis))
-            manifest = _manifest(
-                analysis,
-                info,
-                basis,
-                runs=runs,
-                site=site,
-                include_site_details=include_site_details,
-                blinded=blinded,
-                files=files,
-                figures=figures,
-                skipped=skipped,
-                now=now,
-            )
+            put.work = work
+            put.files = files
+            extra = build(put)
+            manifest = make_manifest(files, extra)
             write_durable(work / "manifest.json", _json_bytes(manifest))
             _fsync_dir(work)
-            old = None
             if target.exists():
                 old = report_root / f".{basis}.old-{os.getpid()}-{time.time_ns()}"
                 os.replace(target, old)
             os.replace(work, target)
             _fsync_dir(report_root)
-            if old is not None:
-                shutil.rmtree(old, ignore_errors=True)
         except BaseException:
             shutil.rmtree(work, ignore_errors=True)
+            if old is not None and not target.exists():
+                os.replace(old, target)
+                _fsync_dir(report_root)
             raise
+        if old is not None:
+            shutil.rmtree(old, ignore_errors=True)
     return manifest
+
+
+def _site(site: dict | None, include_site_details: bool) -> dict:
+    site = site or {}
+    if include_site_details:
+        return scrub(site, site_details=True)
+    return {k: scrub(site[k]) for k in SITE_FIELDS if k in site}
 
 
 def _manifest(
@@ -2301,33 +2702,42 @@ def _manifest(
     runs,
     site,
     include_site_details,
-    blinded,
+    state,
     files,
     figures,
     skipped,
     now,
 ) -> dict:
-    commits = sorted({r.get("levi_commit") for r in runs if r.get("levi_commit")})
+    """The report's manifest. ``analysis`` None: a progress-only report
+    (no conclusion, methods or figures)."""
+    commits = sorted(
+        {
+            r.get("levi_commit")
+            for r in runs
+            if isinstance(r.get("levi_commit"), str)
+            and re.fullmatch(r"[0-9a-f]{7,64}", r["levi_commit"])
+        }
+    )
     manifest = {
         "schema": MANIFEST_SCHEMA,
         "report_schema": SCHEMA,
         "campaign_id": info.campaign_id,
+        "campaign_state": scrub(state),
         "basis": basis,
-        "basis_name": analysis["header"]["basis_name"],
-        "conclusion_level": analysis["conclusion_level"]["level"],
+        "basis_name": dict(BASIS_NAMES[basis]),
+        "progress_only": analysis is None,
         "campaign_sha256": info.campaign_sha256,
         "settings_sha256": info.settings_sha256,
         "runs": [
             {
-                k: r.get(k)
-                for k in (
-                    "run_id",
-                    "plan_sha256",
-                    "state",
-                    "levi_commit",
-                    "reset_mode",
-                    "scene_check",
-                )
+                "run_id": scrub(str(r.get("run_id"))),
+                "plan_sha256": _sha_or_none(r.get("plan_sha256")),
+                "state": scrub(str(r.get("state"))),
+                "levi_commit": r.get("levi_commit")
+                if r.get("levi_commit") in commits
+                else None,
+                "reset_mode": scrub(str(r.get("reset_mode"))),
+                "scene_check": scrub(str(r.get("scene_check"))),
             }
             for r in runs
         ],
@@ -2345,43 +2755,33 @@ def _manifest(
             }
             for a in info.arms
         ],
-        "seed": analysis["seed"],
+        "seed": info.seed,
         "schedule": info.schedule,
         "trials_per_arm": info.trials_per_arm,
         "switches": info.switches,
         "peeks": info.peeks,
-        "operator_blind": info.operator_blind,
-        "deviated": analysis["header"]["deviated"],
-        "unplanned_runs": analysis["unplanned_runs"],
-        "methods": analysis["methods"],
+        "operator_blind_declared": info.operator_blind,
         "files": dict(sorted(files.items())),
-        "figures": figures,
-        "figures_skipped": skipped,
-        "png": "skipped(no converter)",
-        "blinded_summary": bool(blinded),
         "include_site_details": bool(include_site_details),
-        "site": scrub(site or {}, site_details=include_site_details),
-        "extra": scrub(info.extra, site_details=include_site_details),
+        "site": _site(site, include_site_details),
+        "extra": _site(info.extra, include_site_details),
         "generated_at": time.strftime(
             "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() if now is None else now)
         ),
         "llm": "none: the text is filled from templates",
     }
-    return (
-        scrub(manifest, site_details=True)
-        if include_site_details
-        else _scrub_manifest(manifest)
-    )
-
-
-def _scrub_manifest(manifest: dict) -> dict:
-    """The manifest without site details: strings are scrubbed, keys of
-    the report's own structure are kept."""
-    keep = {"files", "figures", "methods", "runs", "arms"}
-    out = {}
-    for key, value in manifest.items():
-        out[key] = value if key in keep else scrub(value)
-    for arm in out["arms"]:
-        arm["versions"] = scrub(arm["versions"])
-        arm["not_verified"] = scrub(arm["not_verified"])
-    return out
+    if analysis is not None:
+        manifest.update(
+            {
+                "conclusion_level": analysis["conclusion_level"]["level"],
+                "seed": analysis["seed"],
+                "operator_blind": analysis["header"]["operator_blind"],
+                "deviated": analysis["header"]["deviated"],
+                "unplanned_runs": [scrub(r) for r in analysis["unplanned_runs"]],
+                "methods": analysis["methods"],
+                "figures": figures,
+                "figures_skipped": skipped,
+                "png": "skipped(no converter)",
+            }
+        )
+    return manifest

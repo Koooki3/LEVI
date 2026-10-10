@@ -14,6 +14,12 @@ import test_ledger_fixtures as fx
 from levi.automatic.campaign import ledger as L
 from levi.automatic.campaign import report as R
 
+
+def write_report(*args, **kwargs):
+    kwargs.setdefault("campaign_state", "REPORTED")
+    return R.write_report(*args, **kwargs)
+
+
 TEXT_SUFFIXES = {".md", ".csv", ".tex", ".json", ".svg"}
 
 
@@ -55,7 +61,7 @@ def reports(campaign, tmp_path_factory):
     lay, led = campaign
     root = tmp_path_factory.mktemp("campaign") / "report"
     manifests = {
-        basis: R.write_report(root, led, info(), basis, layout=lay, now=0)
+        basis: write_report(root, led, info(), basis, layout=lay, now=0)
         for basis in L.LABEL_BASES
     }
     return root, manifests
@@ -133,14 +139,14 @@ def test_every_basis_gets_its_own_complete_folder(reports):
 def test_writing_one_basis_leaves_the_others_untouched(campaign, tmp_path):
     lay, led = campaign
     root = tmp_path / "report"
-    R.write_report(root, led, info(), "operator_label", layout=lay, now=0)
-    R.write_report(root, led, info(), "autonomous_verdict", layout=lay, now=0)
+    write_report(root, led, info(), "operator_label", layout=lay, now=0)
+    write_report(root, led, info(), "autonomous_verdict", layout=lay, now=0)
     before = {
         p: (p.read_bytes(), p.stat().st_mtime_ns)
         for p in (root / "autonomous_verdict").rglob("*")
         if p.is_file()
     }
-    R.write_report(root, led, info(), "operator_label", layout=lay, now=1)
+    write_report(root, led, info(), "operator_label", layout=lay, now=1)
     after = {
         p: (p.read_bytes(), p.stat().st_mtime_ns)
         for p in (root / "autonomous_verdict").rglob("*")
@@ -314,7 +320,7 @@ def test_the_report_holds_no_site_details_or_personal_data(campaign, tmp_path):
     led = L.derive(lay, facts)
     root = tmp_path / "report"
     extra = {"operator": "Jane Operator", "effective_toml_sha256": "ab" * 32}
-    manifest = R.write_report(
+    manifest = write_report(
         root, led, info(extra=extra), "operator_label", layout=lay, site=site(), now=0
     )
     for path in (root / "operator_label").rglob("*"):
@@ -332,7 +338,7 @@ def test_the_report_holds_no_site_details_or_personal_data(campaign, tmp_path):
 def test_site_details_on_request_never_include_people(campaign, tmp_path):
     lay, led = campaign
     root = tmp_path / "report"
-    manifest = R.write_report(
+    manifest = write_report(
         root,
         led,
         info(),
@@ -380,7 +386,7 @@ def clean_facts(lay, a_rate=0.0, b_rate=1.0):
 
 def confirmatory_info(**over):
     base = {
-        "arms": (R.ArmInfo("A"), R.ArmInfo("B")),
+        "arms": (R.ArmInfo("A", role="reference"), R.ArmInfo("B")),
         "preregistered": True,
         "design_difference": 0.5,
         "design_baseline": 0.2,
@@ -388,16 +394,27 @@ def confirmatory_info(**over):
     return info(**{**base, **over})
 
 
-def test_a_confirmatory_conclusion_needs_every_condition(tmp_path):
-    lay = fx.layout(per_arm=30, segment_trials=5)
-    led = L.derive(lay, clean_facts(lay, a_rate=0.2, b_rate=1.0))
+def confirmatory_ledger(**layout_over):
+    lay = fx.layout(**{"per_arm": 30, "segment_trials": 5, **layout_over})
+    return lay, L.derive(lay, clean_facts(lay, a_rate=0.2, b_rate=1.0))
+
+
+def edited(facts, run, pick, **changes):
+    facts[run] = [
+        L.EpisodeFact(**{**f.__dict__, **changes}) if pick(f) else f for f in facts[run]
+    ]
+
+
+def test_a_confirmatory_conclusion_needs_every_condition():
+    lay, led = confirmatory_ledger()
     good = R.analyse(led, confirmatory_info(), "operator_label", layout=lay)
     assert good["conclusion_level"]["level"] == "confirmatory", good["conclusion_level"]
     text = R.summary(good, "en")
     assert "[Confirmatory] Under the pre-registered analysis" in text
     assert "Conclusion level: confirmatory." in text
+    assert "B is higher than that of A" in text
     zh = R.summary(good, "zh-CN")
-    assert "【确证性】在预注册的分析下" in zh
+    assert "【确证性】在预注册的分析下" in zh and "比 A 高" in zh
     for over, basis, condition in (
         ({"peeks": 1}, "operator_label", "no_peeks"),
         ({"preregistered": False}, "operator_label", "preregistered"),
@@ -405,12 +422,37 @@ def test_a_confirmatory_conclusion_needs_every_condition(tmp_path):
         ({"schedule": "interleaved"}, "operator_label", "schedule_allows"),
         ({"trials_per_arm": 40}, "operator_label", "sample_size_reached"),
         ({}, "autonomous_verdict", "reviewed_basis"),
+        ({}, "posthoc_verdict", "reviewed_basis"),
         ({"design_difference": 0.1}, "operator_label", "powered_design"),
+        (
+            {"arms": (R.ArmInfo("A"), R.ArmInfo("B"))},
+            "operator_label",
+            "drift_assessed",
+        ),
     ):
-        a = R.analyse(led, confirmatory_info(**over), basis, layout=lay)
+        if basis == "posthoc_verdict":
+            facts = clean_facts(lay, a_rate=0.2, b_rate=1.0)
+            for run in facts:
+                facts[run] = [
+                    L.EpisodeFact(
+                        **{
+                            **f.__dict__,
+                            "labels": {
+                                **f.labels,
+                                "posthoc_verdict": f.labels["operator_label"],
+                            },
+                        }
+                    )
+                    for f in facts[run]
+                ]
+            use = L.derive(lay, facts)
+        else:
+            use = led
+        a = R.analyse(use, confirmatory_info(**over), basis, layout=lay)
         level = a["conclusion_level"]
         assert level["level"] == "exploratory" and not level["conditions"][condition], (
-            over
+            over,
+            basis,
         )
         text = R.summary(a, "en")
         assert "[Confirmatory]" not in text and "[Exploratory]" in text
@@ -418,14 +460,124 @@ def test_a_confirmatory_conclusion_needs_every_condition(tmp_path):
         R.check_wording(text, confirmatory=False)
 
 
-def test_an_interval_holding_zero_never_says_the_arms_are_alike():
+def test_the_planned_n_counts_pairs_not_labelled_rows():
     lay = fx.layout(per_arm=30, segment_trials=5)
-    led = L.derive(lay, clean_facts(lay, a_rate=0.6, b_rate=0.6))
-    a = R.analyse(led, info(), "operator_label", layout=lay)
+    facts = clean_facts(lay, a_rate=0.2, b_rate=1.0)
+    b_runs = [s.run_ids[0] for s in lay.segments if s.arm == "B"]
+    # Six of B's trials name a card outside their segment: labelled, valid,
+    # never paired.
+    for run in b_runs[:1]:
+        edited(facts, run, lambda f: True, card="r99c9", card_source="run_manifest")
+    edited(
+        facts,
+        b_runs[1],
+        lambda f: f.number == 1,
+        card="r99c8",
+        card_source="run_manifest",
+    )
+    led = L.derive(lay, facts)
+    a = R.analyse(led, confirmatory_info(), "operator_label", layout=lay)
+    assert a["header"]["coverage"]["B"]["labelled"] == 30
+    assert a["comparisons"][0]["n_pairs"] == 24
+    assert a["conclusion_level"]["conditions"]["sample_size_reached"] is False
+    assert a["conclusion_level"]["level"] == "exploratory"
+
+
+def test_only_the_primary_comparison_can_be_confirmatory():
+    lay = fx.layout(arms=("A", "B", "C"), per_arm=30, segment_trials=5)
+    by_run = {}
+    rates = {"A": 0.2, "B": 1.0, "C": 1.0}
+    for seg in lay.segments:
+        one = L.CampaignLayout(lay.campaign_id, (seg,))
+        by_run.update(clean_facts(one, a_rate=rates[seg.arm], b_rate=rates[seg.arm]))
+    led = L.derive(lay, by_run)
+    arms = (R.ArmInfo("A", role="reference"), R.ArmInfo("B"), R.ArmInfo("C"))
+    a = R.analyse(led, confirmatory_info(arms=arms), "operator_label", layout=lay)
+    assert a["conclusion_level"]["level"] == "confirmatory", a["conclusion_level"]
+    lines = R.summary(a, "en").splitlines()
+    primary = [x for x in lines if "of B is higher than that of A" in x]
+    other = [x for x in lines if "of C is higher than that of A" in x]
+    assert primary and primary[0].startswith("[Confirmatory]")
+    assert other and other[0].startswith("[Exploratory]")
+    assert not [x for x in lines if x.startswith("[Confirmatory]") and "of C " in x]
+
+
+@pytest.mark.parametrize("arms", [("A", "reference"), ("A", "candidate")])
+def test_a_drift_check_that_could_not_run_is_no_pass(arms):
+    # One round of 30 cards: no trend, no halves; also a blocked order.
+    lay, led = confirmatory_ledger(segment_trials=30)
+    use = (R.ArmInfo(arms[0], role=arms[1]), R.ArmInfo("B"))
+    a = R.analyse(led, confirmatory_info(arms=use), "operator_label", layout=lay)
+    cond = a["conclusion_level"]["conditions"]
+    assert cond["no_drift_warning"] is True  # nothing raised...
+    assert cond["drift_assessed"] is False  # ...because nothing could run
+    assert a["conclusion_level"]["level"] == "exploratory"
+
+
+def test_the_schedule_is_checked_against_the_ledger():
+    # Claimed counterbalanced, but every round ran A then B.
+    lay, led = confirmatory_ledger(order=[("A", "B")] * 6)
+    a = R.analyse(led, confirmatory_info(), "operator_label", layout=lay)
+    level = a["conclusion_level"]
+    assert level["observed_schedule"]["kind"] == "interleaved"
+    assert level["conditions"]["schedule_allows"] is False
+    assert "Order in the ledger: interleaved over 6 rounds" in R.summary(a, "en")
+    # One round of all cards per arm is a blocked order whatever is claimed.
+    lay, led = confirmatory_ledger(segment_trials=30)
+    a = R.analyse(led, confirmatory_info(), "operator_label", layout=lay)
+    assert a["conclusion_level"]["observed_schedule"]["kind"] == "blocked"
+    assert a["conclusion_level"]["conditions"]["schedule_allows"] is False
+
+
+def test_different_step_budgets_are_no_confirmatory_comparison():
+    lay = fx.layout(per_arm=30, segment_trials=5)
+    facts = clean_facts(lay, a_rate=0.2, b_rate=1.0)
+    for seg in lay.segments:
+        if seg.arm == "B":
+            edited(facts, seg.run_ids[0], lambda f: True, max_steps=400)
+    led = L.derive(lay, facts)
+    a = R.analyse(led, confirmatory_info(), "operator_label", layout=lay)
+    assert a["conclusion_level"]["conditions"]["same_step_budget"] is False
+    assert a["conclusion_level"]["level"] == "exploratory"
+
+
+def test_a_lower_arm_is_called_lower():
+    lay = fx.layout(per_arm=30, segment_trials=5)
+    led = L.derive(lay, clean_facts(lay, a_rate=1.0, b_rate=0.2))
+    a = R.analyse(led, confirmatory_info(), "operator_label", layout=lay)
     en, zh = R.summary(a, "en"), R.summary(a, "zh-CN")
-    assert "These data cannot tell A and B apart" in en
-    assert "about 0.370 or more" in en
-    assert "本次数据不足以区分 A 与 B" in zh
+    assert "of B is lower than that of A by 0.800" in en
+    assert "higher" not in en.split("## Comparisons")[1].split("##")[0]
+    assert "比 A 低 0.800" in zh
+
+
+def test_the_family_is_adjusted_by_holm():
+    lay = fx.layout(arms=("A", "B", "C"), per_arm=30, segment_trials=5)
+    led = L.derive(lay, fx.synthetic_facts(lay))
+    arms = (R.ArmInfo("A", role="reference"), R.ArmInfo("B"), R.ArmInfo("C"))
+    a = R.analyse(led, info(arms=arms), "operator_label", layout=lay)
+    raw = [c["p"] for c in a["comparisons"]]
+    order = sorted(range(3), key=lambda i: raw[i])
+    expected, running = [None] * 3, 0.0
+    for rank, i in enumerate(order):
+        running = max(running, min(1.0, (3 - rank) * raw[i]))
+        expected[i] = running
+    assert [c["p_holm"] for c in a["comparisons"]] == pytest.approx(expected)
+    assert any(c["p_holm"] > c["p"] for c in a["comparisons"])
+
+
+def test_a_confirmatory_sentence_needs_the_holm_rejection_and_the_primary_flag():
+    lay, led = confirmatory_ledger()
+    good = R.analyse(led, confirmatory_info(), "operator_label", layout=lay)
+    assert "[Confirmatory] Under" in R.summary(good, "en")
+    no_reject = json.loads(json.dumps(good))
+    no_reject["comparisons"][0]["holm_reject"] = False
+    text = R.summary(no_reject, "en")
+    assert "Under the pre-registered analysis" not in text
+    assert "[Exploratory] The data suggest" in text
+    not_primary = json.loads(json.dumps(good))
+    not_primary["comparisons"][0]["primary"] = False
+    assert "Under the pre-registered analysis" not in R.summary(not_primary, "en")
 
 
 def test_a_drift_warning_makes_every_conclusion_exploratory():
@@ -433,40 +585,150 @@ def test_a_drift_warning_makes_every_conclusion_exploratory():
     facts = clean_facts(lay, a_rate=0.2, b_rate=1.0)
     # The reference arm A collapses in the second half of the campaign.
     for seg in lay.segments:
-        if seg.arm == "A" and seg.round > 3:
-            facts[seg.run_ids[0]] = [
-                L.EpisodeFact(**{**f.__dict__, "labels": {"operator_label": "failure"}})
-                for f in facts[seg.run_ids[0]]
-            ]
-        if seg.arm == "A" and seg.round <= 3:
-            facts[seg.run_ids[0]] = [
-                L.EpisodeFact(**{**f.__dict__, "labels": {"operator_label": "success"}})
-                for f in facts[seg.run_ids[0]]
-            ]
+        if seg.arm == "A":
+            value = "failure" if seg.round > 3 else "success"
+            edited(
+                facts,
+                seg.run_ids[0],
+                lambda f: True,
+                labels={"operator_label": value},
+                operator_blind=None,
+            )
     led = L.derive(lay, facts)
-    arms = (R.ArmInfo("A", role="reference"), R.ArmInfo("B"))
-    a = R.analyse(led, confirmatory_info(arms=arms), "operator_label", layout=lay)
+    a = R.analyse(led, confirmatory_info(), "operator_label", layout=lay)
     assert a["drift"]["warning"]["warning"] is True
     assert a["conclusion_level"]["level"] == "exploratory"
     assert "Drift warning" in R.summary(a, "en")
 
 
-# ------------------------------------------------------------- blinding
+# ------------------------------------------------------ blind labels (CL14)
 
 
-def test_a_blinded_summary_holds_no_per_arm_value(campaign):
+def test_agreement_uses_the_label_written_before_the_reveal():
+    """The operator first says failure, sees the verdict (success) and
+    changes to success: the agreement counts a disagreement, the rate the
+    current label, and the declared full blinding is lowered."""
+    lay = fx.layout(per_arm=10, segment_trials=5)
+    facts = clean_facts(lay, a_rate=0.4, b_rate=0.4)
+    a_runs = [s.run_ids[0] for s in lay.segments if s.arm == "A"]
+    for run in a_runs:
+        edited(
+            facts,
+            run,
+            lambda f: f.number == 5,
+            labels={"operator_label": "success", "autonomous_verdict": "success"},
+            operator_blind="failure",
+            revised_after_reveal=True,
+        )
+    led = L.derive(lay, facts)
+    a = R.analyse(led, info(operator_blind="full"), "operator_label", layout=lay)
+    agree = a["agreement"]["A"]["all"]
+    assert agree["matrix"]["failure"]["success"] == 2  # blind failure, verdict success
+    assert agree["agreement"]["k"] == 8 and agree["agreement"]["n"] == 10
+    assert a["success"]["A"]["k"] == 6  # current labels: 2 + 2 per segment + 2 revised
+    sens = a["blind_sensitivity"]
+    assert sens["applies"] and sens["revised_after_reveal"] == {"A": 2, "B": 0}
+    assert sens["success"]["A"]["k"] == 4
+    assert a["header"]["operator_blind"] == "partial"
+    assert a["header"]["operator_blind_declared"] == "full"
+    en = R.summary(a, "en")
+    assert "lowered to partial" in en and "- A: 2 operator labels changed" in en
+    assert "With the first (blind) operator labels only" in en
+    # Nothing revised: nothing lowered, no sensitivity analysis.
+    plain = R.analyse(
+        L.derive(lay, clean_facts(lay, 0.4, 0.4)),
+        info(operator_blind="full"),
+        "operator_label",
+        layout=lay,
+    )
+    assert plain["header"]["operator_blind"] == "full"
+    assert plain["blind_sensitivity"]["applies"] is False
+
+
+def test_a_conclusion_that_needs_revised_labels_is_exploratory():
+    lay, _ = confirmatory_ledger()
+    facts = clean_facts(lay, a_rate=0.2, b_rate=1.0)
+    # B's successes were all failures before the reveal.
+    for seg in lay.segments:
+        if seg.arm == "B":
+            edited(
+                facts,
+                seg.run_ids[0],
+                lambda f: True,
+                operator_blind="failure",
+                revised_after_reveal=True,
+            )
+    led = L.derive(lay, facts)
+    a = R.analyse(led, confirmatory_info(), "operator_label", layout=lay)
+    assert a["blind_sensitivity"]["agrees"] is False
+    assert a["conclusion_level"]["conditions"]["blind_labels_agree"] is False
+    assert a["conclusion_level"]["level"] == "exploratory"
+
+
+# ------------------------------------------------------------- gating
+
+
+@pytest.mark.parametrize(
+    ("state", "blinded"),
+    [("ARM_RUNNING", False), ("PAUSED", False), ("REPORTED", True)],
+)
+def test_a_running_or_blinded_campaign_writes_progress_only(
+    campaign, tmp_path, state, blinded
+):
     lay, led = campaign
+    manifest = R.write_report(
+        tmp_path,
+        led,
+        info(),
+        "operator_label",
+        layout=lay,
+        campaign_state=state,
+        blinded=blinded,
+        now=0,
+    )
+    folder = tmp_path / "operator_label"
+    files = sorted(str(p.relative_to(folder)) for p in folder.rglob("*") if p.is_file())
+    assert files == [
+        "manifest.json",
+        "progress.json",
+        "summary.en.md",
+        "summary.zh-CN.md",
+    ]
+    assert manifest["progress_only"] is True and "conclusion_level" not in manifest
     a = R.analyse(led, info(), "operator_label", layout=lay)
-    for lang in R.LANGS:
-        text = R.summary(a, lang, blinded=True)
-        assert "Wilson" not in text
+    for path in folder.rglob("*"):
+        text = path.read_text()
+        for word in (
+            "Wilson",
+            "drift",
+            "Drift",
+            "漂移",
+            "Conclusion level",
+            "结论等级",
+            "onfirmatory",
+            "确证",
+            "Conditions not met",
+            "未满足",
+        ):
+            assert word not in text, (path.name, word)
         for arm in a["arms"]:
             s = a["success"][arm]
             assert R.fmt(s["rate"], "pct") not in text
             assert f"{s['k']}/{s['n']}" not in text
-        for c in a["comparisons"]:
-            assert R.fmt(c["newcombe"]["difference"], "diff") not in text
-        assert "%" not in text.replace("80%", "").replace("95%", "")
+    prog = json.loads((folder / "progress.json").read_text())
+    assert (
+        prog["counts"]["A"]["valid"] == 30 and prog["coverage"]["B"]["labelled"] == 30
+    )
+    assert (
+        "state ARM_RUNNING" in (folder / "summary.en.md").read_text()
+        or state != "ARM_RUNNING"
+    )
+
+
+def test_the_campaign_state_must_be_given(campaign, tmp_path):
+    lay, led = campaign
+    with pytest.raises(TypeError):
+        R.write_report(tmp_path, led, info(), "operator_label", layout=lay)
 
 
 # ------------------------------------------------------- other designs
@@ -494,9 +756,7 @@ def test_a_reset_policy_campaign_is_analysed_unpaired(tmp_path):
     )
     text = R.summary(a, "en")
     assert "initial conditions were not paired" in text
-    manifest = R.write_report(
-        tmp_path, led, info(), "operator_label", layout=lay, now=0
-    )
+    manifest = write_report(tmp_path, led, info(), "operator_label", layout=lay, now=0)
     assert "f2-differences" in manifest["figures"]
 
 
@@ -615,7 +875,7 @@ def test_free_text_in_the_data_cannot_run_as_a_formula(campaign, tmp_path):
         **{**f0.__dict__, "layout_fidelity": "deviated", "layout_reason": "=1+2"}
     )
     led = L.derive(lay, facts)
-    R.write_report(tmp_path, led, info(), "operator_label", layout=lay, now=0)
+    write_report(tmp_path, led, info(), "operator_label", layout=lay, now=0)
     text = (tmp_path / "operator_label/data/trials.csv").read_text()
     assert ",'=1+2," in text
 
@@ -625,12 +885,8 @@ def test_free_text_in_the_data_cannot_run_as_a_formula(campaign, tmp_path):
 
 def test_the_same_inputs_give_the_same_bytes(campaign, tmp_path):
     lay, led = campaign
-    a = R.write_report(
-        tmp_path / "one", led, info(), "operator_label", layout=lay, now=5
-    )
-    b = R.write_report(
-        tmp_path / "two", led, info(), "operator_label", layout=lay, now=5
-    )
+    a = write_report(tmp_path / "one", led, info(), "operator_label", layout=lay, now=5)
+    b = write_report(tmp_path / "two", led, info(), "operator_label", layout=lay, now=5)
     assert a["files"] == b["files"]
     assert a == b
 
@@ -654,7 +910,7 @@ def test_the_analysis_follows_the_seed(campaign):
 def test_a_failed_write_leaves_the_old_report_whole(campaign, tmp_path, monkeypatch):
     lay, led = campaign
     root = tmp_path / "report"
-    R.write_report(root, led, info(), "operator_label", layout=lay, now=0)
+    write_report(root, led, info(), "operator_label", layout=lay, now=0)
     before = {
         str(p.relative_to(root)): p.read_bytes()
         for p in (root / "operator_label").rglob("*")
@@ -666,7 +922,7 @@ def test_a_failed_write_leaves_the_old_report_whole(campaign, tmp_path, monkeypa
 
     monkeypatch.setattr(R, "_parquet", boom)
     with pytest.raises(OSError, match="disk full"):
-        R.write_report(root, led, info(), "operator_label", layout=lay, now=9)
+        write_report(root, led, info(), "operator_label", layout=lay, now=9)
     after = {
         str(p.relative_to(root)): p.read_bytes()
         for p in (root / "operator_label").rglob("*")
@@ -682,7 +938,7 @@ def test_leftovers_of_a_killed_writer_are_cleared(campaign, tmp_path):
     (root / ".operator_label.tmp-1-1/tables").mkdir(parents=True)
     (root / ".operator_label.old-1-1").mkdir()
     (root / ".posthoc_verdict.tmp-1-1").mkdir()
-    R.write_report(root, led, info(), "operator_label", layout=lay, now=0)
+    write_report(root, led, info(), "operator_label", layout=lay, now=0)
     names = sorted(p.name for p in root.iterdir())
     # Only this basis's leftovers are cleared; another basis keeps its own.
     assert names == [
@@ -735,7 +991,7 @@ def test_bad_campaign_information_is_refused(campaign):
 def test_a_crash_between_the_two_renames_gets_the_old_report_back(campaign, tmp_path):
     lay, led = campaign
     root = tmp_path / "report"
-    R.write_report(root, led, info(), "operator_label", layout=lay, now=0)
+    write_report(root, led, info(), "operator_label", layout=lay, now=0)
     summary = (root / "operator_label/summary.en.md").read_bytes()
     # The old report was moved aside and the process died before the new
     # one moved in.
@@ -750,9 +1006,7 @@ def test_an_arm_that_has_not_run_yet_still_gives_a_report(tmp_path):
     lay = fx.layout(per_arm=10, segment_trials=5)
     facts = {run: fs for run, fs in fx.synthetic_facts(lay).items() if "__A__" in run}
     led = L.derive(lay, facts)
-    manifest = R.write_report(
-        tmp_path, led, info(), "operator_label", layout=lay, now=0
-    )
+    manifest = write_report(tmp_path, led, info(), "operator_label", layout=lay, now=0)
     a = json.loads((tmp_path / "operator_label/data/analysis.json").read_text())
     assert a["success"]["B"]["available"] is False
     assert a["comparisons"][0]["n_pairs"] == 0
@@ -772,3 +1026,134 @@ def test_paths_inside_free_text_are_scrubbed():
     out = R.scrub({"note": text})["note"]
     assert "/home/someone" not in out and "~/x" not in out and "10.0.0.2" not in out
     assert "10/30" in out and "k/n" in out
+
+
+# ------------------------------------------------- privacy: every field
+
+
+MARKS = (
+    b"SECRET_MARK",
+    b"secret.example",
+    b"332522071841",
+    b"10.1.2.3",
+    b"Jane Operator",
+    b"aa:bb:cc:dd:ee:ff",
+)
+LEAK = "see /home/marvel/SECRET_MARK/x, mail x@secret.example, cam 332522071841, ip 10.1.2.3"
+
+
+@pytest.mark.parametrize("state", ["REPORTED", "ARM_RUNNING"])
+def test_no_free_text_field_leaks_into_any_output_file(tmp_path, state):
+    lay = fx.layout(per_arm=10, segment_trials=5)
+    facts = fx.synthetic_facts(lay)
+    for run in facts:
+        facts[run] = [
+            L.EpisodeFact(
+                **{
+                    **f.__dict__,
+                    "failure_mode": None if f.failure_mode is None else f"slip: {LEAK}",
+                    "layout_fidelity": "deviated",
+                    "layout_reason": LEAK,
+                }
+            )
+            for f in facts[run]
+        ]
+    led = L.derive(lay, facts)
+    leaky = info(
+        task=f"pick the cup ({LEAK})",
+        arms=(
+            R.ArmInfo(
+                "A",
+                role="reference",
+                checkpoint="/home/marvel/SECRET_MARK/pi05_fr3_all_step49999",
+                config=f"pi05_fr3_all_state {LEAK}",
+                manifest_sha256="/home/marvel/SECRET_MARK",
+                versions=LEAK,
+                not_verified=(LEAK, "camera 332522071841"),
+            ),
+            R.ArmInfo("B", config="cfg aa:bb:cc:dd:ee:ff"),
+        ),
+        campaign_sha256="SECRET_MARK",
+        settings_sha256="ab" * 32,
+        extra={
+            "host": "SECRET_MARK-pc",
+            "anything": "SECRET_MARK",
+            "mac": "aa:bb:cc:dd:ee:ff",
+        },
+    )
+    R.write_report(
+        tmp_path,
+        led,
+        leaky,
+        "operator_label",
+        layout=lay,
+        campaign_state=state,
+        now=0,
+        runs=[
+            {
+                "run_id": "r1",
+                "plan_sha256": "SECRET_MARK",
+                "state": f"COMPLETED {LEAK}",
+                "levi_commit": "SECRET_MARK",
+            }
+        ],
+        site={
+            "gpu": f"RTX 5090 {LEAK}",
+            "hostname": "SECRET_MARK-host",
+            "camera_serials": "332522071841",
+            "notes": "SECRET_MARK",
+            "operator_name": "Jane Operator",
+        },
+    )
+    seen = 0
+    for path in (tmp_path / "operator_label").rglob("*"):
+        if path.is_file():
+            seen += 1
+            data = path.read_bytes()
+            for mark in MARKS:
+                assert mark not in data, (path.name, mark)
+    assert seen >= (4 if state != "REPORTED" else 40)
+    manifest = json.loads((tmp_path / "operator_label/manifest.json").read_text())
+    assert (
+        manifest["campaign_sha256"] is None and manifest["settings_sha256"] == "ab" * 32
+    )
+    assert manifest["arms"][0]["manifest_sha256"] is None
+    assert manifest["arms"][0]["checkpoint"] == "pi05_fr3_all_step49999"
+    assert set(manifest["site"]) == {"gpu"} and manifest["extra"] == {}
+
+
+def test_an_error_while_swapping_puts_the_old_report_back(
+    campaign, tmp_path, monkeypatch
+):
+    lay, led = campaign
+    root = tmp_path / "report"
+    write_report(root, led, info(), "operator_label", layout=lay, now=0)
+    summary = (root / "operator_label/summary.en.md").read_bytes()
+    real = R.os.replace
+
+    def failing(src, dst):
+        if ".operator_label.tmp-" in str(src):
+            raise OSError("rename failed")
+        return real(src, dst)
+
+    monkeypatch.setattr(R.os, "replace", failing)
+    with pytest.raises(OSError, match="rename failed"):
+        write_report(root, led, info(), "operator_label", layout=lay, now=1)
+    monkeypatch.setattr(R.os, "replace", real)
+    assert (root / "operator_label/summary.en.md").read_bytes() == summary
+    assert not [p for p in root.iterdir() if p.is_dir() and p.name.startswith(".")]
+
+
+def test_wording_matches_whole_words_and_never_masks_arm_ids():
+    R.check_wording(
+        "The new gripper improves grip; approves nothing.", confirmatory=False
+    )
+    with pytest.raises(R.WordingError):
+        R.check_wording("This proves it.", confirmatory=False)
+    with pytest.raises(R.WordingError):
+        R.check_wording("本次结果证明 B 更好。", confirmatory=False)
+    # Arm ids are not masked: a one-letter arm cannot hide a phrase.
+    with pytest.raises(R.WordingError):
+        R.check_wording(
+            "b significantly outperforms a.", confirmatory=False, mask=["c1", "task"]
+        )
