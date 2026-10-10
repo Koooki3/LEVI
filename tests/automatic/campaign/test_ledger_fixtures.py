@@ -3,6 +3,8 @@ guided tests. Everything is made up and seeded; no real rollout is read."""
 
 import random
 
+from campaign_guard import aeri_home_fixture, guard_fixture  # noqa: F401
+
 from levi.automatic.campaign.ledger import CampaignLayout, EpisodeFact, SegmentPlan
 
 CAMPAIGN = "c20261010-synthetic"

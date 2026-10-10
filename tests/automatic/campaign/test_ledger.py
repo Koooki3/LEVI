@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import test_ledger_fixtures as fx
+from campaign_guard import aeri_home_fixture, guard_fixture  # noqa: F401
 
 from levi.automatic.campaign import ledger as L
 
