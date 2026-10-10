@@ -118,6 +118,7 @@ SUBJECTS = {
 # be counted (``discarded``) or that the person could not tell
 # (``unclear``); neither is ever truth. The other kinds keep two values.
 OPERATOR_VALUES = ("success", "failure", "discarded", "unclear")
+DECIDED = ("success", "failure")
 # How a forward episode ended, from its stop reason in the journal: its
 # budget ran out, the detector stopped it early, the operator stopped it, or
 # anything else (a fault, the policy, a crash, a missing reason).
@@ -327,6 +328,14 @@ class LabelStore:
             "at_wall_ns": time.time_ns(),
             "supersedes": len(earlier) if earlier else None,
         }
+        if kind == "operator_label" and subject == "task_outcome":
+            # Blind labelling (review CL14 B1): the first success/failure
+            # label of an episode reveals its automatic verdict (the card
+            # shows it from then on, to whoever looks); discarded and
+            # unclear reveal nothing. Decided under the lock, kept on file.
+            revealed = any(line.get("value") in DECIDED for line in earlier)
+            record["verdict_revealed_before"] = revealed
+            record["reveals_verdict"] = not revealed and value in DECIDED
         line = (json.dumps(record, sort_keys=True) + "\n").encode()
         descriptor = os.open(
             self.path(kind), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644
@@ -377,6 +386,30 @@ def ended_forward(events) -> dict:
             continue
         if role == "forward":
             out[event.episode_id] = event.episode_result
+    return out
+
+
+def operator_view(lines) -> dict:
+    """``{episode_id: {"current", "blind", "revised_after_reveal"}}`` from
+    the ``operator_label`` lines (file order) of subject ``task_outcome``.
+    ``blind`` is the episode's first success/failure label: the one written
+    before its automatic verdict was revealed (None without one);
+    ``revised_after_reveal``: a later label says something else."""
+    out: dict = {}
+    for line in lines:
+        if line.get("subject") != "task_outcome":
+            continue
+        found = out.setdefault(
+            line["episode_id"],
+            {"current": None, "blind": None, "revised_after_reveal": False},
+        )
+        value = line.get("value")
+        found["current"] = value
+        if found["blind"] is None:
+            if value in DECIDED:
+                found["blind"] = value
+        elif value != found["blind"]:
+            found["revised_after_reveal"] = True
     return out
 
 
@@ -632,15 +665,18 @@ def _guarded(k: int, n: int) -> dict:
     return found
 
 
-def _agree(records, operator: dict) -> dict:
-    matrix = {op: {a: 0 for a in AUTOMATIC_KINDS} for op in ("success", "failure")}
+def _agree(records, view: dict) -> dict:
+    matrix = {op: {a: 0 for a in AUTOMATIC_KINDS} for op in DECIDED}
     apart = {"unlabelled": 0, "discarded": 0, "unclear": 0}
+    revised = 0
     for r in records:
-        value = operator.get(r.episode_id)
-        if value in matrix:
-            matrix[value][automatic_of(r.goal_verification)] += 1
-        elif value in ("discarded", "unclear"):
-            apart[value] += 1
+        found = view.get(r.episode_id) or {}
+        if found.get("blind") in matrix:
+            # The blind label, whatever was written after the reveal.
+            matrix[found["blind"]][automatic_of(r.goal_verification)] += 1
+            revised += bool(found.get("revised_after_reveal"))
+        elif found.get("current") in ("discarded", "unclear"):
+            apart[found["current"]] += 1
         else:
             apart["unlabelled"] += 1
     s, f = matrix["success"], matrix["failure"]
@@ -655,36 +691,57 @@ def _agree(records, operator: dict) -> dict:
         "agree": agree,
         "agreement": _guarded(agree, judged),
         "small_sample": judged < AGREEMENT_MIN_N,
-        # The automatic verdict said success where the operator said failure;
-        # failure where the operator said success.
-        "false_success": _guarded(f["success"], f["success"] + f["failure"]),
-        "missed_success": _guarded(s["failure"], s["success"] + s["failure"]),
+        # Over decided pairs only (undecided apart). Not the same as
+        # levi.live.stats' false_success / missed_success, which count an
+        # undecided verdict in (missed_success as a miss): hence the names.
+        "agent_success_operator_failure": _guarded(
+            f["success"], f["success"] + f["failure"]
+        ),
+        "agent_failure_operator_success": _guarded(
+            s["failure"], s["success"] + s["failure"]
+        ),
         "undecided": s["undecided"] + f["undecided"],
         "none": s["none"] + f["none"],
+        # Blind-labelled episodes whose label changed after the reveal: the
+        # blind label is the one compared, the change is only counted here.
+        "revised_after_reveal": revised,
     }
 
 
-def agreement(records, operator: dict) -> dict:
+def agreement(records, lines) -> dict:
     """The automatic verdict (the final judgement of each forward episode,
-    in the journal) against the operator's current label (T-CL-14), in
-    total and by how the episode ended (``ENDED_BY``). Only episodes the
-    operator called success or failure are compared (``judged``: those the
-    run decided too); an undecided verdict and no verdict (``none``) are
-    counted apart, as are the operator's ``discarded`` and ``unclear`` and
-    the unlabelled episodes. Below ``AGREEMENT_MIN_N`` decided pairs a
-    stratum gets its Wilson interval and no point estimate. An episode the
-    detector or the operator ended early is shorter than one run to its
-    budget: only the ``budget`` stratum carries over to unattended runs."""
+    in the journal) against the operator's blind label (T-CL-14): the
+    first success/failure label of the episode, written before its verdict
+    was revealed (``operator_view``; ``lines``: the ``operator_label``
+    lines). In total and by how the episode ended (``ENDED_BY``). Episodes
+    without a blind label count apart by their current value (``discarded``,
+    ``unclear``, ``unlabelled``); an undecided verdict and no verdict
+    (``none``) count apart too. Below ``AGREEMENT_MIN_N`` decided pairs a
+    stratum gets its Wilson interval and no point estimate (a display
+    threshold, not a test of significance).
+
+    Strata: ``budget`` is the judge's agreement on whole episodes the
+    detector did not stop; ``early_stop`` is the detector and the judge
+    together, as an unattended AERI run uses them; ``operator_stop``
+    episodes were ended by a person and do not carry over to unattended
+    runs."""
+    view = operator_view(lines)
     forward = [r for r in records if r.role == "forward"]
     groups: dict = {name: [] for name in ENDED_BY}
     for r in forward:
         groups[ended_by(r.stop_reason)].append(r)
     return {
         "label_kind": "operator_label",
+        "compared": "blind_label",
         "min_n": AGREEMENT_MIN_N,
-        "note": "only the budget stratum carries over to unattended runs",
-        "total": _agree(forward, operator),
-        "by_ended_by": {name: _agree(groups[name], operator) for name in ENDED_BY},
+        "note": (
+            "budget: the judge on whole episodes; early_stop: detector and "
+            "judge together (unattended use); operator_stop does not carry "
+            "over to unattended runs; min_n is a display threshold, not a "
+            "significance test"
+        ),
+        "total": _agree(forward, view),
+        "by_ended_by": {name: _agree(groups[name], view) for name in ENDED_BY},
     }
 
 
@@ -1127,6 +1184,6 @@ def report(
         ),
         "scene_decisions_by_human": scene_by_human(decisions, mode["scene_check"]),
         "agreement": agreement(
-            records, labels.latest("operator_label") if labels else {}
+            records, labels.lines("operator_label") if labels else []
         ),
     }

@@ -945,10 +945,12 @@ DRAFT_NOTICE = "not confirmed by the user (HA-23) / 未经用户确认，HA-23"
 HIDDEN_UNTIL_LABELLED = "hidden_until_labelled"
 
 
-def _operator_block(run_dir: Path, committed: list) -> dict | None:
+def _operator_block(run_dir: Path, committed: list, blind: bool) -> dict | None:
     """The operator's label of the forward episode that ended last
-    (T-CL-14): its current value, how it ended, and the automatic verdict
-    only once the operator has labelled it (the operator judges first)."""
+    (T-CL-14): its current value, and the automatic verdict only once the
+    operator has given it a success/failure label (the operator judges
+    first; ``discarded``/``unclear`` reveal nothing). ``blind`` hides how it
+    ended until then too (an early stop means the detector fired)."""
     from . import metrics
 
     last = None
@@ -969,18 +971,25 @@ def _operator_block(run_dir: Path, committed: list) -> dict | None:
     except metrics.LabelRefused as exc:
         # Unreadable labels: shown as not labelled, so still blind.
         lines, problem = [], str(exc)[:300]
-    current = lines[-1].get("value") if lines else None
+    view = metrics.operator_view(lines).get(last.episode_id) or {}
+    current = view.get("current")
+    blind_label = view.get("blind")
     found = last.episode_result
     automatic = metrics.automatic_of(found.goal_verification)
-    shown = current is not None
-    decided = ("success", "failure")
+    # Revealed by the first success/failure label (its record says
+    # ``reveals_verdict``), never by discarded or unclear.
+    shown = blind_label is not None
+    decided = metrics.DECIDED
     return {
         "episode_id": last.episode_id,
         "current": current,  # None: not labelled yet
-        "labelled": shown,
+        "labelled": current is not None,
+        "blind_label": blind_label,
+        "revealed": shown,
+        "revised_after_reveal": bool(view.get("revised_after_reveal")),
         "labels": len(lines),
         "values": list(metrics.OPERATOR_VALUES),
-        "ended_by": metrics.ended_by(found.stop_reason),
+        "ended_by": metrics.ended_by(found.stop_reason) if shown or not blind else None,
         "automatic_verdict": {
             "verdict": automatic,
             "task_outcome": found.task_outcome,
@@ -989,15 +998,16 @@ def _operator_block(run_dir: Path, committed: list) -> dict | None:
         if shown
         else None,
         "automatic_verdict_hidden": None if shown else HIDDEN_UNTIL_LABELLED,
-        "agrees": current == automatic
-        if current in decided and automatic in decided
+        # The blind label against the verdict.
+        "agrees": blind_label == automatic
+        if blind_label in decided and automatic in decided
         else None,
         "labels_unreadable": problem,
     }
 
 
 def pending_card(
-    run_dir, *, now_wall_ns: int | None = None, blind: bool = False
+    run_dir, *, now_wall_ns: int | None = None, blind: bool = True
 ) -> dict:
     """What a person needs when the run waits for them (design X2 §1.2,
     "to-do card"), read only from the run's folder (journal, manifest,
@@ -1005,12 +1015,13 @@ def pending_card(
     person is waited for (the other fields still describe the last episode).
 
     ``operator_label`` asks for the operator's label of the forward episode
-    that ended last and never shows its automatic verdict before that label
-    exists (``automatic_verdict`` null, ``automatic_verdict_hidden``).
-    ``blind=True`` hides the verdict in ``last_episode`` too
-    (``task_outcome`` and ``goal_verification`` null, ``verdict_hidden``)
-    while that episode is unlabelled; the default keeps ``last_episode`` as
-    it was."""
+    that ended last and never shows its automatic verdict before a
+    success/failure label exists (``automatic_verdict`` null,
+    ``automatic_verdict_hidden``). Blind (the default) also hides, until
+    then, how the episode ended (``operator_label.ended_by``) and, in
+    ``last_episode``, ``task_outcome``, ``goal_verification`` and
+    ``stop_reason`` (``verdict_hidden``); ``blind=False`` keeps
+    ``last_episode`` as it was before T-CL-14."""
     from .journal import Journal
 
     run_dir = Path(run_dir)
@@ -1082,17 +1093,18 @@ def pending_card(
             "rollout_path": path,
             "last_frames": entry.get("last_frames"),
         }
-    operator = _operator_block(run_dir, committed)
+    operator = _operator_block(run_dir, committed, blind)
     if (
         blind
         and episode is not None
         and operator is not None
         and operator["episode_id"] == episode["episode_id"]
-        and not operator["labelled"]
+        and not operator["revealed"]
     ):
         episode.update(
             task_outcome=None,
             goal_verification=None,
+            stop_reason=None,
             verdict_hidden=HIDDEN_UNTIL_LABELLED,
         )
     card["last_episode"] = episode

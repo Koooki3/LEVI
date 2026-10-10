@@ -111,6 +111,10 @@ def test_label_confirms_at_a_terminal_and_writes_only_the_label(
     assert code == cli.EXIT_OK, out
     assert "none yet" in asked["asked"][0] or "none yet" in out
     assert "verified" not in out and "goal_verification" not in out
+    # Review CL14 H1 (M17): the question shows nothing the run decided,
+    # nor how the episode ended (an early stop means the detector fired).
+    for giveaway in ("verified", "goal_verif", "early_stop", "ended by", "budget"):
+        assert giveaway not in asked["asked"][0], asked["asked"][0]
     (line,) = M.LabelStore(run_dir).lines("operator_label")
     assert (line["value"], line["by"], line["episode_id"]) == (
         "success",
@@ -128,10 +132,11 @@ def test_label_confirms_at_a_terminal_and_writes_only_the_label(
     }
     assert journal.read_bytes() == before
     assert (run_dir / "manifest.json").read_bytes() == manifest
-    # The report reads it (unclear: apart, never compared).
+    # The report compares the blind label (success) and counts the change.
     code, out = call(capsys, "report", "--run-dir", str(run_dir), "--format", "json")
     total = json.loads(out)["agreement"]["total"]
-    assert code == 0 and total["unclear"] == 1 and total["judged"] == 0
+    assert code == 0 and total["judged"] == 1 and total["revised_after_reveal"] == 1
+    assert total["unclear"] == 0
 
 
 @pytest.mark.parametrize(
@@ -186,3 +191,12 @@ def test_a_terminal_closed_at_the_question_writes_nothing(
     assert code == cli.EXIT_REFUSED and asked["asked"]
     assert json.loads(out)["ok"] is False
     assert not (run_dir / "labels" / "operator_label.jsonl").exists()
+
+
+def test_a_run_dir_that_is_a_file_is_refused_not_raised(tmp_path, capsys, terminal):
+    """Review CL14 L5."""
+    path = tmp_path / "file"
+    path.write_text("x")
+    terminal(True, "success")
+    code, _ = label(capsys, path, "success")
+    assert code == cli.EXIT_REFUSED

@@ -140,6 +140,11 @@ def test_only_an_ended_forward_episode_takes_a_label(kept, reset_mode):
         # The reset policy's episode is not the policy under evaluation.
         with pytest.raises(M.LabelRefused, match="forward"):
             M.label_operator(kept.run_dir, ep(1, "reset"), "success", by="op-1")
+        # Review CL14 L7 (M3): a reset episode's result is no forward result.
+        events = Journal.read(kept.run_dir).events
+        ended = {e.episode_id for e in events if e.episode_result is not None}
+        assert ep(1, "reset") in ended
+        assert set(M.ended_forward(events)) == {ep(1), ep(2)}
     assert tree(kept.folder) == before
     record = M.label_operator(kept.run_dir, ep(1), "failure", by="op-1", note="x")
     assert record["kind"] == "operator_label" and record["value"] == "failure"
@@ -149,17 +154,20 @@ def test_only_an_ended_forward_episode_takes_a_label(kept, reset_mode):
     changed = {k for k in after if before.get(k) != after[k]}
     labels = ".aeri/runs/r-cli/labels"
     assert changed == {f"{labels}/operator_label.jsonl", f"{labels}/.lock"}
-    # A correction is appended; the report reads the latest.
+    # A correction is appended and becomes the current value (the truth);
+    # the agreement still compares the blind label (failure, the run said
+    # success) and counts the change after the reveal.
     M.label_operator(kept.run_dir, ep(1), "success", by="op-2")
+    assert M.LabelStore(kept.run_dir).truth() == {ep(1): "success"}
     found = M.report(
         Journal.read(kept.run_dir).events, labels=M.LabelStore(kept.run_dir)
     )
     total = found["agreement"]["total"]
-    assert total["judged"] == 1 and total["agree"] == 1
+    assert (total["judged"], total["agree"], total["revised_after_reveal"]) == (1, 0, 1)
     assert found["agreement"]["by_ended_by"]["early_stop"]["judged"] == 1
     # One episode: an interval, no point estimate.
     assert total["agreement"]["rate"] is None and total["small_sample"]
-    assert total["agreement"]["wilson95"] == [0.207, 1.0]
+    assert total["agreement"]["wilson95"] == [0.0, 0.793]
     assert "agreement" in found["comparable"]
 
 
@@ -284,8 +292,11 @@ def test_agreement_is_split_by_how_the_episode_ended(tmp_path):
     assert not budget["small_sample"]
     assert budget["agreement"]["rate"] == 0.8
     assert budget["agreement"]["wilson95"] == [0.49, 0.943]
-    assert budget["false_success"]["n"] == 1 and budget["false_success"]["of"] == 7
-    assert budget["missed_success"]["n"] == 1 and budget["missed_success"]["of"] == 3
+    wrong = budget["agent_success_operator_failure"]
+    assert (wrong["n"], wrong["of"]) == (1, 7)
+    missed = budget["agent_failure_operator_success"]
+    assert (missed["n"], missed["of"]) == (1, 3)
+    assert "false_success" not in budget and budget["revised_after_reveal"] == 0
     early = found["by_ended_by"]["early_stop"]
     assert (early["judged"], early["agree"], early["unclear"]) == (1, 1, 1)
     assert early["small_sample"] and early["agreement"]["rate"] is None
@@ -358,41 +369,112 @@ def leaves(value, key=None):
     return [value] if isinstance(value, str) else []
 
 
+# What would tell the operator what the run decided, or that its detector
+# fired (an early stop is never a failure: orchestrator._verification).
+GIVEAWAYS = {
+    "success",
+    "failure",
+    "verified",
+    "contradicted",
+    "undecided",
+    "goal_verified",
+    "early_stop",
+}
+
+
 def test_the_waiting_card_hides_the_verdict_until_the_operator_labels(waiting):
     run_dir = waiting / ".aeri" / "runs" / RUN
     before = tree(waiting)
     card = rec.pending_card(run_dir)
     assert tree(waiting) == before  # read only
     block = card["operator_label"]
-    assert block["episode_id"] == ep(1) and block["ended_by"] == "early_stop"
+    assert block["episode_id"] == ep(1)
     assert block["current"] is None and not block["labelled"] and block["labels"] == 0
-    assert block["automatic_verdict"] is None
+    assert block["automatic_verdict"] is None and block["ended_by"] is None
     assert block["automatic_verdict_hidden"] == "hidden_until_labelled"
     assert block["agrees"] is None and block["values"] == list(M.OPERATOR_VALUES)
-    # Blind: nothing in the card says what the run decided.
-    blind = rec.pending_card(run_dir, blind=True)
-    last = blind["last_episode"]
+    # Blind by default: nothing in the card says what the run decided, nor
+    # that its detector stopped the episode.
+    last = card["last_episode"]
     assert last["task_outcome"] is None and last["goal_verification"] is None
+    assert last["stop_reason"] is None
     assert last["verdict_hidden"] == "hidden_until_labelled"
-    verdicts = {"success", "failure", "verified", "contradicted", "undecided"}
-    assert not verdicts & set(leaves(blind)), leaves(blind)
-    assert json.dumps(blind)  # plain JSON
-    # The default keeps the card as it was (T-CL-04) apart from the new block.
-    assert card["last_episode"]["task_outcome"] == "success"
+    assert not GIVEAWAYS & set(leaves(card)), leaves(card)
+    assert json.dumps(card)  # plain JSON
+    # blind=False keeps last_episode as it was (T-CL-04); the block stays blind.
+    seen = rec.pending_card(run_dir, blind=False)
+    assert seen["last_episode"]["task_outcome"] == "success"
+    assert seen["last_episode"]["stop_reason"] == "goal_verified"
+    assert seen["operator_label"]["automatic_verdict"] is None
     M.label_operator(run_dir, ep(1), "failure", by="op-1")
-    after = rec.pending_card(run_dir, blind=True)["operator_label"]
+    after = rec.pending_card(run_dir)["operator_label"]
     assert after["current"] == "failure" and after["labelled"] and after["labels"] == 1
+    assert after["blind_label"] == "failure" and after["ended_by"] == "early_stop"
     assert after["automatic_verdict"] == {
         "verdict": "success",
         "task_outcome": "success",
         "goal_verification": "verified",
     }
     assert after["automatic_verdict_hidden"] is None and after["agrees"] is False
-    shown = rec.pending_card(run_dir, blind=True)["last_episode"]
+    shown = rec.pending_card(run_dir)["last_episode"]
     assert shown["task_outcome"] == "success" and "verdict_hidden" not in shown
+    assert shown["stop_reason"] == "goal_verified"
+    # A later label is a revision after the reveal: the blind one still counts.
     M.label_operator(run_dir, ep(1), "unclear", by="op-1")
     block = rec.pending_card(run_dir)["operator_label"]
-    assert block["current"] == "unclear" and block["agrees"] is None
+    assert block["current"] == "unclear" and block["blind_label"] == "failure"
+    assert block["agrees"] is False
+
+
+@pytest.mark.parametrize("first", ["unclear", "discarded"])
+def test_an_undecided_label_does_not_reveal_the_verdict(waiting, first):
+    """Review CL14 B1: labelling unclear (or discarded) to peek, then
+    success, must not count as a blind label."""
+    run_dir = waiting / ".aeri" / "runs" / RUN
+    record = M.label_operator(run_dir, ep(1), first, by="op-1")
+    assert record["verdict_revealed_before"] is False
+    assert record["reveals_verdict"] is False
+    card = rec.pending_card(run_dir)
+    assert card["operator_label"]["current"] == first
+    assert card["operator_label"]["automatic_verdict"] is None
+    assert not GIVEAWAYS & set(leaves(card)), leaves(card)
+    # The first decided label reveals the verdict; the reveal is on file.
+    record = M.label_operator(run_dir, ep(1), "failure", by="op-1")
+    assert record["verdict_revealed_before"] is False
+    assert record["reveals_verdict"] is True
+    assert rec.pending_card(run_dir)["operator_label"]["automatic_verdict"]
+    # Changed after seeing the verdict: kept, marked, and never the blind label.
+    record = M.label_operator(run_dir, ep(1), "success", by="op-2")
+    assert record["verdict_revealed_before"] is True
+    assert record["reveals_verdict"] is False
+    found = M.report(Journal.read(run_dir).events, labels=M.LabelStore(run_dir))
+    total = found["agreement"]["total"]
+    assert (total["judged"], total["agree"]) == (1, 0)  # blind failure vs success
+    assert total["revised_after_reveal"] == 1
+    assert total["matrix"]["failure"]["success"] == 1
+    # The current value (and the truth) is the latest label.
+    assert M.LabelStore(run_dir).truth() == {ep(1): "success"}
+
+
+def test_a_peek_then_a_decided_label_never_counts_as_blind(waiting):
+    run_dir = waiting / ".aeri" / "runs" / RUN
+    M.label_operator(run_dir, ep(1), "unclear", by="op-1")
+    M.label_operator(run_dir, ep(1), "success", by="op-1")
+    found = M.report(Journal.read(run_dir).events, labels=M.LabelStore(run_dir))
+    total = found["agreement"]["total"]
+    # unclear revealed nothing: success is the first decided, blind label.
+    assert (total["judged"], total["agree"], total["revised_after_reveal"]) == (1, 1, 0)
+
+
+def test_an_initial_state_label_is_not_an_outcome_label(waiting):
+    """Review CL14 L7 (M20): the card reads task_outcome labels only."""
+    run_dir = waiting / ".aeri" / "runs" / RUN
+    M.LabelStore(run_dir).add(
+        "operator_label", ep(1), "ready", subject="initial_state", by="op-1"
+    )
+    block = rec.pending_card(run_dir)["operator_label"]
+    assert block["labels"] == 0 and block["current"] is None
+    assert block["automatic_verdict"] is None
 
 
 def test_an_unreadable_label_file_keeps_the_card_blind(waiting):

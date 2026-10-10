@@ -783,6 +783,8 @@ def cmd_label(args) -> int:
         current = metrics.LabelStore(run_dir).latest("operator_label")
     except metrics.LabelRefused as exc:
         return _refuse(args, str(exc))
+    except OSError as exc:  # not a run folder (a file, no permission)
+        return _refuse(args, f"{run_dir}: {exc.strerror or exc}")
     if args.episode not in ended:
         return _refuse(
             args,
@@ -795,10 +797,11 @@ def cmd_label(args) -> int:
             "levi automatic label must be confirmed at a terminal; nothing was "
             "written / 必须在终端里确认，未写入任何内容",
         )
-    how = metrics.ended_by(ended[args.episode].stop_reason)
     now = current.get(args.episode)
+    # Nothing the run decided, nor how the episode ended (an early stop
+    # means the detector fired): the operator judges blind.
     question = (
-        f"Label {args.episode} (ended by: {how}) as {args.value}; "
+        f"Label {args.episode} as {args.value}; "
         f"current label: {now or 'none yet'} / 当前标签：{now or '未标'}. "
         f"Type {args.value} to confirm / 输入 {args.value} 确认: "
     )

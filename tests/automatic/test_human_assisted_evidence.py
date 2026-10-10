@@ -245,8 +245,9 @@ def test_the_card_says_what_a_person_needs(tmp_path):
     assert rig.orch.run() == "WAIT_HUMAN"
     wait = rig.orch.journal.events[-1]
     before = snapshot(tmp_path)
+    # blind=False: the verdict as it was before T-CL-14 made the card blind.
     card = rec.pending_card(
-        rig.run_dir, now_wall_ns=wait.emitted_wall_ns + 90_000_000_000
+        rig.run_dir, now_wall_ns=wait.emitted_wall_ns + 90_000_000_000, blind=False
     )
     assert snapshot(tmp_path) == before  # read only
     assert card["waiting"] and card["state"] == "WAIT_HUMAN"
