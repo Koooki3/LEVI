@@ -688,6 +688,14 @@ resources, a reset at its horizon, a full disk, a restart, a double
 resume) asserts for each row the final state, the recorded degradation and
 that no motion ran or was even tried without a token.
 
+**Live compatibility** (`test_aeri_live_compat.py`): the rollouts and
+session files of a fake AERI run are taken in by the real live service (its
+controller and worker in `once` mode, against the fake model server): the
+forward episodes are labelled, the reset folder excluded with
+`watch.exclude` is not (without the exclusion it becomes a dataset of its
+own, which is why it should be excluded). Nothing in `levi/live` or its
+tests is changed.
+
 **Not yet:** the real FR3 adapter, a real run command, the
 `/automatic` page; `atomic_skill_sequence` and `scripted_safe_reset`.
 
