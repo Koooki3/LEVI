@@ -12,7 +12,9 @@ import sys
 from pathlib import Path
 
 import pytest
+from test_aeri_cli import CONTRACT, job_text
 
+from levi.automatic import cli
 from levi.automatic import journal as J
 from levi.domain import aeri
 
@@ -280,7 +282,11 @@ def _child(*args):
 
 
 CHILD_MODES = {"reset_mode": "human_assisted", "scene_check": "provider"}
-CHILD_PLAN = "cd" * 32
+# The child's plan (journal_header_child.PLAN_BODY): its plan.json is on
+# disk from the step before the journal file on.
+CHILD_PLAN = J.plan_digest(
+    {"reset_mode": "human_assisted", "scene_check": "provider", "n": 1}
+)
 
 
 @pytest.mark.parametrize("point", ["after_lock", "empty_file", "torn_header"])
@@ -325,3 +331,150 @@ def test_killed_after_the_header_the_run_exists_and_recovers(tmp_path):
     after = J.Journal.read(run)
     assert after.corrupt is None
     assert {e.minor for e in after.events} == {aeri.MINORS["run_event"]}
+
+
+# --- step 3: the plan in the run folder ---------------------------------------------------
+
+PLAN_BODY = {
+    "schema_version": "levi.aeri.job.v1",
+    "run": {"episodes": 2, "folders": ("forward", "reset")},
+    "reset_mode": "single_reset_policy",
+    "scene_check": "provider",
+    "where": Path("/somewhere"),  # not JSON: written as text, like the digest
+}
+BODY_SHA = J.plan_digest(PLAN_BODY)
+
+
+def planned(directory, **kwargs):
+    return J.Journal.create(
+        directory,
+        run_id=RUN,
+        plan_sha256=BODY_SHA,
+        authority=who(),
+        plan=PLAN_BODY,
+        **MODES,
+        **kwargs,
+    )
+
+
+def test_the_plan_is_kept_next_to_the_journal(tmp_path):
+    planned(tmp_path).close()
+    kept = J.read_plan(tmp_path)
+    assert kept["plan_sha256"] == BODY_SHA
+    assert kept["plan"]["where"] == "/somewhere"
+    assert J.plan_digest(kept["plan"]) == BODY_SHA
+    assert J.Journal.read(tmp_path).events[0].header.plan_sha256 == BODY_SHA
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
+
+
+@pytest.mark.parametrize("strategy", ["single_reset_policy", "human_assisted"])
+def test_the_job_loader_and_the_journal_digest_a_plan_alike(tmp_path, strategy):
+    (tmp_path / "rollouts").mkdir()
+    (tmp_path / "initial-state.yaml").write_text(CONTRACT)
+    job = tmp_path / "automatic-eval.yaml"
+    job.write_text(job_text(tmp_path / "rollouts", strategy=strategy))
+    loaded = cli.load_job(job)
+    assert J.plan_digest(loaded["plan"]) == loaded["plan_sha256"]
+
+
+def test_no_plan_no_file(tmp_path):
+    new(tmp_path).close()
+    assert J.read_plan(tmp_path) is None
+    assert not (tmp_path / J.PLAN_FILE).exists()
+
+
+def test_a_plan_that_does_not_hash_to_the_plan_sha256_is_refused(tmp_path):
+    with pytest.raises(J.JournalRefused) as caught:
+        J.Journal.create(
+            tmp_path, run_id=RUN, plan_sha256=PLAN, authority=who(), plan=PLAN_BODY
+        )
+    assert caught.value.code == "E_PLAN"
+    assert not (tmp_path / J.PLAN_FILE).exists()
+    assert not (tmp_path / J.JOURNAL).exists()
+
+
+def test_a_plan_kept_by_a_create_cut_short_is_accepted_again(tmp_path):
+    J.keep_plan(tmp_path, PLAN_BODY, BODY_SHA)  # then the process died
+    planned(tmp_path).close()
+    assert J.read_plan(tmp_path)["plan_sha256"] == BODY_SHA
+
+
+def test_another_runs_plan_in_the_folder_refuses_the_create(tmp_path):
+    other = {**PLAN_BODY, "seed": 7}
+    J.keep_plan(tmp_path, other, J.plan_digest(other))
+    for call in (lambda: planned(tmp_path), lambda: new(tmp_path)):
+        with pytest.raises(J.JournalRefused) as caught:
+            call()
+        assert caught.value.code == "E_PLAN"
+    assert J.read_plan(tmp_path)["plan"]["seed"] == 7
+    assert J.Journal.read(tmp_path).events == []
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        b"not json",
+        b"[]",
+        b'{"plan_sha256": "ab", "plan": {}}',
+        b'{"plan_sha256": "' + BODY_SHA.encode() + b'", "plan": {"edited": 1}}',
+    ],
+)
+def test_a_damaged_plan_file_refuses_create_and_open(tmp_path, damage):
+    planned(tmp_path / "run").close()
+    (tmp_path / "run" / J.PLAN_FILE).write_bytes(damage)
+    with pytest.raises(J.JournalRefused) as caught:
+        J.read_plan(tmp_path / "run")
+    assert caught.value.code == "E_PLAN"
+    with pytest.raises(J.JournalRefused) as caught:
+        J.Journal.open(tmp_path / "run", plan_sha256=BODY_SHA)
+    assert caught.value.code == "E_PLAN"
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    (fresh / J.PLAN_FILE).write_bytes(damage)
+    with pytest.raises(J.JournalRefused) as caught:
+        planned(fresh)
+    assert caught.value.code == "E_PLAN"
+
+
+def test_reopening_with_the_plan_checks_it_and_keeps_it_for_an_old_run(tmp_path):
+    J.Journal.create(
+        tmp_path, run_id=RUN, plan_sha256=BODY_SHA, authority=who(), **MODES
+    ).close()
+    assert J.read_plan(tmp_path) is None  # a run started without its plan
+    with pytest.raises(J.JournalRefused) as caught:
+        J.Journal.open(tmp_path, plan_sha256=BODY_SHA, plan={**PLAN_BODY, "seed": 1})
+    assert caught.value.code == "E_PLAN"
+    assert J.read_plan(tmp_path) is None
+    J.Journal.open(tmp_path, plan_sha256=BODY_SHA, plan=PLAN_BODY).close()
+    assert J.read_plan(tmp_path)["plan_sha256"] == BODY_SHA
+    J.Journal.open(tmp_path, plan_sha256=BODY_SHA, plan=PLAN_BODY).close()
+
+
+def test_a_plan_file_of_another_plan_than_the_header_refuses_the_open(tmp_path):
+    planned(tmp_path).close()
+    other = {**PLAN_BODY, "seed": 7}
+    (tmp_path / J.PLAN_FILE).write_text(
+        json.dumps({"plan_sha256": J.plan_digest(other), "plan": other}, default=str)
+    )
+    with pytest.raises(J.JournalRefused) as caught:
+        J.Journal.open(tmp_path, plan_sha256=None)
+    assert caught.value.code == "E_PLAN"
+    # The refusal left no writer behind.
+    (tmp_path / J.PLAN_FILE).unlink()
+    J.Journal.open(tmp_path, plan_sha256=None).close()
+
+
+def test_killed_after_the_plan_before_the_header_the_run_starts_again(tmp_path):
+    run = tmp_path / "run"
+    assert _child(run, "after_plan").returncode == -signal.SIGKILL
+    kept = J.read_plan(run)
+    assert kept is not None and J.Journal.read(run).events == []
+    J.Journal.create(
+        run,
+        run_id="r-header-crash",
+        plan_sha256=kept["plan_sha256"],
+        authority=who(),
+        plan=kept["plan"],
+        **CHILD_MODES,
+    ).close()
+    assert J.Journal.read(run).events[0].header.plan_sha256 == kept["plan_sha256"]

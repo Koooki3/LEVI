@@ -16,6 +16,10 @@ Files in the run's directory (``<rollout_root>/.aeri/runs/<run_id>/``):
   to decide anything; losing it loses nothing.
 - ``torn/``: the bytes of a torn last line, kept for inspection before the
   file is cut back to its last whole line.
+- ``plan.json``: the normalised plan the run was started with and its
+  ``plan_sha256`` (the header's), when the caller gave it; written once
+  (temporary file, fsync, replace, fsync directory) before the header, and
+  checked whenever the journal is created or reopened.
 
 Transactions: ``prepared`` (synced before any side effect) -> the caller
 acts -> ``acknowledged`` (what the controller says happened: yes, no or
@@ -72,6 +76,7 @@ JOURNAL = "state_journal.jsonl"
 LOCK = "journal.lock"
 SNAPSHOT = "state.json"
 TORN = "torn"
+PLAN_FILE = "plan.json"
 INITIAL_STATE = "PREFLIGHT"
 ZEROS = "0" * 64
 SCHEMA = aeri.SCHEMAS["run_event"]
@@ -159,6 +164,71 @@ def write_durable(path: Path, data: bytes) -> None:
         os.fsync(handle.fileno())
     os.replace(temporary, path)
     fsync_dir(path.parent)
+
+
+# --- the plan in the run folder ------------------------------------------------------
+
+
+def plan_digest(plan) -> str:
+    """``plan_sha256`` of a normalised plan: the rule of the job loader
+    (``cli.load_job``); a value JSON cannot hold counts as its text."""
+    return hashlib.sha256(
+        json.dumps(plan, sort_keys=True, default=str).encode()
+    ).hexdigest()
+
+
+def read_plan(directory) -> dict | None:
+    """``{"plan_sha256", "plan"}`` from the run folder's ``plan.json``;
+    ``None`` when there is none. One that cannot be read, or whose plan does
+    not hash to its ``plan_sha256``, is refused (``E_PLAN``)."""
+    path = Path(directory) / PLAN_FILE
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise JournalRefused("E_PLAN", f"{path}: {exc}") from None
+    try:
+        kept = json.loads(data)
+    except (ValueError, RecursionError):
+        raise JournalRefused("E_PLAN", f"{path} is not JSON") from None
+    if (
+        not isinstance(kept, dict)
+        or not isinstance(kept.get("plan_sha256"), str)
+        or not isinstance(kept.get("plan"), dict)
+        or plan_digest(kept["plan"]) != kept["plan_sha256"]
+    ):
+        raise JournalRefused("E_PLAN", f"{path} does not hold a plan and its sha256")
+    return kept
+
+
+def keep_plan(directory, plan: dict, plan_sha256: str) -> bool:
+    """Write ``plan.json`` once (durably); an existing one must hold the
+    same plan sha256 (``E_PLAN`` otherwise, never overwritten). ``True``
+    when this call wrote it. Called under the journal's lock."""
+    if not isinstance(plan, dict) or plan_digest(plan) != plan_sha256:
+        raise JournalRefused("E_PLAN", "the plan does not hash to plan_sha256")
+    kept = read_plan(directory)
+    if kept is not None:
+        if kept["plan_sha256"] != plan_sha256:
+            raise JournalRefused(
+                "E_PLAN", f"{PLAN_FILE} holds another plan ({kept['plan_sha256']})"
+            )
+        return False
+    value = {"plan_sha256": plan_sha256, "plan": plan}
+    text = json.dumps(value, sort_keys=True, indent=1, default=str) + "\n"
+    write_durable(Path(directory) / PLAN_FILE, text.encode())
+    return True
+
+
+def _check_kept_plan(directory, plan_sha256: str) -> None:
+    """A ``plan.json`` already in the folder belongs to this plan."""
+    kept = read_plan(directory)
+    if kept is not None and kept["plan_sha256"] != plan_sha256:
+        raise JournalRefused(
+            "E_PLAN",
+            f"{PLAN_FILE} holds plan {kept['plan_sha256']}, the run {plan_sha256}",
+        )
 
 
 # --- replay: the rules every line must keep ------------------------------------------
@@ -521,11 +591,14 @@ class Journal:
         clock_domain: str | None = None,
         reset_mode: str | None = None,
         scene_check: str | None = None,
+        plan: dict | None = None,
     ) -> "Journal":
         """Start the journal of a new run (refused when one exists).
         ``reset_mode`` and ``scene_check`` (code names) go into the header
         only when given; a caller that gives neither writes the header an
-        older caller wrote, at this code's minor."""
+        older caller wrote, at this code's minor. ``plan``: the normalised
+        plan, kept as ``plan.json`` before the header (it must hash to
+        ``plan_sha256``); a ``plan.json`` already there must be this plan's."""
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         fsync_dir(directory.parent)
@@ -535,6 +608,10 @@ class Journal:
             result = scan(directory / JOURNAL)
             if result.events or result.corrupt:
                 raise JournalRefused("E_EXISTS", f"{directory} already has a journal")
+            if plan is not None:
+                keep_plan(directory, plan, plan_sha256)
+            else:
+                _check_kept_plan(directory, plan_sha256)
             path = directory / JOURNAL
             if path.exists():
                 cls._cut_torn(directory, result)  # a header torn by a crash
@@ -587,6 +664,7 @@ class Journal:
         reset_mode: str | None = None,
         scene_check: str | None = None,
         authority: dict | None = None,
+        plan: dict | None = None,
     ) -> "Journal":
         """Take over an existing journal as its writer: a torn last line is
         set aside, the plan hash must match (``None`` skips that check, for
@@ -596,7 +674,11 @@ class Journal:
         names differently refuses the open (``E_PLAN``; the header is never
         rewritten) and, with an ``authority``, leaves a
         ``run_header_mismatch`` note. A header without them (run_event
-        minor 0) or a caller that gives none is not checked."""
+        minor 0) or a caller that gives none is not checked.
+
+        A ``plan.json`` in the folder must be the header's plan (``E_PLAN``);
+        ``plan`` given (it must hash to the header's ``plan_sha256``) is kept
+        as ``plan.json`` when the run has none (a run started before it)."""
         directory = Path(directory)
         if not (directory / JOURNAL).is_file():
             raise JournalRefused("E_EMPTY", f"{directory} has no journal")
@@ -611,6 +693,7 @@ class Journal:
                     raise JournalRefused(
                         "E_PLAN", "the plan changed since the run started"
                     )
+                _check_kept_plan(directory, header.plan_sha256)
                 cls._cut_torn(directory, result)
             journal = cls(
                 directory, lock, result, clock, clock_domain or aeri.host_clock_domain()
@@ -623,6 +706,8 @@ class Journal:
                 journal._check_modes(
                     {"reset_mode": reset_mode, "scene_check": scene_check}, authority
                 )
+                if plan is not None:
+                    keep_plan(directory, plan, journal._events[0].header.plan_sha256)
             return journal
         except BaseException:
             journal.close()

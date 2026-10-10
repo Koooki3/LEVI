@@ -6,6 +6,7 @@ both modes and SIGKILL itself at ``<point>``:
 - ``after_lock``: the run folder exists and is locked, no journal file;
 - ``empty_file``: the journal file exists, nothing written;
 - ``torn_header``: half the header's bytes are on disk (synced);
+- ``after_plan``: ``plan.json`` is on disk, no header yet;
 - ``after_header``: the whole header is on disk.
 """
 
@@ -17,7 +18,7 @@ from levi.automatic import journal as J
 
 RUN = "r-header-crash"
 MODES = {"reset_mode": "human_assisted", "scene_check": "provider"}
-PLAN = "cd" * 32
+PLAN_BODY = {"reset_mode": "human_assisted", "scene_check": "provider", "n": 1}
 
 
 def die():
@@ -43,6 +44,8 @@ def main(directory, point):
             die()
 
         J.Journal._write = half
+    elif point == "after_plan":
+        J.Journal.append = lambda self, *a, **k: die()
     who = {
         "principal_kind": "orchestrator",
         "principal_id": "orch-test",
@@ -50,7 +53,14 @@ def main(directory, point):
         "process": J.process_identity(),
         "command_id": None,
     }
-    J.Journal.create(directory, run_id=RUN, plan_sha256=PLAN, authority=who, **MODES)
+    J.Journal.create(
+        directory,
+        run_id=RUN,
+        plan_sha256=J.plan_digest(PLAN_BODY),
+        authority=who,
+        plan=PLAN_BODY,
+        **MODES,
+    )
     if point == "after_header":
         die()
     return 1  # every point dies before this
