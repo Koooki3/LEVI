@@ -142,6 +142,7 @@ const axisProps = {
 
 const TICK_LINE_H = 14;
 const MAX_TICK_LINES = 3;
+const TICK_OFFSET = 8;
 
 /** The drawn width of one character at the 12px axis font: a CJK glyph is
  * about twice a Latin one. An estimate is enough to decide where to break. */
@@ -189,7 +190,9 @@ function wrappedCategoryAxis(names: string[], plotWidth: number) {
   const byName = new Map(names.map((name, i) => [name, wrapped[i]]));
   return {
     extra: (lines - 1) * TICK_LINE_H,
-    height: lines * TICK_LINE_H + 6,
+    // The first baseline sits TICK_OFFSET below the axis line; leave the last
+    // line its descent too.
+    height: TICK_OFFSET + lines * TICK_LINE_H + 2,
     tick: (props: { x?: number; y?: number; payload?: { value?: string } }) => {
       const value = String(props.payload?.value ?? "");
       return (
@@ -203,7 +206,7 @@ function wrappedCategoryAxis(names: string[], plotWidth: number) {
             <tspan
               key={i}
               x={props.x}
-              dy={i === 0 ? TICK_LINE_H - 2 : TICK_LINE_H}
+              dy={i === 0 ? TICK_LINE_H - 4 : TICK_LINE_H}
             >
               {row}
             </tspan>
@@ -234,32 +237,40 @@ export function meanAxisDomain(
   return [lo < 0 ? lo - pad : 0, hi > 0 ? hi + pad : 0];
 }
 
-/** Value label at the free end of a bar (below a negative one). */
-function meanBarLabel(props: {
+type LabelProps = {
   x?: number | string;
   y?: number | string;
   width?: number | string;
   height?: number | string;
   value?: number | string;
-}) {
-  const x = Number(props.x);
-  const y = Number(props.y);
-  const width = Number(props.width);
-  const height = Number(props.height);
-  const value = Number(props.value);
-  if (![x, y, width, height, value].every(Number.isFinite)) return null;
-  const top = Math.min(y, y + height);
-  const bottom = Math.max(y, y + height);
-  return (
-    <text
-      x={x + width / 2}
-      y={value < 0 ? bottom + LABEL_H - 2 : top - 4}
-      textAnchor="middle"
-      className="recap-bar-value"
-    >
-      {chartNumber(value)}
-    </text>
-  );
+};
+
+/** Decimals for the bar labels: two when a bar is too narrow for three (the
+ * table view and the summary keep the exact figures). */
+export const meanLabelDigits = (barPx: number) => (barPx < 44 ? 2 : 3);
+
+/** Value label at the free end of a bar (below a negative one). */
+function meanBarLabel(digits: number) {
+  return function MeanBarLabel(props: LabelProps) {
+    const x = Number(props.x);
+    const y = Number(props.y);
+    const width = Number(props.width);
+    const height = Number(props.height);
+    const value = Number(props.value);
+    if (![x, y, width, height, value].every(Number.isFinite)) return null;
+    const top = Math.min(y, y + height);
+    const bottom = Math.max(y, y + height);
+    return (
+      <text
+        x={x + width / 2}
+        y={value < 0 ? bottom + LABEL_H - 2 : top - 4}
+        textAnchor="middle"
+        className="recap-bar-value"
+      >
+        {chartNumber(value, digits)}
+      </text>
+    );
+  };
 }
 const pct = (value: number) => chartNumber(value, 1) + "%";
 const range = (lo: number, hi: number, digits = 3) =>
@@ -426,6 +437,10 @@ export const RecapComparisonCharts = React.memo(function RecapComparisonCharts({
             const names = means.map((bar) => t(outcomeKey(bar.outcome)));
             const axis = wrappedCategoryAxis(names, width - MEANS_Y_W - 8);
             const height = CHART_H + axis.extra;
+            // Recharts' default: the bars of a group share 80% of its band.
+            const barPx =
+              ((width - MEANS_Y_W - 8) / Math.max(means.length, 1)) * 0.4 - 2;
+            const labelOf = meanBarLabel(meanLabelDigits(barPx));
             return (
               <BarChart
                 width={width}
@@ -458,7 +473,7 @@ export const RecapComparisonCharts = React.memo(function RecapComparisonCharts({
                   fill="currentColor"
                   isAnimationActive={false}
                 >
-                  <LabelList dataKey="a" content={meanBarLabel} />
+                  <LabelList dataKey="a" content={labelOf} />
                 </Bar>
                 <Bar
                   dataKey="b"
@@ -466,7 +481,7 @@ export const RecapComparisonCharts = React.memo(function RecapComparisonCharts({
                   fill="currentColor"
                   isAnimationActive={false}
                 >
-                  <LabelList dataKey="b" content={meanBarLabel} />
+                  <LabelList dataKey="b" content={labelOf} />
                 </Bar>
               </BarChart>
             );

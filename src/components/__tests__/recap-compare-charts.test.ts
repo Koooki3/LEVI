@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   meanAxisDomain,
+  meanLabelDigits,
   wrapTickLines,
 } from "@/components/recap-compare-charts";
 
@@ -65,5 +66,12 @@ describe("meanAxisDomain", () => {
     expect(hi).toBeGreaterThan(0.2);
     expect(meanAxisDomain([0, 0], 120)).toEqual([-1, 0]);
     expect(meanAxisDomain([], 120)).toEqual([-1, 0]);
+  });
+});
+
+describe("meanLabelDigits", () => {
+  test("narrow bars get two decimals, wide ones three", () => {
+    expect(meanLabelDigits(30)).toBe(2);
+    expect(meanLabelDigits(60)).toBe(3);
   });
 });
