@@ -52,11 +52,12 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from levi.domain import aeri
 
-from . import cli, jobs_wizard, launch, metrics, policies
+from . import cli, control, jobs_wizard, launch, metrics, policies
 from .journal import Journal, JournalError, read_plan
 from .recorder import EVIDENCE, FRAMES, MANIFEST, pending_card
 
@@ -1045,3 +1046,281 @@ def run_frame(run_id: str, sha256: str):
             },
         )
     raise _fail(404, "not_found", "No such frame")
+
+
+# --- starting a run -------------------------------------------------------------------------
+
+
+class LaunchBody(_Strict):
+    job_id: str = Field(min_length=1, max_length=128)
+    plan_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    launch_token: str = Field(min_length=1, max_length=512)
+    confirm: str = Field(max_length=64)
+    request_id: str = Field(pattern=ID.pattern)
+
+
+def _principal_of(request_id: str) -> str:
+    """The operator id a launch is filed under in the run index: it carries
+    the request id, so the same request after a restart finds its run."""
+    name = f"ui.{request_id}"
+    if len(name) > 128:
+        name = f"ui.{hashlib.sha256(request_id.encode()).hexdigest()[:32]}"
+    return name
+
+
+def _request_of_plan(job_id: str, path: str, digest: str):
+    """The ``LaunchRequest`` (and its plan) that produced ``digest``: the
+    remembered one, else a plan in dry-run mode, else the job's own mode."""
+    candidates = []
+    recalled = _recall_plan(job_id, digest)
+    if recalled:
+        candidates.append(recalled)
+    candidates += [(launch.DRY_RUN, {}), (None, {})]
+    for mode, overrides in candidates:
+        request = _request_for(path, mode, overrides)
+        try:
+            found = launch.plan(request)
+        except launch.LaunchRefused:
+            continue
+        if found.plan_sha256 == digest:
+            return request, found
+    raise _fail(
+        412,
+        "plan_changed",
+        "The plan is not the one that was read (or the job changed): plan again",
+    )
+
+
+@router.post("/runs", status_code=202)
+def start_run(body: LaunchBody, request: Request):
+    """Launch the plan the person read. Only ``dry_run`` launches in this
+    version (other modes: 501 ``no_robot_adapter``). The launch core checks
+    the digest, the token (ten minutes, bound to the job file's bytes) and
+    every refusal of the plan again."""
+    _person(request)
+    if body.confirm != "launch":
+        raise _fail(422, "confirm_required", 'Send confirm: "launch"')
+    payload = body.model_dump()
+    again = _MEMO.get("runs", body.request_id, payload)
+    if again is not None:
+        return again
+    path = _job_path(body.job_id)
+    found_request, found = _request_of_plan(body.job_id, path, body.plan_sha256)
+    principal = _principal_of(body.request_id)
+    launching = launch.LaunchRequest(
+        **{
+            **found_request.record(),
+            "principal": {"kind": "operator", "id": principal},
+        }
+    )
+    with _operation("launch"):
+        try:
+            handle = launch.launch(
+                launching,
+                plan_sha256=body.plan_sha256,
+                launch_token=body.launch_token,
+                wait_s=LAUNCH_WAIT_S,
+                deadline_s=LAUNCH_DEADLINE_S,
+            )
+        except launch.LaunchRefused as exc:
+            if exc.code == "E_RUN_EXISTS" and found.run_id:
+                # The same request, already served: the same answer.
+                try:
+                    entry = launch.read_record(launch.index_path(found.run_id))
+                except (OSError, ValueError, launch.LaunchRefused):
+                    entry = {}
+                if (
+                    entry.get("principal_id") == principal
+                    and entry.get("plan_sha256") == body.plan_sha256
+                ):
+                    answer = {"run_id": found.run_id}
+                    _MEMO.put("runs", body.request_id, payload, answer)
+                    return answer
+            raise _refused(exc) from None
+    answer = {"run_id": handle.run_id}
+    _MEMO.put("runs", body.request_id, payload, answer)
+    _audit(
+        "api_launched",
+        run_id=handle.run_id,
+        plan_sha256=body.plan_sha256,
+        request_id=body.request_id,
+    )
+    return answer
+
+
+class _AttachBody(_Strict):
+    request_id: str = Field(pattern=ID.pattern)
+    confirm: str = Field(max_length=64)
+
+
+@router.post("/runs/{run_id}/attach", status_code=202)
+def attach_run(run_id: str, body: _AttachBody, request: Request):
+    """Bring back a run whose runner is gone (it comes back locked, for a
+    person to resume)."""
+    _person(request)
+    run = _locate(run_id)
+    if body.confirm != "attach":
+        raise _fail(422, "confirm_required", 'Send confirm: "attach"')
+    payload = body.model_dump()
+    again = _MEMO.get(f"attach:{run_id}", body.request_id, payload)
+    if again is not None:
+        return again
+    with _operation(f"run:{run_id}"):
+        try:
+            handle = launch.attach(
+                run.run_dir,
+                backend=LAUNCH_BACKEND,
+                wait_s=LAUNCH_WAIT_S,
+                deadline_s=LAUNCH_DEADLINE_S,
+            )
+        except launch.LaunchRefused as exc:
+            raise _refused(exc) from None
+    answer = {"run_id": handle.run_id}
+    _MEMO.put(f"attach:{run_id}", body.request_id, payload, answer)
+    _audit("api_attached", run_id=run_id, request_id=body.request_id)
+    return answer
+
+
+@router.post("/runs/{run_id}/arm", status_code=501)
+@router.post("/runs/{run_id}/disarm", status_code=501)
+def arm_run(run_id: str, request: Request):
+    _person(request)
+    raise _fail(501, "no_robot_adapter", NO_ADAPTER)
+
+
+# --- stop and resume ------------------------------------------------------------------------
+
+
+class StopBody(_Strict):
+    command_id: str = Field(pattern=ID.pattern)
+    confirm: str = Field(max_length=64)
+
+
+class ResumeBody(_Strict):
+    command_id: str = Field(pattern=ID.pattern)
+    expected_seq: int = Field(ge=0)
+    environment_handled: bool
+    health_rechecked: bool
+    challenge: str = Field(min_length=1, max_length=128)
+
+
+def _answer_of(result: dict | None, queued: str, command_id: str):
+    """The contract's ``{result, code?}`` from the runner's result file; a
+    command the runner has not answered yet is ``queued`` (202)."""
+    if result is None:
+        return JSONResponse(
+            {"result": "queued", "command_id": command_id, "queued": queued},
+            status_code=202,
+        )
+    if not result.get("ok"):
+        kind = "refused"
+    elif result.get("repeated"):
+        kind = "repeated"
+    else:
+        kind = "applied"
+    out = {
+        "result": kind,
+        "code": result.get("code"),
+        "command_id": command_id,
+        "state": result.get("state"),
+    }
+    return JSONResponse(out)
+
+
+def _send(run: _Run, value: dict, wait_s: float):
+    try:
+        queued = control.write_command(run.run_dir, value)
+    except control.CommandError as exc:
+        status = 409 if exc.code == "command_used" else 422
+        raise _fail(status, exc.code, scrub(exc.detail)[:300]) from None
+    except OSError as exc:
+        raise _fail(
+            503, "control_unavailable", scrub(exc.strerror or str(exc))
+        ) from None
+    _audit(
+        "api_command",
+        run_id=run.run_id,
+        command_id=value["command_id"],
+        kind=value["kind"],
+        queued=queued,
+    )
+    return queued, control.wait_result(run.run_dir, value["command_id"], wait_s)
+
+
+def _require_runner(run: _Run) -> None:
+    if not run.runner()["alive"] or run.state == "COMPLETED":
+        raise _fail(
+            409,
+            "not_running",
+            "No runner serves this run (it ended, or attach it first)",
+            state=run.state,
+        )
+
+
+@router.post("/runs/{run_id}/stop")
+def stop_run(run_id: str, body: StopBody, request: Request):
+    """Ask the runner to stop the run (an episode under way is brought to
+    an end first). The same ``command_id`` again is ``repeated``."""
+    _person(request)
+    run = _locate(run_id)
+    if body.confirm != "stop":
+        raise _fail(422, "confirm_required", 'Send confirm: "stop"')
+    payload = body.model_dump()
+    again = _MEMO.get(f"stop:{run_id}", body.command_id, payload)
+    if again is not None:
+        return again
+    _require_runner(run)
+    with _operation(f"run:{run_id}"):
+        value = control.command("stop", body.command_id, PRINCIPAL)
+        queued, result = _send(run, value, STOP_WAIT_S)
+    answer = _answer_of(result, queued, body.command_id)
+    if result is not None:
+        _MEMO.put(f"stop:{run_id}", body.command_id, payload, answer)
+    return answer
+
+
+@router.post("/runs/{run_id}/resume")
+def resume_run(run_id: str, body: ResumeBody, request: Request):
+    """Resume a run that waits for a person. Needs the two confirmations,
+    the sequence the person saw and the one-time ``challenge`` of that
+    snapshot."""
+    _person(request)
+    run = _locate(run_id)
+    payload = body.model_dump()
+    again = _MEMO.get(f"resume:{run_id}", body.command_id, payload)
+    if again is not None:
+        return again
+    _require_runner(run)
+    if run.state not in WAITING:
+        raise _fail(
+            409, "not_waiting", f"The run is {run.state}, not waiting for a person"
+        )
+    if not (body.environment_handled and body.health_rechecked):
+        raise _fail(
+            409,
+            "confirmations_missing",
+            "Confirm that the scene is handled and the robot's health was checked",
+        )
+    if body.expected_seq != run.seq or not _CHALLENGES.take(
+        run_id, body.challenge, run.seq
+    ):
+        raise _fail(
+            409,
+            "stale_sequence",
+            "The run moved on (or the challenge expired): read the run again",
+            seq=run.seq,
+        )
+    with _operation(f"run:{run_id}"):
+        value = control.command(
+            "resume",
+            body.command_id,
+            PRINCIPAL,
+            expected_seq=body.expected_seq,
+            environment_handled=True,
+            health_rechecked=True,
+        )
+        queued, result = _send(run, value, RESUME_WAIT_S)
+    answer = _answer_of(result, queued, body.command_id)
+    if result is not None:
+        _MEMO.put(f"resume:{run_id}", body.command_id, payload, answer)
+    return answer
