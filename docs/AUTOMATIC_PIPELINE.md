@@ -957,6 +957,7 @@ updated and both modes have tests.
 | `cli:run` | same | differs: a dry-run scene that is not ready ends the run in WAIT_HUMAN |
 | `cli:status` | same | same |
 | `cli:validate` | same | differs: a real run is refused without a scene provider that can answer; --dry-run validates |
+| `metrics:agreement` | same | same |
 | `metrics:automation` | differs: every intervention is unplanned | differs: a scene check sending the run to a person is planned |
 | `metrics:autonomous` | same | same |
 | `metrics:comparable` | same | same |

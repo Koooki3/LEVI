@@ -194,6 +194,8 @@ MODE_MATRIX: dict = {
     "metrics:time_per_valid_episode_ms": _both(SAME),
     "metrics:human_minutes_per_valid_episode": _both(SAME),
     "metrics:scene_decisions_by_human": _both(SAME),
+    # The operator's label against the automatic verdict (T-CL-14).
+    "metrics:agreement": _both(SAME),
     # levi automatic subcommands (cli.build_parser).
     "cli:doctor": _per(
         SAME,

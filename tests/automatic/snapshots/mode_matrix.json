@@ -64,6 +64,10 @@
    "human_assisted": "differs:a real run is refused without a scene provider that can answer; --dry-run validates",
    "single_reset_policy": "same"
   },
+  "metrics:agreement": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
   "metrics:automation": {
    "human_assisted": "differs:a scene check sending the run to a person is planned",
    "single_reset_policy": "differs:every intervention is unplanned"

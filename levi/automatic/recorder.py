@@ -942,11 +942,75 @@ def evidence_records(run_dir) -> list:
 DRAFT_NOTICE = "not confirmed by the user (HA-23) / 未经用户确认，HA-23"
 
 
-def pending_card(run_dir, *, now_wall_ns: int | None = None) -> dict:
+HIDDEN_UNTIL_LABELLED = "hidden_until_labelled"
+
+
+def _operator_block(run_dir: Path, committed: list) -> dict | None:
+    """The operator's label of the forward episode that ended last
+    (T-CL-14): its current value, how it ended, and the automatic verdict
+    only once the operator has labelled it (the operator judges first)."""
+    from . import metrics
+
+    last = None
+    for event in reversed(committed):
+        if event.episode_result is not None and metrics.ended_forward([event]):
+            last = event
+            break
+    if last is None:
+        return None
+    problem = None
+    try:
+        lines = [
+            line
+            for line in metrics.LabelStore(run_dir).lines("operator_label")
+            if line.get("episode_id") == last.episode_id
+            and line.get("subject") == "task_outcome"
+        ]
+    except metrics.LabelRefused as exc:
+        # Unreadable labels: shown as not labelled, so still blind.
+        lines, problem = [], str(exc)[:300]
+    current = lines[-1].get("value") if lines else None
+    found = last.episode_result
+    automatic = metrics.automatic_of(found.goal_verification)
+    shown = current is not None
+    decided = ("success", "failure")
+    return {
+        "episode_id": last.episode_id,
+        "current": current,  # None: not labelled yet
+        "labelled": shown,
+        "labels": len(lines),
+        "values": list(metrics.OPERATOR_VALUES),
+        "ended_by": metrics.ended_by(found.stop_reason),
+        "automatic_verdict": {
+            "verdict": automatic,
+            "task_outcome": found.task_outcome,
+            "goal_verification": found.goal_verification,
+        }
+        if shown
+        else None,
+        "automatic_verdict_hidden": None if shown else HIDDEN_UNTIL_LABELLED,
+        "agrees": current == automatic
+        if current in decided and automatic in decided
+        else None,
+        "labels_unreadable": problem,
+    }
+
+
+def pending_card(
+    run_dir, *, now_wall_ns: int | None = None, blind: bool = False
+) -> dict:
     """What a person needs when the run waits for them (design X2 §1.2,
     "to-do card"), read only from the run's folder (journal, manifest,
-    evidence); nothing is written. ``waiting`` is False when no person is
-    waited for (the other fields still describe the last episode)."""
+    evidence, labels); nothing is written. ``waiting`` is False when no
+    person is waited for (the other fields still describe the last episode).
+
+    ``operator_label`` asks for the operator's label of the forward episode
+    that ended last and never shows its automatic verdict before that label
+    exists (``automatic_verdict`` null, ``automatic_verdict_hidden``).
+    ``blind=True`` hides the verdict in ``last_episode`` too
+    (``task_outcome`` and ``goal_verification`` null, ``verdict_hidden``)
+    while that episode is unlabelled; the default keeps ``last_episode`` as
+    it was."""
     from .journal import Journal
 
     run_dir = Path(run_dir)
@@ -1018,7 +1082,21 @@ def pending_card(run_dir, *, now_wall_ns: int | None = None) -> dict:
             "rollout_path": path,
             "last_frames": entry.get("last_frames"),
         }
+    operator = _operator_block(run_dir, committed)
+    if (
+        blind
+        and episode is not None
+        and operator is not None
+        and operator["episode_id"] == episode["episode_id"]
+        and not operator["labelled"]
+    ):
+        episode.update(
+            task_outcome=None,
+            goal_verification=None,
+            verdict_hidden=HIDDEN_UNTIL_LABELLED,
+        )
     card["last_episode"] = episode
+    card["operator_label"] = operator
     described = _read_json(run_dir / EVIDENCE / INITIAL_STATE)
     contract = None
     if isinstance(described, dict) and described.get("id"):

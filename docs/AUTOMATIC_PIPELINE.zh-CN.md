@@ -347,6 +347,7 @@ AERI 改动合并前的独立审查要核对 `MODE_MATRIX` 已更新、两种模
 | `cli:run` | 相同 | 不同：试运行中场景不就绪时，运行停在 WAIT_HUMAN |
 | `cli:status` | 相同 | 相同 |
 | `cli:validate` | 相同 | 不同：没有能作答的场景提供方时拒绝真机运行；--dry-run 可通过校验 |
+| `metrics:agreement` | 相同 | 相同 |
 | `metrics:automation` | 不同：所有干预都是计划外 | 不同：场景核对把运行交给人，属于计划内干预 |
 | `metrics:autonomous` | 相同 | 相同 |
 | `metrics:comparable` | 相同 | 相同 |

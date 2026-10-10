@@ -110,6 +110,31 @@ SUBJECTS = {
     "task_outcome": ("success", "failure"),
     "initial_state": ("ready", "reset_required"),
 }
+# An operator's outcome label (T-CL-14) may also say the episode is not to
+# be counted (``discarded``) or that the person could not tell
+# (``unclear``); neither is ever truth. The other kinds keep two values.
+OPERATOR_VALUES = ("success", "failure", "discarded", "unclear")
+# How a forward episode ended, from its stop reason in the journal: its
+# budget ran out, the detector stopped it early, the operator stopped it, or
+# anything else (a fault, the policy, a crash, a missing reason).
+ENDED_BY = ("budget", "early_stop", "operator_stop", "unknown")
+_ENDED_OF_STOP = {
+    "horizon_exhausted": "budget",
+    "goal_verified": "early_stop",
+    "operator_stop": "operator_stop",
+}
+# The automatic verdict for the agreement, from the final judgement:
+# decided (success, failure), left undecided, or none (not judged).
+AUTOMATIC_KINDS = ("success", "failure", "undecided", "none")
+_AUTOMATIC_OF_VERIFICATION = {
+    "verified": "success",
+    "contradicted": "failure",
+    "undecided": "undecided",
+    "unavailable": "none",
+}
+# Below this many decided pairs a stratum gets its interval, no point
+# estimate (``rate`` null, ``small_sample`` true).
+AGREEMENT_MIN_N = 10
 TRUTH = ("adjudicated_then_operator", "adjudicated")
 LABEL_SCHEMA = "levi.aeri.label.v1"
 RESET_MODES = ("single_reset_policy", "human_assisted")  # = modes.RESET_MODES
@@ -142,6 +167,7 @@ COMPARABLE = (
     "human_minutes_per_valid_episode",
     "automation.unplanned",
     "automation.longest_run_without_unplanned",
+    "agreement",
 )
 MODE_SPECIFIC = (
     "reset",
@@ -164,6 +190,23 @@ class LabelRefused(ValueError):
 def share(k: int, n: int) -> dict:
     """``{"n", "of", "rate", "wilson95"}``; rate and interval None for n=0."""
     return {"n": k, "of": n, "rate": ratio(k, n), "wilson95": wilson(k, n)}
+
+
+def ended_by(stop_reason) -> str:
+    """``budget``, ``early_stop``, ``operator_stop`` or ``unknown``."""
+    return _ENDED_OF_STOP.get(stop_reason, "unknown")
+
+
+def automatic_of(goal_verification) -> str:
+    """``success``, ``failure``, ``undecided`` or ``none``."""
+    return _AUTOMATIC_OF_VERIFICATION.get(goal_verification, "none")
+
+
+def label_values(kind: str, subject: str) -> tuple:
+    """The values a label of this kind may give this subject."""
+    if kind == "operator_label" and subject == "task_outcome":
+        return OPERATOR_VALUES
+    return SUBJECTS.get(subject, ())
 
 
 # --- labels ---------------------------------------------------------------------------------------
@@ -241,13 +284,14 @@ class LabelStore:
             raise LabelRefused("the autonomous verdict comes from the run journal only")
         if kind not in STORED_KINDS:
             raise LabelRefused(f"unknown label kind {kind!r}")
-        if subject not in SUBJECTS or value not in SUBJECTS[subject]:
-            raise LabelRefused(f"{subject}={value!r} is not a label")
+        if subject not in SUBJECTS or value not in label_values(kind, subject):
+            raise LabelRefused(f"{subject}={value!r} is not a {kind}")
         try:
             aeri.episode_parts(episode_id)
-        except ValueError:
+        except (AttributeError, ValueError):
             raise LabelRefused(f"{episode_id!r} is not an episode id") from None
-        if not isinstance(by, str) or not PRINCIPAL.match(by):
+        # fullmatch: ``$`` alone would let a trailing newline through.
+        if not isinstance(by, str) or not PRINCIPAL.fullmatch(by):
             raise LabelRefused("by is an opaque principal id (no names, no addresses)")
         self.folder.mkdir(parents=True, exist_ok=True)
         # One writer at a time: the check for an earlier label and the
@@ -299,13 +343,70 @@ class LabelStore:
         return out
 
     def truth(self, subject: str = "task_outcome", rule: str = TRUTH[0]) -> dict:
+        """``{episode_id: value}``. An operator's current label that is
+        ``discarded`` or ``unclear`` is no truth: the episode has none
+        unless an adjudicated label gives it one."""
         if rule not in TRUTH:
             raise LabelRefused(f"truth is one of {', '.join(TRUTH)}")
+        allowed = SUBJECTS.get(subject, ())
         found = {}
+        kinds = ("adjudicated_ground_truth",)
         if rule == "adjudicated_then_operator":
-            found.update(self.latest("operator_label", subject))
-        found.update(self.latest("adjudicated_ground_truth", subject))
+            kinds = ("operator_label", *kinds)
+        for kind in kinds:
+            found.update(
+                {e: v for e, v in self.latest(kind, subject).items() if v in allowed}
+            )
         return found
+
+
+def ended_forward(events) -> dict:
+    """``{episode_id: EpisodeResult}`` of the forward episodes whose result
+    the journal committed: the episodes an operator may label."""
+    out = {}
+    for event in events:
+        if event.record != "committed" or event.episode_result is None:
+            continue
+        try:
+            role = aeri.episode_parts(event.episode_id)[1]
+        except (AttributeError, ValueError):
+            continue
+        if role == "forward":
+            out[event.episode_id] = event.episode_result
+    return out
+
+
+def label_operator(run_dir, episode_id: str, value: str, *, by: str, note="") -> dict:
+    """Append an operator's outcome label (``OPERATOR_VALUES``) for a
+    forward episode of this run that has ended (its result is in the
+    journal), whenever that is: while the run goes on, while it waits for a
+    person, after it ended. A later label for the same episode is a
+    correction: it is appended and becomes the current value, the earlier
+    ones stay on file. Reads the journal without its lock and never writes
+    it; only ``labels/operator_label.jsonl`` (and the labels' lock file)
+    is written."""
+    from .journal import Journal
+
+    if value not in OPERATOR_VALUES:
+        raise LabelRefused(
+            f"{value!r} is not an operator label ({', '.join(OPERATOR_VALUES)})"
+        )
+    try:
+        role = aeri.episode_parts(episode_id)[1]
+    except (AttributeError, ValueError):
+        raise LabelRefused(f"{episode_id!r} is not an episode id") from None
+    if role != "forward":
+        raise LabelRefused(
+            f"{episode_id} is a {role} episode: only forward episodes are labelled"
+        )
+    if episode_id not in ended_forward(Journal.read(Path(run_dir)).events):
+        raise LabelRefused(
+            f"{episode_id} has not ended in this run (no result in its journal): "
+            "only an ended forward episode takes a label"
+        )
+    return LabelStore(run_dir).add(
+        "operator_label", episode_id, value, by=by, note=note, supersede=True
+    )
 
 
 # --- what the journal says --------------------------------------------------------------------------
@@ -516,6 +617,70 @@ def early_termination(records, truth: dict, *, max_steps: int | None = None) -> 
         "unknown_verdicts": sum(
             r.task_outcome == "unknown" for r in forward if r.episode_id in truth
         ),
+    }
+
+
+def _guarded(k: int, n: int) -> dict:
+    """``share`` without its point estimate below ``AGREEMENT_MIN_N``."""
+    found = share(k, n)
+    if n < AGREEMENT_MIN_N:
+        found["rate"] = None
+    return found
+
+
+def _agree(records, operator: dict) -> dict:
+    matrix = {op: {a: 0 for a in AUTOMATIC_KINDS} for op in ("success", "failure")}
+    apart = {"unlabelled": 0, "discarded": 0, "unclear": 0}
+    for r in records:
+        value = operator.get(r.episode_id)
+        if value in matrix:
+            matrix[value][automatic_of(r.goal_verification)] += 1
+        elif value in ("discarded", "unclear"):
+            apart[value] += 1
+        else:
+            apart["unlabelled"] += 1
+    s, f = matrix["success"], matrix["failure"]
+    judged = s["success"] + s["failure"] + f["success"] + f["failure"]
+    agree = s["success"] + f["failure"]
+    return {
+        "episodes": len(records),
+        "operator_decided": sum(s.values()) + sum(f.values()),
+        **apart,
+        "matrix": matrix,
+        "judged": judged,
+        "agree": agree,
+        "agreement": _guarded(agree, judged),
+        "small_sample": judged < AGREEMENT_MIN_N,
+        # The automatic verdict said success where the operator said failure;
+        # failure where the operator said success.
+        "false_success": _guarded(f["success"], f["success"] + f["failure"]),
+        "missed_success": _guarded(s["failure"], s["success"] + s["failure"]),
+        "undecided": s["undecided"] + f["undecided"],
+        "none": s["none"] + f["none"],
+    }
+
+
+def agreement(records, operator: dict) -> dict:
+    """The automatic verdict (the final judgement of each forward episode,
+    in the journal) against the operator's current label (T-CL-14), in
+    total and by how the episode ended (``ENDED_BY``). Only episodes the
+    operator called success or failure are compared (``judged``: those the
+    run decided too); an undecided verdict and no verdict (``none``) are
+    counted apart, as are the operator's ``discarded`` and ``unclear`` and
+    the unlabelled episodes. Below ``AGREEMENT_MIN_N`` decided pairs a
+    stratum gets its Wilson interval and no point estimate. An episode the
+    detector or the operator ended early is shorter than one run to its
+    budget: only the ``budget`` stratum carries over to unattended runs."""
+    forward = [r for r in records if r.role == "forward"]
+    groups: dict = {name: [] for name in ENDED_BY}
+    for r in forward:
+        groups[ended_by(r.stop_reason)].append(r)
+    return {
+        "label_kind": "operator_label",
+        "min_n": AGREEMENT_MIN_N,
+        "note": "only the budget stratum carries over to unattended runs",
+        "total": _agree(forward, operator),
+        "by_ended_by": {name: _agree(groups[name], operator) for name in ENDED_BY},
     }
 
 
@@ -957,4 +1122,7 @@ def report(
             run_automation["person_ms"], records
         ),
         "scene_decisions_by_human": scene_by_human(decisions, mode["scene_check"]),
+        "agreement": agreement(
+            records, labels.latest("operator_label") if labels else {}
+        ),
     }
