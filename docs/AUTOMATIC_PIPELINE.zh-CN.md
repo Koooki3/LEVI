@@ -329,3 +329,18 @@ recording:
 
 **尚未实现：** 真实 FR3 适配层、真机运行命令、`/automatic` 页面；`atomic_skill_sequence` 和 `scripted_safe_reset`。
 
+
+## 测评 policy 发现（`levi/automatic/policies.py`）
+
+`discover(policy_root)` 列出策略根目录（本机是 `openpi/checkpoints`）下的检查点目录，供启动页回答“部署哪个策略”“有没有复位策略、用哪个”。它只读：只列目录、读几个小的元数据文件，不 import openpi、不加载权重、不重算哈希、不打开端口、不跟随符号链接。`discover_report` 还返回被跳过的条目、条目数是否被上限截断、根目录一级的问题；`select(entries, role)` 取某个角色的可部署条目。
+
+| 字段 | 来源 |
+| --- | --- |
+| `kind`、`deployable`、`is_jax` | 有 `params/` 和 `norm_stats.json` 是可部署的 JAX 目录；有 `actor/` 是 PyTorch 源目录（列出但不可部署）；其余为 `unknown`，原因 `layout_not_recognised`。 |
+| `config`、`config_source` | 先取 `VERSION.json` 的 `config`，再取 `README_DEPLOY.md` 里的 `--policy.config`，再取配方（`DEFAULT_RECIPE` 或 `recipe=` 参数），都没有则为 `none`。README 里训练机的配置名单独放在 `training_config_name`，从不用于部署。 |
+| `role`、`role_source` | `VERSION.json` 的 `policy_role` 或 `role` 明说 `forward`/`reset` 时取之；否则看配方；否则配置属于前向系列时按约定记 `forward`；否则 `unknown`。**`reset` 角色从不猜。** |
+| `variant`、`version`、`model`、`step`、`version_note`、`siblings`、`verified`、`not_verified` | `VERSION.json` 原文（`parallel_to` 对应 `version_note`）。 |
+| `sha256_state`、`sha256_records` | 磁盘上已有的哈希：目录内或根目录的 `*.sha256` 清单（按各行路径的目录前缀归属）和 `CONVERSION.json` 里的哈希。`covers` 写明记录覆盖什么（`files`，或 `source_weights+norm_stats`，后者不是转换后的参数）。状态只有 `recorded`、`missing`；`VERSION.json` 里“已核对”的说法不算哈希。 |
+| `converted`、`size_bytes` | `CONVERSION.json` 存在且可读；按 `lstat` 累加的体积，最多数 `MAX_FILES_PER_ENTRY` 个文件（超过记 `size_truncated`）。 |
+
+`VERSION.json` 或 `CONVERSION.json` 有问题（不是 JSON、太大、不是对象、符号链接、管道）时记入 `problems`，目录照常列出。大小写和 Unicode 折叠后同名、或 `(model, version, variant, step)` 相同的目录，两边都会被标记。根目录里的隐藏项、普通文件和符号链接列在 `skipped` 中，不读取。没有任何条目的角色是 `reset` 时，`select(entries, "reset")` 为空，调用方只给“人工复位”。按约定归类的角色和配方里的配置名是对本机的推断，不是检查点自己的声明，页面应显示 `role_source`。测试见 `tests/automatic/test_policies.py`。
