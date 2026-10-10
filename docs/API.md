@@ -154,6 +154,10 @@ Fenced blocks with a JSON body become components: `levi-progress` (`{"source": "
 
 自动测评流水线的 HTTP 接口在 `/api/levi/automatic/…`（能力、策略检查点、作业、计划、运行及其快照、事件、指标、停止、恢复、标签、场景答复、证据与画面、启动引导）。写路由是人的操作（需要界面令牌，agent 的 Bearer 凭据会被拒绝），带 `request_id`/`command_id` 保证幂等和需要键入的 `confirm`；本版本只能启动 `dry_run`。路由表、错误码和盲标规则见 [AUTOMATIC_PIPELINE.zh-CN.md](AUTOMATIC_PIPELINE.zh-CN.md#http-接口leviautomaticapipy)。
 
+Multi-model evaluation campaigns have their own routes under `/api/levi/automatic/campaigns` (plan, start, snapshot, confirm, pause/resume/unblind, attach, card answers, report and report files). A campaign is carried out by a controller process of its own (`systemd-run --user`), blind to success rates until it ends or a person unblinds it (a counted peek), and in a guided campaign the backend never starts a policy server or connects to a policy or robot port. See [AUTOMATIC_CAMPAIGN.md](AUTOMATIC_CAMPAIGN.md#campaign-http-interface-and-controller).
+
+多模型评测计划另有 `/api/levi/automatic/campaigns` 路由（计划、启动、快照、确认、暂停/恢复/揭盲、接管、卡号回答、报告及报告文件）。每个计划由独立的控制器进程执行（`systemd-run --user`），结束或被人揭盲（算一次偷看）之前看不到成功率；引导式评测里后端从不启动策略服务，也不连接策略或机器人端口。详见 [AUTOMATIC_CAMPAIGN.zh-CN.md](AUTOMATIC_CAMPAIGN.zh-CN.md#评测计划的-http-接口与控制器)。
+
 ## Service entry points / 服务入口
 
 The browser workbench is served on `http://127.0.0.1:7860`. Backend port `7861` serves the API: `/` returns a bilingual entry guide, `/favicon.ico` returns the LEVI icon, and `GET /api/levi/health` returns `{"service":"levi-api","status":"ok"}` for startup checks. The launcher supplies the guide with the selected frontend address/port. These entry routes do not expose datasets or credentials.

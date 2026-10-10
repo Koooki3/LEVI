@@ -2,13 +2,13 @@
 
 [中文](AUTOMATIC_CAMPAIGN.zh-CN.md)
 
-**Status: library only.** This page will describe how the automatic
-evaluation pipeline (AERI) compares several policies (arms) on one task.
-Two parts exist so far, and no command, page or API calls them yet: the
-statistical methods (`levi/automatic/analysis/`, pure functions) and the
-figure writers that draw their results for the web page and for a paper
-(see [Figures](#figures)). The campaign plan, schedule, report and page are
-later work and get their own sections here.
+**Status.** This page describes how the automatic evaluation pipeline
+(AERI) compares several policies (arms) on one task: the statistical
+methods (`levi/automatic/analysis/`, pure functions), the figure writers,
+the plan and schedule, the state machine, the trial ledger, the report and
+the guided legacy-client campaign, and, last, the
+[HTTP interface and controller](#campaign-http-interface-and-controller)
+that carry out a campaign from the evaluation page.
 
 ## Statistical methods
 
@@ -831,3 +831,109 @@ the operator's over all valid episodes and apart for those that ran the
 full step budget (`budget`) and those the operator's key ended
 (`operator_stop`). Only the full-budget agreement carries over to
 unattended runs; the report keeps the strata apart as well.
+
+## Campaign HTTP interface and controller
+
+`levi/automatic/campaign/api.py` (routes), `controller.py` (the controller
+process and the planning) and `adapters.py` (the world a controller
+touches). Routes are under `/api/levi/automatic/campaigns`; they follow the
+rules of the run routes (see [the automatic pipeline's HTTP interface](AUTOMATIC_PIPELINE.md#http-interface-leviautomaticapipy)):
+a write is a person's action (the UI token; an agent's Bearer credential
+gets 403 `person_only`), carries a `command_id` or `request_id` (the same
+request again returns the first answer; another body under a used id is
+409), needs a typed `confirm` where it changes the campaign, and one
+operation at a time per campaign (423 `busy` otherwise). Ids are matched
+against strict patterns before they touch a path.
+
+| Route | Who | What |
+| --- | --- | --- |
+| `POST /campaigns/plan` | read | A job, the arms (checkpoint ids from the policy discovery, `candidate` or `reference`), `trials_per_arm`, the schedule, the primary comparison and `preregistered` become a plan: `campaign_sha256` (also as `plan_sha256`), `settings_sha256`, `segments` (`no`, `arms`, `cards`), `switches`, `power` (the design's detectable difference and the power table; never a post-hoc power), `refusals` and `checks`. Writes nothing that stays. |
+| `POST /campaigns` | person | The same body plus `plan_sha256`, `confirm: "start-campaign"` and `request_id`. 202 `{campaign_id}`; 412 `plan_changed`; 422 `plan_refused` (what forbids the start); 409 `campaign_exists`, `robot_busy`. |
+| `GET /campaigns`, `GET /campaigns/{id}` | read | The snapshot (below). |
+| `POST /campaigns/{id}/confirm` | person | `{command_id, kind, challenge}`, `kind`: `switch_policy`, `env` or `segment_done`; `env` also answers a campaign that waits after a fault (`options`: `relaunch`, `accept_short_segment`, `override_stop_rule`). The `challenge` of the to-do is one time, lives 60 s and is bound to the step the campaign is at. |
+| `POST /campaigns/{id}/pause`, `resume`, `unblind` | person | `{command_id, confirm}` with `confirm` the route's own word. A pause takes effect at the next segment boundary. |
+| `POST /campaigns/{id}/attach` | person | Start a controller for a campaign whose controller is gone. |
+| `GET`, `POST /campaigns/{id}/cards` | read, person | Guided campaigns: the episodes whose layout card nobody confirmed yet, and a person's answer. |
+| `GET /campaigns/{id}/report?basis=` | read | `{basis, files, analysis, manifest}`; `files[].name` is relative to `report/<basis>/`. 409 `blinded`, 409 `not_ready`, 404 `no_report`. |
+| `GET /campaigns/{id}/report/files/{name}?basis=` | read | One file of `report/<basis>/` (tables, figures as SVG, PDF or JSON specs, data); the name is matched component by component and opened with `O_NOFOLLOW`. |
+| `POST /campaigns/{id}/report` | person | `{command_id, basis?}`: derive the ledger again and write the report again (after card answers, for another basis). |
+
+**The plan request.** The campaign is named after the request
+(`c-<10 hex digits>`), so the same request is the same campaign with the
+same `campaign_sha256`; change the seed to run it again. Every arm's
+config comes from its checkpoint's `VERSION.json` (an arm whose config is
+not stated is refused) and the pairing table is built from that. A
+human-assisted job gets abstract layout cards `c001...` (one per trial);
+a reset-policy job gets none. `execution_mode` is optional and not in the
+interface contract's table: `guided` (default) or `dry_run`.
+
+**Two hosts.**
+
+- `dry_run`: the whole chain on fakes. `DryRunPolicyHost` records what it
+  was asked and starts nothing; `DryRunLauncher` starts one real dry run
+  per segment (`launch.launch`, a fake robot, scenes scripted `ready`; the
+  children's plans are made with the same dry-run request, so the digest
+  frozen in the campaign plan is the one the launch checks); the ledger is
+  derived from the dry runs' journals; the report is written at
+  `ANALYZING`. A job without a contract gets a draft one
+  (`$LEVI_AERI_HOME/campaign-jobs/dry-run-initial-state.yaml`). A
+  human-assisted dry run waits for a person to reset the scene after each
+  episode: open the child run (`child_run_id` of the snapshot) to resume it.
+- `guided`: the user's own legacy client does the robot work. The backend
+  **never starts a policy server and never connects to a policy or robot
+  port**. Per segment the to-do list is: `switch_policy` (only when the arm
+  changes: start the policy of that checkpoint yourself, then confirm; the
+  policy counts as ready only after your confirmation), `place_cards` (set
+  the scene; the legacy client's command is shown for copying), `segment_done`
+  (run the command; the campaign watches the rollout folders read only and
+  seals the segment when the client wrote the segment's trials, or when you
+  say it is done; fewer trials than planned wait for your decision,
+  `accept_short_segment`). The command is the operator guide's (§6.3,
+  `LEVI_SETUP_DOC`) with only `--eval-num`, `--rollout-group` and
+  `--eval-note "<campaign id> s<NN> <arm code>"` replaced and
+  `--levi-mode dual`; it is frozen when the campaign starts. Rollouts are
+  read below `LEVI_AERI_ROLLOUT_ROOT` (or the job's
+  `recording.rollout_root`) in each arm's group folder. An episode counts for
+  the paired analysis only after a person confirmed its layout card
+  (`/cards`).
+
+**The controller.** One process per campaign, started by the API with
+`systemd-run --user --unit=levi-aeri-campaign-<id> --collect -p
+KillMode=control-group -p TimeoutStopSec=120 <python> -m
+levi.automatic.campaign.controller --campaign-id <id>` (never in the
+product's cgroup, no `Restart`, so restarting the product does not stop a
+campaign). It is the only writer of the campaign journal: it drives
+`Conductor.advance`, answers nothing by itself, takes the requests the
+routes left as files under `campaigns/<id>/ctl/` (0700 like the campaign
+folder; `question.json`, `answers/`, `pause/`, `unblind/`, `segment-done/`,
+`serving.json`, `controller.json`) and journals a peek as a `unblind_peek`
+note. One campaign per robot: the controller holds
+`campaign-<robot>.lock` (`flock`) while it lives. After a crash the
+snapshot says `controller.alive: false`; `attach` starts a controller that
+recovers to a place where a person confirms (`FAULT_LOCKED` when a side
+effect was open; nothing is launched again by itself).
+
+**The snapshot.** `{id, state, execution_mode, arms: [{id, code, done,
+remaining, deviated, discarded, unconfirmed}], segment: {no, total,
+arm_code}, todo, safety: {faults, fused}, blinded, controller: {alive},
+wait_reason, peeks, updated_at}` (and `child_run_id` of a dry run). `todo` is
+`null` or `{kind, challenge, segment, arm_code, ...}` with `kind` one of
+`switch_policy`, `place_cards`, `segment_done`, `recover_run`.
+
+**Blinding.** While `blinded` is true, the snapshot, the list and every
+file the campaign writes before the report hold counts of episodes done,
+left, deviated and discarded and nothing else: no success rate, no verdict
+and no label count. Arms are shown by their codes (`X1`, `X2`...), not
+their letters. A campaign stops being blind at `ANALYZING` or when a person
+unblinds it: the latter is a **peek** (journaled; the report counts it and
+its conclusions are exploratory). The report is served only when not blind.
+
+**Settings.** `LEVI_AERI_ROLLOUT_ROOT`: an absolute folder, the legacy
+client's rollout root for guided campaigns (a job's own
+`recording.rollout_root` wins); `LEVI_SETUP_DOC` (the operator guide, as for
+the setup recipes); `LEVI_AERI_HOME`, `LEVI_AERI_JOB_ROOTS` and
+`LEVI_AERI_POLICY_ROOT` as for the runs. Tests:
+`tests/automatic/campaign/test_api_campaign_*.py` and
+`test_controller_campaign.py` (a fake unit start, a temporary
+`LEVI_AERI_HOME`, the campaign guard that fails a test on any attempt to
+reach a robot or policy port).

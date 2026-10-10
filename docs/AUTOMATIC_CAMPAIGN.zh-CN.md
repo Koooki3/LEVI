@@ -2,7 +2,7 @@
 
 [English](AUTOMATIC_CAMPAIGN.md)
 
-**状态：只有库。** 本页将说明自动测评流水线（AERI）怎样在同一个任务上比较多个策略（组）。目前有两部分，都还没有任何命令、页面或 API 调用：统计方法（`levi/automatic/analysis/`，一组纯函数），以及把统计结果画给网页和论文的图表写出器（见[图表](#图表)）。评测计划、时间表、报告和页面是后续工作，届时在本页另写章节。
+**状态。** 本页说明自动测评流水线（AERI）怎样在同一个任务上比较多个策略（组）：统计方法（`levi/automatic/analysis/`，一组纯函数）、图表写出器、计划与时间表、状态机、试验台账、报告、引导式旧客户端评测，以及最后一节的[评测计划的 HTTP 接口与控制器](#评测计划的-http-接口与控制器)，评测页面靠它执行评测计划。
 
 ## 统计方法
 
@@ -346,3 +346,35 @@ campaign 的文件在 `$LEVI_AERI_HOME/campaigns/<id>/`（`LEVI_AERI_HOME` 默�
 **卡号要人确认。** 按顺序把片段对到卡上容易出错，所以片段只有在人确认后才占卡：`CardConfirmations(path).add(episode_key, card, by=<不透明 ID>)` 追加一行（`levi.aeri.campaign_card.v1`，加锁、同步落盘）；同一片段以最后一行为准，`card=None` 撤回确认，之前的行保留在文件里。未确认的片段从不进入成对分析。
 
 **一致率。** `segment_agreement(facts)` 在全部有效片段上比较自动标签和操作员标签，并把跑满步数（`budget`）和操作员按键提前结束（`operator_stop`）的片段分开统计。只有完整步数组的一致率可以外推到无人值守运行；报告里也分层给出。
+
+## 评测计划的 HTTP 接口与控制器
+
+`levi/automatic/campaign/api.py`（路由）、`controller.py`（控制器进程和计划生成）、`adapters.py`（控制器接触的外部世界）。路由在 `/api/levi/automatic/campaigns` 下，遵守运行路由的规则（见[自动测评流水线的 HTTP 接口](AUTOMATIC_PIPELINE.zh-CN.md#http-接口leviautomaticapipy)）：写操作是人的操作（界面令牌；agent 的 Bearer 凭据得 403 `person_only`），带 `command_id` 或 `request_id`（同一请求再来返回第一次的答复，同一编号换了内容是 409），改变评测计划的操作要键入 `confirm`，同一个计划同一时刻只做一件事（否则 423 `busy`）。各种 ID 在碰到路径之前先按严格格式匹配。
+
+| 路由 | 谁 | 作用 |
+| --- | --- | --- |
+| `POST /campaigns/plan` | 只读 | 作业、各组（策略检查点 ID，`candidate` 或 `reference`）、每组试验数、时间表、主要比较和 `preregistered` 生成一个计划：`campaign_sha256`（同时作为 `plan_sha256`）、`settings_sha256`、`segments`（`no`、`arms`、`cards`）、`switches`、`power`（设计功效：可检出差异和功效表，从不报事后功效）、`refusals`、`checks`。不留下任何文件。 |
+| `POST /campaigns` | 人 | 同样的请求体加 `plan_sha256`、`confirm: "start-campaign"` 和 `request_id`。202 `{campaign_id}`；412 `plan_changed`；422 `plan_refused`（不能启动的原因）；409 `campaign_exists`、`robot_busy`。 |
+| `GET /campaigns`、`GET /campaigns/{id}` | 只读 | 快照（见下）。 |
+| `POST /campaigns/{id}/confirm` | 人 | `{command_id, kind, challenge}`，`kind` 为 `switch_policy`、`env` 或 `segment_done`；`env` 也用来回答出故障后在等人的计划（`options`：`relaunch`、`accept_short_segment`、`override_stop_rule`）。待办里的 `challenge` 一次有效、60 秒有效期，并绑定计划当前所在的步骤。 |
+| `POST /campaigns/{id}/pause`、`resume`、`unblind` | 人 | `{command_id, confirm}`，`confirm` 为该路由自己的词。暂停在下一个段边界生效。 |
+| `POST /campaigns/{id}/attach` | 人 | 为控制器已经没了的计划再起一个控制器。 |
+| `GET`、`POST /campaigns/{id}/cards` | 只读、人 | 引导式评测：还没人确认布局卡的片段，以及人的回答。 |
+| `GET /campaigns/{id}/report?basis=` | 只读 | `{basis, files, analysis, manifest}`；`files[].name` 相对于 `report/<basis>/`。409 `blinded`、409 `not_ready`、404 `no_report`。 |
+| `GET /campaigns/{id}/report/files/{name}?basis=` | 只读 | `report/<basis>/` 下的一个文件（表、SVG/PDF 图或 JSON 图规格、数据）；名字逐段匹配，用 `O_NOFOLLOW` 打开。 |
+| `POST /campaigns/{id}/report` | 人 | `{command_id, basis?}`：重新推导台账并重写报告（卡号回答之后，或换一个口径）。 |
+
+**计划请求。** 计划以请求命名（`c-<10 位十六进制>`），所以同一个请求就是同一个计划，`campaign_sha256` 也相同；想再跑一遍就换种子。每组的配置取自其检查点的 `VERSION.json`（没写明配置的组被拒绝），配对表由它生成。人工复位的作业得到抽象的布局卡 `c001...`（每个试验一张），复位策略的作业没有卡。`execution_mode` 可选，不在接口契约的表里：`guided`（默认）或 `dry_run`。
+
+**两种宿主。**
+
+- `dry_run`：整条链路在 Fake 上演练。`DryRunPolicyHost` 只记录被要求做什么，什么也不启动；`DryRunLauncher` 每段启动一次真实的试运行（`launch.launch`，Fake 机器人，场景脚本为 `ready`；子运行的计划用同样的试运行请求生成，所以冻结在计划里的摘要就是启动时核对的摘要）；台账由试运行的日志推导；报告在 `ANALYZING` 写出。作业没有契约时会得到一份草案契约（`$LEVI_AERI_HOME/campaign-jobs/dry-run-initial-state.yaml`）。人工复位的试运行每个片段后都等人复位场景：打开子运行（快照里的 `child_run_id`）去恢复它。
+- `guided`：机器人那部分由用户自己的旧评测客户端完成。后端**从不启动策略服务，也从不连接策略或机器人端口**。每一段的待办依次是：`switch_policy`（只在换组时出现：自己启动该检查点的策略，再确认；只有你确认之后策略才算就绪）、`place_cards`（布置场景；显示旧客户端命令供复制）、`segment_done`（运行命令；计划只读地观察 rollout 目录，客户端写够本段试验数时封存本段，或者你说本段已完成；少于计划数的要由你决定，`accept_short_segment`）。命令来自操作手册（§6.3，`LEVI_SETUP_DOC`），只替换 `--eval-num`、`--rollout-group` 和 `--eval-note "<计划 ID> s<NN> <组码>"`，并带 `--levi-mode dual`，在计划启动时冻结。rollout 在 `LEVI_AERI_ROLLOUT_ROOT`（或作业自己的 `recording.rollout_root`）下各组的目录里读取。片段只有在人确认了布局卡（`/cards`）之后才进入成对分析。
+
+**控制器。** 每个计划一个进程，由 API 用 `systemd-run --user --unit=levi-aeri-campaign-<id> --collect -p KillMode=control-group -p TimeoutStopSec=120 <python> -m levi.automatic.campaign.controller --campaign-id <id>` 启动（不在产品的 cgroup 里，没有 `Restart`，所以重启产品不会停掉评测）。它是计划日志的唯一写入者：驱动 `Conductor.advance`，自己从不替人回答，取走路由以文件形式留在 `campaigns/<id>/ctl/` 下的请求（和计划目录一样权限 0700；`question.json`、`answers/`、`pause/`、`unblind/`、`segment-done/`、`serving.json`、`controller.json`），并把偷看记成 `unblind_peek` 备注。一台机器人一个计划：控制器存活期间持有 `campaign-<robot>.lock`（`flock`）。崩溃之后快照里是 `controller.alive: false`；`attach` 启动的控制器恢复到需要人确认的位置（有副作用没做完时是 `FAULT_LOCKED`；绝不自己重新启动子运行）。
+
+**快照。** `{id, state, execution_mode, arms: [{id, code, done, remaining, deviated, discarded, unconfirmed}], segment: {no, total, arm_code}, todo, safety: {faults, fused}, blinded, controller: {alive}, wait_reason, peeks, updated_at}`（试运行再加 `child_run_id`）。`todo` 是 `null` 或 `{kind, challenge, segment, arm_code, ...}`，`kind` 为 `switch_policy`、`place_cards`、`segment_done`、`recover_run` 之一。
+
+**盲法。** `blinded` 为真时，快照、列表以及报告之前计划写下的每个文件里只有已完成、剩余、偏离和作废的片段数，没有成功率、判定或标签计数。各组显示组码（`X1`、`X2`……）而不是字母。计划在 `ANALYZING` 时不再盲，或者由人揭盲：后者算一次**偷看**（写入日志；报告会计数，结论只能是探索性的）。只有不盲时才提供报告。
+
+**设置。** `LEVI_AERI_ROLLOUT_ROOT`：绝对路径，引导式评测里旧客户端的 rollout 根目录（作业自己的 `recording.rollout_root` 优先）；`LEVI_SETUP_DOC`（操作手册，与 setup 配方相同）；`LEVI_AERI_HOME`、`LEVI_AERI_JOB_ROOTS`、`LEVI_AERI_POLICY_ROOT` 同运行。测试：`tests/automatic/campaign/test_api_campaign_*.py` 和 `test_controller_campaign.py`（假的单元启动、临时 `LEVI_AERI_HOME`、一旦试图连机器人或策略端口就让测试失败的 campaign 守卫）。
