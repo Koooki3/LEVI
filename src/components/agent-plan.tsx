@@ -18,9 +18,91 @@ export type HarnessPlan = {
     waived?: boolean;
   } | null;
   questions: { field: string; message: string }[];
-  estimate: { minimum_requests: number; tokens: string };
+  estimate: {
+    minimum_requests: number;
+    tokens: string;
+    // Only a plan with workflow.event_intelligence on (docs/EVENTS.md).
+    event_intelligence?: EventEstimate;
+  };
   excluded: string[];
+  event_intelligence?: EventSettings | null;
 };
+/** workflow.event_intelligence as the plan froze it. */
+export type EventSettings = {
+  mode: string;
+  sources: string[];
+  max_windows: number;
+  merge_seconds: number;
+  change_point_penalty: number;
+  planner: string;
+  active_evidence: boolean;
+};
+/** What event candidates add to a plan's cost: frames, never requests. */
+export type EventEstimate = {
+  extra_requests: number;
+  max_windows_per_episode: number;
+  frames_per_window: number;
+  max_extra_frames_per_episode: number;
+  frames_cap: number;
+};
+/** The plan's event intelligence settings, shown to the person approving
+ * it; read-only (the settings are part of what the approval covers). */
+function EventIntelligencePlan({
+  settings,
+  estimate,
+}: {
+  settings: EventSettings;
+  estimate?: EventEstimate;
+}) {
+  const { t } = useLocale();
+  return (
+    <div role="group" aria-label={t("Event intelligence")}>
+      <h4>{t("Event intelligence")}</h4>
+      <ul className="ag-list ag-list--plain">
+        <li>
+          {t("Mode")}: <code className="ag-code">{settings.mode}</code>
+        </li>
+        <li>
+          {t("Candidate sources")}:{" "}
+          <code className="ag-code">{settings.sources.join(", ")}</code>
+        </li>
+        <li>
+          {t("Candidate windows per episode, at most")}: {settings.max_windows}
+        </li>
+        <li>
+          {t("Merge distance (s)")}: {settings.merge_seconds}
+        </li>
+        <li>
+          {t("Change-point penalty")}: {settings.change_point_penalty}
+        </li>
+        <li>
+          {t("Frame planner")}:{" "}
+          <code className="ag-code">{settings.planner}</code>
+        </li>
+        <li>
+          {t("Evidence a model asks for itself")}: {t("off (fixed)")}
+        </li>
+        {estimate && (
+          <>
+            <li>
+              {t("Extra frames per episode, at most")}:{" "}
+              {estimate.max_extra_frames_per_episode} ({t("frame cap")}{" "}
+              {estimate.frames_cap})
+            </li>
+            <li>
+              {t("Extra model requests")}: {estimate.extra_requests}
+            </li>
+          </>
+        )}
+      </ul>
+      <Hint>
+        {t(
+          "Event candidates from the recorded signals only choose extra refinement frames within the frame cap; they are never boundaries. Their priorities are uncalibrated heuristics, not probabilities.",
+        )}
+      </Hint>
+    </div>
+  );
+}
 export default function AgentPlan({
   plan,
   busy,
@@ -81,6 +163,12 @@ export default function AgentPlan({
           Execution approval does not authorize publishing or overwriting
           annotations.
         </Hint>
+        {plan.event_intelligence && (
+          <EventIntelligencePlan
+            settings={plan.event_intelligence}
+            estimate={plan.estimate.event_intelligence}
+          />
+        )}
         <Disclosure summary={t("Contract details")} icon={FileText}>
           <code className="ag-code">{plan.digest}</code>
           <ul className="ag-list">

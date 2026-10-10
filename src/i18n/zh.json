@@ -2849,5 +2849,17 @@
   "This episode's data is too large to chart": "这个片段的数据太大，无法绘制图表",
   "The data file behind this episode is larger than LEVI reads into memory at once, so the charts are empty. The videos and annotations still work.": "这个片段背后的数据文件超过了 LEVI 一次读入内存的上限，所以图表是空的。视频和标注仍然可用。",
   "Some episodes were left out of this analysis": "部分片段没有计入这次分析",
-  "Episodes left out because their data file is too large:": "因数据文件太大而未计入的片段数："
+  "Episodes left out because their data file is too large:": "因数据文件太大而未计入的片段数：",
+  "Event intelligence": "事件智能",
+  "Candidate sources": "候选来源",
+  "Candidate windows per episode, at most": "每个片段最多候选窗口数",
+  "Merge distance (s)": "合并距离（秒）",
+  "Change-point penalty": "变点惩罚系数",
+  "Frame planner": "帧规划方式",
+  "Evidence a model asks for itself": "模型自行要求证据",
+  "off (fixed)": "关闭（固定）",
+  "Extra frames per episode, at most": "每个片段最多增加的帧数",
+  "Extra model requests": "额外模型请求数",
+  "Event candidates from the recorded signals only choose extra refinement frames within the frame cap; they are never boundaries. Their priorities are uncalibrated heuristics, not probabilities.": "来自记录信号的事件候选只在帧上限内挑选额外的精修帧，从不作为边界。候选的优先级是未校准的启发式规则，不是概率。",
+  "frame cap": "帧上限"
 }
