@@ -6,6 +6,7 @@ import {
   waitFor,
 } from "@/components/ds/__tests__/dom";
 import type { LiveSession } from "../types";
+import { resultFixture } from "./result-fixture";
 import { identityOf } from "../session-route";
 const session: LiveSession = {
   root: "/fixture",
@@ -48,6 +49,8 @@ describe("individual live session", () => {
     const calls: string[] = [];
     globalThis.fetch = (async (path: unknown) => {
       calls.push(String(path));
+      if (String(path).includes("/results/session?"))
+        return Response.json(resultFixture());
       return new Response(
         JSON.stringify({
           enabled: true,
@@ -59,15 +62,16 @@ describe("individual live session", () => {
     const { host } = await render(
       <SessionDetail identity={identityOf(session)} />,
     );
-    await waitFor(() => calls.length > 0);
-    expect(calls[0]).toContain("dataset=model__task");
-    expect(calls[0]).toContain("session=run-1");
-    expect(calls[0]).not.toContain("session=session-1");
+    await waitFor(() => calls.some((path) => path.includes("/stats?")));
+    const statsCall = calls.find((path) => path.includes("/stats?"))!;
+    expect(statsCall).toContain("dataset=model__task");
+    expect(statsCall).toContain("session=run-1");
+    expect(statsCall).not.toContain("session=session-1");
     expect(host.textContent).toContain("wanted-checkpoint");
     expect(host.querySelector('a[href="/live"]')).not.toBeNull();
-    expect(host.querySelector("button[aria-expanded]")).toBeNull();
+    expect(host.querySelector("button[aria-expanded]") === null).toBe(true);
   });
-  test("a replaced current snapshot never becomes the old session but saved records remain readable", async () => {
+  test("a rebound current source never exposes old outcome statistics", async () => {
     current = [
       {
         ...session,
@@ -76,31 +80,51 @@ describe("individual live session", () => {
         policy: { checkpoint: "wrong-checkpoint" },
       },
     ];
-    globalThis.fetch = (async () =>
-      new Response(
-        JSON.stringify({
-          enabled: true,
-          summary: { episodes: { count: 1 } },
-          episodes: {
-            rows: [{ demo: "saved-episode", episode_index: 7, state: "done" }],
-            total: 1,
-          },
-        }),
-      )) as typeof fetch;
+    globalThis.fetch = (async (path: unknown) =>
+      String(path).includes("/results/session?")
+        ? Response.json(
+            resultFixture({
+              status: "rebound",
+              result_visibility: "unknown",
+              analysis: null,
+              records: [],
+              runs: [],
+              reports: [],
+            }),
+          )
+        : new Response(
+            JSON.stringify({
+              enabled: true,
+              summary: { episodes: { count: 1 } },
+              episodes: {
+                rows: [
+                  { demo: "saved-episode", episode_index: 7, state: "done" },
+                ],
+                total: 1,
+              },
+            }),
+          )) as typeof fetch;
     const { host } = await render(
       <SessionDetail identity={identityOf(session)} />,
     );
-    await waitFor(() => host.textContent?.includes("saved-episode"));
+    await waitFor(() => host.textContent?.includes("Session source changed"));
+    expect(host.textContent).not.toContain("saved-episode");
+    expect(host.querySelector('a[href*="/stats/export"]') === null).toBe(true);
     expect(host.textContent).not.toContain("wrong-checkpoint");
     expect(host.textContent).toContain("no longer reporting");
   });
   test("offline status is stated while history can load", async () => {
     current = [];
     failures = 1;
-    globalThis.fetch = (async () =>
-      new Response(
-        JSON.stringify({ enabled: true, summary: { episodes: { count: 0 } } }),
-      )) as typeof fetch;
+    globalThis.fetch = (async (path: unknown) =>
+      String(path).includes("/results/session?")
+        ? Response.json(resultFixture())
+        : new Response(
+            JSON.stringify({
+              enabled: true,
+              summary: { episodes: { count: 0 } },
+            }),
+          )) as typeof fetch;
     const { host } = await render(
       <SessionDetail identity={identityOf(session)} />,
     );
@@ -115,7 +139,9 @@ describe("individual live session", () => {
     lastOk = null;
     let ready = false;
     let calls = 0;
-    globalThis.fetch = (async () => {
+    globalThis.fetch = (async (path: unknown) => {
+      if (String(path).includes("/results/session?"))
+        return Response.json(resultFixture());
       calls++;
       return ready
         ? new Response(
@@ -149,6 +175,97 @@ describe("individual live session", () => {
     expect(calls).toBe(2);
     expect(host.textContent).toContain("Live status is unavailable");
     expect(host.textContent).not.toContain("Could not read the statistics");
+  });
+  test("explicit withheld visibility prevents even requesting legacy outcome statistics", async () => {
+    const calls: string[] = [];
+    globalThis.fetch = (async (path: unknown) => {
+      calls.push(String(path));
+      return Response.json(
+        resultFixture({ status: "blocked", result_visibility: "withheld" }),
+      );
+    }) as typeof fetch;
+    const { host } = await render(
+      <SessionDetail identity={identityOf(session)} />,
+    );
+    await waitFor(() => host.textContent?.includes("Result access blocked"));
+    expect(calls.some((path) => path.includes("/stats?"))).toBe(false);
+    expect(host.querySelector('a[href*="/stats/export"]') === null).toBe(true);
+    expect(host.querySelector("meter") === null).toBe(true);
+    expect(host.textContent).not.toContain("demo-7");
+  });
+  test("a failed result lookup never falls back to legacy outcome statistics", async () => {
+    const calls: string[] = [];
+    globalThis.fetch = (async (path: unknown) => {
+      calls.push(String(path));
+      return new Response("Unavailable", { status: 503 });
+    }) as typeof fetch;
+    const { host } = await render(
+      <SessionDetail identity={identityOf(session)} />,
+    );
+    await waitFor(() =>
+      host.textContent?.includes("Could not read session analysis"),
+    );
+    expect(calls.some((path) => path.includes("/stats?"))).toBe(false);
+    expect(host.querySelector('a[href*="/stats/export"]') === null).toBe(true);
+  });
+  test("a gated campaign without exact current analysis never requests old statistics", async () => {
+    const calls: string[] = [];
+    globalThis.fetch = (async (path: unknown) => {
+      calls.push(String(path));
+      return Response.json(
+        resultFixture({ analysis: null, reason: "gated_campaign_report" }),
+      );
+    }) as typeof fetch;
+    const { host } = await render(
+      <SessionDetail identity={identityOf(session)} />,
+    );
+    await waitFor(() =>
+      host.textContent?.includes("passed its disclosure gate"),
+    );
+    expect(calls.some((path) => path.includes("/stats?"))).toBe(false);
+    expect(host.querySelector('a[href*="/stats/export"]') === null).toBe(true);
+  });
+  test("visible to withheld removes old statistics before a pending result refresh resolves", async () => {
+    let allowed = true;
+    let pending: (response: Response) => void = () => {};
+    globalThis.fetch = ((path: unknown) => {
+      if (String(path).includes("/results/session?"))
+        return allowed
+          ? Promise.resolve(Response.json(resultFixture()))
+          : new Promise<Response>((r) => {
+              pending = r;
+            });
+      return Promise.resolve(
+        Response.json({
+          enabled: true,
+          summary: { episodes: { count: 1 } },
+          episodes: {
+            rows: [{ demo: "old-outcome-row", state: "done" }],
+            total: 1,
+          },
+        }),
+      );
+    }) as typeof fetch;
+    const { host, rerender } = await render(
+      <SessionDetail identity={identityOf(session)} />,
+    );
+    await waitFor(() => host.textContent?.includes("old-outcome-row"));
+    allowed = false;
+    lastOk = 60000;
+    await rerender(<SessionDetail identity={identityOf(session)} />);
+    expect(host.textContent).not.toContain("old-outcome-row");
+    expect(host.querySelector('a[href*="/stats/export"]') === null).toBe(true);
+    pending(
+      Response.json(
+        resultFixture({
+          status: "blocked",
+          result_visibility: "withheld",
+          analysis: null,
+        }),
+      ),
+    );
+    await waitFor(() => host.textContent?.includes("Result access blocked"));
+    expect(host.textContent).not.toContain("old-outcome-row");
   });
   test("invalid bookmarks are explained and have a return link", async () => {
     const { host } = await render(<SessionDetail identity={null} />);

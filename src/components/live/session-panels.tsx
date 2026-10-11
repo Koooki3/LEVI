@@ -1,6 +1,10 @@
 "use client";
 import Link from "next/link";
-import { sessionHref } from "./session-route";
+import { sessionHref, identityOf } from "./session-route";
+import { resultIndexPath, resultMatches } from "./result-api";
+import { useResults } from "./use-results";
+import { ResultState } from "./session-results";
+import type { ResultItem } from "./result-types";
 import { useEffect, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { ago } from "@/components/pool/pool-progress";
@@ -221,7 +225,9 @@ export function SessionCard({
   onToggle,
   onChanged,
   detail = false,
+  result,
 }: {
+  result?: ResultItem;
   session: LiveSession;
   detail?: boolean;
   open: boolean;
@@ -242,7 +248,11 @@ export function SessionCard({
   return (
     <LiveRow
       detail={detail}
-      title={`${s.group} / ${s.task_folder}`}
+      title={
+        `${s.group} / ${s.task_folder}`.length > 84
+          ? `${`${s.group} / ${s.task_folder}`.slice(0, 84)}…`
+          : `${s.group} / ${s.task_folder}`
+      }
       subtitle={s.run_id || s.session_id || t("manual session (no run)")}
       icon={Bot}
       fault={!!fault}
@@ -251,6 +261,7 @@ export function SessionCard({
       summary={
         <>
           <SessionState state={s.state} />
+          {result && <ResultState item={result} />}
           {ep.no != null && (
             <span>
               {t("Episode")} {ep.no}
@@ -276,6 +287,14 @@ export function SessionCard({
                 {t("This older session has no stable identifier.")}
               </span>
             ))}
+          {!detail && sessionHref(s) && (
+            <Link
+              className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
+              href={`${sessionHref(s)}#session-analysis`}
+            >
+              {t("Session analysis")}
+            </Link>
+          )}
           <details className="pg-live-row-more" open={detail || undefined}>
             <summary>{t("Session actions")}</summary>
             <ViewerAction
@@ -330,9 +349,16 @@ export function SessionCard({
           )}
         </div>
       </header>
+      {`${s.group} / ${s.task_folder}`.length > 84 && !detail && (
+        <ExpandableText
+          text={`${s.group} / ${s.task_folder}`}
+          mono
+          previewLength={56}
+        />
+      )}
       {s.prompt && (
         <div className="pg-live-prompt">
-          <ExpandableText text={s.prompt} />
+          <ExpandableText text={s.prompt} previewLength={56} />
         </div>
       )}
       {fault && (
@@ -342,93 +368,121 @@ export function SessionCard({
           why={s.reason || t("The session reports a fault.")}
         />
       )}
-      <dl className="pg-live-dl">
-        <Field label={t("Run")}>
-          {s.run_id ? <code>{s.run_id}</code> : t("manual session (no run)")}
-        </Field>
-        <Field label={t("Episode")}>
-          {ep.no != null ? (
-            <>
-              {ep.no}
-              {ep.target ? ` / ${ep.target}` : ""}
-              {ep.counted != null && (
-                <span className="pg-pool-muted">
-                  {" "}
-                  · {t("counted")} {ep.counted}
-                </span>
-              )}
-            </>
-          ) : (
-            "—"
-          )}
-        </Field>
-        <Field label={t("Steps")}>
-          {ep.max_steps ? (
-            <>
-              <Progress
-                className="pg-live-bar"
-                value={Math.min(1, steps ?? 0) * 100}
-                label={`${ep.step ?? 0} / ${ep.max_steps}`}
-              />
-            </>
-          ) : (
-            "—"
-          )}
-        </Field>
-        <Field label={t("Policy")}>
-          {s.policy?.config || s.policy?.checkpoint ? (
-            <>
-              <code>{s.policy?.config || "—"}</code>
-              <br />
-              <ExpandableText text={s.policy?.checkpoint || "—"} mono />
-            </>
-          ) : (
-            "—"
-          )}
-        </Field>
-        <Field label={t("Most recent episode")}>
-          {last.outcome || last.steps != null ? (
-            <>
-              {s.label_mode === "dual_label" &&
-                (last.outcome === "success" || last.outcome === "failure") && (
-                  <>
-                    <span className="pg-live-optag">
-                      {t("Operator label")}
-                    </span>{" "}
-                  </>
+      {detail && (last.outcome || last.steps != null) && (
+        <p className="pg-pool-muted">
+          {t("Most recent episode")}: {t(outcomeLabel(last.outcome))}
+          {last.steps != null && ` · ${last.steps} ${t("steps")}`}
+        </p>
+      )}
+      {detail && ep.max_steps ? (
+        <Progress
+          className="pg-live-bar"
+          value={Math.min(1, steps ?? 0) * 100}
+          label={`${ep.step ?? 0} / ${ep.max_steps}`}
+        />
+      ) : null}
+      <details className="pg-live-disclosure" open={!detail || undefined}>
+        <summary>{t("Session metadata and progress")}</summary>
+        <dl className="pg-live-dl">
+          <Field label={t("Run")}>
+            {s.run_id ? <code>{s.run_id}</code> : t("manual session (no run)")}
+          </Field>
+          <Field label={t("Episode")}>
+            {ep.no != null ? (
+              <>
+                {ep.no}
+                {ep.target ? ` / ${ep.target}` : ""}
+                {ep.counted != null && (
+                  <span className="pg-pool-muted">
+                    {" "}
+                    · {t("counted")} {ep.counted}
+                  </span>
                 )}
-              {t(outcomeLabel(last.outcome))}
-              {last.steps != null && ` · ${last.steps} ${t("steps")}`}
-              {last.duration_s != null &&
-                ` · ${shortDuration(last.duration_s)}`}
-              {last.ended_at != null && (
-                <span className="pg-pool-muted"> · {clock(last.ended_at)}</span>
-              )}
-            </>
-          ) : (
-            "—"
-          )}
-        </Field>
-        <Field label={t("Reset wait")}>
-          <ResetWait session={s} />
-        </Field>
-        <Field label={t("Robot (client's view)")}>
-          {inband.ok === false || inbandProblems.length > 0 ? (
-            <span className="pg-live-bad">
-              {inbandProblems.join("; ") || t("not OK")}
-            </span>
-          ) : inband.ok === true ? (
-            <>
-              {inband.robot_mode_name || t("OK")}
-              {inband.source && (
-                <span className="pg-pool-muted"> · {inband.source}</span>
-              )}
-            </>
-          ) : (
-            "—"
-          )}
-        </Field>
-      </dl>
+              </>
+            ) : (
+              "—"
+            )}
+          </Field>
+          <Field label={t("Steps")}>
+            {ep.max_steps ? (
+              <>
+                <Progress
+                  className="pg-live-bar"
+                  value={Math.min(1, steps ?? 0) * 100}
+                  label={`${ep.step ?? 0} / ${ep.max_steps}`}
+                />
+              </>
+            ) : (
+              "—"
+            )}
+          </Field>
+          <Field label={t("Policy")}>
+            {s.policy?.config || s.policy?.checkpoint ? (
+              <>
+                <ExpandableText
+                  text={s.policy?.config || "—"}
+                  mono
+                  previewLength={48}
+                />
+                <br />
+                <ExpandableText
+                  text={s.policy?.checkpoint || "—"}
+                  mono
+                  previewLength={48}
+                />
+              </>
+            ) : (
+              "—"
+            )}
+          </Field>
+          <Field label={t("Most recent episode")}>
+            {last.outcome || last.steps != null ? (
+              <>
+                {s.label_mode === "dual_label" &&
+                  (last.outcome === "success" ||
+                    last.outcome === "failure") && (
+                    <>
+                      <span className="pg-live-optag">
+                        {t("Operator label")}
+                      </span>{" "}
+                    </>
+                  )}
+                {t(outcomeLabel(last.outcome))}
+                {last.steps != null && ` · ${last.steps} ${t("steps")}`}
+                {last.duration_s != null &&
+                  ` · ${shortDuration(last.duration_s)}`}
+                {last.ended_at != null && (
+                  <span className="pg-pool-muted">
+                    {" "}
+                    · {clock(last.ended_at)}
+                  </span>
+                )}
+              </>
+            ) : (
+              "—"
+            )}
+          </Field>
+          <Field label={t("Reset wait")}>
+            <ResetWait session={s} />
+          </Field>
+          <Field label={t("Robot (client's view)")}>
+            {inband.ok === false || inbandProblems.length > 0 ? (
+              <span className="pg-live-bad">
+                {inbandProblems.join("; ") || t("not OK")}
+              </span>
+            ) : inband.ok === true ? (
+              <>
+                {inband.robot_mode_name || t("OK")}
+                {inband.source && (
+                  <span className="pg-pool-muted"> · {inband.source}</span>
+                )}
+              </>
+            ) : (
+              "—"
+            )}
+          </Field>
+        </dl>
+      </details>
     </LiveRow>
   );
 }
@@ -447,6 +501,11 @@ export function SessionsPanel({
   const { t } = useLocale();
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
+  const resultRequest = useResults(resultIndexPath());
+  const resultItems =
+    resultRequest.data && "items" in resultRequest.data
+      ? resultRequest.data.items
+      : [];
   sessions = sortSessions(sessions);
   const pages = Math.ceil(sessions.length / 6);
   const current = Math.min(page, Math.max(0, pages - 1));
@@ -476,6 +535,10 @@ export function SessionsPanel({
               <SessionCard
                 key={cardKeys[i]}
                 session={s}
+                result={resultItems.find((item) => {
+                  const identity = identityOf(s);
+                  return identity && resultMatches(item, identity);
+                })}
                 open={open.has(cardKeys[i])}
                 onToggle={() =>
                   setOpen((previous) => {

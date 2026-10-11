@@ -28,6 +28,7 @@ import {
   writeBrowserStorage,
 } from "@/utils/browserStorage";
 import { T, useLocale } from "./levi-locale";
+import { AnnotationSessionLinks } from "./live/annotation-session-links";
 import { friendlyError } from "./live/friendly-error";
 import {
   Badge,
@@ -1169,6 +1170,11 @@ export default function AgentWorkbench() {
               {run && (
                 <section className="ag-section">
                   <h3>{run.context.repo_id}</h3>
+                  <AnnotationSessionLinks
+                    key={run.id}
+                    repo={run.context.repo_id}
+                    run={run.id}
+                  />
                   <p>
                     <Badge tone="neutral">{t(run.status)}</Badge>
                   </p>

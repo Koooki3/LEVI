@@ -25,7 +25,7 @@ export function sessionHref(s: LiveSession): string | null {
   const identity = identityOf(s);
   return identity ? identityHref(identity) : null;
 }
-function identityHref(identity: SessionIdentity): string {
+export function identityHref(identity: SessionIdentity): string {
   return `/live/sessions/${encodeURIComponent(JSON.stringify(identity))}`;
 }
 export function statsSessionHref(s: StatsSession): string | null {

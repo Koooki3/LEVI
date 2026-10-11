@@ -1,12 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Button, SkeletonText } from "@/components/ds";
+import { Button, ExpandableText, SkeletonText } from "@/components/ds";
 import { Note, Problem } from "@/components/pages-ui/feedback";
 import { useLocale } from "@/components/levi-locale";
 import { useLivePoll } from "./use-live";
 import { SessionCard } from "./session-panels";
-import { findSession, type SessionIdentity } from "./session-route";
+import { findSession, identityOf, type SessionIdentity } from "./session-route";
 import { useLiveStats } from "./use-live-stats";
 import { EPISODE_PAGE, type EpisodeView } from "./stats-logic";
 import {
@@ -15,6 +15,9 @@ import {
   ExportLinks,
   StatsEmpty,
 } from "./stats-panel";
+import { canShowResult, resultMatches, resultSessionPath } from "./result-api";
+import { useResults } from "./use-results";
+import { SessionResultPanel } from "./session-results";
 import { sessionIsBusy } from "./live-filters";
 
 export function SessionDetail({
@@ -35,7 +38,25 @@ export function SessionDetail({
   };
   const [limit, setLimit] = useState(EPISODE_PAGE);
   const [view, setView] = useState<EpisodeView>("latency");
-  const statsEnabled = !!identity && !!dataset;
+  // A legacy dataset/run bookmark can use a uniquely matched current source,
+  // but never guess a root from a display name or use old statistics as permission.
+  const sourceIdentity =
+    identity && !identity.root && session ? identityOf(session) : identity;
+  const resultRequest = useResults(
+    sourceIdentity ? resultSessionPath(sourceIdentity) : null,
+    poll.lastOk == null ? null : Math.floor(poll.lastOk / 30000),
+  );
+  const resultItem =
+    resultRequest.data && "identity" in resultRequest.data
+      ? resultRequest.data
+      : null;
+  const resultVisible =
+    !!sourceIdentity &&
+    !!resultItem &&
+    resultMatches(resultItem, sourceIdentity) &&
+    canShowResult(resultItem) &&
+    resultItem.analysis != null;
+  const statsEnabled = !!identity && !!dataset && resultVisible;
   const stats = useLiveStats(
     scope,
     limit,
@@ -53,7 +74,7 @@ export function SessionDetail({
   }, [offline, statsEnabled, stats.refresh]);
   const refresh = () => {
     poll.refresh();
-    stats.refresh();
+    resultRequest.refresh();
   };
   return (
     <main className="ds-root pg-workbench pg-live pg-live-detail">
@@ -70,14 +91,18 @@ export function SessionDetail({
         />
       ) : (
         <>
-          <p className="pg-pool-muted">
-            <code>
-              {identity.group
-                ? `${identity.group} / ${identity.task}`
-                : dataset}
-            </code>{" "}
+          <div className="pg-pool-muted">
+            <ExpandableText
+              text={
+                identity.group
+                  ? `${identity.group} / ${identity.task}`
+                  : dataset
+              }
+              mono
+              previewLength={56}
+            />{" "}
             · <code>{identity.run || identity.id}</code>
-          </p>
+          </div>
           {poll.failures > 0 && (
             <Note tone="warning" role="status">
               {t(
@@ -90,7 +115,11 @@ export function SessionDetail({
           )}
           {session ? (
             <SessionCard
-              session={session}
+              session={
+                resultVisible
+                  ? session
+                  : { ...session, last_episode: undefined }
+              }
               open
               onToggle={() => {}}
               onChanged={refresh}
@@ -105,12 +134,24 @@ export function SessionDetail({
               )}
             </Note>
           )}
-          <section
-            className="pg-live-section"
-            aria-labelledby="session-statistics"
-          >
-            <h2 id="session-statistics">{t("Statistics")}</h2>
-            {!dataset ? (
+          <SessionResultPanel
+            identity={sourceIdentity ?? identity}
+            request={resultRequest}
+          />
+          <details className="pg-live-section pg-live-disclosure">
+            <summary id="session-statistics">
+              {t("Performance statistics")}
+              {statsEnabled && stats.data?.summary?.episodes?.count != null
+                ? ` · ${stats.data.summary.episodes.count} ${t("Episodes")}`
+                : ""}
+            </summary>
+            {!resultVisible ? (
+              <Note tone="info">
+                {t(
+                  "Outcome statistics are shown only after the exact source confirms that results are visible.",
+                )}
+              </Note>
+            ) : !dataset ? (
               <Note tone="info">
                 {t(
                   "No dataset is linked to this session yet. Statistics will appear after its episodes are registered.",
@@ -156,7 +197,7 @@ export function SessionDetail({
                 )}
               </>
             )}
-          </section>
+          </details>
         </>
       )}
     </main>

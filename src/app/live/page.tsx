@@ -38,6 +38,7 @@ import {
 } from "@/components/live/command-text";
 import { disabledText } from "@/components/live/embedding";
 import { LiveServiceBlock } from "@/components/live/live-service-block";
+import { ResultSourcesDisclosure } from "@/components/live/result-directory";
 import { StatsPanel } from "@/components/live/stats-panel";
 import { LiveSummaryBar, liveSummary } from "@/components/live/live-summary";
 import { useDatasetDetails, useLivePoll } from "@/components/live/use-live";
@@ -236,6 +237,7 @@ export default function LivePage() {
           <nav className="pg-live-jump" aria-label={t("On this page")}>
             <a href="#live-sessions">{t("Evaluation sessions")}</a>
             <a href="#live-pipeline">{t("Annotation pipeline")}</a>
+            <a href="#live-results-region">{t("Result sources")}</a>
             <a href="#live-stats-region">{t("Statistics")}</a>
             <a href="#live-service-region">{t("Background service")}</a>
           </nav>
@@ -321,6 +323,7 @@ export default function LivePage() {
                   </div>
                 )}
               </section>
+              <ResultSourcesDisclosure />
               <details
                 className="pg-live-section pg-live-disclosure pg-live-slot o5"
                 id="live-stats-region"

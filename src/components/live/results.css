@@ -1,0 +1,90 @@
+.pg-live-results,
+.pg-live-result-content,
+.pg-live-result-records,
+.pg-live-result-record {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.pg-live-result-content {
+  display: grid;
+  gap: var(--ds-space-3);
+}
+.pg-live-result-content .pg-live-dl dd {
+  min-width: 0;
+}
+.pg-live-result-content details {
+  min-width: 0;
+}
+.pg-live-result-content summary {
+  cursor: pointer;
+}
+.pg-live-result-content :is(ul, figure) {
+  margin: var(--ds-space-3) 0;
+}
+.pg-live-result-chart {
+  padding: var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-sunken);
+}
+.pg-live-result-chart ul {
+  padding: 0;
+  list-style: none;
+}
+.pg-live-result-chart li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--ds-space-3);
+  margin: var(--ds-space-2) 0;
+  align-items: center;
+}
+.pg-live-result-chart meter {
+  width: 100%;
+  accent-color: var(--ds-accent);
+}
+.pg-live-result-record {
+  padding: var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+}
+.pg-live-result-record h3 {
+  font-size: var(--ds-text-body-size);
+}
+.pg-live-result-filter {
+  display: grid;
+  gap: var(--ds-space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  margin: var(--ds-space-3) 0;
+}
+@media (max-width: 600px) {
+  .pg-live-result-chart li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.pg-live-result-records {
+  display: grid;
+  gap: var(--ds-space-3);
+}
+
+.pg-live-result-chart meter::-webkit-meter-bar {
+  background: var(--ds-surface-sunken);
+  border-color: var(--ds-separator);
+}
+.pg-live-result-chart meter::-webkit-meter-optimum-value {
+  background: var(--ds-accent);
+}
+.pg-live-result-chart meter::-moz-meter-bar {
+  background: var(--ds-accent);
+}
+
+.pg-live-detail .pg-live-row-title strong,
+.pg-live-detail .ds-long-text__preview,
+.pg-live-results .ds-long-text__preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}

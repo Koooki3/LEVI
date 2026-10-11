@@ -31,8 +31,9 @@ export function useLiveStats(
   evaluating: boolean,
   enabled: boolean,
 ): RefreshableLiveStats {
-  const [state, setState] = useState<LiveStats>({
+  const [state, setState] = useState<LiveStats & { dataPath: string | null }>({
     data: null,
+    dataPath: null,
     error: "",
     loading: false,
   });
@@ -50,11 +51,18 @@ export function useLiveStats(
     try {
       const { scope: now, limit: size } = wanted.current;
       const data = await loader.load(now, size);
-      if (data) setState({ data, error: "", loading: false });
+      if (data)
+        setState({
+          data,
+          dataPath: statsPath(now, size),
+          error: "",
+          loading: false,
+        });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
       setState((s) => ({
         data: s.data,
+        dataPath: s.dataPath,
         error: e instanceof Error ? e.message : String(e),
         loading: false,
       }));
@@ -64,7 +72,12 @@ export function useLiveStats(
   // A changed request loads at once.
   useEffect(() => {
     if (enabled) void run.current();
-  }, [path, enabled]);
+    else {
+      loader.stop();
+      last.current = null;
+      setState({ data: null, dataPath: null, error: "", loading: false });
+    }
+  }, [path, enabled, loader]);
 
   // The page's poll moved: refresh when it is due.
   useEffect(() => {
@@ -78,5 +91,9 @@ export function useLiveStats(
   const refresh = useCallback(() => {
     if (enabled && document.visibilityState !== "hidden") void run.current();
   }, [enabled]);
-  return { ...state, refresh };
+  return {
+    ...state,
+    data: enabled && state.dataPath === path ? state.data : null,
+    refresh,
+  };
 }
