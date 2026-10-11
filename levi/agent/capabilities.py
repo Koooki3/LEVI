@@ -1475,10 +1475,18 @@ def _invoke(
             reverse=True,
         ):
             dataset = record["context"]["repo_id"]
+            # Resolve only records covered by the connection's original grants.
+            if not principal.human and dataset not in principal.datasets:
+                continue
             if local_scope:
                 if not dataset.startswith("local/"):
                     continue
-                home, key = links.target(dataset.split("/", 1)[1], store.state)
+                try:
+                    home, key = links.target(dataset.split("/", 1)[1], store.state)
+                except ValueError:
+                    # An invalid historical alias is not a match. The request's
+                    # own source is validated above and its errors still refuse.
+                    continue
                 # Native and product aliases share a dataset only in the same
                 # canonical Store, with the run's persisted dataset key intact.
                 if (
@@ -1488,9 +1496,6 @@ def _invoke(
                 ):
                     continue
             elif args.repo_id and dataset != args.repo_id:
-                continue
-            # Canonical filtering never broadens a connection's original grants.
-            if not principal.human and dataset not in principal.datasets:
                 continue
             state = waiting_for(store, record)
             if state["finished"] and not args.include_finished:

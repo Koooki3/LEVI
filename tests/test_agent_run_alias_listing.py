@@ -178,3 +178,54 @@ def test_unfiltered_permissions_finished_and_limit_keep_existing_behavior(alias_
     assert [row["run_id"] for row in listed(canonical, principal=agent)] == [
         "native-run"
     ]
+
+
+@pytest.fixture
+def broken_historical_alias(alias_runs, linked_live, tmp_path, monkeypatch):
+    product, canonical, _ = alias_runs
+    foreign = make_live(tmp_path / "broken-foreign", name="other-source")
+    monkeypatch.setenv(links.ENV, f"{linked_live},{foreign}")
+    alias = "local/live.other-source"
+    add_run(canonical, "unrelated-historical", alias, key="other-source", created=99)
+    view = foreign / links.STATE / "views" / "other-source"
+    (foreign / links.STATE / "agent").symlink_to(view, target_is_directory=True)
+    # Exercise the real linked-source guard, not a mocked resolver exception.
+    with pytest.raises(ValueError, match="symbolic links"):
+        links.target(alias.split("/", 1)[1], canonical.store.state)
+    return product, canonical, alias
+
+
+@pytest.mark.parametrize("grant", ["human", "native-only", "native-and-unrelated"])
+def test_broken_historical_alias_cannot_abort_healthy_query(
+    broken_historical_alias, monkeypatch, grant
+):
+    _, canonical, alias = broken_historical_alias
+    principal = (
+        HUMAN
+        if grant == "human"
+        else Principal(
+            "connection",
+            datasets=(NATIVE, alias) if grant == "native-and-unrelated" else (NATIVE,),
+        )
+    )
+    resolved = []
+    real_target = links.target
+
+    def track_target(name, own=None):
+        resolved.append(name)
+        return real_target(name, own)
+
+    monkeypatch.setattr(links, "target", track_target)
+    rows = listed(canonical, NATIVE, principal)
+    expected = ["product-run", "native-run"] if grant == "human" else ["native-run"]
+    assert [row["run_id"] for row in rows] == expected
+    if grant == "native-only":
+        assert alias.split("/", 1)[1] not in resolved
+    else:
+        assert alias.split("/", 1)[1] in resolved
+
+
+def test_broken_requested_alias_is_still_refused(broken_historical_alias):
+    product, _, alias = broken_historical_alias
+    with pytest.raises(ValueError, match="symbolic links"):
+        listed(product, alias)
