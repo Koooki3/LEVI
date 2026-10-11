@@ -12,6 +12,17 @@ function code(file: string): string {
 }
 
 describe("viewer.css", () => {
+  test("timeline text masks share the card background rather than making white boxes", () => {
+    const css = code("annotations.css");
+    const mask =
+      css.match(/\.tl-section-head > \.tl-section-sub\s*\{([^}]+)\}/)?.[1] ??
+      "";
+    expect(mask).toContain("background: var(--ds-surface-sunken)");
+    expect(mask).toContain("z-index: 6");
+    expect(css.match(/\.annotations-skin \.tl\s*\{([^}]+)\}/)?.[1]).toContain(
+      "background: var(--ds-surface-sunken)",
+    );
+  });
   test("has no colour literal: the data palette comes from --ds-data-N", () => {
     const hits = code("viewer.css")
       .split("\n")

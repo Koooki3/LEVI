@@ -65,6 +65,7 @@ export function CampaignCards({
         keys.current.idFor(intent),
         episode.key,
         card,
+        picked === NO_CARD ? "no_card" : "confirm",
       );
       if (result.result !== "refused") {
         setSaved((prev) => ({ ...prev, [episode.key]: picked }));
@@ -139,7 +140,10 @@ export function CampaignCards({
                       <option value="">
                         {t("automatic.campaign.cards.choose")}
                       </option>
-                      {cardChoices(p.candidate_card, all).map((c) => (
+                      {cardChoices(
+                        p.candidate_card,
+                        p.candidate_cards ?? all,
+                      ).map((c) => (
                         <option key={c} value={c}>
                           {c}
                         </option>

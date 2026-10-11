@@ -1,4 +1,6 @@
 "use client";
+import Link from "next/link";
+import { sessionHref } from "./session-route";
 import { useEffect, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { ago } from "@/components/pool/pool-progress";
@@ -216,8 +218,10 @@ export function SessionCard({
   open,
   onToggle,
   onChanged,
+  detail = false,
 }: {
   session: LiveSession;
+  detail?: boolean;
   open: boolean;
   onToggle: () => void;
   onChanged?: () => void;
@@ -235,6 +239,7 @@ export function SessionCard({
   ].slice(0, 4);
   return (
     <LiveRow
+      detail={detail}
       title={`${s.group} / ${s.task_folder}`}
       subtitle={s.run_id || s.session_id || t("manual session (no run)")}
       icon={Bot}
@@ -256,6 +261,19 @@ export function SessionCard({
       }
       actions={
         <>
+          {!detail &&
+            (sessionHref(s) ? (
+              <Link
+                className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
+                href={sessionHref(s)!}
+              >
+                {t("Session details")}
+              </Link>
+            ) : (
+              <span className="pg-live-action-note">
+                {t("This older session has no stable identifier.")}
+              </span>
+            ))}
           <ViewerAction
             url={s.viewer_url}
             status={s.view_status}

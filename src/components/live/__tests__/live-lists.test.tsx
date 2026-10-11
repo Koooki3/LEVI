@@ -84,7 +84,9 @@ describe("compact live rows", () => {
   });
   test("viewer actions preserve the session scope and do not expand the summary", async () => {
     const { host } = await render(<SessionsPanel sessions={[session]} />);
-    const link = host.querySelector("a")!;
+    const link = host.querySelector('a[href^="/local/"]')!;
+    const details = host.querySelector('a[href^="/live/sessions/"]')!;
+    expect(details.closest("button[aria-expanded]")).toBeNull();
     expect(link.getAttribute("href")).toBe(session.viewer_url ?? null);
     expect(link.closest("button[aria-expanded]")).toBeNull();
     await click(link);

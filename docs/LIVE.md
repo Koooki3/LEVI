@@ -852,3 +852,11 @@ Open:
 - A release-review run is not committable by anyone once it is archived (older than `keep_review_runs`); its verdict remains in the dataset state and the anchored records.
 - Without `--auto-approve` each batch needs a person at three gates (temporal plan, draft, review plan).
 - Other limits are listed above under "Limits".
+
+### Individual session pages
+
+Open **Session details** from an evaluation row or a session in the statistics table. `/live/sessions/<identity>` is a bookmarkable detail view of the current client status, the policy and task, recent episode, reset wait, and saved annotation statistics and downloads. The link preserves the source root, model and task folder, session and run IDs, and the dataset; the statistics use the dataset and the run ID (or the older session ID). Repeated names and ambiguous records are never guessed. Older manual records without an ID keep their inline details.
+
+When a client stops reporting or its status file is replaced, saved statistics can still be shown; this does not reconstruct a complete robot event history. A disabled workspace, missing dataset, and unreachable status or statistics are shown explicitly. Automatic labels remain unreviewed. A guided campaign can link to its strictly matched live client session; waiting, unavailable, mismatched and ambiguous associations have no detail link.
+
+The annotation timeline uses the same card background behind section labels to hide the playhead without white text boxes in the light theme. Live disclosures have a short entry transition, with both system and in-app reduced motion supported. Keyboard disclosure and viewer links remain separate controls.

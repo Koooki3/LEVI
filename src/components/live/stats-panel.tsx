@@ -2,6 +2,8 @@
 // The "Statistics" section of the live page: key figures, the evaluation
 // sessions, one row per episode, and downloads. Read-only; the data is
 // `GET /api/levi/live/stats` (docs/LIVE.md, "Statistics and reports").
+import Link from "next/link";
+import { statsSessionHref } from "./session-route";
 import { Badge, Select, SkeletonText } from "@/components/ds";
 import { Problem } from "@/components/pages-ui/feedback";
 import { useEffect, useRef, useState } from "react";
@@ -78,7 +80,15 @@ export function SessionsTable({ rows }: { rows: StatsSession[] }) {
             {rows.map((r) => (
               <tr key={`${r.dataset}/${r.session}`}>
                 <td>
-                  <code title={r.dataset ?? ""}>{r.session || "—"}</code>
+                  <span>
+                    {statsSessionHref(r) ? (
+                      <Link className="ds-focus" href={statsSessionHref(r)!}>
+                        <code>{r.session}</code>
+                      </Link>
+                    ) : (
+                      <code>{r.session || "—"}</code>
+                    )}
+                  </span>
                 </td>
                 <td className="num">{count(r.episodes)}</td>
                 <td className="num">{seconds(r.to_verdict_median_s)}</td>

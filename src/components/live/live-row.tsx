@@ -6,6 +6,7 @@ import { useLocale } from "@/components/levi-locale";
 
 /** Actions are siblings of the disclosure button, never nested in it. */
 export function LiveRow({
+  detail = false,
   title,
   subtitle,
   icon,
@@ -16,6 +17,7 @@ export function LiveRow({
   onToggle,
   children,
 }: {
+  detail?: boolean;
   title: string;
   subtitle?: string;
   icon: LucideIcon;
@@ -34,26 +36,36 @@ export function LiveRow({
       aria-label={title}
     >
       <div className="pg-live-row-head">
-        <button
-          type="button"
-          className="pg-live-row-toggle ds-focus"
-          aria-label={`${t(open ? "Collapse details" : "Expand details")}: ${title}${subtitle ? ` · ${subtitle}` : ""}`}
-          aria-expanded={open}
-          aria-controls={id}
-          onClick={onToggle}
-        >
-          <span className="pg-live-row-thumb" aria-hidden="true">
-            <Icon icon={icon} size="md" />
-          </span>
-          <span className="pg-live-row-title">
-            <strong>
-              <code>{title}</code>
-            </strong>
-            {subtitle && <span className="pg-pool-muted">{subtitle}</span>}
-          </span>
-          <span className="pg-live-row-summary">{summary}</span>
-          <Icon icon={open ? ChevronUp : ChevronDown} />
-        </button>
+        {detail ? (
+          <div className="pg-live-session-head">
+            <span className="pg-live-row-title">
+              <strong>{title}</strong>
+              <span>{subtitle}</span>
+            </span>
+            <span className="pg-live-row-summary">{summary}</span>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="pg-live-row-toggle ds-focus"
+            aria-label={`${t(open ? "Collapse details" : "Expand details")}: ${title}${subtitle ? ` · ${subtitle}` : ""}`}
+            aria-expanded={open}
+            aria-controls={id}
+            onClick={onToggle}
+          >
+            <span className="pg-live-row-thumb" aria-hidden="true">
+              <Icon icon={icon} size="md" />
+            </span>
+            <span className="pg-live-row-title">
+              <strong>
+                <code>{title}</code>
+              </strong>
+              {subtitle && <span className="pg-pool-muted">{subtitle}</span>}
+            </span>
+            <span className="pg-live-row-summary">{summary}</span>
+            <Icon icon={open ? ChevronUp : ChevronDown} />
+          </button>
+        )}
         {actions && <div className="pg-live-row-actions">{actions}</div>}
       </div>
       {open && (

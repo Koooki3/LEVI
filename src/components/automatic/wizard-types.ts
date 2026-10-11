@@ -1,3 +1,4 @@
+import type { LiveSession } from "@/components/live/types";
 // Types of the automatic-evaluation (AERI) wizard and campaign pages. They
 // follow levi2/design/aeri-ui-api-contract.md sections 2-4; a field the
 // contract does not list is not read here. Times are epoch milliseconds, ids
@@ -200,7 +201,21 @@ export type CampaignArmProgress = {
   unconfirmed?: number;
 };
 
+export type CampaignLiveSession = {
+  status:
+    | "waiting"
+    | "linked"
+    | "ended"
+    | "ambiguous"
+    | "mismatch"
+    | "unavailable";
+  segment: number;
+  session?: LiveSession;
+  candidates?: number;
+};
+
 export type CampaignSnapshot = {
+  live_session?: CampaignLiveSession;
   id: string;
   state: string;
   execution_mode?: CampaignExecutionMode | (string & {});
@@ -239,4 +254,5 @@ export type PendingCardEpisode = {
   run_id: string;
   number: number;
   candidate_card: string | null;
+  candidate_cards?: string[];
 };

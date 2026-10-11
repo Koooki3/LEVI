@@ -33,7 +33,7 @@ export interface LiveSession {
   root?: string;
   group: string;
   task_folder: string;
-  dataset?: string;
+  dataset?: string | null;
   state: string;
   reported_state?: string;
   crashed?: boolean;

@@ -2336,13 +2336,13 @@
 }
 
 /* The playhead line runs through the whole tracks region; a section's title
-   and description sit above it on the card colour, so no text is struck
+   and description sit above it on the same sunken card colour, so no text is struck
    through (the line shows again in the rows, where the tracks are). */
 .annotations-skin .tl-section-head > .tl-section-title,
 .annotations-skin .tl-section-head > .tl-section-sub {
   position: relative;
   z-index: 6;
-  background: var(--ds-surface-1);
+  background: var(--ds-surface-sunken);
 }
 
 /* No tooltip while the playhead is being dragged (the pointer stays over the
@@ -2367,5 +2367,14 @@
   margin: 0;
   color: var(--ds-text-primary);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Descriptions wrap with the timeline on narrow viewers. */
+.annotations-skin .tl-section-head {
+  flex-wrap: wrap;
+}
+.annotations-skin .tl-section-sub {
+  min-width: 0;
   overflow-wrap: anywhere;
 }

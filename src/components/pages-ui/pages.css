@@ -2569,3 +2569,61 @@
     padding: 0 var(--ds-space-3) var(--ds-space-3);
   }
 }
+
+/* The live overview shares one frame per section; inner rows use separators. */
+.pg-live .pg-live-section {
+  box-shadow: none;
+}
+.pg-live .pg-live-cards .pg-live-list-row {
+  background: transparent;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  box-shadow: none;
+}
+.pg-live .pg-live-cards .pg-live-list-row.fault {
+  box-shadow: inset 3px 0 0 var(--ds-danger);
+}
+.pg-live .pg-live-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: var(--ds-space-6);
+}
+.pg-live-session-head {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-4);
+}
+.pg-live-detail > .pg-live-section,
+.pg-live-detail > .pg-live-card {
+  margin-top: var(--ds-space-5);
+}
+@keyframes pg-live-detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--ds-motion-shift));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.pg-live-row-detail {
+  animation: pg-live-detail-in var(--ds-dur-base) var(--ds-ease-standard);
+}
+@media (max-width: 1100px) {
+  .pg-live .pg-live-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .pg-live-row-detail {
+    animation: none;
+  }
+}
+[data-motion="reduce"] .pg-live-row-detail {
+  animation: none;
+  transition: none;
+}

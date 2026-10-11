@@ -6,6 +6,7 @@ import {
 } from "@/components/ds/__tests__/dom";
 import { describe, expect, test } from "bun:test";
 import { useState } from "react";
+import { renderToString } from "react-dom/server";
 import { InspectorLayout, InspectorPortal } from "../inspector";
 
 setupDom();
@@ -37,6 +38,17 @@ function Page({ enabled }: { enabled: boolean }) {
 }
 
 describe("inspector column", () => {
+  test("server and initial client markup share the same viewport-independent snapshot", () => {
+    const wide = mockMatchMedia(["min-width: 1200px"]);
+    const server = renderToString(<Page enabled />);
+    wide();
+    const narrow = mockMatchMedia(["max-width: 1199px"]);
+    const client = renderToString(<Page enabled />);
+    narrow();
+    expect(client).toBe(server);
+    expect(server).toContain('data-open="true"');
+  });
+
   test("the form renders in the right column when it is enabled", async () => {
     const restore = mockMatchMedia(["min-width: 1200px"]);
     const { host } = await render(<Page enabled />);

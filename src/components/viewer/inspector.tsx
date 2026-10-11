@@ -47,12 +47,8 @@ export function useInspectorReveal(): (() => void) | null {
 const NARROW = "(max-width: 1199px)";
 
 function useNarrow(): boolean {
-  const [narrow, setNarrow] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      typeof window.matchMedia === "function" &&
-      window.matchMedia(NARROW).matches,
-  );
+  // Match the server snapshot; measure only after hydration.
+  const [narrow, setNarrow] = useState(false);
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
     const query = window.matchMedia(NARROW);
@@ -101,12 +97,11 @@ export function InspectorLayout({
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   // Open beside the content on wide windows; on narrow ones the drawer
   // starts collapsed so it does not cover the video.
-  const [open, setOpen] = useState(
-    () =>
-      typeof window === "undefined" ||
-      typeof window.matchMedia !== "function" ||
-      window.matchMedia("(min-width: 1200px)").matches,
-  );
+  const [open, setOpen] = useState(true);
+  useEffect(() => {
+    if (typeof window.matchMedia === "function")
+      setOpen(window.matchMedia("(min-width: 1200px)").matches);
+  }, []);
   const narrow = useNarrow();
   const asideRef = useRef<HTMLElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);

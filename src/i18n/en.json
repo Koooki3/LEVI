@@ -3643,5 +3643,21 @@
   "automatic.event.reason.hidden_until_labelled": "(hidden until you label the last episode)",
   "automatic.assess.decision.ready": "Ready",
   "automatic.assess.decision.reset_required": "Needs a reset",
-  "automatic.assess.decision.unknown": "Could not be judged"
+  "automatic.assess.decision.unknown": "Could not be judged",
+  "Back to live evaluation": "Back to live evaluation",
+  "Evaluation session details": "Evaluation session details",
+  "Session details": "Session details",
+  "Invalid session link": "Invalid session link",
+  "Open a session from live evaluation or its statistics table.": "Open a session from live evaluation or its statistics table.",
+  "Live status is unavailable. Saved statistics may still be available.": "Live status is unavailable. Saved statistics may still be available.",
+  "This session is no longer reporting. The statistics below describe saved annotation records, not a current robot state.": "This session is no longer reporting. The statistics below describe saved annotation records, not a current robot state.",
+  "No dataset is linked to this session yet. Statistics will appear after its episodes are registered.": "No dataset is linked to this session yet. Statistics will appear after its episodes are registered.",
+  "Live statistics are unavailable while the live workspace is disabled.": "Live statistics are unavailable while the live workspace is disabled.",
+  "This older session has no stable identifier.": "This older session has no stable identifier.",
+  "Waiting for this segment's evaluation client to report.": "Waiting for this segment's evaluation client to report.",
+  "The evaluation client is reporting this segment.": "The evaluation client is reporting this segment.",
+  "This segment's evaluation session has ended or stopped reporting.": "This segment's evaluation session has ended or stopped reporting.",
+  "Several sessions match this segment. No session was selected.": "Several sessions match this segment. No session was selected.",
+  "The evaluation client does not match this segment's settings.": "The evaluation client does not match this segment's settings.",
+  "The live evaluation status is unavailable.": "The live evaluation status is unavailable."
 }

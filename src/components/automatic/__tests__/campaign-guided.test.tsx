@@ -494,7 +494,26 @@ describe("layout card confirmation", () => {
     expect(host.querySelector(".ac-cards")?.textContent).toContain("Saved");
   });
 
-  test("'no card' is sent as null", async () => {
+  test("card candidates belong to the episode's segment, including non-current cards", async () => {
+    const a = api(() => snap(), {
+      getCampaignCards: mock(async () => ({
+        pending: [
+          { ...pendingCards[0], candidate_cards: ["c001", "older-card"] },
+        ],
+      })),
+    });
+    const { host } = await render(
+      <CampaignOverview campaignId="camp-1" api={a} intervalMs={50} />,
+    );
+    await waitFor(() => host.querySelector(".ac-cards select"));
+    const values = Array.from(
+      host.querySelector<HTMLSelectElement>(".ac-cards select")!.options,
+    ).map((o) => o.value);
+    expect(values).toContain("older-card");
+    expect(values).not.toContain("c002");
+  });
+
+  test("'no card' is an explicit final decision", async () => {
     const a = api(() => snap());
     const { host } = await render(
       <CampaignOverview campaignId="camp-1" api={a} intervalMs={50} />,
@@ -511,6 +530,7 @@ describe("layout card confirmation", () => {
       .calls[0];
     expect(call[2]).toBe("ep-1");
     expect(call[3]).toBeNull();
+    expect(call[4]).toBe("no_card");
     expect(host.querySelector(".ac-cards")?.textContent).toContain(
       "no card, not paired",
     );

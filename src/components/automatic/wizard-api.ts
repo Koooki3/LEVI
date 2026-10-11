@@ -235,17 +235,23 @@ export const getCampaignCards = (id: string) =>
     `${AUTO}/campaigns/${encodeURIComponent(id)}/cards`,
   );
 
-/** Say which layout card an episode had (`card` null: no card / it deviated). */
+/** Explicit no-card is final; withdraw reopens confirmation. */
 export const confirmCampaignCard = (
   id: string,
   commandId: string,
   episodeKey: string,
   card: string | null,
+  decision?: "confirm" | "no_card" | "withdraw",
 ) =>
   apiRequest<CommandResult>(
     "POST",
     `${AUTO}/campaigns/${encodeURIComponent(id)}/cards`,
-    { command_id: commandId, episode_key: episodeKey, card },
+    {
+      command_id: commandId,
+      episode_key: episodeKey,
+      card,
+      ...(decision ? { decision } : {}),
+    },
   );
 
 export const campaignCommand = (

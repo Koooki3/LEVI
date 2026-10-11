@@ -9,6 +9,7 @@ import { EyeOff, Link2, Pause, Play } from "lucide-react";
 import { Badge, Button, Progress, Table } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Note, RequestProblem } from "@/components/pages-ui/feedback";
+import { CampaignSessionLink } from "./campaign-live-session";
 import { CampaignCards } from "./campaign-cards";
 import { CampaignTodoCard } from "./campaign-todo";
 import {
@@ -213,6 +214,7 @@ export function CampaignOverview({
         )}
       </p>
 
+      <CampaignSessionLink value={value?.live_session} />
       {view.canAttach && (
         <Note tone="warning" role="alert">
           <strong>{t("automatic.campaign.controller.down")}</strong>{" "}

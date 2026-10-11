@@ -3643,5 +3643,21 @@
   "automatic.event.reason.hidden_until_labelled": "（在你标注上一个片段之前不显示）",
   "automatic.assess.decision.ready": "已就绪",
   "automatic.assess.decision.reset_required": "需要复位",
-  "automatic.assess.decision.unknown": "无法判断"
+  "automatic.assess.decision.unknown": "无法判断",
+  "Back to live evaluation": "返回实时评测",
+  "Evaluation session details": "评测会话详情",
+  "Session details": "会话详情",
+  "Invalid session link": "会话链接无效",
+  "Open a session from live evaluation or its statistics table.": "请从实时评测页面或统计表打开会话。",
+  "Live status is unavailable. Saved statistics may still be available.": "实时状态暂时不可用，已保存的统计可能仍可查看。",
+  "This session is no longer reporting. The statistics below describe saved annotation records, not a current robot state.": "此会话已停止上报。下方统计来自已保存的标注记录，不表示机器人当前状态。",
+  "No dataset is linked to this session yet. Statistics will appear after its episodes are registered.": "此会话尚未关联数据集，片段登记后即可查看统计。",
+  "Live statistics are unavailable while the live workspace is disabled.": "实时工作区未启用，暂时无法读取统计。",
+  "This older session has no stable identifier.": "此旧会话没有稳定编号，可在此展开查看。",
+  "Waiting for this segment's evaluation client to report.": "等待本段评测客户端上报。",
+  "The evaluation client is reporting this segment.": "评测客户端正在上报本段状态。",
+  "This segment's evaluation session has ended or stopped reporting.": "本段评测会话已结束或停止上报。",
+  "Several sessions match this segment. No session was selected.": "有多个会话符合本段条件，尚未选择任何会话。",
+  "The evaluation client does not match this segment's settings.": "评测客户端与本段设置不一致。",
+  "The live evaluation status is unavailable.": "实时评测状态暂时不可用。"
 }
