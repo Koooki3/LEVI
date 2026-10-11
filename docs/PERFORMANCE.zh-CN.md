@@ -384,3 +384,5 @@ Owned worker 提供 `collect_sdk_completion(request)`，返回原提交 token、
 `BorrowedRoleExecution(authority, runtime, lease, observer)` 用 `dispatch_existing(request, payload, role=..., episode_id=..., policy_epoch=...)` 与 `collect_existing(request)` 执行 Cycle 已签发的 grant，不调用 begin/finish/renew。`BorrowedCompletion` 返回原 request、SDK ACK、stop proof、新鲜整群观测及 CPU 结果，由 Cycle 再独立观测后唯一 finish。超时保留 pending；坏 ACK/探针撤销结果但保留同 request 的真实缓存 drain。迟到、撤销或关闭后的结果为 None。只有真实 SDK ACK 加新鲜完整整群 idle 能形成 stop proof；当前 running-group 合同不把整 worker 退出伪装成该证明。旧 `OwnedRoleRuntime.begin/collect` 独立入口保持兼容。没有 HTTP fallback、生产挂载或新真实 SDK 提供者。
 
 专属 `test_borrowed_cycle_execution.py` 检查要求新解释器和显式 `LEVI_JOINT_KERNEL_ROOT`，从记录的实际路径加载原 Kernel/Cycle 与候选 owned 文件。CPU 假 IPC 验证原 begin/finish 各一次、准确匹配的 SDK 收据结构，以及最后独立的完整整群观测。收据之后其他成员变忙会阻止发布并保留原槽。这是软件组合证据，未安装生产提供者、真实 SDK/native bootstrap、物理保持或 Orchestrator 挂载。
+
+RuntimeOwnership 新增 `owns_exact_request(request)` 纯身份查询，覆盖仍待排空的撤销或迟到请求；它不授予许可或证明静默。`accepts_exact_request(request, observation, now_ns=...)` 在同一锁下先用 `is` 确认原活动对象，再沿原结果许可校验。既有 `accepts_result`、revoke 与 finish 对旧调用者保留原公开按值语义。
