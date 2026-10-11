@@ -526,6 +526,22 @@ def _header_visibility(
     return None if checked else "source_run_binding_unknown"
 
 
+def _analysis_record_current(record, row):
+    """Match the analysis record to the current canonical episode labels."""
+    if record.get("episode_index") != row.get("episode_index"):
+        return False
+    temporal = row.get("temporal") if isinstance(row.get("temporal"), dict) else {}
+    if isinstance(temporal.get("committed_at"), (int, float)) and temporal[
+        "committed_at"
+    ] > (record.get("labelled_at") or 0):
+        return False
+    return (
+        record.get("operator") == stats.operator_brief(row.get("operator_label"))
+        and record.get("agent") == analysis._agent(row.get("verdict"))
+        and record.get("online") == analysis._online(row)
+    )
+
+
 def _records(snapshot, live_dir):
     key = ("records", live_dir)
     if key in snapshot.parsed:
@@ -1104,25 +1120,7 @@ def _session(
                 or row.get("state") != "done"
             ):
                 continue
-            if record.get("episode_index") != row.get("episode_index"):
-                stale = True
-                continue
-            temporal = (
-                row.get("temporal") if isinstance(row.get("temporal"), dict) else {}
-            )
-            if isinstance(temporal.get("committed_at"), (int, float)) and temporal[
-                "committed_at"
-            ] > (record.get("labelled_at") or 0):
-                stale = True
-                continue
-            # Compare labels to their current canonical source. Historical
-            # analysis is not allowed to keep a replaced label visible.
-            if (
-                record.get("operator")
-                != stats.operator_brief(row.get("operator_label"))
-                or record.get("agent") != analysis._agent(row.get("verdict"))
-                or record.get("online") != analysis._online(row)
-            ):
+            if not _analysis_record_current(record, row):
                 stale = True
                 continue
             selected.append(record)
@@ -1601,6 +1599,14 @@ def legacy_sources(
                 409,
                 {
                     "reason": "statistics_source_unknown",
+                    "statistics_visibility": "unknown",
+                },
+            )
+        if kind == "analysis" and not _analysis_record_current(record, row):
+            raise HTTPException(
+                409,
+                {
+                    "reason": "statistics_source_stale",
                     "statistics_visibility": "unknown",
                 },
             )
