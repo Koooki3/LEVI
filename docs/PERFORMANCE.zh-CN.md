@@ -121,3 +121,55 @@ except BudgetRejected as why:       # why.reason：too_large | busy | no_space |
 **被弃用的缓存。** 闲置时间和上限由使用缓存的一方执行，所以没人再打开的缓存会一直占着它的字节。`claim_abandoned(root, idle_s)` 是留给外部清理器的接口，用来整体删除这样的缓存：只有在该目录是 `DiskBudget` 缓存、没有存活的写入者、没有被租用的条目、并且其中的一切（目录本身、每个条目目录、每个 `.meta`）在 `idle_s` 秒内都没被碰过时，它才在持有缓存锁的情况下产出 `True`；清理器随后用一次 `rename` 把目录改成同级的另一个名字再删除，下一次使用会重建缓存。`is_abandoned(root, idle_s)` 回答同样的问题但不保持锁（只是提示）。
 
 **从外部清理这个目录。** 定时清理脚本仍可作为兜底，前提是遵守两条：跳过以 `.` 开头的名字（那是记账用的 `.budget`），并把整个条目目录当作一个整体。由于最后一次使用既记在条目目录上，也记在条目内的文件上，按条目内最新文件时间排序的脚本看到的顺序与本类一致。脚本删掉整个条目时，本类只会发现它不见了；只删了一部分时，该条目会被判为损坏并清掉剩余部分。
+
+## 显式启用的工作负载准入内核
+
+`levi.live.workload_broker.WorkloadBroker` 是供既有实时控制器使用的进程内
+准入内核，没有新增守护进程或资源调度系统。它不探测 GPU、不拿 flock、
+不启动 worker、不停止进程、不调模型，也不连接机器人。物理所有权仍由既有
+控制器和资源 driver 管理。这一检查点尚未接入控制器或运行服务。
+
+内核复用 `aeri.WorkloadSpec`、`Deadline`、`ResourcePressure`、`ResourceLease`、
+`AdmissionRejected` 和 `WORKLOAD_PRIORITY`。有界队列依次优先处理
+`policy_realtime`、`judge_critical`、`vision_light`、`background_annotation`、
+`batch`；同类先看最近的截止时间，再按到达顺序。此 GPU 内核明确拒绝只请求
+CPU 的工作；`any` 选择 GPU，不暗中回退 CPU。P0 安全、watchdog 和停止路径
+不调用或等待这个对象。
+
+`submit` 冻结工作负载的运行、片段、profile SHA-256、完整 p99 耗时与显存
+估计。`admit` 要求同运行、同时钟的新鲜压力、既有 GPU gate 开放，以及调用者
+授权的同片段、同 profile `SafeWindow`。窗口和所有权证明还须绑定当前 broker
+身份。VRAM、策略身份或模型状态未知、模型尚在加载、旧或未来压力、gate
+关闭或自相矛盾、缺少内存或耗时估计，都会拒绝准入。flock 可用不代表显存可用
+或控制窗口安全。关键判定不允许冷启动；完整耗时估计必须包含启动/唤醒、
+推理和结果投递，p99 加余量须同时落在截止时间、包含排队耗时的预算及安全
+窗口内。
+
+同一时刻只有一个 GPU 租约或预约占有物理槽，正向与复位轮换也不能并行。
+新 broker 默认所有权未知。首次准入前，`prove_idle` 要求可信控制器通过实际
+原 worker、子进程及 GPU 检查提供 `IdleProof`；不能使用模型回复，也不能因
+队列为空就假定退出。`bind_worker` 记录准确 PID、进程启动 ticks 和 boot
+身份；`accepts_result` 要求已有 worker 绑定、准确当前租约/epoch、结果权限
+未撤销且截止时间与租约未过期。
+
+取消、过期、压力失效和优先级抢占只撤结果权限，不释放物理槽。
+`preemption_request` 向所有者提供 `request_boundary` 或 `cooperative`
+请求，不发信号或指令。低优先 worker 只有在 `release_after_exit` 收到同一
+worker、全部子进程与本人 GPU 分配的新鲜 `ExitProof` 后，才实际让出。
+活着或状态未知的 owner 持续占槽。`release_unstarted` 也须明确核实预约
+从未启动 worker；取消后迟到的 worker 仍可绑定，避免丢失所有权。
+正在运行的策略不会因模型 gate 被抢占。租约 ID 包含新 broker 身份，每次
+发放递增 epoch；旧结果或退出证明不能释放新 owner。
+
+队列默认最多 128 项，上限 1024；满队列明确拒绝并施加背压。过期请求产生
+有界拒绝通知，溢出计数可见。快照与抢占信息只是本地状态，没有新增持久
+调度状态。调用在线程间原子执行；跨进程仍依赖既有 driver 和 GPU 所有权。
+
+**验证范围**：CPU/mock 测试覆盖并发、优先级、抢占、实际退出证明门禁、
+期限与排队耗时、显存余量、压力/窗口新鲜度、旧 epoch 与重启未知状态。
+这些测试不能证明实际策略 quiesce、GPU 显存交接或可用的 p99。真实
+`running` 仍关闭既有模型 gate，没有删除 busy state 或伪装成 waiting。
+可信的运行时策略 quiesce 证明入口尚未接通，因此步数上限前自主介入仍未
+验证。控制器接线、真实压力/退出探针、GPU 测量和真机测试是后续独立门禁。
+
+所有权证明还必须绑定当前租约代次，实际 worker 退出证明同时绑定租约 ID；旧空闲证明不能释放新预留。

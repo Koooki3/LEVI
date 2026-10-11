@@ -181,3 +181,69 @@ Scale. Every write and read lists the cache folder and every entry costs one `st
 **Abandoned caches.** Idle time and the limit are enforced by whoever uses the cache, so a cache that nobody opens again keeps its bytes. `claim_abandoned(root, idle_s)` is the interface for an outside cleaner that wants to remove such a cache as a whole: it yields `True`, while holding the cache's lock, only if the folder is a `DiskBudget` cache, no writer is alive, no entry is leased, and nothing in it (the folder, each entry folder, each `.meta`) was touched for `idle_s` seconds; the cleaner then renames the folder to a sibling name in one `rename` and deletes that, and the next use recreates the cache. `is_abandoned(root, idle_s)` answers the same question without keeping the lock (a hint only).
 
 **Cleaning the folder from outside.** A scheduled clean-up script may still work on the folder as a safety net, if it follows two rules: skip names that start with `.` (they are the bookkeeping, `.budget`), and treat a whole entry folder as one unit. Because the last use is recorded in files inside the entry as well as on the entry folder, a script that ranks entries by the newest file time sees the same order. If it deletes an entry, this class simply finds it gone; if it deletes part of one, the entry is found damaged and the rest removed.
+
+## Opt-in workload admission kernel
+
+`levi.live.workload_broker.WorkloadBroker` is an in-process admission kernel for
+the existing live controller, not a new daemon or resource scheduler. It does
+not probe the GPU, acquire a flock, start workers, stop processes, call a model
+or contact a robot. The existing controller and resource driver remain the
+physical owners. This checkpoint is not wired into the controller or services.
+
+The kernel reuses `aeri.WorkloadSpec`, `Deadline`, `ResourcePressure`,
+`ResourceLease`, `AdmissionRejected` and `WORKLOAD_PRIORITY`. Its bounded queue
+orders `policy_realtime`, `judge_critical`, `vision_light`,
+`background_annotation`, then `batch`; within a class, the earliest due time
+wins, followed by arrival order. CPU-only requests are explicitly refused by
+this GPU-only kernel; `any` selects GPU without a hidden CPU fallback. P0 safety,
+watchdog and stop paths never call or wait for this object.
+
+`submit` freezes a workload's run, episode, profile SHA-256, complete p99 duration
+and memory estimate. `admit` requires fresh same-run and same-clock pressure, an
+open existing gate and a caller-authorized `SafeWindow` for the same episode and
+profile. Window and ownership proofs also carry the current broker identity; ownership
+proofs bind the current lease epoch (and worker exit proofs its lease ID).
+Unknown VRAM, unknown policy presence, unknown/loading model state, old/future
+pressure, a closed or contradictory gate, missing memory or duration estimates
+all fail closed. A free flock is not proof of free VRAM or a safe control window.
+Critical judgement refuses a cold start. The complete duration estimate must
+include startup/wake, inference and result delivery; p99 plus a margin must fit
+both the deadline, the budget including queue time, and the safety window.
+
+Only one GPU lease/reservation physically owns the slot at a time, including
+forward/reset rotation. New broker instances default to unknown ownership.
+`prove_idle` needs an `IdleProof` from the trusted controller's actual previous
+worker, descendant and GPU checks before first admission. It must never be
+constructed from a model response or guessed because a queue is empty.
+`bind_worker` records exact PID, process start ticks and boot identity.
+`accepts_result` requires that worker binding, the exact current lease/epoch,
+an unrevoked permission and an unexpired deadline/lease.
+
+Cancellation, expiry, pressure failure and priority preemption withdraw result
+permission without releasing the physical slot. `preemption_request` exposes a
+`request_boundary` or `cooperative` request to the owner; it issues no signal or
+command. A lower preemptible worker yields to higher priority only after
+`release_after_exit` receives a fresh `ExitProof` for that exact worker, all
+its descendants and its owned GPU allocation. Live and unknown owners stay
+reserved. `release_unstarted` needs explicit fresh confirmation that the
+reservation never spawned a worker. A late worker may still be bound after
+cancellation so ownership cannot disappear. An already running policy is never
+preempted by a model gate. Lease IDs include a fresh broker identity and each
+grant advances the epoch; old results and old exit proofs cannot release a new
+owner.
+
+The queue defaults to 128 requests, capped at 1024; full queues apply explicit
+backpressure. Expired requests produce bounded rejection notices with an
+observable dropped-notice count. Snapshot and preemption reads are local state;
+there is no new persistent scheduler state. Atomic calls support caller threads;
+cross-process coordination still uses the existing driver and GPU ownership.
+
+**Validation boundary:** CPU/mock tests cover concurrent admission, priority,
+preemption, actual-exit proof requirements, deadlines and queue elapsed time,
+VRAM margins, pressure/window freshness, old epochs and restart uncertainty.
+They do not prove an actual policy quiesce, GPU memory handoff or useful p99.
+Real `running` still closes the existing model gate; no busy state is removed
+or renamed to waiting. No trustworthy runtime policy-quiesce proof has been
+wired, so autonomous intervention before the step limit remains unverified.
+Controller wiring, real pressure/exit probes, GPU measurements and robot tests
+are separate integration gates.
