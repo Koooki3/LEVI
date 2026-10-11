@@ -1,4 +1,5 @@
 "use client";
+import { ExpandableText } from "@/components/ds";
 import Link from "next/link";
 import { useLocale } from "@/components/levi-locale";
 import { ago } from "@/components/pool/pool-progress";
@@ -373,7 +374,9 @@ export function DatasetCard({
         </div>
       </header>
       {detail?.task_text && (
-        <p className="pg-live-prompt">“{detail.task_text}”</p>
+        <div className="pg-live-prompt">
+          <ExpandableText text={detail.task_text} />
+        </div>
       )}
 
       <div className="pg-live-stats">

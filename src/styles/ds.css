@@ -205,15 +205,19 @@
   align-items: center;
   justify-content: center;
   gap: var(--ds-space-2);
-  height: var(--ds-control-md);
-  padding: 0 var(--ds-space-3);
+  min-height: var(--ds-control-md);
+  height: auto;
+  padding: var(--ds-space-1) var(--ds-space-3);
   border: 1px solid transparent;
   border-radius: var(--ds-radius-sm);
   font: inherit;
   font-size: var(--ds-text-body-size);
   font-weight: var(--ds-weight-medium);
-  line-height: 1;
-  white-space: nowrap;
+  line-height: var(--ds-text-body-line);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
   cursor: pointer;
   user-select: none;
   transition:
@@ -226,12 +230,14 @@
   transform: scale(var(--ds-motion-press-scale));
 }
 .ds-btn--sm {
-  height: var(--ds-control-sm);
+  min-height: var(--ds-control-sm);
+  height: auto;
   padding: 0 var(--ds-space-2);
   font-size: var(--ds-text-callout-size);
 }
 .ds-btn--lg {
-  height: var(--ds-control-lg);
+  min-height: var(--ds-control-lg);
+  height: auto;
   padding: 0 var(--ds-space-4);
 }
 .ds-btn--primary {
@@ -561,13 +567,16 @@
   display: inline-flex;
   align-items: center;
   gap: var(--ds-space-1);
-  height: 22px;
-  padding: 0 var(--ds-space-2);
+  min-height: 22px;
+  max-width: 100%;
+  min-width: 0;
+  padding: var(--ds-space-1) var(--ds-space-2);
   border-radius: var(--ds-radius-xs);
   font-size: var(--ds-text-caption-size);
   line-height: var(--ds-text-caption-line);
   font-weight: var(--ds-weight-medium);
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .ds-badge .ds-icon {
   width: 14px;
@@ -679,6 +688,7 @@
 }
 .ds-card__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--ds-space-4);
@@ -698,6 +708,9 @@
 }
 .ds-card__actions {
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
   gap: var(--ds-space-2);
 }
 .ds-divider--horizontal {
@@ -1160,6 +1173,8 @@
 
 /* ── Table ─────────────────────────────────────────────────────────── */
 .ds-table-wrap {
+  min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--ds-separator);
   border-radius: var(--ds-radius-md);
@@ -1342,4 +1357,64 @@
 .ds-menu__shortcut {
   margin-left: var(--ds-space-4);
   font-size: var(--ds-text-caption-size);
+}
+
+/* Text-bearing flex/grid items may shrink; full text wraps, never clips. */
+.ds-card,
+.ds-field,
+.ds-tabs__panel {
+  min-width: 0;
+}
+.ds-card__header > div:first-child {
+  min-width: 0;
+  flex: 1 1 16rem;
+}
+.ds-card__title,
+.ds-card__description,
+.ds-field__label,
+.ds-field__hint,
+.ds-field__error,
+.ds-table td {
+  overflow-wrap: anywhere;
+}
+.ds-badge > span,
+.ds-tag > span,
+.ds-status > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ds-status {
+  min-width: 0;
+  max-width: 100%;
+}
+.ds-tag__remove {
+  flex-shrink: 0;
+}
+.ds-long-text {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.ds-long-text summary {
+  cursor: pointer;
+}
+.ds-long-text__label {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.ds-long-text__body {
+  white-space: pre-wrap;
+  margin: var(--ds-space-2) 0;
+}
+.ds-long-text details[open] .ds-long-text__preview {
+  display: none;
+}
+.ds-long-text summary:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+
+.ds-btn__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }

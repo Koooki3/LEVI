@@ -272,3 +272,9 @@ ESLint 的颜色规则和 `src` 里所有文件一样覆盖查看器的文件；
 `global-styles.test.ts` 检查页面基础、吸顶顶栏、字标、`levi.css` 的缺席、旧名称和 Tailwind 色板类；`brand.test.ts` 检查标识；`route-title.test.ts` 检查标签页标题；`lint-config.test.ts` 和 `src/__tests__/eslint-hex.test.ts` 检查颜色规则（覆盖每个源文件，例外都列出并带注释，`rgb()` / `hsl()` 也会被拦住）；`src/i18n/__tests__/catalog.test.ts` 检查语言目录；`recent.test.ts` 和 `home-data.test.ts` 检查首页的数据；`report-blocks.test.tsx` 检查报告页的排序表头（`aria-sort`、图标、提示）、指标变化图标和状态图标；`shell-dom.test.tsx` 检查组合键、命令面板里的数据集和对话框；`jobs-toast.test.tsx` 检查作业结果和进度；`motion-preference.test.tsx` 检查动效设置；`error-pages.test.tsx` 检查“找不到页面”和错误页。
 
 `bun test` 在 DOM（happy-dom，开发依赖）里运行组件测试。组件测试先引入 `./dom` 并调用 `setupDom()`，其中有 `render`、`press`、`click`、`focus`、`dropFocus`、`fire`、`flush`、`mockMatchMedia`。每个这样的测试文件结束后会移除 DOM 全局对象，其他测试仍在没有 DOM 的环境里运行。`tokens-contrast.test.ts` 还会在组件或样张页的 TSX 里发现颜色字面量（十六进制、`rgb()`、`hsl()`）或 Tailwind 任意值时报错。
+
+### 长内容与密集页面
+
+带文字的按钮、徽标、卡片标题按可用宽度换行。表格容器可通过键盘聚焦并横向滚动；文字单元格中的长路径换行，不撑宽整个页面。长任务指令和检查点使用 `ExpandableText`：短预览可展开完整、可选择的内容，并准确复制原文。省略号不会让内容失去查看入口。
+
+实时总览每页显示六个评测会话，修改过滤条件后回到第一页，行内展开和独立详情链接仍分开。查看器与删除等次要控件收进“会话操作”，详情链接直接可见。服务控制和报告放在原生、键盘可操作的折叠区，本页导航可直接到会话、标注、报告和服务。故障警示和机械臂健康状态保持可见。

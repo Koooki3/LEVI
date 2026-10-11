@@ -184,11 +184,14 @@ export default function LivePage() {
           )}
         </Note>
       )}
-      <Note tone="info">
-        {t(
-          "Watch evaluation sessions, the FR3 arm and background annotation. Expand a row for details. Finished sessions and pipelines can be deleted after a preview; manage individual source files in the local dataset viewer. Automatic results are unreviewed and their accuracy has not been evaluated.",
-        )}
-      </Note>
+      <details className="pg-live-intro">
+        <summary>{t("About live evaluation")}</summary>
+        <Note tone="info">
+          {t(
+            "Watch evaluation sessions, the FR3 arm and background annotation. Expand a row for details. Finished sessions and pipelines can be deleted after a preview; manage individual source files in the local dataset viewer. Automatic results are unreviewed and their accuracy has not been evaluated.",
+          )}
+        </Note>
+      </details>
       {status?.enabled !== false && (
         <LiveSummaryBar summary={liveSummary(sessions, rows, service)} />
       )}
@@ -230,6 +233,12 @@ export default function LivePage() {
               coreError={coreDown ? poll.error : ""}
             />
           )}
+          <nav className="pg-live-jump" aria-label={t("On this page")}>
+            <a href="#live-sessions">{t("Evaluation sessions")}</a>
+            <a href="#live-pipeline">{t("Annotation pipeline")}</a>
+            <a href="#live-stats-region">{t("Statistics")}</a>
+            <a href="#live-service-region">{t("Background service")}</a>
+          </nav>
           <LiveFilterBar
             filters={listFilters}
             options={filterOptions}
@@ -243,6 +252,7 @@ export default function LivePage() {
             <div className="pg-live-main">
               <div className="pg-live-slot o1">
                 <SessionsPanel
+                  key={JSON.stringify(listFilters)}
                   sessions={shownSessions}
                   total={sessions.length}
                   filtered={liveFiltersActive(listFilters)}
@@ -311,20 +321,30 @@ export default function LivePage() {
                   </div>
                 )}
               </section>
-              <StatsPanel
-                tick={poll.lastOk}
-                evaluating={isEvaluating(sessions, service)}
-                enabled={status?.enabled === true}
-              />
+              <details
+                className="pg-live-section pg-live-disclosure pg-live-slot o5"
+                id="live-stats-region"
+              >
+                <summary>{t("Statistics and reports")}</summary>
+                <StatsPanel
+                  tick={poll.lastOk}
+                  evaluating={isEvaluating(sessions, service)}
+                  enabled={status?.enabled === true}
+                />
+              </details>
             </div>
             <aside className="pg-live-side">
               <div className="pg-live-slot o2">
                 <Fr3Panel fr3={fr3} />
               </div>
-              <div className="pg-live-slot o4">
+              <details
+                className="pg-live-slot o4 pg-live-section pg-live-disclosure"
+                id="live-service-region"
+              >
+                <summary>{t("Background service")}</summary>
                 <LiveServiceBlock />
                 <ServicePanel status={status} alive={alive} now={now} />
-              </div>
+              </details>
             </aside>
           </div>
         </>

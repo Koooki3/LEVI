@@ -3659,5 +3659,16 @@
   "This segment's evaluation session has ended or stopped reporting.": "本段评测会话已结束或停止上报。",
   "Several sessions match this segment. No session was selected.": "有多个会话符合本段条件，尚未选择任何会话。",
   "The evaluation client does not match this segment's settings.": "评测客户端与本段设置不一致。",
-  "The live evaluation status is unavailable.": "实时评测状态暂时不可用。"
+  "The live evaluation status is unavailable.": "实时评测状态暂时不可用。",
+  "Full text": "完整内容",
+  "Copy full text": "复制完整内容",
+  "Text copied": "内容已复制",
+  "Could not copy the text": "无法复制内容",
+  "Evaluation session pages": "评测会话分页",
+  "Page {page} of {pages}": "第 {page} / {pages} 页",
+  "About live evaluation": "实时评测说明",
+  "On this page": "本页导航",
+  "Statistics and reports": "统计与报告",
+  "Background service": "后台服务",
+  "Session actions": "会话操作"
 }

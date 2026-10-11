@@ -21,7 +21,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 /**
  * Buttons. One `primary` per screen (graphite fill); `secondary` is outlined,
  * `ghost` has no frame until hovered, `danger` is only for an irreversible
- * action. Sizes: sm 28 px, md 32 px (default), lg 40 px.
+ * action. Minimum heights: sm 28 px, md 32 px (default), lg 40 px; long labels wrap.
  */
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   function Button(

@@ -43,3 +43,5 @@ export {
 export { Menu, type MenuItem } from "./Menu";
 export { Table, TableRow } from "./Table";
 export { ThemePicker } from "./ThemePicker";
+
+export { ExpandableText } from "./ExpandableText";

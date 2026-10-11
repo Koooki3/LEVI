@@ -1,5 +1,6 @@
 "use client";
 import type { HTMLAttributes, ReactNode, TableHTMLAttributes } from "react";
+import { useLocale } from "@/components/levi-locale";
 import { cx } from "./internal";
 
 /**
@@ -19,8 +20,14 @@ export function Table({
   density?: "compact" | "regular";
   children: ReactNode;
 }) {
+  const { t } = useLocale();
   return (
-    <div className="ds-table-wrap">
+    <div
+      className="ds-table-wrap ds-focus"
+      tabIndex={0}
+      role="region"
+      aria-label={typeof caption === "string" ? caption : t("Scrollable table")}
+    >
       <table
         className={cx("ds-table", `ds-table--${density}`, className)}
         {...rest}

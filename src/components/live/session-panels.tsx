@@ -18,6 +18,8 @@ import { Bot, OctagonAlert } from "lucide-react";
 import { EmptyLine, Problem } from "@/components/pages-ui/feedback";
 import {
   Badge,
+  Button,
+  ExpandableText,
   Icon,
   Progress,
   StatusDot,
@@ -274,33 +276,36 @@ export function SessionCard({
                 {t("This older session has no stable identifier.")}
               </span>
             ))}
-          <ViewerAction
-            url={s.viewer_url}
-            status={s.view_status}
-            updatedAt={s.updated_at}
-            dataset={datasetOfSession(s)}
-            onChanged={onChanged}
-          />
-          <LiveDeleteButton
-            target={
-              s.root && s.session_id
-                ? {
-                    kind: "session",
-                    root: s.root,
-                    group: s.group,
-                    task_folder: s.task_folder,
-                    session_id: s.session_id,
-                  }
-                : null
-            }
-            title={`${s.group} / ${s.task_folder} · ${s.run_id || s.session_id || ""}`}
-            blocked={
-              sessionIsBusy(s)
-                ? t("A running evaluation session cannot be deleted.")
-                : undefined
-            }
-            onChanged={onChanged}
-          />
+          <details className="pg-live-row-more" open={detail || undefined}>
+            <summary>{t("Session actions")}</summary>
+            <ViewerAction
+              url={s.viewer_url}
+              status={s.view_status}
+              updatedAt={s.updated_at}
+              dataset={datasetOfSession(s)}
+              onChanged={onChanged}
+            />
+            <LiveDeleteButton
+              target={
+                s.root && s.session_id
+                  ? {
+                      kind: "session",
+                      root: s.root,
+                      group: s.group,
+                      task_folder: s.task_folder,
+                      session_id: s.session_id,
+                    }
+                  : null
+              }
+              title={`${s.group} / ${s.task_folder} · ${s.run_id || s.session_id || ""}`}
+              blocked={
+                sessionIsBusy(s)
+                  ? t("A running evaluation session cannot be deleted.")
+                  : undefined
+              }
+              onChanged={onChanged}
+            />
+          </details>
         </>
       }
     >
@@ -325,7 +330,11 @@ export function SessionCard({
           )}
         </div>
       </header>
-      {s.prompt && <p className="pg-live-prompt">“{s.prompt}”</p>}
+      {s.prompt && (
+        <div className="pg-live-prompt">
+          <ExpandableText text={s.prompt} />
+        </div>
+      )}
       {fault && (
         <Problem
           live={false}
@@ -371,7 +380,7 @@ export function SessionCard({
             <>
               <code>{s.policy?.config || "—"}</code>
               <br />
-              <code>{s.policy?.checkpoint || "—"}</code>
+              <ExpandableText text={s.policy?.checkpoint || "—"} mono />
             </>
           ) : (
             "—"
@@ -437,7 +446,10 @@ export function SessionsPanel({
 }) {
   const { t } = useLocale();
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(0);
   sessions = sortSessions(sessions);
+  const pages = Math.ceil(sessions.length / 6);
+  const current = Math.min(page, Math.max(0, pages - 1));
   const cardKeys = sessionKeys(sessions);
   return (
     <section className="pg-live-section" aria-labelledby="live-sessions">
@@ -458,23 +470,52 @@ export function SessionsPanel({
         </EmptyLine>
       ) : (
         <div className="pg-live-cards">
-          {sessions.map((s, i) => (
-            <SessionCard
-              key={cardKeys[i]}
-              session={s}
-              open={open.has(cardKeys[i])}
-              onToggle={() =>
-                setOpen((previous) => {
-                  const next = new Set(previous);
-                  if (next.has(cardKeys[i])) next.delete(cardKeys[i]);
-                  else next.add(cardKeys[i]);
-                  return next;
-                })
-              }
-              onChanged={onChanged}
-            />
-          ))}
+          {sessions.slice(current * 6, current * 6 + 6).map((s, j) => {
+            const i = current * 6 + j;
+            return (
+              <SessionCard
+                key={cardKeys[i]}
+                session={s}
+                open={open.has(cardKeys[i])}
+                onToggle={() =>
+                  setOpen((previous) => {
+                    const next = new Set(previous);
+                    if (next.has(cardKeys[i])) next.delete(cardKeys[i]);
+                    else next.add(cardKeys[i]);
+                    return next;
+                  })
+                }
+                onChanged={onChanged}
+              />
+            );
+          })}
         </div>
+      )}
+      {pages > 1 && (
+        <nav
+          className="pg-live-pagination"
+          aria-label={t("Evaluation session pages")}
+        >
+          <Button
+            size="sm"
+            disabled={current === 0}
+            onClick={() => setPage(current - 1)}
+          >
+            {t("Previous")}
+          </Button>
+          <span aria-live="polite">
+            {t("Page {page} of {pages}")
+              .replace("{page}", String(current + 1))
+              .replace("{pages}", String(pages))}
+          </span>
+          <Button
+            size="sm"
+            disabled={current + 1 >= pages}
+            onClick={() => setPage(current + 1)}
+          >
+            {t("Next")}
+          </Button>
+        </nav>
       )}
     </section>
   );

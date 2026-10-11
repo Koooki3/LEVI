@@ -2627,3 +2627,69 @@
   animation: none;
   transition: none;
 }
+
+/* Long paths and commands stay inside their page/card, with full contents. */
+.pg-workbench {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pg-head > *,
+.pg-live-grid > *,
+.pg-live-main,
+.pg-live-side,
+.pg-note > :not(.ds-icon),
+.pg-live-row-head,
+.pg-live-row-summary,
+.pg-live-row-actions {
+  min-width: 0;
+}
+.pg-live-row-title {
+  overflow-wrap: anywhere;
+}
+.pg-live-dl dt {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pg-live-pagination,
+.pg-live-jump {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-3);
+  margin: var(--ds-space-3) 0;
+}
+.pg-live-disclosure > summary,
+.pg-live-intro > summary {
+  cursor: pointer;
+  font-weight: var(--ds-weight-medium);
+}
+.pg-live-intro {
+  margin: var(--ds-space-3) 0;
+}
+.pg-live-disclosure > .pg-live-section {
+  padding: var(--ds-space-3) 0 0;
+  border: 0;
+  background: transparent;
+}
+.pg-live :is(h2, details[id]) {
+  scroll-margin-top: calc(var(--levi-header-height, 56px) + var(--ds-space-4));
+}
+@media (max-width: 600px) {
+  .pg-live-dl {
+    grid-template-columns: minmax(0, 96px) minmax(0, 1fr);
+  }
+}
+
+.pg-live-row-more {
+  min-width: 0;
+  max-width: 100%;
+  font-size: var(--ds-text-caption-size);
+}
+.pg-live-row-more > summary {
+  cursor: pointer;
+}
+.pg-live-row-more[open] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}

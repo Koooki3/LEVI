@@ -3659,5 +3659,16 @@
   "This segment's evaluation session has ended or stopped reporting.": "This segment's evaluation session has ended or stopped reporting.",
   "Several sessions match this segment. No session was selected.": "Several sessions match this segment. No session was selected.",
   "The evaluation client does not match this segment's settings.": "The evaluation client does not match this segment's settings.",
-  "The live evaluation status is unavailable.": "The live evaluation status is unavailable."
+  "The live evaluation status is unavailable.": "The live evaluation status is unavailable.",
+  "Full text": "Full text",
+  "Copy full text": "Copy full text",
+  "Text copied": "Text copied",
+  "Could not copy the text": "Could not copy the text",
+  "Evaluation session pages": "Evaluation session pages",
+  "Page {page} of {pages}": "Page {page} of {pages}",
+  "About live evaluation": "About live evaluation",
+  "On this page": "On this page",
+  "Statistics and reports": "Statistics and reports",
+  "Background service": "Background service",
+  "Session actions": "Session actions"
 }
