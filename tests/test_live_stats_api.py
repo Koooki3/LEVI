@@ -112,7 +112,7 @@ def test_stats_answer_aggregates_sessions_and_a_page_of_episodes(live_stats):
     one = client.get("/api/levi/live/stats?dataset=g__u").json()
     assert one["summary"]["episodes"]["count"] == 2
     assert one["scope"] == {"dataset": "g__u", "session": None, "since": None}
-    assert one["datasets"] == ["g__t", "g__u"]  # the choices, not the scope
+    assert one["datasets"] == ["g__u"]  # only the authorized requested scope
     s1 = client.get("/api/levi/live/stats?session=s1").json()
     assert s1["summary"]["episodes"]["count"] == 4 and len(s1["sessions"]) == 1
     nothing = client.get("/api/levi/live/stats?dataset=g__x").json()
@@ -216,6 +216,12 @@ def test_nothing_secret_or_absolute_leaves_the_service(live_stats):
         client.get("/api/levi/live/stats/export?format=json").text,
     ]
     for text in texts:
+        if text.startswith("{"):
+            body = json.loads(text)
+            for identity in body.get("source_identities", []):
+                # The new consistency contract exposes only configured roots.
+                assert identity.pop("root") in c.watch.roots
+            text = json.dumps(body)
         assert str(c.workspace) not in text and "/home/" not in text
         assert "human.key" not in text and "api_key" not in text.lower()
         assert "demo_0009" in text

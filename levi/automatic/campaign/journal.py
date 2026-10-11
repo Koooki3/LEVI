@@ -370,10 +370,10 @@ def scan(path: Path, *, loader=None) -> Scan:
             return Scan()
     except FileNotFoundError:
         return Scan()
+    if loader is not None:
+        loader.count_lines(data.count(b"\n"))
     parts = data.split(b"\n")
     whole, tail = parts[:-1], parts[-1]
-    if loader is not None:
-        loader.count_lines(len(whole))
     result = Scan()
     previous = ZEROS
     offset = 0

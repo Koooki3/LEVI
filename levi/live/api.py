@@ -1,7 +1,8 @@
 """HTTP views for the live page (``/api/levi/live/*``).
 
 The GET routes only read files the supervisor and the robot side write, and
-none returns a token or a path outside the live workspace's own state.
+none returns a token. Results/statistics include authenticated configured root
+identities for consistency checks; other source file paths are withheld.
 
 Which live workspace: the one this LEVI runs on when it is a live workspace
 (the live service's own core), else the one ``locate.py`` finds
@@ -999,7 +1000,8 @@ def stats_view(
     """The quantitative statistics of the labelling (docs/LIVE.md, "Statistics
     and reports"): aggregates, one row per evaluation session and a page of
     per-episode rows (newest first), for everything or one dataset, session
-    or time range. Read from ``live/stats.jsonl``; no path, token or key."""
+    or time range. Read from ``live/stats.jsonl``; only authenticated configured root identities,
+    no other source path, token or key."""
     config = _result_config()
     if config is None:
         return _disabled()
@@ -1013,7 +1015,7 @@ def stats_view(
         since=since,
         include_excluded=include_excluded,
     )
-    return statsview.build(
+    payload = statsview.build(
         config,
         dataset=dataset,
         session=session,
@@ -1023,6 +1025,8 @@ def stats_view(
         include_excluded=include_excluded,
         sources=sources,
     )
+    payload["source_identities"] = sources["source_identities"]
+    return payload
 
 
 @router.get("/analysis")
@@ -1050,15 +1054,17 @@ def analysis_view(
     names = tuple(x for x in (stages or "").split(",") if x) or analysis.STAGES
     if len(names) > 50 or any(len(x) > 64 for x in names):
         raise HTTPException(400, "stages is a short comma-separated list")
+    if since not in (None, "") and sessions.parse_time(since) is None:
+        raise HTTPException(400, "since is an ISO time or epoch seconds")
+    sources = result_index.legacy_sources(
+        config,
+        _RESULT_READS.get(),
+        kind="analysis",
+        group=group or None,
+        task=task or None,
+        since=since,
+    )
     try:
-        sources = result_index.legacy_sources(
-            config,
-            _RESULT_READS.get(),
-            kind="analysis",
-            group=group or None,
-            task=task or None,
-            since=since,
-        )
         found = analysis.build(
             config,
             group=group or None,
@@ -1108,6 +1114,7 @@ def stats_export(
         include_excluded=include_excluded,
         sources=sources,
     )
+    payload["source_identities"] = sources["source_identities"]
     if format == "csv":
         body = statsfmt.to_csv(payload)
     elif format == "md":
@@ -1158,7 +1165,7 @@ def _result_config():
     )
     if written is None:
         return None
-    raw = snapshot.read(written)
+    raw = snapshot.read(written, max_bytes=result_index.MAX_CONFIG_BYTES)
     data = snapshot.admit(tomllib.loads(raw.decode("utf-8")))
     config = live_config.from_dict(data, str(written))
     config.service.workspace = str(root)

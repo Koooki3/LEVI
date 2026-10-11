@@ -39,7 +39,9 @@ AERI 会话缺少明确公开可见性记录时不会自动导出；其已发布
 
 结果目录与精确会话页面分别使用 `GET /api/levi/live/results` 和 `GET /api/levi/live/results/session?root=<已配置根>&group=<模型>&task=<任务>&session=<运行或会话ID>`。会话请求还接受 `session_id`、`run_id` 做一致性核对。根目录必须与服务端配置完全一致，身份字段不能选择任意文件路径。目录可按 `dataset`（规范数据集或已核实查看器别名）和 `run_id`（真实时间片段标注或审核运行，不是评测运行）筛选。跨根同名记录、同一任务的不同评测运行分别保留。
 
-JSON schema 为 `levi.live.result-index.v1`，每项含 `identity`、`status`、`result_visibility`、`analysis`、`records`、`runs`、`viewers`、`reports`、`policy`、`source`、`comparison`。`analysis` 复用既有实时汇总，人工与自动标签分别统计。`result_visibility` 为 `visible`、`withheld` 或 `unknown`；结局统计须同时满足 `visible` 和 `analysis` 非空。活动、盲态、身份未知、来源重绑定或发生变化时，不返回分析、记录、标注运行链接或报告文件。即使旧会话或状态文件没有 AERI 信息，也核对真实采集头的 `eval.aeri` 与片段角色。可读且无 AERI 标志的旧采集头可按原规则展示，缺失或不可读的采集头不能放行分析。
+JSON schema 为 `levi.live.result-index.v1`，每项含 `identity`、`status`、`result_visibility`、`statistics_visibility`、`analysis`、`records`、`runs`、`viewers`、`reports`、`policy`、`source`、`comparison`。`analysis` 复用既有实时汇总，人工与自动标签分别统计。`result_visibility` 为 `visible`、`withheld` 或 `unknown`；新会话分析须同时满足 `visible` 和 `analysis` 非空。活动、盲态、身份未知、来源重绑定或发生变化时，不返回分析、记录、标注运行链接或报告文件。即使旧会话或状态文件没有 AERI 信息，也分别核对真实采集头的 `metadata.aeri`、`metadata.eval.aeri` 与片段角色；任一盲态或未知格式都关闭分析。可读且无 AERI 标志的旧采集头可按原规则展示，缺失或不可读的采集头不能放行分析。
+
+`statistics_visibility` 独立控制既有实时统计、导出和最近片段。可信、无 AERI 标志且不属于多轮评测的普通会话在运行中可保持 `visible`，并保留核实后的精确数据集身份；新会话终态分析仍关闭。多轮评测统计保持关闭，沿用原多轮报告门。实际 `/stats`、`/stats/export`、`/analysis` 处理器通过同一请求快照核对规范来源、会话与采集头，复用原统计函数。混有盲态或未知来源的范围返回 HTTP 409，已核实的精确旧会话范围仍可查询。没有运行及采集头绑定的数据集级提前中止、丢弃聚合不能放行旧分析。筛选后的统计 `datasets` 只列获准范围，不再列全局选项。成功统计 JSON（包括 JSON 导出）新增 `source_identities`，每项含从实际消费来源认证的规范 `root`、`group`、`task`、`run_id`、`session_id`、`datasets`。页面与已选结果身份逐项核对；两次请求间同数据集和运行被重绑到另一来源根时，不能冒充原根显示。
 
 状态包含 `active`、`waiting_annotation`、`partial`、`reported`、`stale`、`missing_source`、`archived`、`rebound`、`unknown`、`blocked`，表达可用性和来源状态，不代表模型质量。请求期间来源或标签被替换会使响应失效。`/api/levi/live/results/session/download` 只接受相同身份及 `format=json|markdown`、`lang=en|zh`，现场生成带摘要值的当前只读快照，不发布或自动导出。目录报告保持独立的标签依据与版本，并明确其记录的来源哈希是否与当前快照一致；不跟随外部报告路径，也不把它们变成下载地址。历史规范会话的可见性无法核实时，仍保留目录身份和未核实的版本引用，关闭分析内容。
 
@@ -47,4 +49,4 @@ JSON schema 为 `levi.live.result-index.v1`，每项含 `identity`、`status`、
 
 多轮评测复用原有终态与盲性报告门，不把多轮分析冒充实时会话汇总。比较须有明确的多轮评测、精确子运行与组映射，以及一致的冻结策略和设置哈希。重置、标签依据、早停规则、覆盖率、运行提交和环境版本来自既有报告；存在差异或未核实条件时不能判为可比。模型名称和时间不能证明可比。历史不完整或丢弃片段无法精确归入会话时，其覆盖率保持未知。
 
-单次请求共享来源读取和解析索引，结束时核对固定的来源快照，不保留跨请求缓存。每个配置根最多扫描 1,000 份会话，全目录最多扫描 1,000 份数据集状态、1,000 份报告引用，每份文件最多 16 MiB。单次请求来源字节缓存最多 32 MiB，解析最多 250,000 个 JSON 值和 50,000 行分析记录；这些属于工程预算。读取前按剩余字节预算核对文件大小，标注运行 JSON 读取也遵守该预算，避免超界分配。目录返回 `complete`、`truncated`、`limits`；发生截断时关闭派生结果，不声称范围完整。这些接口不启动作业、不写源采集数据、不登记导出、不修改工作区状态。
+单次请求共享来源读取和解析索引，结束时核对固定的来源快照，不保留跨请求缓存。每个配置根最多扫描 1,000 份会话，全目录最多扫描 1,000 份数据集状态、1,000 份报告引用，每份文件最多 16 MiB。单次请求来源字节缓存最多 32 MiB，解析最多 250,000 个 JSON/TOML 值和 50,000 行 JSONL 记录；这些属于工程预算。读取前按剩余字节预算核对文件大小，TOML 配置另有 64 KiB 解析输入上限，在读取和解析前核对，通过 `limits`、`truncated` 的 `config_bytes` 明示；默认 CLI 配置加载不变。配置、多轮计划、journal、报告、标注运行 JSON 和关联工作区目录共用这些预算。JSON 解码前先计数值的起点，结束核验发现来源代次或大小变化时先拒绝再读取替换内容，避免超界分配。loader 仅是内部依赖，不暴露为 HTTP 请求参数。目录返回 `complete`、`truncated`、`limits`；发生截断时关闭派生结果，不声称范围完整。这些接口不启动作业、不写源采集数据、不登记导出、不修改工作区状态。

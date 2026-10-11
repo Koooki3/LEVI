@@ -404,6 +404,55 @@ def served(client, tmp_path, monkeypatch):
     c = cfg(tmp_path)
     cli.prepare(c)
     monkeypatch.setattr(api, "_workspace", lambda: Path(c.service.workspace))
+    monkeypatch.setattr(api, "_result_config", lambda: c)
+    original = stats.record
+
+    def record_with_canonical_sources(live_dir, row, *args, **kwargs):
+        import hashlib
+
+        value = original(live_dir, row, *args, **kwargs)
+        root = Path(c.watch.roots[0])
+        for normalized in stats.read(c.live_dir):
+            name, run, demo = (normalized[k] for k in ("dataset", "session", "demo"))
+            group = "legacy-" + hashlib.sha256(name.encode()).hexdigest()[:12]
+            source = root / group / "task"
+            directory = source / demo
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "metadata.json").write_text(
+                json.dumps({"eval": {"run_id": run}})
+            )
+            sessions = root / ".eval_sessions"
+            sessions.mkdir(exist_ok=True)
+            (sessions / (group + "__" + run + ".json")).write_text(
+                json.dumps(
+                    {
+                        "schema": "levi.eval.session.v1",
+                        "group": group,
+                        "task_folder": "task",
+                        "run_id": run,
+                        "session_id": run,
+                        "state": "running",
+                    }
+                )
+            )
+            path = mirror.state_path(c, name)
+            state = json.loads(path.read_text()) if path.exists() else {}
+            state.update(
+                name=name,
+                group=group,
+                task_folder="task",
+                root=str(root),
+                source=str(source),
+            )
+            state.setdefault("demos", {})[demo] = {
+                "state": "done",
+                "run_id": run,
+                "completed_at": normalized["timeline"]["completed_at"],
+            }
+            mirror.jsonio.write(path, state)
+        return value
+
+    monkeypatch.setattr(stats, "record", record_with_canonical_sources)
     return client, c
 
 
@@ -444,7 +493,7 @@ def test_csv_cells_that_start_like_a_formula_are_quoted():
 
 def test_a_record_with_nan_or_infinity_is_damaged_and_skipped(tmp_path, served):
     client, c = served
-    stats.record(c.live_dir, full("demo_ok", 0, session="s1"))
+    stats.record(c.live_dir, full("demo_0000", 0, session="s1"))
     path = c.live_dir / "stats.jsonl"
     line = json.dumps(full("demo_nan", 1, session="s1")).replace(
         '"attempts": 0', '"attempts": NaN'
@@ -455,7 +504,7 @@ def test_a_record_with_nan_or_infinity_is_damaged_and_skipped(tmp_path, served):
     )
     assert "Infinity" in inf
     path.write_text(path.read_text() + line + "\n" + inf + "\n")
-    assert [r["demo"] for r in stats.read(c.live_dir)] == ["demo_ok"]
+    assert [r["demo"] for r in stats.read(c.live_dir)] == ["demo_0000"]
     body = client.get("/api/levi/live/stats")
     assert body.status_code == 200 and body.json()["summary"]["episodes"]["count"] == 1
     assert client.get("/api/levi/live/stats/export?format=json").status_code == 200

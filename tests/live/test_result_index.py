@@ -347,7 +347,13 @@ def test_catalog_external_report_paths_are_not_followed(tmp_path, monkeypatch):
         "report": {"directory": str(external)},
         "basis": "operator",
     }
-    monkeypatch.setattr(catalog, "entries", lambda root: [fake])
+    fake["schema"] = catalog.SCHEMA
+    path = (
+        cfg.workspace
+        / "outputs/LEVI/evaluation-results/models/model-a/task-a/sessions/run-a/reference.json"
+    )
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(fake))
     read = result_index._Snapshot.read
 
     def guarded(self, path, **kw):
@@ -822,23 +828,28 @@ def test_directory_request_reads_and_parses_each_source_once(tmp_path, monkeypat
     validated = []
     parsed = []
     real_open = result_index._open_below
-    real_read = result_index._read_below
+    real_valid = result_index._Snapshot.valid
     real_load = json.loads
+    validating = False
 
     def count_open(root, parts):
-        opened.append(tuple(parts))
+        (validated if validating else opened).append(tuple(parts))
         return real_open(root, parts)
 
-    def count_read(root, parts, limit):
-        validated.append(tuple(parts))
-        return real_read(root, parts, limit)
+    def count_valid(snapshot):
+        nonlocal validating
+        validating = True
+        try:
+            return real_valid(snapshot)
+        finally:
+            validating = False
 
     def count_load(value, *a, **kw):
         parsed.append(1)
         return real_load(value, *a, **kw)
 
     monkeypatch.setattr(result_index, "_open_below", count_open)
-    monkeypatch.setattr(result_index, "_read_below", count_read)
+    monkeypatch.setattr(result_index._Snapshot, "valid", count_valid)
     monkeypatch.setattr(result_index.json, "loads", count_load)
     output = result_index.build(cfg)
     assert output["complete"] and output["truncated"] == []

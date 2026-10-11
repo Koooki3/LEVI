@@ -17,7 +17,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from levi import evaluation_results as catalog
-from levi.automatic.api import _open_below, _read_below
+from levi.automatic.api import _open_below
 
 from . import analysis, exclusion, sessions, stats
 
@@ -30,6 +30,7 @@ MAX_SESSIONS = 1000
 MAX_STATES = 1000
 MAX_CATALOG = 1000
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
+MAX_CONFIG_BYTES = 64 * 1024
 MAX_JSON_VALUES = 250_000
 MAX_RECORD_LINES = 50_000
 MISSING = (
@@ -54,24 +55,34 @@ class _Snapshot:
         self.json_values = 0
         self.record_lines = 0
 
-    def read(self, path, *, optional=False):
+    def read(self, path, *, optional=False, max_bytes=None):
         path = catalog._safe(Path(path))
+        limit = min(LIMIT, max_bytes) if max_bytes is not None else LIMIT
+        byte_flag = (
+            "config_bytes"
+            if max_bytes is not None and max_bytes < LIMIT
+            else "file_bytes"
+        )
         if path in self.files:
-            return self.files[path]
+            raw = self.files[path]
+            if raw is not None and len(raw) > limit:
+                self.truncated.add(byte_flag)
+                raise ValueError("Source input-byte budget exhausted")
+            return raw
         try:
             fd = _open_below(Path(path.anchor), path.parts[1:])
             try:
                 before = os.fstat(fd)
                 remaining = MAX_REQUEST_BYTES - self.bytes
-                if before.st_size > LIMIT:
-                    self.truncated.add("file_bytes")
+                if before.st_size > limit:
+                    self.truncated.add(byte_flag)
                     raise ValueError("Source file-byte budget exhausted")
                 if before.st_size > remaining:
                     self.truncated.add("request_bytes")
                     raise ValueError("Request source-byte budget exhausted")
-                raw = os.read(fd, min(LIMIT, remaining) + 1)
-                if len(raw) > LIMIT:
-                    self.truncated.add("file_bytes")
+                raw = os.read(fd, min(limit, remaining) + 1)
+                if len(raw) > limit:
+                    self.truncated.add(byte_flag)
                     raise ValueError("Source file-byte budget exhausted")
                 if len(raw) > remaining:
                     self.truncated.add("request_bytes")
@@ -118,11 +129,44 @@ class _Snapshot:
         if self.json_values >= MAX_JSON_VALUES:
             self.truncated.add("json_values")
             raise ValueError("Request JSON-value budget exhausted")
+        self._json_budget(raw)
         try:
-            value = json.loads(raw)
+            value = json.loads(raw, parse_constant=stats._reject)
         except RecursionError:
             raise ValueError("Source JSON nesting exceeds decoder limits") from None
         return self.admit(value)
+
+    def _json_budget(self, raw):
+        """Count lexical value starts before the decoder allocates containers."""
+        raw = raw.encode() if isinstance(raw, str) else raw
+        index, count = 0, 0
+        remaining = MAX_JSON_VALUES - self.json_values
+        length = len(raw)
+        while index < length:
+            char = raw[index]
+            if char in b" \t\r\n,:]}":
+                index += 1
+                continue
+            if char == 34:
+                index += 1
+                while index < length and raw[index] != 34:
+                    index += 2 if raw[index] == 92 else 1
+                index += 1
+                following = index
+                while following < length and raw[following] in b" \t\r\n":
+                    following += 1
+                if following < length and raw[following] == 58:
+                    continue  # an object key is not a parsed value
+            elif char in b"[{":
+                index += 1
+            else:
+                index += 1
+                while index < length and raw[index] not in b" \t\r\n,]}:":
+                    index += 1
+            count += 1
+            if count > remaining:
+                self.truncated.add("json_values")
+                raise ValueError("Request JSON-value budget exhausted")
 
     def admit(self, value):
         stack = [iter((value,))]
@@ -175,13 +219,30 @@ class _Snapshot:
         try:
             for path, original in self.files.items():
                 try:
-                    now = _read_below(
-                        Path(path.anchor), catalog._safe(path).parts[1:], LIMIT
-                    )
+                    fd = _open_below(Path(path.anchor), catalog._safe(path).parts[1:])
                 except FileNotFoundError:
-                    now = None
-                if now != original:
-                    return False
+                    if original is not None:
+                        return False
+                    continue
+                try:
+                    before = os.fstat(fd)
+                    stamp = (
+                        before.st_dev,
+                        before.st_ino,
+                        before.st_size,
+                        before.st_mtime_ns,
+                        before.st_ctime_ns,
+                    )
+                    # Reject a new generation before allocating its bytes. Each
+                    # validation read is bounded by its already-budgeted source.
+                    if original is None or stamp != self.artifacts.get(path):
+                        return False
+                    now = os.read(fd, len(original) + 1)
+                    after = os.fstat(fd)
+                    if now != original or before != after:
+                        return False
+                finally:
+                    os.close(fd)
             for path, original in self.artifacts.items():
                 info = catalog._safe(path).stat()
                 if (
@@ -378,6 +439,7 @@ def _header_visibility(
     snapshot, source, matching, run, session, *, active=False, include_excluded=False
 ):
     """Older C2 writers omit AERI; canonical capture headers must vouch for legacy data."""
+    checked = 0
     for state in matching.values():
         for demo, row in (state.get("demos") or {}).items():
             if (
@@ -416,25 +478,40 @@ def _header_visibility(
                 return "source_header_session_changed"
             markers = [
                 container["aeri"]
-                for container in (meta, evaluation)
+                for container in (meta, evaluation, session)
                 if "aeri" in container
             ]
             if any(not isinstance(marker, dict) for marker in markers):
                 return "source_aeri_visibility_unknown"
-            for marker in [meta, evaluation, *markers]:
+            for marker in [meta, evaluation, session, *markers]:
                 if any(
                     marker.get(key)
                     for key in ("campaign_id", "blinded", "operator_blind")
                 ):
                     return "source_campaign_uses_gated_report"
-                if any(
-                    key in marker and not isinstance(marker[key], bool)
-                    for key in ("blinded", "operator_blind")
-                ) or (
-                    "analysis_visibility" in marker
-                    and marker["analysis_visibility"] != "public"
+                if (
+                    any(
+                        key in marker and not isinstance(marker[key], bool)
+                        for key in ("blinded", "operator_blind")
+                    )
+                    or (
+                        "analysis_visibility" in marker
+                        and marker["analysis_visibility"] != "public"
+                    )
+                    or (
+                        "episode_role" in marker
+                        and marker["episode_role"] not in ("forward", "reset")
+                    )
+                    or (
+                        marker.get("campaign_id") is not None
+                        and (
+                            not isinstance(marker["campaign_id"], str)
+                            or not marker["campaign_id"]
+                        )
+                    )
                 ):
                     return "source_aeri_visibility_unknown"
+            checked += 1
             is_aeri = (
                 "aeri" in meta
                 or "aeri" in evaluation
@@ -446,7 +523,7 @@ def _header_visibility(
             )
             if is_aeri and (active or session.get("analysis_visibility") != "public"):
                 return "source_aeri_visibility_unknown"
-    return None
+    return None if checked else "source_run_binding_unknown"
 
 
 def _records(snapshot, live_dir):
@@ -985,6 +1062,18 @@ def _session(
                 "stale"
                 if withheld
                 in ("source_header_session_changed", "source_episode_changed")
+                or (
+                    withheld == "source_run_binding_unknown"
+                    and not active
+                    and any(
+                        row.get("run_id") and row.get("run_id") != current_run
+                        for state in matching.values()
+                        for row in (state.get("demos") or {}).values()
+                        if isinstance(row, dict) and not row.get("deleted")
+                    )
+                )
+                else "unknown"
+                if withheld == "source_run_binding_unknown"
                 else "blocked",
                 withheld,
             )
@@ -1206,6 +1295,7 @@ def scan_limits():
         "catalog_entries": MAX_CATALOG,
         "file_bytes": LIMIT,
         "request_bytes": MAX_REQUEST_BYTES,
+        "config_bytes": MAX_CONFIG_BYTES,
         "json_values": MAX_JSON_VALUES,
         "record_lines": MAX_RECORD_LINES,
     }
@@ -1326,7 +1416,7 @@ def _json_lines(snapshot, path, normalizer=None):
     return rows
 
 
-def _statistics_eligibility(config, snapshot, name, state, demo, row):
+def _statistics_eligibility(config, snapshot, name, state, demo, row, identities):
     group, task = state.get("group"), state.get("task_folder")
     if (
         not isinstance(group, str)
@@ -1360,6 +1450,11 @@ def _statistics_eligibility(config, snapshot, name, state, demo, row):
     raw = found[1]
     if raw.get("schema") != "levi.eval.session.v1" or raw.get("run_id") != run:
         return "unknown"
+    current_id = raw.get("session_id")
+    if current_id is not None and (
+        not isinstance(current_id, str) or not SESSION.fullmatch(current_id)
+    ):
+        return "unknown"
     if raw.get("campaign_id") or raw.get("blinded") or raw.get("operator_blind"):
         return "withheld"
     if ("aeri" in raw or "episode_role" in raw) and raw.get(
@@ -1370,7 +1465,19 @@ def _statistics_eligibility(config, snapshot, name, state, demo, row):
     denied = _header_visibility(
         snapshot, source, {name: state}, run, raw, active=active, include_excluded=True
     )
-    return "withheld" if denied else "visible"
+    if denied:
+        return "withheld"
+    identities.append(
+        {
+            "root": str(root),
+            "group": group,
+            "task": task,
+            "run_id": run,
+            "session_id": raw.get("session_id"),
+            "datasets": [name],
+        }
+    )
+    return "visible"
 
 
 def legacy_sources(
@@ -1407,12 +1514,21 @@ def legacy_sources(
                 or (task is not None and state.get("task_folder") != task)
             ):
                 continue
+            inc = state.get("incomplete") or {}
+            if state.get("discarded") or (
+                isinstance(inc, dict)
+                and any(inc.get(k) for k in ("count", "fr3_fault"))
+            ):
+                # These legacy dataset aggregates carry no run/header binding.
+                raise HTTPException(
+                    409,
+                    {
+                        "reason": "statistics_aggregate_source_unknown",
+                        "statistics_visibility": "unknown",
+                    },
+                )
             for demo, row in (state.get("demos") or {}).items():
-                if (
-                    isinstance(row, dict)
-                    and not row.get("deleted")
-                    and not exclusion.is_excluded(row)
-                ):
+                if isinstance(row, dict) and not row.get("deleted"):
                     checks.append((name, demo, row))
     else:
         base = config.live_dir / stats.FILE
@@ -1455,7 +1571,20 @@ def legacy_sources(
         selected, _hidden = statsview.scoped_rows(
             config, dataset, session, since, include_excluded, sources=sources
         )
-        checks = []
+        # Every (dataset, run) end used by the original engine must be trusted,
+        # including a pending demo not yet represented in stats.jsonl.
+        contributing_runs = {(r.get("dataset"), r.get("session")) for r in selected}
+        sources["records"] = stats.select(rows, dataset, session, since)
+        checks = [
+            (name, demo, row)
+            for name, state in states.items()
+            if not state.get("archived")
+            for demo, row in (state.get("demos") or {}).items()
+            if isinstance(row, dict)
+            and (name, row.get("run_id")) in contributing_runs
+            and not row.get("deleted")
+            and (include_excluded or not exclusion.is_excluded(row))
+        ]
     for record in selected:
         name, demo = record.get("dataset"), record.get("demo")
         state = states.get(name)
@@ -1470,13 +1599,14 @@ def legacy_sources(
             )
         checks.append((name, demo, row))
     checked = set()
+    identities = []
     for name, demo, row in checks:
         key = (name, row.get("run_id"))
         if key in checked:
             continue
         checked.add(key)
         visibility = _statistics_eligibility(
-            config, snapshot, name, states[name], demo, row
+            config, snapshot, name, states[name], demo, row, identities
         )
         if visibility != "visible":
             raise HTTPException(
@@ -1497,6 +1627,17 @@ def legacy_sources(
                 "truncated": sorted(snapshot.truncated),
             },
         )
+    grouped = {}
+    for identity in identities:
+        key = tuple(
+            identity[k] for k in ("root", "group", "task", "run_id", "session_id")
+        )
+        if key not in grouped:
+            grouped[key] = {**identity, "datasets": []}
+        grouped[key]["datasets"].extend(identity["datasets"])
+    for identity in grouped.values():
+        identity["datasets"] = sorted(set(identity["datasets"]))
+    sources["source_identities"] = list(grouped.values())
     return sources
 
 
