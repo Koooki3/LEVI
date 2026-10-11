@@ -5,7 +5,11 @@ Value operations use the registered source dataset key in its live workbench;
 the product keeps its own catalog and checkpoint/provider registry.
 """
 
+import contextlib
+import contextvars
+import functools
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -226,7 +230,7 @@ def state_of(name: str | None) -> Path | None:
     return link.state if link else None
 
 
-def target(name: str, own: Path | None = None) -> tuple[Path, str]:
+def _target(name: str, own: Path | None = None) -> tuple[Path, str]:
     """Canonical derived state and dataset key; never mutate process globals.
 
     Linked state must really remain in its registered workspace. An escaped
@@ -255,6 +259,7 @@ def target(name: str, own: Path | None = None) -> tuple[Path, str]:
     ]
     folders += [
         state / "agent" / "workbench.sqlite3",
+        state / "agent" / "locks",
         state / "agent" / "datasets" / link.source,
         state / "annotations" / link.source,
         state / "object_annotations" / link.source,
@@ -264,6 +269,56 @@ def target(name: str, own: Path | None = None) -> tuple[Path, str]:
         if folder.resolve() != folder:
             raise ValueError("Linked derived directories must not be symbolic links")
     return state, link.source
+
+
+_JOB_TARGETS = contextvars.ContextVar("linked_job_targets", default=None)
+
+
+def target(name: str, own: Path | None = None) -> tuple[Path, str]:
+    state, source = _target(name, own)
+    pinned = (_JOB_TARGETS.get() or {}).get(name)
+    if pinned and (state.resolve(), source) != pinned[:2]:
+        raise pinned[2](409, "The job's linked dataset source disappeared or changed")
+    return state, source
+
+
+@contextlib.contextmanager
+def job_scope(job, name, own, error):
+    """Pin a job's canonical identity for its whole operation, without globals."""
+    source = job.get("source")
+    if source is None:
+        if get(name) is not None:
+            raise error(409, "The linked job has no canonical source identity")
+        yield
+        return
+    if not isinstance(source, dict):
+        raise error(409, "Invalid canonical job source")
+    state, dataset = source.get("workbench"), source.get("dataset")
+    if (
+        not isinstance(state, str)
+        or not Path(state).is_absolute()
+        or not isinstance(dataset, str)
+    ):
+        raise error(409, "Invalid canonical job source")
+    expected = (Path(state).resolve(), dataset, error)
+    token = _JOB_TARGETS.set({**(_JOB_TARGETS.get() or {}), name: expected})
+    try:
+        target(name, own)
+        yield
+    finally:
+        _JOB_TARGETS.reset(token)
+
+
+def for_job(name_key, own, error):
+    def decorate(function):
+        @functools.wraps(function)
+        def wrapped(job, *args, **kwargs):
+            with job_scope(job, job[name_key], own(), error):
+                return function(job, *args, **kwargs)
+
+        return wrapped
+
+    return decorate
 
 
 def source_name(name: str) -> str:
@@ -368,3 +423,54 @@ def refuse_path(path) -> None:
             ):
                 return
         raise ReadOnly(READ_ONLY)
+
+
+def job_mark(state: Path, dataset: str) -> str:
+    return hashlib.sha256((str(state.resolve()) + "/" + dataset).encode()).hexdigest()[
+        :12
+    ]
+
+
+def reserve_job_id(directory: Path, name: str, own: Path) -> str:
+    from . import naming
+
+    if get(name) is None:
+        return naming.timestamp_id(directory, ".json")
+    state, source = target(name, own)
+    mark = job_mark(state, source)
+    return naming.timestamp_id(directory, "." + mark + ".json") + "." + mark
+
+
+def is_job_id(value: str) -> bool:
+    from . import naming
+
+    base, separator, mark = value.partition(".")
+    return naming.is_timestamp_id(base) and (
+        not separator or bool(re.fullmatch(r"[0-9a-f]{12}", mark))
+    )
+
+
+def for_dataset(name_key, own, error):
+    def decorate(function):
+        signature = inspect.signature(function)
+
+        @functools.wraps(function)
+        def wrapped(*args, **kwargs):
+            value = signature.bind(*args, **kwargs).arguments[name_key]
+            if not isinstance(value, str):
+                return function(*args, **kwargs)
+            name = value.removeprefix("local/")
+            if get(name) is None:
+                return function(*args, **kwargs)
+            state, source = target(name, own())
+            with job_scope(
+                {"source": {"workbench": str(state), "dataset": source}},
+                name,
+                own(),
+                error,
+            ):
+                return function(*args, **kwargs)
+
+        return wrapped
+
+    return decorate

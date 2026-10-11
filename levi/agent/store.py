@@ -75,10 +75,17 @@ class Conflict(ValueError):
 NEW_CALL = "new-call"
 
 
+def _canonical_write_path(path):
+    if Path(path).resolve() != Path(path).absolute():
+        raise ValueError("Agent derived paths must not contain symbolic links")
+    return Path(path)
+
+
 class Store:
     def __init__(self, state: Path):
         self.state = state
         self.root = state / "agent"
+        _canonical_write_path(self.root)
         self.root.mkdir(parents=True, exist_ok=True)
         with self.connect():
             pass
@@ -91,7 +98,7 @@ class Store:
         if not hasattr(_CONNECTIONS, "items"):
             _CONNECTIONS.items = _ThreadConnections()
         cache = _CONNECTIONS.items
-        path = str((self.root / "workbench.sqlite3").resolve())
+        path = str(_canonical_write_path(self.root / "workbench.sqlite3"))
         db = cache.get(path)
         if db is None:
             db = sqlite3.connect(path, timeout=30)
@@ -590,9 +597,9 @@ def dataset_lock(state, dataset):
 
     if not re.fullmatch(r"[\w.-]+", dataset) or dataset in {".", ".."}:
         raise ValueError("Invalid lock name")
-    folder = state / "agent/locks"
+    folder = _canonical_write_path(state / "agent/locks")
     folder.mkdir(parents=True, exist_ok=True)
-    with (folder / (dataset + ".lock")).open("a") as handle:
+    with _canonical_write_path(folder / (dataset + ".lock")).open("a") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         try:
             yield

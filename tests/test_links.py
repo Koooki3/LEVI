@@ -814,3 +814,182 @@ def test_live_agent_derived_subdirectories_cannot_redirect_to_source_views(
             store.put("runs", "fixture", {"dataset_key": NAME})
             store.run_dir("fixture")
     assert tree(view) == before
+
+
+@pytest.mark.parametrize("kind", ["value", "segmentation"])
+@pytest.mark.parametrize("rebind", [False, True])
+def test_live_job_source_survives_alias_removal_without_foreign_writes(
+    client, live, tmp_path, monkeypatch, kind, rebind
+):
+    from levi.recap import jobs as value_jobs
+    from levi.segmentation import jobs as seg_jobs
+
+    module = value_jobs if kind == "value" else seg_jobs
+    error = value_jobs.RecapError if kind == "value" else seg_jobs.SegError
+    key = "name" if kind == "value" else "dataset"
+    other = make_live(tmp_path / "second")
+    monkeypatch.setenv(links.ENV, f"{live},{other}" if rebind else str(live))
+    assert links.get(LINKED).workspace == live
+    job = {
+        "id": "20261011-0000",
+        key: LINKED,
+        "kind": "label",
+        "status": "running",
+        "source": {"dataset": NAME, "workbench": str(live / links.STATE)},
+    }
+    module._save(job)
+    saved = module.job_path(LINKED, job["id"])
+    original = saved.read_bytes()
+    archive = live / "live/datasets"
+    archive.mkdir()
+    (archive / (NAME + ".json")).write_text(json.dumps({"archived": True}))
+    assert (
+        (links.get(LINKED).workspace == other) if rebind else links.get(LINKED) is None
+    )
+    before = tree(other)
+    for action in [
+        lambda: module._save(job),
+        lambda: module.collect(job),
+        lambda: module._finish_watch(job, None),
+    ]:
+        with pytest.raises(error, match="source disappeared or changed"):
+            action()
+    with pytest.raises(error, match="source disappeared or changed"):
+        if kind == "value":
+            module._publish(job, {})
+        else:
+            module._finish_label(
+                job,
+                {"files": []},
+                lambda *args: pytest.fail("published foreign source"),
+            )
+    assert saved.read_bytes() == original
+    assert tree(other) == before
+
+
+@pytest.mark.parametrize("redirect", ["dataset", "jobs", "plans", "results", "lock"])
+def test_live_segmentation_paths_refuse_same_state_view_symlinks(
+    client, live, redirect
+):
+    from levi.segmentation import jobs
+
+    state = live / links.STATE
+    base = state / "segmentation" / NAME
+    base.mkdir(parents=True)
+    view = state / "views" / NAME
+    target = (
+        base
+        if redirect == "dataset"
+        else base / (".lock" if redirect == "lock" else redirect)
+    )
+    if target == base:
+        target.rmdir()
+    target.symlink_to(view, target_is_directory=True)
+    before = tree(view)
+    with pytest.raises(jobs.SegError, match="symbolic links"):
+        if redirect in {"dataset", "lock"}:
+            with jobs.locked(LINKED):
+                pytest.fail("accepted redirected lock")
+        elif redirect == "jobs":
+            jobs._save(
+                {
+                    "id": "20261011-0000",
+                    "dataset": LINKED,
+                    "source": {"dataset": NAME, "workbench": str(state)},
+                }
+            )
+        else:
+            jobs.start(LINKED, "label", "fake", {}, request={}, watch=False)
+    assert tree(view) == before
+
+
+@pytest.mark.parametrize("redirect", ["locks", "lock", "sqlite", "agent"])
+def test_live_agent_low_level_paths_refuse_view_symlinks(client, live, redirect):
+    from levi.agent.store import Store, dataset_lock
+
+    state = live / links.STATE
+    view = state / "views" / NAME
+    agent = state / "agent"
+    agent.mkdir()
+    target = {
+        "locks": agent / "locks",
+        "lock": agent / "locks" / (NAME + ".lock"),
+        "sqlite": agent / "workbench.sqlite3",
+        "agent": agent,
+    }[redirect]
+    if redirect == "lock":
+        target.parent.mkdir()
+    if target == agent:
+        target.rmdir()
+    target.symlink_to(view, target_is_directory=True)
+    before = tree(view)
+    with pytest.raises(ValueError, match="symbolic links"):
+        if redirect in {"locks", "lock"}:
+            with dataset_lock(state, NAME):
+                pytest.fail("accepted redirected lock")
+        else:
+            Store(state)
+    assert tree(view) == before
+
+
+@pytest.mark.parametrize("kind", ["value", "segmentation"])
+def test_linked_job_ids_bind_the_source_and_legacy_active_jobs_are_read_only(
+    client, live, tmp_path, monkeypatch, kind
+):
+    from levi.recap import jobs as value_jobs
+    from levi.segmentation import jobs as seg_jobs
+
+    module = value_jobs if kind == "value" else seg_jobs
+    error = value_jobs.RecapError if kind == "value" else seg_jobs.SegError
+    key = "name" if kind == "value" else "dataset"
+    other = make_live(tmp_path / "same-name")
+    monkeypatch.setenv(links.ENV, f"{live},{other}")
+    first, second = sorted(links.links(), key=lambda name: name != LINKED)
+    one = links.reserve_job_id(module._jobs_dir(first), first, catalog.STATE)
+    two = links.reserve_job_id(module._jobs_dir(second), second, catalog.STATE)
+    assert one != two and links.is_job_id(one) and links.is_job_id(two)
+    assert len(one.rsplit(".", 1)[1]) == 12
+    old = {
+        "id": "20261011-0000",
+        key: first,
+        "status": "running",
+        "source": {"dataset": NAME, "workbench": str(live / links.STATE)},
+    }
+    for action in [module.cancel, module.collect]:
+        with pytest.raises(error, match="read-only"):
+            action(old)
+    old["status"] = "succeeded"
+    assert module.collect(old) == old
+    foreign = {
+        **old,
+        "source": {**old["source"], "workbench": str(other / links.STATE)},
+    }
+    assert module._key(old) != module._key(foreign)
+    other_dataset = {**old, "source": {**old["source"], "dataset": "another"}}
+    assert module._key(old) != module._key(other_dataset)
+
+
+def test_rebound_live_alias_refreshes_the_cached_media_source(
+    client, live, tmp_path, monkeypatch
+):
+    from levi.agent import media
+    from levi.agent.schema import TaskContext
+
+    other = make_live(tmp_path / "second-media")
+    monkeypatch.setenv(links.ENV, f"{live},{other}")
+    context = TaskContext(
+        repo_id="local/" + LINKED,
+        instruction="Pick the eggplant",
+        provider="fake",
+        episodes=[0],
+        cameras=["observation.images.hand"],
+    )
+    first = media.state_for(context)
+    assert first.root == live / links.STATE / "views" / NAME
+    archive = live / "live/datasets"
+    archive.mkdir()
+    (archive / (NAME + ".json")).write_text(json.dumps({"archived": True}))
+    second = media.state_for(context)
+    assert second is not first
+    assert second.root == other / links.STATE / "views" / NAME
+    assert second.annotations_dir.is_relative_to(other / links.STATE)

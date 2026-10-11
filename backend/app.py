@@ -428,7 +428,10 @@ def _ensure_state(req: DatasetRef) -> DatasetState:
     if (
         cached is not None
         and cached.local_path
-        and _info_signature(cached.root) != cached.info_signature
+        and (
+            (req.local_path and cached.root.resolve() != Path(req.local_path).resolve())
+            or _info_signature(cached.root) != cached.info_signature
+        )
     ):
         _states.pop(key, None)
         cached = None

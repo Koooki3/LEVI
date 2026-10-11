@@ -162,17 +162,34 @@ def root(dataset: str) -> Path:
     folder = state / "segmentation" / naming.catalog_name(source)
     if not folder.resolve().is_relative_to(state.resolve()):
         raise ValueError("Segmentation results must remain inside derived state")
-    return folder
+    return _safe_path(folder)
+
+
+def _safe_path(path: Path) -> Path:
+    if path.resolve() != path.absolute():
+        raise SegError(409, "Segmentation paths must not contain symbolic links")
+    return path
+
+
+def _key(job):
+    return (
+        (
+            str(Path(job["source"]["workbench"]) / job["source"]["dataset"])
+            if job.get("source")
+            else job["dataset"]
+        ),
+        job["id"],
+    )
 
 
 def _jobs_dir(dataset: str) -> Path:
-    return root(dataset) / "jobs"
+    return _safe_path(root(dataset) / "jobs")
 
 
 def job_path(dataset: str, job_id: str) -> Path:
-    if not naming.is_timestamp_id(job_id):
+    if not links.is_job_id(job_id):
         raise SegError(400, "Invalid segmentation job ID")
-    return _jobs_dir(dataset) / f"{job_id}.json"
+    return _safe_path(_jobs_dir(dataset) / f"{job_id}.json")
 
 
 _HELD = threading.local()
@@ -194,7 +211,7 @@ def locked(dataset: str) -> Iterator[None]:
                 depth[dataset] -= 1
             return
         folder.mkdir(parents=True, exist_ok=True)
-        with (folder / ".lock").open("a") as handle:
+        with _safe_path(folder / ".lock").open("a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
             depth[dataset] = 1
             try:
@@ -217,6 +234,7 @@ def public(job: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+@links.for_job("dataset", lambda: paths.STATE, SegError)
 def _save(job: dict[str, Any]) -> None:
     catalog.atomic(job_path(job["dataset"], job["id"]), job)
 
@@ -231,7 +249,7 @@ def jobs(dataset: str) -> list[dict[str, Any]]:
         return []
     rows = []
     for path in folder.glob("*.json"):
-        if not naming.is_timestamp_id(path.stem):
+        if not links.is_job_id(path.stem):
             continue
         value = catalog.read(path, None)
         if value and value.get("id") == path.stem:
@@ -250,6 +268,7 @@ def find(dataset: str, job_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------- start
 
 
+@links.for_dataset("dataset", lambda: paths.STATE, SegError)
 def start(
     dataset: str,
     kind: str,
@@ -281,12 +300,12 @@ def start(
                         f"A {kind} job ({job['id']}) is already running for this dataset",
                     )
         base = root(dataset)
-        job_id = naming.timestamp_id(_jobs_dir(dataset), ".json")
-        plan_path = base / "plans" / f"{job_id}.json"
-        result_path = base / "results" / f"{job_id}.json"
-        log_path = _jobs_dir(dataset) / f"{job_id}.log"
-        progress_path = _jobs_dir(dataset) / f"{job_id}.progress.json"
-        staging = base / "staging" / job_id
+        job_id = links.reserve_job_id(_jobs_dir(dataset), dataset, paths.STATE)
+        plan_path = _safe_path(base / "plans" / f"{job_id}.json")
+        result_path = _safe_path(base / "results" / f"{job_id}.json")
+        log_path = _safe_path(_jobs_dir(dataset) / f"{job_id}.log")
+        progress_path = _safe_path(_jobs_dir(dataset) / f"{job_id}.progress.json")
+        staging = _safe_path(base / "staging" / job_id)
         plan = {**plan, "job_id": job_id, "provider": provider}
         if kind == "label":
             plan["output_dir"] = str(staging)
@@ -353,14 +372,14 @@ def start(
                 )
                 _save(job)
                 raise SegError(503, job["error"]) from exc
-        _PROCESSES[(dataset, job_id)] = process
+        _PROCESSES[_key(job)] = process
         children.track(process, f"segmentation-{kind}", job_id)
         job.update(status="running", pid=process.pid, started_at=time.time())
         _save(job)
     if watch:
         thread = threading.Thread(
             target=_watch,
-            args=(process, dataset, job_id),
+            args=(process, job.copy()),
             name=f"seg-watch-{job_id}",
             daemon=True,
         )
@@ -387,7 +406,7 @@ def _log_tail(job: dict[str, Any]) -> str | None:
 
 
 def _alive(job: dict[str, Any]) -> bool:
-    process = _PROCESSES.get((job["dataset"], job["id"]))
+    process = _PROCESSES.get(_key(job))
     if process is not None:
         return process.poll() is None
     pid = job.get("pid")
@@ -421,11 +440,10 @@ def _stop(process: subprocess.Popen, grace: float = 10.0) -> None:
         process.wait()
 
 
-def _watch(process: subprocess.Popen, dataset: str, job_id: str) -> None:
+def _watch(process: subprocess.Popen, job: dict[str, Any]) -> None:
     """Stop a worker past its time limit or without progress."""
     limit = float(os.getenv("LEVI_SEG_TIMEOUT_SECONDS", "43200"))
     stall = float(os.getenv("LEVI_SEG_STALL_SECONDS", "1800"))
-    job = _read(dataset, job_id) or {}
     watched = [Path(job.get("progress_path", "")), Path(job.get("log_path", ""))]
     started = time.time()
     reason = None
@@ -445,6 +463,16 @@ def _watch(process: subprocess.Popen, dataset: str, job_id: str) -> None:
             continue
         _stop(process)
         break
+    try:
+        _finish_watch(job, reason)
+    except SegError:
+        _forget(_key(job))
+
+
+@links.for_job("dataset", lambda: paths.STATE, SegError)
+def _finish_watch(job, reason):
+    process_key = _key(job)
+    dataset, job_id = job["dataset"], job["id"]
     if reason:
         with locked(dataset):
             current = _read(dataset, job_id)
@@ -456,7 +484,7 @@ def _watch(process: subprocess.Popen, dataset: str, job_id: str) -> None:
                     finished_at=time.time(),
                 )
                 _save(current)
-        _forget((dataset, job_id))
+        _forget(process_key)
         return
     current = _read(dataset, job_id)
     # A distillation needs no dataset transaction to finish: register it now.
@@ -506,6 +534,7 @@ def awaiting_publish(job: dict[str, Any]) -> bool:
     )
 
 
+@links.for_job("dataset", lambda: paths.STATE, SegError)
 def collect(job: dict[str, Any], publish: Publisher | None = None) -> dict[str, Any]:
     """Reconcile a finished worker into its result, exactly once.
 
@@ -514,11 +543,15 @@ def collect(job: dict[str, Any], publish: Publisher | None = None) -> dict[str, 
     finished labelling job stays ``running`` until a caller that can
     publish looks at it."""
     if job.get("status") in FINISHED:
-        _forget((job["dataset"], job["id"]))
+        _forget(_key(job))
         return job
+    if job.get("source") and "." not in job["id"]:
+        raise SegError(
+            409, "Legacy linked jobs are read-only; create a source-bound job"
+        )
     dataset = job["dataset"]
     result_path = Path(str(job["result_path"]))
-    process = _PROCESSES.get((dataset, job["id"]))
+    process = _PROCESSES.get(_key(job))
     return_code = process.poll() if process is not None else None
     if not result_path.is_file() and return_code is None and _alive(job):
         progress = _progress(job)
@@ -535,7 +568,7 @@ def collect(job: dict[str, Any], publish: Publisher | None = None) -> dict[str, 
     with locked(dataset):
         job = _read(dataset, job["id"]) or job
         if job.get("status") in FINISHED:
-            _forget((dataset, job["id"]))
+            _forget(_key(job))
             return job
         if result_path.is_file():
             try:
@@ -563,10 +596,11 @@ def collect(job: dict[str, Any], publish: Publisher | None = None) -> dict[str, 
                 finished_at=time.time(),
             )
         _save(job)
-    _forget((dataset, job["id"]))
+    _forget(_key(job))
     return job
 
 
+@links.for_job("dataset", lambda: paths.STATE, SegError)
 def _finish_label(
     job: dict[str, Any], result: dict[str, Any], publish: Publisher | None
 ) -> None:
@@ -604,6 +638,7 @@ def _finish_label(
     shutil.rmtree(job["staging"], ignore_errors=True)
 
 
+@links.for_job("dataset", lambda: paths.STATE, SegError)
 def _finish_distil(job: dict[str, Any], result: dict[str, Any]) -> None:
     directory = Path(result["model_dir"])
     name = directory.name
@@ -620,11 +655,16 @@ def _finish_distil(job: dict[str, Any], result: dict[str, Any]) -> None:
     )
 
 
+@links.for_job("dataset", lambda: paths.STATE, SegError)
 def cancel(job: dict[str, Any]) -> dict[str, Any]:
     if job.get("status") in FINISHED:
-        _forget((job["dataset"], job["id"]))
+        _forget(_key(job))
         return job
-    process = _PROCESSES.get((job["dataset"], job["id"]))
+    if job.get("source") and "." not in job["id"]:
+        raise SegError(
+            409, "Legacy linked jobs are read-only; create a source-bound job"
+        )
+    process = _PROCESSES.get(_key(job))
     if process is not None and process.poll() is None:
         _stop(process, grace=5.0)
     elif isinstance(job.get("pid"), int) and children.identity(job["pid"]) is not None:
@@ -636,7 +676,7 @@ def cancel(job: dict[str, Any]) -> dict[str, Any]:
             current.update(status="cancelled", finished_at=time.time())
             _save(current)
         job = current
-    _forget((job["dataset"], job["id"]))
+    _forget(_key(job))
     shutil.rmtree(job.get("staging") or "", ignore_errors=True)
     if job.get("kind") == "distil" and job.get("model"):
         # The model folder is only listed with a complete manifest; a

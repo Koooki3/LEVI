@@ -287,7 +287,7 @@ def _jobs_dir(name: str) -> Path:
 
 
 def job_path(name: str, job_id: str) -> Path:
-    if not naming.is_timestamp_id(job_id):
+    if not links.is_job_id(job_id):
         raise RecapError(400, "Invalid RECAP job ID")
     return _jobs_dir(name) / f"{job_id}.json"
 
@@ -309,6 +309,7 @@ def public(job: dict[str, Any]) -> dict[str, Any]:
     return value
 
 
+@links.for_job("name", lambda: catalog.STATE, RecapError)
 def _save(job: dict[str, Any]) -> None:
     catalog.atomic(job_path(job["name"], job["id"]), job)
 
@@ -323,9 +324,7 @@ def jobs(name: str) -> list[dict[str, Any]]:
         return []
     rows = []
     for path in folder.glob("*.json"):
-        if path.name.endswith(".progress.json") or not naming.is_timestamp_id(
-            path.stem
-        ):
+        if path.name.endswith(".progress.json") or not links.is_job_id(path.stem):
             continue
         value = store.load_json(path)
         if value and value.get("id") == path.stem:
@@ -336,7 +335,7 @@ def jobs(name: str) -> list[dict[str, Any]]:
 
 def find(job_id: str, name: str | None = None) -> dict[str, Any] | None:
     """A job by id, in the given dataset or (without one) any dataset."""
-    if not naming.is_timestamp_id(job_id):
+    if not links.is_job_id(job_id):
         raise RecapError(400, "Invalid RECAP job ID")
     if name:
         return _read(name, job_id)
@@ -539,6 +538,7 @@ def _static_filter(
     return record, keeps
 
 
+@links.for_dataset("repo_id", lambda: catalog.STATE, RecapError)
 def start(
     repo_id: str,
     checkpoint: str,
@@ -665,7 +665,7 @@ def start(
         if writing == store.MODELS and episodes is not None:
             _refuse_unmergeable(ds, manifest, request, filtering, folder)
         base = store.root(ds.name)
-        job_id = naming.timestamp_id(_jobs_dir(ds.name), ".json")
+        job_id = links.reserve_job_id(_jobs_dir(ds.name), ds.name, catalog.STATE)
         plan_path = store.safe_path(base / "plans" / f"{job_id}.json")
         result_path = store.safe_path(base / "results" / f"{job_id}.json")
         log_path = _jobs_dir(ds.name) / f"{job_id}.log"
@@ -780,14 +780,14 @@ def start(
                 )
                 _save(job)
                 raise RecapError(400, job["error"]) from exc
-        _PROCESSES[(ds.name, job_id)] = process
+        _PROCESSES[_key(job)] = process
         children.track(process, "recap_value", job_id)
         job.update(status="running", pid=process.pid, started_at=time.time())
         _save(job)
     if watch:
         thread = threading.Thread(
             target=_watch,
-            args=(process, ds.name, job_id),
+            args=(process, job.copy()),
             name=f"recap-watch-{job_id}",
             daemon=True,
         )
@@ -814,7 +814,14 @@ def _log_tail(job: dict[str, Any]) -> str | None:
 
 
 def _key(job: dict[str, Any]) -> tuple[str, str]:
-    return (job["name"], job["id"])
+    return (
+        (
+            str(Path(job["source"]["workbench"]) / job["source"]["dataset"])
+            if job.get("source")
+            else job["name"]
+        ),
+        job["id"],
+    )
 
 
 def _alive(job: dict[str, Any]) -> bool:
@@ -854,12 +861,11 @@ def _stop(process: subprocess.Popen, grace: float = 10.0) -> None:
         process.wait()
 
 
-def _watch(process: subprocess.Popen, name: str, job_id: str) -> None:
+def _watch(process: subprocess.Popen, job: dict[str, Any]) -> None:
     """Stop a worker past its time limit or without progress, and publish
     its result as soon as it exits (the page need not be polling)."""
     limit = float(os.getenv("LEVI_RECAP_VALUE_TIMEOUT_SECONDS", "21600"))
     stall = float(os.getenv("LEVI_RECAP_VALUE_STALL_SECONDS", "1800"))
-    job = _read(name, job_id) or {}
     watched = [Path(job.get("progress_path", "")), Path(job.get("log_path", ""))]
     started = time.time()
     reason = None
@@ -885,6 +891,16 @@ def _watch(process: subprocess.Popen, name: str, job_id: str) -> None:
             continue
         _stop(process)
         break
+    try:
+        _finish_watch(job, reason)
+    except RecapError:
+        _forget(_key(job))
+
+
+@links.for_job("name", lambda: catalog.STATE, RecapError)
+def _finish_watch(job, reason):
+    process_key = _key(job)
+    name, job_id = job["name"], job["id"]
     if reason:
         with store.locked(name):
             job = _read(name, job_id)
@@ -896,7 +912,7 @@ def _watch(process: subprocess.Popen, name: str, job_id: str) -> None:
                     finished_at=time.time(),
                 )
                 _save(job)
-        _forget((name, job_id))
+        _forget(process_key)
         return
     job = _read(name, job_id)
     if job:
@@ -927,11 +943,16 @@ def _progress(job: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
 
+@links.for_job("name", lambda: catalog.STATE, RecapError)
 def collect(job: dict[str, Any]) -> dict[str, Any]:
     """Reconcile a worker's result into one published revision, exactly once."""
     if job.get("status") in FINISHED:
         _forget(_key(job))
         return job
+    if job.get("source") and "." not in job["id"]:
+        raise RecapError(
+            409, "Legacy linked jobs are read-only; create a source-bound job"
+        )
     name = job["name"]
     result_path = Path(str(job["result_path"]))
     process = _PROCESSES.get(_key(job))
@@ -1064,10 +1085,15 @@ def prune_job_files(name: str, keep: int | None = None) -> dict[str, Any]:
     return {"removed_records": removed, "bytes": freed}
 
 
+@links.for_job("name", lambda: catalog.STATE, RecapError)
 def cancel(job: dict[str, Any]) -> dict[str, Any]:
     if job.get("status") in FINISHED:
         _forget(_key(job))
         return job
+    if job.get("source") and "." not in job["id"]:
+        raise RecapError(
+            409, "Legacy linked jobs are read-only; create a source-bound job"
+        )
     # Record the cancellation before stopping the worker: the watch thread
     # collects as soon as the process exits, and would otherwise report the
     # killed worker as "exited without a result" (failed) first.
@@ -1180,6 +1206,7 @@ def _set_stage(job: dict[str, Any], stage: str, done: int, total: int) -> None:
     _save(job)
 
 
+@links.for_job("name", lambda: catalog.STATE, RecapError)
 def _publish(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     plan = json.loads(Path(str(job["plan_path"])).read_text())
     manifest = checkpoints.Manifest.model_validate(plan["checkpoint"]["manifest"])
