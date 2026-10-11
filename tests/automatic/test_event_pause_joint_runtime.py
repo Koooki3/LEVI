@@ -15,7 +15,6 @@ from levi.domain import aeri
 from levi.live.runtime_ownership import RequestStopProof
 
 
-
 @unittest.skipUnless(
     hasattr(aeri, "ResidentGroupSpec"), "needs resident-group kernel d82"
 )

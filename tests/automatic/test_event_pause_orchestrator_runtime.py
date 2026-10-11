@@ -64,7 +64,13 @@ def load_kernel():
     runtime.aeri = schema
     # The isolated runtime must use its matching broker classes, while
     # production imports keep their canonical module and class identities.
-    for name in ("ExitProof", "SafeWindow", "WorkerIdentity", "WorkloadBroker", "_copy"):
+    for name in (
+        "ExitProof",
+        "SafeWindow",
+        "WorkerIdentity",
+        "WorkloadBroker",
+        "_copy",
+    ):
         setattr(runtime, name, getattr(broker, name))
     return schema, broker, runtime
 
