@@ -3,6 +3,7 @@
 import hashlib
 import importlib.metadata
 import os
+import pickle
 import py_compile
 import sys
 from dataclasses import replace
@@ -168,7 +169,9 @@ def test_replacing_pause_code_with_matching_module_filename_is_rejected(sdk_tree
     replacement = namespace["pause_generation"]
     replacement.__module__ = "vllm.v1.engine.async_llm"
     engine.__class__.pause_generation = replacement
-    with pytest.raises(ValueError, match="compiled from the frozen source bytes"):
+    with pytest.raises(
+        ValueError, match="critical SDK binding|compiled from the frozen source bytes"
+    ):
         factory.require_engine(engine)
 
 
@@ -204,3 +207,109 @@ def test_sdk_timestamp_size_pyc_collision_never_executes_cached_pause(sdk_tree):
     engine = factory.load()
     assert "synchronize" in engine.pause_generation.__func__.__code__.co_names
     factory.require_engine(engine)
+
+
+class _SdkPipe:
+    def __init__(self, incoming):
+        self.incoming, self.sent = list(incoming), []
+        self.closed = False
+
+    def recv_bytes(self, limit):
+        encoded = pickle.dumps(self.incoming.pop(0))
+        assert len(encoded) <= limit
+        return encoded
+
+    def send_bytes(self, value):
+        self.sent.append(pickle.loads(value))
+
+    def close(self):
+        self.closed = True
+
+
+def _serve_normal_factory(monkeypatch, factory, pipe):
+    from levi.live import owned_vllm
+    from levi.live.workload_broker import WorkerIdentity
+
+    monkeypatch.setattr(
+        owned_vllm, "process_identity", lambda pid: WorkerIdentity(101, 1, "fake")
+    )
+    owned_vllm.serve_vllm(pipe, factory, "normal-load-chain")
+
+
+def test_normal_factory_load_to_serve_generates_real_software_ack(
+    sdk_tree, monkeypatch
+):
+    _installed, factory = sdk_tree
+    pipe = _SdkPipe([("enrolled", "normal-load-chain"), ("stop", 1, None)])
+    _serve_normal_factory(monkeypatch, factory, pipe)
+    assert pipe.sent[0][0] == "ready" and pipe.sent[0][1].request_epoch == 0
+    assert not any(message[0] == "error" for message in pipe.sent)
+
+
+def test_frozen_factory_cannot_replace_actual_sdk_sync_before_first_ack(
+    sdk_tree, monkeypatch
+):
+    installed, factory = sdk_tree
+    source = installed / "closed_factory.py"
+    source.write_text(
+        "import torch.cuda\nimport vllm.v1.engine.async_llm as module\n"
+        "def build(device=None, sdk=None):\n"
+        "    engine=sdk.AsyncLLM()\n"
+        "    def replacement(*args, **kwargs): return None\n"
+        "    torch.cuda.synchronize=replacement\n"
+        "    module.synchronize=replacement\n"
+        "    return engine\n"
+    )
+    factory = replace(
+        factory, code_sha256=hashlib.sha256(source.read_bytes()).hexdigest()
+    )
+    pipe = _SdkPipe([("enrolled", "normal-load-chain"), ("stop", 1, None)])
+    _serve_normal_factory(monkeypatch, factory, pipe)
+    assert pipe.sent and all(message[1] is None for message in pipe.sent)
+    assert not any(message[0] in ("ready", "idle", "result") for message in pipe.sent)
+
+
+def test_runtime_global_alias_replacement_is_rejected_before_next_ack(
+    sdk_tree, monkeypatch
+):
+    _installed, factory = sdk_tree
+    calls = []
+
+    class MutatingPipe(_SdkPipe):
+        def send_bytes(self, value):
+            super().send_bytes(value)
+            if self.sent[-1][0] == "ready":
+                module = sys.modules["vllm.v1.engine.async_llm"]
+                module.synchronize = lambda: calls.append("unfrozen")
+
+    pipe = MutatingPipe([("enrolled", "normal-load-chain"), ("barrier", 1, None)])
+    _serve_normal_factory(monkeypatch, factory, pipe)
+    assert pipe.sent[0][0] == "ready"
+    assert any(message[0] == "error" for message in pipe.sent)
+    assert not any(message[0] == "idle" for message in pipe.sent)
+    assert calls == []
+
+
+def test_sync_replacing_itself_is_rejected_by_post_pause_binding(sdk_tree, monkeypatch):
+    installed, factory = sdk_tree
+    source = installed / "torch/cuda/__init__.py"
+    source.write_text(
+        "def is_available(): return True\n"
+        "def synchronize(device=None):\n"
+        "    global synchronize\n"
+        "    synchronize = lambda *args: None\n"
+    )
+    hashes = tuple(
+        (
+            name,
+            hashlib.sha256(source.read_bytes()).hexdigest()
+            if name == "torch.cuda"
+            else sha,
+        )
+        for name, sha in factory.torch_source_hashes
+    )
+    factory = replace(factory, torch_source_hashes=hashes)
+    pipe = _SdkPipe([("enrolled", "normal-load-chain"), ("stop", 1, None)])
+    _serve_normal_factory(monkeypatch, factory, pipe)
+    assert pipe.sent and all(message[1] is None for message in pipe.sent)
+    assert not any(message[0] == "ready" for message in pipe.sent)

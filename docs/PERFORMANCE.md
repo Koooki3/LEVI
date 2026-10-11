@@ -495,3 +495,11 @@ Frozen module imports now share one resolver for static, relative, fromlist and
 normal dynamic imports, including cached modules. Per-bundle importlib/builtins
 facades validate returned dependencies; unbound low-level dynamic loader APIs
 are refused. Standard-library origin alone does not approve returned third-party modules.
+
+Critical SDK bindings are sealed before the factory module initializes.
+Factory return and both sides of every idle ACK recheck the exact SDK module/class
+attributes, function code, global aliases, defaults, closures and referenced
+containers, including the actual Torch synchronize. Dynamic critical state that
+cannot retain these bindings is refused. The seal does not certify unimplemented
+remote/native SDK worker provenance. Ordinary tiny factory.load-to-serve tests
+exercise this check without replacing load or require_function.

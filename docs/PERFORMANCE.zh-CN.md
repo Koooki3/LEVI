@@ -363,3 +363,9 @@ SDK/native 闭包和 owned SDK 子进程 bootstrap 尚未安装，真实入口�
 冻结模块的静态、相对、fromlist 与普通动态导入现在使用同一 resolver，
 包括缓存命中。每个 bundle 的 importlib/builtins facade 核实返回依赖；
 未绑定的低层动态加载 API 拒绝。标准库来源可信不代表其返回第三方模块已获准。
+
+关键 SDK 绑定在 factory 模块初始化前封存。factory 返回后和每个 idle ACK
+前后复核准确 module/class 属性、函数 code、globals 别名、defaults、闭包及
+引用容器，包括实际 Torch synchronize。无法保留这些绑定的动态关键状态
+拒绝；封存不证明尚未实现的 remote/native SDK worker 来源。专属小假包测试
+直接使用普通 factory.load 到 serve 链，不替换 load 或 require_function。

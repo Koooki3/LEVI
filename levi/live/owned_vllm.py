@@ -54,7 +54,10 @@ class FrozenVllmFactory(FrozenTorchFactory):
             raise ValueError("frozen installed barrier hashes required")
 
     def load(self):
-        from levi.live.owned_source import frozen_distribution_bundle
+        from levi.live.owned_source import (
+            FrozenCriticalBindings,
+            frozen_distribution_bundle,
+        )
 
         declared = dict(self.sdk_source_hashes)
         if any(
@@ -82,6 +85,7 @@ class FrozenVllmFactory(FrozenTorchFactory):
             torch = torch_bundle.import_module("torch")
             sdk = sdk_bundle.import_module("vllm")
             async_module = sdk_bundle.import_module("vllm.v1.engine.async_llm")
+            critical = FrozenCriticalBindings(bundles)
             factory = self.reviewed_factory(allowed_bundles=bundles)
             if (
                 str(torch.__version__) != self.torch_version
@@ -106,7 +110,10 @@ class FrozenVllmFactory(FrozenTorchFactory):
                 raise ValueError("only one frozen engine/device topology is supported")
             if getattr(engine.vllm_config, "kv_transfer_config", None) is not None:
                 raise ValueError("external KV connector cannot share owned barrier")
+            critical.require()
+            torch_bundle.require_function(torch.cuda.synchronize)
             engine._owned_sdk_bundles = bundles
+            engine._owned_sdk_critical = critical
             self.require_engine(engine)
             return engine
         except BaseException:
@@ -115,15 +122,19 @@ class FrozenVllmFactory(FrozenTorchFactory):
             raise
 
     def require_engine(self, engine):
-        from levi.live.owned_source import FrozenSourceBundle
+        from levi.live.owned_source import FrozenCriticalBindings, FrozenSourceBundle
 
         bundles = getattr(engine, "_owned_sdk_bundles", ())
         if len(bundles) != 2 or any(
             type(bundle) is not FrozenSourceBundle for bundle in bundles
         ):
             raise ValueError("actual engine SDK source binding required")
-        for bundle in bundles:
-            bundle.require_loaded()
+        critical = getattr(engine, "_owned_sdk_critical", None)
+        if type(critical) is not FrozenCriticalBindings or critical.bundles != bundles:
+            raise ValueError("exact critical SDK binding required")
+        critical.require()
+        torch = bundles[0].require_module("torch")
+        bundles[0].require_function(torch.cuda.synchronize)
         for name in ("pause_generation", "resume_generation", "generate", "shutdown"):
             function = getattr(engine, name)
             bundles[1].require_function(function)

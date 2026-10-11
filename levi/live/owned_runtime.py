@@ -229,7 +229,10 @@ class FrozenTorchFactory:
             raise
 
     def load(self):
-        from levi.live.owned_source import frozen_distribution_bundle
+        from levi.live.owned_source import (
+            FrozenCriticalBindings,
+            frozen_distribution_bundle,
+        )
 
         bundle = frozen_distribution_bundle(
             "torch", "torch", self.torch_version, self.torch_source_hashes
@@ -237,6 +240,7 @@ class FrozenTorchFactory:
         bundle.install()
         try:
             torch = bundle.import_module("torch")
+            critical = FrozenCriticalBindings((bundle,))
             factory = self.reviewed_factory(allowed_bundles=(bundle,))
             if (
                 str(torch.__version__) != self.torch_version
@@ -248,7 +252,9 @@ class FrozenTorchFactory:
             model = factory(device=device, sdk=torch)
             if not callable(model):
                 raise TypeError("factory must return a synchronous model callable")
-            bundle.require_loaded()
+            critical.require()
+            bundle.require_function(torch.cuda.synchronize)
+            model._owned_sdk_critical = critical
             return torch, device, model
         except BaseException:
             bundle.close()
@@ -445,10 +451,12 @@ def _serve(connection, factory, launch_id):
         def idle(epoch):
             if type(factory) is FrozenTorchFactory:
                 bundle = torch.__spec__.loader.bundle
+                model._owned_sdk_critical.require()
                 bundle.require_loaded()
                 bundle.require_function(torch.cuda.synchronize)
             torch.cuda.synchronize(device)
             if type(factory) is FrozenTorchFactory:
+                model._owned_sdk_critical.require()
                 bundle.require_loaded()
                 bundle.require_function(torch.cuda.synchronize)
             if any(

@@ -376,3 +376,108 @@ def frozen_distribution_bundle(
     if {name for name, _ in hashes} != expected:
         raise ValueError("SDK manifest does not freeze every installed Python module")
     return FrozenSourceBundle(root.parent, hashes, allowed_bundles=allowed_bundles)
+
+
+class FrozenCriticalBindings:
+    """Snapshot exact critical SDK objects before any factory executes.
+
+    Python function code, its global aliases/defaults/closure cells and the
+    loaded SDK module/class bindings remain fixed. Mutable referenced
+    containers are checked too. Unsupported dynamic critical state must fail
+    closed; this is not proof of an unimplemented remote/native call chain.
+    """
+
+    def __init__(self, bundles):
+        self.bundles = tuple(bundles)
+        self._checks = []
+        self._seen = set()
+        for bundle in self.bundles:
+            bundle.require_loaded()
+            for name in bundle.sources:
+                if name in sys.modules:
+                    self._capture(sys.modules[name])
+
+    def _owned(self, name):
+        return next((bundle for bundle in self.bundles if name in bundle.sources), None)
+
+    def _capture(self, value):
+        if id(value) in self._seen:
+            return
+        self._seen.add(id(value))
+        if isinstance(value, types.ModuleType):
+            if self._owned(value.__name__) is None:
+                return
+            self._mapping(value.__dict__)
+        elif isinstance(value, type):
+            if self._owned(value.__module__) is None:
+                return
+            for name, child in vars(value).items():
+                self._checks.append(("class", value, name, child))
+                self._capture(child)
+        elif isinstance(value, (staticmethod, classmethod)):
+            self._capture(value.__func__)
+        elif isinstance(value, types.FunctionType):
+            bundle = self._owned(value.__module__)
+            if bundle is None:
+                return
+            bundle.require_function(value)
+            for name in ("__code__", "__defaults__", "__kwdefaults__", "__closure__"):
+                child = getattr(value, name)
+                self._checks.append(("attribute", value, name, child))
+                self._capture(child)
+            for name in value.__code__.co_names:
+                child = value.__globals__.get(name, _ABSENT)
+                self._checks.append(("mapping", value.__globals__, name, child))
+                self._capture(child)
+        elif isinstance(value, types.CellType):
+            try:
+                child = value.cell_contents
+            except ValueError:
+                child = _ABSENT
+            self._checks.append(("cell", value, None, child))
+            self._capture(child)
+        elif isinstance(value, dict):
+            self._mapping(value)
+        elif isinstance(value, (list, tuple)):
+            self._checks.append(("sequence", value, None, tuple(value)))
+            for child in value:
+                self._capture(child)
+        elif isinstance(value, set):
+            self._checks.append(("set", value, None, frozenset(value)))
+
+    def _mapping(self, mapping):
+        # Namespace mutation cannot introduce a new global helper after sealing.
+        self._checks.append(("keys", mapping, None, tuple(mapping)))
+        for key, value in tuple(mapping.items()):
+            self._checks.append(("mapping", mapping, key, value))
+            self._capture(value)
+
+    def require(self):
+        for bundle in self.bundles:
+            bundle.require_loaded()
+        for kind, owner, key, expected in self._checks:
+            if kind == "class":
+                matches = vars(owner).get(key, _ABSENT) is expected
+            elif kind == "attribute":
+                matches = getattr(owner, key, _ABSENT) is expected
+            elif kind == "mapping":
+                matches = owner.get(key, _ABSENT) is expected
+            elif kind == "keys":
+                matches = tuple(owner) == expected
+            elif kind == "sequence":
+                matches = len(owner) == len(expected) and all(
+                    current is original
+                    for current, original in zip(owner, expected, strict=True)
+                )
+            elif kind == "set":
+                matches = frozenset(owner) == expected
+            else:
+                try:
+                    matches = owner.cell_contents is expected
+                except ValueError:
+                    matches = expected is _ABSENT
+            if not matches:
+                raise ValueError("critical SDK binding changed after frozen import")
+
+
+_ABSENT = object()
