@@ -19,6 +19,7 @@ import { canShowStatistics, resultSessionPath } from "./result-api";
 import { useResults } from "./use-results";
 import { SessionResultPanel } from "./session-results";
 import { sessionIsBusy } from "./live-filters";
+import { sessionStatisticsMatch } from "./session-stats-source";
 
 export function SessionDetail({
   identity,
@@ -61,6 +62,19 @@ export function SessionDetail({
     !!session && sessionIsBusy(session),
     statsEnabled,
   );
+  const statsData =
+    statsEnabled &&
+    !stats.loading &&
+    !stats.error &&
+    sessionStatisticsMatch(
+      stats.data,
+      scope,
+      resultItem?.identity.datasets ?? [],
+    )
+      ? stats.data
+      : null;
+  const invalidStatsSource =
+    !!stats.data && stats.data.enabled !== false && !statsData;
   const offline = poll.failures > 0;
   useEffect(() => {
     if (!offline || !statsEnabled) return;
@@ -113,7 +127,7 @@ export function SessionDetail({
           {session ? (
             <SessionCard
               session={
-                statsEnabled ? session : { ...session, last_episode: undefined }
+                statsData ? session : { ...session, last_episode: undefined }
               }
               open
               onToggle={() => {}}
@@ -136,8 +150,8 @@ export function SessionDetail({
           <details className="pg-live-section pg-live-disclosure">
             <summary id="session-statistics">
               {t("Performance statistics")}
-              {statsEnabled && stats.data?.summary?.episodes?.count != null
-                ? ` · ${stats.data.summary.episodes.count} ${t("Episodes")}`
+              {statsData?.summary?.episodes?.count != null
+                ? ` · ${statsData.summary.episodes.count} ${t("Episodes")}`
                 : ""}
             </summary>
             {!statsEnabled ? (
@@ -154,7 +168,17 @@ export function SessionDetail({
               </Note>
             ) : (
               <>
-                <ExportLinks scope={scope} />
+                {statsData && <ExportLinks scope={scope} />}
+                {invalidStatsSource && (
+                  <Note tone="warning" role="status">
+                    {t(
+                      "Statistics source could not be verified. Refresh to check this session again.",
+                    )}
+                    <Button size="sm" onClick={stats.refresh}>
+                      {t("Refresh")}
+                    </Button>
+                  </Note>
+                )}
                 {stats.error && (
                   <Problem
                     title={t("Could not read the statistics")}
@@ -174,15 +198,15 @@ export function SessionDetail({
                     )}
                   </Note>
                 )}
-                {stats.data && stats.data.enabled !== false && (
+                {statsData && (
                   <>
-                    <KeyFigures summary={stats.data.summary} />
-                    {(stats.data.summary?.episodes?.count ?? 0) === 0 && (
+                    <KeyFigures summary={statsData.summary} />
+                    {(statsData.summary?.episodes?.count ?? 0) === 0 && (
                       <StatsEmpty filtered />
                     )}
-                    {stats.data.episodes && (
+                    {statsData.episodes && (
                       <EpisodesTable
-                        data={stats.data.episodes}
+                        data={statsData.episodes}
                         view={view}
                         onView={setView}
                         onMore={() => setLimit((n) => n + EPISODE_PAGE)}

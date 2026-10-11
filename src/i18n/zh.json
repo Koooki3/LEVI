@@ -3869,5 +3869,6 @@
   "No time segment annotations are available for a funnel yet.": "尚无可用于到达率图表的时间片段标注。",
   "Quality and subtask analysis": "质量与子任务分析",
   "Performance statistics": "性能统计",
-  "Session metadata and progress": "会话参数与进度"
+  "Session metadata and progress": "会话参数与进度",
+  "Statistics source could not be verified. Refresh to check this session again.": "统计来源尚未核实。请刷新以重新检查此会话。"
 }

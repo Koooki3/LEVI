@@ -8,6 +8,7 @@ import {
 import type { LiveSession } from "../types";
 import { resultFixture } from "./result-fixture";
 import { identityOf } from "../session-route";
+import { statisticsFixture } from "./statistics-fixture";
 const session: LiveSession = {
   root: "/fixture",
   group: "model",
@@ -38,13 +39,211 @@ mock.module("../use-live", () => ({
 const { SessionDetail } = await import("../session-detail");
 setupDom();
 const originalFetch = globalThis.fetch;
+const originalNow = Date.now;
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  Date.now = originalNow;
   current = [session];
   failures = 0;
   lastOk = 100;
 });
 describe("individual live session", () => {
+  for (const [name, bad] of [
+    [
+      "foreign aggregate",
+      {
+        scope: { dataset: "foreign-blind-source", session: "run-1" },
+        datasets: ["foreign-blind-source"],
+      },
+    ],
+    [
+      "foreign session",
+      { scope: { dataset: "model__task", session: "other-run" } },
+    ],
+    ["missing scope", { scope: undefined }],
+    ["missing datasets", { datasets: undefined }],
+    ["missing schema", { schema: undefined }],
+    ["missing sessions", { sessions: undefined }],
+    [
+      "missing row dataset",
+      {
+        episodes: {
+          rows: [
+            {
+              dataset: undefined,
+              session: "run-1",
+              demo: "foreign-private-episode",
+            },
+          ],
+        },
+      },
+    ],
+    [
+      "missing row session field",
+      {
+        episodes: {
+          rows: [
+            {
+              dataset: "model__task",
+              session: undefined,
+              demo: "foreign-private-episode",
+            },
+          ],
+        },
+      },
+    ],
+    ["missing rows", { episodes: { total: 1 } }],
+    [
+      "foreign dataset metadata",
+      { datasets: ["model__task", "foreign-blind-source"] },
+    ],
+    [
+      "foreign episode",
+      {
+        episodes: {
+          total: 2,
+          rows: [
+            { dataset: "model__task", session: "run-1", demo: "allowed-row" },
+            {
+              dataset: "foreign-blind-source",
+              session: "run-1",
+              demo: "foreign-private-episode",
+            },
+          ],
+        },
+      },
+    ],
+    [
+      "foreign session row",
+      { sessions: [{ dataset: "model__task", session: "other-run" }] },
+    ],
+    [
+      "missing row session",
+      {
+        episodes: {
+          rows: [
+            {
+              dataset: "model__task",
+              session: null,
+              demo: "foreign-private-episode",
+            },
+          ],
+        },
+      },
+    ],
+    ["wrong schema", { schema: "other.v1" }],
+  ] as const) {
+    test(`rejects the whole statistics aggregate and export for ${name}`, async () => {
+      globalThis.fetch = (async (path: unknown) =>
+        String(path).includes("/results/session?")
+          ? Response.json(
+              resultFixture({ analysis: null, records: [], runs: [] }),
+            )
+          : Response.json(
+              statisticsFixture({
+                summary: { episodes: { count: 73 } },
+                episodes: {
+                  rows: [
+                    {
+                      demo: "foreign-private-episode",
+                      state: "done",
+                      operator: "success",
+                    },
+                  ],
+                  total: 1,
+                },
+                ...bad,
+              } as Parameters<typeof statisticsFixture>[0]),
+            )) as typeof fetch;
+      const { host } = await render(
+        <SessionDetail identity={identityOf(session)} />,
+      );
+      await waitFor(() =>
+        host.textContent?.includes("Statistics source could not be verified"),
+      );
+      expect(host.textContent).not.toContain("foreign-private-episode");
+      expect(host.textContent).not.toContain("allowed-row");
+      expect(
+        host.querySelector("#session-statistics")?.textContent,
+      ).not.toContain("73");
+      expect(host.querySelector(".pg-live-kpis")).toBeNull();
+      expect(host.querySelector('a[href*="/stats/export"]')).toBeNull();
+    });
+  }
+
+  test("same-scope statistics polling revokes rows, aggregate and exports while pending and after HTTP 409", async () => {
+    current = [{ ...session, state: "running" }];
+    let waiting = false;
+    let resolve: (response: Response) => void = () => {};
+    globalThis.fetch = ((path: unknown) => {
+      if (String(path).includes("/results/session?"))
+        return Promise.resolve(
+          Response.json(
+            resultFixture({ analysis: null, records: [], runs: [] }),
+          ),
+        );
+      return waiting
+        ? new Promise<Response>((r) => {
+            resolve = r;
+          })
+        : Promise.resolve(
+            Response.json(
+              statisticsFixture({
+                summary: { episodes: { count: 73 } },
+                episodes: {
+                  rows: [{ demo: "old-permitted-row", state: "done" }],
+                  total: 1,
+                },
+              }),
+            ),
+          );
+    }) as typeof fetch;
+    const { host, rerender } = await render(
+      <SessionDetail identity={identityOf(session)} />,
+    );
+    await waitFor(() => host.textContent?.includes("old-permitted-row"));
+    expect(host.querySelector('a[href*="/stats/export"]')).not.toBeNull();
+    waiting = true;
+    Date.now = () => originalNow() + 6000;
+    lastOk = 200;
+    await rerender(<SessionDetail identity={identityOf(session)} />);
+    expect(host.textContent).not.toContain("old-permitted-row");
+    expect(
+      host.querySelector("#session-statistics")?.textContent,
+    ).not.toContain("73");
+    expect(host.querySelector('a[href*="/stats/export"]')).toBeNull();
+    resolve(new Response("source changed", { status: 409 }));
+    await waitFor(() => host.textContent?.includes("HTTP 409"));
+    expect(host.textContent).not.toContain("old-permitted-row");
+    expect(host.querySelector('a[href*="/stats/export"]')).toBeNull();
+  });
+  test("a canonical multi-dataset identity permits metadata choices but every row stays in the selected scope", async () => {
+    globalThis.fetch = (async (path: unknown) =>
+      String(path).includes("/results/session?")
+        ? Response.json(
+            resultFixture({
+              identity: {
+                ...resultFixture().identity,
+                datasets: ["model__task", "canonical-secondary"],
+              },
+            }),
+          )
+        : Response.json(
+            statisticsFixture({
+              datasets: ["model__task", "canonical-secondary"],
+              episodes: {
+                rows: [{ demo: "valid-selected-row", state: "done" }],
+                total: 1,
+              },
+            }),
+          )) as typeof fetch;
+    const { host } = await render(
+      <SessionDetail identity={identityOf(session)} />,
+    );
+    await waitFor(() => host.textContent?.includes("valid-selected-row"));
+    expect(host.querySelector('a[href*="/stats/export"]')).not.toBeNull();
+  });
+
   test("reads statistics for the run id and exact dataset and keeps navigation separate", async () => {
     const calls: string[] = [];
     globalThis.fetch = (async (path: unknown) => {
@@ -54,6 +253,11 @@ describe("individual live session", () => {
       return new Response(
         JSON.stringify({
           enabled: true,
+          schema: "levi.live.stats.v1",
+          scope: { dataset: "model__task", session: "run-1" },
+          include_excluded: false,
+          datasets: ["model__task"],
+          sessions: [],
           summary: { episodes: { count: 1 } },
           episodes: { rows: [], total: 0 },
         }),
@@ -95,10 +299,21 @@ describe("individual live session", () => {
         : new Response(
             JSON.stringify({
               enabled: true,
+              schema: "levi.live.stats.v1",
+              scope: { dataset: "model__task", session: "run-1" },
+              include_excluded: false,
+              datasets: ["model__task"],
+              sessions: [],
               summary: { episodes: { count: 1 } },
               episodes: {
                 rows: [
-                  { demo: "saved-episode", episode_index: 7, state: "done" },
+                  {
+                    dataset: "model__task",
+                    session: "run-1",
+                    demo: "saved-episode",
+                    episode_index: 7,
+                    state: "done",
+                  },
                 ],
                 total: 1,
               },
@@ -122,7 +337,13 @@ describe("individual live session", () => {
         : new Response(
             JSON.stringify({
               enabled: true,
+              schema: "levi.live.stats.v1",
+              scope: { dataset: "model__task", session: "run-1" },
+              include_excluded: false,
+              datasets: ["model__task"],
+              sessions: [],
               summary: { episodes: { count: 0 } },
+              episodes: { total: 0, rows: [] },
             }),
           )) as typeof fetch;
     const { host } = await render(
@@ -147,9 +368,21 @@ describe("individual live session", () => {
         ? new Response(
             JSON.stringify({
               enabled: true,
+              schema: "levi.live.stats.v1",
+              scope: { dataset: "model__task", session: "run-1" },
+              include_excluded: false,
+              datasets: ["model__task"],
+              sessions: [],
               summary: { episodes: { count: 1 } },
               episodes: {
-                rows: [{ demo: "recovered-history", state: "done" }],
+                rows: [
+                  {
+                    dataset: "model__task",
+                    session: "run-1",
+                    demo: "recovered-history",
+                    state: "done",
+                  },
+                ],
                 total: 1,
               },
             }),
@@ -254,9 +487,21 @@ describe("individual live session", () => {
           )
         : Response.json({
             enabled: true,
+            schema: "levi.live.stats.v1",
+            scope: { dataset: "model__task", session: "run-1" },
+            include_excluded: false,
+            datasets: ["model__task"],
+            sessions: [],
             summary: { episodes: { count: 1 } },
             episodes: {
-              rows: [{ demo: "trusted-active-legacy", state: "done" }],
+              rows: [
+                {
+                  dataset: "model__task",
+                  session: "run-1",
+                  demo: "trusted-active-legacy",
+                  state: "done",
+                },
+              ],
               total: 1,
             },
           });
@@ -323,9 +568,21 @@ describe("individual live session", () => {
       return Promise.resolve(
         Response.json({
           enabled: true,
+          schema: "levi.live.stats.v1",
+          scope: { dataset: "model__task", session: "run-1" },
+          include_excluded: false,
+          datasets: ["model__task"],
+          sessions: [],
           summary: { episodes: { count: 1 } },
           episodes: {
-            rows: [{ demo: "old-outcome-row", state: "done" }],
+            rows: [
+              {
+                dataset: "model__task",
+                session: "run-1",
+                demo: "old-outcome-row",
+                state: "done",
+              },
+            ],
             total: 1,
           },
         }),

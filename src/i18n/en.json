@@ -3869,5 +3869,6 @@
   "No time segment annotations are available for a funnel yet.": "No time segment annotations are available for a funnel yet.",
   "Quality and subtask analysis": "Quality and subtask analysis",
   "Performance statistics": "Performance statistics",
-  "Session metadata and progress": "Session metadata and progress"
+  "Session metadata and progress": "Session metadata and progress",
+  "Statistics source could not be verified. Refresh to check this session again.": "Statistics source could not be verified. Refresh to check this session again."
 }

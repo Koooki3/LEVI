@@ -38,20 +38,29 @@ export function useLiveStats(
     loading: false,
   });
   const last = useRef<number | null>(null);
+  const generation = useRef(0);
   const loader = useMemo(() => createStatsLoader(fetch), []);
   // The one thing the request depends on, whole.
   const path = statsPath(scope, limit);
   const wanted = useRef({ scope, limit });
   wanted.current = { scope, limit };
+  const current = useRef({ path, enabled });
+  current.current = { path, enabled };
 
   const run = useRef(async () => {});
   run.current = async () => {
     last.current = Date.now();
-    setState((s) => ({ ...s, loading: true }));
+    const mine = ++generation.current;
+    const { scope: now, limit: size } = wanted.current;
+    const requestedPath = statsPath(now, size);
+    const isCurrent = () =>
+      generation.current === mine &&
+      current.current.enabled &&
+      current.current.path === requestedPath;
+    setState({ data: null, dataPath: null, error: "", loading: true });
     try {
-      const { scope: now, limit: size } = wanted.current;
       const data = await loader.load(now, size);
-      if (data)
+      if (data && isCurrent())
         setState({
           data,
           dataPath: statsPath(now, size),
@@ -59,13 +68,17 @@ export function useLiveStats(
           loading: false,
         });
     } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") return;
-      setState((s) => ({
-        data: s.data,
-        dataPath: s.dataPath,
+      if (
+        !isCurrent() ||
+        (e instanceof DOMException && e.name === "AbortError")
+      )
+        return;
+      setState({
+        data: null,
+        dataPath: null,
         error: e instanceof Error ? e.message : String(e),
         loading: false,
-      }));
+      });
     }
   };
 
@@ -73,6 +86,7 @@ export function useLiveStats(
   useEffect(() => {
     if (enabled) void run.current();
     else {
+      ++generation.current;
       loader.stop();
       last.current = null;
       setState({ data: null, dataPath: null, error: "", loading: false });
@@ -86,7 +100,13 @@ export function useLiveStats(
     if (dueForRefresh(Date.now(), last.current, evaluating)) void run.current();
   }, [tick, enabled, evaluating]);
 
-  useEffect(() => () => loader.stop(), [loader]);
+  useEffect(
+    () => () => {
+      ++generation.current;
+      loader.stop();
+    },
+    [loader],
+  );
   // A manual refresh is independent of the status heartbeat and its throttle.
   const refresh = useCallback(() => {
     if (enabled && document.visibilityState !== "hidden") void run.current();
