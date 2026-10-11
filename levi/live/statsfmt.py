@@ -155,6 +155,19 @@ TEXT = {
         "success_rates": "success rate: operator / agent",
         "operator_vs_agent": "operator \\ agent",
         "agent_none": "no verdict",
+        "binary_classification": "Binary classification",
+        "classification_note": "Only paired operator and agent success/failure labels enter these metrics. Missing and undecided verdicts remain separate above. Ratios use 0–1; a dash means the denominator is undefined.",
+        "binary_pairs": "binary success/failure pairs",
+        "classification_accuracy": "Accuracy",
+        "macro_f1": "Macro F1",
+        "balanced_accuracy": "Balanced accuracy",
+        "classification_class": "Class",
+        "precision": "Precision",
+        "recall": "Recall",
+        "f1": "F1",
+        "support": "Support",
+        "class_success": "success",
+        "class_failure": "failure",
         "metrics": {
             "episodes": "episodes",
             "median_commit": "median time to committed segments (s)",
@@ -278,6 +291,19 @@ TEXT = {
         "success_rates": "成功率：操作员 / agent",
         "operator_vs_agent": "操作员 \\ agent",
         "agent_none": "无判定",
+        "binary_classification": "成败分类指标",
+        "classification_note": "这些指标只使用操作员与 agent 均明确判成功或失败的可靠配对；缺失和未决标签仍在上方单独统计。比率为0–1，分母未定义时显示短横线。",
+        "binary_pairs": "成功/失败可靠配对数",
+        "classification_accuracy": "准确率",
+        "macro_f1": "宏平均 F1",
+        "balanced_accuracy": "平衡准确率",
+        "classification_class": "类别",
+        "precision": "精确率",
+        "recall": "召回率",
+        "f1": "F1",
+        "support": "支持数",
+        "class_success": "成功",
+        "class_failure": "失败",
         "metrics": {
             "episodes": "片段数",
             "median_commit": "到时间片段提交的中位秒数",
@@ -416,6 +442,37 @@ def agreement_block(found, t) -> list:
         ],
         t,
     )
+    classification = found.get("classification")
+    if isinstance(classification, dict):
+        out += [f"### {t['binary_classification']}", "", t["classification_note"], ""]
+        out += pairs(
+            [
+                (t["binary_pairs"], num(classification.get("n"))),
+                (t["classification_accuracy"], num(classification.get("accuracy"))),
+                (t["macro_f1"], num(classification.get("macro_f1"))),
+                (t["balanced_accuracy"], num(classification.get("balanced_accuracy"))),
+            ],
+            t,
+        )
+        out += table(
+            [
+                t["classification_class"],
+                t["precision"],
+                t["recall"],
+                t["f1"],
+                t["support"],
+            ],
+            [
+                [
+                    t[f"class_{label}"],
+                    *(
+                        num((classification.get(label) or {}).get(metric))
+                        for metric in ("precision", "recall", "f1", "support")
+                    ),
+                ]
+                for label in ("success", "failure")
+            ],
+        )
     out += table(
         [t["operator_vs_agent"], "success", "failure", "undecided", t["agent_none"]],
         [
