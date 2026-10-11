@@ -412,3 +412,6 @@ is still required before a new launch.
 These existing checks cover the process group and remembered PIDs. A future
 runtime bridge must separately establish complete descendant ownership,
 including workers that leave that group.
+
+
+The original authority exposes `owns_exact_request` for identity-only drain ownership and `accepts_exact_request` for the original permission checks on the same request object. Equal token copies receive no exact permission. Existing value-based APIs are unchanged; this addition does not install owned SDK adapters or prove hardware readiness.

@@ -514,6 +514,22 @@ class RuntimeOwnership:
             self._request_token(request)
             self._revoked = True
 
+    def owns_exact_request(self, request):
+        """Identify the original active object, including revoked drain work.
+
+        This query grants no permission and does not imply backend idle. A
+        revoked/late request remains owned until the original finish/exit proof.
+        """
+        with self._lock:
+            return self._request is not None and request is self._request
+
+    def accepts_exact_request(self, request, observation, *, now_ns):
+        """Apply original result permission only to the original active object."""
+        with self._lock:
+            if not self.owns_exact_request(request):
+                return False
+            return self.accepts_result(request, observation, now_ns=now_ns)
+
     def accepts_result(self, request, observation, *, now_ns):
         with self._lock:
             self._tick(now_ns)
