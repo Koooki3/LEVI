@@ -300,3 +300,47 @@ token 无权取消或释放新代次。心跳、过期或未知身份不能续�
 
 
 原权限内核公开 `owns_exact_request` 查询原对象的排空归属，以及 `accepts_exact_request` 对原对象沿用原许可检查。等值令牌副本不会获得精确许可；旧按值接口不变。此增量不安装真实模型适配器，也不证明真机就绪。
+
+## 受控 SDK 运行时适配（软件候选，显式启用）
+
+`levi.live.owned_runtime` 提供私有 IPC 模型 worker 启动器和
+`OwnedGroupObserver`；`levi.automatic.owned_runtime.OwnedRoleRuntime`
+供脚本组合既有 `RuntimeOwnership` 与 `WorkloadBroker`，不建立第二套调度器。
+现有推理循环也可以把 worker 绑定到同一个 authority，用已授予的角色 token
+提交请求，再用群组 observer 取得原请求收尾证明。适配层默认不安装，不能接管
+任何已经运行的外部策略或 VLM 服务。
+
+启动必须已有原 broker 许可、准确且有效的 canonical 资源 driver 租约及已登记
+的活子进程、继承的 GPU 独占 flock 描述符，以及既有委派的 cgroup v2 supervisor
+根和每个角色各自的空叶目录。启动器先把自己实际创建的子进程记入显式运行时
+目录中的 `levi.children`，再打开模型导入门。观察静默或退出时，会复核完整根与
+叶目录成员、PID/启动时间/boot 身份和已见过的 engine 后代。额外进程、containment
+更换、未知身份或尚未解决的启动会拒绝后续启动。进程或 HTTP 返回、空闲显存
+都不能替代这些证明。
+
+Torch worker 在推理后同步实际 CUDA 设备，Python 请求线程未结束时不发 idle ACK。
+私有 vLLM worker 等唯一 generate 协程退出，再调用
+`AsyncLLM.pause_generation(mode="wait", clear_cache=False)`；冻结实现的调度器
+Future 经 `collective_rpc("synchronize_device")` 完成。已安装版本与 engine、executor、
+worker 源码清单必须匹配独立审查过的版本。这条 SDK 路径仅替代本受控适配中的
+HTTP `VllmPauseBackend` 依赖，不开放 HTTP 服务或外部 generation 入口。源码哈希
+只核对代码一致性，实际私有启动收据、containment 和 SDK ACK 才证明所有权与静默；
+factory 及完整 dispatch 闭包仍须独立审查。当前只支持一个 engine/device 拓扑，
+拒绝外部 KV connector，也不让 GPU 对象跨过 CPU IPC 边界。
+
+SDK 超时、ACK 代次不符或观察未知时，原执行槽继续保留。已撤销的晚到结果可以
+在取得证明后排空槽，但不能发布。关闭入口和撤销 token 不等待模型 mutex。
+常驻续租仍交给原内核，更新同一租约与 runtime 代次，并要求同样的新鲜全成员
+静默证据；不会自动续租、部署或重启服务。
+
+首轮使用的 JAX 策略提供者仍不可用。
+`levi.live.owned_jax.JaxDependencyFence` 可等待输出、存留状态、live-array 依赖
+及 JAX side effect，但明确不产出 backend-idle ACK。标准 infer 的完整 dispatch
+闭包（包括存留 RNG 与所有 transforms）尚未冻结，数组就绪不足以证明整个后端
+静默。这些适配也不提供机械臂物理保持或暂停相机帧的证明。
+
+当前操作会话不在可写的 user-manager 委派根中，可信委派 supervisor 的外层
+bootstrap 尚未安装。后续显式部署必须在获准的委派 supervisor 中保留 canonical
+driver/子进程祖先关系与已锁定的 open-file descriptor；本软件候选不创建 cgroup
+或 systemd 单元。CPU fake 回归覆盖 SDK ACK 与原群组内核，没有运行 GPU 模型、
+真实进程组、已安装服务或机器人。

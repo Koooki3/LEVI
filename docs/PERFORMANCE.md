@@ -415,3 +415,58 @@ including workers that leave that group.
 
 
 The original authority exposes `owns_exact_request` for identity-only drain ownership and `accepts_exact_request` for the original permission checks on the same request object. Equal token copies receive no exact permission. Existing value-based APIs are unchanged; this addition does not install owned SDK adapters or prove hardware readiness.
+
+## Owned SDK runtime adapters (software candidate, opt-in)
+
+`levi.live.owned_runtime` supplies an explicit private-IPC model-worker launcher and
+`OwnedGroupObserver`; `levi.automatic.owned_runtime.OwnedRoleRuntime` is a script
+companion to the existing `RuntimeOwnership` and `WorkloadBroker`. It creates no
+second scheduler. Existing inference cycles can instead bind each worker to the
+same authority, dispatch an already granted role token, and use the group
+observer for their original request-stop proof. No runtime adapter is installed
+by default, and no existing external policy or VLM server can be attached.
+
+The launcher requires original broker admission, the exact active canonical
+resource-driver lease and registered live child, an inherited exclusive GPU
+flock descriptor, and an already delegated cgroup v2 supervisor root with
+distinct empty role leaves. It records its own actual child with `levi.children`
+in an explicit runtime state directory before opening the model-import gate.
+Complete root/leaf membership, PID/start/boot identities and remembered engine
+descendants are checked again when observing idle or exit. Additional processes,
+changed containment, unknown identity or an unresolved startup refuse further
+launches. Process/HTTP completion and free VRAM do not supply these proofs.
+
+The Torch worker synchronizes its actual CUDA device after inference and refuses
+an idle ACK while Python request threads remain. The private vLLM worker calls
+`AsyncLLM.pause_generation(mode="wait", clear_cache=False)` after its single
+generate coroutine has exited. Its frozen implementation resolves the scheduler
+Future through `collective_rpc("synchronize_device")`; the installed version and
+engine/executor/worker source manifest must match the separately reviewed copy.
+This SDK path replaces the HTTP `VllmPauseBackend` dependency for this owned
+adapter only: it has no HTTP server or external generation ingress. A source
+hash checks code consistency; the actual private launch receipt, containment and
+SDK ACK establish ownership and idle. The factory and its full dispatch closure
+still require independent review. Only one engine/device topology is supported;
+external KV connectors and GPU objects crossing the CPU IPC boundary are refused.
+
+An SDK timeout, wrong-epoch ACK or unknown observation retains the original
+execution slot. A revoked late result may drain that slot but cannot be
+published. Ingress close and token revocation do not wait for the model mutex.
+Resident renewal delegates to the original kernel and updates its lease/runtime
+epochs; it requires the same fresh all-member idle evidence. There is no
+automatic renewal, deployment or service restart.
+
+The first trial's JAX policy provider remains unavailable.
+`levi.live.owned_jax.JaxDependencyFence` can wait for output/retained/live-array
+dependencies and JAX side effects, but deliberately emits no backend-idle ACK.
+The complete standard-infer dispatch closure (including retained RNG and all
+transforms) has not been frozen; per-array readiness is insufficient. The new
+adapters also provide no physical robot-hold or paused-camera proof.
+
+The current operator session is outside the writable user-manager delegation,
+and the trusted delegated supervisor bootstrap has not been installed. A future
+explicit deployment must preserve the canonical driver/child ancestry and locked
+open-file descriptor inside an approved delegated supervisor; this software
+candidate does not create cgroups or systemd units. CPU fake tests exercise the
+SDK ACK and original group kernel. GPU models, real process groups, installed
+services and robot operation have not been exercised by those tests.
