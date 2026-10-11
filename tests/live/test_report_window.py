@@ -171,3 +171,47 @@ def test_explicit_dst_offset_is_absolute_and_naive_default_is_utc():
         "2026-11-01T01:30:00-04:00", "2026-11-01T01:30:00-05:00", "America/New_York"
     )
     assert end - start == 3600.0 and zone == "America/New_York"
+
+
+@pytest.mark.parametrize("lang", ["en", "zh"])
+def test_markdown_window_metadata_uses_explicit_zone_not_host_clock(
+    tmp_path, monkeypatch, lang
+):
+    from levi.live import statsfmt
+
+    payload = report.build(
+        synthetic(tmp_path),
+        since=0.0,
+        before=200.0,
+        timezone="Asia/Shanghai",
+        now=300.0,
+    )
+    monkeypatch.setattr(
+        statsfmt.time,
+        "localtime",
+        lambda *args: pytest.fail("filtered report used host-local timezone"),
+    )
+    text = report.render(payload, lang)
+    assert "[1970-01-01T08:00:00+08:00, 1970-01-01T08:03:20+08:00)" in text
+    assert "Asia/Shanghai" in text and "stats_record_at" in text
+    assert "1970-01-01T08:05:00+08:00" in text
+    assert ("Time basis" if lang == "en" else "时间口径") in text
+
+
+def test_cutoff_only_markdown_does_not_claim_an_unfiltered_scope(tmp_path):
+    text = report.render(
+        report.build(synthetic(tmp_path), before=200.0, timezone="UTC")
+    )
+    assert "[-∞, 1970-01-01T00:03:20+00:00)" in text
+    assert "Timezone: UTC" in text and "stats_record_at" in text
+
+
+def test_unrepresentable_epoch_refused_before_config(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        cli,
+        "resolve_config",
+        lambda args: pytest.fail("invalid range reached configuration"),
+    )
+    args = cli.build_parser().parse_args(["report", "--before", "1e300"])
+    with pytest.raises(ValueError):
+        cli.cmd_report(args)

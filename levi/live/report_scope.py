@@ -1,7 +1,7 @@
 """Explicit ISO/epoch report boundaries; no workspace or dataset reads."""
 
 import math
-from datetime import datetime
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
@@ -41,6 +41,12 @@ def window(since=None, before=None, timezone="UTC"):
                 ) from exc
         if not math.isfinite(stamp):
             raise ValueError("report boundary must be finite")
+        try:
+            datetime.fromtimestamp(stamp, UTC)
+        except (ValueError, OverflowError, OSError) as exc:
+            raise ValueError(
+                "report boundary is outside the supported date range"
+            ) from exc
         return stamp
 
     start, end = boundary(since), boundary(before)

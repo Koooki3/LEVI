@@ -8,6 +8,8 @@ import csv
 import io
 import json
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 EPISODE_COLUMNS = (
     "dataset",
@@ -58,6 +60,10 @@ TEXT = {
         "dataset": "dataset",
         "session": "session",
         "since": "since",
+        "report_window": "Window",
+        "timezone": "Timezone",
+        "time_basis": "Time basis",
+        "stats_record_at": "statistics record time (stats_record_at)",
         "generated": "Generated",
         "setup": "Setup",
         "facts": "Facts",
@@ -176,6 +182,10 @@ TEXT = {
         "dataset": "数据集",
         "session": "会话",
         "since": "起始时间",
+        "report_window": "时间窗口",
+        "timezone": "时区",
+        "time_basis": "时间口径",
+        "stats_record_at": "统计记录时间（stats_record_at）",
         "generated": "生成时间",
         "setup": "设置",
         "facts": "事实",
@@ -313,9 +323,13 @@ def pct(value):
     return "-" if value is None else f"{value * 100:.0f}%"
 
 
-def when(epoch) -> str:
+def when(epoch, *, timezone=None) -> str:
     if epoch is None:
         return "-"
+    if timezone is not None:
+        return datetime.fromtimestamp(epoch, ZoneInfo(timezone)).isoformat(
+            timespec="seconds"
+        )
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(epoch))
 
 
@@ -454,10 +468,30 @@ def to_markdown(
     ep = s.get("episodes") or {}
     out = [f"# {title or t['title']}", ""]
     parts = [f"{t[k]}: {scope[k]}" for k in ("dataset", "session") if scope.get(k)]
-    if scope.get("since") is not None:
+    zone = scope.get("timezone")
+    if zone is not None or scope.get("before") is not None:
+        zone = zone or "UTC"
+        start = (
+            when(scope["since"], timezone=zone)
+            if scope.get("since") is not None
+            else "-∞"
+        )
+        end = (
+            when(scope["before"], timezone=zone)
+            if scope.get("before") is not None
+            else "+∞"
+        )
+        parts.extend(
+            [
+                f"{t['report_window']}: [{start}, {end})",
+                f"{t['timezone']}: {zone}",
+                f"{t['time_basis']}: {t['stats_record_at']}",
+            ]
+        )
+    elif scope.get("since") is not None:
         parts.append(f"{t['since']}: {when(scope['since'])}")
     out.append(f"{t['scope']}: {', '.join(parts) or t['all']}  ")
-    out.append(f"{t['generated']}: {when(payload.get('generated_at'))}")
+    out.append(f"{t['generated']}: {when(payload.get('generated_at'), timezone=zone)}")
     out.append("")
     if settings:
         out += [f"## {t['setup']}", ""]

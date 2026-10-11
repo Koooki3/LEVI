@@ -1010,3 +1010,7 @@ are refused before reading configuration or writing output. The report filter
 does not change the background backlog cutoff. JSON scope states
 `time_basis: stats_record_at`; this is not the operator's original label time.
 Reliable historical human-label replay still needs source/label identity checks.
+
+Filtered Markdown reports state the half-open window, chosen timezone, and
+record-time basis. Boundary and generation times use that zone, including
+explicit offsets; unfiltered reports retain their existing display.
