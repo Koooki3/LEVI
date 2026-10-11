@@ -178,6 +178,7 @@ def from_c5(
     produced_ns: int,
     clock_domain: str,
     valid_ms: int = 5_000,
+    event_ids=(),
 ):
     """An online judgement result (``levi.online.judge.result.v1``) as a
     validated ``Judgement`` or ``JudgementUnavailable``. Times are C's own
@@ -259,7 +260,7 @@ def from_c5(
         "episode_role": episode_role,
         "target": target,
         "subgoal": None,
-        "event_ids": [],
+        "event_ids": list(event_ids),
         "decision": decision,
         "unknown_reason": unknown_reason,
         "predicate_results": predicates,

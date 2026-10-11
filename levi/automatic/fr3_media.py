@@ -14,6 +14,17 @@ class Media:
         self.online, self.judge, self.hz = online_module, judge, hz
         self.active = {}
         self.buffers = {}
+        self.event_ledgers = {}
+        self.event_source = None
+
+    def use_event_source(self, observer, context, config, run_id):
+        self.event_source = observer, context, config, run_id
+
+    def event_ledger(self, episode_id):
+        for ledger in self.event_ledgers.values():
+            if ledger.rows and ledger.rows[-1].episode_id == episode_id:
+                return ledger
+        return None
 
     def open(self, folder):
         folder = Path(folder)
@@ -79,7 +90,21 @@ class Media:
         }
 
     def frame(self, folder, step, obs):
-        self.active[Path(folder)]["pending"] = obs
+        folder = Path(folder)
+        self.active[folder]["pending"] = obs
+        if self.event_source is not None:
+            from .event_window import Ledger
+
+            ledger = self.event_ledgers.get(folder)
+            if ledger is None:
+                ledger = Ledger(*self.event_source, self.cv2)
+                self.event_ledgers[folder] = ledger
+            try:
+                ledger.stage(folder, obs)
+            except (ValueError, TypeError, KeyError, AttributeError, OSError):
+                # Recorder compatibility stays intact. Missing current source
+                # fails event verification closed rather than inventing frames.
+                pass
 
     def commit(self, folder, episode_id):
         row = self.active[Path(folder)]
@@ -126,10 +151,19 @@ class Media:
             self.buffers[episode_id] = buffer
         buffer.add(n, stamp, obs["raw"]["image"])
         row["episode"] = episode_id
+        ledger = self.event_ledgers.get(Path(folder))
+        if (
+            ledger is not None
+            and ledger.rows
+            and ledger.rows[-1].observed_ns == obs.get("observed_ns")
+            and ledger.observer.original is obs
+        ):
+            ledger.commit(n)
 
     def _close(self, folder):
         folder = Path(folder)
         row = self.active.get(folder)
+        self.event_ledgers.pop(folder, None)
         first_error = None
         if row:
             try:
@@ -180,6 +214,7 @@ class Media:
             except BaseException as exc:  # noqa: BLE001 - attempt every owned resource
                 first_error = first_error or exc
         self.buffers.clear()
+        self.event_ledgers.clear()
         if first_error is not None:
             raise first_error
 

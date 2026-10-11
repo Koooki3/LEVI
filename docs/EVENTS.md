@@ -161,7 +161,7 @@ and object-semantic detectors are not implemented online.
 It delegates each existing `observe()` exactly once, returns the original
 observation unchanged, and caches only a bounded snapshot. `SignalEvents.poll`
 consumes that snapshot; it makes no robot or camera request. The caller supplies
-an explicit `step_of` source for the current completed control step, the same
+an explicit `step_of` source for the current pre-action control-loop step, the same
 clock object, the robot actor, frozen channel `Binding`s, an owned evidence root
 and a bounded `keep_frame(ref, encoded_bytes)` callback. `EvidenceStore.keep_frame`
 implements this callback. `open` / `poll` / `close` have the same wire interface
@@ -244,3 +244,47 @@ to stop. Candidate generation does not bypass GPU admission, watchdogs, stop
 signals, motion fences, terminal judgement or human approval. CPU tests exercise
 the actual entry with fake SDK and injected models; actual GPU timing and
 physical execution remain unverified.
+
+
+### Event verification uses staged observation sources
+
+In the explicit FR3 signal entry, the current cached observation is staged before
+an action is sent. A private ledger binds its stream epoch, source serial, run,
+episode, role, host clock, control step and observation time to that same rollout
+path and original observation object. Images become immutable JPEG bytes with
+hashes. `phase=pre_action` and the separately recorded `recording_row` distinguish
+an observation from an acknowledged action: a failed policy chunk advances the
+control step without creating a recording row.
+
+The ledger retains at most the binding's frozen `max_history` recent sources, plus
+one pinned start source, all within a **16 MiB total JPEG budget** (the
+existing signal frame byte cap). Old sources are evicted to stay within the
+budget; an evicted candidate, a missing source, a reversed timestamp, or a
+clock/episode/epoch mismatch makes verification unavailable. High-entropy frames
+near the service's 1280-pixel size limit can exhaust the total budget after only
+a few observations, before the requested event window is covered. Missing real
+observations cannot be repaired with invented frames or weaker evidence rules.
+Synthetic shared-host CPU timings measure stage cost only; they do not validate
+the real camera window capacity or the complete control-loop deadline. Only selected JPEGs
+are decoded, one at a time. The encoded event request also has a 16 MiB total
+budget and uses the existing service image-count and image-size limits.
+
+An event request takes no extra robot observation and adds nothing to the legacy
+recording buffer. It uses the actual C5 client's fixed-offset picker and frozen
+spec. Every required end view must select at least two distinct source serials,
+with its actual earliest/latest selections covering the candidate through the
+settling endpoint. A start image serves only the spec's start check; it cannot
+extend these reported bounds. Insufficient actual picks return unavailable;
+offsets and model decisions stay as declared. The four HTTP top-level fields
+and existing encoding/transport stay compatible; optional image `step` and
+episode `steps` are omitted/null because pre-action sources are not executed CSV
+rows. Control steps and hashes remain in the private proof, not extra HTTP keys.
+
+A ticket freezes actual sampled bounds and event IDs before transport. Later
+frames, buffer eviction and request mutation cannot change that proof; a
+cancelled or already delivered ticket cannot produce another answer. The C5
+model worker retains its existing request ownership until it exits. The old
+no-event terminal request and the reset Initial State Contract path retain their
+compatibility behavior. File events without a matching cached source ledger are
+unavailable. This does not open the running-policy GPU gate or establish physical
+safety; hardware use still requires operator approval.

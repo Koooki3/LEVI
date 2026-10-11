@@ -79,6 +79,17 @@ def ready(root, contract, capabilities, *, now=None, model_spec=None):
 
 
 @dataclass
+class OnlineTicket:
+    request_id: str
+    submitted_ns: int
+    request: dict
+    submission: object
+    proof: object = None
+    cancelled: bool = False
+    delivered: bool = False
+
+
+@dataclass
 class Ticket:
     request_id: str
     submitted_ns: int
@@ -412,6 +423,46 @@ class OnlineVerifier:
                     },
                 )
             return self.reset_provider.submit(request)
+        if request.get("event_ids"):
+            from . import event_window
+
+            try:
+                ledger = self.media.event_ledger(request["episode_id"])
+                if ledger is None:
+                    raise ValueError("event source ledger unavailable")
+                proof, spec, images = ledger.freeze(request, self.module, self.judge)
+                episode = {
+                    "run_id": request["run_id"],
+                    "steps": None,
+                    "fps": 1e9 / self.job["config"].control_period_ns,
+                }
+                submission = event_window.submit(
+                    self.module,
+                    self.judge,
+                    spec,
+                    images,
+                    self.job["texts"]["forward"],
+                    episode,
+                )
+                import copy
+
+                return OnlineTicket(
+                    request["request_id"],
+                    self.clock.now(),
+                    copy.deepcopy(request),
+                    submission,
+                    proof,
+                )
+            except (ValueError, TypeError, KeyError, AttributeError, OSError) as exc:
+                return self._response(
+                    request,
+                    {
+                        "schema": "levi.online.judge.result.v1",
+                        "status": "error",
+                        "reason": "invalid_request: event window unavailable: "
+                        + str(exc),
+                    },
+                )
         buffer = self.media.buffers.get(request["episode_id"])
         if buffer is None or not len(buffer):
             return self._response(
@@ -440,18 +491,11 @@ class OnlineVerifier:
             episode,
             start_frame=buffer.start_frame(),
         )
-        return type(
-            "OnlineTicket",
-            (),
-            {
-                "request_id": request["request_id"],
-                "submitted_ns": self.clock.now(),
-                "request": dict(request),
-                "submission": submission,
-            },
-        )()
+        return OnlineTicket(
+            request["request_id"], self.clock.now(), dict(request), submission
+        )
 
-    def _response(self, request, body):
+    def _response(self, request, body, proof=None):
         value = legacy_live.from_c5(
             body,
             run_id=request["run_id"],
@@ -459,9 +503,14 @@ class OnlineVerifier:
             episode_id=request["episode_id"],
             episode_role=request["episode_role"],
             target=request["target"],
-            observed_from_step=0,
-            observed_through_step=request["observed_through_step"],
-            observed_through_ns=request["observed_through_ns"],
+            observed_from_step=proof.observed_from_step if proof is not None else 0,
+            observed_through_step=proof.observed_through_step
+            if proof is not None
+            else request["observed_through_step"],
+            observed_through_ns=proof.observed_through_ns
+            if proof is not None
+            else request["observed_through_ns"],
+            event_ids=proof.event_ids if proof is not None else (),
             produced_ns=self.clock.now(),
             clock_domain=self.clock.domain,
         )
@@ -470,10 +519,27 @@ class OnlineVerifier:
     def collect(self, ticket, *, timeout_ns):
         if isinstance(ticket, Ticket):
             return self.reset_provider.collect(ticket, timeout_ns=timeout_ns)
+        if ticket.cancelled or ticket.delivered:
+            return None
         pending = ticket.submission.pending
         if not pending.wait(timeout_ns / 1e9):
             return None
+        if ticket.cancelled:
+            return None
         result = pending.take()
+        ticket.delivered = True
+        if (
+            ticket.proof is not None
+            and self.clock.domain != ticket.proof.picks[0].source.clock_domain
+        ):
+            return self._response(
+                ticket.request,
+                {
+                    "schema": "levi.online.judge.result.v1",
+                    "status": "error",
+                    "reason": "invalid_request: event proof clock domain changed",
+                },
+            )
         return self._response(
             ticket.request,
             result
@@ -482,10 +548,12 @@ class OnlineVerifier:
                 "status": "unavailable",
                 "reason": "provider_error: empty reply",
             },
+            ticket.proof,
         )
 
     def cancel(self, ticket, reason):
         if isinstance(ticket, Ticket):
             self.reset_provider.cancel(ticket, reason)
         else:
+            ticket.cancelled = True
             ticket.submission.pending.cancel()

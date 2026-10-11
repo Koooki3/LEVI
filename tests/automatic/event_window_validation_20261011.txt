@@ -1,0 +1,17 @@
+$ /home/marvel/work/wenkai/LEVI/.venv/bin/python -m pytest -q -rs tests/automatic/test_event_window.py tests/automatic/test_fr3_bridge.py tests/automatic/test_fr3_signal_entry.py tests/automatic/test_aeri_legacy_live.py tests/automatic/test_provider_readiness.py --basetemp=/home/marvel/work/wenkai/LEVI/lab/worktrees/aeri-event-window/.state/tmp/pt-window
+........................................................................ [ 40%]
+............s........................................................... [ 81%]
+................................                                         [100%]
+=========================== short test summary info ============================
+SKIPPED [1] tests/automatic/test_fr3_bridge.py:1162: set LEVI_TEST_FR3_CLIENT_SOURCE to check the deployed SDK pure functions
+175 passed, 1 skipped in 16.35s
+exit=0
+$ /home/marvel/work/wenkai/LEVI/.venv/bin/ruff check levi/automatic/event_window.py levi/automatic/fr3_media.py levi/automatic/fr3_providers.py levi/automatic/fr3_run.py levi/automatic/adapters/legacy_live.py tests/automatic/test_event_window.py tests/automatic/bench_event_window.py
+All checks passed!
+exit=0
+$ /home/marvel/work/wenkai/LEVI/.venv/bin/ruff format --check levi/automatic/event_window.py levi/automatic/fr3_media.py levi/automatic/fr3_providers.py levi/automatic/fr3_run.py levi/automatic/adapters/legacy_live.py tests/automatic/test_event_window.py tests/automatic/bench_event_window.py
+7 files already formatted
+exit=0
+$ /home/marvel/work/wenkai/LEVI/.venv/bin/levi docs check
+docs are in step with the code
+exit=0

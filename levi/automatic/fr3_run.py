@@ -523,11 +523,11 @@ def assembled(
     orch = None
     robot = base_robot
     if signals is not None:
-        from .adapters.signal_events import CachedObserver
+        from .event_window import EventObserver
 
         # ctx.last_step is the actual current control-loop step, not a guessed
         # pose/action counter (which also counts homing and reset motion).
-        robot = CachedObserver(
+        robot = EventObserver(
             base_robot,
             clock,
             step_of=lambda: (
@@ -537,6 +537,13 @@ def assembled(
     from .fr3_media import Media, Recorder
 
     media = Media(cv2, rotation, online, judge, args.control_hz)
+    if signals is not None:
+        media.use_event_source(
+            robot,
+            lambda: orch.ctx if orch is not None else None,
+            signals[2],
+            cfg.run_id,
+        )
     directory = Path(job["rollout_root"]) / ".aeri" / "runs" / cfg.run_id
     recorder = Recorder(
         job["rollout_root"],

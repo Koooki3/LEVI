@@ -1,0 +1,56 @@
+{
+  "schema": "levi.event_window.synthetic_cpu_measurement.v1",
+  "measured_wall_ns": 1791712348698083997,
+  "python": "3.11.16",
+  "opencv": "4.14.0",
+  "numpy": "2.4.6",
+  "platform": "Linux-7.0.0-34-generic-x86_64-with-glibc2.39",
+  "opencv_threads": 32,
+  "spec_max_side": 1280,
+  "scope": "shared-host synthetic CPU only; no video writer/action/model/control deadline measurement",
+  "measurements": [
+    {
+      "shape": [
+        480,
+        640,
+        3
+      ],
+      "views": 2,
+      "samples": 200,
+      "warmup": 20,
+      "entropy": "uniform uint8 noise seed42",
+      "max_history": 128,
+      "stage_mean_ms": 2.344277935,
+      "stage_p50_ms": 2.329515,
+      "stage_p95_ms": 2.4154590000000002,
+      "stage_max_ms": 2.465286,
+      "observer_mean_ms": 0.08546705500000001,
+      "observer_p95_ms": 0.22027469999999988,
+      "peak_retained_jpeg_bytes": 16603378,
+      "final_recent_count": 22
+    },
+    {
+      "shape": [
+        960,
+        1280,
+        3
+      ],
+      "views": 2,
+      "samples": 200,
+      "warmup": 20,
+      "entropy": "uniform uint8 noise seed42",
+      "max_history": 128,
+      "stage_mean_ms": 10.066855600000002,
+      "stage_p50_ms": 10.0167295,
+      "stage_p95_ms": 10.67416205,
+      "stage_max_ms": 11.16008,
+      "observer_mean_ms": 0.74891204,
+      "observer_p95_ms": 1.43678905,
+      "peak_retained_jpeg_bytes": 14418615,
+      "final_recent_count": 4
+    }
+  ],
+  "script_sha256": "e2f87e6a83f203697df21c7ff090ed60d518c3b8f8638c19569efb6ea41d5885",
+  "script": "tests/automatic/bench_event_window.py",
+  "command": "PYTHONPATH=<worktree> <LEVI-python> tests/automatic/bench_event_window.py"
+}
