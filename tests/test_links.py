@@ -993,3 +993,73 @@ def test_rebound_live_alias_refreshes_the_cached_media_source(
     assert second is not first
     assert second.root == other / links.STATE / "views" / NAME
     assert second.annotations_dir.is_relative_to(other / links.STATE)
+
+
+@pytest.mark.parametrize("native_context", [False, True])
+def test_pinned_agent_media_keeps_native_and_product_contexts_in_source(
+    client, live, live_agent, native_context
+):
+    from levi.agent import media
+
+    wb, context = live_agent
+    canonical = wb.routed({"repo_id": context.repo_id})
+    if native_context:
+        context = context.model_copy(update={"repo_id": "local/" + NAME})
+
+    @media.in_workbench
+    def read(workbench):
+        return media.state_for(context)
+
+    assert read(canonical).root == live / links.STATE / "views" / NAME
+
+
+@pytest.mark.parametrize("rebind", [False, True])
+@pytest.mark.parametrize("during_read", [False, True])
+def test_pinned_agent_media_rejects_alias_changes_without_foreign_reads(
+    client, live, live_agent, tmp_path, monkeypatch, rebind, during_read
+):
+    from levi.agent import media
+    from levi.agent.store import Conflict
+
+    wb, context = live_agent
+    other = make_live(tmp_path / "other-media")
+    monkeypatch.setenv(links.ENV, f"{live},{other}" if rebind else str(live))
+    canonical = wb.routed({"repo_id": context.repo_id})
+    before = tree(other)
+
+    def archive():
+        folder = live / "live/datasets"
+        folder.mkdir(exist_ok=True)
+        (folder / (NAME + ".json")).write_text(json.dumps({"archived": True}))
+
+    @media.in_workbench
+    def read(workbench):
+        if during_read:
+            archive()
+        return media.state_for(context)
+
+    if not during_read:
+        assert read(canonical).root == live / links.STATE / "views" / NAME
+        archive()
+    with pytest.raises(Conflict, match="pinned media source"):
+        read(canonical)
+    assert canonical.store.state == live / links.STATE
+    assert tree(other) == before
+
+
+def test_pinned_agent_media_never_falls_back_for_an_unmapped_repository(
+    client, live, live_agent
+):
+    from levi.agent import media
+    from levi.agent.store import Conflict
+
+    wb, context = live_agent
+    canonical = wb.routed({"repo_id": context.repo_id})
+    context = context.model_copy(update={"repo_id": "local/unknown-source"})
+
+    @media.in_workbench
+    def read(workbench):
+        return media.state_for(context)
+
+    with pytest.raises(Conflict, match="not mapped"):
+        read(canonical)

@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from .schema import EvidenceRef, TaskContext
-from .store import digest, file_hash
+from .store import Conflict, digest, file_hash
 
 _LINKED_REPOS: ContextVar[dict | None] = ContextVar(
     "linked_media_repositories", default=None
@@ -31,11 +31,16 @@ def in_workbench(fn):
             return fn(wb, *args, **kwargs)
         from levi import links
 
-        mapping = {
-            "local/" + link.source: "local/" + link.name
-            for link in links.links().values()
-            if links.target(link.name, wb.store.state)[0] == wb.store.state
-        }
+        source = wb.source_link
+        home = wb.store.state.resolve()
+        _check_link(source.name, home, source.source)
+        mapping = {}
+        for link in links.links().values():
+            state, dataset = links.target(link.name, wb.store.state)
+            if state.resolve() == home:
+                identity = (link.name, home, dataset)
+                mapping["local/" + link.source] = identity
+                mapping["local/" + link.name] = identity
         token = _LINKED_REPOS.set(mapping)
         try:
             return fn(wb, *args, **kwargs)
@@ -43,6 +48,17 @@ def in_workbench(fn):
             _LINKED_REPOS.reset(token)
 
     return wrapped
+
+
+def _check_link(name, home, dataset):
+    from levi import links
+
+    current = links.get(name)
+    if current is None:
+        raise Conflict("The pinned media source disappeared or changed")
+    state, source = links.target(name, home)
+    if state.resolve() != home or source != dataset:
+        raise Conflict("The pinned media source disappeared or changed")
 
 
 def backend():
@@ -54,8 +70,21 @@ def backend():
 
 def state_for(context: TaskContext):
     app = backend()
-    repo = (_LINKED_REPOS.get() or {}).get(context.repo_id, context.repo_id)
-    return app._ensure_state(app.DatasetRef(repo_id=repo, revision=context.revision))
+    mapping = _LINKED_REPOS.get()
+    if mapping is None:
+        return app._ensure_state(
+            app.DatasetRef(repo_id=context.repo_id, revision=context.revision)
+        )
+    identity = mapping.get(context.repo_id)
+    if identity is None:
+        raise Conflict("The media dataset is not mapped to this pinned workbench")
+    name, home, dataset = identity
+    _check_link(name, home, dataset)
+    state = app._ensure_state(
+        app.DatasetRef(repo_id="local/" + name, revision=context.revision)
+    )
+    _check_link(name, home, dataset)
+    return state
 
 
 def pin_remote(context: TaskContext):
