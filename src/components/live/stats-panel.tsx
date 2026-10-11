@@ -46,7 +46,13 @@ export function KeyFigures({ summary }: { summary: StatsResponse["summary"] }) {
   );
 }
 
-export function SessionsTable({ rows }: { rows: StatsSession[] }) {
+export function SessionsTable({
+  rows,
+  linkForSession = statsSessionHref,
+}: {
+  rows: StatsSession[];
+  linkForSession?: (row: StatsSession) => string | null;
+}) {
   const { t } = useLocale();
   if (rows.length === 0) return null;
   // Agent vs operator, only when the operator labelled some episode success or failure.
@@ -81,8 +87,8 @@ export function SessionsTable({ rows }: { rows: StatsSession[] }) {
               <tr key={`${r.dataset}/${r.session}`}>
                 <td>
                   <span>
-                    {statsSessionHref(r) ? (
-                      <Link className="ds-focus" href={statsSessionHref(r)!}>
+                    {linkForSession(r) ? (
+                      <Link className="ds-focus" href={linkForSession(r)!}>
                         <code>{r.session}</code>
                       </Link>
                     ) : (

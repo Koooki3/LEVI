@@ -6,7 +6,12 @@ import { Note, Problem } from "@/components/pages-ui/feedback";
 import { useLocale } from "@/components/levi-locale";
 import { useLivePoll } from "./use-live";
 import { SessionCard } from "./session-panels";
-import { findSession, identityOf, type SessionIdentity } from "./session-route";
+import {
+  findSession,
+  identityOf,
+  identityHref,
+  type SessionIdentity,
+} from "./session-route";
 import { useLiveStats } from "./use-live-stats";
 import { EPISODE_PAGE, type EpisodeView } from "./stats-logic";
 import {
@@ -247,7 +252,21 @@ export function SessionDetail({
                 {statsData && (
                   <>
                     <KeyFigures summary={statsData.summary} />
-                    <SessionsTable rows={statsData.sessions ?? []} />
+                    <SessionsTable
+                      rows={statsData.sessions ?? []}
+                      linkForSession={() =>
+                        resultItem
+                          ? identityHref({
+                              root: resultItem.identity.root,
+                              group: resultItem.identity.group,
+                              task: resultItem.identity.task,
+                              id: resultItem.identity.session_id ?? "",
+                              run: resultItem.identity.run_id ?? "",
+                              dataset,
+                            })
+                          : null
+                      }
+                    />
                     {(statsData.summary?.episodes?.count ?? 0) === 0 && (
                       <StatsEmpty filtered />
                     )}

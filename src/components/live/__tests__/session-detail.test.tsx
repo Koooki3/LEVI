@@ -7,7 +7,7 @@ import {
 } from "@/components/ds/__tests__/dom";
 import type { LiveSession } from "../types";
 import { resultFixture } from "./result-fixture";
-import { identityOf } from "../session-route";
+import { identityOf, parseSessionIdentity } from "../session-route";
 import {
   statisticsFixture,
   statisticsSourceFixture,
@@ -76,6 +76,12 @@ describe("individual live session", () => {
     ).toBe(true);
     expect(host.querySelector(".pg-live-stats-table")?.textContent).toContain(
       "run-1",
+    );
+    const href = host
+      .querySelector(".pg-live-stats-table a")!
+      .getAttribute("href")!;
+    expect(parseSessionIdentity(href.split("/").at(-1)!)).toEqual(
+      identityOf(session),
     );
   });
   test("same-page statistics navigation opens the disclosure without replacing the source", async () => {
