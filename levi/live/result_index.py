@@ -105,8 +105,13 @@ class _Snapshot:
     def json(self, path, *, optional=False):
         key = ("json", Path(path))
         if key not in self.parsed:
-            raw = self.read(path, optional=optional)
-            self.parsed[key] = self.decode(raw) if raw is not None else None
+            try:
+                raw = self.read(path, optional=optional)
+                self.parsed[key] = self.decode(raw) if raw is not None else None
+            except (OSError, ValueError):
+                if not self.truncated:
+                    self.truncated.add("source_error")
+                raise
         return self.parsed[key]
 
     def decode(self, raw):
@@ -249,6 +254,7 @@ def _base(config, root, group, task, session):
         "status": "unknown",
         "reason": "canonical_session_missing",
         "result_visibility": "unknown",
+        "statistics_visibility": "unknown",
         "analysis": None,
         "records": [],
         "runs": [],
@@ -292,6 +298,10 @@ def _stop(item, status, reason):
         "withheld" if status in ("active", "blocked") else "unknown"
     )
     item["source"]["snapshot"] = None
+    if status not in ("waiting_annotation",):
+        item["statistics_visibility"] = (
+            "withheld" if status in ("active", "blocked") else "unknown"
+        )
     return item
 
 
@@ -364,7 +374,9 @@ def _states(config, snapshot):
     return found
 
 
-def _header_visibility(snapshot, source, matching, run, session):
+def _header_visibility(
+    snapshot, source, matching, run, session, *, active=False, include_excluded=False
+):
     """Older C2 writers omit AERI; canonical capture headers must vouch for legacy data."""
     for state in matching.values():
         for demo, row in (state.get("demos") or {}).items():
@@ -372,7 +384,7 @@ def _header_visibility(snapshot, source, matching, run, session):
                 not isinstance(row, dict)
                 or row.get("run_id") != run
                 or row.get("deleted")
-                or exclusion.is_excluded(row)
+                or (exclusion.is_excluded(row) and not include_excluded)
             ):
                 continue
             if not isinstance(demo, str) or not re.fullmatch(r"demo_[0-9]+", demo):
@@ -423,13 +435,16 @@ def _header_visibility(snapshot, source, matching, run, session):
                     and marker["analysis_visibility"] != "public"
                 ):
                     return "source_aeri_visibility_unknown"
-            if (
+            is_aeri = (
                 "aeri" in meta
                 or "aeri" in evaluation
                 or "episode_role" in meta
                 or "episode_role" in evaluation
                 or evaluation.get("verdict_by") == "aeri"
-            ) and session.get("analysis_visibility") != "public":
+                or "aeri" in session
+                or "episode_role" in session
+            )
+            if is_aeri and (active or session.get("analysis_visibility") != "public"):
                 return "source_aeri_visibility_unknown"
     return None
 
@@ -650,6 +665,7 @@ def _campaign(item, raw, root, snapshot):
     from levi.automatic.campaign import api as campaign_api
 
     campaign = raw.get("campaign_id")
+    item["statistics_visibility"] = "withheld"
     item["comparison"]["campaign_id"] = campaign if isinstance(campaign, str) else None
     try:
         c = campaign_api._locate(campaign, loader=snapshot)
@@ -829,6 +845,44 @@ def session(
     _snapshot=None,
     _validate=True,
 ):
+    snapshot = _snapshot or _Snapshot()
+    item = _session(
+        config,
+        root=root,
+        group=group,
+        task=task,
+        session=session,
+        session_id=session_id,
+        run_id=run_id,
+        linker=linker,
+        _snapshot=snapshot,
+        _validate=False,
+    )
+    if snapshot.truncated:
+        return _stop(item, "unknown", "index_scan_truncated")
+    if _validate and (
+        item["result_visibility"] == "visible"
+        or item["statistics_visibility"] == "visible"
+    ):
+        if not snapshot.valid():
+            return _stop(item, "stale", "source_changed_during_read")
+        item["source"]["snapshot"] = snapshot.digest()
+    return item
+
+
+def _session(
+    config,
+    *,
+    root,
+    group,
+    task,
+    session,
+    session_id=None,
+    run_id=None,
+    linker=None,
+    _snapshot=None,
+    _validate=True,
+):
     group, task = _component(group), _component(task)
     session = _component(session, SESSION)
     if session_id is not None:
@@ -860,13 +914,14 @@ def session(
         ):
             return _stop(item, "rebound", "session_identity_changed")
         item["identity"].update(session_id=current_id, run_id=current_run)
-        if raw.get("state") not in ("finished", "stopped"):
-            return _stop(item, "active", "session_not_terminal")
+        active = raw.get("state") not in ("finished", "stopped")
         source = catalog._safe(allowed / group / task)
         if not source.is_dir():
             return _stop(item, "missing_source", "rollout_source_missing")
         snapshot.pin(source)
         if raw.get("campaign_id"):
+            if active:
+                return _stop(item, "active", "session_not_terminal")
             result = _campaign(item, raw, allowed, snapshot)
             if snapshot.truncated:
                 return _stop(item, "unknown", "index_scan_truncated")
@@ -919,7 +974,9 @@ def session(
                 if rebound
                 else "dataset_source_unknown",
             )
-        withheld = _header_visibility(snapshot, source, matching, current_run, raw)
+        withheld = _header_visibility(
+            snapshot, source, matching, current_run, raw, active=active
+        )
         if snapshot.truncated:
             return _stop(item, "unknown", "index_scan_truncated")
         if withheld:
@@ -931,6 +988,11 @@ def session(
                 else "blocked",
                 withheld,
             )
+        item["statistics_visibility"] = "visible"
+        if active:
+            _stop(item, "active", "session_not_terminal")
+            item["statistics_visibility"] = "visible"
+            return item
         selected = []
         have = set()
         stale = False
@@ -1047,13 +1109,13 @@ def session(
         )
 
 
-def build(config, *, dataset=None, run_id=None, linker=None):
+def build(config, *, dataset=None, run_id=None, linker=None, _snapshot=None):
     if dataset is not None and not DATASET.fullmatch(dataset):
         raise HTTPException(400, "Invalid dataset identity")
     if run_id is not None:
         _component(run_id, SESSION)
     items = []
-    snapshot = _Snapshot()
+    snapshot = _snapshot or _Snapshot()
     for root in _roots(config):
         try:
             allowed = _root(config, root)
@@ -1122,7 +1184,10 @@ def build(config, *, dataset=None, run_id=None, linker=None):
             _stop(item, "stale", "source_changed_during_read")
         elif snapshot.truncated:
             _stop(item, "unknown", "index_scan_truncated")
-        elif item["result_visibility"] == "visible":
+        elif (
+            item["result_visibility"] == "visible"
+            or item["statistics_visibility"] == "visible"
+        ):
             item["source"]["snapshot"] = digest
     return {
         "schema": SCHEMA,
@@ -1130,15 +1195,19 @@ def build(config, *, dataset=None, run_id=None, linker=None):
         "items": items,
         "complete": not bool(snapshot.truncated),
         "truncated": sorted(snapshot.truncated),
-        "limits": {
-            "sessions_per_root": MAX_SESSIONS,
-            "datasets": MAX_STATES,
-            "catalog_entries": MAX_CATALOG,
-            "file_bytes": LIMIT,
-            "request_bytes": MAX_REQUEST_BYTES,
-            "json_values": MAX_JSON_VALUES,
-            "record_lines": MAX_RECORD_LINES,
-        },
+        "limits": scan_limits(),
+    }
+
+
+def scan_limits():
+    return {
+        "sessions_per_root": MAX_SESSIONS,
+        "datasets": MAX_STATES,
+        "catalog_entries": MAX_CATALOG,
+        "file_bytes": LIMIT,
+        "request_bytes": MAX_REQUEST_BYTES,
+        "json_values": MAX_JSON_VALUES,
+        "record_lines": MAX_RECORD_LINES,
     }
 
 
@@ -1236,6 +1305,199 @@ def _history(config, seen, snapshot):
         except (OSError, ValueError, HTTPException, TypeError):
             continue
     return list(found.values())
+
+
+def _json_lines(snapshot, path, normalizer=None):
+    rows = []
+    raw = snapshot.read(path, optional=True)
+    for line in io.BytesIO(raw or b""):
+        if not line.strip():
+            continue
+        snapshot.count_lines()
+        try:
+            value = snapshot.decode(line)
+        except ValueError:
+            if snapshot.truncated:
+                raise
+            continue
+        row = normalizer(value) if normalizer is not None else value
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def _statistics_eligibility(config, snapshot, name, state, demo, row):
+    group, task = state.get("group"), state.get("task_folder")
+    if (
+        not isinstance(group, str)
+        or not PART.fullmatch(group)
+        or not isinstance(task, str)
+        or not PART.fullmatch(task)
+    ):
+        return "unknown"
+    run = row.get("run_id")
+    if (
+        not isinstance(run, str)
+        or not SESSION.fullmatch(run)
+        or not isinstance(demo, str)
+        or not re.fullmatch(r"demo_[0-9]+", demo)
+        or row.get("deleted")
+    ):
+        return "unknown"
+    source = state.get("source")
+    roots = [
+        root for root in _roots(config) if source == str(Path(root) / group / task)
+    ]
+    if len(roots) != 1:
+        return "unknown"
+    root = _root(config, roots[0])
+    source = catalog._safe(Path(source))
+    snapshot.pin(root)
+    snapshot.pin(source)
+    found = _find(snapshot, root, group, task, run)
+    if found is None:
+        return "unknown"
+    raw = found[1]
+    if raw.get("schema") != "levi.eval.session.v1" or raw.get("run_id") != run:
+        return "unknown"
+    if raw.get("campaign_id") or raw.get("blinded") or raw.get("operator_blind"):
+        return "withheld"
+    if ("aeri" in raw or "episode_role" in raw) and raw.get(
+        "analysis_visibility"
+    ) != "public":
+        return "withheld"
+    active = raw.get("state") not in ("finished", "stopped")
+    denied = _header_visibility(
+        snapshot, source, {name: state}, run, raw, active=active, include_excluded=True
+    )
+    return "withheld" if denied else "visible"
+
+
+def legacy_sources(
+    config,
+    snapshot,
+    *,
+    kind,
+    dataset=None,
+    session=None,
+    since=None,
+    group=None,
+    task=None,
+    include_excluded=False,
+):
+    """Authorize the exact original-engine scope against pinned canonical sources."""
+    from . import gating, management, statsview
+
+    states = _states(config, snapshot)
+    snapshot.pin(config.live_dir)
+    if kind == "analysis":
+        rows = _records(snapshot, config.live_dir)
+        sources = {"records": rows, "states": states}
+        selected = [
+            r
+            for r in rows
+            if (group is None or r.get("group") == group)
+            and (task is None or r.get("task") == task)
+        ]
+        checks = []
+        for name, state in states.items():
+            if (
+                state.get("archived")
+                or (group is not None and state.get("group") != group)
+                or (task is not None and state.get("task_folder") != task)
+            ):
+                continue
+            for demo, row in (state.get("demos") or {}).items():
+                if (
+                    isinstance(row, dict)
+                    and not row.get("deleted")
+                    and not exclusion.is_excluded(row)
+                ):
+                    checks.append((name, demo, row))
+    else:
+        base = config.live_dir / stats.FILE
+        paths = sorted(
+            (p for p in base.parent.glob(stats.FILE + ".*") if p.suffix[1:].isdigit()),
+            key=lambda p: -int(p.suffix[1:]),
+        )
+        rows = []
+        for path in [*paths, base]:
+            rows.extend(
+                r
+                for r in _json_lines(snapshot, path, stats.normalize)
+                if str(r.get("schema", "")).startswith("levi.live.episode_stats.")
+            )
+        carried = 0
+        keyed = []
+        for row in rows:
+            carried = (
+                stats.num_or_zero(row.get("at"))
+                if row.get("at") is not None
+                else carried
+            )
+            keyed.append((carried, row))
+        rows = [r for _at, r in sorted(keyed, key=lambda pair: pair[0])]
+        management_data = (
+            snapshot.json(config.live_dir / management.FILE, optional=True) or {}
+        )
+        gate = []
+        for path in (
+            config.live_dir / (gating.HISTORY + ".1"),
+            config.live_dir / gating.HISTORY,
+        ):
+            gate.extend(_json_lines(snapshot, path))
+        sources = {
+            "records": rows,
+            "states": states,
+            "gate": gate,
+            "tombstones": management_data.get("sessions", []),
+        }
+        selected, _hidden = statsview.scoped_rows(
+            config, dataset, session, since, include_excluded, sources=sources
+        )
+        checks = []
+    for record in selected:
+        name, demo = record.get("dataset"), record.get("demo")
+        state = states.get(name)
+        row = (state.get("demos") or {}).get(demo) if isinstance(state, dict) else None
+        if not isinstance(row, dict) or row.get("run_id") != record.get("session"):
+            raise HTTPException(
+                409,
+                {
+                    "reason": "statistics_source_unknown",
+                    "statistics_visibility": "unknown",
+                },
+            )
+        checks.append((name, demo, row))
+    checked = set()
+    for name, demo, row in checks:
+        key = (name, row.get("run_id"))
+        if key in checked:
+            continue
+        checked.add(key)
+        visibility = _statistics_eligibility(
+            config, snapshot, name, states[name], demo, row
+        )
+        if visibility != "visible":
+            raise HTTPException(
+                409,
+                {
+                    "reason": "statistics_source_withheld"
+                    if visibility == "withheld"
+                    else "statistics_source_unknown",
+                    "statistics_visibility": visibility,
+                },
+            )
+    if snapshot.truncated:
+        raise HTTPException(
+            409,
+            {
+                "reason": "statistics_scope_incomplete",
+                "statistics_visibility": "unknown",
+                "truncated": sorted(snapshot.truncated),
+            },
+        )
+    return sources
 
 
 def download(item, *, format="json", lang="en"):

@@ -14,10 +14,64 @@ from levi.live import api, cli, gating, mirror, stats
 from levi.live import config as live_config
 
 
+def legacy_sources(c, rows):
+    root = Path(c.watch.roots[0])
+    for record in rows:
+        name = record["dataset"]
+        group, _, task = name.partition("__")
+        task = task or "task"
+        source = root / group / task
+        demo = record["demo"]
+        directory = source / demo
+        directory.mkdir(parents=True, exist_ok=True)
+        run = record["session"]
+        (directory / "metadata.json").write_text(json.dumps({"eval": {"run_id": run}}))
+        sessions = root / ".eval_sessions"
+        sessions.mkdir(exist_ok=True)
+        (sessions / f"{name}.json").write_text(
+            json.dumps(
+                {
+                    "schema": "levi.eval.session.v1",
+                    "group": group,
+                    "task_folder": task,
+                    "run_id": run,
+                    "session_id": run,
+                    "state": "running",
+                }
+            )
+        )
+        path = mirror.state_path(c, name)
+        state = json.loads(path.read_text()) if path.exists() else {}
+        state.update(
+            name=name, group=group, task_folder=task, root=str(root), source=str(source)
+        )
+        state.setdefault("demos", {})[demo] = {
+            **state.get("demos", {}).get(demo, {}),
+            "state": "done",
+            "run_id": run,
+            "episode_index": record.get("episode", {}).get("episode_index"),
+            "completed_at": record.get("timeline", {}).get("completed_at"),
+        }
+        mirror.jsonio.write(path, state)
+
+
+def result_config(monkeypatch, c):
+    monkeypatch.setattr(api, "_result_config", lambda: c)
+    original = stats.record
+
+    def record_with_sources(live_dir, row, *a, **kw):
+        value = original(live_dir, row, *a, **kw)
+        legacy_sources(c, stats.read(c.live_dir))
+        return value
+
+    monkeypatch.setattr(stats, "record", record_with_sources)
+
+
 @pytest.fixture
 def live_stats(client, tmp_path, monkeypatch):
     c = cfg(tmp_path)
     cli.prepare(c)
+    result_config(monkeypatch, c)
     monkeypatch.setattr(api, "_workspace", lambda: Path(c.service.workspace))
     monkeypatch.setenv("LEVI_LIVE_HOME", c.service.home)
     rows = [full(f"demo_{n:04d}", n) for n in range(4)]
@@ -32,6 +86,8 @@ def live_stats(client, tmp_path, monkeypatch):
 
 def test_the_api_is_disabled_outside_a_live_workspace(client, tmp_path, monkeypatch):
     monkeypatch.setattr(api, "_workspace", lambda: tmp_path)
+    monkeypatch.setattr(api, "_result_config", lambda: None)
+    api._REASON.set("not_live")
     off = {"enabled": False, "reason": "not_live"}
     assert client.get("/api/levi/live/stats").json() == off
     assert client.get("/api/levi/live/stats/export").json() == off
@@ -74,19 +130,16 @@ def test_a_session_end_the_state_knows_counts_for_in_session(live_stats):
     # The dataset's state also lists an episode of the session that has no
     # record yet (it ended at 160): the last episode now counts as inside too.
     path = mirror.state_path(c, "g__t")
-    mirror.jsonio.write(
-        path,
-        {
-            "name": "g__t",
-            "demos": {
-                "demo_0004": {
-                    "state": "mirrored",
-                    "run_id": "s1",
-                    "completed_at": 160.0,
-                }
-            },
-        },
-    )
+    state = json.loads(path.read_text())
+    state["demos"]["demo_0004"] = {
+        "state": "mirrored",
+        "run_id": "s1",
+        "completed_at": 160.0,
+    }
+    mirror.jsonio.write(path, state)
+    pending = Path(state["source"]) / "demo_0004" / "metadata.json"
+    pending.parent.mkdir(parents=True)
+    pending.write_text(json.dumps({"eval": {"run_id": "s1"}}))
     got = client.get("/api/levi/live/stats?session=s1").json()
     assert got["summary"]["in_session"]["count"] == 4
     assert got["summary"]["in_session"]["ratio"] == 1.0
@@ -182,6 +235,7 @@ def test_a_workspace_without_records_answers_empty_not_error(
 ):
     c = cfg(tmp_path)
     cli.prepare(c)
+    result_config(monkeypatch, c)
     monkeypatch.setattr(api, "_workspace", lambda: Path(c.service.workspace))
     body = client.get("/api/levi/live/stats").json()
     assert body["enabled"] and body["summary"]["episodes"]["count"] == 0
@@ -191,19 +245,10 @@ def test_a_workspace_without_records_answers_empty_not_error(
 
 def test_removed_episodes_are_hidden_by_default_and_can_be_included(live_stats):
     client, c, _ = live_stats
-    mirror.jsonio.write(
-        mirror.state_path(c, "g__t"),
-        {
-            "name": "g__t",
-            "demos": {
-                "demo_0001": {
-                    "state": "done",
-                    "run_id": "s1",
-                    "excluded": {"at": 1.0, "by": "person", "reason": ""},
-                },
-            },
-        },
-    )
+    path = mirror.state_path(c, "g__t")
+    state = json.loads(path.read_text())
+    state["demos"]["demo_0001"]["excluded"] = {"at": 1.0, "by": "person", "reason": ""}
+    mirror.jsonio.write(path, state)
     base = client.get("/api/levi/live/stats?dataset=g__t").json()
     assert base["include_excluded"] is False and base["excluded_demos"] == 1
     assert base["summary"]["episodes"]["count"] == 3
@@ -235,6 +280,7 @@ def test_a_dataset_name_with_a_root_mark_works_in_filters_exports_and_urls(
 ):
     c = cfg(tmp_path)
     cli.prepare(c)
+    result_config(monkeypatch, c)
     monkeypatch.setattr(api, "_workspace", lambda: Path(c.service.workspace))
     name = "pi05__stack__at__models"
     for n in range(2):

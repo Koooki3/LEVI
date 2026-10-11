@@ -32,11 +32,13 @@ The JSON shapes are documented in ``docs/LIVE.md``.
 
 import contextlib
 import contextvars
+import functools
 import os
 import re
 import secrets
 import sqlite3
 import time
+import tomllib
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
@@ -95,6 +97,56 @@ def _own() -> Path:
 _REASON: contextvars.ContextVar[str] = contextvars.ContextVar(
     "live_disabled_reason", default="not_configured"
 )
+
+
+_RESULT_READS = contextvars.ContextVar("live_result_reads", default=None)
+
+
+def _result_request(function):
+    @functools.wraps(function)
+    def wrapped(*args, **kwargs):
+        snapshot = result_index._Snapshot()
+        token = _RESULT_READS.set(snapshot)
+        try:
+            answer = function(*args, **kwargs)
+            if function.__name__ in (
+                "stats_view",
+                "stats_export",
+                "analysis_view",
+            ) and (snapshot.truncated or not snapshot.valid()):
+                raise HTTPException(
+                    409,
+                    {
+                        "reason": "statistics_scope_incomplete"
+                        if snapshot.truncated
+                        else "statistics_source_changed",
+                        "statistics_visibility": "unknown",
+                        "truncated": sorted(snapshot.truncated),
+                    },
+                )
+            return answer
+        except (OSError, ValueError):
+            if function.__name__ == "results_view":
+                return {
+                    "schema": result_index.SCHEMA,
+                    "available": True,
+                    "items": [],
+                    "complete": False,
+                    "truncated": sorted(snapshot.truncated or {"source_error"}),
+                    "limits": result_index.scan_limits(),
+                }
+            raise HTTPException(
+                409,
+                {
+                    "reason": "result_source_unavailable",
+                    "statistics_visibility": "unknown",
+                    "truncated": sorted(snapshot.truncated),
+                },
+            ) from None
+        finally:
+            _RESULT_READS.reset(token)
+
+    return wrapped
 
 
 def _workspace() -> Path | None:
@@ -935,6 +987,7 @@ def service_operation(operation_id: str):
 
 
 @router.get("/stats")
+@_result_request
 def stats_view(
     dataset: str | None = None,
     session: str | None = None,
@@ -947,10 +1000,19 @@ def stats_view(
     and reports"): aggregates, one row per evaluation session and a page of
     per-episode rows (newest first), for everything or one dataset, session
     or time range. Read from ``live/stats.jsonl``; no path, token or key."""
-    config = _config()
+    config = _result_config()
     if config is None:
         return _disabled()
     dataset, session, since = _scope(dataset, session, since)
+    sources = result_index.legacy_sources(
+        config,
+        _RESULT_READS.get(),
+        kind="stats",
+        dataset=dataset,
+        session=session,
+        since=since,
+        include_excluded=include_excluded,
+    )
     return statsview.build(
         config,
         dataset=dataset,
@@ -959,10 +1021,12 @@ def stats_view(
         limit=max(1, min(int(limit), statsview.MAX_PAGE)),
         offset=max(0, int(offset)),
         include_excluded=include_excluded,
+        sources=sources,
     )
 
 
 @router.get("/analysis")
+@_result_request
 def analysis_view(
     group: str | None = None,
     task: str | None = None,
@@ -977,7 +1041,7 @@ def analysis_view(
     are written by the live service or ``levi live analysis --sync``, never
     by this route. Every figure that comes from the background labelling is
     marked ``review: auto``. No path, token or key."""
-    config = _config()
+    config = _result_config()
     if config is None:
         return _disabled()
     for value in (group, task):
@@ -987,8 +1051,21 @@ def analysis_view(
     if len(names) > 50 or any(len(x) > 64 for x in names):
         raise HTTPException(400, "stages is a short comma-separated list")
     try:
+        sources = result_index.legacy_sources(
+            config,
+            _RESULT_READS.get(),
+            kind="analysis",
+            group=group or None,
+            task=task or None,
+            since=since,
+        )
         found = analysis.build(
-            config, group=group or None, task=task or None, since=since, stages=names
+            config,
+            group=group or None,
+            task=task or None,
+            since=since,
+            stages=names,
+            sources=sources,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -996,6 +1073,7 @@ def analysis_view(
 
 
 @router.get("/stats/export")
+@_result_request
 def stats_export(
     format: str = "json",
     dataset: str | None = None,
@@ -1006,12 +1084,21 @@ def stats_export(
 ):
     """The same statistics as a download: ``csv`` (one row per episode),
     ``json`` (everything) or ``md`` (a readable report)."""
-    config = _config()
+    config = _result_config()
     if config is None:
         return _disabled()
     if format not in EXPORTS:
         raise HTTPException(400, "format is csv, json or md")
     dataset, session, since = _scope(dataset, session, since)
+    sources = result_index.legacy_sources(
+        config,
+        _RESULT_READS.get(),
+        kind="stats",
+        dataset=dataset,
+        session=session,
+        since=since,
+        include_excluded=include_excluded,
+    )
     payload = statsview.build(
         config,
         dataset=dataset,
@@ -1019,6 +1106,7 @@ def stats_export(
         since=since,
         limit=MAX_EXPORT_ROWS,
         include_excluded=include_excluded,
+        sources=sources,
     )
     if format == "csv":
         body = statsfmt.to_csv(payload)
@@ -1058,7 +1146,9 @@ router.routes.append(
 
 # Result reads deliberately avoid _workspace's training-pool remembrance write.
 def _result_config():
-    found = locate.find(_own())
+    snapshot = _RESULT_READS.get() or result_index._Snapshot()
+    found = locate.find(_own(), loader=snapshot)
+    _REASON.set(found.problem or "not_live")
     if found.workspace is None or not locate.is_live(found.workspace):
         return None
     root = found.workspace
@@ -1068,10 +1158,9 @@ def _result_config():
     )
     if written is None:
         return None
-    try:
-        config = live_config.load(written)
-    except ValueError:
-        return None
+    raw = snapshot.read(written)
+    data = snapshot.admit(tomllib.loads(raw.decode("utf-8")))
+    config = live_config.from_dict(data, str(written))
     config.service.workspace = str(root)
     return config
 
@@ -1161,7 +1250,11 @@ def _result_linker(config, item, states, snapshot):
             and service.ui_port not in (5000, 5001, 5100, 7470, 8000)
         ):
             live_ui = f"http://{'[' + host + ']' if host == '::1' else host}:{service.ui_port}"
+    record_datasets = {row.get("dataset") for row in item["records"]}
+    seen_viewers = set()
     for name, state in states.items():
+        if name not in record_datasets:
+            continue
         capture = state.get("capture")
         native = None
         href = None
@@ -1250,7 +1343,10 @@ def _result_linker(config, item, states, snapshot):
             "annotation_base": annotation_base,
             "status": "ready" if href else "unknown",
         }
-        item["viewers"].append(mapping)
+        viewer_key = (capture, native, repo, href)
+        if viewer_key not in seen_viewers:
+            seen_viewers.add(viewer_key)
+            item["viewers"].append(mapping)
         for run in item["runs"]:
             if run["dataset"] != name:
                 continue
@@ -1279,16 +1375,22 @@ def _result_linker(config, item, states, snapshot):
 
 
 @router.get("/results")
+@_result_request
 def results_view(dataset: str | None = None, run_id: str | None = None):
     config = _result_config()
     if config is None:
         return {"schema": result_index.SCHEMA, "available": False, "items": []}
     return result_index.build(
-        config, dataset=dataset, run_id=run_id, linker=_result_linker
+        config,
+        dataset=dataset,
+        run_id=run_id,
+        linker=_result_linker,
+        _snapshot=_RESULT_READS.get(),
     )
 
 
 @router.get("/results/session")
+@_result_request
 def result_session(
     root: str,
     group: str,
@@ -1309,10 +1411,12 @@ def result_session(
         session_id=session_id,
         run_id=run_id,
         linker=_result_linker,
+        _snapshot=_RESULT_READS.get(),
     )
 
 
 @router.get("/results/session/download")
+@_result_request
 def result_session_download(
     root: str,
     group: str,
@@ -1323,7 +1427,7 @@ def result_session_download(
     format: str = "json",
     lang: str = "en",
 ):
-    item = result_session(root, group, task, session, session_id, run_id)
+    item = result_session.__wrapped__(root, group, task, session, session_id, run_id)
     content = result_index.download(item, format=format, lang=lang)
     return Response(
         content=content,

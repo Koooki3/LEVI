@@ -475,7 +475,9 @@ def test_config_lookup_does_not_remember_embedded_workspaces(tmp_path, monkeypat
     cfg, _args = configured(tmp_path)
     path = cfg.workspace / "live/effective.toml"
     path.write_text(live_config.render(live_config.Config()))
-    monkeypatch.setattr(locate, "find", lambda own: locate.Found(cfg.workspace, "env"))
+    monkeypatch.setattr(
+        locate, "find", lambda own, **_kw: locate.Found(cfg.workspace, "env")
+    )
     monkeypatch.setattr(locate, "is_live", lambda path: True)
 
     def writing(*a, **kw):
@@ -1037,3 +1039,139 @@ def test_multiple_canonical_dataset_keys_preserve_result_and_deduplicate_capture
     assert item["result_visibility"] == "visible"
     assert item["identity"]["datasets"] == ["dataset-a", "dataset-b"]
     assert len({v["viewer_href"] for v in item["viewers"]}) == 1
+
+
+def legacy_client(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    cfg, args = configured(tmp_path)
+    # One exact normal session, without the intentionally unmatched second-run row.
+    path = cfg.live_dir / analysis.FILE
+    path.write_text(path.read_text().splitlines()[0] + "\n")
+    change_state(args, lambda s: s["demos"].pop("demo_0001", None))
+    from levi.live import stats
+
+    stats.record(
+        cfg.live_dir,
+        {
+            "dataset": "dataset-a",
+            "demo": "demo_0000",
+            "session": "run-a",
+            "at": 1,
+            "result": {"state": "done", "verdict": {"outcome": "success"}},
+        },
+    )
+    monkeypatch.setattr(api, "_result_config", lambda: cfg)
+    application = FastAPI()
+    application.include_router(api.router)
+    return TestClient(application), cfg, args
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_real_legacy_handlers_and_active_privacy_field_remain_available(
+    tmp_path, monkeypatch, running
+):
+    client, cfg, args = legacy_client(tmp_path, monkeypatch)
+    if running:
+        change_session(args, state="running")
+    for endpoint, params in [
+        ("stats", {"dataset": "dataset-a", "session": "run-a"}),
+        ("stats/export", {"dataset": "dataset-a", "session": "run-a"}),
+        ("analysis", {"group": "model-a", "task": "task-a"}),
+    ]:
+        response = client.get("/api/levi/live/" + endpoint, params=params)
+        assert response.status_code == 200, response.text
+        assert "success" in response.text
+    item = lookup(cfg)
+    assert item["statistics_visibility"] == "visible"
+    assert item["identity"]["datasets"] == ["dataset-a"]
+    assert item["identity"]["run_id"] == "run-a"
+    if running:
+        assert item["analysis"] is None and item["result_visibility"] == "withheld"
+
+
+@pytest.mark.parametrize(
+    "case", ["active_blind", "unknown_aeri", "campaign", "missing_header", "rebound"]
+)
+def test_real_old_handlers_close_restricted_or_unknown_sources(
+    tmp_path, monkeypatch, case
+):
+    client, cfg, args = legacy_client(tmp_path, monkeypatch)
+    if case == "active_blind":
+        change_session(args, state="running", campaign_id="blind-campaign")
+        write_header(
+            args["rollout_root"] / "model-a/task-a",
+            "demo_0000",
+            "run-a",
+            aeri={"blinded": True},
+        )
+    elif case == "unknown_aeri":
+        write_header(
+            args["rollout_root"] / "model-a/task-a", "demo_0000", "run-a", aeri={}
+        )
+    elif case == "campaign":
+        change_session(args, campaign_id="c001")
+    elif case == "missing_header":
+        (args["rollout_root"] / "model-a/task-a/demo_0000/metadata.json").unlink()
+    else:
+        change_state(
+            args, lambda s: s["demos"]["demo_0000"].update(run_id="replacement")
+        )
+    for endpoint, params in [
+        ("stats", {"dataset": "dataset-a", "session": "run-a"}),
+        ("stats/export", {"dataset": "dataset-a", "session": "run-a"}),
+        ("analysis", {"group": "model-a", "task": "task-a"}),
+    ]:
+        response = client.get("/api/levi/live/" + endpoint, params=params)
+        assert response.status_code == 409, response.text
+        assert "success" not in response.text
+    assert lookup(cfg)["statistics_visibility"] != "visible"
+
+
+def test_old_global_mixed_unknown_scope_is_refused_without_hiding_exact_legacy(
+    tmp_path, monkeypatch
+):
+    client, cfg, _args = legacy_client(tmp_path, monkeypatch)
+    from levi.live import stats
+
+    stats.record(
+        cfg.live_dir,
+        {
+            "dataset": "unknown-dataset",
+            "demo": "demo_0000",
+            "session": "unknown-run",
+            "at": 2,
+            "result": {"state": "done", "verdict": {"outcome": "success"}},
+        },
+    )
+    assert client.get("/api/levi/live/stats").status_code == 409
+    assert client.get("/api/levi/live/stats/export").status_code == 409
+    assert (
+        client.get(
+            "/api/levi/live/stats", params={"dataset": "dataset-a", "session": "run-a"}
+        ).status_code
+        == 200
+    )
+
+
+def test_old_handlers_discard_results_if_source_changes_during_summary(
+    tmp_path, monkeypatch
+):
+    client, _cfg, args = legacy_client(tmp_path, monkeypatch)
+    from levi.live import stats
+
+    original = stats.summarize
+
+    def changed(*a, **kw):
+        result = original(*a, **kw)
+        write_header(
+            args["rollout_root"] / "model-a/task-a", "demo_0000", "replacement"
+        )
+        return result
+
+    monkeypatch.setattr(stats, "summarize", changed)
+    response = client.get(
+        "/api/levi/live/stats", params={"dataset": "dataset-a", "session": "run-a"}
+    )
+    assert response.status_code == 409 and "success" not in response.text

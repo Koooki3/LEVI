@@ -122,13 +122,44 @@ def test_a_store_that_cannot_be_read_is_waited_for_not_recorded(tmp_path):
 
 def _client(client, c, monkeypatch):
     monkeypatch.setattr(api, "_workspace", lambda: Path(c.service.workspace))
+    monkeypatch.setattr(api, "_result_config", lambda: c)
     monkeypatch.setenv("LEVI_LIVE_HOME", c.service.home)
     cli.prepare(c)
+    root = Path(c.watch.roots[0])
+    source = root / "g/t"
+    (source / "demo_0000").mkdir(parents=True)
+    (source / "demo_0000/metadata.json").write_text(
+        json.dumps({"eval": {"run_id": "s1"}})
+    )
+    (root / ".eval_sessions").mkdir()
+    (root / ".eval_sessions/g-t.json").write_text(
+        json.dumps(
+            {
+                "schema": "levi.eval.session.v1",
+                "group": "g",
+                "task_folder": "t",
+                "session_id": "s1",
+                "run_id": "s1",
+                "state": "finished",
+            }
+        )
+    )
+    put_state(
+        c,
+        "g__t",
+        "g",
+        "t",
+        {"demo_0000": {"state": "done", "run_id": "s1", "episode_index": 0}},
+        root=str(root),
+        source=str(source),
+    )
     return client
 
 
 def test_the_route_is_disabled_outside_a_live_workspace(client, tmp_path, monkeypatch):
     monkeypatch.setattr(api, "_workspace", lambda: tmp_path)
+    monkeypatch.setattr(api, "_result_config", lambda: None)
+    api._REASON.set("not_live")
     assert client.get("/api/levi/live/analysis").json() == {
         "enabled": False,
         "reason": "not_live",
