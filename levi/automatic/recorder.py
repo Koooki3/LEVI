@@ -904,6 +904,65 @@ class EvidenceStore:
         self._whole(path, data)
         return body
 
+    def retained_scene(self, record: dict, kept: dict) -> bool:
+        """Read back the exact scene record and every cited frame before release.
+
+        File providers already keep frames before asking the model; their
+        records may have no newly written frames. Validate cited content in
+        this store instead of requiring a provider's frames() interface.
+        """
+        if not isinstance(kept, dict) or record.get("frame_unsaved"):
+            return False
+        if any(
+            frame.get("skipped") or not frame.get("file")
+            for frame in kept.get("frames", [])
+        ):
+            return False
+        references = [*record.get("evidence_refs", [])]
+        for predicate in record.get("predicate_results", []):
+            references.extend(predicate.get("evidence_refs", []))
+        if not references:
+            return False
+        name = str(record.get("assessment_id") or record["request_id"])
+        encoded = (json.dumps(kept, sort_keys=True, indent=1) + "\n").encode()
+        try:
+            paths = [self.folder / f"{name}.json", *self.folder.glob(f"{name}.*.json")]
+            found = False
+            for path in paths:
+                if path.is_file() and not path.is_symlink():
+                    with path.open("rb") as handle:
+                        if handle.read(len(encoded) + 1) == encoded:
+                            found = True
+                            break
+            if not found:
+                return False
+            for reference in references:
+                digest = reference.get("sha256")
+                if (
+                    reference.get("kind") != "frame"
+                    or not isinstance(digest, str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                ):
+                    return False
+                retained = False
+                for suffix in (".jpg", ".png", ".bin"):
+                    path = self.frames / (digest + suffix)
+                    if not path.is_file() or path.is_symlink():
+                        continue
+                    with path.open("rb") as handle:
+                        data = handle.read(self.max_frame_bytes + 1)
+                    if (
+                        len(data) <= self.max_frame_bytes
+                        and hashlib.sha256(data).hexdigest() == digest
+                    ):
+                        retained = True
+                        break
+                if not retained:
+                    return False
+        except (OSError, ValueError, TypeError):
+            return False
+        return True
+
     def keep_contract(self, described: dict) -> None:
         """The run's Initial State Contract (``describe()``), for the
         waiting card; rewritten only when it changed."""

@@ -1687,7 +1687,11 @@ plan parameters and timestamps; an actual `reset_final` judgement confirming
 the exact complete Initial State Contract with current frame evidence; an
 independent `post_reset` scene reporting ready; successful recording seal and
 home; and the existing `VERIFY_INITIAL` scene reporting ready again. Final
-proof is retained separately from scene proof. The model deadlines remain
+proof is retained separately from scene proof. Both ready scene gates must
+retain their assessment record and every cited frame: write refusal, an I/O
+failure, missing or changed frame content, or unsaved frames blocks forward.
+The post-home initial-state check enforces this again after operator resume;
+other reset modes retain their existing evidence-note behavior. The model deadlines remain
 unchanged (3 seconds active judgement, 5 seconds final/scene). Stop and fault are
 checked before and after sampling and blocking judgements; policy errors,
 timeouts, unknown answers, missing proof, contract violations and seal/home

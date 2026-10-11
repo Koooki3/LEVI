@@ -54,6 +54,19 @@ setup = provider_setup
         "old_evidence",
         "post_reset_unknown",
         "post_home_unknown",
+        "post_reset_write_none",
+        "post_reset_write_exception",
+        "post_reset_missing_frames",
+        "post_reset_changed_frames",
+        "post_reset_missing_record",
+        "post_reset_unsaved_frames",
+        "post_home_write_none",
+        "post_home_write_exception",
+        "post_home_missing_frames",
+        "post_home_changed_frames",
+        "post_home_missing_record",
+        "post_home_unsaved_frames",
+        "post_home_write_none_resume",
         "stop_final",
         "fault_final",
         "stop_settle",
@@ -331,9 +344,46 @@ def test_complete_file_worker_reset_without_events(
                     orch.stop("stop-proof")
                 if attack.startswith("fault"):
                     orch.robot.latched = "synthetic proof-write fault"
-            return original_write(record, *args, **kwargs)
+            scene_target = (
+                "post_reset" if attack.startswith("post_reset_") else "initial_state"
+            )
+            targeted_scene = record.get("target") == scene_target and (
+                scene_target == "post_reset" or len(scene_count) > 2
+            )
+            if targeted_scene:
+                if "write_none" in attack:
+                    return None
+                if "write_exception" in attack:
+                    raise OSError("synthetic scene record write failure")
+                if "missing_record" in attack:
+                    return {**record, "frames": []}
+                if "unsaved_frames" in attack:
+                    record["frame_unsaved"] = ["side:synthetic_unsaved"]
+            kept = original_write(record, *args, **kwargs)
+            if targeted_scene and "missing_frames" in attack:
+                for path in orch.evidence.frames.iterdir():
+                    path.unlink()
+            if targeted_scene and "changed_frames" in attack:
+                for path in orch.evidence.frames.iterdir():
+                    path.write_bytes(b"synthetic changed frame")
+            return kept
 
         orch.evidence.write = writing
+        if attack.endswith("_resume"):
+            original_run = orch.run
+
+            def running():
+                state = original_run()
+                assert state == "WAIT_HUMAN"
+                assert orch.resume(
+                    "synthetic-resume",
+                    expected_seq=orch.journal.next_seq,
+                    environment_handled=True,
+                    health_rechecked=True,
+                ).ok
+                return original_run()
+
+            orch.run = running
         return orch
 
     monkeypatch.setattr(Orchestrator, "create", creating)

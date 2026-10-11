@@ -317,7 +317,12 @@ def _scene_facts(message) -> dict:
         "unknown_predicates": list(message.unknown_predicates),
         "unknown_reason": message.unknown_reason,
         "predicate_results": [
-            {"name": p.name, "value": p.value, "required": p.required}
+            {
+                "name": p.name,
+                "value": p.value,
+                "required": p.required,
+                "evidence_refs": [r.model_dump(mode="json") for r in p.evidence_refs],
+            }
             for p in message.predicate_results
         ],
         "evidence_refs": [
@@ -1070,6 +1075,9 @@ class Orchestrator:
         # A stop that arrived while the scene was being assessed.
         if self._stop_before_start():
             return
+        if self._scene_evidence_failed:
+            self._to_human(rm.scene_reason("unavailable"))
+            return
         if self._scene_violations >= self.config.scene_violation_limit:
             self._to_human("contract_violation_limit")
             return
@@ -1118,13 +1126,22 @@ class Orchestrator:
             "asked_ns": self._now(),
         }
         decision = "unavailable"
+        self._scene_evidence_failed = False
+        require_retained = (
+            self.config.reset_horizon_completion == "verify_final"
+            and target in ("post_reset", "initial_state")
+        )
         try:
             decision, reason, message = self._assess_once(record)
             record["decision"], record["reason"] = decision, reason
             if message is not None:
                 record.update(_scene_facts(message))
         finally:
-            self._keep_evidence(record)
+            retained = self._keep_evidence(record, require_retained=require_retained)
+        if require_retained and decision == "ready" and not retained:
+            self._scene_evidence_failed = True
+            self._note("scene_evidence_unavailable", request_id)
+            return "unavailable"
         return decision
 
     def _assess_once(self, record: dict) -> tuple:
@@ -1191,12 +1208,14 @@ class Orchestrator:
             )
         return verdict.decision, verdict.reason, message
 
-    def _keep_evidence(self, record: dict) -> None:
-        """Write the record and the frames the provider captured for it (a
-        person's check). Never decides and never stops the run: a failure
-        is a note."""
+    def _keep_evidence(self, record: dict, *, require_retained=False) -> bool:
+        """Keep scene proof; verify_final ready gates require retained record/frames.
+
+        Other modes keep the existing note-only failure behavior.
+        """
         take = getattr(self.scene, "frames", None)
         lost = getattr(self.scene, "unsaved", None)
+        frames_failed = False
         try:
             if callable(lost):
                 unsaved = lost(record["request_id"])
@@ -1207,15 +1226,22 @@ class Orchestrator:
         except Exception as exc:  # noqa: BLE001 - evidence only
             self._note("evidence_write_failed", f"frames: {exc}")
             frames = {}
+            frames_failed = True
         if self.evidence is None:
-            return
+            return False
         record.setdefault("decision", "unavailable")
         record.setdefault("reason", "provider_error")
         try:
-            if self.evidence.write(record, frames) is None:
+            kept = self.evidence.write(record, frames)
+            if kept is None:
                 self._note("evidence_budget_exhausted", record["request_id"])
-        except Exception as exc:  # noqa: BLE001 - evidence only
+                return False
+            if require_retained:
+                return not frames_failed and self.evidence.retained_scene(record, kept)
+            return True
+        except Exception as exc:  # noqa: BLE001 - unavailable evidence cannot prove ready
             self._note("evidence_write_failed", f"{type(exc).__name__}: {exc}")
+            return False
 
     def _collect_scene(self, ticket) -> tuple:
         """``(raw, None)``, or ``(None, why)`` (``timeout``, or
