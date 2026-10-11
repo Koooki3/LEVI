@@ -1018,3 +1018,5 @@ explicit offsets; unfiltered reports retain their existing display.
 Filtered Markdown keeps fractional ISO seconds and the exact Unix epoch boundaries; this also disambiguates submicrosecond cutoffs. Boundaries must be representable in the requested timezone before reading report configuration.
 
 The report displays shared binary classification metrics in both Markdown languages: per-class Precision, Recall, F1 and support, together with accuracy, macro F1 and balanced accuracy. Only explicit operator/agent success-failure pairs enter these metrics; missing and undecided labels keep their existing separate counts. Undefined denominators display a dash; JSON retains full precision.
+
+Markdown classification ratios use up to three decimal places; JSON remains unrounded and counts remain integers.

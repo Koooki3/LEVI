@@ -448,9 +448,15 @@ def agreement_block(found, t) -> list:
         out += pairs(
             [
                 (t["binary_pairs"], num(classification.get("n"))),
-                (t["classification_accuracy"], num(classification.get("accuracy"))),
-                (t["macro_f1"], num(classification.get("macro_f1"))),
-                (t["balanced_accuracy"], num(classification.get("balanced_accuracy"))),
+                (
+                    t["classification_accuracy"],
+                    num(classification.get("accuracy"), digits=3),
+                ),
+                (t["macro_f1"], num(classification.get("macro_f1"), digits=3)),
+                (
+                    t["balanced_accuracy"],
+                    num(classification.get("balanced_accuracy"), digits=3),
+                ),
             ],
             t,
         )
@@ -466,9 +472,10 @@ def agreement_block(found, t) -> list:
                 [
                     t[f"class_{label}"],
                     *(
-                        num((classification.get(label) or {}).get(metric))
-                        for metric in ("precision", "recall", "f1", "support")
+                        num((classification.get(label) or {}).get(metric), digits=3)
+                        for metric in ("precision", "recall", "f1")
                     ),
+                    num((classification.get(label) or {}).get("support")),
                 ]
                 for label in ("success", "failure")
             ],

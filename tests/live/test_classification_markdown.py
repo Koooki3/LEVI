@@ -84,3 +84,44 @@ def test_empty_or_legacy_classification_preserves_previous_report():
         assert f"| {t['macro_f1']} | - |" in md
         assert f"| {t['balanced_accuracy']} | - |" in md
         assert statsfmt.agreement_block(stats.agreement([]), t) == []
+
+
+@pytest.mark.parametrize("lang", ["en", "zh"])
+def test_formal_cli_keeps_three_digit_noninteger_ratios(
+    tmp_path, monkeypatch, capsys, lang
+):
+    config = Config()
+    config.service.workspace = str(tmp_path / "ws")
+    config.service.home = str(tmp_path / "home")
+    labels = (
+        [("success", "success")]
+        + [("success", "failure")] * 2
+        + [("failure", "success")] * 2
+        + [("failure", "failure")] * 4
+    )
+    for n, (person, predicted) in enumerate(labels):
+        stats.record(
+            config.live_dir,
+            {
+                "schema": stats.SCHEMA,
+                "dataset": "model__task",
+                "demo": f"demo_{n}",
+                "session": "s1",
+                "at": 100.0 + n,
+                "operator_label": {"outcome": person},
+                "result": {"state": "done", "verdict": {"outcome": predicted}},
+            },
+        )
+    monkeypatch.setattr(cli, "resolve_config", lambda args: config)
+    args = cli.build_parser().parse_args(["report", "--format", "md", "--lang", lang])
+    assert cli.cmd_report(args) == 0
+    md = capsys.readouterr().out
+    t = statsfmt.TEXT[lang]
+    assert f"| {t['class_success']} | 0.333 | 0.333 | 0.333 | 3 |" in md
+    assert f"| {t['class_failure']} | 0.667 | 0.667 | 0.667 | 6 |" in md
+    assert f"| {t['classification_accuracy']} | 0.556 |" in md
+    assert f"| {t['binary_pairs']} | 9 |" in md
+    assert (
+        report.build(config)["summary"]["agreement"]["classification"]["accuracy"]
+        == 5 / 9
+    )
