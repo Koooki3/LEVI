@@ -118,7 +118,7 @@ class MeasuredPhysicalHoldTests(unittest.TestCase):
         self.make()
         self.robot.held = False
         proof = self.invoke()
-        self.assertEqual(self.robot.calls, 3)
+        self.assertGreaterEqual(self.robot.calls, 3)
         self.assertEqual(proof.policy_epoch, 3)
         self.assertGreaterEqual(
             proof.observed_through_ns - proof.observed_from_ns, CFG.stable_window_ns
@@ -128,6 +128,129 @@ class MeasuredPhysicalHoldTests(unittest.TestCase):
         self.assertTrue(
             proof.admission_closed and proof.no_new_commands and proof.physically_stable
         )
+
+    def advancing(self, *, callback_ns=0, measurement_ns=0, overshoot_ns=0):
+        self.make()
+        base_now, base_advance = self.clock.now, self.clock.advance
+
+        def now():
+            self.clock.ns += 1
+            return base_now()
+
+        def advance(ns):
+            # Overshoot applies to scheduled waits, not the fake getstate read.
+            base_advance(ns + (overshoot_ns if ns > 1 else 0))
+
+        self.clock.now, self.clock.advance = now, advance
+        base_observe, base_closed = self.robot.observe, self.observer.observe_admission
+
+        def observe():
+            observed = base_observe()
+            self.clock.ns += measurement_ns
+            # Total observation stamp follows the actual measured getstate stamp.
+            observed["observed_ns"] = self.clock.now()
+            return observed
+
+        def closed(*args):
+            self.clock.ns += callback_ns
+            proof = base_closed(*args)
+            self.clock.ns += callback_ns
+            return proof
+
+        self.robot.observe, self.observer.observe_admission = observe, closed
+        self.sample_times = []
+        base_sample = self.observer._sample
+
+        def sample(before, after, observed):
+            value = base_sample(before, after, observed)
+            self.sample_times.append((before, value[0]))
+            return value
+
+        self.observer._sample = sample
+
+    def assert_complete_with_actual_gaps(self):
+        proof = self.invoke()
+        self.assertFalse(self.observer.failed)
+        self.assertGreaterEqual(
+            proof.observed_through_ns - proof.observed_from_ns, CFG.stable_window_ns
+        )
+        self.assertGreater(self.robot.calls, 1)
+        self.assertLessEqual(self.robot.calls, 1000)
+        for earlier, later in zip(self.sample_times, self.sample_times[1:]):
+            self.assertLessEqual(later[0] - earlier[0], CFG.sample_interval_ns)
+            self.assertLessEqual(later[1] - earlier[1], CFG.sample_interval_ns)
+        self.assertEqual(proof.condition_sha256, hold_contract_sha256(CFG))
+        self.assertEqual(proof.plan_sha256, PLAN)
+
+    def test_advancing_clock_matches_independent_chronological_counterexample(self):
+        self.advancing()
+        self.assert_complete_with_actual_gaps()
+
+    def test_finite_closure_and_measurement_latency_fit_maximum_interval(self):
+        self.advancing(callback_ns=40_000, measurement_ns=50_000)
+        self.assert_complete_with_actual_gaps()
+
+    def test_small_sleep_overshoot_with_advancing_clock_is_legal(self):
+        self.advancing(callback_ns=20_000, measurement_ns=50_000, overshoot_ns=40_000)
+        self.assert_complete_with_actual_gaps()
+
+    def test_actual_start_and_stamp_gaps_still_fail_permanently(self):
+        for fault in ("start", "stamp", "deadline"):
+            with self.subTest(fault=fault):
+                self.advancing()
+                if fault == "start":
+                    self.clock.extra = CFG.sample_interval_ns
+                elif fault == "stamp":
+                    original = self.robot.observe
+
+                    def delayed(original=original):
+                        if self.robot.calls == 1:
+                            self.clock.ns += CFG.sample_interval_ns
+                        return original()
+
+                    self.robot.observe = delayed
+                else:
+                    self.deadline = self.clock.now() + CFG.stable_window_ns // 2
+                self.rejected()
+
+    def test_legal_config_beyond_999_maximum_gaps_refuses_before_sampling(self):
+        self.make()
+        cfg = SettleConfig(1_000_000, 999_500_000, 999_500_000, 0.001, 0.01, 0.01)
+        self.observer = MeasuredPhysicalHold(
+            self.robot,
+            self.clock,
+            cfg,
+            run_id=RUN,
+            plan_sha256=PLAN,
+            observe_admission=self.observer.observe_admission,
+            interrupted=lambda: self.stopped,
+        )
+        self.deadline = self.clock.now() + 2_000_000_000
+        with self.assertRaisesRegex(InterventionUnproven, "999 maximum sample gaps"):
+            self.invoke()
+        self.assertTrue(self.observer.failed)
+        self.assertEqual(self.robot.calls, 0)
+
+    def test_long_window_can_complete_without_exceeding_1000_samples(self):
+        self.advancing()
+        cfg = SettleConfig(1_000_000, 600_000_000, 610_000_000, 0.001, 0.01, 0.01)
+        self.observer = MeasuredPhysicalHold(
+            self.robot,
+            self.clock,
+            cfg,
+            run_id=RUN,
+            plan_sha256=PLAN,
+            observe_admission=self.observer.observe_admission,
+            interrupted=lambda: self.stopped,
+        )
+        self.deadline = self.clock.now() + 2_000_000_000
+        proof = self.invoke()
+        self.assertFalse(self.observer.failed)
+        self.assertLessEqual(self.robot.calls, 1000)
+        self.assertGreaterEqual(
+            proof.observed_through_ns - proof.observed_from_ns, cfg.stable_window_ns
+        )
+        self.assertEqual(proof.condition_sha256, hold_contract_sha256(cfg))
 
     def test_every_admission_identity_and_closed_window_is_required(self):
         attacks = {
@@ -260,7 +383,7 @@ class MeasuredPhysicalHoldTests(unittest.TestCase):
 
     def test_frozen_maximum_sample_interval_must_not_be_exceeded(self):
         self.make()
-        self.clock.extra = 1
+        self.clock.extra = CFG.sample_interval_ns
         self.rejected()
 
     def test_interruption_never_publishes_or_retries(self):
@@ -284,15 +407,25 @@ class MeasuredPhysicalHoldTests(unittest.TestCase):
 
     def test_final_admission_check_cannot_reopen_gate(self):
         self.make()
-        checks = []
+        stamps, complete_checks = [], []
+
+        def measured(obs):
+            stamps.append(obs["observed_ns"])
+            return obs
 
         def final_closure(proof):
-            checks.append(1)
-            return replace(proof, no_new_commands=False) if len(checks) == 7 else proof
+            if stamps and stamps[-1] - stamps[0] >= CFG.stable_window_ns:
+                complete_checks.append(1)
+                if (
+                    len(complete_checks) == 2
+                ):  # after-sample check, then final publication
+                    return replace(proof, no_new_commands=False)
+            return proof
 
+        self.robot.adjust = measured
         self.adjust_admission = final_closure
         self.rejected()
-        self.assertEqual(len(checks), 7)
+        self.assertEqual(len(complete_checks), 2)
 
     def test_clock_identity_or_time_reversal_refuses(self):
         for attack in ("domain", "time"):

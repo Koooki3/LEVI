@@ -235,6 +235,15 @@ class MeasuredPhysicalHold:
                 raise InterventionUnproven(
                     "hold run/episode/policy epoch/deadline mismatch"
                 )
+            interval = self.config.sample_interval_ns
+            if self.config.stable_window_ns > 999 * interval:
+                raise InterventionUnproven(
+                    "frozen hold window exceeds 999 maximum sample gaps"
+                )
+            # Capture earlier than the maximum gap, reserving closure/clock/IO
+            # time. Integer ceiling preserves enough span in 1000 samples for
+            # long windows; no scheduling promise overrides actual gap checks.
+            cadence = max(1, interval // 2, (self.config.stable_window_ns + 998) // 999)
             began = self._now()
             if deadline <= began:
                 raise InterventionUnproven("hold deadline expired")
@@ -294,12 +303,15 @@ class MeasuredPhysicalHold:
                         True,
                     )
                 previous_started, previous_stamp = before, sample[0]
-                # Schedule from the prior capture start, so observation latency
-                # is part of (not added after) the frozen maximum interval.
-                due = before + self.config.sample_interval_ns
-                while self._now() < due:
+                # Cadence is a target within the frozen maximum, not a relaxed
+                # limit. The next capture still checks actual start/stamp gaps.
+                due = before + cadence
+                while True:
+                    now = self._now()
+                    if now >= due:
+                        break
                     self._ready()
-                    remaining = min(due - self._now(), end - self._now())
+                    remaining = min(due, end) - now
                     if remaining <= 0:
                         raise InterventionUnproven(
                             "complete hold window unavailable before deadline"
