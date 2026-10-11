@@ -208,7 +208,10 @@ def expected(mode) -> set:
     return {
         tuple(c.removeprefix("transition:").split("->"))
         for c, cells in modes.MODE_MATRIX.items()
-        if c.startswith("transition:") and modes.kind(cells[mode]) != "n/a"
+        if c.startswith("transition:")
+        and modes.kind(cells[mode]) != "n/a"
+        and tuple(c.removeprefix("transition:").split("->"))
+        not in modes.EVENT_PAUSE_TRANSITIONS
     }
 
 
@@ -241,7 +244,7 @@ def test_human_assisted_reaches_the_reset_policy_mode_minus_its_reset_transition
 ):
     single = reached_by(modes.SINGLE, tmp_path_factory)
     human = reached_by(modes.HUMAN, tmp_path_factory)
-    assert single == set(sm.TRANSITIONS)
+    assert single == set(sm.TRANSITIONS) - modes.EVENT_PAUSE_TRANSITIONS
     assert human == single - modes.RESET_ONLY_TRANSITIONS
 
 
@@ -297,3 +300,56 @@ def test_every_sentence_has_its_chinese_wording():
     assert modes.sentences() == set(modes.ZH)
     zh = modes.markdown("zh")
     assert not any(sentence in zh for sentence in modes.sentences())
+
+
+def event_pause_expected(mode):
+    return modes.EVENT_PAUSE_TRANSITIONS - (
+        modes.RESET_ONLY_TRANSITIONS if mode == modes.HUMAN else set()
+    )
+
+
+@pytest.mark.parametrize(
+    "reset_mode",
+    [
+        pytest.param(
+            mode,
+            marks=pytest.mark.mode_matrix(
+                *(f"transition:{a}->{b}" for a, b in sorted(event_pause_expected(mode)))
+            ),
+            id=mode,
+        )
+        for mode in modes.RESET_MODES
+    ],
+)
+def test_event_pause_owned_runtime_reaches_its_registered_transitions(reset_mode):
+    from test_event_pause_orchestrator_runtime import OrchestratorRuntimeTests
+
+    helper = OrchestratorRuntimeTests()
+    found, states = set(), set()
+    roles = ("forward", "reset") if reset_mode == modes.SINGLE else ("forward",)
+    try:
+        for role in roles:
+            for decisions in (
+                [{"decision": "confirmed"}],
+                [{"decision": "rejected"}, {"decision": "confirmed"}],
+                [{"decision": "unknown"}],
+            ):
+                r = helper.make(
+                    strategy=reset_mode,
+                    scene_script=[{"decision": "reset_required"}]
+                    if role == "reset"
+                    else [],
+                    goal_script=decisions,
+                )
+                r.orch.run()
+                found |= _pairs(r.orch) & modes.EVENT_PAUSE_TRANSITIONS
+                states |= {
+                    e.to_state for e in r.orch.journal.events if e.record == "committed"
+                }
+                assert sm.check_journal(r.orch.journal.events) == []
+        assert found == event_pause_expected(reset_mode)
+        assert states & modes.EVENT_PAUSE_STATES == {
+            f"{r.upper()}_JUDGING" for r in roles
+        }
+    finally:
+        helper.doCleanups()

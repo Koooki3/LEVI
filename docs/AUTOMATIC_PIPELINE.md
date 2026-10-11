@@ -1083,19 +1083,27 @@ updated and both modes have tests.
 | `transition:FAULT_LOCKED->FAULT_LOCKED` | same | same |
 | `transition:FAULT_LOCKED->PREFLIGHT` | same | same |
 | `transition:FORWARD_ACTIVE->FAULT_LOCKED` | same | same |
+| `transition:FORWARD_ACTIVE->FORWARD_JUDGING` | same | same |
 | `transition:FORWARD_ACTIVE->FORWARD_STOPPING` | same | same |
 | `transition:FORWARD_FINALIZE->FAULT_LOCKED` | same | same |
 | `transition:FORWARD_FINALIZE->ROBOT_HOME` | same | same |
+| `transition:FORWARD_JUDGING->FAULT_LOCKED` | same | same |
+| `transition:FORWARD_JUDGING->FORWARD_ACTIVE` | same | same |
+| `transition:FORWARD_JUDGING->WAIT_HUMAN` | same | same |
 | `transition:FORWARD_STOPPING->FAULT_LOCKED` | same | same |
 | `transition:FORWARD_STOPPING->FORWARD_FINALIZE` | same | same |
 | `transition:PREFLIGHT->FAULT_LOCKED` | same | same |
 | `transition:PREFLIGHT->VERIFY_INITIAL` | same | same |
 | `transition:PREFLIGHT->WAIT_HUMAN` | same | same |
 | `transition:RESET_ACTIVE->FAULT_LOCKED` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_ACTIVE->RESET_JUDGING` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `transition:RESET_ACTIVE->RESET_VERIFY` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `transition:RESET_FINALIZE->FAULT_LOCKED` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `transition:RESET_FINALIZE->VERIFY_INITIAL` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `transition:RESET_FINALIZE->WAIT_HUMAN` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_JUDGING->FAULT_LOCKED` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_JUDGING->RESET_ACTIVE` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_JUDGING->WAIT_HUMAN` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `transition:RESET_VERIFY->FAULT_LOCKED` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `transition:RESET_VERIFY->RESET_FINALIZE` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `transition:ROBOT_HOME->FAULT_LOCKED` | same | same |

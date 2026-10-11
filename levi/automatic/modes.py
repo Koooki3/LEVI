@@ -40,7 +40,9 @@ import sys
 
 RESET_MODES = ("single_reset_policy", "human_assisted")
 SINGLE, HUMAN = RESET_MODES
-RESET_STATES = frozenset({"RESET_ACTIVE", "RESET_VERIFY", "RESET_FINALIZE"})
+RESET_STATES = frozenset(
+    {"RESET_ACTIVE", "RESET_VERIFY", "RESET_FINALIZE", "RESET_JUDGING"}
+)
 # Every transition into, within or out of a reset episode: the ones
 # human_assisted never takes (design X2 §1.2). Written out, not derived, so
 # a new reset transition is a decision (the reachability test compares this
@@ -50,12 +52,28 @@ RESET_ONLY_TRANSITIONS = frozenset(
         ("VERIFY_INITIAL", "RESET_ACTIVE"),
         ("SCENE_ASSESS", "RESET_ACTIVE"),
         ("RESET_ACTIVE", "RESET_VERIFY"),
+        ("RESET_ACTIVE", "RESET_JUDGING"),
+        ("RESET_JUDGING", "RESET_ACTIVE"),
+        ("RESET_JUDGING", "WAIT_HUMAN"),
+        ("RESET_JUDGING", "FAULT_LOCKED"),
         ("RESET_ACTIVE", "FAULT_LOCKED"),
         ("RESET_VERIFY", "RESET_FINALIZE"),
         ("RESET_VERIFY", "FAULT_LOCKED"),
         ("RESET_FINALIZE", "VERIFY_INITIAL"),
         ("RESET_FINALIZE", "WAIT_HUMAN"),
         ("RESET_FINALIZE", "FAULT_LOCKED"),
+    }
+)
+# The event-pause inference mode adds these edges independently of reset mode.
+# Legacy asynchronous fake runs cannot reach them; dedicated owned-runtime
+# scenarios cover them in every applicable reset mode.
+EVENT_PAUSE_STATES = frozenset({"FORWARD_JUDGING", "RESET_JUDGING"})
+EVENT_PAUSE_TRANSITIONS = frozenset(
+    {(f"{role}_ACTIVE", f"{role}_JUDGING") for role in ("FORWARD", "RESET")}
+    | {
+        (f"{role}_JUDGING", target)
+        for role in ("FORWARD", "RESET")
+        for target in (f"{role}_ACTIVE", "WAIT_HUMAN", "FAULT_LOCKED")
     }
 )
 SNAPSHOT_SCHEMA = "levi.aeri.mode_matrix.v1"
@@ -111,6 +129,10 @@ _SAME_TRANSITIONS = (
     ("VERIFY_INITIAL", "COMPLETED"),
     ("VERIFY_INITIAL", "FAULT_LOCKED"),
     ("FORWARD_ACTIVE", "FORWARD_STOPPING"),
+    ("FORWARD_ACTIVE", "FORWARD_JUDGING"),
+    ("FORWARD_JUDGING", "FORWARD_ACTIVE"),
+    ("FORWARD_JUDGING", "WAIT_HUMAN"),
+    ("FORWARD_JUDGING", "FAULT_LOCKED"),
     ("FORWARD_ACTIVE", "FAULT_LOCKED"),
     ("FORWARD_STOPPING", "FORWARD_FINALIZE"),
     ("FORWARD_STOPPING", "FAULT_LOCKED"),

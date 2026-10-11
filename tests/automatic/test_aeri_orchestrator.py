@@ -803,6 +803,7 @@ def test_random_runs_keep_every_invariant(tmp_path):
     states, steps = set(), 0
     for seed in range(150):
         _rng, r = random_rig(tmp_path / f"s{seed}", seed)
+        assert r.config.termination.inference_mode == "legacy_async"
         robots = []
         for attempt in range(6):
             try:
@@ -830,7 +831,12 @@ def test_random_runs_keep_every_invariant(tmp_path):
         check_invariants(r, extra_robots=robots)
         r.orch.close()
         r.recorder.close()
-    assert states >= set(sm.STATES) - {"PREFLIGHT"}
+    # This generator freezes the asynchronous inference mode; event-pause
+    # judging states are exercised by the owned-runtime mode-matrix scenarios.
+    from levi.automatic import modes
+
+    assert not (states & modes.EVENT_PAUSE_STATES)
+    assert states >= set(sm.STATES) - modes.EVENT_PAUSE_STATES - {"PREFLIGHT"}
     assert steps >= 10_000
 
 
