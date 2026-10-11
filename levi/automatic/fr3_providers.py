@@ -215,6 +215,24 @@ class FileProvider:
             )
             if message.kind == "unavailable":
                 return data
+            if self.kind == "reset_judgement":
+                if (message.spec_id, message.spec_version) != self.contract.key:
+                    raise ValueError(
+                        "reset judgement does not match the initial-state contract"
+                    )
+                required = set(self.contract.required)
+                optional = set(self.contract.optional)
+                predicates = {p.name: p for p in message.predicate_results}
+                if set(predicates) != required | optional:
+                    raise ValueError(
+                        "reset judgement must report every contract predicate"
+                    )
+                if any(
+                    p.required != (name in required) for name, p in predicates.items()
+                ):
+                    raise ValueError(
+                        "reset judgement changed required/optional predicate semantics"
+                    )
             observed = (
                 message.observed_ns
                 if contract == "scene"

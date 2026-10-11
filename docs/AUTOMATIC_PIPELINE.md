@@ -1627,7 +1627,17 @@ request ticket: exact reference, SHA256 and captured observation time. Every
 read required predicate needs current frame evidence. All cited frames must
 still exist with the same hash. Encoding/storage failure, old references,
 missing predicate evidence, or altered files yield an unavailable result. The
-transport does not infer model truth; a real scene/reset/events worker remains
+reset-goal reply must also match the exact confirmed initial-state contract id
+and version, report its complete required and optional predicate list, and keep
+those required/optional flags unchanged. Optional false or unknown values do
+not decide reset success. A generic forward-goal spec or a shortened reset
+checklist is unavailable. Such reset replies cannot contribute judgement IDs or
+start forward execution: this run waits for a person. A separate post-reset
+scene check may still record `goal_verification: verified` and
+`task_outcome: success` when it observes the initial state restored; those fields
+retain that scene observation, not acceptance of the reset reply or completion
+of the run. The transport does not infer model truth; a real scene/reset/events
+worker remains
 unimplemented, and file transport alone does not make a hardware run ready.
 Events beyond 1000 consumed files remain readable. Media shutdown attempts every
 writer/file before reporting the first error. `--scene-question` cannot be mixed

@@ -773,6 +773,14 @@ def test_explicit_stale_robot_read_locks_motion(tmp_path, monkeypatch):
         ("reset_judgement", "timestamp"),
         ("reset_judgement", "saved_deleted"),
         ("reset_judgement", "none"),
+        ("reset_judgement", "generic_final"),
+        ("reset_judgement", "missing_required"),
+        ("reset_judgement", "downgraded_required"),
+        ("reset_judgement", "missing_optional"),
+        ("reset_judgement", "upgraded_optional"),
+        ("reset_judgement", "extra_predicate"),
+        ("reset_judgement", "wrong_version"),
+        ("reset_judgement", "optional_unknown"),
     ],
 )
 def test_actual_execute_binds_provider_evidence_to_current_ticket(
@@ -786,6 +794,14 @@ def test_actual_execute_binds_provider_evidence_to_current_ticket(
     mode = "human_assisted" if kind == "scene" else "single_reset_policy"
     r = rig(tmp_path, monkeypatch, mode)
     monkeypatch.setitem(sys.modules, "cv2", r.modules[4])
+    if kind == "reset_judgement":
+        contract = replace(
+            r.job["contract"],
+            required=("object_at_source", "gripper_open"),
+            optional=("scene_clear",),
+        )
+        r.job["contract"] = contract
+        r.job["config"] = replace(r.job["config"], initial_state=contract)
     reset = {}
     replies = []
 
@@ -816,6 +832,17 @@ def test_actual_execute_binds_provider_evidence_to_current_ticket(
             answer = json.loads(
                 builder.collect(builder.submit(ticket.request), timeout_ns=0)
             )
+            if self.kind == "reset_judgement" and attack != "generic_final":
+                answer["spec_id"], answer["spec_version"] = self.contract.key
+                answer["predicate_results"] = [
+                    {
+                        "name": name,
+                        "required": name in self.contract.required,
+                        "value": name in self.contract.required,
+                        "evidence_refs": [],
+                    }
+                    for name in (*self.contract.required, *self.contract.optional)
+                ]
             references = [
                 {"kind": "frame", "ref": ref, "sha256": digest, "step": None}
                 for ref, digest, file in ticket.frames
@@ -848,6 +875,22 @@ def test_actual_execute_binds_provider_evidence_to_current_ticket(
                     answer[observed_key] += 1
                 if attack == "saved_deleted":
                     (self.store.folder / ticket.frames[0][2]).unlink()
+                if attack == "missing_required":
+                    answer["predicate_results"].pop(1)
+                if attack == "downgraded_required":
+                    answer["predicate_results"][1].update(required=False, value=False)
+                if attack == "missing_optional":
+                    answer["predicate_results"].pop(2)
+                if attack == "upgraded_optional":
+                    answer["predicate_results"][2].update(required=True, value=True)
+                if attack == "extra_predicate":
+                    answer["predicate_results"].append(
+                        {**answer["predicate_results"][0], "name": "extra"}
+                    )
+                if attack == "wrong_version":
+                    answer["spec_version"] = "2"
+                if attack == "optional_unknown":
+                    answer["predicate_results"][2]["value"] = None
             ticket.path.write_text(json.dumps(answer))
             result = super().collect(ticket, timeout_ns=timeout_ns)
             decoded = json.loads(result)
@@ -892,14 +935,20 @@ def test_actual_execute_binds_provider_evidence_to_current_ticket(
     monkeypatch.setattr(P, "OnlineVerifier", lambda *a, **kw: Verifier())
     state = R.execute(r.job, r.binding, load_modules=lambda binding: r.modules)
     scan = Journal.read(Path(r.job["rollout_root"]) / ".aeri/runs/real-test")
-    if attack == "none":
+    if attack in {"none", "optional_unknown"}:
         assert state == "COMPLETED", replies
+        assert any(e.to_state == "FORWARD_ACTIVE" for e in scan.events)
+        if kind == "reset_judgement":
+            assert any(
+                e.episode_result and e.episode_result.judgement_ids for e in scan.events
+            )
     else:
         assert state == "WAIT_HUMAN"
         assert not any(e.to_state == "FORWARD_ACTIVE" for e in scan.events)
         if kind == "scene":
             assert not any(e.episode_result for e in scan.events)
         else:
+            assert any(reply["kind"] == "unavailable" for reply in replies), replies
             assert all(
                 not e.episode_result.judgement_ids
                 for e in scan.events
