@@ -470,3 +470,12 @@ open-file descriptor inside an approved delegated supervisor; this software
 candidate does not create cgroups or systemd units. CPU fake tests exercise the
 SDK ACK and original group kernel. GPU models, real process groups, installed
 services and robot operation have not been exercised by those tests.
+
+The private factory contract is now `build(device=..., sdk=...)` for Torch.
+An explicit `source_root` and complete Python `source_hashes` manifest pin the
+factory, parent initializers and local dependencies. Verified bytes are directly
+compiled by the owned loader, so timestamp/size-compatible .pyc files are never
+executed. Preloaded modules, different origins/loaders, unfrozen imports and
+standard-library names resolving outside the interpreter are refused. SDK
+objects are explicitly injected; a source hash alone is not a trusted loader
+or approval of the complete dependency closure. No production factory is installed.

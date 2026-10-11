@@ -7,9 +7,6 @@ No PID supplied by a caller can become an owned model worker.
 """
 
 import hashlib
-import importlib
-import importlib.machinery
-import inspect
 import json
 import multiprocessing
 import os
@@ -20,7 +17,7 @@ import sys
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from levi.live import gpumgr
@@ -177,6 +174,8 @@ class FrozenTorchFactory:
     code_sha256: str
     torch_version: str
     device: str
+    source_root: str | None = field(default=None, kw_only=True)
+    source_hashes: tuple[tuple[str, str], ...] = field(default=(), kw_only=True)
 
     def __post_init__(self):
         if (
@@ -194,32 +193,38 @@ class FrozenTorchFactory:
     def capability_id(self):
         return "torch-owned:" + hashlib.sha256(repr(self).encode()).hexdigest()
 
-    def reviewed_factory(self):
-        # Resolve without executing changed factory/package code first. The
-        # complete dependency closure still requires independent review.
-        search = sys.path
-        for name in self.module.split("."):
-            spec = importlib.machinery.PathFinder.find_spec(name, search)
-            if spec is None:
-                raise ValueError("frozen local factory module missing")
-            search = spec.submodule_search_locations
-        source = spec.origin
-        if (
-            source is None
-            or hashlib.sha256(Path(source).read_bytes()).hexdigest() != self.code_sha256
-        ):
-            raise ValueError("factory implementation differs from frozen source")
-        module = importlib.import_module(self.module)
-        factory = getattr(module, self.name)
-        actual_source = inspect.getsourcefile(factory)
-        if (
-            actual_source is None
-            or Path(actual_source).resolve() != Path(source).resolve()
-            or hashlib.sha256(Path(actual_source).read_bytes()).hexdigest()
-            != self.code_sha256
-        ):
-            raise ValueError("factory entrypoint moved or source changed during import")
-        return factory
+    def reviewed_factory(self, *, allowed_bundles=()):
+        from levi.live.owned_source import FrozenSourceBundle
+
+        if self.source_root is None:
+            raise ValueError(
+                "frozen factory source root and complete manifest required"
+            )
+        hashes = self.source_hashes or ((self.module, self.code_sha256),)
+        if dict(hashes).get(self.module) != self.code_sha256:
+            raise ValueError(
+                "factory entrypoint must match its frozen closure manifest"
+            )
+        bundle = FrozenSourceBundle(
+            self.source_root, hashes, allowed_bundles=allowed_bundles
+        )
+        bundle.install()
+        try:
+            module = bundle.import_module(self.module)
+            factory = getattr(module, self.name)
+            if (
+                not callable(factory)
+                or getattr(factory, "__module__", None) != self.module
+                or getattr(getattr(factory, "__code__", None), "co_filename", None)
+                != bundle.sources[self.module][0]
+            ):
+                raise ValueError(
+                    "factory entrypoint is outside its frozen execution module"
+                )
+            return factory
+        except BaseException:
+            bundle.close()
+            raise
 
     def load(self):
         factory = self.reviewed_factory()
@@ -231,7 +236,7 @@ class FrozenTorchFactory:
         ):
             raise ValueError("installed Torch/device differs from frozen SDK")
         device = torch.device(self.device)
-        model = factory(device=device)
+        model = factory(device=device, sdk=torch)
         if not callable(model):
             raise TypeError("factory must return a synchronous model callable")
         return torch, device, model

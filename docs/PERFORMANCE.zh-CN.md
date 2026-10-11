@@ -344,3 +344,10 @@ bootstrap 尚未安装。后续显式部署必须在获准的委派 supervisor �
 driver/子进程祖先关系与已锁定的 open-file descriptor；本软件候选不创建 cgroup
 或 systemd 单元。CPU fake 回归覆盖 SDK ACK 与原群组内核，没有运行 GPU 模型、
 真实进程组、已安装服务或机器人。
+
+Torch 私有 factory 新合同是 `build(device=..., sdk=...)`。显式
+`source_root` 与完整 Python `source_hashes` 清单冻结 factory、父包初始化和本地
+依赖。owned loader 直接编译同一份已验证 bytes，不读取可碰撞的 .pyc。
+预加载模块、不同 origin/loader、未冻结依赖，以及解析到解释器目录之外的
+同名标准库均拒绝。SDK 对象显式注入；source hash 本身不是受信 loader 或
+完整调用闭包的审查批准。本轮没有安装生产 factory。

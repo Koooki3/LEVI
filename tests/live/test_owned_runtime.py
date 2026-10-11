@@ -346,7 +346,7 @@ def test_factory_hash_mismatch_is_refused_before_import(tmp_path, monkeypatch):
     module.write_text("raise RuntimeError('must-not-import-changed-source')\n")
     monkeypatch.syspath_prepend(str(tmp_path))
     with pytest.raises(ValueError, match="differs from frozen source"):
-        FACTORY.reviewed_factory()
+        replace(FACTORY, source_root=str(tmp_path)).reviewed_factory()
     assert "reviewed_factory" not in sys.modules
 
 
