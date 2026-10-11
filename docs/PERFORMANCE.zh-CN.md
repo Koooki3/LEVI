@@ -173,3 +173,30 @@ worker、全部子进程与本人 GPU 分配的新鲜 `ExitProof` 后，才实�
 验证。控制器接线、真实压力/退出探针、GPU 测量和真机测试是后续独立门禁。
 
 所有权证明还必须绑定当前租约代次，实际 worker 退出证明同时绑定租约 ID；旧空闲证明不能释放新预留。
+
+
+## 常驻模型与串行请求的所有权（显式启用）
+
+`levi.live.runtime_ownership.RuntimeOwnership` 在原准入 broker 之外维护单独的
+请求槽。常驻模型绑定原物理 `ResourceLease`、准确 PID/启动 ticks/boot 身份，
+以及本实例 ID 和 runtime epoch。同 broker 只允许一个请求权限管理器；
+丢失 Python 对象引用不会解除绑定。请求 token 绑定同一个 runtime 和递增的
+请求 epoch，截止时间受物理租约约束。可信的新鲜观察须确认准确模型进程
+存活、实际资源 driver/flock 租约仍被持有。身份未知或变化后保持关闭，直到
+物理退出被核实；重启后的所有者不能接纳旧 token。
+
+HTTP 完成、取消、超时和调用线程结束只能通过 `revoke_request` 撤销结果权限。
+请求槽持续占用，直到 `finish_request` 收到该请求专属的 `RequestStopProof`：
+实际后台请求已经停止，**全部**请求 worker（包括线程）已经退出。后台忽略
+取消时不能发下一个请求。迟到完成可以清请求槽，但不能提交结果。同 runtime
+轮换请求不释放常驻 GPU 物理所有者。真正交接仍委托原 broker 的严格
+`ExitProof` 核实进程、全部后代和本人 GPU 分配退出；活动请求还须先有自己的
+停止证明。不把 HTTP 状态或调用线程结束当成后台 ACK，不伪造 GPU 释放标记。
+
+这只是进程内合同基础，尚未挂载 runtime/backend 桥。它不启动探针、线程或
+服务，不改控制器、gate 或配置。可信集成须提供真实后台完成 ACK、跟踪全部
+实际请求 worker，并让生命周期变更与这些调用串行；本地对象锁不能替代跨
+进程资源所有权。既有请求所有者须保持占用，直到全部实际工作线程结束。CPU
+fake 覆盖活 worker 忽略取消、过期、PID 复用、旧 epoch、重启未知，以及请求
+轮换后常驻所有权仍保留。这些测试不提供真实 GPU 交接或策略 quiesce 证据；
+真实 `running` gate 保持关闭。

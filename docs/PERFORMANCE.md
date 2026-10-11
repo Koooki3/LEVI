@@ -247,3 +247,37 @@ or renamed to waiting. No trustworthy runtime policy-quiesce proof has been
 wired, so autonomous intervention before the step limit remains unverified.
 Controller wiring, real pressure/exit probes, GPU measurements and robot tests
 are separate integration gates.
+
+
+## Resident runtime and serial request ownership (opt-in)
+
+`levi.live.runtime_ownership.RuntimeOwnership` composes the admission broker with
+a separate request slot. A resident model is bound to the original physical
+`ResourceLease` and exact PID/start ticks/boot identity, plus an instance ID and
+runtime epoch. One broker can have only one bound request authority; losing the
+Python wrapper does not clear that binding. Request tokens carry that runtime and a monotonically increasing
+request epoch; their deadline is bounded by the physical lease. Fresh trusted
+observations must establish that the exact runtime is alive and its actual
+resource-driver/flock lease is still held. Unknown or changed identities latch
+closed until verified physical exit. Restarted owners cannot adopt old tokens.
+
+HTTP completion, cancellation, timeout and calling-thread completion only revoke
+result permission (`revoke_request`). A request slot remains occupied until
+`finish_request` receives a request-specific `RequestStopProof`: the actual backend
+request has stopped and **all** request workers, including threads, have exited.
+A backend that ignores cancellation blocks further requests. Late completion may
+clear the request slot but its result is rejected. Same-runtime request rotation
+never releases the resident GPU owner. Physical handoff still delegates to the
+original broker's strict process, descendant and owned-GPU `ExitProof`; an active
+request must first have its own stop proof. No caller may substitute HTTP status
+or a finished calling thread for backend ACK, or fabricate a GPU release flag.
+
+This is an in-process contract foundation, not a mounted runtime/backend bridge.
+It starts no probes, threads or services and does not change controller, gates or
+configuration. Trusted integration must supply real backend completion ACKs,
+track all actual request workers and serialize lifecycle changes with these calls;
+constructor-local locks are not cross-process resource ownership. The existing
+request owner must retain its slot until every actual working thread ends. CPU
+fakes cover cancellation ignored by a live worker, expiry, PID reuse, old epochs,
+restart uncertainty and resident ownership retained across requests. They provide
+no real GPU handoff or policy quiesce evidence; the real `running` gate stays shut.
