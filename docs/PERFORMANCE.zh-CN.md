@@ -386,3 +386,5 @@ Owned worker 提供 `collect_sdk_completion(request)`，返回原提交 token、
 专属 `test_borrowed_cycle_execution.py` 检查要求新解释器和显式 `LEVI_JOINT_KERNEL_ROOT`，从记录的实际路径加载原 Kernel/Cycle 与候选 owned 文件。CPU 假 IPC 验证原 begin/finish 各一次、准确匹配的 SDK 收据结构，以及最后独立的完整整群观测。收据之后其他成员变忙会阻止发布并保留原槽。这是软件组合证据，未安装生产提供者、真实 SDK/native bootstrap、物理保持或 Orchestrator 挂载。
 
 RuntimeOwnership 新增 `owns_exact_request(request)` 纯身份查询，覆盖仍待排空的撤销或迟到请求；它不授予许可或证明静默。`accepts_exact_request(request, observation, now_ns=...)` 在同一锁下先用 `is` 确认原活动对象，再沿原结果许可校验。既有 `accepts_result`、revoke 与 finish 对旧调用者保留原公开按值语义。
+
+Borrowed 执行必须使用上述原 Kernel 精确查询。等值 token 副本在 observer、worker 或 revoke 副作用前拒绝。派发和结果许可使用 `accepts_exact_request`；收集及撤销须由 `owns_exact_request` 确认同一原对象。撤销或迟到的原对象仍可用真正 ACK 排空，结果为 None。缺少精确公开合同的 Kernel 拒绝，不回落到按值许可。

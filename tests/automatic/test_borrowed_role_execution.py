@@ -315,3 +315,60 @@ def test_borrowed_close_never_waits_for_collection_or_worker_mutex(borrowed):
     finally:
         workers["forward"]._lock.release()
         executor._lock.release()
+
+
+def test_equal_copy_cannot_dispatch_or_revoke_original_grant(borrowed, monkeypatch):
+    executor, workers, deadline = borrowed
+    original = grant(executor, deadline)
+    copied = replace(original)
+    assert copied == original and copied is not original
+    observation = executor.observer.observe(executor.lease)
+    assert executor.authority.accepts_result(copied, observation, now_ns=NOW)
+    revocations = []
+    original_revoke = executor.authority.revoke_request
+
+    def spy_revoke(*args, **kwargs):
+        revocations.append(args[0])
+        return original_revoke(*args, **kwargs)
+
+    def untouched_probe(_lease):
+        raise AssertionError("copy must reject before any observer side effect")
+
+    monkeypatch.setattr(executor.authority, "revoke_request", spy_revoke)
+    monkeypatch.setattr(executor.observer, "observe", untouched_probe)
+    with pytest.raises(ValueError, match="original active"):
+        dispatch(executor, copied)
+    assert not revocations and not workers["forward"]._connection.sent
+    assert executor.authority.snapshot(now_ns=NOW)["request"] is original
+    assert executor.authority.accepts_exact_request(original, observation, now_ns=NOW)
+
+
+@pytest.mark.parametrize("operation", ["collect_existing", "revoke"])
+def test_equal_copy_cannot_collect_or_revoke_original_borrowed_work(
+    borrowed, operation
+):
+    executor, workers, deadline = borrowed
+    original = grant(executor, deadline)
+    dispatch(executor, original)
+    workers["forward"]._connection.finish("original")
+    with pytest.raises(ValueError, match="exact active"):
+        getattr(executor, operation)(replace(original))
+    assert executor.authority.owns_exact_request(original)
+    completion = executor.collect_existing(original, timeout_s=0.001)
+    assert completion.request is original and completion.result == "original"
+    assert finish(executor, completion)
+
+
+def test_missing_exact_kernel_contract_refuses_without_value_fallback(
+    execution, monkeypatch
+):
+    runner, _workers, _deadline = execution
+    monkeypatch.setattr(runner.authority, "accepts_exact_request", None)
+    with pytest.raises(ValueError, match="exact original"):
+        BorrowedRoleExecution(
+            runner.authority,
+            runner.runtime,
+            runner.lease,
+            runner.observer,
+            clock=lambda: NOW,
+        )

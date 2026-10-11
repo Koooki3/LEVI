@@ -81,6 +81,8 @@ def test_exact_original_root_sources_are_loaded():
         "Cycle.invoke": InferenceCycle.invoke,
         "Kernel.begin": runtime_ownership.RuntimeOwnership.begin_role_request,
         "Kernel.finish": runtime_ownership.RuntimeOwnership.finish_request,
+        "Kernel.owns_exact": runtime_ownership.RuntimeOwnership.owns_exact_request,
+        "Kernel.accepts_exact": runtime_ownership.RuntimeOwnership.accepts_exact_request,
         "Worker.collect": owned_runtime.OwnedModelWorker.collect_sdk_completion,
         "Borrowed.dispatch": BorrowedRoleExecution.dispatch_existing,
     }
@@ -231,3 +233,22 @@ def test_actual_cycle_borrows_once_and_independently_checks_final_group(
     assert cycle_observations[-1] is not completions[0].observation
     assert runner.authority.snapshot(now_ns=NOW)["runtime"] == runner.runtime
     assert runner.authority.snapshot(now_ns=NOW)["lease"] == runner.lease
+
+
+def test_original_legacy_kernel_without_exact_contract_is_refused(execution):
+    runner, workers, _deadline = execution
+    if callable(getattr(runner.authority, "accepts_exact_request", None)):
+        pytest.skip("exact-contract Kernel present; legacy refusal checked separately")
+    assert Path(inspect.getsourcefile(type(runner.authority))).resolve() == (
+        ROOT / "levi/live/runtime_ownership.py"
+    )
+    with pytest.raises(ValueError, match="exact original"):
+        BorrowedRoleExecution(
+            runner.authority,
+            runner.runtime,
+            runner.lease,
+            runner.observer,
+            clock=lambda: NOW,
+        )
+    assert all(not worker._connection.sent for worker in workers.values())
+    assert runner.authority.snapshot(now_ns=NOW)["request"] is None

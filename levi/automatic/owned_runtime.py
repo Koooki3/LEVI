@@ -156,6 +156,10 @@ class BorrowedRoleExecution:
 
         if (
             type(authority) is not RuntimeOwnership
+            or any(
+                not callable(getattr(authority, name, None))
+                for name in ("owns_exact_request", "accepts_exact_request")
+            )
             or type(runtime) is not RuntimeToken
             or any(
                 type(value) is not int
@@ -348,7 +352,8 @@ class BorrowedRoleExecution:
     def _withdraw(self, request):
         self._withdrawn = True
         try:
-            self._authority.revoke_request(request, now_ns=self._clock())
+            if self._authority.owns_exact_request(request) is True:
+                self._authority.revoke_request(request, now_ns=self._clock())
         except ValueError:
             pass  # Cycle already resolved it; never revoke a different token.
 
@@ -388,12 +393,15 @@ class BorrowedRoleExecution:
                 raise ValueError(
                     "exact new borrowed role/episode/epoch request required"
                 )
+            # Reject equal copies before observation/dispatch/revoke side effects.
+            if self._authority.owns_exact_request(request) is not True:
+                raise ValueError("original active borrowed request object required")
             if self._active is not None and self._collected is None:
                 raise ValueError("borrowed request unresolved")
             try:
                 observation = self._observe(idle=True, request=request)
                 if (
-                    self._authority.accepts_result(
+                    self._authority.accepts_exact_request(
                         request, observation, now_ns=self._clock()
                     )
                     is not True
@@ -403,7 +411,8 @@ class BorrowedRoleExecution:
                     )
             except Exception:
                 try:
-                    self._authority.revoke_request(request, now_ns=self._clock())
+                    if self._authority.owns_exact_request(request) is True:
+                        self._authority.revoke_request(request, now_ns=self._clock())
                 except ValueError:
                     pass
                 raise
@@ -419,7 +428,10 @@ class BorrowedRoleExecution:
         from levi.live.owned_runtime import SdkCompletion, SdkIdleAck, _cpu_payload
 
         with self._lock:
-            if request is not self._active:
+            if (
+                request is not self._active
+                or self._authority.owns_exact_request(request) is not True
+            ):
                 raise ValueError("exact active borrowed request required")
             try:
                 self._binding()
@@ -444,7 +456,7 @@ class BorrowedRoleExecution:
                     _cpu_payload(completion.result)
                     self._collected = completion
                 observation = self._observe(idle=True, request=request)
-                permitted = self._authority.accepts_result(
+                permitted = self._authority.accepts_exact_request(
                     request, observation, now_ns=self._clock()
                 )
                 if permitted is not True or self._closed.is_set():
@@ -471,7 +483,10 @@ class BorrowedRoleExecution:
                 raise
 
     def revoke(self, request):
-        if request is not self._active:
+        if (
+            request is not self._active
+            or self._authority.owns_exact_request(request) is not True
+        ):
             raise ValueError("exact active borrowed request required")
         self._withdraw(request)
 
