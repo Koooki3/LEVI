@@ -469,6 +469,16 @@ class Judge:
         self._busy = threading.Lock()
         self._owner = None
         self._stop_reason = None
+        self._aeri_specs = {}
+        self._aeri_cancel = {}
+        self._aeri_cancelled = {}
+        self._aeri_cancel_lock = threading.Lock()
+
+    def register_aeri_spec(self, spec):
+        """Mount an explicit frozen run/plan/model spec; never accept one from HTTP."""
+        from .aeri_online import register
+
+        return register(self, spec)
 
     # --- the model call ---------------------------------------------------------
 
@@ -874,7 +884,7 @@ def handler_for(judge, host, port, max_bytes):
                 self._send(404, {"error": "not found"})
 
         def do_POST(self):
-            if self.path != "/v1/judge":
+            if self.path not in {"/v1/judge", "/v1/aeri/provider", "/v1/aeri/cancel"}:
                 self._send(404, {"error": "not found"})
                 return
             problem = self._origin_ok()
@@ -907,7 +917,26 @@ def handler_for(judge, host, port, max_bytes):
             if len(body) != length:
                 self._refuse(400, "the body ended before its Content-Length")
                 return
-            code, value = judge.handle(body)
+            if self.path == "/v1/judge":
+                code, value = judge.handle(body)
+            else:
+                from . import aeri_online
+
+                try:
+                    value = (
+                        aeri_online.handle(judge, body)
+                        if self.path == "/v1/aeri/provider"
+                        else aeri_online.cancel_request(judge, body)
+                    )
+                    code = 200
+                except (ValueError, TypeError, KeyError):
+                    code, value = (
+                        422,
+                        {
+                            "status": "unavailable",
+                            "reason": "invalid AERI provider request",
+                        },
+                    )
             self._send(code, value)
 
     return Handler
@@ -929,10 +958,16 @@ class Server(ThreadingHTTPServer):
 class Endpoint:
     """The online judgement's HTTP endpoint, a thread of the supervisor."""
 
-    def __init__(self, config, gpu, *, ask=None, log=None):
+    def __init__(self, config, gpu, *, ask=None, log=None, aeri_specs=()):
         self.config = config
         self.log = log or (lambda *a: None)
         self.judge = Judge(config, gpu, ask=ask, log=self.log)
+        from levi.automatic.provider_worker import load_spec
+
+        for path in config.online.aeri_specs:
+            self.judge.register_aeri_spec(load_spec(path))
+        for spec in aeri_specs:
+            self.judge.register_aeri_spec(spec)
         self.server = None
         self.thread = None
         self.error = ""

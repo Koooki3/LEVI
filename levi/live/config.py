@@ -61,6 +61,7 @@ OMIT_AT_DEFAULT = frozenset(
         ("vllm", "cpus"),
         ("online", "pressure_avg10_max"),
         ("online", "pressure_kinds"),
+        ("online", "aeri_specs"),
     }
 )
 CHECKOUT = Path(__file__).resolve().parents[2]
@@ -370,6 +371,8 @@ class Online:
     # A spec of levi/live/specs whose rule is ``final_state`` (one question
     # per episode on its last seconds, no gripper channel).
     spec: str = "generic-final.v1.json"
+    # Explicit operator-frozen AERI model spec files; empty keeps C5 unchanged.
+    aeri_specs: list = field(default_factory=list)
     # Upper bound of the model request (seconds); past it the answer is
     # ``error`` (timeout) and the request is cut.
     timeout_s: float = 15.0
@@ -736,6 +739,26 @@ def _online_problems(config) -> list:
     import ipaddress
 
     o, out = config.online, []
+    if (
+        not isinstance(o.aeri_specs, list)
+        or len(o.aeri_specs) > 32
+        or any(
+            not isinstance(path, str) or not Path(path).is_absolute()
+            for path in o.aeri_specs
+        )
+        or len(set(o.aeri_specs)) != len(o.aeri_specs)
+    ):
+        out.append(
+            "online.aeri_specs must list up to 32 distinct absolute frozen spec files"
+        )
+    elif o.aeri_specs:
+        from levi.automatic.provider_worker import load_spec
+
+        for path in o.aeri_specs:
+            try:
+                load_spec(path)
+            except (OSError, ValueError, TypeError):
+                out.append(f"online.aeri_specs cannot validate frozen spec: {path}")
     try:
         loopback = ipaddress.ip_address(o.host).is_loopback
     except ValueError:

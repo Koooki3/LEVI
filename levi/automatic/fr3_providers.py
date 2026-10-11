@@ -37,7 +37,7 @@ def read_answer(path):
         os.close(fd)
 
 
-def ready(root, contract, capabilities, *, now=None):
+def ready(root, contract, capabilities, *, now=None, model_spec=None):
     raw = read_answer(Path(root) / "READY.json")
     try:
         value = json.loads(raw) if raw else {}
@@ -45,6 +45,26 @@ def ready(root, contract, capabilities, *, now=None):
         return False
     now = time.time_ns() if now is None else now
     stamp = value.get("updated_wall_ns") if isinstance(value, dict) else None
+    if model_spec is not None:
+        from levi.children import identity
+
+        recorded = value.get("identity") if isinstance(value, dict) else None
+        pid = recorded.get("pid") if isinstance(recorded, dict) else None
+        actual = identity(pid) if type(pid) is int and pid > 0 else None
+        if (
+            actual is None
+            or recorded
+            != {
+                "pid": pid,
+                "start_ticks": int(actual["start_ticks"]),
+                "boot_id": actual["boot_id"] if "boot_id" in actual else actual["boot"],
+            }
+            or value.get("spec_sha256") != model_spec.sha256
+            or value.get("plan_sha256") != model_spec.value["plan_sha256"]
+            or value.get("run_id") != model_spec.value["run_id"]
+            or value.get("model_digest") != model_spec.value["provider"]["model_digest"]
+        ):
+            return False
     return bool(
         isinstance(value, dict)
         and value.get("schema") == "levi.aeri.provider_ready.v1"
@@ -66,6 +86,7 @@ class Ticket:
     path: Path
     observed_ns: int
     frames: tuple[tuple[str, str, str], ...]
+    payload: dict | None = None
 
 
 def retained_hash(path):
@@ -90,10 +111,11 @@ def retained_hash(path):
 
 
 class FileProvider:
-    def __init__(self, root, kind, robot, clock, contract):
+    def __init__(self, root, kind, robot, clock, contract, *, model_spec=None):
         self.root, self.kind = Path(root), kind
         self.robot, self.clock, self.contract = robot, clock, contract
         self.store = None
+        self.model_spec = model_spec
         self.pending = {}
 
     def use_evidence(self, store):
@@ -103,7 +125,9 @@ class FileProvider:
         return (
             self.root.is_dir()
             and not self.root.is_symlink()
-            and ready(self.root, self.contract, (self.kind,))
+            and ready(
+                self.root, self.contract, (self.kind,), model_spec=self.model_spec
+            )
         )
 
     def submit(self, request):
@@ -111,7 +135,27 @@ class FileProvider:
         # reply to the exact scene it was asked to assess.
         if not self.reachable():
             raise ValueError("real provider is missing or stale")
+        submitted_ns = self.clock.now()
+        request = dict(request)
+        if self.model_spec is not None:
+            phase = (
+                "scene"
+                if self.kind == "scene"
+                else "reset_final"
+                if request["request_id"].endswith(":final")
+                else "reset_active"
+            )
+            request.update(
+                spec_sha256=self.model_spec.sha256,
+                plan_sha256=self.model_spec.value["plan_sha256"],
+                submitted_ns=submitted_ns,
+                phase=phase,
+                deadline_due_ns=submitted_ns
+                + self.model_spec.value["deadlines_ns"][phase],
+            )
         observed = self.robot.observe()
+        if self.model_spec is not None and self.kind == "reset_judgement":
+            request["observed_through_ns"] = observed["observed_ns"]
         frames = []
         import cv2
 
@@ -182,6 +226,7 @@ class FileProvider:
             response,
             observed["observed_ns"],
             tuple((f["ref"], f["sha256"], f["file"]) for f in frames),
+            payload=payload,
         )
         if failure is not None:
             return self.unavailable(ticket, failure)
@@ -215,6 +260,15 @@ class FileProvider:
             )
             if message.kind == "unavailable":
                 return data
+            if self.model_spec is not None:
+                from .provider_model import validate_result
+
+                validate_result(
+                    self.model_spec,
+                    ticket.payload,
+                    json.loads(data),
+                    now_ns=self.clock.now(),
+                )
             if self.kind == "reset_judgement":
                 if (message.spec_id, message.spec_version) != self.contract.key:
                     raise ValueError(

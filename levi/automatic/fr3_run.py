@@ -207,8 +207,13 @@ def load_binding(path, job):
     if job["mode"] == "shadow":
         raise ValueError("shadow mode has no motion authority")
     provider = value["providers"]
-    if not isinstance(provider, dict) or set(provider) != {"online_url", "file_root"}:
-        raise ValueError("providers requires online_url and file_root")
+    if not isinstance(provider, dict) or set(provider) not in (
+        {"online_url", "file_root"},
+        {"online_url", "file_root", "model_spec_file", "model_spec_sha256"},
+    ):
+        raise ValueError(
+            "providers requires online_url/file_root and, together, model_spec_file/model_spec_sha256"
+        )
     judge_url = urlparse(provider["online_url"])
     if (
         judge_url.scheme != "http"
@@ -228,15 +233,54 @@ def load_binding(path, job):
         or Path(provider["file_root"]).is_symlink()
     ):
         raise ValueError("provider file_root must be an existing real directory")
-    if job["config"].scene_check == "provider":
-        caps = {"scene"} | (
-            {"events", "reset_judgement"} if "reset" in roles else set()
-        )
-        if not providers.ready(provider["file_root"], job["contract"], caps):
+    model_spec = model_binding(provider, job)
+    if job["config"].scene_check == "provider" or (
+        model_spec is not None and "reset" in roles
+    ):
+        caps = {"scene"} if job["config"].scene_check == "provider" else set()
+        if "reset" in roles:
+            caps.add("reset_judgement")
+        if job["config"].termination.allow_early_stop:
+            caps.add("events")
+        if not providers.ready(
+            provider["file_root"], job["contract"], caps, model_spec=model_spec
+        ):
             raise ValueError(
                 "real provider READY.json is missing, stale or does not match contract/capabilities"
             )
     return value, hashlib.sha256(data).hexdigest()
+
+
+def model_binding(provider, job):
+    """Pure-file check: freeze must match the existing job, never rewrite it."""
+    if "model_spec_file" not in provider:
+        return None  # Existing external file protocol; not a model-worker claim.
+    from .provider_worker import load_spec
+
+    path = Path(provider["model_spec_file"])
+    if not path.is_absolute():
+        raise ValueError("model_spec_file must be absolute")
+    spec = load_spec(path)
+    value, cfg = spec.value, job["config"]
+    if (
+        provider["model_spec_sha256"] != spec.sha256
+        or value["run_id"] != cfg.run_id
+        or value["plan_sha256"] != job["plan_sha256"]
+        or value["plan_sha256"] != cfg.plan_sha256
+        or spec.contract.describe() != job["contract"].describe()
+        or value["deadlines_ns"]
+        != {
+            "scene": cfg.scene_timeout_ns,
+            "reset_final": cfg.final_judge_timeout_ns,
+            "reset_active": cfg.judge_request_timeout_ns,
+        }
+    ):
+        raise ValueError("model spec differs from frozen job run/plan/ISC/deadlines")
+    if cfg.termination.allow_early_stop:
+        raise ValueError(
+            "model worker has no frame-bearing events; freeze a new plan with allow_early_stop:false"
+        )
+    return spec
 
 
 def modules(binding):
@@ -368,6 +412,8 @@ def assembled(
         media=media,
     )
     file_root = binding["providers"]["file_root"]
+    model_spec = model_binding(binding["providers"], job)
+    model_kwargs = {"model_spec": model_spec} if model_spec is not None else {}
 
     def capture():
         obs = robot.observe()
@@ -388,11 +434,11 @@ def assembled(
         )
     else:
         scene = providers.FileProvider(
-            file_root, "scene", robot, clock, job["contract"]
+            file_root, "scene", robot, clock, job["contract"], **model_kwargs
         )
     reset_provider = (
         providers.FileProvider(
-            file_root, "reset_judgement", robot, clock, job["contract"]
+            file_root, "reset_judgement", robot, clock, job["contract"], **model_kwargs
         )
         if "reset" in clients
         else None

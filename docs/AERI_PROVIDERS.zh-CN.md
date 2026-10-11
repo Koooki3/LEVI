@@ -1,0 +1,84 @@
+# 自动评测模型提供者
+
+[English](AERI_PROVIDERS.md) · [自动评测流水线](AUTOMATIC_PIPELINE.zh-CN.md)
+
+此提供者通过现有实时服务的在线 Judge 真正执行谓词模型调用，不生成机器人动作。文件响应必须通过完整 AERI 合同、当前保留证据、run/plan 身份和期限检查才可使用。传输测试不能证明模型或真机已准备好。
+
+## 先走无复位策略路径
+
+现有 `human_assisted` / `operator_attested` 路径保留人工场景门和前向 C5 终局判定，不需要场景模型 worker。不要为了绕过缺失的提供者加复位策略。复位模型只读已确认的初始状态合同（ISC）；`generic-final` 只用于前向终局。
+
+新 worker 只有 `scene` 和 `reset_judgement` 能力，**没有 events 能力**。现有 FileEvents 请求没有观测帧，不能据此实现视觉事件。使用模型 worker 的新计划必须明确冻结 `termination.allow_early_stop: false`。保留旧 true 默认值的作业会阻断，代码不暗改旧作业。以后添加观测事件或延长期限，需新计划／规格和独立测试。
+
+## 冻结完整模型规格
+
+`levi.automatic.provider_model.FrozenSpec` 读取 `levi.aeri.model_spec.v1`，以下字段全部必需：
+
+| 字段 | 来源与核验 |
+| --- | --- |
+| `id`、`version`、`run_id`、`plan_sha256` | 明确的规格版本和完全匹配的冻结作业身份。 |
+| `contract` | 完整 confirmed ISC，含 required/optional 谓词及证据／视角规则。 |
+| `definitions` | 每个谓词均有操作员给出的物理定义；不根据名字猜。物体、位置、容差和可见性规则均由该来源确定。 |
+| `source.ref`、`source.sha256` | 操作员冻结来源入口，以及 `{"contract": ..., "definitions": ...}` 规范 JSON 的 SHA256。哈希绑定内容，不证明物理安全，也不代替人工审阅。 |
+| `provider` | 明确声明的 ProviderConfig 字段：本地回环模型地址、名称／摘要、视觉／结构化能力、图像／上下文上限。实际服务逐项匹配，不猜 checkpoint 或摘要。 |
+| `deadlines_ns` | 与作业完全一致的 scene、reset_final、reset_active 期限；当前桥为 5／5／3 秒。 |
+| `image_budget`、`max_output_tokens` | 明确且不超模型容量的预算。 |
+| `observation_max_age_ns`、`validity_ns` | 明确有界的证据年龄和结果有效期。 |
+| `prompt_sha256`、`answer_schema_sha256` | 固定生成的提示模板及输出 schema 哈希。 |
+
+纯函数 `freeze(mapping)` 计算最后两个哈希并核验显式字段，不生成物理定义、人工批准、模型或作业身份。规范 JSON 使用 UTF-8、排序键和紧凑分隔符，`FrozenSpec.sha256` 绑定全部字段。来源及规格字节随新计划保留。
+
+先做**纯文件检查**：
+
+```bash
+python -m levi.automatic.provider_worker check --spec /absolute/path/frozen-model-spec.json
+```
+
+`check` 不访问网络／模型 SDK，不写文件。缺定义、ISC 未确认、来源／提示／schema 哈希错误、无模型摘要或字段不全均阻断。桥绑定必须同时配置 `providers.model_spec_file` 和 `providers.model_spec_sha256`，并核对作业 run、plan、ISC 和三种期限。新规格路径缺失不能降级。旧外部文件协议可兼容读取，但其心跳不能证明这个模型 worker 存在。
+
+模型 profile 必须写齐 `ProviderConfig` 的全部字段，不能用省略字段的默认值替代冻结配置。每个字段均与实际共享 Judge profile 核对。
+
+## 运行与证据
+
+worker 启动前，现有在线 Judge 必须显式注册同一冻结规格。新 `/v1/aeri/provider` 接受注册摘要、请求、当前 JPEG 和取消身份，不接受调用者提示或替换规格；`/v1/aeri/cancel` 只取消匹配身份。两者沿用回环 Host／Origin／请求体上限检查。
+
+操作者通过已有实时配置登记本地冻结文件：
+
+```toml
+[online]
+aeri_specs = ["/absolute/path/frozen-model-spec.json"]
+```
+
+列表默认空，默认配置渲染时省略该键，兼容原 C5 配置。条目必须是互不重复的绝对路径，指向当前身份拥有的完整冻结规格。配置检查只读文件，构造在线端点时加载登记内容，不执行推理；未知摘要不可用，HTTP 不能注册规格。更改列表或作业绑定须保留新规格／计划身份，本身不启动服务，也不证明实际模型 profile 已匹配。
+
+经单独运行授权后：
+
+```bash
+python -m levi.automatic.provider_worker run \
+  --spec /absolute/path/frozen-model-spec.json \
+  --root /absolute/path/provider-files \
+  --evidence-root /absolute/path/current-run/evidence \
+  --online-url http://127.0.0.1:7882
+```
+
+目录需预先存在并属于当前执行身份。证据根必须显式授权并与请求一致。worker 逐级 NOFOLLOW 打开目录，有界读取当前身份的普通请求／JPEG 文件，在模型前后核对哈希，原子替换并 fsync 响应。在线 Judge 的图片只是临时副本，保留的原图仍在本次运行证据目录。
+
+请求位于 `scene/requests` 或 `reset_judgement/requests`；文件名为请求 ID 的 SHA256，responses／cancelled 子目录沿用同名。桥发送 run、plan/spec 摘要、phase、单调时钟 submitted_ns 和绝对 deadline_due_ns，期限不得超冻结 phase 上限。缺绑定、身份／时钟错、观测过旧／来自未来、哈希变化／引用不属于本次证据、漏谓词或降级 required，均不能产生场景准备好或复位确认。
+
+模型只返回完整冻结谓词的 true／false／null、本次真实 ref/hash、规格／模型身份和采集时间。代码算出 ready／reset_required／unknown 或 confirmed／rejected／unknown；optional 不决定结果。非 null 判读必须引用当前证据，视角和最少证据规则也适用于复位确认，不凭空给校准置信度。
+
+READY 只有活通道及实际模型 profile 校验成功才维护，绑定 PID、启动 ticks、boot ID、run/plan/spec/model 及两项真实能力。模型路径拒绝死亡／复用 PID 和过期心跳；通道或 GPU 门失败即取消准备状态，正常退出删除 READY，同目录锁拒绝第二个 worker。
+
+## 取消与恢复
+
+AERI 与 C5 共用 Judge 并发锁、请求归属、GPU online_admit/check/done 与 transport abort，不另起 vLLM、不绕 GPU 门，其他训练持有者仍可阻断准入。
+
+实际期限在模型 Budget 外严格执行（Budget 最小为 10 秒）。超时、文件取消、GPU 门关闭或 supervisor abort 切断本次传输并返回不可用，晚到结果不能成功。调用者已收到不可用时，Judge 仍持并发锁与 GPU 准入，直到实际模型线程退出；不听取消的模型不能与下一次 C5／AERI 重叠。若线程不退出，通道保持 busy。
+
+持久 intent 防止重启后重复推理。已完成请求仅在 request/spec/response 哈希一致时复用原响应；旧 intent 未完成则重启产出不可用，不猜成功、不自动重放。相同 ID 的内容变化被拒绝；请求／响应／processed 文件随运行证据保留。
+
+## 已验证边界
+
+测试执行真正的文件 worker、JPEG 保留、AERI／ISC 合同、桥 submit/collect 和共享 Judge；模型注入、HTTP 为 fake。覆盖坏 JSON／规格／模型／ref／hash／时间／身份、漏或降级谓词、GPU 门关闭、取消、晚回、重启歧义、纯文件零网络零写检查和冻结计划／期限绑定。
+
+本轮未运行真实模型推理、GPU 延迟测量、机器人 SDK／网络或现场动作，也未验证物理参数。模型判读质量、是否能在 5／3 秒完成仍未测。物理定义、checkpoint／模型摘要、相机视角、安全和现场批准均保留人工门，不把这些 mock 验证称为真机可用。
