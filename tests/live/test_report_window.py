@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from levi.live import cli, report, stats
+from levi.live import cli, report, report_scope, stats
 from levi.live.config import Config
 
 
@@ -215,3 +215,56 @@ def test_unrepresentable_epoch_refused_before_config(tmp_path, monkeypatch):
     args = cli.build_parser().parse_args(["report", "--before", "1e300"])
     with pytest.raises(ValueError):
         cli.cmd_report(args)
+
+
+def test_fractional_markdown_window_and_membership_match(tmp_path):
+    built = report.build(
+        synthetic(tmp_path), since=100.5, before=200.5, timezone="UTC", now=300
+    )
+    assert built["episodes"]["rows"][0]["demo"] == "demo_1"
+    assert built["episodes"]["total"] == 1
+    for lang in ("en", "zh-CN"):
+        md = report.render(built, lang=lang)
+        assert (
+            "[1970-01-01T00:01:40.500000+00:00, 1970-01-01T00:03:20.500000+00:00)" in md
+        )
+        assert "[100.5, 200.5)" in md
+
+
+def test_submicrosecond_markdown_window_keeps_exact_epoch(tmp_path):
+    start, end = 100.00000001, 200.00000001
+    built = report.build(
+        synthetic(tmp_path), since=start, before=end, timezone="UTC", now=300
+    )
+    assert built["episodes"]["rows"][0]["demo"] == "demo_1"
+    md = report.render(built)
+    assert f"[{start}, {end})" in md
+
+
+@pytest.mark.parametrize(
+    "boundary,zone",
+    [
+        ("9999-12-31T23:30:00+00:00", "Pacific/Kiritimati"),
+        ("0001-01-01T00:00:00+00:00", "America/New_York"),
+    ],
+)
+def test_requested_zone_range_refused_before_config(
+    tmp_path, monkeypatch, boundary, zone
+):
+    reached = []
+    monkeypatch.setattr(cli, "resolve_config", lambda args: reached.append(True))
+    args = cli.build_parser().parse_args(
+        ["report", "--before", boundary, "--timezone", zone]
+    )
+    with pytest.raises(ValueError, match="supported date range"):
+        cli.cmd_report(args)
+    assert reached == []
+
+
+def test_renderable_maximum_boundary_remains_supported(tmp_path):
+    before = "9999-12-30T23:30:00+00:00"
+    start, end, zone = report_scope.window(None, before, "Pacific/Kiritimati")
+    built = report.build(
+        synthetic(tmp_path), since=start, before=end, timezone=zone, now=300
+    )
+    assert "9999-12-31T13:30:00+14:00" in report.render(built)

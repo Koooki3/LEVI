@@ -43,6 +43,7 @@ def window(since=None, before=None, timezone="UTC"):
             raise ValueError("report boundary must be finite")
         try:
             datetime.fromtimestamp(stamp, UTC)
+            datetime.fromtimestamp(stamp, zone)
         except (ValueError, OverflowError, OSError) as exc:
             raise ValueError(
                 "report boundary is outside the supported date range"

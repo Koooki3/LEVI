@@ -61,6 +61,7 @@ TEXT = {
         "session": "session",
         "since": "since",
         "report_window": "Window",
+        "epoch_window": "Unix epoch window (seconds)",
         "timezone": "Timezone",
         "time_basis": "Time basis",
         "stats_record_at": "statistics record time (stats_record_at)",
@@ -183,6 +184,7 @@ TEXT = {
         "session": "会话",
         "since": "起始时间",
         "report_window": "时间窗口",
+        "epoch_window": "Unix 时间窗口（秒）",
         "timezone": "时区",
         "time_basis": "时间口径",
         "stats_record_at": "统计记录时间（stats_record_at）",
@@ -327,9 +329,7 @@ def when(epoch, *, timezone=None) -> str:
     if epoch is None:
         return "-"
     if timezone is not None:
-        return datetime.fromtimestamp(epoch, ZoneInfo(timezone)).isoformat(
-            timespec="seconds"
-        )
+        return datetime.fromtimestamp(epoch, ZoneInfo(timezone)).isoformat()
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(epoch))
 
 
@@ -484,6 +484,11 @@ def to_markdown(
         parts.extend(
             [
                 f"{t['report_window']}: [{start}, {end})",
+                (
+                    f"{t['epoch_window']}: ["
+                    f"{scope['since'] if scope.get('since') is not None else '-∞'}, "
+                    f"{scope['before'] if scope.get('before') is not None else '+∞'})"
+                ),
                 f"{t['timezone']}: {zone}",
                 f"{t['time_basis']}: {t['stats_record_at']}",
             ]

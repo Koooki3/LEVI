@@ -1014,3 +1014,5 @@ Reliable historical human-label replay still needs source/label identity checks.
 Filtered Markdown reports state the half-open window, chosen timezone, and
 record-time basis. Boundary and generation times use that zone, including
 explicit offsets; unfiltered reports retain their existing display.
+
+Filtered Markdown keeps fractional ISO seconds and the exact Unix epoch boundaries; this also disambiguates submicrosecond cutoffs. Boundaries must be representable in the requested timezone before reading report configuration.
