@@ -13,6 +13,7 @@ import importlib
 import json
 import math
 import os
+import select
 import shlex
 import signal
 import stat
@@ -24,7 +25,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlparse
 
-from . import cli
+from . import cli, control, launch
 from . import fr3_bridge as bridge
 from . import fr3_providers as providers
 from . import state_machine as sm
@@ -621,6 +622,8 @@ def assembled(
     finished = threading.Event()
     old_signals = {}
     thread = None
+    tracking = None
+    pump = None
     try:
         orch = Orchestrator.create(
             directory,
@@ -638,6 +641,22 @@ def assembled(
             fence=fence,
             listener=sessions,
         )
+        if job.get("standalone_inputs") is not None:
+            tracking = launch.register_standalone(job, job["standalone_inputs"])
+            from .runner import Flag
+
+            tracked_runner = SimpleNamespace(
+                run_dir=directory,
+                run_id=cfg.run_id,
+                orch=orch,
+                path=None,
+                sigterm=Flag(),
+                wake=threading.Event(),
+                started=tracking["created_wall_ns"],
+            )
+            launch.standalone_status(tracking, "running", state_of_run=orch.state)
+            pump = control.CommandPump(tracked_runner)
+            pump.start()
         if signals is not None:
             if orch.evidence is None:
                 raise ValueError("signal events require the real run evidence store")
@@ -671,6 +690,10 @@ def assembled(
                 last = time.monotonic()
                 try:
                     sessions.heartbeat()
+                    if tracking is not None:
+                        launch.standalone_status(
+                            tracking, "running", state_of_run=orch.state
+                        )
                 except Exception as exc:  # noqa: BLE001 - no stale live session while moving
                     robot.emergency_hold()
                     orch.stop("session-heartbeat-failed")
@@ -691,6 +714,15 @@ def assembled(
             )
             if not sys.stdin.isatty():
                 return state
+            if tracking is not None:
+                # The terminal and page share the original command/state core.
+                # Do not hold this driver inside input() after a page resumes.
+                while orch.state == "WAIT_HUMAN" and not robot.stopped():
+                    ready, _, _ = select.select([sys.stdin], [], [], 0.2)
+                    if ready:
+                        break
+                if orch.state != "WAIT_HUMAN":
+                    continue
             answer = input("> ").strip()
             if robot.stopped() or answer != "resume":
                 orch.stop("terminal-stop")
@@ -706,10 +738,18 @@ def assembled(
         robot.emergency_hold()
         if thread is not None:
             thread.join(timeout=3)
+        if pump is not None:
+            pump.close()
         cleanup_error = None
         operations = ([fence.revoke, orch.close] if orch is not None else []) + [
             recorder.close
         ]
+        if tracking is not None:
+            operations.append(
+                lambda: launch.standalone_status(
+                    tracking, "exited", final_state=orch.state
+                )
+            )
         for operation in operations:
             try:
                 operation()
@@ -863,15 +903,32 @@ def main(argv=None):
         if input("Type " + phrase + ": ").strip() != phrase:
             raise ValueError("operator did not authorize motion")
         # Re-read after confirmation: operator waiting cannot hide a changed plan.
+        checked_job_fact = launch.job_fact(str(Path(args.config).resolve()))
         checked = cli.load_job(args.config)
         checked_binding, checked_digest = load_binding(args.binding, checked)
         if (
-            checked["plan_sha256"] != args.expect_plan
+            launch.job_fact(str(Path(args.config).resolve())) != checked_job_fact
+            or checked["plan_sha256"] != args.expect_plan
             or checked_digest != args.expect_binding
         ):
             raise ValueError("configuration changed during operator confirmation")
+        if launch.index_path(checked["config"].run_id).exists():
+            raise ValueError(
+                "run id is already registered; real runs cannot be replayed or attached"
+            )
+        checked["standalone_inputs"] = {
+            "job": checked_job_fact,
+            "binding_sha256": checked_digest,
+        }
         return 0 if execute(checked, checked_binding) == "COMPLETED" else 1
-    except (ValueError, TypeError, OSError, cli.JobError, cli.sa.ContractError) as exc:
+    except (
+        ValueError,
+        TypeError,
+        OSError,
+        cli.JobError,
+        cli.sa.ContractError,
+        launch.LaunchRefused,
+    ) as exc:
         print(str(exc), file=sys.stderr)
         return 2
 

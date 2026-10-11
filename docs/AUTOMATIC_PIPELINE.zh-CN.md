@@ -744,3 +744,22 @@ ready；记录封存与归位成功；现有 `VERIFY_INITIAL` 再次确认当前
 worker、OnlineVerifier 和日志，只注入 SDK I/O 与模型回答。它验证软件门禁，
 不能证明模型准确性或物理可用。真实 worker 仍须配置并准确匹配身份，只有文件
 通道不够。现场执行仍需操作员当次终端确认及监督验收。
+
+## 独立操作脚本与共享运行跟踪
+
+`python scripts/aeri.py check --config JOB --binding BINDING` 复用
+`python -m levi.automatic.fr3_run --check` 的只读检查。`execute` 保留原有
+终端人工口令，以及 `--expect-plan` / `--expect-binding` 摘要核对。
+`plan`、`runs`、`stop`、`resume` 等指令直接复用 `levi automatic`，执行核
+和命令协议只有一套。脚本不会部署模型或启动服务。
+
+经人工授权的独立运行登记到 `LEVI_AERI_HOME`，明确标记
+`origin: operator_terminal`、实际执行模式，并绑定输入摘要、规范记录路径、
+日志头、冻结计划和进程身份。原页面和 CLI 读取同一份经过验证的登记与日志。
+关闭页面不停止运行器，重新打开会读取当前状态。停止、恢复和初态回答复用
+原命令队列、序号检查、人工确认与幂等协议。真实运行不能自动重放或 attach；
+故障仍走原人工审核，真实 HTTP 启动继续拒绝。
+
+CPU SDK mock 仅证明接口接线，不证明真机就绪或模型互斥激活。forward、VLM、
+reset 的静默交接仍依赖经审核的 Performance Architecture 集成。真机执行前
+必须冻结成功判定规格和物理绑定；普通向导不能替代这些事实。

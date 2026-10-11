@@ -1704,3 +1704,27 @@ and model responses injected. It validates software gates, not model accuracy
 or physical readiness. A real worker must be configured and identity-matched;
 the file transport alone is insufficient. Actual hardware execution still
 requires the operator's fresh terminal confirmation and supervised acceptance.
+
+## Standalone operator script and shared tracking
+
+`python scripts/aeri.py check --config JOB --binding BINDING` uses the same
+read-only FR3 check as `python -m levi.automatic.fr3_run --check`.
+`execute` forwards to its existing operator-terminal confirmation and reviewed
+`--expect-plan` / `--expect-binding` checks. `plan`, `runs`, `stop`, `resume`,
+and other commands use `levi automatic` directly; there is one execution and
+command core. This script does not deploy models or start services.
+
+An operator-authorized standalone run registers in `LEVI_AERI_HOME` with
+`origin: operator_terminal`, its actual execution mode, immutable input hashes,
+canonical recording location, journal header, retained plan and process identity.
+The existing page and CLI read the same authenticated registration and journal.
+Closing the page does not own or stop the runner; reconnecting reads its current
+state. Stop/resume and scene answers use the existing command inbox, sequence
+checks, human confirmations and idempotency. Real replay/attach remains refused;
+a fault still requires the existing human review. HTTP real launch stays refused.
+
+CPU SDK mocks validate this wiring, not hardware readiness or exclusive model
+activation. Forward/VLM/reset model handoff still depends on the reviewed
+Performance Architecture integration. Freeze the success judgement provider
+specification and physical binding before any real execution; the ordinary
+wizard alone does not establish those facts.

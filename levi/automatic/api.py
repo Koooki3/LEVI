@@ -386,7 +386,7 @@ class _Run:
         if not isinstance(record, dict):
             record = self.entry.get("runner")
         record = record if isinstance(record, dict) else {}
-        alive = launch.runner_alive(record)
+        alive = launch.registered_runner_alive(self.entry, record)
         out = {"alive": alive}
         if alive and isinstance(record.get("pid"), int):
             out["pid"] = record["pid"]
@@ -414,9 +414,8 @@ def _locate(run_id: str) -> _Run:
     if not isinstance(run_id, str) or not ID.fullmatch(run_id):
         raise _fail(404, "not_found", "No such run")
     try:
-        entry = launch.read_record(launch.index_path(run_id))
-        run_dir = Path(entry["run_dir"])
-        launched = (run_dir / launch.LAUNCH_RECORD).is_file()
+        entry, run_dir = launch.registered_run(run_id)
+        launched = True
     except (OSError, ValueError, KeyError, TypeError, launch.LaunchRefused):
         raise _fail(404, "not_found", "No such run") from None
     if run_dir.name != run_id or not launched or run_dir.is_symlink():
@@ -776,6 +775,11 @@ def _summary(run: _Run) -> dict:
         "state": run.state,
         "reset_mode": run.reset_mode,
         "execution_mode": run.entry.get("execution_mode"),
+        **(
+            {"origin": run.entry["origin"]}
+            if run.entry.get("backend") == "standalone"
+            else {}
+        ),
         "episodes_done": len(metrics.ended_forward(run.events)),
         "episodes_total": run.episodes_total,
         "started_at": _ms(run.entry.get("created_wall_ns")),
@@ -934,6 +938,11 @@ def snapshot_of(run: _Run) -> dict:
         "reset_mode": run.reset_mode,
         "scene_check": run.scene_check,
         "execution_mode": run.entry.get("execution_mode"),
+        **(
+            {"origin": run.entry["origin"]}
+            if run.entry.get("backend") == "standalone"
+            else {}
+        ),
         "episodes": {
             "done": len(ended),
             "total": run.episodes_total,
@@ -1280,7 +1289,9 @@ def _require_runner(run: _Run) -> None:
         raise _fail(
             409,
             "not_running",
-            "No runner serves this run (it ended, or attach it first)",
+            "Standalone writer exited; real replay/attach is refused"
+            if run.entry.get("backend") == "standalone"
+            else "No runner serves this run (it ended, or attach it first)",
             state=run.state,
         )
 

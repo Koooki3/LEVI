@@ -861,13 +861,19 @@ def _launched(args) -> Path:
         run_dir = Path(os.path.abspath(args.run_dir))
     else:
         try:
-            run_dir = Path(launch.read_record(launch.index_path(args.run))["run_dir"])
+            _entry, run_dir = launch.registered_run(args.run)
         except (OSError, ValueError, KeyError, TypeError, launch.LaunchRefused):
             raise JobError(
                 f"no run {args.run} in the index / 索引里没有该运行"
             ) from None
     if not (run_dir / launch.LAUNCH_RECORD).is_file():
         raise JobError(f"{run_dir} is not a launched run / 不是已启动的运行")
+    try:
+        _entry, registered = launch.registered_run(run_dir.name)
+        if registered != run_dir:
+            raise launch.LaunchRefused("E_REQUEST", "run directory differs from index")
+    except (OSError, ValueError, KeyError, TypeError, launch.LaunchRefused) as exc:
+        raise JobError(str(exc)) from None
     return run_dir
 
 
@@ -948,12 +954,19 @@ def _operator_checks(args):
         runner_record = launch.read_record(run_dir / launch.RUNNER_RECORD)
     except (OSError, ValueError):
         runner_record = None
-    if not launch.runner_alive(runner_record):
+    try:
+        entry, _directory = launch.registered_run(run_dir.name)
+    except (OSError, ValueError, KeyError, TypeError, launch.LaunchRefused) as exc:
+        return None, None, str(exc)
+    if not launch.registered_runner_alive(entry, runner_record):
         return (
             None,
             None,
             (
-                "E_NO_RUNNER: no runner serves this run; attach first "
+                "E_NO_RUNNER: standalone writer exited; real replay/attach is refused / "
+                "独立运行器已退出，禁止真机重放或 attach"
+                if entry.get("backend") == "standalone"
+                else "E_NO_RUNNER: no runner serves this run; attach first "
                 "(levi automatic attach) / 没有运行器，先 attach"
             ),
         )

@@ -932,6 +932,183 @@ def update_index(run_id: str, path=None, **changes) -> None:
         write_record(where, value)
 
 
+STANDALONE_SCHEMA = "levi.aeri.standalone.v1"
+STANDALONE_ORIGIN = "operator_terminal"
+
+
+def _standalone_mac(value, key):
+    body = {k: v for k, v in value.items() if k != "registration_mac"}
+    return hmac.new(
+        key,
+        json.dumps(body, sort_keys=True, separators=(",", ":")).encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def register_standalone(job, facts, *, path=None):
+    """Register an already operator-authorized run, never authorize motion.
+
+    The authenticated record binds the original process, immutable input facts,
+    canonical location and the journal's actual plan/header. HTTP cannot create
+    this record by supplying a directory or a fabricated launch.json.
+    """
+    from levi.children import identity
+
+    from .journal import Journal, read_plan
+
+    run_id = _id(job["config"].run_id, "run id")
+    directory = run_dir_of(Path(job["rollout_root"]), run_id).resolve()
+    scan = Journal.read(directory)
+    kept = read_plan(directory)
+    process = identity(os.getpid())
+    if not process or not scan.events or scan.corrupt or not kept:
+        raise LaunchRefused(
+            "E_REQUEST", "standalone needs a valid journal, plan and process identity"
+        )
+    if (
+        scan.events[0].run_id != run_id
+        or scan.events[0].header.plan_sha256 != job["plan_sha256"]
+        or kept["plan_sha256"] != job["plan_sha256"]
+    ):
+        raise LaunchRefused("E_PLAN_CHANGED", "standalone journal and job do not match")
+    record = {
+        "schema": STANDALONE_SCHEMA,
+        "origin": STANDALONE_ORIGIN,
+        "run_id": run_id,
+        "run_dir": str(directory),
+        "rollout_root": str(Path(job["rollout_root"]).resolve()),
+        "plan_sha256": job["plan_sha256"],
+        "execution_mode": job["mode"],
+        "reset_mode": job["config"].reset_strategy,
+        "backend": "standalone",
+        "entry": "cli",
+        "created_wall_ns": time.time_ns(),
+        "pid": os.getpid(),
+        "identity": {"start_ticks": process["start_ticks"], "boot": process["boot"]},
+        "header_sha256": hashlib.sha256(scan.lines[0]).hexdigest(),
+        "inputs": facts,
+    }
+    record["registration_mac"] = _standalone_mac(record, core_key(path))
+    folder = home(path) / RUNS
+    folder.mkdir(mode=0o700, exist_ok=True)
+    # Reserve the globally unique run id before publishing its tracking record.
+    index = index_path(run_id, path)
+    try:
+        _create_exclusive(
+            index, {**record, "schema": INDEX_SCHEMA, "registration": record}
+        )
+    except FileExistsError:
+        raise LaunchRefused(
+            "E_RUN_EXISTS", "standalone run id is already registered"
+        ) from None
+    try:
+        _create_exclusive(directory / LAUNCH_RECORD, record)
+    except BaseException:
+        index.unlink()
+        raise
+    return record
+
+
+def registered_run(run_id, path=None):
+    """Shared read-only lookup for CLI/API, authenticating standalone facts."""
+    from .journal import Journal, JournalError, read_plan
+
+    entry = read_record(index_path(run_id, path))
+    directory = Path(entry["run_dir"])
+    if directory.name != run_id or directory.is_symlink():
+        raise LaunchRefused("E_REQUEST", "run directory does not match run id")
+    record = read_record(directory / LAUNCH_RECORD)
+    if (
+        entry.get("backend") != "standalone"
+        and record.get("schema") != STANDALONE_SCHEMA
+    ):
+        request = LaunchRequest.from_record(record.get("request"))
+        if (
+            entry.get("schema") != INDEX_SCHEMA
+            or record.get("schema") != LAUNCH_SCHEMA
+            or request.execution_mode != DRY_RUN
+            or entry.get("execution_mode") != DRY_RUN
+            or record.get("run_id") != run_id
+        ):
+            raise LaunchRefused("E_REQUEST", "unrecognized run registration")
+        expected_dir = run_dir_of(dry_folder(run_id, request.keep_dir, path), run_id)
+        if directory != expected_dir:
+            raise LaunchRefused("E_REQUEST", "dry-run directory differs from launch")
+        try:
+            kept = read_plan(directory)
+        except JournalError:
+            raise LaunchRefused(
+                "E_PLAN_CHANGED", "retained dry-run plan is invalid"
+            ) from None
+        if kept is not None and kept["plan"].get("mode") != DRY_RUN:
+            raise LaunchRefused(
+                "E_REQUEST", "real run cannot be relabelled as a dry run"
+            )
+        return entry, directory
+    key = _read_key(home(path) / KEY_FILE)  # Reading never creates a core key.
+    expected = _standalone_mac(record, key)
+    if record.get("schema") != STANDALONE_SCHEMA or not hmac.compare_digest(
+        expected, str(record.get("registration_mac", ""))
+    ):
+        raise LaunchRefused("E_REQUEST", "standalone registration is not authenticated")
+    if entry.get("registration") != record or any(
+        entry.get(k) != record.get(k)
+        for k in (
+            "run_id",
+            "run_dir",
+            "plan_sha256",
+            "execution_mode",
+            "reset_mode",
+            "backend",
+            "origin",
+        )
+    ):
+        raise LaunchRefused("E_REQUEST", "standalone index differs from registration")
+    expected_dir = run_dir_of(Path(record["rollout_root"]), run_id)
+    if (
+        directory != directory.resolve()
+        or directory != expected_dir
+        or record["run_dir"] != str(directory)
+    ):
+        raise LaunchRefused("E_REQUEST", "standalone location differs from frozen root")
+    scan = Journal.read(directory)
+    try:
+        kept = read_plan(directory)
+    except JournalError:
+        raise LaunchRefused(
+            "E_PLAN_CHANGED", "standalone retained plan is invalid"
+        ) from None
+    if (
+        not scan.events
+        or not kept
+        or scan.events[0].run_id != run_id
+        or scan.events[0].header.plan_sha256 != record["plan_sha256"]
+        or kept["plan_sha256"] != record["plan_sha256"]
+        or hashlib.sha256(scan.lines[0]).hexdigest() != record["header_sha256"]
+    ):
+        raise LaunchRefused(
+            "E_PLAN_CHANGED", "standalone header/plan is not the registered run"
+        )
+    return entry, directory
+
+
+def standalone_status(record, state, *, path=None, **extra):
+    value = {
+        "run_id": record["run_id"],
+        "pid": record["pid"],
+        "identity": record["identity"],
+        "origin": record["origin"],
+        "backend": "standalone",
+        "plan_sha256": record["plan_sha256"],
+        "started_wall_ns": record["created_wall_ns"],
+        "updated_wall_ns": time.time_ns(),
+        "state": state,
+        **extra,
+    }
+    write_record(Path(record["run_dir"]) / RUNNER_RECORD, value)
+    update_index(record["run_id"], path, runner=value)
+
+
 def runs(path=None) -> list[dict]:
     """Every run in the index, newest first, with whether its runner lives."""
     folder = home(path) / RUNS
@@ -942,11 +1119,11 @@ def runs(path=None) -> list[dict]:
         if entry.name.startswith(".") or not ID.fullmatch(entry.stem):
             continue
         try:
-            value = read_record(entry)
-        except (OSError, ValueError):
+            value, _directory = registered_run(entry.stem, path)
+        except (OSError, ValueError, KeyError, TypeError, LaunchRefused):
             continue
         runner = value.get("runner") if isinstance(value.get("runner"), dict) else {}
-        alive = runner_alive(runner)
+        alive = registered_runner_alive(value, runner)
         value["runner_alive"] = alive
         state = None
         run_dir = value.get("run_dir")
@@ -959,6 +1136,20 @@ def runs(path=None) -> list[dict]:
         out.append(value)
     out.sort(key=lambda v: v.get("created_wall_ns") or 0, reverse=True)
     return out
+
+
+def registered_runner_alive(entry, runner):
+    """A standalone record may only refer to its authenticated original writer."""
+    registration = entry.get("registration")
+    if registration is not None and (
+        not isinstance(registration, dict)
+        or not isinstance(runner, dict)
+        or runner.get("pid") != registration.get("pid")
+        or runner.get("identity") != registration.get("identity")
+        or runner.get("plan_sha256") != registration.get("plan_sha256")
+    ):
+        return False
+    return runner_alive(runner)
 
 
 def runner_alive(runner) -> bool:

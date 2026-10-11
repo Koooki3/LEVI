@@ -252,6 +252,16 @@ def write_command(run_dir, value: dict) -> str:
     run_dir = Path(run_dir)
     if not (run_dir / launch.LAUNCH_RECORD).is_file():
         raise CommandError("E_NOT_LAUNCHED", f"{run_dir} is not a launched run")
+    record = launch.read_record(run_dir / launch.LAUNCH_RECORD)
+    if record.get("schema") == launch.STANDALONE_SCHEMA:
+        try:
+            _entry, registered = launch.registered_run(run_dir.name)
+            if registered != run_dir.resolve():
+                raise launch.LaunchRefused(
+                    "E_REQUEST", "command location is not registered"
+                )
+        except (OSError, ValueError, KeyError, TypeError, launch.LaunchRefused) as exc:
+            raise CommandError("E_NOT_LAUNCHED", str(exc)) from None
     found = ensure_folders(run_dir)
     name = f"{value['command_id']}.json"
     data = (json.dumps(value, sort_keys=True) + "\n").encode()
