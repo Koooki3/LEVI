@@ -961,3 +961,8 @@ Open **Session details** from an evaluation row or a session in the statistics t
 When a client stops reporting or its status file is replaced, saved statistics can still be shown; this does not reconstruct a complete robot event history. A disabled workspace, missing dataset, and unreachable status or statistics are shown explicitly. Automatic labels remain unreviewed. A guided campaign can link to its strictly matched live client session; waiting, unavailable, mismatched and ambiguous associations have no detail link.
 
 The annotation timeline uses the same card background behind section labels to hide the playhead without white text boxes in the light theme. Live disclosures have a short entry transition, with both system and in-app reduced motion supported. Keyboard disclosure and viewer links remain separate controls.
+
+
+### Source-bound results
+
+Session outcome statistics and current downloads now require an exact, visible source-bound result. Active, blinded, unknown or replaced capture sources withhold outcome analysis. The result directory keeps root/task/session identities separate, retains historical catalog references, and links verified viewers and annotation runs in their actual workspaces. Current snapshot downloads are distinct from published report versions; campaigns keep their original report gate and analysis basis. See [Evaluation results](EVALUATION_RESULTS.md#read-only-live-result-api) for the API, status meanings and scan limits.

@@ -32,12 +32,14 @@ The JSON shapes are documented in ``docs/LIVE.md``.
 
 import contextlib
 import contextvars
+import json
 import os
 import re
 import secrets
+import sqlite3
 import time
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlsplit
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.routing import APIRoute
@@ -52,6 +54,7 @@ from . import (
     locate,
     management,
     mirror,
+    result_index,
     resumer,
     sessions,
     stats,
@@ -118,8 +121,12 @@ def _linked_id(workspace: Path, name: str) -> str | None:
     return links.product_id(workspace, name)
 
 
-def _browse(config, name, session_id=None):
-    info = catalogue.browse_info(config, name, session_id)
+def _browse(config, name, session_id=None, *, _info=None):
+    info = (
+        dict(_info)
+        if _info is not None
+        else catalogue.browse_info(config, name, session_id)
+    )
     info["view_status"] = {
         "missing": "pending",
         "queued": "building",
@@ -1044,3 +1051,268 @@ def setup_status():
 router.routes.append(
     APIRoute("/api/levi/setup/status", setup_status, methods=["GET"], tags=["Setup"])
 )
+
+
+# Result reads deliberately avoid _workspace's training-pool remembrance write.
+def _result_config():
+    found = locate.find(_own())
+    if found.workspace is None or not locate.is_live(found.workspace):
+        return None
+    root = found.workspace
+    written = next(
+        (p for p in (root / "live/effective.toml", root / "live.toml") if p.is_file()),
+        None,
+    )
+    if written is None:
+        return None
+    try:
+        config = live_config.load(written)
+    except ValueError:
+        return None
+    config.service.workspace = str(root)
+    return config
+
+
+def _result_run_repo(config, run, native, snapshot):
+    """A pinned immutable read of the existing store; no WAL/SHM creation."""
+    from levi.automatic.api import _open_below
+
+    from . import backfill
+
+    path = result_index.catalog._safe(config.workspace / backfill.STORE)
+    fd = None
+    db = None
+    try:
+        fd = _open_below(Path(path.anchor), path.parts[1:])
+        info = os.fstat(fd)
+        snapshot.stat_file(path, info)
+        db = sqlite3.connect(
+            f"file:/proc/self/fd/{fd}?mode=ro&immutable=1", uri=True, timeout=0
+        )
+        found = db.execute(
+            "SELECT body FROM records WHERE kind='runs' AND id=?", (run,)
+        ).fetchone()
+        body = json.loads(found[0]) if found else None
+        if (
+            not isinstance(body, dict)
+            or body.get("id") != run
+            or (body.get("context") or {}).get("repo_id") != native
+        ):
+            return None
+        return native
+    except (OSError, ValueError, TypeError, sqlite3.Error):
+        return None
+    finally:
+        if db is not None:
+            db.close()
+        if fd is not None:
+            os.close(fd)
+
+
+def _result_linker(config, item, states, snapshot):
+    """Reuse native catalog and _browse; never manufacture a product run URL."""
+    catalog = snapshot.json(
+        config.workspace / "outputs/LEVI/workbench/datasets.json", optional=True
+    )
+    catalog = catalog if isinstance(catalog, dict) else {}
+    key = ("viewer_capture_index", config.workspace)
+    if key not in snapshot.parsed:
+        grouped = {}
+        for key_name, value in catalog.items():
+            if (
+                isinstance(value, dict)
+                and not value.get("base")
+                and isinstance(value.get("path"), str)
+            ):
+                grouped.setdefault(value["path"], []).append((key_name, value))
+        snapshot.parsed[key] = grouped
+    embedded = _embedded(config.workspace)
+    live_ui = None
+    service = getattr(config, "service", None)
+    if embedded and service is not None:
+        status = snapshot.json(config.live_dir / "status.json", optional=True)
+        front = (status or {}).get("frontend") or {}
+        host = service.host
+        if (
+            _alive(status, time.time())
+            and front.get("ui") is True
+            and front.get("state") == "ok"
+            and host in ("127.0.0.1", "localhost", "::1")
+            and service.ui_port not in (5000, 5001, 5100, 7470, 8000)
+        ):
+            live_ui = f"http://{'[' + host + ']' if host == '::1' else host}:{service.ui_port}"
+    for name, state in states.items():
+        capture = state.get("capture")
+        native = None
+        href = None
+        repo = None
+        if isinstance(capture, str):
+            matches = snapshot.parsed[key].get(capture, [])
+            if len(matches) == 1:
+                key, entry = matches[0]
+                candidate = entry.get("id")
+                if (
+                    candidate == "local/" + key
+                    and DATASET.fullmatch(key)
+                    and result_index.catalog._safe(Path(capture)).is_relative_to(
+                        config.workspace / "captures"
+                    )
+                ):
+                    native = candidate
+                    # Every browse read below is pinned before its existing gate.
+                    view = Path(entry.get("view") or capture)
+                    if result_index.catalog._safe(view).is_relative_to(
+                        config.workspace
+                    ):
+                        info = snapshot.read(view / "meta/info.json", optional=True)
+                        status = entry.get(
+                            "view_status",
+                            "ready" if entry.get("kind") == "lerobot" else "missing",
+                        )
+                        if status == "ready" and info is None:
+                            status = "missing"
+                        indices = [
+                            row["episode_index"]
+                            for row in (state.get("demos") or {}).values()
+                            if isinstance(row, dict)
+                            and not row.get("deleted")
+                            and not row.get("excluded")
+                            and isinstance(row.get("episode_index"), int)
+                            and row.get("run_id") == item["identity"]["run_id"]
+                        ]
+                        browse = _browse(
+                            config,
+                            name,
+                            item["identity"]["run_id"],
+                            _info={
+                                "repo_id": native,
+                                "view_status": status,
+                                "first_episode_index": min(indices)
+                                if indices and status == "ready"
+                                else None,
+                            },
+                        )
+                        href = browse.get("viewer_url")
+                        if href:
+                            parts = urlsplit(href).path.split("/")
+                            if len(parts) == 4:
+                                repo = unquote(parts[1]) + "/" + unquote(parts[2])
+                        if (
+                            not href
+                            and native
+                            and live_ui
+                            and browse.get("view_status") == "ready"
+                            and browse.get("first_episode_index") is not None
+                        ):
+                            href = (
+                                live_ui
+                                + "/"
+                                + quote(native, safe="/")
+                                + "/episode_"
+                                + str(browse["first_episode_index"])
+                                + "?live_session="
+                                + quote(item["identity"]["run_id"], safe="")
+                            )
+                            repo = native
+        annotation_base = (
+            live_ui + "/" + quote(native, safe="/")
+            if live_ui and native
+            else "/" + quote(native, safe="/")
+            if native and not embedded
+            else None
+        )
+        mapping = {
+            "dataset": name,
+            "repo_id": repo,
+            "native_repo_id": native,
+            "viewer_href": href,
+            "annotation_base": annotation_base,
+            "status": "ready" if href else "unknown",
+        }
+        item["viewers"].append(mapping)
+        for run in item["runs"]:
+            if run["dataset"] != name:
+                continue
+            bound = (
+                _result_run_repo(config, run["run_id"], native, snapshot)
+                if native
+                else None
+            )
+            run["repo_id"] = bound
+            run["viewer_href"] = None
+            if href and run["episodes"]:
+                run["viewer_href"] = re.sub(
+                    r"/episode_[0-9]+(?=[?]|$)",
+                    "/episode_" + str(run["episodes"][0]),
+                    href,
+                )
+            run["annotation_href"] = (
+                annotation_base + "?agent_run=" + quote(run["run_id"], safe="")
+                if annotation_base and bound
+                else None
+            )
+            if not bound:
+                item["source"]["missing"].append(
+                    run["run_id"] + ":run_store_binding_unknown"
+                )
+
+
+@router.get("/results")
+def results_view(dataset: str | None = None, run_id: str | None = None):
+    config = _result_config()
+    if config is None:
+        return {"schema": result_index.SCHEMA, "available": False, "items": []}
+    return result_index.build(
+        config, dataset=dataset, run_id=run_id, linker=_result_linker
+    )
+
+
+@router.get("/results/session")
+def result_session(
+    root: str,
+    group: str,
+    task: str,
+    session: str,
+    session_id: str | None = None,
+    run_id: str | None = None,
+):
+    config = _result_config()
+    if config is None:
+        raise HTTPException(404, "Live results are not configured")
+    return result_index.session(
+        config,
+        root=root,
+        group=group,
+        task=task,
+        session=session,
+        session_id=session_id,
+        run_id=run_id,
+        linker=_result_linker,
+    )
+
+
+@router.get("/results/session/download")
+def result_session_download(
+    root: str,
+    group: str,
+    task: str,
+    session: str,
+    session_id: str | None = None,
+    run_id: str | None = None,
+    format: str = "json",
+    lang: str = "en",
+):
+    item = result_session(root, group, task, session, session_id, run_id)
+    content = result_index.download(item, format=format, lang=lang)
+    return Response(
+        content=content,
+        media_type="application/json"
+        if format == "json"
+        else "text/markdown; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": _attachment(
+                "live-result-current", "json" if format == "json" else "md"
+            ),
+        },
+    )
