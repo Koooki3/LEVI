@@ -37,6 +37,8 @@ def main():
             "levi/domain/aeri.py",
             "levi/automatic/orchestrator.py",
             "levi/automatic/intervention.py",
+            "levi/automatic/adapters/physical_hold.py",
+            "tests/automatic/test_measured_physical_hold.py",
             "levi/automatic/termination.py",
             "levi/automatic/adapters/legacy_live.py",
             "levi/automatic/recorder.py",
@@ -62,7 +64,8 @@ def main():
             "levi/live/workload_broker.py",
         )
     ]
-    sources = {str(path): digest(path) for path in source_files}
+    missing = [str(path) for path in source_files if not path.exists()]
+    sources = {str(path): digest(path) for path in source_files if path.exists()}
 
     def head(root):
         return subprocess.check_output(
@@ -77,6 +80,7 @@ def main():
         "source_head": head(ROOT),
         "kernel_head": head(kernel),
         "source_sha256": sources,
+        "source_missing": missing,
         "source_manifest_sha256": hashlib.sha256(
             json.dumps(sources, sort_keys=True).encode()
         ).hexdigest(),
