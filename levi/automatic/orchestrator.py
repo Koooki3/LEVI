@@ -1,4 +1,4 @@
-"""The automatic evaluation run (T-C-06): one orchestrator drives the 13
+"""The automatic evaluation run (T-C-06): one orchestrator drives the 15
 AERI states through the durable journal, with the robot, policy, recorder
 and the A-side providers injected.
 
@@ -68,6 +68,7 @@ from . import reset_manager as rm
 from . import scene_assessment as sa
 from . import state_machine as sm
 from .adapters import events as ev
+from .adapters.owned_calls import OwnedCalls
 from .intervention import InferenceCycle, InterventionStopped, InterventionUnproven
 from .journal import Journal, JournalRefused, process_identity
 from .recorder import EvidenceStore
@@ -361,8 +362,11 @@ class Orchestrator:
         listener: Callable[[str, dict], None] | None = None,
         evidence=True,
         intervention: InferenceCycle | None = None,
+        owned_calls: OwnedCalls | None = None,
     ):
         self._check_intervention(config, clock, intervention)
+        self._check_owned_calls(owned_calls, intervention)
+        self.owned_calls = owned_calls
         self.intervention = intervention
         self.journal = journal
         self.config = config
@@ -448,6 +452,17 @@ class Orchestrator:
                     "event_pause_judge requires the owned provider scene path"
                 )
 
+    @staticmethod
+    def _check_owned_calls(owned_calls, intervention):
+        if owned_calls is None:
+            return
+        if not isinstance(owned_calls, OwnedCalls) or intervention is None:
+            raise ConfigError("owned_calls requires the explicit intervention cycle")
+        try:
+            owned_calls.validate(intervention)
+        except Exception as exc:
+            raise ConfigError("owned_calls original execution binding invalid") from exc
+
     @classmethod
     def create(
         cls, directory, config: RunConfig, *, plan: dict | None = None, **parts
@@ -456,6 +471,7 @@ class Orchestrator:
         ``plan`` (the job's normalised plan, hashing to the config's
         ``plan_sha256``) is kept as the run folder's ``plan.json``."""
         cls._check_intervention(config, parts["clock"], parts.get("intervention"))
+        cls._check_owned_calls(parts.get("owned_calls"), parts.get("intervention"))
         clock = parts["clock"]
         process = process_identity()
         journal = Journal.create(
@@ -482,6 +498,7 @@ class Orchestrator:
         check differs from the run header's is refused (``E_PLAN``, with a
         ``run_header_mismatch`` note)."""
         cls._check_intervention(config, parts["clock"], parts.get("intervention"))
+        cls._check_owned_calls(parts.get("owned_calls"), parts.get("intervention"))
         clock = parts["clock"]
         journal = Journal.open(
             directory,
@@ -1177,6 +1194,7 @@ class Orchestrator:
             "asked_ns": self._now(),
         }
         decision = "unavailable"
+        owned_frames = {}
         self._scene_evidence_failed = False
         require_retained = (
             self.config.reset_horizon_completion == "verify_final"
@@ -1185,18 +1203,49 @@ class Orchestrator:
         try:
             if self.intervention is not None:
                 self.robot.hold()
-                decision, reason, message = self.intervention.invoke(
-                    "judge",
-                    episode_id,
-                    self.policy_epoch,
-                    deadline_ns=self._now() + self.config.scene_timeout_ns,
-                    call=lambda: self._assess_once(record),
-                    interrupted=lambda: (
-                        self._operator() is not None
-                        or self.robot.latch_state()
-                        or self.robot.health()["state"] == "red"
-                    ),
-                )
+                deadline = self._now() + self.config.scene_timeout_ns
+                if self.owned_calls is None:
+                    decision, reason, message = self.intervention.invoke(
+                        "judge",
+                        episode_id,
+                        self.policy_epoch,
+                        deadline_ns=deadline,
+                        call=lambda: self._assess_once(record),
+                        interrupted=self._intervention_interrupted,
+                    )
+                else:
+                    request = ev.make_request(
+                        request_id=request_id,
+                        run_id=self.config.run_id,
+                        episode_id=episode_id,
+                        target=target,
+                    )
+                    invocation = self.owned_calls.invocation(
+                        "scene",
+                        request,
+                        role="judge",
+                        policy_epoch=self.policy_epoch,
+                        deadline_ns=deadline,
+                        interrupted=self._intervention_interrupted,
+                        observe=self.robot.observe,
+                        min_observed_ns=record["asked_ns"],
+                        evidence=self.evidence,
+                    )
+                    result = self.intervention.invoke(
+                        "judge",
+                        episode_id,
+                        self.policy_epoch,
+                        deadline_ns=deadline,
+                        request_call=invocation.call,
+                        completion_adapter=self.owned_calls.completion,
+                        interrupted=self._intervention_interrupted,
+                    )
+                    raw = invocation.decode(result)
+                    owned_frames = dict(invocation.prepared.frames)
+                    decision, reason, message = self._parse_scene(record, raw)
+                    if decision == "unavailable":
+                        self.intervention.interrupt()
+                        raise InterventionUnproven("owned scene contract unavailable")
             else:
                 decision, reason, message = self._assess_once(record)
             record["decision"], record["reason"] = decision, reason
@@ -1207,7 +1256,11 @@ class Orchestrator:
             self._fault("judgement_unproven")
             decision = "unavailable"
         finally:
-            retained = self._keep_evidence(record, require_retained=require_retained)
+            retained = self._keep_evidence(
+                record,
+                require_retained=require_retained,
+                frames=owned_frames if self.owned_calls is not None else None,
+            )
         if require_retained and decision == "ready" and not retained:
             self._scene_evidence_failed = True
             self._note("scene_evidence_unavailable", request_id)
@@ -1218,7 +1271,6 @@ class Orchestrator:
         """``(decision, reason, parsed message or None)``."""
         request_id = record["request_id"]
         episode_id, target = record["episode_id"], record["target"]
-        asked_ns = record["asked_ns"]
         request = ev.make_request(
             request_id=request_id,
             run_id=self.config.run_id,
@@ -1242,6 +1294,12 @@ class Orchestrator:
                     return "unavailable", why, None
         finally:
             self._scene_notes()
+        return self._parse_scene(record, raw)
+
+    def _parse_scene(self, record, raw):
+        request_id = record["request_id"]
+        episode_id, target = record["episode_id"], record["target"]
+        asked_ns = record["asked_ns"]
         try:
             message = aeri.parse(raw, "scene", specs=self._specs)
         except aeri.AeriError as exc:
@@ -1278,25 +1336,28 @@ class Orchestrator:
             )
         return verdict.decision, verdict.reason, message
 
-    def _keep_evidence(self, record: dict, *, require_retained=False) -> bool:
+    def _keep_evidence(
+        self, record: dict, *, require_retained=False, frames=None
+    ) -> bool:
         """Keep scene proof; verify_final ready gates require retained record/frames.
 
         Other modes keep the existing note-only failure behavior.
         """
-        take = getattr(self.scene, "frames", None)
-        lost = getattr(self.scene, "unsaved", None)
         frames_failed = False
-        try:
-            if callable(lost):
-                unsaved = lost(record["request_id"])
-                if unsaved:
-                    # Shown to the person but not kept: no evidence.
-                    record["frame_unsaved"] = unsaved
-            frames = take(record["request_id"]) if callable(take) else {}
-        except Exception as exc:  # noqa: BLE001 - evidence only
-            self._note("evidence_write_failed", f"frames: {exc}")
-            frames = {}
-            frames_failed = True
+        if frames is None:
+            take = getattr(self.scene, "frames", None)
+            lost = getattr(self.scene, "unsaved", None)
+            try:
+                if callable(lost):
+                    unsaved = lost(record["request_id"])
+                    if unsaved:
+                        # Shown to the person but not kept: no evidence.
+                        record["frame_unsaved"] = unsaved
+                frames = take(record["request_id"]) if callable(take) else {}
+            except Exception as exc:  # noqa: BLE001 - evidence only
+                self._note("evidence_write_failed", f"frames: {exc}")
+                frames = {}
+                frames_failed = True
         if self.evidence is None:
             return False
         record.setdefault("decision", "unavailable")
@@ -1644,17 +1705,41 @@ class Orchestrator:
             if final
             else self.config.judge_request_timeout_ns
         )
-        raw = self.intervention.invoke(
-            "judge",
-            ctx.episode_id,
-            ctx.policy_epoch,
-            deadline_ns=deadline,
-            hold_since_ns=hold_since,
-            call=lambda: self._collect_intervention(
-                self.verifier, self.verifier.submit(request), deadline
-            ),
-            interrupted=self._intervention_interrupted,
-        )
+        if self.owned_calls is None:
+            raw = self.intervention.invoke(
+                "judge",
+                ctx.episode_id,
+                ctx.policy_epoch,
+                deadline_ns=deadline,
+                hold_since_ns=hold_since,
+                call=lambda: self._collect_intervention(
+                    self.verifier, self.verifier.submit(request), deadline
+                ),
+                interrupted=self._intervention_interrupted,
+            )
+        else:
+            invocation = self.owned_calls.invocation(
+                "goal",
+                request,
+                role="judge",
+                policy_epoch=ctx.policy_epoch,
+                deadline_ns=deadline,
+                interrupted=self._intervention_interrupted,
+                observation=obs,
+                min_observed_ns=obs["observed_ns"],
+                evidence=self.evidence,
+            )
+            result = self.intervention.invoke(
+                "judge",
+                ctx.episode_id,
+                ctx.policy_epoch,
+                deadline_ns=deadline,
+                hold_since_ns=hold_since,
+                request_call=invocation.call,
+                completion_adapter=self.owned_calls.completion,
+                interrupted=self._intervention_interrupted,
+            )
+            raw = invocation.decode(result)
         # Parse only AFTER actual backend/worker barrier. Never publish raw SDK completion.
         if self._intervention_interrupted():
             raise InterventionStopped("stop before publishing judgement")
@@ -1756,7 +1841,13 @@ class Orchestrator:
                 ctx.last_step = ctx.steps_done
                 if self._intervention_interrupted():
                     raise InterventionStopped("stop before next action")
+                observed_after = self._now()
                 obs = self.robot.observe()
+                if self.owned_calls is not None and (
+                    type(obs.get("observed_ns")) is not int
+                    or not observed_after <= obs["observed_ns"] <= self._now()
+                ):
+                    raise InterventionUnproven("fresh policy observation required")
                 frames = tuple(sorted(obs["frames"].items()))
                 stalled = stalled + 1 if frames == last_frames else 0
                 last_frames = frames
@@ -1781,7 +1872,9 @@ class Orchestrator:
                     last_frames, stalled = None, 0
                     continue  # observe/stage again before asking for a NEW chunk
                 if not buffer:
-                    buffer = self._chunk(ctx, ctx.last_step, ctx.steps_done)
+                    buffer = self._chunk(
+                        ctx, ctx.last_step, ctx.steps_done, observation=obs
+                    )
                     if not buffer:
                         raise InterventionUnproven(
                             "policy chunk unavailable; no motion retry"
@@ -1986,7 +2079,39 @@ class Orchestrator:
 
     # --- chunks --------------------------------------------------------------------------
 
-    def _chunk(self, ctx: Episode, step: int, start: int):
+    def _chunk(self, ctx: Episode, step: int, start: int, *, observation=None):
+        if self.owned_calls is not None:
+            if observation is None:
+                raise InterventionUnproven(
+                    "owned policy requires this staged observation"
+                )
+            request = self._chunk_request(ctx, step, start, observation=observation)
+            invocation = self.owned_calls.invocation(
+                "chunk",
+                request,
+                role=ctx.role,
+                policy_epoch=ctx.policy_epoch,
+                deadline_ns=request["deadline"]["due_ns"],
+                interrupted=self._intervention_interrupted,
+                observation=observation,
+                min_observed_ns=observation["observed_ns"],
+            )
+            result = self.intervention.invoke(
+                ctx.role,
+                ctx.episode_id,
+                ctx.policy_epoch,
+                deadline_ns=request["deadline"]["due_ns"],
+                request_call=invocation.call,
+                completion_adapter=self.owned_calls.completion,
+                interrupted=self._intervention_interrupted,
+            )
+            raw = invocation.decode(result)
+            if raw.get("kind") == "unavailable":
+                self._note(
+                    "policy_unavailable", f"{request['request_id']}: {raw.get('code')}"
+                )
+                return None
+            return self.accept_chunk(ctx, raw, request)
         if self.intervention is not None:
             return self.intervention.invoke(
                 ctx.role,
@@ -2002,7 +2127,7 @@ class Orchestrator:
             )
         return self._chunk_once(ctx, step, start)
 
-    def _chunk_once(self, ctx: Episode, step: int, start: int):
+    def _chunk_request(self, ctx, step, start, *, observation=None):
         cfg = self.config
         request_id = f"{ctx.episode_id}:c{ctx.chunks}"
         ctx.chunks += 1
@@ -2014,7 +2139,7 @@ class Orchestrator:
             "handle_id": f"h-{ctx.role}-{ctx.policy_epoch}",
             "policy_epoch": ctx.policy_epoch,
             "obs_step": step,
-            "obs_ns": now,
+            "obs_ns": now if observation is None else observation["observed_ns"],
             "clock_domain": self.clock.domain,
             "action_start_index": start,
             "committed_prefix_steps": 0,
@@ -2027,6 +2152,12 @@ class Orchestrator:
                 "hardness": "hard",
             },
         }
+        return request
+
+    def _chunk_once(self, ctx: Episode, step: int, start: int):
+        cfg = self.config
+        request = self._chunk_request(ctx, step, start)
+        request_id = request["request_id"]
         ticket = self.policy.request(request)
         if isinstance(ticket, dict):
             self._note("policy_unavailable", f"{request_id}: {ticket.get('code')}")
