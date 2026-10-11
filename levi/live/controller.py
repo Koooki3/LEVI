@@ -515,7 +515,11 @@ class Controller:
                 found = gpumgr.flock_holders(c.gpu.lock_file)
                 if found is None:
                     # The table could not say: ask the lock itself.
-                    lock_pids = [0] if gpumgr.flock_busy(c.gpu.lock_file) else []
+                    try:
+                        lock_pids = [0] if gpumgr.flock_busy(c.gpu.lock_file) else []
+                    except OSError:
+                        # Unknown ownership is never evidence of an idle GPU.
+                        lock_error = True
                 else:
                     lock_pids = [p for p in found if p not in ours]
         return gpumgr.yield_reasons(

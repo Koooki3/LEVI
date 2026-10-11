@@ -435,3 +435,110 @@ def test_a_persons_run_is_told_why_when_the_labelling_yields():
     assert "yielding the GPU" in g._message(gate)
     assert "continues by itself" in g._message(gate, run=True)
     assert "inferring" in g._message({**gate, "code": "policy_inferring"})
+
+
+@pytest.mark.parametrize("error", [PermissionError("denied"), OSError("I/O")])
+def test_flock_busy_open_errors_raise_instead_of_claiming_idle(
+    tmp_path, monkeypatch, error
+):
+    def fail(*args, **kwargs):
+        raise error
+
+    with monkeypatch.context() as patch:
+        patch.setattr(gpumgr.os, "open", fail)
+        with pytest.raises(type(error), match=str(error)):
+            gpumgr.flock_busy(tmp_path / "gpu.lock")
+
+
+@pytest.mark.parametrize("error", [PermissionError("denied"), OSError("I/O")])
+def test_flock_busy_probe_errors_raise_and_close_fd(tmp_path, monkeypatch, error):
+    lock = tmp_path / "gpu.lock"
+    lock.write_text("")
+    closed = []
+    real_close = os.close
+
+    def fail(*args, **kwargs):
+        raise error
+
+    def close(fd):
+        closed.append(fd)
+        real_close(fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(gpumgr.fcntl, "flock", fail)
+        patch.setattr(gpumgr.os, "close", close)
+        with pytest.raises(type(error), match=str(error)):
+            gpumgr.flock_busy(lock)
+    assert len(closed) == 1
+    with pytest.raises(OSError):
+        os.fstat(closed[0])
+
+
+def broken_lock_probe(monkeypatch, ctl, error):
+    monkeypatch.setattr(gpumgr, "flock_holders", lambda *a, **k: None)
+    monkeypatch.setattr(ctl.vllm, "holds_lock", lambda *a, **k: False)
+    ctl.lock.release()
+
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(gpumgr, "flock_busy", fail)
+
+
+@pytest.mark.parametrize("error", [PermissionError("denied"), OSError("I/O")])
+def test_lock_fallback_error_prevents_model_start(ctl, monkeypatch, error):
+    ctl.rollouts.write(0)
+    t = time.time()
+    broken_lock_probe(monkeypatch, ctl, error)
+    found = ctl._yield_reasons(t, True)
+    assert any(r.code == "probe_error" and "lock" in r.text for r in found)
+    assert step(ctl, t) == "yield"
+    assert ctl.vllm.state == "stopped" and ctl.spawned == []
+    gate = jsonio.read(ctl.config.live_dir / "gate.json")
+    assert gating.closed(gate, worker=True)
+    assert gate["yield"]["reasons"][0]["code"] == "probe_error"
+
+
+@pytest.mark.parametrize("error", [PermissionError("denied"), OSError("I/O")])
+@pytest.mark.parametrize("asleep", [False, True])
+def test_lock_fallback_error_closes_gate_for_existing_model(
+    ctl, monkeypatch, error, asleep
+):
+    ctl.rollouts.write(0)
+    t = time.time()
+    up(ctl, t)
+    ctl.spawned.clear()
+    if asleep:
+        assert ctl.vllm.sleep()
+    before = ctl.vllm.state
+    broken_lock_probe(monkeypatch, ctl, error)
+    ctl.tick(t + 1)
+    assert ctl.decision.code == "yield"
+    assert ctl.yield_state.reasons[0].code == "probe_error"
+    assert ctl.vllm.state == before
+    assert ctl.spawned == []
+    assert gating.closed(jsonio.read(ctl.config.live_dir / "gate.json"), worker=True)
+
+
+@pytest.mark.parametrize("error", [PermissionError("denied"), OSError("I/O")])
+def test_lock_fallback_error_closes_inflight_worker_gate(ctl, monkeypatch, error):
+    ctl.rollouts.write(0)
+    t = time.time()
+    up(ctl, t)
+    worker = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    ctl.worker, ctl.worker_dataset = worker, "pi05_fake__stack_the_plates"
+    try:
+        broken_lock_probe(monkeypatch, ctl, error)
+        wait = ctl.tick(t + 1)
+        gate = jsonio.read(ctl.config.live_dir / "gate.json")
+        assert gating.closed(gate, worker=True)
+        assert gate["yield"]["reasons"][0]["code"] == "probe_error"
+        assert wait <= ctl.config.service.gate_poll_s
+        assert worker.poll() is None
+        ctl.tick(t + 1 + controller.YIELD_STOP_GRACE_S + 0.1)
+        assert worker.poll() is not None and ctl.worker is None
+        assert ctl.vllm.state == "ready"
+    finally:
+        if worker.poll() is None:
+            worker.kill()
+            worker.wait()

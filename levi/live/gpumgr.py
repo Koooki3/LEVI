@@ -204,15 +204,15 @@ def flock_holders(path, locks="/proc/locks", stat=os.stat) -> list | None:
 def flock_busy(path) -> bool:
     """Does somebody hold the lock on ``path``? A non-blocking shared lock is
     tried and let go at once (the table in ``flock_holders`` is preferred:
-    it does not touch the lock at all). A file that does not exist or cannot
-    be opened is not busy."""
+    it does not touch the lock at all). Only an absent file is not busy;
+    unreadable files or failed probes raise so callers can fail closed."""
     try:
         fd = os.open(Path(path).expanduser(), os.O_RDONLY)
-    except OSError:
+    except FileNotFoundError:
         return False
     try:
         fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
-    except OSError:
+    except BlockingIOError:
         return True
     else:
         fcntl.flock(fd, fcntl.LOCK_UN)
