@@ -66,11 +66,7 @@ export function SessionDetail({
     statsEnabled &&
     !stats.loading &&
     !stats.error &&
-    sessionStatisticsMatch(
-      stats.data,
-      scope,
-      resultItem?.identity.datasets ?? [],
-    )
+    sessionStatisticsMatch(stats.data, scope, resultItem?.identity ?? null)
       ? stats.data
       : null;
   const invalidStatsSource =

@@ -139,7 +139,18 @@ export interface StatsEpisode {
   agreement?: Agreement | null;
 }
 
+export interface StatsSourceIdentity {
+  root: string;
+  group: string;
+  task: string;
+  run_id: string;
+  session_id: string | null;
+  datasets: string[];
+}
+
 export interface StatsResponse {
+  /** Actual statistics-engine inputs, authenticated in the response snapshot. */
+  source_identities?: StatsSourceIdentity[];
   enabled?: boolean;
   schema?: string;
   generated_at?: number;

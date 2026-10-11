@@ -1,4 +1,18 @@
-import type { StatsResponse } from "../stats-logic";
+import type { StatsResponse, StatsSourceIdentity } from "../stats-logic";
+
+export function statisticsSourceFixture(
+  overrides: Partial<StatsSourceIdentity> = {},
+): StatsSourceIdentity {
+  return {
+    root: "/fixture",
+    group: "model",
+    task: "task",
+    run_id: "run-1",
+    session_id: "session-1",
+    datasets: ["model__task"],
+    ...overrides,
+  };
+}
 
 /** Shape of levi.live.statsview.build; every positive test keeps provenance. */
 export function statisticsFixture(
@@ -7,6 +21,7 @@ export function statisticsFixture(
   const value: StatsResponse = {
     enabled: true,
     schema: "levi.live.stats.v1",
+    source_identities: [statisticsSourceFixture()],
     generated_at: 100,
     scope: { dataset: "model__task", session: "run-1" },
     include_excluded: false,

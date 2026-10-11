@@ -8,7 +8,10 @@ import {
 import type { LiveSession } from "../types";
 import { resultFixture } from "./result-fixture";
 import { identityOf } from "../session-route";
-import { statisticsFixture } from "./statistics-fixture";
+import {
+  statisticsFixture,
+  statisticsSourceFixture,
+} from "./statistics-fixture";
 const session: LiveSession = {
   root: "/fixture",
   group: "model",
@@ -59,6 +62,72 @@ describe("individual live session", () => {
     [
       "foreign session",
       { scope: { dataset: "model__task", session: "other-run" } },
+    ],
+    ["missing actual source identities", { source_identities: undefined }],
+    ["empty actual source identities", { source_identities: [] }],
+    [
+      "foreign root with identical dataset and run",
+      {
+        source_identities: [statisticsSourceFixture({ root: "/foreign-root" })],
+      },
+    ],
+    [
+      "foreign group with identical dataset and run",
+      {
+        source_identities: [statisticsSourceFixture({ group: "other-group" })],
+      },
+    ],
+    [
+      "foreign task with identical dataset and run",
+      { source_identities: [statisticsSourceFixture({ task: "other-task" })] },
+    ],
+    [
+      "foreign canonical run",
+      { source_identities: [statisticsSourceFixture({ run_id: "other-run" })] },
+    ],
+    [
+      "foreign canonical session id",
+      {
+        source_identities: [
+          statisticsSourceFixture({ session_id: "session-2" }),
+        ],
+      },
+    ],
+    [
+      "null session when canonical is known",
+      { source_identities: [statisticsSourceFixture({ session_id: null })] },
+    ],
+    [
+      "source misses selected dataset",
+      { source_identities: [statisticsSourceFixture({ datasets: [] })] },
+    ],
+    [
+      "source contains unknown dataset",
+      {
+        source_identities: [
+          statisticsSourceFixture({
+            datasets: ["model__task", "foreign-blind-source"],
+          }),
+        ],
+      },
+    ],
+    [
+      "multiple sources include foreign root",
+      {
+        source_identities: [
+          statisticsSourceFixture(),
+          statisticsSourceFixture({ root: "/foreign-root" }),
+        ],
+      },
+    ],
+    [
+      "duplicate canonical identities are ambiguous",
+      {
+        source_identities: [
+          statisticsSourceFixture(),
+          statisticsSourceFixture(),
+        ],
+      },
     ],
     ["missing scope", { scope: undefined }],
     ["missing datasets", { datasets: undefined }],
@@ -171,6 +240,59 @@ describe("individual live session", () => {
     });
   }
 
+  test("same dataset and run rebound from root A to root B clears the entire aggregate and export", async () => {
+    current = [{ ...session, state: "running" }];
+    let rebound = false;
+    globalThis.fetch = (async (path: unknown) =>
+      String(path).includes("/results/session?")
+        ? Response.json(
+            resultFixture({ analysis: null, records: [], runs: [] }),
+          )
+        : Response.json(
+            statisticsFixture({
+              source_identities: [
+                statisticsSourceFixture({
+                  root: rebound ? "/foreign-root" : "/fixture",
+                }),
+              ],
+              summary: { episodes: { count: rebound ? 73 : 1 } },
+              episodes: {
+                total: 1,
+                rows: [
+                  {
+                    dataset: "model__task",
+                    session: "run-1",
+                    demo: rebound
+                      ? "foreign-root-private-episode"
+                      : "permitted-root-a",
+                    state: "done",
+                    operator: "success",
+                  },
+                ],
+              },
+            }),
+          )) as typeof fetch;
+    const { host, rerender } = await render(
+      <SessionDetail identity={identityOf(session)} />,
+    );
+    await waitFor(() => host.textContent?.includes("permitted-root-a"));
+    expect(host.querySelector('a[href*="/stats/export"]')).not.toBeNull();
+    rebound = true;
+    Date.now = () => originalNow() + 6000;
+    lastOk = 200;
+    await rerender(<SessionDetail identity={identityOf(session)} />);
+    await waitFor(() =>
+      host.textContent?.includes("Statistics source could not be verified"),
+    );
+    expect(host.textContent).not.toContain("permitted-root-a");
+    expect(host.textContent).not.toContain("foreign-root-private-episode");
+    expect(
+      host.querySelector("#session-statistics")?.textContent,
+    ).not.toContain("73");
+    expect(host.querySelector(".pg-live-kpis")).toBeNull();
+    expect(host.querySelector('a[href*="/stats/export"]')).toBeNull();
+  });
+
   test("same-scope statistics polling revokes rows, aggregate and exports while pending and after HTTP 409", async () => {
     current = [{ ...session, state: "running" }];
     let waiting = false;
@@ -254,6 +376,7 @@ describe("individual live session", () => {
         JSON.stringify({
           enabled: true,
           schema: "levi.live.stats.v1",
+          source_identities: [statisticsSourceFixture()],
           scope: { dataset: "model__task", session: "run-1" },
           include_excluded: false,
           datasets: ["model__task"],
@@ -300,6 +423,7 @@ describe("individual live session", () => {
             JSON.stringify({
               enabled: true,
               schema: "levi.live.stats.v1",
+              source_identities: [statisticsSourceFixture()],
               scope: { dataset: "model__task", session: "run-1" },
               include_excluded: false,
               datasets: ["model__task"],
@@ -338,6 +462,7 @@ describe("individual live session", () => {
             JSON.stringify({
               enabled: true,
               schema: "levi.live.stats.v1",
+              source_identities: [statisticsSourceFixture()],
               scope: { dataset: "model__task", session: "run-1" },
               include_excluded: false,
               datasets: ["model__task"],
@@ -369,6 +494,7 @@ describe("individual live session", () => {
             JSON.stringify({
               enabled: true,
               schema: "levi.live.stats.v1",
+              source_identities: [statisticsSourceFixture()],
               scope: { dataset: "model__task", session: "run-1" },
               include_excluded: false,
               datasets: ["model__task"],
@@ -488,6 +614,7 @@ describe("individual live session", () => {
         : Response.json({
             enabled: true,
             schema: "levi.live.stats.v1",
+            source_identities: [statisticsSourceFixture()],
             scope: { dataset: "model__task", session: "run-1" },
             include_excluded: false,
             datasets: ["model__task"],
@@ -569,6 +696,7 @@ describe("individual live session", () => {
         Response.json({
           enabled: true,
           schema: "levi.live.stats.v1",
+          source_identities: [statisticsSourceFixture()],
           scope: { dataset: "model__task", session: "run-1" },
           include_excluded: false,
           datasets: ["model__task"],
