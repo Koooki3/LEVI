@@ -15,7 +15,7 @@ import pytest
 from conftest import scaled
 from live_helpers import Rollouts
 
-from levi.live import cli, controller, fakevlm, jsonio, mirror
+from levi.live import analysis, cli, controller, fakevlm, jsonio, mirror
 from levi.live import config as live_config
 
 NAME = "pi05_fake__stack_the_plates"
@@ -325,11 +325,17 @@ def test_restarting_continues_where_it_stopped_and_repeats_nothing(env):
         len(committed) == 1
         and len({p["episode_index"] for p in committed[0]["proposals"]}) == 3
     )
+    recovered = analysis.read(e.config.live_dir)
+    assert len(recovered) == 3
+    assert {r["demo"] for r in recovered} == {f"demo_{n:04d}" for n in range(3)}
+    assert all(r["segments"]["count"] == 5 for r in recovered)
+    recorded = analysis.path(e.config.live_dir).read_bytes()
     # A third start finds nothing to do and asks the model nothing.
     calls = len(e.fake.calls)
     assert calls >= calls_before
     e.run()
     assert len(e.fake.calls) == calls
+    assert analysis.path(e.config.live_dir).read_bytes() == recorded
 
 
 def test_two_tasks_growing_together_are_handled_one_at_a_time(

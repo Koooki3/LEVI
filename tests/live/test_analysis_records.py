@@ -251,3 +251,62 @@ def test_a_capability_that_is_too_large_or_not_json_is_dropped(tmp_path):
     assert analysis._capability({"capability": float("nan")}) is None
     assert analysis._capability({"capability": {"a": float("nan")}}) is None
     assert analysis._capability({}, {"capability": {"a": 1}}) == {"a": 1}
+
+
+def test_controller_recovers_committed_analysis_after_worker_interruption(tmp_path):
+    from levi.live import controller, mirror
+
+    c = workspace(tmp_path)
+    _demos(c)
+    state_path = mirror.state_path(c, "g__t")
+    before = state_path.read_bytes()
+    assert analysis.read(c.live_dir) == []  # commit happened, after_batch did not
+
+    def no_worker(*args, **kwargs):
+        raise AssertionError("analysis recovery must not re-label")
+
+    first = controller.Controller(c, popen=no_worker, log=lambda *a: None)
+    first._reports(1000.0)
+    first._report_thread.join(5)
+    assert not first._report_thread.is_alive()
+    (record_,) = analysis.read(c.live_dir)
+    assert record_["demo"] == "demo_0000"
+    assert record_["segments"]["sequence"] == ["approach", "grasp"]
+    assert record_["operator"]["outcome"] == "failure"
+    assert state_path.read_bytes() == before
+    contents = analysis.path(c.live_dir).read_bytes()
+
+    # Another controller process sees the same durable state after a restart.
+    restarted = controller.Controller(c, popen=no_worker, log=lambda *a: None)
+    restarted._reports(2000.0)
+    restarted._report_thread.join(5)
+    restarted._reports(2030.0)
+    restarted._report_thread.join(5)
+    assert analysis.path(c.live_dir).read_bytes() == contents
+    assert state_path.read_bytes() == before
+
+
+def test_controller_sync_waits_for_worker_and_survives_report_failure(
+    tmp_path, monkeypatch
+):
+    from levi.live import controller, report
+
+    c = workspace(tmp_path)
+    _demos(c)
+    ctl = controller.Controller(c, log=lambda *a: None)
+    ctl.worker = object()
+    ctl._reports(1000.0)
+    assert ctl._report_thread is None
+    assert analysis.read(c.live_dir) == []
+
+    def fail_report(*args, **kwargs):
+        raise OSError("synthetic report failure")
+
+    monkeypatch.setattr(report, "auto", fail_report)
+    ctl.worker = None
+    ctl._reports(1001.0)
+    ctl._report_thread.join(5)
+    assert len(analysis.read(c.live_dir)) == 1
+    old_thread = ctl._report_thread
+    ctl._reports(1002.0)
+    assert ctl._report_thread is old_thread

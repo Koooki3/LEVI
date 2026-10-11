@@ -764,7 +764,7 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 | `spec`、`capability` | 用到的标注指南和释放复核规格文件；这次运行的出处（LEVI 版本、计划、规格、事件智能模式），由写入方给出，是不超过 4 KB 的不透明对象，没有则 `null` |
 | `signature` | 内容（不含时间）的哈希，没有变化的片段不会重复写入 |
 
-写入是在 `flock` 下做一次 `O_APPEND` 写，再 `fsync`；上一次写了一半的末行，下一次写入会先把它收尾。`levi.live.analysis.sync(config)` 补写缺失或有变化的行，读取数据集状态文件、`stats.jsonl` 和运行存储（只读）；它是幂等的，两个进程同时调用也安全，遇到暂时读不到变更集的片段就跳过（以后再调用会补上）。当前版本里实时服务不会自己调用它：`levi live analysis` 会先运行它（`--no-sync` 只读已有内容），所以评测之后运行这条命令即可。
+写入是在 `flock` 下做一次 `O_APPEND` 写，再 `fsync`；上一次写了一半的末行，下一次写入会先把它收尾。`levi.live.analysis.sync(config)` 补写缺失或有变化的行，读取数据集状态文件、`stats.jsonl` 和运行存储（只读）；它是幂等的，两个进程同时调用也安全，遇到暂时读不到变更集的片段就跳过（以后再调用会补上）。worker 在每批结束后同步；没有活动 worker 时，控制器也会每 30 秒在报告线程同步一次。这样中断前已提交的结果会自动补齐，无需重标，也不会重复写记录。`levi live analysis` 同样会先同步（`--no-sync` 只读已有内容）。
 
 `levi live analysis [--group G] [--task T] [--since ISO] [--stages a,b,c] [--format md|json] [--lang en|zh] [--sync|--no-sync] [--out PATH]` 和只读的 `GET /api/levi/live/analysis?group=&task=&since=&stages=` 按检查点和任务（以及合计）给出：
 

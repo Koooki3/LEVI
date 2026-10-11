@@ -383,6 +383,11 @@ def test_the_analysis_hook_runs_after_a_finished_or_failed_batch_only(
     fake = types.ModuleType("levi.live.analysis")
     fake.sync_quiet = lambda config, name=None: calls.append(name)
     c = live_config.Config()
+    # Clear the package attribute too: other suites/controller can import
+    # analysis before this test, and from-import consults that cache first.
+    import levi.live
+
+    monkeypatch.delattr(levi.live, "analysis", raising=False)
     # Absent module (an older checkout): nothing happens, nothing fails.
     monkeypatch.setitem(sys.modules, "levi.live.analysis", None)
     assert worker.after_batch(c, "d", worker.OK) is False

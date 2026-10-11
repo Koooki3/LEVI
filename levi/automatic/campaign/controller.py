@@ -70,7 +70,7 @@ from . import guided as G
 from . import ledger as L
 from . import report as R
 from . import schedule as sched
-from . import spec
+from . import spec, subtasks
 from .conductor import Conductor, ConductorError, RobotLock, aeri_home, campaign_dir
 from .journal import JOURNAL, CampaignJournalError
 
@@ -643,6 +643,11 @@ def write_reports(
     home = Path(folder).parent.parent
     task = shared_task(plan, job_folder(plan["campaign_id"], home))
     info = campaign_info(plan, peeks_of(events), basis=basis, task=task)
+    from levi import paths
+    from levi.live import locate
+
+    live = locate.find(paths.ROOT)
+    records = subtasks.load(live.workspace / "live") if live.workspace else {}
     root = report_root(folder)
     root.mkdir(mode=0o700, exist_ok=True)
     return R.write_report(
@@ -657,6 +662,7 @@ def write_reports(
         seed=plan["schedule"]["seed"],
         resamples=REPORT_RESAMPLES,
         pdf=REPORT_PDF,
+        subtasks=records,
     )
 
 

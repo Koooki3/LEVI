@@ -412,3 +412,65 @@ def test_a_legacy_client_ledger_is_matched_through_that_key(tmp_path):
     data = S.analyse(led, BASIS, S.load(tmp_path))
     total = sum(a["with_segments"] for a in data["arms"])
     assert total == len([r for r in led.rows if r.status == "valid"])
+
+
+@pytest.mark.parametrize("configured", [True, False])
+def test_controller_loads_safely_located_live_records_into_real_report(
+    tmp_path, monkeypatch, campaign, configured
+):
+    from levi import paths
+    from levi.automatic.campaign import controller as C
+    from levi.live import auto, jsonio, locate
+
+    lay, original = campaign
+    keys = {
+        r.episode_id: "grp/task/" + r.episode_id.replace(".", "_")
+        for r in original.rows
+    }
+    led = dataclasses.replace(
+        original,
+        rows=[
+            dataclasses.replace(r, episode_id=keys[r.episode_id]) for r in original.rows
+        ],
+        labels={keys[k]: v for k, v in original.labels.items()},
+    )
+    live = tmp_path / "live-workspace"
+    jsonio.write(live / "live" / auto.MARKER, {"schema": "levi.live.workspace.v1"})
+    for row_ in led.rows:
+        if row_.status == "valid":
+            analysis.append(
+                live / "live",
+                {
+                    "schema": analysis.SCHEMA,
+                    "dataset": "grp__task",
+                    "group": "grp",
+                    "task": "task",
+                    "demo": row_.episode_id.rsplit("/", 1)[-1],
+                    "segments": block(FULL),
+                },
+            )
+    product = tmp_path / "product"
+    monkeypatch.setattr(paths, "ROOT", product)
+    monkeypatch.setenv(locate.ENV_WORKSPACE, str(live if configured else product))
+    assert bool(locate.find(product).workspace) is configured
+    monkeypatch.setattr(C.A, "build_ledger", lambda *a, **k: (led, lay, {}))
+    monkeypatch.setattr(C, "shared_task", lambda *a: "pick the eggplant")
+    monkeypatch.setattr(C, "campaign_info", lambda *a, **k: info())
+    monkeypatch.setattr(C, "REPORT_PDF", False)
+    monkeypatch.setattr(C, "REPORT_RESAMPLES", 100)
+    folder = tmp_path / "campaigns" / fx.CAMPAIGN
+    folder.mkdir(parents=True)
+    C.write_reports(
+        folder,
+        {"campaign_id": fx.CAMPAIGN, "campaign": {}, "schedule": {"seed": 7}},
+        "guided",
+        "REPORTED",
+        [],
+        rollout_root=tmp_path / "rollouts",
+    )
+    output = C.report_root(folder) / BASIS
+    assert (output / "data/subtasks.json").is_file() is configured
+    if configured:
+        data = json.loads((output / "data/subtasks.json").read_text())
+        assert [a["with_segments"] for a in data["arms"]] == [10, 10]
+        assert "Subtask analysis" in (output / "summary.en.md").read_text()

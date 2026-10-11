@@ -33,6 +33,7 @@ import time
 from pathlib import Path
 
 from . import (
+    analysis,
     auto,
     catalogue,
     exclusion,
@@ -1893,6 +1894,10 @@ class Controller:
         found = self.sessions  # replaced, never edited, on each refresh
 
         def job():
+            # A worker can die after committing a batch but before after_batch.
+            # Reconcile its durable results here; sync is idempotent and never
+            # fails the report loop. No GPU or labelling work is started.
+            analysis.sync_quiet(self.config)
             try:
                 for done in report.auto(self.config, found, busy, now):
                     self._report_events.append(
