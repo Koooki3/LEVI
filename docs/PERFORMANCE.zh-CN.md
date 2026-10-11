@@ -380,3 +380,5 @@ SDK/native 闭包和 owned SDK 子进程 bootstrap 尚未安装，真实入口�
 vLLM 关键方法须解析到工厂执行前的原类描述符，`__func__` 与 `__self__` 均须匹配；实例遮蔽即使使用同一 bundle 编译的方法也拒绝。合法类方法、静态方法语义保留。函数 globals、默认值与闭包中的确切被动 `SimpleNamespace` 可绑定传递至 namespace/dict/list/tuple 的 callable 路径，普通数值计数仍可变化。主动对象、未支持容器或未绑定关键 callable 明确拒绝。这只校验已审调用点；loader 不是 Python 安全沙箱，没有据此声明真实 SDK/native/子 bootstrap 可用。
 
 Owned worker 提供 `collect_sdk_completion(request)`，返回原提交 token、严格匹配的 `SdkIdleAck` 和 CPU 结果。超时保留 pending；坏 ACK/payload 或库存未知永久撤销该 pending 结果。真实 ACK 缓存仅可在新鲜探针成功后用于同一 request 的 drain。worker 不发起或结束内核 request，也不把调用返回当停止证明。
+
+`BorrowedRoleExecution(authority, runtime, lease, observer)` 用 `dispatch_existing(request, payload, role=..., episode_id=..., policy_epoch=...)` 与 `collect_existing(request)` 执行 Cycle 已签发的 grant，不调用 begin/finish/renew。`BorrowedCompletion` 返回原 request、SDK ACK、stop proof、新鲜整群观测及 CPU 结果，由 Cycle 再独立观测后唯一 finish。超时保留 pending；坏 ACK/探针撤销结果但保留同 request 的真实缓存 drain。迟到、撤销或关闭后的结果为 None。只有真实 SDK ACK 加新鲜完整整群 idle 能形成 stop proof；当前 running-group 合同不把整 worker 退出伪装成该证明。旧 `OwnedRoleRuntime.begin/collect` 独立入口保持兼容。没有 HTTP fallback、生产挂载或新真实 SDK 提供者。

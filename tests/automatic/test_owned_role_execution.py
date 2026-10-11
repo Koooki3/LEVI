@@ -340,15 +340,23 @@ def test_sdk_completion_unknown_post_ack_retains_genuine_drain(execution):
     assert runner.authority.snapshot(now_ns=NOW)["request"] == request
 
 
-@pytest.mark.parametrize("bad", ["epoch-type", "payload"])
+@pytest.mark.parametrize("bad", ["epoch-type", "worker-start-type", "payload"])
 def test_sdk_completion_bad_input_keeps_pending_and_never_publishes(execution, bad):
     runner, workers, deadline = execution
     request = begin(runner, deadline)
     worker = workers["judge"]
     worker._connection.finish(object() if bad == "payload" else "value")
-    if bad == "epoch-type":
+    if bad in ("epoch-type", "worker-start-type"):
         kind, ack, result = worker._connection.answer[0]
-        worker._connection.answer[0] = (kind, replace(ack, request_epoch=True), result)
+        malformed_worker = replace(ack.worker)
+        # Malformed IPC bytes can bypass a dataclass constructor.
+        object.__setattr__(malformed_worker, "start_ticks", True)
+        replacement = (
+            replace(ack, request_epoch=True)
+            if bad == "epoch-type"
+            else replace(ack, worker=malformed_worker)
+        )
+        worker._connection.answer[0] = (kind, replacement, result)
     with pytest.raises((TypeError, ValueError)):
         worker.collect_sdk_completion(request, timeout_s=0.001)
     assert worker._pending == ("result", request.request_epoch)

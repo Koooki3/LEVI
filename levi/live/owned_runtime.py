@@ -768,6 +768,9 @@ class OwnedModelWorker:
                         or type(ack) is not SdkIdleAck
                         or type(ack.request_epoch) is not int
                         or type(ack.worker) is not WorkerIdentity
+                        or type(ack.worker.pid) is not int
+                        or type(ack.worker.start_ticks) is not int
+                        or type(ack.worker.boot_id) is not str
                         or ack
                         != SdkIdleAck(
                             self.worker,
