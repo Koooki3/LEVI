@@ -300,39 +300,103 @@ def render(
         raise GuidedError("rendering changed more than the allowed parameters")
     # These settings are frozen with the plan, rather than left to a
     # terminal prompt. Keep the source excerpt intact for drift detection.
-    options = []
     if base.max_steps is not None:
-        options.append(
-            (
-                r"(?<!\S)--max-timesteps(?:=|[ \t]+)[^\s\\]+",
-                f"--max-timesteps {base.max_steps}",
-            )
+        text = _frozen_option(
+            text,
+            ("--max-timesteps",),
+            f"--max-timesteps {base.max_steps}",
+            takes_value=True,
         )
     if base.allow_early_stop is not None:
-        options.append(
-            (
-                r"(?<!\S)--(?:no-)?dual-early-key(?=\s|$)",
-                "--dual-early-key" if base.allow_early_stop else "--no-dual-early-key",
-            )
+        text = _frozen_option(
+            text,
+            ("--dual-early-key", "--no-dual-early-key"),
+            "--dual-early-key" if base.allow_early_stop else "--no-dual-early-key",
+            takes_value=False,
         )
     if base.rollout_root is not None:
-        options.append(
-            (
-                r"(?<!\S)--rollout-root(?:=|[ \t]+)(?:\"[^\"]*\"|'[^']*'|[^\s\\]+)",
-                "--rollout-root " + shlex.quote(base.rollout_root),
-            )
+        text = _frozen_option(
+            text,
+            ("--rollout-root",),
+            "--rollout-root " + shlex.quote(base.rollout_root),
+            takes_value=True,
         )
-    for pattern, option in options:
-        matches = list(re.finditer(pattern, text))
-        if len(matches) > 1:
-            raise GuidedError(
-                "the guide repeats a frozen setting: " + option.split()[0]
-            )
-        if matches:
-            text = re.sub(pattern, lambda _, option=option: option, text)
-        else:
-            text += " " + option
     return text
+
+
+def _shell_words(text):
+    """Word spans outside shell comments, retaining quoted values intact.
+
+    shlex gives values but loses the offsets needed to preserve the frozen
+    source excerpt. This scanner only locates spans; shlex decodes each one.
+    Escaped newlines remain part of a word, and # starts a comment only at a
+    word boundary, as in the operator guide's POSIX shell commands.
+    """
+    words = []
+    i = 0
+    while i < len(text):
+        if text[i].isspace() or text[i] in ";|&()":
+            i += 1
+            continue
+        if text.startswith("\\\n", i):
+            i += 2
+            continue
+        if text[i] == "#":
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end + 1
+            continue
+        start, quote = i, None
+        while i < len(text):
+            ch = text[i]
+            if ch == "\\" and quote != "'":
+                i += 2
+                continue
+            if quote:
+                if ch == quote:
+                    quote = None
+            elif ch in "\"'":
+                quote = ch
+            elif ch.isspace() or ch in ";|&()":
+                break
+            i += 1
+        if quote:
+            raise GuidedError("unterminated shell quote in guide")
+        raw = text[start:i].replace("\\\n", "")
+        try:
+            value = shlex.split(raw)
+        except ValueError as exc:
+            raise GuidedError(str(exc)) from None
+        if len(value) == 1:
+            words.append((start, i, value[0]))
+    return words
+
+
+def _frozen_option(text, names, replacement, *, takes_value):
+    words = _shell_words(text)
+    spans = []
+    for index, (start, end, value) in enumerate(words):
+        # A flag appearing inside a quoted prompt/path is one value, never
+        # an option. Only a word beginning with an unquoted -- is selected.
+        if not text.startswith("--", start):
+            continue
+        name, equals, _ = value.partition("=")
+        if name not in names:
+            continue
+        if takes_value and not equals:
+            if index + 1 >= len(words):
+                raise GuidedError(name + " has no value")
+            end = words[index + 1][1]
+        spans.append((start, end))
+    if len(spans) > 1:
+        raise GuidedError("the guide repeats a frozen setting: " + names[0])
+    if spans:
+        start, end = spans[0]
+        return text[:start] + replacement + text[end:]
+    if not words:
+        raise GuidedError("the guide has no shell command")
+    # Insert before trailing comments; appending after # would hide the flag.
+    end = words[-1][1]
+    return text[:end] + " " + replacement + text[end:]
 
 
 def check_drift(snapshot: BaseCommand, guide_text: str) -> str | None:

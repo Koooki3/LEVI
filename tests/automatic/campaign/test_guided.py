@@ -656,3 +656,36 @@ def test_no_card_is_a_durable_answer_and_withdrawal_reopens_it(tmp_path):
         )["pending"][0]["key"]
         == key
     )
+
+
+def test_literal_frozen_flags_in_prompt_and_root_are_not_options():
+    import shlex
+
+    prompt = (
+        "place the item labelled --max-timesteps 25 next to --dual-early-key marker"
+    )
+    root = "/tmp/aeri --max-timesteps 7 --dual-early-key --rollout-root literal"
+    b = G.base_command(
+        GUIDE, prompt=prompt, max_steps=90, allow_early_stop=False, rollout_root=root
+    )
+    out = G.render(b, eval_num=2, rollout_group="a1", eval_note="c1 s01 X1")
+    argv = shlex.split(out.replace("\\\n", ""))
+    assert argv[argv.index("--prompt") + 1] == prompt
+    assert argv[argv.index("--max-timesteps") + 1] == "90"
+    assert argv.count("--max-timesteps") == 1
+    assert argv.count("--no-dual-early-key") == 1
+    assert argv[argv.index("--rollout-root") + 1] == root
+
+
+def test_frozen_flags_in_shell_comments_are_not_options():
+    import shlex
+
+    guide = GUIDE.replace(
+        '正式双标签评测，步数由终端输入"',
+        '正式双标签评测，步数由终端输入" # --max-timesteps 12 --dual-early-key',
+    )
+    b = G.base_command(guide, max_steps=90, allow_early_stop=False)
+    out = G.render(b, eval_num=2, rollout_group="a1", eval_note="c1 s01 X1")
+    argv = shlex.split(out.replace("\\\n", ""), comments=True)
+    assert argv[argv.index("--max-timesteps") + 1] == "90"
+    assert "--no-dual-early-key" in argv
