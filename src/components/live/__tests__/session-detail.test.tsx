@@ -49,8 +49,55 @@ afterEach(() => {
   current = [session];
   failures = 0;
   lastOk = 100;
+  window.location.hash = "";
 });
 describe("individual live session", () => {
+  test("a statistics deep link opens the session disclosure and keeps its verified source", async () => {
+    window.location.hash = "#session-statistics";
+    globalThis.fetch = (async (path: unknown) =>
+      String(path).includes("/results/session?")
+        ? Response.json(
+            resultFixture({ analysis: null, records: [], runs: [] }),
+          )
+        : Response.json(
+            statisticsFixture({
+              sessions: [
+                { dataset: "model__task", session: "run-1", episodes: 1 },
+              ],
+              sessions_total: 1,
+            }),
+          )) as typeof fetch;
+    const { host } = await render(
+      <SessionDetail identity={identityOf(session)} />,
+    );
+    await waitFor(() => !!host.querySelector(".pg-live-kpis"));
+    expect(
+      (host.querySelector("#session-statistics") as HTMLDetailsElement).open,
+    ).toBe(true);
+    expect(host.querySelector(".pg-live-stats-table")?.textContent).toContain(
+      "run-1",
+    );
+  });
+  test("same-page statistics navigation opens the disclosure without replacing the source", async () => {
+    window.location.hash = "";
+    globalThis.fetch = (async (path: unknown) =>
+      String(path).includes("/results/session?")
+        ? Response.json(
+            resultFixture({ analysis: null, records: [], runs: [] }),
+          )
+        : Response.json(statisticsFixture())) as typeof fetch;
+    const { host } = await render(
+      <SessionDetail identity={identityOf(session)} />,
+    );
+    const region = host.querySelector(
+      "#session-statistics",
+    ) as HTMLDetailsElement;
+    expect(region.open).toBe(false);
+    window.location.hash = "#session-statistics";
+    window.dispatchEvent(new Event("hashchange"));
+    expect(region.open).toBe(true);
+  });
+
   for (const [name, bad] of [
     [
       "foreign aggregate",

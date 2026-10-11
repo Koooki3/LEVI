@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Button, ExpandableText, SkeletonText } from "@/components/ds";
 import { Note, Problem } from "@/components/pages-ui/feedback";
@@ -9,7 +9,12 @@ import { SessionCard } from "./session-panels";
 import { findSession, identityOf, type SessionIdentity } from "./session-route";
 import { useLiveStats } from "./use-live-stats";
 import { EPISODE_PAGE, type EpisodeView } from "./stats-logic";
-import { KeyFigures, EpisodesTable, StatsEmpty } from "./stats-panel";
+import {
+  KeyFigures,
+  SessionsTable,
+  EpisodesTable,
+  StatsEmpty,
+} from "./stats-panel";
 import { canShowStatistics, resultSessionPath } from "./result-api";
 import { useResults } from "./use-results";
 import { SessionResultPanel } from "./session-results";
@@ -36,6 +41,21 @@ export function SessionDetail({
   const [limit, setLimit] = useState(EPISODE_PAGE);
   const [exportError, setExportError] = useState("");
   const [view, setView] = useState<EpisodeView>("latency");
+  const statisticsRegion = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const revealStatistics = () => {
+      if (
+        window.location.hash === "#session-statistics" &&
+        statisticsRegion.current
+      ) {
+        statisticsRegion.current.open = true;
+      }
+    };
+    revealStatistics();
+    window.addEventListener("hashchange", revealStatistics);
+    return () => window.removeEventListener("hashchange", revealStatistics);
+  }, [identity]);
+
   // A legacy dataset/run bookmark can use a uniquely matched current source,
   // but never guess a root from a display name or use old statistics as permission.
   const sourceIdentity =
@@ -141,8 +161,12 @@ export function SessionDetail({
             identity={sourceIdentity ?? identity}
             request={resultRequest}
           />
-          <details className="pg-live-section pg-live-disclosure">
-            <summary id="session-statistics">
+          <details
+            ref={statisticsRegion}
+            className="pg-live-section pg-live-disclosure"
+            id="session-statistics"
+          >
+            <summary>
               {t("Performance statistics")}
               {statsData?.summary?.episodes?.count != null
                 ? ` · ${statsData.summary.episodes.count} ${t("Episodes")}`
@@ -223,6 +247,7 @@ export function SessionDetail({
                 {statsData && (
                   <>
                     <KeyFigures summary={statsData.summary} />
+                    <SessionsTable rows={statsData.sessions ?? []} />
                     {(statsData.summary?.episodes?.count ?? 0) === 0 && (
                       <StatsEmpty filtered />
                     )}

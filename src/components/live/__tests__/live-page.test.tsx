@@ -59,7 +59,13 @@ mock.module("../use-live", () => ({
     return { details: {}, refresh: () => {} };
   },
 }));
-mock.module("../stats-panel", () => ({ StatsPanel: () => null }));
+let aggregateStatisticsRenders = 0;
+mock.module("../stats-panel", () => ({
+  StatsPanel: () => {
+    aggregateStatisticsRenders += 1;
+    return null;
+  },
+}));
 mock.module("next/link", () => ({
   default: ({ children, ...props }: Record<string, unknown>) => (
     <a {...(props as object)}>{children as never}</a>
@@ -81,6 +87,14 @@ async function select(host: HTMLElement, label: string, value: string) {
 }
 
 describe("live page list integration", () => {
+  test("statistics live in the session details, so overview never mounts an aggregate request", async () => {
+    aggregateStatisticsRenders = 0;
+    const { host } = await render(<LivePage />);
+    expect(aggregateStatisticsRenders).toBe(0);
+    expect(host.querySelector("#live-stats-region")).toBeNull();
+    expect(host.querySelector('a[href="#live-stats-region"]')).toBeNull();
+  });
+
   test("default collapsed rows request no dataset details; only an expanded visible row is wanted", async () => {
     const { host } = await render(<LivePage />);
     expect(wanted).toEqual([]);

@@ -15,7 +15,6 @@ import {
   datasetFaultKind,
   datasetOfSession,
   detectFault,
-  isEvaluating,
   needsPerson,
   rankDatasets,
   type ReviewFilter,
@@ -39,7 +38,6 @@ import {
 import { disabledText } from "@/components/live/embedding";
 import { LiveServiceBlock } from "@/components/live/live-service-block";
 import { ResultSourcesDisclosure } from "@/components/live/result-directory";
-import { StatsPanel } from "@/components/live/stats-panel";
 import { LiveSummaryBar, liveSummary } from "@/components/live/live-summary";
 import { useDatasetDetails, useLivePoll } from "@/components/live/use-live";
 import { LiveFilterBar } from "@/components/live/filter-bar";
@@ -238,7 +236,6 @@ export default function LivePage() {
             <a href="#live-sessions">{t("Evaluation sessions")}</a>
             <a href="#live-pipeline">{t("Annotation pipeline")}</a>
             <a href="#live-results-region">{t("Result sources")}</a>
-            <a href="#live-stats-region">{t("Statistics")}</a>
             <a href="#live-service-region">{t("Background service")}</a>
           </nav>
           <LiveFilterBar
@@ -324,17 +321,6 @@ export default function LivePage() {
                 )}
               </section>
               <ResultSourcesDisclosure />
-              <details
-                className="pg-live-section pg-live-disclosure pg-live-slot o5"
-                id="live-stats-region"
-              >
-                <summary>{t("Statistics and reports")}</summary>
-                <StatsPanel
-                  tick={poll.lastOk}
-                  evaluating={isEvaluating(sessions, service)}
-                  enabled={status?.enabled === true}
-                />
-              </details>
             </div>
             <aside className="pg-live-side">
               <div className="pg-live-slot o2">

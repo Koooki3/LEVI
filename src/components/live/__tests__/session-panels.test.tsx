@@ -87,3 +87,18 @@ describe("a dual-label session", () => {
     expect(running).not.toContain("the operator starts the next episode");
   });
 });
+
+test("session statistics links keep the exact session route and are absent from detail cards", () => {
+  const s = session({
+    root: "/model-root",
+    session_id: "session-exact",
+    dataset: "model__task",
+  });
+  const out = html(s);
+  expect(out).toContain("#session-statistics");
+  expect(out).toContain(">Statistics</a>");
+  const detail = renderToStaticMarkup(
+    <SessionCard session={s} open detail onToggle={() => {}} />,
+  );
+  expect(detail).not.toContain("#session-statistics");
+});

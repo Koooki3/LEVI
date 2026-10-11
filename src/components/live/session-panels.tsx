@@ -290,6 +290,14 @@ export function SessionCard({
           {!detail && sessionHref(s) && (
             <Link
               className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
+              href={`${sessionHref(s)}#session-statistics`}
+            >
+              {t("Statistics")}
+            </Link>
+          )}
+          {!detail && sessionHref(s) && (
+            <Link
+              className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
               href={`${sessionHref(s)}#session-analysis`}
             >
               {t("Session analysis")}
