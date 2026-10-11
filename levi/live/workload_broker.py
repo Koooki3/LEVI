@@ -111,6 +111,7 @@ class _Active:
     worker: WorkerIdentity | None = None
     revoked: bool = False
     preemption: str | None = None
+    owned_group: object | None = None
 
 
 def _copy(contract, value):
@@ -318,7 +319,8 @@ class WorkloadBroker:
             if (
                 error
                 and self._active
-                and self._active.request.spec.workload_class != "policy_realtime"
+                and self._active.request.spec.workload_class
+                not in ("policy_realtime", "resident_group")
             ):
                 self._revoke("gate_closed_or_unknown")
             # Expired queue entries cannot block later feasible requests forever.
@@ -458,15 +460,24 @@ class WorkloadBroker:
                 and active.worker != worker
             ):
                 raise ValueError("one exact worker identity per physical lease")
+            if (
+                active.request.spec.resident_group is not None
+                and active.owned_group is None
+            ):
+                raise ValueError(
+                    "declared resident group must bind its complete membership"
+                )
             # Binding an already revoked reservation still records its live owner.
             active.worker = worker
 
-    def cancel(self, workload_id, *, now_ns):
+    def cancel(self, workload_id, *, now_ns, lease=None):
         with self._lock:
             self._tick(now_ns)
             if self._queue.pop(workload_id, None) is not None:
                 return True
             if self._active and self._active.request.spec.workload_id == workload_id:
+                if self._active.request.spec.workload_class == "resident_group":
+                    self._token(lease)  # A workload name cannot revoke a newer epoch.
                 self._revoke("cancelled")
                 return True
             return False
@@ -502,6 +513,25 @@ class WorkloadBroker:
         with self._lock:
             self._tick(now_ns)
             active = self._token(lease)
+            if active.request.spec.resident_group is not None:
+                group = active.owned_group
+                if (
+                    group is None
+                    or getattr(proof, "group", None) != group
+                    or getattr(proof, "membership_complete", None) is not True
+                    or not isinstance(getattr(proof, "members", None), tuple)
+                    or tuple(m.member for m in proof.members) != group.members
+                    or any(
+                        flag is not True
+                        for m in proof.members
+                        for flag in (
+                            m.process_exited,
+                            m.descendants_exited,
+                            m.owned_gpu_released,
+                        )
+                    )
+                ):
+                    raise ValueError("complete exact owned group exit proof required")
             if (
                 active.worker is None
                 or proof.lease_id != active.lease.lease_id
@@ -550,6 +580,63 @@ class WorkloadBroker:
                 )
             self._active = None
             self._known_idle = True
+
+    def _prepare_resident_renew(self, lease, deadline, pressure, window, *, now_ns):
+        """Ownership calls under BOTH owner and original broker locks.
+
+        Validate and construct first; mutation is a later infallible assignment.
+        The caller additionally proves the entire owned group quiescent.
+        """
+        deadline = _copy(aeri.Deadline, deadline)
+        pressure = _copy(aeri.ResourcePressure, pressure)
+        self._tick(now_ns)
+        active = self._token(lease)
+        spec = active.request.spec
+        if (
+            spec.workload_class != "resident_group"
+            or active.worker is None
+            or active.revoked
+            or not self._known_idle
+            or not active.lease.granted_ns <= now_ns < active.lease.expires_ns
+        ):
+            raise ValueError("valid nonrevoked known resident permission required")
+        if any(
+            aeri.WORKLOAD_PRIORITY[r.spec.workload_class]
+            < aeri.WORKLOAD_PRIORITY[spec.workload_class]
+            for r in self._queue.values()
+        ):
+            raise ValueError("higher-priority handoff pending")
+        if (
+            deadline.clock_domain != self.clock_domain
+            or deadline.budget_ms <= 0
+            or self._pressure_error(pressure, now_ns)
+            or not self._window_ok(window, active.request, now_ns)
+        ):
+            raise ValueError(
+                "fresh authorized resident window/pressure/deadline required"
+            )
+        # Free memory is additional headroom; retained reservation is already resident.
+        if pressure.free_mib < self.config.memory_margin_mib:
+            raise ValueError("resident memory margin unproven")
+        end = min(
+            deadline.due_ns,
+            now_ns + deadline.budget_ms * NS_PER_MS,
+            window.expires_ns,
+            now_ns + aeri.MAX_LEASE_MS * NS_PER_MS,
+        )
+        if (
+            now_ns + (spec.duration_p99_ms + self.config.deadline_margin_ms) * NS_PER_MS
+            > end
+        ):
+            raise ValueError("renewed resident deadline infeasible")
+        return aeri.ResourceLease.model_validate(
+            active.lease.model_dump(by_alias=True)
+            | {
+                "lease_epoch": self._epoch + 1,
+                "granted_ns": now_ns,
+                "expires_ns": end,
+            }
+        ), _Request(spec, deadline, now_ns, active.request.order)
 
     def drain_rejections(self, *, limit=128):
         if type(limit) is not int or not 1 <= limit <= self.config.max_queue:

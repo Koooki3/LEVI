@@ -192,7 +192,7 @@ physical owners. This checkpoint is not wired into the controller or services.
 
 The kernel reuses `aeri.WorkloadSpec`, `Deadline`, `ResourcePressure`,
 `ResourceLease`, `AdmissionRejected` and `WORKLOAD_PRIORITY`. Its bounded queue
-orders `policy_realtime`, `judge_critical`, `vision_light`,
+orders `policy_realtime`, `judge_critical`, `resident_group`, `vision_light`,
 `background_annotation`, then `batch`; within a class, the earliest due time
 wins, followed by arrival order. CPU-only requests are explicitly refused by
 this GPU-only kernel; `any` selects GPU without a hidden CPU fallback. P0 safety,
@@ -320,6 +320,50 @@ separate contract. The supplied tests are CPU/memory fakes, including both real
 online entrypoints. Real CPU IPC/flock assembly, backend capability validation,
 GPU latency and robot validation remain separate checks; none is claimed here.
 
+
+## Controlled resident groups and bounded renewal (opt-in)
+
+`resident_group` is an explicit physical reservation class below policy and
+critical judgement, above light/background/batch work. Its `ResidentGroupSpec`
+declares each role and distinct owned capability. `RuntimeOwnership.bind_group`
+binds a single supervisor and the complete immutable member PID/start/boot
+identities. A `GroupObservation` must name the original driver lease, generation
+and session, prove driver/flock ownership and complete membership, and establish
+that every member is an owned, running backend. A supplied external server PID
+alone provides none of these capabilities; production adapters must establish
+them. This kernel does not adopt external services or run such probes.
+
+`begin_role_request` shares one slot across forward, judge, reset and optional
+background roles. Every request needs a fresh `RoleWindow` for the current
+run/profile/episode/receiver clock, policy epoch and role. Its separate
+`authorization_epoch` strictly increases per request; a policy epoch also
+increases across episodes. All members' backend idle barriers and all local
+request workers must be proven quiescent. Completion needs a new complete group
+observation after the request stop proof. Client completion cannot supply it.
+A model gate does not revoke the physical resident reservation; it still cannot
+create a role window, authorize a request or change the existing gate.
+
+`renew_resident` explicitly reauthorizes the same original owner while both
+owner and broker locks are held. The old permission must remain valid,
+nonrevoked and known, no request may be active, all members must be idle, and a
+new physical `SafeWindow` (separate from episode role windows), deadline, fresh
+pressure and memory margin must be valid with no higher priority handoff. The
+frozen group memory estimate must include every member, startup/compile/switch
+peaks and headroom; renewal keeps that reservation and checks additional free
+headroom. Validation and token construction precede all lease/runtime changes.
+Each segment remains at most ten minutes; both epochs rise. Old tokens cannot
+cancel or release the new epoch. Heartbeats, expiry and unknown identity cannot
+renew or resurrect ownership.
+
+`GroupExitProof` must prove every original member and its descendants exited and
+released its owned GPU allocation, together with the supervisor's complete
+exit proof. The original broker enforces this too. Complete group exit can
+resolve a stranded request without publishing its result. No method waits for a
+model mutex or invokes backend work. Dedicated fake tests cover role races,
+renew races, rejected/failed atomic renewal, stale tokens, incomplete idle/exit
+proofs and legacy single-worker compatibility. Real adapters, process/flock
+assembly, GPU memory and barrier timing, and robot integration remain separate
+validation gates; this extension stays disabled until explicitly composed.
 
 ## Confirming resident model exit
 

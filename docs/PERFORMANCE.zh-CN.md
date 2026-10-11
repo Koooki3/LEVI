@@ -131,7 +131,7 @@ except BudgetRejected as why:       # why.reason：too_large | busy | no_space |
 
 内核复用 `aeri.WorkloadSpec`、`Deadline`、`ResourcePressure`、`ResourceLease`、
 `AdmissionRejected` 和 `WORKLOAD_PRIORITY`。有界队列依次优先处理
-`policy_realtime`、`judge_critical`、`vision_light`、`background_annotation`、
+`policy_realtime`、`judge_critical`、`resident_group`、`vision_light`、`background_annotation`、
 `batch`；同类先看最近的截止时间，再按到达顺序。此 GPU 内核明确拒绝只请求
 CPU 的工作；`any` 选择 GPU，不暗中回退 CPU。P0 安全、watchdog 和停止路径
 不调用或等待这个对象。
@@ -267,3 +267,33 @@ CPU 回归使用明确的 fake GPU 查询来源、自己创建的 CPU 子进程�
 
 这些既有检查覆盖进程组及记住的 PID。后续运行时桥仍须单独核实完整后代
 所有权，包括已离开该进程组的工作进程。
+
+
+## 受控常驻群组与有界续签（显式启用）
+
+`resident_group` 是正式物理预约分类，优先级低于策略和关键判定，高于轻量视觉、
+后台标注与批处理。`ResidentGroupSpec` 声明各角色和不同的 owned capability；
+`RuntimeOwnership.bind_group` 绑定一个 supervisor 与完整成员的 PID/start/boot 身份。
+`GroupObservation` 必须绑定原 driver 租约、代次、会话，证明 driver/flock 持有和成员
+清单完整，并核实全部成员都是本人管理且运行中的后端。外部服务的 PID 不能代替这些
+能力；真实适配器须实际提供证明。内核不接管外部服务，也不自行探测。
+
+`begin_role_request` 让正向、判定、复位及可选后台角色共用一个请求槽。每次请求都要
+新的 `RoleWindow`，绑定当前运行、profile、片段、接收端时钟、角色和策略代次；独立的
+`authorization_epoch` 每次请求严格递增，跨片段还须提升策略代次。全部成员须有后端
+静默 barrier 和全部本地请求 worker 退出证明。完成请求还要晚于 stop proof 的完整群组
+观察，调用线程结束不能代替它。模型 gate 不撤销群组的物理预约，但这不能产生角色
+窗口、批准请求或改变既有 gate。
+
+`renew_resident` 在原 owner 与 broker 两把锁内明确重新授权：旧许可仍有效、未撤销、
+身份可信，无活动请求，全部成员静默，新的物理 `SafeWindow`（与片段角色窗口分开）、
+截止时间、新鲜压力及显存余量有效，且没有更高优先级交接。冻结的群组内存估计须包含
+全部成员、启动/编译/切换峰值和余量；续签保留这一预约并核对额外可用余量。所有验证
+与 token 构建完成后才同时改租约及 runtime。每段仍最多十分钟，两个代次都递增；旧
+token 无权取消或释放新代次。心跳、过期或未知身份不能续签、复活所有权。
+
+`GroupExitProof` 要证明每个原成员及其全部后代退出并释放本人 GPU 分配，另有 supervisor
+完整退出证明；原 broker 也执行这一要求。完整物理退出可清理悬置请求，但不发布结果。
+内核不等待模型 mutex、不执行后端动作。专属 fake 回归覆盖角色竞争、续签竞争、拒绝与
+构建失败时的原子性、旧 token、不完整静默/退出证明和旧单 worker 兼容。真实适配器、
+进程/flock 组装、GPU 内存与 barrier 时延、机器人联测仍是后续验收门；未显式组合时关闭。

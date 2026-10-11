@@ -178,10 +178,19 @@ def test_restart_unknown_ownership_is_not_inferred_from_empty_queue_or_free_vram
 
 def test_contract_priority_policy_then_critical_judge_then_other_work():
     b = ready()
-    for kind in reversed(aeri.WORKLOAD_CLASSES):
+    # This is the legacy single-worker contract; owned resident groups have
+    # their own complete-membership admission and exit regression suite.
+    single_classes = (
+        "policy_realtime",
+        "judge_critical",
+        "vision_light",
+        "background_annotation",
+        "batch",
+    )
+    for kind in reversed(single_classes):
         assert submit(b, spec(kind, kind)) is None
     granted = []
-    for number, expected in enumerate(aeri.WORKLOAD_CLASSES):
+    for number, expected in enumerate(single_classes):
         lease = b.admit(pressure(), window(b), now_ns=NOW)
         assert isinstance(lease, aeri.ResourceLease)
         assert lease.workload_class == expected

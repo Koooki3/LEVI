@@ -161,6 +161,7 @@ UNKNOWN_REASONS = (
 WORKLOAD_CLASSES = (
     "policy_realtime",
     "judge_critical",
+    "resident_group",
     "vision_light",
     "background_annotation",
     "batch",
@@ -727,6 +728,26 @@ class _Runtime(Envelope):
     schema_id: Literal["levi.aeri.runtime.v1"] = Field(alias="schema")
 
 
+class ResidentMemberSpec(Part):
+    """Declared owned backend capability, never inferred from a supplied PID."""
+
+    role: Literal["forward", "judge", "reset", "background"]
+    capability_id: Id
+
+
+class ResidentGroupSpec(Part):
+    group_id: Id
+    members: Annotated[list[ResidentMemberSpec], Field(min_length=1, max_length=4)]
+
+    @model_validator(mode="after")
+    def _consistent(self):
+        if len({m.role for m in self.members}) != len(self.members):
+            _bad("one owned backend per resident role")
+        if len({m.capability_id for m in self.members}) != len(self.members):
+            _bad("resident capabilities must be distinct")
+        return self
+
+
 class WorkloadSpec(_Runtime):
     """No free priority number: the priority follows from the class."""
 
@@ -741,10 +762,17 @@ class WorkloadSpec(_Runtime):
     duration_p99_ms: Count | None = None
     duration_source: Literal["measured", "declared", "unknown"]
     preemptibility: Literal["none", "request_boundary", "cooperative"]
+    resident_group: ResidentGroupSpec | None = None
 
     @model_validator(mode="after")
     def _consistent(self):
         _same_run(self, self.episode_id)
+        if (self.workload_class == "resident_group") != (
+            self.resident_group is not None
+        ):
+            _bad("resident_group class requires its explicit owned member declaration")
+        if self.resident_group is not None and self.episode_id is not None:
+            _bad("physical resident reservation is separate from episode authority")
         for value, source, what in (
             (self.memory_estimate_mib, self.memory_source, "memory"),
             (self.duration_p99_ms, self.duration_source, "duration"),
