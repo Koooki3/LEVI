@@ -85,6 +85,20 @@ class Ledger:
         self.identity = None
 
     def stage(self, folder, observation):
+        self._stage(folder, observation)
+
+    def stage_paused(self, folder, observation, committed_ns):
+        self._stage(folder, observation, phase="paused", after_ns=committed_ns)
+
+    def stage_resumed(self, folder, observation, committed_ns):
+        if not self.rows or self.rows[-1].phase != "paused":
+            raise ValueError("resume source requires a paused current tail")
+        self._stage(folder, observation, after_ns=committed_ns)
+
+    def _stage(self, folder, observation, *, phase="pre_action", after_ns=None):
+        # Explicit pause/resume refresh replaces only the current control step.
+        # JPEG bytes already returned by freeze and their provenance stay immutable.
+        refreshing = after_ns is not None
         ctx, current = self.context(), self.observer.latest
         if ctx is None or current is None or self.observer.original is not observation:
             raise ValueError("stage does not match the current cached observation")
@@ -109,9 +123,17 @@ class Ledger:
             or (self.identity is not None and self.identity != identity)
         ):
             raise ValueError("stage source episode/epoch/clock/step/time mismatch")
+        if refreshing and (
+            type(after_ns) is not int
+            or after_ns <= 0
+            or started < after_ns
+            or not self.rows
+            or step != self.rows[-1].control_step
+        ):
+            raise ValueError("pause/resume refresh is not a fresh current control step")
         if self.rows and (
             serial <= self.rows[-1].serial
-            or step <= self.rows[-1].control_step
+            or (not refreshing and step <= self.rows[-1].control_step)
             or stamp <= self.rows[-1].observed_ns
         ):
             raise ValueError("duplicate or reversed staged source")
@@ -139,30 +161,28 @@ class Ledger:
             domain,
             step,
             stamp,
-            "pre_action",
+            phase,
             None,
             tuple(encoded),
         )
-        self.identity = identity
-        self.first = self.first or source
-        # Count the pinned start only once, including when it leaves the deque.
-        while (
-            self.rows
-            and self.retained_bytes + sum(len(data) for _, data, _ in source.images)
-            > MAX_FRAME_BYTES
-        ):
-            self.rows.popleft()
-        if (
-            self.retained_bytes
-            + (
-                0
-                if self.first is source
-                else sum(len(data) for _, data, _ in source.images)
-            )
-            > MAX_FRAME_BYTES
-        ):
+        rows = deque(self.rows, maxlen=self.rows.maxlen)
+        if refreshing:
+            rows.pop()
+        first = self.first or source
+
+        def retained():
+            sources = {s.serial: s for s in rows}
+            sources[first.serial] = first
+            return sum(len(data) for s in sources.values() for _, data, _ in s.images)
+
+        # Preserve the original total byte budget, including the pinned start.
+        new_bytes = sum(len(data) for _, data, _ in source.images)
+        while rows and retained() + new_bytes > MAX_FRAME_BYTES:
+            rows.popleft()
+        if retained() + (0 if first is source else new_bytes) > MAX_FRAME_BYTES:
             raise ValueError("event ledger total JPEG byte budget exhausted")
-        self.rows.append(source)
+        rows.append(source)
+        self.identity, self.first, self.rows = identity, first, rows
 
     @property
     def retained_bytes(self):

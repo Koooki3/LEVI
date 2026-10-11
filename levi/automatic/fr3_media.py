@@ -16,9 +16,15 @@ class Media:
         self.buffers = {}
         self.event_ledgers = {}
         self.event_source = None
+        self.event_stage = None
 
-    def use_event_source(self, observer, context, config, run_id):
+    def use_event_source(
+        self, observer, context, config, run_id, *, stage_adapter=None
+    ):
+        if stage_adapter is not None and not callable(stage_adapter):
+            raise TypeError("explicit event stage adapter must be callable")
         self.event_source = observer, context, config, run_id
+        self.event_stage = stage_adapter
 
     def event_ledger(self, episode_id):
         for ledger in self.event_ledgers.values():
@@ -99,6 +105,10 @@ class Media:
             if ledger is None:
                 ledger = Ledger(*self.event_source, self.cv2)
                 self.event_ledgers[folder] = ledger
+            if self.event_stage is not None:
+                # Explicit pause binding failures reach the existing containment.
+                self.event_stage(ledger, folder, obs)
+                return
             try:
                 ledger.stage(folder, obs)
             except (ValueError, TypeError, KeyError, AttributeError, OSError):
