@@ -247,6 +247,11 @@ def main():
 
         sys.argv.pop(1)
         return sam3()
+    if len(sys.argv) > 1 and sys.argv[1] == "results":
+        from .evaluation_results import main as results
+
+        raise SystemExit(results(sys.argv[2:]))
+
     if len(sys.argv) > 1 and sys.argv[1] == "recap":
         configure()
         from .recap.cli import main as recap
