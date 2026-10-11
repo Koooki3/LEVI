@@ -40,7 +40,15 @@ HUMAN_STATES = frozenset({"WAIT_HUMAN", "FAULT_LOCKED"})
 MOTION_STATES = frozenset({"FORWARD_ACTIVE", "RESET_ACTIVE"})
 # States in which a policy may still be inferring (a chunk may be in flight
 # until the quiesce is acknowledged): the GPU gate must be closed.
-POLICY_MAY_INFER = frozenset({"FORWARD_ACTIVE", "FORWARD_STOPPING", "RESET_ACTIVE"})
+POLICY_MAY_INFER = frozenset(
+    {
+        "FORWARD_ACTIVE",
+        "FORWARD_STOPPING",
+        "RESET_ACTIVE",
+        "FORWARD_JUDGING",
+        "RESET_JUDGING",
+    }
+)
 # Physical actions the FR3 server cannot deduplicate.
 NON_IDEMPOTENT_KINDS = frozenset({"policy_steps", "home"})
 # Which role each active state runs.
@@ -95,6 +103,7 @@ FAULT_REASONS = {
             "policy_error",
             "watchdog_timeout",
             "preflight_failed",
+            "judgement_unproven",
         }
     ),
     "safety_guard": frozenset({"safety_stop", "watchdog_timeout"}),
@@ -106,6 +115,8 @@ FAULT_REASONS = {
 RESULT_TRANSITIONS = frozenset(
     {
         ("FORWARD_FINALIZE", "ROBOT_HOME"),
+        ("FORWARD_JUDGING", "WAIT_HUMAN"),
+        ("RESET_JUDGING", "WAIT_HUMAN"),
         ("RESET_FINALIZE", "VERIFY_INITIAL"),
         ("RESET_FINALIZE", "WAIT_HUMAN"),
     }
@@ -136,6 +147,33 @@ def _table() -> dict:
         t.setdefault((a, b), []).append(rule)
 
     quiet = ("none", "notify")
+    for role in ("forward", "reset"):
+        active, judging = f"{role.upper()}_ACTIVE", f"{role.upper()}_JUDGING"
+        add(
+            active,
+            judging,
+            _r({"inference_paused"}, ORCH, {"policy_quiesce"}, role=role),
+        )
+        add(
+            judging,
+            active,
+            _r({"inference_resumed"}, ORCH, {"policy_steps"}, role=role),
+        )
+        add(
+            judging,
+            "WAIT_HUMAN",
+            _r(
+                {
+                    "goal_verified",
+                    "horizon_exhausted",
+                    "reset_horizon_exhausted",
+                    "operator_stop",
+                },
+                ORCH_OR_OPERATOR,
+                {"recorder_seal", "recorder_abort"},
+                role=role,
+            ),
+        )
     add("PREFLIGHT", "VERIFY_INITIAL", _r({"preflight_passed"}, ORCH, {"none"}))
     for start in ("VERIFY_INITIAL", "SCENE_ASSESS"):
         add(

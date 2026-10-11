@@ -40,7 +40,7 @@ def check(
 
 
 def test_every_state_is_known_and_reachable():
-    assert set(sm.STATES) == set(aeri.AERI_STATES) and len(sm.STATES) == 13
+    assert set(sm.STATES) == set(aeri.AERI_STATES) and len(sm.STATES) == 15
     for a, b in sm.TRANSITIONS:
         assert a in sm.STATES and b in sm.STATES
     seen, frontier = {"PREFLIGHT"}, ["PREFLIGHT"]
@@ -258,9 +258,14 @@ def test_fault_locked_is_reachable_from_every_live_state_and_left_only_by_a_comm
     assert sm.successors("WAIT_HUMAN") == {"PREFLIGHT", "COMPLETED", "FAULT_LOCKED"}
 
 
-def test_motion_enters_only_from_a_scene_decision():
+def test_motion_enters_from_scene_or_journalled_judgement_resume():
     into_motion = {a for (a, b) in sm.TRANSITIONS if b in sm.MOTION_STATES}
-    assert into_motion == {"VERIFY_INITIAL", "SCENE_ASSESS"}
+    assert into_motion == {
+        "VERIFY_INITIAL",
+        "SCENE_ASSESS",
+        "FORWARD_JUDGING",
+        "RESET_JUDGING",
+    }
     for (a, b), rules in sm.TRANSITIONS.items():
         if b in sm.MOTION_STATES:
             assert all(

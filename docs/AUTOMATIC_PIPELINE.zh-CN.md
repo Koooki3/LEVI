@@ -41,7 +41,7 @@
 
 **三种结果，互不混用。** `decision: confirmed | rejected`；`decision: unknown`（看过证据仍定不了，必须给 `unknown_reason`）；`kind: unavailable`（根本没有判定：门关、忙、超时、模型出错……）。“unknown”和“unavailable”都不算成功。只有 `gate_closed`、`busy` 和带 `retry_after_ms` 的 `admission_rejected` 可以标为可重试。
 
-**一致性规则（节选）。** `confirmed` 至少要有一个 required 谓词，且全部为真，没有 confirmed 或 undecided 的否决项；`rejected` 要有一个为假的 required 谓词或一个 confirmed 否决项。场景只有在所有 required 谓词都为真时才是 `ready`；`failed_predicates` 和 `unknown_predicates` 必须恰好列出为假和读不出的 required 谓词。`valid_until_ns` 晚于 `produced_ns`，且最多晚 `MAX_RESULT_VALIDITY_MS`（30 秒）；租约最长 `MAX_LEASE_MS`（10 分钟）。片段 ID 的格式是 `<run_id>.<forward|reset>.<NNNN>`，必须属于消息所在的运行。策略端点只能是回环地址，且不能是 5000、5001、5100、7470、8000 端口。片段结果严格跟随目标核实：`verified` 是 `success`，`contradicted` 是 `failure`，`undecided` 和 `unavailable` 是 `unknown`（没判出来的永远不算失败）。判定里带了在线判定的原值（`legacy_c5`）时，必须与 decision 一致：未定的回答不论 outcome 是什么都是 `unknown` / `model_undecided`（带未决否决项、有争议的豁免或缺少输入的成功也算未定），已定的成功是 `confirmed`，已定的失败是 `rejected`。运行事件里没有操作员标签的字段，状态只能是 AERI 的 13 个状态。这些跨字段规则无法写进 JSON Schema，快照看不到它们的变化，由 `E_INCONSISTENT` 夹具把守。
+**一致性规则（节选）。** `confirmed` 至少要有一个 required 谓词，且全部为真，没有 confirmed 或 undecided 的否决项；`rejected` 要有一个为假的 required 谓词或一个 confirmed 否决项。场景只有在所有 required 谓词都为真时才是 `ready`；`failed_predicates` 和 `unknown_predicates` 必须恰好列出为假和读不出的 required 谓词。`valid_until_ns` 晚于 `produced_ns`，且最多晚 `MAX_RESULT_VALIDITY_MS`（30 秒）；租约最长 `MAX_LEASE_MS`（10 分钟）。片段 ID 的格式是 `<run_id>.<forward|reset>.<NNNN>`，必须属于消息所在的运行。策略端点只能是回环地址，且不能是 5000、5001、5100、7470、8000 端口。片段结果严格跟随目标核实：`verified` 是 `success`，`contradicted` 是 `failure`，`undecided` 和 `unavailable` 是 `unknown`（没判出来的永远不算失败）。判定里带了在线判定的原值（`legacy_c5`）时，必须与 decision 一致：未定的回答不论 outcome 是什么都是 `unknown` / `model_undecided`（带未决否决项、有争议的豁免或缺少输入的成功也算未定），已定的成功是 `confirmed`，已定的失败是 `rejected`。运行事件里没有操作员标签的字段，状态只能是 AERI 的 15 个状态。这些跨字段规则无法写进 JSON Schema，快照看不到它们的变化，由 `E_INCONSISTENT` 夹具把守。
 
 **时钟。** 一条消息里所有 `*_ns` 字段共用它的 `clock_domain`，本机单调时钟写作 `host-mono:<boot_id>`。`aeri.check_fresh(message)`（判定、场景评估或租约）读取的是**消费方自己的时钟**（`time.monotonic_ns()` 和本机时钟域；测试可以同时传 `now_ns` 和 `local`，不能只传一个）：时钟域不同抛 `E_CLOCK_DOMAIN`（无法比较，按已过期处理）；`produced_ns`/`granted_ns` 比这个时钟超前 `FUTURE_TOLERANCE_NS`（100 毫秒）以上抛 `E_FUTURE`；有效期已过抛 `E_EXPIRED`。它只是必要条件，不是充分条件：运行、片段、代次、请求这几道围栏另外要做。动作块应答里的 `received_ns` 由接收方用自己的时钟填写，从不由服务端填写，只作审计；动作块是否赶上截止时间由 `aeri.check_deadline(deadline)` 按接收方的时钟判断（硬截止已过抛 `E_EXPIRED`，软截止返回 `False`）。
 
@@ -114,7 +114,7 @@ VERIFY_INITIAL / SCENE_ASSESS -> RESET_ACTIVE -> RESET_VERIFY -> RESET_FINALIZE
 
 `TRANSITIONS` 为每个允许的 `(from, to)` 列出原因、权限主体（`orchestrator`、`operator`、`safety_guard`、`recovery`）和该转换能带的唯一动作类型；`check_transition` 拒绝其余一切（`E_ILLEGAL`、`E_REASON`、`E_AUTHORITY`、`E_ACTION`、`E_STEP`、`E_EPISODE`、`E_RESULT`），`check_journal` 按同一张表重读整份日志。最要紧的规则：
 
-- 运动状态（`FORWARD_ACTIVE`、`RESET_ACTIVE`）只能从场景判断（`VERIFY_INITIAL`、`SCENE_ASSESS`）由编排器以 `policy_steps` 动作进入；
+- 运动状态（`FORWARD_ACTIVE`、`RESET_ACTIVE`）由编排器以 `policy_steps` 动作进入：从场景判断（`VERIFY_INITIAL`、`SCENE_ASSESS`）开始，或在显式事件暂停模式从对应的 `*_JUDGING` 日志状态恢复；
 - `policy_steps` 和 `home` 是物理动作、不幂等：必须标 `non_idempotent` 并带 `step`（`step=None` 被拒）。编排器给每个片段的物理动作编号（0：策略步，1：Home），片段号永不复用，所以日志的幂等键在任何代次、任何恢复之后都拒绝第二次尝试；
 - 每个仍在运行的状态都可以转到 `FAULT_LOCKED`（编排器、安全守卫或恢复）。`WAIT_HUMAN` 和 `FAULT_LOCKED` 只能由带 `command_id` 的操作员命令转到 `PREFLIGHT`，不能直接回到运动；
 - 操作员主体在任何规则上都必须带命令编号；
@@ -145,7 +145,7 @@ VERIFY_INITIAL / SCENE_ASSESS -> RESET_ACTIVE -> RESET_VERIFY -> RESET_FINALIZE
 
 四段，不跳过：**候选**（优先级为 `goal_candidate` 或类型在 `goal_event_types` 中的事件）-> **取证**（同一时刻只有一个请求，覆盖候选及其后 `settle_steps` 步）-> **确认**（属于本运行、本片段、本目标、本请求且未过期的 `confirmed` 判定，没有被撤回事件推翻；连续 `confirmations` 次）-> **停止请求**（`goal_verified`）。
 
-永远不会导致停止的：`unknown`、`unavailable`、超时、属于其他运行或片段的判定、未请求或重复的应答、已过期的、来自其他时钟域或生成时间在未来的、证据没覆盖到稳定窗口的、违反契约的。这些一律丢弃并记备注，片段继续执行到步数上限（`on_unknown: continue_to_horizon`，v1 唯一的策略）。被丢弃的应答会撤回对应请求，裁决器不会无限等待；同一片段判定方违反契约达到 `violation_limit` 次后，本片段不再理会判定（也不做终局判定）；事件提供方违约同样次数后，本片段不再读它的事件；两种情况下运行都在下一个决策点等人（`contract_violation_limit`），优先于结束运行。迟到的旧事件不会把候选往前挪，确认必须覆盖候选（`observed_from_step` 不晚于候选）。
+永远不会导致停止的：`unknown`、`unavailable`、超时、属于其他运行或片段的判定、未请求或重复的应答、已过期的、来自其他时钟域或生成时间在未来的、证据没覆盖到稳定窗口的、违反契约的。这些一律丢弃并记备注，旧模式片段继续执行到步数上限（`on_unknown: continue_to_horizon`）。被丢弃的应答会撤回对应请求，裁决器不会无限等待；同一片段判定方违反契约达到 `violation_limit` 次后，本片段不再理会判定（也不做终局判定）；事件提供方违约同样次数后，本片段不再读它的事件；两种情况下运行都在下一个决策点等人（`contract_violation_limit`），优先于结束运行。迟到的旧事件不会把候选往前挪，确认必须覆盖候选（`observed_from_step` 不晚于候选）。
 
 | `TerminationConfig` | 默认 | 含义 |
 | --- | --- | --- |
@@ -765,3 +765,13 @@ reset 的静默交接仍依赖经审核的 Performance Architecture 集成。真
 必须冻结成功判定规格和物理绑定；普通向导不能替代这些事实。
 
 磁盘日志损坏或不完整时不能恢复。共享控制泵和终端恢复都会重新核对磁盘与当前写入器；损坏会锁住写入器，停止仍可提交。旧的未认证 dry-run 登记须保留计划及一致的有效日志头，才能由 CLI/API 读取。新的 dry-run 启动用现有核心密钥认证冻结计划，因此真正已启动但尚未写入日志头的短暂状态仍可查看。
+
+## 显式事件暂停判定（默认关闭）
+
+`termination.inference_mode` 默认是 `legacy_async`，保留异步判定时继续动作的原行为。显式选 `event_pause_judge` 后，模式和 `termination.physical_hold` 的全部稳定条件进入规范化计划摘要，不能复用旧批准摘要。必须明确提供采样间隔、稳定窗口、最长等待、位置/旋转/夹爪容差；不设物理容差默认值。该模式仅允许 `confirmations: 1`、开启提前停止、无对照组，每片段最多 400 个**已确认执行**的动作。`on_unknown: continue_to_horizon` 只控制旧模式；新模式的 unknown、超时、证据或保持未确认均闭锁，不能按失败继续动作。
+
+新模式复用原 `RuntimeOwnership` 和 `WorkloadBroker` 的唯一角色请求槽，不建立另一个调度器。初始场景判断、forward/reset 请求与目标判断都通过同一角色授权。候选满足既有最短步数和稳定条件后，先废弃动作缓存、提高策略代次并关闭新策略请求，进入 `FORWARD_JUDGING` 或 `RESET_JUDGING` 日志状态。VLM 开始前分别需要按冻结条件取得的独立物理保持证明与全部受控后端的静默证明；VLM 返回后仍须后台请求停止、全部本地请求 worker 退出和整个受控群组静默，才可以接受判定。保持和判定证据必须保留。
+
+确认成功直接封存并进入 `WAIT_HUMAN`，原地等待人工自由复位，不执行 Home。明确未成功且实际动作数不足上限时，重新取观测并暂存，重新认领新代次的策略；`inference_resumed` 是一个新的 `policy_steps` 日志事务，只从它签发新的运动令牌。旧缓存、旧请求和旧代次的迟到应答不能复用。判定等待不计动作；达到上限后在保持状态做终局判断，再封存并等待人。停止注册立即撤销新模式的运动围栏和模型结果权限，不等模型完成或后台排空；证明不足仍保留后台所有权。
+
+**实现边界：**当前只提供可注入的软件协调核和进程内 fake 回归。实际 FR3 工厂没有提供 owned policy 群组、真实后台 barrier、独立物理稳定 observer，以及暂停帧与 FileEvents/OnlineVerifier 事件窗口的可信绑定；缺少任一接口，构造编排器前就拒绝新模式。`Robot.held`、`Policy.ticket.done`、HTTP 成功或 client 返回不是这些证明。真实 paused 帧必须进入当前片段的保留证据窗口，不能复用触发前画面。实际配置、HTTP 真机启动、GPU 模型和机器人均未启用或验证；真实接线和跨分支共用内核组合回归仍需独立验收。

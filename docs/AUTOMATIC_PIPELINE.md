@@ -70,7 +70,7 @@ values (`legacy_c5`), they must agree with the decision: an undecided answer
 is `unknown` / `model_undecided` whatever its outcome (a success with an
 undecided veto, a disputed exemption or a missing input is undecided), a
 decided success `confirmed`, a decided failure `rejected`. The run event has no field for operator labels, and its
-states are the 13 AERI states only. These cross-field rules are not
+states are the 15 AERI states only. These cross-field rules are not
 expressible in JSON Schema, so the snapshots cannot see them change: the
 `E_INCONSISTENT` fixtures guard them.
 
@@ -283,9 +283,9 @@ else (`E_ILLEGAL`, `E_REASON`, `E_AUTHORITY`, `E_ACTION`, `E_STEP`,
 `E_EPISODE`, `E_RESULT`), and `check_journal` re-reads a whole journal
 against the same table. The rules that matter most:
 
-- motion states (`FORWARD_ACTIVE`, `RESET_ACTIVE`) are entered only from a
-  scene decision (`VERIFY_INITIAL`, `SCENE_ASSESS`), by the orchestrator,
-  with a `policy_steps` action;
+- motion states (`FORWARD_ACTIVE`, `RESET_ACTIVE`) are entered by the orchestrator
+  with `policy_steps`: from a scene decision (`VERIFY_INITIAL`, `SCENE_ASSESS`),
+  or from the corresponding journalled `*_JUDGING` state in explicit event-pause mode;
 - `policy_steps` and `home` are physical and not idempotent: the action must
   say `non_idempotent` and carry a `step` (`step=None` is refused). The
   orchestrator numbers the physical actions of an episode (0: its steps,
@@ -1730,3 +1730,13 @@ specification and physical binding before any real execution; the ordinary
 wizard alone does not establish those facts.
 
 A damaged or incomplete on-disk journal cannot resume. Both the shared control pump and terminal resume recheck it against the active writer; corruption locks that writer and leaves stop available. Legacy unsigned dry-run lookup requires a retained plan and matching valid journal header. New dry launches sign their frozen plan under the existing core key, so a genuine starting run remains visible before its first header exists.
+
+## Explicit event-pause judging (off by default)
+
+`termination.inference_mode` defaults to `legacy_async`, preserving the existing asynchronous judgement/action loop. Explicit `event_pause_judge` and every `termination.physical_hold` condition enter the normalized plan digest; an old approval digest cannot authorize the new mode. Sampling interval, stable window, maximum wait and position/rotation/gripper tolerances must be supplied explicitly. This mode requires `confirmations: 1`, early stopping, no control group and at most 400 acknowledged executed actions per episode. `on_unknown: continue_to_horizon` applies only to the legacy mode. Unknown, timeout or unproven evidence/hold locks the new mode; it never treats uncertainty as failure and continues motion.
+
+The coordinator uses the ORIGINAL `RuntimeOwnership` and `WorkloadBroker` role request slot, with no additional scheduler. Initial scene assessment, forward/reset inference and goal judgement share that authority. After a candidate meets the existing minimum-step/settling conditions, old action buffers are discarded, the policy epoch advances, admission closes and a journal transaction enters `FORWARD_JUDGING` or `RESET_JUDGING`. Before VLM inference, independent frozen-condition physical hold proof and all-owned-backend idle proof are both required. Publication requires backend request stop, exit of all local request workers and a fresh complete group idle barrier. Hold and judgement evidence must be retained.
+
+Confirmed success seals the episode and enters `WAIT_HUMAN` where it stands for a free human reset, without Home. An explicit rejection below the action limit requires a new observation/stage, a new policy epoch/acquisition and a new journal `policy_steps` transaction with reason `inference_resumed`; only that transaction issues its new motion token. No old buffer, ticket or late epoch response is reused. Judgement waits count no actions. The horizon is judged while held, then sealed for a person. Stop registration revokes motion and model-result authority immediately without waiting for a model or drainer; unproven backend ownership remains retained.
+
+**Implementation boundary:** this is injected software coordination with in-process fake regressions. Actual FR3 factories supply no owned-policy group, real backend barrier, independent physical stability observer or trusted paused-frame binding to the FileEvents/OnlineVerifier event window. Missing injection refuses the new mode BEFORE journal creation. `Robot.held`, `Policy.ticket.done`, HTTP success and client return are not proofs. Actual paused frames must enter the current retained episode evidence window instead of reusing pre-trigger frames. No actual configuration, real HTTP launch, GPU model or robot has been enabled or validated. Real adapters and a combined regression with the separately developed shared authority still require independent acceptance.

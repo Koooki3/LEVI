@@ -68,6 +68,7 @@ from . import reset_manager as rm
 from . import scene_assessment as sa
 from . import state_machine as sm
 from .adapters import events as ev
+from .intervention import InferenceCycle, InterventionStopped, InterventionUnproven
 from .journal import Journal, JournalRefused, process_identity
 from .recorder import EvidenceStore
 from .termination import TerminationArbiter, TerminationConfig, verification_of
@@ -359,7 +360,10 @@ class Orchestrator:
         crash_hook: Callable[[str], None] | None = None,
         listener: Callable[[str, dict], None] | None = None,
         evidence=True,
+        intervention: InferenceCycle | None = None,
     ):
+        self._check_intervention(config, clock, intervention)
+        self.intervention = intervention
         self.journal = journal
         self.config = config
         self.robot = robot
@@ -420,6 +424,30 @@ class Orchestrator:
 
     # --- construction --------------------------------------------------------------
 
+    @staticmethod
+    def _check_intervention(config, clock, intervention):
+        if (
+            config.termination.inference_mode != "event_pause_judge"
+            and intervention is not None
+        ):
+            raise ConfigError(
+                "intervention injection belongs only to event_pause_judge"
+            )
+        if config.termination.inference_mode == "event_pause_judge":
+            if not isinstance(intervention, InferenceCycle):
+                raise ConfigError(
+                    "event_pause_judge requires injected owned role authority, backend barrier and physical hold observer"
+                )
+            intervention.validate(config, clock)
+            if config.forward_max_steps > 400 or config.reset_max_steps > 400:
+                raise ConfigError(
+                    "event_pause_judge permits at most 400 executed actions"
+                )
+            if config.scene_check != "provider":
+                raise ConfigError(
+                    "event_pause_judge requires the owned provider scene path"
+                )
+
     @classmethod
     def create(
         cls, directory, config: RunConfig, *, plan: dict | None = None, **parts
@@ -427,6 +455,7 @@ class Orchestrator:
         """Start a run: its header names the reset mode and the scene check;
         ``plan`` (the job's normalised plan, hashing to the config's
         ``plan_sha256``) is kept as the run folder's ``plan.json``."""
+        cls._check_intervention(config, parts["clock"], parts.get("intervention"))
         clock = parts["clock"]
         process = process_identity()
         journal = Journal.create(
@@ -452,6 +481,7 @@ class Orchestrator:
         first (never replays anything). A config whose reset mode or scene
         check differs from the run header's is refused (``E_PLAN``, with a
         ``run_header_mismatch`` note)."""
+        cls._check_intervention(config, parts["clock"], parts.get("intervention"))
         clock = parts["clock"]
         journal = Journal.open(
             directory,
@@ -587,7 +617,8 @@ class Orchestrator:
     def _counts(event) -> bool:
         return (
             event.record == "committed"
-            and (event.from_state, event.to_state) == ("FORWARD_FINALIZE", "ROBOT_HOME")
+            and (event.from_state, event.to_state)
+            in {("FORWARD_FINALIZE", "ROBOT_HOME"), ("FORWARD_JUDGING", "WAIT_HUMAN")}
             and event.episode_result is not None
             and event.episode_result.rollout.sealed == "complete"
         )
@@ -979,6 +1010,9 @@ class Orchestrator:
         with self._stop_lock:
             self._stop_gen += 1
             self._stops[command_id] = self._stop_gen  # the loop sees it now
+        if self.intervention is not None:
+            self.fence.revoke()
+            self.intervention.interrupt()
         if not self._lock.acquire(timeout=STOP_LOCK_WAIT_S):
             return CommandResult(True, "stop_requested", self.state)
         try:
@@ -1072,6 +1106,8 @@ class Orchestrator:
         else:
             target, episode = "post_forward", self._last_forward
         decision = self._assess(target, episode)
+        if self.state == "FAULT_LOCKED":
+            return
         # A stop that arrived while the scene was being assessed.
         if self._stop_before_start():
             return
@@ -1132,10 +1168,29 @@ class Orchestrator:
             and target in ("post_reset", "initial_state")
         )
         try:
-            decision, reason, message = self._assess_once(record)
+            if self.intervention is not None:
+                self.robot.hold()
+                decision, reason, message = self.intervention.invoke(
+                    "judge",
+                    episode_id,
+                    self.policy_epoch + 1,
+                    deadline_ns=self._now() + self.config.scene_timeout_ns,
+                    call=lambda: self._assess_once(record),
+                    interrupted=lambda: (
+                        self._operator() is not None
+                        or self.robot.latch_state()
+                        or self.robot.health()["state"] == "red"
+                    ),
+                )
+            else:
+                decision, reason, message = self._assess_once(record)
             record["decision"], record["reason"] = decision, reason
             if message is not None:
                 record.update(_scene_facts(message))
+        except InterventionUnproven as exc:
+            self._note("intervention_unproven", str(exc))
+            self._fault("judgement_unproven")
+            decision = "unavailable"
         finally:
             retained = self._keep_evidence(record, require_retained=require_retained)
         if require_retained and decision == "ready" and not retained:
@@ -1249,7 +1304,7 @@ class Orchestrator:
         minutes: it is collected in slices, and an operator's stop ends the
         wait at once (the stop then takes effect before anything starts)."""
         wait = self.config.scene_wait_ns
-        if self.config.scene_check != "operator_attested":
+        if self.config.scene_check != "operator_attested" and self.intervention is None:
             raw = self.scene.collect(ticket, timeout_ns=wait)
             return (raw, None) if raw is not None else (None, "timeout")
         start = self._now()
@@ -1294,6 +1349,23 @@ class Orchestrator:
             if self._operator() is not None:
                 problem["what"] = "operator"
                 return "no", "none", "operator_stop"
+            if self.intervention is not None:
+                before = self._now()
+                observed = self.robot.observe()
+                if (
+                    type(observed.get("observed_ns")) is not int
+                    or not before <= observed["observed_ns"] <= self._now()
+                ):
+                    raise InterventionUnproven(
+                        "initial policy observation must be fresh"
+                    )
+                if (
+                    self.intervention.hooks.resume_admission(
+                        ctx.episode_id, ctx.policy_epoch, observed
+                    )
+                    is not True
+                ):
+                    raise InterventionUnproven("initial policy admission unproven")
             handle = self.policy.acquire(role, policy_epoch=ctx.policy_epoch)
             if handle.get("kind") == "unavailable":
                 problem["what"] = "policy"
@@ -1327,18 +1399,21 @@ class Orchestrator:
         if role == "forward":
             self._last_forward = ctx.episode_id
         max_steps = self._max_steps(role)
-        ctx.token = self.fence.issue(
-            sm.MotionToken(
-                run_id=self.config.run_id,
-                transaction_id=found.prepared.transaction_id,
-                control_epoch=found.prepared.control_epoch,
-                kind="policy_steps",
-                episode_id=ctx.episode_id,
-                policy_epoch=ctx.policy_epoch,
-                expires_mono_ns=self._now()
-                + (max_steps + 10) * self.config.control_period_ns * 4,
+        if self.intervention is not None:
+            self._issue_intervention_motion(ctx, found)
+        else:
+            ctx.token = self.fence.issue(
+                sm.MotionToken(
+                    run_id=self.config.run_id,
+                    transaction_id=found.prepared.transaction_id,
+                    control_epoch=found.prepared.control_epoch,
+                    kind="policy_steps",
+                    episode_id=ctx.episode_id,
+                    policy_epoch=ctx.policy_epoch,
+                    expires_mono_ns=self._now()
+                    + (max_steps + 10) * self.config.control_period_ns * 4,
+                )
             )
-        )
         self._drive(ctx)
 
     def _preceding(self) -> dict:
@@ -1394,7 +1469,343 @@ class Orchestrator:
             else self.config.reset_max_steps
         )
 
+    def _issue_intervention_motion(self, ctx, found):
+        # Registration and issuing share the small stop-registry lock. A stop
+        # cannot revoke a token and then have this thread restore authorization.
+        with self._stop_lock:
+            if self._stops or self.intervention.failed:
+                raise InterventionStopped("stop before new motion token")
+            ctx.token = self.fence.issue(
+                sm.MotionToken(
+                    run_id=self.config.run_id,
+                    transaction_id=found.prepared.transaction_id,
+                    control_epoch=found.prepared.control_epoch,
+                    kind="policy_steps",
+                    episode_id=ctx.episode_id,
+                    policy_epoch=ctx.policy_epoch,
+                    expires_mono_ns=self._now()
+                    + (self._max_steps(ctx.role) - ctx.steps_done + 10)
+                    * self.config.control_period_ns
+                    * 4,
+                )
+            )
+
+    def _intervention_interrupted(self):
+        return (
+            self._operator() is not None
+            or self.robot.latch_state()
+            or self.robot.health()["state"] == "red"
+        )
+
+    def _intervention_stop(self, ctx):
+        """No backend waits on the emergency path; ownership remains latched."""
+        self.fence.revoke()
+        self.intervention.interrupt()
+        self.robot.hold()
+        if self.robot.latch_state() or self.robot.health()["state"] == "red":
+            self._fault("safety_stop", guard=True)
+        else:
+            self._fault("judgement_unproven")
+
+    def _collect_intervention(self, provider, ticket, deadline_ns):
+        if isinstance(ticket, bytes | bytearray):
+            return bytes(ticket)
+        try:
+            while self._now() < deadline_ns:
+                if self._intervention_interrupted():
+                    raise InterventionStopped("stop/guard during inference")
+                raw = provider.collect(
+                    ticket, timeout_ns=min(HUMAN_SLICE_NS, deadline_ns - self._now())
+                )
+                if raw is not None:
+                    return raw
+            raise InterventionUnproven("inference timed out")
+        except BaseException:
+            provider.cancel(ticket, "intervention_ended")
+            raise
+
+    def _pause_intervention(self, ctx):
+        old_epoch = ctx.policy_epoch
+        self.policy_epoch += 1
+        ctx.policy_epoch = self.policy_epoch
+        deadline = self._now() + self.config.judge_request_timeout_ns
+        proof = {}
+
+        def act(_):
+            self.robot.hold()
+            found = self.intervention.pause(
+                ctx.episode_id, old_epoch, ctx.policy_epoch, deadline_ns=deadline
+            )
+            from dataclasses import asdict
+
+            proof.update(asdict(found))
+            record = {
+                "request_id": f"{ctx.episode_id}:hold{ctx.policy_epoch}",
+                "run_id": self.config.run_id,
+                "episode_id": ctx.episode_id,
+                "target": "inference_hold",
+                "proof": proof,
+            }
+            if self.evidence is None or self.evidence.write(record) is None:
+                raise InterventionUnproven("physical hold proof was not retained")
+            return "yes", "policy_adapter", "inference_paused"
+
+        self._tx(
+            f"{ctx.role.upper()}_JUDGING",
+            "inference_paused",
+            kind="policy_quiesce",
+            act=act,
+            ctx=ctx,
+        )
+        return proof["observed_from_ns"]
+
+    def _resume_intervention(self, ctx):
+        # Snapshot again AFTER VLM has exited and its backend barrier passed.
+        before = self._now()
+        obs = self.robot.observe()
+        if (
+            type(obs.get("observed_ns")) is not int
+            or not before <= obs["observed_ns"] <= self._now()
+        ):
+            raise InterventionUnproven("fresh post-judge observation required")
+        self.recorder.stage(ctx.rollout, obs)
+        self.policy_epoch += 1
+        ctx.policy_epoch = self.policy_epoch
+
+        def act(_):
+            if self._intervention_interrupted():
+                raise InterventionStopped("stop before resume")
+            if (
+                self.intervention.hooks.resume_admission(
+                    ctx.episode_id, ctx.policy_epoch, obs
+                )
+                is not True
+            ):
+                raise InterventionUnproven("fresh policy admission unproven")
+            handle = self.policy.acquire(ctx.role, policy_epoch=ctx.policy_epoch)
+            if handle.get("kind") == "unavailable":
+                raise InterventionUnproven("policy reacquire unavailable")
+            return "yes", "policy_adapter", "inference_resumed"
+
+        found = self._tx(
+            f"{ctx.role.upper()}_ACTIVE",
+            "inference_resumed",
+            kind="policy_steps",
+            act=act,
+            ctx=ctx,
+            step=ctx.steps_done,
+        )
+        self._issue_intervention_motion(ctx, found)
+
+    def _judge_intervention(self, ctx, want, *, final=False):
+        hold_since = self._pause_intervention(ctx)
+        obs = self.robot.observe()
+        self.recorder.stage(ctx.rollout, obs)
+        request_id = want["request_id"]
+        if final:
+            ctx.arbiter.outstanding[request_id] = None
+        else:
+            ctx.arbiter.issued(request_id, ctx.last_step)
+        request = ev.make_request(
+            run_id=self.config.run_id,
+            episode_id=ctx.episode_id,
+            episode_role=ctx.role,
+            target="forward_goal" if ctx.role == "forward" else "reset_goal",
+            observed_through_ns=obs["observed_ns"],
+            **want,
+        )
+        if self.intervention.hooks.prepare_evidence(request, obs) is not True:
+            raise InterventionUnproven(
+                "paused current-frame event evidence binding unproven"
+            )
+        deadline = self._now() + (
+            self.config.final_judge_timeout_ns
+            if final
+            else self.config.judge_request_timeout_ns
+        )
+        raw = self.intervention.invoke(
+            "judge",
+            ctx.episode_id,
+            ctx.policy_epoch,
+            deadline_ns=deadline,
+            hold_since_ns=hold_since,
+            call=lambda: self._collect_intervention(
+                self.verifier, self.verifier.submit(request), deadline
+            ),
+            interrupted=self._intervention_interrupted,
+        )
+        # Parse only AFTER actual backend/worker barrier. Never publish raw SDK completion.
+        if self._intervention_interrupted():
+            raise InterventionStopped("stop before publishing judgement")
+        message = ctx.arbiter.accept(
+            raw,
+            now_ns=self._now(),
+            clock_domain=self.clock.domain,
+            specs=self._specs,
+            expected=request_id,
+        )
+        if not hasattr(message, "decision") or message.decision == "unknown":
+            raise InterventionUnproven("unknown/unavailable/stale judgement")
+        if (
+            message.observed_from_step > want["observed_from_step"]
+            or message.observed_through_step < want["observed_through_step"]
+            or message.observed_through_ns < obs["observed_ns"]
+        ):
+            raise InterventionUnproven("judgement does not cover paused fresh evidence")
+        if (
+            not final
+            and ctx.arbiter.outstanding[request_id].event_id in ctx.arbiter.retracted
+        ):
+            raise InterventionUnproven("candidate was retracted")
+        ctx.arbiter.withdraw(request_id)
+        ctx.judgement_ids.append(message.judgement_id)
+        if (
+            self.evidence is None
+            or self.evidence.write(
+                {
+                    "request_id": request_id,
+                    "run_id": self.config.run_id,
+                    "episode_id": ctx.episode_id,
+                    "target": "paused_judgement",
+                    "policy_epoch": ctx.policy_epoch,
+                    "judgement": message.model_dump(mode="json", by_alias=True),
+                }
+            )
+            is None
+        ):
+            raise InterventionUnproven("paused judgement evidence not retained")
+        return message
+
+    def _seal_intervention(self, ctx, reason, message):
+        if self._intervention_interrupted():
+            raise InterventionStopped("stop before sealing judgement")
+        sealed = {}
+        verification = verification_of(message)
+
+        def result():
+            return {
+                "task_outcome": aeri.OUTCOME_OF_VERIFICATION[verification],
+                "stop_reason": reason,
+                "goal_verification": verification,
+                "robot_home": "not_attempted",
+                "scene_reset": "unknown",
+                "label_kind": "autonomous_verdict",
+                "judgement_ids": ctx.judgement_ids[-64:],
+                "rollout": {
+                    "task_folder": self.config.forward_folder
+                    if ctx.role == "forward"
+                    else self.config.reset_folder,
+                    "demo": f"demo_{ctx.number:04d}",
+                    "sealed": sealed.get("sealed", "incomplete"),
+                },
+            }
+
+        found = self._tx(
+            "WAIT_HUMAN",
+            reason,
+            kind="recorder_seal" if ctx.steps_done else "recorder_abort",
+            act=self._seal(ctx, sealed)
+            if ctx.steps_done
+            else self._discard(ctx, sealed),
+            ctx=ctx,
+            result=result,
+            evidence=ctx.judgement_ids[-64:],
+        )
+        if found.executed != "yes":
+            self._fault("recorder_failed")
+            return
+        if ctx.role == "forward" and ctx.steps_done:
+            self.completed_forward += 1
+        self._close_episode()
+        self.ctx = None
+
+    def _drive_intervention(self, ctx):
+        cfg = self.config
+        ctx.arbiter = TerminationArbiter(
+            cfg.termination,
+            run_id=cfg.run_id,
+            episode_id=ctx.episode_id,
+            role=ctx.role,
+            target="forward_goal" if ctx.role == "forward" else "reset_goal",
+        )
+        buffer = []
+        last_frames, stalled = None, 0
+        try:
+            while ctx.steps_done < self._max_steps(ctx.role):
+                ctx.last_step = ctx.steps_done
+                if self._intervention_interrupted():
+                    raise InterventionStopped("stop before next action")
+                obs = self.robot.observe()
+                frames = tuple(sorted(obs["frames"].items()))
+                stalled = stalled + 1 if frames == last_frames else 0
+                last_frames = frames
+                if stalled >= cfg.camera_stall_limit:
+                    raise InterventionUnproven("camera evidence unavailable")
+                self.recorder.stage(ctx.rollout, obs)
+                for raw in self.events.poll(
+                    ctx.stream, through_step=ctx.last_step, max_events=16
+                ):
+                    for note in ctx.arbiter.on_event(raw):
+                        self._note(note.code, note.detail)
+                        if note.code == "contract_violation":
+                            raise InterventionUnproven("event contract invalid")
+                want = ctx.arbiter.want_request(ctx.last_step)
+                if want is not None:
+                    buffer.clear()  # never restore a chunk from before the pause
+                    message = self._judge_intervention(ctx, want)
+                    if message.decision == "confirmed":
+                        self._seal_intervention(ctx, "goal_verified", message)
+                        return
+                    self._resume_intervention(ctx)
+                    last_frames, stalled = None, 0
+                    continue  # observe/stage again before asking for a NEW chunk
+                if not buffer:
+                    buffer = self._chunk(ctx, ctx.last_step, ctx.steps_done)
+                    if not buffer:
+                        raise InterventionUnproven(
+                            "policy chunk unavailable; no motion retry"
+                        )
+                if self._intervention_interrupted():
+                    raise InterventionStopped("stop after policy inference")
+                result = self.robot.step(buffer.pop(0), token=ctx.token)
+                if result.executed != "yes":
+                    raise InterventionUnproven(
+                        "motion acknowledgement unproven; no retry"
+                    )
+                ctx.steps_done += 1  # waits and refused/unknown motions never count
+                self.recorder.commit(ctx.rollout, result)
+                self.clock.advance(cfg.control_period_ns)
+            buffer.clear()
+            ctx.last_step = max(0, ctx.steps_done - 1)
+            message = self._judge_intervention(
+                ctx,
+                {
+                    "request_id": f"{ctx.episode_id}:final",
+                    "observed_from_step": 0,
+                    "observed_through_step": ctx.last_step,
+                    "event_ids": [],
+                },
+                final=True,
+            )
+            reason = (
+                "goal_verified"
+                if message.decision == "confirmed"
+                else (
+                    "horizon_exhausted"
+                    if ctx.role == "forward"
+                    else "reset_horizon_exhausted"
+                )
+            )
+            self._seal_intervention(ctx, reason, message)
+        except InterventionUnproven as exc:
+            buffer.clear()
+            self._note("intervention_unproven", str(exc))
+            self._intervention_stop(ctx)
+
     def _drive(self, ctx: Episode) -> None:
+        if self.intervention is not None:
+            self._drive_intervention(ctx)
+            return
         cfg = self.config
         target = "forward_goal" if ctx.role == "forward" else "reset_goal"
         arbiter = TerminationArbiter(
@@ -1555,6 +1966,22 @@ class Orchestrator:
     # --- chunks --------------------------------------------------------------------------
 
     def _chunk(self, ctx: Episode, step: int, start: int):
+        if self.intervention is not None:
+            return self.intervention.invoke(
+                ctx.role,
+                ctx.episode_id,
+                ctx.policy_epoch,
+                deadline_ns=self._now() + self.config.chunk_timeout_ns,
+                call=lambda: self._chunk_once(ctx, step, start),
+                interrupted=lambda: (
+                    self._operator() is not None
+                    or self.robot.latch_state()
+                    or self.robot.health()["state"] == "red"
+                ),
+            )
+        return self._chunk_once(ctx, step, start)
+
+    def _chunk_once(self, ctx: Episode, step: int, start: int):
         cfg = self.config
         request_id = f"{ctx.episode_id}:c{ctx.chunks}"
         ctx.chunks += 1

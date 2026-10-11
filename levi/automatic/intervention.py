@@ -1,0 +1,238 @@
+"""Injected event-pause coordination over the EXISTING runtime authority.
+
+No scheduler, hardware observer or backend implementation lives here. Real FR3
+factories do not supply these hooks and therefore cannot enable this mode.
+"""
+
+import hashlib
+import json
+import threading
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
+
+from levi.domain import aeri
+
+
+class InterventionUnproven(ValueError):
+    """Permission is unknown: keep ownership and never retry motion."""
+
+
+class InterventionStopped(InterventionUnproven):
+    pass
+
+
+def hold_contract_sha256(config):
+    return hashlib.sha256(
+        json.dumps(asdict(config), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+@dataclass(frozen=True)
+class PhysicalHoldProof:
+    run_id: str
+    episode_id: str
+    policy_epoch: int
+    plan_sha256: str
+    condition_sha256: str
+    clock_domain: str
+    observed_from_ns: int
+    observed_through_ns: int
+    expires_ns: int
+    admission_closed: bool | None
+    no_new_commands: bool | None
+    physically_stable: bool | None
+
+
+@dataclass(frozen=True)
+class InterventionHooks:
+    # Trusted observers must come from owned real backends, never HTTP/client_done.
+    stop_admission: Callable
+    resume_admission: Callable
+    observe_hold: Callable
+    observe_runtime: Callable
+    role_window: Callable
+    stop_proof: Callable
+    prepare_evidence: Callable
+
+
+class InferenceCycle:
+    """Only a wrapper around RuntimeOwnership's single request slot.
+
+    begin/finish are the original role authority. Proof failure retains its slot;
+    cancellation revokes results without waiting for a model lock or a drainer.
+    The caller journals epoch changes and supplies fresh observation after resume.
+    """
+
+    def __init__(
+        self, *, authority, runtime, hooks, clock, run_id, plan_sha256, condition_sha256
+    ):
+        if (
+            not isinstance(hooks, InterventionHooks)
+            or any(
+                not callable(getattr(hooks, name))
+                for name in hooks.__dataclass_fields__
+            )
+            or any(
+                not callable(getattr(authority, name, None))
+                for name in ("begin_role_request", "finish_request", "revoke_request")
+            )
+        ):
+            raise InterventionUnproven(
+                "owned runtime role authority and trusted proof hooks required"
+            )
+        self.authority, self.runtime, self.hooks = authority, runtime, hooks
+        self.clock, self.run_id, self.plan_sha256 = clock, run_id, plan_sha256
+        self.condition_sha256 = condition_sha256
+        self.hold_conditions = None
+        self.authorization_epoch = 0
+        self._request = None
+        self._lock = threading.Lock()  # token bookkeeping only; never held across I/O
+        self.failed = False
+
+    def validate(self, config, clock):
+        if (
+            self.run_id != config.run_id
+            or self.plan_sha256 != config.plan_sha256
+            or self.clock is not clock
+            or self.condition_sha256
+            != hold_contract_sha256(config.termination.physical_hold)
+            or self.failed
+        ):
+            raise InterventionUnproven("cycle differs from frozen run/hold contract")
+        self.hold_conditions = config.termination.physical_hold
+
+    def interrupt(self):
+        """Immediate result revocation; never calls a backend/drainer."""
+        self.failed = True
+        with self._lock:
+            request = self._request
+        if request is not None:
+            try:
+                self.authority.revoke_request(request, now_ns=self.clock.now())
+            except ValueError:
+                pass  # a completed barrier already cleared the request
+
+    def hold(self, episode_id, policy_epoch, *, since_ns, deadline_ns):
+        proof = self.hooks.observe_hold(episode_id, policy_epoch, deadline_ns)
+        now = self.clock.now()
+        if not isinstance(proof, PhysicalHoldProof) or not (
+            proof.run_id == self.run_id
+            and proof.episode_id == episode_id
+            and proof.policy_epoch == policy_epoch
+            and proof.plan_sha256 == self.plan_sha256
+            and proof.condition_sha256 == self.condition_sha256
+            and proof.clock_domain == self.clock.domain
+            and type(proof.observed_from_ns) is int
+            and type(proof.observed_through_ns) is int
+            and type(proof.expires_ns) is int
+            and self.hold_conditions is not None
+            and proof.observed_through_ns - proof.observed_from_ns
+            >= self.hold_conditions.stable_window_ns
+            and since_ns
+            <= proof.observed_from_ns
+            <= proof.observed_through_ns
+            <= now
+            < proof.expires_ns
+            <= deadline_ns
+            and proof.admission_closed is True
+            and proof.no_new_commands is True
+            and proof.physically_stable is True
+        ):
+            self.failed = True
+            raise InterventionUnproven("independent fresh physical hold proof required")
+        return proof
+
+    def pause(self, episode_id, old_epoch, new_epoch, *, deadline_ns):
+        began = self.clock.now()
+        if type(new_epoch) is not int or new_epoch <= old_epoch:
+            raise InterventionUnproven("pause must advance policy epoch")
+        if self.hooks.stop_admission(episode_id, old_epoch, new_epoch) is not True:
+            self.failed = True
+            raise InterventionUnproven("policy admission/old buffer fence unproven")
+        return self.hold(episode_id, new_epoch, since_ns=began, deadline_ns=deadline_ns)
+
+    def invoke(
+        self,
+        role,
+        episode_id,
+        policy_epoch,
+        *,
+        deadline_ns,
+        call,
+        interrupted,
+        hold_since_ns=None,
+    ):
+        if self.failed or interrupted():
+            raise InterventionStopped("execution already stopped or proof failed")
+        now = self.clock.now()
+        if role == "judge":
+            self.hold(
+                episode_id,
+                policy_epoch,
+                since_ns=hold_since_ns or now,
+                deadline_ns=deadline_ns,
+            )
+        self.authorization_epoch += 1
+        window = self.hooks.role_window(
+            role, episode_id, policy_epoch, self.authorization_epoch, deadline_ns
+        )
+        observation = self.hooks.observe_runtime()
+        deadline = aeri.Deadline(
+            due_ns=deadline_ns,
+            clock_domain=self.clock.domain,
+            budget_ms=max(1, (deadline_ns - now) // 1_000_000),
+            hardness="hard",
+        )
+        try:
+            request = self.authority.begin_role_request(
+                self.runtime,
+                role,
+                deadline,
+                observation,
+                window,
+                episode_id=episode_id,
+                policy_epoch=policy_epoch,
+                now_ns=self.clock.now(),
+            )
+        except Exception as exc:
+            self.failed = True
+            raise InterventionUnproven(
+                "owned all-backend idle role grant unproven"
+            ) from exc
+        with self._lock:
+            self._request = request
+        try:
+            if self.failed or interrupted():
+                raise InterventionStopped("stopped after role grant")
+            result = call()
+            if self.failed or interrupted():
+                raise InterventionStopped("stopped during request")
+            proof = self.hooks.stop_proof(request, deadline_ns)
+            permitted = self.authority.finish_request(
+                request, proof, self.hooks.observe_runtime(), now_ns=self.clock.now()
+            )
+            if permitted is not True or self.clock.now() >= deadline_ns:
+                raise InterventionUnproven("late/revoked completion cannot publish")
+            if role == "judge":
+                self.hold(
+                    episode_id,
+                    policy_epoch,
+                    since_ns=hold_since_ns or now,
+                    deadline_ns=deadline_ns,
+                )
+            if self.failed or interrupted():
+                raise InterventionStopped("stopped before publication")
+            with self._lock:
+                self._request = None
+            return result
+        except BaseException as exc:
+            self.failed = True
+            try:
+                self.authority.revoke_request(request, now_ns=self.clock.now())
+            except ValueError:
+                pass  # finish already cleared its slot; failed still prevents resume
+            if isinstance(exc, Exception) and not isinstance(exc, InterventionUnproven):
+                raise InterventionUnproven(
+                    "request/backend completion proof failed"
+                ) from exc
+            raise

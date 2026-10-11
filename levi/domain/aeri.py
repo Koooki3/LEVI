@@ -201,11 +201,13 @@ AERI_STATES = (
     "PREFLIGHT",
     "VERIFY_INITIAL",
     "FORWARD_ACTIVE",
+    "FORWARD_JUDGING",
     "FORWARD_STOPPING",
     "FORWARD_FINALIZE",
     "ROBOT_HOME",
     "SCENE_ASSESS",
     "RESET_ACTIVE",
+    "RESET_JUDGING",
     "RESET_VERIFY",
     "RESET_FINALIZE",
     "WAIT_HUMAN",
@@ -216,14 +218,19 @@ AERI_STATES = (
 # that faults from one of them still gets a result (task_outcome unknown).
 EPISODE_STATES = (
     "FORWARD_ACTIVE",
+    "FORWARD_JUDGING",
     "FORWARD_STOPPING",
     "FORWARD_FINALIZE",
     "RESET_ACTIVE",
+    "RESET_JUDGING",
     "RESET_VERIFY",
     "RESET_FINALIZE",
 )
 RECORDS = ("run_header", "prepared", "acknowledged", "committed", "aborted", "note")
 TRANSITION_REASONS = (
+    "inference_paused",
+    "inference_resumed",
+    "judgement_unproven",
     "goal_verified",
     "horizon_exhausted",
     "operator_stop",
@@ -1166,6 +1173,10 @@ class RunEvent(Envelope):
             )
             if record != "committed" or not (
                 transition == ("FORWARD_FINALIZE", "ROBOT_HOME")
+                or (
+                    self.from_state in ("FORWARD_JUDGING", "RESET_JUDGING")
+                    and self.to_state == "WAIT_HUMAN"
+                )
                 or self.from_state == "RESET_FINALIZE"
                 or faulted
             ):
@@ -1329,6 +1340,8 @@ class JobTermination(Part):
     writes it (a key left out keeps the default there; the field list is
     pinned to that class by a test)."""
 
+    inference_mode: Literal["legacy_async", "event_pause_judge"] | None = None
+    physical_hold: JobResetSettle | None = None
     allow_early_stop: bool | None = None
     min_steps: StepCount | None = None
     settle_steps: StepCount | None = None

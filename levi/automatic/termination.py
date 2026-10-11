@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 
 from levi.domain import aeri
 
+from .reset_manager import SettleConfig, StrategyError
+
 ON_UNKNOWN = ("continue_to_horizon",)
 
 
@@ -39,6 +41,8 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class TerminationConfig:
+    inference_mode: str = "legacy_async"
+    physical_hold: SettleConfig | dict | None = None
     allow_early_stop: bool = True
     # No request before this step (the policy needs time to act at all).
     min_steps: int = 10
@@ -59,6 +63,33 @@ class TerminationConfig:
     violation_limit: int = 3
 
     def __post_init__(self):
+        if isinstance(self.physical_hold, dict):
+            try:
+                object.__setattr__(
+                    self, "physical_hold", SettleConfig(**self.physical_hold)
+                )
+            except (TypeError, StrategyError) as exc:
+                raise ConfigError(str(exc)) from None
+        if self.physical_hold is not None and not isinstance(
+            self.physical_hold, SettleConfig
+        ):
+            raise ConfigError(
+                "physical_hold must freeze explicit physical stability conditions"
+            )
+        if self.inference_mode == "event_pause_judge" and self.physical_hold is None:
+            raise ConfigError(
+                "event_pause_judge needs explicit frozen physical_hold conditions"
+            )
+        if self.inference_mode not in ("legacy_async", "event_pause_judge"):
+            raise ConfigError(
+                "inference_mode must be legacy_async or event_pause_judge"
+            )
+        if self.inference_mode == "event_pause_judge" and self.confirmations != 1:
+            raise ConfigError("event_pause_judge requires one independent confirmation")
+        if self.inference_mode == "event_pause_judge" and (
+            self.control_fraction != 0 or not self.allow_early_stop
+        ):
+            raise ConfigError("event_pause_judge needs early stop and no control group")
         ints = (
             "min_steps",
             "settle_steps",

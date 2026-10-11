@@ -486,6 +486,22 @@
           "default": null,
           "title": "Goal Event Types"
         },
+        "inference_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "legacy_async",
+                "event_pause_judge"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inference Mode"
+        },
         "max_requests": {
           "anyOf": [
             {
@@ -526,6 +542,17 @@
           ],
           "default": null,
           "title": "On Unknown"
+        },
+        "physical_hold": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JobResetSettle"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "settle_steps": {
           "anyOf": [

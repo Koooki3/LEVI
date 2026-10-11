@@ -69,6 +69,10 @@ class RobotLock:
 
 
 def load_binding(path, job):
+    if job["config"].termination.inference_mode == "event_pause_judge":
+        raise ValueError(
+            "event_pause_judge has no owned FR3 policy/barrier/physical-hold/evidence binding; real execution refused"
+        )
     data = Path(path).read_bytes()
     if len(data) > 64 * 1024:
         raise ValueError("binding exceeds 64 KiB")
