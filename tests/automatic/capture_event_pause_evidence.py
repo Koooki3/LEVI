@@ -54,6 +54,7 @@ def main():
             "tests/automatic/test_event_pause_orchestrator_runtime.py",
             "tests/automatic/test_event_pause_judge.py",
             "tests/automatic/test_inference_request_callback.py",
+            "tests/automatic/test_inference_completion_adapter.py",
             "tests/automatic/aeri_harness.py",
             "tests/automatic/test_aeri_state_machine.py",
             "tests/automatic/test_aeri_termination.py",

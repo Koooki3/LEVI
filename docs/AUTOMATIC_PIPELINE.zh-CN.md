@@ -795,3 +795,5 @@ reset 的静默交接仍依赖经审核的 Performance Architecture 集成。真
 保持采样把目标节奏安排在冻结的最大采样间隔内，给时钟、关闭观察器、测量和睡眠开销留出余量。实际采样起点和测量时间戳的间隔仍必须分别满足原上限；截止时间、完整稳定窗口、任意两采样的容差及最多1000次观测均严格保留。内部节奏使用精确整数运算，让长窗口能够在有界采样数内覆盖；不保证任意慢I/O或没有证明开销余量的窗口都能成功。`SettleConfig` 接受的配置仍可能不可达：采样间隔1 ms、稳定窗口及最长等待999.5 ms时，1000次观测最多只有999个间隔，只能覆盖999 ms。本观察器明确拒绝这一边界，不修改冻结字段或计划摘要。真实FR3入口继续拒绝。
 
 `InferenceCycle.invoke` 必须显式提供且仅提供一个执行入口：兼容的无参数 `call()`，或 `request_call(request)`。forward、reset和judge角色在入口缺失、重复或不可调用时，均在模型授权前拒绝。原 `RuntimeOwnership.begin_role_request` 授权后，`request_call` 收到它直接返回的那个 `RequestToken` 对象，包含角色、片段和策略代次；回调只能借用该请求，不能再次begin或finish。Cycle仍独自负责begin、停止证明和finish。回调异常（包括 `TypeError`）沿原不可逆闭锁撤销结果发布，保留尚无真实停止证明的原请求槽，不做签名猜测或重试。这个接口为已审查owned worker的CPU请求分发准备接线，不安装SDK worker、transport或真实FR3绑定；真实入口继续关闭。
+
+可选的显式 `completion_adapter(request, returned_completion)` 只能与 `request_call` 同时使用，非法组合在授权前拒绝。它必须返回冻结的 `CompletionEvidence(request, result, stop_proof, observation)`，收据及停止证明均绑定本轮授权的原请求对象。Cycle独自把证明交给原权限内核，最终核对租约、角色、完整组、时钟及新鲜空闲观测后才发布结果。不提供适配器时保留原证明hook。回调或适配器异常沿原闭锁保留已撤销的请求槽，不接受tuple、bool、隐式识别或失败回退。SDK ACK来源由注入的借用执行器检查，不能从HTTP或客户端结束推断。

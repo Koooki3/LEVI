@@ -45,6 +45,16 @@ class PhysicalHoldProof:
 
 
 @dataclass(frozen=True)
+class CompletionEvidence:
+    """Explicit receipt; the original authority alone validates stop and idle."""
+
+    request: object
+    result: object
+    stop_proof: object
+    observation: object
+
+
+@dataclass(frozen=True)
 class InterventionHooks:
     # Trusted observers must come from owned real backends, never HTTP/client_done.
     stop_admission: Callable
@@ -187,6 +197,7 @@ class InferenceCycle:
         deadline_ns,
         call=None,
         request_call=None,
+        completion_adapter=None,
         interrupted,
         hold_since_ns=None,
     ):
@@ -197,6 +208,12 @@ class InferenceCycle:
             ):
                 raise InterventionUnproven(
                     "exactly one callable execution entry required"
+                )
+            if completion_adapter is not None and (
+                request_call is None or not callable(completion_adapter)
+            ):
+                raise InterventionUnproven(
+                    "completion adapter requires the explicit request callback"
                 )
             if interrupted():
                 raise InterventionStopped("execution already stopped")
@@ -238,9 +255,28 @@ class InferenceCycle:
             result = call() if request_call is None else request_call(request)
             if self.failed or interrupted():
                 raise InterventionStopped("stopped during request")
-            proof = self.hooks.stop_proof(request, deadline_ns)
+            if completion_adapter is None:
+                proof = self.hooks.stop_proof(request, deadline_ns)
+                observation = self.hooks.observe_runtime()
+            else:
+                evidence = completion_adapter(request, result)
+                if (
+                    not isinstance(evidence, CompletionEvidence)
+                    or evidence.request is not request
+                    or evidence.stop_proof.request is not request
+                ):
+                    raise InterventionUnproven(
+                        "completion evidence must bind the exact original request"
+                    )
+                proof, observation, result = (
+                    evidence.stop_proof,
+                    evidence.observation,
+                    evidence.result,
+                )
+            if self.failed or interrupted():
+                raise InterventionStopped("stopped during completion proof")
             permitted = self.authority.finish_request(
-                request, proof, self.hooks.observe_runtime(), now_ns=self.clock.now()
+                request, proof, observation, now_ns=self.clock.now()
             )
             if permitted is not True or self.clock.now() >= deadline_ns:
                 raise InterventionUnproven("late/revoked completion cannot publish")
