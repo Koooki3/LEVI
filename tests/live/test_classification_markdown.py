@@ -3,9 +3,31 @@
 import json
 
 import pytest
+from test_result_index import change_state, configured, write_header
 
 from levi.live import cli, report, stats, statsfmt
 from levi.live.config import Config
+
+
+def classification_workspace(tmp_path, labels):
+    previous, args = configured(tmp_path)
+    config = Config()
+    config.service.workspace = str(previous.workspace)
+    config.service.home = str(tmp_path / "home")
+    config.watch.roots = previous.watch.roots
+    demos = {}
+    source = args["rollout_root"] / "model-a/task-a"
+    for n, (person, _) in enumerate(labels):
+        demo = f"demo_{n:04d}"
+        write_header(source, demo, "run-a")
+        demos[demo] = {
+            "state": "done",
+            "run_id": "run-a",
+            "episode_index": n,
+            "operator_label": {"outcome": person},
+        }
+    change_state(args, lambda state: state.update(demos=demos))
+    return config
 
 
 @pytest.mark.parametrize(
@@ -25,9 +47,6 @@ from levi.live.config import Config
 def test_formal_cli_displays_existing_binary_metrics(
     tmp_path, monkeypatch, capsys, lang, heading, precision, success, failure, pairs
 ):
-    config = Config()
-    config.service.workspace = str(tmp_path / "ws")
-    config.service.home = str(tmp_path / "home")
     labels = [
         ("success", "success"),
         ("success", "failure"),
@@ -36,14 +55,15 @@ def test_formal_cli_displays_existing_binary_metrics(
         ("success", "undecided"),
         ("failure", None),
     ]
+    config = classification_workspace(tmp_path, labels)
     for n, (person, predicted) in enumerate(labels):
         stats.record(
             config.live_dir,
             {
                 "schema": stats.SCHEMA,
-                "dataset": "model__task",
-                "demo": f"demo_{n}",
-                "session": "s1",
+                "dataset": "dataset-a",
+                "demo": f"demo_{n:04d}",
+                "session": "run-a",
                 "at": 100.0 + n,
                 "operator_label": {"outcome": person},
                 "result": {
@@ -56,7 +76,7 @@ def test_formal_cli_displays_existing_binary_metrics(
                 },
             },
         )
-    monkeypatch.setattr(cli, "resolve_config", lambda args: config)
+    monkeypatch.setattr(cli, "resolve_config", lambda args, **_kwargs: config)
     args = cli.build_parser().parse_args(["report", "--format", "md", "--lang", lang])
     assert cli.cmd_report(args) == 0
     md = capsys.readouterr().out
@@ -90,29 +110,27 @@ def test_empty_or_legacy_classification_preserves_previous_report():
 def test_formal_cli_keeps_three_digit_noninteger_ratios(
     tmp_path, monkeypatch, capsys, lang
 ):
-    config = Config()
-    config.service.workspace = str(tmp_path / "ws")
-    config.service.home = str(tmp_path / "home")
     labels = (
         [("success", "success")]
         + [("success", "failure")] * 2
         + [("failure", "success")] * 2
         + [("failure", "failure")] * 4
     )
+    config = classification_workspace(tmp_path, labels)
     for n, (person, predicted) in enumerate(labels):
         stats.record(
             config.live_dir,
             {
                 "schema": stats.SCHEMA,
-                "dataset": "model__task",
-                "demo": f"demo_{n}",
-                "session": "s1",
+                "dataset": "dataset-a",
+                "demo": f"demo_{n:04d}",
+                "session": "run-a",
                 "at": 100.0 + n,
                 "operator_label": {"outcome": person},
                 "result": {"state": "done", "verdict": {"outcome": predicted}},
             },
         )
-    monkeypatch.setattr(cli, "resolve_config", lambda args: config)
+    monkeypatch.setattr(cli, "resolve_config", lambda args, **_kwargs: config)
     args = cli.build_parser().parse_args(["report", "--format", "md", "--lang", lang])
     assert cli.cmd_report(args) == 0
     md = capsys.readouterr().out

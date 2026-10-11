@@ -202,6 +202,11 @@ def test_the_route_answers_the_summary_and_writes_nothing(
 ):
     c = workspace(tmp_path)
     c = _client(client, c, monkeypatch) and c
+    # The analysis record must describe the current canonical operator label.
+    state_path = c.live_dir / "datasets/g__t.json"
+    state = json.loads(state_path.read_text())
+    state["demos"]["demo_0000"]["operator_label"] = operator("failure")
+    state_path.write_text(json.dumps(state))
     analysis.append(
         c.live_dir,
         record(
