@@ -542,8 +542,8 @@ def _analysis_record_current(record, row):
     )
 
 
-def _records(snapshot, live_dir):
-    key = ("records", live_dir)
+def _analysis_rows(snapshot, live_dir):
+    key = ("analysis_rows", live_dir)
     if key in snapshot.parsed:
         return snapshot.parsed[key]
     raw = snapshot.read(live_dir / analysis.FILE, optional=True)
@@ -561,7 +561,16 @@ def _records(snapshot, live_dir):
             if snapshot.truncated:
                 break
             continue
-    snapshot.parsed[key] = analysis.latest(rows)
+    snapshot.parsed[key] = rows
+    return rows
+
+
+def _records(snapshot, live_dir, *, since=None):
+    key = ("records", live_dir, since)
+    if key not in snapshot.parsed:
+        snapshot.parsed[key] = analysis.latest(
+            analysis.select(_analysis_rows(snapshot, live_dir), since)
+        )
     return snapshot.parsed[key]
 
 
@@ -1497,7 +1506,7 @@ def legacy_sources(
     states = _states(config, snapshot)
     snapshot.pin(config.live_dir)
     if kind == "analysis":
-        rows = _records(snapshot, config.live_dir)
+        rows = _records(snapshot, config.live_dir, since=analysis.parse_since(since))
         sources = {"records": rows, "states": states}
         selected = [
             r

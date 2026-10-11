@@ -91,6 +91,23 @@ def _reject(constant):
     raise ValueError(constant)
 
 
+def parse_since(since):
+    """The existing analysis scope's ISO/epoch lower bound."""
+    since_s = sessions.parse_time(since)
+    if since is not None and since != "" and since_s is None:
+        raise ValueError("since is an ISO time or epoch seconds")
+    return since_s
+
+
+def select(rows, since=None) -> list:
+    """Select normalized records before applying last-line-wins deduplication."""
+    return [
+        row
+        for row in rows
+        if since is None or (row["labelled_at"] or row["at"] or 0) >= since
+    ]
+
+
 def read(live_dir, since=None) -> list:
     """Every readable record in file order (damaged, torn and foreign-schema
     lines skipped). ``since``: epoch seconds, drops older ``labelled_at``."""
@@ -110,10 +127,8 @@ def read(live_dir, since=None) -> list:
         row = normalize(value)
         if row is None:
             continue
-        if since is not None and (row["labelled_at"] or row["at"] or 0) < since:
-            continue
         rows.append(row)
-    return rows
+    return select(rows, since)
 
 
 def normalize(value):
@@ -752,9 +767,7 @@ def build(
     """The summary of a live workspace, read-only: ``analysis.jsonl`` for the
     records, the dataset state files for what is missing. Episodes a person
     removed, and datasets that were archived, are left out."""
-    since_s = sessions.parse_time(since)
-    if since is not None and since != "" and since_s is None:
-        raise ValueError("since is an ISO time or epoch seconds")
+    since_s = parse_since(since)
     live_dir = Path(config.live_dir)
     states = (
         mirror.list_states(config)
@@ -771,11 +784,7 @@ def build(
     source_rows = (
         read(live_dir, since=since_s)
         if sources is None
-        else [
-            r
-            for r in sources["records"]
-            if since_s is None or (r["labelled_at"] or r["at"] or 0) >= since_s
-        ]
+        else select(sources["records"], since_s)
     )
     rows = [
         r

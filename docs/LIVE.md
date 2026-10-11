@@ -1043,3 +1043,5 @@ including the API configuration-byte limit and parsed-node budget. A configurati
 or pointer changed before output invalidates the result; parse errors do not
 print configuration values. Other CLI commands keep their existing configuration
 loader.
+
+CLI and API analysis validate the selected records against the current episode index, committed time and operator, background and online labels. The `since` lower bound uses `labelled_at`, falling back to `at` and then zero; it is inclusive and applies before selecting the last record per episode. Current source visibility is still checked when the window selects no records.
