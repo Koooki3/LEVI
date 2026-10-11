@@ -130,7 +130,7 @@ def _usable_live_workspace(named) -> str | None:
     return str(candidate)
 
 
-def remembered_workspace(home) -> str | None:
+def remembered_workspace(home, *, loader=None) -> str | None:
     """The workspace the last ``levi live start`` with ``home`` ran on, when it
     is still a live workspace (and not a product workspace, ``locate``):
     commands given neither ``--workspace`` nor a configuration act on that
@@ -140,7 +140,7 @@ def remembered_workspace(home) -> str | None:
     back to the status file, but only for a workspace that a ``start`` has
     used (``started_here``). The product LEVI's ``/live`` page reads the same
     records the same way (``locate.find``)."""
-    named, legacy = locate.remembered(home)
+    named, legacy = locate.remembered(home, loader=loader)
     found = _usable_live_workspace(named)
     if found and legacy and not started_here(found):
         return None
@@ -176,14 +176,44 @@ def started_workspaces(home) -> list:
     return found
 
 
-def resolve_config(args):
+def _pinned_report_config(path, workspace, snapshot):
+    """The API's bounded TOML decode/from_dict contract, with CLI path selection."""
+    import tomllib
+
+    from . import result_index
+
+    source = None
+    if path is not None:
+        source = Path(path).expanduser()
+    elif workspace is not None:
+        source = Path(workspace).expanduser() / "live.toml"
+    raw = (
+        snapshot.read(
+            source, optional=path is None, max_bytes=result_index.MAX_CONFIG_BYTES
+        )
+        if source is not None
+        else None
+    )
+    data = snapshot.admit(tomllib.loads(raw.decode("utf-8"))) if raw is not None else {}
+    config = live_config.from_dict(data, str(source) if raw is not None else None)
+    if workspace is not None:
+        config.service.workspace = str(Path(workspace).expanduser().resolve())
+    return config
+
+
+def resolve_config(args, *, loader=None):
     workspace = args.workspace or os.environ.get(ENV_WORKSPACE)
     path = args.config or os.environ.get(ENV_CONFIG)
     if not workspace and not path:
         workspace = remembered_workspace(
-            args.home or os.environ.get(ENV_HOME) or live_config.DEFAULT_HOME
+            args.home or os.environ.get(ENV_HOME) or live_config.DEFAULT_HOME,
+            loader=loader,
         )
-    config = live_config.load(path, workspace)
+    config = (
+        live_config.load(path, workspace)
+        if loader is None
+        else _pinned_report_config(path, workspace, loader)
+    )
     if args.roots:
         config.watch.roots = list(args.roots)
     if args.gpu_mode:
@@ -1345,13 +1375,24 @@ def cmd_exclude(args) -> int:
     return 0
 
 
-def _report_sources(config, **scope):
+def _report_config(args):
+    from . import result_index
+
+    snapshot = result_index._Snapshot()
+    try:
+        config = resolve_config(args, loader=snapshot)
+    except (OSError, ValueError):
+        # TOML contents and external paths never become error output.
+        raise ValueError("result refused: result_source_config_unavailable") from None
+    return config, snapshot
+
+
+def _report_sources(config, snapshot, **scope):
     """Use the API's bounded canonical-source authorization without any writes."""
     from fastapi import HTTPException
 
     from . import result_index
 
-    snapshot = result_index._Snapshot()
     try:
         sources = result_index.legacy_sources(config, snapshot, **scope)
     except HTTPException as exc:
@@ -1377,10 +1418,13 @@ def cmd_report(args) -> int:
     since, before, timezone = report_scope.window(
         args.since, getattr(args, "before", None), getattr(args, "timezone", "UTC")
     )
-    config = resolve_config(argparse.Namespace(**{**vars(args), "since": None}))
+    config, snapshot = _report_config(
+        argparse.Namespace(**{**vars(args), "since": None})
+    )
     dataset, session = args.dataset, args.session
     snapshot, sources = _report_sources(
         config,
+        snapshot,
         kind="stats",
         dataset=dataset,
         session=session,
@@ -1438,7 +1482,7 @@ def cmd_analysis(args) -> int:
     share that snapshot. The service need not be running."""
     # ``--since`` here is the analysis window, not the backlog cutoff of
     # ``add_config_options``: resolve the configuration without it.
-    config = resolve_config(
+    config, snapshot = _report_config(
         argparse.Namespace(
             config=args.config,
             workspace=args.workspace,
@@ -1461,7 +1505,12 @@ def cmd_analysis(args) -> int:
             "to read existing records"
         )
     snapshot, sources = _report_sources(
-        config, kind="analysis", group=args.group, task=args.task, since=args.since
+        config,
+        snapshot,
+        kind="analysis",
+        group=args.group,
+        task=args.task,
+        since=args.since,
     )
     found = analysis.build(
         config,

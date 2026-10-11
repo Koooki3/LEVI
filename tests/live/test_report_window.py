@@ -75,7 +75,7 @@ def test_report_since_reaches_real_statistics_not_backlog(
     config.watch.since = "original backlog cutoff"
     seen = []
 
-    def resolve(args):
+    def resolve(args, **_kwargs):
         seen.append(args.since)
         return config
 
@@ -108,7 +108,7 @@ def test_cutoff_is_exclusive_and_timezone_is_explicit(
     tmp_path, monkeypatch, capsys, flag, fmt
 ):
     config = synthetic(tmp_path)
-    monkeypatch.setattr(cli, "resolve_config", lambda args: config)
+    monkeypatch.setattr(cli, "resolve_config", lambda args, **_kwargs: config)
     args = cli.build_parser().parse_args(
         [
             "report",

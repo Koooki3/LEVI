@@ -1037,3 +1037,9 @@ retains its existing internal/background behavior.
 has not yet joined the pinned source closure. This is a temporary compatibility
 limitation; source verification must happen before any future synchronization,
 and a fresh verified snapshot must follow it before results can be published.
+
+CLI configuration TOML and remembered-workspace pointers use that same snapshot,
+including the API configuration-byte limit and parsed-node budget. A configuration
+or pointer changed before output invalidates the result; parse errors do not
+print configuration values. Other CLI commands keep their existing configuration
+loader.

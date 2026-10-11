@@ -32,7 +32,7 @@ def fixture(tmp_path, monkeypatch):
             "result": {"state": "done"},
         },
     )
-    monkeypatch.setattr(cli, "resolve_config", lambda args: cfg)
+    monkeypatch.setattr(cli, "resolve_config", lambda args, **_kwargs: cfg)
     return cfg, args
 
 
