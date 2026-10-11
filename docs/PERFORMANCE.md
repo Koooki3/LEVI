@@ -490,3 +490,8 @@ Unbound native/third-party imports are refused. No complete real SDK/native
 closure or owned SDK child bootstrap has been installed, so the real entry
 remains closed. Tiny CPU package tests measure only the binding software;
 complete real-package manifest cost and worker provenance remain unmeasured.
+
+Frozen module imports now share one resolver for static, relative, fromlist and
+normal dynamic imports, including cached modules. Per-bundle importlib/builtins
+facades validate returned dependencies; unbound low-level dynamic loader APIs
+are refused. Standard-library origin alone does not approve returned third-party modules.

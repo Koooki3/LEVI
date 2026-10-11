@@ -359,3 +359,7 @@ factory 执行前及 SDK idle ACK 前后，真实包解析路径、loader 与实
 `build(device=..., sdk=...)`。未绑定的 native/第三方导入拒绝。实际完整
 SDK/native 闭包和 owned SDK 子进程 bootstrap 尚未安装，真实入口保持关闭。
 仅测量小 CPU 包的绑定软件；完整真实包清单成本及 worker 来源尚未测量。
+
+冻结模块的静态、相对、fromlist 与普通动态导入现在使用同一 resolver，
+包括缓存命中。每个 bundle 的 importlib/builtins facade 核实返回依赖；
+未绑定的低层动态加载 API 拒绝。标准库来源可信不代表其返回第三方模块已获准。

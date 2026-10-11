@@ -222,6 +222,7 @@ class FrozenTorchFactory:
                 raise ValueError(
                     "factory entrypoint is outside its frozen execution module"
                 )
+            bundle.require_loaded()
             return factory
         except BaseException:
             bundle.close()

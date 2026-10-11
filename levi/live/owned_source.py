@@ -125,6 +125,7 @@ class FrozenSourceBundle(importlib.abc.MetaPathFinder):
             raise ValueError("complete unique frozen source manifest required")
         self.allowed_bundles = tuple(allowed_bundles)
         self.sources = {}
+        self._facades = {}
         self._installed = False
         for name, expected in hashes:
             pieces = name.split(".")
@@ -152,22 +153,110 @@ class FrozenSourceBundle(importlib.abc.MetaPathFinder):
             or any(name in bundle.sources for bundle in self.allowed_bundles)
         )
 
+    def _validate_name(self, name):
+        if not self._allowed(name):
+            raise ImportError("factory dependency is outside the frozen closure")
+        for end in range(1, len(name.split(".")) + 1):
+            parent = ".".join(name.split(".")[:end])
+            if parent.split(".", 1)[0] in sys.stdlib_module_names:
+                _stdlib_spec(parent)
+            elif parent in sys.modules:
+                self._validate_module(sys.modules[parent])
+
+    def _validate_module(self, module):
+        name = getattr(module, "__name__", "")
+        if not self._allowed(name):
+            raise ImportError("imported module is outside the frozen closure")
+        if module is not sys.modules.get(name) and module is not self._facades.get(
+            name
+        ):
+            raise ImportError("import returned a noncanonical cached module")
+        if name.split(".", 1)[0] in sys.stdlib_module_names:
+            _stdlib_spec(name)
+        else:
+            bundle = next(
+                bundle
+                for bundle in (self, *self.allowed_bundles)
+                if name in bundle.sources
+            )
+            if bundle.require_module(name) is not module:
+                raise ImportError("imported module is outside its frozen loader")
+
+    def _validate_value(self, value):
+        if isinstance(value, types.ModuleType):
+            self._validate_module(value)
+        elif isinstance(value, types.FunctionType):
+            name = value.__module__
+            self._validate_name(name)
+            if name.split(".", 1)[0] not in sys.stdlib_module_names:
+                bundle = next(
+                    bundle
+                    for bundle in (self, *self.allowed_bundles)
+                    if name in bundle.sources
+                )
+                bundle.require_function(value)
+
+    def resolve_import(self, name, package=None):
+        absolute = (
+            importlib.util.resolve_name(name, package) if name.startswith(".") else name
+        )
+        if absolute.startswith("importlib."):
+            raise ImportError("low-level dynamic import helpers are not supported")
+        self._validate_name(absolute)  # include cached sys.modules hits
+        module = importlib.import_module(absolute)
+        self._validate_module(module)
+        return self._facade(module)
+
+    def _facade(self, module):
+        name = module.__name__
+        if name not in ("importlib", "builtins"):
+            return module
+        if name not in self._facades:
+            proxy = types.ModuleType(name)
+            for attr in (
+                "__spec__",
+                "__loader__",
+                "__file__",
+                "__package__",
+                "__path__",
+            ):
+                if hasattr(module, attr):
+                    setattr(proxy, attr, getattr(module, attr))
+            if name == "importlib":
+                proxy.import_module = self.resolve_import
+                # Low-level loaders/reload could bypass cached dependency
+                # validation. They are explicitly unsupported in this contract.
+            else:
+                proxy.__dict__.update(vars(module))
+                proxy.__import__ = self.checked_import
+            self._facades[name] = proxy
+        return self._facades[name]
+
     def checked_import(self, name, globals=None, locals=None, fromlist=(), level=0):
         absolute = (
             importlib.util.resolve_name(
-                "." * level + name, globals.get("__package__", "")
+                "." * level + name, (globals or {}).get("__package__", "")
             )
             if level
             else name
         )
-        if not self._allowed(absolute):
-            raise ImportError("factory dependency is outside the frozen closure")
-        if absolute.split(".", 1)[0] in sys.stdlib_module_names:
-            _stdlib_spec(absolute)
-        for bundle in (self, *self.allowed_bundles):
-            if absolute in bundle.sources and absolute in sys.modules:
-                bundle.require_module(absolute)
-        return builtins.__import__(name, globals, locals, fromlist, level)
+        if absolute.startswith("importlib."):
+            raise ImportError("low-level dynamic import helpers are not supported")
+        self._validate_name(absolute)
+        result = builtins.__import__(name, globals, locals, fromlist, level)
+        self._validate_module(result)
+        if fromlist:
+            names = fromlist
+            if "*" in names:
+                names = getattr(
+                    result,
+                    "__all__",
+                    tuple(n for n in vars(result) if not n.startswith("_")),
+                )
+            for attr in names:
+                if hasattr(result, attr):
+                    self._validate_value(getattr(result, attr))
+        return self._facade(result)
 
     def install(self):
         if self._installed:

@@ -168,3 +168,78 @@ def test_factory_without_explicit_frozen_source_root_stays_closed():
         replace(
             FrozenTorchFactory("closed_factory", "build", "ab" * 32, "unused", "cuda:0")
         ).reviewed_factory()
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "import importlib; return importlib.import_module('unreviewed_dependency').VALUE",
+        "from importlib import import_module; return import_module('unreviewed_dependency').VALUE",
+        "import builtins; return builtins.__import__('unreviewed_dependency').VALUE",
+    ],
+)
+def test_cached_dynamic_import_cannot_escape_frozen_closure(
+    tmp_path, monkeypatch, frozen_paths, statement
+):
+    source = tmp_path / "closed_factory.py"
+    source.write_text("def build(device=None, sdk=None): " + statement + "\n")
+    unsafe = ModuleType("unreviewed_dependency")
+    unsafe.VALUE = "unfrozen"
+    monkeypatch.setitem(sys.modules, "unreviewed_dependency", unsafe)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    build = factory(tmp_path).reviewed_factory()
+    with pytest.raises(ImportError, match="outside the frozen closure"):
+        build()
+
+
+def test_runtime_cached_fromlist_module_is_not_an_approved_parent_attribute(
+    tmp_path, monkeypatch, frozen_paths
+):
+    from levi.live.owned_source import FrozenSourceBundle
+
+    package = tmp_path / "closed_factory"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    source = package / "model.py"
+    source.write_text(
+        "from closed_factory import unlisted\ndef build(): return unlisted.VALUE\n"
+    )
+    hashes = (
+        ("closed_factory", hashlib.sha256(b"").hexdigest()),
+        ("closed_factory.model", hashlib.sha256(source.read_bytes()).hexdigest()),
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    bundle = FrozenSourceBundle(tmp_path, hashes).install()
+    parent = bundle.import_module("closed_factory")
+    unsafe = ModuleType("closed_factory.unlisted")
+    unsafe.VALUE = "unfrozen"
+    monkeypatch.setitem(sys.modules, unsafe.__name__, unsafe)
+    parent.unlisted = unsafe
+    with pytest.raises(ImportError, match="outside the frozen closure"):
+        bundle.import_module("closed_factory.model")
+
+
+def test_relative_dynamic_import_can_load_manifested_dependency(
+    tmp_path, monkeypatch, frozen_paths
+):
+    package = tmp_path / "closed_factory"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "helper.py").write_text("VALUE = 'frozen'\n")
+    (package / "model.py").write_text(
+        "import importlib\ndef build(device=None, sdk=None):\n"
+        "    return importlib.import_module('.helper', __package__).VALUE\n"
+    )
+    hashes = tuple(
+        (name, hashlib.sha256(path.read_bytes()).hexdigest())
+        for name, path in (
+            ("closed_factory", package / "__init__.py"),
+            ("closed_factory.helper", package / "helper.py"),
+            ("closed_factory.model", package / "model.py"),
+        )
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    assert (
+        factory(tmp_path, "closed_factory.model", hashes).reviewed_factory()()
+        == "frozen"
+    )
