@@ -15,7 +15,7 @@ import pytest
 from test_live_exclude import audit_lines, mirror_only
 from test_live_pipeline import NAME, Env
 
-from levi.live import api, cli, exclusion, jsonio, locate, stats
+from levi.live import api, cli, exclusion, jsonio, locate, mirror, stats
 
 UI = {"x-levi-ui-token": "test-ui-token"}
 AGENT = {"Authorization": "Bearer test-scoped-token"}
@@ -173,7 +173,13 @@ def test_no_path_or_secret_in_a_refusal(client, product, tmp_path):
 def test_every_read_route_answers_from_the_live_workspace(client, env, product):
     e = env()
     ws, home = product
-    mirror_only(e, 0, 1)
+    # Bind source headers before mirroring so the recorded file signatures
+    # remain valid; these demos still remain pending labelling.
+    for number in (0, 1):
+        e.rollouts.write(number, run_id="s1")
+    e.rollouts.session("running", run_id="s1")
+    scan = next(t for t in mirror.Scanner(e.config).scan() if t.name == NAME)
+    mirror.mirror_dataset(e.config, e.state(), scan.ready)
     jsonio.write(
         e.ws / "outputs/LEVI/workbench/datasets.json",
         {NAME: {"id": "local/the-live-one", "name": NAME}},
@@ -200,11 +206,21 @@ def test_every_read_route_answers_from_the_live_workspace(client, env, product):
     sessions = client.get("/api/levi/live/sessions").json()
     assert sessions["enabled"] is True and "fr3" in sessions
     assert client.get("/api/levi/live/audit").json() == {"enabled": True, "audit": []}
-    body = client.get("/api/levi/live/stats").json()
+    response = client.get("/api/levi/live/stats")
+    assert response.status_code == 200, response.text
+    body = response.json()
     assert body["enabled"] is True
+    assert body["source_identities"][0]["run_id"] == "s1"
     export = client.get("/api/levi/live/stats/export?format=csv")
     assert export.status_code == 200
     assert snapshot(ws) == before
+
+    # Missing canonical session identity closes both quantitative routes.
+    (e.rollouts.root / ".eval_sessions" / f"{NAME}.json").unlink()
+    for path in ("stats", "stats/export?format=csv"):
+        refused = client.get(f"/api/levi/live/{path}")
+        assert refused.status_code == 409
+        assert refused.json()["detail"]["reason"] == "statistics_source_unknown"
 
 
 def test_the_live_page_link_is_given_only_when_the_service_runs_one(
