@@ -581,3 +581,12 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 `GET /api/levi/automatic/campaigns/<id>/cards` 为每个待确认片段返回 `candidate_cards`，含其所属段的全部卡位；保存时也按该段校验。`POST .../cards` 接受 `decision: confirm | no_card | withdraw`：确认必须带卡号，无卡和撤回必须带 null。明确无卡会跨重启保留、离开待确认，并且不进入成对分析；撤回会重新待确认。兼容旧客户端与旧日志：没有显式 decision 的 null 仍表示撤回。
 
 上述保证用合成文件与假件验证，不表示真机人工验收完成。
+
+向导 campaign 快照包含 `live_session`，也可通过
+`GET /api/levi/automatic/campaigns/{id}/live-session?segment=N` 获取。状态为
+`waiting`、`linked`、`ended`、`ambiguous`、`mismatch` 或 `unavailable`；唯一匹配时
+包含现有公开 `session` 对象。关联先要求已完成片段精确证明 campaign、段号和组代码，
+再核对数据根、组、任务目录、运行及会话身份、完整策略路径、配置、任务指令、双标签模式
+和本段开始时间。不采用最新会话猜测；多个当前匹配明确报告歧义。公开对象不含内部完整
+检查点路径，`dataset` 暂为 null，由实时服务解析镜像。该关联已用合成 I/O 测试覆盖，
+尚未进行真机验证。

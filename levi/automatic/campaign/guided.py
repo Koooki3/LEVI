@@ -540,6 +540,7 @@ def collect_segment(
     *,
     confirmations: dict | None = None,
     posthoc: dict | None = None,
+    expected_code: str | None = None,
 ) -> dict:
     """The legacy client's episodes of one segment and what is still to be
     confirmed: ``runs`` (run ids, first run first), ``facts`` (per run),
@@ -565,6 +566,9 @@ def collect_segment(
                 ignored.append({"key": record.key, "reason": "unreadable note"})
             continue
         if parsed[0] != layout.campaign_id or parsed[1] != segment:
+            continue
+        if expected_code is not None and parsed[2] != expected_code:
+            ignored.append({"key": record.key, "reason": "wrong arm code"})
             continue
         if ev.get("label_mode") != "dual":
             ignored.append({"key": record.key, "reason": "not a dual-label run"})

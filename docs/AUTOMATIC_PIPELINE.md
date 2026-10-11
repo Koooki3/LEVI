@@ -1498,3 +1498,15 @@ Wizard job policies record `deployment.checkpoint_id`, `deployment.config`, and 
 `GET /api/levi/automatic/campaigns/<id>/cards` includes `candidate_cards` for each pending episode, containing every layout card in that episode's segment. Confirmation is checked against that segment. `POST .../cards` accepts `decision: confirm | no_card | withdraw`: `confirm` requires a card; `no_card` and `withdraw` require null. An explicit `no_card` survives a restart, leaves the pending list and never enters paired analysis. Withdrawing reopens confirmation. For old clients and old logs, null without an explicit decision continues to mean withdrawal.
 
 These guarantees are verified with synthetic files and fake I/O. They are not a real-robot acceptance result.
+
+The guided campaign snapshot includes `live_session`, also available from
+`GET /api/levi/automatic/campaigns/{id}/live-session?segment=N`. Its status is
+`waiting`, `linked`, `ended`, `ambiguous`, `mismatch` or `unavailable`; a unique
+match includes the existing public `session` object. Matching first requires a
+completed rollout with the exact campaign, segment and arm code, then compares
+root, group, task folder, run/session identity, full policy path, config, task
+instruction, dual-label mode and the segment start boundary. No newest-session
+fallback is used. Multiple current matches remain ambiguous. The public object
+omits the private checkpoint path and sets `dataset` to null until the live
+service resolves its mirror. This association is covered by synthetic I/O tests;
+it has not been verified on hardware.

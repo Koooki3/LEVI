@@ -143,3 +143,23 @@ def test_cards_api_lists_all_segment_cards_and_distinguishes_no_card(world):
     )
     assert withdraw.status_code == 200
     assert world.client.get(f"{URL}/{cid}/cards").json()["pending"][0]["key"] == keys[0]
+
+
+def test_live_session_endpoint_and_snapshot_share_exact_association(world, monkeypatch):
+    from levi.automatic.campaign import api
+
+    cid, _plan = started(world)
+    calls = []
+
+    def associate(plan, folder, root, segment, **kw):
+        calls.append((plan["campaign_id"], root, segment, kw))
+        return {"status": "waiting", "segment": segment}
+
+    monkeypatch.setattr(api.LS, "associate", associate)
+    snap = world.snapshot(cid)
+    result = world.client.get(f"{URL}/{cid}/live-session?segment=1")
+    assert result.status_code == 200
+    assert result.json() == {"status": "waiting", "segment": 1}
+    assert snap["live_session"]["status"] == "waiting"
+    assert calls[-1][3]["prompt"] == "stack the plates"
+    assert world.client.get(f"{URL}/{cid}/live-session?segment=999").status_code == 404

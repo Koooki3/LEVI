@@ -649,6 +649,7 @@ def collect(plan: dict, folder, root: str, segment: int) -> dict:
         layout,
         segment,
         confirmations=cards.latest(),
+        expected_code=arm_codes(plan)[arm],
     )
 
 

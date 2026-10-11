@@ -48,7 +48,7 @@ import time
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import Field
 
 from levi.automatic import api as base
@@ -58,6 +58,7 @@ from . import adapters as A
 from . import controller as C
 from . import guided as G
 from . import ledger as L
+from . import live_session as LS
 from . import report as R
 from . import schedule as sched
 from . import spec
@@ -589,6 +590,7 @@ def snapshot_of(c: _Campaign, *, light: bool = False) -> dict:
         "safety": _safety(c),
         "blinded": blinded,
         "controller": {"alive": c.alive},
+        "live_session": _live_session(c, segment),
         "wait_reason": c.replay.wait_reason
         if c.state in ("WAIT_HUMAN", "FAULT_LOCKED", "PAUSED")
         else None,
@@ -599,6 +601,39 @@ def snapshot_of(c: _Campaign, *, light: bool = False) -> dict:
     if launched is not None and c.host == "dry_run":
         value["child_run_id"] = launched.run_id
     return value
+
+
+def _live_session(c, segment):
+    if c.host != "guided" or c.plan is None:
+        return {"status": "unavailable", "segment": segment}
+    times = [
+        e.emitted_wall_ns / 1e9
+        for e in c.events
+        if e.record == "committed" and e.segment == segment
+    ]
+    return LS.associate(
+        c.plan,
+        c.folder,
+        c.host_record.get("rollout_root"),
+        segment,
+        prompt=C.shared_task(c.plan, C.job_folder(c.id, aeri_home())),
+        not_before=min(times) if times else None,
+    )
+
+
+@router.get("/{campaign_id}/live-session")
+def campaign_live_session(
+    campaign_id: str, segment: int | None = Query(None, ge=1, le=100_000)
+):
+    c = _locate(campaign_id)
+    segment = segment or c.replay.segment or 0
+    if (
+        c.plan
+        and segment
+        and not any(s["index"] == segment for s in c.plan["schedule"]["segments"])
+    ):
+        raise _fail(404, "segment_unknown", "No such segment in this campaign")
+    return _live_session(c, segment)
 
 
 @router.get("")
