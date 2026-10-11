@@ -54,3 +54,14 @@ export function isLinkedRefusal(message: string | null | undefined): boolean {
 export function writeFailure(message: string, own: string): string {
   return isLinkedRefusal(message) ? LINKED_READ_ONLY : own;
 }
+
+/** Only an explicit server capability enables writes; old servers stay safe. */
+export function isLinkedReadOnly(
+  repoId: string | null | undefined,
+  entry?: Pick<CatalogEntry, "linked"> | null,
+): boolean {
+  return isLinkedDataset(repoId, entry) && entry?.linked?.readonly !== false;
+}
+
+export const LINKED_SHARED_NOTICE =
+  "Edits, reviews and Value results are saved in this live dataset’s shared workspace. Original rollout files remain unchanged.";

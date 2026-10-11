@@ -3697,5 +3697,7 @@
   "The frozen plan needs a confirmed Initial State Contract.": "The frozen plan needs a confirmed Initial State Contract.",
   "The frozen plan needs the forward policy deployment identity.": "The frozen plan needs the forward policy deployment identity.",
   "The frozen plan needs the reset policy deployment identity.": "The frozen plan needs the reset policy deployment identity.",
-  "Shadow mode does not authorize robot motion.": "Shadow mode does not authorize robot motion."
+  "Shadow mode does not authorize robot motion.": "Shadow mode does not authorize robot motion.",
+  "Live evaluation · shared workspace": "Live evaluation · shared workspace",
+  "Edits, reviews and Value results are saved in this live dataset’s shared workspace. Original rollout files remain unchanged.": "Edits, reviews and Value results are saved in this live dataset’s shared workspace. Original rollout files remain unchanged."
 }

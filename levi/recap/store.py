@@ -61,7 +61,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-from .. import catalog, naming
+from .. import catalog, links, naming
 from . import signature as _signature
 
 SCHEMA = "levi.recap_value.revision.v1"
@@ -112,7 +112,11 @@ class MergeRefused(ValueError):
 def root(name: str) -> Path:
     if not name or "/" in name or name in {".", ".."}:
         raise ValueError("Invalid dataset name")
-    return catalog.STATE / "recap_values" / name
+    state, source = links.target(name, catalog.STATE)
+    folder = state / "recap_values" / source
+    if not folder.resolve().is_relative_to(state.resolve()):
+        raise ValueError("RECAP results must remain inside derived state")
+    return folder
 
 
 def layout() -> str:
@@ -182,26 +186,27 @@ def locked(name: str):
     """Serialises publication for one dataset across threads and LEVI
     processes sharing the workspace. Re-entrant within a thread (an flock
     taken twice by one process through two handles would deadlock)."""
+    folder = root(name)
+    key = str(folder.resolve())
     with _GUARD:
-        thread_lock = _THREAD_LOCKS.setdefault(name, threading.RLock())
+        thread_lock = _THREAD_LOCKS.setdefault(key, threading.RLock())
     with thread_lock:
         held = _HELD.__dict__.setdefault("depth", {})
-        if held.get(name):
-            held[name] += 1
+        if held.get(key):
+            held[key] += 1
             try:
                 yield
             finally:
-                held[name] -= 1
+                held[key] -= 1
             return
-        folder = root(name)
         folder.mkdir(parents=True, exist_ok=True)
         with (folder / ".lock").open("a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
-            held[name] = 1
+            held[key] = 1
             try:
                 yield
             finally:
-                held[name] = 0
+                held[key] = 0
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
 
@@ -514,7 +519,7 @@ def _publish_revision(
     record = {
         "schema": SCHEMA,
         "revision_id": rid,
-        "dataset": name,
+        "dataset": links.source_name(name),
         **meta,
         "episodes": len(episodes),
         "episode_indices": sorted(int(e) for e in episodes),
@@ -669,7 +674,7 @@ def publish_model(
             sources.setdefault((row.get("version"), row.get("job_id")), []).append(ep)
         record = {
             "schema": RESULT_SCHEMA,
-            "dataset": name,
+            "dataset": links.source_name(name),
             **meta,
             "static_filter": _merged_filter(meta.get("static_filter"), ordered),
             # Which computation each episode comes from.

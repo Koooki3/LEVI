@@ -490,18 +490,14 @@ def dataset_file(slug: str, path: str):
 
 @app.get("/api/levi/review")
 def get_review(repo_id: str):
-    from .agent.store import Store
 
-    if links.is_linked(display_name(repo_id, None)):
-        # A linked (live workspace) dataset has no review of this LEVI's own.
-        empty = {"repo_id": repo_id, "flagged": [], "notes": ""}
-        return JSONResponse(empty, headers={"X-LEVI-Annotation-Revision": "linked"})
+    home, key = links.target(display_name(repo_id, None), STATE)
     response = JSONResponse(
         read(review_path(repo_id), {"repo_id": repo_id, "flagged": [], "notes": ""})
     )
-    response.headers["X-LEVI-Annotation-Revision"] = Store(STATE).head(
-        display_name(repo_id, None)
-    )
+    from .agent.store import ReadStore
+
+    response.headers["X-LEVI-Annotation-Revision"] = ReadStore(home).head(key)
     return response
 
 
@@ -512,11 +508,10 @@ def save_review(payload: Review):
 
     if any(ep < 0 for ep in payload.flagged):
         raise ValueError("Episode IDs must be non-negative")
-    name = display_name(payload.repo_id, None)
-    links.refuse_write(name)
+    home, name = links.target(display_name(payload.repo_id, None), STATE)
     with (
-        dataset_lock(STATE, name),
-        transaction(STATE, name, expected=expected_revision.get()) as revision,
+        dataset_lock(home, name),
+        transaction(home, name, expected=expected_revision.get()) as revision,
     ):
         value = {**payload.model_dump(), "repo_id": canonical_id(payload.repo_id)}
         value["flagged"] = sorted(set(value["flagged"]))

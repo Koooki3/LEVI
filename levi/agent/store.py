@@ -282,7 +282,9 @@ class Store:
         revisions = self.root / "datasets" / dataset / "revisions"
         if revisions.is_dir():
             existing |= {p.name for p in revisions.iterdir()}
-        stamp = new_id({name.split("-", 1)[-1] for name in existing})
+        stamp = new_id(
+            {re.sub(r"^[A-Za-z][\w-]*-(?=\d{8}T)", "", name) for name in existing}
+        )
         revision = f"{kind}-{stamp}" if kind else stamp
         target = self.bundle(dataset, revision)
         previous = self.head(dataset)

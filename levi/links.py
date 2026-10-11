@@ -1,42 +1,15 @@
-"""Read-only links to the live service's workspace.
+"""Link live datasets to their canonical derived workbench without copying.
 
-The live service keeps its own workspace (``levi/live/locate.py``): the
-mirrored rollouts (``captures/<name>``), the browsing views LEVI builds from
-them and the annotations, outcome labels and automatic verdicts written for
-them all live there, never in the workspace a person works in. Every path of
-this LEVI is confined to its own workspace (``levi/paths.py``), so its "Local
-datasets" could neither list nor open them.
-
-A link makes the live workspace's datasets readable here without copying them
-and without the live service running (it is normally stopped between
-evaluations, so its HTTP interface cannot be the way in):
-
-- ``entries()``: the live catalog's datasets as read-only entries named
-  ``live.<name>`` with a ``linked`` field. They are computed when asked and
-  never written into this LEVI's catalog, so they cannot be mistaken for, or
-  overwrite, a dataset of its own, and a dataset the live workspace drops
-  disappears here by itself (that is the sync: there is no copy to keep in
-  step).
-- ``inside(path)``: a path is readable when it lies inside a linked
-  workspace's ``captures/`` or ``outputs/LEVI/workbench/views/``. Nothing else
-  of the live workspace is opened as a file, and nothing here is writable:
-  every write path of this LEVI still confines to its own workspace and
-  refuses a linked dataset (``read_only``).
-- ``state_of(name)``: the live workspace's workbench state, where the
-  annotations, labels and the agent store of a linked dataset are read.
-
-Which workspaces are linked: the one this LEVI's live page shows
-(``levi/live/locate.py``), the ones the training pool remembers the page
-showed, and the absolute paths in ``LEVI_LINKED_WORKSPACES`` (comma
-separated). A candidate must be a live workspace that really contains its
-``live/`` marker and is neither this LEVI's own workspace nor any checkout's
-``.state``. Nothing here writes, and nothing reads a token or a key.
+Original captures and browsing views remain read-only. Annotation, review and
+Value operations use the registered source dataset key in its live workbench;
+the product keeps its own catalog and checkpoint/provider registry.
 """
 
 import hashlib
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -167,7 +140,13 @@ def links() -> dict[str, Link]:
     out: dict[str, Link] = {}
     for workspace in workspaces():
         for source, item in sorted(_catalog(workspace).items()):
-            if not isinstance(item, dict) or item.get("base"):
+            if (
+                not isinstance(source, str)
+                or not re.fullmatch(r"[A-Za-z0-9_.-]+", source)
+                or source in {".", ".."}
+                or not isinstance(item, dict)
+                or item.get("base")
+            ):
                 continue  # a namespace is another experiment of one dataset
             try:
                 state = json.loads(
@@ -187,7 +166,7 @@ def links() -> dict[str, Link]:
 
 
 def entries() -> dict[str, dict]:
-    """The linked datasets as catalog entries (read-only, never persisted)."""
+    """The linked datasets as catalog entries (never persisted here)."""
     out: dict[str, dict] = {}
     for name, link in links().items():
         item = dict(_catalog(link.workspace).get(link.source) or {})
@@ -211,7 +190,7 @@ def entries() -> dict[str, dict]:
                 "kind": "live",
                 "source": link.source,
                 "workspace": link.workspace.name,
-                "readonly": True,
+                "readonly": False,
                 **({"stale": True} if stale else {}),
             },
         )
@@ -245,6 +224,23 @@ def state_of(name: str | None) -> Path | None:
     None for a dataset of this LEVI's own."""
     link = get(name)
     return link.state if link else None
+
+
+def target(name: str, own: Path | None = None) -> tuple[Path, str]:
+    """Canonical derived state and dataset key; never mutate process globals.
+
+    Linked state must really remain in its registered workspace. An escaped
+    workbench symlink cannot turn a derived operation into a source write.
+    """
+    link = get(name)
+    if link is None:
+        return (Path(own) if own is not None else paths.STATE), name
+    state = _resolve(link.state)
+    if state is None or state != link.state or not state.is_relative_to(link.workspace):
+        raise ValueError("Linked derived state must remain inside its workspace")
+    if state.is_relative_to(link.workspace / "captures"):
+        raise ValueError("Linked derived state must not overlap source captures")
+    return state, link.source
 
 
 def source_name(name: str) -> str:
@@ -319,5 +315,30 @@ def refuse_path(path) -> None:
     if target is None:
         return
     for workspace in workspaces():
-        if target.is_relative_to(workspace):
-            raise ReadOnly(READ_ONLY)
+        if not target.is_relative_to(workspace):
+            continue
+        state = workspace / STATE
+        # Only registered datasets' derived annotation paths are writable.
+        # Resolving both sides also prevents symlink escapes into captures.
+        if state.resolve() == state and target.is_relative_to(state):
+            parts = target.relative_to(state).parts
+            sources = _catalog(workspace)
+            if (
+                len(parts) >= 2
+                and parts[0] in {"annotations", "object_annotations"}
+                and parts[1] in sources
+            ):
+                return
+            if (
+                len(parts) >= 3
+                and parts[:2] == ("agent", "datasets")
+                and parts[2] in sources
+            ):
+                return
+            if (
+                len(parts) == 2
+                and parts[0] == "reviews"
+                and parts[1].removesuffix(".json") in sources
+            ):
+                return
+        raise ReadOnly(READ_ONLY)

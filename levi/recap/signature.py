@@ -96,6 +96,7 @@ RESULT_IGNORED = frozenset(
         "dataset",
         "job_id",
         "repo_id",
+        "source",  # canonical workspace/dataset provenance, no numeric effect
         "request",
         "last_request",
         "dataset_type_source",  # how the type was chosen, not the type

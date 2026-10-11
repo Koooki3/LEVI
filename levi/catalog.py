@@ -333,6 +333,11 @@ def display_name(repo_id: str | None, local_path: str | None) -> str:
 
 
 def review_path(repo: str):
+    from . import links
     from .agent.store import resolve
 
-    return resolve(STATE, display_name(repo, None), "reviews")
+    home, key = links.target(display_name(repo, None), STATE)
+    from .agent.store import current_pin, resolve_readonly
+
+    resolver = resolve if current_pin(home, key) is not None else resolve_readonly
+    return resolver(home, key, "reviews")

@@ -96,36 +96,37 @@ def editor(*, read_only=False, internal=False):
                 **{k: fields.get(k) for k in ("repo_id", "revision", "local_path")}
             )
             state = app._ensure_state(ref)
-            home = links.state_of(state.display_slug)
-            if home is not None:
-                # A linked (live workspace) dataset: its annotations are read
-                # where they are kept; nothing is ever written there.
-                if not read_only:
-                    raise HTTPException(403, links.READ_ONLY)
-                response = fn(*args, **kwargs)
-                response.headers["X-LEVI-Annotation-Revision"] = ReadStore(home).head(
-                    links.source_name(state.display_slug)
+            home, dataset = links.target(state.display_slug, app.STATE)
+            if links.is_linked(state.display_slug) and read_only:
+                reader = ReadStore(home)
+                head = reader.head(dataset)
+                scope = (
+                    pin(home, dataset, reader.bundle(dataset, head))
+                    if head != "legacy"
+                    else nullcontext()
                 )
+                with scope:
+                    response = fn(*args, **kwargs)
+                response.headers["X-LEVI-Annotation-Revision"] = head
                 return response
-            store = Store(app.STATE)
-            head = store.head(state.display_slug)
+            store = Store(home)
+            head = store.head(dataset)
             expected = head if internal else expected_revision.get()
             try:
                 lock = (
                     nullcontext()
-                    if read_only
-                    or current_pin(app.STATE, state.display_slug) is not None
-                    else dataset_lock(app.STATE, state.display_slug)
+                    if read_only or current_pin(home, dataset) is not None
+                    else dataset_lock(home, dataset)
                 )
                 with lock:
                     with transaction(
-                        app.STATE,
-                        state.display_slug,
+                        home,
+                        dataset,
                         expected=expected,
                         read_only=read_only,
                     ) as revision:
                         response = fn(*args, **kwargs)
-                    observed = revision if read_only else store.head(state.display_slug)
+                    observed = revision if read_only else store.head(dataset)
                 response.headers["X-LEVI-Annotation-Revision"] = observed
                 return response
             except Conflict as exc:

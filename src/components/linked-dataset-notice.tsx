@@ -5,6 +5,7 @@ import { useLocale } from "@/components/levi-locale";
 import { useDatasetSource } from "@/context/dataset-source-context";
 import {
   LINKED_NOTICE,
+  LINKED_SHARED_NOTICE,
   LINKED_READ_ONLY,
   LINKED_REASON,
 } from "@/utils/linkedDataset";
@@ -14,7 +15,7 @@ import "@/components/viewer/viewer.css";
  * shown above everything the viewer offers: it is read-only here, and where
  * to label or review it. Nothing for any other dataset. */
 export function LinkedDatasetNotice() {
-  const { linked } = useDatasetSource();
+  const { linked, readOnly } = useDatasetSource();
   const { t } = useLocale();
   if (!linked) return null;
   return (
@@ -22,10 +23,14 @@ export function LinkedDatasetNotice() {
       <div className="vw-note-head">
         <Icon icon={Lock} />
         <Badge tone="info" icon={null}>
-          {t("Live evaluation · read-only")}
+          {t(
+            readOnly
+              ? "Live evaluation · read-only"
+              : "Live evaluation · shared workspace",
+          )}
         </Badge>
       </div>
-      <p>{t(LINKED_NOTICE)}</p>
+      <p>{t(readOnly ? LINKED_NOTICE : LINKED_SHARED_NOTICE)}</p>
     </div>
   );
 }
@@ -42,9 +47,9 @@ export function ReadOnlyReason({
    * reason. */
   full?: boolean;
 }) {
-  const { linked } = useDatasetSource();
+  const { readOnly } = useDatasetSource();
   const { t } = useLocale();
-  if (!linked) return null;
+  if (!readOnly) return null;
   return (
     <span id={id} className="vw-muted vw-readonly-reason">
       {t(full ? LINKED_READ_ONLY : LINKED_REASON)}

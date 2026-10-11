@@ -99,7 +99,7 @@ def test_the_live_datasets_are_listed_read_only_and_never_stored(client, live):
         "kind": "live",
         "source": NAME,
         "workspace": "livews",
-        "readonly": True,
+        "readonly": False,
     }
     assert found["linked"] == [{"kind": "live", "workspace": "livews", "datasets": 1}]
     assert client.get(f"/api/levi/catalog/{LINKED}").json()["revision"]
@@ -181,20 +181,7 @@ def test_nothing_is_ever_written_into_the_live_workspace(client, live):
 @pytest.mark.parametrize(
     "method, url, body",
     [
-        (
-            "post",
-            "/annotations/api/episodes/0/atoms",
-            {"episode_index": 0, "atoms": []},
-        ),
-        ("delete", "/annotations/api/episodes/0/atoms", None),
-        ("post", "/annotations/api/episodes/0/outcome", {"outcome": "failure"}),
-        ("post", "/annotations/api/episodes/0/status", {"status": "done"}),
-        ("post", "/annotations/api/dataset/vocabulary", {"vocabulary": []}),
         ("post", "/annotations/api/export", {}),
-        ("post", "/annotations/api/sam3/run", {"episode_indices": [0]}),
-        ("post", "/annotations/api/sam3/edits", {}),
-        ("post", "/annotations/api/recap/run", {}),
-        ("post", "/api/levi/review", {"flagged": [0]}),
         ("post", "/api/levi/manifest", {"operation": "all"}),
     ],
 )
@@ -369,9 +356,7 @@ def test_a_quality_inspection_of_a_live_dataset_reads_and_writes_only_here(
         {"Content-Type": "text/plain"},
     ],
 )
-@pytest.mark.parametrize(
-    "url", ["/annotations/api/export", "/annotations/api/sam3/plan"]
-)
+@pytest.mark.parametrize("url", ["/annotations/api/export"])
 def test_a_content_type_variant_does_not_get_a_write_past_the_guard(
     client, live, url, headers
 ):
@@ -388,20 +373,18 @@ def test_the_write_functions_themselves_refuse_a_live_dataset(client, live):
     repo = "local/" + LINKED
     state = backend._ensure_state(backend.DatasetRef(repo_id=repo))
     before = tree(live)
-    with pytest.raises(PermissionError):
-        backend._write_episode_annotations(state, 1, [])
-    with pytest.raises(PermissionError):
-        backend._delete_episode_annotations(state, 0)
-    with pytest.raises(PermissionError):
-        outcomes.write_label(state.annotations_dir, 1, "success")
-    with pytest.raises(PermissionError):
-        backend._sidecar(state).publish([])
-    with pytest.raises(PermissionError):
-        backend._sidecar(state).initialize()
+    backend._write_episode_annotations(state, 1, [])
+    outcomes.write_label(state.annotations_dir, 1, "success")
+    assert state.annotations_dir == live / links.STATE / "annotations" / NAME
+    assert outcomes.read_labels(state.annotations_dir)[1]["outcome"] == "success"
     with pytest.raises(PermissionError):
         links.refuse_path(live / "outputs/LEVI/workbench/annotations/x")
     links.refuse_path(live.parent / "elsewhere")  # not a linked workspace
-    assert tree(live) == before
+    assert tree(live / "captures") == {
+        k.removeprefix("captures/"): v
+        for k, v in before.items()
+        if k.startswith("captures/")
+    }
 
 
 def test_a_dataset_of_this_levis_own_named_live_x_is_not_shadowed(
@@ -474,3 +457,94 @@ def test_a_store_being_written_is_read_from_a_copy_and_left_as_it_is(client, liv
     after = sorted(p.name for p in (state / "agent").iterdir())
     assert ReadStore(state).head("d") == "r2"
     assert sorted(p.name for p in (state / "agent").iterdir()) == after
+
+
+def test_live_edits_share_source_revision_and_reject_stale_editor(client, live):
+    from levi.agent.store import Store
+
+    home = live / links.STATE
+    store = Store(home)
+    base, revision, _ = store.prepare(NAME)
+    store.publish(NAME, base, revision, "seed", "seed", {"revision": revision})
+    repo = "local/" + LINKED
+    observed = client.get("/annotations/api/episodes/0/atoms", params={"repo_id": repo})
+    assert observed.headers["X-LEVI-Annotation-Revision"] == revision
+    headers = {"X-LEVI-Annotation-Revision": revision}
+    payload = {"repo_id": repo, "outcome": "failure"}
+    written = client.post(
+        "/annotations/api/episodes/0/outcome", json=payload, headers=headers
+    )
+    assert written.status_code == 200, written.text
+    new_revision = store.head(NAME)
+    assert new_revision != revision
+    stale = client.post(
+        "/api/levi/review", json={"repo_id": repo, "flagged": [0]}, headers=headers
+    )
+    assert stale.status_code == 409, stale.text
+    saved = client.post(
+        "/api/levi/review",
+        json={"repo_id": repo, "flagged": [0]},
+        headers={"X-LEVI-Annotation-Revision": new_revision},
+    )
+    assert saved.status_code == 200, saved.text
+    assert client.get("/api/levi/review", params={"repo_id": repo}).json()[
+        "flagged"
+    ] == [0]
+    assert not (catalog.STATE / "annotations" / LINKED).exists()
+    assert not (catalog.STATE / "reviews" / (LINKED + ".json")).exists()
+
+
+def test_live_fake_value_publishes_in_canonical_source_and_reads_human_label(
+    client, live, monkeypatch
+):
+    from test_recap_value import run
+
+    from levi.recap import checkpoints, jobs, store
+
+    checkpoint_root = paths.ROOT / "checkpoints"
+    monkeypatch.setenv("LEVI_RECAP_VALUE_CHECKPOINT_DIR", str(checkpoint_root))
+    checkpoints.import_checkpoint(
+        None, "fake-a", provider="fake", fields={"failure_reward": -30.0}
+    )
+    repo = "local/" + LINKED
+    before = tree(live / "captures"), tree(live / links.STATE / "views")
+    ds = jobs.dataset(repo)
+    assert ds.human == {0: "success"}
+    job = run(client, repo, episodes=[0])
+    assert job["status"] == "succeeded", job
+    assert job["source"] == {"dataset": NAME, "workspace": live.name}
+    assert store.root(LINKED) == live / links.STATE / "recap_values" / NAME
+    assert not (catalog.STATE / "recap_values" / LINKED).exists()
+    found = jobs.find(job["id"])
+    assert found["source"]["workbench"] == str(live / links.STATE)
+    values = client.get("/annotations/api/recap/episodes/0", params={"repo_id": repo})
+    assert values.status_code == 200, values.text
+    assert len(values.json()["value"]) > 0
+    assert before == (tree(live / "captures"), tree(live / links.STATE / "views"))
+    assert not jobs.wait_idle(60)
+
+
+def test_untrusted_source_key_cannot_enable_writes(client, live):
+    state = live / links.STATE
+    items = json.loads((state / "datasets.json").read_text())
+    items["../captures"] = items[NAME]
+    (state / "datasets.json").write_text(json.dumps(items))
+    assert "live.../captures" not in links.entries()
+
+
+@pytest.mark.parametrize("kind", [None, "temporal", "objects"])
+def test_three_successive_source_revisions_never_reuse_a_directory(client, live, kind):
+    from levi.agent.store import Store
+
+    store = Store(live / links.STATE)
+    seen = set()
+    for attempt in range(3):
+        base, revision, folder = store.prepare(NAME, kind)
+        assert revision not in seen
+        seen.add(revision)
+        (folder / "annotations" / "note.json").write_text(str(attempt))
+        store.publish(
+            NAME, base, revision, str(attempt), str(attempt), {"revision": revision}
+        )
+        assert store.head(NAME) == revision
+    assert len(seen) == 3

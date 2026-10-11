@@ -17,7 +17,7 @@ import { leviApi, downloadJson, exportName } from "./levi-api";
 export default function LeviReview({ repoId }: { repoId: string }) {
   const { flagged } = useFlaggedEpisodes();
   // A live workspace's dataset: reviewed where the live service keeps it.
-  const { linked } = useDatasetSource();
+  const { readOnly } = useDatasetSource();
   const [busy, setBusy] = useState(false),
     [notes, setNotes] = useState(""),
     [editing, setEditing] = useState(false);
@@ -35,7 +35,7 @@ export default function LeviReview({ repoId }: { repoId: string }) {
     };
   }, [repoId]);
   async function save() {
-    if (linked) return;
+    if (readOnly) return;
     setBusy(true);
     try {
       const review = await leviApi("review", {
@@ -69,8 +69,8 @@ export default function LeviReview({ repoId }: { repoId: string }) {
         size="sm"
         icon={Download}
         loading={busy}
-        disabled={linked}
-        aria-describedby={linked ? "review-readonly-why" : undefined}
+        disabled={readOnly}
+        aria-describedby={readOnly ? "review-readonly-why" : undefined}
         onClick={save}
       >
         {t("Export review")} ({flagged.size})
@@ -80,8 +80,8 @@ export default function LeviReview({ repoId }: { repoId: string }) {
         size="sm"
         label={t("Review notes")}
         tooltipPlacement="bottom"
-        disabled={linked}
-        aria-describedby={linked ? "review-readonly-why" : undefined}
+        disabled={readOnly}
+        aria-describedby={readOnly ? "review-readonly-why" : undefined}
         onClick={() => setEditing(true)}
       />
       <ReadOnlyReason id="review-readonly-why" />

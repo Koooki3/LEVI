@@ -3,6 +3,8 @@ import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
 import {
   isLinkedDataset,
+  isLinkedReadOnly,
+  LINKED_SHARED_NOTICE,
   isLinkedRefusal,
   isLinkedRepo,
   LINKED_NOTICE,
@@ -71,4 +73,23 @@ describe("which datasets are the live workspace's, read-only here", () => {
     expect((zh as Record<string, string>)[LINKED_NOTICE]).toContain("只读");
     expect((zh as Record<string, string>)[LINKED_NOTICE]).toContain("实时服务");
   });
+});
+
+test("writes require an explicit server capability, including old servers", () => {
+  expect(isLinkedReadOnly("local/live.run1", null)).toBe(true);
+  const linked = {
+    kind: "live" as const,
+    source: "run1",
+    workspace: "ws",
+    readonly: false,
+  };
+  expect(isLinkedReadOnly("local/live.run1", { linked })).toBe(false);
+  expect(
+    isLinkedReadOnly("local/live.run1", {
+      linked: { ...linked, readonly: true },
+    }),
+  ).toBe(true);
+  expect(isLinkedReadOnly("local/live.run1", {})).toBe(false);
+  expect(en[LINKED_SHARED_NOTICE]).toBe(LINKED_SHARED_NOTICE);
+  expect(zh[LINKED_SHARED_NOTICE]).toContain("共享工作区");
 });

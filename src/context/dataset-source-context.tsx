@@ -8,7 +8,7 @@
  */
 import React, { createContext, useContext, useEffect, useState } from "react";
 import type { CatalogEntry, DatasetFormat } from "@/types/dataset-format.types";
-import { isLinkedDataset } from "@/utils/linkedDataset";
+import { isLinkedDataset, isLinkedReadOnly } from "@/utils/linkedDataset";
 
 /** How often an open viewer checks its dataset for changes on disk. */
 export const DATASET_POLL_MS = 5000;
@@ -36,6 +36,7 @@ interface DatasetSource {
    * (levi/links.py): nothing on its pages writes. By the catalog entry once
    * it has answered, by the `live.` name before. */
   linked: boolean;
+  readOnly: boolean;
 }
 
 const DatasetSourceContext = createContext<DatasetSource>({
@@ -46,6 +47,7 @@ const DatasetSourceContext = createContext<DatasetSource>({
   loadedEpisodes: null,
   removed: false,
   linked: false,
+  readOnly: false,
 });
 
 export function useDatasetSource(): DatasetSource {
@@ -123,6 +125,8 @@ export function DatasetSourceProvider({
         loadedEpisodes,
         removed,
         linked: org === "local" && isLinkedDataset(`${org}/${dataset}`, entry),
+        readOnly:
+          org === "local" && isLinkedReadOnly(`${org}/${dataset}`, entry),
       }}
     >
       {children}

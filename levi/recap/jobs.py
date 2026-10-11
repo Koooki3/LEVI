@@ -28,7 +28,7 @@ from typing import Any
 import numpy as np
 import pyarrow.parquet as pq
 
-from .. import catalog, children, naming, paths
+from .. import catalog, children, links, naming, paths
 from ..revision import dataset_revision
 from ..versions import is_dataset_v2
 from . import advantage, checkpoints, signature, store
@@ -52,6 +52,7 @@ PUBLIC_JOB_KEYS = (
     "error",
     "revision_id",
     "created_at",
+    "source",
 )
 
 # Keyed by (dataset name, job id): ids are unique per dataset only.
@@ -161,10 +162,11 @@ def dataset(repo_id: str) -> Dataset:
         int(t.get("task_index", i)): str(t.get("task", ""))
         for i, t in enumerate(_jsonl(root / "meta/tasks.jsonl"))
     }
-    from ..agent.store import resolve
+    from ..agent.store import resolve_readonly
     from ..annotations import outcomes
 
-    labels = outcomes.read_labels(resolve(catalog.STATE, name, "annotations"))
+    state, source = links.target(name, catalog.STATE)
+    labels = outcomes.read_labels(resolve_readonly(state, source, "annotations"))
     human = {ep: v["outcome"] for ep, v in labels.items()}
     return Dataset(repo_id, name, root, info, rows, tasks, human)
 
@@ -291,7 +293,20 @@ def job_path(name: str, job_id: str) -> Path:
 
 
 def public(job: dict[str, Any]) -> dict[str, Any]:
-    return {key: job.get(key) for key in PUBLIC_JOB_KEYS}
+    value = {
+        key: job.get(key)
+        for key in PUBLIC_JOB_KEYS
+        if key != "source" or "source" in job
+    }
+    source = value.get("source")
+    if isinstance(source, dict):
+        value["source"] = {
+            "dataset": source.get("dataset"),
+            "workspace": Path(source["workbench"]).parent.parent.parent.name
+            if source.get("workbench")
+            else None,
+        }
+    return value
 
 
 def _save(job: dict[str, Any]) -> None:
@@ -326,9 +341,9 @@ def find(job_id: str, name: str | None = None) -> dict[str, Any] | None:
     if name:
         return _read(name, job_id)
     base = catalog.STATE / "recap_values"
-    if not base.is_dir():
-        return None
-    for folder in sorted(base.iterdir()):
+    folders = sorted(base.iterdir()) if base.is_dir() else []
+    folders += [store.root(name) for name in links.links()]
+    for folder in dict.fromkeys(folders):
         path = folder / "jobs" / f"{job_id}.json"
         if path.is_file():
             return store.load_json(path)
@@ -672,7 +687,7 @@ def start(
                 "dev_only_base_models": checkpoints.dev_only(folder, manifest),
             },
             "dataset": {
-                "name": ds.name,
+                "name": links.source_name(ds.name),
                 "root": str(ds.root),
                 "fps": ds.fps,
                 "data_path": ds.info["data_path"],
@@ -701,6 +716,16 @@ def start(
             "id": job_id,
             "repo_id": repo_id,
             "name": ds.name,
+            **(
+                {
+                    "source": {
+                        "dataset": links.source_name(ds.name),
+                        "workbench": str(links.target(ds.name, catalog.STATE)[0]),
+                    }
+                }
+                if links.is_linked(ds.name)
+                else {}
+            ),
             "checkpoint": manifest.name,
             "provider": manifest.provider,
             "status": "queued",
@@ -1347,6 +1372,7 @@ def _common_meta(job, plan, manifest, result) -> dict[str, Any]:
         "provider": manifest.provider,
         "job_id": job["id"],
         "repo_id": job["repo_id"],
+        "source": job.get("source"),
         "request": request,
         "dataset_type": request["dataset_type"],
         "dataset_type_source": request.get("dataset_type_source", "request"),
@@ -1796,7 +1822,9 @@ def clear(
         try:
             folder = store.root(value)
         except ValueError as exc:
-            raise RecapError(400, str(exc)) from exc
+            raise RecapError(
+                409 if "derived state" in str(exc) else 400, str(exc)
+            ) from exc
         if not folder.is_dir():
             raise RecapError(404, f"No RECAP results folder for {value}")
         resolved.append(value)

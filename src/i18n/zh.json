@@ -3697,5 +3697,7 @@
   "The frozen plan needs a confirmed Initial State Contract.": "冻结计划缺少已确认的初始状态契约。",
   "The frozen plan needs the forward policy deployment identity.": "冻结计划缺少正向策略部署身份。",
   "The frozen plan needs the reset policy deployment identity.": "冻结计划缺少复位策略部署身份。",
-  "Shadow mode does not authorize robot motion.": "影子模式没有机器人运动权限。"
+  "Shadow mode does not authorize robot motion.": "影子模式没有机器人运动权限。",
+  "Live evaluation · shared workspace": "实时评测 · 共享工作区",
+  "Edits, reviews and Value results are saved in this live dataset’s shared workspace. Original rollout files remain unchanged.": "编辑、审核和 Value 结果保存到该实时数据集的共享工作区。原始 rollout 文件保持不变。"
 }

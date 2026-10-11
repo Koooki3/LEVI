@@ -53,7 +53,7 @@ export interface LinkedDataset {
   source: string;
   /** The live workspace's folder name (never its path). */
   workspace: string;
-  readonly: true;
+  readonly: boolean;
 }
 
 /** What the catalog says is linked: one row per live workspace. */

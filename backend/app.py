@@ -350,10 +350,16 @@ class DatasetState:
         replace or delete a single episode's annotations directly on disk.
         """
         home = links.state_of(self.display_slug)
-        if home is not None:  # a live workspace's dataset: read there, never write
-            return resolve_readonly(
-                home, links.source_name(self.display_slug), "annotations"
+        if home is not None:
+            from levi.agent.store import current_pin
+
+            home, key = links.target(self.display_slug, STATE)
+            resolver = (
+                bundle_resolve
+                if current_pin(home, key) is not None
+                else resolve_readonly
             )
+            return resolver(home, key, "annotations")
         return bundle_resolve(STATE, self.display_slug, "annotations")
 
     def annotation_file(self, episode_index: int) -> Path:
@@ -371,9 +377,15 @@ class DatasetState:
         """Workspace sidecar root, independent from the source dataset tree."""
         home = links.state_of(self.display_slug)
         if home is not None:
-            return resolve_readonly(
-                home, links.source_name(self.display_slug), "object_annotations"
+            from levi.agent.store import current_pin
+
+            home, key = links.target(self.display_slug, STATE)
+            resolver = (
+                bundle_resolve
+                if current_pin(home, key) is not None
+                else resolve_readonly
             )
+            return resolver(home, key, "object_annotations")
         return bundle_resolve(STATE, self.display_slug, "object_annotations")
 
 
@@ -397,6 +409,7 @@ def _ensure_state(req: DatasetRef) -> DatasetState:
         name = resolve_name(req.repo_id)
         req = DatasetRef(local_path=str(local_root(req.repo_id)))
     if req.local_path:
+        name = name or links.name_for_path(req.local_path)
         # A linked (live workspace) dataset's folder lies outside this
         # workspace: ``local_root`` has already checked it (levi/links.py).
         req.local_path = str(
@@ -445,7 +458,8 @@ def _sidecar(state: DatasetState) -> SidecarStore:
         state.object_annotations_path, identity=identity, create=not linked
     )
     # Worker jobs are mutable runtime records, never part of immutable bundles.
-    store.staging_root = STATE / "object_annotations" / state.display_slug / "staging"
+    home, source = links.target(state.display_slug, STATE)
+    store.staging_root = home / "object_annotations" / source / "staging"
     return store
 
 
@@ -990,7 +1004,6 @@ def _write_episode_annotations(
     a different, deliberate state from "never touched". To remove the
     record entirely, use ``_delete_episode_annotations``.
     """
-    links.refuse_write(state.display_slug)
     links.refuse_path(state.annotations_dir)
     state.annotations_dir.mkdir(parents=True, exist_ok=True)
     path = state.annotation_file(episode_index)
@@ -1002,7 +1015,6 @@ def _write_episode_annotations(
 def _delete_episode_annotations(state: DatasetState, episode_index: int) -> bool:
     """Delete one episode's annotation file entirely. Returns whether a file
     actually existed to delete."""
-    links.refuse_write(state.display_slug)
     links.refuse_path(state.annotations_dir)
     path = state.annotation_file(episode_index)
     existed = path.exists()
@@ -1844,6 +1856,16 @@ async def _linked_read_only(request: Request) -> None:
     that do not go through them: SAM3 and RECAP runs, exports)."""
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
+    if any(
+        part in request.url.path
+        for part in (
+            "/api/recap/",
+            "/api/episodes/",
+            "/api/dataset/vocabulary",
+            "/api/sam3/",
+        )
+    ):
+        return  # Value jobs resolve their canonical derived state independently.
     if request.url.path.endswith("/api/dataset/load"):
         return  # loading only reads (the app is mounted under a prefix)
     refs = [request.query_params.get("repo_id"), request.query_params.get("local_path")]

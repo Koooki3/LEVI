@@ -192,7 +192,7 @@ export const AnnotationsProvider: React.FC<{ children: React.ReactNode }> = ({
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const backendEnabled = isAnnotateBackendEnabled();
-  const { linked: readOnly } = useDatasetSource();
+  const { readOnly } = useDatasetSource();
   // Read by the callbacks below without making each of them depend on it.
   const readOnlyRef = useRef(readOnly);
   readOnlyRef.current = readOnly;
