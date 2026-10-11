@@ -1488,6 +1488,7 @@ def legacy_sources(
     dataset=None,
     session=None,
     since=None,
+    before=None,
     group=None,
     task=None,
     include_excluded=False,
@@ -1569,12 +1570,18 @@ def legacy_sources(
             "tombstones": management_data.get("sessions", []),
         }
         selected, _hidden = statsview.scoped_rows(
-            config, dataset, session, since, include_excluded, sources=sources
+            config,
+            dataset,
+            session,
+            since,
+            include_excluded,
+            sources=sources,
+            before=before,
         )
         # Every (dataset, run) end used by the original engine must be trusted,
         # including a pending demo not yet represented in stats.jsonl.
         contributing_runs = {(r.get("dataset"), r.get("session")) for r in selected}
-        sources["records"] = stats.select(rows, dataset, session, since)
+        sources["records"] = stats.select(rows, dataset, session, since, before=before)
         checks = [
             (name, demo, row)
             for name, state in states.items()

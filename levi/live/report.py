@@ -157,10 +157,13 @@ def build(
     since=None,
     before=None,
     timezone=None,
+    sources=None,
 ) -> dict:
     """Everything a report says, as one dict (the JSON file's content).
     ``policy`` is ``{config, checkpoint}`` of the evaluation session when the
     robot side's file is at hand."""
+    # Pinned calls omit external policy/previous metadata: those files have
+    # no canonical source binding in the legacy report format.
     now = time.time() if now is None else now
     payload = statsview.build(
         config,
@@ -172,6 +175,7 @@ def build(
         limit=None,
         include_excluded=include_excluded,
         now=now,
+        sources=sources,
     )
     rows, _ = statsview.scoped_rows(
         config,
@@ -180,9 +184,16 @@ def build(
         since,
         include_excluded=include_excluded,
         before=before,
+        sources=sources,
     )
     everything = statsview.scoped_rows(
-        config, dataset, session, since, include_excluded=True, before=before
+        config,
+        dataset,
+        session,
+        since,
+        include_excluded=True,
+        before=before,
+        sources=sources,
     )[0]
     report = {
         "schema": SCHEMA,
@@ -196,13 +207,19 @@ def build(
         "settings": {
             **settings(config),
             **({"spec": spec_of(rows)} if spec_of(rows) else {}),
-            **({"policy": policy} if policy else {}),
+            **({"policy": policy} if policy and sources is None else {}),
         },
         "previous": None,
         **{k: payload[k] for k in ("scope", "summary", "sessions", "episodes")},
     }
     first = (payload["summary"].get("window") or {}).get("first_at")
-    before = previous_of(config, dataset, first, skip=stem(dataset, session))
+    if sources is not None:
+        report["metadata_omitted"] = ["previous_report", "policy"]
+    before = (
+        previous_of(config, dataset, first, skip=stem(dataset, session))
+        if sources is None
+        else None
+    )
     if before:
         report["previous"] = {
             "session": before.get("session"),

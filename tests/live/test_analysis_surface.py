@@ -25,37 +25,66 @@ def _populate(c):
         "ch1",
         [seg(0, "approach", 0, 2, "success"), seg(0, "grasp", 2, 4, "failure")],
     )
+    root = Path(c.watch.roots[0])
+    source = root / "g/t"
+    (source / "demo_0000").mkdir(parents=True)
+    (source / "demo_0000/metadata.json").write_text(
+        json.dumps({"eval": {"run_id": "s1"}})
+    )
+    session_dir = root / ".eval_sessions"
+    session_dir.mkdir()
+    (session_dir / "g-t.json").write_text(
+        json.dumps(
+            {
+                "schema": "levi.eval.session.v1",
+                "group": "g",
+                "task_folder": "t",
+                "session_id": "s1",
+                "run_id": "s1",
+                "state": "finished",
+            }
+        )
+    )
     put_state(
         c,
         "g__t",
         "g",
         "t",
         {"demo_0000": row(0, changeset="ch1", operator="failure", verdict="failure")},
+        source=str(source),
     )
 
 
 def _args(c, tmp_path, *more):
+    from levi.live.config import render
+
+    path = tmp_path / "private-live.toml"
+    path.write_text(render(c))
     return [
         "analysis",
+        "--config",
+        str(path),
         "--workspace",
         str(c.workspace),
+        "--no-sync",
         *more,
     ]
 
 
-def test_the_cli_syncs_then_prints_the_summary(tmp_path, capsys):
+def test_the_cli_reads_the_summary_after_separate_sync(tmp_path, capsys):
     c = workspace(tmp_path)
     _populate(c)
+    assert analysis.sync(c)["written"] == 1
     assert cli.main(_args(c, tmp_path, "--format", "json")) == 0
     captured = capsys.readouterr()
     found = json.loads(captured.out)
     assert found["schema"] == analysis.SUMMARY_SCHEMA
     assert found["cells"][0]["landing"]["operator"]["counts"] == {"approach": 1}
-    assert "1 written" in captured.err
+    assert captured.err == ""
     assert len(analysis.read(c.live_dir)) == 1
     # a second run writes nothing new
     assert cli.main(_args(c, tmp_path, "--format", "json")) == 0
-    assert "0 written" in capsys.readouterr().err
+    assert capsys.readouterr().err == ""
     assert len(analysis.read(c.live_dir)) == 1
 
 
@@ -71,6 +100,7 @@ def test_no_sync_reads_only_what_is_on_file(tmp_path, capsys):
 def test_the_cli_filters_and_renders_both_languages(tmp_path, capsys):
     c = workspace(tmp_path)
     _populate(c)
+    assert analysis.sync(c)["written"] == 1
     assert cli.main(_args(c, tmp_path, "--group", "g", "--task", "t")) == 0
     en = capsys.readouterr().out
     assert en.startswith("# Evaluation analysis") and "g / t" in en
@@ -97,7 +127,8 @@ def test_the_cli_in_a_workspace_that_is_not_live_leaves_no_file(tmp_path, capsys
     for child in list(c.live_dir.iterdir()):
         child.unlink()
     c.live_dir.rmdir()
-    assert cli.main(_args(c, tmp_path, "--format", "json")) == 0
+    assert cli.main(_args(c, tmp_path, "--format", "json")) == 2
+    assert capsys.readouterr().out == ""
     assert not c.live_dir.exists()
 
 

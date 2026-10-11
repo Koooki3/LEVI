@@ -42,7 +42,6 @@ from . import (
 from . import config as live_config
 from . import queue as labelling_queue
 from . import report as live_report
-from . import sessions as live_sessions
 
 ENV_WORKSPACE = "LEVI_LIVE_WORKSPACE"
 ENV_HOME = "LEVI_LIVE_HOME"
@@ -1346,6 +1345,31 @@ def cmd_exclude(args) -> int:
     return 0
 
 
+def _report_sources(config, **scope):
+    """Use the API's bounded canonical-source authorization without any writes."""
+    from fastapi import HTTPException
+
+    from . import result_index
+
+    snapshot = result_index._Snapshot()
+    try:
+        sources = result_index.legacy_sources(config, snapshot, **scope)
+    except HTTPException as exc:
+        reason = exc.detail.get("reason", "statistics_source_unknown")
+        raise ValueError(f"result refused: {reason}") from None
+    except (OSError, ValueError):
+        raise ValueError("result refused: result_source_unavailable") from None
+    return snapshot, sources
+
+
+def _report_sources_valid(snapshot):
+    """No terminal text or output file is published from an incomplete generation."""
+    if snapshot.truncated:
+        raise ValueError("result refused: statistics_scope_incomplete")
+    if not snapshot.valid():
+        raise ValueError("result refused: statistics_source_changed")
+
+
 def cmd_report(args) -> int:
     """The statistics of a scope as a report: Markdown (default), JSON or the
     per-episode CSV, to the terminal or ``--out``. Reads the workspace's files
@@ -1355,6 +1379,15 @@ def cmd_report(args) -> int:
     )
     config = resolve_config(argparse.Namespace(**{**vars(args), "since": None}))
     dataset, session = args.dataset, args.session
+    snapshot, sources = _report_sources(
+        config,
+        kind="stats",
+        dataset=dataset,
+        session=session,
+        since=since,
+        before=before,
+        include_excluded=args.include_excluded,
+    )
     if args.format == "csv":
         payload = statsview.build(
             config,
@@ -1365,28 +1398,26 @@ def cmd_report(args) -> int:
             timezone=timezone,
             limit=None,
             include_excluded=args.include_excluded,
+            sources=sources,
         )
         text = statsfmt.to_csv(payload)
     else:
-        policy = None
-        if dataset and session:
-            found = live_sessions.read_sessions(config.watch.roots)
-            policy = live_report.policy_of(config, found, dataset, session)
         built = live_report.build(
             config,
             dataset,
             session,
-            policy=policy,
             since=since,
             before=before,
             timezone=timezone,
             include_excluded=args.include_excluded,
+            sources=sources,
         )
         text = (
             statsfmt.to_json(built)
             if args.format == "json"
             else live_report.render(built, args.lang)
         )
+    _report_sources_valid(snapshot)
     if args.out:
         target = Path(args.out).expanduser()
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -1402,9 +1433,9 @@ def cmd_report(args) -> int:
 def cmd_analysis(args) -> int:
     """``levi live analysis``: the evaluation-result analysis (success rate,
     label coverage, subtask funnel and durations, where failures stopped) per
-    checkpoint and task, from ``live/analysis.jsonl``. ``--sync`` first adds
-    the records of episodes finished since the last one (the only thing it
-    writes); the service need not be running."""
+    checkpoint and task, from ``live/analysis.jsonl``. ``--no-sync`` reads a
+    verified snapshot; synchronization is refused until its run-store reads
+    share that snapshot. The service need not be running."""
     # ``--since`` here is the analysis window, not the backlog cutoff of
     # ``add_config_options``: resolve the configuration without it.
     config = resolve_config(
@@ -1423,20 +1454,29 @@ def cmd_analysis(args) -> int:
     )
     names = tuple(x for x in (args.stages or "").split(",") if x) or analysis.STAGES
     if args.sync:
-        done = analysis.sync(config, stages=names)
-        print(
-            f"analysis records: {done['written']} written, {done['unchanged']} "
-            f"unchanged, {done['unreadable']} waiting for the run store",
-            file=sys.stderr,
+        # sync reads the run store and writes analysis/report artifacts. Until
+        # that closure shares the canonical snapshot, never write before checking.
+        raise ValueError(
+            "analysis sync is unavailable with source verification; use --no-sync "
+            "to read existing records"
         )
+    snapshot, sources = _report_sources(
+        config, kind="analysis", group=args.group, task=args.task, since=args.since
+    )
     found = analysis.build(
-        config, group=args.group, task=args.task, since=args.since, stages=names
+        config,
+        group=args.group,
+        task=args.task,
+        since=args.since,
+        stages=names,
+        sources=sources,
     )
     text = (
         analysis.to_json(found)
         if args.format == "json"
         else analysis.to_markdown(found, args.lang)
     )
+    _report_sources_valid(snapshot)
     if args.out:
         target = Path(args.out).expanduser()
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -1700,8 +1740,8 @@ def build_parser():
         "--sync",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="first write the records of episodes finished since the last one "
-        "(default; --no-sync reads only what is on file)",
+        help="synchronization is currently refused because its sources are not pinned; "
+        "use --no-sync to read source-verified existing records",
     )
     ana.add_argument("--out", help="write here instead of the terminal")
     stat = sub.add_parser("stats", help="maintain the per-episode statistics")

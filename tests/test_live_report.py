@@ -233,7 +233,48 @@ def test_the_service_writes_the_report_itself_once_the_session_is_over(
 def test_levi_live_report_prints_or_writes_the_same_report(tmp_path, capsys):
     c = synthetic(tmp_path)
     session_rows(c, "s1", 1000.0, n=2)
-    base = ["--workspace", str(c.workspace), "--root", str(tmp_path / "none")]
+    root = tmp_path / "rollouts"
+    source = root / "g/t"
+    source.mkdir(parents=True)
+    session_dir = root / ".eval_sessions"
+    session_dir.mkdir()
+    (session_dir / "g-t.json").write_text(
+        json.dumps(
+            {
+                "schema": "levi.eval.session.v1",
+                "group": "g",
+                "task_folder": "t",
+                "session_id": "s1",
+                "run_id": "s1",
+                "state": "finished",
+            }
+        )
+    )
+    rows = stats.read(c.live_dir)
+    demos = {}
+    for n, row_ in enumerate(rows):
+        demo = f"demo_{n:04d}"
+        row_["demo"] = demo
+        demos[demo] = {"run_id": "s1", "state": "done"}
+        (source / demo).mkdir()
+        (source / demo / "metadata.json").write_text(
+            json.dumps({"eval": {"run_id": "s1"}})
+        )
+    (c.live_dir / stats.FILE).write_text(
+        "".join(json.dumps(row_) + "\n" for row_ in rows)
+    )
+    (c.live_dir / "datasets").mkdir()
+    (c.live_dir / "datasets/g__t.json").write_text(
+        json.dumps(
+            {
+                "group": "g",
+                "task_folder": "t",
+                "source": str(source),
+                "demos": demos,
+            }
+        )
+    )
+    base = ["--workspace", str(c.workspace), "--root", str(root)]
     assert cli.main(["report", *base, "--dataset", "g__t", "--session", "s1"]) == 0
     out = capsys.readouterr().out
     assert out.startswith("# Live annotation statistics: g__t / s1")

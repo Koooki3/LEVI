@@ -772,7 +772,7 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 | `spec`、`capability` | 用到的标注指南和释放复核规格文件；这次运行的出处（LEVI 版本、计划、规格、事件智能模式），由写入方给出，是不超过 4 KB 的不透明对象，没有则 `null` |
 | `signature` | 内容（不含时间）的哈希，没有变化的片段不会重复写入 |
 
-写入是在 `flock` 下做一次 `O_APPEND` 写，再 `fsync`；上一次写了一半的末行，下一次写入会先把它收尾。`levi.live.analysis.sync(config)` 补写缺失或有变化的行，读取数据集状态文件、`stats.jsonl` 和运行存储（只读）；它是幂等的，两个进程同时调用也安全，遇到暂时读不到变更集的片段就跳过（以后再调用会补上）。worker 在每批结束后同步；没有活动 worker 时，控制器也会每 30 秒在报告线程同步一次。这样中断前已提交的结果会自动补齐，无需重标，也不会重复写记录。`levi live analysis` 同样会先同步（`--no-sync` 只读已有内容）。
+写入是在 `flock` 下做一次 `O_APPEND` 写，再 `fsync`；上一次写了一半的末行，下一次写入会先把它收尾。`levi.live.analysis.sync(config)` 补写缺失或有变化的行，读取数据集状态文件、`stats.jsonl` 和运行存储（只读）；它是幂等的，两个进程同时调用也安全，遇到暂时读不到变更集的片段就跳过（以后再调用会补上）。worker 在每批结束后同步；没有活动 worker 时，控制器也会每 30 秒在报告线程同步一次。这样中断前已提交的结果会自动补齐，无需重标，也不会重复写记录。`levi live analysis --no-sync` 只读已核验来源的现有记录。CLI 同步目前拒绝执行，包括旧的默认同步行为；请明确加 `--no-sync`。上面的后台同步行为保持不变。
 
 `levi live analysis [--group G] [--task T] [--since ISO] [--stages a,b,c] [--format md|json] [--lang en|zh] [--sync|--no-sync] [--out PATH]` 和只读的 `GET /api/levi/live/analysis?group=&task=&since=&stages=` 按检查点和任务（以及合计）给出：
 
@@ -932,3 +932,15 @@ scope 明确 `time_basis: stats_record_at`，这不是人工标签最初落盘�
 报告在中英文 Markdown 中显示共享成败分类指标：每类精确率、召回率、F1及支持数，以及准确率、宏平均 F1和平衡准确率。只统计操作员与 agent 均明确判成功/失败的配对；缺失、未决仍按原口径单列。分母未定义时显示短横线，JSON保留完整精度。
 
 Markdown 分类比率最多显示三位小数，JSON不作舍入，片段数和支持数仍为整数。
+
+CLI 报告与只读分析复用结果 API 的同一有界来源快照。来源未知、运行或捕获头部
+身份变化、受限的 campaign/AERI 结果、预算耗尽，以及输出前来源变化，都会拒绝
+并且不向终端发布结果、不写 `--out`。报告来源检查与统计引擎使用同一个
+`[since, before)` 窗口。已验证模式省略策略元数据和历史报告对比：旧外部文件
+没有可靠的规范来源绑定。JSON 报告以 `metadata_omitted` 明示省略项；这不表示
+这些元数据已核验为空。CLI 不读取这些外部文件。不传来源快照的 `report.build`
+保留既有内部／后台行为。
+
+`levi live analysis` 目前必须加 `--no-sync`。默认行为与显式 `--sync` 会在调用
+写入器前拒绝，因为运行存储的同步尚未纳入同一来源闭包。这是当前兼容性限制；
+后续同步必须先完成来源预检，同步后再建立新的核验快照，才能发布结果。

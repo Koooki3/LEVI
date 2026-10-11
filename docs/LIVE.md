@@ -814,7 +814,7 @@ Reading an evaluation's result (for example a low stacking success rate for one 
 | `spec`, `capability` | the guideline and release-review files used; where the run came from (LEVI version, plan, spec, event-intelligence mode) as the writer gave it, an opaque object of at most 4 KB, or `null` |
 | `signature` | a hash of the content (not of the time), so an unchanged episode is not written twice |
 
-The write is one `O_APPEND` write under an `flock`, then `fsync`; a torn last line is closed by the next write. `levi.live.analysis.sync(config)` adds the lines that are missing or changed, reading the dataset state files, `stats.jsonl` and the run store (read-only); it is idempotent, safe from two processes at once, and skips an episode whose change set the store cannot be read for now (a later call fills it in). The worker syncs after each finished batch. While no worker is active, the controller also syncs in its report thread every 30 seconds: results committed before an interruption are recovered without re-labelling or duplicate records. `levi live analysis` also syncs first (`--no-sync` reads only what is on file).
+The write is one `O_APPEND` write under an `flock`, then `fsync`; a torn last line is closed by the next write. `levi.live.analysis.sync(config)` adds the lines that are missing or changed, reading the dataset state files, `stats.jsonl` and the run store (read-only); it is idempotent, safe from two processes at once, and skips an episode whose change set the store cannot be read for now (a later call fills it in). The worker syncs after each finished batch. While no worker is active, the controller also syncs in its report thread every 30 seconds: results committed before an interruption are recovered without re-labelling or duplicate records. `levi live analysis --no-sync` reads only source-verified existing records. CLI synchronization is currently refused, including its historical default; use `--no-sync` explicitly. The background synchronization described above is unchanged.
 
 `levi live analysis [--group G] [--task T] [--since ISO] [--stages a,b,c] [--format md|json] [--lang en|zh] [--sync|--no-sync] [--out PATH]` and the read-only `GET /api/levi/live/analysis?group=&task=&since=&stages=` give, per checkpoint and task (and for all together):
 
@@ -1020,3 +1020,20 @@ Filtered Markdown keeps fractional ISO seconds and the exact Unix epoch boundari
 The report displays shared binary classification metrics in both Markdown languages: per-class Precision, Recall, F1 and support, together with accuracy, macro F1 and balanced accuracy. Only explicit operator/agent success-failure pairs enter these metrics; missing and undecided labels keep their existing separate counts. Undefined denominators display a dash; JSON retains full precision.
 
 Markdown classification ratios use up to three decimal places; JSON remains unrounded and counts remain integers.
+
+CLI reports and read-only analysis use the same bounded canonical-source snapshot
+as the result API. Unknown sources, changed run/header identities, withheld
+campaign/AERI results, exhausted budgets, and source changes before output are
+refused without publishing terminal results or writing `--out`. Report source
+checks use the same `[since, before)` window as the statistics engine. In this
+verified mode, reports omit policy metadata and previous-report comparisons:
+legacy external files do not carry a reliable canonical binding. JSON reports
+state this in `metadata_omitted`; these omissions do not mean verified emptiness.
+The CLI does not read those external files. `report.build` without pinned sources
+retains its existing internal/background behavior.
+
+`levi live analysis` currently requires `--no-sync`. Its default and explicit
+`--sync` are refused before calling the writer because run-store synchronization
+has not yet joined the pinned source closure. This is a temporary compatibility
+limitation; source verification must happen before any future synchronization,
+and a fresh verified snapshot must follow it before results can be published.

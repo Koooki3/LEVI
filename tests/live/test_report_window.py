@@ -15,7 +15,34 @@ def synthetic(tmp_path):
     config.service.workspace = str(tmp_path / "ws")
     config.service.home = str(tmp_path / "home")
     config.live_dir.mkdir(parents=True)
+    root = tmp_path / "rollouts"
+    source = root / "g/t"
+    source.mkdir(parents=True)
+    config.watch.roots = [str(root)]
+    sessions = root / ".eval_sessions"
+    sessions.mkdir()
+    (sessions / "g-t.json").write_text(
+        json.dumps(
+            {
+                "schema": "levi.eval.session.v1",
+                "group": "g",
+                "task_folder": "t",
+                "run_id": "s1",
+                "session_id": "s1",
+                "state": "finished",
+            }
+        )
+    )
+    states = config.live_dir / "datasets"
+    states.mkdir()
+    demos = {}
     for n, stamp in enumerate((100.0, 200.0, 300.0)):
+        demo = f"demo_{n}"
+        (source / demo).mkdir()
+        (source / demo / "metadata.json").write_text(
+            json.dumps({"eval": {"run_id": "s1"}})
+        )
+        demos[demo] = {"run_id": "s1", "state": "done"}
         stats.record(
             config.live_dir,
             {
@@ -27,6 +54,16 @@ def synthetic(tmp_path):
                 "result": {"state": "done"},
             },
         )
+    (states / "g__t.json").write_text(
+        json.dumps(
+            {
+                "group": "g",
+                "task_folder": "t",
+                "source": str(source),
+                "demos": demos,
+            }
+        )
+    )
     return config
 
 
