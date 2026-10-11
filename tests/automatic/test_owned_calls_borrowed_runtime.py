@@ -22,7 +22,7 @@ from types import SimpleNamespace
 import pytest
 import test_event_pause_orchestrator_runtime as kernel_fixture
 import test_owned_calls_orchestrator as local
-from aeri_harness import config, fake, rig
+from aeri_harness import config, fake, results, rig
 
 from levi.automatic.adapters import events as ev
 from levi.automatic.intervention import (
@@ -434,6 +434,79 @@ class ActualBorrowedTests(unittest.TestCase):
         )
         self.assertEqual(len(self.begin_attempts), len(self.finished))
         self.assertEqual(len(self.finished), len(self.executor.dispatches))
+
+    def test_paused_goal_rejects_old_replayed_future_and_noninteger_observations(self):
+        for invalid in ("old", "replayed_active", "future", "bool", "missing"):
+            with self.subTest(invalid=invalid):
+                r = self.make()
+                for worker in self.workers.values():
+                    worker._connection.state["goal"] = ["confirmed"]
+                original = r.robot.observe
+                active, captured = [], []
+
+                def observe(
+                    original=original,
+                    r=r,
+                    active=active,
+                    captured=captured,
+                    invalid=invalid,
+                ):
+                    obs = original()
+                    if r.orch.state.endswith("_ACTIVE"):
+                        active[:] = [dict(obs)]
+                    if r.orch.state.endswith("_JUDGING"):
+                        if invalid == "replayed_active":
+                            self.assertTrue(active)
+                            obs = dict(active[-1])
+                        elif invalid == "old":
+                            obs["observed_ns"] = r.clock.now() - 1_000_000
+                        elif invalid == "future":
+                            obs["observed_ns"] = r.clock.now() + 1
+                        elif invalid == "bool":
+                            obs["observed_ns"] = True
+                        else:
+                            obs.pop("observed_ns", None)
+                        captured.append(obs.get("observed_ns"))
+                    return obs
+
+                r.robot.observe = observe
+                self.assertEqual(r.orch.run(), "FAULT_LOCKED")
+                self.assertTrue(captured)
+                self.assertTrue(r.cycle.failed)
+                self.assertFalse(
+                    any(kind == "goal" for kind, _obs, _p in self.preparations)
+                )
+                self.assertFalse(
+                    any(
+                        packet["kind"] == "goal"
+                        for _req, packet in self.executor.dispatches
+                    )
+                )
+                self.assertFalse(
+                    any(e.task_outcome == "success" for e in results(r.orch))
+                )
+
+    def test_paused_goal_timestamp_equal_to_post_pause_capture_start_is_fresh(self):
+        r = self.make()
+        for worker in self.workers.values():
+            worker._connection.state["goal"] = ["confirmed"]
+        original = r.robot.observe
+        captured = []
+
+        def observe():
+            before = r.clock.now()
+            obs = original()
+            if r.orch.state.endswith("_JUDGING"):
+                self.assertEqual(obs["observed_ns"], before)
+                captured.append(before)
+            return obs
+
+        r.robot.observe = observe
+        self.assertEqual(r.orch.run(), "WAIT_HUMAN")
+        self.assertTrue(captured)
+        self.assertFalse(r.cycle.failed)
+        self.assertTrue(any(e.task_outcome == "success" for e in results(r.orch)))
+        self.assertEqual(len(self.begin_attempts), len(self.finished))
 
     def test_bad_actual_sdk_ack_no_decode_and_original_slot_retained(self):
         r = self.make(bad_ack=True)

@@ -1681,7 +1681,15 @@ class Orchestrator:
 
     def _judge_intervention(self, ctx, want, *, final=False):
         hold_since = self._pause_intervention(ctx)
+        # The pause transaction has committed. Bind this capture to its own
+        # original-clock interval before staging, preparing evidence or granting.
+        observation_since = self._now()
         obs = self.robot.observe()
+        if (
+            type(obs.get("observed_ns")) is not int
+            or not observation_since <= obs["observed_ns"] <= self._now()
+        ):
+            raise InterventionUnproven("fresh post-pause observation required")
         self.recorder.stage(ctx.rollout, obs)
         request_id = want["request_id"]
         if final:
@@ -1726,7 +1734,7 @@ class Orchestrator:
                 deadline_ns=deadline,
                 interrupted=self._intervention_interrupted,
                 observation=obs,
-                min_observed_ns=obs["observed_ns"],
+                min_observed_ns=observation_since,
                 evidence=self.evidence,
             )
             result = self.intervention.invoke(

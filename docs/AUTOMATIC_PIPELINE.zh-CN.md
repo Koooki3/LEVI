@@ -799,3 +799,5 @@ reset 的静默交接仍依赖经审核的 Performance Architecture 集成。真
 可选的显式 `completion_adapter(request, returned_completion)` 只能与 `request_call` 同时使用，非法组合在授权前拒绝。它必须返回冻结的 `CompletionEvidence(request, result, stop_proof, observation)`，收据及停止证明均绑定本轮授权的原请求对象。Cycle独自把证明交给原权限内核，最终核对租约、角色、完整组、时钟及新鲜空闲观测后才发布结果。不提供适配器时保留原证明hook。回调或适配器异常沿原闭锁保留已撤销的请求槽，不接受tuple、bool、隐式识别或失败回退。SDK ACK来源由注入的借用执行器检查，不能从HTTP或客户端结束推断。
 
 显式注入 `Orchestrator(owned_calls=OwnedCalls(...))` 后，场景、暂停目标与策略chunk均经 `request_call` 借用同一原Cycle权限、runtime和租约。必填CPU准备回调返回不可变 `PreparedCall` bytes，包含原AERI请求、观测来源时间、片段/角色/代次/时钟及payload哈希。场景在保持与授权后采集新帧，分发前保留JPEG证据；目标准备必须使用现有 `PausedFrames.freeze` 窗口；策略明确接收当轮刚stage的新观测，不暗取后来覆盖的 `robot.raw`。借用执行器检查SDK ACK来源。CPU解码只在Cycle完成后运行，输出场景/目标bytes或chunk dict，再交原AERI解析、仲裁、日志和动作检查。显式注入后的绑定、准备、完成或codec错误均不回退旧provider或HTTP；不注入时保留原路径。生产冻结prompt/spec、场景/暂停窗口/策略codec及SDK factories尚未安装，注入合同和CPU fake不构成真实硬件证明；真实FR3入口继续关闭。
+
+暂停后的目标判定取帧只能在暂停事务提交后开始。观测时间戳必须是整数，并落在调用 Robot.observe 前后读取的原运行时钟区间内；等于调用前时间合法。旧帧、完整回放旧观测、未来时间、缺时间或布尔值均在 recorder 入库、证据准备及判定授权前拒绝。owned 目标来源以独立记录的取帧开始时间为下界，不能用帧自身时间证明自己新鲜。
