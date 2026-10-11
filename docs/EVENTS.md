@@ -2,13 +2,14 @@
 
 [中文](EVENTS.zh-CN.md)
 
-`levi.events` reads what a robot's recorded signals say happened, and when. **Only a temporal plan that turns it on uses it** ([below](#in-a-plan-event-intelligence)): there its candidates choose extra frames for the boundary refinement. Nothing else calls it: a plan without it, the interface and the CLI behave as before, as do the signal lines an agent reads (`levi.agent.signals`) and anchored reviews (`levi.agent.anchored`). The modules are pure functions over numpy arrays and pydantic records: no model, no Torch, no files written.
+`levi.events` reads what a robot's recorded signals say happened, and when. **Only a temporal plan that turns it on uses it** ([below](#in-a-plan-event-intelligence)): there its candidates choose extra frames for the boundary refinement. The opt-in online stream described below is a separate adapter; no runtime service mounts it by default. For the recorded-data path, a plan without it, the interface and the CLI behave as before, as do the signal lines an agent reads (`levi.agent.signals`) and anchored reviews (`levi.agent.anchored`). The recorded-data readers and causal kernel are pure computations over arrays and records: no model, no Torch, no files written. The optional adapter retains encoded evidence only through an explicit evidence-store callback.
 
 | Module | What it holds |
 | --- | --- |
 | `gripper` | Open/close crossings of one gripper channel with hysteresis; the kernel behind the signal lines and anchored reviews. |
 | `motion` | Speed and stillness on the recorded timestamps. |
 | `contracts` | `SignalObservation` and `EventCandidate`, the records the readers produce. |
+| `stream` | Causal candidates of a bounded observed prefix, with an explicit declaration and fixed thresholds. |
 | `signal_profiles` | What each recorded channel means: role, actor, units, frame, which end of a gripper is open. |
 | `facts` | The signal facts of one episode as `SignalObservation`s, per channel and actor. |
 | `change_points` | Penalised change points of each actor's speed, gripper level and rotation speed, as `EventCandidate`s. |
@@ -143,3 +144,62 @@ The command line refuses any input path naming a frozen or held-out set and writ
 ## Third-party sources
 
 `levi/events/third_party.json` (`levi.third_party_registry.v1`) records every outside source this package depends on or borrows from: `source`, `version`, `licenses` (code, weights, data), `use` (`dependency`, `adopt-idea`, `adapt-code`, `vendored`), whether any of it is `shipped` or `code_copied`, whether it is `redistributable`, a `citation` with its checked `reference_key`, and `where` it is used. `levi.events.third_party.problems` enforces, in the test suite: a source whose code licence is non-commercial, missing or unverified may only be an idea (nothing copied or shipped); a citation needs a verified reference; a dependency must be declared in `pyproject.toml`; every arXiv number a `levi/events` module mentions must belong to a registered source. Today it lists `ruptures` (an idea, BSD-2-Clause, not installed), VideoSeek (an idea: its overview, skim and focus tools named the evidence planner's tiers; Lin et al. 2026, arXiv:2603.20185, code MIT, nothing copied) and the existing core dependencies NumPy and pydantic: this package adds no dependency. [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) remains the release inventory.
+
+
+## Opt-in online observation stream
+
+`levi.events.stream.CausalSignals` reads one observed prefix at a time. Its
+`feed(Sample(step, observed_ns, values), now_ns=...)` uses a frozen, declared
+`SignalProfile`: gripper units, range and open polarity must be explicit;
+position channels must be measured xyz in metres in one declared frame.
+Thresholds are fixed by `StreamConfig`, never fitted to future samples.
+Missing, invalid or out-of-range signals and observation gaps break continuity.
+They report `unknown` rather than inventing a crossing. Rotation, change-point
+and object-semantic detectors are not implemented online.
+
+`levi.automatic.adapters.signal_events.CachedObserver` wraps an existing robot.
+It delegates each existing `observe()` exactly once, returns the original
+observation unchanged, and caches only a bounded snapshot. `SignalEvents.poll`
+consumes that snapshot; it makes no robot or camera request. The caller supplies
+an explicit `step_of` source for the current completed control step, the same
+clock object, the robot actor, frozen channel `Binding`s, an owned evidence root
+and a bounded `keep_frame(ref, encoded_bytes)` callback. `EvidenceStore.keep_frame`
+implements this callback. `open` / `poll` / `close` have the same wire interface
+as `FileEvents`; the output parses as `levi.aeri.event.v1`.
+
+SDK `pose[6]` is a **command**, so its events are named
+`gripper_command_open` / `gripper_command_close`. A measured gripper channel
+binds `robot_state.gripper_position` and requires `gripper_measurement` from the
+same `getstate` read: route `getstate`, field `gripper_pos`, strictly advancing
+`generation`, `read_from_ns` / `read_through_ns` inside the current observation
+call, matching `clock_domain`, and a normalized `value` equal to the measured
+field. A command never stands in for missing measurement. The adapter uses
+observed `pose[0:3]` for measured position channels; every channel must belong to
+the explicitly selected robot actor.
+
+A candidate carries a stream-epoch event ID, sequence number, actor, exact
+observed step window, clock, signal kind/units, the declared profile hash in the
+detector version, and current frame references. The adapter JPEG-encodes the
+cached images, retains those exact bytes and rereads the bounded regular file
+without following symlinks. It compares the stored SHA-256 to the encoded bytes and checks queued evidence again before delivery.
+A hash of ndarray pixels is not a retained JPEG hash. Missing, skipped, corrupt
+or expired evidence produces a degraded status and no candidate message.
+Future, stale, wrong-step or wrong-clock observations are refused; closing or
+reopening fences the observation cache, and an old stream ID is rejected.
+
+Storage is bounded: 2 images and 16 MiB of pixels in the observer, at most 64
+profile channels, a configurable 2–4096 scalar samples (default 128), 128 pending
+messages and 128 retractable candidates, and at most 1024 episode identities per
+adapter instance. The caller owns the evidence-store byte budget; events do not
+remove retained evidence. `status` reports unknown reasons, dropped history and
+dropped messages. `retract(stream_id, event_id)` can explicitly withdraw a
+current-epoch candidate within that bounded history.
+
+**Validation boundary:** CPU/mock tests exercise observation delegation, prefix
+causality, units and polarity, missing-signal fallback, actual JPEG hashes,
+`EvidenceStore` / `FileEvents` compatibility, bounded storage and step/clock/epoch
+attacks. The adapter is not mounted into the real run, live judging or background
+annotation defaults. GPU admission, live service wiring and real-robot validation
+remain separate integration gates. A candidate requests fresh evidence and an
+existing stable-window judgement; it is never a success verdict or a motion
+command.

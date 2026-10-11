@@ -2,13 +2,14 @@
 
 [English](EVENTS.md)
 
-`levi.events` 读取机器人记录的信号说明了什么时候发生了什么。**只有开启了它的时间片段标注计划才用它**（[见下文](#计划中的事件智能)）：事件候选在那里为边界精修挑选额外的帧。其他地方都不调用它：没开启的计划、界面和命令行行为不变，agent 读到的信号行（`levi.agent.signals`）和锚定复核（`levi.agent.anchored`）也不变。各模块都是作用在 numpy 数组和 pydantic 记录上的纯函数：不调模型，不导入 Torch，不写文件。
+`levi.events` 读取机器人记录的信号说明了什么时候发生了什么。**只有开启了它的时间片段标注计划才用它**（[见下文](#计划中的事件智能)）：事件候选在那里为边界精修挑选额外的帧。下文的在线观测流是独立的显式适配器，运行服务默认不挂载。在离线标注路径中，没开启的计划、界面和命令行行为不变，agent 读到的信号行（`levi.agent.signals`）和锚定复核（`levi.agent.anchored`）也不变。离线读取器和因果内核是作用在数组与记录上的纯计算：不调模型，不导入 Torch，不写文件。可选适配器只通过显式证据存储回调保存编码帧。
 
 | 模块 | 内容 |
 | --- | --- |
 | `gripper` | 单个夹爪通道带滞回的张开/闭合穿越；信号行和锚定复核共用的内核。 |
 | `motion` | 按记录的时间戳计算速度和静止。 |
 | `contracts` | 读取器产出的记录：`SignalObservation` 和 `EventCandidate`。 |
+| `stream` | 有界已观测前缀的因果候选内核；显式声明与固定阈值。 |
 | `signal_profiles` | 每个记录通道的含义：角色、执行器、单位、坐标系、夹爪哪一端是张开。 |
 | `facts` | 把一个片段的信号事实按通道和执行器整理成 `SignalObservation`。 |
 | `change_points` | 对每个执行器的速度、夹爪电平、角速度做带惩罚的变点检测，输出 `EventCandidate`。 |
@@ -143,3 +144,48 @@ python -m levi.events.calibrate --root <工作区> \
 ## 第三方来源
 
 `levi/events/third_party.json`（`levi.third_party_registry.v1`）登记本包依赖或借鉴的每个外部来源：来源 `source`、版本 `version`、许可 `licenses`（代码、权重、数据）、采用方式 `use`（`dependency`、`adopt-idea`、`adapt-code`、`vendored`）、是否随 LEVI 分发（`shipped`）或拷贝了代码（`code_copied`）、能否再分发（`redistributable`）、带核实过的 `reference_key` 的引用 `citation`，以及用在哪里（`where`）。测试用 `levi.events.third_party.problems` 强制这些规则：代码许可为非商业、缺失或未核实的来源只能借鉴思路（不拷贝、不分发）；有引用就必须对应已核实的参考条目；依赖必须在 `pyproject.toml` 里声明；`levi/events` 模块里出现的每个 arXiv 编号都必须属于某个已登记来源。目前登记了 `ruptures`（只借鉴思路，BSD-2-Clause，未安装）、VideoSeek（只借鉴思路：证据规划器的分层名称来自它的 overview、skim、focus 三个工具；Lin 等 2026，arXiv:2603.20185，代码 MIT，未拷贝任何代码）和现有核心依赖 NumPy、pydantic：本包没有新增依赖。发布用的清单仍是 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
+
+## 显式启用的在线观测流
+
+`levi.events.stream.CausalSignals` 逐次读取已观测前缀。
+`feed(Sample(step, observed_ns, values), now_ns=...)` 使用冻结的声明式
+`SignalProfile`：夹爪单位、有效范围、开口极性必须明确；位置必须是同一声明
+坐标系中的实测 xyz，单位为米。`StreamConfig` 固定阈值，不从未来样本拟合。
+缺失、非法或越界信号、观测间断都会打断连续状态，报告 `unknown`，不会凭空
+补出事件。在线旋转、变点和物体语义检测尚未实现。
+
+`levi.automatic.adapters.signal_events.CachedObserver` 包装既有机器人。
+每个既有 `observe()` 只调用一次，原观测原样返回，缓存只有一个有界快照。
+`SignalEvents.poll` 消费该快照，不请求机器人或相机。调用者须提供当前已完成
+控制步的显式 `step_of`、同一个时钟对象、机器人 actor、冻结的 `Binding`、
+本人证据目录及有字节预算的 `keep_frame(ref, encoded_bytes)` 回调。
+`EvidenceStore.keep_frame` 可直接使用；`open` / `poll` / `close` 与
+`FileEvents` 使用相同的接口，输出符合 `levi.aeri.event.v1`。
+
+SDK `pose[6]` 是**指令**，对应事件名为 `gripper_command_open` /
+`gripper_command_close`。实测夹爪必须绑定 `robot_state.gripper_position`，
+并提供同次 `getstate` 读取的 `gripper_measurement`：`route=getstate`、
+`field=gripper_pos`、严格递增的 `generation`、位于本次观测调用内的
+`read_from_ns` / `read_through_ns`、相同 `clock_domain`，以及与实测字段相等的
+归一化 `value`。缺测量时不能用指令代替。实测位置绑定 `pose[0:3]`；
+全部信号必须属于显式指定的同一机器人 actor。
+
+候选包含观测流代次内的事件 ID、序号、actor、准确观测步数窗口、时钟、
+信号类型及单位、检测器版本中的声明 profile 哈希，以及当前帧引用。
+适配器把缓存图像编码成 JPEG，通过回调保存这些确切字节，再以不跟随符号
+链接的方式重读有界普通文件，核对编码字节与落盘文件的 SHA-256，待取候选投递前再次核对。
+ndarray 像素哈希不能冒充已保留 JPEG 的哈希。缺失、跳过、损坏或过期证据
+会报告降级，不输出候选消息。未来、过期、错步数或异时钟观测被拒绝；
+关闭或重新开启片段会清空观测缓存，旧观测流 ID 不能继续使用。
+
+存储有上限：缓存最多两幅图像、合计 16 MiB 像素；profile 最多 64 个通道；
+标量历史可配置 2–4096 个样本，默认 128；待取消息和可撤销候选各 128 个；
+一个适配器实例最多登记 1024 个片段身份。证据目录字节预算由调用者负责，
+事件模块不删除保留的证据。`status` 显示未知原因、历史淘汰和消息丢弃计数；
+`retract(stream_id, event_id)` 可以在有界历史内显式撤销当前代次的候选。
+
+**验证范围**：CPU/mock 测试覆盖既有观测消费、前缀因果性、单位和极性、
+缺信号回退、真实 JPEG 哈希、`EvidenceStore` / `FileEvents` 兼容、有界存储及
+步数、时钟、代次攻击。真实运行、实时成败判定和后台标注入口尚未默认挂载；
+GPU 准入、服务接线与真机验证仍是独立门禁。候选只请求新证据和既有稳定窗口
+判定，不代表任务成功，也不是运动指令。
