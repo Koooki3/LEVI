@@ -71,7 +71,12 @@ describe("the run window", () => {
     open(snapshot({ state: "FORWARD_ACTIVE" }));
     const { host } = await render(<RunWindow runId="run-1" />);
     await waitFor(() => host.querySelector("[data-state=RESET_ACTIVE]"));
-    for (const state of ["RESET_ACTIVE", "RESET_VERIFY", "RESET_FINALIZE"]) {
+    for (const state of [
+      "RESET_ACTIVE",
+      "RESET_JUDGING",
+      "RESET_VERIFY",
+      "RESET_FINALIZE",
+    ]) {
       const node = host.querySelector(`[data-state=${state}]`)!;
       expect(node.getAttribute("data-status")).toBe("disabled");
       expect(node.textContent).toContain("not used: you reset by hand");
@@ -82,6 +87,23 @@ describe("the run window", () => {
     expect(host.textContent).toContain("Manual reset (evaluated policy only)");
     expect(host.textContent).toContain("Dry run");
   });
+  for (const [state, label] of [
+    ["FORWARD_JUDGING", "Policy paused; judging"],
+    ["RESET_JUDGING", "Reset policy paused; judging"],
+  ]) {
+    test(`shows ${state} as the named current paused judgement`, async () => {
+      open(snapshot({ state, reset_mode: "single_reset_policy" }));
+      const { host } = await render(<RunWindow runId="run-1" />);
+      await waitFor(() =>
+        host.querySelector(`[data-state=${state}][aria-current=step]`),
+      );
+      const current = host.querySelector("[aria-current=step]")!;
+      expect(current.textContent).toContain(label);
+      expect(
+        current.closest(".ar-lane")?.querySelector("h3")?.textContent,
+      ).not.toBe("Other");
+    });
+  }
   test("a policy-reset run keeps the reset states available", async () => {
     open(
       snapshot({ state: "RESET_ACTIVE", reset_mode: "single_reset_policy" }),

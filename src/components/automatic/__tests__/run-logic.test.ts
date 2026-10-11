@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   STATE_LANES,
+  STATE_LABEL,
   currentEpisodeText,
   eventReason,
   localDuration,
@@ -28,10 +29,10 @@ const nodes = (state: string, mode: "human_assisted" | "single_reset_policy") =>
   stateGraph(state, mode).flatMap((lane) => lane.nodes);
 
 describe("the state graph", () => {
-  test("has the 13 states of the state machine, each once", () => {
+  test("has the 15 states of the state machine, each once", () => {
     const all = STATE_LANES.flatMap((lane) => lane.states);
-    expect(all.length).toBe(13);
-    expect(new Set(all).size).toBe(13);
+    expect(all.length).toBe(15);
+    expect(new Set(all).size).toBe(15);
   });
   test("marks the current state", () => {
     const current = nodes("FORWARD_ACTIVE", "single_reset_policy").filter(
@@ -39,16 +40,38 @@ describe("the state graph", () => {
     );
     expect(current.map((n) => n.state)).toEqual(["FORWARD_ACTIVE"]);
   });
-  test("greys the three reset states in a manual-reset run, not in a policy run", () => {
+  test("greys all reset states in a manual-reset run, not in a policy run", () => {
     const manual = nodes("WAIT_HUMAN", "human_assisted");
     expect(
       manual.filter((n) => n.status === "disabled").map((n) => n.state),
-    ).toEqual(["RESET_ACTIVE", "RESET_VERIFY", "RESET_FINALIZE"]);
+    ).toEqual([
+      "RESET_ACTIVE",
+      "RESET_JUDGING",
+      "RESET_VERIFY",
+      "RESET_FINALIZE",
+    ]);
     expect(
       nodes("WAIT_HUMAN", "single_reset_policy").some(
         (n) => n.status === "disabled",
       ),
     ).toBe(false);
+  });
+  test("paused judgements stay in their actual lane with a named current state", () => {
+    for (const [state, laneId] of [
+      ["FORWARD_JUDGING", "forward"],
+      ["RESET_JUDGING", "reset"],
+    ]) {
+      const lanes = stateGraph(state, "single_reset_policy");
+      const current = lanes
+        .flatMap((lane) => lane.nodes)
+        .filter((node) => node.status === "current");
+      expect(current.map((node) => node.state)).toEqual([state]);
+      expect(lanes.find((lane) => lane.id === laneId)?.nodes).toContainEqual({
+        state,
+        status: "current",
+      });
+      expect(STATE_LABEL[state]).toBe(`automatic.run.state.${state}`);
+    }
   });
   test("a state the page does not know still shows as current", () => {
     const lanes = stateGraph("INIT", "human_assisted");

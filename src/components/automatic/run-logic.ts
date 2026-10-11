@@ -14,7 +14,7 @@ import type {
 
 // ── State graph ───────────────────────────────────────────────────────────
 
-/** The 13 states of `levi/domain/aeri.py` (`AERI_STATES`), by lane. */
+/** The 15 states of `levi/domain/aeri.py` (`AERI_STATES`), by lane. */
 export const STATE_LANES: { id: string; key: string; states: string[] }[] = [
   {
     id: "forward",
@@ -23,6 +23,7 @@ export const STATE_LANES: { id: string; key: string; states: string[] }[] = [
       "PREFLIGHT",
       "VERIFY_INITIAL",
       "FORWARD_ACTIVE",
+      "FORWARD_JUDGING",
       "FORWARD_STOPPING",
       "FORWARD_FINALIZE",
       "ROBOT_HOME",
@@ -32,7 +33,7 @@ export const STATE_LANES: { id: string; key: string; states: string[] }[] = [
   {
     id: "reset",
     key: "automatic.run.lane.reset",
-    states: ["RESET_ACTIVE", "RESET_VERIFY", "RESET_FINALIZE"],
+    states: ["RESET_ACTIVE", "RESET_JUDGING", "RESET_VERIFY", "RESET_FINALIZE"],
   },
   {
     id: "end",
@@ -40,18 +41,25 @@ export const STATE_LANES: { id: string; key: string; states: string[] }[] = [
     states: ["WAIT_HUMAN", "FAULT_LOCKED", "COMPLETED"],
   },
 ];
-export const RESET_STATES = ["RESET_ACTIVE", "RESET_VERIFY", "RESET_FINALIZE"];
+export const RESET_STATES = [
+  "RESET_ACTIVE",
+  "RESET_JUDGING",
+  "RESET_VERIFY",
+  "RESET_FINALIZE",
+];
 
 export const STATE_LABEL: Record<string, string> = {
   INIT: "automatic.run.state.INIT",
   PREFLIGHT: "automatic.run.state.PREFLIGHT",
   VERIFY_INITIAL: "automatic.run.state.VERIFY_INITIAL",
   FORWARD_ACTIVE: "automatic.run.state.FORWARD_ACTIVE",
+  FORWARD_JUDGING: "automatic.run.state.FORWARD_JUDGING",
   FORWARD_STOPPING: "automatic.run.state.FORWARD_STOPPING",
   FORWARD_FINALIZE: "automatic.run.state.FORWARD_FINALIZE",
   ROBOT_HOME: "automatic.run.state.ROBOT_HOME",
   SCENE_ASSESS: "automatic.run.state.SCENE_ASSESS",
   RESET_ACTIVE: "automatic.run.state.RESET_ACTIVE",
+  RESET_JUDGING: "automatic.run.state.RESET_JUDGING",
   RESET_VERIFY: "automatic.run.state.RESET_VERIFY",
   RESET_FINALIZE: "automatic.run.state.RESET_FINALIZE",
   WAIT_HUMAN: "automatic.run.state.WAIT_HUMAN",
@@ -70,7 +78,7 @@ export interface GraphLane {
   nodes: GraphNode[];
 }
 
-/** In `human_assisted` the three RESET_* states are never entered. */
+/** In `human_assisted` the RESET_* states are never entered. */
 export function resetUnused(mode: ResetMode | null | undefined): boolean {
   return mode === "human_assisted";
 }

@@ -1,6 +1,6 @@
 "use client";
 // Small pieces shared by the run list, the launch panel and the run window:
-// the mode labels, the 13-state graph, a note box and the error line.
+// the mode labels, the 15-state graph, a note box and the error line.
 import {
   Ban,
   CircleCheck,

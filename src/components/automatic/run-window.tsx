@@ -1,5 +1,5 @@
 "use client";
-// The window of one run: the 13-state graph, the current episode and counters,
+// The window of one run: the 15-state graph, the current episode and counters,
 // what the run needs from a person, the event timeline, the metrics and a
 // stop button. Everything on it comes from the run's own files through the
 // read-only API; the only writes are a person's (stop, label, resume, scene
