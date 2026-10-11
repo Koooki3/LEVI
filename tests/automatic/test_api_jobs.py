@@ -260,3 +260,22 @@ def test_checkpoint_identity_is_frozen_in_the_plan(client, roots, checkpoints):
         path.read_text().replace('checkpoint_id: "fwd-a"', 'checkpoint_id: "fwd-b"')
     )
     assert cli.load_job(path)["plan_sha256"] != old
+
+
+def test_fr3_recipe_is_read_only_and_names_frozen_plan_gaps(client, roots, checkpoints):
+    created = post(client, form()).json()
+    before = (roots / "wizard" / "wiz-a.yaml").read_bytes()
+    answer = client.get(f"{BASE}/jobs/{created['id']}/fr3-bridge")
+    assert answer.status_code == 200, answer.text
+    recipe = answer.json()
+    assert recipe["hardware_verified"] is False
+    assert recipe["manual_review_required"] is True
+    assert recipe["requires_new_plan"] is True
+    assert "confirmed_initial_state_contract_required" in recipe["blockers"]
+    assert "--check" in recipe["check_command"]
+    assert (
+        "--expect-binding '<binding-sha256-from-check>'"
+        in recipe["execute_command_template"]
+    )
+    assert (roots / "wizard" / "wiz-a.yaml").read_bytes() == before
+    assert client.get(f"{BASE}/jobs/not-present/fr3-bridge").status_code == 404

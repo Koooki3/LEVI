@@ -1,0 +1,559 @@
+"""Explicit operator entry: python -m levi.automatic.fr3_run --help.
+
+--check is read-only and imports no hardware modules. --execute needs a typed
+confirmation at a terminal, immutable job/binding digests and real providers.
+No deployment/service launch is performed. This is separate from the HTTP
+launch runner, whose real-mode refusal remains in force.
+"""
+
+import argparse
+import hashlib
+import importlib
+import json
+import math
+import shlex
+import signal
+import sys
+import threading
+import time
+from dataclasses import replace
+from pathlib import Path
+from urllib.parse import urlparse
+
+from . import cli
+from . import fr3_bridge as bridge
+from . import fr3_providers as providers
+from . import state_machine as sm
+from .adapters import human
+from .orchestrator import Orchestrator
+from .recorder import SessionFiles
+
+SCHEMA = "levi.aeri.fr3.binding.v1"
+
+
+def load_binding(path, job):
+    data = Path(path).read_bytes()
+    if len(data) > 64 * 1024:
+        raise ValueError("binding exceeds 64 KiB")
+    value = cli.sa.parse_document(data.decode("utf-8"))
+    required = {
+        "schema",
+        "openpi_root",
+        "robot_url",
+        "health_file",
+        "cameras",
+        "safety",
+        "policies",
+        "providers",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != required
+        or value["schema"] != SCHEMA
+    ):
+        raise ValueError("binding requires exactly " + ", ".join(sorted(required)))
+    for name in ("openpi_root", "health_file"):
+        if not isinstance(value[name], str) or not Path(value[name]).is_absolute():
+            raise ValueError(name + " must be an absolute path")
+    url = urlparse(value["robot_url"])
+    if (
+        url.scheme != "http"
+        or url.hostname != "127.0.0.1"
+        or url.port not in (5000, 5001)
+        or url.username
+        or url.password
+    ):
+        raise ValueError("robot_url must be the operator's loopback robot server")
+    cameras = value["cameras"]
+    if not isinstance(cameras, dict):
+        raise TypeError("cameras must be a mapping")
+    if (
+        set(cameras) != {"side", "wrist"}
+        or any(not isinstance(s, str) or not s.isdigit() for s in cameras.values())
+        or cameras["side"] == cameras["wrist"]
+    ):
+        raise ValueError("two distinct camera serials are required")
+    safety = value["safety"]
+    if not isinstance(safety, dict):
+        raise TypeError("safety must be a mapping")
+    expected = {
+        "min_z",
+        "max_xy",
+        "max_step_m",
+        "max_step_rad",
+        "home_pose",
+        "home_duration_s",
+        "home_tolerance_mm",
+    }
+    if set(safety) != expected:
+        raise ValueError("safety requires exactly " + ", ".join(sorted(expected)))
+    for name in expected - {"home_pose"}:
+        x = safety[name]
+        if (
+            isinstance(x, bool)
+            or not isinstance(x, int | float)
+            or not math.isfinite(x)
+            or x <= 0
+        ):
+            raise ValueError("safety." + name + " must be positive finite")
+    if safety["home_duration_s"] * 1e9 >= job["config"].home_timeout_ns:
+        raise ValueError("home duration must be shorter than the frozen home timeout")
+    pose = safety["home_pose"]
+    if (
+        not isinstance(pose, list)
+        or len(pose) != 6
+        or any(
+            isinstance(x, bool)
+            or not isinstance(x, int | float)
+            or not math.isfinite(x)
+            for x in pose
+        )
+    ):
+        raise ValueError("home_pose must contain six finite metres/radians")
+    if pose[2] < safety["min_z"] or any(abs(x) > safety["max_xy"] for x in pose[:2]):
+        raise ValueError("home pose is outside the configured workspace")
+    roles = (
+        {"forward"}
+        if job["config"].reset_strategy == "human_assisted"
+        else {"forward", "reset"}
+    )
+    if not isinstance(value["policies"], dict) or set(value["policies"]) != roles:
+        raise ValueError("policy endpoint roles do not match reset strategy")
+    deployments = job["plan"].get("deployments", {})
+    for role in roles:
+        if role not in deployments:
+            raise ValueError(role + " requires a frozen deployment identity")
+        bridge.checkpoint_path(deployments[role].get("checkpoint_dir"))
+        endpoint = value["policies"][role]
+        if not isinstance(endpoint, dict):
+            raise TypeError("policy endpoint must be a mapping")
+        if (
+            set(endpoint) != {"host", "port"}
+            or endpoint["host"] != "127.0.0.1"
+            or type(endpoint["port"]) is not int
+            or not 1024 <= endpoint["port"] <= 65535
+        ):
+            raise ValueError("policy endpoint must be an explicit loopback host/port")
+        if endpoint["port"] in (5000, 5001, 5100, 7470):
+            raise ValueError("policy endpoint names a motion/learner port")
+    if not job.get("rollout_root") or not Path(job["rollout_root"]).is_absolute():
+        raise ValueError("recording.rollout_root must be frozen as an absolute path")
+    if job["contract"] is None or job["contract"].status != "confirmed":
+        raise ValueError("real execution requires a confirmed Initial State Contract")
+    if job["mode"] == "shadow":
+        raise ValueError("shadow mode has no motion authority")
+    provider = value["providers"]
+    if not isinstance(provider, dict) or set(provider) != {"online_url", "file_root"}:
+        raise ValueError("providers requires online_url and file_root")
+    judge_url = urlparse(provider["online_url"])
+    if (
+        judge_url.scheme != "http"
+        or judge_url.hostname != "127.0.0.1"
+        or judge_url.port != 7882
+        or judge_url.username
+        or judge_url.password
+    ):
+        raise ValueError("online_url must be the existing loopback C5 :7882 endpoint")
+    if (
+        not isinstance(provider["file_root"], str)
+        or not Path(provider["file_root"]).is_absolute()
+    ):
+        raise ValueError("provider file_root must be absolute")
+    if (
+        not Path(provider["file_root"]).is_dir()
+        or Path(provider["file_root"]).is_symlink()
+    ):
+        raise ValueError("provider file_root must be an existing real directory")
+    if job["config"].scene_check == "provider":
+        caps = {"scene"} | (
+            {"events", "reset_judgement"} if "reset" in roles else set()
+        )
+        if not providers.ready(provider["file_root"], job["contract"], caps):
+            raise ValueError(
+                "real provider READY.json is missing, stale or does not match contract/capabilities"
+            )
+    return value, hashlib.sha256(data).hexdigest()
+
+
+def modules(binding):
+    root = Path(binding["openpi_root"])
+    sys.path.insert(0, str(root))
+    sys.path.insert(0, str(root / "packages" / "openpi-client" / "src"))
+    client = importlib.import_module("examples.fr3_local.run_robotiq_client")
+    health = importlib.import_module("examples.fr3_local.fr3_health")
+    env = importlib.import_module("examples.fr3_local.fr3_env")
+    online = importlib.import_module("examples.fr3_local.levi_online_judge")
+    import cv2
+    from scipy.spatial.transform import Rotation
+
+    return client, health, env, online, cv2, Rotation
+
+
+def execute(job, binding, *, load_modules=modules):
+    cfg = replace(
+        job["config"], specs={**job["config"].specs, **job["contract"].spec()}
+    )
+    directory = Path(job["rollout_root"]) / ".aeri" / "runs" / cfg.run_id
+    if directory.exists():
+        raise ValueError(
+            "this run already exists; hardware replay is refused; use a new reviewed run id"
+        )
+    client, health, env_module, online, cv2, rotation = load_modules(binding)
+    args = client.Args()
+    for name, value in binding["safety"].items():
+        if name != "home_tolerance_mm":
+            setattr(args, name, value)
+    args.control_hz = 1e9 / cfg.control_period_ns
+    args.view_camera_id, args.wrist_camera_id = (
+        binding["cameras"]["side"],
+        binding["cameras"]["wrist"],
+    )
+    args.franka_server_url = binding["robot_url"]
+    args.require_matching_server = True
+    deployments = job["plan"]["deployments"]
+    clients = {}
+    # Every deployed role is checked before constructing cameras or any arm I/O.
+    for role, endpoint in binding["policies"].items():
+        clients[role] = client.websocket_client_policy.WebsocketClientPolicy(
+            endpoint["host"], endpoint["port"]
+        )
+        metadata = clients[role].get_server_metadata()
+        bridge.check_identity(deployments[role], metadata)
+        client._check_server(metadata, args)
+        client._check_prompt(job["texts"][role], args, metadata)
+    judge = online.OnlineJudge(
+        online.fetch_spec(binding["providers"]["online_url"]),
+        timeout_s=cfg.final_judge_timeout_ns / 1e9,
+    )
+    clock, fence = bridge.Clock(), sm.MotionFence()
+    guard = health.Fr3Guard(health.GuardConfig(health_file=binding["health_file"]))
+    if guard.check(force=True).status != "ok":
+        raise ValueError("fresh green health monitor required before RobotEnv")
+    env = env_module.RobotEnv(
+        action_space="pose_euler",
+        gripper_action_space="position",
+        camera_kwargs=client.build_camera_kwargs(args),
+        do_reset=False,
+        server_url=binding["robot_url"],
+        post_step_verify_delay=0.0,
+    )
+    try:
+        guard.attach(env)
+        return assembled(
+            job,
+            binding,
+            client,
+            online,
+            cv2,
+            rotation,
+            env,
+            guard,
+            args,
+            clock,
+            fence,
+            cfg,
+            clients,
+            judge,
+        )
+    finally:
+        env.close()
+
+
+def assembled(
+    job,
+    binding,
+    client,
+    online,
+    cv2,
+    rotation,
+    env,
+    guard,
+    args,
+    clock,
+    fence,
+    cfg,
+    clients,
+    judge,
+):
+    deployments = job["plan"]["deployments"]
+    robot = bridge.Robot(
+        env,
+        guard,
+        client,
+        args,
+        clock,
+        fence,
+        tolerance_mm=binding["safety"]["home_tolerance_mm"],
+    )
+    from .fr3_media import Media, Recorder
+
+    media = Media(cv2, rotation, online, judge, args.control_hz)
+    directory = Path(job["rollout_root"]) / ".aeri" / "runs" / cfg.run_id
+    recorder = Recorder(
+        job["rollout_root"],
+        run_id=cfg.run_id,
+        run_dir=directory,
+        group=job["group"],
+        texts=job["texts"],
+        media=media,
+    )
+    file_root = binding["providers"]["file_root"]
+
+    def capture():
+        obs = robot.observe()
+        out = {}
+        for view, pixels in obs["images_bgr"].items():
+            ok, data = cv2.imencode(".jpg", pixels)
+            if ok:
+                out[view] = data.tobytes()
+        return out
+
+    if cfg.scene_check == "operator_attested":
+        scene = human.HumanSceneProvider(
+            job["contract"],
+            capture,
+            human.FileTransport(directory / "scene"),
+            clock,
+            cfg.run_id,
+        )
+    else:
+        scene = providers.FileProvider(
+            file_root, "scene", robot, clock, job["contract"]
+        )
+    reset_provider = (
+        providers.FileProvider(
+            file_root, "reset_judgement", robot, clock, job["contract"]
+        )
+        if "reset" in clients
+        else None
+    )
+    sessions = SessionFiles(
+        job["rollout_root"],
+        run_id=cfg.run_id,
+        group=job["group"],
+        folders=cli.session_folders(cfg),
+        texts=job["texts"],
+        policies=deployments,
+    )
+    policy = bridge.Policy(
+        clients, deployments, job["texts"], robot, client, args, clock
+    )
+    orch = None
+    finished = threading.Event()
+    old_signals = {}
+    try:
+        orch = Orchestrator.create(
+            directory,
+            cfg,
+            plan=job["plan"],
+            robot=robot,
+            policy=policy,
+            recorder=recorder,
+            events=providers.FileEvents(file_root, cfg.run_id, clock),
+            verifier=providers.OnlineVerifier(
+                online, judge, clock, media, job, reset_provider, robot=robot
+            ),
+            scene=scene,
+            clock=clock,
+            fence=fence,
+            listener=sessions,
+        )
+        if reset_provider is not None:
+            reset_provider.use_evidence(orch.evidence)
+
+        signal_stop = {"signum": None}
+        robot.stop_probe = lambda: signal_stop["signum"] is not None
+
+        def stop(signum, frame):
+            # Python signal handlers may interrupt a non-reentrant lock.
+            # Record a plain flag only; every motion route sees it immediately.
+            signal_stop["signum"] = signum
+
+        if threading.current_thread() is threading.main_thread():
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                old_signals[signum] = signal.signal(signum, stop)
+
+        def heartbeat():
+            last = time.monotonic()
+            delivered = False
+            while not finished.wait(0.05):
+                if signal_stop["signum"] is not None and not delivered:
+                    robot.emergency_hold()
+                    orch.stop("signal-" + str(signal_stop["signum"]))
+                    delivered = True
+                if time.monotonic() - last < 2:
+                    continue
+                last = time.monotonic()
+                try:
+                    sessions.heartbeat()
+                except Exception as exc:  # noqa: BLE001 - no stale live session while moving
+                    robot.emergency_hold()
+                    orch.stop("session-heartbeat-failed")
+                    print("Session heartbeat failed: " + str(exc), file=sys.stderr)
+                    return
+
+        thread = threading.Thread(
+            target=heartbeat, daemon=True, name="aeri-C2-heartbeat"
+        )
+        thread.start()
+        while True:
+            state = orch.run()
+            if state != "WAIT_HUMAN" or robot.stopped():
+                return state
+            print(
+                "WAIT_HUMAN: scene/health require operator review. "
+                "Type resume after handling the environment and rechecking health, or stop."
+            )
+            if not sys.stdin.isatty():
+                return state
+            if input("> ").strip() != "resume":
+                orch.stop("terminal-stop")
+                return orch.state
+            orch.resume(
+                "terminal-resume-" + str(time.time_ns()),
+                expected_seq=orch.journal.next_seq,
+                environment_handled=True,
+                health_rechecked=robot.health()["state"] == "ok",
+            )
+    finally:
+        finished.set()
+        robot.emergency_hold()
+        if orch is not None:
+            fence.revoke()
+            orch.close()
+        recorder.close()
+        for signum, previous in old_signals.items():
+            signal.signal(signum, previous)
+
+
+def recipe(job_path):
+    """Read-only recipe for a retained wizard/campaign job; never arm it."""
+    job = cli.load_job(job_path)
+    blockers = [
+        "reviewed_fr3_binding_required",
+        "operator_terminal_confirmation_required",
+        "physical_validation_not_performed",
+        "online_C5_provider_required",
+    ]
+    missing = []
+    if not job["rollout_root"]:
+        missing.append("absolute_rollout_root_required")
+    if job["contract"] is None or job["contract"].status != "confirmed":
+        missing.append("confirmed_initial_state_contract_required")
+    if job["mode"] == "shadow":
+        missing.append("shadow_has_no_motion_authority")
+    roles = (
+        ("forward",)
+        if job["config"].reset_strategy == "human_assisted"
+        else ("forward", "reset")
+    )
+    for role in roles:
+        deployment = job["plan"].get("deployments", {}).get(role, {})
+        try:
+            bridge.checkpoint_path(deployment.get("checkpoint_dir"))
+        except ValueError:
+            missing.append(role + "_deployment_identity_required")
+    if job["config"].scene_check == "provider":
+        blockers.append("real_scene_provider_required")
+    if "reset" in roles:
+        blockers += [
+            "real_reset_goal_and_event_providers_required",
+            "reset_policy_deployment_review_required",
+        ]
+    entrypoint = "python -B -m levi.automatic.fr3_run"
+    source = (
+        entrypoint
+        + " --config "
+        + shlex.quote(str(Path(job_path).resolve()))
+        + " --binding '<reviewed-binding.json>'"
+    )
+    return {
+        "entrypoint": entrypoint,
+        "check_command": source + " --check",
+        "execute_command_template": source
+        + " --execute --expect-plan "
+        + job["plan_sha256"]
+        + " --expect-binding '<binding-sha256-from-check>'",
+        "plan_sha256": job["plan_sha256"],
+        "hardware_verified": False,
+        "manual_review_required": True,
+        "blockers": missing + blockers,
+        "requires_new_plan": bool(missing),
+    }
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config")
+    parser.add_argument("--binding")
+    parser.add_argument("--check", action="store_true")
+    parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--expect-plan")
+    parser.add_argument("--expect-binding")
+    parser.add_argument(
+        "--scene-question", help="answer one real captured human scene question"
+    )
+    parser.add_argument(
+        "--predicates",
+        help="JSON mapping of required predicate names to true/false/null",
+    )
+    args = parser.parse_args(argv)
+    try:
+        if args.scene_question:
+            question_path = Path(args.scene_question)
+            question = json.loads(question_path.read_text())
+            if question_path.parent.name != "questions" or not args.predicates:
+                raise ValueError(
+                    "scene-question must name a current scene/questions file and predicates"
+                )
+            predicates = json.loads(args.predicates)
+            human.write_answer(question_path.parent.parent, question, predicates)
+            return 0
+        if not args.config or not args.binding or args.check == args.execute:
+            raise ValueError(
+                "choose exactly one of --check and --execute; supply --config and --binding"
+            )
+        job = cli.load_job(args.config)
+        _binding, digest = load_binding(args.binding, job)
+        if args.check:
+            print(
+                json.dumps(
+                    {
+                        "plan_sha256": job["plan_sha256"],
+                        "binding_sha256": digest,
+                        "reset_strategy": job["config"].reset_strategy,
+                        "hardware_verified": False,
+                    },
+                    indent=2,
+                )
+            )
+            return 0
+        if args.expect_plan != job["plan_sha256"] or args.expect_binding != digest:
+            raise ValueError(
+                "job/binding digests must match the reviewed --check output"
+            )
+        if not sys.stdin.isatty():
+            raise ValueError("real execution requires an operator terminal")
+        phrase = "execute " + job["config"].run_id
+        print(
+            "This connects to the robot and may move it. Confirm the reviewed scene, limits, "
+            "checkpoints, active providers and hardware readiness."
+        )
+        if input("Type " + phrase + ": ").strip() != phrase:
+            raise ValueError("operator did not authorize motion")
+        # Re-read after confirmation: operator waiting cannot hide a changed plan.
+        checked = cli.load_job(args.config)
+        checked_binding, checked_digest = load_binding(args.binding, checked)
+        if (
+            checked["plan_sha256"] != args.expect_plan
+            or checked_digest != args.expect_binding
+        ):
+            raise ValueError("configuration changed during operator confirmation")
+        return 0 if execute(checked, checked_binding) == "COMPLETED" else 1
+    except (ValueError, TypeError, OSError, cli.JobError, cli.sa.ContractError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -2,18 +2,7 @@
 
 [中文](AUTOMATIC_PIPELINE.zh-CN.md)
 
-**Status: runs on fakes only.** This page documents the integration
-contracts (`levi/domain/aeri.py`), the durable journal
-(`levi/automatic/journal.py`), the state machine and orchestrator
-(`levi/automatic/state_machine.py`, `orchestrator.py`), the termination
-arbiter (`termination.py`), the reset arbitration (`scene_assessment.py`,
-`reset_manager.py`), the recorder layer (`recorder.py`), the metrics
-(`metrics.py`), the command line (`cli.py`), the provider adapters
-(`levi/automatic/adapters/`) and the in-process fakes
-(`integrations/fr3_automatic/fake.py`). There is no real robot adapter and no
-page yet, and the command line only dry-runs on the fakes; nothing here
-moves a robot, starts a model or opens a port, and nothing tested here
-counts as verified on the robot.
+**Status: software implementation with fake-I/O validation; hardware acceptance is pending.** This page documents the software contracts and explicit execution bridge.
 
 The pipeline joins three parts through versioned messages:
 
@@ -1452,8 +1441,9 @@ forward episodes are labelled, the reset folder excluded with
 own, which is why it should be excluded). Nothing in `levi/live` or its
 tests is changed.
 
-**Not yet:** the real FR3 adapter, a real run command, the
-`/automatic` page; `atomic_skill_sequence` and `scripted_safe_reset`.
+**Not yet:** `atomic_skill_sequence` and `scripted_safe_reset`. The explicit
+FR3 software bridge and page are implemented; supervised hardware acceptance
+remains pending.
 
 
 ## Evaluation policy discovery (`levi/automatic/policies.py`)
@@ -1489,7 +1479,7 @@ the checkpoints; the page should show `role_source`. Tests:
 
 ### Guided execution settings and layout answers
 
-Guided campaigns use the existing dual-label client and support `human_assisted` resets only. A `single_reset_policy` guided plan reports `guided_reset_policy_unsupported` and cannot start; dry runs still exercise both reset strategies. Real AERI runner modes remain unavailable until a reviewed execution adapter is installed.
+Guided campaigns use the existing dual-label client and support `human_assisted` resets only. A `single_reset_policy` guided plan reports `guided_reset_policy_unsupported` and cannot start; dry runs still exercise both reset strategies. The HTTP runner still refuses real modes; the explicit FR3 entry described below is separately gated by operator confirmation.
 
 The copied command now passes the frozen forward step budget as `--max-timesteps`, the early-key setting as `--dual-early-key` or `--no-dual-early-key`, and the collected data root as `--rollout-root`. An existing flag is replaced once; duplicate flags are refused. These values remain in the saved command configuration, while the original operator-guide excerpt is retained for drift detection. Step budgets are included in the shared-settings digest. The client may let an operator change a budget at a terminal gate; such a change deviates from the frozen plan and must not be treated as the planned experiment.
 
@@ -1510,3 +1500,102 @@ fallback is used. Multiple current matches remain ambiguous. The public object
 omits the private checkpoint path and sets `dataset` to null until the live
 service resolves its mirror. This association is covered by synthetic I/O tests;
 it has not been verified on hardware.
+
+
+## Explicit FR3 execution bridge
+
+
+The operator entry is `python -B -m levi.automatic.fr3_run`. It supports
+`human_assisted` and `single_reset_policy` in the AERI state machine. The HTTP
+runner still refuses real modes. Guided legacy commands remain a separate
+human-reset workflow. No physical run of either bridge mode has been accepted.
+
+From an online job, read `GET /api/levi/automatic/jobs/{job_id}/fr3-bridge`;
+from a campaign, read `GET /api/levi/automatic/campaigns/{id}/fr3-bridge?segment=N`.
+The response contains `entrypoint`, `check_command`, `execute_command_template`,
+`plan_sha256`, `hardware_verified: false`, `manual_review_required: true`,
+`requires_new_plan` and machine-readable `blockers`. This endpoint reads the
+retained job and never executes a command. The command template has explicit
+binding-file and binding-digest placeholders. Unknown jobs/segments return 404;
+invalid retained jobs return 422 `job_invalid`.
+
+If the recipe requires a new plan, create a new job under a configured job root
+using the job format above, with the operator-confirmed `task.initial_state_spec`,
+an absolute `recording.rollout_root`, and each discovered policy's frozen
+`deployment.config` and full `deployment.checkpoint_dir`. Use a new `run_id`.
+Do not edit an already frozen job or declare its draft contract confirmed on
+behalf of the operator. The bridge refuses shadow mode and existing run folders.
+
+The operator prepares a JSON binding file outside the frozen job. Required keys:
+
+| Key | Actual source |
+| --- | --- |
+| `schema` | `levi.aeri.fr3.binding.v1` |
+| `openpi_root` | Absolute existing openpi checkout; uses its FR3 client, health guard and environment through lazy imports |
+| `robot_url` | Reviewed loopback robot endpoint, `http://127.0.0.1:5000/` or `:5001/`; used only after terminal confirmation |
+| `health_file` | Absolute current C3 monitor file; a fresh green guard reading is mandatory before creating the environment |
+| `cameras` | Exactly `side` and `wrist`, distinct actual numeric serial strings |
+| `safety` | Exactly `min_z`, `max_xy`, `max_step_m`, `max_step_rad`, `home_pose` (six metres/radians), `home_duration_s`, `home_tolerance_mm`; use reviewed site limits, not guessed values. Home duration must fit the frozen home timeout |
+| `policies` | Exactly `forward`, plus `reset` for policy reset; each is `{"host":"127.0.0.1","port": PORT}` for an already running, independently reviewed server |
+| `providers` | `{"online_url":"http://127.0.0.1:7882","file_root":"/absolute/provider-directory"}` |
+
+Run the copied `--check` command in the existing openpi-capable Python environment
+(with LEVI, OpenCV, NumPy and SciPy available). It reads files and validates the
+binding only; it does not import the SDK, connect to devices/policies/C5, start a
+service, or claim physical readiness. Save its two digests. After the operator
+has reviewed the running robot/health monitor, both cameras, policy metadata,
+limits and providers, fill the copied `--execute` template with those exact
+digests. Each invocation requires a real terminal and the typed phrase
+`execute <run_id>`. Configuration is re-read after confirmation. Neither a
+configuration flag nor a previous run's journal can replace this confirmation.
+The bridge does not launch robot, policy, health, or judge services.
+
+For forward goal judgement, the existing C5 endpoint and online client must be
+available. The adapter submits actual recorded frames plus a fresh terminal
+observation after quiescence; operator outcome labels are not model inputs.
+Policy metadata must exactly match the frozen serving config and full resolved
+checkpoint directory for every role before any robot environment is created.
+
+For `scene_check: provider`, connect a real external provider to `file_root`:
+
+1. The provider maintains `READY.json`: schema `levi.aeri.provider_ready.v1`,
+   `contract_id`, string `contract_version`, `capabilities` (`scene`; for policy
+   reset also `events` and `reset_judgement`), and integer `updated_wall_ns`.
+   Refresh before ten seconds elapse. Missing/stale/mismatched readiness is refused.
+2. Watch `<kind>/requests/<sha256(request_id)>.json`, where kind is `scene` or
+   `reset_judgement`. Each `levi.aeri.provider_request.v1` envelope contains the
+   exact AERI `request`, local `clock_domain`/`observed_ns`, kept current JPEG
+   `frames`, `evidence_root`, and required/optional contract predicates. Read
+   those actual evidence files and assess that request, rather than a prior scene.
+3. Atomically write a fresh AERI `levi.aeri.scene.v1` or
+   `levi.aeri.judgement.v1` response into `<kind>/responses/<same hash>.json`.
+   Follow the contracts above: matching run/request/episode/role/contract, clock
+   domain, observed step/time, predicates, and retained evidence references.
+   Unavailable or unclear assessments must say so. The orchestrator validates
+   replies; no response is manufactured by this bridge. Prewritten responses,
+   symlinks and invalid/stale replies cannot establish readiness.
+4. The event provider reads `events/<sha256(episode_id)>/request.json` with
+   run/episode/role/clock identity, then writes unique `event-*.json` AERI event
+   proposals there. Respect `<kind>/cancelled/` notices. Events only propose
+   termination; the independent final/reset judge still must verify the result.
+
+The repository supplies this transport, not an external scene/reset model
+process. Without that real provider, policy-reset execution is blocked; copying
+an example readiness file does not implement a provider. For human reset,
+`scene_check: operator_attested` instead uses captured questions under
+`<rollout_root>/.aeri/runs/<run_id>/scene/questions/`. In a second terminal the
+operator reads each question and its current frames, then answers with
+`python -B -m levi.automatic.fr3_run --scene-question <question.json> --predicates
+'{"required_predicate":true}'` using the actual contract's predicate names.
+An uncertain predicate stays null. A `WAIT_HUMAN` terminal prompt resumes only
+when the operator explicitly types `resume` after handling the scene.
+
+Acknowledged steps alone commit video/CSV media. Homing uses the existing guarded
+Cartesian `_go_home` path, checks the final pose and open gripper, and cannot call
+joint reset. Every motion HTTP call checks the current fence and stop request.
+A health fault, failed home or unknown acknowledgement locks motion without
+retrying it. SIGINT/SIGTERM cease new commands and stop the orchestrator; this is
+not a hardware emergency-stop replacement. Fake-I/O tests cover both reset
+modes, reset failure, metadata mismatch, stop/fault fences, uncertain ack,
+provider freshness and no-connection `--check`. Camera codecs, server timing,
+physical stop behaviour and reset reliability remain for supervised acceptance.

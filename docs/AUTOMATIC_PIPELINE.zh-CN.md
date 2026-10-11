@@ -2,7 +2,7 @@
 
 [English](AUTOMATIC_PIPELINE.md)
 
-**状态：只在 Fake 上运行。** 本页写集成契约（`levi/domain/aeri.py`）、持久化事务日志（`levi/automatic/journal.py`）、状态机与编排器（`levi/automatic/state_machine.py`、`orchestrator.py`）、终止裁决器（`termination.py`）、复位仲裁（`scene_assessment.py`、`reset_manager.py`）、录制层（`recorder.py`）、指标（`metrics.py`）、命令行（`cli.py`）、提供方适配层（`levi/automatic/adapters/`）和进程内 Fake（`integrations/fr3_automatic/fake.py`）。真实机器人适配层和页面都还没有，命令行只能在 Fake 上试运行；这里的代码不会让机器人动、不会启动模型、不会开端口，在这里通过的测试都不算真机验证。
+**状态：软件实现已做 fake I/O 验证，现场验收尚未完成。** 本页说明软件契约与显式执行桥。
 
 流水线由三部分组成，彼此只通过带版本的消息交互：
 
@@ -552,7 +552,7 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 
 **后台实时标注兼容**（`test_aeri_live_compat.py`）：Fake AERI 运行写出的 rollout 和会话文件被真实的后台实时标注服务接收（它的控制器和 worker 以 `once` 模式运行，对接假模型服务）：前向片段被标注；用 `watch.exclude` 排除的复位目录不被标注（不排除时它会成为一个单独的数据集，所以应当排除）。`levi/live` 及其测试都没有改动。
 
-**尚未实现：** 真实 FR3 适配层、真机运行命令、`/automatic` 页面；`atomic_skill_sequence` 和 `scripted_safe_reset`。
+**尚未实现：** `atomic_skill_sequence` 和 `scripted_safe_reset`。显式 FR3 软件桥与页面已有实现，现场验收尚未完成。
 
 
 ## 测评 policy 发现（`levi/automatic/policies.py`）
@@ -572,7 +572,7 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 
 ### 引导式执行设置与布局卡回答
 
-引导式评测计划沿用现有双标签客户端，支持 `human_assisted` 人工复位。`single_reset_policy` 引导式计划返回 `guided_reset_policy_unsupported`，不能启动；试运行仍验证两种复位策略。真实 AERI 运行器模式须等经过审查的执行适配器接入后才能开放。
+引导式评测计划沿用现有双标签客户端，支持 `human_assisted` 人工复位。`single_reset_policy` 引导式计划返回 `guided_reset_policy_unsupported`，不能启动；试运行仍验证两种复位策略。HTTP 运行器仍拒绝真实模式；下文显式 FR3 入口另设逐次人工确认。
 
 复制的命令现在明确传递冻结步数 `--max-timesteps`、提前按键设置 `--dual-early-key` 或 `--no-dual-early-key`，以及收集数据的根目录 `--rollout-root`。已有参数只替换一次，重复参数会被拒绝。这些值保存在命令配置中，原始手册指令仍完整保留，用于检测手册变化。步数纳入共享设置摘要。旧客户端仍可能允许操作员在开始闸门改变步数；这样的片段偏离冻结计划，不能按原计划实验解读。
 
@@ -590,3 +590,82 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 和本段开始时间。不采用最新会话猜测；多个当前匹配明确报告歧义。公开对象不含内部完整
 检查点路径，`dataset` 暂为 null，由实时服务解析镜像。该关联已用合成 I/O 测试覆盖，
 尚未进行真机验证。
+
+
+## 显式 FR3 真机执行桥
+
+
+实际入口是 `python -B -m levi.automatic.fr3_run`，用 AERI 状态机执行
+`human_assisted` 与 `single_reset_policy`。HTTP runner 仍拒绝真实模式；现有
+向导复制的人工客户端指令属于另一条人工复位流程。两种桥接模式均未完成物理验收。
+
+在线作业读取 `GET /api/levi/automatic/jobs/{job_id}/fr3-bridge`，实验读取
+`GET /api/levi/automatic/campaigns/{id}/fr3-bridge?segment=N`。接口只读已保存的
+子作业，返回 `entrypoint`、`check_command`、`execute_command_template`、
+`plan_sha256`、`hardware_verified: false`、`manual_review_required: true`、
+`requires_new_plan` 和代码列表 `blockers`，不会执行命令。模板中的 binding 路径
+和摘要必须由操作者填入。未知作业或分段返回 404，保存的作业无效返回 422 `job_invalid`。
+
+若提示需要新计划，应在已配置的作业根目录按上文格式建新作业，包含经人确认的
+`task.initial_state_spec`、绝对 `recording.rollout_root`、发现到的各策略
+`deployment.config` 与完整 `deployment.checkpoint_dir`，并使用新 `run_id`。
+不能修改已冻结的作业，也不能替人把草稿合约改成 confirmed。桥拒绝 shadow 模式
+和已有运行目录，不自动重放之前的运动。
+
+操作者在冻结作业之外准备 JSON binding 文件，全部顶层字段必须明确：
+
+| 字段 | 实际来源 |
+| --- | --- |
+| `schema` | `levi.aeri.fr3.binding.v1` |
+| `openpi_root` | 既有 openpi 检出的绝对路径；延迟导入其 FR3 客户端、健康守卫和环境 |
+| `robot_url` | 已人工审阅的回环运动端点 `http://127.0.0.1:5000/` 或 `:5001/`，终端确认之后才连接 |
+| `health_file` | 正在运行的 C3 监视文件绝对路径，创建环境前必须读到新鲜绿色健康结果 |
+| `cameras` | 恰好 `side` 和 `wrist`，填写不同的真实数字序列号字符串 |
+| `safety` | 恰好 `min_z`、`max_xy`、`max_step_m`、`max_step_rad`、`home_pose`（六项米/弧度）、`home_duration_s`、`home_tolerance_mm`；取现场审阅的范围，不猜值。归位时长必须小于冻结的归位超时 |
+| `policies` | 恰好 `forward`，策略复位另加 `reset`；每项为 `{"host":"127.0.0.1","port": PORT}`，指向已单独审阅并运行的策略服务 |
+| `providers` | `{"online_url":"http://127.0.0.1:7882","file_root":"/absolute/provider-directory"}` |
+
+在既有可运行 openpi 的 Python 环境（同时可导入 LEVI、OpenCV、NumPy、SciPy）
+执行页面给出的 `--check`。它只读文件、检查 binding，不导入 SDK、不连接设备、
+策略或 C5，也不启动服务，不能据此认定现场可用。保留输出的计划与 binding 摘要。
+操作者审阅正在运行的机器人、健康监视器、相机、策略身份、限制和提供方后，把
+这两个摘要填入 `--execute` 模板。每次启动都要求真实终端输入
+`execute <run_id>`；确认后再读一次配置。配置项或旧日志不能替代这次人工确认。
+桥不启动机器人、策略、健康或判定服务。
+
+正向目标判定复用既有 C5 在线接口与客户端，提交实际已录制帧及静默后的新鲜末态
+观测，不把操作者结局标签交给模型。所有角色的服务元数据都必须准确匹配冻结的
+服务 config 和解析后的完整检查点目录，之后才创建机器人环境。
+
+`scene_check: provider` 必须接入真实外部提供方，文件协议如下：
+
+1. 提供方持续更新 `file_root/READY.json`：schema 为
+   `levi.aeri.provider_ready.v1`，含 `contract_id`、字符串 `contract_version`、
+   `capabilities`（`scene`；策略复位还需 `events`、`reset_judgement`）与整数
+   `updated_wall_ns`，十秒内刷新。缺失、过期或身份不符即拒绝。
+2. 监视 `<kind>/requests/<sha256(request_id)>.json`，kind 为 `scene` 或
+   `reset_judgement`。`levi.aeri.provider_request.v1` 包含原始 AERI `request`、
+   本地 `clock_domain`/`observed_ns`、当前 JPEG 帧引用 `frames`、`evidence_root`
+   与合约必需/可选谓词。读取实际证据文件，针对这次请求判断。
+3. 原子写入 `<kind>/responses/<同一 hash>.json`，内容为契约规定的 AERI
+   `levi.aeri.scene.v1` 或 `levi.aeri.judgement.v1`。严格匹配运行、请求、片段、
+   角色、合约、时钟域、观测时间步、谓词和证据引用。不可判断时如实返回。
+   编排器仍验证响应；桥不制造答案。预写响应、符号链接和错误/过期响应不能建立就绪。
+4. 事件提供方读取 `events/<sha256(episode_id)>/request.json` 中的运行、片段、
+   角色和时钟身份，在同目录写唯一 `event-*.json` AERI 提案，并尊重
+   `<kind>/cancelled/` 通知。事件只提出终止，末态/复位仍需独立判定。
+
+仓库提供文件传输层，尚不提供外部场景/复位模型进程。缺该真实提供方时策略复位
+被阻止，复制 READY 示例不能实现提供方。人工复位可选
+`scene_check: operator_attested`，问题与当前帧保存在
+`<rollout_root>/.aeri/runs/<run_id>/scene/questions/`。操作者在另一终端读取后，用
+`python -B -m levi.automatic.fr3_run --scene-question <question.json> --predicates
+'{"required_predicate":true}'` 回答实际合约的谓词，不确定填 null。
+`WAIT_HUMAN` 只有操作者处理好场景后明确输入 `resume` 才继续。
+
+只有已确认执行的时间步才提交视频/CSV。归位复用已守卫的笛卡尔 `_go_home`，
+核验最终姿态与夹爪打开，不调用关节复位。每条运动 HTTP 调用检查当前 fence 和
+停止请求；健康故障、归位失败、未知确认均锁住运动，不重试。SIGINT/SIGTERM
+停止新指令并终止编排器，不能代替硬件急停。fake I/O 覆盖两种复位模式、复位失败、
+身份不符、停机/故障门、未知确认、提供方时效和 `--check` 无连接。相机编码、服务
+时序、物理停机行为和复位可靠性仍需现场监督验收。

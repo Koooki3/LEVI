@@ -163,3 +163,15 @@ def test_live_session_endpoint_and_snapshot_share_exact_association(world, monke
     assert snap["live_session"]["status"] == "waiting"
     assert calls[-1][3]["prompt"] == "stack the plates"
     assert world.client.get(f"{URL}/{cid}/live-session?segment=999").status_code == 404
+
+
+def test_campaign_fr3_recipe_resolves_only_a_retained_child(world):
+    cid, _ = started(world)
+    answer = world.client.get(f"{URL}/{cid}/fr3-bridge?segment=1")
+    assert answer.status_code == 200, answer.text
+    recipe = answer.json()
+    assert recipe["hardware_verified"] is False
+    assert recipe["requires_new_plan"] is True
+    assert "confirmed_initial_state_contract_required" in recipe["blockers"]
+    assert "fr3_run" in recipe["check_command"]
+    assert world.client.get(f"{URL}/{cid}/fr3-bridge?segment=999").status_code == 404

@@ -673,6 +673,17 @@ def create_job(body: dict[str, Any], request: Request):
     return answer
 
 
+@router.get("/jobs/{job_id}/fr3-bridge")
+def job_fr3_bridge(job_id: str):
+    from . import fr3_run
+
+    path = _job_path(job_id)
+    try:
+        return fr3_run.recipe(path)
+    except (cli.JobError, OSError, ValueError) as exc:
+        raise _fail(422, "job_invalid", scrub(str(exc))[:300]) from None
+
+
 # --- the plan ----------------------------------------------------------------------------------
 
 

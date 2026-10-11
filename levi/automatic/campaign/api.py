@@ -621,6 +621,28 @@ def _live_session(c, segment):
     )
 
 
+@router.get("/{campaign_id}/fr3-bridge")
+def campaign_fr3_bridge(
+    campaign_id: str, segment: int | None = Query(None, ge=1, le=100_000)
+):
+    from levi.automatic import fr3_run
+
+    c = _locate(campaign_id)
+    segment = segment or c.replay.segment or 0
+    if (
+        not c.plan
+        or not segment
+        or not any(child["segment"] == segment for child in c.plan["children"])
+    ):
+        raise _fail(404, "segment_unknown", "No retained child job for this segment")
+    child = A.child_of(c.plan, segment)
+    path = C.job_folder(c.id, aeri_home()) / child["file"]
+    try:
+        return fr3_run.recipe(path)
+    except (OSError, ValueError) as exc:
+        raise _fail(422, "job_invalid", base.scrub(str(exc))[:300]) from None
+
+
 @router.get("/{campaign_id}/live-session")
 def campaign_live_session(
     campaign_id: str, segment: int | None = Query(None, ge=1, le=100_000)
