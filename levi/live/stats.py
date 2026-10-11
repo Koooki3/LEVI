@@ -894,6 +894,46 @@ def ended_of(value) -> str:
     return ended if ended in ENDED_BY else "unknown"
 
 
+def binary_classification(tp: int, fn: int, fp: int, tn: int) -> dict:
+    """Unrounded binary metrics on paired, definite human/model labels only.
+
+    Success is positive. Undefined ratios stay None; unknown verdicts and
+    missing labels never enter these four counts. Two-class averages require
+    both component scores to be defined.
+    """
+    if any(type(count) is not int or count < 0 for count in (tp, fn, fp, tn)):
+        raise ValueError("classification counts must be nonnegative integers")
+
+    def divide(top, bottom):
+        return top / bottom if bottom else None
+
+    def score(correct, missed, false):
+        return {
+            "precision": divide(correct, correct + false),
+            "recall": divide(correct, correct + missed),
+            "f1": divide(2 * correct, 2 * correct + missed + false),
+            "support": correct + missed,
+        }
+
+    def mean(a, b):
+        return (a + b) / 2 if a is not None and b is not None else None
+
+    success, failure = score(tp, fn, fp), score(tn, fp, fn)
+    n = tp + fn + fp + tn
+    return {
+        "n": n,
+        "tp": tp,
+        "fn": fn,
+        "fp": fp,
+        "tn": tn,
+        "accuracy": divide(tp + tn, n),
+        "success": success,
+        "failure": failure,
+        "macro_f1": mean(success["f1"], failure["f1"]),
+        "balanced_accuracy": mean(success["recall"], failure["recall"]),
+    }
+
+
 def agreement(pairs, _split=True) -> dict:
     """The agent label against the operator label (ground truth).
 
@@ -921,6 +961,9 @@ def agreement(pairs, _split=True) -> dict:
     found = {
         "pairs": count,
         "matrix": matrix,
+        "classification": binary_classification(
+            s["success"], s["failure"], f["success"], f["failure"]
+        ),
         "judged": judged,
         "agree": agree,
         "rate": ratio(agree, judged),

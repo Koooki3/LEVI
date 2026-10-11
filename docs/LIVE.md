@@ -981,3 +981,20 @@ New terminal-session analysis and current downloads require an exact, visible so
 Session-detail statistics downloads include `expected_sources`, a JSON object with schema `levi.live.stats-source-binding.v1` and `identities` taken from the verified Stats response. Each identity contains the canonical root, group, task, run_id, nullable session_id and datasets. The server compares the complete canonical identity collection against the actual inputs of that download in the same pinned snapshot. A mismatch returns HTTP 409 with no report content; malformed or oversized bindings (8192 UTF-8 bytes, at most 16 identities and 64 datasets per identity) return 400. Dataset and identity ordering does not change the comparison; duplicates and unknown fields are rejected. A successful bound response acknowledges the binding in `X-LEVI-Stats-Source-Binding`; the page checks it before saving and shows a refresh action on failure. Calls without `expected_sources` retain the existing general-statistics export behavior. Expected roots are compared as identities and never opened as input paths.
 
 Live evaluation overview keeps session status and links. Statistics are in each session detail page: the Statistics link opens that section, with figures, latency/agreement rows, episodes and downloads bound to the verified source. The overview does not start an aggregate statistics request.
+
+### Definite-label classification metrics
+
+Live agreement reports and automatic evaluation analysis share the `classification`
+object: TP, FN, FP, TN, sample count, accuracy, success/failure precision, recall
+and F1, macro F1, and balanced accuracy. Success is the positive class; only
+paired definite success/failure labels enter this matrix. Missing or undecided
+labels retain their separate coverage counts and the existing false-success and
+missed-success definitions; they are not silently classified as failure.
+
+Values retain full precision. A zero denominator is JSON `null`, rather than
+a synthetic zero. F1 is computed directly as `2 TP / (2 TP + FP + FN)`; it is
+zero when true successes were all missed, even if success precision is undefined.
+Macro F1 averages both class F1 scores; balanced accuracy averages both class
+recalls. Either average is `null` if a component is undefined. End-condition
+groups use the same definitions. These metrics alone do not implement a historical
+time window or establish source-label identity.

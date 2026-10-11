@@ -23,6 +23,7 @@ from collections import Counter
 
 import numpy as np
 
+from levi.live.stats import binary_classification
 from levi.live.stats import wilson as _live_wilson
 
 from . import _core
@@ -151,6 +152,9 @@ def agreement(pairs, *, level: float = _core.DEFAULT_LEVEL) -> dict:
         available=judged > 0,
         level=level,
         matrix=matrix,
+        classification=binary_classification(
+            s["success"], s["failure"], f["success"], f["failure"]
+        ),
         labelled=sum(sum(r.values()) for r in matrix.values()),
         unlabelled=unlabelled,
         judged=judged,
