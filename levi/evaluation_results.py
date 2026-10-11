@@ -83,11 +83,27 @@ def _atomic(path: Path, raw: bytes) -> None:
 def entries(root: Path) -> list[dict]:
     root = _safe(root)
     rows = []
-    for path in sorted(root.glob("models/*/*/sessions/*/reference.json")):
+    references = sorted(root.glob("models/*/*/sessions/*/reports/*/reference.json"))
+    legacy = [
+        p
+        for p in root.glob("models/*/*/sessions/*/reference.json")
+        if not (p.parent / "reports").exists()
+    ]
+    for path in [*references, *sorted(legacy)]:
         value = json.loads(_read(path))
         if value.get("schema") == SCHEMA:
             rows.append(value)
     return rows
+
+
+def _identity(target: Path, rollout_root: Path, source: Path) -> None:
+    reference = target / "reference.json"
+    if reference.exists():
+        previous = json.loads(_read(reference)).get("rollout")
+        if previous != {"root": str(rollout_root), "directory": str(source)}:
+            raise CatalogError(
+                "Catalog identity is already bound to a different rollout source"
+            )
 
 
 def _index(root: Path) -> None:
@@ -270,8 +286,10 @@ def register(
             _index(root)
             return limited
         target = _safe(root / "models" / model / task / "sessions" / session)
+        _identity(target, rollout_root, rollout_dir)
         version = target / "versions" / (digest + ".json")
         _atomic(version, _json(row))
+        _atomic(target / "reports" / _name(row["basis"]) / "reference.json", _json(row))
         _atomic(target / "reference.json", _json(row))
         # A campaign has one report per basis, shared by all model/task references.
         campaign_ref = root / "campaigns" / campaign / basis / "reference.json"
@@ -291,6 +309,222 @@ def register(
     return row
 
 
+def export_live(
+    root: Path, *, live_dir: Path, rollout_root: Path, session_file: Path
+) -> dict:
+    """Export one finished, explicitly identified session using existing analysis.
+
+    Current session metadata must match each selected record's run_id. Unknown,
+    active or blinded/campaign-bound sessions are refused, not guessed or merged.
+    """
+    from .live import analysis
+
+    root, live_dir = _safe(root), _safe(live_dir)
+    rollout_root, session_file = _safe(rollout_root), _safe(session_file)
+    if not session_file.is_relative_to(rollout_root / ".eval_sessions"):
+        raise CatalogError("Session metadata must belong to this rollout root")
+    raw_session = _read(session_file)
+    session = json.loads(raw_session)
+    if not isinstance(session, dict) or session.get("schema") != "levi.eval.session.v1":
+        raise CatalogError("Expected canonical evaluation session metadata")
+    if session.get("state") not in ("stopped", "finished"):
+        raise CatalogError("Only finished sessions can publish analysis")
+    if (
+        session.get("campaign_id")
+        or session.get("blinded")
+        or session.get("operator_blind")
+    ):
+        raise CatalogError("Campaign/blinded sessions use their gated campaign report")
+    # Older AERI writers do not carry campaign/visibility provenance.
+    # Terminal child sessions alone cannot authorize a blind campaign reveal.
+    if (session.get("aeri") or session.get("episode_role")) and session.get(
+        "analysis_visibility"
+    ) != "public":
+        raise CatalogError(
+            "AERI analysis visibility is unknown; use the gated campaign report"
+        )
+    model, task = _name(session.get("group")), _name(session.get("task_folder"))
+    run_id = _name(session.get("run_id"))
+    source = _safe(rollout_root / model / task)
+    if not source.is_dir():
+        raise CatalogError("The session has no matching rollout folder")
+    if (
+        root.is_relative_to(rollout_root)
+        or rollout_root.is_relative_to(root)
+        or root.is_relative_to(live_dir)
+        or live_dir.is_relative_to(root)
+    ):
+        raise CatalogError(
+            "Derived catalog must be separate from live and rollout sources"
+        )
+    raw_analysis = _read(live_dir / "analysis.jsonl")
+    rows = analysis.latest(analysis.read(live_dir))
+    selected, excluded, state_snapshots = [], 0, {}
+    for row in rows:
+        if (row.get("group"), row.get("task"), row.get("session")) != (
+            model,
+            task,
+            run_id,
+        ):
+            continue
+        name, demo = _name(row.get("dataset")), _name(row.get("demo"))
+        state_file = live_dir / "datasets" / (name + ".json")
+        raw_state = _read(state_file)
+        state_snapshots[state_file] = raw_state
+        state = json.loads(raw_state)
+        if not isinstance(state, dict) or state.get("archived"):
+            excluded += 1
+            continue
+        if _safe(Path(state.get("source", ""))) != source or (
+            state.get("group"),
+            state.get("task_folder"),
+        ) != (model, task):
+            raise CatalogError(
+                "Analysis record's dataset source does not match the session"
+            )
+        current = (state.get("demos") or {}).get(demo) or {}
+        if current.get("deleted") or current.get("excluded"):
+            excluded += 1
+            continue
+        # A record alone is not proof that its current source belongs to this run.
+        if current.get("run_id") != run_id:
+            raise CatalogError("Dataset episode session changed; refresh analysis")
+        selected.append(row)
+    if not selected:
+        raise CatalogError("No committed analysis matches this explicit session")
+    summary = analysis.summarize(
+        selected, scope={"group": model, "task": task, "session": run_id}
+    )
+    summary["export"] = {
+        "scope": "committed labelled episodes only",
+        "excluded": excluded,
+        "missing_episode_coverage": "not inferred from historical session metadata",
+    }
+    files = {
+        "data/analysis.json": analysis.to_json(summary).encode(),
+        "data/records.json": _json(selected),
+        "summary.en.md": analysis.to_markdown(summary, "en").encode(),
+        "summary.zh-CN.md": analysis.to_markdown(summary, "zh").encode(),
+    }
+    # Render existing rates only; no second statistical implementation.
+    all_values = summary["all"]
+    bars = []
+    for y, key, title in (
+        (35, "success", "Operator labels"),
+        (105, "background_success", "Background (automatic, unreviewed)"),
+    ):
+        metric = all_values[key]
+        rate = metric.get("rate")
+        width = 0 if rate is None else max(0, min(1, rate)) * 400
+        label = "unknown" if rate is None else f"{metric['n']}/{metric['of']}"
+        bars.append(
+            f'<text x="10" y="{y}">{title}: {label}</text>'
+            f'<rect x="10" y="{y + 10}" width="{width}" height="24" fill="#3777c6"/>'
+        )
+    files["figures/success.svg"] = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="170" role="img" '
+        'aria-label="Separate operator and automatic success rates">'
+        + "".join(bars)
+        + "</svg>"
+    ).encode()
+    if (
+        _read(session_file) != raw_session
+        or _read(live_dir / "analysis.jsonl") != raw_analysis
+    ):
+        raise CatalogError("Source changed while exporting; retry")
+    if any(_read(path) != raw for path, raw in state_snapshots.items()):
+        raise CatalogError("Dataset source changed while exporting; retry")
+    metadata = {
+        "schema": "levi.live.analysis.export.v1",
+        "model": model,
+        "task": task,
+        "session": run_id,
+        "session_id": session.get("session_id"),
+        "basis": "operator_and_automatic_separate",
+        "source": {
+            "session_file": str(session_file),
+            "session_sha256": hashlib.sha256(raw_session).hexdigest(),
+            "analysis_file": str(live_dir / "analysis.jsonl"),
+            "analysis_sha256": hashlib.sha256(raw_analysis).hexdigest(),
+            "rollout_directory": str(source),
+            "dataset_states": {
+                str(path): hashlib.sha256(raw).hexdigest()
+                for path, raw in state_snapshots.items()
+            },
+        },
+        "files": {
+            name: {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
+            for name, raw in files.items()
+        },
+    }
+    digest = hashlib.sha256(_json(metadata)).hexdigest()
+    _safe(root).mkdir(parents=True, exist_ok=True)
+    with _safe(root / ".catalog.lock").open("a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        target = _safe(root / "models" / model / task / "sessions" / run_id)
+        _identity(target, rollout_root, source)
+        # Recheck after acquiring the publication lock, before any visible output.
+        if (
+            _read(session_file) != raw_session
+            or _read(live_dir / "analysis.jsonl") != raw_analysis
+            or any(_read(path) != raw for path, raw in state_snapshots.items())
+        ):
+            raise CatalogError("Source changed before publication; retry")
+        version = target / "versions" / digest
+        for name, raw in files.items():
+            _atomic(version / name, raw)
+        _atomic(version / "manifest.json", _json(metadata))
+        row = {
+            "schema": SCHEMA,
+            "model": model,
+            "task": task,
+            "session": run_id,
+            "campaign_id": None,
+            "campaign_state": "finished",
+            "basis": metadata["basis"],
+            "progress_only": False,
+            "rollout": {"root": str(rollout_root), "directory": str(source)},
+            "report": {
+                "directory": str(version),
+                "manifest_sha256": hashlib.sha256(_json(metadata)).hexdigest(),
+                "files": {
+                    name: value["sha256"] for name, value in metadata["files"].items()
+                },
+            },
+            "mapping": "canonical terminal session plus matching dataset episode run_id",
+        }
+        _atomic(target / "reports" / _name(row["basis"]) / "reference.json", _json(row))
+        _atomic(target / "reference.json", _json(row))
+        _index(root)
+    return row
+
+
+def sync_live_catalog(config, root=None) -> dict:
+    """Index ended sessions of configured roots; never infer session grouping."""
+    from .live import sessions
+
+    root = (
+        Path(root)
+        if root is not None
+        else Path(config.workspace) / "outputs/LEVI/evaluation-results"
+    )
+    written, skipped = 0, []
+    for session in sessions.read_sessions(config.watch.roots).values():
+        if session.raw_state not in ("finished", "stopped"):
+            continue
+        try:
+            export_live(
+                root,
+                live_dir=config.live_dir,
+                rollout_root=Path(session.root),
+                session_file=Path(session.path),
+            )
+            written += 1
+        except (CatalogError, OSError, ValueError) as exc:
+            skipped.append({"session_id": session.session_id, "reason": str(exc)[:200]})
+    return {"written": written, "skipped": skipped}
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -303,10 +537,22 @@ def main(argv=None) -> int:
         "list", help="Read current model/task/session references"
     )
     read.add_argument("--root", type=Path, required=True)
+    export = commands.add_parser(
+        "live-export", help="Export a finished canonical live session"
+    )
+    for flag in ("root", "live-dir", "rollout-root", "session-file"):
+        export.add_argument("--" + flag, type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "list":
             result = entries(args.root)
+        elif args.command == "live-export":
+            result = export_live(
+                args.root,
+                live_dir=args.live_dir,
+                rollout_root=args.rollout_root,
+                session_file=args.session_file,
+            )
         else:
             result = register(
                 args.root,

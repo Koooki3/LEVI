@@ -1002,3 +1002,9 @@ def sync_quiet(config, dataset=None) -> None:
     that must not fail because the analysis record could not be written."""
     with contextlib.suppress(Exception):
         sync(config, dataset)
+    # Export already ended, explicitly identified sessions without blocking
+    # annotation recovery when one source/report is unavailable.
+    with contextlib.suppress(Exception):
+        from levi.evaluation_results import sync_live_catalog
+
+        sync_live_catalog(config)
