@@ -10,7 +10,6 @@ import math
 import os
 import threading
 import time
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,10 +33,13 @@ class HomeResult:
 
 class Clock:
     def __init__(self):
-        self.domain = "fr3-" + uuid.uuid4().hex[:20]
+        self.domain = aeri.host_clock_domain()
 
     def now(self):
         return time.monotonic_ns()
+
+    def __call__(self):
+        return self.now()
 
     def advance(self, ns):
         time.sleep(max(0, ns) / 1e9)

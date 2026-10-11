@@ -61,21 +61,25 @@ python -m levi.automatic.provider_worker run \
   --online-url http://127.0.0.1:7882
 ```
 
-Directories already exist and belong to the executing identity. Evidence root is explicitly authorized and must match the request. The worker opens every directory component without following symlinks, reads owned regular request/JPEG files within byte limits, verifies frame hashes before and after inference, and replaces/fsyncs responses atomically. Images are temporary on the online Judge; the retained originals remain in the run's evidence store.
+The worker file root already exists and belongs to the executing identity. A new run evidence directory may be absent: bootstrap opens and checks only an existing owned ancestor without symlinks; it creates neither a run nor evidence. READY describes the model channel, never physical scene readiness. After execute creates the fresh run, the first ticket rechecks the complete authorized path. Replacement, symlinks or changed ownership block it. Evidence root is explicitly authorized and must match the request. The worker opens every directory component without following symlinks, reads owned regular request/JPEG files within byte limits, verifies frame hashes before and after inference, and replaces/fsyncs responses atomically. Images are temporary on the online Judge; the retained originals remain in the run's evidence store.
 
 Requests live under `scene/requests` or `reset_judgement/requests`; their filenames are SHA256 of the request ID. Responses and cancellations use the same filename in their respective directories. The bridge supplies `run_id`, `plan_sha256`, `spec_sha256`, phase, monotonic `submitted_ns` and absolute `deadline_due_ns`. The deadline cannot exceed the frozen phase limit. Missing bindings, wrong identity/clock, old/future observations, changed or unretained hashes, incomplete predicates and downgraded required flags never grant readiness or reset confirmation.
 
 The model returns only true/false/null for the complete frozen predicate set, current frame ref/hash citations, the spec/model identity and the captured observation time. Code computes `ready/reset_required/unknown` or `confirmed/rejected/unknown`. Optional predicates never decide. Every non-null reading needs current evidence; preferred views and minimum visible evidence also govern a reset confirmation. There is no invented calibrated confidence.
 
-READY is published only after an actual live channel/profile check succeeds. It binds PID, process start ticks, boot ID, run/plan/spec/model and the two implemented capabilities. Stale, dead or reused process identity is refused on the model path. Channel/gate failures remove readiness. Stopping the worker removes READY. One directory lock prevents competing worker instances.
+READY is published only after an actual live channel/profile check succeeds. It binds PID, process start ticks, boot ID, run/plan/spec/model and the two implemented capabilities. Stale, dead or reused process identity is refused on the model path. Channel/gate failures remove readiness. Stopping the worker removes READY. One directory lock prevents competing worker instances. Heartbeat does not mistake this worker's own legal in-flight request for external busy and remove existing READY. Its original ten-second age bound remains; no new readiness evidence is fabricated. A progressing poll cursor prevents the first thousand historical tickets from starving new ones, without deleting history.
 
 ## Cancellation and recovery
+
+Whichever of C5/AERI runs first, a cancellation/timeout reply retains ownership, GPU admission and the mutex until the actual worker exits. AERI uses one serial GPU-check thread; supervision reads completed results, so a slow check cannot delay the frozen deadline or cancellation reply, and its unfinished thread retains ownership.
 
 AERI calls and C5 use the same Judge mutex, model ownership, `online_admit/check/done` and transport abort. No private vLLM service is started and no GPU gate is bypassed. An external training owner continues to block admission under existing rules.
 
 The actual request deadline is enforced outside the model Budget (whose minimum is 10 seconds). Timeout, file cancellation, gate closure or supervisor abort cuts the owned transport and makes the response unavailable. A late answer cannot succeed. The Judge keeps its mutex and GPU admission until the actual model thread exits, even when the caller already received an unavailable response; a model ignoring cancellation cannot overlap another C5/AERI call. If it never exits, the channel stays busy rather than silently granting a new call.
 
 A durable intent prevents duplicate inference across restarts. A completed request reuses its original response only when request/spec/response hashes match. An interrupted intent produces unavailable on restart, not a guessed success or automatic inference replay. Changed content under the same request ID is refused. Keep request/response/processed files with the run evidence for audit.
+
+With `allow_early_stop:false`, the current single reset policy still enters WAIT_HUMAN at reset horizon exhaustion, even with a confirmed `reset_active` candidate and a ready post-reset scene; it cannot autonomously continue forward. The current `_finish_reset` does not request `_final_judgement`, so this candidate is not a `reset_goal` final verification. This change preserves that gate. A bounded autonomous reset loop needs a separate design and acceptance.
 
 ## Verified limits
 

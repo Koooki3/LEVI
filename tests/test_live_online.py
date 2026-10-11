@@ -610,6 +610,13 @@ def test_one_judgement_at_a_time_the_second_is_unavailable_at_once(tmp_path):
     assert first["r"][1]["status"] == "ok" and gpu.done == 1
 
 
+def wait_for_judge_retirement(judge):
+    deadline = time.monotonic() + scaled(5)
+    while judge._busy.locked() and time.monotonic() < deadline:
+        time.sleep(0.005)
+    assert not judge._busy.locked() and judge._owner is None
+
+
 def test_a_model_that_does_not_answer_in_time_is_an_error_timeout(tmp_path):
     ask = Ask(hold=scaled(10))
     gpu = Gpu()
@@ -618,6 +625,7 @@ def test_a_model_that_does_not_answer_in_time_is_an_error_timeout(tmp_path):
     code, body = post(judge, request())
     took = time.monotonic() - began
     ask.release.set()
+    wait_for_judge_retirement(judge)
     assert code == 200 and body["status"] == "error"
     assert body["reason"].startswith("timeout") and body["outcome"] is None
     assert 0.9 <= took < 3.0
@@ -632,6 +640,7 @@ def test_a_gate_that_closes_while_the_model_works_cuts_the_request(tmp_path):
     began = time.monotonic()
     code, body = post(judge, request())
     ask.release.set()
+    wait_for_judge_retirement(judge)
     assert code == 200
     assert time.monotonic() - began < 1.5
     assert body["status"] == "unavailable" and body["reason"].startswith("gate_closed")
@@ -650,6 +659,7 @@ def test_the_supervisor_can_cut_an_answer_in_progress(tmp_path):
     assert judge.abort("vllm_sleeping: free VRAM fell to 300 MiB")
     thread.join(scaled(5))
     ask.release.set()
+    wait_for_judge_retirement(judge)
     assert found["r"][1]["status"] == "unavailable"
     assert found["r"][1]["reason"].startswith("vllm_sleeping")
     assert not judge.abort("nothing in progress")
@@ -1471,6 +1481,7 @@ def test_a_judgement_is_cut_end_to_end_when_the_robot_starts_homing(tmp_path, ro
         began = time.monotonic()
         code, body = post(judge, request())
         ask.release.set()
+        wait_for_judge_retirement(judge)
         assert code == 200 and time.monotonic() - began < 1.5
         assert body["status"] == "unavailable"
         assert body["reason"].startswith("gate_closed: robot_quiet")

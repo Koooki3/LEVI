@@ -69,17 +69,23 @@ def query(judge, spec_sha256, payload, images, *, cancel=None, probe=False, ask=
     if not judge._busy.acquire(blocking=False):
         return {"status": "unavailable", "reason": "busy"}
     # Own cancellation is registered before admission; C5 abort sees this owner.
+    from .online import RequestOwnership
+
     owner = "live-aeri:" + uuid.uuid4().hex
-    judge._owner, judge._stop_reason = owner, None
+    ownership = RequestOwnership(judge, owner)
     from levi.inference import transport
 
-    done, box = threading.Event(), {}
+    done, probe_done, admitted_event = (
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+    )
+    box, gate_result = {}, {}
     folder = judge.config.live_dir / "aeri-online-tmp" / owner.split(":", 1)[1]
     # The actual callable receives the same abort event used by the monitor.
-    aborted = threading.Event()
+    aborted = ownership.cancelled
 
     def work():
-        admitted = False
         try:
             with transport.requests_of(owner):
                 if (
@@ -94,7 +100,8 @@ def query(judge, spec_sha256, payload, images, *, cancel=None, probe=False, ask=
                 ok, code, why = judge.gpu.online_admit(time.time())
                 if not ok:
                     raise ValueError(f"{code}: {why}")
-                admitted = True
+                ownership.admitted = True
+                admitted_event.set()
                 if aborted.is_set() or cancel.is_set() or time.monotonic_ns() >= due:
                     raise ValueError("cancelled during GPU admission")
                 config = judge.provider()
@@ -172,50 +179,65 @@ def query(judge, spec_sha256, payload, images, *, cancel=None, probe=False, ask=
             import shutil
 
             shutil.rmtree(folder, ignore_errors=True)
-            judge._owner = None
-            try:
-                if admitted:
-                    judge.gpu.online_done()
-            finally:
-                judge._busy.release()
-                done.set()
+            done.set()
+            ownership.finished()
 
-    thread = threading.Thread(target=work, name="live-aeri-ask", daemon=True)
+    def check_gate():
+        try:
+            while not admitted_event.wait(POLL_S):
+                if done.is_set() or aborted.is_set():
+                    return
+            while not aborted.is_set():
+                # Only this owned serial worker may block on the controller.
+                # The caller observes completed results and never waits inside it.
+                final = done.is_set()
+                try:
+                    checked = judge.gpu.online_check(time.time())
+                except Exception:  # noqa: BLE001 - unknown gate blocks success
+                    checked = False, "gate_check_failed", "unknown"
+                gate_result["value"] = checked
+                if final or not checked[0]:
+                    return
+                aborted.wait(POLL_S)
+        finally:
+            probe_done.set()
+            ownership.finished()
+
     try:
-        thread.start()
-    except BaseException:
-        judge._owner = None
-        judge._busy.release()
-        raise
-    reason = None
-    while not done.wait(POLL_S):
-        if cancel.is_set() or judge._stop_reason:
-            reason = "cancelled"
-        elif time.monotonic_ns() >= due:
-            reason = "timeout"
-        else:
+        for target, name in ((work, "live-aeri-ask"), (check_gate, "live-aeri-gate")):
+            ownership.add_worker()
             try:
-                ok, code, why = judge.gpu.online_check(time.time())
-                if not ok:
-                    reason = f"{code}: {why}"
-            except Exception:  # noqa: BLE001 - unknown gate state blocks admission
-                reason = "gate_check_failed"
-        if reason:
-            aborted.set()
-            transport.abort(owner)
-            # Locks remain owned until work() finally actually exits.
-            return {"status": "unavailable", "reason": reason}
-    if cancel.is_set() or time.monotonic_ns() >= due:
-        return {"status": "unavailable", "reason": "cancelled or expired"}
-    try:
-        ok, code, why = judge.gpu.online_check(time.time())
-    except Exception:  # noqa: BLE001 - unknown gate state blocks success
-        ok, code, why = False, "gate_check_failed", "unknown"
-    if not ok:
-        return {"status": "unavailable", "reason": f"{code}: {why}"}
-    if "error" in box:
-        return {"status": "unavailable", "reason": box["error"]}
-    return {"status": "ok", **box}
+                threading.Thread(target=target, name=name, daemon=True).start()
+            except BaseException:
+                ownership.finished()
+                aborted.set()
+                raise
+        while not (done.is_set() and probe_done.is_set()):
+            reason = None
+            if cancel.is_set() or judge._stop_reason:
+                reason = "cancelled"
+            elif time.monotonic_ns() >= due:
+                reason = "timeout"
+            elif gate_result.get("value", (True,))[0] is False:
+                _, code, why = gate_result["value"]
+                reason = f"{code}: {why}"
+            if reason:
+                aborted.set()
+                transport.abort(owner)
+                return {"status": "unavailable", "reason": reason}
+            time.sleep(POLL_S)
+        if cancel.is_set() or judge._stop_reason or time.monotonic_ns() >= due:
+            return {"status": "unavailable", "reason": "cancelled or expired"}
+        if "error" in box:
+            return {"status": "unavailable", "reason": box["error"]}
+        ok, code, why = gate_result.get(
+            "value", (False, "gate_check_failed", "unknown")
+        )
+        if not ok:
+            return {"status": "unavailable", "reason": f"{code}: {why}"}
+        return {"status": "ok", **box}
+    finally:
+        ownership.finished()
 
 
 class SharedChannel:

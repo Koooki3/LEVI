@@ -161,8 +161,22 @@ class Worker:
         self.root, self.spec = Path(root).absolute(), spec
         self.evidence_root = Path(evidence_root).absolute()
         self.fd = directory(self.root)
+        self.evidence_fd = None
+        self.evidence_anchor = self.evidence_root
         try:
-            self.evidence_fd = directory(self.evidence_root)
+            if ".." in self.evidence_root.parts:
+                raise ValueError(
+                    "explicit evidence path must not contain parent traversal"
+                )
+            while True:
+                try:
+                    self.evidence_anchor_fd = directory(self.evidence_anchor)
+                    break
+                except FileNotFoundError:
+                    self.evidence_anchor = self.evidence_anchor.parent
+            self.evidence_relative = self.evidence_root.relative_to(
+                self.evidence_anchor
+            )
         except BaseException:
             os.close(self.fd)
             raise
@@ -170,15 +184,17 @@ class Worker:
         self.stop = threading.Event()
         self.lockfd = None
         self.heartbeat = None
+        self.channel_lock = threading.Lock()
+        self.cursors = {}
 
     def __enter__(self):
-        self.lockfd = os.open(
-            "worker.lock",
-            os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC,
-            0o600,
-            dir_fd=self.fd,
-        )
         try:
+            self.lockfd = os.open(
+                "worker.lock",
+                os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC,
+                0o600,
+                dir_fd=self.fd,
+            )
             info = os.fstat(self.lockfd)
             if (
                 not stat.S_ISREG(info.st_mode)
@@ -191,10 +207,13 @@ class Worker:
             except BlockingIOError:
                 raise ValueError("another provider worker is alive") from None
         except BaseException:
-            os.close(self.lockfd)
+            if self.lockfd is not None:
+                os.close(self.lockfd)
             self.lockfd = None
             os.close(self.fd)
-            os.close(self.evidence_fd)
+            if self.evidence_fd is not None:
+                os.close(self.evidence_fd)
+            os.close(self.evidence_anchor_fd)
             # No ownership: do not touch the live worker's READY.
             raise
         self.refresh_ready()
@@ -211,6 +230,10 @@ class Worker:
 
     def refresh_ready(self):
         """Only a successfully checked live channel publishes capabilities."""
+        if not self.channel_lock.acquire(blocking=False):
+            # This worker is inside its own already admitted request, not a new
+            # readiness assertion. Preserve the existing bounded heartbeat.
+            return True
         try:
             result = self.channel.probe(self.spec, self.stop)
             if (
@@ -239,6 +262,8 @@ class Worker:
             with contextlib.suppress(FileNotFoundError):
                 os.unlink("READY.json", dir_fd=self.fd)
             return False
+        finally:
+            self.channel_lock.release()
 
     def unavailable(self, payload, reason, code="contract_violation"):
         request = payload["request"]
@@ -257,6 +282,31 @@ class Worker:
             "clock_domain": aeri.host_clock_domain(),
         }
         return aeri.validate(value, kind).model_dump(mode="json", by_alias=True)
+
+    def open_evidence(self):
+        """Never create a run: open its now-existing authorized owned chain."""
+        relative = str(self.evidence_relative / "item")
+        fd, _leaf = parent_at(self.evidence_anchor_fd, relative)
+        try:
+            # Also recheck the absolute chain; an anchor renamed/replaced since
+            # bootstrap must not silently read evidence from an obsolete tree.
+            current = directory(self.evidence_root)
+            try:
+                known, seen = os.fstat(fd), os.fstat(current)
+                if (known.st_dev, known.st_ino) != (seen.st_dev, seen.st_ino):
+                    raise ValueError("authorized evidence directory was replaced")
+                if self.evidence_fd is not None:
+                    prior = os.fstat(self.evidence_fd)
+                    if (prior.st_dev, prior.st_ino) != (seen.st_dev, seen.st_ino):
+                        raise ValueError("retained evidence directory was replaced")
+            finally:
+                os.close(current)
+            if self.evidence_fd is None:
+                self.evidence_fd = fd
+                fd = None
+        finally:
+            if fd is not None:
+                os.close(fd)
 
     def process(self, kind, name):
         if kind not in ("scene", "reset_judgement") or not __import__("re").fullmatch(
@@ -325,6 +375,7 @@ class Worker:
                 pm.validate_input(self.spec, payload, now_ns=time.monotonic_ns())
                 if payload.get("evidence_root") != str(self.evidence_root):
                     raise ValueError("request evidence root is not authorized")
+                self.open_evidence()
                 images = []
                 for frame in payload["frames"]:
                     image = read_at(self.evidence_fd, frame["file"], MAX_FRAME_BYTES)
@@ -340,10 +391,12 @@ class Worker:
                 watcher.start()
                 if cancel.is_set():
                     raise ValueError("request cancelled before inference")
-                answer = self.channel.ask_model(self.spec, payload, images, cancel)
+                with self.channel_lock:
+                    answer = self.channel.ask_model(self.spec, payload, images, cancel)
                 pm.validate_input(self.spec, payload, now_ns=time.monotonic_ns())
                 if cancel.is_set() or self.stop.is_set():
                     raise ValueError("request cancelled")
+                self.open_evidence()
                 # Re-read files before publishing: no changed evidence may grant readiness.
                 for frame in payload["frames"]:
                     if (
@@ -383,15 +436,18 @@ class Worker:
         return True
 
     def poll(self):
-        import heapq
-
         count = 0
         for kind in ("scene", "reset_judgement"):
             try:
                 parent, _leaf = parent_at(self.fd, kind + "/requests/item", create=True)
                 names = os.listdir(parent)
                 os.close(parent)
-                for name in heapq.nsmallest(1000, names):
+                names.sort()
+                cursor = self.cursors.get(kind, "")
+                ahead = [name for name in names if name > cursor]
+                behind = [name for name in names if name <= cursor]
+                for name in (ahead + behind)[:1000]:
+                    self.cursors[kind] = name
                     if name.endswith(".json"):
                         try:
                             count += bool(self.process(kind, name))
@@ -412,7 +468,9 @@ class Worker:
             os.close(self.lockfd)
             self.lockfd = None
         os.close(self.fd)
-        os.close(self.evidence_fd)
+        if self.evidence_fd is not None:
+            os.close(self.evidence_fd)
+        os.close(self.evidence_anchor_fd)
 
     def __exit__(self, *_):
         self.close()

@@ -552,10 +552,7 @@ def test_file_bridge_submit_worker_collect_uses_same_frozen_plan_and_deadline(se
 
     spec, root, evidence, _, judge, _ = setup
 
-    class Clock:
-        domain = aeri.host_clock_domain()
-        now = staticmethod(time.monotonic_ns)
-        advance = staticmethod(lambda ns: time.sleep(ns / 1e9))
+    from levi.automatic.fr3_bridge import Clock
 
     class Store:
         folder = evidence

@@ -61,21 +61,25 @@ python -m levi.automatic.provider_worker run \
   --online-url http://127.0.0.1:7882
 ```
 
-目录需预先存在并属于当前执行身份。证据根必须显式授权并与请求一致。worker 逐级 NOFOLLOW 打开目录，有界读取当前身份的普通请求／JPEG 文件，在模型前后核对哈希，原子替换并 fsync 响应。在线 Judge 的图片只是临时副本，保留的原图仍在本次运行证据目录。
+worker 文件根需预先存在并属于当前执行身份。新运行的证据目录可以尚未出现：bootstrap 只打开已有父目录并核验 NOFOLLOW／身份，不创建 run 或证据目录。READY 只表示模型通道准备，不能代表物理场景准备。execute 创建新 run 后，首个票据再次核验完整授权目录链，目录更换／链接／身份变化均阻断。证据根必须显式授权并与请求一致。worker 逐级 NOFOLLOW 打开目录，有界读取当前身份的普通请求／JPEG 文件，在模型前后核对哈希，原子替换并 fsync 响应。在线 Judge 的图片只是临时副本，保留的原图仍在本次运行证据目录。
 
 请求位于 `scene/requests` 或 `reset_judgement/requests`；文件名为请求 ID 的 SHA256，responses／cancelled 子目录沿用同名。桥发送 run、plan/spec 摘要、phase、单调时钟 submitted_ns 和绝对 deadline_due_ns，期限不得超冻结 phase 上限。缺绑定、身份／时钟错、观测过旧／来自未来、哈希变化／引用不属于本次证据、漏谓词或降级 required，均不能产生场景准备好或复位确认。
 
 模型只返回完整冻结谓词的 true／false／null、本次真实 ref/hash、规格／模型身份和采集时间。代码算出 ready／reset_required／unknown 或 confirmed／rejected／unknown；optional 不决定结果。非 null 判读必须引用当前证据，视角和最少证据规则也适用于复位确认，不凭空给校准置信度。
 
-READY 只有活通道及实际模型 profile 校验成功才维护，绑定 PID、启动 ticks、boot ID、run/plan/spec/model 及两项真实能力。模型路径拒绝死亡／复用 PID 和过期心跳；通道或 GPU 门失败即取消准备状态，正常退出删除 READY，同目录锁拒绝第二个 worker。
+READY 只有活通道及实际模型 profile 校验成功才维护，绑定 PID、启动 ticks、boot ID、run/plan/spec/model 及两项真实能力。模型路径拒绝死亡／复用 PID 和过期心跳；通道或 GPU 门失败即取消准备状态，正常退出删除 READY，同目录锁拒绝第二个 worker。自身合法在途请求不会被 heartbeat 当成外部 busy 而删除已有 READY；原心跳仍受 10 秒时限，不伪造新的准备证明。文件 poll 游标每轮推进，不因前 1000 个历史票据饿死新票据，也不删除历史证据。
 
 ## 取消与恢复
+
+C5 与 AERI 无论谁先运行，caller 取消／超时回复都不会提前释放实际 worker 的归属、GPU 准入和并发锁。AERI 使用一个串行 GPU 检查线程，监督路径只读已完成结果；慢检查也受原期限和取消约束，线程未退出时保留所有权。
 
 AERI 与 C5 共用 Judge 并发锁、请求归属、GPU online_admit/check/done 与 transport abort，不另起 vLLM、不绕 GPU 门，其他训练持有者仍可阻断准入。
 
 实际期限在模型 Budget 外严格执行（Budget 最小为 10 秒）。超时、文件取消、GPU 门关闭或 supervisor abort 切断本次传输并返回不可用，晚到结果不能成功。调用者已收到不可用时，Judge 仍持并发锁与 GPU 准入，直到实际模型线程退出；不听取消的模型不能与下一次 C5／AERI 重叠。若线程不退出，通道保持 busy。
 
 持久 intent 防止重启后重复推理。已完成请求仅在 request/spec/response 哈希一致时复用原响应；旧 intent 未完成则重启产出不可用，不猜成功、不自动重放。相同 ID 的内容变化被拒绝；请求／响应／processed 文件随运行证据保留。
+
+当前 `allow_early_stop:false` 的单复位策略到达 reset horizon 后，即使 `reset_active` 候选已 confirmed、复位后 scene 已 ready，仍进入 WAIT_HUMAN，不能自主继续 forward。原 `_finish_reset` 不调用 `_final_judgement`，因此候选确认不等于 `reset_goal` 终局验证。本改动保留这道人为检查门；未来有界复位闭环需独立设计与验收。
 
 ## 已验证边界
 

@@ -448,6 +448,34 @@ def decide(spec, answer, start_answer=None) -> dict:
     }
 
 
+class RequestOwnership:
+    """Keep the shared Judge until caller and every actual worker have exited."""
+
+    def __init__(self, judge, owner):
+        self.judge, self.owner = judge, owner
+        self.cancelled = threading.Event()
+        self.lock = threading.Lock()
+        self.users = 1
+        self.admitted = False
+        judge._owner, judge._stop_reason = owner, None
+
+    def add_worker(self):
+        with self.lock:
+            self.users += 1
+
+    def finished(self):
+        with self.lock:
+            self.users -= 1
+            if self.users or self.judge._owner != self.owner:
+                return
+            try:
+                if self.admitted:
+                    self.judge.gpu.online_done()
+            finally:
+                self.judge._owner = None
+                self.judge._busy.release()
+
+
 class Judge:
     """One online judgement at a time.
 
@@ -577,14 +605,13 @@ class Judge:
                 "unavailable",
                 reason="busy: another online judgement is in progress (one at a time)",
             )
+        ownership = RequestOwnership(self, f"live-online:{request_id}")
         try:
             ok, code, why, waited = self._admit(began)
             if not ok:
                 return answer(200, "unavailable", reason=f"{code}: {why}")
-            try:
-                found = self._run(request, request_id, began)
-            finally:
-                self.gpu.online_done()
+            ownership.admitted = True
+            found = self._run(request, request_id, began, ownership)
             if waited and found.get("status") == "ok":
                 found["reason"] = f"gate_waited: the gate opened after {waited:.1f} s"
             return answer(
@@ -597,7 +624,7 @@ class Judge:
             self.log(f"online judgement {request_id} failed: {exc!r}")
             return answer(200, "error", reason=f"internal_error: {type(exc).__name__}")
         finally:
-            self._busy.release()
+            ownership.finished()
 
     def _admit(self, began):
         """``(ok, code, reason, seconds waited)``. A gate that is closed while
@@ -625,7 +652,7 @@ class Judge:
                 )
             time.sleep(GATE_WAIT_POLL_S)
 
-    def _run(self, request, request_id, began) -> dict:
+    def _run(self, request, request_id, began, ownership) -> dict:
         from levi.agent import anchored
         from levi.inference import transport
 
@@ -633,12 +660,10 @@ class Judge:
         # background review quotes it (``generic.anchored_spec``), in the
         # lab's wording when ``[judge.task_text]`` has one (the client's
         # ``task`` is the policy's instruction and is never changed).
-        owner = f"live-online:{request_id}"
+        owner = ownership.owner
         # Registered before anything else: a cut the supervisor asks for from
         # here on (``abort``) is seen, by the loop below and before the
         # request is sent.
-        self._stop_reason = None
-        self._owner = owner
         task, reworded = generic.judge_task(
             request.task,
             self.config.judge.task_text,
@@ -667,45 +692,55 @@ class Judge:
                     # ``requests_of`` forgets a cut made before it: look again.
                     # The start check is asked first (two small images); the
                     # final frames' question is the one the result rests on.
-                    if self._stop_reason is None and start_names:
+                    if (
+                        self._stop_reason is None
+                        and not ownership.cancelled.is_set()
+                        and start_names
+                    ):
                         box["start_raw"], box["start_usage"] = self._ask(
                             spec.start, folder, start_names
                         )
-                    if self._stop_reason is None:
+                    if self._stop_reason is None and not ownership.cancelled.is_set():
                         box["raw"], box["usage"] = self._ask(spec, folder, names)
             except BaseException as exc:  # noqa: BLE001 - reported below
                 box["error"] = exc
             finally:
                 shutil.rmtree(folder, ignore_errors=True)
                 done.set()
+                ownership.finished()
 
         thread = threading.Thread(target=work, name="live-online-ask", daemon=True)
-        thread.start()
+        ownership.add_worker()
+        try:
+            thread.start()
+        except BaseException:
+            ownership.finished()
+            raise
         deadline = began + self.config.online.timeout_s
         looked = 0.0
-        try:
-            while not done.wait(POLL_S):
-                now = time.monotonic()
-                if now >= deadline:
+        while not done.wait(POLL_S):
+            now = time.monotonic()
+            if now >= deadline:
+                ownership.cancelled.set()
+                transport.abort(owner)
+                return {
+                    "status": "error",
+                    "reason": f"timeout: no answer within {self.config.online.timeout_s:g} s",
+                }
+            if self._stop_reason:
+                ownership.cancelled.set()
+                transport.abort(owner)
+                return {"status": "unavailable", "reason": self._stop_reason}
+            if now - looked >= GATE_EVERY_S:
+                looked = now
+                ok, code, why = self.gpu.online_check(time.time())
+                if not ok:
+                    ownership.cancelled.set()
                     transport.abort(owner)
                     return {
-                        "status": "error",
-                        "reason": f"timeout: no answer within {self.config.online.timeout_s:g} s",
+                        "status": "unavailable",
+                        "reason": f"{code}: {why} (the request was cut)",
                     }
-                if self._stop_reason:
-                    transport.abort(owner)
-                    return {"status": "unavailable", "reason": self._stop_reason}
-                if now - looked >= GATE_EVERY_S:
-                    looked = now
-                    ok, code, why = self.gpu.online_check(time.time())
-                    if not ok:
-                        transport.abort(owner)
-                        return {
-                            "status": "unavailable",
-                            "reason": f"{code}: {why} (the request was cut)",
-                        }
-        finally:
-            self._owner = None
         if self._stop_reason:
             return {"status": "unavailable", "reason": self._stop_reason}
         if "error" in box:
