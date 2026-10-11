@@ -107,3 +107,39 @@ def test_a_guided_campaign_never_starts_or_asks_a_policy_server(world, aeri_home
     wanted = aeri_home / "campaigns" / cid / "ctl" / "wanted.json"
     assert wanted.exists()
     assert not (aeri_home / "campaigns" / cid / "ctl" / "serving.json").exists()
+
+
+def test_cards_api_lists_all_segment_cards_and_distinguishes_no_card(world):
+    cid, plan = started(world)
+    running = walk_to_running(world, cid, 1, plan)
+    keys = Client(world).run(cid, plan, 1, running, 1)
+    pending = wait_for(lambda: world.client.get(f"{URL}/{cid}/cards").json()["pending"])
+    assert pending[0]["candidate_cards"] == plan["segments"][0]["cards"]
+    body = {
+        "command_id": "no-card",
+        "episode_key": keys[0],
+        "card": None,
+        "decision": "no_card",
+    }
+    response = world.client.post(f"{URL}/{cid}/cards", json=body)
+    assert response.status_code == 200, response.text
+    assert world.client.get(f"{URL}/{cid}/cards").json()["pending"] == []
+    assert (
+        world.client.post(f"{URL}/{cid}/cards", json=body).json()["result"]
+        == "repeated"
+    )
+    wrong = world.client.post(
+        f"{URL}/{cid}/cards",
+        json={
+            **body,
+            "command_id": "bad-no-card",
+            "card": pending[0]["candidate_card"],
+        },
+    )
+    assert wrong.status_code == 422
+    withdraw = world.client.post(
+        f"{URL}/{cid}/cards",
+        json={**body, "command_id": "withdraw", "decision": "withdraw"},
+    )
+    assert withdraw.status_code == 200
+    assert world.client.get(f"{URL}/{cid}/cards").json()["pending"][0]["key"] == keys[0]

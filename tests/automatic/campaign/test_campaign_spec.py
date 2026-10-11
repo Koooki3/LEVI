@@ -164,7 +164,10 @@ def test_changing_any_shared_setting_of_one_child_is_refused(tmp_path, path):
 @pytest.mark.parametrize(
     "path, value",
     [
-        (("policies", "forward", "max_steps"), 999),
+        (
+            ("policies", "forward", "deployment"),
+            {"checkpoint_id": "another", "config": "other"},
+        ),
         (("recording", "group"), "another-group"),
         (("experiment", "name"), "renamed"),
         (("experiment", "episodes"), 17),
@@ -418,3 +421,11 @@ def test_n8_a_list_of_arms_says_to_key_them_by_id(tmp_path):
     with pytest.raises(spec.CampaignError) as caught:
         spec.plan_campaign(path, job_root=tmp_path / "jobs", planner=FakePlanner())
     assert "keyed by" in caught.value.detail
+
+
+def test_step_budgets_are_shared_settings_and_cannot_differ(tmp_path):
+    docs, _ = documents(tmp_path)
+    one = next(iter(docs))
+    docs[one]["policies"]["forward"]["max_steps"] = 999
+    with pytest.raises(spec.CampaignError, match="policies.forward.max_steps"):
+        spec.settings_sha256(docs)

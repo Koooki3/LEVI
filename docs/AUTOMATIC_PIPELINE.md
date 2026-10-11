@@ -1356,7 +1356,7 @@ are scrubbed from every text that leaves.
 | `GET capabilities` | read | adapters, execution modes (only `dry_run` is available), reset modes, scene checks, defaults |
 | `GET policies` | read | deployable checkpoints from `LEVI_AERI_POLICY_ROOT` (directory listings only; weights are never read or hashed): `id`, `role`, `config`, `sha256_status` (`verified`: a hash list naming the weight files exists on disk, LEVI does not recompute it; `recorded`; `none`), `notes`; `reset_available` is false unless a checkpoint is *stated* to be a reset policy (the page then offers a person's reset only) |
 | `GET jobs` | read | job files under `LEVI_AERI_JOB_ROOTS`: opaque `id` (no path), `name`, `valid`, `reset_mode`, `errors` |
-| `POST jobs` | person | the wizard form becomes a **new** job file in `<first job root>/wizard/` (never overwrites: `409 job_exists`; the same form again is the same file). Checkpoints must come from `GET policies`; `human_assisted` takes no reset policy; `422 job_invalid` lists `errors: [{field, message}]`. The job schema has no policy field, so the chosen checkpoints are kept as comments. A scene check by a person (`operator_attested`) needs an Initial State Contract the form cannot name yet |
+| `POST jobs` | person | the wizard form becomes a **new** job file in `<first job root>/wizard/` (never overwrites: `409 job_exists`; the same form again is the same file). Checkpoints must come from `GET policies`; `human_assisted` takes no reset policy; `422 job_invalid` lists `errors: [{field, message}]`. The selected checkpoint, serving config and discovered directory are frozen in each policy's `deployment` block and included in the plan digest. A scene check by a person (`operator_attested`) needs an Initial State Contract the form cannot name yet |
 | `POST plan` | read | the launch plan (`launchable`, `refusals`, `checks`, `launch_token`, `token_expires_at`); the mode defaults to `dry_run` |
 | `POST runs` | person | launch the plan that was read (`plan_sha256`, `launch_token`, `confirm: "launch"`, `request_id`): `412 plan_changed`/`token_expired`, `409 run_exists`/`robot_busy`, `501 no_robot_adapter`, `503 systemd_unavailable`. The same `request_id` returns the same run, also after a restart |
 | `GET runs`, `GET runs/{id}` | read | summaries; the snapshot: state, `seq`, episodes, counters, the waiting card, the open scene question, a one-time `challenge` (bound to `seq`, 60 s, memory only), the runner |
@@ -1486,3 +1486,15 @@ in `skipped` and not read. A root that is `None`, empty or contains a NUL byte g
 convention and recipe configs are guesses about this machine, not facts about
 the checkpoints; the page should show `role_source`. Tests:
 `tests/automatic/test_policies.py`.
+
+### Guided execution settings and layout answers
+
+Guided campaigns use the existing dual-label client and support `human_assisted` resets only. A `single_reset_policy` guided plan reports `guided_reset_policy_unsupported` and cannot start; dry runs still exercise both reset strategies. Real AERI runner modes remain unavailable until a reviewed execution adapter is installed.
+
+The copied command now passes the frozen forward step budget as `--max-timesteps`, the early-key setting as `--dual-early-key` or `--no-dual-early-key`, and the collected data root as `--rollout-root`. An existing flag is replaced once; duplicate flags are refused. These values remain in the saved command configuration, while the original operator-guide excerpt is retained for drift detection. Step budgets are included in the shared-settings digest. The client may let an operator change a budget at a terminal gate; such a change deviates from the frozen plan and must not be treated as the planned experiment.
+
+Wizard job policies record `deployment.checkpoint_id`, `deployment.config`, and the discovery's `deployment.checkpoint_dir`. These identities enter the normalized plan digest. Campaign child jobs use each group's own deployment identity. Old jobs without deployment fields remain readable; a recorded identity does not prove that a server is actually serving it.
+
+`GET /api/levi/automatic/campaigns/<id>/cards` includes `candidate_cards` for each pending episode, containing every layout card in that episode's segment. Confirmation is checked against that segment. `POST .../cards` accepts `decision: confirm | no_card | withdraw`: `confirm` requires a card; `no_card` and `withdraw` require null. An explicit `no_card` survives a restart, leaves the pending list and never enters paired analysis. Withdrawing reopens confirmation. For old clients and old logs, null without an explicit decision continues to mean withdrawal.
+
+These guarantees are verified with synthetic files and fake I/O. They are not a real-robot acceptance result.

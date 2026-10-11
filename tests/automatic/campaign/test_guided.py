@@ -585,3 +585,74 @@ def test_a_guided_campaign_reaches_a_report(tmp_path):
         if path.is_file():
             assert b"222222222222" not in path.read_bytes()
             assert b"robot-pc" not in path.read_bytes()
+
+
+def test_frozen_settings_are_explicit_even_when_the_guide_asks_at_the_terminal():
+    for steps, early in ((73, True), (411, False)):
+        frozen = G.base_command(
+            GUIDE,
+            max_steps=steps,
+            allow_early_stop=early,
+            rollout_root="/data/roll outs",
+        )
+        again = G.BaseCommand.from_dict(frozen.to_dict())
+        out = G.render_checked(
+            again, GUIDE, eval_num=2, rollout_group="a1", eval_note="c1 s01 X1"
+        )
+        assert f"--max-timesteps {steps}" in out
+        assert ("--dual-early-key" if early else "--no-dual-early-key") in out
+        assert "--rollout-root '/data/roll outs'" in out
+        assert again.text == base().text
+        with pytest.raises(G.GuideDrift):
+            G.render_checked(
+                again,
+                GUIDE.replace("--min-z 0.05", "--min-z 0.06"),
+                eval_num=2,
+                rollout_group="a1",
+                eval_note="c1 s01 X1",
+            )
+
+
+def test_frozen_settings_replace_present_flags_and_refuse_duplicates():
+    guide = GUIDE.replace(
+        "--eval-num 50 --min-z",
+        "--max-timesteps=25 --no-dual-early-key --rollout-root /old --eval-num 50 --min-z",
+    )
+    frozen = G.base_command(
+        guide, max_steps=90, allow_early_stop=True, rollout_root="/new"
+    )
+    out = G.render(frozen, eval_num=2, rollout_group="a1", eval_note="c1 s01 X1")
+    assert "--max-timesteps 90" in out and "--max-timesteps=25" not in out
+    assert "--dual-early-key" in out and "--no-dual-early-key" not in out
+    assert "--rollout-root /new" in out and "/old" not in out
+    duplicate = G.base_command(
+        guide.replace("--max-timesteps=25", "--max-timesteps=25 --max-timesteps 30"),
+        max_steps=90,
+    )
+    with pytest.raises(G.GuidedError, match="repeats"):
+        G.render(duplicate, eval_num=2, rollout_group="a1", eval_note="c1 s01 X1")
+
+
+def test_no_card_is_a_durable_answer_and_withdrawal_reopens_it(tmp_path):
+    layout = fx.layout(per_arm=5, segment_trials=5)
+    write_rollout(
+        tmp_path, "g", "t", 1, note=G.eval_note(fx.CAMPAIGN, 1, "X1"), run_id="r1"
+    )
+    records = G.scan_rollouts(tmp_path, "g", "t")
+    key = records[0].key
+    path = tmp_path / "cards.jsonl"
+    G.CardConfirmations(path).add(key, None, by="op-1", decision="no_card")
+    answers = G.CardConfirmations(path).latest()
+    assert key in answers and answers[key] is None
+    got = G.collect_segment(records, layout, 1, confirmations=answers)
+    assert got["pending"] == []
+    row = got["rows"][0]
+    assert row.card_source == "operator_no_card" and not row.pairable
+    assert got["counts"]["A"]["unconfirmed"] == 0
+    G.CardConfirmations(path).add(key, None, by="op-1", decision="withdraw")
+    assert (
+        G.collect_segment(
+            records, layout, 1, confirmations=G.CardConfirmations(path).latest()
+        )["pending"][0]["key"]
+        == key
+    )

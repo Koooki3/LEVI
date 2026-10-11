@@ -83,7 +83,8 @@ LABEL_BASES = (
 MASKED_KEYS = (
     ("experiment", "name"),
     ("experiment", "episodes"),
-    ("policies",),
+    ("policies", "forward", "deployment"),
+    ("policies", "reset", "deployment"),
     ("recording", "group"),
 )
 ERROR_CODES = (
@@ -656,6 +657,20 @@ def child_document(spec: CampaignSpec, arm: str, segment) -> tuple[str, dict]:
     experiment["name"] = name
     experiment["episodes"] = segment.trials
     document["experiment"] = experiment
+    policies = copy.deepcopy(document.get("policies") or {})
+    for role, selected in (
+        ("forward", spec.block.arms[arm].policy_forward),
+        ("reset", spec.block.arms[arm].policy_reset),
+    ):
+        if selected is not None:
+            policy = dict(policies.get(role) or {})
+            policy["deployment"] = {
+                "checkpoint_id": selected.checkpoint_name,
+                "config": selected.config,
+                "checkpoint_dir": selected.checkpoint_dir,
+            }
+            policies[role] = policy
+    document["policies"] = policies
     recording = dict(document.get("recording") or {})
     recording["group"] = spec.group_of(arm)
     # Every arm writes the same task folders (design X3 §1.1); the job's

@@ -223,6 +223,18 @@ def load_job(path) -> dict:
         },
         "texts": texts,
     }
+    deployments = {
+        role: policy.deployment.model_dump(exclude_none=True)
+        for role, policy in (
+            ("forward", spec.policies.forward),
+            ("reset", spec.policies.reset),
+        )
+        if policy is not None
+        and policy.deployment is not None
+        and (role == "forward" or not human)
+    }
+    if deployments:
+        plan["deployments"] = deployments
     digest = hashlib.sha256(
         json.dumps(plan, sort_keys=True, default=str).encode()
     ).hexdigest()

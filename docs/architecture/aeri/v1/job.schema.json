@@ -1,5 +1,41 @@
 {
   "$defs": {
+    "JobDeployment": {
+      "additionalProperties": false,
+      "description": "Recorded serving identity; reading a plan never loads the checkpoint.",
+      "properties": {
+        "checkpoint_dir": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checkpoint Dir"
+        },
+        "checkpoint_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Checkpoint Id",
+          "type": "string"
+        },
+        "config": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Config",
+          "type": "string"
+        }
+      },
+      "required": [
+        "checkpoint_id",
+        "config"
+      ],
+      "title": "JobDeployment",
+      "type": "object"
+    },
     "JobExperiment": {
       "additionalProperties": false,
       "properties": {
@@ -71,6 +107,17 @@
     "JobPolicy": {
       "additionalProperties": false,
       "properties": {
+        "deployment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JobDeployment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "max_steps": {
           "anyOf": [
             {

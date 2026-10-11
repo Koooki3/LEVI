@@ -60,7 +60,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from levi.automatic import analysis as an
-from levi.automatic import launch
+from levi.automatic import cli, launch
 from levi.automatic import scene_assessment as sa
 from levi.children import identity
 from levi.setup import recipes
@@ -272,8 +272,11 @@ def prepare(
     if errors:
         raise PlanRefused(422, "campaign_invalid", "The plan is not valid", errors)
     raw = _read_job(job_path)
-    reset = raw.get("reset") if isinstance(raw.get("reset"), dict) else {}
-    human = reset.get("strategy") == "human_assisted"
+    try:
+        normal = cli.load_job(job_path)
+    except cli.JobError as exc:
+        raise PlanRefused(422, "job_invalid", str(exc)[:300]) from None
+    human = normal["config"].reset_strategy == "human_assisted"
     campaign_id = campaign_id_of(request)
     checks: list = []
     refusals: list = []
@@ -286,6 +289,15 @@ def prepare(
     rollout_root = None
     base_command = None
     if host == "guided":
+        if not human:
+            refusals.append("guided_reset_policy_unsupported")
+            _check(
+                checks,
+                "guided_reset_policy_unsupported",
+                False,
+                "The legacy dual-label client supports human resets only; a reset policy needs an execution adapter",
+                "error",
+            )
         recording = document.get("recording")
         recording = dict(recording) if isinstance(recording, dict) else {}
         rollout_root = (
@@ -311,7 +323,13 @@ def prepare(
             )
         try:
             prompt = (document.get("task") or {}).get("instruction")
-            base = G.base_command(read_guide(), prompt=prompt)
+            base = G.base_command(
+                read_guide(),
+                prompt=prompt,
+                max_steps=normal["config"].forward_max_steps,
+                allow_early_stop=normal["config"].termination.allow_early_stop,
+                rollout_root=rollout_root,
+            )
             base_command = base.to_dict()
             _check(
                 checks,

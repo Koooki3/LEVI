@@ -7,8 +7,9 @@ and the campaign collects what the client wrote.
 **Commands.** ``base_command`` takes the dual-label evaluation command from
 the operator guide (``setup.md`` §6.3, its first code block), read with the
 same parser as the setup recipes (``levi.setup.recipes``). ``render``
-replaces only the allowed parameters (``--eval-num``, ``--rollout-group``,
-``--eval-note``) and checks that everything else is character for character
+replaces the segment parameters (``--eval-num``, ``--rollout-group``,
+``--eval-note``), then supplies the frozen step budget, early-key setting
+and rollout root. Before adding those settings it checks that everything else is character for character
 the guide's text; the task instruction (``--prompt``) is a shared setting of
 the campaign (``task.prompt``, part of ``settings_sha256``), frozen into the
 ``BaseCommand`` when the campaign is planned and the same in every segment; ``--levi-mode dual`` must
@@ -43,8 +44,9 @@ import fcntl
 import json
 import os
 import re
+import shlex
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from levi.automatic import analysis as an
@@ -102,6 +104,9 @@ class BaseCommand:
     # The campaign's shared task instruction (frozen with the plan); None
     # keeps the guide's own ``--prompt``.
     prompt: str | None = None
+    max_steps: int | None = None
+    allow_early_stop: bool | None = None
+    rollout_root: str | None = None
 
     @property
     def sha256(self) -> str:
@@ -115,20 +120,28 @@ class BaseCommand:
             "first_line": self.first_line,
             "sha256": self.sha256,
             "prompt": self.prompt,
+            "max_steps": self.max_steps,
+            "allow_early_stop": self.allow_early_stop,
+            "rollout_root": self.rollout_root,
         }
 
     @staticmethod
     def from_dict(data: dict) -> BaseCommand:
         if data.get("sha256") != recipes.digest(data["text"]):
             raise GuidedError("the saved command does not match its digest")
-        return _with_prompt(
-            BaseCommand(
-                data["section"],
-                int(data["block"]),
-                data["text"],
-                int(data["first_line"]),
+        return _with_settings(
+            _with_prompt(
+                BaseCommand(
+                    data["section"],
+                    int(data["block"]),
+                    data["text"],
+                    int(data["first_line"]),
+                ),
+                data.get("prompt"),
             ),
-            data.get("prompt"),
+            max_steps=data.get("max_steps"),
+            allow_early_stop=data.get("allow_early_stop"),
+            rollout_root=data.get("rollout_root"),
         )
 
 
@@ -138,7 +151,30 @@ def _with_prompt(base: BaseCommand, prompt: str | None) -> BaseCommand:
     _check_value("prompt", prompt)
     if len(FLAGS["prompt"].findall(base.text)) != 1:
         raise GuidedError("the guide's command gives no single --prompt to replace")
-    return BaseCommand(base.section, base.block, base.text, base.first_line, prompt)
+    return replace(base, prompt=prompt)
+
+
+def _with_settings(base, *, max_steps=None, allow_early_stop=None, rollout_root=None):
+    if max_steps is not None and (
+        type(max_steps) is not int or not 1 <= max_steps <= 1_000_000
+    ):
+        raise GuidedError("max_steps must be a positive whole number at most 1000000")
+    if allow_early_stop is not None and type(allow_early_stop) is not bool:
+        raise GuidedError("allow_early_stop must be true or false")
+    if rollout_root is not None and (
+        not isinstance(rollout_root, str)
+        or not os.path.isabs(rollout_root)
+        or any(ord(c) < 32 for c in rollout_root)
+    ):
+        raise GuidedError(
+            "rollout_root must be an absolute path without control characters"
+        )
+    return replace(
+        base,
+        max_steps=max_steps,
+        allow_early_stop=allow_early_stop,
+        rollout_root=rollout_root,
+    )
 
 
 def base_command(
@@ -147,6 +183,9 @@ def base_command(
     block: int = BLOCK,
     *,
     prompt: str | None = None,
+    max_steps: int | None = None,
+    allow_early_stop: bool | None = None,
+    rollout_root: str | None = None,
 ) -> BaseCommand:
     """The guide's code block ``block`` of section ``section``, which must
     be a dual-label evaluation command with each allowed parameter once.
@@ -175,8 +214,11 @@ def base_command(
             raise GuidedError(
                 f"section {section} block {block} must give --{name.replace('_', '-')} once"
             )
-    return _with_prompt(
-        BaseCommand(section, block, excerpt.text, excerpt.first), prompt
+    return _with_settings(
+        _with_prompt(BaseCommand(section, block, excerpt.text, excerpt.first), prompt),
+        max_steps=max_steps,
+        allow_early_stop=allow_early_stop,
+        rollout_root=rollout_root,
     )
 
 
@@ -256,6 +298,40 @@ def render(
     # Everything but the allowed values is the guide's text, unchanged.
     if _masked(text) != _masked(base.text):
         raise GuidedError("rendering changed more than the allowed parameters")
+    # These settings are frozen with the plan, rather than left to a
+    # terminal prompt. Keep the source excerpt intact for drift detection.
+    options = []
+    if base.max_steps is not None:
+        options.append(
+            (
+                r"(?<!\S)--max-timesteps(?:=|[ \t]+)[^\s\\]+",
+                f"--max-timesteps {base.max_steps}",
+            )
+        )
+    if base.allow_early_stop is not None:
+        options.append(
+            (
+                r"(?<!\S)--(?:no-)?dual-early-key(?=\s|$)",
+                "--dual-early-key" if base.allow_early_stop else "--no-dual-early-key",
+            )
+        )
+    if base.rollout_root is not None:
+        options.append(
+            (
+                r"(?<!\S)--rollout-root(?:=|[ \t]+)(?:\"[^\"]*\"|'[^']*'|[^\s\\]+)",
+                "--rollout-root " + shlex.quote(base.rollout_root),
+            )
+        )
+    for pattern, option in options:
+        matches = list(re.finditer(pattern, text))
+        if len(matches) > 1:
+            raise GuidedError(
+                "the guide repeats a frozen setting: " + option.split()[0]
+            )
+        if matches:
+            text = re.sub(pattern, lambda _, option=option: option, text)
+        else:
+            text += " " + option
     return text
 
 
@@ -393,6 +469,7 @@ def legacy_fact(
     *,
     card: str | None = None,
     posthoc: str | None = None,
+    no_card: bool = False,
 ) -> L.EpisodeFact:
     """What a legacy client rollout says about its episode. ``card``: a
     person's confirmation; ``posthoc``: the background review's verdict
@@ -449,7 +526,9 @@ def legacy_fact(
         stop_reason=STOP_OF_ENDED.get(ended),
         ended_by=ended,
         card=card,
-        card_source="operator_confirmed" if card is not None else "unconfirmed",
+        card_source="operator_confirmed"
+        if card is not None
+        else ("operator_no_card" if no_card else "unconfirmed"),
         labels=labels,
     )
 
@@ -503,6 +582,7 @@ def collect_segment(
             record,
             card=confirmations.get(record.key),
             posthoc=posthoc.get(record.key),
+            no_card=record.key in confirmations and confirmations[record.key] is None,
         )
         facts.setdefault(fact.run_id, []).append(fact)
         first_seen[fact.run_id] = min(
@@ -525,7 +605,9 @@ def collect_segment(
             "candidate_card": r.candidate_card,
         }
         for r in led.rows
-        if r.status == "valid" and r.card is None
+        if r.status == "valid"
+        and r.card is None
+        and r.card_source != "operator_no_card"
     ]
     return {
         "segment": segment,
@@ -609,15 +691,31 @@ class CardConfirmations:
     def latest(self) -> dict:
         out = {}
         for line in self.lines():
-            if line.get("card") is None:
+            if line.get("decision") == "no_card":
+                out[line["episode_key"]] = None
+            elif line.get("card") is None:
                 out.pop(line["episode_key"], None)
             else:
                 out[line["episode_key"]] = line["card"]
         return out
 
-    def add(self, episode_key: str, card: str | None, *, by: str) -> dict:
+    def add(
+        self,
+        episode_key: str,
+        card: str | None,
+        *,
+        by: str,
+        decision: str | None = None,
+    ) -> dict:
         """Confirm ``card`` for an episode (``None`` withdraws a
         confirmation)."""
+        decision = decision or ("withdraw" if card is None else "confirm")
+        if decision not in ("confirm", "no_card", "withdraw") or (
+            decision == "confirm"
+        ) != (card is not None):
+            raise GuidedError(
+                "decision confirm needs a card; no_card and withdraw need null"
+            )
         if not isinstance(episode_key, str) or not episode_key or "\n" in episode_key:
             raise GuidedError("episode key")
         if card is not None:
@@ -628,6 +726,7 @@ class CardConfirmations:
             "schema": CARD_SCHEMA,
             "episode_key": episode_key,
             "card": card,
+            "decision": decision,
             "by": by,
             "at_wall_ns": time.time_ns(),
         }

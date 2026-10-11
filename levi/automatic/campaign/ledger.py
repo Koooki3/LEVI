@@ -76,7 +76,13 @@ LABEL_BASES = (
 AUTOMATIC_BASES = frozenset({"autonomous_verdict", "posthoc_verdict"})
 STATUSES = ("valid", "discarded", "incomplete")
 SOURCES = ("aeri", "legacy_client")
-CARD_SOURCES = ("run_manifest", "schedule_order", "operator_confirmed", "unconfirmed")
+CARD_SOURCES = (
+    "run_manifest",
+    "schedule_order",
+    "operator_confirmed",
+    "unconfirmed",
+    "operator_no_card",
+)
 CONFIRMED = frozenset({"run_manifest", "schedule_order", "operator_confirmed"})
 CARD_PROBLEMS = ("not_in_segment", "duplicate", "no_card_left")
 # How the automatic verdict reads (``metrics.AUTOMATIC_KINDS``).
@@ -218,7 +224,9 @@ class EpisodeFact:
             raise LedgerError(f"status {self.status!r}")
         if self.card_source not in CARD_SOURCES:
             raise LedgerError(f"card_source {self.card_source!r}")
-        if (self.card is None) != (self.card_source == "unconfirmed"):
+        if (self.card is None) != (
+            self.card_source in ("unconfirmed", "operator_no_card")
+        ):
             raise LedgerError("a card comes with its source, and only then")
         if self.layout_fidelity not in (None, *LAYOUT_FIDELITY):
             raise LedgerError(f"layout_fidelity {self.layout_fidelity!r}")
@@ -360,6 +368,8 @@ def derive(layout: CampaignLayout, facts_by_run: dict) -> Ledger:
                         elif fact.card in held:
                             problem = "duplicate"
                         card = fact.card
+                    elif fact.card_source == "operator_no_card":
+                        pass  # explicitly unpaired; do not suggest or consume a card
                     elif fact.source == "aeri":
                         if remaining:
                             card, source = remaining[0], "schedule_order"
@@ -396,7 +406,9 @@ def derive(layout: CampaignLayout, facts_by_run: dict) -> Ledger:
                         round=seg.round,
                         slot=slot,
                         card=card,
-                        card_source=source if card is not None else "unconfirmed",
+                        card_source=source
+                        if card is not None or source == "operator_no_card"
+                        else "unconfirmed",
                         card_problem=problem,
                         candidate_card=candidate,
                         run_id=run,
@@ -457,6 +469,7 @@ def counts(ledger: Ledger, layout: CampaignLayout | None = None) -> dict:
             entry["unconfirmed"] += (
                 ledger.layout_source == "card_set"
                 and not row.card_confirmed
+                and row.card_source != "operator_no_card"
                 and row.card_problem is None
             )
             entry["card_problems"] += row.card_problem is not None

@@ -148,11 +148,10 @@ def _label(value) -> str:
 
 def build_text(form: JobForm, forward: dict, reset: dict | None) -> str:
     """The job file's text. ``forward`` / ``reset``: ``{id, config}`` of the
-    chosen checkpoints (kept as comments)."""
+    chosen checkpoint identities, frozen in the policy deployment blocks."""
     human = form.reset.strategy == "human_assisted"
     lines = [
-        "# Written by the LEVI job wizard; the job schema has no policy field, so the",
-        "# chosen checkpoints are recorded here only.",
+        "# Written by the LEVI job wizard; chosen checkpoints are frozen below.",
         f"# forward policy: {_label(forward['id'])} (config {_label(forward.get('config'))})",
     ]
     if reset is not None:
@@ -170,8 +169,25 @@ def build_text(form: JobForm, forward: dict, reset: dict | None) -> str:
         "  forward:",
         f"    max_steps: {form.run.max_steps}",
     ]
+
+    def deployment(value):
+        if not value.get("config"):
+            raise FormError(
+                422, "job_invalid", "The selected checkpoint has no serving config"
+            )
+        result = [
+            "    deployment:",
+            f"      checkpoint_id: {_text(value['id'])}",
+            f"      config: {_text(value['config'])}",
+        ]
+        if value.get("path"):
+            result.append(f"      checkpoint_dir: {_text(value['path'])}")
+        return result
+
+    lines += deployment(forward)
     if not human:
         lines += ["  reset:", f"    max_steps: {form.run.max_steps}"]
+        lines += deployment(reset)
     lines += ["task:", f"  instruction: {_text(form.task.instruction)}"]
     if not human and form.task.reset_instruction:
         lines.append(f"  reset_instruction: {_text(form.task.reset_instruction)}")

@@ -653,11 +653,13 @@ def create_job(body: dict[str, Any], request: Request):
                 {
                     "id": form.policy_forward.checkpoint_id,
                     "config": forward[form.policy_forward.checkpoint_id].config,
+                    "path": forward[form.policy_forward.checkpoint_id].path,
                 },
                 (
                     {
                         "id": form.policy_reset.checkpoint_id,
                         "config": reset[form.policy_reset.checkpoint_id].config,
+                        "path": reset[form.policy_reset.checkpoint_id].path,
                     }
                     if form.policy_reset
                     else None

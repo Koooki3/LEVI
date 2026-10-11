@@ -161,6 +161,7 @@ class CardBody(_Strict):
     command_id: str = Field(pattern=base.ID.pattern)
     episode_key: str = Field(min_length=1, max_length=300)
     card: str | None = Field(None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+    decision: Literal["confirm", "no_card", "withdraw"] | None = None
 
 
 class ReportBody(_Strict):
@@ -827,6 +828,7 @@ def _pending_cards(c: _Campaign) -> list:
                 "run_id": p["run_id"],
                 "number": p["number"],
                 "candidate_card": p["candidate_card"],
+                "candidate_cards": list(seg["slots"]),
             }
             for p in found["pending"]
         ]
@@ -847,7 +849,7 @@ def pending_cards(campaign_id: str):
 @router.post("/{campaign_id}/cards")
 def confirm_card(campaign_id: str, body: CardBody, request: Request):
     """Guided campaigns: say which layout card a legacy-client episode had
-    (``card`` null withdraws it). Only a confirmed card puts the episode
+    (``decision=no_card`` excludes it; null alone withdraws it). Only a confirmed card puts the episode
     into the paired analysis."""
     _person(request)
     with base._operation(f"campaign:{campaign_id}"):
@@ -857,23 +859,23 @@ def confirm_card(campaign_id: str, body: CardBody, request: Request):
             raise _fail(409, "not_guided", "Only a guided campaign takes card answers")
         if _repeated(c, body.command_id):
             return {"result": "repeated", "command_id": body.command_id}
-        known = set()
+        known = {}
         for seg in c.plan["schedule"]["segments"]:
             try:
                 collected = A.collect(c.plan, c.folder, root, seg["index"])
             except (G.GuidedError, OSError, ValueError):
                 continue
-            known.update(row.episode_id for row in collected["rows"])
+            known.update(
+                {row.episode_id: list(seg["slots"]) for row in collected["rows"]}
+            )
         if body.episode_key not in known:
             raise _fail(422, "episode_unknown", "No such episode in this campaign")
-        cards = {
-            card for seg in c.plan["schedule"]["segments"] for card in seg["slots"]
-        }
+        cards = known[body.episode_key]
         if body.card is not None and body.card not in cards:
             raise _fail(422, "card_unknown", "No such layout card in this campaign")
         try:
             G.CardConfirmations(c.folder / "cards.jsonl").add(
-                body.episode_key, body.card, by=base.PRINCIPAL
+                body.episode_key, body.card, by=base.PRINCIPAL, decision=body.decision
             )
         except G.GuidedError as exc:
             raise _fail(422, "card_invalid", str(exc)[:200]) from None

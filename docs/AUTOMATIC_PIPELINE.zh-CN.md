@@ -520,7 +520,7 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 | `GET capabilities` | 读 | 适配器、执行模式（只有 `dry_run` 可用）、复位模式、场景核对方式、默认值 |
 | `GET policies` | 读 | 从 `LEVI_AERI_POLICY_ROOT` 发现可部署的检查点（只读目录列表，从不读取或计算权重哈希）：`id`、`role`、`config`、`sha256_status`（`verified`：磁盘上有点名权重文件的哈希清单，LEVI 不重新计算；`recorded`；`none`）、`notes`；只有明确声明为复位策略的检查点才让 `reset_available` 为真（否则页面只提供人工复位） |
 | `GET jobs` | 读 | `LEVI_AERI_JOB_ROOTS` 下的作业文件：不含路径的不透明 `id`、`name`、`valid`、`reset_mode`、`errors` |
-| `POST jobs` | 人 | 把向导表单写成 `<第一个作业根>/wizard/` 下的**新**作业文件（绝不覆盖：`409 job_exists`；同一表单再提交得到同一文件）。检查点必须来自 `GET policies`；`human_assisted` 不带复位策略；`422 job_invalid` 带逐字段的 `errors: [{field, message}]`。作业格式没有策略字段，所选检查点写成注释。由人核对场景（`operator_attested`）需要初始状态契约，表单目前还不能指定 |
+| `POST jobs` | 人 | 把向导表单写成 `<第一个作业根>/wizard/` 下的**新**作业文件（绝不覆盖：`409 job_exists`；同一表单再提交得到同一文件）。检查点必须来自 `GET policies`；`human_assisted` 不带复位策略；`422 job_invalid` 带逐字段的 `errors: [{field, message}]`。所选检查点、服务配置与发现目录写入各策略的 `deployment` 块，并纳入计划摘要。由人核对场景（`operator_attested`）需要初始状态契约，表单目前还不能指定 |
 | `POST plan` | 读 | 启动计划（`launchable`、`refusals`、`checks`、`launch_token`、`token_expires_at`）；模式缺省为 `dry_run` |
 | `POST runs` | 人 | 启动看过的计划（`plan_sha256`、`launch_token`、`confirm: "launch"`、`request_id`）：`412 plan_changed`/`token_expired`、`409 run_exists`/`robot_busy`、`501 no_robot_adapter`、`503 systemd_unavailable`。同一 `request_id` 返回同一运行，重启后也一样 |
 | `GET runs`、`GET runs/{id}` | 读 | 摘要；快照：状态、`seq`、片段、计数、等待卡、打开的场景问题、一次性 `challenge`（绑定 `seq`，60 秒，只在内存里）、运行器 |
@@ -569,3 +569,15 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 | `converted`、`size_bytes` | `CONVERSION.json` 存在且可读；按 `lstat` 累加的体积，最多数 `MAX_FILES_PER_ENTRY` 个目录项（文件、目录、链接都计，超过记 `size_truncated`）。 |
 
 `VERSION.json` 或 `CONVERSION.json` 有问题（不是 JSON、太大、不是对象、符号链接、管道）时记入 `problems`，目录照常列出。大小写和 Unicode 折叠后同名、或 `(model, version, variant, step)` 相同的目录，两边都会被标记。根目录里的隐藏项、普通文件和符号链接列在 `skipped` 中，不读取。根参数为 `None`、空串或含 NUL 时返回空结果和 `root_invalid`。`VERSION.json` 与 README 的配置名不一致时给出 `config_sources_disagree` 警告。没有任何条目的角色是 `reset` 时，`select(entries, "reset")` 为空，调用方只给“人工复位”。按约定归类的角色和配方里的配置名是对本机的推断，不是检查点自己的声明，页面应显示 `role_source`。测试见 `tests/automatic/test_policies.py`。
+
+### 引导式执行设置与布局卡回答
+
+引导式评测计划沿用现有双标签客户端，支持 `human_assisted` 人工复位。`single_reset_policy` 引导式计划返回 `guided_reset_policy_unsupported`，不能启动；试运行仍验证两种复位策略。真实 AERI 运行器模式须等经过审查的执行适配器接入后才能开放。
+
+复制的命令现在明确传递冻结步数 `--max-timesteps`、提前按键设置 `--dual-early-key` 或 `--no-dual-early-key`，以及收集数据的根目录 `--rollout-root`。已有参数只替换一次，重复参数会被拒绝。这些值保存在命令配置中，原始手册指令仍完整保留，用于检测手册变化。步数纳入共享设置摘要。旧客户端仍可能允许操作员在开始闸门改变步数；这样的片段偏离冻结计划，不能按原计划实验解读。
+
+向导作业的策略会记录 `deployment.checkpoint_id`、`deployment.config` 和发现时的 `deployment.checkpoint_dir`，身份纳入归一化计划摘要。评测计划的子作业写入各组自己的部署身份。没有部署字段的旧作业仍可读取；记录身份并不证明策略服务实际上已经加载它。
+
+`GET /api/levi/automatic/campaigns/<id>/cards` 为每个待确认片段返回 `candidate_cards`，含其所属段的全部卡位；保存时也按该段校验。`POST .../cards` 接受 `decision: confirm | no_card | withdraw`：确认必须带卡号，无卡和撤回必须带 null。明确无卡会跨重启保留、离开待确认，并且不进入成对分析；撤回会重新待确认。兼容旧客户端与旧日志：没有显式 decision 的 null 仍表示撤回。
+
+上述保证用合成文件与假件验证，不表示真机人工验收完成。

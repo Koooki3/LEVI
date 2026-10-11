@@ -1215,7 +1215,16 @@ class JobExperiment(Part):
     execution_mode: Literal[EXECUTION_MODES] = "shadow"
 
 
+class JobDeployment(Part):
+    """Recorded serving identity; reading a plan never loads the checkpoint."""
+
+    checkpoint_id: JobFolder
+    config: JobFolder
+    checkpoint_dir: JobPath | None = None
+
+
 class JobPolicy(Part):
+    deployment: JobDeployment | None = None
     max_steps: Annotated[int, Field(ge=1, le=1_000_000)] | None = None
 
 

@@ -60,7 +60,7 @@ def test_a_form_becomes_a_new_valid_job_that_plans(
     assert response.json()["id"] == job_id_of(client, "wizard/wiz-a")
     path = roots / "wizard" / "wiz-a.yaml"
     text = path.read_text()
-    assert str(tmp_path) not in text
+    assert str(checkpoints / "fwd-a") in text
     assert "# forward policy: fwd-a (config pi05_fr3_all_state)" in text
     job = cli.load_job(path)
     assert job["config"].reset_strategy == "human_assisted"
@@ -242,3 +242,21 @@ def test_a_read_only_root_is_reported(client, roots, checkpoints):
         assert answer.json()["detail"]["code"] == "job_write_failed"
     finally:
         roots.chmod(0o700)
+
+
+def test_checkpoint_identity_is_frozen_in_the_plan(client, roots, checkpoints):
+    response = post(client, form())
+    assert response.status_code == 201
+    path = roots / "wizard" / "wiz-a.yaml"
+    job = cli.load_job(path)
+    identity = job["plan"]["deployments"]["forward"]
+    assert identity == {
+        "checkpoint_id": "fwd-a",
+        "config": "pi05_fr3_all_state",
+        "checkpoint_dir": str(checkpoints / "fwd-a"),
+    }
+    old = job["plan_sha256"]
+    path.write_text(
+        path.read_text().replace('checkpoint_id: "fwd-a"', 'checkpoint_id: "fwd-b"')
+    )
+    assert cli.load_job(path)["plan_sha256"] != old

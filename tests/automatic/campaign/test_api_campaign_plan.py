@@ -29,7 +29,7 @@ def test_a_plan_has_the_contract_shape(world):
     power = plan["power"]
     assert set(power) >= {"detectable_difference", "n", "rows"}
     assert power["n"] == 4 and power["post_hoc_power"] == "not reported"
-    assert plan["refusals"] == []
+    assert plan["refusals"] == ["guided_reset_policy_unsupported"]
     codes = {c["code"] for c in plan["checks"]}
     assert {"pairing", "schedule", "guide_command", "rollout_root"} <= codes
     assert all(set(c) == {"code", "ok", "severity", "detail"} for c in plan["checks"])
@@ -124,7 +124,7 @@ def test_a_plan_with_a_bad_request_is_refused(world):
 
 
 def test_what_forbids_only_the_start_is_a_refusal_of_the_plan(world, monkeypatch):
-    job = world.make_job()
+    job = world.make_job(strategy="human_assisted")
     monkeypatch.delenv("LEVI_SETUP_DOC")
     monkeypatch.delenv(C.ROLLOUT_ROOT_ENV)
     plan = world.plan(job).json()
@@ -142,7 +142,7 @@ def test_what_forbids_only_the_start_is_a_refusal_of_the_plan(world, monkeypatch
 
 
 def test_a_guide_that_changes_the_command_unsafe_is_refused(world, monkeypatch):
-    job = world.make_job()
+    job = world.make_job(strategy="human_assisted")
     monkeypatch.setattr(
         C, "read_guide", lambda: (_ for _ in ()).throw(ValueError("no guide here"))
     )
@@ -206,7 +206,7 @@ def test_a_start_is_idempotent_and_never_repeats_a_campaign(world, aeri_home):
 
 
 def test_another_campaign_on_the_robot_is_refused(world, aeri_home):
-    job = world.make_job()
+    job = world.make_job(strategy="human_assisted")
     held = K.RobotLock(aeri_home, "main", "other-campaign")
     try:
         answer, _ = world.start(job)
@@ -226,3 +226,12 @@ def test_job_files_of_a_start_are_new_files_only(world, aeri_home):
     assert "campaign.plan.json" in names and "campaign.yaml" in names
     assert sum("__s0" in n and n.endswith(".yaml") for n in names) == 4
     assert os.path.exists(aeri_home / "campaign-jobs" / C.DRY_CONTRACT_FILE)
+
+
+def test_guided_reset_policy_is_a_capability_refusal_before_start(world):
+    job = world.make_job(strategy="single_reset_policy")
+    plan = world.plan(job).json()
+    assert "guided_reset_policy_unsupported" in plan["refusals"]
+    started, _ = world.start(job)
+    assert started.status_code == 422
+    assert world.plan(job, execution_mode="dry_run").json()["refusals"] == []
