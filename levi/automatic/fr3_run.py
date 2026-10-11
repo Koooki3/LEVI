@@ -19,8 +19,9 @@ import stat
 import sys
 import threading
 import time
-from dataclasses import replace
+from dataclasses import fields, replace
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
 from . import cli
@@ -83,7 +84,7 @@ def load_binding(path, job):
     }
     if (
         not isinstance(value, dict)
-        or set(value) != required
+        or set(value) not in (required, required | {"signal_events"})
         or value["schema"] != SCHEMA
     ):
         raise ValueError("binding requires exactly " + ", ".join(sorted(required)))
@@ -233,14 +234,17 @@ def load_binding(path, job):
         or Path(provider["file_root"]).is_symlink()
     ):
         raise ValueError("provider file_root must be an existing real directory")
-    model_spec = model_binding(provider, job)
+    if "signal_events" in value and value["signal_events"] is None:
+        raise ValueError("signal_events must be a complete explicit declaration")
+    signals = signal_binding(value.get("signal_events"))
+    model_spec = model_binding(provider, job, signals=signals)
     if job["config"].scene_check == "provider" or (
         model_spec is not None and "reset" in roles
     ):
         caps = {"scene"} if job["config"].scene_check == "provider" else set()
         if "reset" in roles:
             caps.add("reset_judgement")
-        if job["config"].termination.allow_early_stop:
+        if job["config"].termination.allow_early_stop and signals is None:
             caps.add("events")
         if not providers.ready(
             provider["file_root"], job["contract"], caps, model_spec=model_spec
@@ -251,7 +255,123 @@ def load_binding(path, job):
     return value, hashlib.sha256(data).hexdigest()
 
 
-def model_binding(provider, job):
+def signal_binding(value):
+    """File-only opt-in validation; every semantic/threshold is reviewed inline.
+
+    The full binding bytes, including this declaration, are covered by the
+    operator's existing --expect-binding digest and reread after confirmation.
+    No profile is inferred from task names or SDK defaults.
+    """
+    if value is None:
+        return None
+    from levi.events.signal_profiles import SignalProfile
+    from levi.events.stream import StreamConfig
+
+    from .adapters.signal_events import Binding, CachedObserver, SignalEvents
+
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schema", "profile", "bindings", "config", "actor_id"}
+        or value["schema"] != "levi.aeri.signal_events.binding.v1"
+    ):
+        raise ValueError(
+            "signal_events requires schema/profile/bindings/config/actor_id"
+        )
+    raw = value["profile"]
+    if (
+        not isinstance(raw, dict)
+        or set(raw) != {"schema_version", "origin", "channels", "overridden"}
+        or raw["origin"] != "declared"
+        or raw["overridden"] != []
+    ):
+        raise ValueError("signal_events requires a complete declared profile")
+    if not isinstance(raw["channels"], list) or not raw["channels"]:
+        raise ValueError("signal_events requires explicit channels")
+    for channel in raw["channels"]:
+        required = {"role", "feature", "index", "actor_id", "kind", "units"}
+        if not isinstance(channel, dict) or not required <= set(channel):
+            raise ValueError("signal channel semantics must be explicit")
+        if type(channel["index"]) is not int or any(
+            not isinstance(channel[name], str)
+            for name in ("feature", "actor_id", "kind", "units")
+        ):
+            raise ValueError("signal channel semantics must be explicitly typed")
+        if channel["kind"] not in {
+            "measured",
+            "commanded",
+        }:
+            raise ValueError("signal channel index/kind must be explicit and typed")
+        if channel["role"] == "gripper" and not {"open_level", "valid_range"} <= set(
+            channel
+        ):
+            raise ValueError("gripper polarity and range must be explicit")
+        if channel["role"] == "gripper":
+            limits = channel.get("valid_range")
+            if (
+                not isinstance(limits, list)
+                or len(limits) != 2
+                or any(
+                    type(v) not in (int, float) or not math.isfinite(v) for v in limits
+                )
+            ):
+                raise ValueError("gripper range must be explicit finite numbers")
+        if channel["role"] == "position" and (
+            channel.get("frame") != "base" or "axis" not in channel
+        ):
+            raise ValueError(
+                "FR3 measured position requires explicit base frame and axis"
+            )
+    profile = SignalProfile.model_validate(raw)
+    config = value["config"]
+    if not isinstance(config, dict) or set(config) != {
+        f.name for f in fields(StreamConfig)
+    }:
+        raise ValueError("all StreamConfig thresholds and budgets must be explicit")
+    config = StreamConfig(**config)
+    raw_bindings = value["bindings"]
+    if not isinstance(raw_bindings, list) or not 1 <= len(raw_bindings) <= 64:
+        raise ValueError("signal bindings must be a bounded nonempty list")
+    bindings = []
+    for item in raw_bindings:
+        if not isinstance(item, dict) or set(item) != {
+            "feature",
+            "index",
+            "path",
+            "kind",
+        }:
+            raise ValueError("signal binding requires feature/index/path/kind")
+        if (
+            not isinstance(item["feature"], str)
+            or type(item["index"]) is not int
+            or not isinstance(item["path"], list)
+            or not 1 <= len(item["path"]) <= 4
+            or any(type(part) not in (str, int) for part in item["path"])
+            or item["kind"] not in {"measured", "commanded"}
+        ):
+            raise ValueError("signal binding fields must be explicitly typed")
+        bindings.append(
+            Binding(item["feature"], item["index"], tuple(item["path"]), item["kind"])
+        )
+    actor = value["actor_id"]
+    if actor != "arm_0":
+        raise ValueError("FR3 signal actor must be the explicitly declared arm_0")
+    # Constructor performs complete profile/channel/path validation without I/O.
+    clock = SimpleNamespace(domain="host-mono:binding")
+    SignalEvents(
+        CachedObserver(None, clock, step_of=lambda: 0),
+        profile,
+        bindings,
+        run_id="binding-check",
+        clock=clock,
+        evidence_root=Path("/"),
+        keep_frame=lambda *args: None,
+        config=config,
+        actor_id=actor,
+    )
+    return profile, tuple(bindings), config, actor
+
+
+def model_binding(provider, job, *, signals=None):
     """Pure-file check: freeze must match the existing job, never rewrite it."""
     if "model_spec_file" not in provider:
         return None  # Existing external file protocol; not a model-worker claim.
@@ -276,7 +396,7 @@ def model_binding(provider, job):
         }
     ):
         raise ValueError("model spec differs from frozen job run/plan/ISC/deadlines")
-    if cfg.termination.allow_early_stop:
+    if cfg.termination.allow_early_stop and signals is None:
         raise ValueError(
             "model worker has no frame-bearing events; freeze a new plan with allow_early_stop:false"
         )
@@ -390,7 +510,8 @@ def assembled(
     judge,
 ):
     deployments = job["plan"]["deployments"]
-    robot = bridge.Robot(
+    signals = signal_binding(binding.get("signal_events"))
+    base_robot = bridge.Robot(
         env,
         guard,
         client,
@@ -399,6 +520,20 @@ def assembled(
         fence,
         tolerance_mm=binding["safety"]["home_tolerance_mm"],
     )
+    orch = None
+    robot = base_robot
+    if signals is not None:
+        from .adapters.signal_events import CachedObserver
+
+        # ctx.last_step is the actual current control-loop step, not a guessed
+        # pose/action counter (which also counts homing and reset motion).
+        robot = CachedObserver(
+            base_robot,
+            clock,
+            step_of=lambda: (
+                orch.ctx.last_step if orch is not None and orch.ctx is not None else -1
+            ),
+        )
     from .fr3_media import Media, Recorder
 
     media = Media(cv2, rotation, online, judge, args.control_hz)
@@ -412,7 +547,7 @@ def assembled(
         media=media,
     )
     file_root = binding["providers"]["file_root"]
-    model_spec = model_binding(binding["providers"], job)
+    model_spec = model_binding(binding["providers"], job, signals=signals)
     model_kwargs = {"model_spec": model_spec} if model_spec is not None else {}
 
     def capture():
@@ -454,7 +589,28 @@ def assembled(
     policy = bridge.Policy(
         clients, deployments, job["texts"], robot, client, args, clock
     )
-    orch = None
+    events = (
+        providers.FileEvents(file_root, cfg.run_id, clock) if signals is None else None
+    )
+    if signals is not None:
+        from .adapters.signal_events import SignalEvents
+
+        profile, bindings, config, actor = signals
+
+        def unattached_evidence(*args):
+            raise ValueError("evidence store not attached")
+
+        events = SignalEvents(
+            robot,
+            profile,
+            bindings,
+            run_id=cfg.run_id,
+            clock=clock,
+            evidence_root=directory / "evidence",
+            keep_frame=unattached_evidence,
+            config=config,
+            actor_id=actor,
+        )
     finished = threading.Event()
     old_signals = {}
     thread = None
@@ -466,7 +622,7 @@ def assembled(
             robot=robot,
             policy=policy,
             recorder=recorder,
-            events=providers.FileEvents(file_root, cfg.run_id, clock),
+            events=events,
             verifier=providers.OnlineVerifier(
                 online, judge, clock, media, job, reset_provider, robot=robot
             ),
@@ -475,11 +631,16 @@ def assembled(
             fence=fence,
             listener=sessions,
         )
+        if signals is not None:
+            if orch.evidence is None:
+                raise ValueError("signal events require the real run evidence store")
+            events.evidence_root = orch.evidence.folder
+            events.keep_frame = orch.evidence.keep_frame
         if reset_provider is not None:
             reset_provider.use_evidence(orch.evidence)
 
         signal_stop = {"signum": None}
-        robot.stop_probe = lambda: signal_stop["signum"] is not None
+        base_robot.stop_probe = lambda: signal_stop["signum"] is not None
 
         def stop(signum, frame):
             # Python signal handlers may interrupt a non-reentrant lock.
@@ -672,6 +833,10 @@ def main(argv=None):
                         "binding_sha256": digest,
                         "reset_strategy": job["config"].reset_strategy,
                         "hardware_verified": False,
+                        "event_source": "signals"
+                        if _binding.get("signal_events") is not None
+                        else "files",
+                        "signal_events": _binding.get("signal_events"),
                     },
                     indent=2,
                 )

@@ -79,7 +79,13 @@ AERI 与 C5 共用 Judge 并发锁、请求归属、GPU online_admit/check/done 
 
 持久 intent 防止重启后重复推理。已完成请求仅在 request/spec/response 哈希一致时复用原响应；旧 intent 未完成则重启产出不可用，不猜成功、不自动重放。相同 ID 的内容变化被拒绝；请求／响应／processed 文件随运行证据保留。
 
-当前 `allow_early_stop:false` 的单复位策略到达 reset horizon 后，即使 `reset_active` 候选已 confirmed、复位后 scene 已 ready，仍进入 WAIT_HUMAN，不能自主继续 forward。原 `_finish_reset` 不调用 `_final_judgement`，因此候选确认不等于 `reset_goal` 终局验证。本改动保留这道人为检查门；未来有界复位闭环需独立设计与验收。
+使用 `reset_horizon_completion: wait_human` 时，复位达到步数上限仍需人工处理，`reset_active` 候选不等于 `reset_goal` 终局验证。独立的 `verify_final` 有界复位路径继续要求既有冻结稳定性和终局初始状态合约。选择信号事件不改变完成策略和这些验证门。
+
+
+FR3 绑定现在可显式选择[事件文档](EVENTS.zh-CN.md#显式-fr3-事件绑定)中的带帧
+信号来源，完整 profile、bindings 和阈值都进入人工审批的绑定 SHA。只有合法
+信号路径解除模型 worker 的提前停止拒绝；旧 FileEvents 来源配提前停止模型
+worker 仍被拒绝。worker 继续提供场景／复位判定，并保留共享 GPU 和取消门。
 
 ## 已验证边界
 

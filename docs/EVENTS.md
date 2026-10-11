@@ -198,8 +198,49 @@ current-epoch candidate within that bounded history.
 **Validation boundary:** CPU/mock tests exercise observation delegation, prefix
 causality, units and polarity, missing-signal fallback, actual JPEG hashes,
 `EvidenceStore` / `FileEvents` compatibility, bounded storage and step/clock/epoch
-attacks. The adapter is not mounted into the real run, live judging or background
-annotation defaults. GPU admission, live service wiring and real-robot validation
+attacks. The FR3 entry mounts the adapter only with the reviewed declaration below. Live judging and background
+annotation defaults do not mount it. GPU admission, live service wiring and real-robot validation
 remain separate integration gates. A candidate requests fresh evidence and an
 existing stable-window judgement; it is never a success verdict or a motion
 command.
+
+
+### Explicit FR3 event binding
+
+The operator entry `python -m levi.automatic.fr3_run` accepts an optional inline
+`signal_events` object in its existing binding. Without it, `FileEvents` remains
+the source. Its exact fields are `schema` (`levi.aeri.signal_events.binding.v1`),
+`actor_id` (`arm_0`), `profile`, `bindings` and `config`. Null and partial
+objects are refused. `profile` requires `schema_version`, `origin: declared`,
+nonempty `channels` and empty `overridden`; each channel explicitly declares
+role, feature, index, actor, kind and units. Grippers additionally declare range
+and open polarity. Measured xyz must declare axes, metres and the FR3 `base`
+frame. No task name or dataset inference supplies these semantics.
+
+Each binding explicitly supplies `feature`, integer `index`, `kind` and `path`:
+measured xyz uses `["pose", 0]` through `["pose", 2]`; measured grippers use
+`["robot_state", "gripper_position"]`; commanded grippers use `["pose", 6]`.
+`config` must explicitly supply every `StreamConfig` field: `max_history`,
+`max_age_ns`, `still_ns`, `motion_speed_m_s` and `max_gap_ns`. Values and physical
+thresholds come from the operator; this entry provides no fallback thresholds.
+The shared gripper detector retains its existing fixed normalized hysteresis.
+
+`--check` returns the declaration and selected event source. The complete inline
+bytes belong to `binding_sha256`; `--execute --expect-binding` checks that
+approval before and after terminal confirmation. A changed declaration,
+threshold or binding needs new binding approval, even if the job's plan SHA is
+unchanged. One `CachedObserver` wraps the existing Robot for the policy,
+recorder, scene/reset providers and verifier. Its read-only step source is the
+current orchestrator control step, independent of homing/reset action counters.
+No event polling adds an observation or HTTP call. The actual run EvidenceStore
+is attached after orchestrator creation and before any event stream opens.
+
+A model worker with this fully validated frame-bearing source may use the
+job's existing early-stop setting; the external FileEvents path still rejects
+that model-worker combination. Its scene/reset READY heartbeat need not claim
+an external events capability. Signal candidates retain real current JPEGs,
+and existing forward Media/C5 or reset ISC verification still decides whether
+to stop. Candidate generation does not bypass GPU admission, watchdogs, stop
+signals, motion fences, terminal judgement or human approval. CPU tests exercise
+the actual entry with fake SDK and injected models; actual GPU timing and
+physical execution remain unverified.

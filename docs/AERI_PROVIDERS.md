@@ -79,7 +79,15 @@ The actual request deadline is enforced outside the model Budget (whose minimum 
 
 A durable intent prevents duplicate inference across restarts. A completed request reuses its original response only when request/spec/response hashes match. An interrupted intent produces unavailable on restart, not a guessed success or automatic inference replay. Changed content under the same request ID is refused. Keep request/response/processed files with the run evidence for audit.
 
-With `allow_early_stop:false`, the current single reset policy still enters WAIT_HUMAN at reset horizon exhaustion, even with a confirmed `reset_active` candidate and a ready post-reset scene; it cannot autonomously continue forward. The current `_finish_reset` does not request `_final_judgement`, so this candidate is not a `reset_goal` final verification. This change preserves that gate. A bounded autonomous reset loop needs a separate design and acceptance.
+With `reset_horizon_completion: wait_human`, reset horizon exhaustion still requires human intervention; a `reset_active` candidate is not final `reset_goal` verification. The separate `verify_final` bounded-reset path requires its existing frozen stability and final-ISC contract. Selecting signal events changes neither completion policy nor those verification gates.
+
+
+The FR3 binding can now explicitly select the validated frame-bearing signal source
+described in [Events](EVENTS.md#explicit-fr3-event-binding). Its complete profile,
+bindings and thresholds are covered by the operator-approved binding SHA. Only
+that path lifts the model-worker early-stop refusal; FileEvents remains refused
+with an early-stop model-worker plan. The worker still provides scene/reset
+verification and retains its shared GPU/cancellation gates.
 
 ## Verified limits
 

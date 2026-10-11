@@ -186,6 +186,39 @@ ndarray 像素哈希不能冒充已保留 JPEG 的哈希。缺失、跳过、损
 
 **验证范围**：CPU/mock 测试覆盖既有观测消费、前缀因果性、单位和极性、
 缺信号回退、真实 JPEG 哈希、`EvidenceStore` / `FileEvents` 兼容、有界存储及
-步数、时钟、代次攻击。真实运行、实时成败判定和后台标注入口尚未默认挂载；
+步数、时钟、代次攻击。FR3 入口仅在下述已审核声明存在时挂载；实时成败判定和后台标注入口默认不挂载；
 GPU 准入、服务接线与真机验证仍是独立门禁。候选只请求新证据和既有稳定窗口
 判定，不代表任务成功，也不是运动指令。
+
+
+### 显式 FR3 事件绑定
+
+人工入口 `python -m levi.automatic.fr3_run` 的既有绑定文件可选填内联
+`signal_events`；不填时仍使用 `FileEvents`。对象必须完整包含 `schema`
+（`levi.aeri.signal_events.binding.v1`）、`actor_id`（`arm_0`）、`profile`、
+`bindings` 和 `config`，空值或缺项被拒绝。`profile` 必须有 `schema_version`、
+`origin: declared`、非空 `channels` 和空 `overridden`；每个通道明确写角色、
+feature、index、actor、kind 和单位。夹爪还须声明有效范围和张开端；实测 xyz
+须声明轴、米和 FR3 的 `base` 坐标系，不从任务名称或数据集推断语义。
+
+每个 binding 明确写 `feature`、整数 `index`、`kind` 和 `path`：实测 xyz
+绑定 `["pose", 0]` 至 `["pose", 2]`；实测夹爪绑定
+`["robot_state", "gripper_position"]`；夹爪指令绑定 `["pose", 6]`。
+`config` 必须显式给出全部 `StreamConfig` 字段：`max_history`、`max_age_ns`、
+`still_ns`、`motion_speed_m_s` 和 `max_gap_ns`。数值与物理阈值由人工提供，
+入口不补默认阈值；共享夹爪检测器继续使用既有归一化滞回规则。
+
+`--check` 显示声明和事件来源。全部内联字节进入 `binding_sha256`；
+`--execute --expect-binding` 在终端确认前后核对审批摘要。声明、阈值或
+binding 改变后，即使任务计划 SHA 相同，也必须重新审核绑定。
+同一个 `CachedObserver` 包装既有 Robot，供策略、记录器、场景／复位提供者
+和判定器使用；只读步号来自编排器当前控制步，不使用回家／复位动作计数。
+事件轮询不新增观测或 HTTP 调用。实际运行的 EvidenceStore 在编排器创建后、
+事件片段打开前挂载。
+
+完整验证的带帧信号来源可供模型 worker 使用任务原有的提前停止设置；旧
+FileEvents 来源仍拒绝这项模型 worker 组合，场景／复位 READY 心跳无需伪称
+外部 events 能力。信号候选保留真实当前 JPEG，再由既有正向 Media／C5 或
+复位初始状态合约判定是否停止。候选不绕过 GPU 准入、看门狗、停止信号、
+运动隔离、终局判定和人工批准。CPU 测试走真实入口、假 SDK 与注入模型；
+实际 GPU 时限和物理执行仍未验证。
