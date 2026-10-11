@@ -204,6 +204,15 @@
           "default": null,
           "title": "Enabled"
         },
+        "horizon_completion": {
+          "default": "wait_human",
+          "enum": [
+            "wait_human",
+            "verify_final"
+          ],
+          "title": "Horizon Completion",
+          "type": "string"
+        },
         "human_scene_timeout_s": {
           "anyOf": [
             {
@@ -257,6 +266,17 @@
           "title": "Scene Check",
           "type": "string"
         },
+        "settle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JobResetSettle"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "strategy": {
           "default": "single_reset_policy",
           "enum": [
@@ -273,6 +293,59 @@
         }
       },
       "title": "JobReset",
+      "type": "object"
+    },
+    "JobResetSettle": {
+      "additionalProperties": false,
+      "description": "All physical stability parameters must be supplied by the operator.",
+      "properties": {
+        "gripper_tolerance": {
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "title": "Gripper Tolerance",
+          "type": "number"
+        },
+        "max_wait_ns": {
+          "exclusiveMinimum": 0,
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Max Wait Ns",
+          "type": "integer"
+        },
+        "position_tolerance_m": {
+          "exclusiveMinimum": 0,
+          "title": "Position Tolerance M",
+          "type": "number"
+        },
+        "rotation_tolerance_rad": {
+          "exclusiveMinimum": 0,
+          "title": "Rotation Tolerance Rad",
+          "type": "number"
+        },
+        "sample_interval_ns": {
+          "exclusiveMinimum": 0,
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Sample Interval Ns",
+          "type": "integer"
+        },
+        "stable_window_ns": {
+          "exclusiveMinimum": 0,
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Stable Window Ns",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sample_interval_ns",
+        "stable_window_ns",
+        "max_wait_ns",
+        "position_tolerance_m",
+        "rotation_tolerance_rad",
+        "gripper_tolerance"
+      ],
+      "title": "JobResetSettle",
       "type": "object"
     },
     "JobTask": {

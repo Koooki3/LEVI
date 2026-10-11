@@ -111,6 +111,8 @@ RESET_POLICY_FIELDS = (
     "reset_enabled",
     "max_reset_attempts",
     "on_scene_unknown",
+    "reset_horizon_completion",
+    "reset_settle",
 )
 
 
@@ -170,6 +172,11 @@ def load_job(path) -> dict:
                 ("reset_enabled", spec.reset.enabled),
                 ("max_reset_attempts", spec.reset.max_attempts),
                 ("on_scene_unknown", spec.reset.on_unknown),
+                ("reset_horizon_completion", spec.reset.horizon_completion),
+                (
+                    "reset_settle",
+                    spec.reset.settle.model_dump() if spec.reset.settle else None,
+                ),
             )
             if value is not None
         }
@@ -343,7 +350,7 @@ def _plain(config) -> dict:
     for name, value in _fields(config).items():
         if name == "specs":
             continue
-        if name == "termination":
+        if name in ("termination", "reset_settle") and value is not None:
             value = asdict(value)
         elif name == "initial_state":
             value = value.key if value else None

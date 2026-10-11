@@ -586,9 +586,16 @@ def recipe(job_path):
         blockers.append("real_scene_provider_required")
     if "reset" in roles:
         blockers += [
-            "real_reset_goal_and_event_providers_required",
+            "real_reset_goal_provider_required",
             "reset_policy_deployment_review_required",
         ]
+        cfg = job["config"]
+        if cfg.reset_horizon_completion == "verify_final":
+            blockers.append("reviewed_pose_stability_capability_required")
+        elif not cfg.termination.allow_early_stop:
+            missing.append("automatic_bounded_reset_requires_new_verify_final_plan")
+        else:
+            blockers.append("real_event_provider_required")
     entrypoint = "python -B -m levi.automatic.fr3_run"
     source = (
         entrypoint

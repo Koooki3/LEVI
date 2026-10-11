@@ -1636,9 +1636,67 @@ start forward execution: this run waits for a person. A separate post-reset
 scene check may still record `goal_verification: verified` and
 `task_outcome: success` when it observes the initial state restored; those fields
 retain that scene observation, not acceptance of the reset reply or completion
-of the run. The transport does not infer model truth; a real scene/reset/events
-worker remains
-unimplemented, and file transport alone does not make a hardware run ready.
+of the run. The transport does not infer model truth; the scene/reset model
+worker must be explicitly configured and matched to the approved specification.
+An event producer is separate; file transport alone does not make a hardware run ready.
 Events beyond 1000 consumed files remain readable. Media shutdown attempts every
 writer/file before reporting the first error. `--scene-question` cannot be mixed
 with `--check`, `--execute`, job or binding options, so `--check` stays read-only.
+
+## Bounded reset with final verification
+
+`reset.horizon_completion: wait_human` remains the default. Reaching the reset
+step limit still records `stop_reason: horizon_exhausted`; it is never success
+proof. An operator may approve a **new plan** with
+`reset.horizon_completion: verify_final` for an enabled `single_reset_policy`,
+a confirmed Initial State Contract, provider scene checks and
+`termination.allow_early_stop: false`. The option and all stability parameters
+enter the plan digest: approval of the previous plan cannot launch this plan.
+The existing runner still refuses real hardware; use the reviewed FR3 bridge
+recipe, its connection-free `--check`, then a separately supervised `--execute`.
+
+This mode requires an explicit `reset.settle` block containing all six fields:
+`sample_interval_ns`, `stable_window_ns`, `max_wait_ns`,
+`position_tolerance_m`, `rotation_tolerance_rad`, and `gripper_tolerance`.
+Times must be positive and satisfy interval <= window <= maximum wait; the
+budget allows at most 1000 observations. Tolerances must be finite and positive;
+the gripper tolerance uses the measured normalized 0..1 opening. There are no
+default physical thresholds. The operator must freeze them in a new approved
+plan after reviewing the position measurement capability. Synthetic values in
+tests are not recommended physical settings; these thresholds and observation
+sources await supervised acceptance in HA-23.
+
+After the natural step limit, the policy must quiesce successfully, then fresh
+observations must span a continuous stable window. Every pair in that window
+must satisfy the frozen XYZ distance, wrapped Euler-angle distance and measured
+gripper opening tolerances. At least two observations must have strictly
+increasing timestamps in the current host clock domain, captured during their
+read. `pose[6]` is the SDK's gripper **command**, so it cannot prove stability:
+`robot_state.gripper_position` is required separately, with provenance from an
+explicit `gripper_pos` field in this observation's existing `getstate` response.
+The bridge retains the read generation and host timestamps, and compares the
+SDK's value with that response. A missing field followed by the SDK's fallback
+zero has no proof; an explicitly measured zero can be valid. No extra device
+read is added. Missing, nonfinite,
+stale or out-of-order measurements do not grant continuation. This checks
+observed Cartesian/gripper stability and absence of new policy commands; it
+makes no claim about joint stability, velocity or mechanical safety.
+
+Only the complete chain may continue: bounded stable observations retained with
+plan parameters and timestamps; an actual `reset_final` judgement confirming
+the exact complete Initial State Contract with current frame evidence; an
+independent `post_reset` scene reporting ready; successful recording seal and
+home; and the existing `VERIFY_INITIAL` scene reporting ready again. Final
+proof is retained separately from scene proof. The model deadlines remain
+unchanged (3 seconds active judgement, 5 seconds final/scene). Stop and fault are
+checked before and after sampling and blocking judgements; policy errors,
+timeouts, unknown answers, missing proof, contract violations and seal/home
+failures keep the human or fault path. The raw horizon arbitration rule remains
+unchanged.
+
+The offline regression uses the real host clock, FileEvents with **no event
+files**, file providers, model worker, OnlineVerifier and journal, with SDK I/O
+and model responses injected. It validates software gates, not model accuracy
+or physical readiness. A real worker must be configured and identity-matched;
+the file transport alone is insufficient. Actual hardware execution still
+requires the operator's fresh terminal confirmation and supervised acceptance.

@@ -56,6 +56,7 @@ Whether a scene may skip a reset is decided by the Initial State Contract
 strategy (``reset_manager``), both T-C-08.
 """
 
+import math
 import threading
 from collections import Counter
 from collections.abc import Callable
@@ -129,6 +130,8 @@ class RunConfig:
     max_reset_attempts: int = 1
     # Scene unknown or unavailable never skips a reset: run it, or ask a person.
     on_scene_unknown: str = "reset"
+    reset_horizon_completion: str = "wait_human"
+    reset_settle: rm.SettleConfig | None = None
     # After an operator's stop: home first (the design's path), or wait for
     # a person where the arm stands. The home still passes the safety check.
     home_after_operator_stop: bool = True
@@ -196,6 +199,37 @@ class RunConfig:
             self.initial_state, sa.InitialStateContract
         ):
             raise ConfigError("initial_state is an InitialStateContract or None")
+        if isinstance(self.reset_settle, dict):
+            try:
+                object.__setattr__(
+                    self, "reset_settle", rm.SettleConfig(**self.reset_settle)
+                )
+            except (rm.StrategyError, TypeError) as exc:
+                raise ConfigError(str(exc)) from None
+        if self.reset_settle is not None and not isinstance(
+            self.reset_settle, rm.SettleConfig
+        ):
+            raise ConfigError("reset_settle is a SettleConfig")
+        if (
+            self.reset_horizon_completion == "wait_human"
+            and self.reset_settle is not None
+        ):
+            raise ConfigError("reset_settle belongs only to verify_final")
+        if self.reset_horizon_completion not in ("wait_human", "verify_final"):
+            raise ConfigError("reset_horizon_completion is wait_human or verify_final")
+        if self.reset_horizon_completion == "verify_final" and (
+            self.reset_strategy != "single_reset_policy"
+            or not self.reset_enabled
+            or self.initial_state is None
+            or self.initial_state.status != "confirmed"
+            or self.scene_check != "provider"
+            or self.termination.allow_early_stop
+            or self.reset_settle is None
+        ):
+            raise ConfigError(
+                "verify_final needs enabled single_reset_policy, confirmed Initial State "
+                "Contract, provider scene checks, explicit settle settings and allow_early_stop:false"
+            )
         try:
             self.strategy()
         except rm.StrategyError as exc:
@@ -251,6 +285,7 @@ class Episode:
     result_written: bool = False
     scene_decision: str | None = None
     judgement_ids: list = field(default_factory=list)
+    bounded_failure: bool = False
 
 
 @dataclass
@@ -1397,6 +1432,7 @@ class Orchestrator:
                         arbiter.withdraw(request_id)
                         del tickets[request_id]
                         self._note("judgement_timeout", request_id)
+                        ctx.bounded_failure = True
                     continue
                 del tickets[request_id]
                 verdict = arbiter.on_result(
@@ -1408,6 +1444,8 @@ class Orchestrator:
                 )
                 for note in verdict.notes:
                     self._note(note.code, note.detail)
+                    if note.code != "early_stop_withheld":
+                        ctx.bounded_failure = True
                 if verdict.stop and stop_reason is None:
                     stop_reason = "goal_verified"
                     ctx.stop_judgement = verdict.judgement_id
@@ -1441,6 +1479,7 @@ class Orchestrator:
                 chunk = self._chunk(ctx, step, next_index)
                 if chunk is None:
                     chunk_failures += 1
+                    ctx.bounded_failure = True
                     if chunk_failures >= cfg.chunk_failure_limit:
                         stop_reason = "policy_error"
                         break
@@ -1691,7 +1730,7 @@ class Orchestrator:
             raw,
             now_ns=self._now(),
             clock_domain=self.clock.domain,
-            specs=self.config.specs,
+            specs=self._specs,
             expected=request_id,
         )
         if not hasattr(found, "kind"):
@@ -1711,8 +1750,194 @@ class Orchestrator:
             )
             return None
         if found.kind == "judgement":
+            if ctx.role == "reset" and (
+                found.observed_through_step != ctx.last_step
+                or not self._reset_final_contract(found)
+            ):
+                self._note("reset_final_contract_invalid", request_id)
+                return None
             ctx.judgement_ids.append(found.judgement_id)
         return found
+
+    def _reset_final_contract(self, message) -> bool:
+        """The approved ISC, not a forward spec or a shortened checklist."""
+        contract = self.config.initial_state
+        if contract is None or (message.spec_id, message.spec_version) != contract.key:
+            return False
+        required = set(contract.required)
+        predicates = {p.name: p for p in message.predicate_results}
+        if set(predicates) != required | set(contract.optional) or any(
+            p.required != (name in required) for name, p in predicates.items()
+        ):
+            return False
+        references = [ref for p in predicates.values() for ref in p.evidence_refs]
+        if any(
+            p.value is not None and not p.evidence_refs for p in predicates.values()
+        ) or any(ref.kind != "frame" or ref.sha256 is None for ref in references):
+            return False
+        views = {ref.ref.split(":", 1)[0] for ref in references}
+        if len({ref.ref for ref in references}) < contract.min_evidence_refs:
+            return False
+        return not contract.preferred_views or bool(
+            set(contract.preferred_views) <= views
+            if contract.require_all_views
+            else set(contract.preferred_views) & views
+        )
+
+    def _settle_reset(self, ctx) -> bool:
+        """No new commands plus fresh observed pose stability; not mechanical safety."""
+        cfg = self.config.reset_settle
+        began = self._now()
+        samples, window = [], []
+        passed = False
+        try:
+            if self.clock.domain != aeri.host_clock_domain():
+                raise ValueError("settle needs the current host clock domain")
+            while self._now() - began <= cfg.max_wait_ns and len(samples) < 1000:
+                if self._operator() is not None or not self._safe_to_home():
+                    break
+                before = self._now()
+                observed = self.robot.observe()
+                after = self._now()
+                if self._operator() is not None or not self._safe_to_home():
+                    break
+                stamp, pose = observed.get("observed_ns"), observed.get("pose")
+                gripper = observed.get("robot_state", {}).get("gripper_position")
+                measurement = observed.get("gripper_measurement")
+                if not (
+                    isinstance(measurement, dict)
+                    and measurement.get("route") == "getstate"
+                    and measurement.get("field") == "gripper_pos"
+                    and measurement.get("clock_domain") == self.clock.domain
+                    and type(measurement.get("generation")) is int
+                    and measurement["generation"] > 0
+                    and type(measurement.get("read_from_ns")) is int
+                    and type(measurement.get("read_through_ns")) is int
+                    and before
+                    <= measurement["read_from_ns"]
+                    <= measurement["read_through_ns"]
+                    <= after
+                    and type(measurement.get("value")) in (float, int)
+                    and measurement["value"] == gripper
+                    and (
+                        not samples
+                        or measurement["generation"]
+                        > samples[-1]["gripper_measurement"]["generation"]
+                    )
+                ):
+                    raise ValueError(
+                        "settle needs current getstate/gripper_pos measurement provenance"
+                    )
+                if (
+                    self.clock.domain != aeri.host_clock_domain()
+                    or observed.get("state_fresh") is not True
+                    or type(stamp) is not int
+                    or not before <= stamp <= after
+                    or (samples and stamp <= samples[-1]["observed_ns"])
+                    or not isinstance(pose, (list, tuple))
+                    or len(pose) != 7
+                    or any(
+                        type(v) not in (float, int) or not math.isfinite(v)
+                        for v in pose
+                    )
+                    or not 0 <= pose[6] <= 1
+                    or type(gripper) not in (float, int)
+                    or not math.isfinite(gripper)
+                    or not 0 <= gripper <= 1
+                ):
+                    raise ValueError(
+                        "settle needs fresh finite XYZ/Euler/gripper observations"
+                    )
+                sample = {
+                    "ref": f"{ctx.episode_id}:settle{len(samples)}",
+                    "observed_ns": stamp,
+                    "clock_domain": self.clock.domain,
+                    "pose": list(pose),
+                    "measured_gripper": gripper,
+                    "gripper_measurement": dict(measurement),
+                    "frame_sha256": dict(observed.get("frames", {})),
+                }
+                samples.append(sample)
+                stable = all(
+                    math.dist(pose[:3], old["pose"][:3]) <= cfg.position_tolerance_m
+                    and math.sqrt(
+                        sum(
+                            math.remainder(a - b, 2 * math.pi) ** 2
+                            for a, b in zip(pose[3:6], old["pose"][3:6], strict=True)
+                        )
+                    )
+                    <= cfg.rotation_tolerance_rad
+                    and abs(gripper - old["measured_gripper"]) <= cfg.gripper_tolerance
+                    for old in window
+                )
+                window = [*window, sample] if stable else [sample]
+                if (
+                    len(window) >= 2
+                    and stamp - window[0]["observed_ns"] >= cfg.stable_window_ns
+                ):
+                    passed = self._now() - began <= cfg.max_wait_ns
+                    break
+                left = cfg.max_wait_ns - (self._now() - began)
+                if left < cfg.sample_interval_ns:
+                    break
+                remaining = cfg.sample_interval_ns
+                while remaining > 0:
+                    if self._operator() is not None or not self._safe_to_home():
+                        break
+                    wait = min(remaining, HUMAN_SLICE_NS)
+                    self.clock.advance(wait)
+                    remaining -= wait
+        except Exception as exc:  # noqa: BLE001 - unavailable observations cannot prove stability
+            self._note("reset_settle_unavailable", str(exc))
+        if self.state == "FAULT_LOCKED":
+            return False
+        record = {
+            "request_id": f"{ctx.episode_id}:settle",
+            "run_id": self.config.run_id,
+            "episode_id": ctx.episode_id,
+            "target": "reset_settle",
+            "plan_sha256": self.config.plan_sha256,
+            "journal_seq": self.journal.next_seq,
+            "parameters": cfg.__dict__,
+            "parameters_source": "run.reset_settle",
+            "observations": samples,
+            "stable_window_refs": [sample["ref"] for sample in window]
+            if passed
+            else [],
+            "observed_stable": passed,
+        }
+        try:
+            kept = self.evidence is not None and self.evidence.write(record) is not None
+        except Exception:  # noqa: BLE001 - proof must be retained
+            kept = False
+        self._note(
+            "reset_settle_verified" if passed and kept else "reset_settle_unavailable",
+            record["request_id"],
+        )
+        return passed and kept and self._operator() is None
+
+    def _keep_reset_final(self, ctx, message) -> bool:
+        """Keep final proof separately from the independently captured scene."""
+        if self.evidence is None:
+            return False
+        try:
+            return (
+                self.evidence.write(
+                    {
+                        "request_id": message.request_id,
+                        "run_id": self.config.run_id,
+                        "episode_id": ctx.episode_id,
+                        "target": "reset_goal",
+                        "journal_seq": self.journal.next_seq,
+                        "horizon_completion": "verify_final",
+                        "judgement": message.model_dump(mode="json", by_alias=True),
+                    }
+                )
+                is not None
+            )
+        except Exception as exc:  # noqa: BLE001 - missing proof never grants motion
+            self._note("reset_final_evidence_failed", type(exc).__name__)
+            return False
 
     def _verification(self, ctx: Episode, reason: str) -> str:
         """goal_verification of a forward episode. An early stop is a
@@ -1836,13 +2061,74 @@ class Orchestrator:
         if found.executed != "yes":
             self._fault("policy_error")
             return
+        bounded = (
+            reason == "reset_horizon_exhausted"
+            and self.config.reset_horizon_completion == "verify_final"
+        )
+        final_verified = False
+        if bounded:
+            if not self._safe_to_home():
+                return
+            operator = self._operator()
+            if operator is not None:
+                reason, auth = "operator_stop", operator
+                ctx.stop_authority = operator
+            elif (
+                ctx.steps_done == self.config.reset_max_steps
+                and ctx.evidence_ok
+                and not ctx.bounded_failure
+                and not self._violation_hold
+                and not ctx.arbiter.violations
+                and not ctx.arbiter.event_violations
+                and not ctx.arbiter.unknowns
+                and not ctx.arbiter.unavailables
+            ):
+                settled = self._settle_reset(ctx)
+                if self.state == "FAULT_LOCKED":
+                    return
+                final = None
+                if settled and self._operator() is None:
+                    if not self._safe_to_home():
+                        return
+                    if self._operator() is None:
+                        final = self._final_judgement(ctx, ctx.arbiter)
+                if not self._safe_to_home():
+                    return
+                operator = self._operator()
+                if operator is not None:
+                    reason, auth = "operator_stop", operator
+                    ctx.stop_authority = operator
+                elif verification_of(final) == "verified":
+                    final_verified = self._keep_reset_final(ctx, final)
+        # Disk writes may also overlap a new stop/fault: recheck before capture.
+        if bounded and not self._safe_to_home():
+            return
+        # The scene is an independent observation, even when final proof failed.
         decision = (
             self._assess("post_reset", ctx.episode_id)
-            if ctx.evidence_ok
+            if ctx.evidence_ok and (not bounded or self._operator() is None)
             else "unavailable"
         )
         ctx.scene_decision = decision
-        if reason in (
+        if bounded:
+            if not self._safe_to_home():
+                return
+            operator = self._operator()
+            if operator is not None:
+                reason, auth = "operator_stop", operator
+                ctx.stop_authority = operator
+        if (
+            bounded
+            and reason == "reset_horizon_exhausted"
+            and final_verified
+            and decision == "ready"
+            and not self._violation_hold
+            and not self._scene_violations
+        ):
+            # Raw horizon remains refused by reset_manager: only complete proof
+            # produces its existing verified outcome. The stop reason stays budget.
+            outcome = "reset_verified"
+        elif reason in (
             "operator_stop",
             "policy_error",
             "watchdog_timeout",

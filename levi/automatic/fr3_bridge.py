@@ -96,6 +96,8 @@ class Robot:
         self._sending = False
         self._motion = None
         self._http_acks = []
+        self._state_generation = 0
+        self._gripper_measurement = None
         original_post = env._post
 
         def fenced_post(route, payload=None):
@@ -118,7 +120,28 @@ class Robot:
                 "reset_gripper",
             ):
                 raise ValueError("recovery/setup motion is not part of AERI")
+            read_from = self.clock.now() if route == "getstate" else None
             response = original_post(route, payload)
+            if route == "getstate":
+                self._state_generation += 1
+                self._gripper_measurement = None
+                value = (
+                    response.get("gripper_pos") if isinstance(response, dict) else None
+                )
+                if (
+                    type(value) in (float, int)
+                    and math.isfinite(value)
+                    and 0 <= value <= 1
+                ):
+                    self._gripper_measurement = {
+                        "route": "getstate",
+                        "field": "gripper_pos",
+                        "generation": self._state_generation,
+                        "read_from_ns": read_from,
+                        "read_through_ns": self.clock.now(),
+                        "clock_domain": self.clock.domain,
+                        "value": value,
+                    }
             if route in (
                 "clearerr",
                 "pose",
@@ -164,11 +187,27 @@ class Robot:
         }
 
     def observe(self):
+        generation, began = self._state_generation, self.clock.now()
         raw = self.env.get_observation()
         pose = [float(x) for x in raw["robot_state"]["cartesian_position"]]
         if len(pose) != 7 or not all(math.isfinite(x) for x in pose):
             raise ValueError("invalid robot observation")
         self.raw = raw
+        measured = raw["robot_state"].get("gripper_position")
+        proof = self._gripper_measurement
+        if not (
+            proof is not None
+            and proof["generation"] > generation
+            and proof["clock_domain"] == self.clock.domain
+            and began
+            <= proof["read_from_ns"]
+            <= proof["read_through_ns"]
+            <= self.clock.now()
+            and type(measured) in (float, int)
+            and math.isfinite(measured)
+            and measured == proof["value"]
+        ):
+            proof = None
         images = {"side": raw["image"]["view1"], "wrist": raw["image"]["hand"]}
         signatures = {
             k: hashlib.sha256(v.tobytes()).hexdigest() for k, v in images.items()
@@ -180,6 +219,7 @@ class Robot:
             "state_fresh": True,
             "images_bgr": images,
             "robot_state": raw["robot_state"],
+            "gripper_measurement": dict(proof) if proof is not None else None,
             "raw": raw,
         }
 

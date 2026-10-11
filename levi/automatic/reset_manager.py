@@ -7,8 +7,9 @@ The rules every strategy keeps (the orchestrator relies on them, and
 
 - only a ``ready`` verdict (``SceneVerdict.may_skip_reset``) starts a
   forward episode without a reset: ``unknown`` and ``unavailable`` never do;
-- a reset that reached its horizon, was stopped, or lost its policy goes to
-  a person (its rollout is sealed first: the failed rollout is kept);
+- a raw reset horizon, a stop or a lost policy goes to a person; only an
+  explicitly frozen verify_final run may supply reset_verified after full
+  final ISC proof and an independent ready scene (the orchestrator verifies it);
 - a reset whose home failed never continues (the orchestrator locks the run
   in ``FAULT_LOCKED`` / ``home_failed``; no strategy is asked);
 - a resume is the operator's (``Orchestrator.resume``), idempotent per
@@ -23,6 +24,7 @@ waits for a person). ``AtomicSkillSequence`` and ``ScriptedSafeReset`` are
 named for later and refused today.
 """
 
+import math
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -40,6 +42,46 @@ LATER = ("atomic_skill_sequence", "scripted_safe_reset")
 
 class StrategyError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class SettleConfig:
+    """Operator-frozen position stability test; no default physical tolerances."""
+
+    sample_interval_ns: int
+    stable_window_ns: int
+    max_wait_ns: int
+    position_tolerance_m: float
+    rotation_tolerance_rad: float
+    gripper_tolerance: float
+
+    def __post_init__(self):
+        for name in ("sample_interval_ns", "stable_window_ns", "max_wait_ns"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 1:
+                raise StrategyError(f"settle {name} must be a positive integer")
+        if not self.sample_interval_ns <= self.stable_window_ns <= self.max_wait_ns:
+            raise StrategyError(
+                "settle needs sample_interval <= stable_window <= max_wait"
+            )
+        if self.max_wait_ns // self.sample_interval_ns > 999:
+            raise StrategyError("settle permits at most 1000 observations")
+        for name in (
+            "position_tolerance_m",
+            "rotation_tolerance_rad",
+            "gripper_tolerance",
+        ):
+            value = getattr(self, name)
+            if (
+                type(value) not in (float, int)
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise StrategyError(f"settle {name} must be finite and positive")
+        if self.gripper_tolerance > 1:
+            raise StrategyError(
+                "settle gripper_tolerance applies to normalized 0..1 position"
+            )
 
 
 @dataclass(frozen=True)

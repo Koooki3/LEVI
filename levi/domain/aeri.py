@@ -1249,12 +1249,34 @@ class JobTask(Part):
     initial_state_spec: JobPath | None = None
 
 
+class JobResetSettle(Part):
+    """All physical stability parameters must be supplied by the operator."""
+
+    sample_interval_ns: Annotated[Ns, Field(gt=0)]
+    stable_window_ns: Annotated[Ns, Field(gt=0)]
+    max_wait_ns: Annotated[Ns, Field(gt=0)]
+    position_tolerance_m: Annotated[float, Field(gt=0)]
+    rotation_tolerance_rad: Annotated[float, Field(gt=0)]
+    gripper_tolerance: Annotated[float, Field(gt=0, le=1)]
+
+    @model_validator(mode="after")
+    def _consistent(self):
+        if not self.sample_interval_ns <= self.stable_window_ns <= self.max_wait_ns:
+            _bad("settle needs sample_interval <= stable_window <= max_wait")
+        if self.max_wait_ns // self.sample_interval_ns > 999:
+            _bad("settle permits at most 1000 observations")
+        return self
+
+
 class JobReset(Part):
     # A code name or an alias (``RESET_STRATEGY_ALIASES``).
     strategy: Literal[RESET_STRATEGY_NAMES] = "single_reset_policy"
     enabled: bool | None = None
     max_attempts: Annotated[int, Field(ge=0, le=100)] | None = None
     on_unknown: Literal["reset", "wait_human"] | None = None
+    # Natural step-limit completion is not success: opt in to final ISC verification.
+    horizon_completion: Literal["wait_human", "verify_final"] = "wait_human"
+    settle: JobResetSettle | None = None
     # Who assesses the scene: the machine provider, or (human_assisted
     # only) a person answering each required predicate on a frame the
     # system has just captured (design X2 §1.2).
@@ -1363,6 +1385,19 @@ class JobSpec(AeriContract):
 
     @model_validator(mode="after")
     def _consistent(self):
+        if self.reset.horizon_completion == "verify_final" and (
+            self.human_assisted
+            or self.reset.enabled is False
+            or self.reset.settle is None
+        ):
+            _bad(
+                "reset.horizon_completion verify_final needs enabled single_reset_policy and explicit settle settings"
+            )
+        if (
+            self.reset.settle is not None
+            and self.reset.horizon_completion != "verify_final"
+        ):
+            _bad("reset.settle belongs only to horizon_completion verify_final")
         if (
             self.reset_strategy == "single_reset_policy"
             and self.reset.enabled is not False
