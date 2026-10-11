@@ -369,9 +369,9 @@ def export_live(
             continue
         name, demo = _name(row.get("dataset")), _name(row.get("demo"))
         state_file = live_dir / "datasets" / (name + ".json")
-        raw_state = _read(state_file)
-        state_snapshots[state_file] = raw_state
-        state = json.loads(raw_state)
+        if state_file not in state_snapshots:
+            state_snapshots[state_file] = _read(state_file)
+        state = json.loads(state_snapshots[state_file])
         if not isinstance(state, dict) or state.get("archived"):
             excluded += 1
             continue

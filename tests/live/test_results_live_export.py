@@ -219,3 +219,43 @@ def test_catalog_failure_does_not_undo_committed_analysis(tmp_path, monkeypatch)
     analysis.sync_quiet(object())
     assert called == ["analysis", "catalog"]
     assert (args["live_dir"] / "analysis.jsonl").read_bytes() == before
+
+
+def test_all_episode_rows_share_one_dataset_snapshot(tmp_path, monkeypatch):
+    import levi.evaluation_results as catalog
+
+    args = sources(tmp_path)
+    state_file = args["live_dir"] / "datasets/dataset-a.json"
+    state = json.loads(state_file.read_text())
+    state["demos"]["demo_0001"]["run_id"] = "run-a"
+    state_file.write_text(json.dumps(state))
+    analysis.append(
+        args["live_dir"],
+        analysis.build_record(
+            "dataset-a",
+            "demo_0001",
+            {
+                "run_id": "run-a",
+                "episode_index": 1,
+                "operator_label": {"outcome": "failure"},
+            },
+            state=state,
+            now=2,
+        ),
+    )
+    original, reads = catalog._read, []
+
+    def racing(path):
+        if path == state_file:
+            reads.append(path)
+            if len(reads) == 2:
+                changed = json.loads(state_file.read_text())
+                changed["demos"]["demo_0000"]["run_id"] = "foreign-run"
+                state_file.write_text(json.dumps(changed))
+        return original(path)
+
+    monkeypatch.setattr(catalog, "_read", racing)
+    with pytest.raises(CatalogError, match="changed"):
+        export_live(**args)
+    assert len(reads) == 2
+    assert not args["root"].exists()
