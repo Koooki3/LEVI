@@ -172,9 +172,17 @@ class Probes:
 
 class Controller:
     def __init__(
-        self, config, *, probes=None, vllm=None, popen=subprocess.Popen, log=None
+        self,
+        config,
+        *,
+        probes=None,
+        vllm=None,
+        popen=subprocess.Popen,
+        log=None,
+        runtime_bridge=None,
     ):
         self.config = config
+        self.runtime_bridge = runtime_bridge
         self.probes = probes or Probes()
         self.popen = popen
         self.log = log or (lambda *a: print(time.strftime("%H:%M:%S"), *a, flush=True))
@@ -646,6 +654,22 @@ class Controller:
 
     def _gpu_step(self, now, want: bool) -> bool:
         """Advance the GPU side; True when the model is awake and answering."""
+        if getattr(self, "runtime_bridge", None) is not None:
+            # The explicit trusted launcher owns admission/start/bind. Never
+            # start, adopt or wake through a legacy/manual/external branch.
+            self.runtime_bridge.retry_drain()
+            ready = (
+                self.vllm.mine()
+                and self.runtime_bridge._check_record(self.vllm)
+                and self.vllm.state == "ready"
+                and self.runtime_bridge.available()
+            )
+            self.decision = gpumgr.Decision(
+                bool(ready),
+                "strict bounded runtime; background model work paused",
+                "ok" if ready else "runtime_unavailable",
+            )
+            return bool(ready)
         c = self.config
         mode = c.effective_gpu_mode()
         profile = c.vllm_profile()
@@ -960,6 +984,12 @@ class Controller:
 
     def sleep_vllm(self, code, reason):
         """Put vLLM to sleep (its memory is wanted): pause the worker first."""
+        if getattr(self, "runtime_bridge", None) is not None:
+            self.runtime_bridge.close()
+            self._abort_online(f"vllm_sleeping: {reason}")
+            # A finite strict burst ends admission here. Request drainer first;
+            # physical owner/flock remain until a later strict stop proof.
+            return
         self.event(f"vLLM goes to sleep: {reason}")
         self.decision = gpumgr.Decision(False, reason, code)
         self._abort_online(f"vllm_sleeping: {reason}")
@@ -974,6 +1004,8 @@ class Controller:
         self.event(f"giving the GPU back: {reason}")
         self.decision = gpumgr.Decision(False, reason, code)
         self._abort_online(f"vllm_stopping: {reason}")
+        if getattr(self, "runtime_bridge", None) is not None:
+            self.runtime_bridge.close()
         self._stop_worker()
         self._stop_vllm()
         self.idle_since = None
@@ -981,7 +1013,25 @@ class Controller:
     def _stop_vllm(self) -> bool:
         """Stop vLLM and let go of the GPU lock *only once the process is
         gone*: the lock says "vLLM is on the GPU"."""
+        bridge = getattr(self, "runtime_bridge", None)
+        if bridge is not None:
+            bridge.close()
+            if not bridge._check_record(self.vllm):
+                # The previous stop may have deleted the record. Only the
+                # original strict observer can confirm release; signal nobody.
+                try:
+                    gone = bridge.release_after_exit()
+                except Exception:  # noqa: BLE001 - unknown dependency remains closed
+                    gone = False
+                if gone:
+                    self.lock.release()
+                return gone
         gone = self.vllm.stop()
+        if gone and bridge is not None:
+            try:
+                gone = self.runtime_bridge.release_after_exit()
+            except Exception:  # noqa: BLE001 - unknown dependency remains closed
+                gone = False
         if gone:
             self.lock.release()
         return gone
@@ -991,6 +1041,8 @@ class Controller:
         GPU lock must still be held: by the vLLM process itself (it inherited
         the descriptor) or, failing that, by us now. If somebody else holds
         the lock while it runs, take no part in it and say so."""
+        if getattr(self, "runtime_bridge", None) is not None:
+            return
         if not self.vllm.mine():
             return
         acquired = self.lock.acquire()
@@ -1210,7 +1262,9 @@ class Controller:
             waiting_since=waiting,
         )
 
-    def online_admit(self, now):
+    def online_admit(
+        self, now, *, ownership=None, due_ns=None, episode_id=None, profile_sha256=None
+    ):
         """May an online judgement ask the model now? ``(True, None, None)``,
         or ``(False, code, reason)`` at once. Never a cold start; a wake only
         under the rules a batch's wake follows (an open gate, room on the
@@ -1228,6 +1282,48 @@ class Controller:
         try:
             if not self.running:
                 return False, "shutting_down", "the live service is stopping"
+            if getattr(self, "runtime_bridge", None) is not None:
+                if ownership is None or type(due_ns) is not int:
+                    return (
+                        False,
+                        "runtime_unavailable",
+                        "strict request lifecycle required",
+                    )
+                if self.worker is not None or self.orphan is not None:
+                    return (
+                        False,
+                        "runtime_unavailable",
+                        "background producer still active",
+                    )
+                if c.effective_gpu_mode() == "manual" or not self.vllm.mine():
+                    return (
+                        False,
+                        "runtime_unavailable",
+                        "exclusive owned runtime required",
+                    )
+                if not self.runtime_bridge._check_record(self.vllm):
+                    return False, "runtime_unavailable", "runtime incarnation differs"
+                gate = self._fresh_gate(now)
+                if not gate.open:
+                    return False, "gate_closed", f"{gate.code}: {gate.reason}"
+                if self.vllm.state != "ready":
+                    return False, "runtime_unavailable", "strict runtime must be ready"
+                pressed = self._pressed()
+                if pressed:
+                    return pressed
+                try:
+                    ownership.runtime_request = self.runtime_bridge.begin_request(
+                        due_ns=due_ns,
+                        episode_id=episode_id,
+                        profile_sha256=profile_sha256,
+                    )
+                except Exception as exc:  # noqa: BLE001 - strict observer failure closes admission
+                    return False, "runtime_unavailable", str(exc)[:200]
+                self._online_busy = True
+                ownership.admitted = True
+                if ownership.runtime_request.cancelled.is_set():
+                    return False, "runtime_unavailable", "backend resume unproven"
+                return True, None, None
             if self.attention:
                 return (
                     False,
@@ -1348,6 +1444,22 @@ class Controller:
         open? ``(True, None, None)`` or ``(False, code, reason)``."""
         if not self.running:
             return False, "shutting_down", "the live service is stopping"
+        if getattr(self, "runtime_bridge", None) is not None:
+            request = self.runtime_bridge._request
+            gate = self._fresh_gate(now)
+            if (
+                not gate.open
+                or request is None
+                or not self.runtime_bridge.check(request)
+            ):
+                if request is not None:
+                    self.runtime_bridge.cancel(request)
+                return (
+                    False,
+                    "runtime_unavailable",
+                    "strict gate/runtime permission closed",
+                )
+            return True, None, None
         if self.config.effective_gpu_mode() == "manual":
             return True, None, None
         gate = self._fresh_gate(now)
@@ -1358,6 +1470,18 @@ class Controller:
     def online_done(self):
         self._online_busy = False
         self.idle_since = None
+
+    def online_result_allowed(self, request):
+        """The gate may change while the backend barrier waits."""
+        bridge = getattr(self, "runtime_bridge", None)
+        return (
+            bridge is not None
+            and self.running
+            and self.config.effective_gpu_mode() != "manual"
+            and self._fresh_gate(time.time()).open
+            and bridge._check_record(self.vllm)
+            and bridge.result_allowed(request)
+        )
 
     def _external_ready(self, ttl=EXTERNAL_TTL_S) -> bool:
         """Does a vLLM this service did not start answer on ``vllm.port``
@@ -1410,6 +1534,13 @@ class Controller:
         }
 
     def _spawn(self, name, now=None):
+        if getattr(self, "runtime_bridge", None) is not None:
+            self.decision = gpumgr.Decision(
+                False,
+                "background model worker awaits shared strict authority wiring",
+                "runtime_unavailable",
+            )
+            return
         c = self.config
         effective = c.live_dir / "effective.toml"
         effective.parent.mkdir(parents=True, exist_ok=True)
@@ -1578,6 +1709,9 @@ class Controller:
             self.orphan = None
 
     def _orphan_running(self) -> bool:
+        if getattr(self, "runtime_bridge", None) is not None:
+            # An unreadable PID is not proof that a legacy producer exited.
+            return self.orphan is not None
         if not self.orphan:
             return False
         if gpumgr.identity(self.orphan[0]) is None:
@@ -2239,6 +2373,8 @@ class Controller:
 
     def shutdown(self):
         self.running = False
+        if getattr(self, "runtime_bridge", None) is not None:
+            self.runtime_bridge.close()
         self.wake.set()
         self.stop_online()
         self._stop_worker(grace=30.0)

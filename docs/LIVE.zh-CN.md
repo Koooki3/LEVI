@@ -445,6 +445,14 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 
 设置在启动时读取：改完 `live.toml` 后 `levi live stop` 再 `levi live start`（重启的是实时服务，不是产品 LEVI）。`enabled = true` 时，监督进程在启动时载入答案校验相关的代码（pydantic、numpy、模型客户端），常驻内存多约 26 MiB（本机实测）。
 
+开发组合入口可以显式注入 `Controller(runtime_bridge=...)`；默认是 `None`，
+上面的配置不会启用它。有界 strict 桥要求实际 driver/flock/runtime 观察与
+冻结的独占后端 idle-barrier 能力。两个判定入口收到后台 ACK 且全部本地工作
+线程退出后才提交成功；取消或超时保留 busy，直到这些证明或严格 runtime
+退出到达。该模式没有旧外部模型或 manual 放行旁路。后台模型 worker 暂停，
+等它接上同一权限入口。这仅是有限 lease 接线；真实 IPC/flock/GPU/后端检查
+仍未完成，见[桥接限制](PERFORMANCE.zh-CN.md#显式有界-runtime-桥)。
+
 **关掉后台标注（`pipeline.background = false`）。** 监督进程不启动 worker，自己也不发模型请求：没有时间片段，没有释放复核或最终状态复核。它照常把每个已完成的 rollout 连同操作员标签和客户端转来的在线结果一起镜像进来，写状态文件，响应页面和 API，并给每个片段写一条 `live/stats.jsonl` 记录，所以页面、`stats.agreement`、会话报告和 `levi live report` 都照常可用，在线结果也能和操作员标签对照。镜像进来的片段立刻记为 `done`：`eval.agent_label.status` 为 `ok` 时带在线判定，否则没有判定（`no_agent`，`reason` 写明原因）。`accepts_sessions` 仍为 true。此时 `temporal`、`anchored`、`anchored_spec`、`anchored_min_valid`、`guideline`、`vocabulary` 都不使用，也不校验（后台开着时会被拒绝的组合，例如 `temporal = false` 加 `anchored = false`，这时也接受）；它们保持原样，切回去不用改别的。切换之前已经镜像、还在等标注的片段继续等，直到后台重新打开；后台关着时收进来的片段，之后不会补标。`vllm.prewarm` 照样会启动 vLLM（在线判定需要它）。后台开着（默认）时一切和以前一样，同一片段的后台复核会在 `verdict` 里替换在线判定（在线判定仍保存在数据集状态的 `online.verdict` 里）。
 
 ### 接口 C5

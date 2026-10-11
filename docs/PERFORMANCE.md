@@ -272,15 +272,53 @@ original broker's strict process, descendant and owned-GPU `ExitProof`; an activ
 request must first have its own stop proof. No caller may substitute HTTP status
 or a finished calling thread for backend ACK, or fabricate a GPU release flag.
 
-This is an in-process contract foundation, not a mounted runtime/backend bridge.
-It starts no probes, threads or services and does not change controller, gates or
-configuration. Trusted integration must supply real backend completion ACKs,
+RuntimeOwnership itself is an in-process contract foundation. It starts no
+probes, threads or services and does not change gates or configuration.
+Trusted integration must supply real backend completion ACKs,
 track all actual request workers and serialize lifecycle changes with these calls;
 constructor-local locks are not cross-process resource ownership. The existing
 request owner must retain its slot until every actual working thread ends. CPU
 fakes cover cancellation ignored by a live worker, expiry, PID reuse, old epochs,
 restart uncertainty and resident ownership retained across requests. They provide
 no real GPU handoff or policy quiesce evidence; the real `running` gate stays shut.
+
+### Explicit bounded runtime bridge
+
+`levi.live.runtime_bridge.RuntimeBridge` combines these existing contracts;
+`Controller(runtime_bridge=None)` preserves the default behavior. No CLI,
+environment setting, service configuration or real endpoint installs the bridge.
+A trusted composition must inject actual resource-driver, kernel flock and exact
+PID/start/boot/port-owner observations, plus a frozen exclusive single-engine
+backend capability. Unknown evidence or a changed driver generation closes
+admission. It never imports a lab scheduler or accepts an environment claim as
+ownership evidence.
+
+The trusted launcher calls `admit_runtime` on the original broker before launch,
+then `bind_runtime` for the actual owned leader. Strict Controller paths do not
+launch, adopt an external/restart runtime or fall back to manual admission.
+Background model workers are explicitly paused until they can use this same
+authority; the bridge does not claim that all producers are wired.
+
+Both online judgement and the AERI endpoint join all their actual local worker
+threads and wait for a same-runtime, same-request-epoch backend barrier before
+publishing success. `VllmPauseBackend` supports only the independently verified
+synchronized `/pause` wait/abort barrier and `/resume`, through an injected pinned
+loopback transport. Disconnect, `/abort_requests`, `/is_paused` and sleep are not
+completion proofs. Exact authority is checked before and after the barrier;
+barrier time counts against the request deadline. Timeout or unknown ACK revokes
+the result and retains Judge busy, request slot and physical owner. A later valid
+barrier, or strict process/descendant/GPU exit together with local worker exit,
+can resolve the slot without reviving its result. P0 local revocation and a
+physical-release attempt do not wait for the lifecycle mutex or drainer.
+
+This bridge supports a finite physical lease only. Expiry cannot be extended
+through a new wrapper or broker. Its strict sleep hook ends admission and keeps
+the physical owner and flock; it does not release GPU ownership or implement
+long-lived sleep/wake renewal. Physical release requires the original broker's
+strict exit proof. Permanent residency and policy/reset role groups require a
+separate contract. The supplied tests are CPU/memory fakes, including both real
+online entrypoints. Real CPU IPC/flock assembly, backend capability validation,
+GPU latency and robot validation remain separate checks; none is claimed here.
 
 
 ## Confirming resident model exit

@@ -97,7 +97,17 @@ def query(judge, spec_sha256, payload, images, *, cancel=None, probe=False, ask=
                     raise ValueError("cancelled before model access")
                 # Admission can wake an existing server and block. Monitor its
                 # time in the same deadline, not before the watchdog begins.
-                ok, code, why = judge.gpu.online_admit(time.time())
+                if ownership.bridge is not None:
+                    if spec.value.get("run_id") != ownership.bridge.broker.run_id:
+                        raise ValueError("frozen run differs from runtime authority")
+                    ok, code, why = judge.gpu.online_admit(
+                        time.time(),
+                        ownership=ownership,
+                        due_ns=due,
+                        episode_id=payload.get("episode_id") if payload else None,
+                    )
+                else:
+                    ok, code, why = judge.gpu.online_admit(time.time())
                 if not ok:
                     raise ValueError(f"{code}: {why}")
                 ownership.admitted = True
@@ -205,13 +215,16 @@ def query(judge, spec_sha256, payload, images, *, cancel=None, probe=False, ask=
 
     try:
         for target, name in ((work, "live-aeri-ask"), (check_gate, "live-aeri-gate")):
-            ownership.add_worker()
+            thread = threading.Thread(target=target, name=name, daemon=True)
+            ownership.add_worker(thread)
             try:
-                threading.Thread(target=target, name=name, daemon=True).start()
+                thread.start()
             except BaseException:
+                ownership.worker_not_started(thread)
                 ownership.finished()
                 aborted.set()
                 raise
+        ownership.seal_workers()
         while not (done.is_set() and probe_done.is_set()):
             reason = None
             if cancel.is_set() or judge._stop_reason:
@@ -222,21 +235,31 @@ def query(judge, spec_sha256, payload, images, *, cancel=None, probe=False, ask=
                 _, code, why = gate_result["value"]
                 reason = f"{code}: {why}"
             if reason:
-                aborted.set()
+                ownership.cancel()
                 transport.abort(owner)
                 return {"status": "unavailable", "reason": reason}
             time.sleep(POLL_S)
         if cancel.is_set() or judge._stop_reason or time.monotonic_ns() >= due:
+            ownership.cancel()
             return {"status": "unavailable", "reason": "cancelled or expired"}
         if "error" in box:
+            ownership.cancel()
             return {"status": "unavailable", "reason": box["error"]}
         ok, code, why = gate_result.get(
             "value", (False, "gate_check_failed", "unknown")
         )
         if not ok:
+            ownership.cancel()
             return {"status": "unavailable", "reason": f"{code}: {why}"}
+        if not ownership.commit(due):
+            return {"status": "unavailable", "reason": "backend_idle_unproven"}
+        if "result" in box:
+            box["result"]["cost"]["elapsed_ms"] = (
+                time.monotonic_ns() - now
+            ) // 1_000_000
         return {"status": "ok", **box}
     finally:
+        ownership.seal_workers()
         ownership.finished()
 
 

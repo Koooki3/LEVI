@@ -193,13 +193,43 @@ HTTP 完成、取消、超时和调用线程结束只能通过 `revoke_request` 
 `ExitProof` 核实进程、全部后代和本人 GPU 分配退出；活动请求还须先有自己的
 停止证明。不把 HTTP 状态或调用线程结束当成后台 ACK，不伪造 GPU 释放标记。
 
-这只是进程内合同基础，尚未挂载 runtime/backend 桥。它不启动探针、线程或
-服务，不改控制器、gate 或配置。可信集成须提供真实后台完成 ACK、跟踪全部
+RuntimeOwnership 本身只是进程内合同基础。它不启动探针、线程或
+服务，不改 gate 或配置。可信集成须提供真实后台完成 ACK、跟踪全部
 实际请求 worker，并让生命周期变更与这些调用串行；本地对象锁不能替代跨
 进程资源所有权。既有请求所有者须保持占用，直到全部实际工作线程结束。CPU
 fake 覆盖活 worker 忽略取消、过期、PID 复用、旧 epoch、重启未知，以及请求
 轮换后常驻所有权仍保留。这些测试不提供真实 GPU 交接或策略 quiesce 证据；
 真实 `running` gate 保持关闭。
+
+### 显式有界 runtime 桥
+
+`levi.live.runtime_bridge.RuntimeBridge` 组合上述既有合同；控制器参数
+`runtime_bridge=None` 保持默认行为。没有 CLI、环境变量、服务配置或真实
+端点自动安装这座桥。可信组合入口必须注入实际资源 driver、内核 flock、
+准确 PID/启动 ticks/boot/端口所有者的观察，以及冻结的独占单引擎后端能力。
+证据未知或 driver 代次变化时关闭准入；不 import lab 调度器，不把环境字符串
+当作所有权证明。
+
+可信启动器先通过原 broker 调用 `admit_runtime`，再为实际本人 leader 调用
+`bind_runtime`。strict 控制器不走旧启动、外部模型接管或 manual 放行分支。
+后台模型 worker 明确暂停，等它能使用同一权限入口后再接；不宣称全部请求
+生产者已经接通。
+
+普通在线判定与 AERI 入口都须 join 全部实际本地工作线程，并收到同 runtime、
+同请求 epoch 的后端 barrier，才能提交成功。`VllmPauseBackend` 只适配经独立
+核实实现的同步 `/pause` wait/abort barrier 与 `/resume`，通过注入的固定回环
+transport 调用。断连、`/abort_requests`、`/is_paused` 和 sleep 都不是完成证明。
+barrier 前后再次核实准确权限，barrier 时间计入请求截止时间。超时或 ACK 未知
+撤销结果，但保留 Judge busy、请求槽和物理 owner；迟到有效 barrier，或严格
+进程/全部后代/GPU 退出加本地线程退出，可清槽，不能复活结果。P0 本地撤权
+与物理释放尝试不等待生命周期 mutex 或 drainer。
+
+首版仅支持有限物理 lease，过期不能靠新 wrapper 或 broker 延长。strict sleep
+hook 结束本轮准入，保留物理 owner 和 flock；不释放 GPU 所有权，也没有实现
+长期睡眠、唤醒与续租。物理释放仍须原 broker 的严格退出证明。永久常驻以及
+策略/复位角色组另需合同。专属测试是 CPU/内存 fake，覆盖两个实际在线入口；
+真实 CPU IPC/flock 组装、后端能力核实、GPU 时延和机器人验证仍是独立检查，
+本轮没有这些证据。
 
 
 ## 确认常驻模型退出

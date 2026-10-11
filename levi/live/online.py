@@ -457,23 +457,104 @@ class RequestOwnership:
         self.lock = threading.Lock()
         self.users = 1
         self.admitted = False
+        self.bridge = getattr(judge.gpu, "runtime_bridge", None)
+        self.runtime_request = None
+        self.threads = []
+        self.registration_closed = False
+        self.released = False
         judge._owner, judge._stop_reason = owner, None
 
-    def add_worker(self):
+    def add_worker(self, thread=None):
         with self.lock:
+            if self.bridge is not None and (
+                self.registration_closed or not isinstance(thread, threading.Thread)
+            ):
+                raise ValueError("strict workers require actual threads before sealing")
             self.users += 1
+            if thread is not None:
+                self.threads.append(thread)
+
+    def worker_not_started(self, thread):
+        with self.lock:
+            self.threads.remove(thread)
+
+    def seal_workers(self):
+        """Register the entire worker set before any completion can drain it."""
+        with self.lock:
+            self.registration_closed = True
+            if self.runtime_request is not None and self.users <= 1:
+                self._drain()
+
+    def _release(self):
+        if self.released or self.judge._owner != self.owner:
+            return
+        self.released = True
+        try:
+            if self.admitted:
+                self.judge.gpu.online_done()
+        finally:
+            self.judge._owner = None
+            self.judge._busy.release()
+
+    def _drained(self):
+        with self.lock:
+            if self.users == 0:
+                self._release()
+
+    def _drain(self):
+        if self.cancelled.is_set() or self.judge._stop_reason:
+            self.bridge.cancel(self.runtime_request)
+        self.bridge.drain(self.runtime_request, self.threads, self._drained)
+
+    def commit(self, due_ns):
+        """Strict success waits for backend ACK and actual local thread exit."""
+        if self.bridge is None:
+            return True
+        request = self.runtime_request
+        if request is None:
+            return False
+        self.seal_workers()
+        self._drain()
+        while not request.done.wait(0.01):
+            if (
+                self.cancelled.is_set()
+                or self.judge._stop_reason
+                or time.monotonic_ns() >= due_ns
+            ):
+                self.bridge.cancel(request)
+                return False
+        allowed = (
+            request.permitted
+            and not self.cancelled.is_set()
+            and not self.judge._stop_reason
+            and time.monotonic_ns() < due_ns
+        )
+        if allowed:
+            final_check = getattr(self.judge.gpu, "online_result_allowed", None)
+            allowed = (
+                final_check(request)
+                if final_check is not None
+                else self.bridge.result_allowed(request)
+            )
+        return allowed
+
+    def cancel(self):
+        self.cancelled.set()
+        if self.runtime_request is not None:
+            self.bridge.cancel(self.runtime_request)
 
     def finished(self):
         with self.lock:
             self.users -= 1
+            if self.bridge is not None and self.runtime_request is not None:
+                if self.registration_closed and self.users <= 1:
+                    self._drain()
+                if self.users == 0 and self.runtime_request.done.is_set():
+                    self._release()
+                return
             if self.users or self.judge._owner != self.owner:
                 return
-            try:
-                if self.admitted:
-                    self.judge.gpu.online_done()
-            finally:
-                self.judge._owner = None
-                self.judge._busy.release()
+            self._release()
 
 
 class Judge:
@@ -569,6 +650,10 @@ class Judge:
         if owner is None:
             return False
         self._stop_reason = reason
+        bridge = getattr(self.gpu, "runtime_bridge", None)
+        if bridge is not None:
+            # Event-only path: never wait for lifecycle mutex or backend drainer.
+            bridge.close()
         with contextlib.suppress(Exception):
             from levi.inference import transport
 
@@ -607,11 +692,16 @@ class Judge:
             )
         ownership = RequestOwnership(self, f"live-online:{request_id}")
         try:
-            ok, code, why, waited = self._admit(began)
+            ok, code, why, waited = self._admit(began, ownership, request)
             if not ok:
                 return answer(200, "unavailable", reason=f"{code}: {why}")
             ownership.admitted = True
             found = self._run(request, request_id, began, ownership)
+            due_ns = int((began + self.config.online.timeout_s) * 1e9)
+            if found.get("status") != "ok":
+                ownership.cancel()
+            elif not ownership.commit(due_ns):
+                found = {"status": "unavailable", "reason": "backend_idle_unproven"}
             if waited and found.get("status") == "ok":
                 found["reason"] = f"gate_waited: the gate opened after {waited:.1f} s"
             return answer(
@@ -621,12 +711,14 @@ class Judge:
                 **found,
             )
         except Exception as exc:  # noqa: BLE001 - the endpoint answers, always
+            ownership.cancel()
             self.log(f"online judgement {request_id} failed: {exc!r}")
             return answer(200, "error", reason=f"internal_error: {type(exc).__name__}")
         finally:
+            ownership.seal_workers()
             ownership.finished()
 
-    def _admit(self, began):
+    def _admit(self, began, ownership=None, request=None):
         """``(ok, code, reason, seconds waited)``. A gate that is closed while
         no session is on the robot (``gate_pending``: the next episode is due,
         or a policy server no session vouches for) is waited for, at most
@@ -635,7 +727,15 @@ class Judge:
         once."""
         deadline = began + self.config.online.timeout_s
         while True:
-            ok, code, why = self.gpu.online_admit(time.time())
+            if ownership is not None and ownership.bridge is not None:
+                ok, code, why = self.gpu.online_admit(
+                    time.time(),
+                    ownership=ownership,
+                    due_ns=int(deadline * 1e9),
+                    episode_id=request.episode.get("episode_id"),
+                )
+            else:
+                ok, code, why = self.gpu.online_admit(time.time())
             waited = time.monotonic() - began
             if ok:
                 return True, None, None, waited if waited >= GATE_WAIT_NOTE_S else 0.0
@@ -710,32 +810,34 @@ class Judge:
                 ownership.finished()
 
         thread = threading.Thread(target=work, name="live-online-ask", daemon=True)
-        ownership.add_worker()
+        ownership.add_worker(thread)
         try:
             thread.start()
         except BaseException:
+            ownership.worker_not_started(thread)
             ownership.finished()
             raise
+        ownership.seal_workers()
         deadline = began + self.config.online.timeout_s
         looked = 0.0
         while not done.wait(POLL_S):
             now = time.monotonic()
             if now >= deadline:
-                ownership.cancelled.set()
+                ownership.cancel()
                 transport.abort(owner)
                 return {
                     "status": "error",
                     "reason": f"timeout: no answer within {self.config.online.timeout_s:g} s",
                 }
             if self._stop_reason:
-                ownership.cancelled.set()
+                ownership.cancel()
                 transport.abort(owner)
                 return {"status": "unavailable", "reason": self._stop_reason}
             if now - looked >= GATE_EVERY_S:
                 looked = now
                 ok, code, why = self.gpu.online_check(time.time())
                 if not ok:
-                    ownership.cancelled.set()
+                    ownership.cancel()
                     transport.abort(owner)
                     return {
                         "status": "unavailable",

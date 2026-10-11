@@ -484,6 +484,17 @@ prewarm = true                  # needed: vLLM is never cold-started for a judge
 
 The settings are read at start: change `live.toml`, then `levi live stop` and `levi live start` (the live service, not the product LEVI). With `enabled = true` the supervisor loads the answer-checking code (pydantic, numpy, the model client) at start: about 26 MiB more resident memory, measured on this machine.
 
+Developer integration can explicitly inject `Controller(runtime_bridge=...)`;
+the default is `None` and no setting above activates it. The bounded strict bridge
+requires actual driver/flock/runtime observations and a frozen exclusive backend
+idle-barrier capability. Both judgement entrypoints wait for backend ACK and all
+local worker threads to exit before publishing success; cancellation/timeout
+retains busy until that proof or strict runtime exit arrives. Legacy external and
+manual admission are unavailable in this mode. Background model workers are
+paused pending connection to the same authority. This is finite lease integration,
+with real IPC/flock/GPU/backend checks still outstanding; see
+[runtime bridge limits](PERFORMANCE.md#explicit-bounded-runtime-bridge).
+
 **Background labelling off (`pipeline.background = false`).** The supervisor starts no worker and makes no model request of its own: no time segments, no release or final-state review. It still mirrors every finished rollout with its operator label and the online result the client relayed, writes the status file, answers the page and the API, and writes one `live/stats.jsonl` record per episode, so the page, `stats.agreement`, the session reports and `levi live report` keep working and the online result can be compared with the operator label. A mirrored episode is marked `done` at once: with an online verdict when `eval.agent_label.status` is `ok`, else with none (`no_agent`; its `reason` says why). `accepts_sessions` stays true. `temporal`, `anchored`, `anchored_spec`, `anchored_min_valid`, `guideline` and `vocabulary` are not used and not checked then (a combination that is refused with the background on, such as `temporal = false` with `anchored = false`, is accepted); they stay as they are, so switching back needs no other edit. Episodes mirrored before the switch that still wait for labelling keep waiting until the background is on again; episodes taken in while it was off are not labelled later. `vllm.prewarm` still starts vLLM (the online judgement needs it). With the background on (the default) everything runs as before, and a background review of the same episode replaces the online verdict in `verdict` (the online one stays under `online.verdict` in the dataset state).
 
 ### Interface C5
