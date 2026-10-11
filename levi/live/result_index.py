@@ -8,6 +8,7 @@ Downloads are current snapshots, not a publication of a catalog version.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
@@ -28,6 +29,9 @@ LIMIT = 16 * 1024 * 1024
 MAX_SESSIONS = 1000
 MAX_STATES = 1000
 MAX_CATALOG = 1000
+MAX_REQUEST_BYTES = 32 * 1024 * 1024
+MAX_JSON_VALUES = 250_000
+MAX_RECORD_LINES = 50_000
 MISSING = (
     "incomplete",
     "fr3_fault",
@@ -46,6 +50,8 @@ class _Snapshot:
         self.artifacts = {}
         self.parsed = {}
         self.truncated = set()
+        self.bytes = 0
+        self.json_values = 0
 
     def read(self, path, *, optional=False):
         path = catalog._safe(Path(path))
@@ -55,7 +61,21 @@ class _Snapshot:
             fd = _open_below(Path(path.anchor), path.parts[1:])
             try:
                 before = os.fstat(fd)
-                raw = os.read(fd, LIMIT + 1)
+                remaining = MAX_REQUEST_BYTES - self.bytes
+                if before.st_size > LIMIT:
+                    self.truncated.add("file_bytes")
+                    raise ValueError("Source file-byte budget exhausted")
+                if before.st_size > remaining:
+                    self.truncated.add("request_bytes")
+                    raise ValueError("Request source-byte budget exhausted")
+                raw = os.read(fd, min(LIMIT, remaining) + 1)
+                if len(raw) > LIMIT:
+                    self.truncated.add("file_bytes")
+                    raise ValueError("Source file-byte budget exhausted")
+                if len(raw) > remaining:
+                    self.truncated.add("request_bytes")
+                    raise ValueError("Request source-byte budget exhausted")
+                self.bytes += len(raw)
                 after = os.fstat(fd)
                 if len(raw) > LIMIT or (
                     before.st_dev,
@@ -85,8 +105,33 @@ class _Snapshot:
         key = ("json", Path(path))
         if key not in self.parsed:
             raw = self.read(path, optional=optional)
-            self.parsed[key] = json.loads(raw) if raw is not None else None
+            self.parsed[key] = self.decode(raw) if raw is not None else None
         return self.parsed[key]
+
+    def decode(self, raw):
+        if self.json_values >= MAX_JSON_VALUES:
+            self.truncated.add("json_values")
+            raise ValueError("Request JSON-value budget exhausted")
+        try:
+            value = json.loads(raw)
+        except RecursionError:
+            raise ValueError("Source JSON nesting exceeds decoder limits") from None
+        stack = [iter((value,))]
+        while stack:
+            try:
+                part = next(stack[-1])
+            except StopIteration:
+                stack.pop()
+                continue
+            self.json_values += 1
+            if self.json_values > MAX_JSON_VALUES:
+                self.truncated.add("json_values")
+                raise ValueError("Request JSON-value budget exhausted")
+            if isinstance(part, dict):
+                stack.append(iter(part.values()))
+            elif isinstance(part, list):
+                stack.append(iter(part))
+        return value
 
     def pin(self, path):
         path = catalog._safe(Path(path))
@@ -375,12 +420,17 @@ def _records(snapshot, live_dir):
         return snapshot.parsed[key]
     raw = snapshot.read(live_dir / analysis.FILE, optional=True)
     rows = []
-    for line in (raw or b"").splitlines():
+    for count, line in enumerate(io.BytesIO(raw or b"")):
+        if count >= MAX_RECORD_LINES:
+            snapshot.truncated.add("record_lines")
+            break
         try:
-            row = analysis.normalize(json.loads(line))
+            row = analysis.normalize(snapshot.decode(line))
             if row:
                 rows.append(row)
         except (ValueError, TypeError):
+            if snapshot.truncated:
+                break
             continue
     snapshot.parsed[key] = analysis.latest(rows)
     return snapshot.parsed[key]
@@ -512,7 +562,7 @@ def _published(config, snapshot, item, source):
             ):
                 continue
             raw = snapshot.read(directory / "manifest.json")
-            manifest = json.loads(raw)
+            manifest = snapshot.json(directory / "manifest.json")
             if hashlib.sha256(raw).hexdigest() != report.get("manifest_sha256"):
                 continue
             if manifest.get("schema") != "levi.live.analysis.export.v1":
@@ -605,8 +655,8 @@ def _campaign(item, raw, root, snapshot):
         snapshot.pin(c.folder)
         snapshot.read(c.folder / "journal.jsonl", optional=True)
         snapshot.read(c.folder / "plan.json", optional=True)
-        snapshot.read(c.folder / "report" / chosen / "manifest.json")
-        snapshot.read(c.folder / "report" / chosen / "data/analysis.json")
+        snapshot.json(c.folder / "report" / chosen / "manifest.json")
+        snapshot.json(c.folder / "report" / chosen / "data/analysis.json")
         report = campaign_api.get_report(campaign)
         manifest = report["manifest"]
         if (
@@ -772,6 +822,8 @@ def session(
             return _stop(item, "missing_source", "configured_root_missing")
         snapshot.pin(allowed)
         found = _find(snapshot, allowed, group, task, session)
+        if snapshot.truncated:
+            return _stop(item, "unknown", "index_scan_truncated")
         if found is None:
             return item
         _path, raw = found
@@ -795,6 +847,8 @@ def session(
         snapshot.pin(source)
         if raw.get("campaign_id"):
             result = _campaign(item, raw, allowed, snapshot)
+            if snapshot.truncated:
+                return _stop(item, "unknown", "index_scan_truncated")
             return (
                 result
                 if not _validate or snapshot.valid()
@@ -814,6 +868,8 @@ def session(
             return _stop(item, "missing_source", "rollout_source_missing")
         snapshot.pin(source)
         states = _state_scope(config, snapshot, group, task)
+        if snapshot.truncated:
+            return _stop(item, "unknown", "index_scan_truncated")
         matching = {}
         archived = False
         rebound = False
@@ -843,6 +899,8 @@ def session(
                 else "dataset_source_unknown",
             )
         withheld = _header_visibility(snapshot, source, matching, current_run, raw)
+        if snapshot.truncated:
+            return _stop(item, "unknown", "index_scan_truncated")
         if withheld:
             return _stop(
                 item,
@@ -914,6 +972,8 @@ def session(
                     missing["done_without_record"] += 1
                 elif row.get("state") != "done":
                     missing["unlabelled"] += 1
+        if snapshot.truncated:
+            return _stop(item, "unknown", "index_scan_truncated")
         if stale:
             return _stop(item, "stale", "analysis_source_changed")
         if not selected:
@@ -959,7 +1019,11 @@ def session(
             item["source"]["snapshot"] = snapshot.digest()
         return item
     except (OSError, ValueError, TypeError, KeyError):
-        return _stop(item, "unknown", "source_unreadable")
+        return _stop(
+            item,
+            "unknown",
+            "index_scan_truncated" if snapshot.truncated else "source_unreadable",
+        )
 
 
 def build(config, *, dataset=None, run_id=None, linker=None):
@@ -1050,6 +1114,9 @@ def build(config, *, dataset=None, run_id=None, linker=None):
             "datasets": MAX_STATES,
             "catalog_entries": MAX_CATALOG,
             "file_bytes": LIMIT,
+            "request_bytes": MAX_REQUEST_BYTES,
+            "json_values": MAX_JSON_VALUES,
+            "record_lines": MAX_RECORD_LINES,
         },
     }
 

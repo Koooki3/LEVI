@@ -1080,6 +1080,9 @@ def _result_run_repo(config, run, native, snapshot):
     from . import backfill
 
     path = result_index.catalog._safe(config.workspace / backfill.STORE)
+    key = ("run_repo", path, run, native)
+    if key in snapshot.parsed:
+        return snapshot.parsed[key]
     fd = None
     db = None
     try:
@@ -1089,17 +1092,31 @@ def _result_run_repo(config, run, native, snapshot):
         db = sqlite3.connect(
             f"file:/proc/self/fd/{fd}?mode=ro&immutable=1", uri=True, timeout=0
         )
+        remaining = result_index.MAX_REQUEST_BYTES - snapshot.bytes
+        if remaining <= 0:
+            snapshot.truncated.add("request_bytes")
+            return None
+        db.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, min(result_index.LIMIT, remaining))
         found = db.execute(
             "SELECT body FROM records WHERE kind='runs' AND id=?", (run,)
         ).fetchone()
-        body = json.loads(found[0]) if found else None
+        if found:
+            raw = found[0].encode()
+            snapshot.bytes += len(raw)
+            body = snapshot.decode(raw)
+        else:
+            body = None
         if (
             not isinstance(body, dict)
             or body.get("id") != run
             or (body.get("context") or {}).get("repo_id") != native
         ):
             return None
+        snapshot.parsed[key] = native
         return native
+    except sqlite3.DataError:
+        snapshot.truncated.add("run_store_bytes")
+        return None
     except (OSError, ValueError, TypeError, sqlite3.Error):
         return None
     finally:

@@ -928,3 +928,70 @@ def test_http_contract_and_unavailable_downloads(tmp_path, monkeypatch):
         ).status_code
         == 400
     )
+
+
+@pytest.mark.parametrize(
+    "kind", ["request_bytes", "json_values", "record_lines", "file_bytes"]
+)
+def test_request_budget_is_explicit_and_fail_closed(tmp_path, monkeypatch, kind):
+    cfg, _args = configured(tmp_path)
+    opened = []
+    real_read = result_index.os.read
+
+    def limited(fd, count):
+        opened.append(count)
+        return real_read(fd, count)
+
+    monkeypatch.setattr(result_index.os, "read", limited)
+    if kind == "request_bytes":
+        monkeypatch.setattr(result_index, "MAX_REQUEST_BYTES", 8)
+    elif kind == "json_values":
+        monkeypatch.setattr(result_index, "MAX_JSON_VALUES", 2)
+    elif kind == "file_bytes":
+        monkeypatch.setattr(result_index, "LIMIT", 8)
+    else:
+        monkeypatch.setattr(result_index, "MAX_RECORD_LINES", 0)
+    output = result_index.build(cfg)
+    assert output["complete"] is False
+    assert kind in output["truncated"]
+    for item in output["items"]:
+        assert item["result_visibility"] == "unknown"
+        assert item["analysis"] is None
+        assert (
+            item["records"] == item["runs"] == item["reports"] == item["viewers"] == []
+        )
+    if kind == "request_bytes":
+        assert opened == []  # Size checks refuse files before allocating their bytes.
+        assert output["limits"]["request_bytes"] == 8
+    if kind == "record_lines":
+        assert lookup(cfg)["reason"] == "index_scan_truncated"
+
+
+def test_request_budget_applies_to_total_cached_files_not_only_each_file(
+    tmp_path, monkeypatch
+):
+    cfg, args = configured(tmp_path)
+    session_bytes = args["session_file"].stat().st_size
+    state_bytes = (cfg.live_dir / "datasets/dataset-a.json").stat().st_size
+    monkeypatch.setattr(result_index, "MAX_REQUEST_BYTES", session_bytes + state_bytes)
+    snapshot = result_index._Snapshot()
+    item = result_index.session(
+        cfg,
+        root=cfg.watch.roots[0],
+        group="model-a",
+        task="task-a",
+        session="run-a",
+        _snapshot=snapshot,
+    )
+    assert snapshot.bytes == session_bytes + state_bytes
+    assert snapshot.truncated == {"request_bytes"}
+    assert item["analysis"] is None and item["result_visibility"] == "unknown"
+
+
+def test_run_body_respects_remaining_request_budget(tmp_path, monkeypatch):
+    cfg, _args = linked_fixture(tmp_path, monkeypatch, False)
+    snapshot = result_index._Snapshot()
+    monkeypatch.setattr(result_index, "MAX_REQUEST_BYTES", 8)
+    assert api._result_run_repo(cfg, "temporal-a", "local/native-a", snapshot) is None
+    assert snapshot.truncated == {"run_store_bytes"}
+    assert snapshot.bytes == 0
