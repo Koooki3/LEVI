@@ -376,3 +376,5 @@ SDK/native 闭包和 owned SDK 子进程 bootstrap 尚未安装，真实入口�
 入口须调用 `close_engine(engine)`。外部预加载及替换对象保持原样，
 关闭后的 bundle 拒绝继续导入。这里清理的是 Python 源码生命周期；
 物理设备所有权仍须原内核完整且新鲜的群组退出证明才能释放。
+
+vLLM 关键方法须解析到工厂执行前的原类描述符，`__func__` 与 `__self__` 均须匹配；实例遮蔽即使使用同一 bundle 编译的方法也拒绝。合法类方法、静态方法语义保留。函数 globals、默认值与闭包中的确切被动 `SimpleNamespace` 可绑定传递至 namespace/dict/list/tuple 的 callable 路径，普通数值计数仍可变化。主动对象、未支持容器或未绑定关键 callable 明确拒绝。这只校验已审调用点；loader 不是 Python 安全沙箱，没有据此声明真实 SDK/native/子 bootstrap 可用。

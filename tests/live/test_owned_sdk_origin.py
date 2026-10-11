@@ -456,3 +456,212 @@ def test_torch_load_uses_same_transaction_for_failure_and_success(sdk_tree, vali
         with pytest.raises(TypeError, match="callable"):
             factory.load()
     _assert_clean_sdk(before)
+
+
+def _refreeze_sdk(installed, factory):
+    def manifest(package):
+        rows = []
+        for path in sorted((installed / package).rglob("*.py")):
+            pieces = path.relative_to(installed).with_suffix("").parts
+            if pieces[-1] == "__init__":
+                pieces = pieces[:-1]
+            rows.append(
+                (".".join(pieces), hashlib.sha256(path.read_bytes()).hexdigest())
+            )
+        return tuple(rows)
+
+    return replace(
+        factory,
+        code_sha256=hashlib.sha256(
+            (installed / "closed_factory.py").read_bytes()
+        ).hexdigest(),
+        sdk_source_hashes=manifest("vllm"),
+        torch_source_hashes=manifest("torch"),
+        barrier_hashes=tuple(
+            (
+                relative,
+                hashlib.sha256(
+                    (installed / "vllm" / relative).read_bytes()
+                ).hexdigest(),
+            )
+            for relative in BARRIER_FILES
+        ),
+    )
+
+
+@pytest.mark.parametrize("case", ["instance", "holder", "default", "closure"])
+def test_normal_factory_cannot_change_actual_critical_callable(
+    sdk_tree, monkeypatch, case
+):
+    installed, factory = sdk_tree
+    source = installed / "vllm/v1/engine/async_llm.py"
+    code = source.read_text()
+    if case == "instance":
+        code += "    async def alternate_pause(self, **kwargs): return None\n"
+        mutation = "engine.pause_generation=engine.alternate_pause"
+    elif case == "holder":
+        code = code.replace(
+            "class AsyncLLM:",
+            "HOLDER=SimpleNamespace(sync=synchronize)\nclass AsyncLLM:",
+        ).replace("synchronize()", "HOLDER.sync()")
+        mutation = "module.HOLDER.sync=lambda: None"
+    elif case == "default":
+        code = code.replace(
+            "class AsyncLLM:",
+            "def pause_helper(holder=SimpleNamespace(sync=synchronize)): holder.sync()\nclass AsyncLLM:",
+        ).replace("synchronize()", "pause_helper()")
+        mutation = "module.pause_helper.__defaults__[0].sync=lambda: None"
+    else:
+        code = code.replace(
+            "class AsyncLLM:",
+            "def make_pause():\n    holder=SimpleNamespace(sync=synchronize)\n    async def pause(self, **kwargs): holder.sync()\n    return pause\nclass AsyncLLM:",
+        )
+        code += "AsyncLLM.pause_generation=make_pause()\n"
+        mutation = "engine.pause_generation.__func__.__closure__[0].cell_contents.sync=lambda: None"
+    source.write_text(code)
+    (installed / "closed_factory.py").write_text(
+        "import vllm.v1.engine.async_llm as module\n"
+        "def build(device=None, sdk=None):\n"
+        "    engine=sdk.AsyncLLM()\n    " + mutation + "\n    return engine\n"
+    )
+    before = list(sys.meta_path)
+    pipe = _SdkPipe([("enrolled", "normal-load-chain"), ("stop", 1, None)])
+    _serve_normal_factory(monkeypatch, _refreeze_sdk(installed, factory), pipe)
+    assert pipe.sent and all(message[1] is None for message in pipe.sent)
+    assert not any(message[0] in ("ready", "idle", "result") for message in pipe.sent)
+    _assert_clean_sdk(before)
+
+
+@pytest.mark.parametrize("shadow", ["plain-function", "other-self", "same-self"])
+def test_runtime_instance_shadow_is_refused_before_next_ack(
+    sdk_tree, monkeypatch, shadow
+):
+    _installed, factory = sdk_tree
+
+    class MutatingPipe(_SdkPipe):
+        def send_bytes(self, value):
+            super().send_bytes(value)
+            if self.sent[-1][0] == "ready":
+                # The observer changes only CPU test state; load/serve/binding stay real.
+                instance = sys.modules["closed_factory"].LAST
+                function = type(instance).pause_generation
+                instance.pause_generation = {
+                    "plain-function": function,
+                    "other-self": function.__get__(type(instance)(), type(instance)),
+                    "same-self": function.__get__(instance, type(instance)),
+                }[shadow]
+
+    installed = sdk_tree[0]
+    (installed / "closed_factory.py").write_text(
+        "LAST=None\ndef build(device=None, sdk=None):\n"
+        "    global LAST\n    LAST=sdk.AsyncLLM()\n    return LAST\n"
+    )
+    pipe = MutatingPipe([("enrolled", "normal-load-chain"), ("barrier", 1, None)])
+    _serve_normal_factory(monkeypatch, _refreeze_sdk(installed, factory), pipe)
+    assert pipe.sent[0][0] == "ready"
+    assert any(message[0] == "error" for message in pipe.sent)
+    assert not any(message[0] == "idle" for message in pipe.sent)
+
+
+def test_transitive_callable_holder_counter_state_can_change(sdk_tree, monkeypatch):
+    installed, factory = sdk_tree
+    source = installed / "vllm/v1/engine/async_llm.py"
+    source.write_text(
+        source.read_text()
+        .replace(
+            "class AsyncLLM:",
+            "HOLDER=SimpleNamespace(inner=[{'sync':synchronize}], counter=0, other=0, stats={'count':0})\nclass AsyncLLM:",
+        )
+        .replace(
+            "synchronize()",
+            "HOLDER.inner[0]['sync'](); HOLDER.counter+=1; HOLDER.other+=1; HOLDER.stats['count']+=1",
+        )
+    )
+    pipe = _SdkPipe(
+        [("enrolled", "normal-load-chain"), ("barrier", 1, None), ("stop", 2, None)]
+    )
+    _serve_normal_factory(monkeypatch, _refreeze_sdk(installed, factory), pipe)
+    assert [message[0] for message in pipe.sent] == ["ready", "idle"]
+
+
+def test_runtime_nested_callable_holder_mutation_is_refused(sdk_tree, monkeypatch):
+    installed, factory = sdk_tree
+    source = installed / "vllm/v1/engine/async_llm.py"
+    source.write_text(
+        source.read_text()
+        .replace(
+            "class AsyncLLM:",
+            "HOLDER=SimpleNamespace(inner=[{'sync':synchronize}])\nclass AsyncLLM:",
+        )
+        .replace("synchronize()", "HOLDER.inner[0]['sync']()")
+    )
+
+    class MutatingPipe(_SdkPipe):
+        def send_bytes(self, value):
+            super().send_bytes(value)
+            if self.sent[-1][0] == "ready":
+                sys.modules["vllm.v1.engine.async_llm"].HOLDER.inner[0]["sync"] = (
+                    lambda: None
+                )
+
+    pipe = MutatingPipe([("enrolled", "normal-load-chain"), ("barrier", 1, None)])
+    _serve_normal_factory(monkeypatch, _refreeze_sdk(installed, factory), pipe)
+    assert pipe.sent[0][0] == "ready" and pipe.sent[-1][0] == "error"
+    assert not any(message[0] == "idle" for message in pipe.sent)
+
+
+@pytest.mark.parametrize("descriptor", ["classmethod", "staticmethod"])
+def test_legal_critical_method_descriptor_semantics_are_preserved(
+    sdk_tree, monkeypatch, descriptor
+):
+    installed, factory = sdk_tree
+    source = installed / "vllm/v1/engine/async_llm.py"
+    signature = "cls, **kwargs" if descriptor == "classmethod" else "**kwargs"
+    source.write_text(
+        source.read_text().replace(
+            "    async def pause_generation(self, **kwargs): synchronize()",
+            "    @"
+            + descriptor
+            + "\n    async def pause_generation("
+            + signature
+            + "): synchronize()",
+        )
+    )
+    pipe = _SdkPipe([("enrolled", "normal-load-chain"), ("stop", 1, None)])
+    _serve_normal_factory(monkeypatch, _refreeze_sdk(installed, factory), pipe)
+    assert [message[0] for message in pipe.sent] == ["ready"]
+
+
+def test_unknown_callable_holder_object_is_explicitly_refused(sdk_tree, monkeypatch):
+    installed, factory = sdk_tree
+    source = installed / "vllm/v1/engine/async_llm.py"
+    source.write_text(
+        source.read_text()
+        .replace(
+            "class AsyncLLM:",
+            "class Holder:\n    def __init__(self): self.sync=synchronize\nHOLDER=Holder()\nclass AsyncLLM:",
+        )
+        .replace("synchronize()", "HOLDER.sync()")
+    )
+    pipe = _SdkPipe([("enrolled", "normal-load-chain"), ("stop", 1, None)])
+    _serve_normal_factory(monkeypatch, _refreeze_sdk(installed, factory), pipe)
+    assert pipe.sent and all(message[1] is None for message in pipe.sent)
+    assert pipe.sent[0][0] == "error"
+
+
+def test_instance_rebinding_during_pause_refuses_post_barrier_ack(
+    sdk_tree, monkeypatch
+):
+    installed, factory = sdk_tree
+    source = installed / "vllm/v1/engine/async_llm.py"
+    source.write_text(
+        source.read_text().replace(
+            "async def pause_generation(self, **kwargs): synchronize()",
+            "async def pause_generation(self, **kwargs): synchronize(); self.pause_generation=self.alternate_pause",
+        )
+        + "    async def alternate_pause(self, **kwargs): return None\n"
+    )
+    pipe = _SdkPipe([("enrolled", "normal-load-chain"), ("stop", 1, None)])
+    _serve_normal_factory(monkeypatch, _refreeze_sdk(installed, factory), pipe)
+    assert pipe.sent and all(message[1] is None for message in pipe.sent)
+    assert not any(message[0] in ("ready", "idle", "result") for message in pipe.sent)

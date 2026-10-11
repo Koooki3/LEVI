@@ -414,6 +414,8 @@ class FrozenCriticalBindings:
         self.bundles = tuple(bundles)
         self._checks = []
         self._seen = set()
+        self._dependency_seen = set()
+        self._class_bindings = {}
         for bundle in self.bundles:
             bundle.require_loaded()
             for name in bundle.sources:
@@ -434,6 +436,7 @@ class FrozenCriticalBindings:
         elif isinstance(value, type):
             if self._owned(value.__module__) is None:
                 return
+            self._class_bindings[value] = dict(vars(value))
             for name, child in vars(value).items():
                 self._checks.append(("class", value, name, child))
                 self._capture(child)
@@ -448,10 +451,13 @@ class FrozenCriticalBindings:
                 child = getattr(value, name)
                 self._checks.append(("attribute", value, name, child))
                 self._capture(child)
+                if name != "__code__":
+                    self._capture_dependency(child)
             for name in value.__code__.co_names:
                 child = value.__globals__.get(name, _ABSENT)
                 self._checks.append(("mapping", value.__globals__, name, child))
                 self._capture(child)
+                self._capture_dependency(child)
         elif isinstance(value, types.CellType):
             try:
                 child = value.cell_contents
@@ -468,6 +474,109 @@ class FrozenCriticalBindings:
         elif isinstance(value, set):
             self._checks.append(("set", value, None, frozenset(value)))
 
+    def _capture_dependency(self, value):
+        if id(value) in self._dependency_seen or value is _ABSENT:
+            return
+        self._dependency_seen.add(id(value))
+        if type(value) is types.SimpleNamespace:
+            expected = self._callable_container(value, capture=True)
+            self._checks.append(("callable_container", value, None, expected))
+        elif type(value) in (dict, list, tuple, set, frozenset):
+            children = value.values() if type(value) is dict else value
+            for child in children:
+                self._capture_dependency(child)
+        elif isinstance(value, types.CellType):
+            try:
+                child = value.cell_contents
+            except ValueError:
+                return
+            self._capture_dependency(child)
+        elif not (
+            value is None
+            or type(value) in (bool, int, float, complex, str, bytes)
+            or isinstance(value, (types.ModuleType, type, types.FunctionType))
+        ):
+            raise ValueError("unsupported critical callable dependency")
+
+    def _callable_container(self, value, *, capture=False, seen=None):
+        # Inspect only exact, passive object/container types. Numeric state is
+        # deliberately absent from the signature; callable paths remain fixed.
+        seen = set() if seen is None else seen
+        if value is None or type(value) in (bool, int, float, complex, str, bytes):
+            return None
+        if isinstance(value, types.FunctionType):
+            if self._owned(value.__module__) is None:
+                raise ValueError("unbound critical callable dependency")
+            if capture:
+                self._capture(value)
+            return ("function", id(value))
+        if isinstance(value, type):
+            if capture:
+                self._capture(value)
+            return ("class", id(value))
+        if id(value) in seen:
+            return ("cycle", id(value))
+        seen.add(id(value))
+        if type(value) is types.SimpleNamespace:
+            children = vars(value).items()
+        elif type(value) is dict:
+            if any(type(key) not in (str, int, bool, bytes) for key in value):
+                raise ValueError("unsupported critical callable container key")
+            children = value.items()
+        elif type(value) in (list, tuple):
+            children = enumerate(value)
+        else:
+            raise ValueError("unsupported critical callable dependency")
+        signature = []
+        for key, child in children:
+            shape = self._callable_container(child, capture=capture, seen=seen)
+            if shape is not None:
+                signature.append((key, shape))
+        return (type(value), id(value), tuple(signature))
+
+    def require_methods(self, instance, names, *, expected_type):
+        import inspect
+
+        if type(instance) is not expected_type:
+            raise ValueError("critical SDK instance type changed")
+        if (
+            inspect.getattr_static(expected_type, "__getattribute__")
+            is not object.__getattribute__
+        ):
+            raise ValueError("dynamic critical SDK method resolution unsupported")
+        for name in names:
+            descriptor = next(
+                (
+                    self._class_bindings[owner][name]
+                    for owner in expected_type.__mro__
+                    if owner in self._class_bindings
+                    and name in self._class_bindings[owner]
+                ),
+                _ABSENT,
+            )
+            if inspect.getattr_static(instance, name, _ABSENT) is not descriptor:
+                raise ValueError("critical SDK instance method binding changed")
+            actual = getattr(instance, name)
+            if isinstance(descriptor, types.FunctionType):
+                matches = (
+                    isinstance(actual, types.MethodType)
+                    and actual.__func__ is descriptor
+                    and actual.__self__ is instance
+                )
+            elif isinstance(descriptor, classmethod):
+                matches = (
+                    isinstance(actual, types.MethodType)
+                    and actual.__func__ is descriptor.__func__
+                    and actual.__self__ is expected_type
+                )
+            elif isinstance(descriptor, staticmethod):
+                matches = actual is descriptor.__func__
+            else:
+                raise TypeError("unsupported critical SDK method descriptor")
+            if not matches:
+                raise ValueError("critical SDK resolved callable binding changed")
+            self._owned(expected_type.__module__).require_function(actual)
+
     def _mapping(self, mapping):
         # Namespace mutation cannot introduce a new global helper after sealing.
         self._checks.append(("keys", mapping, None, tuple(mapping)))
@@ -479,7 +588,9 @@ class FrozenCriticalBindings:
         for bundle in self.bundles:
             bundle.require_loaded()
         for kind, owner, key, expected in self._checks:
-            if kind == "class":
+            if kind == "callable_container":
+                matches = self._callable_container(owner) == expected
+            elif kind == "class":
                 matches = vars(owner).get(key, _ABSENT) is expected
             elif kind == "attribute":
                 matches = getattr(owner, key, _ABSENT) is expected

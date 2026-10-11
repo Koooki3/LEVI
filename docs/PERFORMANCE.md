@@ -512,3 +512,5 @@ closes the same lifetime in reverse order; explicit vLLM callers use
 and closed bundles refuse subsequent imports. This cleanup concerns Python
 source lifetime only; physical device ownership still needs the kernel's
 complete fresh group-exit proof.
+
+Critical vLLM methods now resolve to the original pre-factory class descriptors: `__func__` and `__self__` must match; instance shadowing is refused even when the replacement was compiled in the same bundle. Ordinary class/static method semantics are retained. Functions' globals, defaults and closures may refer to exact passive `SimpleNamespace` holders: callable paths through namespaces/dicts/lists/tuples remain bound, while ordinary numeric counters can change. Unknown active objects, unsupported containers or unbound critical callables are refused. These checks bind the reviewed call sites; the loader is not a Python sandbox, and no real SDK/native/child bootstrap support is claimed.

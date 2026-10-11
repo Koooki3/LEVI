@@ -143,9 +143,13 @@ class FrozenVllmFactory(FrozenTorchFactory):
         critical.require()
         torch = bundles[0].require_module("torch")
         bundles[0].require_function(torch.cuda.synchronize)
-        for name in ("pause_generation", "resume_generation", "generate", "shutdown"):
-            function = getattr(engine, name)
-            bundles[1].require_function(function)
+        critical.require_methods(
+            engine,
+            ("pause_generation", "resume_generation", "generate", "shutdown"),
+            expected_type=bundles[1]
+            .require_module("vllm.v1.engine.async_llm")
+            .AsyncLLM,
+        )
 
 
 def serve_vllm(connection, factory, launch_id):
