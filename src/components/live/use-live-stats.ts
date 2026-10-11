@@ -5,7 +5,7 @@
 // at all while the tab is hidden (the page's poll stops then). The request is
 // a function of the whole scope (`statsPath`), so anything that changes it,
 // the removed-episodes switch included, asks again at once.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createStatsLoader,
   dueForRefresh,
@@ -20,13 +20,17 @@ export interface LiveStats {
   loading: boolean;
 }
 
+export interface RefreshableLiveStats extends LiveStats {
+  refresh: () => void;
+}
+
 export function useLiveStats(
   scope: StatsScope,
   limit: number,
   tick: number | null,
   evaluating: boolean,
   enabled: boolean,
-): LiveStats {
+): RefreshableLiveStats {
   const [state, setState] = useState<LiveStats>({
     data: null,
     error: "",
@@ -70,5 +74,9 @@ export function useLiveStats(
   }, [tick, enabled, evaluating]);
 
   useEffect(() => () => loader.stop(), [loader]);
-  return state;
+  // A manual refresh is independent of the status heartbeat and its throttle.
+  const refresh = useCallback(() => {
+    if (enabled && document.visibilityState !== "hidden") void run.current();
+  }, [enabled]);
+  return { ...state, refresh };
 }

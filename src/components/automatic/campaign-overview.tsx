@@ -9,6 +9,7 @@ import { EyeOff, Link2, Pause, Play } from "lucide-react";
 import { Badge, Button, Progress, Table } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Note, RequestProblem } from "@/components/pages-ui/feedback";
+import { Fr3BridgeRecipe } from "./fr3-bridge-recipe";
 import { CampaignSessionLink } from "./campaign-live-session";
 import { CampaignCards } from "./campaign-cards";
 import { CampaignTodoCard } from "./campaign-todo";
@@ -215,6 +216,12 @@ export function CampaignOverview({
       </p>
 
       <CampaignSessionLink value={value?.live_session} />
+      {view.executionMode === "guided" && view.segment.no > 0 && (
+        <Fr3BridgeRecipe
+          key={campaignId + ":" + view.segment.no}
+          target={{ campaignId, segment: view.segment.no }}
+        />
+      )}
       {view.canAttach && (
         <Note tone="warning" role="alert">
           <strong>{t("automatic.campaign.controller.down")}</strong>{" "}

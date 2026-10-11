@@ -2693,3 +2693,27 @@
   flex-direction: column;
   gap: var(--ds-space-2);
 }
+
+.pg-fr3-recipe {
+  min-width: 0;
+  margin: var(--ds-space-4) 0;
+  padding: var(--ds-space-4);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+}
+.pg-fr3-recipe .aw-command {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2);
+  margin: var(--ds-space-2) 0;
+}
+.pg-fr3-recipe .aw-command__text {
+  flex: 1 1 20rem;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.pg-fr3-recipe ul {
+  padding-left: var(--ds-space-5);
+}

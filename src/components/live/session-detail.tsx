@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button, SkeletonText } from "@/components/ds";
 import { Note, Problem } from "@/components/pages-ui/feedback";
@@ -35,13 +35,26 @@ export function SessionDetail({
   };
   const [limit, setLimit] = useState(EPISODE_PAGE);
   const [view, setView] = useState<EpisodeView>("latency");
+  const statsEnabled = !!identity && !!dataset;
   const stats = useLiveStats(
     scope,
     limit,
     poll.lastOk,
     !!session && sessionIsBusy(session),
-    !!identity && !!dataset,
+    statsEnabled,
   );
+  const offline = poll.failures > 0;
+  useEffect(() => {
+    if (!offline || !statsEnabled) return;
+    // Status may stay offline while the archived statistics service recovers.
+    // One 30 s retry clock only while offline; online refreshes still follow the poll.
+    const timer = setInterval(stats.refresh, 30_000);
+    return () => clearInterval(timer);
+  }, [offline, statsEnabled, stats.refresh]);
+  const refresh = () => {
+    poll.refresh();
+    stats.refresh();
+  };
   return (
     <main className="ds-root pg-workbench pg-live pg-live-detail">
       <Link className="pg-back-link ds-focus" href="/live">
@@ -70,7 +83,7 @@ export function SessionDetail({
               {t(
                 "Live status is unavailable. Saved statistics may still be available.",
               )}{" "}
-              <Button variant="ghost" size="sm" onClick={poll.refresh}>
+              <Button variant="ghost" size="sm" onClick={refresh}>
                 {t("Refresh")}
               </Button>
             </Note>
@@ -80,7 +93,7 @@ export function SessionDetail({
               session={session}
               open
               onToggle={() => {}}
-              onChanged={poll.refresh}
+              onChanged={refresh}
               detail
             />
           ) : !poll.lastOk && poll.failures === 0 ? (
@@ -110,7 +123,11 @@ export function SessionDetail({
                   <Problem
                     title={t("Could not read the statistics")}
                     why={stats.error}
-                    fix={t("The page asks again with the next refresh.")}
+                    fix={
+                      <Button size="sm" onClick={stats.refresh}>
+                        {t("Refresh")}
+                      </Button>
+                    }
                   />
                 )}
                 {!stats.data && !stats.error && <SkeletonText lines={3} />}

@@ -1,5 +1,10 @@
 import { describe, expect, mock, test, afterEach } from "bun:test";
-import { render, setupDom, waitFor } from "@/components/ds/__tests__/dom";
+import {
+  click,
+  render,
+  setupDom,
+  waitFor,
+} from "@/components/ds/__tests__/dom";
 import type { LiveSession } from "../types";
 import { identityOf } from "../session-route";
 const session: LiveSession = {
@@ -14,6 +19,7 @@ const session: LiveSession = {
 };
 let current: LiveSession[] = [session];
 let failures = 0;
+let lastOk: number | null = 100;
 mock.module("next/link", () => ({
   default: ({ children, ...props }: Record<string, unknown>) => (
     <a {...(props as object)}>{children as never}</a>
@@ -23,7 +29,7 @@ mock.module("../use-live", () => ({
   useLivePoll: () => ({
     sessions: { sessions: current },
     status: { enabled: true },
-    lastOk: 100,
+    lastOk,
     failures,
     refresh: () => {},
   }),
@@ -35,6 +41,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
   current = [session];
   failures = 0;
+  lastOk = 100;
 });
 describe("individual live session", () => {
   test("reads statistics for the run id and exact dataset and keeps navigation separate", async () => {
@@ -101,6 +108,47 @@ describe("individual live session", () => {
     await waitFor(() =>
       host.textContent?.includes("No labelled episode matches"),
     );
+  });
+  test("manual statistics retry recovers while live remains offline with no heartbeat", async () => {
+    current = [];
+    failures = 3;
+    lastOk = null;
+    let ready = false;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      return ready
+        ? new Response(
+            JSON.stringify({
+              enabled: true,
+              summary: { episodes: { count: 1 } },
+              episodes: {
+                rows: [{ demo: "recovered-history", state: "done" }],
+                total: 1,
+              },
+            }),
+          )
+        : new Response(JSON.stringify({ detail: "stats offline" }), {
+            status: 503,
+          });
+    }) as typeof fetch;
+    const { host } = await render(
+      <SessionDetail identity={identityOf(session)} />,
+    );
+    await waitFor(() =>
+      host.textContent?.includes("Could not read the statistics"),
+    );
+    expect(calls).toBe(1);
+    ready = true;
+    await click(
+      [...host.querySelectorAll("button")].find(
+        (b) => b.textContent === "Refresh",
+      )!,
+    );
+    await waitFor(() => host.textContent?.includes("recovered-history"));
+    expect(calls).toBe(2);
+    expect(host.textContent).toContain("Live status is unavailable");
+    expect(host.textContent).not.toContain("Could not read the statistics");
   });
   test("invalid bookmarks are explained and have a return link", async () => {
     const { host } = await render(<SessionDetail identity={null} />);

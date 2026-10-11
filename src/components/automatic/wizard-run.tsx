@@ -17,6 +17,7 @@ import {
   planUsable,
   type WizardForm,
 } from "./wizard-logic";
+import { Fr3BridgeRecipe } from "./fr3-bridge-recipe";
 import { PlanCard } from "./wizard-plan";
 import type { LaunchPlan, PoliciesResponse } from "./wizard-types";
 
@@ -158,6 +159,12 @@ export function WizardRunConfirm({
         </div>
       )}
       {plan && <PlanCard plan={plan} now={now} />}
+      {jobId && (
+        <Fr3BridgeRecipe
+          key={jobId + (plan?.plan_sha256 ?? "")}
+          target={{ jobId }}
+        />
+      )}
       <div className="aw-actions__group">
         <Button
           icon={RotateCcw}

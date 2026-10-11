@@ -1,4 +1,5 @@
 "use client";
+import { Fr3BridgeRecipe } from "./fr3-bridge-recipe";
 // The launch panel of /automatic: pick a job file, make a plan, read the plan
 // card, launch (after a confirmation), then go to the run window. The first
 // release runs dry runs only: a mode that moves a robot cannot be launched.
@@ -189,6 +190,12 @@ export function LaunchPanel() {
           now={now}
           launching={launching}
           onLaunch={() => void launch()}
+        />
+      )}
+      {jobId && (
+        <Fr3BridgeRecipe
+          key={jobId + (plan?.plan_sha256 ?? "")}
+          target={{ jobId }}
         />
       )}
       {dialog}
