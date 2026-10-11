@@ -1,8 +1,10 @@
 """Pinned LeRobot evidence, including v3 shared video offsets. CPU decode only."""
 
+import functools
 import hashlib
 import json
 import shutil
+from contextvars import ContextVar
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +12,37 @@ import pandas as pd
 
 from .schema import EvidenceRef, TaskContext
 from .store import digest, file_hash
+
+_LINKED_REPOS: ContextVar[dict | None] = ContextVar(
+    "linked_media_repositories", default=None
+)
+
+
+def in_workbench(fn):
+    """Map old source repo IDs only within this request/execution context.
+
+    Persisted runs keep their source context for the live worker. Concurrent
+    workbenches never replace process-wide roots or environment variables.
+    """
+
+    @functools.wraps(fn)
+    def wrapped(wb, *args, **kwargs):
+        if getattr(wb, "source_link", None) is None:
+            return fn(wb, *args, **kwargs)
+        from levi import links
+
+        mapping = {
+            "local/" + link.source: "local/" + link.name
+            for link in links.links().values()
+            if links.target(link.name, wb.store.state)[0] == wb.store.state
+        }
+        token = _LINKED_REPOS.set(mapping)
+        try:
+            return fn(wb, *args, **kwargs)
+        finally:
+            _LINKED_REPOS.reset(token)
+
+    return wrapped
 
 
 def backend():
@@ -21,9 +54,8 @@ def backend():
 
 def state_for(context: TaskContext):
     app = backend()
-    return app._ensure_state(
-        app.DatasetRef(repo_id=context.repo_id, revision=context.revision)
-    )
+    repo = (_LINKED_REPOS.get() or {}).get(context.repo_id, context.repo_id)
+    return app._ensure_state(app.DatasetRef(repo_id=repo, revision=context.revision))
 
 
 def pin_remote(context: TaskContext):

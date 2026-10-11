@@ -29,7 +29,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-from .. import catalog, children, naming, paths
+from .. import catalog, children, links, naming, paths
 from . import models
 
 ACTIVE = {"queued", "running"}
@@ -158,7 +158,11 @@ def _env(extra: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def root(dataset: str) -> Path:
-    return paths.STATE / "segmentation" / naming.catalog_name(dataset)
+    state, source = links.target(dataset, paths.STATE)
+    folder = state / "segmentation" / naming.catalog_name(source)
+    if not folder.resolve().is_relative_to(state.resolve()):
+        raise ValueError("Segmentation results must remain inside derived state")
+    return folder
 
 
 def _jobs_dir(dataset: str) -> Path:
@@ -179,6 +183,8 @@ def locked(dataset: str) -> Iterator[None]:
     """One writer per dataset across threads and LEVI processes; re-entrant
     within a thread (the same process flocking twice would deadlock)."""
     with _LOCK:
+        folder = root(dataset)
+        dataset = str(folder.resolve())
         depth = _HELD.__dict__.setdefault("depth", {})
         if depth.get(dataset):
             depth[dataset] += 1
@@ -187,7 +193,6 @@ def locked(dataset: str) -> Iterator[None]:
             finally:
                 depth[dataset] -= 1
             return
-        folder = root(dataset)
         folder.mkdir(parents=True, exist_ok=True)
         with (folder / ".lock").open("a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
@@ -200,7 +205,16 @@ def locked(dataset: str) -> Iterator[None]:
 
 
 def public(job: dict[str, Any]) -> dict[str, Any]:
-    return {key: job.get(key) for key in PUBLIC_KEYS}
+    return {key: job.get(key) for key in PUBLIC_KEYS} | (
+        {
+            "source": {
+                "dataset": job["source"]["dataset"],
+                "workspace": Path(job["source"]["workbench"]).parent.parent.parent.name,
+            }
+        }
+        if job.get("source")
+        else {}
+    )
 
 
 def _save(job: dict[str, Any]) -> None:
@@ -284,6 +298,16 @@ def start(
             "kind": kind,
             "provider": provider,
             "dataset": dataset,
+            **(
+                {
+                    "source": {
+                        "dataset": links.source_name(dataset),
+                        "workbench": str(links.target(dataset, paths.STATE)[0]),
+                    }
+                }
+                if links.is_linked(dataset)
+                else {}
+            ),
             "model": model,
             "status": "queued",
             "progress": {"stage": "queued", "done": 0, "total": 0},

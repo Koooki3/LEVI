@@ -1850,10 +1850,8 @@ def _do_export(
 
 
 async def _linked_read_only(request: Request) -> None:
-    """A dataset of a linked (live) workspace is read here and nowhere
-    written: any request that is not a read and names one is refused, whatever
-    route it takes (the editors refuse it too; this also covers the routes
-    that do not go through them: SAM3 and RECAP runs, exports)."""
+    """Keep source/export operations protected; canonical derived editors
+    and jobs validate their own writable workbench and revision."""
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
     if any(
@@ -1863,9 +1861,10 @@ async def _linked_read_only(request: Request) -> None:
             "/api/episodes/",
             "/api/dataset/vocabulary",
             "/api/sam3/",
+            "/api/segmentation/",
         )
     ):
-        return  # Value jobs resolve their canonical derived state independently.
+        return  # Editors and jobs resolve their canonical derived state independently.
     if request.url.path.endswith("/api/dataset/load"):
         return  # loading only reads (the app is mounted under a prefix)
     refs = [request.query_params.get("repo_id"), request.query_params.get("local_path")]

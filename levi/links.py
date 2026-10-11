@@ -240,6 +240,29 @@ def target(name: str, own: Path | None = None) -> tuple[Path, str]:
         raise ValueError("Linked derived state must remain inside its workspace")
     if state.is_relative_to(link.workspace / "captures"):
         raise ValueError("Linked derived state must not overlap source captures")
+    # Store construction and locks write before an annotation's own guard.
+    # Reject derived roots redirected to captures/views or another state.
+    folders = [
+        state / category
+        for category in (
+            "agent",
+            "annotations",
+            "object_annotations",
+            "reviews",
+            "recap_values",
+            "segmentation",
+        )
+    ]
+    folders += [
+        state / "agent" / "workbench.sqlite3",
+        state / "agent" / "datasets" / link.source,
+        state / "annotations" / link.source,
+        state / "object_annotations" / link.source,
+        state / "reviews" / (link.source + ".json"),
+    ]
+    for folder in folders:
+        if folder.resolve() != folder:
+            raise ValueError("Linked derived directories must not be symbolic links")
     return state, link.source
 
 
@@ -312,9 +335,12 @@ def refuse_path(path) -> None:
     and sidecars, so a route, an agent or a command that bypasses the HTTP
     checks still cannot reach the live workspace."""
     target = _resolve(path)
+    requested = Path(path).expanduser().absolute()
     if target is None:
         return
     for workspace in workspaces():
+        if requested.is_relative_to(workspace) and not target.is_relative_to(workspace):
+            raise ReadOnly(READ_ONLY)
         if not target.is_relative_to(workspace):
             continue
         state = workspace / STATE

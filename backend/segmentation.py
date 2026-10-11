@@ -19,7 +19,9 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
+from levi import links
 from levi.agent.legacy import editor
+from levi.agent.store import ReadStore, annotation_digest, dataset_lock
 from levi.annotations import ObjectAnnotation
 from levi.segmentation import jobs as seg_jobs
 from levi.segmentation import live as seg_live
@@ -56,13 +58,22 @@ def _dataset_name(state) -> str:
     return state.display_slug
 
 
-def _publisher(state) -> seg_jobs.Publisher:
+def _publisher(state, source_snapshot=None) -> seg_jobs.Publisher:
     """Publish worker rows into this dataset's sidecar, replacing only the
     (episode, camera) pairs the run produced."""
 
     def publish(
         rows: list[dict[str, Any]], pairs: set[tuple[int, str]], model: dict[str, Any]
     ):
+        if source_snapshot:
+            home, source = links.target(state.display_slug, _app().STATE)
+            if (
+                ReadStore(home).head(source) != source_snapshot["revision"]
+                or annotation_digest(home, source) != source_snapshot["content"]
+            ):
+                raise ValueError(
+                    "Source annotations changed while segmentation ran; rerun before publishing"
+                )
         annotations = [
             ObjectAnnotation.model_validate(
                 {k: v for k, v in row.items() if k in _ANNOTATION_FIELDS}
@@ -248,7 +259,9 @@ def _publish_pending(
     publish = _publisher(state)
     for job in seg_jobs.jobs(name):
         if seg_jobs.awaiting_publish(job):
-            seg_jobs.collect(job, publish)
+            seg_jobs.collect(
+                job, _publisher(state, job.get("request", {}).get("source_snapshot"))
+            )
     for session in seg_live.sessions(name):
         seg_live.finish(session, publish)
     return JSONResponse({"ok": True})
@@ -336,6 +349,14 @@ def segmentation_label(request: LabelRequest) -> JSONResponse:
         raise HTTPException(400, "This dataset has no episodes")
     cameras = _cameras(state, request.cameras)
     items = _videos(state, episodes, cameras)
+    source_snapshot = None
+    if links.is_linked(state.display_slug):
+        home, source = links.target(state.display_slug, _app().STATE)
+        with dataset_lock(home, source):
+            source_snapshot = {
+                "revision": ReadStore(home).head(source),
+                "content": annotation_digest(home, source),
+            }
     plan = {
         "schema": "levi.segmentation.label.v1",
         "model": spec,
@@ -352,6 +373,7 @@ def segmentation_label(request: LabelRequest) -> JSONResponse:
                 "episodes": len(episodes),
                 "cameras": cameras,
                 "model": spec.get("name"),
+                **({"source_snapshot": source_snapshot} if source_snapshot else {}),
             },
             model=spec.get("name"),
             warnings=warnings,

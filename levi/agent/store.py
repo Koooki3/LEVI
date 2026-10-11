@@ -264,14 +264,20 @@ class Store:
         revision = revision or self.head(dataset)
         if not re.fullmatch(r"[\w.-]+", revision) or revision in {".", ".."}:
             raise ValueError("Invalid bundle revision")
-        return self.root / "datasets" / dataset / "revisions" / revision
+        path = self.root / "datasets" / dataset / "revisions" / revision
+        if path.resolve() != path.absolute():
+            raise ValueError("Bundle paths must not follow symbolic links")
+        return path
 
     def run_dir(self, id):
         run = self.get("runs", id)
         name = run["dataset_key"]
         if not re.fullmatch(r"[\w.-]+", id) or id in {".", ".."}:
             raise ValueError("Invalid run ID")
-        return self.root / "datasets" / name / "runs" / id
+        path = self.root / "datasets" / name / "runs" / id
+        if path.resolve() != path.absolute():
+            raise ValueError("Run paths must not follow symbolic links")
+        return path
 
     def prepare(self, dataset, kind=None):
         from .runtime import new_id

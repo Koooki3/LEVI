@@ -221,3 +221,8 @@ Value computation for `local/live.<name>` uses the product checkpoint registry a
 
 
 `local/live.<名字>` 的 Value 计算使用产品检查点注册表和实时 workbench 的人工结局标签。任务、计划及发布结果共用实时工作区的 `outputs/LEVI/workbench/recap_values/<来源名字>`；产品查询解析同一份文件。来源元数据记录 workbench 和数据集，不改变数值合并签名。不会写入 rollout、浏览视图或重复的产品数据集。
+
+
+Clear previews and reports resolve paths relative to each dataset’s canonical result root before removal. Derived Value writes reject symbolic links, including links to browsing views in the same workbench. The normal human confirmation requirement for applying clear remains in force.
+
+清理预览与报告在删除前按每个数据集的 canonical 结果根验证相对路径。派生 Value 写入拒绝符号链接，包括指向同一 workbench 内浏览视图的链接。执行清理仍须遵守原有人工确认要求。

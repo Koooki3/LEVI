@@ -520,6 +520,15 @@ def test_live_fake_value_publishes_in_canonical_source_and_reads_human_label(
     values = client.get("/annotations/api/recap/episodes/0", params={"repo_id": repo})
     assert values.status_code == 200, values.text
     assert len(values.json()["value"]) > 0
+    preview = jobs.clear([LINKED])
+    assert preview["applied"] is False
+    assert all(
+        item["path"].startswith(NAME + "/") for item in preview["datasets"][0]["items"]
+    )
+    cleared = jobs.clear([LINKED], apply=True)
+    assert cleared["applied"] is True
+    assert (store.root(LINKED) / "cleared.jsonl").is_file()
+    assert jobs.find(job["id"])["status"] == "succeeded"
     assert before == (tree(live / "captures"), tree(live / links.STATE / "views"))
     assert not jobs.wait_idle(60)
 
@@ -548,3 +557,260 @@ def test_three_successive_source_revisions_never_reuse_a_directory(client, live,
         )
         assert store.head(NAME) == revision
     assert len(seen) == 3
+
+
+@pytest.fixture
+def live_agent(client, live):
+    from test_agent_workbench import GroundedFixture
+
+    from levi import service
+    from levi.agent.runtime import Workbench
+    from levi.agent.schema import ProviderConfig, TaskContext
+
+    wb = Workbench(service.STATE, provider=GroundedFixture())
+    wb.store.put(
+        "providers",
+        "fixture",
+        ProviderConfig(
+            name="fixture",
+            base_url="https://example.invalid/v1",
+            model="fixture",
+            tools=True,
+            vision=True,
+        ).model_dump(),
+    )
+    context = TaskContext(
+        repo_id="local/" + LINKED,
+        episodes=[0],
+        instruction="Review motion",
+        provider="fixture",
+        cameras=["observation.images.hand"],
+        allow_media_egress=True,
+    )
+    return wb, context
+
+
+def test_live_agent_plan_execute_review_commit_use_one_canonical_source(
+    client, live, live_agent
+):
+    from test_agent_workbench import execute
+
+    from levi.agent.capabilities import invoke
+    from levi.agent.security import Principal
+    from levi.agent.store import ReadStore
+
+    wb, context = live_agent
+    human = Principal("tester", human=True)
+    before = tree(live / "captures"), tree(live / links.STATE / "views")
+    run = invoke(wb, human, "runs.plan", context.model_dump())
+    assert run["dataset_key"] == NAME
+    canonical = wb.routed({"run_id": run["id"]})
+    assert canonical.store.state == live / links.STATE
+    assert canonical.registry.state == catalog.STATE
+    assert (
+        ReadStore(live / links.STATE).get("runs", run["id"])["context"]["repo_id"]
+        == context.repo_id
+    )
+    assert canonical.store.list("providers") == []
+    run = execute(canonical, canonical.store.get("runs", run["id"]))
+    assert run["status"] == "waiting_for_review", run
+    change = canonical.store.get("changes", run["changes"])
+    assert (
+        wb.routed({"changeset_id": change["id"]}).store.state == canonical.store.state
+    )
+    invoke(wb, human, "changes.approve", {"changeset_id": change["id"], "revision": 0})
+    receipt = invoke(
+        wb,
+        human,
+        "changes.commit",
+        {"changeset_id": change["id"], "revision": 0},
+        "once",
+    )
+    got = client.get(
+        "/annotations/api/episodes/0/atoms", params={"repo_id": context.repo_id}
+    )
+    assert got.status_code == 200, got.text
+    assert got.headers["X-LEVI-Annotation-Revision"] == receipt["revision"]
+    assert any(atom["content"] == "Move gripper" for atom in got.json()["atoms"])
+    listed = client.get("/api/levi/agent/v1/runs").json()
+    assert any(row["id"] == run["id"] for row in listed)
+    assert not wb.store.list("runs")
+    assert before == (tree(live / "captures"), tree(live / links.STATE / "views"))
+
+
+def test_live_agent_rejects_ambiguous_old_ids_and_source_gate(client, live, live_agent):
+    import time
+
+    from levi.agent.capabilities import invoke
+    from levi.agent.security import Principal
+    from levi.agent.store import Conflict
+
+    wb, context = live_agent
+    human = Principal("tester", human=True)
+    run = invoke(wb, human, "runs.plan", context.model_dump())
+    canonical = wb.routed({"run_id": run["id"]})
+    wb.store.put("runs", run["id"], canonical.store.get("runs", run["id"]))
+    with pytest.raises(Conflict, match="several workbenches"):
+        invoke(wb, human, "runs.get", {"run_id": run["id"]})
+    selected = invoke(
+        wb, human, "runs.get", {"run_id": run["id"], "repo_id": context.repo_id}
+    )
+    assert selected["id"] == run["id"]
+    # A distinct next run resolves before its source's gate is checked.
+    next_run = invoke(wb, human, "runs.plan", context.model_dump())
+    (live / "live/gate.json").write_text(
+        json.dumps(
+            {
+                "open": False,
+                "updated_at": time.time(),
+                "code": "yield",
+                "reason": "fixture",
+            }
+        )
+    )
+    with pytest.raises(Conflict, match="yielding"):
+        invoke(wb, human, "runs.execute", {"run_id": next_run["id"]})
+
+
+@pytest.mark.parametrize("edit_during_run", [False, True])
+def test_live_fake_segmentation_publishes_canonical_or_rejects_changed_source(
+    client, live, edit_during_run, monkeypatch
+):
+    from test_segmentation import _wait_job
+
+    from levi.segmentation import jobs
+
+    monkeypatch.setattr(paths, "CHECKPOINTS", paths.ROOT / "checkpoints")
+    repo = "local/" + LINKED
+    before = tree(live / "captures"), tree(live / links.STATE / "views")
+    started = client.post(
+        "/annotations/api/segmentation/label",
+        json={"repo_id": repo, "provider": "fake", "episodes": [1]},
+    )
+    assert started.status_code == 202, started.text
+    if edit_during_run:
+        changed = client.post(
+            "/annotations/api/episodes/1/outcome",
+            json={"repo_id": repo, "outcome": "failure"},
+        )
+        assert changed.status_code == 200, changed.text
+    job = _wait_job(client, repo, started.json()["id"])
+    assert job["status"] == ("failed" if edit_during_run else "succeeded"), job
+    if edit_during_run:
+        assert "annotations changed" in job["error"]
+    else:
+        assert job["annotation_count"] > 0
+    assert job["source"] == {"dataset": NAME, "workspace": live.name}
+    assert jobs.root(LINKED) == live / links.STATE / "segmentation" / NAME
+    assert before == (tree(live / "captures"), tree(live / links.STATE / "views"))
+    assert not jobs.wait_idle(60)
+
+
+def test_live_agent_draft_rejects_a_human_edit_before_commit(client, live, live_agent):
+    from test_agent_workbench import execute
+
+    from levi.agent.capabilities import invoke
+    from levi.agent.security import Principal
+    from levi.agent.store import Conflict
+
+    wb, context = live_agent
+    human = Principal("tester", human=True)
+    run = invoke(wb, human, "runs.plan", context.model_dump())
+    canonical = wb.routed({"run_id": run["id"]})
+    run = execute(canonical, canonical.store.get("runs", run["id"]))
+    change = canonical.store.get("changes", run["changes"])
+    changed = client.post(
+        "/annotations/api/episodes/0/outcome",
+        json={"repo_id": context.repo_id, "outcome": "failure"},
+    )
+    assert changed.status_code == 200, changed.text
+    with pytest.raises(Conflict):
+        invoke(
+            wb, human, "changes.approve", {"changeset_id": change["id"], "revision": 0}
+        )
+    assert (
+        client.get(
+            "/annotations/api/episodes/outcomes", params={"repo_id": context.repo_id}
+        ).json()["labels"]["0"]["outcome"]
+        == "failure"
+    )
+
+
+def test_linked_annotation_symlink_cannot_escape_to_another_workspace(
+    client, live, tmp_path
+):
+    from levi.annotations import outcomes
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    notes = live / links.STATE / "annotations" / NAME
+    moved = notes.with_name("saved")
+    notes.rename(moved)
+    notes.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(links.ReadOnly):
+        outcomes.write_label(notes, 0, "failure")
+    assert list(outside.iterdir()) == []
+
+
+@pytest.mark.parametrize("redirect", ["dataset", "models", "model_versions"])
+def test_live_value_same_state_view_symlinks_refuse_writes(client, live, redirect):
+    from levi.recap import store
+
+    folder = store.root(LINKED)
+    view = live / links.STATE / "views" / NAME
+    target = (
+        folder
+        if redirect == "dataset"
+        else folder / "models"
+        if redirect == "models"
+        else folder / "models" / "fake-a" / "v"
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.symlink_to(view, target_is_directory=True)
+    before = tree(view)
+    with pytest.raises(ValueError, match="symbolic links"):
+        if redirect == "dataset":
+            with store.locked(LINKED):
+                pass
+        else:
+            store.publish_model(
+                LINKED, {}, {"checkpoint": {"name": "fake-a"}}, dataset_name=NAME
+            )
+    assert tree(view) == before
+
+
+def test_existing_live_run_keeps_its_source_context_and_can_resume_in_product(
+    client, live, live_agent
+):
+    from test_agent_workbench import execute
+
+    wb, context = live_agent
+    canonical = wb.routed({"repo_id": context.repo_id})
+    # Existing background runs name the dataset in their own live catalog.
+    run = canonical.plan(context.model_copy(update={"repo_id": "local/" + NAME}))
+    run = execute(canonical, run)
+    assert run["status"] == "waiting_for_review", run
+    assert run["context"]["repo_id"] == "local/" + NAME
+    assert not wb.store.list("runs")
+
+
+@pytest.mark.parametrize("category", ["revisions", "runs"])
+def test_live_agent_derived_subdirectories_cannot_redirect_to_source_views(
+    client, live, category
+):
+    from levi.agent.store import Store
+
+    state = live / links.STATE
+    store = Store(state)
+    view = state / "views" / NAME
+    folder = state / "agent" / "datasets" / NAME / category
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    folder.symlink_to(view, target_is_directory=True)
+    before = tree(view)
+    with pytest.raises(ValueError, match="symbolic links"):
+        if category == "revisions":
+            store.prepare(NAME)
+        else:
+            store.put("runs", "fixture", {"dataset_key": NAME})
+            store.run_dir("fixture")
+    assert tree(view) == before

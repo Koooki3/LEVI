@@ -283,7 +283,7 @@ def set_dataset_type(repo_id: str, dataset_type: str) -> dict[str, Any]:
 
 
 def _jobs_dir(name: str) -> Path:
-    return store.root(name) / "jobs"
+    return store.safe_path(store.root(name) / "jobs")
 
 
 def job_path(name: str, job_id: str) -> Path:
@@ -666,8 +666,8 @@ def start(
             _refuse_unmergeable(ds, manifest, request, filtering, folder)
         base = store.root(ds.name)
         job_id = naming.timestamp_id(_jobs_dir(ds.name), ".json")
-        plan_path = base / "plans" / f"{job_id}.json"
-        result_path = base / "results" / f"{job_id}.json"
+        plan_path = store.safe_path(base / "plans" / f"{job_id}.json")
+        result_path = store.safe_path(base / "results" / f"{job_id}.json")
         log_path = _jobs_dir(ds.name) / f"{job_id}.log"
         progress_path = _jobs_dir(ds.name) / f"{job_id}.progress.json"
         total = int(
@@ -1774,6 +1774,18 @@ def _symlinks(name: str, items: list[dict[str, Any]]) -> list[str]:
     found: list[str] = []
     if folder.is_symlink():
         return ["."]
+    # Discover redirects before loading their result metadata. Read guards
+    # reject them too, but a dry clear must still report the unsafe paths.
+    for category in (store.MODELS, store.LEGACY):
+        base = folder / category
+        if base.is_symlink():
+            found.append(category)
+        elif base.is_dir():
+            found += [
+                str(path.relative_to(folder))
+                for path in base.rglob("*")
+                if path.is_symlink()
+            ]
     for item in items:
         path = item["path"]
         relative = path.relative_to(folder)
@@ -1864,7 +1876,24 @@ def clear(
                     raise RecapError(
                         409, f"Symbolic links appeared in {name}: {', '.join(links)}"
                     )
+                # Validate reporting paths before deleting anything; linked
+                # results have a different canonical workbench from the product.
+                report_items = [
+                    {
+                        **{k: v for k, v in i.items() if k != "path"},
+                        "path": str(i["path"].relative_to(store.root(name).parent)),
+                    }
+                    for i in items
+                ]
                 _remove(name, items)
+        else:
+            report_items = [
+                {
+                    **{k: v for k, v in i.items() if k != "path"},
+                    "path": str(i["path"].relative_to(store.root(name).parent)),
+                }
+                for i in items
+            ]
         size = sum(i["bytes"] for i in items)
         report["bytes"] += size
         report["datasets"].append(
@@ -1872,13 +1901,7 @@ def clear(
                 "name": name,
                 "bytes": size,
                 "symlinks": links,
-                "items": [
-                    {
-                        **{k: v for k, v in i.items() if k != "path"},
-                        "path": str(i["path"].relative_to(base)),
-                    }
-                    for i in items
-                ],
+                "items": report_items,
             }
         )
     return report

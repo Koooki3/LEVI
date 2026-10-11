@@ -212,15 +212,109 @@ def run_episodes(step, episodes, width=1):
 
 
 class Workbench:
-    def __init__(self, state, provider=None):
+    def __init__(self, state, provider=None, *, registry=None, source_link=None):
         self.store = Store(state)
+        self.registry = registry or self.store
+        self.source_link = source_link
         self.provider = provider or RoutedProvider()
 
+    def linked_workbenches(self):
+        """Canonical linked stores, once per workbench; no writable discovery."""
+        from levi import links
+
+        from .store import ReadStore
+
+        seen = {self.store.state.resolve()}
+        for link in links.links().values():
+            home, _ = links.target(link.name, self.store.state)
+            if home in seen:
+                continue
+            seen.add(home)
+            yield link, ReadStore(home)
+
+    def routed(self, arguments):
+        """Resolve one dataset or persisted entity before capability dispatch.
+
+        IDs from older workbenches may collide. An ambiguous ID refuses the
+        operation instead of selecting whichever workspace happens to be first.
+        """
+        from levi import links
+
+        repo = arguments.get("repo_id")
+        if repo and repo.startswith("local/"):
+            link = links.get(repo.split("/", 1)[1])
+            if link:
+                home, _ = links.target(link.name, self.store.state)
+                if home != self.store.state:
+                    return Workbench(
+                        home, self.provider, registry=self.registry, source_link=link
+                    )
+        kind, identifier = next(
+            (
+                (kind, arguments[key])
+                for key, kind in (
+                    ("run_id", "runs"),
+                    ("changeset_id", "changes"),
+                    ("job_id", "object_jobs"),
+                )
+                if arguments.get(key)
+            ),
+            (None, None),
+        )
+        if not identifier:
+            return self
+        matches = []
+        try:
+            self.store.get(kind, identifier)
+            matches.append(self)
+        except KeyError:
+            pass
+        for link, reader in self.linked_workbenches():
+            try:
+                reader.get(kind, identifier)
+            except KeyError:
+                continue
+            matches.append(
+                Workbench(
+                    reader.state,
+                    self.provider,
+                    registry=self.registry,
+                    source_link=link,
+                )
+            )
+        if len(matches) > 1:
+            raise Conflict(
+                "Entity ID occurs in several workbenches; select its dataset"
+            )
+        return matches[0] if matches else self
+
+    def entity_id(self, taken):
+        if self.source_link is None:
+            return new_id(taken)
+        from levi.links import _mark
+
+        marker = _mark(self.store.state)
+        stamps = {value.removesuffix("." + marker) for value in taken}
+        return new_id(stamps) + "." + marker
+
+    def provider_record(self, name):
+        try:
+            return self.registry.get("providers", name)
+        except KeyError:
+            # A pre-existing live run retains its original provider profile.
+            # No profiles or credentials are copied into another workbench.
+            return self.store.get("providers", name)
+
+    @media.in_workbench
     def plan(self, context: TaskContext, principal=None):
         from levi import links
 
         if context.repo_id.startswith("local/"):
-            links.refuse_write(context.repo_id.split("/", 1)[1])
+            home, _ = links.target(context.repo_id.split("/", 1)[1], self.store.state)
+            if home != self.store.state:
+                raise ValueError(
+                    "Linked plans must dispatch through their canonical workbench"
+                )
         from .supervision import require_teacher
 
         if context.workflow.get("kind") == "temporal" and not context.workflow.get(
@@ -263,7 +357,7 @@ class Workbench:
                 raise ValueError("External media access needs explicit consent")
         else:
             config = ProviderConfig.model_validate(
-                self.store.get("providers", context.provider)
+                self.provider_record(context.provider)
             )
             if not config.enabled:
                 raise ValueError("Provider is disconnected")
@@ -300,7 +394,7 @@ class Workbench:
         # The kind prefixes the id, so compare against the timestamp part or
         # the check never matches and a second run overwrites the first.
         stamps = {existing.split("-", 1)[-1] for existing in self.store.ids("runs")}
-        id = f"{context.workflow['kind']}-{new_id(stamps)}"
+        id = f"{context.workflow['kind']}-{self.entity_id(stamps)}"
         run = {
             "id": id,
             "status": RunStatus.PLANNED,
@@ -312,9 +406,11 @@ class Workbench:
             # Who asked for this run, so its cost can later be attributed to the
             # right agent rather than averaged over every agent that ever ran.
             "principal": getattr(principal, "id", None),
-            "dataset_key": state.display_slug,
-            "base_revision": self.store.head(state.display_slug),
-            "base_content": annotation_digest(self.store.state, state.display_slug),
+            "dataset_key": links.source_name(state.display_slug),
+            "base_revision": self.store.head(links.source_name(state.display_slug)),
+            "base_content": annotation_digest(
+                self.store.state, links.source_name(state.display_slug)
+            ),
             "files": files,
             "snapshot_bytes": sum(files.values()),
             "completed": [],
@@ -446,6 +542,7 @@ class Workbench:
         thread.start()
         return self.store.get("runs", id)
 
+    @media.in_workbench
     def execute(self, id, owner, *, pilot=True):
         stopped = threading.Event()
         lease_lost = threading.Event()
@@ -514,7 +611,7 @@ class Workbench:
                         "Execution lease lost; resume after reconciliation"
                     )
                 current_config = ProviderConfig.model_validate(
-                    self.store.get("providers", config.name)
+                    self.provider_record(config.name)
                 )
                 if current_config.model_dump(exclude={"enabled"}) != config.model_dump(
                     exclude={"enabled"}
@@ -911,6 +1008,23 @@ class Workbench:
             )
 
     def model_step(self, id, config, context, summary, evidence, phase, started):
+        if self.source_link is not None:
+            from levi.live import gating
+
+            from .security import Principal
+
+            try:
+                gating.check(
+                    Principal("local-human", human=True),
+                    "runs.execute",
+                    self.source_link.workspace / "live",
+                )
+            except Conflict as exc:
+                from levi.inference.gpu import GpuBusy
+
+                # Keep the ordinary recoverable GPU-blocked state. The
+                # product's resumer cannot own a different workbench's run.
+                raise GpuBusy(str(exc), gate="linked-live") from exc
         context = TaskContext.model_validate(context.model_dump())
         from .observations import skills
         from .planning import require
@@ -921,9 +1035,7 @@ class Workbench:
         require(self, run)
         if run.get("control"):
             raise ValueError("Execution paused/cancelled before model call")
-        current = ProviderConfig.model_validate(
-            self.store.get("providers", config.name)
-        )
+        current = ProviderConfig.model_validate(self.provider_record(config.name))
         if not current.enabled or current.model_dump(
             exclude={"enabled"}
         ) != config.model_dump(exclude={"enabled"}):
@@ -1242,7 +1354,7 @@ class Workbench:
                 p for p in proposals if p["episode_index"] not in known
             ]
         change = ChangeSet(
-            id=existing or new_id(set(self.store.ids("changes"))),
+            id=existing or self.entity_id(set(self.store.ids("changes"))),
             run_id=id,
             base_revision=run["base_revision"],
             proposals=proposals,
@@ -1291,7 +1403,9 @@ class Workbench:
 
         change = self.store.get("changes", id)
         run = self.store.get("runs", change["run_id"])
-        links.refuse_write(run["dataset_key"])
+        home, key = links.target(run["dataset_key"], self.store.state)
+        if home != self.store.state or key != run["dataset_key"]:
+            raise ValueError("Changes must use their canonical dataset workbench")
         with dataset_lock(self.store.state, run["dataset_key"]):
             change = self.store.get("changes", id)
             if change["status"] == "committed":

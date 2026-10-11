@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
+from . import media
 from .runtime import Workbench
 from .schema import Budget, Contract, ModelOutput, Proposal, TaskContext
 from .security import Principal
@@ -16,6 +17,7 @@ class Empty(Contract):
 
 class RunRef(Contract):
     run_id: str
+    repo_id: str | None = None
 
 
 class Pending(RunRef):
@@ -59,6 +61,7 @@ class Start(RunRef):
 
 class ChangesRef(Contract):
     changeset_id: str
+    repo_id: str | None = None
 
 
 class Review(ChangesRef):
@@ -883,6 +886,7 @@ def public_run(run):
     }
 
 
+@media.in_workbench
 def _invoke(
     workbench: Workbench,
     principal: Principal,
@@ -2307,6 +2311,7 @@ def invoke(workbench, principal, name, arguments, key=None):
                 "External Pilot connections cannot dispatch API-model plans"
             )
         arguments = args.model_dump()
+        workbench = workbench.routed(arguments)
         run = scope(workbench.store, arguments)
         repo = arguments.get("repo_id") or (run["context"]["repo_id"] if run else None)
         principal.require(permission, repo)
@@ -2316,7 +2321,13 @@ def invoke(workbench, principal, name, arguments, key=None):
             # already going stop at their next request (gpu.require_free).
             from levi.live import gating
 
-            gating.check(principal, name)
+            gating.check(
+                principal,
+                name,
+                workbench.source_link.workspace / "live"
+                if workbench.source_link
+                else None,
+            )
         if not principal.human and name not in {
             "capabilities.list",
             "workspace.get_context",

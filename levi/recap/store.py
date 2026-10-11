@@ -109,6 +109,15 @@ class MergeRefused(ValueError):
     """A subset recomputation whose parameters differ from the stored result."""
 
 
+def safe_path(path: Path) -> Path:
+    """Derived writes never follow a symlink, even to a sibling view."""
+    if path.resolve() != path.absolute():
+        raise ValueError(
+            "RECAP paths must remain in canonical derived state without symbolic links"
+        )
+    return path
+
+
 def root(name: str) -> Path:
     if not name or "/" in name or name in {".", ".."}:
         raise ValueError("Invalid dataset name")
@@ -116,7 +125,7 @@ def root(name: str) -> Path:
     folder = state / "recap_values" / source
     if not folder.resolve().is_relative_to(state.resolve()):
         raise ValueError("RECAP results must remain inside derived state")
-    return folder
+    return safe_path(folder)
 
 
 def layout() -> str:
@@ -135,10 +144,11 @@ def is_model_name(value: str | None) -> bool:
 
 
 def write_json(path: Path, value: Any) -> None:
-    catalog.atomic(path, value)
+    catalog.atomic(safe_path(path), value)
 
 
 def write_table(path: Path, table: pa.Table) -> None:
+    safe_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
     pq.write_table(table, temp)
@@ -154,6 +164,7 @@ def _fsync_dir(folder: Path) -> None:
 
 
 def _durable_table(path: Path, table: pa.Table) -> None:
+    safe_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
     with temp.open("wb") as handle:
@@ -166,6 +177,7 @@ def _durable_table(path: Path, table: pa.Table) -> None:
 def _durable_json(path: Path, value: Any) -> None:
     """Survives power loss: the bytes reach the disk before the rename, and
     the rename before the call returns."""
+    safe_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
     with temp.open("w") as handle:
@@ -200,7 +212,7 @@ def locked(name: str):
                 held[key] -= 1
             return
         folder.mkdir(parents=True, exist_ok=True)
-        with (folder / ".lock").open("a") as handle:
+        with safe_path(folder / ".lock").open("a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
             held[key] = 1
             try:
@@ -238,7 +250,7 @@ class Located:
 def _slot(name: str, model: str) -> Path:
     if not is_model_name(model):
         raise ValueError(f"Invalid value model name {model!r}")
-    return root(name) / MODELS / model
+    return safe_path(root(name) / MODELS / model)
 
 
 def head(name: str, model: str) -> str | None:
@@ -502,7 +514,7 @@ def _publish_revision(
     The revision directory is reserved first; ``revision.json`` is written
     last, so a directory without it is an interrupted publication and is
     never served."""
-    folder = root(name) / LEGACY
+    folder = safe_path(root(name) / LEGACY)
     rid = naming.timestamp_id(folder, create_dir=True)
     target = folder / rid
     per_episode: dict[str, Any] = {}
@@ -556,6 +568,7 @@ def signature_differences(old: dict[str, Any], new: dict[str, Any]) -> list[str]
 
 def _link(source: Path, target: Path) -> None:
     """Hard-link an unchanged episode file (copy across file systems)."""
+    safe_path(target)
     try:
         os.link(source, target)
     except OSError:
@@ -601,7 +614,7 @@ def publish_model(
                 for e in old_record.get("episode_indices") or []
                 if int(e) not in episodes and int(e) not in dropped
             ]
-        version = naming.timestamp_id(slot / "v", create_dir=True)
+        version = naming.timestamp_id(safe_path(slot / "v"), create_dir=True)
         target = slot / "v" / version
         now = time.time()
         old_summary = (
@@ -758,18 +771,20 @@ def sweep(name: str, *, now: float | None = None) -> dict[str, list[str]]:
     it newly marked as replaced."""
     now = time.time() if now is None else now
     done: dict[str, list[str]] = {"removed": [], "retired": []}
-    base = root(name) / MODELS
+    base = safe_path(root(name) / MODELS)
     if not base.is_dir():
         return done
     with locked(name):
         for slot in sorted(p for p in base.iterdir() if p.is_dir()):
+            safe_path(slot)
             for stray in slot.glob(".head.json.*.tmp"):
                 stray.unlink(missing_ok=True)
             live = head(name, slot.name) if is_model_name(slot.name) else None
-            versions = slot / "v"
+            versions = safe_path(slot / "v")
             if not versions.is_dir():
                 continue
             for folder in sorted(p for p in versions.iterdir() if p.is_dir()):
+                safe_path(folder)
                 if folder.name == live:
                     continue
                 label = f"{slot.name}/{folder.name}"

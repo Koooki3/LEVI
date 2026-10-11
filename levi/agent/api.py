@@ -23,10 +23,11 @@ import time as _time
 STARTED_AT = _time.time()
 
 
-def workbench():
+def workbench(run_id=None):
     from levi import service
 
-    return Workbench(service.STATE)
+    wb = Workbench(service.STATE)
+    return wb.routed({"run_id": run_id}) if run_id else wb
 
 
 def principal(request):
@@ -133,19 +134,21 @@ def runs(request: Request):
     from .grants import require_run
 
     result = []
-    for run in wb.store.list("runs"):
-        try:
-            who.require("read", run["context"]["repo_id"])
-            require_run(wb.store, who, run["id"])
-        except PermissionError:
-            continue
-        result.append(public_run(run))
+    stores = [wb.store, *[reader for _, reader in wb.linked_workbenches()]]
+    for store in stores:
+        for run in store.list("runs"):
+            try:
+                who.require("read", run["context"]["repo_id"])
+                require_run(store, who, run["id"])
+            except PermissionError:
+                continue
+            result.append(public_run(run))
     return result
 
 
 @router.get("/runs/{run_id}/artifacts/{name}")
 def artifact(run_id: str, name: str, request: Request):
-    wb = workbench()
+    wb = workbench(run_id)
     try:
         run = wb.store.get("runs", run_id)
     except KeyError as exc:
