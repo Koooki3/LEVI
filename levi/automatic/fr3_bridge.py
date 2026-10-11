@@ -58,6 +58,26 @@ def check_identity(expected, metadata):
         raise ValueError("policy deployment identity mismatch")
 
 
+def acknowledged(route, response):
+    """Only the reviewed server's explicit success shapes establish delivery."""
+    if isinstance(response, dict):
+        return (
+            (response.get("ok") is True or response.get("success") is True)
+            and not response.get("error")
+            and response.get("ok") is not False
+            and response.get("success") is not False
+        )
+    known = {
+        "clearerr": {"Clear"},
+        "pose": {"Moved"},
+        "open_gripper": {"Opened", "open gripper target already satisfied"},
+        "close_gripper": {"Closed", "close gripper target already satisfied"},
+        "close_gripper_slow": {"Closed", "close gripper target already satisfied"},
+        "move_gripper": {"Moved Gripper"},
+    }
+    return isinstance(response, str) and response in known.get(route, set())
+
+
 class Robot:
     """Requires Fr3Guard.attach(env) before construction; never calls reset()."""
 
@@ -73,6 +93,7 @@ class Robot:
         self.stop_probe = lambda: False
         self._sending = False
         self._motion = None
+        self._http_acks = []
         original_post = env._post
 
         def fenced_post(route, payload=None):
@@ -96,6 +117,18 @@ class Robot:
             ):
                 raise ValueError("recovery/setup motion is not part of AERI")
             response = original_post(route, payload)
+            if route in (
+                "clearerr",
+                "pose",
+                "open_gripper",
+                "close_gripper",
+                "close_gripper_slow",
+                "move_gripper",
+            ):
+                if not acknowledged(route, response):
+                    self.latched = "unknown or negative HTTP acknowledgement: " + route
+                    raise ValueError(self.latched)
+                self._http_acks.append((route, response))
             if (
                 route == "getstate"
                 and isinstance(response, dict)
@@ -164,7 +197,18 @@ class Robot:
         if self.stopped() or self.latch_state() or self.health()["state"] != "ok":
             raise ValueError("motion is stopped or fault locked")
         current = self.env.get_observation()["robot_state"]["cartesian_position"]
+        original = [float(x) for x in action]
         fixed, notes = self.client._clamp_action(action, current, self.args)
+        expected = list(original)
+        if len(expected) == 7 and getattr(self.args, "binarize_gripper", False):
+            expected[6] = 1.0 if expected[6] >= 0.5 else 0.0
+        changed = (
+            len(expected) != 7
+            or len(fixed) != 7
+            or any(abs(float(a) - b) > 1e-6 for a, b in zip(fixed, expected))
+        )
+        if changed or len(original) != 7 or not 0 <= original[6] <= 1:
+            raise ValueError("action was rewritten outside the reviewed normalization")
         # Reject rather than change the frozen motion or home target silently.
         if notes or len(fixed) != 7 or not all(math.isfinite(float(x)) for x in fixed):
             raise ValueError(
@@ -177,13 +221,45 @@ class Robot:
         # env is already guarded. Any exception/None after this call may have
         # delivered a pose: report unknown, never retry the command.
         self._sending = True
+        self._http_acks = []
         self._motion = (token, kind)
         try:
             result = self.env.step(fixed)
         finally:
             self._motion = None
-        if result is None:
-            raise RuntimeError("guarded step has no delivery acknowledgement")
+        if not isinstance(result, dict) or any(
+            name not in result
+            for name in ("clearerr_response", "pose_response", "gripper_response")
+        ):
+            raise RuntimeError("guarded step has no complete delivery acknowledgement")
+        if not acknowledged(
+            "clearerr", result["clearerr_response"]
+        ) or not acknowledged("pose", result["pose_response"]):
+            raise RuntimeError("guarded step nested motion acknowledgement is unknown")
+        routes = [route for route, _ in self._http_acks]
+        if routes.count("clearerr") != 1 or routes.count("pose") != 1:
+            raise RuntimeError("guarded step did not expose exactly one fenced pose")
+        gripper = result["gripper_response"]
+        grip_routes = [
+            route
+            for route in routes
+            if route.endswith("gripper") or route == "close_gripper_slow"
+        ]
+        if gripper is None:
+            if grip_routes:
+                raise RuntimeError("sent gripper has no acknowledgement")
+        elif (
+            isinstance(gripper, dict)
+            and gripper.get("command") == "rate_limited"
+            and not grip_routes
+        ):
+            pass  # The client explicitly sent no new gripper command.
+        elif (
+            not isinstance(gripper, dict)
+            or gripper.get("command") not in grip_routes
+            or not acknowledged(gripper["command"], gripper.get("response"))
+        ):
+            raise RuntimeError("guarded step nested gripper acknowledgement is unknown")
         self._sending = False
         self.steps += 1
         return result

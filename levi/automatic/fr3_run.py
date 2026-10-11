@@ -7,12 +7,15 @@ launch runner, whose real-mode refusal remains in force.
 """
 
 import argparse
+import fcntl
 import hashlib
 import importlib
 import json
 import math
+import os
 import shlex
 import signal
+import stat
 import sys
 import threading
 import time
@@ -29,6 +32,38 @@ from .orchestrator import Orchestrator
 from .recorder import SessionFiles
 
 SCHEMA = "levi.aeri.fr3.binding.v1"
+ARM_LOCK_FILE = "/tmp/levi-aeri-fr3-arm.lock"
+
+
+class RobotLock:
+    """One conservative arm lock for both local motion ports; never unlink it."""
+
+    def __enter__(self):
+        self.fd = os.open(
+            ARM_LOCK_FILE, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600
+        )
+        try:
+            info = os.fstat(self.fd)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) != 0o600
+            ):
+                raise ValueError("physical arm lock has an unsafe owner/type/mode")
+            try:
+                fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise ValueError(
+                    "physical FR3 arm is already owned by another bridge run"
+                ) from None
+        except BaseException:
+            os.close(self.fd)
+            raise
+        return self
+
+    def __exit__(self, *args):
+        os.close(self.fd)
 
 
 def load_binding(path, job):
@@ -84,10 +119,33 @@ def load_binding(path, job):
         "home_pose",
         "home_duration_s",
         "home_tolerance_mm",
+        "rx_range",
+        "ry_range",
+        "rz_range",
+        "binarize_gripper",
     }
     if set(safety) != expected:
         raise ValueError("safety requires exactly " + ", ".join(sorted(expected)))
-    for name in expected - {"home_pose"}:
+    if type(safety["binarize_gripper"]) is not bool:
+        raise ValueError("binarize_gripper must be an explicit reviewed boolean")
+    for name in ("rx_range", "ry_range", "rz_range"):
+        limits = safety[name]
+        if (
+            not isinstance(limits, list)
+            or len(limits) != 2
+            or any(type(x) not in (int, float) or not math.isfinite(x) for x in limits)
+            or not 0 < limits[1] - limits[0] <= 2 * math.pi
+        ):
+            raise ValueError(
+                name + " must be a finite increasing angular interval of at most 2pi"
+            )
+    for name in expected - {
+        "home_pose",
+        "rx_range",
+        "ry_range",
+        "rz_range",
+        "binarize_gripper",
+    }:
         x = safety[name]
         if (
             isinstance(x, bool)
@@ -110,6 +168,12 @@ def load_binding(path, job):
         )
     ):
         raise ValueError("home_pose must contain six finite metres/radians")
+    for angle, name in zip(
+        pose[3:6], ("rx_range", "ry_range", "rz_range"), strict=True
+    ):
+        lo, hi = safety[name]
+        if (angle - lo) % (2 * math.pi) > hi - lo + 1e-6:
+            raise ValueError("home rotation is outside reviewed " + name)
     if pose[2] < safety["min_z"] or any(abs(x) > safety["max_xy"] for x in pose[:2]):
         raise ValueError("home pose is outside the configured workspace")
     roles = (
@@ -190,6 +254,12 @@ def modules(binding):
 
 
 def execute(job, binding, *, load_modules=modules):
+    # Stable across run ids, rollout roots, worktrees and ports 5000/5001.
+    with RobotLock():
+        return _execute_locked(job, binding, load_modules=load_modules)
+
+
+def _execute_locked(job, binding, *, load_modules):
     cfg = replace(
         job["config"], specs={**job["config"].specs, **job["contract"].spec()}
     )
@@ -341,6 +411,7 @@ def assembled(
     orch = None
     finished = threading.Event()
     old_signals = {}
+    thread = None
     try:
         orch = Orchestrator.create(
             directory,
@@ -406,7 +477,8 @@ def assembled(
             )
             if not sys.stdin.isatty():
                 return state
-            if input("> ").strip() != "resume":
+            answer = input("> ").strip()
+            if robot.stopped() or answer != "resume":
                 orch.stop("terminal-stop")
                 return orch.state
             orch.resume(
@@ -418,12 +490,23 @@ def assembled(
     finally:
         finished.set()
         robot.emergency_hold()
-        if orch is not None:
-            fence.revoke()
-            orch.close()
-        recorder.close()
+        if thread is not None:
+            thread.join(timeout=3)
+        cleanup_error = None
+        operations = ([fence.revoke, orch.close] if orch is not None else []) + [
+            recorder.close
+        ]
+        for operation in operations:
+            try:
+                operation()
+            except BaseException as exc:  # noqa: BLE001 - attempt every owned resource
+                cleanup_error = cleanup_error or exc
         for signum, previous in old_signals.items():
             signal.signal(signum, previous)
+        if cleanup_error is not None:
+            if sys.exc_info()[0] is None:
+                raise cleanup_error
+            print("Cleanup failed: " + str(cleanup_error), file=sys.stderr)
 
 
 def recipe(job_path):
@@ -500,6 +583,19 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.scene_question:
+            if any(
+                (
+                    args.check,
+                    args.execute,
+                    args.config,
+                    args.binding,
+                    args.expect_plan,
+                    args.expect_binding,
+                )
+            ):
+                raise ValueError(
+                    "scene-question cannot be combined with check/execute/config/binding"
+                )
             question_path = Path(args.scene_question)
             question = json.loads(question_path.read_text())
             if question_path.parent.name != "questions" or not args.predicates:

@@ -128,14 +128,33 @@ class Media:
         row["episode"] = episode_id
 
     def _close(self, folder):
-        row = self.active.pop(Path(folder), None)
+        folder = Path(folder)
+        row = self.active.get(folder)
+        first_error = None
         if row:
-            for writer in row["video"].values():
-                writer.release()
-            for handle in row["files"].values():
-                handle.flush()
-                os.fsync(handle.fileno())
-                handle.close()
+            try:
+                for writer in row["video"].values():
+                    try:
+                        writer.release()
+                    except BaseException as exc:  # noqa: BLE001 - attempt every owned resource
+                        first_error = first_error or exc
+                for handle in row["files"].values():
+                    try:
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    except BaseException as exc:  # noqa: BLE001 - attempt every owned resource
+                        first_error = first_error or exc
+                    finally:
+                        try:
+                            handle.close()
+                        except BaseException as exc:  # noqa: BLE001 - attempt every owned resource
+                            first_error = first_error or exc
+            finally:
+                self.active.pop(folder, None)
+                if row["episode"]:
+                    self.buffers.pop(row["episode"], None)
+        if first_error is not None:
+            raise first_error
         return row
 
     def finish(self, folder, frames):
@@ -154,8 +173,15 @@ class Media:
             self.buffers.pop(row["episode"], None)
 
     def close(self):
+        first_error = None
         for folder in list(self.active):
-            self._close(folder)
+            try:
+                self._close(folder)
+            except BaseException as exc:  # noqa: BLE001 - attempt every owned resource
+                first_error = first_error or exc
+        self.buffers.clear()
+        if first_error is not None:
+            raise first_error
 
 
 class Recorder(RolloutRecorder):
@@ -164,5 +190,11 @@ class Recorder(RolloutRecorder):
         super().commit(rollout, result)
 
     def close(self):
-        super().close()
-        self.media.close()
+        first_error = None
+        for operation in (super().close, self.media.close):
+            try:
+                operation()
+            except BaseException as exc:  # noqa: BLE001 - attempt every owned resource
+                first_error = first_error or exc
+        if first_error is not None:
+            raise first_error

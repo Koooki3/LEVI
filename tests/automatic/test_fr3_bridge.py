@@ -26,7 +26,9 @@ Rotation = NS(from_euler=lambda *a: NS(as_quat=lambda: np.array([0.0, 0.0, 0.0, 
 
 
 @pytest.fixture(autouse=True)
-def no_network(monkeypatch):
+def no_network(monkeypatch, tmp_path):
+    monkeypatch.setattr(R, "ARM_LOCK_FILE", str(tmp_path / "physical-arm.lock"))
+
     def refuse(*args, **kwargs):
         raise AssertionError("real bridge test tried network I/O")
 
@@ -102,6 +104,10 @@ def rig(tmp_path, monkeypatch, mode="human_assisted", *, faults=(), scenes=()):
             "home_pose": [0.4, 0, 0.2, 0, 0, 0],
             "home_duration_s": 0.003,
             "home_tolerance_mm": 5,
+            "rx_range": [-3.141592653589793, 3.141592653589793],
+            "ry_range": [-3.141592653589793, 3.141592653589793],
+            "rz_range": [-3.141592653589793, 3.141592653589793],
+            "binarize_gripper": True,
         },
         "policies": {
             role: {"host": "127.0.0.1", "port": 8000 + i}
@@ -142,13 +148,17 @@ def rig(tmp_path, monkeypatch, mode="human_assisted", *, faults=(), scenes=()):
 
         def step(self, action):
             assert self.guarded
-            self._post("clearerr")
-            self._post("pose")
+            clearerr = self._post("clearerr")
+            pose = self._post("pose")
             self.sent += 1
             if "no_ack" in faults:
                 return None
             self.pose = np.asarray(action).copy()
-            return {"ok": True}
+            return {
+                "clearerr_response": clearerr,
+                "pose_response": pose,
+                "gripper_response": None,
+            }
 
         def close(self):
             self.closed = True
@@ -598,15 +608,9 @@ def test_real_file_provider_keeps_current_frames_and_rejects_prebuilt_reply(
     )
     root = Path(r.binding["providers"]["file_root"])
     provider = file_provider(root, "scene", robot, r.clock, r.job["contract"])
-    provider.use_evidence(
-        NS(
-            folder=tmp_path / "evidence",
-            keep_frame=lambda ref, data: {
-                "ref": ref,
-                "sha256": hashlib.sha256(data).hexdigest(),
-            },
-        )
-    )
+    from levi.automatic.recorder import EvidenceStore
+
+    provider.use_evidence(EvidenceStore(tmp_path / "retained"))
     request = {"request_id": "real-scene-1", "run_id": "real-test"}
     ticket = provider.submit(request)
     payload = json.loads(
@@ -619,7 +623,7 @@ def test_real_file_provider_keeps_current_frames_and_rejects_prebuilt_reply(
     assert payload["contract"]["required"] == ["object_at_source"]
     assert provider.collect(ticket, timeout_ns=0) is None
     ticket.path.write_bytes(b'{"actual": "provider response"}')
-    assert provider.collect(ticket, timeout_ns=0) == b'{"actual": "provider response"}'
+    assert json.loads(provider.collect(ticket, timeout_ns=0))["kind"] == "unavailable"
     with pytest.raises(ValueError, match="unsolicited"):
         provider.submit(request)
     cancelled = provider.submit({"request_id": "cancel-2", "run_id": "real-test"})
@@ -753,3 +757,444 @@ def test_explicit_stale_robot_read_locks_motion(tmp_path, monkeypatch):
         env._post("getstate")
     assert robot.latch_state()
     assert robot.step(env.pose, token=None).executed == "no"
+
+
+@pytest.mark.parametrize(
+    "kind,attack",
+    [
+        ("scene", "top_old"),
+        ("scene", "predicate_old"),
+        ("scene", "missing"),
+        ("scene", "timestamp"),
+        ("scene", "saved_deleted"),
+        ("scene", "none"),
+        ("reset_judgement", "predicate_old"),
+        ("reset_judgement", "missing"),
+        ("reset_judgement", "timestamp"),
+        ("reset_judgement", "saved_deleted"),
+        ("reset_judgement", "none"),
+    ],
+)
+def test_actual_execute_binds_provider_evidence_to_current_ticket(
+    tmp_path, monkeypatch, kind, attack
+):
+    import sys
+
+    from levi.automatic import fr3_providers as P
+
+    real_provider = P.FileProvider
+    mode = "human_assisted" if kind == "scene" else "single_reset_policy"
+    r = rig(tmp_path, monkeypatch, mode)
+    monkeypatch.setitem(sys.modules, "cv2", r.modules[4])
+    reset = {}
+    replies = []
+
+    class AnsweringProvider(real_provider):
+        def collect(self, ticket, *, timeout_ns):
+            if self.kind == "scene":
+                decision = (
+                    "reset_required"
+                    if mode == "single_reset_policy" and not reset.get("initial_seen")
+                    else "ready"
+                )
+                reset["initial_seen"] = True
+                builder = ev.FakeSceneAssessor(
+                    [],
+                    r.clock,
+                    "real-test",
+                    default={"decision": decision, "delay_ns": 0},
+                    contract=r.job["contract"].key,
+                    predicates=r.job["contract"].required,
+                )
+            else:
+                builder = ev.FakeGoalVerifier(
+                    [],
+                    r.clock,
+                    "real-test",
+                    default={"decision": "confirmed", "delay_ns": 0},
+                )
+            answer = json.loads(
+                builder.collect(builder.submit(ticket.request), timeout_ns=0)
+            )
+            references = [
+                {"kind": "frame", "ref": ref, "sha256": digest, "step": None}
+                for ref, digest, file in ticket.frames
+            ]
+            for predicate in answer["predicate_results"]:
+                predicate["evidence_refs"] = references
+            observed_key = (
+                "observed_ns" if self.kind == "scene" else "observed_through_ns"
+            )
+            answer[observed_key] = ticket.observed_ns
+            answer["provider"], answer["model_name"] = "vlm", "test-model"
+            if self.kind == "scene":
+                answer["evidence_refs"] = references
+            if self.kind == kind:
+                old = [
+                    {
+                        "kind": "frame",
+                        "ref": "side:OLD-NONEXISTENT",
+                        "sha256": "0" * 64,
+                        "step": None,
+                    }
+                ]
+                if attack == "top_old":
+                    answer["evidence_refs"] = old
+                if attack == "predicate_old":
+                    answer["predicate_results"][0]["evidence_refs"] = old
+                if attack == "missing":
+                    answer["predicate_results"][0]["evidence_refs"] = []
+                if attack == "timestamp":
+                    answer[observed_key] += 1
+                if attack == "saved_deleted":
+                    (self.store.folder / ticket.frames[0][2]).unlink()
+            ticket.path.write_text(json.dumps(answer))
+            result = super().collect(ticket, timeout_ns=timeout_ns)
+            decoded = json.loads(result)
+            replies.append(
+                {k: decoded.get(k) for k in ("request_id", "kind", "code", "detail")}
+            )
+            return result
+
+    def provider(root, which, robot, clock, contract):
+        value = AnsweringProvider(root, which, robot, clock, contract)
+        if which == "reset_judgement":
+            reset["provider"] = value
+        return value
+
+    monkeypatch.setattr(P, "FileProvider", provider)
+    forward = ev.FakeGoalVerifier(
+        [], r.clock, "real-test", default={"decision": "confirmed", "delay_ns": 0}
+    )
+
+    class Verifier:
+        def submit(self, request):
+            return (
+                reset["provider"].submit(request)
+                if request["episode_role"] == "reset"
+                else forward.submit(request)
+            )
+
+        def collect(self, ticket, *, timeout_ns):
+            return (
+                reset["provider"].collect(ticket, timeout_ns=timeout_ns)
+                if ticket.request["episode_role"] == "reset"
+                else forward.collect(ticket, timeout_ns=timeout_ns)
+            )
+
+        def cancel(self, ticket, reason):
+            return (
+                reset["provider"].cancel(ticket, reason)
+                if ticket.request["episode_role"] == "reset"
+                else forward.cancel(ticket, reason)
+            )
+
+    monkeypatch.setattr(P, "OnlineVerifier", lambda *a, **kw: Verifier())
+    state = R.execute(r.job, r.binding, load_modules=lambda binding: r.modules)
+    scan = Journal.read(Path(r.job["rollout_root"]) / ".aeri/runs/real-test")
+    if attack == "none":
+        assert state == "COMPLETED", replies
+    else:
+        assert state == "WAIT_HUMAN"
+        assert not any(e.to_state == "FORWARD_ACTIVE" for e in scan.events)
+        if kind == "scene":
+            assert not any(e.episode_result for e in scan.events)
+        else:
+            assert all(
+                not e.episode_result.judgement_ids
+                for e in scan.events
+                if e.episode_result
+            )
+    assert r.calls[-1][0] == "closed"
+
+
+def test_file_events_deliver_after_more_than_thousand_seen_files(tmp_path):
+    from levi.automatic.fr3_providers import FileEvents
+
+    events = FileEvents(tmp_path, "run", fake.FakeClock())
+    stream = events.open("ep", "forward")
+    folder = events.streams[stream][0]
+    for n in range(1101):
+        (folder / f"event-{n:05d}.json").write_text(json.dumps({"number": n}))
+    found = []
+    for _ in range(20):
+        found.extend(
+            json.loads(item)["number"]
+            for item in events.poll(stream, through_step=99, max_events=64)
+        )
+    assert found == list(range(1101))
+    assert events.poll(stream, through_step=99, max_events=64) == []
+
+
+@pytest.mark.parametrize(
+    "route,response",
+    [
+        ("clearerr", None),
+        ("clearerr", {"ok": False}),
+        ("pose", None),
+        ("pose", {"ok": False}),
+        ("close_gripper", None),
+        ("close_gripper", {"ok": False}),
+    ],
+)
+def test_actual_execute_refuses_unknown_or_negative_nested_http_ack(
+    tmp_path, monkeypatch, route, response
+):
+    r = rig(tmp_path, monkeypatch)
+    env_class = r.modules[2].RobotEnv
+    post, step = env_class._post, env_class.step
+
+    def failing_post(self, name, payload=None):
+        if name == route:
+            r.calls.append(("route", name))
+            return response
+        return post(self, name, payload)
+
+    def with_gripper(self, action):
+        value = step(self, action)
+        if route == "close_gripper":
+            value["gripper_response"] = {
+                "command": route,
+                "response": self._post(route),
+            }
+        return value
+
+    monkeypatch.setattr(env_class, "_post", failing_post)
+    monkeypatch.setattr(env_class, "step", with_gripper)
+    assert (
+        R.execute(r.job, r.binding, load_modules=lambda b: r.modules) == "FAULT_LOCKED"
+    )
+    routes = [c[1] for c in r.calls if c[0] == "route"]
+    assert routes.count(route) == 1
+    if route == "clearerr":
+        assert "pose" not in routes
+    assert r.calls[-1][0] == "closed"
+
+
+def test_nested_pose_field_must_match_an_actual_ack(tmp_path, monkeypatch):
+    r = rig(tmp_path, monkeypatch)
+    env_class = r.modules[2].RobotEnv
+    step = env_class.step
+
+    def missing_nested(self, action):
+        value = step(self, action)
+        value["pose_response"] = None
+        return value
+
+    monkeypatch.setattr(env_class, "step", missing_nested)
+    assert (
+        R.execute(r.job, r.binding, load_modules=lambda b: r.modules) == "FAULT_LOCKED"
+    )
+    assert sum(c == ("route", "pose") for c in r.calls) == 1
+
+
+def test_different_run_roots_and_both_ports_share_the_physical_arm_lock(
+    tmp_path, monkeypatch
+):
+    r = rig(tmp_path, monkeypatch)
+    held, release = threading.Event(), threading.Event()
+    result = []
+    monkeypatch.setattr(R, "assembled", lambda *a: "COMPLETED")
+
+    def importing(binding):
+        held.set()
+        assert release.wait(5)
+        return r.modules
+
+    def first():
+        result.append(R.execute(r.job, r.binding, load_modules=importing))
+
+    thread = threading.Thread(target=first)
+    thread.start()
+    assert held.wait(5)
+    second = {
+        **r.job,
+        "config": replace(r.job["config"], run_id="different-run"),
+        "rollout_root": str(tmp_path / "other-root"),
+    }
+    try:
+        for port in (5000, 5001):
+            binding = {**r.binding, "robot_url": f"http://127.0.0.1:{port}/"}
+            with pytest.raises(ValueError, match="already owned"):
+                R.execute(
+                    second,
+                    binding,
+                    load_modules=lambda b: pytest.fail("second run imported SDK"),
+                )
+        assert r.calls == []
+    finally:
+        release.set()
+        thread.join(5)
+    assert result == ["COMPLETED"]
+
+    # A failed import also releases the same kernel lock.
+    def failed(binding):
+        raise RuntimeError("import failed")
+
+    with pytest.raises(RuntimeError, match="import failed"):
+        R.execute(second, r.binding, load_modules=failed)
+    assert R.execute(second, r.binding, load_modules=lambda b: r.modules) == "COMPLETED"
+
+
+@pytest.mark.parametrize("option", ["--check", "--execute", "--config", "--binding"])
+def test_check_and_question_modes_refuse_mixing_before_any_write(
+    tmp_path, monkeypatch, option
+):
+    monkeypatch.setattr(
+        R.human, "write_answer", lambda *a: pytest.fail("mixed mode wrote an answer")
+    )
+    monkeypatch.setattr(
+        R.cli, "load_job", lambda *a: pytest.fail("mixed mode read a job")
+    )
+    argv = [
+        "--scene-question",
+        str(tmp_path / "absent/questions/q.json"),
+        "--predicates",
+        "{}",
+        option,
+    ]
+    if option in ("--config", "--binding"):
+        argv.append("absent")
+    assert R.main(argv) == 2
+    assert not Path(R.ARM_LOCK_FILE).exists()
+
+
+@pytest.mark.parametrize("fault", ["release", "fsync"])
+def test_media_close_attempts_every_resource_even_after_first_error(
+    tmp_path, monkeypatch, fault
+):
+    from levi.automatic import fr3_media as M
+
+    seen = []
+
+    def fail(*args):
+        raise OSError("first close error")
+
+    class Handle:
+        def __init__(self, name):
+            self.name = name
+
+        def flush(self):
+            seen.append("flush-" + self.name)
+
+        def fileno(self):
+            return 7
+
+        def close(self):
+            seen.append("close-" + self.name)
+
+    media = M.Media(None, None, None, None, 10)
+    media.active[tmp_path] = {
+        "video": {
+            "side": NS(
+                release=fail
+                if fault == "release"
+                else lambda: seen.append("release-side")
+            ),
+            "wrist": NS(release=lambda: seen.append("release-wrist")),
+        },
+        "files": {"one": Handle("one"), "two": Handle("two")},
+        "episode": "ep",
+    }
+    media.buffers["ep"] = "buffer"
+    monkeypatch.setattr(M.os, "fsync", fail if fault == "fsync" else lambda fd: None)
+    with pytest.raises(OSError, match="first close error"):
+        media.close()
+    assert "release-wrist" in seen and "close-one" in seen and "close-two" in seen
+    assert media.active == {} and media.buffers == {}
+
+
+def test_reviewed_binding_matches_actual_sdk_pure_clamp(tmp_path, monkeypatch):
+    import ast
+    import os
+
+    source_path = os.environ.get("LEVI_TEST_FR3_CLIENT_SOURCE")
+    if not source_path:
+        pytest.skip(
+            "set LEVI_TEST_FR3_CLIENT_SOURCE to check the deployed SDK pure functions"
+        )
+    module = ast.parse(Path(source_path).read_text())
+    names = {"wrap_to_pi", "_clamp_angle_to", "_clamp_action"}
+    functions = [
+        node
+        for node in module.body
+        if isinstance(node, ast.FunctionDef) and node.name in names
+    ]
+    assert {node.name for node in functions} == names
+    namespace = {"np": np, "Args": NS}
+    exec(  # noqa: S102 - trusted deployed source, only three pure functions
+        compile(
+            ast.Module(body=functions, type_ignores=[]),
+            "deployed-sdk-pure-clamp",
+            "exec",
+        ),
+        namespace,
+    )
+    r = rig(tmp_path, monkeypatch)
+    pure_clamp = namespace["_clamp_action"]
+    pose = np.array([*r.binding["safety"]["home_pose"], 1.0])
+    values, notes = pure_clamp(pose, pose, NS(**r.binding["safety"]))
+    assert notes == [] and np.allclose(values, pose)
+    fractional = pose.copy()
+    fractional[6] = 0.7
+    values, notes = pure_clamp(fractional, pose, NS(**r.binding["safety"]))
+    assert notes == [] and values[6] == 1.0  # explicitly frozen normalization
+    # The real client's default rx interval cannot home to zero rotation.
+    invalid = json.loads(json.dumps(r.binding))
+    invalid["safety"]["rx_range"] = [1.50, 4.03]
+    path = tmp_path / "binding.json"
+    path.write_text(json.dumps(invalid))
+    with pytest.raises(ValueError, match="home rotation"):
+        R.load_binding(path, r.job)
+    for parameter in ("rx_range", "ry_range", "rz_range", "binarize_gripper"):
+        invalid = json.loads(json.dumps(r.binding))
+        del invalid["safety"][parameter]
+        path.write_text(json.dumps(invalid))
+        with pytest.raises(ValueError, match="safety requires"):
+            R.load_binding(path, r.job)
+
+
+@pytest.mark.parametrize("fault", ["skipped", "error"])
+def test_actual_execute_cannot_start_when_current_evidence_is_not_saved(
+    tmp_path, monkeypatch, fault
+):
+    import sys
+
+    from levi.automatic import fr3_providers as P
+    from levi.automatic.recorder import EvidenceStore
+
+    real_provider = P.FileProvider
+    r = rig(tmp_path, monkeypatch)
+    monkeypatch.setitem(sys.modules, "cv2", r.modules[4])
+    monkeypatch.setattr(P, "FileProvider", real_provider)
+
+    def failed_save(*args):
+        if fault == "error":
+            raise OSError("disk full")
+        return {"file": None, "skipped": "evidence_budget_exhausted"}
+
+    monkeypatch.setattr(EvidenceStore, "keep_frame", failed_save)
+    assert R.execute(r.job, r.binding, load_modules=lambda b: r.modules) == "WAIT_HUMAN"
+    scan = Journal.read(Path(r.job["rollout_root"]) / ".aeri/runs/real-test")
+    assert not any(e.to_state == "FORWARD_ACTIVE" for e in scan.events)
+
+
+def test_recorder_close_preserves_first_error_and_still_closes_media(monkeypatch):
+    from levi.automatic import fr3_media as M
+
+    seen = []
+
+    def recorder_close(self):
+        seen.append("recorder")
+        raise OSError("first recorder error")
+
+    def media_close():
+        seen.append("media")
+        raise OSError("second media error")
+
+    monkeypatch.setattr(M.RolloutRecorder, "close", recorder_close)
+    recorder = object.__new__(M.Recorder)
+    recorder.media = NS(close=media_close)
+    with pytest.raises(OSError, match="first recorder error"):
+        recorder.close()
+    assert seen == ["recorder", "media"]

@@ -13,6 +13,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from levi.domain import aeri
+
 from .adapters import legacy_live
 from .journal import write_durable
 
@@ -62,6 +64,29 @@ class Ticket:
     submitted_ns: int
     request: dict
     path: Path
+    observed_ns: int
+    frames: tuple[tuple[str, str, str], ...]
+
+
+def retained_hash(path):
+    """Hash a bounded regular evidence file without following a final symlink."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= 16 * 1024 * 1024:
+            return None
+        digest, size = hashlib.sha256(), 0
+        while data := os.read(fd, 64 * 1024):
+            size += len(data)
+            if size > 16 * 1024 * 1024:
+                return None
+            digest.update(data)
+        return digest.hexdigest() if size == info.st_size else None
+    finally:
+        os.close(fd)
 
 
 class FileProvider:
@@ -90,15 +115,37 @@ class FileProvider:
         frames = []
         import cv2
 
-        if self.store is not None:
-            for view, pixels in observed["images_bgr"].items():
-                ok, data = cv2.imencode(".jpg", pixels)
-                if not ok:
-                    continue
-                saved = self.store.keep_frame(
-                    view + ":" + key(request["request_id"])[:16], data.tobytes()
-                )
-                frames.append({"view": view, **saved})
+        failure = None
+        if self.store is None:
+            failure = "current evidence store is missing"
+        else:
+            try:
+                for view, pixels in observed["images_bgr"].items():
+                    ok, data = cv2.imencode(".jpg", pixels)
+                    if not ok:
+                        raise ValueError("current camera frame encoding failed")
+                    encoded = data.tobytes()
+                    saved = self.store.keep_frame(
+                        view + ":" + key(request["request_id"])[:16], encoded
+                    )
+                    relative = Path(saved.get("file") or "")
+                    if (
+                        saved.get("skipped")
+                        or not saved.get("file")
+                        or relative.is_absolute()
+                        or ".." in relative.parts
+                        or saved.get("sha256") != hashlib.sha256(encoded).hexdigest()
+                        or retained_hash(self.store.folder / relative)
+                        != saved["sha256"]
+                    ):
+                        raise ValueError(
+                            "current camera evidence was not durably retained"
+                        )
+                    frames.append({"view": view, **saved})
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                failure = str(exc)
+        if not frames and failure is None:
+            failure = "current camera evidence is empty"
         base = self.root / self.kind
         for name in ("requests", "responses", "cancelled"):
             (base / name).mkdir(parents=True, exist_ok=True)
@@ -129,10 +176,79 @@ class FileProvider:
             (json.dumps(payload, indent=2) + "\n").encode(),
         )
         ticket = Ticket(
-            request["request_id"], self.clock.now(), dict(request), response
+            request["request_id"],
+            self.clock.now(),
+            dict(request),
+            response,
+            observed["observed_ns"],
+            tuple((f["ref"], f["sha256"], f["file"]) for f in frames),
         )
+        if failure is not None:
+            return self.unavailable(ticket, failure)
         self.pending[ticket.request_id] = ticket
         return ticket
+
+    def unavailable(self, ticket, reason):
+        return json.dumps(
+            {
+                "schema": aeri.SCHEMAS[
+                    "scene" if self.kind == "scene" else "judgement"
+                ],
+                "minor": aeri.MINOR,
+                "run_id": ticket.request["run_id"],
+                "emitted_wall_ns": time.time_ns(),
+                "kind": "unavailable",
+                "request_id": ticket.request_id,
+                "retryable": False,
+                "code": "contract_violation",
+                "detail": reason[:300],
+                "produced_ns": self.clock.now(),
+                "clock_domain": self.clock.domain,
+            }
+        ).encode()
+
+    def current_response(self, ticket, data):
+        contract = "scene" if self.kind == "scene" else "judgement"
+        try:
+            message = aeri.parse(
+                data, contract, specs={**aeri.BUILTIN_SPECS, **self.contract.spec()}
+            )
+            if message.kind == "unavailable":
+                return data
+            observed = (
+                message.observed_ns
+                if contract == "scene"
+                else message.observed_through_ns
+            )
+            if observed != ticket.observed_ns:
+                raise ValueError(
+                    "provider observation does not match this captured scene"
+                )
+            retained = {ref: digest for ref, digest, _ in ticket.frames}
+            if not retained or any(
+                retained_hash(self.store.folder / file) != digest
+                for _, digest, file in ticket.frames
+            ):
+                raise ValueError("current retained evidence is missing or changed")
+            cited = list(getattr(message, "evidence_refs", []))
+            for predicate in message.predicate_results:
+                if (
+                    predicate.required
+                    and predicate.value is not None
+                    and not predicate.evidence_refs
+                ):
+                    raise ValueError("a required predicate has no current evidence")
+                cited.extend(predicate.evidence_refs)
+            if not cited or any(
+                ref.kind != "frame" or retained.get(ref.ref) != ref.sha256
+                for ref in cited
+            ):
+                raise ValueError(
+                    "provider evidence is not one of this request's retained frames"
+                )
+            return data
+        except (aeri.AeriError, ValueError, TypeError) as exc:
+            return self.unavailable(ticket, str(exc))
 
     def collect(self, ticket, *, timeout_ns):
         deadline = self.clock.now() + timeout_ns
@@ -140,7 +256,7 @@ class FileProvider:
             data = read_answer(ticket.path)
             if data is not None:
                 del self.pending[ticket.request_id]
-                return data
+                return self.current_response(ticket, data)
             remaining = deadline - self.clock.now()
             if remaining <= 0:
                 return None
@@ -185,9 +301,10 @@ class FileEvents:
     def poll(self, stream_id, *, through_step, max_events):
         folder, seen = self.streams[stream_id]
         out = []
-        for path in sorted(folder.glob("event-*.json"))[:1000]:
-            if path.name in seen:
-                continue
+        unseen = (path for path in folder.glob("event-*.json") if path.name not in seen)
+        import heapq
+
+        for path in heapq.nsmallest(1000, unseen):
             data = read_answer(path)
             if data is None:
                 continue

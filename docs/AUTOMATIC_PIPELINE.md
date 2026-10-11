@@ -1535,7 +1535,7 @@ The operator prepares a JSON binding file outside the frozen job. Required keys:
 | `robot_url` | Reviewed loopback robot endpoint, `http://127.0.0.1:5000/` or `:5001/`; used only after terminal confirmation |
 | `health_file` | Absolute current C3 monitor file; a fresh green guard reading is mandatory before creating the environment |
 | `cameras` | Exactly `side` and `wrist`, distinct actual numeric serial strings |
-| `safety` | Exactly `min_z`, `max_xy`, `max_step_m`, `max_step_rad`, `home_pose` (six metres/radians), `home_duration_s`, `home_tolerance_mm`; use reviewed site limits, not guessed values. Home duration must fit the frozen home timeout |
+| `safety` | Exactly `min_z`, `max_xy`, `max_step_m`, `max_step_rad`, `home_pose` (six metres/radians), `home_duration_s`, `home_tolerance_mm`, `rx_range`, `ry_range`, `rz_range` (each a two-value increasing interval of at most 2π), `binarize_gripper` (explicit boolean); use reviewed site limits, not guessed values. Home duration must fit the frozen home timeout |
 | `policies` | Exactly `forward`, plus `reset` for policy reset; each is `{"host":"127.0.0.1","port": PORT}` for an already running, independently reviewed server |
 | `providers` | `{"online_url":"http://127.0.0.1:7882","file_root":"/absolute/provider-directory"}` |
 
@@ -1599,3 +1599,36 @@ not a hardware emergency-stop replacement. Fake-I/O tests cover both reset
 modes, reset failure, metadata mismatch, stop/fault fences, uncertain ack,
 provider freshness and no-connection `--check`. Camera codecs, server timing,
 physical stop behaviour and reset reliability remain for supervised acceptance.
+
+
+The binding freezes the rotation ranges and gripper normalization as well as the
+position limits. `--check` refuses a home rotation outside those ranges. Only the
+explicitly reviewed binary gripper normalization may change an action; any other
+silent clamp is refused. Tests evaluate the deployed client's three pure clamp
+functions from its AST when `LEVI_TEST_FR3_CLIENT_SOURCE` names that source file;
+they never import its hardware modules.
+
+Before any SDK import or connection, execution holds the host's single physical
+arm lock `/tmp/levi-aeri-fr3-arm.lock` across all run ids, rollout roots, worktrees
+and both ports 5000/5001. The file is intentionally retained; closing its file
+descriptor releases the kernel lock. This coordinates bridge processes only.
+The operator must independently confirm that legacy clients and external robot
+controllers are stopped; the lock cannot govern those processes.
+
+Every motion HTTP response must be a known route-specific acknowledgement
+(`Clear`, `Moved`, `Opened`, `Closed`, `Moved Gripper`, or an explicit successful
+JSON response). A negative, empty, or unknown response immediately prevents the
+next route and locks uncertain delivery, without replay. The nested step result
+must also match the acknowledged pose and any sent gripper command. A gripper
+`None` is accepted only when no new gripper command was sent.
+
+Scene and reset-goal replies now cite only frames durably retained by their own
+request ticket: exact reference, SHA256 and captured observation time. Every
+read required predicate needs current frame evidence. All cited frames must
+still exist with the same hash. Encoding/storage failure, old references,
+missing predicate evidence, or altered files yield an unavailable result. The
+transport does not infer model truth; a real scene/reset/events worker remains
+unimplemented, and file transport alone does not make a hardware run ready.
+Events beyond 1000 consumed files remain readable. Media shutdown attempts every
+writer/file before reporting the first error. `--scene-question` cannot be mixed
+with `--check`, `--execute`, job or binding options, so `--check` stays read-only.
