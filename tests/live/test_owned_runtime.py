@@ -170,7 +170,10 @@ def test_vllm_sdk_generate_exhaustion_precedes_device_pause_ack(monkeypatch):
             events.append("shutdown")
 
     factory = SimpleNamespace(
-        load=Engine, require_engine=lambda engine: None, capability_id="owned-vllm"
+        load=Engine,
+        require_engine=lambda engine: None,
+        close_engine=lambda engine: None,
+        capability_id="owned-vllm",
     )
     pipe = Pipe(
         [

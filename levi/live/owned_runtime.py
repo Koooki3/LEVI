@@ -194,8 +194,8 @@ class FrozenTorchFactory:
     def capability_id(self):
         return "torch-owned:" + hashlib.sha256(repr(self).encode()).hexdigest()
 
-    def reviewed_factory(self, *, allowed_bundles=()):
-        from levi.live.owned_source import FrozenSourceBundle
+    def reviewed_factory(self, *, allowed_bundles=(), load_transaction=None):
+        from levi.live.owned_source import FrozenSourceBundle, SourceLoadTransaction
 
         if self.source_root is None:
             raise ValueError(
@@ -209,8 +209,9 @@ class FrozenTorchFactory:
         bundle = FrozenSourceBundle(
             self.source_root, hashes, allowed_bundles=allowed_bundles
         )
-        bundle.install()
+        transaction = load_transaction or SourceLoadTransaction()
         try:
+            transaction.install(bundle)
             module = bundle.import_module(self.module)
             factory = getattr(module, self.name)
             if (
@@ -223,25 +224,35 @@ class FrozenTorchFactory:
                     "factory entrypoint is outside its frozen execution module"
                 )
             bundle.require_loaded()
+            if load_transaction is None:
+                factory._owned_source_lifetime = transaction.commit()
             return factory
         except BaseException:
-            bundle.close()
+            if load_transaction is None:
+                transaction.close()
             raise
 
     def load(self):
         from levi.live.owned_source import (
             FrozenCriticalBindings,
+            SourceLoadTransaction,
             frozen_distribution_bundle,
         )
 
-        bundle = frozen_distribution_bundle(
-            "torch", "torch", self.torch_version, self.torch_source_hashes
-        )
-        bundle.install()
-        try:
+        with SourceLoadTransaction() as transaction:
+            bundle = transaction.install(
+                frozen_distribution_bundle(
+                    "torch",
+                    "torch",
+                    self.torch_version,
+                    self.torch_source_hashes,
+                )
+            )
             torch = bundle.import_module("torch")
             critical = FrozenCriticalBindings((bundle,))
-            factory = self.reviewed_factory(allowed_bundles=(bundle,))
+            factory = self.reviewed_factory(
+                allowed_bundles=(bundle,), load_transaction=transaction
+            )
             if (
                 str(torch.__version__) != self.torch_version
                 or not torch.cuda.is_available()
@@ -255,10 +266,8 @@ class FrozenTorchFactory:
             critical.require()
             bundle.require_function(torch.cuda.synchronize)
             model._owned_sdk_critical = critical
+            model._owned_source_lifetime = transaction.commit()
             return torch, device, model
-        except BaseException:
-            bundle.close()
-            raise
 
 
 class CgroupScope:
@@ -442,6 +451,7 @@ def _serve(connection, factory, launch_id):
     after inference exits and all Python request workers have ended. Transport
     completion and a parent thread joining never synthesize an SDK idle ACK.
     """
+    model = None
     try:
         if _receive(connection) != ("enrolled", launch_id):
             return
@@ -491,7 +501,11 @@ def _serve(connection, factory, launch_id):
         except (EOFError, BrokenPipeError, OSError):
             pass
     finally:
-        connection.close()
+        try:
+            if type(factory) is FrozenTorchFactory and model is not None:
+                model._owned_source_lifetime.close()
+        finally:
+            connection.close()
 
 
 class OwnedModelWorker:

@@ -503,3 +503,12 @@ containers, including the actual Torch synchronize. Dynamic critical state that
 cannot retain these bindings is refused. The seal does not certify unimplemented
 remote/native SDK worker provenance. Ordinary tiny factory.load-to-serve tests
 exercise this check without replacing load or require_function.
+
+Factory/SDK source loading uses one transaction. Failed hook installation,
+module initialization, factory build or engine validation rolls back every
+owned hook and exact newly created module. Successful private worker exit
+closes the same lifetime in reverse order; explicit vLLM callers use
+`close_engine(engine)`. External/preloaded/replacement modules are preserved,
+and closed bundles refuse subsequent imports. This cleanup concerns Python
+source lifetime only; physical device ownership still needs the kernel's
+complete fresh group-exit proof.

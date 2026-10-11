@@ -313,3 +313,146 @@ def test_sync_replacing_itself_is_rejected_by_post_pause_binding(sdk_tree, monke
     _serve_normal_factory(monkeypatch, factory, pipe)
     assert pipe.sent and all(message[1] is None for message in pipe.sent)
     assert not any(message[0] == "ready" for message in pipe.sent)
+
+
+def _assert_clean_sdk(before, preserved=None):
+    assert sys.meta_path == before
+    preserved = preserved or {}
+    for name, module in tuple(sys.modules.items()):
+        if name.split(".", 1)[0] in {"torch", "vllm", "closed_factory"}:
+            assert preserved.get(name) is module
+
+
+@pytest.mark.parametrize("name", ["torch", "vllm", "closed_factory"])
+def test_failed_install_rolls_back_owned_hooks_and_preserves_preload(
+    sdk_tree, monkeypatch, name
+):
+    _installed, factory = sdk_tree
+    before = list(sys.meta_path)
+    existing = ModuleType(name)
+    monkeypatch.setitem(sys.modules, name, existing)
+    with pytest.raises(ValueError, match="preloaded"):
+        factory.load()
+    _assert_clean_sdk(before, {name: existing})
+
+
+@pytest.mark.parametrize("stage", ["module", "build", "topology", "critical"])
+def test_actual_factory_failure_rolls_back_entire_source_transaction(sdk_tree, stage):
+    installed, factory = sdk_tree
+    before = list(sys.meta_path)
+    source = installed / "closed_factory.py"
+    code = {
+        "module": "raise RuntimeError('module failed')\ndef build(**kwargs): pass\n",
+        "build": "def build(**kwargs): raise RuntimeError('build failed')\n",
+        "topology": (
+            "def build(device=None, sdk=None):\n"
+            "    engine=sdk.AsyncLLM()\n"
+            "    engine.vllm_config.parallel_config.tensor_parallel_size=2\n"
+            "    return engine\n"
+        ),
+        "critical": (
+            "import torch.cuda\n"
+            "def build(device=None, sdk=None):\n"
+            "    torch.cuda.synchronize=lambda *args: None\n"
+            "    return sdk.AsyncLLM()\n"
+        ),
+    }[stage]
+    source.write_text(code)
+    factory = replace(
+        factory, code_sha256=hashlib.sha256(source.read_bytes()).hexdigest()
+    )
+    with pytest.raises((ValueError, RuntimeError)):
+        factory.load()
+    _assert_clean_sdk(before)
+
+
+def test_successful_engine_close_is_idempotent_and_exact_owner_only(sdk_tree):
+    _installed, factory = sdk_tree
+    before = list(sys.meta_path)
+    engine = factory.load()
+    external = ModuleType("torch.cuda")
+    sys.modules["torch.cuda"] = external
+    factory.close_engine(engine)
+    factory.close_engine(engine)
+    _assert_clean_sdk(before, {"torch.cuda": external})
+    with pytest.raises(ImportError, match="lifetime is closed"):
+        engine._owned_sdk_bundles[0].import_module("torch")
+
+
+def test_normal_serve_closes_factory_and_sdk_modules(sdk_tree, monkeypatch):
+    _installed, factory = sdk_tree
+    before = list(sys.meta_path)
+    pipe = _SdkPipe([("enrolled", "normal-load-chain"), ("stop", 1, None)])
+    _serve_normal_factory(monkeypatch, factory, pipe)
+    assert pipe.closed and pipe.sent[0][0] == "ready"
+    _assert_clean_sdk(before)
+
+
+def test_failed_barrier_serve_also_closes_entire_source_lifetime(sdk_tree, monkeypatch):
+    _installed, factory = sdk_tree
+    before = list(sys.meta_path)
+
+    class MutatingPipe(_SdkPipe):
+        def send_bytes(self, value):
+            super().send_bytes(value)
+            if self.sent[-1][0] == "ready":
+                sys.modules["vllm.v1.engine.async_llm"].synchronize = lambda: None
+
+    pipe = MutatingPipe([("enrolled", "normal-load-chain"), ("barrier", 1, None)])
+    _serve_normal_factory(monkeypatch, factory, pipe)
+    assert pipe.closed and any(message[0] == "error" for message in pipe.sent)
+    _assert_clean_sdk(before)
+
+
+def test_closed_bundle_refuses_before_any_ordinary_import(sdk_tree, monkeypatch):
+    _installed, factory = sdk_tree
+    engine = factory.load()
+    factory.close_engine(engine)
+
+    def unsafe_import(*args, **kwargs):
+        raise AssertionError("closed bundle reached ordinary import")
+
+    monkeypatch.setattr(importlib, "import_module", unsafe_import)
+    with pytest.raises(ImportError, match="lifetime is closed"):
+        engine._owned_sdk_bundles[0].import_module("torch")
+
+
+def test_standalone_factory_has_explicit_owned_cleanup_lifetime(sdk_tree):
+    _installed, factory = sdk_tree
+    before = list(sys.meta_path)
+    build = factory.reviewed_factory()
+    assert "closed_factory" in sys.modules
+    build._owned_source_lifetime.close()
+    build._owned_source_lifetime.close()
+    _assert_clean_sdk(before)
+
+
+@pytest.mark.parametrize("valid", [False, True])
+def test_torch_load_uses_same_transaction_for_failure_and_success(sdk_tree, valid):
+    installed, vllm_factory = sdk_tree
+    before = list(sys.meta_path)
+    source = installed / "closed_factory.py"
+    source.write_text(
+        "def build(device=None, sdk=None):\n"
+        + (
+            "    def model(payload): return payload\n    return model\n"
+            if valid
+            else "    return None\n"
+        )
+    )
+    factory = FrozenTorchFactory(
+        "closed_factory",
+        "build",
+        hashlib.sha256(source.read_bytes()).hexdigest(),
+        "frozen",
+        "cuda:0",
+        source_root=str(installed),
+        torch_source_hashes=vllm_factory.torch_source_hashes,
+    )
+    if valid:
+        _torch, _device, model = factory.load()
+        model._owned_source_lifetime.close()
+    else:
+        with pytest.raises(TypeError, match="callable"):
+            factory.load()
+    _assert_clean_sdk(before)

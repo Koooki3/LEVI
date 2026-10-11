@@ -369,3 +369,10 @@ SDK/native 闭包和 owned SDK 子进程 bootstrap 尚未安装，真实入口�
 引用容器，包括实际 Torch synchronize。无法保留这些绑定的动态关键状态
 拒绝；封存不证明尚未实现的 remote/native SDK worker 来源。专属小假包测试
 直接使用普通 factory.load 到 serve 链，不替换 load 或 require_function。
+
+工厂与 SDK 源码加载采用同一事务。钩子安装、模块初始化、工厂构建或
+引擎校验失败时，撤销全部本次钩子及其确切创建的模块。私有 worker
+正常或异常结束时按安装逆序关闭同一生命周期；直接调用 vLLM 的软件
+入口须调用 `close_engine(engine)`。外部预加载及替换对象保持原样，
+关闭后的 bundle 拒绝继续导入。这里清理的是 Python 源码生命周期；
+物理设备所有权仍须原内核完整且新鲜的群组退出证明才能释放。

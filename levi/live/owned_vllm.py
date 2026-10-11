@@ -56,6 +56,7 @@ class FrozenVllmFactory(FrozenTorchFactory):
     def load(self):
         from levi.live.owned_source import (
             FrozenCriticalBindings,
+            SourceLoadTransaction,
             frozen_distribution_bundle,
         )
 
@@ -79,14 +80,16 @@ class FrozenVllmFactory(FrozenTorchFactory):
         )
         torch_bundle.allowed_bundles = (sdk_bundle,)
         bundles = (torch_bundle, sdk_bundle)
-        try:
+        with SourceLoadTransaction() as transaction:
             for bundle in bundles:
-                bundle.install()
+                transaction.install(bundle)
             torch = torch_bundle.import_module("torch")
             sdk = sdk_bundle.import_module("vllm")
             async_module = sdk_bundle.import_module("vllm.v1.engine.async_llm")
             critical = FrozenCriticalBindings(bundles)
-            factory = self.reviewed_factory(allowed_bundles=bundles)
+            factory = self.reviewed_factory(
+                allowed_bundles=bundles, load_transaction=transaction
+            )
             if (
                 str(torch.__version__) != self.torch_version
                 or not torch.cuda.is_available()
@@ -115,11 +118,16 @@ class FrozenVllmFactory(FrozenTorchFactory):
             engine._owned_sdk_bundles = bundles
             engine._owned_sdk_critical = critical
             self.require_engine(engine)
+            engine._owned_source_lifetime = transaction.commit()
             return engine
-        except BaseException:
-            for bundle in bundles:
-                bundle.close()
-            raise
+
+    def close_engine(self, engine):
+        from levi.live.owned_source import OwnedSourceLifetime
+
+        lifetime = getattr(engine, "_owned_source_lifetime", None)
+        if type(lifetime) is not OwnedSourceLifetime:
+            raise ValueError("actual engine source lifetime required")
+        lifetime.close()
 
     def require_engine(self, engine):
         from levi.live.owned_source import FrozenCriticalBindings, FrozenSourceBundle
@@ -153,9 +161,10 @@ def serve_vllm(connection, factory, launch_id):
 
         if await asyncio.to_thread(_receive, connection) != ("enrolled", launch_id):
             return
-        engine = factory.load()
-        worker = process_identity(os.getpid())
+        engine = None
         try:
+            engine = factory.load()
+            worker = process_identity(os.getpid())
 
             async def idle(epoch, mode="wait"):
                 # In the frozen implementation this Future resolves only after
@@ -197,8 +206,12 @@ def serve_vllm(connection, factory, launch_id):
         finally:
             # Device ownership is not released here. The supervisor still
             # requires empty complete containment before a physical handoff.
-            factory.require_engine(engine)
-            engine.shutdown()
+            if engine is not None:
+                try:
+                    factory.require_engine(engine)
+                    engine.shutdown()
+                finally:
+                    factory.close_engine(engine)
 
     try:
         asyncio.run(run())

@@ -89,6 +89,7 @@ class _SourceLoader(importlib.abc.Loader):
     def exec_module(self, module):
         if module.__spec__.loader is not self or module.__spec__.origin != self.origin:
             raise ValueError("frozen source loader/spec changed")
+        self.bundle._owned_modules[self.name] = module
         module.__file__ = self.origin
         module.__cached__ = None
         namespace = dict(vars(builtins))
@@ -126,6 +127,7 @@ class FrozenSourceBundle(importlib.abc.MetaPathFinder):
         self.allowed_bundles = tuple(allowed_bundles)
         self.sources = {}
         self._facades = {}
+        self._owned_modules = {}
         self._installed = False
         for name, expected in hashes:
             pieces = name.split(".")
@@ -154,6 +156,8 @@ class FrozenSourceBundle(importlib.abc.MetaPathFinder):
         )
 
     def _validate_name(self, name):
+        if not self._installed:
+            raise ImportError("owned source lifetime is closed")
         if not self._allowed(name):
             raise ImportError("factory dependency is outside the frozen closure")
         for end in range(1, len(name.split(".")) + 1):
@@ -312,6 +316,8 @@ class FrozenSourceBundle(importlib.abc.MetaPathFinder):
         return None
 
     def require_module(self, name):
+        if not self._installed:
+            raise ImportError("owned source lifetime is closed")
         module = sys.modules.get(name)
         loader = getattr(getattr(module, "__spec__", None), "loader", None)
         if (
@@ -325,6 +331,7 @@ class FrozenSourceBundle(importlib.abc.MetaPathFinder):
         return module
 
     def import_module(self, name):
+        self._validate_name(name)
         importlib.import_module(name)
         return self.require_module(name)
 
@@ -340,6 +347,8 @@ class FrozenSourceBundle(importlib.abc.MetaPathFinder):
             )
 
     def require_loaded(self):
+        if not self._installed:
+            raise ImportError("owned source lifetime is closed")
         roots = {name.split(".", 1)[0] for name in self.sources}
         for name in tuple(sys.modules):
             if name.split(".", 1)[0] in roots:
@@ -349,6 +358,20 @@ class FrozenSourceBundle(importlib.abc.MetaPathFinder):
         if self in sys.meta_path:
             sys.meta_path.remove(self)
         self._installed = False
+        for name, module in sorted(
+            self._owned_modules.items(),
+            key=lambda item: item[0].count("."),
+            reverse=True,
+        ):
+            # Do not delete an external replacement or a pre-existing module.
+            if sys.modules.get(name) is module:
+                del sys.modules[name]
+            parent_name, _, child_name = name.rpartition(".")
+            parent = sys.modules.get(parent_name)
+            if parent is not None and vars(parent).get(child_name) is module:
+                del vars(parent)[child_name]
+        self._owned_modules.clear()
+        self._facades.clear()
 
 
 def frozen_distribution_bundle(
@@ -481,3 +504,48 @@ class FrozenCriticalBindings:
 
 
 _ABSENT = object()
+
+
+class OwnedSourceLifetime:
+    """Only bundles installed by this load; close in reverse installation order."""
+
+    def __init__(self, bundles):
+        self.bundles = tuple(bundles)
+        self.closed = False
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        for bundle in reversed(self.bundles):
+            bundle.close()
+
+
+class SourceLoadTransaction:
+    """Own every SDK/factory hook and module through one explicit transaction."""
+
+    def __init__(self):
+        self.bundles = []
+        self._committed = False
+
+    def __enter__(self):
+        return self
+
+    def install(self, bundle):
+        # Include a partial install in the rollback set before doing any work.
+        self.bundles.append(bundle)
+        return bundle.install()
+
+    def commit(self):
+        if self._committed:
+            raise ValueError("source load transaction already committed")
+        lifetime = OwnedSourceLifetime(self.bundles)
+        self._committed = True
+        return lifetime
+
+    def close(self):
+        OwnedSourceLifetime(self.bundles).close()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_type is not None or not self._committed:
+            self.close()
