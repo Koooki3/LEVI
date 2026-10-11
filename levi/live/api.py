@@ -1087,11 +1087,15 @@ def stats_export(
     since: float | None = None,
     lang: str = "en",
     include_excluded: bool = False,
+    expected_sources: str | None = None,
 ):
     """The same statistics as a download: ``csv`` (one row per episode),
     ``json`` (everything) or ``md`` (a readable report)."""
+    expected = result_index.expected_statistics_sources(expected_sources)
     config = _result_config()
     if config is None:
+        if expected is not None:
+            raise HTTPException(409, {"reason": "statistics_export_source_mismatch"})
         return _disabled()
     if format not in EXPORTS:
         raise HTTPException(400, "format is csv, json or md")
@@ -1105,6 +1109,7 @@ def stats_export(
         since=since,
         include_excluded=include_excluded,
     )
+    result_index.match_statistics_export_sources(expected, sources["source_identities"])
     payload = statsview.build(
         config,
         dataset=dataset,
@@ -1128,6 +1133,11 @@ def stats_export(
         headers={
             "Content-Disposition": _attachment(stem, format),
             "Cache-Control": "no-store",
+            **(
+                {"X-LEVI-Stats-Source-Binding": result_index.STATS_BINDING_SCHEMA}
+                if expected is not None
+                else {}
+            ),
         },
     )
 

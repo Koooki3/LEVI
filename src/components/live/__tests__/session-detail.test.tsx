@@ -240,6 +240,61 @@ describe("individual live session", () => {
     });
   }
 
+  test("bound export HTTP 409 retains clear feedback and revokes statistics download entries", async () => {
+    let changed = false;
+    let href = "";
+    globalThis.fetch = (async (path: unknown) => {
+      const value = String(path);
+      if (value.includes("/results/session?"))
+        return Response.json(
+          resultFixture({ analysis: null, records: [], runs: [] }),
+        );
+      if (value.includes("/stats/export?")) {
+        href = value;
+        changed = true;
+        return new Response("source changed", { status: 409 });
+      }
+      return Response.json(
+        statisticsFixture({
+          source_identities: [
+            statisticsSourceFixture({
+              root: changed ? "/foreign-root" : "/fixture",
+            }),
+          ],
+          episodes: {
+            rows: [{ demo: "verified-row", state: "done" }],
+            total: 1,
+          },
+        }),
+      );
+    }) as typeof fetch;
+    const { host } = await render(
+      <SessionDetail identity={identityOf(session)} />,
+    );
+    await waitFor(() => host.textContent?.includes("verified-row"));
+    await click(host.querySelector('a[href*="/stats/export"]'));
+    await waitFor(() =>
+      host.textContent?.includes(
+        "Statistics source changed. Refresh this session before downloading.",
+      ),
+    );
+    await waitFor(() =>
+      host.textContent?.includes("Statistics source could not be verified"),
+    );
+    expect(
+      JSON.parse(
+        new URL(href, "http://localhost").searchParams.get("expected_sources")!,
+      ).identities,
+    ).toEqual([statisticsSourceFixture()]);
+    expect(host.querySelector('a[href*="/stats/export"]')).toBeNull();
+    expect(host.textContent).not.toContain("verified-row");
+    expect(
+      [...host.querySelectorAll("button")].some(
+        (button) => button.textContent === "Refresh",
+      ),
+    ).toBe(true);
+  });
+
   test("same dataset and run rebound from root A to root B clears the entire aggregate and export", async () => {
     current = [{ ...session, state: "running" }];
     let rebound = false;

@@ -196,15 +196,29 @@ export function statsPath(scope: StatsScope, limit: number): string {
   return `stats${query(scope, { limit: String(limit) })}`;
 }
 
+export const STATS_BINDING_SCHEMA = "levi.live.stats-source-binding.v1";
+
 /** The download link of one export format for a scope, in a language. */
 export function exportHref(
   format: ExportFormat,
   scope: StatsScope,
   language: string,
+  sources?: readonly StatsSourceIdentity[],
 ): string {
   return `/api/levi/live/stats/export${query(scope, {
     format,
     lang: language === "zh" ? "zh" : "en",
+    ...(sources
+      ? {
+          expected_sources: JSON.stringify({
+            schema: STATS_BINDING_SCHEMA,
+            identities: sources.map((source) => ({
+              ...source,
+              datasets: [...source.datasets].sort(),
+            })),
+          }),
+        }
+      : {}),
   })}`;
 }
 

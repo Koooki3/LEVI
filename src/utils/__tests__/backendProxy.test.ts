@@ -274,6 +274,33 @@ describe("forwardedCookie", () => {
 });
 
 describe("backendProxy", () => {
+  test("preserves only the upstream statistics binding acknowledgement", async () => {
+    const schema = "levi.live.stats-source-binding.v1";
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response("bound export", {
+          headers: { "X-LEVI-Stats-Source-Binding": schema },
+        }),
+      ),
+    ) as unknown as typeof fetch;
+    const response = await call("GET", { host: "localhost:7860" }, [
+      "live",
+      "stats",
+      "export",
+    ]);
+    expect(response.headers.get("X-LEVI-Stats-Source-Binding")).toBe(schema);
+    expect(await response.text()).toBe("bound export");
+    globalThis.fetch = mock(() =>
+      Promise.resolve(new Response("unbound export")),
+    ) as unknown as typeof fetch;
+    const unbound = await call(
+      "GET",
+      { host: "localhost:7860", "X-LEVI-Stats-Source-Binding": schema },
+      ["live", "stats", "export"],
+    );
+    expect(unbound.headers.get("X-LEVI-Stats-Source-Binding")).toBeNull();
+  });
+
   test("a read from the page is forwarded with the UI token", async () => {
     const response = await call("GET", { host: "localhost:7860" });
     expect(response.status).toBe(200);

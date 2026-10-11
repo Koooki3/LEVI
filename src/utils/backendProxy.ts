@@ -264,6 +264,8 @@ export async function backendProxy(
       "content-disposition",
       "etag",
       "x-levi-annotation-revision",
+      // Session downloads require the backend to confirm the pinned source binding.
+      "x-levi-stats-source-binding",
       "last-modified",
       // Dataset files change while LEVI runs (levi/sync.py): keep the
       // backend's "revalidate before reuse" policy.

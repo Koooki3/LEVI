@@ -9,16 +9,12 @@ import { SessionCard } from "./session-panels";
 import { findSession, identityOf, type SessionIdentity } from "./session-route";
 import { useLiveStats } from "./use-live-stats";
 import { EPISODE_PAGE, type EpisodeView } from "./stats-logic";
-import {
-  KeyFigures,
-  EpisodesTable,
-  ExportLinks,
-  StatsEmpty,
-} from "./stats-panel";
+import { KeyFigures, EpisodesTable, StatsEmpty } from "./stats-panel";
 import { canShowStatistics, resultSessionPath } from "./result-api";
 import { useResults } from "./use-results";
 import { SessionResultPanel } from "./session-results";
 import { sessionIsBusy } from "./live-filters";
+import { SessionStatisticsExport } from "./session-statistics-export";
 import { sessionStatisticsMatch } from "./session-stats-source";
 
 export function SessionDetail({
@@ -38,6 +34,7 @@ export function SessionDetail({
     includeExcluded: false,
   };
   const [limit, setLimit] = useState(EPISODE_PAGE);
+  const [exportError, setExportError] = useState("");
   const [view, setView] = useState<EpisodeView>("latency");
   // A legacy dataset/run bookmark can use a uniquely matched current source,
   // but never guess a root from a display name or use old statistics as permission.
@@ -80,6 +77,7 @@ export function SessionDetail({
     return () => clearInterval(timer);
   }, [offline, statsEnabled, stats.refresh]);
   const refresh = () => {
+    setExportError("");
     poll.refresh();
     resultRequest.refresh();
   };
@@ -164,7 +162,35 @@ export function SessionDetail({
               </Note>
             ) : (
               <>
-                {statsData && <ExportLinks scope={scope} />}
+                {exportError && (
+                  <Problem
+                    title={t("Could not download statistics")}
+                    why={t(exportError)}
+                    fix={
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          setExportError("");
+                          refresh();
+                          stats.refresh();
+                        }}
+                      >
+                        {t("Refresh")}
+                      </Button>
+                    }
+                  />
+                )}
+                {statsData && (
+                  <SessionStatisticsExport
+                    scope={scope}
+                    sources={statsData.source_identities ?? []}
+                    onSuccess={() => setExportError("")}
+                    onError={(message) => {
+                      setExportError(message);
+                      stats.refresh();
+                    }}
+                  />
+                )}
                 {invalidStatsSource && (
                   <Note tone="warning" role="status">
                     {t(

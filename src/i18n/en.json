@@ -3870,5 +3870,8 @@
   "Quality and subtask analysis": "Quality and subtask analysis",
   "Performance statistics": "Performance statistics",
   "Session metadata and progress": "Session metadata and progress",
-  "Statistics source could not be verified. Refresh to check this session again.": "Statistics source could not be verified. Refresh to check this session again."
+  "Statistics source could not be verified. Refresh to check this session again.": "Statistics source could not be verified. Refresh to check this session again.",
+  "Could not download statistics": "Could not download statistics",
+  "Statistics source changed. Refresh this session before downloading.": "Statistics source changed. Refresh this session before downloading.",
+  "Could not download statistics. Refresh this session and try again.": "Could not download statistics. Refresh this session and try again."
 }

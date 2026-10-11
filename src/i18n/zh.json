@@ -3870,5 +3870,8 @@
   "Quality and subtask analysis": "质量与子任务分析",
   "Performance statistics": "性能统计",
   "Session metadata and progress": "会话参数与进度",
-  "Statistics source could not be verified. Refresh to check this session again.": "统计来源尚未核实。请刷新以重新检查此会话。"
+  "Statistics source could not be verified. Refresh to check this session again.": "统计来源尚未核实。请刷新以重新检查此会话。",
+  "Could not download statistics": "无法下载统计",
+  "Statistics source changed. Refresh this session before downloading.": "统计来源已变化。请刷新此会话后再下载。",
+  "Could not download statistics. Refresh this session and try again.": "无法下载统计。请刷新此会话后重试。"
 }

@@ -1641,6 +1641,91 @@ def legacy_sources(
     return sources
 
 
+STATS_BINDING_SCHEMA = "levi.live.stats-source-binding.v1"
+MAX_STATS_BINDING_BYTES = 8192
+_SOURCE_FIELDS = {"root", "group", "task", "run_id", "session_id", "datasets"}
+
+
+def _canonical_statistics_sources(identities):
+    if not isinstance(identities, list) or not 1 <= len(identities) <= 16:
+        raise ValueError("Invalid source collection")
+    normalized = []
+    for item in identities:
+        if not isinstance(item, dict) or set(item) != _SOURCE_FIELDS:
+            raise ValueError("Invalid source identity")
+        root = item["root"]
+        if (
+            not isinstance(root, str)
+            or not root.startswith("/")
+            or len(root) > 4096
+            or any(ord(c) < 32 or ord(c) == 127 for c in root)
+        ):
+            raise ValueError("Invalid source root")
+        for field, pattern in (("group", PART), ("task", PART), ("run_id", SESSION)):
+            if not isinstance(item[field], str) or not pattern.fullmatch(item[field]):
+                raise ValueError("Invalid source member")
+        sid = item["session_id"]
+        if sid is not None and (not isinstance(sid, str) or not SESSION.fullmatch(sid)):
+            raise ValueError("Invalid source session")
+        datasets = item["datasets"]
+        if (
+            not isinstance(datasets, list)
+            or not 1 <= len(datasets) <= 64
+            or any(not isinstance(x, str) or not DATASET.fullmatch(x) for x in datasets)
+            or len(set(datasets)) != len(datasets)
+        ):
+            raise ValueError("Invalid source datasets")
+        normalized.append({**item, "datasets": sorted(datasets)})
+    keys = [json.dumps(x, sort_keys=True, separators=(",", ":")) for x in normalized]
+    if len(set(keys)) != len(keys):
+        raise ValueError("Duplicate source identity")
+    return [item for _, item in sorted(zip(keys, normalized, strict=True))]
+
+
+def expected_statistics_sources(value):
+    """Bounded identity comparison input; expected roots are never opened as paths."""
+    if value is None:
+        return None
+
+    def unique_object(pairs):
+        result = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError("Duplicate binding member")
+            result[key] = item
+        return result
+
+    try:
+        if (
+            len(value) > MAX_STATS_BINDING_BYTES
+            or len(value.encode("utf-8")) > MAX_STATS_BINDING_BYTES
+        ):
+            raise ValueError("Binding is too large")
+        binding = json.loads(value, object_pairs_hook=unique_object)
+        if (
+            not isinstance(binding, dict)
+            or set(binding) != {"schema", "identities"}
+            or binding["schema"] != STATS_BINDING_SCHEMA
+        ):
+            raise ValueError("Invalid binding schema")
+        return _canonical_statistics_sources(binding["identities"])
+    except (ValueError, TypeError, RecursionError):
+        raise HTTPException(
+            400, {"reason": "invalid_statistics_source_binding"}
+        ) from None
+
+
+def match_statistics_export_sources(expected, actual):
+    if expected is None:
+        return
+    try:
+        matches = expected == _canonical_statistics_sources(actual)
+    except (ValueError, TypeError):
+        matches = False
+    if not matches:
+        raise HTTPException(409, {"reason": "statistics_export_source_mismatch"})
+
+
 def download(item, *, format="json", lang="en"):
     if format not in ("json", "markdown") or lang not in ("en", "zh"):
         raise HTTPException(400, "Unknown result download format or language")
