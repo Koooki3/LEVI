@@ -1150,6 +1150,19 @@ class Orchestrator:
         """ready | reset_required | unknown | unavailable (never ready
         without a fresh, fenced assessment that says so). Every assessment
         is kept in ``evidence/`` (T-CL-04), the refused ones too."""
+        if self.intervention is not None:
+            # A scene judgement owns a real epoch too. In particular, the
+            # subsequent reset may use a different episode identifier, which
+            # the shared runtime permits only with a strictly newer epoch.
+            # Persist before granting so restart cannot reuse this allocation.
+            self.policy_epoch += 1
+            self.journal.append(
+                "note",
+                authority=self._auth(),
+                control_epoch=self.journal.control_epoch,
+                policy_epoch=self.policy_epoch,
+                note={"code": "inference_epoch_reserved", "detail": episode_id},
+            )
         # Unique across restarts: the journal's next line number.
         request_id = f"{episode_id}:scene{self.journal.next_seq}"
         record = {
@@ -1173,7 +1186,7 @@ class Orchestrator:
                 decision, reason, message = self.intervention.invoke(
                     "judge",
                     episode_id,
-                    self.policy_epoch + 1,
+                    self.policy_epoch,
                     deadline_ns=self._now() + self.config.scene_timeout_ns,
                     call=lambda: self._assess_once(record),
                     interrupted=lambda: (

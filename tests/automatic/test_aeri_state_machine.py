@@ -381,7 +381,7 @@ def test_a_late_thread_holding_an_old_token_cannot_move():
 
 def test_tables_are_closed_over_the_contract_enums():
     pairs = list(itertools.product(sm.STATES, repeat=2))
-    assert len(pairs) == 169
+    assert len(pairs) == 225
     assert set(sm.TRANSITIONS) <= set(pairs)
 
 
