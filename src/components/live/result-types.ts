@@ -141,6 +141,7 @@ export interface ResultItem {
   status: ResultStatus;
   reason: string | null;
   result_visibility: "visible" | "withheld" | "unknown";
+  statistics_visibility: "visible" | "withheld" | "unknown";
   source: {
     kind: "current_session" | "catalog_reference";
     catalog_versions?: {

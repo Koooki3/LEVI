@@ -15,7 +15,7 @@ import {
   ExportLinks,
   StatsEmpty,
 } from "./stats-panel";
-import { canShowResult, resultMatches, resultSessionPath } from "./result-api";
+import { canShowStatistics, resultSessionPath } from "./result-api";
 import { useResults } from "./use-results";
 import { SessionResultPanel } from "./session-results";
 import { sessionIsBusy } from "./live-filters";
@@ -50,13 +50,10 @@ export function SessionDetail({
     resultRequest.data && "identity" in resultRequest.data
       ? resultRequest.data
       : null;
-  const resultVisible =
+  const statsEnabled =
     !!sourceIdentity &&
     !!resultItem &&
-    resultMatches(resultItem, sourceIdentity) &&
-    canShowResult(resultItem) &&
-    resultItem.analysis != null;
-  const statsEnabled = !!identity && !!dataset && resultVisible;
+    canShowStatistics(resultItem, { ...sourceIdentity, dataset });
   const stats = useLiveStats(
     scope,
     limit,
@@ -116,9 +113,7 @@ export function SessionDetail({
           {session ? (
             <SessionCard
               session={
-                resultVisible
-                  ? session
-                  : { ...session, last_episode: undefined }
+                statsEnabled ? session : { ...session, last_episode: undefined }
               }
               open
               onToggle={() => {}}
@@ -145,7 +140,7 @@ export function SessionDetail({
                 ? ` · ${stats.data.summary.episodes.count} ${t("Episodes")}`
                 : ""}
             </summary>
-            {!resultVisible ? (
+            {!statsEnabled ? (
               <Note tone="info">
                 {t(
                   "Outcome statistics are shown only after the exact source confirms that results are visible.",

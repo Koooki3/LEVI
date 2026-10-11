@@ -213,7 +213,11 @@ describe("individual live session", () => {
     globalThis.fetch = (async (path: unknown) => {
       calls.push(String(path));
       return Response.json(
-        resultFixture({ analysis: null, reason: "gated_campaign_report" }),
+        resultFixture({
+          analysis: null,
+          reason: "gated_campaign_report",
+          statistics_visibility: "withheld",
+        }),
       );
     }) as typeof fetch;
     const { host } = await render(
@@ -222,6 +226,87 @@ describe("individual live session", () => {
     await waitFor(() =>
       host.textContent?.includes("passed its disclosure gate"),
     );
+    expect(calls.some((path) => path.includes("/stats?"))).toBe(false);
+    expect(host.querySelector('a[href*="/stats/export"]') === null).toBe(true);
+  });
+  test("trusted nonblind active legacy keeps live statistics while current analysis remains withheld", async () => {
+    current = [
+      {
+        ...session,
+        state: "running",
+        last_episode: { outcome: "success", steps: 8 },
+      },
+    ];
+    const calls: string[] = [];
+    globalThis.fetch = (async (path: unknown) => {
+      calls.push(String(path));
+      return String(path).includes("/results/session?")
+        ? Response.json(
+            resultFixture({
+              status: "active",
+              result_visibility: "withheld",
+              statistics_visibility: "visible",
+              analysis: null,
+              records: [],
+              runs: [],
+              reports: [],
+            }),
+          )
+        : Response.json({
+            enabled: true,
+            summary: { episodes: { count: 1 } },
+            episodes: {
+              rows: [{ demo: "trusted-active-legacy", state: "done" }],
+              total: 1,
+            },
+          });
+    }) as typeof fetch;
+    const { host } = await render(
+      <SessionDetail identity={identityOf(session)} />,
+    );
+    await waitFor(() => host.textContent?.includes("trusted-active-legacy"));
+    expect(calls.some((path) => path.includes("/stats?"))).toBe(true);
+    expect(host.querySelector('a[href*="/stats/export"]') !== null).toBe(true);
+    expect(
+      host.querySelector('a[href*="/results/session/download"]') === null,
+    ).toBe(true);
+    expect(host.querySelector("meter") === null).toBe(true);
+  });
+  test("an active source with withheld or unknown statistics privacy never requests old outcomes", async () => {
+    for (const visibility of ["withheld", "unknown"] as const) {
+      const calls: string[] = [];
+      globalThis.fetch = (async (path: unknown) => {
+        calls.push(String(path));
+        return Response.json(
+          resultFixture({
+            status: "active",
+            result_visibility: "withheld",
+            statistics_visibility: visibility,
+            analysis: null,
+          }),
+        );
+      }) as typeof fetch;
+      const { host } = await render(
+        <SessionDetail identity={identityOf(session)} />,
+      );
+      await waitFor(() => host.textContent?.includes("Evaluation in progress"));
+      expect(calls.some((path) => path.includes("/stats?"))).toBe(false);
+      expect(host.querySelector('a[href*="/stats/export"]') === null).toBe(
+        true,
+      );
+      expect(host.textContent).not.toContain("demo-7");
+    }
+  });
+  test("unknown statistics eligibility never falls back from visible analysis", async () => {
+    const calls: string[] = [];
+    globalThis.fetch = (async (path: unknown) => {
+      calls.push(String(path));
+      return Response.json(resultFixture({ statistics_visibility: "unknown" }));
+    }) as typeof fetch;
+    const { host } = await render(
+      <SessionDetail identity={identityOf(session)} />,
+    );
+    await waitFor(() => host.textContent?.includes("Analysis available"));
     expect(calls.some((path) => path.includes("/stats?"))).toBe(false);
     expect(host.querySelector('a[href*="/stats/export"]') === null).toBe(true);
   });

@@ -70,6 +70,21 @@ export function canShowResult(item: ResultItem): boolean {
     ["waiting_annotation", "partial", "reported", "stale"].includes(item.status)
   );
 }
+export function canShowStatistics(
+  item: ResultItem,
+  identity: SessionIdentity,
+): boolean {
+  return (
+    item.source?.kind === "current_session" &&
+    item.statistics_visibility === "visible" &&
+    !["blocked", "rebound", "archived", "missing_source"].includes(
+      item.status,
+    ) &&
+    resultMatches(item, identity) &&
+    !!identity.dataset &&
+    item.identity.datasets.includes(identity.dataset)
+  );
+}
 function safeViewerURL(href: string): URL | null {
   try {
     const url = new URL(href, "http://levi.invalid");

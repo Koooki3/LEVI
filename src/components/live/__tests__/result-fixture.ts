@@ -20,6 +20,12 @@ export function resultFixture(overrides: Partial<ResultItem> = {}): ResultItem {
     status: "reported",
     reason: null,
     result_visibility: "visible",
+    statistics_visibility:
+      overrides.result_visibility === "withheld"
+        ? "withheld"
+        : overrides.result_visibility === "unknown"
+          ? "unknown"
+          : "visible",
     source: {
       kind: "current_session",
       snapshot: "snapshot-hash",

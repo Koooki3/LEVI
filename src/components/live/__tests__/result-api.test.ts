@@ -3,6 +3,7 @@ import {
   annotationRunHref,
   resultEpisodeHref,
   canShowResult,
+  canShowStatistics,
   resultDownloadHref,
   resultIndexPath,
   resultMatches,
@@ -120,6 +121,35 @@ describe("precise result request identities", () => {
     ])
       expect(resultEpisodeHref({ ...viewer, viewer_href: href }, 7)).toBeNull();
     expect(resultEpisodeHref({ ...viewer, status: "unknown" }, 7)).toBeNull();
+  });
+  test("statistics eligibility is separate and requires exact verified dataset membership", () => {
+    const item = resultFixture({
+      status: "active",
+      result_visibility: "withheld",
+      statistics_visibility: "visible",
+      analysis: null,
+    });
+    const identity = resultIdentity(item);
+    expect(canShowStatistics(item, identity)).toBe(true);
+    expect(canShowResult(item)).toBe(false);
+    expect(canShowStatistics(item, { ...identity, dataset: "other" })).toBe(
+      false,
+    );
+    expect(canShowStatistics(item, { ...identity, root: "/other" })).toBe(
+      false,
+    );
+    expect(
+      canShowStatistics(
+        { ...item, statistics_visibility: "unknown" },
+        identity,
+      ),
+    ).toBe(false);
+    expect(canShowStatistics({ ...item, status: "rebound" }, identity)).toBe(
+      false,
+    );
+    expect(canShowStatistics({ ...item, status: "blocked" }, identity)).toBe(
+      false,
+    );
   });
   test("visibility is explicit: status alone never unlocks data", () => {
     expect(canShowResult(resultFixture())).toBe(true);
