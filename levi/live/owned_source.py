@@ -10,9 +10,11 @@ import hashlib
 import importlib
 import importlib.abc
 import importlib.machinery
+import importlib.metadata
 import importlib.util
 import sys
 import sysconfig
+import types
 from pathlib import Path
 
 _STDLIB_ROOT = Path(sysconfig.get_path("stdlib")).resolve()
@@ -94,10 +96,17 @@ class _SourceLoader(importlib.abc.Loader):
         module.__dict__["__builtins__"] = namespace
         # Execute exactly the verified immutable bytes, never a .pyc or a
         # second read of a path that could change after verification.
-        exec(  # noqa: S102 - execute only the already verified immutable source bytes
-            compile(self.source, self.origin, "exec", dont_inherit=True),
-            module.__dict__,
-        )
+        code = compile(self.source, self.origin, "exec", dont_inherit=True)
+        self.codes = []
+
+        def remember(value):
+            self.codes.append(value)
+            for child in value.co_consts:
+                if isinstance(child, types.CodeType):
+                    remember(child)
+
+        remember(code)
+        exec(code, module.__dict__)  # noqa: S102 - verified immutable source bytes
 
 
 class FrozenSourceBundle(importlib.abc.MetaPathFinder):
@@ -230,7 +239,51 @@ class FrozenSourceBundle(importlib.abc.MetaPathFinder):
         importlib.import_module(name)
         return self.require_module(name)
 
+    def require_function(self, function):
+        function = getattr(function, "__func__", function)
+        module = self.require_module(getattr(function, "__module__", ""))
+        loader = module.__spec__.loader
+        if not any(
+            getattr(function, "__code__", None) is code for code in loader.codes
+        ):
+            raise ValueError(
+                "SDK function is not compiled from the frozen source bytes"
+            )
+
+    def require_loaded(self):
+        roots = {name.split(".", 1)[0] for name in self.sources}
+        for name in tuple(sys.modules):
+            if name.split(".", 1)[0] in roots:
+                self.require_module(name)
+
     def close(self):
         if self in sys.meta_path:
             sys.meta_path.remove(self)
         self._installed = False
+
+
+def frozen_distribution_bundle(
+    distribution_name, package, version, hashes, *, allowed_bundles=()
+):
+    """Bind the actual resolver to every Python source in one installed package.
+
+    Native/third-party modules outside these explicitly composed bundles are
+    refused. They need their own reviewed binding before real SDK deployment.
+    """
+    if not hashes:
+        raise ValueError("complete installed SDK Python source manifest required")
+    distribution = importlib.metadata.distribution(distribution_name)
+    if distribution.version != version:
+        raise ValueError("installed SDK differs from frozen version")
+    root = Path(distribution.locate_file(package)).resolve(strict=True)
+    expected = set()
+    for path in root.rglob("*.py"):
+        if not path.resolve().is_relative_to(root):
+            raise ValueError("installed SDK source escapes its package root")
+        parts = path.relative_to(root).with_suffix("").parts
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        expected.add(".".join((package, *parts)))
+    if {name for name, _ in hashes} != expected:
+        raise ValueError("SDK manifest does not freeze every installed Python module")
+    return FrozenSourceBundle(root.parent, hashes, allowed_bundles=allowed_bundles)

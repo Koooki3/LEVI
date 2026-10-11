@@ -351,3 +351,11 @@ Torch 私有 factory 新合同是 `build(device=..., sdk=...)`。显式
 预加载模块、不同 origin/loader、未冻结依赖，以及解析到解释器目录之外的
 同名标准库均拒绝。SDK 对象显式注入；source hash 本身不是受信 loader 或
 完整调用闭包的审查批准。本轮没有安装生产 factory。
+
+SDK 执行现在必须提供真实已安装 Python 包的完整 `torch_source_hashes` 清单；
+vLLM 还须完整 `sdk_source_hashes`，八个 barrier hash 必须属于该完整清单。
+factory 执行前及 SDK idle ACK 前后，真实包解析路径、loader 与实际函数 code
+均须绑定已验证 bytes，预加载或 shadow 包拒绝。vLLM factory 同样接收
+`build(device=..., sdk=...)`。未绑定的 native/第三方导入拒绝。实际完整
+SDK/native 闭包和 owned SDK 子进程 bootstrap 尚未安装，真实入口保持关闭。
+仅测量小 CPU 包的绑定软件；完整真实包清单成本及 worker 来源尚未测量。

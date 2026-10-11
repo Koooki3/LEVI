@@ -479,3 +479,14 @@ executed. Preloaded modules, different origins/loaders, unfrozen imports and
 standard-library names resolving outside the interpreter are refused. SDK
 objects are explicitly injected; a source hash alone is not a trusted loader
 or approval of the complete dependency closure. No production factory is installed.
+
+SDK execution now requires complete `torch_source_hashes` and, for vLLM,
+`sdk_source_hashes` manifests of the actual installed Python packages. The eight
+barrier hashes must belong to that full package manifest. Package resolution,
+loader and executed function code must match the verified bytes before the
+factory runs and around SDK idle acknowledgments; preloaded/shadow packages
+are refused. vLLM factories receive `build(device=..., sdk=...)` too.
+Unbound native/third-party imports are refused. No complete real SDK/native
+closure or owned SDK child bootstrap has been installed, so the real entry
+remains closed. Tiny CPU package tests measure only the binding software;
+complete real-package manifest cost and worker provenance remain unmeasured.

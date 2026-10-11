@@ -7,11 +7,7 @@ closed. Existing RuntimeOwnership remains the sole execution scheduler.
 """
 
 import asyncio
-import hashlib
-import importlib
-import importlib.metadata
-from dataclasses import dataclass
-from pathlib import Path
+from dataclasses import dataclass, field
 
 from levi.live.owned_runtime import (
     FrozenTorchFactory,
@@ -41,6 +37,7 @@ class FrozenVllmFactory(FrozenTorchFactory):
 
     vllm_version: str
     barrier_hashes: tuple[tuple[str, str], ...]
+    sdk_source_hashes: tuple[tuple[str, str], ...] = field(default=(), kw_only=True)
 
     def __post_init__(self):
         super().__post_init__()
@@ -57,38 +54,79 @@ class FrozenVllmFactory(FrozenTorchFactory):
             raise ValueError("frozen installed barrier hashes required")
 
     def load(self):
-        distribution = importlib.metadata.distribution("vllm")
-        if distribution.version != self.vllm_version:
-            raise ValueError("installed vLLM differs from frozen SDK")
-        root = Path(distribution.locate_file("vllm"))
-        for relative, expected in self.barrier_hashes:
-            if hashlib.sha256((root / relative).read_bytes()).hexdigest() != expected:
-                raise ValueError("installed vLLM idle-barrier implementation changed")
-        factory = self.reviewed_factory()
-        import torch
-        from vllm.v1.engine.async_llm import AsyncLLM
+        from levi.live.owned_source import frozen_distribution_bundle
 
-        if (
-            str(torch.__version__) != self.torch_version
-            or not torch.cuda.is_available()
-        ):
-            raise ValueError("frozen accelerator SDK unavailable")
-        engine = factory(device=self.device)
-        if type(engine) is not AsyncLLM:
-            raise TypeError("factory must create the frozen private AsyncLLM engine")
-        parallel = engine.vllm_config.parallel_config
+        declared = dict(self.sdk_source_hashes)
         if any(
-            getattr(parallel, key, None) != 1
-            for key in (
-                "tensor_parallel_size",
-                "pipeline_parallel_size",
-                "data_parallel_size",
-            )
+            declared.get("vllm." + name[:-3].replace("/", ".")) != sha
+            for name, sha in self.barrier_hashes
         ):
-            raise ValueError("only one frozen engine/device topology is supported")
-        if getattr(engine.vllm_config, "kv_transfer_config", None) is not None:
-            raise ValueError("external KV connector cannot share owned barrier")
-        return engine
+            raise ValueError(
+                "barrier source must belong to the complete frozen SDK manifest"
+            )
+        torch_bundle = frozen_distribution_bundle(
+            "torch", "torch", self.torch_version, self.torch_source_hashes
+        )
+        sdk_bundle = frozen_distribution_bundle(
+            "vllm",
+            "vllm",
+            self.vllm_version,
+            self.sdk_source_hashes,
+            allowed_bundles=(torch_bundle,),
+        )
+        torch_bundle.allowed_bundles = (sdk_bundle,)
+        bundles = (torch_bundle, sdk_bundle)
+        try:
+            for bundle in bundles:
+                bundle.install()
+            torch = torch_bundle.import_module("torch")
+            sdk = sdk_bundle.import_module("vllm")
+            async_module = sdk_bundle.import_module("vllm.v1.engine.async_llm")
+            factory = self.reviewed_factory(allowed_bundles=bundles)
+            if (
+                str(torch.__version__) != self.torch_version
+                or not torch.cuda.is_available()
+            ):
+                raise ValueError("frozen accelerator SDK unavailable")
+            torch_bundle.require_function(torch.cuda.synchronize)
+            engine = factory(device=self.device, sdk=sdk)
+            if type(engine) is not async_module.AsyncLLM:
+                raise TypeError(
+                    "factory must create the frozen private AsyncLLM engine"
+                )
+            parallel = engine.vllm_config.parallel_config
+            if any(
+                getattr(parallel, key, None) != 1
+                for key in (
+                    "tensor_parallel_size",
+                    "pipeline_parallel_size",
+                    "data_parallel_size",
+                )
+            ):
+                raise ValueError("only one frozen engine/device topology is supported")
+            if getattr(engine.vllm_config, "kv_transfer_config", None) is not None:
+                raise ValueError("external KV connector cannot share owned barrier")
+            engine._owned_sdk_bundles = bundles
+            self.require_engine(engine)
+            return engine
+        except BaseException:
+            for bundle in bundles:
+                bundle.close()
+            raise
+
+    def require_engine(self, engine):
+        from levi.live.owned_source import FrozenSourceBundle
+
+        bundles = getattr(engine, "_owned_sdk_bundles", ())
+        if len(bundles) != 2 or any(
+            type(bundle) is not FrozenSourceBundle for bundle in bundles
+        ):
+            raise ValueError("actual engine SDK source binding required")
+        for bundle in bundles:
+            bundle.require_loaded()
+        for name in ("pause_generation", "resume_generation", "generate", "shutdown"):
+            function = getattr(engine, name)
+            bundles[1].require_function(function)
 
 
 def serve_vllm(connection, factory, launch_id):
@@ -111,7 +149,9 @@ def serve_vllm(connection, factory, launch_id):
             async def idle(epoch, mode="wait"):
                 # In the frozen implementation this Future resolves only after
                 # _finish_pause collective synchronize_device completes.
+                factory.require_engine(engine)
                 await engine.pause_generation(mode=mode, clear_cache=False)
+                factory.require_engine(engine)
                 return SdkIdleAck(worker, launch_id, epoch, factory.capability_id)
 
             _send(connection, ("ready", await idle(0), None))
@@ -125,6 +165,7 @@ def serve_vllm(connection, factory, launch_id):
                 if operation == "barrier":
                     _send(connection, ("idle", await idle(epoch), None))
                 elif operation == "infer":
+                    factory.require_engine(engine)
                     await engine.resume_generation()
                     # Sampling parameters are built inside the same private
                     # worker. No public OpenAI server, engine handle or socket.
@@ -145,6 +186,7 @@ def serve_vllm(connection, factory, launch_id):
         finally:
             # Device ownership is not released here. The supervisor still
             # requires empty complete containment before a physical handoff.
+            factory.require_engine(engine)
             engine.shutdown()
 
     try:

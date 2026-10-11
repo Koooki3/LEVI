@@ -176,6 +176,7 @@ class FrozenTorchFactory:
     device: str
     source_root: str | None = field(default=None, kw_only=True)
     source_hashes: tuple[tuple[str, str], ...] = field(default=(), kw_only=True)
+    torch_source_hashes: tuple[tuple[str, str], ...] = field(default=(), kw_only=True)
 
     def __post_init__(self):
         if (
@@ -227,19 +228,30 @@ class FrozenTorchFactory:
             raise
 
     def load(self):
-        factory = self.reviewed_factory()
-        import torch
+        from levi.live.owned_source import frozen_distribution_bundle
 
-        if (
-            str(torch.__version__) != self.torch_version
-            or not torch.cuda.is_available()
-        ):
-            raise ValueError("installed Torch/device differs from frozen SDK")
-        device = torch.device(self.device)
-        model = factory(device=device, sdk=torch)
-        if not callable(model):
-            raise TypeError("factory must return a synchronous model callable")
-        return torch, device, model
+        bundle = frozen_distribution_bundle(
+            "torch", "torch", self.torch_version, self.torch_source_hashes
+        )
+        bundle.install()
+        try:
+            torch = bundle.import_module("torch")
+            factory = self.reviewed_factory(allowed_bundles=(bundle,))
+            if (
+                str(torch.__version__) != self.torch_version
+                or not torch.cuda.is_available()
+            ):
+                raise ValueError("installed Torch/device differs from frozen SDK")
+            bundle.require_function(torch.cuda.synchronize)
+            device = torch.device(self.device)
+            model = factory(device=device, sdk=torch)
+            if not callable(model):
+                raise TypeError("factory must return a synchronous model callable")
+            bundle.require_loaded()
+            return torch, device, model
+        except BaseException:
+            bundle.close()
+            raise
 
 
 class CgroupScope:
@@ -430,7 +442,14 @@ def _serve(connection, factory, launch_id):
         worker = process_identity(os.getpid())
 
         def idle(epoch):
+            if type(factory) is FrozenTorchFactory:
+                bundle = torch.__spec__.loader.bundle
+                bundle.require_loaded()
+                bundle.require_function(torch.cuda.synchronize)
             torch.cuda.synchronize(device)
+            if type(factory) is FrozenTorchFactory:
+                bundle.require_loaded()
+                bundle.require_function(torch.cuda.synchronize)
             if any(
                 t is not threading.current_thread() and t.is_alive()
                 for t in threading.enumerate()
