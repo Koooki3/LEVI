@@ -4,6 +4,7 @@ arms, two segments each, a real dry run per segment, a report at the end;
 blinding, peeks, pause and resume, the report routes."""
 
 import json
+from pathlib import Path
 
 from campaign_guard import aeri_home_fixture, guard_fixture
 from test_api_campaign_common import (
@@ -64,7 +65,8 @@ def test_a_dry_run_campaign_runs_to_its_report(world):
     assert [s["segment"]["no"] for s in seen] == [1, 2, 3, 4]
     todo = seen[0]["todo"]
     assert todo["kind"] == "place_cards" and todo["challenge"]
-    assert todo["cards"] == plan["segments"][0]["cards"]
+    # A reset policy restores the scene; schedule slots are not layout cards.
+    assert todo["layout_source"] == "none" and todo["cards"] == []
     assert seen[0]["segment"]["total"] == 4
     assert done["blinded"] is False and done["todo"] is None
     assert {a["done"] for a in done["arms"]} == {4}
@@ -275,3 +277,47 @@ def test_the_report_can_be_made_again_for_a_basis(world):
     assert other.status_code == 200, other.text
     shown = world.client.get(f"{URL}/{cid}/report?basis=posthoc_verdict")
     assert shown.status_code == 200 and shown.json()["basis"] == "posthoc_verdict"
+
+
+def test_free_placement_candidates_run_without_layout_cards_or_controls(world):
+    job = world.make_job(strategy="human_assisted")
+    answer, plan = world.start(
+        job,
+        execution_mode="dry_run",
+        layouts={"source": "none"},
+        preregistered=False,
+        arms=[
+            {"id": "A", "checkpoint_id": "pi05_a", "role": "candidate"},
+            {"id": "B", "checkpoint_id": "recap_b", "role": "candidate"},
+        ],
+        trials_per_arm=2,
+        schedule={"kind": "blocked", "segment_trials": 2, "seed": 7},
+    )
+    assert answer.status_code == 202, answer.text
+    cid = answer.json()["campaign_id"]
+    seen = []
+    done = run_to_end(world, cid, segments=2, seen=seen)
+    assert len(seen) == 2 and all(
+        snap["todo"]["layout_source"] == "none"
+        and snap["todo"]["cards"] == []
+        and "freely placed" in snap["todo"]["detail"]
+        for snap in seen
+    )
+    assert all(segment["cards"] == [] for segment in plan["segments"])
+    assert done["state"] == "REPORTED"
+    report = world.client.get(f"{URL}/{cid}/report")
+    assert report.status_code == 200, report.text
+    manifest = report.json()["manifest"]
+    assert manifest["conclusion_level"] == "exploratory"
+    assert all(arm["role"] == "candidate" for arm in manifest["arms"])
+    frozen = json.loads(
+        (
+            Path(world.tmp)
+            / "aeri-home/campaign-jobs/campaigns"
+            / cid
+            / "campaign.plan.json"
+        ).read_text()
+    )
+    assert frozen["cards"] is None and frozen["layouts_sha256"] is None
+    assert frozen["campaign"]["control"]["fraction"] == 0
+    assert frozen["campaign"]["primary"] is None
