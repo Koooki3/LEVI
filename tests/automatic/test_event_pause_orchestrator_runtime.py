@@ -55,13 +55,17 @@ def load_kernel():
         "levi.domain._joint_resource_schema", root / "levi/domain/aeri.py"
     )
     broker = source_module(
-        "levi.live.workload_broker", root / "levi/live/workload_broker.py"
+        "levi.live._joint_workload_broker", root / "levi/live/workload_broker.py"
     )
     broker.aeri = schema  # exact dependency domain, no mocked kernel decisions
     runtime = source_module(
-        "levi.live.runtime_ownership", root / "levi/live/runtime_ownership.py"
+        "levi.live._joint_runtime_ownership", root / "levi/live/runtime_ownership.py"
     )
     runtime.aeri = schema
+    # The isolated runtime must use its matching broker classes, while
+    # production imports keep their canonical module and class identities.
+    for name in ("ExitProof", "SafeWindow", "WorkerIdentity", "WorkloadBroker", "_copy"):
+        setattr(runtime, name, getattr(broker, name))
     return schema, broker, runtime
 
 
@@ -605,3 +609,25 @@ class OrchestratorRuntimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_external_kernel_overlay_preserves_canonical_module_identities(monkeypatch):
+    from levi.automatic import intervention, orchestrator
+    from levi.live import runtime_ownership, workload_broker
+
+    canonical = {
+        "levi.automatic.intervention": intervention,
+        "levi.live.runtime_ownership": runtime_ownership,
+        "levi.live.workload_broker": workload_broker,
+    }
+    assert orchestrator.InferenceCycle is intervention.InferenceCycle
+    monkeypatch.setenv("LEVI_JOINT_KERNEL_ROOT", str(HERE.parents[2]))
+    schema, broker, runtime = load_kernel()
+    assert schema is not aeri and broker is not workload_broker
+    assert runtime is not runtime_ownership
+    assert runtime.WorkerIdentity is broker.WorkerIdentity
+    assert runtime.WorkloadBroker is broker.WorkloadBroker
+    assert runtime.aeri is broker.aeri is schema
+    for name, module in canonical.items():
+        assert sys.modules[name] is module
+    assert orchestrator.InferenceCycle is intervention.InferenceCycle

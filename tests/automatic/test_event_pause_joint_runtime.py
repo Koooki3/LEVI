@@ -4,26 +4,16 @@ Requires the resident-group kernel dependency (d82). No process or GPU probes.
 """
 
 import importlib.util
-import sys
 import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
+from levi.automatic import intervention
 from levi.automatic.reset_manager import SettleConfig
 from levi.domain import aeri
 from levi.live.runtime_ownership import RequestStopProof
 
-HERE = Path(__file__).resolve()
-CORE = HERE.parents[2] / "levi" / "automatic" / "intervention.py"
-# Under a composed tree this normal import suffices; the source loader also lets
-# a driver test this isolated module against a separately checked kernel tree.
-module_spec = importlib.util.spec_from_file_location(
-    "levi.automatic.intervention", CORE
-)
-intervention = importlib.util.module_from_spec(module_spec)
-sys.modules[module_spec.name] = intervention
-module_spec.loader.exec_module(intervention)
 
 
 @unittest.skipUnless(
