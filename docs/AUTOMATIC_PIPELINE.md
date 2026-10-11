@@ -1728,3 +1728,5 @@ activation. Forward/VLM/reset model handoff still depends on the reviewed
 Performance Architecture integration. Freeze the success judgement provider
 specification and physical binding before any real execution; the ordinary
 wizard alone does not establish those facts.
+
+A damaged or incomplete on-disk journal cannot resume. Both the shared control pump and terminal resume recheck it against the active writer; corruption locks that writer and leaves stop available. Legacy unsigned dry-run lookup requires a retained plan and matching valid journal header. New dry launches sign their frozen plan under the existing core key, so a genuine starting run remains visible before its first header exists.

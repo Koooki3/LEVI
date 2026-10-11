@@ -727,7 +727,8 @@ def assembled(
             if robot.stopped() or answer != "resume":
                 orch.stop("terminal-stop")
                 return orch.state
-            orch.resume(
+            control.resume_checked(
+                orch,
                 "terminal-resume-" + str(time.time_ns()),
                 expected_seq=orch.journal.next_seq,
                 environment_handled=True,

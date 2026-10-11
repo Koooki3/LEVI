@@ -1029,6 +1029,9 @@ def registered_run(run_id, path=None):
             or request.execution_mode != DRY_RUN
             or entry.get("execution_mode") != DRY_RUN
             or record.get("run_id") != run_id
+            or entry.get("run_id") != run_id
+            or entry.get("backend") != request.backend
+            or entry.get("plan_sha256") != record.get("plan_sha256")
         ):
             raise LaunchRefused("E_REQUEST", "unrecognized run registration")
         expected_dir = run_dir_of(dry_folder(run_id, request.keep_dir, path), run_id)
@@ -1040,7 +1043,51 @@ def registered_run(run_id, path=None):
             raise LaunchRefused(
                 "E_PLAN_CHANGED", "retained dry-run plan is invalid"
             ) from None
-        if kept is not None and kept["plan"].get("mode") != DRY_RUN:
+        scan = Journal.read(directory)
+        if "registration_mac" in record:
+            key = _read_key(home(path) / KEY_FILE)
+            if not hmac.compare_digest(
+                _standalone_mac(record, key), str(record["registration_mac"])
+            ):
+                raise LaunchRefused(
+                    "E_REQUEST", "dry-run launch record is not authenticated"
+                )
+            if (
+                record.get("run_dir") != str(directory)
+                or directory != directory.resolve()
+            ):
+                raise LaunchRefused(
+                    "E_REQUEST", "authenticated dry-run location differs from launch"
+                )
+            # A genuine launcher can publish before the runner writes its
+            # first header. Only its signed frozen plan identifies that
+            # short starting window; old unsigned records need a header.
+            frozen = record.get("plan")
+            from .journal import plan_digest
+
+            if (
+                not isinstance(frozen, dict)
+                or plan_digest(frozen) != record["plan_sha256"]
+                or frozen.get("mode") != DRY_RUN
+            ):
+                raise LaunchRefused(
+                    "E_PLAN_CHANGED", "authenticated dry-run plan is invalid"
+                )
+            if kept is None and not scan.events and not scan.corrupt and not scan.torn:
+                return entry, directory
+        if (
+            kept is None
+            or not scan.events
+            or scan.events[0].run_id != run_id
+            or scan.events[0].header.plan_sha256 != kept["plan_sha256"]
+            or record.get("plan_sha256") != kept["plan_sha256"]
+            or entry.get("plan_sha256") != kept["plan_sha256"]
+        ):
+            raise LaunchRefused(
+                "E_PLAN_CHANGED",
+                "dry-run registration needs its retained plan and matching header",
+            )
+        if kept["plan"].get("mode") != DRY_RUN:
             raise LaunchRefused(
                 "E_REQUEST", "real run cannot be relabelled as a dry run"
             )
@@ -1272,11 +1319,12 @@ def launch(
             f"the plan is now {found.plan_sha256[:12]}, not {str(plan_sha256)[:12]}: "
             "read the new plan first",
         )
+    reviewed_input = job_fact(found.job_path)
     check_token(
         core_key(path),
         launch_token,
         found.plan_sha256,
-        job_fact(found.job_path),
+        reviewed_input,
         now_ns,
     )
     if found.refusals:
@@ -1322,17 +1370,19 @@ def launch(
                 f"{run_dir}: {exc.strerror or exc}",
             ) from None
         fsync_dir(run_dir.parent)
-        write_record(
-            run_dir / LAUNCH_RECORD,
-            {
-                "schema": LAUNCH_SCHEMA,
-                "request": request.record(),
-                "plan_sha256": found.plan_sha256,
-                "run_id": run_id,
-                "unit": unit,
-                "launched_wall_ns": started,
-            },
-        )
+        record = {
+            "schema": LAUNCH_SCHEMA,
+            "request": request.record(),
+            "plan_sha256": found.plan_sha256,
+            "plan": found.plan,
+            "inputs": {"job": reviewed_input},
+            "run_dir": str(run_dir),
+            "run_id": run_id,
+            "unit": unit,
+            "launched_wall_ns": started,
+        }
+        record["registration_mac"] = _standalone_mac(record, core_key(path))
+        write_record(run_dir / LAUNCH_RECORD, record)
     except BaseException:
         # Nothing ran: the run id is free again.
         with contextlib.suppress(OSError):

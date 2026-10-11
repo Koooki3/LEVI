@@ -42,7 +42,7 @@ from collections import deque
 from pathlib import Path
 
 from . import launch
-from .journal import JournalError, fsync_dir, process_identity
+from .journal import Journal, JournalError, fsync_dir, line_sha, process_identity
 
 COMMAND_SCHEMA = "levi.aeri.command.v1"
 RESULT_SCHEMA = "levi.aeri.command_result.v1"
@@ -262,6 +262,16 @@ def write_command(run_dir, value: dict) -> str:
                 )
         except (OSError, ValueError, KeyError, TypeError, launch.LaunchRefused) as exc:
             raise CommandError("E_NOT_LAUNCHED", str(exc)) from None
+    if value["kind"] != "stop" and record.get("schema") in (
+        launch.STANDALONE_SCHEMA,
+        launch.LAUNCH_SCHEMA,
+    ):
+        scan = Journal.read(run_dir)
+        if scan.corrupt or scan.torn or not scan.events:
+            raise CommandError(
+                "journal_corrupt",
+                "journal is damaged or incomplete; only stop is allowed",
+            )
     found = ensure_folders(run_dir)
     name = f"{value['command_id']}.json"
     data = (json.dumps(value, sort_keys=True) + "\n").encode()
@@ -299,6 +309,40 @@ def wait_result(run_dir, command_id: str, timeout_s: float) -> dict | None:
         if time.monotonic() >= deadline:
             return None
         time.sleep(POLL_S)
+
+
+def resume_checked(orch, command_id, **fields):
+    """Resume only a complete disk journal matching this writer's memory.
+
+    Use the existing state lock and short append mutex to avoid mistaking a
+    concurrent valid append for a torn write. Stop keeps its original path.
+    """
+    from .orchestrator import CommandResult
+
+    with orch._lock:
+        journal = orch.journal
+        with journal._mutex:
+            try:
+                scan = Journal.read(journal.directory)
+                damaged = (
+                    scan.corrupt
+                    or ("journal has an incomplete tail" if scan.torn else None)
+                    or (
+                        "journal differs from the active writer"
+                        if not scan.events
+                        or len(scan.events) != journal.next_seq
+                        or line_sha(scan.lines[-1]) != journal._last_sha
+                        else None
+                    )
+                )
+            except (OSError, JournalError) as exc:
+                damaged = str(exc)
+            if damaged:
+                # Existing Journal writes refuse corruption and the existing
+                # driver observes FAULT_LOCKED, then holds and exits normally.
+                journal.corrupt = damaged
+                return CommandResult(False, "journal_corrupt", orch.state)
+        return orch.resume(command_id, **fields)
 
 
 # --- the runner's side ---------------------------------------------------------------------------
@@ -439,7 +483,8 @@ class CommandPump(threading.Thread):
             if kind == "stop":
                 found = orch.stop(value["command_id"])
             elif kind == "resume":
-                found = orch.resume(
+                found = resume_checked(
+                    orch,
                     value["command_id"],
                     expected_seq=value["expected_seq"],
                     environment_handled=value["environment_handled"],

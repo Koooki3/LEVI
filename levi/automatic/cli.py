@@ -1001,6 +1001,11 @@ def cmd_resume(args) -> int:
     run_dir, scan, problem = _operator_checks(args)
     if problem:
         return _refuse(args, problem)
+    if scan.corrupt or scan.torn:
+        return _refuse(
+            args,
+            "journal_corrupt: journal is damaged or incomplete; only stop is allowed / 日志损坏或不完整，只允许停止",
+        )
     state = scan.effective_state
     if state not in ("WAIT_HUMAN", "FAULT_LOCKED"):
         return _refuse(

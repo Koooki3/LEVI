@@ -1,6 +1,7 @@
 """Real dispatch and FR3 core on fake SDK only; no GPU/robot evidence."""
 
 import importlib.util
+import json
 import threading
 import time
 from pathlib import Path
@@ -11,6 +12,10 @@ from fastapi import HTTPException
 from test_fr3_bridge import (  # noqa: F401 - imported pytest safety fixture
     no_network,
     rig,
+)
+from test_launch import (  # noqa: F401 - isolated fake launcher fixture
+    fake_systemd,
+    write_job,
 )
 
 from levi.automatic import api, cli, control, fr3_run, launch
@@ -238,3 +243,182 @@ def test_real_standalone_cannot_be_downgraded_to_an_unsigned_dry_launch(
     with pytest.raises(HTTPException) as exc:
         api._locate("real-test")
     assert exc.value.status_code == 404
+
+
+@pytest.mark.parametrize("tail", [b"{}\n", b"{partial"])
+def test_active_writer_rejects_disk_corruption_before_resume(
+    tmp_path, monkeypatch, tail
+):
+    world = tracked(tmp_path, monkeypatch, scenes=("unknown",))
+    monkeypatch.setattr(fr3_run.sys.stdin, "isatty", lambda: True)
+
+    def no_input(*args):
+        time.sleep(0.01)
+        return [], [], []
+
+    monkeypatch.setattr(fr3_run.select, "select", no_input)
+    result = []
+    thread = threading.Thread(
+        target=lambda: result.append(
+            fr3_run.execute(
+                world.job, world.binding, load_modules=lambda binding: world.modules
+            )
+        )
+    )
+    thread.start()
+    directory = launch.run_dir_of(Path(world.job["rollout_root"]), "real-test")
+    try:
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            try:
+                run = api._locate("real-test")
+                if run.state == "WAIT_HUMAN" and run.runner()["alive"]:
+                    break
+            except HTTPException:
+                pass
+            time.sleep(0.01)
+        else:
+            pytest.fail("writer did not wait")
+        journal = directory / "state_journal.jsonl"
+        with journal.open("ab") as stream:
+            stream.write(tail)
+        read = api._locate("real-test")
+        assert read.state == "FAULT_LOCKED"
+        assert api.snapshot_of(read)["challenge"] is None
+        monkeypatch.setattr(api, "_person", lambda request: None)
+        body = api.ResumeBody(
+            command_id="api-resume",
+            expected_seq=read.seq,
+            environment_handled=True,
+            health_rechecked=True,
+            challenge="old-challenge",
+        )
+        with pytest.raises(HTTPException) as refusal:
+            api.resume_run("real-test", body, None)
+        assert refusal.value.status_code == 409
+        assert refusal.value.detail["code"] == "journal_corrupt"
+        assert (
+            cli.cmd_resume(
+                SimpleNamespace(
+                    run="real-test",
+                    run_dir=None,
+                    principal="operator",
+                    command_id=None,
+                    json=True,
+                )
+            )
+            == cli.EXIT_REFUSED
+        )
+        command = control.command(
+            "resume",
+            "corrupt-resume",
+            "operator",
+            expected_seq=read.seq,
+            environment_handled=True,
+            health_rechecked=True,
+        )
+        with pytest.raises(control.CommandError, match="journal_corrupt"):
+            control.write_command(directory, command)
+        # Model a valid command queued earlier: the real pump must recheck at
+        # execution time, independently of the writer/API precheck.
+        paths = control.ensure_folders(directory)
+        control._link_whole(
+            paths["inbox"], "corrupt-resume.json", (json.dumps(command) + "\n").encode()
+        )
+        refused = control.wait_result(directory, "corrupt-resume", 1)
+        assert refused is not None and not refused["ok"]
+        assert (
+            refused["code"] == "journal_corrupt" and refused["state"] == "FAULT_LOCKED"
+        )
+        thread.join(1)
+        assert not thread.is_alive() and result == ["FAULT_LOCKED"]
+        assert journal.read_bytes().endswith(tail)
+        # Stop remains queueable despite damaged diagnostic history.
+        assert (
+            control.write_command(
+                directory, control.command("stop", "safe-stop", "operator")
+            )
+            == "queued"
+        )
+    finally:
+        if thread.is_alive():
+            control.write_command(
+                directory, control.command("stop", "cleanup-stop", "operator")
+            )
+            thread.join(1)
+
+
+def test_fabricated_legacy_dry_registration_without_header_and_plan_is_refused(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("LEVI_AERI_HOME", str(tmp_path / "home"))
+    launch.ensure_home()
+    (launch.home() / launch.RUNS).mkdir()
+    run_id = "fake-dry"
+    request = launch.LaunchRequest(
+        job_path=str(tmp_path / "never-approved.yaml"),
+        execution_mode="dry_run",
+        backend="foreground",
+        entry="cli",
+        principal={"kind": "operator", "id": "fake"},
+        keep_dir=str(tmp_path / "rollouts"),
+    )
+    directory = launch.run_dir_of(launch.dry_folder(run_id, request.keep_dir), run_id)
+    directory.mkdir(parents=True)
+    launch.write_record(
+        directory / launch.LAUNCH_RECORD,
+        {
+            "schema": launch.LAUNCH_SCHEMA,
+            "run_id": run_id,
+            "request": request.record(),
+            "plan_sha256": "a" * 64,
+        },
+    )
+    launch.write_record(
+        launch.index_path(run_id),
+        {
+            "schema": launch.INDEX_SCHEMA,
+            "run_id": run_id,
+            "run_dir": str(directory),
+            "execution_mode": "dry_run",
+            "backend": "foreground",
+            "plan_sha256": "a" * 64,
+        },
+    )
+    with pytest.raises(HTTPException):
+        api._locate(run_id)
+    with pytest.raises(cli.JobError):
+        cli._launched(SimpleNamespace(run=run_id, run_dir=None))
+    assert not (launch.home() / launch.KEY_FILE).exists()
+
+
+@pytest.mark.usefixtures("fake_systemd")
+@pytest.mark.parametrize("change", ["inputs", "run_id", "mode"])
+def test_only_authentic_dry_starting_record_is_visible(tmp_path, monkeypatch, change):
+    monkeypatch.setenv("LEVI_AERI_HOME", str(tmp_path / "home"))
+    job = write_job(tmp_path)
+    request = launch.LaunchRequest(
+        job_path=str(job),
+        execution_mode="dry_run",
+        backend="systemd",
+        entry="cli",
+        principal={"kind": "operator", "id": "fake"},
+    )
+    plan = launch.plan(request)
+    handle = launch.launch(
+        request, plan_sha256=plan.plan_sha256, launch_token=plan.launch_token
+    )
+    directory = Path(handle.run_dir)
+    assert not (directory / "state_journal.jsonl").exists()
+    assert api._locate(handle.run_id).state == "INIT"
+    record = launch.read_record(directory / launch.LAUNCH_RECORD)
+    assert record["inputs"]["job"] == launch.job_fact(job)
+    if change == "inputs":
+        record["inputs"]["job"]["sha256"] = "f" * 64
+    elif change == "run_id":
+        record["run_id"] = "copied-id"
+    else:
+        record["request"]["execution_mode"] = "assisted"
+    launch.write_record(directory / launch.LAUNCH_RECORD, record)
+    with pytest.raises(HTTPException):
+        api._locate(handle.run_id)

@@ -350,7 +350,11 @@ class _Run:
         self.run_dir = run_dir
         self.scan = Journal.read(run_dir)
         self.events = self.scan.events
-        self.state = self.scan.effective_state if self.events else "INIT"
+        self.state = (
+            ("FAULT_LOCKED" if self.scan.torn else self.scan.effective_state)
+            if self.events
+            else "INIT"
+        )
         self.seq = len(self.events)
         try:
             kept = read_plan(run_dir)
@@ -854,8 +858,10 @@ def card_of(run: _Run, *, force: bool = False) -> dict | None:
     if reason in BLIND_REASONS and operator and not revealed:
         reason = HIDDEN
     return {
-        "reason": reason,
-        "resume_seq": raw.get("expected_seq"),
+        "reason": "journal_corrupt" if run.scan.corrupt or run.scan.torn else reason,
+        "resume_seq": None
+        if run.scan.corrupt or run.scan.torn
+        else raw.get("expected_seq"),
         "waited_ms": raw.get("waited_ms") or 0,
         "nth_wait": raw.get("human_wait_number") or 0,
         "last_episode": episode,
@@ -955,7 +961,9 @@ def snapshot_of(run: _Run) -> dict:
         },
         "pending_card": card_of(run),
         "scene_question": scene_question_of(run),
-        "challenge": _CHALLENGES.issue(run.run_id, run.seq),
+        "challenge": None
+        if run.scan.corrupt or run.scan.torn
+        else _CHALLENGES.issue(run.run_id, run.seq),
         "runner": run.runner(),
         "updated_at": _last_activity_ms(run),
     }
@@ -1325,6 +1333,12 @@ def resume_run(run_id: str, body: ResumeBody, request: Request):
     snapshot."""
     _person(request)
     run = _locate(run_id)
+    if run.scan.corrupt or run.scan.torn:
+        raise _fail(
+            409,
+            "journal_corrupt",
+            "Journal is damaged or incomplete; only stop is allowed",
+        )
     payload = body.model_dump()
     again = _MEMO.get(f"resume:{run_id}", body.command_id, payload)
     if again is not None:
