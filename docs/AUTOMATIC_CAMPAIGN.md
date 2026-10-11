@@ -941,3 +941,20 @@ the setup recipes); `LEVI_AERI_HOME`, `LEVI_AERI_JOB_ROOTS` and
 `test_controller_campaign.py` (a fake unit start, a temporary
 `LEVI_AERI_HOME`, the campaign guard that fails a test on any attempt to
 reach a robot or policy port).
+
+## Ordinary evaluations with free human placement
+
+The ordinary wizard explicitly requests `layouts: {source: none}`. For human
+reset it creates a `blocked` schedule with one segment per policy, no reference
+arm or primary comparison, `control.fraction: 0`, `termination.control_fraction: 0`,
+and `blinding.operator: none`. The defaults are 10 trials per policy and a
+400-step limit. Three selected policies therefore expand into exactly 30
+forward trials, without an extra control group. Initial-state readiness and
+human reset checks still apply.
+
+Place the scene freely before the first trial and after each reset. No cards
+are generated or requested, and no paired or confirmatory evidence is claimed.
+Results are exploratory. Older API requests without `layouts` preserve their
+original card-set behaviour, and historical card evidence remains visible.
+Missing physical bindings or success-provider specifications must be reviewed
+before real launch; a generated plan is not hardware validation.

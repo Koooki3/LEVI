@@ -124,6 +124,10 @@ class PrimaryBody(_Strict):
     alpha: float = Field(0.05, gt=0.0, le=0.5)
 
 
+class LayoutsBody(_Strict):
+    source: Literal["card_set", "none"]
+
+
 class PlanBody(_Strict):
     job_id: str = Field(min_length=1, max_length=128)
     arms: list[ArmBody] = Field(min_length=2, max_length=spec.MAX_ARMS)
@@ -131,6 +135,9 @@ class PlanBody(_Strict):
     schedule: ScheduleBody
     primary: PrimaryBody = Field(default_factory=PrimaryBody)
     preregistered: bool = False
+    # Absent preserves historical card-set planning. New ordinary UI explicitly
+    # requests none; no layout evidence is invented for free placement.
+    layouts: LayoutsBody | None = None
     # Not in the contract's table: how the campaign is carried out. The page
     # does not send it; the default is the user's own legacy client.
     execution_mode: Literal["guided", "dry_run"] = "guided"
@@ -491,7 +498,8 @@ def _todo(c: _Campaign) -> dict | None:
     arm = c.arm_of(segment)
     code = A.arm_codes(c.plan).get(arm) if arm else None
     slots = []
-    if segment:
+    layout_source = c.plan["campaign"]["layouts"]["source"]
+    if segment and layout_source == "card_set":
         slots = list(c.plan["schedule"]["segments"][segment - 1]["slots"])
     todo: dict[str, Any] | None = None
     serving = A.read_serving(c.folder) or {}
@@ -518,7 +526,10 @@ def _todo(c: _Campaign) -> dict | None:
             "segment": segment,
             "arm_code": code,
             "cards": slots,
-            "detail": "Hold the arm still and lay out the cards in this order.",
+            "detail": "Hold the arm still and prepare the freely placed scene."
+            if layout_source == "none"
+            else "Hold the arm still and lay out the cards in this order.",
+            "layout_source": layout_source,
         }
         todo.update(_command_of(c, segment) or {})
     elif state == "ARM_RUNNING" and c.host == "guided":
@@ -587,6 +598,9 @@ def snapshot_of(c: _Campaign, *, light: bool = False) -> dict:
         "id": c.id,
         "state": c.state,
         "execution_mode": c.host,
+        "layout_source": ((c.plan or {}).get("campaign", {}).get("layouts") or {}).get(
+            "source"
+        ),
         "arms": _arm_rows(c, blinded),
         "segment": {
             "no": segment,
@@ -878,7 +892,12 @@ def _pending_cards(c: _Campaign) -> list:
     given)."""
     root = c.host_record.get("rollout_root")
     out = []
-    if c.host != "guided" or not c.plan or not root:
+    if (
+        c.host != "guided"
+        or not c.plan
+        or not root
+        or c.plan["campaign"]["layouts"]["source"] == "none"
+    ):
         return out
     for seg in c.plan["schedule"]["segments"]:
         try:

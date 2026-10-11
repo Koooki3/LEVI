@@ -134,12 +134,22 @@ describe("choice and settings checks", () => {
     expect(shortRunWarning({ ...f, maxSteps: "400" })).toBe(false);
   });
 
-  test("campaign checks: segment not above trials, alpha in range", () => {
-    const f = { ...defaultForm(), mode: "campaign" as const };
+  test("ordinary campaign uses its trial count, alpha remains valid", () => {
+    const f = {
+      ...defaultForm(),
+      mode: "campaign" as const,
+      resetChoice: "reset-checkpoint",
+    };
     expect(validateCampaign(f)).toEqual({});
     expect(
       validateCampaign({ ...f, segmentTrials: "50" }).segment,
-    ).toBeTruthy();
+    ).toBeUndefined();
+    expect(
+      buildCampaignRequest(
+        { ...f, armIds: ["a", "b"], trialsPerArm: "5" },
+        "job",
+      ).schedule.segment_trials,
+    ).toBe(5);
     expect(validateCampaign({ ...f, alpha: "0.9" }).alpha).toBeTruthy();
     expect(validateCampaign({ ...f, trialsPerArm: "1" }).trials).toBeTruthy();
   });
@@ -165,7 +175,7 @@ describe("requests", () => {
     });
   });
 
-  test("a campaign request names every arm, the reference and the schedule", () => {
+  test("ordinary campaign explicitly requests free placement with no reference", () => {
     const c = {
       ...form,
       mode: "campaign" as const,
@@ -174,12 +184,12 @@ describe("requests", () => {
     };
     const req = buildCampaignRequest(c, "job-1");
     expect(req.arms).toEqual([
-      { id: "A", checkpoint_id: "a", role: "reference" },
+      { id: "A", checkpoint_id: "a", role: "candidate" },
       { id: "B", checkpoint_id: "b", role: "candidate" },
     ]);
     expect(req.schedule).toEqual({
-      kind: "counterbalanced_segments",
-      segment_trials: 5,
+      kind: "blocked",
+      segment_trials: 10,
       seed: 7,
     });
     expect(req.primary).toEqual({
@@ -187,7 +197,8 @@ describe("requests", () => {
       label_basis: "operator_label",
       alpha: 0.05,
     });
-    expect(req.preregistered).toBe(true);
+    expect(req.preregistered).toBe(false);
+    expect(req.layouts).toEqual({ source: "none" });
     // The job of a campaign names the reference arm as its forward policy.
     expect(buildJobDraft(c, policies(false)).policy_forward.checkpoint_id).toBe(
       "a",

@@ -277,6 +277,24 @@ def prepare(
     except cli.JobError as exc:
         raise PlanRefused(422, "job_invalid", str(exc)[:300]) from None
     human = normal["config"].reset_strategy == "human_assisted"
+    layout_source = (request.get("layouts") or {}).get("source")
+    free = layout_source == "none"
+    if not human and layout_source == "card_set":
+        raise PlanRefused(
+            422, "campaign_invalid", "a reset policy cannot use layout cards"
+        )
+    if layout_source not in (None, "none", "card_set"):
+        raise PlanRefused(422, "campaign_invalid", "unknown layout source")
+    if free and (
+        any(a["role"] == "reference" for a in arms_in)
+        or request.get("preregistered")
+        or request["schedule"]["kind"] != "blocked"
+    ):
+        raise PlanRefused(
+            422,
+            "campaign_invalid",
+            "free placement requires blocked order, no reference and no preregistration",
+        )
     campaign_id = campaign_id_of(request)
     checks: list = []
     refusals: list = []
@@ -366,13 +384,22 @@ def prepare(
     else:
         pair = sorted(ids)[:2]
         comparison = [pair[1], pair[0]]
-    block["primary"] = {
+    primary = {
         "metric": "success",
         "comparison": comparison,
         "alpha": request["primary"]["alpha"],
         "label_basis": request["primary"]["label_basis"],
         "preregistered": bool(request["preregistered"]),
     }
+    if free:
+        block["control"] = {"fraction": 0.0}
+        block["blinding"] = {"operator": "none"}
+        document["termination"] = {
+            **(document.get("termination") or {}),
+            "control_fraction": 0.0,
+        }
+    else:
+        block["primary"] = primary
     dry_contract = host == "dry_run" and not (document.get("task") or {}).get(
         "initial_state_spec"
     )
@@ -383,7 +410,7 @@ def prepare(
             "initial_state_spec": str(contract_path),
         }
     layouts_text = None
-    if human:
+    if human and not free:
         size = (
             request["schedule"].get("segment_trials")
             or sched.DEFAULT_SEGMENT_TRIALS[request["schedule"]["kind"]]
@@ -523,6 +550,15 @@ def _render_all(prepared: Prepared) -> list:
 def power_of(request: dict, human: bool) -> dict:
     n = request["trials_per_arm"]
     alpha = request["primary"]["alpha"]
+    if (request.get("layouts") or {}).get("source") == "none":
+        return {
+            "detectable_difference": None,
+            "n": n,
+            "design": "exploratory",
+            "baseline": None,
+            "rows": [],
+            "post_hoc_power": "not reported",
+        }
     table = an.power_table([n], [0.5, 0.3], alpha=alpha)
     design = "paired" if human else "unpaired"
     return {
@@ -549,7 +585,18 @@ def plan_view(prepared: Prepared, request: dict) -> dict:
         "campaign_sha256": plan.campaign_sha256,
         "settings_sha256": plan.settings_sha256,
         "segments": [
-            {"no": s.index, "arms": [s.arm], "cards": list(s.slots)}
+            {
+                "no": s.index,
+                "arms": [s.arm],
+                "cards": []
+                if plan.spec.job.human_assisted and not human
+                else list(s.slots),
+                **(
+                    {"trials": s.trials}
+                    if plan.spec.job.human_assisted and not human
+                    else {}
+                ),
+            }
             for s in schedule.segments
         ],
         "switches": schedule.switches,

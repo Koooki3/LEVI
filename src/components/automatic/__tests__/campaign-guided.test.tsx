@@ -173,6 +173,39 @@ describe("rules of the guided campaign", () => {
 });
 
 describe("the guided to-do list", () => {
+  test("free placement keeps human readiness but offers no layout cards", async () => {
+    const a = api(() =>
+      snap({
+        layout_source: "none",
+        blinded: false,
+        todo: {
+          kind: "place_cards",
+          layout_source: "none",
+          cards: [],
+          challenge: "free-ready",
+          arm_code: "A",
+        },
+      }),
+    );
+    const { host } = await render(
+      <CampaignOverview campaignId="camp-1" api={a} intervalMs={50} />,
+    );
+    await waitFor(() => host.textContent?.includes("Prepare the scene freely"));
+    expect(host.querySelector(".ac-cards")).toBeNull();
+    expect(host.querySelector(".ac-todo")?.textContent).not.toContain(
+      "layout cards",
+    );
+    expect(
+      (a!.getCampaignCards as ReturnType<typeof mock>).mock.calls.length,
+    ).toBe(0);
+    await tickAll(host);
+    await click(buttonNamed(host, "Confirm")!);
+    await acceptDialog();
+    expect(
+      (a!.confirmCampaign as ReturnType<typeof mock>).mock.calls[0][2],
+    ).toBe("env");
+  });
+
   test("place_cards shows the cards and the command, and confirms as env", async () => {
     const a = api(() =>
       snap({

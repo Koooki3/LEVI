@@ -382,3 +382,16 @@ campaign 的文件在 `$LEVI_AERI_HOME/campaigns/<id>/`（`LEVI_AERI_HOME` 默�
 **盲法。** `blinded` 为真时，快照、列表以及报告之前计划写下的每个文件里只有已完成、剩余、偏离和作废的片段数，没有成功率、判定或标签计数。各组显示组码（`X1`、`X2`……）而不是字母。计划在 `ANALYZING` 时不再盲，或者由人揭盲：后者算一次**偷看**（写入日志；报告会计数，结论只能是探索性的）。只有不盲时才提供报告。
 
 **设置。** `LEVI_AERI_ROLLOUT_ROOT`：绝对路径，引导式评测里旧客户端的 rollout 根目录（作业自己的 `recording.rollout_root` 优先）；`LEVI_SETUP_DOC`（操作手册，与 setup 配方相同）；`LEVI_AERI_HOME`、`LEVI_AERI_JOB_ROOTS`、`LEVI_AERI_POLICY_ROOT` 同运行。测试：`tests/automatic/campaign/test_api_campaign_*.py` 和 `test_controller_campaign.py`（假的单元启动、临时 `LEVI_AERI_HOME`、一旦试图连机器人或策略端口就让测试失败的 campaign 守卫）。
+
+## 普通评估与人工自由摆放
+
+普通向导显式请求 `layouts: {source: none}`。人工复位时生成 `blocked`
+顺序计划，每个策略一个时间段，不设参考组和主比较，
+`control.fraction: 0`、`termination.control_fraction: 0`，
+`blinding.operator: none`。默认每策略 10 轮、每片段最多 400 步；选三个策略
+就实际展开为 30 个正向片段，不增加对照组。初态就绪和人工复位检查继续保留。
+
+首轮和每次复位后都可以自由摆放。系统不生成或要求布局卡，不声明配对或
+确证性证据，结果仅用于探索性评估。旧 API 请求没有 `layouts` 字段时保持
+原布局卡行为，历史布局证据仍可查看。缺失的物理绑定和成功判定规格必须
+在真机启动前人工核对，生成计划不能作为真机验证。

@@ -126,6 +126,7 @@ export type CampaignPlanRequest = {
   schedule: { kind: ScheduleKind; segment_trials: number; seed: number };
   primary: { metric: "success"; label_basis: string; alpha: number };
   preregistered: boolean;
+  layouts?: { source: "card_set" | "none" };
   execution_mode?: CampaignExecutionMode;
 };
 
@@ -148,6 +149,7 @@ export type CampaignPlan = {
   segments: { no: number; arms: string[]; cards: string[] }[];
   switches: number;
   power: {
+    design?: "paired" | "unpaired" | "exploratory";
     detectable_difference: number | null;
     n?: number;
     rows: PowerRow[];
@@ -168,6 +170,7 @@ export type KnownTodoKind =
   | "recover_run";
 
 export type CampaignTodo = {
+  layout_source?: "card_set" | "none";
   kind: KnownTodoKind | (string & {}) | null;
   // The contract leaves the rest of the todo open ("..."); these are the
   // fields api.py puts in it, read when present.
@@ -216,6 +219,7 @@ export type CampaignLiveSession = {
 
 export type CampaignSnapshot = {
   live_session?: CampaignLiveSession;
+  layout_source?: "card_set" | "none";
   id: string;
   state: string;
   execution_mode?: CampaignExecutionMode | (string & {});

@@ -544,11 +544,23 @@ def check_block(block: CampaignBlock, job: aeri.JobSpec) -> None:
             "a reset policy sets the initial scene, cards cannot: with "
             f"reset.strategy {job.reset_strategy} write layouts.source: none",
         )
-    if not reset_policy_mode and layouts.source != "card_set":
+    # Free placement is exploratory; keep initial-state/human readiness gates.
+    if (
+        job.human_assisted
+        and layouts.source == "none"
+        and (
+            block.primary is not None
+            or kind in sched.CONFIRMATORY_KINDS
+            or references
+            or block.blinding.operator != "none"
+            or block.control.fraction != 0
+            or job.termination.control_fraction != 0
+        )
+    ):
         raise CampaignError(
             "E_CAMPAIGN_LAYOUTS",
-            "human_assisted campaigns lay out cards: write layouts.source: card_set "
-            "and layouts.file (source none belongs to the reset policy mode)",
+            "free human placement needs an exploratory schedule, no primary/reference, blinding none, "
+            "control.fraction 0 and termination.control_fraction 0",
         )
     if layouts.source == "none" and (
         layouts.file is not None or layouts.per_round is not None

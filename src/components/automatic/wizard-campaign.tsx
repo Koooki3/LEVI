@@ -1,8 +1,6 @@
 "use client";
-// Step 4 of a multi-model plan. The shared settings were made into a job file;
-// here the person sets trials, order, the main measure and alpha, and sees the
-// plan from the server change as she edits (schedule, number of policy
-// switches, the power table). Starting asks for the phrase `start-campaign`.
+// Confirm a simple multi-policy plan: trial count, mode, safety checks and
+// policy switches. Technical digests remain available for review.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge,
@@ -10,9 +8,7 @@ import {
   Input,
   Radio,
   RadioGroup,
-  Select,
   Skeleton,
-  Switch,
   Table,
 } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
@@ -23,8 +19,6 @@ import { PhraseConfirm } from "./wizard-confirm";
 import { JobAttempts } from "./wizard-job";
 import {
   IntentKeys,
-  LABEL_BASES,
-  SCHEDULE_KINDS,
   buildCampaignRequest,
   buildJobDraft,
   hasProblems,
@@ -130,7 +124,6 @@ export function WizardCampaignConfirm({
   const planned = useRef("");
 
   const problems = validateCampaign(form);
-  const schedule = SCHEDULE_KINDS.find((k) => k.value === form.scheduleKind);
 
   useEffect(() => {
     alive.current = true;
@@ -238,72 +231,7 @@ export function WizardCampaignConfirm({
             onChange={(e) => setForm({ trialsPerArm: e.target.value })}
           />
         </Field>
-        <Field
-          label={t("automatic.wizard.campaign.schedule")}
-          error={undefined}
-        >
-          <Select
-            value={form.scheduleKind}
-            onChange={(e) =>
-              setForm({
-                scheduleKind: e.target.value as WizardForm["scheduleKind"],
-              })
-            }
-          >
-            {SCHEDULE_KINDS.map((k) => (
-              <option key={k.value} value={k.value}>
-                {t(k.key)}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field
-          label={t("automatic.wizard.campaign.segment")}
-          hint={t("automatic.wizard.campaign.segment_hint")}
-          error={problems.segment ? t(problems.segment) : undefined}
-        >
-          <Input
-            inputMode="numeric"
-            value={form.segmentTrials}
-            onChange={(e) => setForm({ segmentTrials: e.target.value })}
-          />
-        </Field>
-        <Field
-          label={t("automatic.wizard.campaign.seed")}
-          error={problems.seed ? t(problems.seed) : undefined}
-        >
-          <Input
-            inputMode="numeric"
-            value={form.seed}
-            onChange={(e) => setForm({ seed: e.target.value })}
-          />
-        </Field>
-        <Field label={t("automatic.wizard.campaign.basis")}>
-          <Select
-            value={form.labelBasis}
-            onChange={(e) => setForm({ labelBasis: e.target.value })}
-          >
-            {LABEL_BASES.map((b) => (
-              <option key={b.value} value={b.value}>
-                {t(b.key)}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field
-          label={t("automatic.wizard.campaign.alpha")}
-          error={problems.alpha ? t(problems.alpha) : undefined}
-        >
-          <Input
-            inputMode="decimal"
-            value={form.alpha}
-            onChange={(e) => setForm({ alpha: e.target.value })}
-          />
-        </Field>
       </div>
-      {schedule?.exploratory && (
-        <Note tone="warning">{t("automatic.wizard.campaign.exploratory")}</Note>
-      )}
       <RadioGroup legend={t("automatic.wizard.campaign.mode")}>
         <div className="aw-modes">
           <div>
@@ -330,12 +258,7 @@ export function WizardCampaignConfirm({
           </div>
         </div>
       </RadioGroup>
-      <Switch
-        label={t("automatic.wizard.campaign.prereg")}
-        description={t("automatic.wizard.campaign.prereg_note")}
-        checked={form.preregistered}
-        onChange={(e) => setForm({ preregistered: e.target.checked })}
-      />
+      <Note>{t("automatic.wizard.campaign.free_layout")}</Note>
 
       {busy === "plan" && (
         <div role="status" aria-label={t("automatic.wizard.plan.making")}>
@@ -355,18 +278,6 @@ export function WizardCampaignConfirm({
         >
           <dl className="pg-summary">
             <div>
-              <dt>{t("automatic.wizard.campaign.hash")}</dt>
-              <dd>
-                <code>{plan.campaign_sha256.slice(0, 16)}</code>
-              </dd>
-            </div>
-            <div>
-              <dt>{t("automatic.wizard.campaign.settings_hash")}</dt>
-              <dd>
-                <code>{plan.settings_sha256.slice(0, 16)}</code>
-              </dd>
-            </div>
-            <div>
               <dt>{t("automatic.wizard.campaign.segments")}</dt>
               <dd>{plan.segments.length}</dd>
             </div>
@@ -380,7 +291,26 @@ export function WizardCampaignConfirm({
               </dd>
             </div>
           </dl>
-          <PowerTable power={plan.power} />
+          <details>
+            <summary>{t("Technical details")}</summary>
+            <dl className="pg-summary">
+              <div>
+                <dt>{t("automatic.wizard.campaign.hash")}</dt>
+                <dd>
+                  <code>{plan.campaign_sha256.slice(0, 16)}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>{t("automatic.wizard.campaign.settings_hash")}</dt>
+                <dd>
+                  <code>{plan.settings_sha256.slice(0, 16)}</code>
+                </dd>
+              </div>
+            </dl>
+          </details>
+          {plan.power.design !== "exploratory" && (
+            <PowerTable power={plan.power} />
+          )}
           <ChecksList checks={plan.checks} />
           <Refusals codes={plan.refusals} />
         </section>

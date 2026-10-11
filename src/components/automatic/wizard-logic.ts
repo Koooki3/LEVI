@@ -120,13 +120,13 @@ export function defaultForm(capabilities?: Capabilities | null): WizardForm {
     episodes: String(d?.episodes ?? 5),
     allowEarlyStop: true,
     executionMode: "dry_run",
-    trialsPerArm: "20",
-    scheduleKind: "counterbalanced_segments",
-    segmentTrials: "5",
+    trialsPerArm: "10",
+    scheduleKind: "blocked",
+    segmentTrials: "10",
     seed: "7",
     labelBasis: "operator_label",
     alpha: "0.05",
-    preregistered: true,
+    preregistered: false,
     campaignMode: "guided",
   };
 }
@@ -261,11 +261,6 @@ export function validateCampaign(form: WizardForm): Problems {
   const trials = wholeNumber(form.trialsPerArm);
   if (trials === null || trials < 2 || trials > 500)
     problems.trials = "automatic.wizard.err.trials";
-  const segment = wholeNumber(form.segmentTrials);
-  if (segment === null || segment < 1)
-    problems.segment = "automatic.wizard.err.segment";
-  else if (trials !== null && segment > trials)
-    problems.segment = "automatic.wizard.err.segment_over";
   if (wholeNumber(form.seed) === null)
     problems.seed = "automatic.wizard.err.seed";
   const alpha = fractionNumber(form.alpha);
@@ -302,7 +297,7 @@ export function jobName(instruction: string, now: Date, suffix = ""): string {
  * campaign request. */
 export function jobForwardId(form: WizardForm): string {
   if (form.mode === "single") return form.policyId;
-  return form.referenceId || form.armIds[0] || "";
+  return form.armIds[0] || "";
 }
 
 export type JobDraft = Omit<JobCreate, "request_id" | "name">;
@@ -352,7 +347,7 @@ export function buildArms(form: WizardForm): CampaignArmInput[] {
   return form.armIds.map((checkpoint_id, index) => ({
     id: armLetter(index),
     checkpoint_id,
-    role: checkpoint_id === form.referenceId ? "reference" : "candidate",
+    role: "candidate",
   }));
 }
 
@@ -365,8 +360,8 @@ export function buildCampaignRequest(
     arms: buildArms(form),
     trials_per_arm: wholeNumber(form.trialsPerArm) ?? 0,
     schedule: {
-      kind: form.scheduleKind,
-      segment_trials: wholeNumber(form.segmentTrials) ?? 0,
+      kind: "blocked",
+      segment_trials: wholeNumber(form.trialsPerArm) ?? 0,
       seed: wholeNumber(form.seed) ?? 0,
     },
     primary: {
@@ -374,7 +369,8 @@ export function buildCampaignRequest(
       label_basis: form.labelBasis,
       alpha: fractionNumber(form.alpha) ?? 0.05,
     },
-    preregistered: form.preregistered,
+    preregistered: false,
+    layouts: { source: "none" },
     execution_mode: form.campaignMode,
   };
 }

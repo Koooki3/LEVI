@@ -58,6 +58,7 @@ export type CampaignView = {
   done: number;
   total: number;
   executionMode: "guided" | "dry_run" | null;
+  layoutSource: "card_set" | "none";
   /** False only when the server says the controller is not running. */
   controllerDown: boolean;
   /** The controller is gone and the campaign has not ended: it can be
@@ -118,6 +119,7 @@ export function viewOf(snapshot: CampaignSnapshot): CampaignView {
     total: arms.reduce((n, a) => n + a.total, 0),
     executionMode:
       mode === "guided" ? "guided" : mode === "dry_run" ? "dry_run" : null,
+    layoutSource: snapshot.layout_source === "none" ? "none" : "card_set",
     controllerDown,
     canAttach: controllerDown && !ENDED_STATES.has(state),
     peeks:

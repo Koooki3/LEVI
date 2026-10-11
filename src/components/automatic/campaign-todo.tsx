@@ -83,7 +83,13 @@ export function CampaignTodoCard({
   const keys = useState(() => new IntentKeys())[0];
   const known = isKnownTodo(todo);
   const kind = known ? todo.kind : "unknown";
-  const checks = CHECKS[kind] ?? [];
+  const freePlacement = kind === "place_cards" && todo.layout_source === "none";
+  const checks = freePlacement
+    ? [
+        "automatic.campaign.todo.free.ready",
+        "automatic.campaign.todo.cards.still",
+      ]
+    : (CHECKS[kind] ?? []);
   const waitReason = todo.reason ?? "";
   const options = kind === "recover_run" ? RECOVER_OPTIONS : [];
   const [chosen, setChosen] = useState<string>("");
@@ -112,7 +118,11 @@ export function CampaignTodoCard({
     // Two steps: the checklist, then an explicit confirmation.
     const ok = await confirm({
       title: t("automatic.campaign.todo.confirm_title"),
-      description: t(CONFIRM_TEXT[requestKind]),
+      description: t(
+        freePlacement
+          ? "automatic.campaign.todo.free.confirm"
+          : CONFIRM_TEXT[requestKind],
+      ),
       confirmLabel: t("automatic.campaign.todo.confirm_button"),
     });
     if (!ok) return;
@@ -157,7 +167,11 @@ export function CampaignTodoCard({
           todo.arm_code ?? "?",
         )
       : kind === "place_cards"
-        ? t("automatic.campaign.todo.cards.title")
+        ? t(
+            freePlacement
+              ? "automatic.campaign.todo.free.title"
+              : "automatic.campaign.todo.cards.title",
+          )
         : kind === "segment_done"
           ? t("automatic.campaign.todo.done.title").replace(
               "{arm}",

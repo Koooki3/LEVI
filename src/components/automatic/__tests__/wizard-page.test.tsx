@@ -464,8 +464,8 @@ describe("the wizard, a multi-model plan", () => {
     await click(buttonNamed(host, "Next")!);
     expect(host.textContent).toContain("Choose at least two policies");
     await click(boxes[1]);
-    // The reference option appears for a chosen arm.
-    expect(host.textContent).toContain("Reference arm");
+    // Ordinary evaluations do not ask the operator to add a reference arm.
+    expect(host.textContent).not.toContain("Reference arm");
     await click(buttonNamed(host, "Next")!);
     await type(host.querySelector("textarea")!, "go");
     await click(buttonNamed(host, "Next")!);
@@ -491,6 +491,9 @@ describe("the wizard, a multi-model plan", () => {
       .calls[0][0] as { arms: unknown[]; job_id: string };
     expect(planned.job_id).toBe("job-1");
     expect(planned.arms.length).toBe(2);
+    expect((planned as { layouts?: { source: string } }).layouts).toEqual({
+      source: "none",
+    });
     // Guided is the default way to carry a campaign out; the rehearsal on
     // fakes is a choice, and the plan follows it.
     expect((planned as { execution_mode?: string }).execution_mode).toBe(

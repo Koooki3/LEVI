@@ -164,15 +164,6 @@ export function StepChoose({
                   />
                 )}
                 <CheckpointFacts checkpoint={checkpoint} />
-                {form.mode === "campaign" && selected && (
-                  <Radio
-                    name="aw-reference"
-                    label={t("automatic.wizard.policy.is_reference")}
-                    description={t("automatic.wizard.policy.reference_note")}
-                    checked={form.referenceId === checkpoint.id}
-                    onChange={() => setForm({ referenceId: checkpoint.id })}
-                  />
-                )}
               </li>
             );
           })}

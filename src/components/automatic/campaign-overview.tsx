@@ -297,14 +297,16 @@ export function CampaignOverview({
         />
       )}
 
-      {view.executionMode === "guided" && view.state !== "DRAFT" && (
-        <CampaignCards
-          campaignId={campaignId}
-          knownCards={view.todo?.cards ?? []}
-          unconfirmed={view.arms.reduce((n, a) => n + a.unconfirmed, 0)}
-          api={api}
-        />
-      )}
+      {view.executionMode === "guided" &&
+        view.layoutSource === "card_set" &&
+        view.state !== "DRAFT" && (
+          <CampaignCards
+            campaignId={campaignId}
+            knownCards={view.todo?.cards ?? []}
+            unconfirmed={view.arms.reduce((n, a) => n + a.unconfirmed, 0)}
+            api={api}
+          />
+        )}
 
       <section className="aw-panel" aria-labelledby="ac-progress">
         <h2 id="ac-progress">{t("automatic.campaign.progress.title")}</h2>
