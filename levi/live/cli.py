@@ -34,6 +34,7 @@ from . import (
     jsonio,
     locate,
     mirror,
+    report_scope,
     resources,
     statsfmt,
     statsview,
@@ -51,7 +52,7 @@ ENV_CONFIG = "LEVI_LIVE_CONFIG"
 # --- configuration from flags ------------------------------------------------------------
 
 
-def add_config_options(parser):
+def add_config_options(parser, *, since_help=None):
     parser.add_argument("--config", help="live.toml (default: <workspace>/live.toml)")
     parser.add_argument(
         "--workspace",
@@ -77,7 +78,8 @@ def add_config_options(parser):
         help="also annotate rollouts finished before the service began",
     )
     parser.add_argument(
-        "--since", help="ISO time: rollouts finished before it are backlog"
+        "--since",
+        help=since_help or "ISO time: rollouts finished before it are backlog",
     )
     parser.add_argument(
         "--prewarm",
@@ -1348,13 +1350,19 @@ def cmd_report(args) -> int:
     """The statistics of a scope as a report: Markdown (default), JSON or the
     per-episode CSV, to the terminal or ``--out``. Reads the workspace's files
     only; the service need not be running."""
-    config = resolve_config(args)
+    since, before, timezone = report_scope.window(
+        args.since, getattr(args, "before", None), getattr(args, "timezone", "UTC")
+    )
+    config = resolve_config(argparse.Namespace(**{**vars(args), "since": None}))
     dataset, session = args.dataset, args.session
     if args.format == "csv":
         payload = statsview.build(
             config,
             dataset=dataset,
             session=session,
+            since=since,
+            before=before,
+            timezone=timezone,
             limit=None,
             include_excluded=args.include_excluded,
         )
@@ -1369,6 +1377,9 @@ def cmd_report(args) -> int:
             dataset,
             session,
             policy=policy,
+            since=since,
+            before=before,
+            timezone=timezone,
             include_excluded=args.include_excluded,
         )
         text = (
@@ -1642,7 +1653,20 @@ def build_parser():
     rep = sub.add_parser(
         "report", help="the statistics of a dataset or session as a report"
     )
-    add_config_options(rep)
+    add_config_options(
+        rep, since_help="report records at or after this ISO time or epoch seconds"
+    )
+    rep.add_argument(
+        "--before",
+        "--until",
+        dest="before",
+        help="report records strictly before this ISO time or epoch seconds",
+    )
+    rep.add_argument(
+        "--timezone",
+        default="UTC",
+        help="IANA zone for offset-free report times (default UTC)",
+    )
     rep.add_argument("--dataset", help="only this live dataset (<group>__<task>)")
     rep.add_argument("--session", help="only this evaluation session (run id)")
     rep.add_argument("--format", choices=("md", "json", "csv"), default="md")

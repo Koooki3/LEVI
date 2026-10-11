@@ -161,8 +161,13 @@ def gate_rows(config) -> list:
     return gating.history(config.live_dir, limit=10**6, tail_bytes=GATE_TAIL_BYTES)
 
 
-def scope_of(dataset=None, session=None, since=None) -> dict:
-    return {"dataset": dataset or None, "session": session or None, "since": since}
+def scope_of(
+    dataset=None, session=None, since=None, *, before=None, timezone=None
+) -> dict:
+    scope = {"dataset": dataset or None, "session": session or None, "since": since}
+    if before is not None or timezone is not None:
+        scope.update(before=before, timezone=timezone, time_basis="stats_record_at")
+    return scope
 
 
 def scoped_rows(
@@ -173,12 +178,13 @@ def scoped_rows(
     include_excluded=False,
     *,
     sources=None,
+    before=None,
 ):
     """``(records, hidden)``: the records of a scope, without the episodes a
     person removed unless ``include_excluded``, and how many removed demos the
     scope holds."""
     scoped = stats.select(
-        marked_records(config, sources=sources), dataset, session, since
+        marked_records(config, sources=sources), dataset, session, since, before=before
     )
     hidden = {
         (r.get("dataset"), r.get("demo")) for r in scoped if r.get("excluded") is True
@@ -226,6 +232,8 @@ def build(
     dataset=None,
     session=None,
     since=None,
+    before=None,
+    timezone=None,
     limit=100,
     offset=0,
     include_excluded=False,
@@ -247,6 +255,8 @@ def build(
             dataset,
             session,
             since,
+            before,
+            timezone,
             limit,
             offset,
             bool(include_excluded),
@@ -256,7 +266,13 @@ def build(
     if cached is not None:
         return {**cached, "generated_at": round(now, 3)}
     rows, hidden = scoped_rows(
-        config, dataset, session, since, include_excluded, sources=sources
+        config,
+        dataset,
+        session,
+        since,
+        include_excluded,
+        sources=sources,
+        before=before,
     )
     active = (
         None
@@ -279,7 +295,7 @@ def build(
         "enabled": True,
         "schema": SCHEMA,
         "generated_at": round(now, 3),
-        "scope": scope_of(dataset, session, since),
+        "scope": scope_of(dataset, session, since, before=before, timezone=timezone),
         "include_excluded": bool(include_excluded),
         "excluded_demos": hidden,
         "datasets": sorted(

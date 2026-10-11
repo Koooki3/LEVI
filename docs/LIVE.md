@@ -998,3 +998,15 @@ Macro F1 averages both class F1 scores; balanced accuracy averages both class
 recalls. Either average is `null` if a component is undefined. End-condition
 groups use the same definitions. These metrics alone do not implement a historical
 time window or establish source-label identity.
+
+### Report record-time window
+
+`levi live report --since 2026-10-10 --before 2026-10-11 --timezone Asia/Shanghai`
+selects statistics records in `[since, before)`; `--until` is an alias for
+`--before`. JSON, Markdown and CSV use the same window. Offset-free dates/times
+use the explicit IANA zone (default UTC); times with an offset are absolute.
+Ambiguous or nonexistent local DST times require an offset. Invalid boundaries
+are refused before reading configuration or writing output. The report filter
+does not change the background backlog cutoff. JSON scope states
+`time_basis: stats_record_at`; this is not the operator's original label time.
+Reliable historical human-label replay still needs source/label identity checks.

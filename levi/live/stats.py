@@ -449,9 +449,13 @@ def mark_excluded(rows, excluded=None, known=None) -> list:
     return out
 
 
-def select(rows, dataset=None, session=None, since=None, include_excluded=True) -> list:
+def select(
+    rows, dataset=None, session=None, since=None, include_excluded=True, *, before=None
+) -> list:
     """The records of one dataset and/or evaluation session and/or written at
-    or after ``since`` (epoch seconds). ``None`` means no filter. With
+    or after ``since`` and strictly before ``before`` (epoch seconds).
+    Missing record times cannot satisfy a bounded window. ``None`` means
+    no filter. With
     ``include_excluded`` False the records marked ``excluded`` (see
     ``mark_excluded``) are left out."""
     out = []
@@ -462,7 +466,12 @@ def select(rows, dataset=None, session=None, since=None, include_excluded=True) 
             continue
         if session is not None and row.get("session") != session:
             continue
-        if since is not None and (num(row.get("at")) or 0) < since:
+        stamp = num(row.get("at"))
+        if (since is not None or before is not None) and stamp is None:
+            continue
+        if since is not None and stamp < since:
+            continue
+        if before is not None and stamp >= before:
             continue
         if not include_excluded and row.get("excluded") is True:
             continue

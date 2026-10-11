@@ -154,6 +154,9 @@ def build(
     now=None,
     policy=None,
     include_excluded=False,
+    since=None,
+    before=None,
+    timezone=None,
 ) -> dict:
     """Everything a report says, as one dict (the JSON file's content).
     ``policy`` is ``{config, checkpoint}`` of the evaluation session when the
@@ -163,16 +166,24 @@ def build(
         config,
         dataset=dataset,
         session=session,
+        since=since,
+        before=before,
+        timezone=timezone,
         limit=None,
         include_excluded=include_excluded,
         now=now,
     )
     rows, _ = statsview.scoped_rows(
-        config, dataset, session, include_excluded=include_excluded
+        config,
+        dataset,
+        session,
+        since,
+        include_excluded=include_excluded,
+        before=before,
     )
-    everything = statsview.scoped_rows(config, dataset, session, include_excluded=True)[
-        0
-    ]
+    everything = statsview.scoped_rows(
+        config, dataset, session, since, include_excluded=True, before=before
+    )[0]
     report = {
         "schema": SCHEMA,
         "dataset": dataset,
