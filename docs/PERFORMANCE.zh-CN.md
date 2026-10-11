@@ -378,3 +378,5 @@ SDK/native 闭包和 owned SDK 子进程 bootstrap 尚未安装，真实入口�
 物理设备所有权仍须原内核完整且新鲜的群组退出证明才能释放。
 
 vLLM 关键方法须解析到工厂执行前的原类描述符，`__func__` 与 `__self__` 均须匹配；实例遮蔽即使使用同一 bundle 编译的方法也拒绝。合法类方法、静态方法语义保留。函数 globals、默认值与闭包中的确切被动 `SimpleNamespace` 可绑定传递至 namespace/dict/list/tuple 的 callable 路径，普通数值计数仍可变化。主动对象、未支持容器或未绑定关键 callable 明确拒绝。这只校验已审调用点；loader 不是 Python 安全沙箱，没有据此声明真实 SDK/native/子 bootstrap 可用。
+
+Owned worker 提供 `collect_sdk_completion(request)`，返回原提交 token、严格匹配的 `SdkIdleAck` 和 CPU 结果。超时保留 pending；坏 ACK/payload 或库存未知永久撤销该 pending 结果。真实 ACK 缓存仅可在新鲜探针成功后用于同一 request 的 drain。worker 不发起或结束内核 request，也不把调用返回当停止证明。

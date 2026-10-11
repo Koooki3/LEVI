@@ -22,6 +22,7 @@ from pathlib import Path
 
 from levi.live import gpumgr
 from levi.live.runtime_bridge import DriverIdentity, DriverObservation
+from levi.live.runtime_ownership import RequestToken
 from levi.live.workload_broker import WorkerIdentity
 
 
@@ -409,6 +410,13 @@ class SdkIdleAck:
     capability_id: str
 
 
+@dataclass(frozen=True)
+class SdkCompletion:
+    request: RequestToken
+    sdk_ack: SdkIdleAck
+    result: object
+
+
 MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 
 
@@ -582,6 +590,9 @@ class OwnedModelWorker:
         self._closed = threading.Event()
         self._idle = None
         self._pending = ("ready", 0)
+        self._submitted_request = self._completed_request = None
+        self._received_reply = self._sdk_completion = None
+        self._reply_withdrawn = False
         self.worker = self._process = None
         group_scope.reserve_launch(role, self)
         self._connection, child = multiprocessing.Pipe()
@@ -679,8 +690,11 @@ class OwnedModelWorker:
     def submit(self, request, payload):
         # Verify against the original authority before locking the worker: the
         # group observer probes every member, including this one's idle lock.
+        from levi.live.runtime_ownership import RequestToken
+
         if (
-            self._authority is None
+            type(request) is not RequestToken
+            or self._authority is None
             or request.role != self.role
             or not self._authority.accepts_result(
                 request,
@@ -700,6 +714,9 @@ class OwnedModelWorker:
             ):
                 raise ValueError("current unique role request epoch required")
             self._idle = None
+            self._submitted_request = request
+            self._completed_request = self._sdk_completion = self._received_reply = None
+            self._reply_withdrawn = False
             self._pending = ("result", request.request_epoch)
             _send(self._connection, ("infer", request.request_epoch, payload))
 
@@ -712,26 +729,93 @@ class OwnedModelWorker:
             self._pending = ("idle", epoch)
             _send(self._connection, ("barrier", epoch, None))
 
-    def collect(self, *, timeout_s=1.0):
+    def _collect_sdk(self, timeout_s, request=None):
         if not 0 < timeout_s <= 30:
             raise ValueError("bounded worker wait required")
         with self._lock:
-            self._healthy()
-            if self._pending is None:
-                raise ValueError("no pending owned command")
-            if not self._connection.poll(timeout_s):
-                raise TimeoutError("owned SDK idle ACK not received; slot retained")
-            kind, ack, result = _receive(self._connection)
-            expected, epoch = self._pending
-            if kind != expected or ack != SdkIdleAck(
-                self.worker, self.launch_id, epoch, self.factory.capability_id
+            if (
+                request is not None
+                and request is not getattr(self, "_submitted_request", None)
+                and request is not getattr(self, "_completed_request", None)
             ):
+                raise ValueError("exact submitted SDK request required")
+            try:
+                self._healthy()
+                if request is not None:
+                    if request is getattr(self, "_completed_request", None):
+                        completion = self._sdk_completion
+                        return SdkCompletion(
+                            request,
+                            completion.sdk_ack,
+                            None
+                            if self._closed.is_set() or self._reply_withdrawn
+                            else completion.result,
+                        )
+                    if request is not getattr(self, "_submitted_request", None):
+                        raise ValueError("exact submitted SDK request required")
+                if self._pending is None:
+                    raise ValueError("no pending owned command")
+                expected, epoch = self._pending
+                reply = getattr(self, "_received_reply", None)
+                if reply is None:
+                    if not self._connection.poll(timeout_s):
+                        raise TimeoutError(
+                            "owned SDK idle ACK not received; slot retained"
+                        )
+                    kind, ack, result = _receive(self._connection)
+                    if (
+                        kind != expected
+                        or type(ack) is not SdkIdleAck
+                        or type(ack.request_epoch) is not int
+                        or type(ack.worker) is not WorkerIdentity
+                        or ack
+                        != SdkIdleAck(
+                            self.worker,
+                            self.launch_id,
+                            epoch,
+                            self.factory.capability_id,
+                        )
+                    ):
+                        raise ValueError("exact current owned SDK idle ACK required")
+                    _cpu_payload(result)
+                    # Cache a genuine reply before the post-ACK inventory probe.
+                    # An unknown probe may recover only this same request drain.
+                    self._received_reply = reply = (ack, result)
+                ack, result = reply
+                self._healthy()
+                submitted = getattr(self, "_submitted_request", None)
+                result = (
+                    None
+                    if self._closed.is_set() or getattr(self, "_reply_withdrawn", False)
+                    else result
+                )
+                self._pending = None
+                self._idle = ack
+                self._received_reply = None
+                self._submitted_request = None
+                self._completed_request = submitted
+                self._sdk_completion = (
+                    SdkCompletion(submitted, ack, result)
+                    if submitted is not None
+                    else None
+                )
+                return self._sdk_completion if request is not None else result
+            except TimeoutError:
+                raise
+            except Exception:
+                self._reply_withdrawn = True
                 self._closed.set()
-                raise ValueError("exact current owned SDK idle ACK required")
-            self._healthy()
-            self._pending = None
-            self._idle = ack
-            return result
+                raise
+
+    def collect(self, *, timeout_s=1.0):
+        return self._collect_sdk(timeout_s)
+
+    def collect_sdk_completion(self, request, *, timeout_s=1.0):
+        from levi.live.runtime_ownership import RequestToken
+
+        if type(request) is not RequestToken:
+            raise ValueError("exact submitted SDK request required")
+        return self._collect_sdk(timeout_s, request)
 
     def close_ingress(self):
         self._closed.set()

@@ -87,6 +87,9 @@ def execution(monkeypatch):
         worker._authority = worker._observer = None
         worker._lock, worker._closed = threading.Lock(), threading.Event()
         worker._pending = None
+        worker._submitted_request = worker._completed_request = None
+        worker._received_reply = worker._sdk_completion = None
+        worker._reply_withdrawn = False
         worker._idle = owned.SdkIdleAck(
             worker.worker, worker.launch_id, 0, worker.factory.capability_id
         )
@@ -297,3 +300,58 @@ def test_unknown_descendant_cannot_release_original_owner_or_request(
     proof = runner.observer.exit_proof(runner.authority.broker, runner.lease)
     runner.authority.release_after_exit(runner.runtime, proof, now_ns=NOW)
     assert runner.authority.snapshot(now_ns=NOW)["runtime"] is None
+
+
+def test_sdk_completion_retains_original_token_and_strict_ack(execution):
+    runner, workers, deadline = execution
+    request = begin(runner, deadline)
+    worker = workers["judge"]
+    worker._connection.finish({"value": "cpu"})
+    completion = worker.collect_sdk_completion(request, timeout_s=0.001)
+    assert completion.request is request
+    assert completion.sdk_ack.request_epoch == request.request_epoch
+    assert completion.result == {"value": "cpu"}
+    assert worker.collect_sdk_completion(request, timeout_s=0.001) == completion
+    assert runner.authority.snapshot(now_ns=NOW)["request"] == request
+    with pytest.raises(ValueError, match="exact submitted"):
+        worker.collect_sdk_completion(replace(request), timeout_s=0.001)
+
+
+def test_sdk_completion_unknown_post_ack_retains_genuine_drain(execution):
+    runner, workers, deadline = execution
+    request = begin(runner, deadline)
+    worker = workers["judge"]
+    worker._connection.finish("withdraw forever")
+    probes = []
+
+    def unknown():
+        probes.append(None)
+        if len(probes) == 2:
+            raise ValueError("unknown after exact SDK ACK")
+
+    worker._healthy = unknown
+    with pytest.raises(ValueError, match="unknown"):
+        worker.collect_sdk_completion(request, timeout_s=0.001)
+    assert worker._pending == ("result", request.request_epoch)
+    assert worker._received_reply is not None
+    completion = worker.collect_sdk_completion(request, timeout_s=0.001)
+    assert completion.result is None
+    assert completion.sdk_ack.request_epoch == request.request_epoch
+    assert runner.authority.snapshot(now_ns=NOW)["request"] == request
+
+
+@pytest.mark.parametrize("bad", ["epoch-type", "payload"])
+def test_sdk_completion_bad_input_keeps_pending_and_never_publishes(execution, bad):
+    runner, workers, deadline = execution
+    request = begin(runner, deadline)
+    worker = workers["judge"]
+    worker._connection.finish(object() if bad == "payload" else "value")
+    if bad == "epoch-type":
+        kind, ack, result = worker._connection.answer[0]
+        worker._connection.answer[0] = (kind, replace(ack, request_epoch=True), result)
+    with pytest.raises((TypeError, ValueError)):
+        worker.collect_sdk_completion(request, timeout_s=0.001)
+    assert worker._pending == ("result", request.request_epoch)
+    assert worker._received_reply is None and worker._idle is None
+    worker._connection.finish("must not publish after failure")
+    assert worker.collect_sdk_completion(request, timeout_s=0.001).result is None
