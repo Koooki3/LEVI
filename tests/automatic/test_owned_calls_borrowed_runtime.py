@@ -6,7 +6,9 @@ evidence artifacts before loading. It never executes a moving peer worktree. No 
 
 import hashlib
 import importlib
+import inspect
 import json
+import marshal
 import os
 import re
 import subprocess
@@ -83,6 +85,92 @@ borrowed = kernel_fixture.source_module(
 )
 sys.path.insert(0, str(SNAPSHOT / "tests/automatic"))
 helpers = importlib.import_module("test_owned_role_execution")
+
+
+def fixed_loaded_source(module, repository, commit, relative):
+    """Prove loaded bytes against git objects; never copy a kernel or grant."""
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise RuntimeError("an explicit full source commit is required")
+    path = Path(module.__file__).resolve()
+    expected = subprocess.check_output(
+        ["git", "show", commit + ":" + relative], cwd=repository, timeout=1
+    )
+    actual = path.read_bytes()
+    if actual != expected:
+        raise RuntimeError("loaded source differs from fixed commit: " + str(path))
+    return {
+        "module": module.__name__,
+        "loaded_path": str(path),
+        "commit": commit,
+        "git_path": relative,
+        "source_sha256": hashlib.sha256(actual).hexdigest(),
+    }
+
+
+def loaded_provenance():
+    kernel_commit = os.environ["LEVI_JOINT_KERNEL_COMMIT"]
+    implementation_commit = os.environ["LEVI_JOINT_IMPLEMENTATION_COMMIT"]
+    implementation = Path(__file__).resolve().parents[2]
+    schema, broker, runtime = kernel_fixture.KERNEL
+    modules = (
+        (schema, ROOT, kernel_commit, "levi/domain/aeri.py"),
+        (broker, ROOT, kernel_commit, "levi/live/workload_broker.py"),
+        (runtime, ROOT, kernel_commit, "levi/live/runtime_ownership.py"),
+        (
+            sys.modules["levi.live.runtime_bridge"],
+            ROOT,
+            kernel_commit,
+            "levi/live/runtime_bridge.py",
+        ),
+        (
+            sys.modules[InferenceCycle.__module__],
+            implementation,
+            implementation_commit,
+            "levi/automatic/intervention.py",
+        ),
+        (
+            sys.modules[Orchestrator.__module__],
+            implementation,
+            implementation_commit,
+            "levi/automatic/orchestrator.py",
+        ),
+        (
+            sys.modules["levi.automatic.adapters.owned_calls"],
+            implementation,
+            implementation_commit,
+            "levi/automatic/adapters/owned_calls.py",
+        ),
+        (sdk, PEER, FIXED, "levi/live/owned_runtime.py"),
+        (borrowed, PEER, FIXED, "levi/automatic/owned_runtime.py"),
+    )
+    functions = (
+        runtime.RuntimeOwnership.begin_role_request,
+        runtime.RuntimeOwnership.finish_request,
+        runtime.RuntimeOwnership.owns_exact_request,
+        runtime.RuntimeOwnership.accepts_exact_request,
+        InferenceCycle.invoke,
+        Orchestrator._drive_intervention,
+        borrowed.BorrowedRoleExecution.dispatch_existing,
+        borrowed.BorrowedRoleExecution.collect_existing,
+    )
+    return {
+        "loaded_sources": [fixed_loaded_source(*entry) for entry in modules],
+        "loaded_functions": [
+            {
+                "qualified_name": function.__module__ + "." + function.__qualname__,
+                "source_path": inspect.getsourcefile(function),
+                "first_line": function.__code__.co_firstlineno,
+                "code_sha256": hashlib.sha256(
+                    marshal.dumps(function.__code__)
+                ).hexdigest(),
+            }
+            for function in functions
+        ],
+        "hardware_and_sdk": "explicit in-memory fakes; production bindings remain closed",
+    }
+
+
+print(json.dumps(loaded_provenance(), sort_keys=True))
 
 
 class AutoPipe(helpers.Pipe):

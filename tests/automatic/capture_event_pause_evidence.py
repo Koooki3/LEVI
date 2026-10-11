@@ -72,6 +72,8 @@ def main():
             "levi/domain/aeri.py",
             "levi/live/runtime_ownership.py",
             "levi/live/workload_broker.py",
+            "levi/live/runtime_bridge.py",
+            "levi/automatic/intervention.py",
         )
     ]
     missing = [str(path) for path in source_files if not path.exists()]
@@ -98,6 +100,16 @@ def main():
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONPATH": str(ROOT),
             "LEVI_JOINT_KERNEL_ROOT": str(kernel),
+            **{
+                name: os.environ[name]
+                for name in (
+                    "LEVI_BORROWED_ROOT",
+                    "LEVI_BORROWED_COMMIT",
+                    "LEVI_JOINT_KERNEL_COMMIT",
+                    "LEVI_JOINT_IMPLEMENTATION_COMMIT",
+                )
+                if name in os.environ
+            },
         },
     }
     env = {**os.environ, **record["environment"]}
