@@ -358,21 +358,29 @@ class Scan:
         return "FAULT_LOCKED" if self.corrupt else self.replay.state
 
 
-def scan(path: Path) -> Scan:
+def scan(path: Path, *, loader=None) -> Scan:
     """Read a campaign journal without changing it."""
     try:
-        data = Path(path).read_bytes()
+        data = (
+            loader.read(Path(path), optional=True)
+            if loader is not None
+            else Path(path).read_bytes()
+        )
+        if data is None:
+            return Scan()
     except FileNotFoundError:
         return Scan()
     parts = data.split(b"\n")
     whole, tail = parts[:-1], parts[-1]
+    if loader is not None:
+        loader.count_lines(len(whole))
     result = Scan()
     previous = ZEROS
     offset = 0
     for index, line in enumerate(whole):
         last = index == len(whole) - 1 and not tail
         try:
-            raw = json.loads(line)
+            raw = loader.decode(line) if loader is not None else json.loads(line)
         except (ValueError, RecursionError):
             if last:
                 result.torn = data[offset:]
@@ -383,7 +391,11 @@ def scan(path: Path) -> Scan:
             result.corrupt = f"line {index}: the hash chain is broken"
             return result
         try:
-            event = aeri.parse_campaign_event(line)
+            event = (
+                aeri.validate_campaign_event(raw)
+                if loader is not None
+                else aeri.parse_campaign_event(line)
+            )
         except aeri.AeriError as exc:
             result.corrupt = f"line {index}: {exc}"
             return result
@@ -410,10 +422,16 @@ def scan(path: Path) -> Scan:
 # --- the plan copy -------------------------------------------------------------------
 
 
-def read_plan(directory) -> dict | None:
+def read_plan(directory, *, loader=None) -> dict | None:
     path = Path(directory) / PLAN_FILE
     try:
-        value = json.loads(path.read_bytes())
+        value = (
+            loader.json(path, optional=True)
+            if loader is not None
+            else json.loads(path.read_bytes())
+        )
+        if value is None:
+            return None
     except FileNotFoundError:
         return None
     except (OSError, ValueError) as exc:
@@ -589,8 +607,8 @@ class CampaignJournal:
             raise
 
     @staticmethod
-    def read(directory) -> Scan:
-        return scan(Path(directory) / JOURNAL)
+    def read(directory, *, loader=None) -> Scan:
+        return scan(Path(directory) / JOURNAL, loader=loader)
 
     def close(self) -> None:
         if self._fd is not None:

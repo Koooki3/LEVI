@@ -112,15 +112,15 @@ def _workspace() -> Path | None:
     return found.workspace
 
 
-def _linked_id(workspace: Path, name: str) -> str | None:
+def _linked_id(workspace: Path, name: str, *, loader=None) -> str | None:
     if not _embedded(workspace):
         return None
     from levi import links
 
-    return links.product_id(workspace, name)
+    return links.product_id(workspace, name, loader=loader)
 
 
-def _browse(config, name, session_id=None, *, _info=None):
+def _browse(config, name, session_id=None, *, _info=None, _loader=None):
     info = (
         dict(_info)
         if _info is not None
@@ -133,7 +133,11 @@ def _browse(config, name, session_id=None, *, _info=None):
     }.get(info.get("view_status"), info.get("view_status"))
     source_name = (info.get("repo_id") or "local/" + name).removeprefix("local/")
     repo = (
-        _linked_id(config.workspace, source_name)
+        (
+            _linked_id(config.workspace, source_name, loader=_loader)
+            if _loader is not None
+            else _linked_id(config.workspace, source_name)
+        )
         if _embedded(config.workspace)
         else info.get("repo_id")
     )
@@ -1131,8 +1135,8 @@ def _result_linker(config, item, states, snapshot):
         config.workspace / "outputs/LEVI/workbench/datasets.json", optional=True
     )
     catalog = catalog if isinstance(catalog, dict) else {}
-    key = ("viewer_capture_index", config.workspace)
-    if key not in snapshot.parsed:
+    index_key = ("viewer_capture_index", config.workspace)
+    if index_key not in snapshot.parsed:
         grouped = {}
         for key_name, value in catalog.items():
             if (
@@ -1141,7 +1145,7 @@ def _result_linker(config, item, states, snapshot):
                 and isinstance(value.get("path"), str)
             ):
                 grouped.setdefault(value["path"], []).append((key_name, value))
-        snapshot.parsed[key] = grouped
+        snapshot.parsed[index_key] = grouped
     embedded = _embedded(config.workspace)
     live_ui = None
     service = getattr(config, "service", None)
@@ -1163,13 +1167,13 @@ def _result_linker(config, item, states, snapshot):
         href = None
         repo = None
         if isinstance(capture, str):
-            matches = snapshot.parsed[key].get(capture, [])
+            matches = snapshot.parsed[index_key].get(capture, [])
             if len(matches) == 1:
-                key, entry = matches[0]
+                catalog_key, entry = matches[0]
                 candidate = entry.get("id")
                 if (
-                    candidate == "local/" + key
-                    and DATASET.fullmatch(key)
+                    candidate == "local/" + catalog_key
+                    and DATASET.fullmatch(catalog_key)
                     and result_index.catalog._safe(Path(capture)).is_relative_to(
                         config.workspace / "captures"
                     )
@@ -1200,6 +1204,7 @@ def _result_linker(config, item, states, snapshot):
                             config,
                             name,
                             item["identity"]["run_id"],
+                            _loader=snapshot,
                             _info={
                                 "repo_id": native,
                                 "view_status": status,

@@ -48,13 +48,15 @@ def records(live_dir) -> list:
     return rows
 
 
-def session_ends(config, include_excluded=False) -> dict:
+def session_ends(config, include_excluded=False, *, states=None) -> dict:
     """``{(dataset, session): latest completed_at}`` over every demo the
     datasets' state files know, labelled or not yet: the end of a session as
     far as the service has seen it. Episodes a person removed do not move it
     unless ``include_excluded``."""
     ends: dict = {}
-    for name, state in mirror.list_states(config).items():
+    for name, state in (
+        mirror.list_states(config) if states is None else states
+    ).items():
         for row in (state.get("demos") or {}).values():
             if not isinstance(row, dict):
                 continue
@@ -67,14 +69,16 @@ def session_ends(config, include_excluded=False) -> dict:
     return ends
 
 
-def excluded_demos(config) -> tuple:
+def excluded_demos(config, *, states=None) -> tuple:
     """``({(dataset, demo)} a person has removed, {datasets whose state could
     be read})`` (``exclusion.py``). The state files are the truth: a record
     only says what was so when it was written, and an episode may have been
     restored since."""
     found: set = set()
     known: set = set()
-    for name, state in mirror.list_states(config).items():
+    for name, state in (
+        mirror.list_states(config) if states is None else states
+    ).items():
         known.add(name)
         for demo, row in (state.get("demos") or {}).items():
             if isinstance(row, dict) and exclusion.is_excluded(row):
@@ -82,13 +86,34 @@ def excluded_demos(config) -> tuple:
     return found, known
 
 
-def marked_records(config) -> list:
+def marked_records(config, *, sources=None) -> list:
     """Every record, with ``excluded`` decided by the state files."""
-    removed, known = excluded_demos(config)
-    states = mirror.list_states(config, include_archived=True)
-    tombstones = management.removed_sessions(config)
+    active = (
+        None
+        if sources is None
+        else {
+            name: state
+            for name, state in sources["states"].items()
+            if not state.get("archived")
+        }
+    )
+    removed, known = excluded_demos(config, states=active)
+    states = (
+        mirror.list_states(config, include_archived=True)
+        if sources is None
+        else sources["states"]
+    )
+    tombstones = (
+        management.removed_sessions(config)
+        if sources is None
+        else sources["tombstones"]
+    )
     rows = []
-    for row in stats.mark_excluded(records(config.live_dir), removed, known):
+    for row in stats.mark_excluded(
+        records(config.live_dir) if sources is None else sources["records"],
+        removed,
+        known,
+    ):
         state = states.get(row.get("dataset")) or {}
         if state.get("archived"):
             continue
@@ -140,11 +165,21 @@ def scope_of(dataset=None, session=None, since=None) -> dict:
     return {"dataset": dataset or None, "session": session or None, "since": since}
 
 
-def scoped_rows(config, dataset=None, session=None, since=None, include_excluded=False):
+def scoped_rows(
+    config,
+    dataset=None,
+    session=None,
+    since=None,
+    include_excluded=False,
+    *,
+    sources=None,
+):
     """``(records, hidden)``: the records of a scope, without the episodes a
     person removed unless ``include_excluded``, and how many removed demos the
     scope holds."""
-    scoped = stats.select(marked_records(config), dataset, session, since)
+    scoped = stats.select(
+        marked_records(config, sources=sources), dataset, session, since
+    )
     hidden = {
         (r.get("dataset"), r.get("demo")) for r in scoped if r.get("excluded") is True
     }
@@ -195,6 +230,7 @@ def build(
     offset=0,
     include_excluded=False,
     now=None,
+    sources=None,
 ) -> dict:
     """The statistics of a scope. ``limit`` and ``offset`` page the episode
     table (newest first); ``limit=None`` returns every episode. Episodes a
@@ -203,21 +239,36 @@ def build(
     so a page that polls does not recompute it."""
     now = time.time() if now is None else now
     key = (
-        str(config.live_dir),
-        _inputs(config),
-        dataset,
-        session,
-        since,
-        limit,
-        offset,
-        bool(include_excluded),
+        None
+        if sources is not None
+        else (
+            str(config.live_dir),
+            _inputs(config),
+            dataset,
+            session,
+            since,
+            limit,
+            offset,
+            bool(include_excluded),
+        )
     )
-    cached = _BUILT.get(key)
+    cached = _BUILT.get(key) if sources is None else None
     if cached is not None:
         return {**cached, "generated_at": round(now, 3)}
-    rows, hidden = scoped_rows(config, dataset, session, since, include_excluded)
-    ends = session_ends(config, include_excluded)
-    gate = gate_rows(config)
+    rows, hidden = scoped_rows(
+        config, dataset, session, since, include_excluded, sources=sources
+    )
+    active = (
+        None
+        if sources is None
+        else {
+            name: state
+            for name, state in sources["states"].items()
+            if not state.get("archived")
+        }
+    )
+    ends = session_ends(config, include_excluded, states=active)
+    gate = gate_rows(config) if sources is None else sources["gate"]
     episodes = stats.episode_rows(rows, ends)
     episodes.sort(key=lambda r: -(stats.num(r.get("at")) or 0))
     total = len(episodes)
@@ -232,7 +283,13 @@ def build(
         "include_excluded": bool(include_excluded),
         "excluded_demos": hidden,
         "datasets": sorted(
-            {r.get("dataset") for r in records(config.live_dir) if r.get("dataset")}
+            {
+                r.get("dataset")
+                for r in (
+                    records(config.live_dir) if sources is None else sources["records"]
+                )
+                if r.get("dataset")
+            }
         ),
         "summary": stats.summarize(rows, gate=gate, session_ends=ends),
         "sessions": sessions[:MAX_SESSIONS],
@@ -244,9 +301,10 @@ def build(
             "rows": episodes,
         },
     }
-    if len(_BUILT) >= BUILT_MAX:
-        _BUILT.clear()
-    _BUILT[key] = payload
+    if sources is None:
+        if len(_BUILT) >= BUILT_MAX:
+            _BUILT.clear()
+        _BUILT[key] = payload
     return payload
 
 

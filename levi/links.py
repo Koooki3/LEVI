@@ -65,8 +65,10 @@ _WORKSPACES: dict = {}
 TTL = 1.0  # seconds a discovery is reused (a request reads annotations often)
 
 
-def workspaces() -> list[Path]:
+def workspaces(*, loader=None) -> list[Path]:
     """The live workspaces linked now, in a stable order, without duplicates."""
+    if loader is not None:
+        return _discover(loader=loader)
     key = (
         str(paths.ROOT),
         os.environ.get(ENV),
@@ -82,12 +84,16 @@ def workspaces() -> list[Path]:
     return list(found)
 
 
-def _discover() -> list[Path]:
+def _discover(*, loader=None) -> list[Path]:
     from .live import locate
 
     found: list = []
     try:
-        shown = locate.find(paths.ROOT)
+        shown = (
+            locate.find(paths.ROOT, loader=loader)
+            if loader is not None
+            else locate.find(paths.ROOT)
+        )
         if shown.workspace is not None and shown.embedded:
             found.append(shown.workspace)
     except Exception as exc:  # noqa: BLE001  a broken live home never hides the datasets
@@ -95,7 +101,16 @@ def _discover() -> list[Path]:
     try:
         from .pool import exclusions, settings
 
-        found += list(exclusions.remembered(settings.pool_dir()))
+        if loader is None:
+            found += list(exclusions.remembered(settings.pool_dir()))
+        else:
+            kept = (
+                loader.json(settings.pool_dir() / exclusions.REMEMBERED, optional=True)
+                or {}
+            )
+            found += [
+                Path(w) for w in kept.get("workspaces", []) if isinstance(w, str) and w
+            ]
     except Exception as exc:  # noqa: BLE001
         LOG.debug("remembered live workspaces not linked: %s", exc)
     for text in (os.environ.get(ENV) or "").split(","):
@@ -117,8 +132,11 @@ def _stamp(path: Path):
     return (st.st_ino, st.st_size, st.st_mtime_ns)
 
 
-def _catalog(workspace: Path) -> dict:
+def _catalog(workspace: Path, *, loader=None) -> dict:
     path = workspace / CATALOG
+    if loader is not None:
+        value = loader.json(path, optional=True)
+        return value if isinstance(value, dict) else {}
     stamp = _stamp(path)
     cached = _CACHE.get(str(path))
     if cached and cached[0] == stamp:
@@ -136,14 +154,20 @@ def _mark(workspace: Path) -> str:
     return hashlib.sha256(str(workspace).encode()).hexdigest()[:6]
 
 
-def links() -> dict[str, Link]:
+def links(*, loader=None) -> dict[str, Link]:
     """Every linked dataset, by its name here."""
     from . import catalog
 
-    own = catalog.datasets()  # a dataset of this LEVI's own keeps its name
+    own = (
+        (loader.json(catalog.STATE / "datasets.json", optional=True) or {})
+        if loader is not None
+        else catalog.datasets()
+    )  # a dataset of this LEVI's own keeps its name
     out: dict[str, Link] = {}
-    for workspace in workspaces():
-        for source, item in sorted(_catalog(workspace).items()):
+    for workspace in workspaces(loader=loader) if loader is not None else workspaces():
+        if loader is not None:
+            loader.pin(workspace)
+        for source, item in sorted(_catalog(workspace, loader=loader).items()):
             if (
                 not isinstance(source, str)
                 or not re.fullmatch(r"[A-Za-z0-9_.-]+", source)
@@ -153,8 +177,18 @@ def links() -> dict[str, Link]:
             ):
                 continue  # a namespace is another experiment of one dataset
             try:
-                state = json.loads(
-                    (workspace / "live/datasets" / f"{source}.json").read_text()
+                state = (
+                    (
+                        loader.json(
+                            workspace / "live/datasets" / f"{source}.json",
+                            optional=True,
+                        )
+                        or {}
+                    )
+                    if loader is not None
+                    else json.loads(
+                        (workspace / "live/datasets" / f"{source}.json").read_text()
+                    )
                 )
             except (OSError, ValueError):
                 state = {}
@@ -208,12 +242,12 @@ def get(name: str | None) -> Link | None:
     return links().get(name)
 
 
-def product_id(workspace, source: str) -> str | None:
+def product_id(workspace, source: str, *, loader=None) -> str | None:
     """The id (``local/live.<name>``) under which this LEVI shows dataset
     ``source`` of live workspace ``workspace``, or None when it does not link
     it (the live page then has no viewer to open here)."""
     target = _resolve(workspace)
-    for name, link in links().items():
+    for name, link in (links(loader=loader) if loader is not None else links()).items():
         if link.source == source and link.workspace == target:
             return "local/" + name
     return None

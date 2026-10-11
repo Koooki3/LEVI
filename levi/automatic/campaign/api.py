@@ -291,11 +291,16 @@ def _spawn(campaign_id: str) -> None:
 
 
 class _Campaign:
-    def __init__(self, campaign_id: str, folder: Path):
+    def __init__(self, campaign_id: str, folder: Path, *, loader=None):
         self.id = campaign_id
         self.folder = folder
-        self.host_record = C.read_host(folder) or {}
-        self.scan = CampaignJournal.read(folder)
+        self.loader = loader
+        self.host_record = (
+            loader.json(folder / "ctl" / C.HOST_FILE, optional=True)
+            if loader is not None
+            else C.read_host(folder)
+        ) or {}
+        self.scan = CampaignJournal.read(folder, loader=loader)
         self.events = self.scan.events
         self.replay = self.scan.replay
         self.state = self.scan.effective_state if self.events else "DRAFT"
@@ -303,13 +308,15 @@ class _Campaign:
 
     def _plan(self) -> dict | None:
         try:
-            found = read_kept_plan(self.folder)
+            found = read_kept_plan(self.folder, loader=self.loader)
         except Exception:  # noqa: BLE001 - a broken copy: try the job folder
             found = None
         if found is not None:
             return found
         try:
-            return spec.read_plan(C.job_folder(self.id, aeri_home()) / spec.PLAN_FILE)
+            return spec.read_plan(
+                C.job_folder(self.id, aeri_home()) / spec.PLAN_FILE, loader=self.loader
+            )
         except spec.CampaignError:
             return None
 
@@ -346,7 +353,7 @@ class _Campaign:
         return found[0]["arm"] if found else None
 
 
-def _locate(campaign_id: str) -> _Campaign:
+def _locate(campaign_id: str, *, loader=None) -> _Campaign:
     if not isinstance(campaign_id, str) or not CAMPAIGN_ID.fullmatch(campaign_id):
         raise _fail(404, "not_found", "No such campaign")
     folder = campaign_dir(aeri_home(), campaign_id)
@@ -356,7 +363,7 @@ def _locate(campaign_id: str) -> _Campaign:
         raise _fail(404, "not_found", "No such campaign") from None
     if not stat.S_ISDIR(info.st_mode):
         raise _fail(404, "not_found", "No such campaign")
-    found = _Campaign(campaign_id, folder)
+    found = _Campaign(campaign_id, folder, loader=loader)
     if not found.events and not found.host_record:
         raise _fail(404, "not_found", "No such campaign")
     return found
@@ -960,6 +967,8 @@ def _basis_of(c: _Campaign, basis: str | None) -> str:
 
 
 def _require_reportable(c: _Campaign) -> None:
+    if getattr(c, "loader", None) is not None and c.state not in FINISHED:
+        raise _fail(409, "not_ready", "The report is made when the campaign ends")
     if _blinded(c):
         raise _fail(
             409,
@@ -1007,17 +1016,34 @@ def _report_files(basis_dir: Path) -> list:
     return sorted(out, key=lambda f: f["name"])
 
 
-@router.get("/{campaign_id}/report")
-def get_report(campaign_id: str, basis: str | None = None):
-    c = _locate(campaign_id)
+def get_report(
+    campaign_id: str, basis: str | None = None, *, _loader=None, _campaign=None
+):
+    c = (
+        _campaign
+        if _campaign is not None
+        else (
+            _locate(campaign_id, loader=_loader)
+            if _loader is not None
+            else _locate(campaign_id)
+        )
+    )
     _require_reportable(c)
     chosen = _basis_of(c, basis)
     root = C.report_root(c.folder)
     basis_dir = root / chosen
     if not basis_dir.is_dir() or basis_dir.is_symlink():
         raise _fail(404, "no_report", "No report for this basis yet")
-    analysis = base._json_below(basis_dir, ("data", "analysis.json"))
-    manifest = base._json_below(basis_dir, ("manifest.json",)) or {}
+    analysis = (
+        _loader.json(basis_dir / "data/analysis.json")
+        if _loader is not None
+        else base._json_below(basis_dir, ("data", "analysis.json"))
+    )
+    manifest = (
+        _loader.json(basis_dir / "manifest.json")
+        if _loader is not None
+        else base._json_below(basis_dir, ("manifest.json",))
+    ) or {}
     if isinstance(manifest, dict):
         manifest = base.scrub(manifest)
     return {
@@ -1026,6 +1052,11 @@ def get_report(campaign_id: str, basis: str | None = None):
         "analysis": analysis if isinstance(analysis, dict) else {},
         "manifest": manifest,
     }
+
+
+@router.get("/{campaign_id}/report")
+def report_view(campaign_id: str, basis: str | None = None):
+    return get_report(campaign_id, basis)
 
 
 @router.get("/{campaign_id}/report/files/{name:path}")

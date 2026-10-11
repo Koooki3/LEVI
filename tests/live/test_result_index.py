@@ -405,7 +405,7 @@ def campaign_fixture(tmp_path, monkeypatch, state="REPORTED"):
         plan=plan,
         host_record={"rollout_root": str(args["rollout_root"])},
     )
-    monkeypatch.setattr(campaign_api, "_locate", lambda identity: c)
+    monkeypatch.setattr(campaign_api, "_locate", lambda identity, **_kw: c)
     return cfg, args, c, report
 
 
@@ -672,7 +672,7 @@ def linked_fixture(tmp_path, monkeypatch, embedded):
     monkeypatch.setattr(
         api,
         "_linked_id",
-        lambda workspace, name: "local/live.native-a" if embedded else None,
+        lambda workspace, name, **_kw: "local/live.native-a" if embedded else None,
     )
     return cfg, args
 
@@ -995,3 +995,45 @@ def test_run_body_respects_remaining_request_budget(tmp_path, monkeypatch):
     assert api._result_run_repo(cfg, "temporal-a", "local/native-a", snapshot) is None
     assert snapshot.truncated == {"run_store_bytes"}
     assert snapshot.bytes == 0
+
+
+@pytest.mark.parametrize("where", ["meta", "eval"])
+@pytest.mark.parametrize(
+    "restricted",
+    [
+        {"blinded": True},
+        {"operator_blind": True},
+        {"campaign_id": "hidden"},
+        None,
+        "unknown",
+    ],
+)
+def test_independent_aeri_markers_cannot_mask_each_other(tmp_path, where, restricted):
+    cfg, args = configured(tmp_path)
+    change_session(args, analysis_visibility="public")
+    path = args["rollout_root"] / "model-a/task-a/demo_0000/metadata.json"
+    top = {"episode_role": "forward"}
+    nested = restricted
+    if where == "meta":
+        top, nested = nested, top
+    path.write_text(
+        json.dumps({"aeri": top, "eval": {"run_id": "run-a", "aeri": nested}})
+    )
+    item = lookup(cfg)
+    assert item["result_visibility"] != "visible"
+    assert item["records"] == item["runs"] == item["reports"] == []
+
+
+def test_multiple_canonical_dataset_keys_preserve_result_and_deduplicate_capture(
+    tmp_path, monkeypatch
+):
+    cfg, _args = linked_fixture(tmp_path, monkeypatch, False)
+    (cfg.live_dir / "datasets/dataset-b.json").write_bytes(
+        (cfg.live_dir / "datasets/dataset-a.json").read_bytes()
+    )
+    item = api.result_session(
+        root=cfg.watch.roots[0], group="model-a", task="task-a", session="run-a"
+    )
+    assert item["result_visibility"] == "visible"
+    assert item["identity"]["datasets"] == ["dataset-a", "dataset-b"]
+    assert len({v["viewer_href"] for v in item["viewers"]}) == 1

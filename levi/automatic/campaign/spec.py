@@ -945,12 +945,14 @@ def plan_campaign(job_path, *, job_root, planner: ChildPlanner | None = None):
     )
 
 
-def read_plan(path) -> dict:
+def read_plan(path, *, loader=None) -> dict:
     """A ``campaign.plan.json`` checked against its own ``campaign_sha256``
     (``E_CAMPAIGN_PLAN`` otherwise)."""
     path = Path(path)
     try:
-        value = json.loads(path.read_bytes())
+        value = (
+            loader.json(path) if loader is not None else json.loads(path.read_bytes())
+        )
     except (OSError, ValueError) as exc:
         raise CampaignError("E_CAMPAIGN_PLAN", f"{path}: {exc}") from None
     if (

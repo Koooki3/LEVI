@@ -78,7 +78,7 @@ def started_here(workspace) -> bool:
     return (live / STARTED).is_file() or (live / "logs" / "live.log").is_file()
 
 
-def remembered(home_dir) -> tuple:
+def remembered(home_dir, *, loader=None) -> tuple:
     """What the live home names as the service's workspace: ``(named,
     legacy)``. ``named`` is the ``workspace`` of ``<home>/started.json`` when
     that record exists, else the one in ``<home>/status.json`` (or None);
@@ -86,10 +86,18 @@ def remembered(home_dir) -> tuple:
     workspace a ``start`` used (``started_here``, checked by the caller once
     the path is known to be safe)."""
     home_dir = Path(home_dir).expanduser()
-    record = jsonio.read(home_dir / STARTED)
+    record = (
+        loader.json(home_dir / STARTED, optional=True)
+        if loader is not None
+        else jsonio.read(home_dir / STARTED)
+    )
     if isinstance(record, dict):
         return record.get("workspace"), False
-    status = jsonio.read(home_dir / "status.json")
+    status = (
+        loader.json(home_dir / "status.json", optional=True)
+        if loader is not None
+        else jsonio.read(home_dir / "status.json")
+    )
     return (status.get("workspace") if isinstance(status, dict) else None), True
 
 
@@ -190,7 +198,7 @@ def confined(path, workspace) -> bool:
     return bool(target and root and target.is_relative_to(root))
 
 
-def find(own) -> Found:
+def find(own, *, loader=None) -> Found:
     own = Path(own)
     if is_live(own):
         return Found(own, "own")
@@ -199,7 +207,7 @@ def find(own) -> Found:
     if explicit:
         how, named = "env", explicit
     else:
-        named, legacy = remembered(home())
+        named, legacy = remembered(home(), loader=loader)
         how = "status"
         if not isinstance(named, str) or not named.strip():
             return Found(None, how, "not_configured")

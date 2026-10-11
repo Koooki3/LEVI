@@ -52,6 +52,7 @@ class _Snapshot:
         self.truncated = set()
         self.bytes = 0
         self.json_values = 0
+        self.record_lines = 0
 
     def read(self, path, *, optional=False):
         path = catalog._safe(Path(path))
@@ -116,6 +117,9 @@ class _Snapshot:
             value = json.loads(raw)
         except RecursionError:
             raise ValueError("Source JSON nesting exceeds decoder limits") from None
+        return self.admit(value)
+
+    def admit(self, value):
         stack = [iter((value,))]
         while stack:
             try:
@@ -132,6 +136,12 @@ class _Snapshot:
             elif isinstance(part, list):
                 stack.append(iter(part))
         return value
+
+    def count_lines(self, count=1):
+        self.record_lines += count
+        if self.record_lines > MAX_RECORD_LINES:
+            self.truncated.add("record_lines")
+            raise ValueError("Request record-line budget exhausted")
 
     def pin(self, path):
         path = catalog._safe(Path(path))
@@ -392,17 +402,27 @@ def _header_visibility(snapshot, source, matching, run, session):
             evaluation = meta["eval"]
             if evaluation.get("run_id") != run:
                 return "source_header_session_changed"
-            marker = meta.get("aeri") or evaluation.get("aeri") or {}
-            if not isinstance(marker, dict):
+            markers = [
+                container["aeri"]
+                for container in (meta, evaluation)
+                if "aeri" in container
+            ]
+            if any(not isinstance(marker, dict) for marker in markers):
                 return "source_aeri_visibility_unknown"
-            if (
-                marker.get("campaign_id")
-                or marker.get("blinded")
-                or marker.get("operator_blind")
-                or meta.get("blinded")
-                or evaluation.get("blinded")
-            ):
-                return "source_campaign_uses_gated_report"
+            for marker in [meta, evaluation, *markers]:
+                if any(
+                    marker.get(key)
+                    for key in ("campaign_id", "blinded", "operator_blind")
+                ):
+                    return "source_campaign_uses_gated_report"
+                if any(
+                    key in marker and not isinstance(marker[key], bool)
+                    for key in ("blinded", "operator_blind")
+                ) or (
+                    "analysis_visibility" in marker
+                    and marker["analysis_visibility"] != "public"
+                ):
+                    return "source_aeri_visibility_unknown"
             if (
                 "aeri" in meta
                 or "aeri" in evaluation
@@ -425,6 +445,7 @@ def _records(snapshot, live_dir):
             snapshot.truncated.add("record_lines")
             break
         try:
+            snapshot.count_lines()
             row = analysis.normalize(snapshot.decode(line))
             if row:
                 rows.append(row)
@@ -631,7 +652,7 @@ def _campaign(item, raw, root, snapshot):
     campaign = raw.get("campaign_id")
     item["comparison"]["campaign_id"] = campaign if isinstance(campaign, str) else None
     try:
-        c = campaign_api._locate(campaign)
+        c = campaign_api._locate(campaign, loader=snapshot)
         campaign_api._require_reportable(c)
         if (
             catalog._safe(Path(c.host_record.get("rollout_root") or "")) != root
@@ -657,7 +678,7 @@ def _campaign(item, raw, root, snapshot):
         snapshot.read(c.folder / "plan.json", optional=True)
         snapshot.json(c.folder / "report" / chosen / "manifest.json")
         snapshot.json(c.folder / "report" / chosen / "data/analysis.json")
-        report = campaign_api.get_report(campaign)
+        report = campaign_api.get_report(campaign, _loader=snapshot, _campaign=c)
         manifest = report["manifest"]
         if (
             manifest.get("schema") != "levi.aeri.campaign_report_manifest.v1"

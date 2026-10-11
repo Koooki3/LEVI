@@ -662,7 +662,9 @@ def cell(records, *, missing=None, stages=STAGES) -> dict:
     return found
 
 
-def missing_counts(config, records, group=None, task=None, include_excluded=False):
+def missing_counts(
+    config, records, group=None, task=None, include_excluded=False, *, states=None
+):
     """``{(group, task): {...}}`` of episodes the records cannot show, from
     the dataset state files: ``incomplete`` (stopped early), ``fr3_fault``
     (a robot fault, part of ``incomplete``), ``discarded`` (voided by the
@@ -671,7 +673,9 @@ def missing_counts(config, records, group=None, task=None, include_excluded=Fals
     ``done_without_record`` (labelled, record not written yet)."""
     have = {(r["dataset"], r["demo"]) for r in records}
     out: dict = {}
-    for name, state in mirror.list_states(config).items():
+    for name, state in (
+        mirror.list_states(config) if states is None else states
+    ).items():
         key = (state.get("group"), state.get("task_folder"))
         if (group is not None and key[0] != group) or (
             task is not None and key[1] != task
@@ -742,7 +746,9 @@ def summarize(records, *, missing=None, stages=STAGES, scope=None) -> dict:
     }
 
 
-def build(config, *, group=None, task=None, since=None, stages=STAGES) -> dict:
+def build(
+    config, *, group=None, task=None, since=None, stages=STAGES, sources=None
+) -> dict:
     """The summary of a live workspace, read-only: ``analysis.jsonl`` for the
     records, the dataset state files for what is missing. Episodes a person
     removed, and datasets that were archived, are left out."""
@@ -750,17 +756,38 @@ def build(config, *, group=None, task=None, since=None, stages=STAGES) -> dict:
     if since is not None and since != "" and since_s is None:
         raise ValueError("since is an ISO time or epoch seconds")
     live_dir = Path(config.live_dir)
-    states = mirror.list_states(config)
-    removed, _known = statsview.excluded_demos(config)
+    states = (
+        mirror.list_states(config)
+        if sources is None
+        else {
+            name: state
+            for name, state in sources["states"].items()
+            if not state.get("archived")
+        }
+    )
+    removed, _known = statsview.excluded_demos(
+        config, states=None if sources is None else states
+    )
+    source_rows = (
+        read(live_dir, since=since_s)
+        if sources is None
+        else [
+            r
+            for r in sources["records"]
+            if since_s is None or (r["labelled_at"] or r["at"] or 0) >= since_s
+        ]
+    )
     rows = [
         r
-        for r in latest(read(live_dir, since=since_s))
+        for r in latest(source_rows)
         if (r["dataset"], r["demo"]) not in removed
         and (not states or r["dataset"] in states)
         and (group is None or r.get("group") == group)
         and (task is None or r.get("task") == task)
     ]
-    missing = missing_counts(config, rows, group, task)
+    missing = missing_counts(
+        config, rows, group, task, states=None if sources is None else states
+    )
     found = summarize(
         rows,
         missing=missing,
