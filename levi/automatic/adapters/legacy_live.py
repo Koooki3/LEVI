@@ -50,11 +50,15 @@ LEGACY_OF = {
     "PREFLIGHT": "standby",
     "VERIFY_INITIAL": "waiting_reset",
     "FORWARD_ACTIVE": "running",
+    # C2 has no exclusive judge state. Running conservatively closes its
+    # timeshare/background gate; the original role authority runs the judge.
+    "FORWARD_JUDGING": "running",
     "FORWARD_STOPPING": "running",
     "FORWARD_FINALIZE": "waiting_reset",
     "ROBOT_HOME": "homing",
     "SCENE_ASSESS": "waiting_reset",
     "RESET_ACTIVE": "running",
+    "RESET_JUDGING": "running",
     "RESET_VERIFY": "waiting_reset",
     "RESET_FINALIZE": "homing",
     "WAIT_HUMAN": "waiting_reset",
@@ -64,6 +68,7 @@ LEGACY_OF = {
 # Whose session file is active in each state; the other says ``standby``.
 ACTIVE_ROLE = {
     "RESET_ACTIVE": "reset",
+    "RESET_JUDGING": "reset",
     "RESET_VERIFY": "reset",
     "RESET_FINALIZE": "reset",
 }

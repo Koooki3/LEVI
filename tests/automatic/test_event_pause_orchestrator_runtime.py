@@ -24,6 +24,7 @@ from levi.automatic.adapters import events as ev
 from levi.automatic.intervention import (
     InferenceCycle,
     InterventionHooks,
+    InterventionUnproven,
     PhysicalHoldProof,
     hold_contract_sha256,
 )
@@ -418,6 +419,181 @@ class OrchestratorRuntimeTests(unittest.TestCase):
         self.assertEqual(r.orch.run(), "FAULT_LOCKED")
         self.assertEqual(r.policy.requests, 0)
         self.assertEqual(r.robot.step_calls, 0)
+
+    def test_every_proof_hook_exception_latches_cycle_across_human_resume(self):
+        for hook in (
+            "observe_hold",
+            "role_window",
+            "observe_runtime",
+            "stop_proof",
+            "stop_admission",
+            "resume_admission",
+            "prepare_evidence",
+        ):
+            with self.subTest(hook=hook):
+                r = self.make()
+                original = r.cycle.hooks
+
+                def unproven(*args, hook=hook):
+                    raise RuntimeError("trusted hook failed: " + hook)
+
+                r.cycle.hooks = replace(original, **{hook: unproven})
+                try:
+                    r.orch.run()
+                except (RuntimeError, InterventionUnproven):
+                    pass  # caller may propagate, but permission must be latched
+                self.assertEqual(r.orch.state, "FAULT_LOCKED")
+                self.assertTrue(r.cycle.failed)
+                self.assertIsNone(r.orch.fence.current)
+                prior_steps, prior_grants = r.robot.step_calls, len(self.grants)
+                snapshot = r.owner.snapshot(now_ns=r.clock.now())
+                self.assertEqual(snapshot["runtime"], r.cycle.runtime)
+                if hook == "stop_proof":
+                    self.assertIsNotNone(snapshot["request"])
+                    self.assertTrue(snapshot["request_revoked"])
+                r.cycle.hooks = original
+                self.resume(r, "resume-after-" + hook)
+                self.assertEqual(r.orch.run(), "FAULT_LOCKED")
+                self.assertTrue(r.cycle.failed)
+                self.assertEqual(r.robot.step_calls, prior_steps)
+                self.assertEqual(len(self.grants), prior_grants)
+                self.assertEqual(
+                    r.owner.snapshot(now_ns=r.clock.now())["request"],
+                    snapshot["request"],
+                )
+                self.assertEqual(sm.check_journal(r.orch.journal.events), [])
+
+    def test_runtime_observation_exception_after_grant_retains_revoked_slot(self):
+        r = self.make()
+        original = r.cycle.hooks
+        observations = []
+
+        def runtime_observation():
+            observations.append(1)
+            if len(observations) == 2:
+                raise RuntimeError("fresh backend observation failed")
+            return original.observe_runtime()
+
+        r.cycle.hooks = replace(original, observe_runtime=runtime_observation)
+        self.assertEqual(r.orch.run(), "FAULT_LOCKED")
+        self.assertTrue(r.cycle.failed)
+        snapshot = r.owner.snapshot(now_ns=r.clock.now())
+        self.assertIsNotNone(snapshot["request"])
+        self.assertTrue(snapshot["request_revoked"])
+        r.cycle.hooks = original
+        self.resume(r, "resume-after-barrier-observation")
+        self.assertEqual(r.orch.run(), "FAULT_LOCKED")
+        self.assertEqual(r.robot.step_calls, 0)
+        self.assertEqual(len(self.grants), 1)
+        self.assertEqual(
+            r.owner.snapshot(now_ns=r.clock.now())["request"], snapshot["request"]
+        )
+
+    def test_orchestrator_containment_interrupts_existing_slot_before_backend_wait(
+        self,
+    ):
+        r = self.make()
+        captured = []
+
+        def escaped_failure():
+            r.orch._contain(RuntimeError("outside model callback"))
+            captured.append((r.cycle.failed, r.owner.snapshot(now_ns=r.clock.now())))
+            return "must not publish"
+
+        with self.assertRaises(InterventionUnproven):
+            r.cycle.invoke(
+                "forward",
+                f"{r.orch.config.run_id}.forward.0001",
+                1,
+                deadline_ns=r.clock.now() + 100_000_000,
+                call=escaped_failure,
+                interrupted=lambda: False,
+            )
+        self.assertEqual(r.orch.state, "FAULT_LOCKED")
+        self.assertTrue(captured[0][0])
+        self.assertEqual(captured[0][1]["runtime"], r.cycle.runtime)
+        self.assertIsNotNone(captured[0][1]["request"])
+        self.assertTrue(captured[0][1]["request_revoked"])
+        self.assertEqual(
+            r.owner.snapshot(now_ns=r.clock.now())["request"], captured[0][1]["request"]
+        )
+        self.assertEqual(r.robot.step_calls, 0)
+
+    def test_real_session_listener_keeps_background_gate_closed_during_judging(self):
+        import json
+
+        from levi.automatic.recorder import SessionFiles
+        from levi.live import config as live_config
+        from levi.live import gpumgr, sessions
+
+        for role in ("forward", "reset"):
+            with self.subTest(role=role):
+                r = self.make(
+                    strategy="human_assisted"
+                    if role == "forward"
+                    else "single_reset_policy",
+                    scene_script=[
+                        {"decision": "ready" if role == "forward" else "reset_required"}
+                    ],
+                )
+                root = r.directory / "fake-sessions"
+                listener = SessionFiles(
+                    root,
+                    run_id=r.orch.config.run_id,
+                    group="fake",
+                    folders={"forward": "forward-task", "reset": "reset-task"},
+                    pid=0,
+                    wall=lambda: 1_800_000_000.0,
+                )
+                r.orch.listener = listener
+                submit = r.verifier.submit
+                checked = []
+                config = live_config.Config()
+                config.gpu.mode = "timeshare"
+
+                def verify_with_real_session_gate(
+                    request,
+                    *,
+                    listener=listener,
+                    role=role,
+                    root=root,
+                    config=config,
+                    checked=checked,
+                    submit=submit,
+                ):
+                    active = json.loads(listener.path(role).read_text())
+                    self.assertEqual(active["aeri"]["state"], role.upper() + "_JUDGING")
+                    self.assertEqual(active["state"], "running")
+                    self.assertEqual(active["episode_role"], role)
+                    self.assertEqual(
+                        json.loads(
+                            listener.path(
+                                "reset" if role == "forward" else "forward"
+                            ).read_text()
+                        )["state"],
+                        "standby",
+                    )
+                    observed = sessions.read_sessions([root], now=1_800_000_001.0)
+                    gate = gpumgr.gate(config, "timeshare", observed, True)
+                    self.assertFalse(gate.open)
+                    self.assertEqual(gate.code, "policy_inferring")
+                    checked.append(True)
+                    return submit(request)
+
+                r.verifier.submit = verify_with_real_session_gate
+                self.assertEqual(r.orch.run(), "WAIT_HUMAN")
+                self.assertTrue(checked)
+                self.assertFalse(
+                    any(
+                        e.record == "note" and e.note.code == "session_write_failed"
+                        for e in r.orch.journal.events
+                    )
+                )
+                # No process was probed: the real reader receives an explicit
+                # fake pid=0 and current session timestamps.
+                for path in tuple(sessions._CACHE):
+                    if str(root) in path:
+                        del sessions._CACHE[path]
 
     def test_backend_worker_exit_unproven_retains_real_kernel_slot(self):
         r = self.make()

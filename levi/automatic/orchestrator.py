@@ -872,6 +872,8 @@ class Orchestrator:
         """An exception escaped the loop: no motion stays authorised, the
         robot holds, the run locks (or the orchestrator halts in memory)."""
         self.fence.revoke()
+        if self.intervention is not None:
+            self.intervention.interrupt()
         try:
             self.robot.hold()
         except Exception as held:  # noqa: BLE001
@@ -1514,6 +1516,12 @@ class Orchestrator:
         """No backend waits on the emergency path; ownership remains latched."""
         self.fence.revoke()
         self.intervention.interrupt()
+        if self.journal.open_transaction is not None:
+            # An observer can fail inside a prepared pause/resume action.
+            # Preserve unknown acknowledgement and abort before faulting;
+            # another transaction cannot be prepared while it is unresolved.
+            self._contain(InterventionUnproven("inference transaction unproven"))
+            return
         self.robot.hold()
         if self.robot.latch_state() or self.robot.health()["state"] == "red":
             self._fault("safety_stop", guard=True)
