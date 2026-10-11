@@ -13,6 +13,16 @@ Use only LEVI_WORKSPACE for runtime data (default checkout `.state/`). Never har
 Preserve source captures: conversion and annotation export write to new output directories.
 Frontend text belongs in both locale catalogs; English is the default and Chinese is available from the language switch.
 
+## Maintainer approval policy (2026-10-11)
+
+In the maintainer's LEVI workspace, Codex and Claude Code may self-approve routine edits, experiments and tests already covered by the shared progress, workflow or subsequent plan. GPU-only work is not real-robot use. Keep isolated worktrees, resource ownership, independent review and all data/secret protections.
+
+GPU and driver/resource-lock scheduling may also be self-approved: normal acquisition, queueing, renewal, release and cleanup of a leftover lease after its owner and registered children are verified exited. Expired heartbeat alone does not permit taking a live or unknown owner's resource. Real-robot scheduling still needs human review.
+
+Real-robot use strictly requires human review. Milestone, task and user phase completion need human acceptance of concrete results; sensitive file changes/deletions and new steps absent from all shared plans that require human judgment need prior human review. Do not add an unapproved step to a plan to bypass this boundary. Existing explicit pauses, no-push rules and running-service safeguards remain in force.
+
+维护者 2026-10-11 授权：LEVI 内既有计划中的普通修改、实验、测试可由 Codex/Claude Code 自行放行；单独 GPU 使用不算真机。真机使用严格人工审核。里程碑、任务与阶段目标完成须人工验收；敏感文件改动删减，以及所有共享计划均未包含且需人判断的新步骤，仍先人工审核。不以自行补计划绕过审核，不自动恢复明确暂停的工作。详见工作区操作手册第 0 节与共享记忆。
+
 ## Working rules for agents
 
 - **Branch per change.** Work in a git worktree and branch (`git worktree add lab/worktrees/<topic> -b <feat|fix|docs>/<topic> main`; `lab/` is the maintainer's git-ignored folder inside this checkout, never a new top-level folder); commit small, one topic per commit; do not push and do not force-push. Merging to main is done by whoever currently drives the project (fast-forward), after an independent review.
