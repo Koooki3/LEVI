@@ -1459,8 +1459,14 @@ def _invoke(
         store.event(run["id"], "usage_reported", tokens=sample.get("tokens"))
         return sample
     if name == "runs.list":
+        from levi import links
+
         from .tracking import waiting_for
 
+        local_scope = None
+        if args.repo_id and args.repo_id.startswith("local/"):
+            home, key = links.target(args.repo_id.split("/", 1)[1], store.state)
+            local_scope = (home.resolve(), key)
         rows = []
         # Newest first by creation time; the store's order is not chronological.
         for record in sorted(
@@ -1469,8 +1475,21 @@ def _invoke(
             reverse=True,
         ):
             dataset = record["context"]["repo_id"]
-            if args.repo_id and dataset != args.repo_id:
+            if local_scope:
+                if not dataset.startswith("local/"):
+                    continue
+                home, key = links.target(dataset.split("/", 1)[1], store.state)
+                # Native and product aliases share a dataset only in the same
+                # canonical Store, with the run's persisted dataset key intact.
+                if (
+                    (home.resolve(), key) != local_scope
+                    or home.resolve() != store.state.resolve()
+                    or record.get("dataset_key") != key
+                ):
+                    continue
+            elif args.repo_id and dataset != args.repo_id:
                 continue
+            # Canonical filtering never broadens a connection's original grants.
             if not principal.human and dataset not in principal.datasets:
                 continue
             state = waiting_for(store, record)
