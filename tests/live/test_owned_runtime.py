@@ -360,3 +360,21 @@ def test_live_supervisor_cannot_escape_group_root(tmp_path, monkeypatch):
     (tmp_path / "cgroup.procs").write_text("")
     with pytest.raises(ValueError, match="remain in the group root"):
         scope.require_supervisor()
+
+
+def test_active_observation_refuses_unknown_previously_seen_descendant(
+    receipt, monkeypatch
+):
+    receipt.scope = SimpleNamespace(members=lambda: (WORKER.pid,))
+    receipt.group_scope = SimpleNamespace(require_supervisor=lambda: None)
+    receipt.driver_observer = SimpleNamespace(require_held=lambda: None)
+    receipt._known_members = {owned.WorkerIdentity(999, 2, "fake")}
+    monkeypatch.setattr(owned, "process_identity", lambda pid: WORKER)
+    monkeypatch.setattr(owned, "_descends_from", lambda worker, ancestor: True)
+    monkeypatch.setattr(
+        owned.gpumgr,
+        "process_state",
+        lambda pid, recorded: "alive" if pid == WORKER.pid else "unknown",
+    )
+    with pytest.raises(ValueError, match="identity is unknown"):
+        owned.OwnedModelWorker._healthy(receipt)

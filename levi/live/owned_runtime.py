@@ -35,13 +35,15 @@ def process_identity(pid):
     return WorkerIdentity(pid, int(value["start_ticks"]), value["boot"])
 
 
-def process_alive(worker):
-    return (
-        gpumgr.process_state(
-            worker.pid, {"start_ticks": str(worker.start_ticks), "boot": worker.boot_id}
-        )
-        == "alive"
+def incarnation_state(worker):
+    """Keep unknown distinct from a proven exit of this exact incarnation."""
+    return gpumgr.process_state(
+        worker.pid, {"start_ticks": str(worker.start_ticks), "boot": worker.boot_id}
     )
+
+
+def process_alive(worker):
+    return incarnation_state(worker) == "alive"
 
 
 def _descends_from(worker, ancestor):
@@ -600,11 +602,12 @@ class OwnedModelWorker:
         if set(self.scope.members()) != set(members):
             raise ValueError("model worker inventory changed during probe")
         self._known_members.update(identities)
-        if any(
-            process_alive(identity) and identity.pid not in members
-            for identity in self._known_members
-        ):
-            raise ValueError("known model descendant escaped containment")
+        for identity in self._known_members:
+            state = incarnation_state(identity)
+            if state == "unknown":
+                raise ValueError("known model descendant identity is unknown")
+            if state == "alive" and identity.pid not in members:
+                raise ValueError("known model descendant escaped containment")
 
     def idle(self):
         with self._lock:
@@ -712,7 +715,7 @@ class OwnedModelWorker:
         return (
             state == "gone"
             and not self.scope.members()
-            and not any(process_alive(m) for m in self._known_members)
+            and all(incarnation_state(m) == "gone" for m in self._known_members)
         )
 
 

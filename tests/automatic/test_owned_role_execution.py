@@ -270,3 +270,30 @@ def test_unknown_probe_withdraws_result_and_cached_ack_can_later_drain(
     monkeypatch.setattr(runner.observer, "observe", original_observe)
     assert runner.collect(request, timeout_s=0.001) is None
     assert runner.authority.snapshot(now_ns=NOW)["request"] is None
+
+
+def test_unknown_descendant_cannot_release_original_owner_or_request(
+    execution, monkeypatch
+):
+    runner, workers, deadline = execution
+    request = begin(runner, deadline)
+    descendant = WorkerIdentity(999, 2, "fake")
+    for worker in workers.values():
+        worker.scope = SimpleNamespace(members=lambda: ())
+        worker._known_members = set()
+    workers["judge"]._known_members = {descendant}
+    runner.observer.group_scope.members = lambda: ()
+    states = {999: "unknown"}
+    monkeypatch.setattr(
+        owned.gpumgr, "process_state", lambda pid, recorded: states.get(pid, "gone")
+    )
+    proof = runner.observer.exit_proof(runner.authority.broker, runner.lease)
+    assert not proof.descendants_exited and not proof.owned_gpu_released
+    with pytest.raises(ValueError, match="complete exact"):
+        runner.authority.release_after_exit(runner.runtime, proof, now_ns=NOW)
+    assert runner.authority.snapshot(now_ns=NOW)["request"] == request
+    assert runner.authority.snapshot(now_ns=NOW)["lease"] == runner.lease
+    states[999] = "gone"
+    proof = runner.observer.exit_proof(runner.authority.broker, runner.lease)
+    runner.authority.release_after_exit(runner.runtime, proof, now_ns=NOW)
+    assert runner.authority.snapshot(now_ns=NOW)["runtime"] is None
