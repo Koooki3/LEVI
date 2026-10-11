@@ -42,6 +42,7 @@ def main():
             "levi/automatic/event_window.py",
             "levi/automatic/fr3_media.py",
             "tests/automatic/test_paused_frames.py",
+            "tests/automatic/test_paused_frames_orchestrator_runtime.py",
             "tests/automatic/test_measured_physical_hold.py",
             "levi/automatic/termination.py",
             "levi/automatic/adapters/legacy_live.py",
