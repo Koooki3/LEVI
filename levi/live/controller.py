@@ -502,7 +502,14 @@ class Controller:
 
     def _yield_reasons(self, now, looking: bool) -> list:
         c = self.config
-        ours = self._our_gpu_pids()
+        try:
+            ours = self._our_gpu_pids()
+        except (OSError, ValueError):
+            return [
+                gpumgr.Reason(
+                    "probe_error", "the model process group cannot be read: yielding"
+                )
+            ]
         apps, apps_error = (None, "")
         lock_pids, lock_error = None, False
         y = c.gpu.yield_
@@ -660,8 +667,9 @@ class Controller:
         if state == "error":
             # A failed start (or a vLLM that died): note it, back off, and
             # after a few in a row stop and ask for a person.
-            if not self.vllm.mine():
-                self.lock.release()
+            if not self.vllm.mine() and not self._stop_vllm():
+                self.decision = gpumgr.Decision(False, self.vllm.error, "gpu_not_free")
+                return False
             self._vllm_failed(now)
             self.vllm.state = "stopped"
             state = "stopped"
@@ -825,8 +833,9 @@ class Controller:
             "a cold start takes 45-70 s)"
         )
         if not self.vllm.start(profile, fd=self.lock.fileno()):
-            if not self.vllm.mine():
-                self.lock.release()
+            if self.vllm.leaving() or (not self.vllm.mine() and not self._stop_vllm()):
+                self.decision = gpumgr.Decision(False, self.vllm.error, "gpu_not_free")
+                return False
             self._vllm_failed(now)
             self.vllm.state = "stopped"
         return False
@@ -970,16 +979,25 @@ class Controller:
             return
         acquired = self.lock.acquire()
         self._say_lock()
-        if acquired or self.vllm.holds_lock(self.config.gpu.lock_file):
+        if (acquired and not self.lock.unavailable) or self.vllm.holds_lock(
+            self.config.gpu.lock_file
+        ):
             self.event("took back the vLLM that was running")
             return
-        pid = (jsonio.read(self.vllm.record_path) or {}).get("pid")
-        with contextlib.suppress(OSError):
-            self.vllm.record_path.unlink()
-        self.vllm.state = "stopped"
+        try:
+            record = self.vllm._record()
+        except (OSError, ValueError):
+            record = None
+        pid = record.get("pid") if record else None
+        # Missing FD/lock evidence never converts our still-live record into
+        # an external server. Construction does not stop or signal it.
+        self.vllm._pending(
+            record, "GPU lock ownership could not be verified during adoption"
+        )
         self.event(
-            f"a vLLM (pid {pid}) is running but another agent holds the GPU lock: "
-            "not taking it over; it is treated as someone else's server",
+            f"a vLLM (pid {pid}) is running but another agent holds the GPU lock "
+            "or its ownership is unavailable: not taking it over; "
+            "the original owner record is kept for confirmed stop",
             "error",
         )
 
@@ -2209,9 +2227,10 @@ class Controller:
         self.stop_online()
         self._stop_worker(grace=30.0)
         self._stop_catalogue()
-        if self.vllm.mine():
-            self._stop_vllm()
-        self.lock.release()
+        # An unconfirmed stop keeps its record and this descriptor while we
+        # remain alive. Process exit still closes it; inherited child copies
+        # may retain the flock. Shutdown is not a physical-exit/backend ACK.
+        self._stop_vllm()
         self.state = "stopped"
         # No supervisor, no gate: a file left behind would go stale and turn
         # people away ("supervisor not running") for as long as it lies there.

@@ -131,7 +131,8 @@ def listening_ports_strict(tables=("/proc/net/tcp", "/proc/net/tcp6")) -> set:
 def compute_apps(runner=subprocess.run) -> list:
     """Compute processes on the GPU as ``gpu_holders`` lists them, but every
     failure raises (``OSError`` or ``subprocess.SubprocessError``), and a row
-    whose memory is not a number keeps ``memory_mib`` None."""
+    whose memory is not a number keeps ``memory_mib`` None. Incomplete PID
+    rows raise ``ValueError`` rather than being silently discarded."""
     done = runner(
         [
             "nvidia-smi",
@@ -143,14 +144,18 @@ def compute_apps(runner=subprocess.run) -> list:
         timeout=10,
         check=True,
     )
+    if getattr(done, "returncode", 0) != 0:
+        raise subprocess.CalledProcessError(
+            done.returncode, done.args if hasattr(done, "args") else "nvidia-smi"
+        )
     rows = []
     for line in done.stdout.strip().splitlines():
         parts = [p.strip() for p in line.split(",")]
-        if len(parts) < 3 or not parts[0].isdigit():
-            continue
+        if len(parts) != 3 or not parts[0].isdigit() or int(parts[0]) <= 0:
+            raise ValueError("incomplete nvidia-smi compute process row")
         try:
             mib = int(float(parts[2]))
-        except ValueError:
+        except (ValueError, OverflowError):
             mib = None
         rows.append(
             {
@@ -875,17 +880,52 @@ class GpuLock:
 EXITED = frozenset("ZXx")
 
 
-def identity(pid):
-    """(start ticks, boot id) of a process, None once it is gone, a zombie or
-    being reaped."""
+def identity_strict(pid):
+    """Exact live identity, None only for a missing/exited process.
+
+    Unreadable or malformed evidence raises; missing boot identity is unknown.
+    """
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
+        raise ValueError("invalid process pid")
     try:
-        stat = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
-        if stat[0] in EXITED:
-            return None
-        boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
-        return {"start_ticks": stat[19], "boot": boot}
-    except (OSError, IndexError):
+        fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+    except FileNotFoundError:
         return None
+    except IndexError as exc:
+        raise ValueError("malformed process stat") from exc
+    if len(fields) < 20 or not fields[19].isdigit():
+        raise ValueError("incomplete process stat")
+    if fields[0] in EXITED:
+        return None
+    boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    if not boot:
+        raise ValueError("missing boot identity")
+    return {"start_ticks": fields[19], "boot": boot}
+
+
+def identity(pid):
+    """Live identity for status; None also when the reading is unavailable."""
+    try:
+        return identity_strict(pid)
+    except (OSError, ValueError):
+        return None
+
+
+def process_state(pid, recorded) -> str:
+    """alive/gone/unknown for the original owner; PID reuse is gone, not ours."""
+    try:
+        current = identity_strict(pid)
+    except (OSError, ValueError):
+        return "unknown"
+    if current is None:
+        return "gone"
+    if (
+        not isinstance(recorded, dict)
+        or not recorded.get("start_ticks")
+        or not recorded.get("boot")
+    ):
+        return "unknown"
+    return "alive" if current == recorded else "gone"
 
 
 def same_process(pid, recorded) -> bool:
@@ -1023,11 +1063,14 @@ STOP_CONFIRM_S = 60.0  # how long a stop waits for the GPU to be really free
 
 
 def _group_alive(pgid) -> list:
-    """Live (not zombie) processes of the group, without ``_group``'s fallback
-    to the leader's own pid: empty once the whole group is gone."""
+    """Complete live process-group scan; unreadable members/root are unknown.
+
+    A member disappearing during the scan is gone, so ENOENT is safe to skip.
+    Any other read error or malformed stat prevents an exit proof.
+    """
     alive = []
-    try:
-        for entry in os.scandir("/proc"):
+    with os.scandir("/proc") as entries:
+        for entry in entries:
             if not entry.name.isdigit():
                 continue
             try:
@@ -1037,12 +1080,14 @@ def _group_alive(pgid) -> list:
                     .rsplit(")", 1)[1]
                     .split()
                 )
-            except (OSError, IndexError):
+            except FileNotFoundError:
                 continue
+            except IndexError as exc:
+                raise ValueError("malformed process-group stat") from exc
+            if len(fields) < 3:
+                raise ValueError("incomplete process-group stat")
             if int(fields[2]) == pgid and fields[0] not in EXITED:
                 alive.append(int(entry.name))
-    except OSError:
-        pass
     return alive
 
 
@@ -1061,7 +1106,7 @@ class Vllm:
         self.profile: dict | None = None
         # pids of a stop that kept the GPU lock to wait for the card to be free,
         # and that flag: set only by such a stop, cleared when the release is
-        # confirmed and by ``start()``. ``leaving()`` reads nothing else.
+        # confirmed. ``start()`` refuses a pending stop; ``leaving()`` reads nothing else.
         self._leaving: set = set()
         self._confirm_pending = False
         # Called while a stop waits (every 0.5 s): the controller keeps the
@@ -1095,22 +1140,77 @@ class Vllm:
         except (OSError, ValueError):
             return None
 
-    def _adopt(self):
-        """After a supervisor restart: take back a vLLM this service started."""
-        record = jsonio.read(self.record_path)
+    def _record(self):
+        """Read lifecycle evidence without conflating an unreadable record with absence."""
+        try:
+            record = json.loads(self.record_path.read_text())
+        except FileNotFoundError:
+            return None
         if not isinstance(record, dict):
-            return
+            raise ValueError("invalid vLLM owner record")  # noqa: TRY004 - invalid JSON evidence
         pid = record.get("pid")
-        if same_process(pid, record.get("identity")) and self._pid() == pid:
-            if not healthy(self.port):
-                self.state = "starting"
+        if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
+            raise ValueError("invalid vLLM owner pid")
+        leaving = record.get("leaving", [])
+        if not isinstance(leaving, list) or any(
+            not isinstance(member, int) or isinstance(member, bool) or member <= 1
+            for member in leaving
+        ):
+            raise ValueError("invalid pending vLLM members")
+        return record
+
+    def _pending(self, record, reason):
+        """Keep original identity and remembered members, also across supervisor restart."""
+        self.state, self._confirm_pending = "error", True
+        self.error = (
+            f"vLLM stop unconfirmed: {reason}; "
+            "GPU ownership remains unresolved; no release is confirmed"
+        )[:300]
+        if record is not None:
+            self._leaving.add(record["pid"])
+            saved = dict(record)
+            saved.update(
+                confirm_pending=True,
+                leaving=sorted(self._leaving),
+                stop_error=self.error,
+            )
+            try:
+                jsonio.write(self.record_path, saved)
+            except (OSError, ValueError):
+                self.error = (self.error + "; owner record could not be saved")[:300]
+        return False
+
+    def _adopt(self):
+        """Only take back a proved live owner; unknown evidence retains its record."""
+        try:
+            record = self._record()
+            if record is None:
+                return
+            self._leaving = set(record.get("leaving", []))
+            if record.get("confirm_pending"):
+                self.state, self._confirm_pending = "error", True
+                self.error = (
+                    record.get("stop_error") or "vLLM stop confirmation is pending"
+                )
+                return
+            status = process_state(record["pid"], record.get("identity"))
+            if status == "alive" and self._pid() == record["pid"]:
+                self.state = (
+                    "starting"
+                    if not healthy(self.port)
+                    else ("asleep" if is_sleeping(self.port) else "ready")
+                )
+                self.started_at = record.get("started_at")
+                self.profile = record.get("profile")
+            elif status == "gone":
+                # Adoption/status must not wait for a slow physical stop.
+                self._pending(
+                    record, "original leader exited; group/GPU confirmation pending"
+                )
             else:
-                self.state = "asleep" if is_sleeping(self.port) else "ready"
-            self.started_at = record.get("started_at")
-            self.profile = record.get("profile")
-        else:
-            with contextlib.suppress(OSError):
-                self.record_path.unlink()
+                self._pending(record, "owner identity or pid file is unknown")
+        except (OSError, ValueError, TypeError):
+            self._pending(None, "owner record is unreadable")
 
     def holds_lock(self, lock_file) -> bool:
         """Does the vLLM process (or a child) hold the GPU lock file open? It
@@ -1154,7 +1254,16 @@ class Vllm:
         """Launch vLLM with ``profile``; False (with ``error``) if it could not."""
         if self.state in ("starting", "ready") and self.mine():
             return True
-        self._leaving, self._confirm_pending = set(), False
+        # A new launch must never overwrite an unresolved original owner.
+        try:
+            record = self._record()
+        except (OSError, ValueError):
+            return self._pending(None, "owner record is unreadable")
+        if self._confirm_pending or record is not None:
+            return self._pending(
+                record, "previous owner requires confirmed stop before launch"
+            )
+        self._leaving = set()
         self._launch_error = ""
         env = script_env(self.config)
         env.update(
@@ -1322,16 +1431,17 @@ class Vllm:
             ):
                 self.stop()
                 self.state, self.error = "error", "vLLM did not become healthy in time"
-        elif (
-            self.state == "ready"
-            and self.mine()
-            and not self._healthy()
-            and identity(self._pid() or 0) is None
-        ):
-            # Died after it was ready.
-            self.state, self.error = "error", "vLLM exited"
-            with contextlib.suppress(OSError):
-                self.record_path.unlink()
+        elif self.state == "ready" and not self._healthy():
+            try:
+                record = self._record()
+            except (OSError, ValueError):
+                self._pending(None, "owner record is unreadable")
+            else:
+                if (
+                    record is not None
+                    and process_state(record["pid"], record.get("identity")) != "alive"
+                ):
+                    self._pending(record, "owner identity is gone or unknown")
         return self.state
 
     def pending_timings(self, now, max_age_s) -> dict:
@@ -1384,74 +1494,77 @@ class Vllm:
         return False
 
     def stop(self) -> bool:
-        """Stop this service's vLLM (only if it is ours). True when gone."""
-        if not self.mine():
-            if self._confirm_pending and self._on_gpu(self._leaving):
-                return False  # an earlier stop could not confirm the GPU is free
-            self._leaving, self._confirm_pending = set(), False
+        """Stop only a proved original owner; release only on complete exit evidence."""
+        try:
+            record = self._record()
+        except (OSError, ValueError):
+            return self._pending(None, "owner record is unreadable")
+        if record is None:
+            if self._confirm_pending:
+                return self._pending(None, "pending owner record is missing")
             self.state = "stopped"
             return True
+        pid, recorded = record["pid"], record.get("identity")
+        self._leaving.add(pid)
+        status = process_state(pid, recorded)
+        if status == "unknown":
+            return self._pending(record, "owner identity is unknown")
+        try:
+            self._leaving.update(_group_alive(pid))
+        except (OSError, ValueError):
+            return self._pending(record, "process group is unknown")
         self.state = "stopping"
         self._health = (0.0, False)
-        record = jsonio.read(self.record_path) or {}
-        pid = record.get("pid")
-        # The processes of the group, before the script and the signals take
-        # them out of it: their memory is what the lock waits for.
-        self._leaving = set(_group_alive(pid)) | ({pid} if pid else set())
-        try:
-            self.runner(
-                [
-                    str(self.config.vllm_stop_script),
-                    "--stop",
-                    str(self.port),
-                ],
-                env=script_env(self.config),
-                capture_output=True,
-                timeout=120,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            pass
-        recorded = record.get("identity")
-        if same_process(pid, recorded):
-            # The script could not (missing pidfile): signal the group directly.
-            with contextlib.suppress(ProcessLookupError, PermissionError):
-                os.killpg(pid, signal.SIGTERM)
-            deadline = time.time() + 30
-            while same_process(pid, recorded) and time.time() < deadline:
-                self._beat()
-                time.sleep(0.5)
-            if same_process(pid, recorded):
+        if status == "alive":
+            # Never call the PID-based stop script for a reused/unknown PID.
+            if self._pid() == pid and process_state(pid, recorded) == "alive":
+                try:
+                    self.runner(
+                        [str(self.config.vllm_stop_script), "--stop", str(self.port)],
+                        env=script_env(self.config),
+                        capture_output=True,
+                        timeout=120,
+                        check=False,
+                    )
+                except (OSError, subprocess.SubprocessError):
+                    pass
+            if process_state(pid, recorded) == "alive":
                 with contextlib.suppress(ProcessLookupError, PermissionError):
-                    os.killpg(pid, signal.SIGKILL)
-        gone = not same_process(pid, recorded)
-        if gone:
-            # The leader is gone; the engine processes of its group may still
-            # be releasing the card. The lock says "vLLM is on the GPU": let go
-            # of it only once nothing of the group is alive or holds VRAM.
-            deadline = time.time() + STOP_CONFIRM_S
-            while time.time() < deadline and (
-                _group_alive(pid) or self._on_gpu(self._leaving)
-            ):
-                self._beat()
-                time.sleep(0.5)
-            if _group_alive(pid) or self._on_gpu(self._leaving):
-                self.state = "error"
-                self._confirm_pending = True
-                self.error = (
-                    "vLLM's processes still hold GPU memory after the stop; "
-                    "the GPU lock is kept until they are gone"
+                    os.killpg(pid, signal.SIGTERM)
+                deadline = time.time() + 30
+                while (
+                    process_state(pid, recorded) == "alive" and time.time() < deadline
+                ):
+                    self._beat()
+                    time.sleep(0.5)
+                if process_state(pid, recorded) == "alive":
+                    with contextlib.suppress(ProcessLookupError, PermissionError):
+                        os.killpg(pid, signal.SIGKILL)
+        deadline = time.time() + STOP_CONFIRM_S
+        while True:
+            status = process_state(pid, recorded)
+            try:
+                group = _group_alive(pid)
+                self._leaving.update(group)
+                on_gpu = self._on_gpu(self._leaving)
+            except (OSError, subprocess.SubprocessError, ValueError):
+                return self._pending(record, "process group or GPU query is unknown")
+            if status == "unknown":
+                return self._pending(record, "owner identity is unknown")
+            if status == "gone" and not group and not on_gpu:
+                try:
+                    self.record_path.unlink()
+                except OSError:
+                    return self._pending(record, "owner record could not be removed")
+                self._leaving, self._confirm_pending = set(), False
+                self.state, self.error, self.profile = "stopped", "", None
+                return True
+            if time.time() >= deadline:
+                return self._pending(
+                    record, "original process/group or GPU allocation remains"
                 )
-                return False
-        if gone:
-            self._leaving, self._confirm_pending = set(), False
-            with contextlib.suppress(OSError):
-                self.record_path.unlink()
-            self.state = "stopped"
-            self.profile = None
-        else:
-            self.state, self.error = "error", "vLLM did not stop"
-        return gone
+            self._beat()
+            time.sleep(0.5)
 
     def _beat(self):
         if self.keepalive:
@@ -1465,8 +1578,8 @@ class Vllm:
     @staticmethod
     def _on_gpu(pids) -> bool:
         """Does any of ``pids`` still appear among nvidia-smi's compute
-        processes? (An unreadable nvidia-smi says no: nothing can be told.)"""
-        return any(row["pid"] in pids for row in gpu_holders())
+        processes? Unreadable/incomplete evidence raises, never means empty."""
+        return any(row["pid"] in pids for row in compute_apps())
 
     def public(self) -> dict:
         return {

@@ -542,3 +542,31 @@ def test_lock_fallback_error_closes_inflight_worker_gate(ctl, monkeypatch, error
         if worker.poll() is None:
             worker.kill()
             worker.wait()
+
+
+def test_unknown_owned_group_yields_on_actual_tick_and_retains_lock(ctl, monkeypatch):
+    ctl.rollouts.write(0)
+    ctl.rollouts.session("standby")
+    ctl.config.gpu.yield_.enabled = False
+    up(ctl, time.time())
+    ctl.config.gpu.yield_.enabled = True
+    real_scan = gpumgr.os.scandir
+
+    def scan(path):
+        if str(path) == "/proc":
+            raise PermissionError("/proc unreadable")
+        return real_scan(path)
+
+    with monkeypatch.context() as probes:
+        probes.setattr(gpumgr.os, "scandir", scan)
+        ctl.tick(time.time() + 5)
+        assert ctl.yield_state.active
+        assert any(r.code == "probe_error" for r in ctl.yield_state.reasons)
+        assert ctl.lock.held
+        # The existing yield path may sleep instead of stopping. An explicit
+        # stop must still retain ownership when the same group probe is unknown.
+        assert not ctl._stop_vllm()
+        assert ctl.vllm.leaving()
+        assert ctl.vllm.record_path.exists()
+        gate = jsonio.read(ctl.config.live_dir / "gate.json")
+        assert not gate["open"] and gating.closed(gate, worker=True)

@@ -281,3 +281,38 @@ request owner must retain its slot until every actual working thread ends. CPU
 fakes cover cancellation ignored by a live worker, expiry, PID reuse, old epochs,
 restart uncertainty and resident ownership retained across requests. They provide
 no real GPU handoff or policy quiesce evidence; the real `running` gate stays shut.
+
+
+## Confirming resident model exit
+
+The existing live controller releases its GPU flock only after `Vllm.stop()`
+confirms the original PID/start ticks/boot owner has exited, a complete
+`/proc` scan finds no live member of its process group, and a successful
+`nvidia-smi` compute-process scan finds none of its remembered PIDs. PID reuse
+does not authorize signalling the new process. Unreadable identity, boot,
+process-group or GPU evidence, malformed GPU PID rows, and owner-record
+read/write errors keep the stop unconfirmed. The original record and identity
+are retained, with pending members saved when possible; new launches are
+refused until a later complete stop confirms exit. Pending retries repeat the
+process-group and GPU checks. Status-only GPU listings remain permissive.
+
+Shutdown retains an unresolved record and the controller's lock descriptor
+while the controller is alive. Process exit necessarily closes that descriptor;
+a live child that inherited the same open file description may still hold
+the flock. Shutdown or an HTTP response is not a physical-release or backend
+idle ACK. These changes do not mount the opt-in runtime bridge, open the
+`running` gate, or prove that a backend request stopped.
+
+CPU regressions use fake GPU query sources and owned CPU children with a
+scratch flock, including a child that outlives its leader. They verify
+conservative ownership retention and later recovery, not actual GPU memory
+handoff, backend pause ACK timing or robot behavior.
+
+A supervisor that cannot acquire the lock or verify its inherited descriptor
+keeps a live original owner record as unresolved. Construction neither stops
+that server nor relabels it external; later explicit stop/tick confirmation
+is still required before a new launch.
+
+These existing checks cover the process group and remembered PIDs. A future
+runtime bridge must separately establish complete descendant ownership,
+including workers that leave that group.

@@ -276,7 +276,7 @@ def free_port():
 
 
 @pytest.fixture
-def live(tmp_path, serve, demo_template):
+def live(tmp_path, serve, demo_template, monkeypatch):
     script, pid_dir = serve
     c = live_config.Config()
     c.service.workspace = str(tmp_path / "ws")
@@ -289,6 +289,13 @@ def live(tmp_path, serve, demo_template):
     # the yield rules (which pause the labelling for the whole deployment)
     # are tested in test_live_yield.py.
     c.gpu.yield_.enabled = False
+    # Strict stop evidence has an explicit fake GPU source in CPU lifecycle tests.
+    real_compute_apps = gpumgr.compute_apps
+    monkeypatch.setattr(
+        gpumgr,
+        "compute_apps",
+        lambda runner=None: [] if runner is None else real_compute_apps(runner),
+    )
     c.gpu.lock_file = str(tmp_path / "gpu.lock")
     c.gpu.settle_s = 20.0
     c.gpu.standby_min_s = 0.0  # (the tests of that wait set it themselves)
@@ -1068,13 +1075,13 @@ def test_a_vllm_that_would_run_without_the_lock_is_not_taken_over(live):
     ctl = started_controller(live)
     errors = [e["text"] for e in ctl.events if e["level"] == "error"]
     assert errors and "another agent holds the GPU lock" in errors[0]
-    assert not ctl.vllm.mine()  # treated as someone else's server, never stopped
-    assert gpumgr.healthy(c.vllm.port)
+    assert (
+        ctl.vllm.mine() and ctl.vllm.leaving()
+    )  # identity remains ours, ownership unresolved
+    assert ctl.vllm.record_path.exists() and not ctl.lock.held
+    assert gpumgr.healthy(c.vllm.port)  # construction did not stop or take it over
     holder.release()
-    gpumgr.Vllm.stop(vllm)  # the test's own cleanup (the record is gone: use pid)
-    pid = vllm._pid()
-    if pid:
-        os.killpg(pid, signal.SIGTERM)
+    assert gpumgr.Vllm.stop(vllm)  # explicit cleanup requires strict exit proof
     assert wait_for(lambda: not gpumgr.healthy(c.vllm.port))
 
 
@@ -1492,7 +1499,8 @@ def test_a_record_without_an_identity_is_never_mine_and_is_never_signalled(
     # A restarted supervisor does not take such a record back either.
     vllm.record_path.write_text(json.dumps({"pid": os.getpid(), "identity": None}))
     again = gpumgr.Vllm(c)
-    assert again.state == "stopped" and not again.mine()
+    assert again.state == "error" and again.leaving() and not again.mine()
+    assert again.record_path.exists()  # live PID without identity is unknown
 
 
 # --- M4: a policy server too big for vLLM, and the other long blocks --------------------
@@ -1690,7 +1698,7 @@ def test_the_lock_is_kept_while_a_vllm_process_still_holds_gpu_memory(ctl, monke
     monkeypatch.setattr(gpumgr, "STOP_CONFIRM_S", 1.0)
     monkeypatch.setattr(
         gpumgr,
-        "gpu_holders",
+        "compute_apps",
         lambda *a, **k: (
             [{"pid": pid, "name": "VLLM::EngineCore", "memory_mib": 21000}]
             if still["on"]
@@ -1833,7 +1841,7 @@ def test_a_gpu_that_never_frees_is_reported_after_the_grace(ctl, monkeypatch):
     monkeypatch.setattr(gpumgr, "STOP_CONFIRM_S", 0.5)
     monkeypatch.setattr(
         gpumgr,
-        "gpu_holders",
+        "compute_apps",
         lambda *a, **k: [{"pid": pid, "name": "VLLM::EngineCore", "memory_mib": 9}],
     )
     assert ctl._stop_vllm() is False
@@ -1861,7 +1869,7 @@ def test_the_gate_is_kept_fresh_while_a_stop_waits_and_removed_at_shutdown(
     monkeypatch.setattr(gpumgr, "STOP_CONFIRM_S", 1.3)
     monkeypatch.setattr(
         gpumgr,
-        "gpu_holders",
+        "compute_apps",
         lambda *a, **k: [{"pid": pid, "name": "VLLM::EngineCore", "memory_mib": 9}],
     )
     before = json.loads(path.read_text())["updated_at"]
