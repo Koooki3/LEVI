@@ -185,11 +185,19 @@ class InferenceCycle:
         policy_epoch,
         *,
         deadline_ns,
-        call,
+        call=None,
+        request_call=None,
         interrupted,
         hold_since_ns=None,
     ):
         with self._proof_boundary():
+            if (call is None) == (request_call is None) or any(
+                value is not None and not callable(value)
+                for value in (call, request_call)
+            ):
+                raise InterventionUnproven(
+                    "exactly one callable execution entry required"
+                )
             if interrupted():
                 raise InterventionStopped("execution already stopped")
             now = self.clock.now()
@@ -225,7 +233,9 @@ class InferenceCycle:
                 self._request = request
             if self.failed or interrupted():
                 raise InterventionStopped("stopped after role grant")
-            result = call()
+            # Borrow the exact original grant; this cycle alone begins/finishes.
+            # A callback failure is proof failure, never a signature retry signal.
+            result = call() if request_call is None else request_call(request)
             if self.failed or interrupted():
                 raise InterventionStopped("stopped during request")
             proof = self.hooks.stop_proof(request, deadline_ns)
