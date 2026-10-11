@@ -721,7 +721,10 @@ def test_the_launch_script_failing_is_reported_with_vllm_s_own_reason(ctl, tmp_p
     ctl.vllm = gpumgr.Vllm(ctl.config)
     ctl.rollouts.write(0)
     step(ctl, time.time())
-    assert ctl.start_failures == 1 and "exited 7" in ctl.vllm.error
+    # Exit status alone cannot prove that a script created no detached server.
+    assert ctl.start_failures == 0 and "exited 7" in ctl.vllm.error
+    assert ctl.vllm.leaving() and ctl.lock.held
+    assert json.loads(ctl.vllm.record_path.read_text())["launch_pending"]
 
 
 def test_no_cold_start_while_an_evaluation_is_unfinished(ctl):
@@ -1453,15 +1456,17 @@ def test_a_vllm_that_dies_between_two_identity_reads_is_not_ours(live, monkeypat
     must not store ``identity: null`` (None == None made ``mine()`` true for a
     pid that is gone, holding the lock and a later ``killpg`` on a stranger)."""
     c, _ = live
-    real = gpumgr.identity
+    real = gpumgr.identity_strict
     calls = []
+    vllm = gpumgr.Vllm(c)
 
     def flaky(pid):
+        if pid != vllm._pid():  # The launcher has a separately recorded identity.
+            return real(pid)
         calls.append(pid)
         return real(pid) if len(calls) == 1 else None  # gone from the 2nd read on
 
-    monkeypatch.setattr(gpumgr, "identity", flaky)
-    vllm = gpumgr.Vllm(c)
+    monkeypatch.setattr(gpumgr, "identity_strict", flaky)
     try:
         vllm.start(c.vllm_profile())
         record = (

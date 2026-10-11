@@ -482,10 +482,21 @@ class Controller:
         """Processes whose GPU use is this service's own: itself and the
         process group of the vLLM it started."""
         pids = {os.getpid()}
-        if self.vllm.mine():
-            leader = self.vllm._pid()
-            if leader:
-                pids |= {leader, *gpumgr._group_alive(leader)}
+        record = self.vllm._record()
+        if record is not None:
+            leader = record.get("pid")
+            if (
+                not leader
+                or gpumgr.process_state(leader, record.get("identity")) == "unknown"
+            ):
+                raise ValueError("model owner identity is unknown")
+            if self.vllm._pid() != leader:
+                raise ValueError("model pid file does not match its recorded owner")
+            if gpumgr.process_state(leader, record.get("identity")) == "alive":
+                members = gpumgr._group_alive(leader)
+                if gpumgr.process_state(leader, record.get("identity")) != "alive":
+                    raise ValueError("model owner identity changed during group probe")
+                pids |= {leader, *members}
         return pids
 
     def _read_apps(self, now):
@@ -655,11 +666,16 @@ class Controller:
         )
         self._check_resume(now)
         if state == "error" and self.vllm.leaving():
-            # A stop that could not confirm the card is free: not a failed
-            # start. Keep the lock, look again each tick.
+            # Unresolved launch/stop ownership keeps the lock. A failed launch
+            # enters backoff only after its owner exit has been confirmed.
+            failed_launch = bool((self.vllm._launch_record or {}).get("launch_pending"))
+            launch_error = self.vllm.error
             if self.vllm.stop():
                 self.lock.release()
                 self.event("vLLM has left the GPU: the lock is let go")
+                if failed_launch:
+                    self.vllm.error = launch_error
+                    self._vllm_failed(now)
             else:
                 self.decision = gpumgr.Decision(False, self.vllm.error, "gpu_not_free")
                 return False

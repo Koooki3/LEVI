@@ -1,11 +1,13 @@
 """Strict exit proofs: fake GPU sources, owned CPU processes and scratch flocks."""
 
 import contextlib
+import json
 import os
 import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -427,3 +429,381 @@ def test_constructor_adoption_keeps_alive_owner_without_lock_proof(
         sleeper.wait(timeout=5)
         holder.release()
         ctl.lock.release()
+
+
+def launch_controller(vllm, lock):
+    ctl = object.__new__(Controller)
+    ctl.config, ctl.vllm, ctl.lock = vllm.config, vllm, lock
+    ctl.sessions, ctl._waiting_since, ctl._standby_since = {}, {}, {}
+    ctl.policy_up, ctl.policy_changed_at = False, None
+    ctl.started_at, ctl.next_start_at = time.time() - 1000, 0
+    ctl._check_resume, ctl._vllm_failed = Mock(), Mock()
+    ctl.event, ctl._say_lock = Mock(), Mock()
+    ctl.attention = None
+    ctl.yield_state = SimpleNamespace(active=False)
+    ctl.free_mib = lambda now: 32607
+    ctl._vram, ctl._policy_mib = (0, {"total_mib": 32607}), (0, None)
+    return ctl
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "identity_permission",
+        "launch_timeout",
+        "missing_pidfile",
+        "script_nonzero",
+        "record_write_failure",
+        "first_record_write_failure",
+    ],
+)
+def test_failed_launch_retains_ownership_through_controller(
+    tmp_path, monkeypatch, case
+):
+    """Review counterexamples: real owned CPU child, scratch flock, fake GPU."""
+    config = Config()
+    config.service.workspace = str(tmp_path)
+    config.vllm.pid_dir = str(tmp_path / "pids")
+    config.vllm.script = "/fake-launcher"
+    config.vllm.stop_script = "/never-executed"
+    config.vllm_pid_dir.mkdir()
+    lock, contender = (
+        gpumgr.GpuLock(tmp_path / "scratch.lock"),
+        gpumgr.GpuLock(tmp_path / "scratch.lock"),
+    )
+    assert lock.acquire()
+    state = {}
+    real_read, real_write = gpumgr.Path.read_text, jsonio.write
+
+    def launcher(argv, **kwargs):
+        child = subprocess.Popen(
+            [sys.executable, "-B", "-c", "import time; time.sleep(120)"],
+            start_new_session=True,
+            pass_fds=kwargs.get("pass_fds", ()),
+        )
+        state["child"], state["identity"] = child, gpumgr.identity_strict(child.pid)
+        if case != "missing_pidfile":
+            vllm._pidfile().write_text(str(child.pid))
+        process = Mock()
+        if case == "launch_timeout":
+            process.wait.side_effect = subprocess.TimeoutExpired(argv, 120)
+        else:
+            process.wait.return_value = 1 if case == "script_nonzero" else 0
+        return process
+
+    def read(path, *args, **kwargs):
+        if (
+            case == "identity_permission"
+            and state.get("child")
+            and str(path) == f"/proc/{state['child'].pid}/stat"
+        ):
+            raise PermissionError("fake owner identity unreadable")
+        return real_read(path, *args, **kwargs)
+
+    def write(path, value, **kwargs):
+        if Path(path) == vllm.record_path and (
+            case == "first_record_write_failure"
+            or (case == "record_write_failure" and value.get("pid"))
+        ):
+            raise PermissionError("fake owner record write denied")
+        return real_write(path, value, **kwargs)
+
+    vllm = gpumgr.Vllm(
+        config,
+        popen=Mock(side_effect=launcher),
+        runner=Mock(side_effect=AssertionError("actual stop script")),
+    )
+    ctl = launch_controller(vllm, lock)
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(gpumgr, "healthy", lambda port: False)
+            patch.setattr(gpumgr, "script_env", lambda config: {})
+            patch.setattr(gpumgr.Path, "read_text", read)
+            patch.setattr(jsonio, "write", write)
+            patch.setattr(
+                gpumgr,
+                "compute_apps",
+                Mock(side_effect=OSError("explicit fake GPU unavailable")),
+            )
+            patch.setattr(gpumgr, "STOP_CONFIRM_S", 0)
+            patch.setattr(
+                gpumgr.os,
+                "killpg",
+                Mock(side_effect=AssertionError("unconfirmed child signalled")),
+            )
+            assert not ctl._gpu_step(time.time(), True)
+            assert not ctl._stop_vllm()
+            assert lock.held and vllm.leaving()
+            ctl._vllm_failed.assert_not_called()
+            count = vllm.popen.call_count
+            assert not vllm.start(config.vllm_profile(), fd=lock.fileno())
+            assert vllm.popen.call_count == count
+            if case == "first_record_write_failure":
+                assert count == 0 and "child" not in state
+            else:
+                assert state["child"].poll() is None and not contender.acquire()
+                assert vllm.record_path.exists()
+                if case != "missing_pidfile":
+                    assert vllm._launch_record["pid"] == state["child"].pid
+                if case not in ("identity_permission", "missing_pidfile"):
+                    assert vllm._launch_record["identity"] == state["identity"]
+            vllm.runner.assert_not_called()
+            if (
+                case != "first_record_write_failure"
+            ):  # No child exists when the prelaunch write fails.
+                again = gpumgr.Vllm(
+                    config,
+                    popen=Mock(side_effect=AssertionError("pending restart launched")),
+                )
+                assert again.leaving() and not again.start(config.vllm_profile())
+            print(
+                json.dumps(
+                    {
+                        "case": case,
+                        "source": "owned CPU + fake GPU",
+                        "child_pid": state.get("child").pid
+                        if state.get("child")
+                        else None,
+                        "child_alive": bool(
+                            state.get("child") and state["child"].poll() is None
+                        ),
+                        "pending": vllm.leaving(),
+                        "stop_result": False,
+                        "controller_lock_held": lock.held,
+                        "launch_calls": count,
+                        "actual_stop_scripts": vllm.runner.call_count,
+                    }
+                )
+            )
+        child = state.get("child")
+        if child:
+            child.terminate()
+            child.wait(timeout=5)
+        if case not in ("first_record_write_failure", "missing_pidfile"):
+            with monkeypatch.context() as patch:
+                patch.setattr(
+                    gpumgr, "compute_apps", list
+                )  # explicit fake complete scan
+                patch.setattr(gpumgr, "STOP_CONFIRM_S", 0)
+                assert ctl._stop_vllm() and not lock.held
+                assert not vllm.record_path.exists() and not vllm.leaving()
+    finally:
+        child = state.get("child")
+        if child and gpumgr.process_state(child.pid, state["identity"]) == "alive":
+            child.terminate()
+        if child:
+            child.wait(timeout=5)
+        lock.release()
+        assert contender.acquire()
+        contender.release()
+
+
+def test_yield_does_not_exempt_a_changed_pidfile(tmp_path, monkeypatch):
+    """Two real CPU owners with explicitly fake GPU usage on the foreign one."""
+    config = Config()
+    config.service.workspace = str(tmp_path)
+    config.vllm.pid_dir = str(tmp_path)
+    owned, foreign = [
+        subprocess.Popen(
+            [sys.executable, "-B", "-c", "import time; time.sleep(120)"],
+            start_new_session=True,
+        )
+        for _ in range(2)
+    ]
+    identities = [gpumgr.identity_strict(proc.pid) for proc in (owned, foreign)]
+    try:
+        jsonio.write(
+            config.live_dir / "vllm.json", {"pid": owned.pid, "identity": identities[0]}
+        )
+        pidfile = tmp_path / f"vllm_{config.vllm.port}.pid"
+        pidfile.write_text(str(owned.pid))
+        monkeypatch.setattr(gpumgr, "healthy", lambda port: False)
+        vllm = gpumgr.Vllm(config)
+        ctl = launch_controller(vllm, SimpleNamespace(held=True))
+        ctl._ports_now, ctl._ports_error, ctl._apps = set(), "", (0, None, "")
+        ctl.probes = SimpleNamespace(
+            apps=lambda: [
+                {"pid": foreign.pid, "name": "fake foreign GPU", "memory_mib": 20000}
+            ]
+        )
+        pidfile.write_text(str(foreign.pid))
+        with pytest.raises(ValueError, match="pid file"):
+            ctl._our_gpu_pids()
+        assert [reason.code for reason in ctl._yield_reasons(time.time(), True)] == [
+            "probe_error"
+        ]
+        pidfile.write_text(str(owned.pid))
+        assert (
+            owned.pid in ctl._our_gpu_pids() and foreign.pid not in ctl._our_gpu_pids()
+        )
+        reasons = ctl._yield_reasons(time.time(), True)
+        assert reasons
+        print(
+            json.dumps(
+                {
+                    "case": "yield_changed_pidfile",
+                    "source": "two owned CPU processes + fake foreign GPU",
+                    "recorded_pid": owned.pid,
+                    "foreign_pid": foreign.pid,
+                    "foreign_exempt": foreign.pid in ctl._our_gpu_pids(),
+                    "mismatch_yield_reason": "probe_error",
+                    "matching_file_yield_reasons": [reason.code for reason in reasons],
+                }
+            )
+        )
+    finally:
+        for proc, ident in zip((owned, foreign), identities, strict=True):
+            if gpumgr.process_state(proc.pid, ident) == "alive":
+                proc.terminate()
+            proc.wait(timeout=5)
+
+
+def test_launch_preparation_failure_still_backs_off(tmp_path, monkeypatch):
+    config = Config()
+    config.service.workspace = str(tmp_path)
+    config.vllm.script = "/never-launched"
+    lock = gpumgr.GpuLock(tmp_path / "scratch.lock")
+    vllm = gpumgr.Vllm(
+        config, popen=Mock(side_effect=AssertionError("command must not run"))
+    )
+    ctl = launch_controller(vllm, lock)
+    monkeypatch.setattr(gpumgr, "script_env", lambda config: {})
+    monkeypatch.setattr(gpumgr, "healthy", lambda port: False)
+    monkeypatch.setattr(
+        gpumgr,
+        "launch_prefix",
+        Mock(side_effect=ValueError("invalid launch preparation")),
+    )
+    try:
+        assert not ctl._gpu_step(time.time(), True)
+        assert not vllm.leaving() and not lock.held and not vllm.record_path.exists()
+        vllm.popen.assert_not_called()
+        ctl._vllm_failed.assert_called_once()
+    finally:
+        lock.release()
+
+
+def test_failed_launch_remembers_real_launcher_and_detached_server(
+    tmp_path, monkeypatch
+):
+    config = Config()
+    config.service.workspace = str(tmp_path)
+    config.vllm.pid_dir = str(tmp_path)
+    config.vllm.script = "/explicit-fake-launcher"
+    config.vllm.stop_script = "/never-executed"
+    lock, contender = (
+        gpumgr.GpuLock(tmp_path / "scratch.lock"),
+        gpumgr.GpuLock(tmp_path / "scratch.lock"),
+    )
+    assert lock.acquire()
+    state = {}
+    pidfile = tmp_path / f"vllm_{config.vllm.port}.pid"
+
+    def launcher(argv, **kwargs):
+        # Both are owned CPU sleepers. The server deliberately leaves the launcher's group.
+        source = (
+            "import os,time; from pathlib import Path; pid=os.fork(); "
+            f"Path({str(pidfile)!r}).write_text(str(pid)) if pid else os.setsid(); "
+            "time.sleep(120)"
+        )
+        process = subprocess.Popen(
+            [sys.executable, "-B", "-c", source],
+            start_new_session=True,
+            pass_fds=kwargs.get("pass_fds", ()),
+        )
+        state["launcher"] = process
+        deadline = time.monotonic() + 5
+        while not pidfile.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        state["server_pid"] = int(pidfile.read_text())
+        state["launcher_identity"] = gpumgr.identity_strict(process.pid)
+        state["server_identity"] = gpumgr.identity_strict(state["server_pid"])
+        return SimpleNamespace(
+            pid=process.pid, wait=Mock(side_effect=subprocess.TimeoutExpired(argv, 120))
+        )
+
+    vllm = gpumgr.Vllm(
+        config,
+        popen=launcher,
+        runner=Mock(side_effect=AssertionError("stop script must not run")),
+    )
+    ctl = launch_controller(vllm, lock)
+    try:
+        monkeypatch.setattr(gpumgr, "script_env", lambda config: {})
+        monkeypatch.setattr(gpumgr, "healthy", lambda port: False)
+        monkeypatch.setattr(gpumgr, "compute_apps", list)  # explicit fake GPU scan
+        monkeypatch.setattr(gpumgr, "STOP_CONFIRM_S", 0)
+        assert not ctl._gpu_step(time.time(), True) and lock.held
+        record = vllm._record()
+        assert record["launcher"] == {
+            "pid": state["launcher"].pid,
+            "identity": state["launcher_identity"],
+            "group": state["launcher"].pid,
+        }
+        assert (
+            record["pid"] == state["server_pid"]
+            and record["identity"] == state["server_identity"]
+        )
+        assert not ctl._stop_vllm() and not contender.acquire()
+        assert (
+            gpumgr.process_state(state["server_pid"], state["server_identity"])
+            == "alive"
+        )
+        os.kill(state["server_pid"], signal.SIGTERM)
+        deadline = time.monotonic() + 5
+        while (
+            gpumgr.process_state(state["server_pid"], state["server_identity"])
+            == "alive"
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        assert (
+            not ctl._stop_vllm() and lock.held
+        )  # launcher can still create descendants
+        print(
+            json.dumps(
+                {
+                    "case": "real_launcher_retained",
+                    "source": "owned CPU launcher + detached CPU child + fake GPU",
+                    "launcher": record["launcher"],
+                    "server_pid": record["pid"],
+                    "server_identity": record["identity"],
+                    "server_exited": True,
+                    "launcher_alive": state["launcher"].poll() is None,
+                    "controller_lock_held": lock.held,
+                }
+            )
+        )
+        state["launcher"].terminate()
+        state["launcher"].wait(timeout=5)
+        assert ctl._stop_vllm() and not lock.held and contender.acquire()
+        contender.release()
+        vllm.runner.assert_not_called()
+    finally:
+        server_pid = state.get("server_pid")
+        if (
+            server_pid
+            and gpumgr.process_state(server_pid, state["server_identity"]) == "alive"
+        ):
+            os.kill(server_pid, signal.SIGTERM)
+        process = state.get("launcher")
+        if process:
+            if (
+                gpumgr.process_state(process.pid, state.get("launcher_identity"))
+                == "alive"
+            ):
+                process.terminate()
+            process.wait(timeout=5)
+        lock.release()
+        assert contender.acquire()
+        contender.release()
+
+
+def test_exited_launcher_pid_is_in_gpu_confirmation(model, monkeypatch):
+    vllm, ctl = model
+    record = vllm._record()
+    record["launcher"] = {"pid": PID + 10, "identity": OLD, "group": PID + 10}
+    jsonio.write(vllm.record_path, record)
+    monkeypatch.setattr(gpumgr, "compute_apps", lambda: [{"pid": PID + 10}])
+    assert_kept(vllm, ctl)
+    assert PID + 10 in vllm._leaving

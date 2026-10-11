@@ -1104,11 +1104,13 @@ class Vllm:
         self.state = "stopped"
         self.started_at: float | None = None
         self.profile: dict | None = None
-        # pids of a stop that kept the GPU lock to wait for the card to be free,
-        # and that flag: set only by such a stop, cleared when the release is
-        # confirmed. ``start()`` refuses a pending stop; ``leaving()`` reads nothing else.
+        # Remembered members and unresolved launch/stop ownership. Clear only
+        # after confirmed exit. ``start()`` refuses pending ownership;
+        # ``leaving()`` reads this flag without probing processes or the GPU.
         self._leaving: set = set()
         self._confirm_pending = False
+        # Latest evidence from this launch survives a failed atomic record write.
+        self._launch_record: dict | None = None
         # Called while a stop waits (every 0.5 s): the controller keeps the
         # gate file fresh with it, or a long stop would let it go stale.
         self.keepalive = None
@@ -1145,19 +1147,32 @@ class Vllm:
         try:
             record = json.loads(self.record_path.read_text())
         except FileNotFoundError:
-            return None
+            return self._launch_record
         if not isinstance(record, dict):
             raise ValueError("invalid vLLM owner record")  # noqa: TRY004 - invalid JSON evidence
         pid = record.get("pid")
-        if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
+        if not (record.get("launch_pending") is True and pid is None) and (
+            not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1
+        ):
             raise ValueError("invalid vLLM owner pid")
+        launcher = record.get("launcher")
+        if launcher is not None and (
+            not isinstance(launcher, dict)
+            or any(
+                not isinstance(launcher.get(key), int)
+                or isinstance(launcher.get(key), bool)
+                or launcher[key] <= 1
+                for key in ("pid", "group")
+            )
+        ):
+            raise ValueError("invalid vLLM launcher record")
         leaving = record.get("leaving", [])
         if not isinstance(leaving, list) or any(
             not isinstance(member, int) or isinstance(member, bool) or member <= 1
             for member in leaving
         ):
             raise ValueError("invalid pending vLLM members")
-        return record
+        return self._launch_record or record
 
     def _pending(self, record, reason):
         """Keep original identity and remembered members, also across supervisor restart."""
@@ -1167,13 +1182,16 @@ class Vllm:
             "GPU ownership remains unresolved; no release is confirmed"
         )[:300]
         if record is not None:
-            self._leaving.add(record["pid"])
+            if record.get("pid") is not None:
+                self._leaving.add(record["pid"])
             saved = dict(record)
             saved.update(
                 confirm_pending=True,
                 leaving=sorted(self._leaving),
                 stop_error=self.error,
             )
+            if self._launch_record is not None or record.get("launch_pending"):
+                self._launch_record = saved
             try:
                 jsonio.write(self.record_path, saved)
             except (OSError, ValueError):
@@ -1188,6 +1206,8 @@ class Vllm:
                 return
             self._leaving = set(record.get("leaving", []))
             if record.get("confirm_pending"):
+                if record.get("launch_pending"):
+                    self._launch_record = record
                 self.state, self._confirm_pending = "error", True
                 self.error = (
                     record.get("stop_error") or "vLLM stop confirmation is pending"
@@ -1265,29 +1285,55 @@ class Vllm:
             )
         self._leaving = set()
         self._launch_error = ""
-        env = script_env(self.config)
-        env.update(
-            PORT=str(self.port),
-            GPU_UTIL=str(profile["gpu_memory_utilization"]),
-            VLLM_WAIT_S="0",
-            LEVI_AGENT=self.config.gpu.lock_agent,
-        )
-        if profile.get("sleep_mode"):
-            # Dev endpoints (/sleep, /wake_up, /is_sleeping), bound to the
-            # loopback interface only.
-            env["VLLM_SERVER_DEV_MODE"] = "1"
-        self.config.logs_dir.mkdir(parents=True, exist_ok=True)
-        log = self.config.logs_dir / "vllm-launch.log"
         prefix: list = []
+        # Failures here precede command execution and still use normal backoff.
         try:
+            env = script_env(self.config)
+            env.update(
+                PORT=str(self.port),
+                GPU_UTIL=str(profile["gpu_memory_utilization"]),
+                VLLM_WAIT_S="0",
+                LEVI_AGENT=self.config.gpu.lock_agent,
+            )
+            if profile.get("sleep_mode"):
+                env["VLLM_SERVER_DEV_MODE"] = "1"
             prefix = launch_prefix(self.config)
-            with log.open("ab") as sink:
+            argv = [
+                *prefix,
+                str(self.config.vllm_script),
+                *launch_args(self.config, profile),
+            ]
+            self.config.logs_dir.mkdir(parents=True, exist_ok=True)
+            log = self.config.logs_dir / "vllm-launch.log"
+            sink = log.open("ab")
+        except (OSError, ValueError) as exc:
+            self.state, self.error = "error", f"vLLM launch preparation failed: {exc}"
+            self._launch_error = self.error
+            return False
+
+        previous_pid = self._pid()
+        record = {
+            "pid": None,
+            "identity": None,
+            "launch_pending": True,
+            "confirm_pending": True,
+            "port": self.port,
+            "profile": profile,
+            "started_at": time.time(),
+        }
+        # Reserve unresolved ownership before any launcher can create children.
+        self._launch_record, self._confirm_pending = record, True
+        process, code, failure = None, None, ""
+        with sink:
+            try:
+                jsonio.write(self.record_path, record)
+            except (OSError, ValueError):
+                return self._pending(
+                    record, "launch owner record could not be saved; launcher not run"
+                )
+            try:
                 process = self.popen(
-                    [
-                        *prefix,
-                        str(self.config.vllm_script),
-                        *launch_args(self.config, profile),
-                    ],
+                    argv,
                     env=env,
                     stdout=sink,
                     stderr=sink,
@@ -1295,50 +1341,76 @@ class Vllm:
                     start_new_session=True,
                     pass_fds=(fd,) if fd is not None else (),
                 )
+                launcher_pid = getattr(process, "pid", None)
+                if (
+                    isinstance(launcher_pid, int)
+                    and not isinstance(launcher_pid, bool)
+                    and launcher_pid > 1
+                ):
+                    launcher = {
+                        "pid": launcher_pid,
+                        "identity": None,
+                        "group": launcher_pid,
+                    }
+                    record["launcher"] = launcher
+                    try:
+                        launcher["identity"] = identity_strict(launcher_pid)
+                        if launcher["identity"] is not None:
+                            try:
+                                launcher["group"] = os.getpgid(launcher_pid)
+                            except ProcessLookupError:
+                                if (
+                                    process_state(launcher_pid, launcher["identity"])
+                                    != "gone"
+                                ):
+                                    raise
+                        if launcher["group"] != launcher_pid:
+                            raise ValueError("launcher process group changed")
+                        jsonio.write(self.record_path, record)
+                    except (OSError, ValueError):
+                        failure = "launcher identity/group or owner record is unknown"
                 code = process.wait(timeout=120)
-        except (OSError, subprocess.SubprocessError) as exc:
-            self.state = "error"
-            through = (
-                f" through {' '.join(prefix)} (vllm.cpus, vllm.nice)" if prefix else ""
-            )
-            self.error = (
-                f"vLLM launch failed: {type(exc).__name__} running "
-                f"{self.config.vllm_script}{through} (vllm.script; docs/VLLM.md, "
-                "`levi live doctor`)"
-            )
-            if prefix:
-                self._launch_error = self.error
-            return False
-        pid = self._pid()
-        ident = identity(pid) if pid else None  # read once: this is what is stored
-        if code != 0 and prefix:
-            self.state = "error"
-            self.error = self._launch_error = (
+            except (OSError, subprocess.SubprocessError) as exc:
+                failure = f"vLLM launch failed: {type(exc).__name__} running {self.config.vllm_script}"
+
+        # The pid file is only an owner candidate from this launch. Never adopt
+        # an unchanged previous file, or treat unreadable identity as exit.
+        pid = self._pid() if process is not None else None
+        if pid and pid > 1 and pid != previous_pid:
+            record["pid"] = pid
+            try:
+                record["identity"] = identity_strict(pid)
+            except (OSError, ValueError):
+                failure = "launched server identity is unknown"
+        else:
+            failure = failure or "launched server pid file is missing or unchanged"
+        if code is not None and code != 0 and prefix:
+            self._launch_error = (
                 f"the launch through {' '.join(prefix)} (vllm.cpus, vllm.nice) "
                 f"exited {code}: {_last_line(log)}"
             )[:300]
-            return False
-        if code != 0 or not pid or ident is None:
-            self.state, self.error = (
-                "error",
-                f"serve script exited {code}; see vllm-launch.log",
+            failure = self._launch_error
+        elif code is not None and code != 0:
+            self.error = f"serve script exited {code}; see vllm-launch.log"
+            failure = "; ".join(filter(None, (self.failure_reason(), failure)))
+        if failure or record["identity"] is None:
+            self.error = (
+                failure or "launched server exited before identity was recorded"
             )
-            self.error = self.failure_reason()
-            return False
-        self.started_at = time.time()
-        self._cold_pending = True
+            return self._pending(record, self.failure_reason())
+
+        self.started_at = record["started_at"]
         self.profile = profile
+        complete = dict(record, launch_pending=False, confirm_pending=False)
+        try:
+            jsonio.write(self.record_path, complete)
+        except (OSError, ValueError):
+            return self._pending(
+                record, "launched server owner record could not be saved"
+            )
+        self._launch_record = complete
+        self._confirm_pending, self._cold_pending = False, True
         self.state, self.error = "starting", ""
-        jsonio.write(
-            self.record_path,
-            {
-                "pid": pid,
-                "identity": ident,
-                "started_at": self.started_at,
-                "profile": profile,
-                "port": self.port,
-            },
-        )
         return True
 
     def log_path(self) -> Path:
@@ -1504,13 +1576,20 @@ class Vllm:
                 return self._pending(None, "pending owner record is missing")
             self.state = "stopped"
             return True
+        if record.get("pid") is None:
+            return self._pending(record, "launch has no verified server owner")
         pid, recorded = record["pid"], record.get("identity")
         self._leaving.add(pid)
         status = process_state(pid, recorded)
         if status == "unknown":
             return self._pending(record, "owner identity is unknown")
+        if record.get("launch_pending") and status != "gone":
+            return self._pending(
+                record, "incomplete launch still has a live server owner"
+            )
         try:
             self._leaving.update(_group_alive(pid))
+            self._launch_group(record)
         except (OSError, ValueError):
             return self._pending(record, "process group is unknown")
         self.state = "stopping"
@@ -1544,7 +1623,7 @@ class Vllm:
         while True:
             status = process_state(pid, recorded)
             try:
-                group = _group_alive(pid)
+                group = _group_alive(pid) + self._launch_group(record)
                 self._leaving.update(group)
                 on_gpu = self._on_gpu(self._leaving)
             except (OSError, subprocess.SubprocessError, ValueError):
@@ -1557,6 +1636,7 @@ class Vllm:
                 except OSError:
                     return self._pending(record, "owner record could not be removed")
                 self._leaving, self._confirm_pending = set(), False
+                self._launch_record = None
                 self.state, self.error, self.profile = "stopped", "", None
                 return True
             if time.time() >= deadline:
@@ -1566,13 +1646,28 @@ class Vllm:
             self._beat()
             time.sleep(0.5)
 
+    def _launch_group(self, record):
+        """Keep an observed launcher/group in the exit proof, without signalling it."""
+        launcher = record.get("launcher")
+        if not launcher:
+            return []
+        self._leaving.add(launcher["pid"])
+        status = process_state(launcher["pid"], launcher.get("identity"))
+        if status == "unknown":
+            raise ValueError("launcher identity is unknown")
+        members = _group_alive(launcher["group"])
+        self._leaving.update(members)
+        if status == "alive":
+            members = [launcher["pid"], *members]
+        return members
+
     def _beat(self):
         if self.keepalive:
             with contextlib.suppress(Exception):
                 self.keepalive()
 
     def leaving(self) -> bool:
-        """A stop is still waiting for vLLM's processes to leave the GPU."""
+        """A launch or stop still needs owner exit confirmation."""
         return self._confirm_pending and self.state == "error"
 
     @staticmethod

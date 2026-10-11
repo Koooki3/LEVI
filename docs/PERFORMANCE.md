@@ -296,6 +296,20 @@ are retained, with pending members saved when possible; new launches are
 refused until a later complete stop confirms exit. Pending retries repeat the
 process-group and GPU checks. Status-only GPU listings remain permissive.
 
+Launch ownership is reserved in memory and an atomic pending record before
+executing a command. An unreadable/unwritable reservation prevents launch.
+Returned launcher PID/start/boot/group and the new server PID/identity are
+retained when readable; timeout, nonzero exit, missing/unchanged PID file,
+unknown identity, or final record-write failure keeps ownership unresolved.
+An incomplete launch does not signal a live/unknown server or permit another
+launch. Its recorded owner can recover after exit only with complete group
+and GPU checks, including an observed launcher/group. Without a server PID,
+even launcher exit is insufficient to confirm all detached children exited.
+Preparation failures before command execution still use ordinary backoff.
+Yield probes enumerate the verified record's process group and recheck its
+identity. A mismatched/unreadable PID file produces a conservative probe error;
+another process named by that file is never exempted as this service's GPU user.
+
 Shutdown retains an unresolved record and the controller's lock descriptor
 while the controller is alive. Process exit necessarily closes that descriptor;
 a live child that inherited the same open file description may still hold
