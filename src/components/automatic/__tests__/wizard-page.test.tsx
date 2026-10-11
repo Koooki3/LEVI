@@ -148,6 +148,73 @@ async function toSettings(host: HTMLElement) {
   });
 }
 
+describe("compact wizard navigation and identifiers", () => {
+  test("identical previews retain distinguishable full names and exact copy outside selection", async () => {
+    const common = "checkpoint/" + "x".repeat(200);
+    const names = [
+      common + "/first/" + "z".repeat(30),
+      common + "/second/" + "z".repeat(30),
+    ];
+    const list = policies(false);
+    list.checkpoints.forEach((c, index) => {
+      c.name = names[index];
+      c.config = "config/" + "q".repeat(240);
+    });
+    const api = fakeApi({ getPolicies: mock(async () => list) });
+    const { host } = await render(<WizardPage api={api} navigate={() => {}} />);
+    await flush(10);
+    await click(buttonNamed(host, "Next")!);
+    await waitFor(
+      () => host.querySelectorAll('input[name="aw-policy"]').length === 2,
+    );
+    const radios = host.querySelectorAll<HTMLInputElement>(
+      'input[name="aw-policy"]',
+    );
+    expect(radios[0].getAttribute("aria-label")).toBe(names[0]);
+    expect(radios[1].getAttribute("aria-label")).toBe(names[1]);
+    const first = host.querySelector(".aw-choice")!;
+    expect(first.querySelector("label details")).toBeNull();
+    expect(first.querySelector(".ds-long-text__body")?.textContent).toBe(
+      names[0],
+    );
+    expect(first.querySelector("summary")?.textContent?.length).toBeLessThan(
+      90,
+    );
+    let copied = "";
+    const original = navigator.clipboard.writeText;
+    navigator.clipboard.writeText = async (text) => {
+      copied = text;
+    };
+    try {
+      await click(first.querySelector(".ds-long-text button"));
+      expect(copied).toBe(names[0]);
+      expect(radios[0].checked).toBe(false);
+    } finally {
+      navigator.clipboard.writeText = original;
+    }
+  });
+
+  test("shortcuts focus existing actions and confirmation without executing them", async () => {
+    const api = fakeApi();
+    const { host } = await render(<WizardPage api={api} navigate={() => {}} />);
+    await flush(10);
+    await click(buttonNamed(host, "Step actions")!);
+    expect(document.activeElement).toBe(buttonNamed(host, "Next"));
+    expect(api.createJob).not.toHaveBeenCalled();
+    await toSettings(host);
+    expect(document.activeElement).toBe(host.querySelector("#aw-step-title"));
+    await click(host.querySelector('input[name="aw-policy"]'));
+    await click(buttonNamed(host, "Next")!);
+    await type(host.querySelector("textarea")!, "Place the cup in the box");
+    await click(buttonNamed(host, "Next")!);
+    await waitFor(() => Boolean(host.querySelector(".aw-phrase input")));
+    await click(buttonNamed(host, "Review and start")!);
+    expect(document.activeElement).toBe(host.querySelector(".aw-phrase input"));
+    expect(api.launchRun).not.toHaveBeenCalled();
+    expect(buttonNamed(host, "Start the run")!.disabled).toBe(true);
+  });
+});
+
 describe("the wizard, one run", () => {
   test("walks to a launched run and goes to its page", async () => {
     const api = fakeApi();

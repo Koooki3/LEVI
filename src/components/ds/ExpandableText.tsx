@@ -8,9 +8,12 @@ import { useToast } from "./Toast";
 export function ExpandableText({
   text,
   mono = false,
+  previewLength = 160,
 }: {
   text: string;
   mono?: boolean;
+  /** A shorter preview for dense pickers; complete text and copy stay intact. */
+  previewLength?: number;
 }) {
   const { t } = useLocale();
   const toast = useToast();
@@ -34,7 +37,7 @@ export function ExpandableText({
       <details>
         <summary>
           <span className="ds-long-text__preview">
-            {content(text.slice(0, 160))}…{" "}
+            {content(text.slice(0, previewLength))}…{" "}
           </span>
           <span className="ds-long-text__label">{t("Full text")}</span>
         </summary>

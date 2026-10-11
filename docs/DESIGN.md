@@ -280,6 +280,8 @@ Text-bearing buttons, badges and card headers wrap within the available width. T
 
 The live overview shows six evaluation sessions per page, resets pagination when filters change, and keeps inline disclosures and detail links separate. Secondary viewer and deletion controls sit under “Session actions”, while the detail link stays visible. Service controls and reports sit behind native keyboard-accessible disclosures; the page navigation reaches sessions, annotation, reports and service without repeated scrolling. Fault alerts and robot health remain visible.
 
+The evaluation wizard keeps long checkpoint names and configurations in compact previews, with the full identifiers available by keyboard and exact copy. On narrow screens, “Step actions” reaches and focuses Next, and “Review and start” reaches the confirmation phrase. These shortcuts stay in the normal document flow: no overlay or nested form scrolling. A step change focuses its heading so the next form starts visibly.
+
 ### FR3 execution preparation
 
 The automatic job launch panel, wizard confirmation step and guided campaign overview offer a read-only FR3 preparation section. Loading it reads the retained job or current campaign segment and exposes its check command, plan digest, requirements and a separately disclosed execution template for exact copying. The page does not execute either command. The real AERI software bridge remains physically unaccepted and needs a reviewed binding and human confirmation in the terminal. Missing frozen-plan fields or a confirmed Initial State Contract require a new plan; a legacy guided command is not this bridge. Older backends and missing retained jobs show an unavailable message.

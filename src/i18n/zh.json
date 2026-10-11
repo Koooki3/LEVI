@@ -1065,6 +1065,8 @@
   "automatic.wizard.mode.campaign": "多模型评测计划",
   "automatic.wizard.mode.label": "要启动什么",
   "automatic.wizard.mode.single": "单次测评",
+  "automatic.wizard.reach_actions": "步骤操作",
+  "automatic.wizard.reach_launch": "查看并启动",
   "automatic.wizard.next": "下一步",
   "automatic.wizard.phrase.mismatch": "请原样输入：{phrase}",
   "automatic.wizard.plan.again": "重新生成计划",

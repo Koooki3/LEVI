@@ -41,8 +41,29 @@
   display: grid;
   gap: var(--ds-space-4);
 }
-.aw-panel > h2 {
+.aw-panel > h2,
+.aw-panel__head h2 {
   margin: 0;
+}
+.aw-panel__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+}
+.aw-panel__head h2 {
+  scroll-margin-top: 120px;
+}
+.aw-action-shortcut {
+  display: none;
+}
+.aw-choice__config {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.aw-choice .ds-long-text {
+  min-width: 0;
 }
 .aw-actions {
   display: flex;
@@ -271,6 +292,9 @@
    screen the two options share the row and may wrap inside their own box
    instead of pressing against its edge. */
 @media (max-width: 640px) {
+  .aw-action-shortcut {
+    display: inline-flex;
+  }
   .aw-modeseg {
     display: flex;
     width: 100%;

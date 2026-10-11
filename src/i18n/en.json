@@ -1065,6 +1065,8 @@
   "automatic.wizard.mode.campaign": "Multi-model evaluation plan",
   "automatic.wizard.mode.label": "What to start",
   "automatic.wizard.mode.single": "One evaluation run",
+  "automatic.wizard.reach_actions": "Step actions",
+  "automatic.wizard.reach_launch": "Review and start",
   "automatic.wizard.next": "Next",
   "automatic.wizard.phrase.mismatch": "Type exactly: {phrase}",
   "automatic.wizard.plan.again": "Plan again",

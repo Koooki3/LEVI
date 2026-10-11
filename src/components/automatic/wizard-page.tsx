@@ -2,7 +2,7 @@
 // The evaluation wizard (/automatic/new): environment, choice, settings,
 // confirm. A single run goes to /automatic/runs/<id> after launch; a
 // multi-model plan goes to /automatic/campaigns/<id>.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { Button, SegmentedControl, Skeleton } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
@@ -38,6 +38,9 @@ export function WizardPage({
   navigate: (href: string) => void;
 }) {
   const { t } = useLocale();
+  const panel = useRef<HTMLElement>(null);
+  const title = useRef<HTMLHeadingElement>(null);
+  const previousStep = useRef(0);
   const [step, setStep] = useState(0);
   const [form, setFormState] = useState<WizardForm>(() => defaultForm());
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
@@ -91,6 +94,21 @@ export function WizardPage({
     setAttempted(false);
     setStep((s) => Math.min(s + 1, 3));
   };
+  useEffect(() => {
+    if (previousStep.current === step) return;
+    previousStep.current = step;
+    title.current?.focus({ preventScroll: true });
+    title.current?.scrollIntoView?.({ block: "start", behavior: "auto" });
+  }, [step]);
+
+  const reachActions = () => {
+    const target = panel.current?.querySelector<HTMLElement>(
+      step === 3 ? ".aw-phrase input" : ".aw-actions button:last-child",
+    );
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView?.({ block: "center", behavior: "auto" });
+  };
+
   const back = () => {
     setAttempted(false);
     setStep((s) => Math.max(s - 1, 0));
@@ -127,8 +145,23 @@ export function WizardPage({
         ))}
       </ol>
 
-      <section className="aw-panel" aria-labelledby="aw-step-title">
-        <h2 id="aw-step-title">{t(STEP_KEYS[step])}</h2>
+      <section ref={panel} className="aw-panel" aria-labelledby="aw-step-title">
+        <div className="aw-panel__head">
+          <h2 ref={title} id="aw-step-title" tabIndex={-1}>
+            {t(STEP_KEYS[step])}
+          </h2>
+          <Button
+            className="aw-action-shortcut"
+            size="sm"
+            onClick={reachActions}
+          >
+            {t(
+              step === 3
+                ? "automatic.wizard.reach_launch"
+                : "automatic.wizard.reach_actions",
+            )}
+          </Button>
+        </div>
         {step === 0 && <SetupGuideLoader load={api.getSetupGuide} />}
         {step > 0 && step < 3 && loading && <Skeleton height={96} />}
         {step > 0 && loadError && (

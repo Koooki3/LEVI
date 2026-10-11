@@ -6,6 +6,7 @@ import {
   Badge,
   Checkbox,
   Field,
+  ExpandableText,
   Input,
   Radio,
   RadioGroup,
@@ -41,15 +42,22 @@ const HASH_KEYS = {
   none: "automatic.wizard.hash.none",
 } as const;
 
+function checkpointPreview(name: string): string {
+  return name.length > 180 ? name.slice(0, 48) + "…" + name.slice(-24) : name;
+}
+
 function CheckpointFacts({ checkpoint }: { checkpoint: PolicyCheckpoint }) {
   const { t } = useLocale();
   return (
     <>
+      {checkpoint.name.length > 180 && (
+        <ExpandableText text={checkpoint.name} previewLength={48} />
+      )}
+      <div className="aw-choice__config">
+        {t("automatic.wizard.policy.config")}:{" "}
+        <ExpandableText text={checkpoint.config} mono previewLength={48} />
+      </div>
       <p className="aw-choice__meta">
-        <span>
-          {t("automatic.wizard.policy.config")}:{" "}
-          <code>{checkpoint.config}</code>
-        </span>
         {checkpoint.family && (
           <span>
             {t("automatic.wizard.policy.family")}: {checkpoint.family}
@@ -140,13 +148,15 @@ export function StepChoose({
                 {form.mode === "single" ? (
                   <Radio
                     name="aw-policy"
-                    label={checkpoint.name}
+                    label={checkpointPreview(checkpoint.name)}
+                    aria-label={checkpoint.name}
                     checked={selected}
                     onChange={() => setForm({ policyId: checkpoint.id })}
                   />
                 ) : (
                   <Checkbox
-                    label={checkpoint.name}
+                    label={checkpointPreview(checkpoint.name)}
+                    aria-label={checkpoint.name}
                     checked={selected}
                     onChange={(event) =>
                       toggleArm(checkpoint.id, event.target.checked)
@@ -194,7 +204,8 @@ export function StepChoose({
             >
               <Radio
                 name="aw-reset"
-                label={`${t("automatic.wizard.reset.policy")}: ${checkpoint.name}`}
+                label={`${t("automatic.wizard.reset.policy")}: ${checkpointPreview(checkpoint.name)}`}
+                aria-label={`${t("automatic.wizard.reset.policy")}: ${checkpoint.name}`}
                 checked={form.resetChoice === checkpoint.id}
                 onChange={() => setForm({ resetChoice: checkpoint.id })}
               />
