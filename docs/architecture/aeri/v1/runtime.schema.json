@@ -628,6 +628,58 @@
       "title": "QuiesceAck",
       "type": "object"
     },
+    "ResidentGroupSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "group_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Group Id",
+          "type": "string"
+        },
+        "members": {
+          "items": {
+            "$ref": "#/$defs/ResidentMemberSpec"
+          },
+          "maxItems": 4,
+          "minItems": 1,
+          "title": "Members",
+          "type": "array"
+        }
+      },
+      "required": [
+        "group_id",
+        "members"
+      ],
+      "title": "ResidentGroupSpec",
+      "type": "object"
+    },
+    "ResidentMemberSpec": {
+      "additionalProperties": false,
+      "description": "Declared owned backend capability, never inferred from a supplied PID.",
+      "properties": {
+        "capability_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "title": "Capability Id",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "forward",
+            "judge",
+            "reset",
+            "background"
+          ],
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "capability_id"
+      ],
+      "title": "ResidentMemberSpec",
+      "type": "object"
+    },
     "ResourceLease": {
       "additionalProperties": false,
       "description": "Renewal or re-grant raises ``lease_epoch``; results under an older\nepoch, or after expiry or revocation, are void.",
@@ -717,6 +769,7 @@
           "enum": [
             "policy_realtime",
             "judge_critical",
+            "resident_group",
             "vision_light",
             "background_annotation",
             "batch"
@@ -1157,6 +1210,17 @@
           "title": "Requester",
           "type": "string"
         },
+        "resident_group": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResidentGroupSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "run_id": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
           "title": "Run Id",
@@ -1171,6 +1235,7 @@
           "enum": [
             "policy_realtime",
             "judge_critical",
+            "resident_group",
             "vision_light",
             "background_annotation",
             "batch"
