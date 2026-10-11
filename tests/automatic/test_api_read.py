@@ -141,9 +141,20 @@ def test_plan_of_an_unknown_job_is_404_and_of_a_bad_one_422(client, tmp_path, ro
     assert response.json()["detail"]["errors"]
 
 
-def test_a_job_outside_the_roots_cannot_be_named(client, tmp_path):
-    response = client.post(f"{BASE}/plan", json={"job_id": str(tmp_path / "x.yaml")})
+def test_a_job_outside_the_roots_cannot_be_named(client):
+    # Keep this below PlanBody's length limit so it exercises the ID lookup,
+    # regardless of the checkout/basetemp path length.
+    response = client.post(f"{BASE}/plan", json={"job_id": "/outside/x.yaml"})
     assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "not_found"
+
+
+def test_an_overlong_job_path_is_rejected_before_lookup(client):
+    response = client.post(
+        f"{BASE}/plan", json={"job_id": "/outside/" + "x" * 128 + ".yaml"}
+    )
+    assert response.status_code == 422
+    assert any(error["type"] == "string_too_long" for error in response.json()["detail"])
 
 
 def test_snapshot_events_metrics_of_a_finished_run(client, tmp_path, roots):
