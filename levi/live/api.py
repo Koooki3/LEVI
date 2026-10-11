@@ -32,7 +32,6 @@ The JSON shapes are documented in ``docs/LIVE.md``.
 
 import contextlib
 import contextvars
-import json
 import os
 import re
 import secrets
