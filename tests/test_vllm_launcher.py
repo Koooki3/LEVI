@@ -132,6 +132,11 @@ def test_a_launch_that_cannot_run_names_the_script(tmp_path):
     vllm = gpumgr.Vllm(c)
     assert not vllm.start(c.vllm_profile())
     assert "missing.sh" in vllm.error and "docs/VLLM.md" in vllm.error
+    assert "GPU ownership remains unresolved" in vllm.error
+    assert "no release is confirmed" in vllm.error
+    assert len(vllm.error) <= 300
+    owner = json.loads(vllm.record_path.read_text())
+    assert owner["confirm_pending"] is True and owner["launch_pending"] is True
 
 
 def _script(args, env):

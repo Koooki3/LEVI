@@ -1177,10 +1177,17 @@ class Vllm:
     def _pending(self, record, reason):
         """Keep original identity and remembered members, also across supervisor restart."""
         self.state, self._confirm_pending = "error", True
-        self.error = (
-            f"vLLM stop unconfirmed: {reason}; "
-            "GPU ownership remains unresolved; no release is confirmed"
-        )[:300]
+        prefix = "vLLM stop unconfirmed: "
+        suffix = (
+            "; GPU ownership remains unresolved; no release is confirmed; "
+            "see docs/VLLM.md"
+        )
+        budget = 300 - len(prefix) - len(suffix)
+        if len(reason) > budget:
+            # Keep the error kind and script basename even for a long path.
+            half = (budget - 3) // 2
+            reason = reason[:half] + "..." + reason[-(budget - 3 - half) :]
+        self.error = prefix + reason + suffix
         if record is not None:
             if record.get("pid") is not None:
                 self._leaving.add(record["pid"])
