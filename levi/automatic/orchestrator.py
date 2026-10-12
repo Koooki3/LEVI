@@ -1050,6 +1050,8 @@ class Orchestrator:
         with self._stop_lock:
             self._stop_gen += 1
             self._stops[command_id] = self._stop_gen  # the loop sees it now
+            if self.intervention is not None:
+                self.intervention.note_operator_stop()
         if self.intervention is not None:
             self.fence.revoke()
             self.intervention.interrupt(operator=True)

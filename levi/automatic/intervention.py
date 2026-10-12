@@ -114,6 +114,14 @@ class InferenceCycle:
             raise InterventionUnproven("cycle differs from frozen run/hold contract")
         self.hold_conditions = config.termination.physical_hold
 
+    def note_operator_stop(self) -> None:
+        """Called under the orchestrator's stop-registry lock, before the stop
+        is visible to the loop, so a loop-side interrupt() cannot win the race
+        and make an operator's stop look like a failed proof."""
+        with self._lock:
+            if not self.failed:
+                self.operator_stopped = True
+
     def rearm(self) -> bool:
         """Open the cycle again after an operator's stop, only when no proof
         failed and the request slot is confirmed released; else it stays latched."""

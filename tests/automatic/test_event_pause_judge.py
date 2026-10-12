@@ -414,6 +414,40 @@ def test_stop_then_resume_opens_a_new_cycle_without_illegal_motion(tmp_path):
     assert not r.cycle.failed
 
 
+def test_stop_is_an_operator_stop_even_if_the_loop_interrupts_first(tmp_path):
+    import threading
+
+    r = build(tmp_path, event_step=None, script=[{"decision": "confirmed"}])
+    revoke = r.orch.fence.revoke
+    raced = []
+
+    def revoke_after_loop_interrupt():
+        # The stop is registered; the loop thread sees it and interrupts the
+        # cycle before stop() reaches its own interrupt(operator=True).
+        if r.orch._stops and not raced:
+            raced.append(1)
+            loop = threading.Thread(target=r.cycle.interrupt)
+            loop.start()
+            loop.join()
+        return revoke()
+
+    r.orch.fence.revoke = revoke_after_loop_interrupt
+    original = r.robot.step
+
+    def step_then_stop(action, *, token):
+        out = original(action, token=token)
+        if r.robot.step_calls == 3 and not r.orch._stops:
+            r.orch.stop("stop-race")
+        return out
+
+    r.robot.step = step_then_stop
+    assert r.orch.run() == "FAULT_LOCKED"
+    assert raced and r.cycle.operator_stopped
+    assert _resume(r, "resume-race").ok
+    assert r.orch.run() in ("WAIT_HUMAN", "COMPLETED")
+    assert not r.cycle.failed and r.robot.step_calls > 3
+
+
 def test_resume_is_refused_while_a_stopped_cycle_holds_its_request_slot(tmp_path):
     r = build(tmp_path)
     collect = r.verifier.collect
