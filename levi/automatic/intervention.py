@@ -100,6 +100,7 @@ class InferenceCycle:
         self._lock = threading.Lock()  # token bookkeeping only; never held across I/O
         self.failed = False
         self.operator_stopped = False  # latched by a stop, not by a failed proof
+        self.proof_failed = False  # a proof failed: never rearmed
         self.revocation_error = None
 
     def validate(self, config, clock):
@@ -126,7 +127,11 @@ class InferenceCycle:
         """Open the cycle again after an operator's stop, only when no proof
         failed and the request slot is confirmed released; else it stays latched."""
         with self._lock:
-            if not (self.failed and self.operator_stopped) or self._request is not None:
+            if (
+                not (self.failed and self.operator_stopped)
+                or self.proof_failed
+                or self._request is not None
+            ):
                 return False
             if self.revocation_error is not None:
                 return False
@@ -158,6 +163,8 @@ class InferenceCycle:
                 raise InterventionStopped("execution already stopped or proof failed")
             yield
         except BaseException as exc:
+            if not isinstance(exc, InterventionStopped):
+                self.proof_failed = True
             self.interrupt()
             if isinstance(exc, Exception) and not isinstance(exc, InterventionUnproven):
                 raise InterventionUnproven(
@@ -192,7 +199,7 @@ class InferenceCycle:
                 and proof.no_new_commands is True
                 and proof.physically_stable is True
             ):
-                self.failed = True
+                self.failed = self.proof_failed = True
                 raise InterventionUnproven(
                     "independent fresh physical hold proof required"
                 )
@@ -204,7 +211,7 @@ class InferenceCycle:
             if type(new_epoch) is not int or new_epoch <= old_epoch:
                 raise InterventionUnproven("pause must advance policy epoch")
             if self.hooks.stop_admission(episode_id, old_epoch, new_epoch) is not True:
-                self.failed = True
+                self.failed = self.proof_failed = True
                 raise InterventionUnproven("policy admission/old buffer fence unproven")
             return self.hold(
                 episode_id, new_epoch, since_ns=began, deadline_ns=deadline_ns

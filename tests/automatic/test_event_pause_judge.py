@@ -1,5 +1,6 @@
 """Small in-process fake regressions; no GPU, socket, subprocess or robot."""
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -446,6 +447,23 @@ def test_stop_is_an_operator_stop_even_if_the_loop_interrupts_first(tmp_path):
     assert _resume(r, "resume-race").ok
     assert r.orch.run() in ("WAIT_HUMAN", "COMPLETED")
     assert not r.cycle.failed and r.robot.step_calls > 3
+
+
+def test_stop_during_pause_with_unproven_admission_is_not_rearmed(tmp_path):
+    r = build(tmp_path)
+    hooks = r.cycle.hooks
+
+    def stop_then_fail(episode, old, new):
+        r.orch.stop("stop-in-pause")  # arrives while pause() runs
+        return False  # and the old-buffer fence is not proven
+
+    r.cycle.hooks = replace(hooks, stop_admission=stop_then_fail)
+    assert r.orch.run() == "FAULT_LOCKED"
+    assert r.cycle.proof_failed and r.cycle.failed
+    steps = r.robot.step_calls
+    found = _resume(r, "resume-unproven")
+    assert not found.ok and found.code == "intervention_latched"
+    assert r.cycle.failed and r.robot.step_calls == steps
 
 
 def test_resume_is_refused_while_a_stopped_cycle_holds_its_request_slot(tmp_path):
