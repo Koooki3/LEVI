@@ -971,6 +971,15 @@ class Orchestrator:
             prior = self.journal.by_command(command_id)
             if prior:
                 if prior[0].reason == "human_resumed":
+                    if any(
+                        event.record == "note"
+                        and event.transaction_id == prior[0].transaction_id
+                        and event.note.code == "resume_rearm_refused"
+                        for event in prior
+                    ):
+                        return CommandResult(
+                            False, "intervention_latched", self.state, True
+                        )
                     return CommandResult(
                         True, "repeated", self.state, True, prior[0].sequence_no
                     )
@@ -1030,6 +1039,19 @@ class Orchestrator:
                 # A proof may fail after the eligibility inspection. Never
                 # leave that committed PREFLIGHT runnable or clear its stops.
                 self._contain(InterventionUnproven("resume cycle became latched"))
+                try:
+                    # The committed state transition is not a successful
+                    # command result. Persist its refusal before returning so
+                    # retry/restart never infer success from human_resumed.
+                    self.journal.note(
+                        "resume_rearm_refused",
+                        "intervention_latched",
+                        authority=self._auth("operator", command_id),
+                        transaction_id=found.prepared.transaction_id,
+                    )
+                except Exception as exc:
+                    self._contain(exc)
+                    raise
                 return CommandResult(False, "intervention_latched", self.state)
             if lost:
                 # Stops that never took effect (the run locked or waited

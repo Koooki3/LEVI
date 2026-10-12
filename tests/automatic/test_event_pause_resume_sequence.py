@@ -166,3 +166,104 @@ def test_valid_resume_rearms_only_after_commit_and_repeated_command_is_unchanged
     repeated = resume(r, -1)
     assert repeated.ok and repeated.repeated and repeated.code == "repeated"
     assert vars(r.cycle) == before and rearms == [1]
+
+
+@pytest.mark.parametrize("reopen", [False, True])
+def test_rearm_refusal_is_a_durable_repeated_command_result(tmp_path, reopen):
+    from levi.automatic.journal import Journal
+
+    r = stopped(tmp_path)
+
+    def fail_after_prepare(point):
+        if point == "after_prepared":
+            r.cycle.interrupt(proof_failed=True)
+
+    r.orch.crash_hook = fail_after_prepare
+    first = resume(r, r.orch.journal.next_seq)
+    assert not first.ok and first.code == "intervention_latched"
+    if reopen:
+        r.orch.journal.close()
+        r.orch.journal = Journal.open(
+            r.directory,
+            plan_sha256=r.orch.config.plan_sha256,
+            clock=r.orch.clock,
+            clock_domain=r.orch.clock.domain,
+        )
+    before = dict(vars(r.cycle))
+    sequence = r.orch.journal.next_seq
+    repeated = resume(r, -1)
+    assert not repeated.ok and repeated.code == first.code and repeated.repeated
+    assert repeated.sequence_no == first.sequence_no
+    assert vars(r.cycle) == before and r.orch.journal.next_seq == sequence
+    # A later healthy cycle cannot turn this historical refusal into success.
+    r.cycle.failed = r.cycle.operator_stopped = r.cycle.proof_failed = False
+    repeated = resume(r, -1)
+    assert not repeated.ok and repeated.code == first.code and repeated.repeated
+    assert sm.check_journal(r.orch.journal.events) == []
+
+
+def test_later_cycle_failure_cannot_reclassify_a_successful_resume(tmp_path):
+    r = stopped(tmp_path)
+    first = resume(r, r.orch.journal.next_seq)
+    assert first.ok
+    r.cycle.interrupt(proof_failed=True)
+    sequence = r.orch.journal.next_seq
+    repeated = resume(r, -1)
+    assert repeated.ok and repeated.code == "repeated" and repeated.repeated
+    assert r.orch.journal.next_seq == sequence and r.cycle.proof_failed
+
+
+def test_stale_resume_and_existing_stop_repetitions_leave_cycle_unchanged(tmp_path):
+    r = stopped(tmp_path)
+    before = dict(vars(r.cycle))
+    sequence = r.orch.journal.next_seq
+    for _ in range(2):
+        stale = resume(r, sequence - 1)
+        assert not stale.ok and stale.code == "stale_sequence"
+        stop = r.orch.stop("initial-stop")
+        assert stop.ok and stop.repeated
+        assert vars(r.cycle) == before and r.orch.journal.next_seq == sequence
+
+
+def test_refusal_marker_write_failure_does_not_return_an_unrecorded_result(
+    tmp_path, monkeypatch
+):
+    r = stopped(tmp_path)
+    note = r.orch.journal.note
+
+    def fail_after_prepare(point):
+        if point == "after_prepared":
+            r.cycle.interrupt(proof_failed=True)
+
+    def fail_refusal_marker(code, *args, **kwargs):
+        if code == "resume_rearm_refused":
+            raise OSError("injected refusal marker write failure")
+        return note(code, *args, **kwargs)
+
+    r.orch.crash_hook = fail_after_prepare
+    monkeypatch.setattr(r.orch.journal, "note", fail_refusal_marker)
+    steps = r.robot.step_calls
+    with pytest.raises(OSError, match="refusal marker write failure"):
+        resume(r, r.orch.journal.next_seq)
+    assert r.cycle.failed and r.cycle.proof_failed
+    assert r.orch.state == "FAULT_LOCKED" and r.robot.step_calls == steps
+    assert r.orch.fence.current is None
+
+
+def test_other_transaction_refusal_marker_cannot_override_success(tmp_path):
+    r = stopped(tmp_path)
+    assert resume(r, r.orch.journal.next_seq).ok
+    other = next(
+        event
+        for event in r.orch.journal.events
+        if event.record == "prepared" and event.reason != "human_resumed"
+    )
+    r.orch.journal.note(
+        "resume_rearm_refused",
+        "intervention_latched",
+        authority=r.orch._auth("operator", "resume-sequence"),
+        transaction_id=other.transaction_id,
+    )
+    repeated = resume(r, -1)
+    assert repeated.ok and repeated.repeated and repeated.code == "repeated"
+    assert sm.check_journal(r.orch.journal.events) == []
