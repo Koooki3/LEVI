@@ -267,3 +267,149 @@ def test_other_transaction_refusal_marker_cannot_override_success(tmp_path):
     repeated = resume(r, -1)
     assert repeated.ok and repeated.repeated and repeated.code == "repeated"
     assert sm.check_journal(r.orch.journal.events) == []
+
+
+@pytest.mark.parametrize("outcome", ["accepted", "refused"])
+@pytest.mark.parametrize("reopen", [False, True])
+def test_outcome_write_failure_retry_never_reports_success(
+    tmp_path, monkeypatch, outcome, reopen
+):
+    from levi.automatic.journal import Journal
+
+    r = stopped(tmp_path)
+    note = r.orch.journal.note
+    marker = "resume_rearm_" + outcome
+    if outcome == "refused":
+
+        def fail_after_prepare(point):
+            if point == "after_prepared":
+                r.cycle.interrupt(proof_failed=True)
+
+        r.orch.crash_hook = fail_after_prepare
+
+    def fail_outcome_marker(code, *args, **kwargs):
+        if code == marker:
+            raise OSError("injected outcome marker write failure")
+        return note(code, *args, **kwargs)
+
+    monkeypatch.setattr(r.orch.journal, "note", fail_outcome_marker)
+    steps = r.robot.step_calls
+    with pytest.raises(OSError, match="outcome marker write failure"):
+        resume(r, r.orch.journal.next_seq)
+    assert r.orch.state == "FAULT_LOCKED" and r.cycle.failed
+    assert r.orch.fence.current is None and r.robot.step_calls == steps
+    if reopen:
+        r.orch.journal.close()
+        r.orch.journal = Journal.open(
+            r.directory,
+            plan_sha256=r.orch.config.plan_sha256,
+            clock=r.orch.clock,
+            clock_domain=r.orch.clock.domain,
+        )
+    before = dict(vars(r.cycle))
+    sequence = r.orch.journal.next_seq
+    repeated = resume(r, -1)
+    assert not repeated.ok and repeated.code == "command_used" and repeated.repeated
+    assert vars(r.cycle) == before and r.orch.journal.next_seq == sequence
+    assert r.robot.step_calls == steps and sm.check_journal(r.orch.journal.events) == []
+
+
+@pytest.mark.parametrize("reopen", [False, True])
+def test_old_unmarked_event_resume_is_readable_but_not_reported_success(
+    tmp_path, reopen
+):
+    from levi.automatic.journal import Journal
+
+    r = stopped(tmp_path)
+    # Reproduce a retained human_resumed record from before outcome markers,
+    # without executing or granting any policy/model action.
+    r.orch._tx(
+        "PREFLIGHT",
+        "human_resumed",
+        authority=r.orch._auth("operator", "resume-sequence"),
+        expected_seq=r.orch.journal.next_seq,
+    )
+    if reopen:
+        r.orch.journal.close()
+        r.orch.journal = Journal.open(
+            r.directory,
+            plan_sha256=r.orch.config.plan_sha256,
+            clock=r.orch.clock,
+            clock_domain=r.orch.clock.domain,
+        )
+    sequence = r.orch.journal.next_seq
+    before = dict(vars(r.cycle))
+    repeated = resume(r, -1)
+    assert not repeated.ok and repeated.code == "command_used" and repeated.repeated
+    assert r.orch.journal.next_seq == sequence and vars(r.cycle) == before
+    assert sm.check_journal(r.orch.journal.events) == []
+
+
+def test_legacy_resume_repetition_keeps_old_unmarked_contract(tmp_path):
+    from test_aeri_stop_registry import waiting
+
+    r = waiting(tmp_path)
+    assert r.orch.config.termination.inference_mode == "legacy_async"
+    assert resume(r, r.orch.journal.next_seq).ok
+    assert not any(
+        event.record == "note" and event.note.code.startswith("resume_rearm_")
+        for event in r.orch.journal.by_command("resume-sequence")
+    )
+    repeated = resume(r, -1)
+    assert repeated.ok and repeated.code == "repeated" and repeated.repeated
+
+
+def test_foreign_transaction_acceptance_cannot_resolve_unmarked_resume(tmp_path):
+    r = stopped(tmp_path)
+    other = next(event for event in r.orch.journal.events if event.record == "prepared")
+    r.orch._tx(
+        "PREFLIGHT",
+        "human_resumed",
+        authority=r.orch._auth("operator", "resume-sequence"),
+        expected_seq=r.orch.journal.next_seq,
+    )
+    r.orch.journal.note(
+        "resume_rearm_accepted",
+        "resumed",
+        authority=r.orch._auth("operator", "resume-sequence"),
+        transaction_id=other.transaction_id,
+    )
+    repeated = resume(r, -1)
+    assert not repeated.ok and repeated.code == "command_used" and repeated.repeated
+
+
+@pytest.mark.parametrize("reopen", [False, True])
+def test_storage_failure_during_outcome_and_containment_remains_unknown(
+    tmp_path, monkeypatch, reopen
+):
+    from levi.automatic.journal import Journal
+
+    r = stopped(tmp_path)
+    note = r.orch.journal.note
+
+    def fail_append(*args, **kwargs):
+        raise OSError("injected storage unavailable")
+
+    def lose_storage_at_outcome(code, *args, **kwargs):
+        if code == "resume_rearm_accepted":
+            monkeypatch.setattr(r.orch.journal, "append", fail_append)
+        return note(code, *args, **kwargs)
+
+    monkeypatch.setattr(r.orch.journal, "note", lose_storage_at_outcome)
+    steps = r.robot.step_calls
+    with pytest.raises(OSError, match="storage unavailable"):
+        resume(r, r.orch.journal.next_seq)
+    assert r.orch.halted and r.orch.state == "FAULT_LOCKED"
+    assert r.cycle.failed and r.cycle.proof_failed and r.orch.fence.current is None
+    if reopen:
+        r.orch.journal.close()
+        r.orch.journal = Journal.open(
+            r.directory,
+            plan_sha256=r.orch.config.plan_sha256,
+            clock=r.orch.clock,
+            clock_domain=r.orch.clock.domain,
+        )
+    sequence = r.orch.journal.next_seq
+    repeated = resume(r, -1)
+    assert not repeated.ok and repeated.code == "command_used" and repeated.repeated
+    assert r.orch.journal.next_seq == sequence and r.robot.step_calls == steps

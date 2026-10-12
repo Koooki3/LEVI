@@ -968,18 +968,32 @@ class Orchestrator:
             with self._stop_lock:
                 # Stops registered from now on are later than this resume.
                 generation = self._stop_gen
+            event_mode = self.config.termination.inference_mode == "event_pause_judge"
             prior = self.journal.by_command(command_id)
             if prior:
                 if prior[0].reason == "human_resumed":
-                    if any(
-                        event.record == "note"
-                        and event.transaction_id == prior[0].transaction_id
-                        and event.note.code == "resume_rearm_refused"
-                        for event in prior
-                    ):
-                        return CommandResult(
-                            False, "intervention_latched", self.state, True
+                    if event_mode:
+                        outcomes = {
+                            event.note.code
+                            for event in prior
+                            if event.record == "note"
+                            and event.transaction_id == prior[0].transaction_id
+                        }
+                        if "resume_rearm_refused" in outcomes:
+                            return CommandResult(
+                                False, "intervention_latched", self.state, True
+                            )
+                        committed = any(
+                            event.record == "committed"
+                            and event.transaction_id == prior[0].transaction_id
+                            for event in prior
                         )
+                        if "resume_rearm_accepted" not in outcomes or not committed:
+                            # Old event-mode logs remain readable, but no
+                            # outcome marker means the result is unknown.
+                            return CommandResult(
+                                False, "command_used", self.state, True
+                            )
                     return CommandResult(
                         True, "repeated", self.state, True, prior[0].sequence_no
                     )
@@ -1020,6 +1034,19 @@ class Orchestrator:
             except Exception as exc:
                 self._contain(exc)
                 raise
+
+            def record_outcome(code, detail):
+                try:
+                    self.journal.note(
+                        code,
+                        detail,
+                        authority=self._auth("operator", command_id),
+                        transaction_id=found.prepared.transaction_id,
+                    )
+                except Exception as exc:
+                    self._contain(exc)
+                    raise
+
             with self._stop_lock:
                 # Rearm only after the journal CAS and durable commit. A stop
                 # registered during this transaction must keep its latch; the
@@ -1039,19 +1066,9 @@ class Orchestrator:
                 # A proof may fail after the eligibility inspection. Never
                 # leave that committed PREFLIGHT runnable or clear its stops.
                 self._contain(InterventionUnproven("resume cycle became latched"))
-                try:
-                    # The committed state transition is not a successful
-                    # command result. Persist its refusal before returning so
-                    # retry/restart never infer success from human_resumed.
-                    self.journal.note(
-                        "resume_rearm_refused",
-                        "intervention_latched",
-                        authority=self._auth("operator", command_id),
-                        transaction_id=found.prepared.transaction_id,
-                    )
-                except Exception as exc:
-                    self._contain(exc)
-                    raise
+                # A committed state transition alone cannot establish the
+                # command result. Both outcomes must be durable in event mode.
+                record_outcome("resume_rearm_refused", "intervention_latched")
                 return CommandResult(False, "intervention_latched", self.state)
             if lost:
                 # Stops that never took effect (the run locked or waited
@@ -1060,6 +1077,8 @@ class Orchestrator:
             self._violation_hold = False
             self._scene_violations = 0
             self._reset_attempts = 0
+            if event_mode:
+                record_outcome("resume_rearm_accepted", "resumed")
             return CommandResult(
                 True, "resumed", self.state, False, found.prepared.sequence_no
             )
