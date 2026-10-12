@@ -244,7 +244,19 @@ class TerminationArbiter:
         c = self.config
         if self.disabled or self.stage == "stop_requested" or self.candidate is None:
             return None
-        if self.outstanding or self.requests >= c.max_requests or step < c.min_steps:
+        if self.outstanding:
+            return None
+        if c.inference_mode == "event_pause_judge":
+            # A candidate pauses at once: min_steps, settle_steps, cooldown_steps
+            # and max_requests only pace the legacy asynchronous judge. The
+            # 400-executed-action bound is the only cap in this mode.
+            return {
+                "request_id": f"{self.episode_id}:q{self.requests}",
+                "observed_from_step": self.candidate.step,
+                "observed_through_step": step,
+                "event_ids": [self.candidate.event_id],
+            }
+        if self.requests >= c.max_requests or step < c.min_steps:
             return None
         if (
             self.last_request_step is not None
@@ -265,6 +277,13 @@ class TerminationArbiter:
         self.requests += 1
         self.last_request_step = step
         self.stage = "evidence"
+
+    def consume_candidate(self) -> None:
+        """A rejected pause spends its candidate: only a newer event may pause
+        again, so a rejection cannot loop on the same evidence with no motion."""
+        self.candidate = None
+        self.consecutive = 0
+        self.stage = "idle" if not self.outstanding else self.stage
 
     def withdraw(self, request_id: str) -> None:
         """A request that will not be answered (unavailable at submit, a

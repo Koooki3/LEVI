@@ -182,12 +182,30 @@ def test_missing_owned_hooks_refused_before_creating_journal(tmp_path):
 def test_confirmed_pauses_then_seals_without_more_actions_or_home(tmp_path):
     r = build(tmp_path)
     assert r.orch.run() == "WAIT_HUMAN"
-    assert r.robot.step_calls == 11 and r.robot.home_calls == 0
+    assert r.robot.step_calls == 8 and r.robot.home_calls == 0
     assert results(r.orch)[0].task_outcome == "success"
     transitions = [e for e in r.orch.journal.events if e.record == "committed"]
     assert any(e.to_state == "FORWARD_JUDGING" for e in transitions)
     assert sm.check_journal(r.orch.journal.events) == []
     assert [c[1] for c in r.authority.calls if c[0] == "begin"].count("judge") == 2
+
+
+@pytest.mark.parametrize("event_step", [1, 8])
+def test_candidate_stops_new_actions_at_once_despite_legacy_delays(
+    tmp_path, event_step
+):
+    # build() freezes min_steps=5, settle_steps=3, cooldown_steps=5: none may delay a pause
+    r = build(tmp_path, event_step=event_step)
+    assert r.orch.run() == "WAIT_HUMAN"
+    assert r.robot.step_calls == event_step
+    assert next(h[3] for h in r.hooks_log if h[0] == "pause") == event_step
+
+
+def test_rejected_candidate_is_spent_and_cannot_loop_without_motion(tmp_path):
+    r = build(tmp_path, script=[{"decision": "rejected"}, {"decision": "confirmed"}])
+    assert r.orch.run() == "WAIT_HUMAN"
+    assert next(h[3] for h in r.hooks_log if h[0] == "pause") == 8
+    assert r.robot.step_calls == 40  # no second pause without a newer event
 
 
 def test_rejected_uses_fresh_observation_new_transaction_epoch_and_chunk(tmp_path):
@@ -215,7 +233,7 @@ def test_unknown_and_timeout_never_resume_motion(tmp_path, decision):
     item = {"decision": "unknown"} if decision == "unknown" else {"delay_ns": 10**12}
     r = build(tmp_path, script=[item])
     assert r.orch.run() == "FAULT_LOCKED"
-    assert r.robot.step_calls == 11
+    assert r.robot.step_calls == 8
     assert (
         sum(item[0] == "resume" for item in r.hooks_log) == 1
     )  # initial admission only
@@ -267,7 +285,7 @@ def test_stop_during_judge_revokes_without_waiting_for_backend(tmp_path):
     r.verifier.collect = interrupt
     assert r.orch.run() == "FAULT_LOCKED"
     assert stops[0].ok and r.authority.revoked
-    assert r.robot.step_calls == 11 and r.robot.home_calls == 0
+    assert r.robot.step_calls == 8 and r.robot.home_calls == 0
 
 
 def test_new_mode_and_hold_conditions_change_frozen_plan_hash(tmp_path):
@@ -306,7 +324,7 @@ def test_resume_cannot_reissue_motion_after_registered_stop(tmp_path):
     r.orch._issue_intervention_motion = issue
     assert r.orch.run() == "FAULT_LOCKED"
     assert r.orch.fence.current is None
-    assert r.robot.step_calls == 11
+    assert r.robot.step_calls == 8
 
 
 def test_real_binding_refuses_mode_before_reading_binding_or_robot(tmp_path):

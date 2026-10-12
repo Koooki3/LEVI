@@ -1876,6 +1876,7 @@ class Orchestrator:
                     if message.decision == "confirmed":
                         self._seal_intervention(ctx, "goal_verified", message)
                         return
+                    ctx.arbiter.consume_candidate()
                     self._resume_intervention(ctx)
                     last_frames, stalled = None, 0
                     continue  # observe/stage again before asking for a NEW chunk
