@@ -138,12 +138,13 @@ class InferenceCycle:
             self.failed = self.operator_stopped = False
             return True
 
-    def interrupt(self, *, operator: bool = False):
-        """Immediate result revocation; never calls a backend/drainer."""
-        if operator and not self.failed:
-            self.operator_stopped = True
-        self.failed = True
+    def interrupt(self, *, operator: bool = False, proof_failed: bool = False):
+        """Revoke immediately; a failed proof stays latched even with a stop."""
         with self._lock:
+            if operator and not self.failed:
+                self.operator_stopped = True
+            self.proof_failed |= proof_failed
+            self.failed = True
             request = self._request
         if request is not None:
             try:
@@ -163,9 +164,7 @@ class InferenceCycle:
                 raise InterventionStopped("execution already stopped or proof failed")
             yield
         except BaseException as exc:
-            if not isinstance(exc, InterventionStopped):
-                self.proof_failed = True
-            self.interrupt()
+            self.interrupt(proof_failed=not isinstance(exc, InterventionStopped))
             if isinstance(exc, Exception) and not isinstance(exc, InterventionUnproven):
                 raise InterventionUnproven(
                     "runtime authority/physical evidence unproven"

@@ -901,7 +901,9 @@ class Orchestrator:
         robot holds, the run locks (or the orchestrator halts in memory)."""
         self.fence.revoke()
         if self.intervention is not None:
-            self.intervention.interrupt()
+            self.intervention.interrupt(
+                proof_failed=not isinstance(exc, InterventionStopped)
+            )
         try:
             self.robot.hold()
         except Exception as held:  # noqa: BLE001
@@ -1275,6 +1277,10 @@ class Orchestrator:
             if message is not None:
                 record.update(_scene_facts(message))
         except InterventionUnproven as exc:
+            if self.intervention is not None:
+                self.intervention.interrupt(
+                    proof_failed=not isinstance(exc, InterventionStopped)
+                )
             self._note("intervention_unproven", str(exc))
             self._fault("judgement_unproven")
             decision = "unavailable"
@@ -1596,15 +1602,17 @@ class Orchestrator:
             or self.robot.health()["state"] == "red"
         )
 
-    def _intervention_stop(self, ctx):
-        """No backend waits on the emergency path; ownership remains latched."""
+    def _intervention_stop(self, ctx, exc):
+        """No backend waits; an evidence failure cannot become a plain stop."""
         self.fence.revoke()
-        self.intervention.interrupt()
+        self.intervention.interrupt(
+            proof_failed=not isinstance(exc, InterventionStopped)
+        )
         if self.journal.open_transaction is not None:
             # An observer can fail inside a prepared pause/resume action.
             # Preserve unknown acknowledgement and abort before faulting;
             # another transaction cannot be prepared while it is unresolved.
-            self._contain(InterventionUnproven("inference transaction unproven"))
+            self._contain(exc)
             return
         self.robot.hold()
         if self.robot.latch_state() or self.robot.health()["state"] == "red":
@@ -1950,7 +1958,7 @@ class Orchestrator:
         except InterventionUnproven as exc:
             buffer.clear()
             self._note("intervention_unproven", str(exc))
-            self._intervention_stop(ctx)
+            self._intervention_stop(ctx, exc)
 
     def _drive(self, ctx: Episode) -> None:
         if self.intervention is not None:

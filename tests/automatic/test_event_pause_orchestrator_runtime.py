@@ -486,6 +486,44 @@ class OrchestratorRuntimeTests(unittest.TestCase):
                 )
                 self.assertEqual(sm.check_journal(r.orch.journal.events), [])
 
+    def test_operator_stop_cannot_rearm_a_concurrent_proof_failure(self):
+        for hook in ("prepare_evidence", "resume_admission"):
+            with self.subTest(hook=hook):
+                r = self.make(goal_script=[{"decision": "rejected"}])
+                original = r.cycle.hooks
+
+                def stop_with_unproven_evidence(
+                    *args, hook=hook, r=r, original=original
+                ):
+                    if hook == "resume_admission" and r.robot.step_calls == 0:
+                        return original.resume_admission(*args)
+                    result = r.orch.stop("stop-with-bad-" + hook)
+                    self.assertTrue(result.ok)
+                    return False
+
+                r.cycle.hooks = replace(original, **{hook: stop_with_unproven_evidence})
+                self.assertEqual(r.orch.run(), "FAULT_LOCKED")
+                self.assertTrue(r.cycle.failed)
+                self.assertTrue(r.cycle.operator_stopped)
+                # Neither a released model slot nor a later healthy hook can
+                # turn the failed evidence into an ordinary operator stop.
+                self.assertIsNone(r.cycle._request)
+                before = (r.robot.step_calls, len(self.grants))
+                r.cycle.hooks = original
+                result = r.orch.resume(
+                    "resume-after-bad-" + hook,
+                    expected_seq=r.orch.journal.next_seq,
+                    environment_handled=True,
+                    health_rechecked=True,
+                )
+                self.assertFalse(result.ok)
+                self.assertEqual(result.code, "intervention_latched")
+                self.assertTrue(r.cycle.proof_failed)
+                self.assertEqual(r.orch.run(), "FAULT_LOCKED")
+                self.assertEqual((r.robot.step_calls, len(self.grants)), before)
+                self.assertIsNone(r.orch.fence.current)
+                self.assertEqual(sm.check_journal(r.orch.journal.events), [])
+
     def test_runtime_observation_exception_after_grant_retains_revoked_slot(self):
         r = self.make()
         original = r.cycle.hooks
