@@ -414,7 +414,7 @@ runtime bridge must separately establish complete descendant ownership,
 including workers that leave that group.
 
 
-The original authority exposes `owns_exact_request` for identity-only drain ownership and `accepts_exact_request` for the original permission checks on the same request object. Equal token copies receive no exact permission. Existing value-based APIs are unchanged; this addition does not install owned SDK adapters or prove hardware readiness.
+The original authority exposes `owns_exact_request(request)` as an identity-only drain-ownership query, including revoked/late work still awaiting drain; it grants no permission or idle proof. `accepts_exact_request(request, observation, now_ns=...)` applies the original result checks only after confirming the active object with `is`, under the same lock. Equal token copies receive no exact permission. Existing `accepts_result`, revoke and finish keep their public value semantics for older callers; this addition does not install owned SDK adapters or prove hardware readiness.
 
 ## Owned SDK runtime adapters (software candidate, opt-in)
 
@@ -511,7 +511,7 @@ check. Torch and vLLM idle checks read the bundles and seal from loader-owned
 handles (`load()` returns a `FrozenVllmEngine` for vLLM), never from attributes
 of the factory-returned model or engine, so a fresh seal stored on the engine
 by factory-started code is ignored. The worker
-interpreter runs with `-B -X pycache_prefix=os.devnull`: `-B` alone only stops
+interpreter runs with `-I -B -X pycache_prefix=os.devnull`: `-B` alone only stops
 writing caches, and a same-mtime/size stale `__pycache__` would otherwise
 replace the loader and barrier checks themselves. The worker entry refuses any
 other interpreter before reading its bootstrap. Not covered: a sourceless
@@ -525,6 +525,29 @@ bootstrap read, the child refuses unless every loaded `levi` module is an
 ordinary source module under that root. A shadow `levi` package can therefore
 not replace the loader that binds SDK origins. The interpreter, its
 site-packages `.pth` files and native extensions remain trusted.
+
+Because `-I` removes the working directory and `PYTHONPATH`, the factory's
+`source_root` must be importable through the bootstrap: after the frozen type
+check the worker appends that declared root to `sys.path`. It is appended, so
+the worker root, standard library and site-packages keep precedence, and a
+frozen name resolved elsewhere first is refused by the origin check. An SDK
+distribution placed under the factory root is found the same way; its hash
+manifest still constrains the content.
+
+Not covered by these checks:
+
+- SDK-started processes. vLLM's EngineCore and executor workers run in
+  processes the SDK creates itself; their imports do not go through the owned
+  loader, so the barrier-file hashes are verified only in the worker process
+  that loads them. `-X pycache_prefix` is inherited only by `fork`: measured
+  with `multiprocessing`, `spawn` and `forkserver` children report
+  `sys.pycache_prefix` as `None` (they keep `-I` and `-B`), so such children
+  can read stale bytecode. This is documented, not mitigated.
+- The vLLM idle ACK has no local-thread liveness check; the Torch worker has
+  one.
+- The seal is not a sandbox. Reviewed factory code can import standard-library
+  modules such as `sys`, `gc` or `ctypes` and reach or change objects outside
+  the checked bindings. The final defence is human review of the factory.
 
 Factory/SDK source loading uses one transaction. Failed hook installation,
 module initialization, factory build or engine validation rolls back every
@@ -543,6 +566,4 @@ Owned workers expose `collect_sdk_completion(request)` returning the original su
 
 The dedicated `test_borrowed_cycle_execution.py` check requires a fresh interpreter and explicit `LEVI_JOINT_KERNEL_ROOT`. It loads the original Kernel/Cycle and candidate owned files from their recorded source paths. CPU fake IPC verifies exactly one original begin/finish, genuine matching SDK receipt structure, and an independent final whole-group observation. A peer becoming busy after the receipt prevents publication and retains the original slot. This is software combination evidence, without a production provider, real SDK/native bootstrap, physical hold or Orchestrator mount.
 
-RuntimeOwnership exposes `owns_exact_request(request)` as an identity-only query, including revoked/late work still awaiting drain. It grants no permission or idle proof. `accepts_exact_request(request, observation, now_ns=...)` applies the original result checks only after confirming the active object with `is`, under the same lock. Existing `accepts_result`, revoke and finish retain their public value semantics for older callers.
-
-Borrowed execution requires these exact Kernel queries. Equal token copies are rejected before observer, worker or revoke side effects. Dispatch/result permission uses `accepts_exact_request`; collection and revocation require `owns_exact_request` for the same original object. Revoked/late originals may still drain genuine ACKs with result None. A Kernel missing the exact contract is refused; there is no value-acceptance fallback.
+Borrowed execution requires the exact Kernel queries described in the runtime ownership section above. Equal token copies are rejected before observer, worker or revoke side effects. Dispatch/result permission uses `accepts_exact_request`; collection and revocation require `owns_exact_request` for the same original object. Revoked/late originals may still drain genuine ACKs with result None. A Kernel missing the exact contract is refused; there is no value-acceptance fallback.

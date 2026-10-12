@@ -299,7 +299,7 @@ token 无权取消或释放新代次。心跳、过期或未知身份不能续�
 进程/flock 组装、GPU 内存与 barrier 时延、机器人联测仍是后续验收门；未显式组合时关闭。
 
 
-原权限内核公开 `owns_exact_request` 查询原对象的排空归属，以及 `accepts_exact_request` 对原对象沿用原许可检查。等值令牌副本不会获得精确许可；旧按值接口不变。此增量不安装真实模型适配器，也不证明真机就绪。
+原权限内核公开 `owns_exact_request(request)`，作为纯身份的排空归属查询，覆盖仍待排空的撤销或迟到请求；它不授予许可或证明静默。`accepts_exact_request(request, observation, now_ns=...)` 在同一锁下先用 `is` 确认原活动对象，再沿用原结果许可检查。等值令牌副本不会获得精确许可。既有 `accepts_result`、revoke 与 finish 对旧调用者保留原公开按值语义；此增量不安装 owned SDK 适配器，也不证明真机就绪。
 
 ## 受控 SDK 运行时适配（软件候选，显式启用）
 
@@ -374,7 +374,7 @@ SDK/native 闭包和 owned SDK 子进程 bootstrap 尚未安装，真实入口�
 先导入某个延迟加载的 barrier 模块再改绑；已封存模块离开 `sys.modules` 时，
 下一次检查拒绝。Torch 与 vLLM 的 idle 检查从 loader 持有的句柄读取 bundle 与
 封存（vLLM 的 `load()` 返回 `FrozenVllmEngine`），不读 factory 返回的 model 或
-engine 的属性；factory 派生代码存到 engine 上的新封存因此被忽略。worker 解释器以 `-B -X pycache_prefix=os.devnull`
+engine 的属性；factory 派生代码存到 engine 上的新封存因此被忽略。worker 解释器以 `-I -B -X pycache_prefix=os.devnull`
 启动：`-B` 只禁止写缓存，同 mtime/size 的旧 `__pycache__` 仍会替换 loader 与
 屏障检查本身。worker 入口在读取 bootstrap 前拒绝其他解释器配置。不覆盖：
 替代已删除 `.py` 的无源旧式 `.pyc`、native 扩展、延迟导入的非 barrier 模块，
@@ -385,6 +385,23 @@ worker 不再经继承的工作目录、`PYTHONPATH` 或用户 site 解析 `levi
 读取 bootstrap 前，只要有任何已加载的 `levi` 模块不是该根下的普通源码模块，
 子进程即拒绝。因此 shadow `levi` 包不能替换绑定 SDK 来源的 loader。解释器、
 其 site-packages `.pth` 文件和 native 扩展仍属受信范围。
+
+由于 `-I` 去掉了工作目录和 `PYTHONPATH`，factory 的 `source_root` 必须经
+bootstrap 才能导入：worker 在冻结类型检查后把这个声明的根追加到 `sys.path`
+末尾。追加在末尾，所以 worker 根、标准库和 site-packages 仍优先；若冻结名先在
+别处解析到，由 origin 检查拒绝。放在 factory 根下的 SDK 发行包也经同一路径找到，
+其 hash 清单仍约束内容。
+
+这些检查不覆盖：
+
+- SDK 自己派生的进程。vLLM 的 EngineCore 与 executor worker 运行在 SDK 自行
+  创建的进程里，其导入不经过 owned loader，因此 barrier 文件 hash 只在加载它们的
+  worker 进程中校验。`-X pycache_prefix` 只被 `fork` 继承：用 `multiprocessing`
+  实测，`spawn` 与 `forkserver` 子进程的 `sys.pycache_prefix` 为 `None`（`-I`、
+  `-B` 仍保留），这类子进程可能读取旧字节码。这里只写明，未作补强。
+- vLLM idle ACK 没有本地线程存活检查；Torch worker 有。
+- 封存不是沙箱。已审 factory 代码可以导入 `sys`、`gc`、`ctypes` 等标准库模块，
+  触及或改动受检绑定之外的对象。最终防线是对 factory 的人工审查。
 
 工厂与 SDK 源码加载采用同一事务。钩子安装、模块初始化、工厂构建或
 引擎校验失败时，撤销全部本次钩子及其确切创建的模块。私有 worker
@@ -401,6 +418,4 @@ Owned worker 提供 `collect_sdk_completion(request)`，返回原提交 token、
 
 专属 `test_borrowed_cycle_execution.py` 检查要求新解释器和显式 `LEVI_JOINT_KERNEL_ROOT`，从记录的实际路径加载原 Kernel/Cycle 与候选 owned 文件。CPU 假 IPC 验证原 begin/finish 各一次、准确匹配的 SDK 收据结构，以及最后独立的完整整群观测。收据之后其他成员变忙会阻止发布并保留原槽。这是软件组合证据，未安装生产提供者、真实 SDK/native bootstrap、物理保持或 Orchestrator 挂载。
 
-RuntimeOwnership 新增 `owns_exact_request(request)` 纯身份查询，覆盖仍待排空的撤销或迟到请求；它不授予许可或证明静默。`accepts_exact_request(request, observation, now_ns=...)` 在同一锁下先用 `is` 确认原活动对象，再沿原结果许可校验。既有 `accepts_result`、revoke 与 finish 对旧调用者保留原公开按值语义。
-
-Borrowed 执行必须使用上述原 Kernel 精确查询。等值 token 副本在 observer、worker 或 revoke 副作用前拒绝。派发和结果许可使用 `accepts_exact_request`；收集及撤销须由 `owns_exact_request` 确认同一原对象。撤销或迟到的原对象仍可用真正 ACK 排空，结果为 None。缺少精确公开合同的 Kernel 拒绝，不回落到按值许可。
+Borrowed 执行必须使用前文运行权限一节所述的原 Kernel 精确查询。等值 token 副本在 observer、worker 或 revoke 副作用前拒绝。派发和结果许可使用 `accepts_exact_request`；收集及撤销须由 `owns_exact_request` 确认同一原对象。撤销或迟到的原对象仍可用真正 ACK 排空，结果为 None。缺少精确公开合同的 Kernel 拒绝，不回落到按值许可。
