@@ -288,6 +288,34 @@ def test_stop_during_judge_revokes_without_waiting_for_backend(tmp_path):
     assert r.robot.step_calls == 8 and r.robot.home_calls == 0
 
 
+def test_operator_stop_during_judge_keeps_operator_stop_reason_and_slot(tmp_path):
+    r = build(tmp_path)
+    collect = r.verifier.collect
+    stops = []
+
+    def interrupt(ticket, **kw):
+        if not stops:
+            stops.append(r.orch.stop("stop-reason"))
+        return collect(ticket, **kw)
+
+    r.verifier.collect = interrupt
+    assert r.orch.run() == "FAULT_LOCKED"
+    assert stops[0].ok and r.authority.revoked
+    assert r.authority.active is not None  # the request slot stays latched
+    result = results(r.orch)[0]
+    assert result.stop_reason == "operator_stop"
+    assert result.task_outcome == "unknown"
+    assert sm.check_journal(r.orch.journal.events) == []
+
+
+@pytest.mark.parametrize("decision", ["unknown", "timeout"])
+def test_unproven_judgement_is_not_reported_as_operator_stop(tmp_path, decision):
+    item = {"decision": "unknown"} if decision == "unknown" else {"delay_ns": 10**12}
+    r = build(tmp_path, script=[item])
+    assert r.orch.run() == "FAULT_LOCKED"
+    assert results(r.orch)[0].stop_reason == "watchdog_timeout"
+
+
 def test_new_mode_and_hold_conditions_change_frozen_plan_hash(tmp_path):
     from test_aeri_cli import CONTRACT, job_text
 

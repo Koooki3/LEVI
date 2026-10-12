@@ -824,7 +824,14 @@ class Orchestrator:
         if extra:
             self._note("stop_commands_merged", ", ".join(extra)[:300])
 
-    def _fault(self, reason: str, *, guard: bool = False, hold: bool = True) -> None:
+    def _fault(
+        self,
+        reason: str,
+        *,
+        guard: bool = False,
+        hold: bool = True,
+        stop_reason: str | None = None,
+    ) -> None:
         """Lock the run. An episode still open gets its result (unknown,
         stopped by ``reason``)."""
         ctx = self.ctx
@@ -847,7 +854,7 @@ class Orchestrator:
             and not ctx.result_written
             and self.state in aeri.EPISODE_STATES
         ):
-            result = self._fault_result(ctx, reason)
+            result = self._fault_result(ctx, reason, stop_reason)
         self._tx(
             "FAULT_LOCKED",
             reason,
@@ -859,10 +866,14 @@ class Orchestrator:
         )
         self.ctx = None
 
-    def _fault_result(self, ctx: Episode, reason: str) -> dict:
+    def _fault_result(
+        self, ctx: Episode, reason: str, stop_reason: str | None = None
+    ) -> dict:
         """pipeline §4.3: an episode ended by a fault is recorded, its outcome
         unknown and its stop reason the fault (X1 §2.5 gave it no result)."""
-        stop = reason if reason in aeri.STOP_REASONS else "watchdog_timeout"
+        stop = stop_reason or reason
+        if stop not in aeri.STOP_REASONS:
+            stop = "watchdog_timeout"
         folder = (
             self.config.forward_folder
             if ctx.role == "forward"
@@ -1586,6 +1597,10 @@ class Orchestrator:
         self.robot.hold()
         if self.robot.latch_state() or self.robot.health()["state"] == "red":
             self._fault("safety_stop", guard=True)
+        elif self._operator() is not None:
+            # An operator's stop is not a failed proof: the run still locks
+            # (the request slot stays latched) but the episode says why.
+            self._fault("judgement_unproven", stop_reason="operator_stop")
         else:
             self._fault("judgement_unproven")
 
