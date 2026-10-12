@@ -524,6 +524,35 @@ class OrchestratorRuntimeTests(unittest.TestCase):
                 self.assertIsNone(r.orch.fence.current)
                 self.assertEqual(sm.check_journal(r.orch.journal.events), [])
 
+    def test_operator_stop_cannot_rearm_a_contained_evidence_exception(self):
+        r = self.make()
+        original = r.cycle.hooks
+
+        def stop_then_raise(*args):
+            self.assertTrue(r.orch.stop("stop-with-evidence-exception").ok)
+            raise RuntimeError("evidence preparation failed after stop")
+
+        r.cycle.hooks = replace(original, prepare_evidence=stop_then_raise)
+        with self.assertRaisesRegex(RuntimeError, "evidence preparation failed"):
+            r.orch.run()
+        self.assertEqual(r.orch.state, "FAULT_LOCKED")
+        self.assertIsNone(r.cycle._request)
+        before = (r.robot.step_calls, len(self.grants))
+        r.cycle.hooks = original
+        result = r.orch.resume(
+            "resume-after-evidence-exception",
+            expected_seq=r.orch.journal.next_seq,
+            environment_handled=True,
+            health_rechecked=True,
+        )
+        self.assertFalse(result.ok)
+        self.assertEqual(result.code, "intervention_latched")
+        self.assertTrue(r.cycle.proof_failed)
+        self.assertEqual(r.orch.run(), "FAULT_LOCKED")
+        self.assertEqual((r.robot.step_calls, len(self.grants)), before)
+        self.assertIsNone(r.orch.fence.current)
+        self.assertEqual(sm.check_journal(r.orch.journal.events), [])
+
     def test_runtime_observation_exception_after_grant_retains_revoked_slot(self):
         r = self.make()
         original = r.cycle.hooks
