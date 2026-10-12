@@ -4,6 +4,7 @@ No model/SDK import occurs before the dedicated cgroup enrollment gate. This
 entrypoint has no public socket, service configuration or external PID attach.
 """
 
+import os
 import sys
 from multiprocessing.connection import Connection
 
@@ -12,6 +13,10 @@ from levi.live.owned_vllm import FrozenVllmFactory, serve_vllm
 
 
 def main():
+    # A worker started without the pinned interpreter flags may have read
+    # stale bytecode; refuse before reading the bootstrap or loading any SDK.
+    if not sys.flags.dont_write_bytecode or sys.pycache_prefix != os.devnull:
+        raise ValueError("owned worker requires the pinned no-bytecode interpreter")
     if len(sys.argv) != 2 or not sys.argv[1].isdigit():
         raise ValueError("private inherited owned pipe descriptor required")
     connection = Connection(int(sys.argv[1]))

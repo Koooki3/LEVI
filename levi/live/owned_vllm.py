@@ -31,6 +31,10 @@ BARRIER_FILES = (
 )
 
 
+def barrier_modules():
+    return tuple("vllm." + name[:-3].replace("/", ".") for name in BARRIER_FILES)
+
+
 @dataclass(frozen=True)
 class FrozenVllmFactory(FrozenTorchFactory):
     """torch_version also pins the device synchronization SDK used by vLLM."""
@@ -62,8 +66,10 @@ class FrozenVllmFactory(FrozenTorchFactory):
 
         declared = dict(self.sdk_source_hashes)
         if any(
-            declared.get("vllm." + name[:-3].replace("/", ".")) != sha
-            for name, sha in self.barrier_hashes
+            declared.get(module) != sha
+            for module, (_, sha) in zip(
+                barrier_modules(), self.barrier_hashes, strict=True
+            )
         ):
             raise ValueError(
                 "barrier source must belong to the complete frozen SDK manifest"
@@ -86,6 +92,12 @@ class FrozenVllmFactory(FrozenTorchFactory):
             torch = torch_bundle.import_module("torch")
             sdk = sdk_bundle.import_module("vllm")
             async_module = sdk_bundle.import_module("vllm.v1.engine.async_llm")
+            # OWNFACTORY: seal the complete declared barrier chain, not only
+            # modules that happen to be imported already. A barrier module the
+            # SDK imports lazily could otherwise be imported and rebound by the
+            # factory before it is ever captured.
+            for name in barrier_modules():
+                sdk_bundle.import_module(name)
             critical = FrozenCriticalBindings(bundles)
             factory = self.reviewed_factory(
                 allowed_bundles=bundles, load_transaction=transaction

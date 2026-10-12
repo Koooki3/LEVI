@@ -610,6 +610,125 @@ def test_runtime_nested_callable_holder_mutation_is_refused(sdk_tree, monkeypatc
     assert not any(message[0] == "idle" for message in pipe.sent)
 
 
+@pytest.mark.parametrize("case", ["plain", "imported", "rebound"])
+def test_lazily_imported_barrier_module_is_sealed_before_factory_runs(
+    sdk_tree, monkeypatch, case
+):
+    """OWNFACTORY: every declared barrier file is part of the sealed chain.
+
+    The pause path imports core_client lazily, as real executor modules are.
+    A factory that imports it first and rebinds its device sync must not
+    leave the frozen chain unsealed: no ACK may be emitted.
+    """
+    installed, factory = sdk_tree
+    (installed / "vllm/v1/engine/core_client.py").write_text(
+        "from torch.cuda import synchronize\n"
+        "def sync_device(): synchronize()\n"
+        "def no_sync(): return None\n"
+    )
+    source = installed / "vllm/v1/engine/async_llm.py"
+    source.write_text(
+        source.read_text().replace(
+            "async def pause_generation(self, **kwargs): synchronize()",
+            "async def pause_generation(self, **kwargs):\n"
+            "        from vllm.v1.engine import core_client\n"
+            "        core_client.sync_device()",
+        )
+    )
+    # Removing the new parent attribute restores the sealed parent key order;
+    # the lazy "from package import module" then falls back to sys.modules.
+    (installed / "closed_factory.py").write_text(
+        (
+            ""
+            if case == "plain"
+            else "import vllm.v1.engine as package\n"
+            "import vllm.v1.engine.core_client as client\n"
+            "del package.core_client\n"
+        )
+        + "def build(device=None, sdk=None):\n"
+        + ("    client.sync_device = client.no_sync\n" if case == "rebound" else "")
+        + "    return sdk.AsyncLLM()\n"
+    )
+    before = list(sys.meta_path)
+    pipe = _SdkPipe([("enrolled", "normal-load-chain"), ("stop", 1, None)])
+    _serve_normal_factory(monkeypatch, _refreeze_sdk(installed, factory), pipe)
+    if case != "plain":
+        # Even removing the parent attribute alters a namespace sealed first.
+        assert pipe.sent and all(message[1] is None for message in pipe.sent)
+        assert not any(m[0] in ("ready", "idle", "result") for m in pipe.sent)
+    else:
+        assert [message[0] for message in pipe.sent] == ["ready"]
+    _assert_clean_sdk(before)
+
+
+def test_removed_sealed_barrier_module_refuses_next_ack(sdk_tree, monkeypatch):
+    """A removed sealed module would be re-executed with unsealed bindings."""
+    _installed, factory = sdk_tree
+    removed = []
+
+    class MutatingPipe(_SdkPipe):
+        def send_bytes(self, value):
+            super().send_bytes(value)
+            if self.sent[-1][0] == "ready":
+                removed.append(sys.modules.pop("vllm.v1.engine.core_client", None))
+
+    pipe = MutatingPipe([("enrolled", "normal-load-chain"), ("barrier", 1, None)])
+    _serve_normal_factory(monkeypatch, factory, pipe)
+    assert pipe.sent[0][0] == "ready" and pipe.sent[-1][0] == "error"
+    assert removed and removed[0] is not None
+    assert not any(message[0] == "idle" for message in pipe.sent)
+
+
+@pytest.mark.parametrize("rebind", [False, True])
+def test_torch_model_object_cannot_supply_its_own_sdk_binding(
+    sdk_tree, monkeypatch, rebind
+):
+    """OWNFACTORY: idle checks use loader-owned bindings, not model attributes."""
+    from levi.live import owned_runtime
+
+    installed, vllm_factory = sdk_tree
+    cuda = installed / "torch/cuda/__init__.py"
+    cuda.write_text(cuda.read_text() + "def empty_cache(device=None): return None\n")
+    package = installed / "torch/__init__.py"
+    package.write_text(
+        package.read_text() + "from contextlib import nullcontext as inference_mode\n"
+    )
+    source = installed / "closed_factory.py"
+    source.write_text(
+        "import torch.cuda\n"
+        "class Ignored:\n    def require(self): return None\n"
+        "class Model:\n"
+        "    _owned_sdk_critical = property(lambda self: Ignored(), lambda self, v: None)\n"
+        "    def __call__(self, payload):\n"
+        + (
+            "        torch.cuda.synchronize = torch.cuda.empty_cache\n"
+            if rebind
+            else ""
+        )
+        + "        return payload\n"
+        "def build(device=None, sdk=None): return Model()\n"
+    )
+    refrozen = _refreeze_sdk(installed, vllm_factory)
+    factory = FrozenTorchFactory(
+        "closed_factory",
+        "build",
+        refrozen.code_sha256,
+        "frozen",
+        "cuda:0",
+        source_root=str(installed),
+        torch_source_hashes=refrozen.torch_source_hashes,
+    )
+    monkeypatch.setattr(owned_runtime, "process_identity", lambda pid: "worker")
+    pipe = _SdkPipe([("enrolled", "launch"), ("infer", 1, "cpu"), ("stop", 1, None)])
+    owned_runtime._serve(pipe, factory, "launch")
+    if rebind:
+        assert pipe.sent[0][0] == "ready"
+        assert not any(message[0] in ("idle", "result") for message in pipe.sent)
+        assert pipe.sent[-1] == ("error", None, "ValueError")
+    else:
+        assert [message[0] for message in pipe.sent] == ["ready", "result"]
+
+
 @pytest.mark.parametrize("descriptor", ["classmethod", "staticmethod"])
 def test_legal_critical_method_descriptor_semantics_are_preserved(
     sdk_tree, monkeypatch, descriptor

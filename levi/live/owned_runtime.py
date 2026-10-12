@@ -266,9 +266,36 @@ class FrozenTorchFactory:
                 raise TypeError("factory must return a synchronous model callable")
             critical.require()
             bundle.require_function(torch.cuda.synchronize)
-            model._owned_sdk_critical = critical
-            model._owned_source_lifetime = transaction.commit()
-            return torch, device, model
+            return (
+                torch,
+                device,
+                _FrozenTorchModel(model, bundle, critical, transaction.commit()),
+            )
+
+
+class _FrozenTorchModel:
+    """Loader-owned handle around the factory's model callable.
+
+    Idle checks read the SDK bundle and sealed bindings from this handle, never
+    from the factory-returned object: model code runs on every inference and
+    could otherwise supply its own no-op binding check (OWNFACTORY).
+    """
+
+    __slots__ = (
+        "_model",
+        "_owned_sdk_bundle",
+        "_owned_sdk_critical",
+        "_owned_source_lifetime",
+    )
+
+    def __init__(self, model, bundle, critical, lifetime):
+        self._model = model
+        self._owned_sdk_bundle = bundle
+        self._owned_sdk_critical = critical
+        self._owned_source_lifetime = lifetime
+
+    def __call__(self, payload):
+        return self._model(payload)
 
 
 class CgroupScope:
@@ -465,18 +492,24 @@ def _serve(connection, factory, launch_id):
             return
         torch, device, model = factory.load()
         worker = process_identity(os.getpid())
+        frozen = type(factory) is FrozenTorchFactory
+        if frozen and type(model) is not _FrozenTorchModel:
+            raise ValueError("loader-owned frozen Torch model handle required")
+
+        def require_sdk():
+            model._owned_sdk_critical.require()
+            bundle = model._owned_sdk_bundle
+            bundle.require_loaded()
+            if bundle.require_module("torch") is not torch:
+                raise ValueError("executing Torch module is not the frozen import")
+            bundle.require_function(torch.cuda.synchronize)
 
         def idle(epoch):
-            if type(factory) is FrozenTorchFactory:
-                bundle = torch.__spec__.loader.bundle
-                model._owned_sdk_critical.require()
-                bundle.require_loaded()
-                bundle.require_function(torch.cuda.synchronize)
+            if frozen:
+                require_sdk()
             torch.cuda.synchronize(device)
-            if type(factory) is FrozenTorchFactory:
-                model._owned_sdk_critical.require()
-                bundle.require_loaded()
-                bundle.require_function(torch.cuda.synchronize)
+            if frozen:
+                require_sdk()
             if any(
                 t is not threading.current_thread() and t.is_alive()
                 for t in threading.enumerate()
@@ -510,10 +543,31 @@ def _serve(connection, factory, launch_id):
             pass
     finally:
         try:
-            if type(factory) is FrozenTorchFactory and model is not None:
+            if type(model) is _FrozenTorchModel:
                 model._owned_source_lifetime.close()
         finally:
             connection.close()
+
+
+# OWNFACTORY threat model: "-B" only stops *writing* bytecode. A stale
+# __pycache__ entry carrying the current source mtime/size is still read, and
+# the owned loader, barrier checks and worker loop all run in this interpreter.
+# A pycache prefix below os.devnull can never hold a file (it is not a
+# directory), so every module the worker imports through the ordinary import
+# system is compiled from its current source. Residual: a sourceless legacy
+# .pyc that replaces a deleted .py, native extensions and the parent
+# supervisor's own interpreter are outside this guarantee.
+WORKER_INTERPRETER_FLAGS = ("-B", "-X", f"pycache_prefix={os.devnull}")
+
+
+def _worker_command(descriptor):
+    return [
+        sys.executable,
+        *WORKER_INTERPRETER_FLAGS,
+        "-m",
+        "levi.live.owned_worker",
+        str(descriptor),
+    ]
 
 
 class OwnedModelWorker:
@@ -600,13 +654,7 @@ class OwnedModelWorker:
         # operator's __main__ (which could initialize a model before the gate).
         try:
             self._process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-B",
-                    "-m",
-                    "levi.live.owned_worker",
-                    str(child.fileno()),
-                ],
+                _worker_command(child.fileno()),
                 pass_fds=(child.fileno(),),
                 start_new_session=True,
             )

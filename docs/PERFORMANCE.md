@@ -504,6 +504,18 @@ cannot retain these bindings is refused. The seal does not certify unimplemented
 remote/native SDK worker provenance. Ordinary tiny factory.load-to-serve tests
 exercise this check without replacing load or require_function.
 
+All eight declared vLLM barrier modules are imported through the owned loader
+before the seal, so a lazily imported barrier module cannot be rebound by the
+factory first; a sealed module that leaves `sys.modules` is refused at the next
+check. Torch idle checks read the bundle and seal from a loader-owned model
+handle, never from attributes of the factory-returned model. The worker
+interpreter runs with `-B -X pycache_prefix=os.devnull`: `-B` alone only stops
+writing caches, and a same-mtime/size stale `__pycache__` would otherwise
+replace the loader and barrier checks themselves. The worker entry refuses any
+other interpreter before reading its bootstrap. Not covered: a sourceless
+legacy `.pyc` replacing a deleted `.py`, native extensions, lazily imported
+non-barrier modules, and the supervisor's own interpreter.
+
 Factory/SDK source loading uses one transaction. Failed hook installation,
 module initialization, factory build or engine validation rolls back every
 owned hook and exact newly created module. Successful private worker exit

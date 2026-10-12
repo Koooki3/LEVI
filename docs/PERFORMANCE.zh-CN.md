@@ -370,6 +370,15 @@ SDK/native 闭包和 owned SDK 子进程 bootstrap 尚未安装，真实入口�
 拒绝；封存不证明尚未实现的 remote/native SDK worker 来源。专属小假包测试
 直接使用普通 factory.load 到 serve 链，不替换 load 或 require_function。
 
+八个声明的 vLLM barrier 模块在封存前全部经 owned loader 导入，factory 不能
+先导入某个延迟加载的 barrier 模块再改绑；已封存模块离开 `sys.modules` 时，
+下一次检查拒绝。Torch idle 检查从 loader 持有的 model 句柄读取 bundle 与封存，
+不读 factory 返回对象的属性。worker 解释器以 `-B -X pycache_prefix=os.devnull`
+启动：`-B` 只禁止写缓存，同 mtime/size 的旧 `__pycache__` 仍会替换 loader 与
+屏障检查本身。worker 入口在读取 bootstrap 前拒绝其他解释器配置。不覆盖：
+替代已删除 `.py` 的无源旧式 `.pyc`、native 扩展、延迟导入的非 barrier 模块，
+以及 supervisor 自身的解释器。
+
 工厂与 SDK 源码加载采用同一事务。钩子安装、模块初始化、工厂构建或
 引擎校验失败时，撤销全部本次钩子及其确切创建的模块。私有 worker
 正常或异常结束时按安装逆序关闭同一生命周期；直接调用 vLLM 的软件

@@ -432,6 +432,9 @@ class FrozenCriticalBindings:
         if isinstance(value, types.ModuleType):
             if self._owned(value.__name__) is None:
                 return
+            # The sealed object must stay the importable module: a removed and
+            # re-executed copy would carry fresh, unsealed bindings.
+            self._checks.append(("module", value.__name__, None, value))
             self._mapping(value.__dict__)
         elif isinstance(value, type):
             if self._owned(value.__module__) is None:
@@ -588,7 +591,9 @@ class FrozenCriticalBindings:
         for bundle in self.bundles:
             bundle.require_loaded()
         for kind, owner, key, expected in self._checks:
-            if kind == "callable_container":
+            if kind == "module":
+                matches = sys.modules.get(owner) is expected
+            elif kind == "callable_container":
                 matches = self._callable_container(owner) == expected
             elif kind == "class":
                 matches = vars(owner).get(key, _ABSENT) is expected
