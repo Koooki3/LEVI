@@ -99,6 +99,7 @@ class InferenceCycle:
         self._request = None
         self._lock = threading.Lock()  # token bookkeeping only; never held across I/O
         self.failed = False
+        self.operator_stopped = False  # latched by a stop, not by a failed proof
         self.revocation_error = None
 
     def validate(self, config, clock):
@@ -113,8 +114,21 @@ class InferenceCycle:
             raise InterventionUnproven("cycle differs from frozen run/hold contract")
         self.hold_conditions = config.termination.physical_hold
 
-    def interrupt(self):
+    def rearm(self) -> bool:
+        """Open the cycle again after an operator's stop, only when no proof
+        failed and the request slot is confirmed released; else it stays latched."""
+        with self._lock:
+            if not (self.failed and self.operator_stopped) or self._request is not None:
+                return False
+            if self.revocation_error is not None:
+                return False
+            self.failed = self.operator_stopped = False
+            return True
+
+    def interrupt(self, *, operator: bool = False):
         """Immediate result revocation; never calls a backend/drainer."""
+        if operator and not self.failed:
+            self.operator_stopped = True
         self.failed = True
         with self._lock:
             request = self._request

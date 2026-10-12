@@ -365,6 +365,63 @@ def test_operator_stop_during_judge_keeps_operator_stop_reason_and_slot(tmp_path
     assert sm.check_journal(r.orch.journal.events) == []
 
 
+def _resume(r, command):
+    return r.orch.resume(
+        command,
+        expected_seq=r.orch.journal.next_seq,
+        environment_handled=True,
+        health_rechecked=True,
+    )
+
+
+def test_stop_then_resume_opens_a_new_cycle_without_illegal_motion(tmp_path):
+    r = build(tmp_path, event_step=None, script=[{"decision": "confirmed"}])
+    original = r.robot.step
+
+    def step_then_stop(action, *, token):
+        out = original(action, token=token)
+        if r.robot.step_calls == 3 and not r.orch._stops:
+            r.orch.stop("stop-mid-motion")
+        return out
+
+    r.robot.step = step_then_stop
+    assert r.orch.run() == "FAULT_LOCKED"
+    assert r.robot.step_calls == 3 and r.authority.active is None
+    assert results(r.orch)[0].stop_reason == "operator_stop"
+    found = _resume(r, "resume-1")
+    assert found.ok and found.code == "resumed"
+    before = len(r.robot.motions)
+    assert r.orch.run() in ("WAIT_HUMAN", "COMPLETED")
+    assert r.robot.step_calls > 3 and len(r.robot.motions) > before
+    assert sm.check_journal(r.orch.journal.events) == []
+    assert not r.cycle.failed
+
+
+def test_resume_is_refused_while_a_stopped_cycle_holds_its_request_slot(tmp_path):
+    r = build(tmp_path)
+    collect = r.verifier.collect
+    stops = []
+
+    def interrupt(ticket, **kw):
+        if not stops:
+            stops.append(r.orch.stop("stop-in-judge"))
+        return collect(ticket, **kw)
+
+    r.verifier.collect = interrupt
+    assert r.orch.run() == "FAULT_LOCKED"
+    assert r.authority.active is not None
+    found = _resume(r, "resume-2")
+    assert not found.ok and found.code == "intervention_latched"
+    assert r.orch.state == "FAULT_LOCKED"
+
+
+def test_proof_failure_stays_latched_on_resume(tmp_path):
+    r = build(tmp_path, script=[{"decision": "unknown"}])
+    assert r.orch.run() == "FAULT_LOCKED"
+    found = _resume(r, "resume-3")
+    assert not found.ok and found.code == "intervention_latched"
+
+
 @pytest.mark.parametrize("decision", ["unknown", "timeout"])
 def test_unproven_judgement_is_not_reported_as_operator_stop(tmp_path, decision):
     item = {"decision": "unknown"} if decision == "unknown" else {"delay_ns": 10**12}

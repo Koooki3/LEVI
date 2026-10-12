@@ -981,6 +981,14 @@ class Orchestrator:
                 return CommandResult(False, "not_waiting", self.state)
             if not (environment_handled is True and health_rechecked is True):
                 return CommandResult(False, "confirmations_missing", self.state)
+            if (
+                self.intervention is not None
+                and self.intervention.failed
+                and not self.intervention.rearm()
+            ):
+                # A failed proof, or a stop that still holds the request slot,
+                # never reopens the inference cycle.
+                return CommandResult(False, "intervention_latched", self.state)
             try:
                 found = self._tx(
                     "PREFLIGHT",
@@ -1042,7 +1050,7 @@ class Orchestrator:
             self._stops[command_id] = self._stop_gen  # the loop sees it now
         if self.intervention is not None:
             self.fence.revoke()
-            self.intervention.interrupt()
+            self.intervention.interrupt(operator=True)
         if not self._lock.acquire(timeout=STOP_LOCK_WAIT_S):
             return CommandResult(True, "stop_requested", self.state)
         try:
