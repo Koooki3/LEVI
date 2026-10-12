@@ -145,3 +145,82 @@ def test_worker_refuses_levi_modules_outside_its_pinned_root(tmp_path):
     with pytest.raises(ValueError, match="origin"):
         owned_worker._require_origin(str(tmp_path))
     owned_worker._require_origin(str(Path(owned.__file__).resolve().parents[2]))
+
+
+def _factory_root(root):
+    """A frozen factory plus fake torch SDK outside the repo and site-packages."""
+    import hashlib
+
+    for relative, text in {
+        "torch/__init__.py": (
+            "from . import cuda\n__version__ = 'frozen'\n"
+            "class device:\n    def __init__(self, name): self.name = name\n"
+            "from contextlib import nullcontext as inference_mode\n"
+        ),
+        "torch/cuda/__init__.py": (
+            "def is_available(): return True\n"
+            "def synchronize(device=None): return None\n"
+        ),
+        "torch-frozen.dist-info/METADATA": (
+            "Metadata-Version: 2.1\nName: torch\nVersion: frozen\n"
+        ),
+        "closed_factory.py": (
+            "def build(device=None, sdk=None):\n    return lambda payload: payload\n"
+        ),
+    }.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+    def sha(relative):
+        return hashlib.sha256((root / relative).read_bytes()).hexdigest()
+
+    return owned.FrozenTorchFactory(
+        "closed_factory",
+        "build",
+        sha("closed_factory.py"),
+        "frozen",
+        "cuda:0",
+        source_root=str(root),
+        torch_source_hashes=(
+            ("torch", sha("torch/__init__.py")),
+            ("torch.cuda", sha("torch/cuda/__init__.py")),
+        ),
+    )
+
+
+def test_pinned_worker_loads_factory_from_its_explicit_source_root(tmp_path):
+    """Item 2: the -I worker sees the factory root only through the bootstrap.
+
+    Real child interpreter with the actual worker command; the parent sends
+    the same bootstrap/enrolled/stop messages as OwnedModelWorker.launch.
+    """
+    import multiprocessing
+
+    factory = _factory_root(tmp_path / "factory-root")
+    parent, child = multiprocessing.Pipe()
+    process = subprocess.Popen(
+        owned._worker_command(child.fileno()),
+        cwd=tmp_path,
+        pass_fds=(child.fileno(),),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    child.close()
+    try:
+        owned._send(parent, ("bootstrap", factory, "launch"))
+        owned._send(parent, ("enrolled", "launch"))
+        assert parent.poll(60)
+        kind, ack, detail = owned._receive(parent)
+        if kind == "ready":
+            owned._send(parent, ("stop", 1, None))
+        _out, err = process.communicate(timeout=60)
+    finally:
+        parent.close()
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+    assert (kind, detail) == ("ready", None), err
+    assert ack.request_epoch == 0 and ack.capability_id == factory.capability_id
+    assert process.returncode == 0, err

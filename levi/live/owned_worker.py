@@ -32,6 +32,22 @@ def _require_origin(root):
             raise ValueError("owned worker levi module origin differs from its root")
 
 
+def _add_factory_root(factory):
+    """Make the frozen factory root importable in the isolated worker.
+
+    -I removes cwd/PYTHONPATH, so the supervisor-supplied source_root (part of
+    the frozen capability) is the only route to it. It is appended: worker
+    root, standard library and site-packages keep precedence, and an earlier
+    entry resolving a frozen name elsewhere is refused by the owned loader's
+    origin check. The hash manifest, not the path, constrains the content.
+    """
+    if factory.source_root is None:
+        return
+    root = str(Path(factory.source_root).resolve(strict=True))
+    if root not in sys.path:
+        sys.path.append(root)
+
+
 def main():
     # A worker started without the pinned interpreter flags may have read
     # stale bytecode or a cwd/PYTHONPATH shadow; refuse before reading the
@@ -54,6 +70,7 @@ def main():
         FrozenVllmFactory,
     ):
         raise ValueError("frozen owned backend bootstrap required")
+    _add_factory_root(factory)
     if type(factory) is FrozenVllmFactory:
         serve_vllm(connection, factory, launch_id)
     else:
