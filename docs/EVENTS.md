@@ -235,6 +235,11 @@ current orchestrator control step, independent of homing/reset action counters.
 No event polling adds an observation or HTTP call. The actual run EvidenceStore
 is attached after orchestrator creation and before any event stream opens.
 
+After a rejected candidate, a fresh observation at the same control step is
+consumed once without feeding the causal detector again. Only advancing control
+steps produce new candidates. Observation time must still advance and pass the
+age, step, clock and episode checks; queued evidence is rechecked before delivery.
+
 A model worker with this fully validated frame-bearing source may use the
 job's existing early-stop setting; the external FileEvents path still rejects
 that model-worker combination. Its scene/reset READY heartbeat need not claim

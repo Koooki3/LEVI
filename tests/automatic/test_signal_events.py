@@ -446,7 +446,10 @@ def test_numpy_sdk_pose_scalars_are_valid_measured_xyz(tmp_path):
     assert "missing_signal:pose:0" not in r.events.status["reasons"]
 
 
-def test_queued_candidates_recheck_retained_frame_hash_before_delivery(tmp_path):
+@pytest.mark.parametrize("fresh_observation", [False, True])
+def test_queued_candidates_recheck_retained_frame_hash_before_delivery(
+    tmp_path, fresh_observation
+):
     r = rig(tmp_path)
     r.events.close(r.sid)
     channels = [
@@ -481,6 +484,53 @@ def test_queued_candidates_recheck_retained_frame_hash_before_delivery(tmp_path)
     assert len(poll(r, 1, max_events=1)) == 1
     assert len(r.events.pending) == 1
     next(tmp_path.glob("*.jpg")).write_bytes(b"changed")
+    if fresh_observation:
+        r.clock.ns += 100_000_000
+        r.observer.observe()
     assert r.events.poll(r.sid, through_step=1, max_events=1) == []
     assert r.events.status["dropped"] == 1
     assert r.events.status["reasons"] == ["retained_evidence_changed"]
+
+
+def test_same_step_fresh_observation_is_consumed_without_duplicate_candidate(tmp_path):
+    r = rig(tmp_path)
+    wire = crossing(r)[0]
+    assert len(r.saves) == 1
+    kernel = r.events.stream[3]
+    last, history = kernel._last, tuple(kernel.history)
+    serial = r.observer.serial
+    r.robot.gripper = 0.0
+    assert poll(r, 1) == []
+    assert r.events._last_serial > serial
+    assert kernel._last is last and tuple(kernel.history) == history
+    assert len(r.saves) == 1
+    assert r.events.poll(r.sid, through_step=1, max_events=128) == []
+    r.robot.gripper = 0.0
+    next_event = json.loads(poll(r, 2)[0])
+    assert next_event["step"] == 2 and next_event["window_steps"] == [1, 2]
+    assert next_event["event_id"] != json.loads(wire)["event_id"]
+
+
+@pytest.mark.parametrize("fault", ["old_step", "old_time", "stale", "epoch", "clock"])
+def test_same_step_refresh_keeps_step_time_age_epoch_and_clock_fences(tmp_path, fault):
+    r = rig(tmp_path)
+    crossing(r)
+    r.robot.step = 1
+    r.clock.ns += 100_000_000
+    r.observer.observe()
+    through = 1
+    if fault == "old_step":
+        through = 0
+    elif fault == "old_time":
+        identity, serial, _, _, step, domain, obs = r.observer.latest
+        stamp = r.events._last_observed_ns
+        obs["observed_ns"] = stamp
+        r.observer.latest = identity, serial, stamp, stamp, step, domain, obs
+    elif fault == "stale":
+        r.clock.ns += r.events.config.max_age_ns + 1
+    elif fault == "epoch":
+        r.observer.latest = ("other-epoch", *r.observer.latest[1:])
+    elif fault == "clock":
+        r.clock.domain = "host-mono:changed"
+    with pytest.raises(ValueError):
+        r.events.poll(r.sid, through_step=through, max_events=128)

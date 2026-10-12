@@ -259,6 +259,7 @@ class SignalEvents:
         self.pending.clear()
         self._emitted.clear()
         self._last_serial, self._proof_generation = 0, None
+        self._last_observed_ns = None
         self._seq, self._step = 0, -1
         self.observer.begin(sid)
         self.status = {"state": "waiting", "reasons": [], "dropped": 0}
@@ -390,6 +391,7 @@ class SignalEvents:
             raise ValueError("event clock changed")
         sid, episode_id, role, kernel = self.stream
         current = self.observer.latest
+        advance = False
         if current and current[1] != self._last_serial:
             identity, serial, started, ended, step, domain, obs = current
             if (
@@ -400,16 +402,24 @@ class SignalEvents:
                 raise ValueError("observation epoch/clock mismatch")
             if type(step) is not int or step != through_step:
                 raise ValueError("observation is not of the current control step")
-            if through_step <= self._step:
-                raise ValueError("new observation cannot reuse a control step")
             now = self.clock.now()
             observed_ns = obs.get("observed_ns")
             if (
                 type(observed_ns) is not int
                 or not 0 <= started <= observed_ns <= ended <= now
+                or now - observed_ns > self.config.max_age_ns
+                or (
+                    self._last_observed_ns is not None
+                    and observed_ns <= self._last_observed_ns
+                )
             ):
                 raise ValueError("timestamp is not from this observation call")
             self._last_serial = serial
+            self._last_observed_ns = observed_ns
+            # Resume refreshes the observation before the next action. Consume
+            # its serial once, but only advancing control steps feed the detector.
+            advance = through_step > self._step
+        if advance:
             values, unknown = {}, []
             measured = None
             for binding in self.bindings:
