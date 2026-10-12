@@ -297,6 +297,23 @@ def test_unknown_and_timeout_never_resume_motion(tmp_path, decision):
     assert results(r.orch)[0].task_outcome == "unknown"
 
 
+def test_stale_post_pause_observation_faults_before_any_judge_grant(tmp_path):
+    r = build(tmp_path)
+    original = r.robot.observe
+
+    def observe():
+        obs = original()
+        if any(h[0] == "pause" for h in r.hooks_log):
+            obs["observed_ns"] = 1  # captured before the pause committed
+        return obs
+
+    r.robot.observe = observe
+    assert r.orch.run() == "FAULT_LOCKED"
+    judges = [c for c in r.authority.calls if c[:2] == ("begin", "judge")]
+    assert len(judges) == 1  # the initial scene judgement only, no goal judge grant
+    assert results(r.orch)[0].task_outcome == "unknown"
+
+
 def test_unproven_physical_hold_prevents_any_initial_model_or_action(tmp_path):
     r = build(tmp_path, bad_hold=True)
     assert r.orch.run() == "FAULT_LOCKED"
