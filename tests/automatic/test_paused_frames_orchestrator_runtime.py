@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_event_pause_orchestrator_runtime import KERNEL
+from test_event_pause_orchestrator_runtime import CANDIDATE_STEP, KERNEL
 from test_paused_frames import sampling
 
 from levi.automatic import event_window as W
@@ -161,7 +161,7 @@ class PausedFramesOrchestratorTests(unittest.TestCase):
     def test_confirmed_seals_actual_paused_endpoint_without_reset_motion(self):
         r = self.make()
         self.assertEqual(r.orch.run(), "WAIT_HUMAN")
-        self.assertEqual(r.robot.step_calls, 11)
+        self.assertEqual(r.robot.step_calls, CANDIDATE_STEP)
         self.assertEqual(len(self.payloads), 1)
         self.assertEqual(self.payloads[0].binding.role, "forward")
         self.assertIsNone(r.fence.current)
@@ -207,7 +207,7 @@ class PausedFramesOrchestratorTests(unittest.TestCase):
         self.assertNotEqual(
             first.proof.picks[-1].source.epoch, second.proof.picks[-1].source.epoch
         )
-        self.assertEqual(r.robot.step_calls, 22)
+        self.assertEqual(r.robot.step_calls, 2 * CANDIDATE_STEP)
         self.assertFalse(any(t.role == "reset" for t in self.grants))
         self.assertEqual(sm.check_journal(r.orch.journal.events), [])
 
@@ -222,7 +222,7 @@ class PausedFramesOrchestratorTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             r.orch.run()
         self.assertEqual(r.orch.state, "FAULT_LOCKED")
-        self.assertEqual(r.robot.step_calls, 11)
+        self.assertEqual(r.robot.step_calls, CANDIDATE_STEP)
         self.assertTrue(r.cycle.failed)
         self.assertIsNone(r.fence.current)
         result = r.orch.resume(
@@ -234,7 +234,7 @@ class PausedFramesOrchestratorTests(unittest.TestCase):
         self.assertTrue(result.ok)
         self.stage_fault = None
         self.assertEqual(r.orch.run(), "FAULT_LOCKED")
-        self.assertEqual(r.robot.step_calls, 11)
+        self.assertEqual(r.robot.step_calls, CANDIDATE_STEP)
         self.assertEqual(sm.check_journal(r.orch.journal.events), [])
 
     def test_stale_frame_and_corrupt_payload_rejected_before_judge_grant(self):
@@ -254,7 +254,7 @@ class PausedFramesOrchestratorTests(unittest.TestCase):
 
                 self.prepare_fault = corrupt
                 self.assertEqual(r.orch.run(), "FAULT_LOCKED")
-                self.assertEqual(r.robot.step_calls, 11)
+                self.assertEqual(r.robot.step_calls, CANDIDATE_STEP)
                 self.assertTrue(r.cycle.failed)
                 # Scene judge only; event judge never acquired a request slot.
                 self.assertEqual(sum(t.role == "judge" for t in self.grants), 1)

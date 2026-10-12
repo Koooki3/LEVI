@@ -76,6 +76,11 @@ def load_kernel():
 
 
 KERNEL = load_kernel()
+# The fixture's forward event is at step 8. A candidate pauses at once (no
+# min_steps/settle_steps/cooldown_steps delay), so each episode executes
+# exactly 8 actions before the pause (JOINT-INFERENCE-PROPOSAL: no new action
+# after a candidate).
+CANDIDATE_STEP = 8
 HOLD = SettleConfig(1_000_000, 2_000_000, 100_000_000, 0.001, 0.01, 0.01)
 
 
@@ -363,7 +368,7 @@ class OrchestratorRuntimeTests(unittest.TestCase):
             self.resume(r, f"resume-{number}")
         self.assertEqual(r.orch.run(), "COMPLETED")
         self.assertEqual(len(results(r.orch)), 2)
-        self.assertEqual(r.robot.step_calls, 22)
+        self.assertEqual(r.robot.step_calls, 2 * CANDIDATE_STEP)
         self.assertEqual(r.robot.home_calls, 0)
         self.assertFalse(any(g.role == "reset" for g in self.grants))
         for previous, current in zip(self.grants, self.grants[1:]):
