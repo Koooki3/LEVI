@@ -983,16 +983,19 @@ class Orchestrator:
                 return CommandResult(False, "not_waiting", self.state)
             if not (environment_handled is True and health_rechecked is True):
                 return CommandResult(False, "confirmations_missing", self.state)
-            if (
-                self.intervention is not None
-                and self.intervention.failed
-                and self.intervention.operator_stopped
-                and not self.intervention.rearm()
-            ):
-                # A stop that still holds the request slot cannot be rearmed.
-                # (A failed proof stays latched: resume is accepted and the
-                # next run faults again without any motion.)
-                return CommandResult(False, "intervention_latched", self.state)
+            cycle = self.intervention
+            rearm_needed = False
+            if cycle is not None:
+                with cycle._lock:
+                    rearm_needed = cycle.failed and cycle.operator_stopped
+                    if rearm_needed and (
+                        cycle.proof_failed
+                        or cycle._request is not None
+                        or cycle.revocation_error is not None
+                    ):
+                        # Inspect eligibility without mutating the cycle. The
+                        # journal's actual prepare CAS must succeed first.
+                        return CommandResult(False, "intervention_latched", self.state)
             try:
                 found = self._tx(
                     "PREFLIGHT",
@@ -1009,13 +1012,25 @@ class Orchestrator:
                 self._contain(exc)
                 raise
             with self._stop_lock:
-                # Only the stops registered before this resume began are
-                # overridden by it; a later stop stays and takes effect at
-                # the next decision point.
-                lost = sorted(c for c, g in self._stops.items() if g <= generation)
-                for command in lost:
-                    del self._stops[command]
-                self._consumed_stops.clear()
+                # Rearm only after the journal CAS and durable commit. A stop
+                # registered during this transaction must keep its latch; the
+                # generation check and rearm share the stop registry lock.
+                rearm_refused = (
+                    rearm_needed and self._stop_gen == generation and not cycle.rearm()
+                )
+                if rearm_refused:
+                    lost = []
+                else:
+                    # Only earlier stops are overridden; later stops remain.
+                    lost = sorted(c for c, g in self._stops.items() if g <= generation)
+                    for command in lost:
+                        del self._stops[command]
+                    self._consumed_stops.clear()
+            if rearm_refused:
+                # A proof may fail after the eligibility inspection. Never
+                # leave that committed PREFLIGHT runnable or clear its stops.
+                self._contain(InterventionUnproven("resume cycle became latched"))
+                return CommandResult(False, "intervention_latched", self.state)
             if lost:
                 # Stops that never took effect (the run locked or waited
                 # first): kept in the journal, then cleared by the resume.
