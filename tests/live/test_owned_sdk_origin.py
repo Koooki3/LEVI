@@ -834,3 +834,138 @@ def test_instance_rebinding_during_pause_refuses_post_barrier_ack(
     _serve_normal_factory(monkeypatch, _refreeze_sdk(installed, factory), pipe)
     assert pipe.sent and all(message[1] is None for message in pipe.sent)
     assert not any(message[0] in ("ready", "idle", "result") for message in pipe.sent)
+
+
+def _serve_after_ready_mutation(sdk_tree, monkeypatch, helpers, pause, mutate):
+    """Serve a refrozen fake SDK, mutate once after the first ACK, then barrier."""
+    installed, factory = sdk_tree
+    source = installed / "vllm/v1/engine/async_llm.py"
+    source.write_text(
+        source.read_text()
+        .replace("class AsyncLLM:", helpers + "class AsyncLLM:")
+        .replace(
+            "async def pause_generation(self, **kwargs): synchronize()",
+            "async def pause_generation(self, **kwargs): " + pause,
+        )
+    )
+
+    class MutatingPipe(_SdkPipe):
+        def send_bytes(self, value):
+            super().send_bytes(value)
+            if self.sent[-1][0] == "ready" and mutate is not None:
+                mutate(sys.modules["vllm.v1.engine.async_llm"])
+
+    pipe = MutatingPipe(
+        [("enrolled", "normal-load-chain"), ("barrier", 1, None), ("stop", 2, None)]
+    )
+    _serve_normal_factory(monkeypatch, _refreeze_sdk(installed, factory), pipe)
+    return [message[0] for message in pipe.sent]
+
+
+def _no_sync(*args, **kwargs):
+    return None
+
+
+@pytest.mark.parametrize("attribute", [None, "__defaults__", "__kwdefaults__"])
+def test_replaced_function_default_tuple_identity_refuses_next_ack(
+    sdk_tree, monkeypatch, attribute
+):
+    """Attribute check: a new defaults object, not only mutated contents."""
+
+    def mutate(module):
+        if attribute == "__defaults__":
+            module.pause_helper.__defaults__ = (_no_sync,)
+        else:
+            module.pause_helper.__kwdefaults__ = {"other": _no_sync}
+
+    kinds = _serve_after_ready_mutation(
+        sdk_tree,
+        monkeypatch,
+        "def pause_helper(sync=synchronize, *, other=synchronize): sync(); other()\n",
+        "pause_helper()",
+        None if attribute is None else mutate,
+    )
+    assert kinds == (["ready", "idle"] if attribute is None else ["ready", "error"])
+
+
+@pytest.mark.parametrize("rebind", [False, True])
+def test_rebound_closure_cell_refuses_next_ack(sdk_tree, monkeypatch, rebind):
+    """Cell check: the closure cell itself is rebound to a no-op."""
+
+    def mutate(module):
+        module.pause_helper.__closure__[0].cell_contents = _no_sync
+
+    kinds = _serve_after_ready_mutation(
+        sdk_tree,
+        monkeypatch,
+        "def make_helper():\n    sync = synchronize\n"
+        "    def pause_helper(): sync()\n    return pause_helper\n"
+        "pause_helper = make_helper()\n",
+        "pause_helper()",
+        mutate if rebind else None,
+    )
+    assert kinds == (["ready", "error"] if rebind else ["ready", "idle"])
+
+
+@pytest.mark.parametrize("inject", [False, True])
+def test_new_global_name_in_sealed_sdk_namespace_refuses_next_ack(
+    sdk_tree, monkeypatch, inject
+):
+    """Keys check: no new global may appear in a sealed SDK module."""
+
+    def mutate(module):
+        module.INJECTED_AFTER_SEAL = _no_sync
+
+    kinds = _serve_after_ready_mutation(
+        sdk_tree, monkeypatch, "", "synchronize()", mutate if inject else None
+    )
+    assert kinds == (["ready", "error"] if inject else ["ready", "idle"])
+
+
+@pytest.mark.parametrize("background", [False, True])
+def test_torch_idle_refuses_while_model_request_thread_lives(
+    sdk_tree, monkeypatch, background
+):
+    """Thread check: a request thread still running blocks the result ACK."""
+    import threading
+
+    from levi.live import owned_runtime
+
+    installed, vllm_factory = sdk_tree
+    package = installed / "torch/__init__.py"
+    package.write_text(
+        package.read_text() + "from contextlib import nullcontext as inference_mode\n"
+    )
+    (installed / "closed_factory.py").write_text(
+        "import threading\nimport time\n"
+        "def build(device=None, sdk=None):\n"
+        "    def model(payload):\n"
+        + (
+            "        threading.Thread(target=time.sleep, args=(0.5,),"
+            " name='owned-test-request', daemon=True).start()\n"
+            if background
+            else ""
+        )
+        + "        return payload\n"
+        "    return model\n"
+    )
+    refrozen = _refreeze_sdk(installed, vllm_factory)
+    factory = FrozenTorchFactory(
+        "closed_factory",
+        "build",
+        refrozen.code_sha256,
+        "frozen",
+        "cuda:0",
+        source_root=str(installed),
+        torch_source_hashes=refrozen.torch_source_hashes,
+    )
+    monkeypatch.setattr(owned_runtime, "process_identity", lambda pid: "worker")
+    pipe = _SdkPipe([("enrolled", "launch"), ("infer", 1, "cpu"), ("stop", 1, None)])
+    try:
+        owned_runtime._serve(pipe, factory, "launch")
+    finally:
+        for thread in threading.enumerate():
+            if thread.name == "owned-test-request":
+                thread.join(5)
+    kinds = [message[0] for message in pipe.sent]
+    assert kinds == (["ready", "error"] if background else ["ready", "result"])
