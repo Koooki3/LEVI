@@ -127,41 +127,58 @@ class FrozenVllmFactory(FrozenTorchFactory):
                 raise ValueError("external KV connector cannot share owned barrier")
             critical.require()
             torch_bundle.require_function(torch.cuda.synchronize)
-            engine._owned_sdk_bundles = bundles
-            engine._owned_sdk_critical = critical
-            self.require_engine(engine)
-            engine._owned_source_lifetime = transaction.commit()
-            return engine
+            loaded = FrozenVllmEngine(engine, bundles, critical)
+            self.require_engine(loaded)
+            loaded.lifetime = transaction.commit()
+            return loaded
 
-    def close_engine(self, engine):
+    def close_engine(self, loaded):
         from levi.live.owned_source import OwnedSourceLifetime
 
-        lifetime = getattr(engine, "_owned_source_lifetime", None)
-        if type(lifetime) is not OwnedSourceLifetime:
+        if (
+            type(loaded) is not FrozenVllmEngine
+            or type(loaded.lifetime) is not OwnedSourceLifetime
+        ):
             raise ValueError("actual engine source lifetime required")
-        lifetime.close()
+        loaded.lifetime.close()
 
-    def require_engine(self, engine):
+    def require_engine(self, loaded):
         from levi.live.owned_source import FrozenCriticalBindings, FrozenSourceBundle
 
-        bundles = getattr(engine, "_owned_sdk_bundles", ())
+        if type(loaded) is not FrozenVllmEngine:
+            raise ValueError("loader-owned frozen vLLM engine handle required")
+        bundles, critical = loaded.bundles, loaded.critical
         if len(bundles) != 2 or any(
             type(bundle) is not FrozenSourceBundle for bundle in bundles
         ):
             raise ValueError("actual engine SDK source binding required")
-        critical = getattr(engine, "_owned_sdk_critical", None)
         if type(critical) is not FrozenCriticalBindings or critical.bundles != bundles:
             raise ValueError("exact critical SDK binding required")
         critical.require()
         torch = bundles[0].require_module("torch")
         bundles[0].require_function(torch.cuda.synchronize)
         critical.require_methods(
-            engine,
+            loaded.engine,
             ("pause_generation", "resume_generation", "generate", "shutdown"),
             expected_type=bundles[1]
             .require_module("vllm.v1.engine.async_llm")
             .AsyncLLM,
         )
+
+
+class FrozenVllmEngine:
+    """Loader-owned handle: the engine plus its bundles, seal and lifetime.
+
+    Idle checks read the seal only from this handle (E6). Attributes stored on
+    the factory-created engine are SDK/factory-reachable state: code started by
+    the factory could rebind a barrier, build a fresh seal and store it there.
+    """
+
+    __slots__ = ("bundles", "critical", "engine", "lifetime")
+
+    def __init__(self, engine, bundles, critical):
+        self.engine, self.bundles, self.critical = engine, bundles, critical
+        self.lifetime = None
 
 
 def serve_vllm(connection, factory, launch_id):
@@ -177,17 +194,23 @@ def serve_vllm(connection, factory, launch_id):
 
         if await asyncio.to_thread(_receive, connection) != ("enrolled", launch_id):
             return
-        engine = None
+        loaded = None
         try:
-            engine = factory.load()
+            loaded = factory.load()
+            if type(factory) is FrozenVllmFactory:
+                if type(loaded) is not FrozenVllmEngine:
+                    raise ValueError("loader-owned frozen vLLM engine handle required")
+                engine = loaded.engine
+            else:
+                engine = loaded
             worker = process_identity(os.getpid())
 
             async def idle(epoch, mode="wait"):
                 # In the frozen implementation this Future resolves only after
                 # _finish_pause collective synchronize_device completes.
-                factory.require_engine(engine)
+                factory.require_engine(loaded)
                 await engine.pause_generation(mode=mode, clear_cache=False)
-                factory.require_engine(engine)
+                factory.require_engine(loaded)
                 return SdkIdleAck(worker, launch_id, epoch, factory.capability_id)
 
             _send(connection, ("ready", await idle(0), None))
@@ -201,7 +224,7 @@ def serve_vllm(connection, factory, launch_id):
                 if operation == "barrier":
                     _send(connection, ("idle", await idle(epoch), None))
                 elif operation == "infer":
-                    factory.require_engine(engine)
+                    factory.require_engine(loaded)
                     await engine.resume_generation()
                     # Sampling parameters are built inside the same private
                     # worker. No public OpenAI server, engine handle or socket.
@@ -222,12 +245,12 @@ def serve_vllm(connection, factory, launch_id):
         finally:
             # Device ownership is not released here. The supervisor still
             # requires empty complete containment before a physical handoff.
-            if engine is not None:
+            if loaded is not None:
                 try:
-                    factory.require_engine(engine)
+                    factory.require_engine(loaded)
                     engine.shutdown()
                 finally:
-                    factory.close_engine(engine)
+                    factory.close_engine(loaded)
 
     try:
         asyncio.run(run())

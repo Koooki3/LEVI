@@ -113,7 +113,7 @@ def test_actual_sdk_bundle_loads_only_manifest_compiled_functions(sdk_tree):
     _installed, factory = sdk_tree
     engine = factory.load()
     factory.require_engine(engine)
-    assert engine.__class__.__module__ == "vllm.v1.engine.async_llm"
+    assert engine.engine.__class__.__module__ == "vllm.v1.engine.async_llm"
 
 
 def test_distribution_a_cannot_authorize_shadow_package_b(
@@ -168,7 +168,7 @@ def test_replacing_pause_code_with_matching_module_filename_is_rejected(sdk_tree
     )
     replacement = namespace["pause_generation"]
     replacement.__module__ = "vllm.v1.engine.async_llm"
-    engine.__class__.pause_generation = replacement
+    engine.engine.__class__.pause_generation = replacement
     with pytest.raises(
         ValueError, match="critical SDK binding|compiled from the frozen source bytes"
     ):
@@ -205,7 +205,7 @@ def test_sdk_timestamp_size_pyc_collision_never_executes_cached_pause(sdk_tree):
     source.write_bytes(frozen)
     os.utime(source, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
     engine = factory.load()
-    assert "synchronize" in engine.pause_generation.__func__.__code__.co_names
+    assert "synchronize" in engine.engine.pause_generation.__func__.__code__.co_names
     factory.require_engine(engine)
 
 
@@ -376,7 +376,7 @@ def test_successful_engine_close_is_idempotent_and_exact_owner_only(sdk_tree):
     factory.close_engine(engine)
     _assert_clean_sdk(before, {"torch.cuda": external})
     with pytest.raises(ImportError, match="lifetime is closed"):
-        engine._owned_sdk_bundles[0].import_module("torch")
+        engine.bundles[0].import_module("torch")
 
 
 def test_normal_serve_closes_factory_and_sdk_modules(sdk_tree, monkeypatch):
@@ -414,7 +414,7 @@ def test_closed_bundle_refuses_before_any_ordinary_import(sdk_tree, monkeypatch)
 
     monkeypatch.setattr(importlib, "import_module", unsafe_import)
     with pytest.raises(ImportError, match="lifetime is closed"):
-        engine._owned_sdk_bundles[0].import_module("torch")
+        engine.bundles[0].import_module("torch")
 
 
 def test_standalone_factory_has_explicit_owned_cleanup_lifetime(sdk_tree):
@@ -677,6 +677,56 @@ def test_removed_sealed_barrier_module_refuses_next_ack(sdk_tree, monkeypatch):
     assert pipe.sent[0][0] == "ready" and pipe.sent[-1][0] == "error"
     assert removed and removed[0] is not None
     assert not any(message[0] == "idle" for message in pipe.sent)
+
+
+@pytest.mark.parametrize("reseal", [False, True])
+def test_vllm_engine_object_cannot_supply_its_own_sdk_binding(
+    sdk_tree, monkeypatch, reseal
+):
+    """E6: rebinding plus a fresh seal stored on the engine yields no ACK.
+
+    Factory-started code (here simulated after the first ACK, as a factory
+    thread would) can reach the real bundles through sys.meta_path. The seal
+    used by idle checks must be the loader-owned one, never engine state.
+    """
+    from levi.live.owned_source import FrozenCriticalBindings, FrozenSourceBundle
+
+    installed, factory = sdk_tree
+    (installed / "closed_factory.py").write_text(
+        "LAST=None\ndef build(device=None, sdk=None):\n"
+        "    global LAST\n    LAST=sdk.AsyncLLM()\n    return LAST\n"
+    )
+
+    class MutatingPipe(_SdkPipe):
+        def send_bytes(self, value):
+            super().send_bytes(value)
+            if self.sent[-1][0] == "ready" and reseal:
+                bundles = {
+                    root: next(
+                        f
+                        for f in sys.meta_path
+                        if type(f) is FrozenSourceBundle and root in f.sources
+                    )
+                    for root in ("torch", "vllm")
+                }
+                sys.modules["vllm.v1.engine.async_llm"].synchronize = sys.modules[
+                    "torch.cuda"
+                ].is_available
+                ordered = (bundles["torch"], bundles["vllm"])
+                engine = sys.modules["closed_factory"].LAST
+                engine._owned_sdk_bundles = ordered
+                engine._owned_sdk_critical = FrozenCriticalBindings(ordered)
+
+    pipe = MutatingPipe(
+        [("enrolled", "normal-load-chain"), ("barrier", 1, None), ("stop", 2, None)]
+    )
+    _serve_normal_factory(monkeypatch, _refreeze_sdk(installed, factory), pipe)
+    assert pipe.sent[0][0] == "ready"
+    if reseal:
+        assert pipe.sent[-1][0] == "error"
+        assert not any(message[0] == "idle" for message in pipe.sent)
+    else:
+        assert [message[0] for message in pipe.sent] == ["ready", "idle"]
 
 
 @pytest.mark.parametrize("rebind", [False, True])

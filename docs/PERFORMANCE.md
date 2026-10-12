@@ -507,8 +507,10 @@ exercise this check without replacing load or require_function.
 All eight declared vLLM barrier modules are imported through the owned loader
 before the seal, so a lazily imported barrier module cannot be rebound by the
 factory first; a sealed module that leaves `sys.modules` is refused at the next
-check. Torch idle checks read the bundle and seal from a loader-owned model
-handle, never from attributes of the factory-returned model. The worker
+check. Torch and vLLM idle checks read the bundles and seal from loader-owned
+handles (`load()` returns a `FrozenVllmEngine` for vLLM), never from attributes
+of the factory-returned model or engine, so a fresh seal stored on the engine
+by factory-started code is ignored. The worker
 interpreter runs with `-B -X pycache_prefix=os.devnull`: `-B` alone only stops
 writing caches, and a same-mtime/size stale `__pycache__` would otherwise
 replace the loader and barrier checks themselves. The worker entry refuses any
@@ -527,8 +529,8 @@ site-packages `.pth` files and native extensions remain trusted.
 Factory/SDK source loading uses one transaction. Failed hook installation,
 module initialization, factory build or engine validation rolls back every
 owned hook and exact newly created module. Successful private worker exit
-closes the same lifetime in reverse order; explicit vLLM callers use
-`close_engine(engine)`. External/preloaded/replacement modules are preserved,
+closes the same lifetime in reverse order; explicit vLLM callers pass the
+handle returned by `load()` to `close_engine`. External/preloaded/replacement modules are preserved,
 and closed bundles refuse subsequent imports. This cleanup concerns Python
 source lifetime only; physical device ownership still needs the kernel's
 complete fresh group-exit proof.
