@@ -50,14 +50,14 @@ levi.automatic.__path__ = [
 ]
 
 import test_owned_role_execution as owned_helpers
+
+from levi.automatic import intervention
+from levi.automatic import owned_runtime as borrowed_module
 from levi.automatic.intervention import (
     InferenceCycle,
     InterventionHooks,
     InterventionUnproven,
 )
-
-from levi.automatic import intervention
-from levi.automatic import owned_runtime as borrowed_module
 from levi.automatic.owned_runtime import BorrowedRoleExecution
 from levi.domain import aeri
 from levi.live import owned_runtime, runtime_bridge, runtime_ownership, workload_broker
