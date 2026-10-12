@@ -557,15 +557,28 @@ def _serve(connection, factory, launch_id):
 # system is compiled from its current source. Residual: a sourceless legacy
 # .pyc that replaces a deleted .py, native extensions and the parent
 # supervisor's own interpreter are outside this guarantee.
-WORKER_INTERPRETER_FLAGS = ("-B", "-X", f"pycache_prefix={os.devnull}")
+#
+# OWNORIGIN threat model: "-m levi.live.owned_worker" resolved levi through the
+# inherited cwd, PYTHONPATH and user site, so a shadow package could replace
+# the very loader that binds SDK origins. Isolated mode (-I) drops all three;
+# the levi root is the supervisor's own resolved origin, inserted first, and
+# the child entry rechecks every loaded levi module against it. Residual: the
+# interpreter, its site-packages .pth files and native extensions stay trusted.
+WORKER_INTERPRETER_FLAGS = ("-I", "-B", "-X", f"pycache_prefix={os.devnull}")
+WORKER_ROOT = Path(__file__).resolve().parents[2]
+_WORKER_BOOTSTRAP = (
+    "import sys; sys.path.insert(0, sys.argv[1]); "
+    "from levi.live.owned_worker import main; main()"
+)
 
 
 def _worker_command(descriptor):
     return [
         sys.executable,
         *WORKER_INTERPRETER_FLAGS,
-        "-m",
-        "levi.live.owned_worker",
+        "-c",
+        _WORKER_BOOTSTRAP,
+        str(WORKER_ROOT),
         str(descriptor),
     ]
 

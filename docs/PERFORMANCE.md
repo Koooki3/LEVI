@@ -516,6 +516,14 @@ other interpreter before reading its bootstrap. Not covered: a sourceless
 legacy `.pyc` replacing a deleted `.py`, native extensions, lazily imported
 non-barrier modules, and the supervisor's own interpreter.
 
+The worker no longer resolves `levi` through the inherited working directory,
+`PYTHONPATH` or user site: it runs in isolated mode (`-I`) and imports `levi`
+from the supervisor's own resolved checkout root, passed explicitly. Before the
+bootstrap read, the child refuses unless every loaded `levi` module is an
+ordinary source module under that root. A shadow `levi` package can therefore
+not replace the loader that binds SDK origins. The interpreter, its
+site-packages `.pth` files and native extensions remain trusted.
+
 Factory/SDK source loading uses one transaction. Failed hook installation,
 module initialization, factory build or engine validation rolls back every
 owned hook and exact newly created module. Successful private worker exit

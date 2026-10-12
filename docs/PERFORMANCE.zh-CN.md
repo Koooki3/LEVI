@@ -379,6 +379,12 @@ SDK/native 闭包和 owned SDK 子进程 bootstrap 尚未安装，真实入口�
 替代已删除 `.py` 的无源旧式 `.pyc`、native 扩展、延迟导入的非 barrier 模块，
 以及 supervisor 自身的解释器。
 
+worker 不再经继承的工作目录、`PYTHONPATH` 或用户 site 解析 `levi`：它以隔离
+模式（`-I`）运行，从 supervisor 自身实际解析到并显式传入的检出根导入 `levi`。
+读取 bootstrap 前，只要有任何已加载的 `levi` 模块不是该根下的普通源码模块，
+子进程即拒绝。因此 shadow `levi` 包不能替换绑定 SDK 来源的 loader。解释器、
+其 site-packages `.pth` 文件和 native 扩展仍属受信范围。
+
 工厂与 SDK 源码加载采用同一事务。钩子安装、模块初始化、工厂构建或
 引擎校验失败时，撤销全部本次钩子及其确切创建的模块。私有 worker
 正常或异常结束时按安装逆序关闭同一生命周期；直接调用 vLLM 的软件

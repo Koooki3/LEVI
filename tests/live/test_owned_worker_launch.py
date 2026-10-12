@@ -9,6 +9,7 @@ import os
 import py_compile
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -81,3 +82,66 @@ def test_owned_launch_uses_the_pinned_worker_command():
     source = inspect.getsource(owned.OwnedModelWorker.launch)
     assert "_worker_command(child.fileno())" in source
     assert '"-m"' not in source and "'-m'" not in source
+
+
+def _shadow_levi(root, marker):
+    package = root / "levi" / "live"
+    package.mkdir(parents=True)
+    record = f"open({str(marker)!r}, 'a').write({str(root)!r} + '\\n')\n"
+    (root / "levi" / "__init__.py").write_text(record)
+    (package / "__init__.py").write_text("")
+    (package / "owned_worker.py").write_text(record)
+
+
+def test_worker_executes_the_supervisor_levi_origin_not_a_shadow(tmp_path):
+    """OWNORIGIN: cwd/PYTHONPATH cannot choose which loader the worker runs.
+
+    The owned loader, barrier checks and ACK loop in the child are the code
+    that binds SDK origins; a shadow levi package would replace all of them.
+    """
+    cwd, path_shadow = tmp_path / "cwd", tmp_path / "pythonpath"
+    marker = tmp_path / "executed-shadow"
+    _shadow_levi(cwd, marker)
+    _shadow_levi(path_shadow, marker)
+    env = dict(os.environ, PYTHONPATH=str(path_shadow))
+    # Control: the former "-m levi.live.owned_worker" launch runs a shadow.
+    subprocess.run(
+        [sys.executable, "-B", "-m", "levi.live.owned_worker", "x"],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    executed = set(marker.read_text().split())
+    assert executed and executed <= {str(cwd), str(path_shadow)}
+    marker.unlink()
+    # A closed private pipe: the child passes interpreter, argument and origin
+    # checks, then stops at the first bootstrap read with EOF.
+    read, write = os.pipe()
+    os.close(write)
+    try:
+        result = subprocess.run(
+            owned._worker_command(read),
+            cwd=cwd,
+            env=env,
+            pass_fds=(read,),
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    finally:
+        os.close(read)
+    assert not marker.exists()
+    assert result.returncode != 0 and "EOFError" in result.stderr
+    worker = Path(owned.__file__).resolve().with_name("owned_worker.py")
+    assert str(worker) in result.stderr
+
+
+def test_worker_refuses_levi_modules_outside_its_pinned_root(tmp_path):
+    from levi.live import owned_worker
+
+    with pytest.raises(ValueError, match="origin"):
+        owned_worker._require_origin(str(tmp_path))
+    owned_worker._require_origin(str(Path(owned.__file__).resolve().parents[2]))
