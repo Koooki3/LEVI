@@ -8,6 +8,20 @@ from test_event_pause_judge import build
 from levi.automatic import state_machine as sm
 
 
+@pytest.fixture(autouse=True)
+def close_built_rigs(monkeypatch, request):
+    original = build
+
+    def tracked_build(*args, **kwargs):
+        r = original(*args, **kwargs)
+        # Reopen tests replace the journal on this same orchestrator; close
+        # therefore releases the latest writer as well as failure-path rigs.
+        request.addfinalizer(r.orch.close)
+        return r
+
+    monkeypatch.setitem(globals(), "build", tracked_build)
+
+
 def stopped(tmp_path):
     r = build(tmp_path, event_step=None, script=[{"decision": "confirmed"}])
     step = r.robot.step
@@ -345,10 +359,11 @@ def test_old_unmarked_event_resume_is_readable_but_not_reported_success(
     assert sm.check_journal(r.orch.journal.events) == []
 
 
-def test_legacy_resume_repetition_keeps_old_unmarked_contract(tmp_path):
+def test_legacy_resume_repetition_keeps_old_unmarked_contract(tmp_path, request):
     from test_aeri_stop_registry import waiting
 
     r = waiting(tmp_path)
+    request.addfinalizer(r.orch.close)
     assert r.orch.config.termination.inference_mode == "legacy_async"
     assert resume(r, r.orch.journal.next_seq).ok
     assert not any(
