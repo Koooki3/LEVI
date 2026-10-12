@@ -36,6 +36,20 @@ from levi.automatic.orchestrator import Orchestrator
 from levi.automatic.recorder import EvidenceStore
 from levi.automatic.termination import TerminationConfig
 
+_NEEDED = (
+    "LEVI_BORROWED_ROOT",
+    "LEVI_BORROWED_COMMIT",
+    "LEVI_JOINT_KERNEL_ROOT",
+    "LEVI_JOINT_KERNEL_COMMIT",
+    "LEVI_JOINT_IMPLEMENTATION_COMMIT",
+)
+_MISSING = [name for name in _NEEDED if name not in os.environ]
+if _MISSING:
+    pytest.skip(
+        "needs fixed peer evidence environment: " + ", ".join(_MISSING),
+        allow_module_level=True,
+    )
+
 PEER = Path(os.environ["LEVI_BORROWED_ROOT"]).resolve()
 FIXED = os.environ["LEVI_BORROWED_COMMIT"]
 if not re.fullmatch(r"[0-9a-f]{40}", FIXED):
