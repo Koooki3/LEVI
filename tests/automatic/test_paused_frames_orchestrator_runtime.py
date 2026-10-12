@@ -9,7 +9,11 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_event_pause_orchestrator_runtime import CANDIDATE_STEP, KERNEL
+from test_event_pause_orchestrator_runtime import (
+    CANDIDATE_STEP,
+    KERNEL,
+    SECOND_CANDIDATE_STEP,
+)
 from test_paused_frames import sampling
 
 from levi.automatic import event_window as W
@@ -110,7 +114,7 @@ class PausedFramesOrchestratorTests(unittest.TestCase):
     def test_complete_not_goal_chain_uses_actual_journal_kernel_and_media(self):
         r = self.make(rejected=True)
         self.assertEqual(r.orch.run(), "WAIT_HUMAN")
-        self.assertEqual(r.robot.step_calls, 16)
+        self.assertEqual(r.robot.step_calls, SECOND_CANDIDATE_STEP)
         self.assertEqual(len(self.payloads), 2)
         paused = [
             (state, epoch, s) for state, epoch, s in self.sources if s.phase == "paused"

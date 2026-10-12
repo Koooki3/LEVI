@@ -81,6 +81,9 @@ KERNEL = load_kernel()
 # exactly 8 actions before the pause (JOINT-INFERENCE-PROPOSAL: no new action
 # after a candidate).
 CANDIDATE_STEP = 8
+# A rejected candidate is spent: the next pause needs a newer event, so
+# not-goal chains get one at step 14 (never delivered once step 8 is confirmed).
+SECOND_CANDIDATE_STEP = 14
 HOLD = SettleConfig(1_000_000, 2_000_000, 100_000_000, 0.001, 0.01, 0.01)
 
 
@@ -118,7 +121,10 @@ class OrchestratorRuntimeTests(unittest.TestCase):
         )
         r.events = ev.FakeEventStream(
             {
-                "forward": [{"step": 8, "event_type": "object_settled"}],
+                "forward": [
+                    {"step": step, "event_type": "object_settled"}
+                    for step in (CANDIDATE_STEP, SECOND_CANDIDATE_STEP)
+                ],
                 "reset": [{"step": 4, "event_type": "object_settled"}],
             }
             if events
@@ -392,7 +398,9 @@ class OrchestratorRuntimeTests(unittest.TestCase):
                 for g in self.grants
             )
         )
-        self.assertGreater(r.policy.requests, 2)
+        # one chunk before the pause at step 8; the buffer is discarded and
+        # exactly one new chunk is requested for the pause at step 14
+        self.assertEqual(r.policy.requests, 2)
         self.assertEqual(sm.check_journal(r.orch.journal.events), [])
 
     def test_stop_during_policy_revokes_actual_slot_without_clearing_ownership(self):

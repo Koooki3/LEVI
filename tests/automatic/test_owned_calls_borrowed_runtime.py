@@ -425,7 +425,8 @@ class ActualBorrowedTests(unittest.TestCase):
     def test_exact_original_borrowed_three_paths_not_goal_resume(self):
         r = self.make()
         self.assertEqual(r.orch.run(), "WAIT_HUMAN")
-        self.assertEqual(r.robot.step_calls, 16)
+        # rejected at step 8, then the newer candidate at step 14 pauses again
+        self.assertEqual(r.robot.step_calls, 14)
         self.assertEqual(set(self.decodes), {"scene", "goal", "chunk"})
         self.assertEqual(len(self.begin_attempts), len(self.finished))
         self.assertEqual(len(self.finished), len(self.executor.dispatches))

@@ -54,7 +54,9 @@ class RequestCallbackTests(unittest.TestCase):
                 r = self.make()
                 received = []
 
-                def borrowed(request, role=role, received=received, run_id=r.config.run_id):
+                def borrowed(
+                    request, role=role, received=received, run_id=r.config.run_id
+                ):
                     received.append(request)
                     self.assertIs(request, self.fixture.grants[-1])
                     self.assertEqual(request.role, role)
@@ -187,7 +189,8 @@ class RequestCallbackTests(unittest.TestCase):
         r = self.make(goal_script=[{"decision": "rejected"}, {"decision": "confirmed"}])
         self.token_entry(r)
         self.assertEqual(r.orch.run(), "WAIT_HUMAN")
-        self.assertEqual(r.robot.step_calls, 16)
+        # rejected at step 8, then the newer candidate at step 14 pauses again
+        self.assertEqual(r.robot.step_calls, 14)
         self.assertEqual(len(self.received), len(self.fixture.grants))
         self.assertEqual(len(self.finished), len(self.fixture.grants))
         self.assertEqual(len(self.begin_attempts), len(self.received))

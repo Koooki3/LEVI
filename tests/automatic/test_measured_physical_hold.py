@@ -521,7 +521,8 @@ class MeasuredPhysicalHoldTests(unittest.TestCase):
         )
         r.cycle.hooks = replace(r.cycle.hooks, observe_hold=sampler)
         self.assertEqual(r.orch.run(), "WAIT_HUMAN")
-        self.assertEqual(r.robot.step_calls, 11)
+        # the candidate at step 8 pauses at once (no settle_steps delay)
+        self.assertEqual(r.robot.step_calls, 8)
         self.assertFalse(sampler.failed)
         self.assertIsNone(r.owner.snapshot(now_ns=r.clock.now())["request"])
 

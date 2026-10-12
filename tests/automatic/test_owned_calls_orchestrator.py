@@ -211,7 +211,8 @@ class OwnedCallsTests(unittest.TestCase):
     def test_actual_three_paths_no_old_transport_and_decode_after_finish(self):
         r = self.mount(self.make())
         self.assertEqual(r.orch.run(), "WAIT_HUMAN")
-        self.assertEqual(r.robot.step_calls, 16)
+        # rejected at step 8, then the newer candidate at step 14 pauses again
+        self.assertEqual(r.robot.step_calls, 14)
         self.assertEqual(set(self.decodes), {"scene", "goal", "chunk"})
         self.assertEqual(len(self.begin_attempts), len(self.executor.dispatches))
         self.assertEqual(len(self.finished), len(self.executor.dispatches))
