@@ -64,6 +64,8 @@ def build(
     bad_hold=False,
     bad_barrier=False,
     policy_fault=None,
+    event_steps=None,
+    max_requests=None,
 ):
     from aeri_harness import fake
 
@@ -79,6 +81,7 @@ def build(
             min_steps=5,
             settle_steps=3,
             cooldown_steps=5,
+            **({} if max_requests is None else {"max_requests": max_requests}),
         ),
     )
     clock = fake.FakeClock()
@@ -90,6 +93,8 @@ def build(
         if event_step is None
         else [{"step": event_step, "event_type": "object_settled"}]
     )
+    if event_steps is not None:
+        event_items = [{"step": n, "event_type": "object_settled"} for n in event_steps]
     r = rig(
         tmp_path / "run",
         cfg=cfg,
@@ -206,6 +211,58 @@ def test_rejected_candidate_is_spent_and_cannot_loop_without_motion(tmp_path):
     assert r.orch.run() == "WAIT_HUMAN"
     assert next(h[3] for h in r.hooks_log if h[0] == "pause") == 8
     assert r.robot.step_calls == 40  # no second pause without a newer event
+
+
+def test_max_requests_defaults_to_20_only_in_the_new_mode():
+    assert TerminationConfig().max_requests == 6
+    assert (
+        TerminationConfig(
+            inference_mode="event_pause_judge", physical_hold=HOLD
+        ).max_requests
+        == 20
+    )
+    assert TerminationConfig(max_requests=3).max_requests == 3
+
+
+def test_candidates_after_max_requests_do_not_pause_and_actions_keep_counting(tmp_path):
+    r = build(
+        tmp_path,
+        event_steps=[3, 6, 9],
+        max_requests=2,
+        script=[{"decision": "rejected"}, {"decision": "rejected"}],
+    )
+    assert r.orch.run() == "WAIT_HUMAN"
+    pauses = [h[3] for h in r.hooks_log if h[0] == "pause"]
+    assert pauses[:2] == [3, 6]
+    # the third candidate (step 9) did not pause; the 40 steps run, then the final judge
+    assert 9 not in pauses and r.robot.step_calls == 40
+    assert results(r.orch)[0].task_outcome == "success"
+
+
+def test_new_candidate_must_be_newer_than_the_last_judged_step():
+    from aeri_harness import fake
+
+    from levi.automatic.adapters import events as ev
+    from levi.automatic.termination import TerminationArbiter
+
+    episode = "r-x.forward.0001"
+    cfg = TerminationConfig(inference_mode="event_pause_judge", physical_hold=HOLD)
+    arb = TerminationArbiter(
+        cfg, run_id="r-x", episode_id=episode, role="forward", target="forward_goal"
+    )
+    items = [{"step": n, "event_type": "object_settled"} for n in (4, 4, 5)]
+    stream = ev.FakeEventStream({episode: items}, fake.FakeClock(), "r-x")
+    sid = stream.open(episode, "forward")
+    first, same_step, newer = stream.poll(sid, through_step=10, max_events=10)
+    arb.on_event(first)
+    want = arb.want_request(4)
+    arb.issued(want["request_id"], 4)
+    arb.withdraw(want["request_id"])
+    arb.consume_candidate()
+    arb.on_event(same_step)  # a new id at the already judged step 4
+    assert arb.want_request(4) is None
+    arb.on_event(newer)
+    assert arb.want_request(5) is not None
 
 
 def test_rejected_uses_fresh_observation_new_transaction_epoch_and_chunk(tmp_path):

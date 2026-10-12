@@ -50,7 +50,8 @@ class TerminationConfig:
     settle_steps: int = 8
     # At least this many steps between two requests.
     cooldown_steps: int = 15
-    max_requests: int = 6
+    # None: 6 for legacy_async, 20 for event_pause_judge (resolved in __post_init__).
+    max_requests: int | None = None
     # Consecutive confirmed judgements needed for a stop.
     confirmations: int = 1
     on_unknown: str = "continue_to_horizon"
@@ -63,6 +64,12 @@ class TerminationConfig:
     violation_limit: int = 3
 
     def __post_init__(self):
+        if self.max_requests is None:
+            object.__setattr__(
+                self,
+                "max_requests",
+                20 if self.inference_mode == "event_pause_judge" else 6,
+            )
         if isinstance(self.physical_hold, dict):
             try:
                 object.__setattr__(
@@ -166,6 +173,7 @@ class TerminationArbiter:
         self.outstanding: dict[str, Candidate] = {}  # request id -> candidate
         self.answered: set = set()
         self.requests = 0
+        self.last_judged_step: int | None = None
         self.last_request_step: int | None = None
         self.consecutive = 0
         self.seen_events: set = set()
@@ -247,9 +255,15 @@ class TerminationArbiter:
         if self.outstanding:
             return None
         if c.inference_mode == "event_pause_judge":
-            # A candidate pauses at once: min_steps, settle_steps, cooldown_steps
-            # and max_requests only pace the legacy asynchronous judge. The
-            # 400-executed-action bound is the only cap in this mode.
+            # A candidate pauses at once: min_steps, settle_steps and
+            # cooldown_steps only pace the legacy asynchronous judge. After
+            # max_requests pauses the policy runs on to its end; a candidate
+            # must also be newer than the step the last judgement covered.
+            if self.requests >= c.max_requests or (
+                self.last_judged_step is not None
+                and self.candidate.step <= self.last_judged_step
+            ):
+                return None
             return {
                 "request_id": f"{self.episode_id}:q{self.requests}",
                 "observed_from_step": self.candidate.step,
@@ -276,6 +290,7 @@ class TerminationArbiter:
         self.outstanding[request_id] = self.candidate
         self.requests += 1
         self.last_request_step = step
+        self.last_judged_step = step
         self.stage = "evidence"
 
     def consume_candidate(self) -> None:
