@@ -400,6 +400,8 @@ class SignalEvents:
                 or self.clock.domain != self._clock_domain
             ):
                 raise ValueError("observation epoch/clock mismatch")
+            if type(serial) is not int or serial <= self._last_serial:
+                raise ValueError("observation serial must advance")
             if type(step) is not int or step != through_step:
                 raise ValueError("observation is not of the current control step")
             now = self.clock.now()

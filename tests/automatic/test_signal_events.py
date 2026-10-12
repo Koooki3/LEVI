@@ -534,3 +534,92 @@ def test_same_step_refresh_keeps_step_time_age_epoch_and_clock_fences(tmp_path, 
         r.clock.domain = "host-mono:changed"
     with pytest.raises(ValueError):
         r.events.poll(r.sid, through_step=through, max_events=128)
+
+
+def test_same_step_lower_serial_with_newer_timestamp_is_not_a_new_source(tmp_path):
+    r = rig(tmp_path)
+    crossing(r)
+    r.clock.ns += 100_000_000
+    r.observer.observe()
+    identity, _, started, ended, step, domain, obs = r.observer.latest
+    assert obs["observed_ns"] > r.events._last_observed_ns
+    r.observer.latest = (
+        identity,
+        r.events._last_serial - 1,
+        started,
+        ended,
+        step,
+        domain,
+        obs,
+    )
+    with pytest.raises(ValueError, match="serial"):
+        r.events.poll(r.sid, through_step=1, max_events=128)
+
+
+def queued_two_camera_rig(tmp_path):
+    r = rig(tmp_path)
+    r.events.close(r.sid)
+    channels = [
+        ChannelSpec(
+            role="gripper",
+            feature=name,
+            index=6,
+            kind="measured",
+            units="normalized",
+            valid_range=(0, 1),
+            open_level="high",
+        )
+        for name in ("state_one", "state_two")
+    ]
+    r.events = SignalEvents(
+        r.observer,
+        SignalProfile(channels=channels),
+        [
+            Binding(c.feature, 6, ("robot_state", "gripper_position"), "measured")
+            for c in channels
+        ],
+        run_id="run",
+        clock=r.clock,
+        evidence_root=tmp_path,
+        keep_frame=r.events.keep_frame,
+    )
+    r.sid = r.events.open("run.forward.0001", "forward")
+    r.robot.adjust = lambda obs: {
+        **obs,
+        "images_bgr": {"side": r.robot.image, "wrist": r.robot.image + 1},
+    }
+    poll(r, 0)
+    r.robot.gripper = 1.0
+    first = aeri.parse(poll(r, 1, max_events=1)[0], "event")
+    assert len(first.evidence_refs) == 2
+    assert len(r.events.pending) == 1
+    return r, first
+
+
+@pytest.mark.parametrize("missing_frame", [False, True])
+def test_same_step_two_camera_refresh_delivers_retained_pending_candidate_once(
+    tmp_path, missing_frame
+):
+    r, first = queued_two_camera_rig(tmp_path)
+    if missing_frame:
+        r.robot.adjust = lambda obs: {**obs, "images_bgr": {"side": r.robot.image}}
+    before = len(r.saves)
+    second = aeri.parse(poll(r, 1, max_events=1)[0], "event")
+    assert second.event_id != first.event_id
+    assert second.evidence_refs == first.evidence_refs
+    assert len(second.evidence_refs) == 2
+    assert len(r.saves) == before
+    assert not r.events.pending
+    assert poll(r, 1) == []
+    assert r.events.status["dropped"] == 0
+
+
+def test_same_step_fresh_observation_cannot_refresh_queued_candidate_ttl(tmp_path):
+    r, first = queued_two_camera_rig(tmp_path)
+    r.clock.ns += r.events.config.max_age_ns + 1
+    assert poll(r, 1, max_events=1) == []
+    assert r.observer.latest[-1]["observed_ns"] > first.observed_ns
+    assert r.events.status["dropped"] == 1
+    assert not r.events.pending
+    assert poll(r, 1) == []
+    assert r.events.status["dropped"] == 1
