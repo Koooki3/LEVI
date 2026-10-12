@@ -984,10 +984,12 @@ class Orchestrator:
             if (
                 self.intervention is not None
                 and self.intervention.failed
+                and self.intervention.operator_stopped
                 and not self.intervention.rearm()
             ):
-                # A failed proof, or a stop that still holds the request slot,
-                # never reopens the inference cycle.
+                # A stop that still holds the request slot cannot be rearmed.
+                # (A failed proof stays latched: resume is accepted and the
+                # next run faults again without any motion.)
                 return CommandResult(False, "intervention_latched", self.state)
             try:
                 found = self._tx(

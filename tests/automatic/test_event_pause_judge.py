@@ -415,11 +415,13 @@ def test_resume_is_refused_while_a_stopped_cycle_holds_its_request_slot(tmp_path
     assert r.orch.state == "FAULT_LOCKED"
 
 
-def test_proof_failure_stays_latched_on_resume(tmp_path):
+def test_proof_failure_stays_latched_across_resume(tmp_path):
     r = build(tmp_path, script=[{"decision": "unknown"}])
     assert r.orch.run() == "FAULT_LOCKED"
-    found = _resume(r, "resume-3")
-    assert not found.ok and found.code == "intervention_latched"
+    steps = r.robot.step_calls
+    assert _resume(r, "resume-3").ok
+    assert r.orch.run() == "FAULT_LOCKED"
+    assert r.cycle.failed and r.robot.step_calls == steps
 
 
 @pytest.mark.parametrize("decision", ["unknown", "timeout"])
