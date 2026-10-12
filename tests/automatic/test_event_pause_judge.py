@@ -312,6 +312,24 @@ def test_new_mode_and_hold_conditions_change_frozen_plan_hash(tmp_path):
     assert load_job(path)["plan_sha256"] != new["plan_sha256"]
 
 
+# plan_sha256 of test_aeri_cli.job_text("/pinned/rollouts") computed with the
+# code of fe0e1fd, the last commit before inference_mode/physical_hold existed.
+LEGACY_PLAN_SHA256 = "9910f8c6c486f43a15b096d0b9e437e7adda423f152c591c895c221ab9f026fe"
+
+
+def test_legacy_plan_digest_is_unchanged_by_the_new_mode_fields(tmp_path):
+    from test_aeri_cli import CONTRACT, job_text
+
+    from levi.automatic.cli import load_job
+
+    (tmp_path / "initial-state.yaml").write_text(CONTRACT)
+    (tmp_path / "job.yaml").write_text(job_text("/pinned/rollouts"))
+    job = load_job(tmp_path / "job.yaml")
+    assert "inference_mode" not in job["plan"]["run"]["termination"]
+    assert "physical_hold" not in job["plan"]["run"]["termination"]
+    assert job["plan_sha256"] == LEGACY_PLAN_SHA256
+
+
 def test_resume_cannot_reissue_motion_after_registered_stop(tmp_path):
     r = build(tmp_path, script=[{"decision": "rejected"}])
     original = r.orch._issue_intervention_motion

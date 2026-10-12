@@ -352,6 +352,11 @@ def _plain(config) -> dict:
             continue
         if name in ("termination", "reset_settle") and value is not None:
             value = asdict(value)
+            if name == "termination" and value.get("inference_mode") == "legacy_async":
+                # Keep every legacy plan_sha256 as it was before the new mode.
+                value.pop("inference_mode")
+                if value.get("physical_hold") is None:
+                    value.pop("physical_hold")
         elif name == "initial_state":
             value = value.key if value else None
         out[name] = value
