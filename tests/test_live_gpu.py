@@ -713,6 +713,96 @@ def test_a_failing_vllm_start_backs_off_then_stops_and_names_the_reason(ctl, tmp
     assert ctl.attention is None and ctl.start_failures == 0
 
 
+ENGINE_DEAD = (
+    "EngineDeadError: EngineCore encountered an issue. See stack trace (above)"
+)
+
+
+def test_a_start_the_gpu_defeated_waits_and_recovers_without_a_person(ctl, tmp_path):
+    """Another process takes the memory the start was planned for (vLLM dies
+    with EngineDeadError): that is no failure to count. The service keeps
+    waiting in gpu_wait (code vram), retries on its own interval, and starts
+    once the memory is free -- however many times it failed before."""
+    good_script = ctl.config.vllm.script
+    bad_vllm(tmp_path, ctl, ENGINE_DEAD)
+    ctl.config.vllm.gpu_retry_s = 30.0
+    ctl.rollouts.write(0)
+    t = time.time()
+    launches = []
+    real_start = ctl.vllm.start
+    ctl.vllm.start = lambda *a, **k: launches.append(1) or real_start(*a, **k)
+    starts = lambda: len(launches)
+    step(ctl, t)
+    ctl.machine.free = 3000  # the foreign process arrives while vLLM loads
+    assert failure_seen(ctl)
+    now = t + 1
+    for round_ in range(1, 6):  # more than max_start_failures (3)
+        ctl.tick(now)
+        assert starts() == round_
+        assert ctl.start_failures == 0 and ctl.attention is None
+        assert ctl.state == "gpu_wait" and ctl.running
+        assert ctl.decision.code == "vram" and "retry" not in ctl.decision.reason
+        assert "taken by other processes" in ctl.decision.reason
+        assert "EngineDeadError" in ctl.vllm.error
+        ctl.tick(now + 20)  # inside the retry interval: no new start
+        assert starts() == round_
+        now += 31
+        ctl.machine.free = 26000  # free when planned ...
+        fresh(ctl)
+        ctl.tick(now)
+        ctl.machine.free = 3000  # ... taken again while vLLM loads
+        fresh(ctl)
+        assert failure_seen(ctl, round_ + 1)
+        now += 1
+    assert any("other processes hold the GPU memory" in e["text"] for e in ctl.events)
+    ctl.tick(now)  # the last failure is taken in: still a wait
+    assert ctl.start_failures == 0 and ctl.decision.code == "vram"
+    # The memory comes back and a vLLM that works is used.
+    ctl.machine.free = 26000
+    ctl.config.vllm.script = good_script
+    ctl.vllm = gpumgr.Vllm(ctl.config)
+    now += 31
+    ctl.tick(now)
+    assert wait_for(lambda: ctl.vllm.poll() == "ready")
+    ctl.tick(now + 1)
+    assert ctl.vllm.state == "ready" and ctl.gpu_wait_since is None
+    assert ctl.start_failures == 0 and ctl.attention is None
+
+
+def test_a_gpu_wait_has_an_upper_limit_then_it_asks_for_a_person(ctl, tmp_path):
+    bad_vllm(tmp_path, ctl, ENGINE_DEAD)
+    ctl.config.vllm.gpu_retry_s = 30.0
+    ctl.config.vllm.gpu_wait_max_s = 100.0
+    ctl.rollouts.write(0)
+    t = time.time()
+    step(ctl, t)
+    ctl.machine.free = 3000
+    assert failure_seen(ctl)
+    ctl.tick(t + 1)
+    assert ctl.gpu_wait_since is not None and ctl.start_failures == 0
+    ctl.machine.free = 26000
+    fresh(ctl)
+    ctl.tick(t + 40)
+    ctl.machine.free = 3000
+    fresh(ctl)
+    assert failure_seen(ctl, 2)
+    ctl.tick(t + 200)  # past gpu_wait_max_s: counted like any failure
+    assert ctl.start_failures >= 1 and ctl.decision.code == "backoff"
+
+
+def test_an_engine_failure_with_the_memory_free_is_still_a_counted_failure(
+    ctl, tmp_path
+):
+    bad_vllm(tmp_path, ctl, ENGINE_DEAD)
+    ctl.rollouts.write(0)
+    t = time.time()
+    step(ctl, t)
+    assert failure_seen(ctl)
+    ctl.tick(t + 1)
+    assert ctl.start_failures == 1 and ctl.gpu_wait_since is None
+    assert ctl.decision.code == "backoff"
+
+
 def test_the_launch_script_failing_is_reported_with_vllm_s_own_reason(ctl, tmp_path):
     bad = tmp_path / "bad2.sh"
     bad.write_text("#!/usr/bin/env bash\nexit 7\n")
@@ -2429,6 +2519,8 @@ NEW_KEYS = (
     ("gpu", "quiet_pause_s"),
     ("vllm", "nice"),
     ("vllm", "cpus"),
+    ("vllm", "gpu_retry_s"),
+    ("vllm", "gpu_wait_max_s"),
     ("online", "pressure_avg10_max"),
     ("online", "pressure_kinds"),
 )
@@ -2490,6 +2582,8 @@ def test_a_new_setting_is_written_only_when_set(old_config, tmp_path):
     c.gpu.quiet_pause_s = 120.0
     c.vllm.nice = 19
     c.vllm.cpus = "2-3"
+    c.vllm.gpu_retry_s = 30.0
+    c.vllm.gpu_wait_max_s = 600.0
     c.online.pressure_avg10_max = 20.0
     c.online.pressure_kinds = ["cpu"]
     text = live_config.render(c)

@@ -248,6 +248,11 @@ class Controller:
         self.start_failures = 0
         self.next_start_at = 0.0
         self.attention: dict | None = None
+        # GPU contention (see ``_vllm_failed``): when the first start in a row
+        # failed for want of memory, and the memory the last start planned for.
+        self.gpu_wait_since: float | None = None
+        self._start_need = 0
+        self._gpu_backoff = False
         self._paused: dict | None = None  # the status' labelling_paused
         self._gate_code_since: tuple = (None, 0.0)
         self._decision_since: tuple = (None, 0.0)
@@ -755,6 +760,16 @@ class Controller:
         if not want:
             return False
         if now < self.next_start_at:
+            if self._gpu_backoff:
+                self.decision = gpumgr.Decision(
+                    False,
+                    f"the GPU memory vLLM needs is taken by other processes "
+                    f"(vLLM start failed: {self.vllm.error}); trying again in "
+                    f"{self.next_start_at - now:.0f} s",
+                    "vram",
+                    self._start_need,
+                )
+                return False
             self.decision = gpumgr.Decision(
                 False,
                 f"the last vLLM start failed; trying again in "
@@ -866,6 +881,7 @@ class Controller:
                     False, "another agent holds the GPU lock", "lock", need
                 )
             return False
+        self._start_need = need
         self.event(
             f"starting vLLM (budget {profile['gpu_memory_utilization']}, "
             f"max_model_len {profile['max_model_len']}, {free} MiB free, "
@@ -905,9 +921,12 @@ class Controller:
         """One failed start: wait 60 s doubling to 600 s; after
         ``vllm.max_start_failures`` in a row stop and need a person."""
         v = self.config.vllm
-        self.start_failures += 1
         reason = self.vllm.failure_reason()
         self.vllm.error = reason
+        self._gpu_backoff = self._gpu_contention(now, reason)
+        if self._gpu_backoff:
+            return
+        self.start_failures += 1
         wait = min(
             v.start_backoff_max_s, v.start_backoff_s * 2 ** (self.start_failures - 1)
         )
@@ -923,6 +942,32 @@ class Controller:
                 "error",
             )
 
+    def _gpu_contention(self, now, reason) -> bool:
+        """A failed start that the GPU, not the configuration, explains: the
+        memory the start was planned for (``_start_need``) is no longer free
+        now that our vLLM is gone, because another process took it (vLLM then
+        dies with ``EngineDeadError`` or an out-of-memory error). Such a start
+        is not counted towards ``max_start_failures``: the service waits
+        (``gpu_wait``, code ``vram``) and tries again every
+        ``vllm.gpu_retry_s``, for at most ``vllm.gpu_wait_max_s`` since the
+        first one, after which it is an ordinary failure again."""
+        v = self.config.vllm
+        free = self.free_mib(now, ttl=0.0)
+        if not self._start_need or free is None or free >= self._start_need:
+            return False
+        if self.gpu_wait_since is None:
+            self.gpu_wait_since = now
+        if v.gpu_wait_max_s > 0 and now - self.gpu_wait_since > v.gpu_wait_max_s:
+            return False
+        self.next_start_at = now + v.gpu_retry_s
+        self.event(
+            f"vLLM could not start: other processes hold the GPU memory "
+            f"({free} MiB free, {self._start_need} MiB needed); waiting, "
+            f"trying again in {v.gpu_retry_s:.0f} s: {reason}",
+            "error",
+        )
+        return True
+
     def _check_resume(self, now):
         """``levi live resume`` leaves ``live/resume.json``: forget the failures."""
         path = self.config.live_dir / "resume.json"
@@ -935,12 +980,14 @@ class Controller:
             if self.start_failures or self.attention:
                 self.event("resumed: vLLM may be started again")
             self.start_failures, self.attention, self.next_start_at = 0, None, 0.0
+            self.gpu_wait_since = None
 
     def _resident_step(self, now, want, state, mode, profile) -> bool:
         """vLLM is ours and up: keep it awake only while there is room."""
         c = self.config
         if state == "ready":
             self.start_failures = 0
+            self.gpu_wait_since = None
         if state == "starting":
             self.decision = gpumgr.Decision(True, "vLLM is starting", "ok")
             return False

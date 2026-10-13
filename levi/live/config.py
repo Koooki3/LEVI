@@ -59,6 +59,8 @@ OMIT_AT_DEFAULT = frozenset(
         ("gpu", "quiet_pause_s"),
         ("vllm", "nice"),
         ("vllm", "cpus"),
+        ("vllm", "gpu_retry_s"),
+        ("vllm", "gpu_wait_max_s"),
         ("online", "pressure_avg10_max"),
         ("online", "pressure_kinds"),
         ("online", "aeri_specs"),
@@ -334,6 +336,13 @@ class Vllm:
     max_start_failures: int = 3
     start_backoff_s: float = 60.0
     start_backoff_max_s: float = 600.0
+    # A start that failed because other processes took the GPU memory it was
+    # planned for (EngineDeadError, out of memory) is not a failure to count:
+    # the service waits (gpu_wait) and retries every gpu_retry_s, for at most
+    # gpu_wait_max_s from the first such failure (0: no limit), then it counts
+    # as an ordinary failure again.
+    gpu_retry_s: float = 60.0
+    gpu_wait_max_s: float = 21600.0
     # Greedy decoding, as the evaluated configuration.
     temperature: float = 0.0
     # Use a vLLM this service did not start (another agent's) instead of
