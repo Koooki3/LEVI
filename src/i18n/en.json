@@ -3939,5 +3939,14 @@
   "Labelling is yielding the GPU": "Labelling is yielding the GPU",
   "since": "since",
   "Datasets in the labelling queue": "Datasets in the labelling queue",
-  "Paused": "Paused"
+  "Paused": "Paused",
+  "automatic.event.reason.inference_paused": "The policy was paused for a judgement",
+  "automatic.event.reason.inference_resumed": "The policy carried on",
+  "automatic.event.reason.judgement_unproven": "The judgement could not be proven",
+  "automatic.event.reason.goal_verified": "The system ended the episode early (goal verified)",
+  "automatic.event.reason.horizon_exhausted": "The episode reached its step limit",
+  "automatic.event.reason.preflight_failed": "The preflight checks failed",
+  "automatic.event.reason.recorder_failed": "The recording failed",
+  "automatic.event.reason.contract_violation_limit": "The scene broke the initial-state contract too many times",
+  "automatic.wizard.settings.mode_no_adapter": "No real robot adapter in this version: only a dry run can be started."
 }

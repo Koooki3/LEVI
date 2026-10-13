@@ -3939,5 +3939,14 @@
   "Labelling is yielding the GPU": "标注正在让出 GPU",
   "since": "自",
   "Datasets in the labelling queue": "标注队列中的数据集",
-  "Paused": "已暂停"
+  "Paused": "已暂停",
+  "automatic.event.reason.inference_paused": "策略为等待判定而暂停",
+  "automatic.event.reason.inference_resumed": "策略继续运行",
+  "automatic.event.reason.judgement_unproven": "判定无法证实",
+  "automatic.event.reason.goal_verified": "系统提前结束了这个片段（目标已达成）",
+  "automatic.event.reason.horizon_exhausted": "片段跑满了步数上限",
+  "automatic.event.reason.preflight_failed": "启动前检查没有通过",
+  "automatic.event.reason.recorder_failed": "录制失败",
+  "automatic.event.reason.contract_violation_limit": "场景违反初始状态契约的次数过多",
+  "automatic.wizard.settings.mode_no_adapter": "这个版本没有真实机器人适配器：只能启动试运行（dry run）。"
 }

@@ -36,6 +36,23 @@ import type {
   PolicyCheckpoint,
 } from "./wizard-types";
 
+/** The sentences the server gives for a mode it cannot start, in words. */
+const MODE_REASONS: Record<string, string> = {
+  "no real robot adapter in this version (only a dry run can launch)":
+    "automatic.wizard.settings.mode_no_adapter",
+};
+
+/** An unavailable mode's reason: the page's sentence when it knows the
+ * server's, else the server's own text. */
+export function modeReasonText(
+  reason: string | undefined,
+  t: (key: string) => string,
+): string {
+  if (!reason) return t("automatic.wizard.settings.mode_unavailable");
+  const key = MODE_REASONS[reason];
+  return key ? t(key) : reason;
+}
+
 type SetForm = (change: Partial<WizardForm>) => void;
 
 const HASH_KEYS = {
@@ -368,8 +385,7 @@ export function StepSettings({
                   />
                   {!available && (
                     <p className="aw-mode__reason">
-                      {entry?.reason ??
-                        t("automatic.wizard.settings.mode_unavailable")}
+                      {modeReasonText(entry?.reason, t)}
                     </p>
                   )}
                 </div>
