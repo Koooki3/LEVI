@@ -1215,8 +1215,7 @@ recording:
 characters (no line break). It is written into the frozen plan (`plan.success_condition`,
 so it changes `plan_sha256`) only when given; a job without it has exactly the plan and the
 digest it had before the field existed (a test pins that). **It is only recorded and shown**
-(plan card, run window): whether it takes part in a verdict depends on the judging spec the
-run uses, not on this field. `human_assisted` keeps it (a person resetting by hand still has
+(plan card, run window): no verdict reads it. `human_assisted` keeps it (a person resetting by hand still has
 a condition for success).
 
 ## Launching runs (`launch.py`, `runner.py`, `control.py`)

@@ -1293,8 +1293,7 @@ class JobTask(Part):
     instruction: JobText | None = None
     reset_instruction: JobText | None = None
     # What the operator counts as success. Recorded in the frozen plan and
-    # shown; whether it takes part in a verdict is up to the chosen judging
-    # spec, not to this field.
+    # shown only; no verdict reads it.
     success_condition: JobSuccess | None = None
     # Relative to the job file.
     initial_state_spec: JobPath | None = None

@@ -498,7 +498,7 @@ recording:
   reset_folder: reset_stack_plates__r20261010-a
 ```
 
-**成功条件。** `task.success_condition` 可选：一段话，至多 500 个字符，不能换行。只有写了才进冻结的计划（`plan.success_condition`，因此会改变 `plan_sha256`）；没写的作业，计划和摘要与这个字段出现之前逐字节相同（有测试固定）。**它目前只做记录与显示**（计划卡、运行窗口）：是否参与判定取决于运行所用的判定规格，不取决于这个字段。`human_assisted` 也保留它。
+**成功条件。** `task.success_condition` 可选：一段话，至多 500 个字符，不能换行。只有写了才进冻结的计划（`plan.success_condition`，因此会改变 `plan_sha256`）；没写的作业，计划和摘要与这个字段出现之前逐字节相同（有测试固定）。**它目前只做记录与显示**（计划卡、运行窗口）：不参与任何判定。`human_assisted` 也保留它。
 
 ## 启动运行（`launch.py`、`runner.py`、`control.py`）
 

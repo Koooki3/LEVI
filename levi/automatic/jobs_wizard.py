@@ -59,7 +59,7 @@ class _Form(BaseModel):
 class TaskForm(_Form):
     instruction: str = Field(min_length=1, max_length=aeri.MAX_TEXT)
     reset_instruction: str | None = Field(None, min_length=1, max_length=aeri.MAX_TEXT)
-    # One paragraph; recorded and shown only (no verdict reads it by itself).
+    # One paragraph; recorded and shown only (no verdict reads it).
     success_condition: str | None = Field(
         None,
         min_length=1,
