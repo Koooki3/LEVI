@@ -148,3 +148,64 @@ def test_a_human_assisted_plan_has_no_reset_requirements(client, roots, tmp_path
 def test_an_old_run_without_a_plan_has_no_requirements():
     assert api.requirements_of({}) is None
     assert api.requirements_of(None) is None
+
+
+# --- the current step of the open episode (a lower bound, never invented) -----------------------
+
+
+def open_episode(tmp_path, rows, *, state="open"):
+    steps = tmp_path / "root" / "grp" / "fold" / "demo_0001"
+    steps.mkdir(parents=True)
+    text = "step,observed_ns,executed,detail,pose\n" + "".join(
+        f"{i},1,yes,ok,[]\n" for i in range(rows)
+    )
+    (steps / "aeri_steps.csv").write_text(text + "7,1,yes,ok")  # torn last line
+    manifest = {
+        "rollout_root": str(tmp_path / "root"),
+        "group": "grp",
+        "episodes": [
+            {
+                "episode_id": "r.forward.0001",
+                "role": "forward",
+                "state": state,
+                "task_folder": "fold",
+                "demo": "demo_0001",
+            }
+        ],
+    }
+    return manifest, {"run": {"forward_max_steps": 300}}
+
+
+def test_the_step_is_the_committed_rows_of_the_open_forward_episode(tmp_path):
+    manifest, plan = open_episode(tmp_path, 42)
+    got = api.progress_of(manifest, plan, alive=True)
+    assert got == {
+        "episode_id": "r.forward.0001",
+        "step": 42,  # the torn last line is not a row
+        "max_steps": 300,
+        "source": "steps_csv",
+        "lower_bound": True,
+        "reason": None,
+    }
+
+
+@pytest.mark.parametrize(
+    "case, reason",
+    [("sealed", "no_open_episode"), ("dead", "runner_not_alive")],
+)
+def test_the_step_is_unknown_with_a_reason_not_a_guess(tmp_path, case, reason):
+    manifest, plan = open_episode(
+        tmp_path, 5, state="complete" if case == "sealed" else "open"
+    )
+    got = api.progress_of(manifest, plan, alive=case != "dead")
+    assert got["step"] is None and got["reason"] == reason
+    assert got["max_steps"] == 300
+
+
+def test_a_missing_or_escaping_steps_file_is_unknown(tmp_path):
+    manifest, plan = open_episode(tmp_path, 5)
+    manifest["episodes"][0]["demo"] = "../demo_0001"
+    got = api.progress_of(manifest, plan, alive=True)
+    assert got["step"] is None and got["reason"] == "unreadable"
+    assert api.progress_of({}, {}, alive=True)["step"] is None
+    assert api.progress_of(None, None, alive=True)["reason"] == "no_open_episode"

@@ -991,11 +991,78 @@ def scene_question_of(run: _Run) -> dict | None:
     }
 
 
+def _count_rows(fd: int, limit: int = 64 << 20) -> int:
+    """Complete lines after the header of an open CSV (a torn last line is
+    not a row)."""
+    lines, seen = 0, 0
+    while seen < limit:
+        block = os.read(fd, 1 << 20)
+        if not block:
+            break
+        seen += len(block)
+        lines += block.count(b"\n")
+    return max(0, lines - 1)
+
+
+def progress_of(manifest, plan, *, alive: bool) -> dict:
+    """The step of the forward episode being run, read only from the files
+    the run keeps: the committed rows of its ``aeri_steps.csv``. That file
+    is written in blocks, so the number is a **lower bound** (the recorder
+    does not publish a live step counter); when no such file can be read
+    the step is ``null`` and ``reason`` says why (``no_open_episode``,
+    ``runner_not_alive``, ``unreadable``): never a guess. ``max_steps`` is
+    the plan's forward limit."""
+    manifest = manifest if isinstance(manifest, dict) else {}
+    run = (plan or {}).get("run") if isinstance(plan, dict) else None
+    limit = _int_or_none((run or {}).get("forward_max_steps"))
+    out = {
+        "episode_id": None,
+        "step": None,
+        "max_steps": limit,
+        "source": None,
+        "lower_bound": True,
+        "reason": "no_open_episode",
+    }
+    entries = [
+        e
+        for e in manifest.get("episodes") or []
+        if isinstance(e, dict)
+        and e.get("role") == "forward"
+        and e.get("state") == "open"
+    ]
+    if not entries:
+        return out
+    entry = entries[-1]
+    out["episode_id"] = _text_or_none(entry.get("episode_id"))
+    if not alive:
+        out["reason"] = "runner_not_alive"
+        return out
+    out["reason"] = "unreadable"
+    root, group = manifest.get("rollout_root"), manifest.get("group")
+    parts = (group, entry.get("task_folder"), entry.get("demo"), "aeri_steps.csv")
+    if not isinstance(root, str) or not all(isinstance(p, str) for p in parts):
+        return out
+    try:
+        fd = _open_below(Path(root), parts)
+    except OSError:
+        return out
+    try:
+        out["step"] = _count_rows(fd)
+    except OSError:
+        return out
+    finally:
+        os.close(fd)
+    out["source"] = "steps_csv"
+    out["reason"] = None
+    return out
+
+
 def snapshot_of(run: _Run) -> dict:
     committed = [e for e in run.events if e.record == "committed"]
     ended = metrics.ended_forward(run.events)
     automation = metrics.automation(run.events, run.reset_mode)
     current = next((e.episode_id for e in reversed(committed) if e.episode_id), None)
+    runner = run.runner()
     return {
         "run_id": run.run_id,
         "state": run.state,
@@ -1023,8 +1090,9 @@ def snapshot_of(run: _Run) -> dict:
         "challenge": None
         if run.scan.corrupt or run.scan.torn
         else _CHALLENGES.issue(run.run_id, run.seq),
-        "runner": run.runner(),
+        "runner": runner,
         "requirements": requirements_of(run.plan),
+        "progress": progress_of(run.manifest, run.plan, alive=bool(runner["alive"])),
         "updated_at": _last_activity_ms(run),
     }
 

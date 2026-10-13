@@ -23,7 +23,7 @@ BASE = "/api/levi/automatic"
 RUN_KEYS = {
     "run_id", "state", "seq", "reset_mode", "scene_check", "execution_mode",
     "episodes", "counters", "pending_card", "scene_question", "challenge",
-    "runner", "updated_at", "requirements",
+    "runner", "updated_at", "requirements", "progress",
 }  # fmt: skip
 
 
