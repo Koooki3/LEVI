@@ -956,3 +956,18 @@ def test_two_empty_tasks_do_not_claim_one_name_in_the_same_root(live):
     assert first != second
     assert scanner.name_of(first_key) == first
     assert scanner.name_of(second_key) == second
+
+
+def test_sessions_list_survives_a_session_file_before_the_mirror_state(live, live_http):
+    """Regression (UI-R1 G6): the session file is there but the service has
+    not built the dataset's mirror state yet: the list answers, the row
+    just has no mirror view; it is not a 500."""
+    identity, _path, _value = session(live)
+    mirror.state_path(live["config"], live["name"]).unlink()
+    assert mirror.load_state(live["config"], live["name"]) is None
+    answer = live_http.get("/api/levi/live/sessions")
+    assert answer.status_code == 200
+    rows = answer.json()["sessions"]
+    assert [r["session_id"] for r in rows] == [identity["session_id"]]
+    assert rows[0]["dataset"] == live["name"]
+    assert rows[0]["updated_at"] == pytest.approx(_value["updated_at"])

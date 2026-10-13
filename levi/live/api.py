@@ -362,9 +362,9 @@ def sessions_view():
             row.update(
                 _browse(config, row["dataset"], session.run_id or session.session_id)
             )
-            viewed = (
-                mirror.load_state(config, row["dataset"]).get("catalogue") or {}
-            ).get("updated_at")
+            # The service may not have built the mirror state yet (None).
+            state = mirror.load_state(config, row["dataset"]) or {}
+            viewed = (state.get("catalogue") or {}).get("updated_at")
             row["updated_at"] = max(session.updated_at or 0, viewed or 0) or None
         row["fault"] = session.fault
         row["waiting_reset_since"] = (
