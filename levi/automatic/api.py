@@ -700,6 +700,64 @@ def _severity(value: str) -> str:
     return "warn" if value == "warning" else value
 
 
+def _text_or_none(value) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _int_or_none(value) -> int | None:
+    return value if type(value) is int else None
+
+
+def requirements_of(plan) -> dict | None:
+    """What this evaluation session was asked to do, read only from a
+    frozen plan (``cli.load_job``'s ``plan``): the task texts, the episode
+    count, the step limits, early stopping, the reset mode, the policy
+    identities and the inference mode. ``None`` for a run without a plan
+    (an old run); a key an older plan lacks is ``null`` so a client must
+    treat every value as optional. No path of this machine is echoed (the
+    checkpoint directory stays out); ``success_condition`` is recorded and
+    shown only, never an input of a verdict."""
+    if not isinstance(plan, dict) or not plan:
+        return None
+    run = plan.get("run") if isinstance(plan.get("run"), dict) else {}
+    texts = plan.get("texts") if isinstance(plan.get("texts"), dict) else {}
+    term = run.get("termination") if isinstance(run.get("termination"), dict) else {}
+    deployments = (
+        plan.get("deployments") if isinstance(plan.get("deployments"), dict) else {}
+    )
+    human = (plan.get("reset_mode") or run.get("reset_strategy")) == "human_assisted"
+
+    def policy(role):
+        value = deployments.get(role)
+        if not isinstance(value, dict) or (human and role == "reset"):
+            return None
+        return {
+            "checkpoint_id": _text_or_none(value.get("checkpoint_id")),
+            "config": _text_or_none(value.get("config")),
+        }
+
+    early = term.get("allow_early_stop")
+    return {
+        "task": {
+            "instruction": _text_or_none(texts.get("forward")),
+            "reset_instruction": None if human else _text_or_none(texts.get("reset")),
+            "success_condition": _text_or_none(plan.get("success_condition")),
+        },
+        "episodes": _int_or_none(run.get("episodes")),
+        "max_steps": {
+            "forward": _int_or_none(run.get("forward_max_steps")),
+            "reset": None if human else _int_or_none(run.get("reset_max_steps")),
+        },
+        "allow_early_stop": early if isinstance(early, bool) else None,
+        "reset_mode": plan.get("reset_mode") or run.get("reset_strategy"),
+        "policies": {"forward": policy("forward"), "reset": policy("reset")},
+        "inference": {
+            "mode": _text_or_none(term.get("inference_mode")) or "legacy_async",
+            "physical_hold": bool(term.get("physical_hold")),
+        },
+    }
+
+
 def _plan_view(job_id: str, found: launch.LaunchPlan) -> dict:
     return {
         "job_id": job_id,
@@ -732,6 +790,7 @@ def _plan_view(job_id: str, found: launch.LaunchPlan) -> dict:
         "warnings": [scrub(w)[:400] for w in found.warnings],
         "launch_token": found.launch_token,
         "token_expires_at": _ms(found.token_expires_wall_ns),
+        "requirements": requirements_of(found.plan),
     }
 
 
@@ -965,6 +1024,7 @@ def snapshot_of(run: _Run) -> dict:
         if run.scan.corrupt or run.scan.torn
         else _CHALLENGES.issue(run.run_id, run.seq),
         "runner": run.runner(),
+        "requirements": requirements_of(run.plan),
         "updated_at": _last_activity_ms(run),
     }
 

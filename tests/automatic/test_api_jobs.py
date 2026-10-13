@@ -279,3 +279,49 @@ def test_fr3_recipe_is_read_only_and_names_frozen_plan_gaps(client, roots, check
     )
     assert (roots / "wizard" / "wiz-a.yaml").read_bytes() == before
     assert client.get(f"{BASE}/jobs/not-present/fr3-bridge").status_code == 404
+
+
+def test_a_success_condition_is_written_planned_and_echoed(
+    client, roots, checkpoints, tmp_path
+):
+    condition = "All plates of one colour are stacked."
+    body = form(
+        task={
+            "instruction": "stack the plates",
+            "reset_instruction": "unstack them",
+            "success_condition": condition,
+        },
+        reset={"strategy": "single_reset_policy", "scene_check": "provider"},
+        policy_reset={"checkpoint_id": "rst-a"},
+    )
+    answer = post(client, body)
+    assert answer.status_code == 201, answer.text
+    job = cli.load_job(roots / "wizard" / "wiz-a.yaml")
+    assert job["plan"]["success_condition"] == condition
+    plan = client.post(
+        f"{BASE}/plan",
+        json={"job_id": answer.json()["id"], "execution_mode": "dry_run"},
+    ).json()
+    need = plan["requirements"]
+    assert need["task"]["success_condition"] == condition
+    assert need["task"]["reset_instruction"] == "unstack them"
+    assert need["policies"]["forward"] == {
+        "checkpoint_id": "fwd-a",
+        "config": "pi05_fr3_all_state",
+    }
+    assert need["policies"]["reset"]["config"] == "some_reset_config"
+    assert str(tmp_path) not in str(need)
+
+
+def test_the_success_condition_is_one_bounded_paragraph(client, roots, checkpoints):
+    for bad in ("", "x" * 501, "two\nparagraphs"):
+        answer = post(
+            client, form(task={"instruction": "go", "success_condition": bad})
+        )
+        assert answer.status_code == 422, bad
+        fields = [e["field"] for e in answer.json()["detail"]["errors"]]
+        assert fields == ["task.success_condition"]
+    assert not (roots / "wizard").exists()
+    # Left out, the file has no such key (and its plan digest is as before).
+    assert post(client, form()).status_code == 201
+    assert "success_condition:" not in (roots / "wizard" / "wiz-a.yaml").read_text()

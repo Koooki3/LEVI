@@ -1,11 +1,13 @@
+# ruff: noqa: F401, F811
 """UI-R1: the success condition of a job (recorded and shown only) and the
 session requirements the run snapshot echoes from the frozen plan."""
 
 import pytest
 from test_aeri_cli import CONTRACT, job_text
+from test_api_common import client, finished_run, home, job_id_of, roots, write_job
 from test_event_pause_judge import LEGACY_PLAN_SHA256
 
-from levi.automatic import cli
+from levi.automatic import api, cli, launch
 from levi.domain import aeri
 
 SUCCESS = "All plates of one colour are stacked; no colour is left alone."
@@ -59,3 +61,90 @@ def test_the_limit_is_500_characters():
     assert aeri.MAX_SUCCESS_CONDITION == 500
     task = aeri.JobTask(success_condition="x" * 500)
     assert len(task.success_condition) == 500
+
+
+# --- what the plan card and the session window echo --------------------------------------------
+
+BASE = "/api/levi/automatic"
+REQUIREMENT_KEYS = {
+    "task", "episodes", "max_steps", "allow_early_stop", "reset_mode",
+    "policies", "inference",
+}  # fmt: skip
+
+
+def with_success(path, text=SUCCESS):
+    path.write_text(
+        path.read_text().replace(
+            "  initial_state_spec:",
+            f'  success_condition: "{text}"\n  initial_state_spec:',
+        )
+    )
+
+
+def test_the_plan_view_echoes_the_requirements(client, roots, tmp_path):
+    with_success(write_job(roots, tmp_path, name="r-req"))
+    body = client.post(
+        f"{BASE}/plan",
+        json={"job_id": job_id_of(client, "r-req"), "execution_mode": "dry_run"},
+    ).json()
+    need = body["requirements"]
+    assert set(need) == REQUIREMENT_KEYS
+    assert need["task"] == {
+        "instruction": "stack the plates",
+        "reset_instruction": "Reset: stack the plates",
+        "success_condition": SUCCESS,
+    }
+    assert need["episodes"] == 2
+    assert need["max_steps"] == {"forward": 30, "reset": 20}
+    assert need["allow_early_stop"] is True
+    assert need["reset_mode"] == "single_reset_policy"
+    assert need["inference"] == {"mode": "legacy_async", "physical_hold": False}
+    # A job file without checkpoints in it names none; no path is echoed.
+    assert need["policies"] == {"forward": None, "reset": None}
+    assert "/pinned" not in str(need) and str(tmp_path) not in str(need)
+
+
+def test_the_snapshot_echoes_the_requirements_of_the_frozen_plan(
+    client, roots, tmp_path
+):
+    path = write_job(roots, tmp_path, name="r-snap")
+    with_success(path)
+    request = launch.LaunchRequest(
+        job_path=str(path), execution_mode="dry_run", entry="api", backend="inprocess"
+    )
+    found = launch.plan(request)
+    launch.launch(
+        request,
+        plan_sha256=found.plan_sha256,
+        launch_token=found.launch_token,
+        deadline_s=20,
+    )
+    need = client.get(f"{BASE}/runs/r-snap").json()["requirements"]
+    assert set(need) == REQUIREMENT_KEYS
+    assert need["task"]["success_condition"] == SUCCESS
+    assert need["task"]["instruction"] == "stack the plates"
+    assert need["episodes"] == 2 and need["max_steps"]["forward"] == 30
+
+
+def test_a_job_without_a_success_condition_says_none(client, roots, tmp_path):
+    run_id = finished_run(client, tmp_path, roots, name="r-none")
+    need = client.get(f"{BASE}/runs/{run_id}").json()["requirements"]
+    assert need["task"]["success_condition"] is None
+
+
+def test_a_human_assisted_plan_has_no_reset_requirements(client, roots, tmp_path):
+    write_job(roots, tmp_path, name="r-human", strategy="human_assisted")
+    body = client.post(
+        f"{BASE}/plan",
+        json={"job_id": job_id_of(client, "r-human"), "execution_mode": "dry_run"},
+    ).json()
+    need = body["requirements"]
+    assert need["reset_mode"] == "human_assisted"
+    assert need["max_steps"]["reset"] is None
+    assert need["task"]["reset_instruction"] is None
+    assert need["policies"] == {"forward": None, "reset": None}
+
+
+def test_an_old_run_without_a_plan_has_no_requirements():
+    assert api.requirements_of({}) is None
+    assert api.requirements_of(None) is None

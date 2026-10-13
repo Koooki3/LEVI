@@ -23,7 +23,7 @@ BASE = "/api/levi/automatic"
 RUN_KEYS = {
     "run_id", "state", "seq", "reset_mode", "scene_check", "execution_mode",
     "episodes", "counters", "pending_card", "scene_question", "challenge",
-    "runner", "updated_at",
+    "runner", "updated_at", "requirements",
 }  # fmt: skip
 
 
@@ -154,7 +154,9 @@ def test_an_overlong_job_path_is_rejected_before_lookup(client):
         f"{BASE}/plan", json={"job_id": "/outside/" + "x" * 128 + ".yaml"}
     )
     assert response.status_code == 422
-    assert any(error["type"] == "string_too_long" for error in response.json()["detail"])
+    assert any(
+        error["type"] == "string_too_long" for error in response.json()["detail"]
+    )
 
 
 def test_snapshot_events_metrics_of_a_finished_run(client, tmp_path, roots):

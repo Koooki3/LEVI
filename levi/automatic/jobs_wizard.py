@@ -59,6 +59,13 @@ class _Form(BaseModel):
 class TaskForm(_Form):
     instruction: str = Field(min_length=1, max_length=aeri.MAX_TEXT)
     reset_instruction: str | None = Field(None, min_length=1, max_length=aeri.MAX_TEXT)
+    # One paragraph; recorded and shown only (no verdict reads it by itself).
+    success_condition: str | None = Field(
+        None,
+        min_length=1,
+        max_length=aeri.MAX_SUCCESS_CONDITION,
+        pattern=r"^[^\r\n]+$",
+    )
 
 
 class PolicyForm(_Form):
@@ -191,6 +198,8 @@ def build_text(form: JobForm, forward: dict, reset: dict | None) -> str:
     lines += ["task:", f"  instruction: {_text(form.task.instruction)}"]
     if not human and form.task.reset_instruction:
         lines.append(f"  reset_instruction: {_text(form.task.reset_instruction)}")
+    if form.task.success_condition:
+        lines.append(f"  success_condition: {_text(form.task.success_condition)}")
     if form.termination and form.termination.allow_early_stop is not None:
         lines += [
             "termination:",
