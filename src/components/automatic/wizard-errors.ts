@@ -36,6 +36,8 @@ const CODE_KEYS: Record<string, string> = {
 /** Field paths of the job -> the name the form uses for them. */
 const FIELD_KEYS: Record<string, string> = {
   "task.instruction": "automatic.wizard.settings.instruction",
+  "task.success_condition": "automatic.wizard.settings.success_condition",
+  "task.reset_instruction": "automatic.wizard.settings.reset_instruction",
   "run.max_steps": "automatic.wizard.settings.max_steps",
   "run.episodes": "automatic.wizard.settings.episodes",
   "policy_forward.checkpoint_id": "automatic.wizard.policy.pick_one",

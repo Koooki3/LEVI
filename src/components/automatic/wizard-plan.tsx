@@ -6,6 +6,7 @@ import { CircleCheck, CircleX, Info, TriangleAlert } from "lucide-react";
 import { Badge, Icon } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Note } from "@/components/pages-ui/feedback";
+import { RequirementsCard } from "./requirements-card";
 import { tokenSecondsLeft } from "./wizard-logic";
 import type { LaunchPlan, PlanCheck } from "./wizard-types";
 
@@ -173,6 +174,7 @@ export function PlanCard({ plan, now }: { plan: LaunchPlan; now: number }) {
           <Badge tone="info">{t("automatic.wizard.plan.uses_gate")}</Badge>
         )}
       </p>
+      <RequirementsCard requirements={plan.requirements} />
       <ChecksList checks={plan.checks} />
       <Refusals codes={plan.refusals} />
       <p className="pg-pool-hint" role="status">

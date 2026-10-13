@@ -1,4 +1,5 @@
 import type { LiveSession } from "@/components/live/types";
+import type { Requirements } from "./types";
 // Types of the automatic-evaluation (AERI) wizard and campaign pages. They
 // follow levi2/design/aeri-ui-api-contract.md sections 2-4; a field the
 // contract does not list is not read here. Times are epoch milliseconds, ids
@@ -61,7 +62,12 @@ export type PoliciesResponse = {
 export type JobCreate = {
   request_id: string;
   name: string;
-  task: { instruction: string; reset_instruction?: string };
+  task: {
+    instruction: string;
+    reset_instruction?: string;
+    /** One paragraph; recorded and shown only. */
+    success_condition?: string;
+  };
   policy_forward: { checkpoint_id: string };
   policy_reset?: { checkpoint_id: string };
   reset: { strategy: ResetStrategy; scene_check: SceneCheck };
@@ -97,6 +103,7 @@ export type LaunchPlan = {
   motion: boolean;
   launch_token: string;
   token_expires_at: number;
+  requirements?: Requirements | null;
 };
 
 // --- campaigns ---------------------------------------------------------------

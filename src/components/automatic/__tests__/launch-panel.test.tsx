@@ -7,7 +7,7 @@ import {
   waitFor,
 } from "@/components/ds/__tests__/dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { fixtureJobs, mockFetch, plan } from "./fixtures";
+import { fixtureJobs, mockFetch, plan, requirements } from "./fixtures";
 
 const pushed: string[] = [];
 mock.module("next/navigation", () => ({
@@ -52,6 +52,19 @@ async function planned(over = {}) {
 }
 
 describe("the launch panel", () => {
+  test("the plan card echoes the requirements the server sends", async () => {
+    const { host } = await planned({ requirements: requirements() });
+    const text = host.querySelector("[data-testid=requirements]")!.textContent!;
+    expect(text).toContain("stack the plates");
+    expect(text).toContain("All plates of one colour are stacked.");
+    expect(text).toContain("Recorded and shown only");
+  });
+
+  test("a plan from an older server has no requirements card", async () => {
+    const { host } = await planned();
+    expect(host.querySelector("[data-testid=requirements]")).toBeNull();
+  });
+
   test("a dry-run plan can be started, after a confirmation, and opens the run window", async () => {
     const { host, m } = await planned();
     expect(host.textContent).toContain("Not confirmed by a user");

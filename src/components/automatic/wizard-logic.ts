@@ -32,6 +32,10 @@ export type WizardForm = {
   operatorAttested: boolean;
   // settings
   instruction: string;
+  /** Optional, one paragraph; recorded and shown only (UI-R1). */
+  successCondition: string;
+  /** Optional; used only with a reset policy. */
+  resetInstruction: string;
   maxSteps: string;
   episodes: string;
   allowEarlyStop: boolean;
@@ -52,6 +56,8 @@ export const HUMAN_RESET = "human";
 export const MAX_ARMS = 8;
 export const SHORT_RUN_STEPS = 120;
 export const INSTRUCTION_MAX = 500;
+export const SUCCESS_CONDITION_MAX = 500;
+export const RESET_INSTRUCTION_MAX = 2000;
 
 export const SCHEDULE_KINDS: {
   value: ScheduleKind;
@@ -116,6 +122,8 @@ export function defaultForm(capabilities?: Capabilities | null): WizardForm {
     // the job, and the wizard has no way to give one yet (see attestAvailable).
     operatorAttested: false,
     instruction: "",
+    successCondition: "",
+    resetInstruction: "",
     maxSteps: String(d?.max_steps ?? 400),
     episodes: String(d?.episodes ?? 5),
     allowEarlyStop: true,
@@ -239,6 +247,17 @@ export function validateSettings(form: WizardForm): Problems {
   if (!instruction) problems.instruction = "automatic.wizard.err.instruction";
   else if (instruction.length > INSTRUCTION_MAX)
     problems.instruction = "automatic.wizard.err.instruction_long";
+  const success = form.successCondition.trim();
+  if (success.length > SUCCESS_CONDITION_MAX)
+    problems.successCondition = "automatic.wizard.err.success_condition_long";
+  else if (/[\r\n]/.test(success))
+    problems.successCondition =
+      "automatic.wizard.err.success_condition_paragraph";
+  if (
+    form.resetChoice !== HUMAN_RESET &&
+    form.resetInstruction.trim().length > RESET_INSTRUCTION_MAX
+  )
+    problems.resetInstruction = "automatic.wizard.err.reset_instruction_long";
   const steps = wholeNumber(form.maxSteps);
   if (steps === null || steps < 1 || steps > 100000)
     problems.maxSteps = "automatic.wizard.err.max_steps";
@@ -320,8 +339,13 @@ export function buildJobDraft(
     termination: { allow_early_stop: form.allowEarlyStop },
     recording: forward ? { group: forward.name } : {},
   };
-  if (form.resetChoice !== HUMAN_RESET)
+  const success = form.successCondition.trim();
+  if (success) draft.task.success_condition = success;
+  if (form.resetChoice !== HUMAN_RESET) {
     draft.policy_reset = { checkpoint_id: form.resetChoice };
+    const reset = form.resetInstruction.trim();
+    if (reset) draft.task.reset_instruction = reset;
+  }
   return draft;
 }
 

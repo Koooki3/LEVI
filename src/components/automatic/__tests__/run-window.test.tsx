@@ -6,7 +6,7 @@ import {
   waitFor,
 } from "@/components/ds/__tests__/dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { card, mockFetch, question, snapshot } from "./fixtures";
+import { card, mockFetch, question, requirements, snapshot } from "./fixtures";
 import type { PendingCard, RunSnapshot } from "../types";
 
 mock.module("next/link", () => ({
@@ -65,6 +65,66 @@ function open(
   restore = m.restore;
   return m;
 }
+
+describe("the run window: requirements and step", () => {
+  test("shows the requirements of the session and the step as a lower bound", async () => {
+    open(
+      snapshot({
+        state: "FORWARD_ACTIVE",
+        requirements: requirements(),
+        progress: {
+          episode_id: "run-1.forward.0007",
+          step: 42,
+          max_steps: 300,
+          lower_bound: true,
+          source: "steps_csv",
+          reason: null,
+        },
+      }),
+    );
+    const { host } = await render(<RunWindow runId="run-1" />);
+    await waitFor(() => host.querySelector("[data-testid=requirements]"));
+    const card = host.querySelector("[data-testid=requirements]")!.textContent!;
+    expect(card).toContain("stack the plates");
+    expect(card).toContain("unstack the plates");
+    expect(card).toContain("Recorded and shown only");
+    expect(card).toContain("pi05_fr3");
+    const step = host.querySelector(
+      "[data-testid=step-progress]",
+    )!.textContent!;
+    expect(step).toContain("≥ 42 / 300");
+  });
+
+  test("a step that cannot be known shows a dash and the reason", async () => {
+    open(
+      snapshot({
+        state: "WAIT_HUMAN",
+        progress: {
+          step: null,
+          max_steps: 300,
+          reason: "no_open_episode",
+          lower_bound: true,
+        },
+      }),
+    );
+    const { host } = await render(<RunWindow runId="run-1" />);
+    await waitFor(() => host.querySelector("[data-testid=step-progress]"));
+    const step = host.querySelector(
+      "[data-testid=step-progress]",
+    )!.textContent!;
+    expect(step).toContain("— / 300");
+    expect(step).toContain("no episode is being run right now");
+    expect(step.startsWith("—")).toBe(true);
+  });
+
+  test("a snapshot of an older server (no requirements, no progress) still renders", async () => {
+    open(snapshot());
+    const { host } = await render(<RunWindow runId="run-1" />);
+    await waitFor(() => host.querySelector("[data-state=RESET_ACTIVE]"));
+    expect(host.querySelector("[data-testid=requirements]")).toBeNull();
+    expect(host.querySelector("[data-testid=step-progress]")).toBeNull();
+  });
+});
 
 describe("the run window", () => {
   test("a manual-reset run greys the reset states and says why, in words", async () => {

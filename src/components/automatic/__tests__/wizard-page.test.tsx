@@ -419,6 +419,44 @@ describe("the wizard, one run", () => {
     );
   });
 
+  test("the settings step takes a success condition and a reset instruction, and says what they do", async () => {
+    const api = fakeApi({ reset: true });
+    const { host } = await render(<WizardPage api={api} navigate={() => {}} />);
+    await flush(10);
+    await toSettings(host);
+    await click(host.querySelectorAll('input[name="aw-policy"]')[0]!);
+    // Pick the reset policy: its instruction field appears with it.
+    await click(host.querySelectorAll('input[name="aw-reset"]')[1]!);
+    await click(buttonNamed(host, "Next")!);
+    expect(host.textContent).toContain("Success condition (optional)");
+    expect(host.textContent).toContain("depends on the chosen judging spec");
+    const areas = host.querySelectorAll("textarea");
+    expect(areas.length).toBe(3);
+    await type(areas[0]!, "go");
+    await type(areas[1]!, "All plates of one colour are stacked.");
+    await type(areas[2]!, "unstack them");
+    await click(buttonNamed(host, "Next")!);
+    await flush(50);
+    const created = (api.createJob as ReturnType<typeof mock>).mock
+      .calls[0][0] as { task: Record<string, string> };
+    expect(created.task).toEqual({
+      instruction: "go",
+      success_condition: "All plates of one colour are stacked.",
+      reset_instruction: "unstack them",
+    });
+  });
+
+  test("a human-reset run has no reset instruction field", async () => {
+    const api = fakeApi({ reset: true });
+    const { host } = await render(<WizardPage api={api} navigate={() => {}} />);
+    await flush(10);
+    await toSettings(host);
+    await click(host.querySelectorAll('input[name="aw-policy"]')[0]!);
+    await click(buttonNamed(host, "Next")!);
+    expect(host.querySelectorAll("textarea").length).toBe(2);
+    expect(host.textContent).not.toContain("Reset instruction");
+  });
+
   test("a rejected job shows the server's field errors", async () => {
     const api = fakeApi({
       createJob: mock(async () => {

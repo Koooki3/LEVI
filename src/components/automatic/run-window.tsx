@@ -12,9 +12,11 @@ import { useLocale } from "@/components/levi-locale";
 import { automaticApi, newRequestId } from "./api";
 import { errorText } from "./launch-panel";
 import { PendingCard } from "./pending-card";
+import { RequirementsCard } from "./requirements-card";
 import {
   currentEpisodeText,
   isBlind,
+  stepProgressText,
   mergeCard,
   resultDone,
   resultKey,
@@ -181,6 +183,14 @@ export function RunWindow({ runId }: { runId: string }) {
                   </dd>
                 </>
               )}
+              {snapshot.progress && (
+                <>
+                  <dt>{t("automatic.run.now.step_label")}</dt>
+                  <dd data-testid="step-progress">
+                    {stepProgressText(snapshot.progress, t)}
+                  </dd>
+                </>
+              )}
               <dt>{t("automatic.run.now.planned")}</dt>
               <dd>{snapshot.counters.planned_interventions}</dd>
               <dt>{t("automatic.run.now.unplanned")}</dt>
@@ -189,6 +199,11 @@ export function RunWindow({ runId }: { runId: string }) {
               <dd>{snapshot.counters.faults}</dd>
             </dl>
           </section>
+
+          <RequirementsCard
+            className="ar-section"
+            requirements={snapshot.requirements}
+          />
 
           {snapshot.scene_question && (
             <SceneCheck

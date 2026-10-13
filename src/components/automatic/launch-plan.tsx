@@ -5,6 +5,7 @@ import { CircleAlert, CircleCheck, Info, TriangleAlert } from "lucide-react";
 import { Button, Icon } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { movesRobot } from "./run-logic";
+import { RequirementsCard } from "./requirements-card";
 import { ModeChips, Note } from "./run-parts";
 import type { LaunchPlan } from "./types";
 
@@ -105,6 +106,7 @@ export function PlanCard({
           </>
         )}
       </dl>
+      <RequirementsCard requirements={plan.requirements} />
       {plan.isc?.status === "draft" && (
         <Note
           tone="warning"

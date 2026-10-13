@@ -155,6 +155,65 @@ describe("choice and settings checks", () => {
   });
 });
 
+describe("success condition and reset instruction", () => {
+  const base = { ...defaultForm(), policyId: "a", instruction: "stack" };
+
+  test("a form without them writes neither key", () => {
+    const draft = buildJobDraft(base, policies(true));
+    expect(Object.keys(draft.task)).toEqual(["instruction"]);
+    const withReset = buildJobDraft(
+      { ...base, resetChoice: "r", resetInstruction: "   " },
+      policies(true),
+    );
+    expect(Object.keys(withReset.task)).toEqual(["instruction"]);
+  });
+
+  test("the success condition is trimmed and sent", () => {
+    const draft = buildJobDraft(
+      { ...base, successCondition: "  all plates stacked  " },
+      policies(true),
+    );
+    expect(draft.task.success_condition).toBe("all plates stacked");
+  });
+
+  test("the reset instruction is sent with a reset policy only", () => {
+    const form = { ...base, resetInstruction: " unstack them " };
+    expect(
+      buildJobDraft(form, policies(true)).task.reset_instruction,
+    ).toBeUndefined();
+    expect(
+      buildJobDraft({ ...form, resetChoice: "r" }, policies(true)).task
+        .reset_instruction,
+    ).toBe("unstack them");
+  });
+
+  test("the success condition is one paragraph of at most 500 characters", () => {
+    const check = (text: string) =>
+      validateSettings({ ...base, successCondition: text }).successCondition;
+    expect(check("")).toBeUndefined();
+    expect(check("x".repeat(500))).toBeUndefined();
+    expect(check("x".repeat(501))).toBe(
+      "automatic.wizard.err.success_condition_long",
+    );
+    expect(check("one\ntwo")).toBe(
+      "automatic.wizard.err.success_condition_paragraph",
+    );
+    // Blank lines around the text are trimmed, not an error.
+    expect(check("\nall done\n")).toBeUndefined();
+  });
+
+  test("the reset instruction is at most 2000 characters and only checked with a reset policy", () => {
+    const long = "x".repeat(2001);
+    expect(
+      validateSettings({ ...base, resetChoice: "r", resetInstruction: long })
+        .resetInstruction,
+    ).toBe("automatic.wizard.err.reset_instruction_long");
+    expect(
+      validateSettings({ ...base, resetInstruction: long }).resetInstruction,
+    ).toBeUndefined();
+  });
+});
+
 describe("requests", () => {
   const form = {
     ...defaultForm(),

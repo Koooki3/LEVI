@@ -20,6 +20,8 @@ import type { ExecutionMode } from "./types";
 import {
   HUMAN_RESET,
   INSTRUCTION_MAX,
+  RESET_INSTRUCTION_MAX,
+  SUCCESS_CONDITION_MAX,
   attestAvailable,
   MAX_ARMS,
   forwardCheckpoints,
@@ -266,6 +268,44 @@ export function StepSettings({
           onChange={(event) => setForm({ instruction: event.target.value })}
         />
       </Field>
+      <Field
+        label={t("automatic.wizard.settings.success_condition")}
+        hint={t("automatic.wizard.settings.success_condition_hint").replace(
+          "{max}",
+          String(SUCCESS_CONDITION_MAX),
+        )}
+        error={
+          problems.successCondition ? t(problems.successCondition) : undefined
+        }
+      >
+        <Textarea
+          value={form.successCondition}
+          rows={2}
+          onChange={(event) =>
+            setForm({ successCondition: event.target.value })
+          }
+        />
+      </Field>
+      {form.resetChoice !== HUMAN_RESET && (
+        <Field
+          label={t("automatic.wizard.settings.reset_instruction")}
+          hint={t("automatic.wizard.settings.reset_instruction_hint").replace(
+            "{max}",
+            String(RESET_INSTRUCTION_MAX),
+          )}
+          error={
+            problems.resetInstruction ? t(problems.resetInstruction) : undefined
+          }
+        >
+          <Textarea
+            value={form.resetInstruction}
+            rows={2}
+            onChange={(event) =>
+              setForm({ resetInstruction: event.target.value })
+            }
+          />
+        </Field>
+      )}
       <div className="aw-grid">
         <Field
           label={t("automatic.wizard.settings.max_steps")}

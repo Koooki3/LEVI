@@ -9,6 +9,7 @@ import type {
   PendingCard,
   ResetMode,
   RunEvent,
+  RunProgress,
   RunSnapshot,
 } from "./types";
 
@@ -500,4 +501,23 @@ export function currentEpisodeText(
       return String(named);
   }
   return previous;
+}
+
+/** The step of the episode being run as words. A number from the server is a
+ * lower bound (the run's step file is written in blocks); with none, a dash
+ * and the reason the server gave: never a guess. */
+export function stepProgressText(
+  progress: RunProgress,
+  t: (key: string) => string,
+): string {
+  const limit = progress.max_steps != null ? ` / ${progress.max_steps}` : "";
+  if (typeof progress.step === "number") {
+    const bound = progress.lower_bound !== false;
+    return `${bound ? "≥ " : ""}${progress.step}${limit}${
+      bound ? ` (${t("automatic.req.step_lower_bound")})` : ""
+    }`;
+  }
+  const key = `automatic.req.step_reason.${progress.reason ?? ""}`;
+  const why = progress.reason && t(key) !== key ? ` (${t(key)})` : "";
+  return `—${limit}${why}`;
 }

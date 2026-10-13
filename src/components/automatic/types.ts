@@ -25,6 +25,37 @@ export interface PlanCheck {
   severity: "info" | "warn" | "error";
   detail?: string;
 }
+/** What a session was asked to do (`requirements` of a plan or a snapshot,
+ * read from the frozen plan). Every value may be missing or null: an older
+ * server sends none of it. `success_condition` is recorded and shown only. */
+export interface Requirements {
+  task?: {
+    instruction?: string | null;
+    reset_instruction?: string | null;
+    success_condition?: string | null;
+  } | null;
+  episodes?: number | null;
+  max_steps?: { forward?: number | null; reset?: number | null } | null;
+  allow_early_stop?: boolean | null;
+  reset_mode?: string | null;
+  policies?: {
+    forward?: { checkpoint_id?: string | null; config?: string | null } | null;
+    reset?: { checkpoint_id?: string | null; config?: string | null } | null;
+  } | null;
+  inference?: { mode?: string | null; physical_hold?: boolean | null } | null;
+}
+
+/** The step of the episode being run: a lower bound read from the run's step
+ * file, or `step: null` with the reason it is unknown. */
+export interface RunProgress {
+  episode_id?: string | null;
+  step?: number | null;
+  max_steps?: number | null;
+  source?: string | null;
+  lower_bound?: boolean;
+  reason?: string | null;
+}
+
 export interface LaunchPlan {
   plan_sha256: string;
   run_id: string;
@@ -45,6 +76,7 @@ export interface LaunchPlan {
   motion?: boolean;
   launch_token: string;
   token_expires_at: number;
+  requirements?: Requirements | null;
 }
 
 export interface RunSummary {
@@ -129,6 +161,8 @@ export interface RunSnapshot {
   scene_question: SceneQuestion | null;
   challenge: string;
   runner: { alive: boolean; pid?: number };
+  requirements?: Requirements | null;
+  progress?: RunProgress | null;
   updated_at?: number;
 }
 

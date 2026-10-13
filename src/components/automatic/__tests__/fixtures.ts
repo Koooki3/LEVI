@@ -3,6 +3,7 @@ import type {
   JobsResponse,
   LaunchPlan,
   PendingCard,
+  Requirements,
   RunSnapshot,
   SceneQuestion,
 } from "../types";
@@ -160,5 +161,25 @@ export function fixtureJobs(): JobsResponse {
         errors: ["task.instruction: required"],
       },
     ],
+  };
+}
+
+export function requirements(over: Partial<Requirements> = {}): Requirements {
+  return {
+    task: {
+      instruction: "stack the plates",
+      reset_instruction: "unstack the plates",
+      success_condition: "All plates of one colour are stacked.",
+    },
+    episodes: 12,
+    max_steps: { forward: 300, reset: 200 },
+    allow_early_stop: true,
+    reset_mode: "single_reset_policy",
+    policies: {
+      forward: { checkpoint_id: "fwd-a", config: "pi05_fr3" },
+      reset: { checkpoint_id: "rst-a", config: "pi05_reset" },
+    },
+    inference: { mode: "event_pause_judge", physical_hold: true },
+    ...over,
   };
 }
