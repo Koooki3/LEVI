@@ -392,6 +392,21 @@
           ],
           "default": null,
           "title": "Reset Instruction"
+        },
+        "success_condition": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "minLength": 1,
+              "pattern": "^[^\\r\\n]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Success Condition"
         }
       },
       "title": "JobTask",

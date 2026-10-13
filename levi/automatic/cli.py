@@ -42,6 +42,7 @@ same strict YAML subset as the Initial State Contract
     task:
       instruction: stack the plates
       reset_instruction: "Reset: stack the plates"
+      success_condition: "All plates of one colour are stacked."  # optional, one paragraph
       initial_state_spec: initial-state.yaml   # relative to this file
     termination: {...}           # TerminationConfig fields
     reset:
@@ -230,6 +231,9 @@ def load_job(path) -> dict:
         },
         "texts": texts,
     }
+    if spec.task.success_condition is not None:
+        # Only when given: a job without it keeps its plan digest.
+        plan["success_condition"] = spec.task.success_condition
     deployments = {
         role: policy.deployment.model_dump(exclude_none=True)
         for role, policy in (

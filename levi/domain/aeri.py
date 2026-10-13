@@ -73,6 +73,8 @@ MINORS = {
 MINOR = 0
 MAX_BYTES = 256 * 1024
 MAX_TEXT = 2000
+# The operator's success condition of a task: one paragraph (UI-R1).
+MAX_SUCCESS_CONDITION = 500
 INT64_MAX = 2**63 - 1
 
 SCHEMAS = {
@@ -1234,6 +1236,12 @@ JobFolder = Annotated[
 ]
 JobText = Annotated[str, StringConstraints(min_length=1, max_length=MAX_TEXT)]
 JobPath = Annotated[str, StringConstraints(min_length=1, max_length=4096)]
+JobSuccess = Annotated[
+    str,
+    StringConstraints(
+        min_length=1, max_length=MAX_SUCCESS_CONDITION, pattern=r"^[^\r\n]+$"
+    ),
+]
 
 
 def _sections_present(value, names):
@@ -1284,6 +1292,10 @@ class JobPolicies(Part):
 class JobTask(Part):
     instruction: JobText | None = None
     reset_instruction: JobText | None = None
+    # What the operator counts as success. Recorded in the frozen plan and
+    # shown; whether it takes part in a verdict is up to the chosen judging
+    # spec, not to this field.
+    success_condition: JobSuccess | None = None
     # Relative to the job file.
     initial_state_spec: JobPath | None = None
 
