@@ -483,6 +483,7 @@ policies:
 task:
   instruction: stack the plates
   reset_instruction: "Reset: stack the plates"
+  success_condition: "All plates of one colour are stacked."   # 可选
   initial_state_spec: initial-state.yaml   # 相对本文件
 termination:                  # TerminationConfig 的字段
   min_steps: 10
@@ -496,6 +497,8 @@ recording:
   forward_folder: stack_plates__r20261010-a
   reset_folder: reset_stack_plates__r20261010-a
 ```
+
+**成功条件。** `task.success_condition` 可选：一段话，至多 500 个字符，不能换行。只有写了才进冻结的计划（`plan.success_condition`，因此会改变 `plan_sha256`）；没写的作业，计划和摘要与这个字段出现之前逐字节相同（有测试固定）。**它目前只做记录与显示**（计划卡、运行窗口）：是否参与判定取决于运行所用的判定规格，不取决于这个字段。`human_assisted` 也保留它。
 
 ## 启动运行（`launch.py`、`runner.py`、`control.py`）
 
@@ -531,9 +534,9 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 | `GET policies` | 读 | 从 `LEVI_AERI_POLICY_ROOT` 发现可部署的检查点（只读目录列表，从不读取或计算权重哈希）：`id`、`role`、`config`、`sha256_status`（`verified`：磁盘上有点名权重文件的哈希清单，LEVI 不重新计算；`recorded`；`none`）、`notes`；只有明确声明为复位策略的检查点才让 `reset_available` 为真（否则页面只提供人工复位） |
 | `GET jobs` | 读 | `LEVI_AERI_JOB_ROOTS` 下的作业文件：不含路径的不透明 `id`、`name`、`valid`、`reset_mode`、`errors` |
 | `POST jobs` | 人 | 把向导表单写成 `<第一个作业根>/wizard/` 下的**新**作业文件（绝不覆盖：`409 job_exists`；同一表单再提交得到同一文件）。检查点必须来自 `GET policies`；`human_assisted` 不带复位策略；`422 job_invalid` 带逐字段的 `errors: [{field, message}]`。所选检查点、服务配置与发现目录写入各策略的 `deployment` 块，并纳入计划摘要。由人核对场景（`operator_attested`）需要初始状态契约，表单目前还不能指定 |
-| `POST plan` | 读 | 启动计划（`launchable`、`refusals`、`checks`、`launch_token`、`token_expires_at`）；模式缺省为 `dry_run` |
+| `POST plan` | 读 | 启动计划（`launchable`、`refusals`、`checks`、`launch_token`、`token_expires_at`）和 `requirements`（见下）；模式缺省为 `dry_run` |
 | `POST runs` | 人 | 启动看过的计划（`plan_sha256`、`launch_token`、`confirm: "launch"`、`request_id`）：`412 plan_changed`/`token_expired`、`409 run_exists`/`robot_busy`、`501 no_robot_adapter`、`503 systemd_unavailable`。同一 `request_id` 返回同一运行，重启后也一样 |
-| `GET runs`、`GET runs/{id}` | 读 | 摘要；快照：状态、`seq`、片段、计数、等待卡、打开的场景问题、一次性 `challenge`（绑定 `seq`，60 秒，只在内存里）、运行器 |
+| `GET runs`、`GET runs/{id}` | 读 | 摘要；快照：状态、`seq`、片段、计数、等待卡、打开的场景问题、一次性 `challenge`（绑定 `seq`，60 秒，只在内存里）、运行器，以及 `requirements` 和 `progress`（见下） |
 | `GET runs/{id}/events?after=&limit=` | 读 | 某序号之后的日志转移和备注 |
 | `GET runs/{id}/metrics` | 读 | `metrics.report` |
 | `POST runs/{id}/stop` | 人 | `{command_id, confirm: "stop"}`，走命令通道：`result` 为 `applied`、`repeated` 或 `refused`（运行器三秒内没回复时为 `queued`，状态码 202）；`409 not_running`；该运行上另一个操作未结束时 `423` |
@@ -547,6 +550,8 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 **谁能写。** 写路由拒绝任何 Bearer 凭据（agent 永远不能启动、停止、恢复、打标签或答复），并要求界面令牌。每个写操作带 `request_id` 或 `command_id`：同一个再发返回第一次的回复，已用 ID 换成别的内容是 `409 request_id_used`。每个运行同一时刻只允许一个操作（`423 busy`）。写操作记入 `$LEVI_AERI_HOME/control.jsonl`（`api_*` 行）。
 
 **盲标。** 操作员给一个片段打成功或失败标签之前，任何地方都不显示自动系统怎么判、片段怎么结束：卡片的 `automatic_verdict` 是 `null`（`hidden_until_labelled`），事件里的 `goal_verified`、`horizon_exhausted`、`operator_stop` 换成 `hidden_until_labelled`，只要还有已结束片段没打标签，指标就扣下 `autonomous`、`early_termination` 和 `agreement.by_ended_by`（`null`，列在 `withheld` 里）。`discarded` 和 `unclear` 不揭示任何东西。
+
+**`requirements` 与 `progress`。** 计划应答和运行快照带 `requirements`，只从冻结的计划里读：`task`（`instruction`、`reset_instruction`、`success_condition`）、`episodes`、`max_steps`（`forward`、`reset`）、`allow_early_stop`、`reset_mode`、`policies`（`forward` / `reset`：`checkpoint_id`、`config`，不回显目录）和 `inference`（`mode`：`legacy_async` 或 `event_pause_judge`；`physical_hold`）。旧计划缺的键为 `null`；没有计划的运行 `requirements` 为 `null`。运行快照还带 `progress`：正在跑的前向片段的步数，由它的 `aeri_steps.csv` 里已提交的行数得出。这个文件是分块写入的，所以 `step` 是**下限**（`lower_bound: true`）；读不到时 `step` 为 `null`，`reason` 写明原因（`no_open_episode`、`runner_not_alive`、`unreadable`），不做估算。这两个字段对客户端都是可选的：旧服务不发，页面就不显示。AERI 运行没有单独的事件智能设置，事件模式就是 `termination.inference_mode`。
 
 **设置。** `LEVI_AERI_POLICY_ROOT`：策略检查点目录，`GET policies` 列出它，`POST jobs` 只接受其中的检查点（未设置：没有检查点，由人复位场景）。测试：`tests/automatic/test_api_*.py`。
 

@@ -191,6 +191,8 @@ uv run levi live stop                            # 只停自己的进程
 
 **旧版本。** 不认识 `[queue]` 或 `[gpu.yield]` 的版本会拒绝整个文件。所以 `levi live init` 会写出这两张表（只有这里它们一定出现）；服务给 worker 写的 `live/effective.toml` 和 `levi live start` 创建的文件在它们等于默认值时不写，这样旧版本读这些文件和以前完全一样。每个数据集的模式在 `queue.json` 里，旧版本从不读它。
 
+**页面上。** `/live` 的服务面板按 `queue` 列出每个数据集的状态、模式、等待的片段数和原因（`yielding` 行用人话写出让出原因），让出期间列表上方有一块说明：每条原因、什么情况下结束，以及服务给出 `resume_at` 时标注预计恢复的时间。数据来自状态文件的 `queue` 和 `yield`（与 `GET /api/levi/live/queue` 返回的行相同）；状态文件没有这些字段时只显示数量。
+
 **状态字段。** `status.json` 有 `queue: [{dataset, mode, waiting, state, reason}]`，`state` 取 `queued`、`running`、`yielding`、`paused`（`off` 也用它）、`done`、`failed`；还有 `yield: {enabled, active, reasons: [{code, text}], since, resume_at}`；`gate.json` 带同样的 `yield` 对象。恢复前的安静期里唯一的原因是 `resuming`。`labelling_paused`（评测客户端读的字段）在部署期间不设置，只有 `foreign_gpu`、`foreign_lock`、`probe_error` 持续超过 `gpu.blocked_pause_s` 时才设（代码 `gpu_in_use`）。`levi live status` 和 `levi live doctor` 会用话说明是否在让出、原因，以及每个数据集的模式和状态；`levi live queue list` 把模式和等待的片段数放在一起显示。
 
 **为什么在让出，怎样恢复？**

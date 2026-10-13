@@ -220,6 +220,8 @@ Switching `history` back to `auto` leaves the history episodes already taken in 
 | `probe_error` | the socket table, the GPU's process list or the lock holders cannot be read: **fail closed**, what cannot be seen is taken as in use |
 | (vLLM cannot get the room) | not a yield reason: the existing `insufficient_vram`, `vram` and `gpu_wait` decisions keep applying |
 
+**On the page.** The service panel of `/live` lists every dataset in `queue` with its state, mode, the episodes waiting and why (a `yielding` row gives the yield reasons in plain words), and above the list a block while labelling yields, with each reason, what ends it and, when the service gives `resume_at`, the time labelling is expected to resume. It reads `queue` and `yield` of the status file (the same rows `GET /api/levi/live/queue` returns); a status file without them shows the count only.
+
 **Resuming.** All reasons must stay gone for `resume_after_s` (60) in a row; a reason that comes back starts the count again. Then the next batch starts from the episodes not yet labelled, none twice. The online judgement keeps its own gate (it exists for the deployment) but never wakes the model while `foreign_gpu`, `foreign_lock` or `probe_error` holds.
 
 | Setting | Default | Meaning |

@@ -1196,6 +1196,7 @@ policies:
 task:
   instruction: stack the plates
   reset_instruction: "Reset: stack the plates"
+  success_condition: "All plates of one colour are stacked."   # optional
   initial_state_spec: initial-state.yaml   # relative to this file
 termination:                  # TerminationConfig fields
   min_steps: 10
@@ -1209,6 +1210,14 @@ recording:
   forward_folder: stack_plates__r20261010-a
   reset_folder: reset_stack_plates__r20261010-a
 ```
+
+**Success condition.** `task.success_condition` is optional: one paragraph of at most 500
+characters (no line break). It is written into the frozen plan (`plan.success_condition`,
+so it changes `plan_sha256`) only when given; a job without it has exactly the plan and the
+digest it had before the field existed (a test pins that). **It is only recorded and shown**
+(plan card, run window): whether it takes part in a verdict depends on the judging spec the
+run uses, not on this field. `human_assisted` keeps it (a person resetting by hand still has
+a condition for success).
 
 ## Launching runs (`launch.py`, `runner.py`, `control.py`)
 
@@ -1356,9 +1365,9 @@ are scrubbed from every text that leaves.
 | `GET policies` | read | deployable checkpoints from `LEVI_AERI_POLICY_ROOT` (directory listings only; weights are never read or hashed): `id`, `role`, `config`, `sha256_status` (`verified`: a hash list naming the weight files exists on disk, LEVI does not recompute it; `recorded`; `none`), `notes`; `reset_available` is false unless a checkpoint is *stated* to be a reset policy (the page then offers a person's reset only) |
 | `GET jobs` | read | job files under `LEVI_AERI_JOB_ROOTS`: opaque `id` (no path), `name`, `valid`, `reset_mode`, `errors` |
 | `POST jobs` | person | the wizard form becomes a **new** job file in `<first job root>/wizard/` (never overwrites: `409 job_exists`; the same form again is the same file). Checkpoints must come from `GET policies`; `human_assisted` takes no reset policy; `422 job_invalid` lists `errors: [{field, message}]`. The selected checkpoint, serving config and discovered directory are frozen in each policy's `deployment` block and included in the plan digest. A scene check by a person (`operator_attested`) needs an Initial State Contract the form cannot name yet |
-| `POST plan` | read | the launch plan (`launchable`, `refusals`, `checks`, `launch_token`, `token_expires_at`); the mode defaults to `dry_run` |
+| `POST plan` | read | the launch plan (`launchable`, `refusals`, `checks`, `launch_token`, `token_expires_at`) and `requirements` (below); the mode defaults to `dry_run` |
 | `POST runs` | person | launch the plan that was read (`plan_sha256`, `launch_token`, `confirm: "launch"`, `request_id`): `412 plan_changed`/`token_expired`, `409 run_exists`/`robot_busy`, `501 no_robot_adapter`, `503 systemd_unavailable`. The same `request_id` returns the same run, also after a restart |
-| `GET runs`, `GET runs/{id}` | read | summaries; the snapshot: state, `seq`, episodes, counters, the waiting card, the open scene question, a one-time `challenge` (bound to `seq`, 60 s, memory only), the runner |
+| `GET runs`, `GET runs/{id}` | read | summaries; the snapshot: state, `seq`, episodes, counters, the waiting card, the open scene question, a one-time `challenge` (bound to `seq`, 60 s, memory only), the runner, `requirements` and `progress` (below) |
 | `GET runs/{id}/events?after=&limit=` | read | journal transitions and notes after a sequence |
 | `GET runs/{id}/metrics` | read | `metrics.report` |
 | `POST runs/{id}/stop` | person | `{command_id, confirm: "stop"}` through the command channel: `result` is `applied`, `repeated` or `refused` (`queued`, 202, when the runner has not answered within three seconds); `409 not_running`; `423` while another operation on the run is in progress |
@@ -1384,6 +1393,19 @@ nothing shows how the automatic system judged it or how it ended: the card's
 `early_termination` and `agreement.by_ended_by` (`null`, listed in
 `withheld`) while any ended episode lacks a label. `discarded` and `unclear`
 reveal nothing.
+
+**`requirements` and `progress`.** The plan answer and the run snapshot carry `requirements`,
+read only from the frozen plan: `task` (`instruction`, `reset_instruction`, `success_condition`),
+`episodes`, `max_steps` (`forward`, `reset`), `allow_early_stop`, `reset_mode`, `policies`
+(`forward` / `reset`: `checkpoint_id`, `config`; no directory is echoed) and `inference`
+(`mode`: `legacy_async` or `event_pause_judge`; `physical_hold`). A key an older plan lacks is
+`null`; a run without a plan has `requirements: null`. The run snapshot also carries
+`progress`: the step of the forward episode being run, counted from the committed rows of its
+`aeri_steps.csv`. That file is written in blocks, so `step` is a **lower bound**
+(`lower_bound: true`); when it cannot be read `step` is `null` and `reason` says why
+(`no_open_episode`, `runner_not_alive`, `unreadable`). Nothing is estimated. Both fields are
+optional for clients: the pages leave out what an older server does not send. The AERI run has
+no separate event-intelligence setting; the event mode is `termination.inference_mode`.
 
 **Settings.** `LEVI_AERI_POLICY_ROOT`: the folder of policy checkpoints that
 `GET policies` lists and `POST jobs` accepts (unset: no checkpoints, a
