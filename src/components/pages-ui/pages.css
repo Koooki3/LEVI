@@ -2717,3 +2717,50 @@
 .pg-fr3-recipe ul {
   padding-left: var(--ds-space-5);
 }
+
+/* The labelling queue on the live service panel. */
+.pg-live-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  margin-top: var(--ds-space-3);
+}
+.pg-live-queue ul {
+  margin: var(--ds-space-1) 0 0;
+  padding-left: var(--ds-space-4);
+}
+.pg-live-queue-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--ds-text-caption-size);
+}
+.pg-live-queue-table caption {
+  text-align: left;
+  padding-bottom: var(--ds-space-1);
+}
+.pg-live-queue-table th,
+.pg-live-queue-table td {
+  text-align: left;
+  padding: var(--ds-space-1) var(--ds-space-2);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.pg-live-queue-table thead th {
+  color: var(--ds-text-tertiary);
+  font-weight: 500;
+}
+@media (max-width: 640px) {
+  .pg-live-queue-table thead {
+    display: none;
+  }
+  .pg-live-queue-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--ds-space-1) var(--ds-space-2);
+    padding: var(--ds-space-2) 0;
+    border-top: 1px solid var(--ds-separator);
+  }
+  .pg-live-queue-table td:last-child {
+    grid-column: 1 / -1;
+  }
+}

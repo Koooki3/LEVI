@@ -119,6 +119,31 @@ export interface VllmInfo {
   owned?: boolean;
 }
 
+export type QueueState =
+  | "queued"
+  | "running"
+  | "yielding"
+  | "paused"
+  | "done"
+  | "failed";
+
+export interface QueueRow {
+  dataset: string;
+  mode?: string;
+  waiting?: number;
+  state?: QueueState | (string & {});
+  reason?: string;
+}
+
+export interface YieldInfo {
+  enabled?: boolean;
+  active?: boolean;
+  reasons?: { code?: string; text?: string }[];
+  /** Epoch seconds. */
+  since?: number | null;
+  resume_at?: number | null;
+}
+
 export interface ServiceStatus {
   schema?: string;
   pid?: number;
@@ -149,6 +174,12 @@ export interface ServiceStatus {
   };
   datasets?: Record<string, DatasetRow>;
   queue_depth?: number;
+  /** One row per live dataset: its labelling mode, the episodes waiting and
+   * whether it is queued, running, yielding the GPU, paused, done or failing
+   * (the same rows as `GET /api/levi/live/queue`). */
+  queue?: QueueRow[];
+  /** The labelling's yield rules; absent in an older status file. */
+  yield?: YieldInfo | null;
   worker?: {
     pid?: number;
     dataset?: string | null;

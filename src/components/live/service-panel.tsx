@@ -11,6 +11,7 @@ import {
   shortDuration,
   vllmLabel,
 } from "./live-logic";
+import { LabellingQueue } from "./labelling-queue";
 import { Chip, Field, type Tone } from "./session-panels";
 import { Check, ClipboardCopy, Hand, PlugZap, Server } from "lucide-react";
 import { Button, Icon } from "@/components/ds";
@@ -387,6 +388,7 @@ export function ServicePanel({
             : "—"}
         </Field>
       </dl>
+      <LabellingQueue rows={service.queue} yieldInfo={service.yield} />
 
       <h3 className="pg-live-sub">{t("Resources (supervisor)")}</h3>
       <dl className="pg-live-dl">
