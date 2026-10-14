@@ -138,7 +138,7 @@ speed-up and the largest difference.
 
 `levi.performance.budget.DiskBudget` keeps one cache folder inside a byte limit (and optionally an entry limit) by itself. It exists because a cache that only grows eventually fills the disk: evidence for a few hundred episodes is some GB, for a few thousand tens of GB, and every new schema, model or prompt version starts a second copy. The limit is enforced when an entry is written, by the process that writes it, not by a cleaner that may run too late.
 
-It is a library only. **Nothing in LEVI uses it yet**; it changes no behaviour and has no setting. It uses only the standard library and imports no other LEVI module. It needs a local file system (`flock`, `rename`); network file systems are not supported.
+Its first user is the diagnostic of a Hugging Face dataset (`levi/hub_snapshots.py`): the downloaded metadata, parquet and (when asked) video files are kept in `<workspace>/.cache/levi/hub-snapshots/`, at most 20 GiB, least recently used snapshots evicted first, a snapshot being inspected never evicted; one that cannot fit is downloaded to the old per-dataset folder instead and the report says so (`cache_note`). There is no setting. It uses only the standard library and imports no other LEVI module. It needs a local file system (`flock`, `rename`); network file systems are not supported.
 
 ```python
 from levi.performance.budget import DiskBudget, BudgetRejected

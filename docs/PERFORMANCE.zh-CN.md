@@ -78,7 +78,7 @@ python -m levi.performance pixel-compare <视频或文件夹> [...] [--cores 4]
 
 `levi.performance.budget.DiskBudget` 让一个缓存目录自己守住字节上限（可选再加条目数上限）。原因是只增不减的缓存迟早写满磁盘：几百个片段的证据是几 GB，几千个是几十 GB，而每出现一个新的 schema、模型或提示词版本，就又是一份。上限在写入时由写入者自己执行，而不是靠一个可能来得太晚的清理器。
 
-它只是一个库。**LEVI 里目前没有任何地方使用它**，不改变任何行为，也没有设置项。只用标准库，不导入 LEVI 的其他模块。需要本地文件系统（用到 `flock` 和 `rename`），不支持网络文件系统。
+第一个使用者是 Hugging Face 数据集的诊断（`levi/hub_snapshots.py`）：下载的元数据、parquet 以及（勾选时）视频放在 `<工作区>/.cache/levi/hub-snapshots/`，最多 20 GiB，先淘汰最久没用的快照，正在检查的快照不会被淘汰；放不下的快照改为下载到原来按数据集命名的目录，并在报告里注明（`cache_note`）。没有设置项。只用标准库，不导入 LEVI 的其他模块。需要本地文件系统（用到 `flock` 和 `rename`），不支持网络文件系统。
 
 ```python
 from levi.performance.budget import DiskBudget, BudgetRejected

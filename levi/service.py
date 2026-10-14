@@ -621,18 +621,39 @@ def diagnostics(payload: Diagnostic):
             raise ValueError("Invalid Hub dataset ID")
         from huggingface_hub import snapshot_download
 
-        root = CACHE / payload.repo_id.replace("/", "__")
+        from .hub_snapshots import snapshot
+
         # Metadata plus parquet; video download is explicit and can be large.
         patterns = ["meta/**", "data/**/*.parquet"]
         if payload.decode_video:
             patterns.append("videos/**")
-        snapshot_download(
+
+        def download(folder):
+            snapshot_download(
+                payload.repo_id,
+                token=token(),
+                repo_type="dataset",
+                local_dir=folder,
+                allow_patterns=patterns,
+            )
+
+        # A size-limited cache (levi/hub_snapshots.py): the snapshot stays leased
+        # while it is inspected, and old ones are evicted instead of piling up.
+        with snapshot(
             payload.repo_id,
-            token=token(),
-            repo_type="dataset",
-            local_dir=root,
-            allow_patterns=patterns,
-        )
+            patterns,
+            download,
+            CACHE,
+            whole_budget=payload.decode_video,
+        ) as (folder, note):
+            report = _inspect(payload, folder)
+            if note:
+                report["cache_note"] = note
+            return report
+    return _inspect(payload, root)
+
+
+def _inspect(payload: Diagnostic, root):
     from .harness.quality import inspect
 
     # The same inspection MCP's quality.inspect runs; the report is kept with
