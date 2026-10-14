@@ -307,15 +307,20 @@ class PyGraph:
         changed file from inside a function is added but not expanded, because it
         breaks only if that path runs (a hub like service.py would otherwise pull
         in every test)."""
-        seen, todo = set(changed), list(changed)
+        # Strong edges first, to a fixpoint; weak importers are added afterwards.
+        # Adding them while walking marked a file as seen before a strong edge
+        # reached it, so its importers were skipped and the answer depended on
+        # set iteration order (PYTHONHASHSEED).
+        strong, todo = set(changed), list(changed)
         while todo:
-            x = todo.pop()
-            for imp in self.importers.get(x, ()):
-                if imp not in seen:
-                    seen.add(imp)
+            for imp in self.importers.get(todo.pop(), ()):
+                if imp not in strong:
+                    strong.add(imp)
                     todo.append(imp)
-            seen |= self.weak_importers.get(x, set())
-        return seen
+        out = set(strong)
+        for x in strong:
+            out |= self.weak_importers.get(x, set())
+        return out
 
 
 def is_test(path: str) -> bool:
@@ -421,12 +426,27 @@ def select(changed: list[str], files: list[str], graphs: tuple | None = None) ->
                 }
                 if c.startswith("tests/"):
                     readers |= {g for g in py.text if g.startswith("tests/") and stem in py.bares[g]}
-                mentions = {g for g in py.text if names_deleted(py.text[g], c, g)}
-                for g in readers | mentions:
-                    (named_by_deleted if is_test(g) else deleted_readers).add(g)
+                # A test or a source that imports it is followed like a changed
+                # file. A conftest that imports it reaches tests through fixtures,
+                # which the graph does not record for a missing module: the root
+                # conftest widens, a nested one selects every test below it.
+                for g in readers:
+                    if Path(g).name == "conftest.py":
+                        here = str(Path(g).parent)
+                        if here == "tests":
+                            out["pytest"]["widen"].append(f"{c}: no longer exists and {g} imports it")
+                        else:
+                            named_by_deleted.update(t for t in all_py_tests if t.startswith(here + "/"))
+                    else:
+                        deleted_readers.add(g)
+                # A mere mention selects the test that makes it; it is not an
+                # import, so it is neither followed nor a reason not to widen.
+                named_by_deleted.update(
+                    g for g in py.text if is_test(g) and names_deleted(py.text[g], c, g)
+                )
                 if readers:
                     out["other"].append(f"{c}: no longer exists; following the {len(readers)} files that import it")
-                else:
+                elif not is_test(c):
                     out["pytest"]["widen"].append(f"{c}: no longer exists and no import of it was found")
             py_changed.add(c)
             named_by_path.append(c)
@@ -444,10 +464,9 @@ def select(changed: list[str], files: list[str], graphs: tuple | None = None) ->
             for key in ("pytest", "bun"):
                 out[key]["widen"].append(f"{c}: not mapped to a test group")
 
-    selected = py.closure(py_changed | deleted_readers)
-    # A deleted or renamed module is in no import graph, but a test that still
-    # names it is the first to break.
-    selected |= named_by_deleted
+    # A deleted module is in no import graph: what imports it is followed like a
+    # changed file (tests too, since tests import other tests).
+    selected = py.closure(py_changed | deleted_readers | named_by_deleted)
     # Helper and tool scripts under tests/ and scripts/ are often started by path
     # (a subprocess), which no import shows: a test that names the file counts.
     for c in py_changed:

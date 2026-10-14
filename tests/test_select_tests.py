@@ -291,12 +291,12 @@ def test_a_deleted_test_file_other_tests_import_by_bare_name_selects_them(tmp_pa
     assert not out["widen"]
 
 
-def test_a_deleted_test_file_nothing_imports_widens_and_is_not_listed(tmp_path):
+def test_a_deleted_test_file_nothing_imports_does_not_widen_and_is_not_listed(tmp_path):
     sel = load(tmp_path)
     files = write(tmp_path, {"tests/test_i.py": "# see test_gone.py\n"})
     out = sel.select(["tests/test_gone.py"], files)["pytest"]
     assert "tests/test_gone.py" not in out["tests"]
-    assert out["widen"]
+    assert not out["widen"]
 
 
 def test_a_deleted_module_imported_relatively_from_another_package_is_followed(tmp_path):
@@ -337,3 +337,57 @@ def test_untracked_files_are_part_of_the_tree(tmp_path):
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     write(tmp_path, {"levi/a.py": "", "tests/test_new.py": "from levi import a\n"})
     assert {"levi/a.py", "tests/test_new.py"} <= set(sel.tracked())
+
+
+def test_closure_expands_a_file_reached_weakly_first_and_strongly_later(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {
+            "levi/a.py": "X = 1\n",
+            "levi/s.py": "from levi import a\n",
+            # w imports a inside a function (weak) and s at module level (strong)
+            "levi/w.py": "from levi import s\n\ndef f():\n    from levi import a\n",
+            "tests/test_w.py": "from levi import w\n",
+        },
+    )
+    assert "tests/test_w.py" in sel.select(["levi/a.py"], files)["pytest"]["tests"]
+
+
+def test_a_deleted_module_the_root_conftest_imports_widens(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {
+            "tests/conftest.py": "import pytest\n\n@pytest.fixture(autouse=True)\ndef f():\n    from levi import rec\n",
+            "tests/test_x.py": "def test_x():\n    pass\n",
+        },
+    )
+    assert sel.select(["levi/rec.py"], files)["pytest"]["widen"]
+
+
+def test_a_deleted_module_a_nested_conftest_imports_selects_its_tests(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {
+            "tests/live/conftest.py": "from levi import rec\n",
+            "tests/live/test_a.py": "def test_a():\n    pass\n",
+            "tests/test_other.py": "def test_o():\n    pass\n",
+        },
+    )
+    out = sel.select(["levi/rec.py"], files)["pytest"]
+    assert out["tests"] == ["tests/live/test_a.py"]
+
+
+def test_tests_that_import_a_test_of_the_deleted_module_are_selected(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {
+            "tests/test_rec.py": "from levi import gpumgr\nHELPER = 1\n",
+            "tests/test_e2e.py": "from test_rec import HELPER\n",
+        },
+    )
+    out = sel.select(["levi/gpumgr.py"], files)["pytest"]
+    assert out["tests"] == ["tests/test_e2e.py", "tests/test_rec.py"]
