@@ -137,6 +137,10 @@ def clean(apply=False, ws=None):
         # A Workspace is not validated; the filesystem root or a home folder is
         # never a LEVI workspace, and <root>/.cache/levi there is someone else's.
         raise ValueError(f"Refusing to clean {ws.root}: not a LEVI workspace root")
+    if apply and ws is not None and not Path(ws.state).is_dir():
+        # Positive check: an explicit workspace must already be one (its
+        # workbench folder exists) before anything under it is removed.
+        raise ValueError(f"Refusing to clean {ws.root}: {ws.state} does not exist, so it is not a LEVI workspace")
     state = _workspace(ws).state
     marker = state / "server.pid"
     if marker.exists():

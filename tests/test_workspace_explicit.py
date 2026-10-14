@@ -150,3 +150,13 @@ def test_an_explicit_workspace_at_the_filesystem_root_or_home_is_refused(root):
     ws = Workspace(root, root / "outputs/LEVI/workbench", root / ".cache/levi")
     with pytest.raises(ValueError, match="not a LEVI workspace root"):
         maintenance.clean(False, ws)
+
+
+def test_apply_on_an_explicit_folder_that_is_not_a_workspace_is_refused(tmp_path):
+    ws = Workspace.at(tmp_path / "not-a-workspace")
+    (ws.root / ".cache/levi").mkdir(parents=True)
+    # A dry run may look; removing needs the workbench folder to exist.
+    assert maintenance.clean(False, ws)["entries"]
+    with pytest.raises(ValueError, match="not a LEVI workspace"):
+        maintenance.clean(True, ws)
+    assert (ws.root / ".cache/levi").is_dir()
