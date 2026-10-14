@@ -3948,5 +3948,12 @@
   "automatic.event.reason.preflight_failed": "启动前检查没有通过",
   "automatic.event.reason.recorder_failed": "录制失败",
   "automatic.event.reason.contract_violation_limit": "场景违反初始状态契约的次数过多",
-  "automatic.wizard.settings.mode_no_adapter": "这个版本没有真实机器人适配器：只能启动试运行（dry run）。"
+  "automatic.wizard.settings.mode_no_adapter": "这个版本没有真实机器人适配器：只能启动试运行（dry run）。",
+  "workbench.register.placeholder": "数据集文件夹路径",
+  "workbench.datasets.counts": "本工作区 {own} 个 · 来自实时评测的只读 {linked} 个",
+  "workbench.datasets.filter": "按名称或路径筛选数据集",
+  "workbench.datasets.none": "没有匹配“{query}”的数据集。",
+  "workbench.datasets.all": "显示全部 {count} 个数据集",
+  "workbench.datasets.fewer": "收起",
+  "workbench.datasets.showing": "显示 {shown} / {total}"
 }

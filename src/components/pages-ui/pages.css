@@ -2764,3 +2764,27 @@
     grid-column: 1 / -1;
   }
 }
+
+/* /workbench: slim training-pool strip, one-line row actions, dataset counts */
+.pg-pool-strip {
+  display: flex;
+  gap: 12px 20px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin: var(--ds-space-3) 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.pg-workbench .pg-row-actions {
+  display: flex;
+  gap: var(--ds-space-2);
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.pg-workbench .pg-count {
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-regular);
+  color: var(--ds-text-secondary);
+}

@@ -100,6 +100,8 @@ export default function Workbench() {
   const colon = useColon();
   const confirm = useConfirmAction();
   const [sync, setSync] = useState<SyncStatus | null>(null);
+  const [filter, setFilter] = useState("");
+  const [showAll, setShowAll] = useState(false);
   const refresh = useCallback(async () => {
     const [c, j, st] = await Promise.all([
       leviApi<Catalog>("catalog"),
@@ -161,6 +163,23 @@ export default function Workbench() {
       setBusy(false);
     }
   }
+  // The list: a person's own datasets first, the read-only live ones after;
+  // one page of rows unless a filter is typed or "show all" is pressed.
+  const DATASET_PAGE = 12;
+  const everyDataset = catalog?.local ?? [];
+  const query = filter.trim().toLowerCase();
+  const matching = [...everyDataset]
+    .sort((a, b) => Number(!!a.linked) - Number(!!b.linked))
+    .filter(
+      (d) =>
+        !query ||
+        `${d.name} ${d.linked ? d.linked.workspace : d.path}`
+          .toLowerCase()
+          .includes(query),
+    );
+  const shownDatasets =
+    query || showAll ? matching : matching.slice(0, DATASET_PAGE);
+  const linkedCount = everyDataset.filter((d) => d.linked).length;
   return (
     <main className="ds-root pg-workbench">
       <h1>
@@ -181,27 +200,36 @@ export default function Workbench() {
         />
       )}
       {error && <RequestProblem action={errorWhat} message={error} />}
-      <section className="pg-box pg-pool-teaser">
-        <div>
-          <h2>
+      <div className="pg-pool-strip">
+        <span>
+          <strong>
             <T>Training pool</T>
-          </h2>
-          <p>
-            <T>
-              Every dataset on this machine by task: compose tasks in order,
-              preview, export for π0.5 or RECAP and send it to a training
-              machine.
-            </T>
-          </p>
-        </div>
-        <Link className="ds-btn ds-btn--secondary ds-focus" href="/pool">
+          </strong>
+          {colon}
+          <T>
+            Every dataset on this machine by task: compose tasks in order,
+            preview, export for π0.5 or RECAP and send it to a training machine.
+          </T>
+        </span>
+        <Link
+          className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+          href="/pool"
+        >
           <T>Open the training pool</T>
           <Icon icon={ArrowRight} />
         </Link>
-      </section>
+      </div>
       <section className="pg-box">
         <h2>
           <T>Local datasets</T>
+          {everyDataset.length > 0 && (
+            <span className="pg-count">
+              {" "}
+              {t("workbench.datasets.counts")
+                .replace("{own}", String(everyDataset.length - linkedCount))
+                .replace("{linked}", String(linkedCount))}
+            </span>
+          )}
         </h2>
         <form
           className="pg-row"
@@ -216,9 +244,7 @@ export default function Workbench() {
           <input
             className="ds-input ds-focus grow"
             aria-label={t("Dataset directory")}
-            placeholder={t(
-              "LeRobot dataset (meta/info.json) or raw capture directory",
-            )}
+            placeholder={t("workbench.register.placeholder")}
             value={path}
             required
             onChange={(e) => setPath(e.target.value)}
@@ -228,6 +254,8 @@ export default function Workbench() {
           </Button>
         </form>
         <p className="pg-mt-3 pg-small">
+          <T>LeRobot dataset (meta/info.json) or raw capture directory</T>
+          {" · "}
           <T>Workspace</T>
           {colon}
           <code>{catalog?.workspace || "…"}</code>
@@ -331,9 +359,21 @@ export default function Workbench() {
             <Skeleton height={96} radius="md" />
           </div>
         )}
+        {everyDataset.length > DATASET_PAGE / 2 && (
+          <div className="pg-row pg-gap-top">
+            <input
+              className="ds-input ds-focus grow"
+              type="search"
+              aria-label={t("workbench.datasets.filter")}
+              placeholder={t("workbench.datasets.filter")}
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+          </div>
+        )}
         {catalog && catalog.local.length !== 0 && (
           <div className="ds-table-wrap pg-gap-top">
-            <table className="ds-table">
+            <table className="ds-table ds-table--compact">
               <thead>
                 <tr>
                   <th>
@@ -353,7 +393,7 @@ export default function Workbench() {
                 </tr>
               </thead>
               <tbody>
-                {catalog.local.map((d) => (
+                {shownDatasets.map((d) => (
                   <tr key={d.id}>
                     <td>
                       {d.kind !== "raw" || d.view_status === "ready" ? (
@@ -391,7 +431,7 @@ export default function Workbench() {
                       {d.format?.episodes ?? d.info?.total_episodes ?? "—"}
                     </td>
                     <td>
-                      <div className="pg-stack">
+                      <div className="pg-row-actions">
                         <Button
                           size="sm"
                           disabled={!!d.linked}
@@ -415,7 +455,7 @@ export default function Workbench() {
                             </Button>
                             <span
                               id={`wb-linked-why-${d.name}`}
-                              className="pg-small"
+                              className="sr-only"
                             >
                               {t(LINKED_REASON)}
                             </span>
@@ -462,6 +502,28 @@ export default function Workbench() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {catalog && matching.length === 0 && everyDataset.length > 0 && (
+          <p className="pg-small pg-mt-3">
+            {t("workbench.datasets.none").replace("{query}", filter.trim())}
+          </p>
+        )}
+        {!query && matching.length > DATASET_PAGE && (
+          <div className="pg-row pg-mt-3">
+            <Button size="sm" onClick={() => setShowAll((v) => !v)}>
+              {showAll
+                ? t("workbench.datasets.fewer")
+                : t("workbench.datasets.all").replace(
+                    "{count}",
+                    String(matching.length),
+                  )}
+            </Button>
+            <span className="pg-small">
+              {t("workbench.datasets.showing")
+                .replace("{shown}", String(shownDatasets.length))
+                .replace("{total}", String(matching.length))}
+            </span>
           </div>
         )}
         {catalog && catalog.local.length === 0 && (

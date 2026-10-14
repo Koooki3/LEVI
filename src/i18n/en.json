@@ -3948,5 +3948,12 @@
   "automatic.event.reason.preflight_failed": "The preflight checks failed",
   "automatic.event.reason.recorder_failed": "The recording failed",
   "automatic.event.reason.contract_violation_limit": "The scene broke the initial-state contract too many times",
-  "automatic.wizard.settings.mode_no_adapter": "No real robot adapter in this version: only a dry run can be started."
+  "automatic.wizard.settings.mode_no_adapter": "No real robot adapter in this version: only a dry run can be started.",
+  "workbench.register.placeholder": "Dataset folder path",
+  "workbench.datasets.counts": "{own} in this workspace · {linked} read-only from live evaluation",
+  "workbench.datasets.filter": "Filter datasets by name or path",
+  "workbench.datasets.none": "No dataset matches “{query}”.",
+  "workbench.datasets.all": "Show all {count} datasets",
+  "workbench.datasets.fewer": "Show fewer",
+  "workbench.datasets.showing": "Showing {shown} of {total}"
 }
