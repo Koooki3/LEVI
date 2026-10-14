@@ -6,6 +6,8 @@ import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 ATLAS = ROOT / "docs" / "assets" / "atlas"
 
@@ -23,18 +25,83 @@ def build_module(out: Path):
 REDUCED = r"@media \(prefers-reduced-motion: reduce\) \{ \* \{ animation: none !important; \} \}"
 
 
+OPACITY = r"0?\.[2-9]\d*|1"  # never below .2: motion may dim, not hide
+KEYFRAME_VALUES = {
+    "stroke-dashoffset": r"-?\d{1,3}",
+    "transform": r"translateX\((?:0|-?\d{1,4}px)\)",
+    "opacity": OPACITY,
+}
+KEYFRAME_PROPS = set(KEYFRAME_VALUES)
+TIMING = {"linear", "ease-in-out", "infinite"}
+# Each class declaration value has one exact shape: no "!important" (it would beat the reduced-motion rule),
+# no comma lists, calc(), exponents or upper-case units, and only TIMING words after the duration.
+CLASS_VALUES = {
+    "animation": r"[a-z][\w-]* (?P<s>\d+(?:\.\d+)?)s(?: (?:" + "|".join(TIMING) + "))*",
+    "animation-delay": r"-?\d+(?:\.\d+)?s",
+    "opacity": OPACITY,
+}
+MAX_STOPS = 3  # keyframe selectors (from, to, N%) per animation; the generator uses at most 3: no strobe
+
+
+def declarations(name, body):
+    """[(prop, value)] of "a:b;c:d"; a property or value outside the plain CSS alphabet fails."""
+    out = []
+    for decl in filter(None, body.split(";")):
+        prop, sep, value = decl.partition(":")
+        assert sep and re.fullmatch(r"[a-z-]+", prop), f"{name}: declaration {decl!r}"
+        assert re.fullmatch(r"[\w.%() -]+", value), f"{name}: value {value!r}"
+        out.append((prop, value))
+    return out
+
+
+def check_motion_css(name, css):
+    """Parse CSS made of @keyframes blocks and .class{...} rules, strictly: keyframes have at most MAX_STOPS
+    blocks setting only KEYFRAME_PROPS, class rules set only the CLASS_VALUES properties in their exact shape,
+    and every animation lasts at least 3 s."""
+    keyframes = r"@keyframes [a-z][\w-]*\{((?:[^{}]|\{[^{}]*\})*)\}"
+    for body in re.findall(keyframes, css):
+        stop = r"(?:from|to|\d+%(?:,\d+%)*)\{([^{}]*)\}"
+        assert re.fullmatch(f"(?:{stop})+", body), f"{name}: keyframes {body!r}"
+        stops = re.findall(r"from|to|\d+%", re.sub(r"\{[^{}]*\}", "", body))
+        assert len(stops) <= MAX_STOPS, f"{name}: {len(stops)} keyframe stops"
+        for block in re.findall(stop, body):
+            for prop, value in declarations(name, block):
+                assert prop in KEYFRAME_VALUES, f"{name}: keyframes set {prop}"
+                assert re.fullmatch(KEYFRAME_VALUES[prop], value), (
+                    f"{name}: keyframes {prop} {value!r}"
+                )
+    rules = re.sub(keyframes, "", css)
+    pattern = r"\.[a-z][\w-]*\{([^{}]*)\}"
+    assert re.fullmatch(f"(?:{pattern})*", rules), f"{name}: unexpected CSS {rules!r}"
+    checked = 0
+    for body in re.findall(pattern, rules):
+        for prop, value in declarations(name, body):
+            assert prop in CLASS_VALUES, f"{name}: class rule sets {prop}"
+            shape = re.fullmatch(CLASS_VALUES[prop], value)
+            assert shape, f"{name}: {prop} {value!r}"
+            if prop == "animation":
+                assert float(shape["s"]) >= 3, f"{name}: period {shape['s']}s"
+                checked += 1
+    assert checked == len(re.findall(r"animation\s*:", css, re.IGNORECASE)), (
+        f"{name}: an animation was not checked"
+    )
+
+
 def check_executable_free(name, text, module):
     """Motion is CSS only: a fixed <style>, no script, SMIL, links, transitions or fast loops."""
     assert not re.search(r"<(script|foreignObject|image)\b", text), name
     assert not re.search(r"<(animate\w*|set)\b", text), f"{name}: SMIL"
     assert not re.search(r"\son[a-z]+\s*=|href\s*=|@import", text), name
     assert not re.search(r"url\((?!#)", text), f"{name}: url( must point at #id"
+    assert len(re.findall(r"<(?:\w+:)?style\b", text)) == 1, f"{name}: one <style>"
+    assert not re.search(r"\sstyle\s*=", text), f"{name}: no style= attribute"
     styles = re.findall(r"<style>(.*?)</style>", text, re.DOTALL)
     assert len(styles) == 1, name
     css = styles[0]
     assert "/*" not in css, f"{name}: no comments in <style>"
     assert not re.search(r"transition|animation-duration|\d\s*ms\b", css), name
     # exactly the generator's blocks, in order, then the reduced-motion rule
+    assert len(re.findall(REDUCED, css)) == 1, f"{name}: one reduced-motion rule"
     reduced = re.search(REDUCED, css)
     assert reduced and css.endswith(reduced.group(0)), f"{name}: reduced-motion rule"
     assert reduced.group(0) == module.Fig.CSS_REDUCED
@@ -42,14 +109,7 @@ def check_executable_free(name, text, module):
     expected = "".join(v for k, v in module.Fig.CSS_PARTS.items() if v in rest)
     assert rest == expected, f"{name}: <style> differs from the generator's blocks"
     # inside the allowed blocks: animated properties and periods
-    for body in re.findall(r"@keyframes \w+\{((?:[^{}]|\{[^{}]*\})*)\}", rest):
-        assert set(re.findall(r"([a-z-]+)\s*:", body)) <= {
-            "stroke-dashoffset",
-            "transform",
-            "opacity",
-        }, name
-    for period in re.findall(r"animation:\s*\w+\s+([\d.]+)s", css):
-        assert float(period) >= 3, f"{name}: period {period}s"
+    check_motion_css(name, rest)
     assert len(re.findall(r'filter="url', text)) <= 10, name
 
 
@@ -91,6 +151,75 @@ def test_the_pages_that_show_the_atlas_link_files_that_exist():
         base = (ROOT / page).parent
         for target in re.findall(r"(?:srcset|src)=\"([^\"]+\.svg)\"", text):
             assert (base / target).is_file(), (page, target)
+
+
+def test_every_motion_block_of_the_generator_is_checked_even_if_no_figure_uses_it():
+    module = build_module(ATLAS)
+    for key, part in module.Fig.CSS_PARTS.items():
+        check_motion_css(key, part)
+
+
+@pytest.mark.parametrize(
+    "css",
+    [
+        ".x{animation:1s x linear infinite}",
+        ".x{animation: x 900ms linear infinite}",
+        ".x{animation:x linear infinite}",
+        ".x{display:none}",
+        ".x{opacity:.5;width:3px}",
+        "@keyframes k{to{width:3px}}",
+        ".x{animation:x 3s linear infinite}.y{animation:y 2.5s linear infinite}",
+        ".x{animation:x 3s}p{color:red}",
+        ".x{animation:x 0.5s,y 3s}",
+        ".x{animation:x 1S 3s linear infinite}",
+        ".x{animation:x 1e0s 3s linear infinite}",
+        ".x{animation:x calc(1s) 3s linear infinite}",
+        ".x{animation:x 900ms 3s linear infinite}",
+        ".x{animation:x 3s linear infinite !important}",
+        ".x{opacity:.6 !important}",
+        "@keyframes k{to{WIDTH:3px}}",
+        "@keyframes k{to{width/**/:3px}}",
+        "@keyframes k{0%{opacity:0}1%{opacity:1}2%{opacity:0}3%{opacity:1}}",
+        ".x{animation:k 3s steps(1) infinite}",
+        "@keyframes k{0%,2%,4%,6%{opacity:.2}1%,3%,5%{opacity:1}}",
+        "@keyframes k{0%,50%,100%{transform:translateX(0)}25%,75%{transform:translateX(900px)}}",
+        "@keyframes k{to{transform:scale(0)}}",
+        "@keyframes k{to{transform:translateX(-99999px)}}",
+        "@keyframes k{to{stroke-dashoffset:-99999}}",
+        "@keyframes k{to{opacity:0}}",
+        ".x{opacity:.0}",
+        ".x{opacity:.1}",
+    ],
+)
+def test_the_motion_check_rejects(css):
+    with pytest.raises(AssertionError):
+        check_motion_css("mutant", css)
+
+
+def test_one_reduced_motion_rule_only():
+    module = build_module(ATLAS)
+    text = (ATLAS / "05-live-gpu-light.svg").read_text(encoding="utf8")
+    doubled = text.replace(
+        module.Fig.CSS_REDUCED,
+        module.Fig.CSS_REDUCED + "*{animation:z 1s infinite}" + module.Fig.CSS_REDUCED,
+    )
+    with pytest.raises(AssertionError):
+        check_executable_free("doubled", doubled, module)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        '<style media="all">*{animation:z .1s infinite}</style>',
+        '<svg:style xmlns:svg="http://www.w3.org/2000/svg">*{opacity:0}</svg:style>',
+        '<g style="animation:k .1s infinite !important;opacity:0"/>',
+    ],
+)
+def test_css_outside_the_one_style_element_is_refused(extra):
+    module = build_module(ATLAS)
+    text = (ATLAS / "05-live-gpu-light.svg").read_text(encoding="utf8")
+    with pytest.raises(AssertionError):
+        check_executable_free("extra", text.replace("</svg>", extra + "</svg>"), module)
 
 
 def test_chinese_variants_translate_every_drawn_string():
