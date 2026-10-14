@@ -2,6 +2,8 @@
 
 **LeRobot Exploration, Validation & Integration**
 
+> 在机器人数据训练下一个策略之前，先把它再看一遍：模型提出建议，人来决定，每一步都有实测记录。
+
 [![Checks](https://github.com/Koooki3/LEVI/actions/workflows/test.yml/badge.svg)](https://github.com/Koooki3/LEVI/actions/workflows/test.yml) [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) [![Version](https://img.shields.io/badge/LEVI-0.3.0-555555.svg)](CHANGELOG.md)
 
 [English](README.md) · 简体中文
@@ -28,6 +30,15 @@ LEVI 是面向机器人学习数据的本地工作台：浏览 LeRobot 数据集
 </picture>
 
 另外五张图（分层、一个任务的步骤、机器人旁的实时标注、自动评测的权限划分、证据与局限）在[架构图集](docs/ARCHITECTURE.md)里（图中文字只有英文版）。
+
+## 新在哪里
+
+- **释放事件锚定复核。** 在机器人自己的信号标出的时刻（每次夹爪张开）判断成败，每个事件只问一个窄问题。在叠盘子任务上，它把平衡准确率从 0.81 提到 0.94（[实测](#已经测到了什么)）。
+- **一个能力层。** 网页、REST、MCP 和命令行共用：模型的建议只有经人提交才变成标签，提交可以撤销（[分层图](docs/ARCHITECTURE.md#3-layers-of-the-workbench)）。
+- **每次运行都计成本。** 按 agent 和数据集记录 token 与时间，人工核实过的事实记忆是下一个任务的起点（[Agents](docs/AGENTS.md)）。
+- **在运行中的机器人旁标注。** 实时服务与策略服务器共用一块 GPU，策略推理时让出（[图](docs/ARCHITECTURE.md#5-live-annotation-beside-a-robot)）。
+- **自动评测的权限划分。** 只有一个部分能命令机器人并写日志，契约会拒绝来自判定和运行时的机器人或复位命令。软件已用假 I/O 验证；硬件验收待做（[图](docs/ARCHITECTURE.md#6-automatic-evaluation-three-parts-one-authority)）。
+- **证据不粉饰。** 负面结果一直摆在明处：第二个任务没达标，整理过的数据是否改善策略尚未证明（[证据图](docs/ARCHITECTURE.md#7-evidence-with-its-limits)）。在线**报告**页保持数字最新。
 
 ## 它能做什么
 

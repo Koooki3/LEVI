@@ -2,6 +2,8 @@
 
 **LeRobot Exploration, Validation & Integration**
 
+> Look at your robot data again before it trains the next policy: a model proposes, a person decides, and every step is measured.
+
 [![Checks](https://github.com/Koooki3/LEVI/actions/workflows/test.yml/badge.svg)](https://github.com/Koooki3/LEVI/actions/workflows/test.yml) [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) [![Version](https://img.shields.io/badge/LEVI-0.3.0-555555.svg)](CHANGELOG.md)
 
 English · [简体中文](README.zh-CN.md)
@@ -28,6 +30,15 @@ A robot policy is only as good as the data it learns from, and the data is full 
 </picture>
 
 Five more figures (layers, a task step by step, live annotation beside a robot, the automatic evaluation authority split, and the evidence with its limits) are in the [architecture atlas](docs/ARCHITECTURE.md).
+
+## What is new
+
+- **Release-anchored review.** It judges success at the moments the robot's own signals mark (each gripper opening), one narrow question per event. On the plates task it raised balanced accuracy from 0.81 to 0.94 ([measured](#what-has-been-measured)).
+- **One capability layer.** The web UI, REST, MCP and the CLI share it: a model's suggestion becomes a label only through a person's commit, and a commit can be undone ([layers](docs/ARCHITECTURE.md#3-layers-of-the-workbench)).
+- **Every run is costed.** Tokens and time are recorded per agent and per dataset, and a memory of what a person verified starts the next task ([agents](docs/AGENTS.md)).
+- **Labelling beside a running robot.** The live service shares one GPU with the policy server and yields when the policy infers ([figure](docs/ARCHITECTURE.md#5-live-annotation-beside-a-robot)).
+- **Authority split for automatic evaluation.** One part alone may command the robot and write the journal, and the contract refuses robot or reset commands from the judge and the runtime. Software with fake-I/O validation; hardware acceptance is pending ([figure](docs/ARCHITECTURE.md#6-automatic-evaluation-three-parts-one-authority)).
+- **Honest evidence.** The negative results stay in view: the second task missed the bar, and whether curated data improves a policy is not established ([evidence](docs/ARCHITECTURE.md#7-evidence-with-its-limits)). The live **Report** page keeps the numbers current.
 
 ## What it does
 
