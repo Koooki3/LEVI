@@ -74,12 +74,18 @@ def locked():
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def datasets():
-    return read(STATE / "datasets.json", {})
+def _state(ws=None) -> Path:
+    """This process's workspace state (``STATE``, read now, so a test that patches it works) or the state of
+    an explicit ``levi.workspace.Workspace``."""
+    return STATE if ws is None else Path(ws.state)
 
 
-def aliases():
-    return read(STATE / "dataset_aliases.json", {})
+def datasets(ws=None):
+    return read(_state(ws) / "datasets.json", {})
+
+
+def aliases(ws=None):
+    return read(_state(ws) / "dataset_aliases.json", {})
 
 
 def known():

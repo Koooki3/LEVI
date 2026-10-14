@@ -243,3 +243,16 @@ def test_no_product_code_passes_an_explicit_workspace():
                 if re.search(r"\bws\b|Workspace", call.group(1)):
                     offenders.append(f"{f.relative_to(root)}: {call.group(0)}")
     assert offenders == []
+
+
+def test_the_catalog_reads_an_explicit_workspace_and_defaults_to_its_own(tmp_path, monkeypatch):
+    from levi import catalog
+
+    own = make_workspace(tmp_path / "own", registered=["mine"], leftovers=[])
+    other = make_workspace(tmp_path / "other", registered=["theirs"], leftovers=[])
+    (other.state / "dataset_aliases.json").write_text(json.dumps({"old": "theirs"}))
+    monkeypatch.setattr(catalog, "STATE", own.state)
+    assert set(catalog.datasets()) == {"mine"}
+    assert set(catalog.datasets(other)) == {"theirs"}
+    assert catalog.aliases(other) == {"old": "theirs"}
+    assert catalog.aliases() == {}

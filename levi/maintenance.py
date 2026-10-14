@@ -88,15 +88,15 @@ def orphans(ws=None):
     the CLI (``levi clean``) and the service never pass one, and
     ``tests/test_workspace_explicit.py`` checks that nothing does.
     """
-    from .catalog import aliases, datasets, read
+    from .catalog import aliases, datasets
 
     if ws is None:
         # Legacy path: the catalog's own module-level STATE (tests patch it).
         registered, links, state = datasets(), aliases(), STATE
     else:
         ws = _refuse_unless_a_workspace(ws, apply=False)
-        registered = read(ws.state / "datasets.json", {})
-        links = read(ws.state / "dataset_aliases.json", {})
+        registered = datasets(ws)
+        links = aliases(ws)
         state = ws.state
     known = set(registered)
     stale_links = {old: target for old, target in links.items() if target not in known}
