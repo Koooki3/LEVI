@@ -110,3 +110,25 @@ def test_clean_with_apply_touches_only_the_given_workspace_and_skips_the_pool_sw
     assert (b.root / ".cache/levi/theirs").exists() and outside.exists()
     assert (b.state / "annotations/empty_b").exists()
     assert report["pool"]["bytes"] == 0 and "skipped" in report["pool"]
+
+
+def test_clean_with_apply_and_an_explicit_workspace_never_runs_the_process_wide_pool_sweep(
+    tmp_path, monkeypatch
+):
+    """The sweep deletes expired pool exports and job files of the process-wide
+    workspace; asked to clean workspace A it must not touch workspace B's pool."""
+    from levi.pool import cleanup as pool_cleanup
+
+    calls = []
+    monkeypatch.setattr(
+        pool_cleanup, "sweep", lambda dry_run=True: calls.append(dry_run) or {"bytes": 1}
+    )
+    monkeypatch.setattr(maintenance, "PROJECT", tmp_path / "proj")
+    (tmp_path / "proj").mkdir()
+    ws = make_workspace(tmp_path / "a", registered=[], leftovers=[])
+    maintenance.clean(True, ws)
+    assert calls == []
+    # the legacy call still sweeps, with the apply flag it was given
+    monkeypatch.setattr(maintenance, "STATE", ws.state)
+    maintenance.clean(True)
+    assert calls == [False]
