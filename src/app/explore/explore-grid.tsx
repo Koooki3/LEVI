@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { EmptyState, Icon } from "@/components/ds";
 import { Problem } from "@/components/pages-ui/feedback";
+import { OpenDataset } from "@/components/home/open-dataset";
 
 type ExploreGridProps = {
   datasets: Array<{ id: string; videoUrl: string | null }>;
@@ -56,6 +57,15 @@ export default function ExploreGrid({
               </Link>
               <HfAuthButton />
             </div>
+          </div>
+          <div className="pg-explore-search">
+            <OpenDataset />
+            <p className="pg-small">
+              <T>
+                Search the whole Hub above, or start from a public example that
+                streams on demand.
+              </T>
+            </p>
           </div>
           {error && (
             <Problem

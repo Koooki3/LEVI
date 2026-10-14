@@ -1,5 +1,6 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 import "@/components/pages-ui/pages.css";
+import "@/styles/home.css";
 import React from "react";
 import { DEMO_DATASETS, demoVideoUrl } from "@/lib/demo-datasets";
 import ExploreGrid from "./explore-grid";

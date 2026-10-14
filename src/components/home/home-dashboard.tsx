@@ -7,14 +7,7 @@
  */
 import "@/components/pages-ui/pages.css";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   BookOpen,
@@ -26,7 +19,6 @@ import {
   Activity,
   Compass,
   RotateCw,
-  Search,
 } from "lucide-react";
 import {
   Badge,
@@ -38,6 +30,7 @@ import {
   Skeleton,
 } from "@/components/ds";
 import { leviApi } from "@/components/levi-api";
+import { OpenDataset } from "./open-dataset";
 import { Problem } from "@/components/pages-ui/feedback";
 import { useLocale } from "@/components/levi-locale";
 import { offersTrainingPool } from "@/components/live/embedding";
@@ -69,7 +62,6 @@ const JOB_PAGE: Record<RunningJob["kind"], string> = {
   conversion: "Conversion & review",
   pool: "Training pool",
 };
-const DATASET_ID = /^[\w.-]+\/[\w.-]+$/;
 
 type State = {
   /** Each card shows its skeleton until its own answer arrives
@@ -201,86 +193,6 @@ function Ago({ at, now }: { at: number; now: number | null }) {
   if (now === null) return null;
   const { key, n } = relativeTime(at, now);
   return <>{t(key).replace("{n}", String(n))}</>;
-}
-
-function OpenDataset() {
-  const { t } = useLocale();
-  const router = useRouter();
-  const [query, setQuery] = useState("");
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const invalid = query.trim() !== "" && !DATASET_ID.test(query.trim());
-  useEffect(() => {
-    const controller = new AbortController();
-    if (!query.trim()) {
-      setSuggestions([]);
-      return;
-    }
-    const timer = setTimeout(
-      () =>
-        fetch(
-          `https://huggingface.co/api/datasets?search=${encodeURIComponent(query)}&limit=5`,
-          { signal: controller.signal },
-        )
-          .then((r) => r.json())
-          .then((data) =>
-            setSuggestions(
-              Array.isArray(data) ? data.map((d: { id: string }) => d.id) : [],
-            ),
-          )
-          .catch(() => {}),
-      250,
-    );
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [query]);
-  function open(id: string) {
-    if (DATASET_ID.test(id.trim())) router.push(`/${id.trim()}`);
-  }
-  return (
-    <div className="levi-home-open">
-      <form
-        className="levi-home-search"
-        role="search"
-        onSubmit={(event: FormEvent) => {
-          event.preventDefault();
-          open(query);
-        }}
-      >
-        <Icon icon={Search} className="levi-home-search__icon" />
-        <input
-          className="levi-home-search__input ds-focus"
-          aria-label={t("Dataset ID")}
-          aria-invalid={invalid || undefined}
-          placeholder={t("Search or enter a Hugging Face dataset ID")}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          required
-          pattern="[\w.\-]+/[\w.\-]+"
-        />
-        <Button type="submit" variant="primary" iconEnd={ArrowRight}>
-          {t("Open dataset")}
-        </Button>
-      </form>
-      {suggestions.length > 0 && (
-        <ul className="levi-home-suggestions" aria-label={t("Suggestions")}>
-          {suggestions.map((id) => (
-            <li key={id}>
-              <button
-                type="button"
-                className="ds-focus"
-                onClick={() => open(id)}
-              >
-                <span className="levi-home-mono">{id}</span>
-                <Icon icon={ArrowRight} />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
 }
 
 function LiveCard() {

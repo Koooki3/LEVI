@@ -2788,3 +2788,13 @@
   font-weight: var(--ds-weight-regular);
   color: var(--ds-text-secondary);
 }
+
+/* Explore: the Hub search sits above the public examples */
+.pg-explore-search {
+  margin: var(--ds-space-3) 0 var(--ds-space-5);
+  max-width: 720px;
+}
+.pg-explore-search .pg-small {
+  margin: var(--ds-space-2) 0 0;
+  color: var(--ds-text-secondary);
+}
