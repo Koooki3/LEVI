@@ -133,6 +133,10 @@ def clean(apply=False, ws=None):
     process-wide workspace, so with an explicit ``ws`` it is skipped (reported as
     such) rather than run against a different workspace than the one named.
     """
+    if ws is not None and Path(ws.root).resolve() in {Path("/"), Path.home().resolve()}:
+        # A Workspace is not validated; the filesystem root or a home folder is
+        # never a LEVI workspace, and <root>/.cache/levi there is someone else's.
+        raise ValueError(f"Refusing to clean {ws.root}: not a LEVI workspace root")
     state = _workspace(ws).state
     marker = state / "server.pid"
     if marker.exists():

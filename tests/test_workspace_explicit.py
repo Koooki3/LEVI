@@ -143,3 +143,10 @@ def test_an_explicit_workspace_never_lists_the_checkouts_own_caches(tmp_path):
     listed = {entry["path"] for entry in report["entries"]}
     assert listed == {str(ws.root / ".cache/levi")}
     assert report["pool"]["removed"] == [] and report["pool"]["dry_run"] is True
+
+
+@pytest.mark.parametrize("root", [Path("/"), Path.home()])
+def test_an_explicit_workspace_at_the_filesystem_root_or_home_is_refused(root):
+    ws = Workspace(root, root / "outputs/LEVI/workbench", root / ".cache/levi")
+    with pytest.raises(ValueError, match="not a LEVI workspace root"):
+        maintenance.clean(False, ws)
