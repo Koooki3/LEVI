@@ -160,3 +160,26 @@ def test_apply_on_an_explicit_folder_that_is_not_a_workspace_is_refused(tmp_path
     with pytest.raises(ValueError, match="not a LEVI workspace"):
         maintenance.clean(True, ws)
     assert (ws.root / ".cache/levi").is_dir()
+
+
+def test_a_root_above_a_home_folder_or_a_moved_home_is_refused(tmp_path, monkeypatch):
+    import pwd
+
+    real_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    above = real_home.parent
+    with pytest.raises(ValueError, match="not a LEVI workspace root"):
+        maintenance.clean(False, Workspace(above, above / "outputs/LEVI/workbench", above / ".cache/levi"))
+    # HOME pointing elsewhere does not unprotect the account's real home.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    with pytest.raises(ValueError, match="not a LEVI workspace root"):
+        maintenance.clean(False, Workspace(real_home, real_home / "outputs/LEVI/workbench", real_home / ".cache/levi"))
+
+
+def test_a_state_outside_the_root_is_refused_even_when_it_exists(tmp_path):
+    other = make_workspace(tmp_path / "real", registered=[], leftovers=[])
+    root = tmp_path / "victim"
+    (root / ".cache/levi").mkdir(parents=True)
+    ws = Workspace(root, other.state, root / ".cache/levi")
+    with pytest.raises(ValueError, match="lies outside it"):
+        maintenance.clean(True, ws)
+    assert (root / ".cache/levi").is_dir()

@@ -121,6 +121,26 @@ def orphans(ws=None):
     }
 
 
+def _refuse_unless_a_workspace(ws, apply):
+    """A ``Workspace`` is not validated when it is built, so an explicit one is
+    checked before anything under it is read or removed: its root is never the
+    filesystem root, a home folder or a folder above one (HOME may be changed,
+    so the account's own home counts too); its state lies inside its root; and
+    removing anything needs the state folder to exist already."""
+    import pwd
+
+    root = Path(ws.root).resolve()
+    homes = {Path.home().resolve(), Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()}
+    if root == Path("/") or any(home.is_relative_to(root) for home in homes):
+        raise ValueError(f"Refusing to clean {ws.root}: not a LEVI workspace root")
+    if not Path(ws.state).resolve().is_relative_to(root):
+        raise ValueError(f"Refusing to clean {ws.root}: its state {ws.state} lies outside it")
+    if apply and not Path(ws.state).is_dir():
+        raise ValueError(
+            f"Refusing to clean {ws.root}: {ws.state} does not exist, so it is not a LEVI workspace"
+        )
+
+
 def clean(apply=False, ws=None):
     """Plan (or with ``apply`` do) the bounded clean-up of one workspace.
 
@@ -133,14 +153,8 @@ def clean(apply=False, ws=None):
     process-wide workspace, so with an explicit ``ws`` it is skipped (reported as
     such) rather than run against a different workspace than the one named.
     """
-    if ws is not None and Path(ws.root).resolve() in {Path("/"), Path.home().resolve()}:
-        # A Workspace is not validated; the filesystem root or a home folder is
-        # never a LEVI workspace, and <root>/.cache/levi there is someone else's.
-        raise ValueError(f"Refusing to clean {ws.root}: not a LEVI workspace root")
-    if apply and ws is not None and not Path(ws.state).is_dir():
-        # Positive check: an explicit workspace must already be one (its
-        # workbench folder exists) before anything under it is removed.
-        raise ValueError(f"Refusing to clean {ws.root}: {ws.state} does not exist, so it is not a LEVI workspace")
+    if ws is not None:
+        _refuse_unless_a_workspace(ws, apply)
     state = _workspace(ws).state
     marker = state / "server.pid"
     if marker.exists():
