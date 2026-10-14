@@ -429,7 +429,10 @@ describe("the wizard, one run", () => {
     await click(host.querySelectorAll('input[name="aw-reset"]')[1]!);
     await click(buttonNamed(host, "Next")!);
     expect(host.textContent).toContain("Success condition (optional)");
-    expect(host.textContent).toContain("depends on the chosen judging spec");
+    expect(host.textContent).toContain(
+      "it is only recorded in the job and shown on the plan card and the run window; it takes no part in any verdict.",
+    );
+    expect(host.textContent).not.toContain("judging spec");
     const areas = host.querySelectorAll("textarea");
     expect(areas.length).toBe(3);
     await type(areas[0]!, "go");

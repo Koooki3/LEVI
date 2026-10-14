@@ -43,8 +43,10 @@ describe("the requirements card", () => {
     const text = host.querySelector(
       "[data-row=success_condition]",
     )!.textContent!;
-    expect(text).toContain("Recorded and shown only");
-    expect(text).toContain("judging spec");
+    expect(text).toContain(
+      "Recorded and shown only; it takes no part in any verdict.",
+    );
+    expect(text.toLowerCase()).not.toContain("judging spec");
     expect(text.toLowerCase()).not.toContain("is judged by");
   });
 
