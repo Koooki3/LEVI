@@ -621,7 +621,12 @@ def diagnostics(payload: Diagnostic):
             raise ValueError("Invalid Hub dataset ID")
         import httpx
         from huggingface_hub import HfApi, snapshot_download
-        from huggingface_hub.errors import HfHubHTTPError, OfflineModeIsEnabled
+        from huggingface_hub.errors import (
+            DisabledRepoError,
+            HfHubHTTPError,
+            OfflineModeIsEnabled,
+            RepositoryNotFoundError,
+        )
         from huggingface_hub.utils import filter_repo_objects
 
         from .auth import credential_scope
@@ -640,16 +645,23 @@ def diagnostics(payload: Diagnostic):
                 payload.repo_id, token=credential, files_metadata=True
             )
         except (OfflineModeIsEnabled, httpx.TransportError, HfHubHTTPError) as error:
-            # Hub unreachable or failing (offline mode, network, 5xx): like
+            # Hub unreachable or failing (offline mode, network, 429, 5xx): like
             # before, an earlier download is inspected as it is. Access errors
-            # (401, 403, 404) are re-raised even when an earlier download exists.
+            # (401, 403, 404, gated, disabled) are re-raised even when an
+            # earlier download exists.
             old = CACHE / payload.repo_id.replace("/", "__")
-            status = getattr(getattr(error, "response", None), "status_code", None)
-            down = not isinstance(error, HfHubHTTPError) or (status or 0) >= 500
+            if isinstance(error, HfHubHTTPError):
+                status = error.response.status_code
+                reason = f"HTTP {status}"
+                down = (status == 429 or status >= 500) and not isinstance(
+                    error, (RepositoryNotFoundError, DisabledRepoError)
+                )
+            else:
+                reason, down = type(error).__name__, True
             if not down or not (old / "meta" / "info.json").is_file():
                 raise
             report = _inspect(payload, old)
-            report["cache_note"] = f"Hub unreachable: inspected {old}"
+            report["cache_note"] = f"Hub unreachable ({reason}): inspected {old}"
             return report
         files = filter_repo_objects(
             info.siblings or [], allow_patterns=patterns, key=lambda s: s.rfilename

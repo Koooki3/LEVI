@@ -190,6 +190,7 @@ def test_the_reservation_counts_the_listing_of_the_whole_repository():
 def hub_error(kind):
     import httpx
     from huggingface_hub.errors import (
+        GatedRepoError,
         HfHubHTTPError,
         OfflineModeIsEnabled,
         RepositoryNotFoundError,
@@ -205,7 +206,11 @@ def hub_error(kind):
         "connect": lambda: httpx.ConnectError("refused", request=request),
         "timeout": lambda: httpx.ReadTimeout("slow", request=request),
         "503": lambda: status(HfHubHTTPError, 503),
-        "401": lambda: status(HfHubHTTPError, 401),
+        "429": lambda: status(HfHubHTTPError, 429),
+        "401": lambda: status(RepositoryNotFoundError, 401),
+        "403": lambda: status(HfHubHTTPError, 403),
+        "gated": lambda: status(GatedRepoError, 403),
+        "not found with 500": lambda: status(RepositoryNotFoundError, 500),
         "404": lambda: status(RepositoryNotFoundError, 404),
     }[kind]()
 
@@ -217,7 +222,11 @@ def hub_error(kind):
         ("connect", True),
         ("timeout", True),
         ("503", True),
+        ("429", True),
         ("401", False),
+        ("403", False),
+        ("gated", False),
+        ("not found with 500", False),
         ("404", False),
     ],
 )
