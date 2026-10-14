@@ -7,12 +7,23 @@
 # Both installers link from their global caches (uv: hardlinks, bun:
 # --backend=hardlink), so a warm install takes about a second and adds almost no
 # disk. The environment stays private to this tree: no symlink to another
-# checkout's node_modules or .venv, which would let one tree's install change
-# another's. Nothing here touches the product checkout's environment, a
+# checkout's node_modules or .venv. Files are hardlinked to the global caches, so
+# do not edit a file inside node_modules or site-packages in place (that would
+# write through to every tree sharing the cache); reinstall instead. Without
+# --agent an installed `agent` extra is removed again (uv sync is exact). Nothing here touches the product checkout's environment, a
 # running service or the network when the caches are warm (--offline is tried
 # first). Prints the commands that run the checks from this tree.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+# `uv sync` makes an environment match the lock exactly (it removes packages that
+# are not in it), so never run it against the checkout a product LEVI runs from.
+if [[ "$(git rev-parse --git-dir)" == "$(git rev-parse --git-common-dir)" && -z "${LEVI_DEV_ENV_MAIN:-}" ]]; then
+  echo "refusing to run in the main checkout (its .venv belongs to the product); use a worktree, or set LEVI_DEV_ENV_MAIN=1" >&2
+  exit 2
+fi
+# An exported UV_PROJECT_ENVIRONMENT would make `uv sync` rewrite another tree's venv.
+unset UV_PROJECT_ENVIRONMENT
 
 extras=()
 [[ "${1:-}" == "--agent" ]] && extras=(--extra agent)

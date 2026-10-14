@@ -151,3 +151,90 @@ def test_a_module_named_in_a_string_is_started_not_imported(tmp_path):
     # core only names the service in a string: a service change does not reach it
     # through core's importers.
     assert sel.select(["levi/service.py"], files)["pytest"]["tests"] == []
+
+
+def test_an_autouse_fixture_import_reaches_every_test_below_its_conftest(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {
+            "levi/droid.py": "X = 1\n",
+            "tests/conftest.py": (
+                "import pytest\n\n@pytest.fixture(autouse=True)\ndef _no_droid():\n"
+                "    from levi import droid\n    return droid.X\n"
+            ),
+            "tests/test_a.py": "def test_a():\n    pass\n",
+            "tests/test_b.py": "def test_b():\n    pass\n",
+        },
+    )
+    out = sel.select(["levi/droid.py"], files)
+    assert out["pytest"]["tests"] == ["tests/test_a.py", "tests/test_b.py"]
+
+
+def test_importing_a_submodule_depends_on_its_parent_package_init(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {
+            "levi/pkg/__init__.py": "READY = True\n",
+            "levi/pkg/sub.py": "Y = 1\n",
+            "tests/test_sub.py": "from levi.pkg.sub import Y\n",
+        },
+    )
+    assert sel.select(["levi/pkg/__init__.py"], files)["pytest"]["tests"] == [
+        "tests/test_sub.py"
+    ]
+
+
+def test_a_deleted_module_nobody_names_widens_and_one_a_test_names_does_not(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {"levi/a.py": "", "tests/test_a.py": "# mentions levi.old_name in a message\n"},
+    )
+    assert sel.select(["levi/gone.py"], files)["pytest"]["widen"]
+    assert not sel.select(["levi/old_name.py"], files)["pytest"]["widen"]
+
+
+def test_an_unmapped_file_widens_both_groups(tmp_path):
+    sel = load(tmp_path)
+    files = write(tmp_path, {".github/workflows/test.yml": "", "tests/test_a.py": ""})
+    out = sel.select([".github/workflows/test.yml"], files)
+    assert out["pytest"]["widen"] and out["bun"]["widen"]
+
+
+def test_a_source_a_test_reads_by_path_pieces_selects_that_test(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {
+            "src/app/globals.css": "",
+            "src/app/__tests__/css.test.ts": 'readFileSync(join(dir, "../globals.css"))\n',
+            "src/app/__tests__/other.test.ts": "",
+        },
+    )
+    out = sel.select(["src/app/globals.css"], files)
+    assert out["bun"]["tests"] == ["src/app/__tests__/css.test.ts"]
+
+
+def test_a_bare_import_of_a_helper_in_another_tests_directory_is_followed(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {
+            "tests/live_helpers.py": "H = 1\n",
+            "tests/automatic/test_x.py": "from live_helpers import H\n",
+            "tests/automatic/test_y.py": "",
+        },
+    )
+    assert sel.select(["tests/live_helpers.py"], files)["pytest"]["tests"] == [
+        "tests/automatic/test_x.py"
+    ]
+
+
+def test_a_git_failure_is_an_error_not_an_empty_answer(tmp_path):
+    import pytest
+
+    sel = load(tmp_path)
+    with pytest.raises(SystemExit):
+        sel.git("rev-parse", "--verify", "no-such-ref-anywhere")

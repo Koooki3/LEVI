@@ -58,6 +58,9 @@ TS_WIDEN = (
 )
 # Documentation has its own check; it only selects tests that name the file.
 DOC_CHECK = ("tests/test_docs.py",)
+# Scan every shipped file for developer paths and the like.
+ALWAYS = ("tests/test_live_portable.py",)
+GENERIC_NAMES = {"page.tsx", "layout.tsx", "index.ts", "index.tsx", "route.ts", "__init__.py"}
 
 IMPORT_RE = re.compile(
     r"""(?:import|export)\s[^'"`;]*?from\s*['"]([^'"]+)['"]|"""
@@ -69,10 +72,14 @@ IMPORT_RE = re.compile(
 LEVI_STR_RE = re.compile(r"\b(?:levi|backend|scripts)(?:\.[A-Za-z_][A-Za-z0-9_]*)+")
 
 
-def git(*args: str) -> str:
-    return subprocess.run(
-        ["git", *args], cwd=ROOT, text=True, capture_output=True, check=False
-    ).stdout
+def git(*args: str, strict: bool = True) -> str:
+    """Run git. A failure is an error, not an empty answer: a wrong --base or a
+    checkout without a local `main` (CI pull requests) must not read as "nothing
+    changed"."""
+    run = subprocess.run(["git", *args], cwd=ROOT, text=True, capture_output=True, check=False)
+    if run.returncode and strict:
+        sys.exit(f"select_tests: git {' '.join(args)} failed: {run.stderr.strip()}")
+    return run.stdout
 
 
 def tracked() -> list[str]:
@@ -97,6 +104,11 @@ class PyGraph:
         self.importers: dict[str, set[str]] = defaultdict(set)
         self.weak_importers: dict[str, set[str]] = defaultdict(set)
         self.fixtures: dict[str, dict[str, tuple[set[str], set[str]]]] = {}
+        self.autouse: dict[str, set[str]] = {}
+        self.test_stems: dict[str, set[str]] = defaultdict(set)
+        for f in self.files:
+            if f.startswith("tests/") and not is_test(f) and Path(f).name != "conftest.py":
+                self.test_stems[Path(f).stem].add(f)
         for f in self.files:
             self._scan(f)
         self._add_fixture_edges()
@@ -137,6 +149,8 @@ class PyGraph:
                         mods.add(hit)
             params = {a.arg for a in node.args.args + node.args.kwonlyargs}
             found[node.name] = (mods, params)
+            if any("autouse=True" in ast.unparse(d) for d in node.decorator_list):
+                self.autouse.setdefault(f, set()).add(node.name)
         self.fixtures[f] = found
 
     def _scan(self, f: str) -> None:
@@ -157,12 +171,24 @@ class PyGraph:
             hit = self._resolve(dotted)
             if hit and hit != f:
                 deps.add(hit)
+            # Importing a.b.c runs the __init__ of a and a.b first.
+            parts = dotted.split(".")
+            for i in range(1, len(parts)):
+                parent = self.by_module.get(".".join(parts[:i]))
+                if parent and parent != f and parent.endswith("__init__.py"):
+                    deps.add(parent)
 
         def bare(name: str) -> None:
             # pytest's rootdir mode puts the test file's directory on sys.path.
-            cand = Path(sibling_dir) / (name.split(".")[0] + ".py")
+            stem = name.split(".")[0]
+            cand = Path(sibling_dir) / (stem + ".py")
             if (ROOT / cand).is_file() and cand.as_posix() != f:
                 deps.add(cand.as_posix())
+            elif f.startswith("tests/") and len(self.test_stems.get(stem, ())) == 1:
+                # a helper in another tests/ directory (pytest's rootdir mode)
+                (only,) = self.test_stems[stem]
+                if only != f:
+                    deps.add(only)
 
         if Path(f).name == "conftest.py":
             self._record_fixtures(f, tree, pkg)
@@ -231,6 +257,11 @@ class PyGraph:
                 for c in self.fixtures
                 if Path(f).as_posix().startswith(str(Path(c).parent.as_posix()) + "/")
             ]
+            # An autouse fixture applies to every test below its conftest, asked for
+            # or not.
+            for c in confs:
+                for name in self.autouse.get(c, ()):
+                    self.imports[f] |= deps_of(c, name, set())
             for node in ast.walk(tree):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     for arg in node.args.args + node.args.kwonlyargs:
@@ -330,6 +361,7 @@ def select(changed: list[str], files: list[str], graphs: tuple | None = None) ->
     py_changed: set[str] = set()
     ts_changed: set[str] = set()
     data_changed: list[str] = []
+    named_by_path: list[str] = []
     for c in changed:
         if any(c == w or c.startswith(w) for w in PY_WIDEN):
             out["pytest"]["widen"].append(f"{c}: shared by every Python test")
@@ -338,9 +370,16 @@ def select(changed: list[str], files: list[str], graphs: tuple | None = None) ->
         if c.endswith(".py") and c.split("/")[0] in PY_DIRS:
             if c in py.imports and "*" in py.imports[c]:
                 out["pytest"]["widen"].append(f"{c}: cannot be parsed")
+            if c not in py.text:
+                # deleted or renamed away: whatever still names it must be found
+                hits = [t for t in all_py_tests if module_of(c) in py.text[t] or Path(c).name in py.text[t]]
+                if not hits:
+                    out["pytest"]["widen"].append(f"{c}: no longer exists and no test names it")
             py_changed.add(c)
+            named_by_path.append(c)
         elif re.search(r"\.(tsx?|css)$", c) and c.startswith("src/"):
             ts_changed.add(c)
+            named_by_path.append(c)
         elif c.endswith(".md") and c.startswith(("docs/", "README", "CHANGELOG")):
             out["other"].append(f"{c}: documentation: run `uv run levi docs check`")
             data_changed.append(c)
@@ -348,6 +387,9 @@ def select(changed: list[str], files: list[str], graphs: tuple | None = None) ->
             data_changed.append(c)
         else:
             out["other"].append(f"{c}: not mapped to a test group (CI/config/other)")
+            data_changed.append(c)
+            for key in ("pytest", "bun"):
+                out[key]["widen"].append(f"{c}: not mapped to a test group")
 
     selected = py.closure(py_changed)
     # Helper and tool scripts under tests/ and scripts/ are often started by path
@@ -368,20 +410,41 @@ def select(changed: list[str], files: list[str], graphs: tuple | None = None) ->
                 ts_sel.add(t)
                 hits.add(t)
         selected |= {h for h in hits if h in py.text}
-        if not hits and not d.endswith(".md"):
+        docs_only = d.endswith(".md") and d.startswith(("docs/", "README", "CHANGELOG"))
+        if not hits and not docs_only:
             out["pytest"]["widen"].append(f"{d}: no test names this data file")
         if d.startswith("src/") and re.search(r"\.json$", d):
             ts_sel |= ts.closure({d})
+    # Sources a test reads by path (a stylesheet, a page, a script) are not imported.
+    ts_text = {t: (ROOT / t).read_text(encoding="utf8", errors="replace") for t in all_ts_tests}
+    for c in named_by_path:
+        parts = Path(c).parts
+        # Tests usually build the path from pieces (join(dir, "../globals.css"),
+        # "explore/page.tsx"), so the last two components count as naming it.
+        needles = {c, "/".join(parts[-2:])}
+        if c.endswith(".css") and Path(c).name not in GENERIC_NAMES:
+            needles.add(Path(c).name)
+        for t in all_py_tests:
+            if any(n in py.text[t] for n in needles):
+                selected.add(t)
+        for t, text in ts_text.items():
+            if any(n in text for n in needles):
+                ts_sel.add(t)
     if any(d.endswith(".md") for d in data_changed):
         selected |= {t for t in DOC_CHECK if t in py.text}
+    # Guards that scan every shipped file run whenever shipped code or data changes.
+    if any(not is_test(c) and not is_ts_test(c) for c in changed):
+        selected |= {t for t in ALWAYS if t in py.text}
     out["pytest"]["tests"] = sorted(t for t in selected if is_test(t))
     out["bun"]["tests"] = sorted(t for t in ts_sel if is_ts_test(t))
     return out
 
 
 def changed_files(base: str) -> list[str]:
-    names = set(git("diff", "--name-only", f"{base}...HEAD").splitlines())
-    names |= set(git("diff", "--name-only", "HEAD").splitlines())
+    # --no-renames: a moved file counts as the old path deleted and the new one added,
+    # so whatever still imports the old name is looked for.
+    names = set(git("diff", "--name-only", "--no-renames", f"{base}...HEAD").splitlines())
+    names |= set(git("diff", "--name-only", "--no-renames", "HEAD").splitlines())
     names |= set(git("ls-files", "-o", "--exclude-standard").splitlines())
     return sorted(n for n in names if n)
 
@@ -409,14 +472,14 @@ def render(res: dict) -> str:
 def evaluate(n: int, files: list[str]) -> str:
     """For recent commits that changed code and tests, how many of the tests that
     changed with the code does the selector name, from the code alone?"""
-    log = git("log", "--no-merges", f"-{n * 6}", "--format=%H").split()
+    log = git("log", "--no-merges", f"-{n * 6}", "--format=%H", strict=False).split()
     seen = hit = miss = commits = widened = 0
     ratios = []
     pygraph_files = set(files)
     graphs = (PyGraph(files), TsGraph(files))
     missed: list[str] = []
     for sha in log:
-        names = git("show", "--name-only", "--format=", sha).split()
+        names = git("show", "--name-only", "--format=", sha, strict=False).split()
         tests = [x for x in names if (is_test(x) or is_ts_test(x)) and x in pygraph_files]
         code = [x for x in names if x in pygraph_files and not is_test(x) and not is_ts_test(x)
                 and re.search(r"\.(py|tsx?)$", x) and not x.endswith("select_tests.py")]
