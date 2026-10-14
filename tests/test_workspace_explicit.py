@@ -213,3 +213,33 @@ def test_a_symlinked_folder_under_the_state_is_not_followed(tmp_path):
     (ws.state / "views").symlink_to(tmp_path / "outside")
     maintenance.clean(True, ws)
     assert outside.is_dir()
+
+
+def test_the_cli_offers_no_way_to_pass_a_workspace(monkeypatch):
+    calls = []
+    monkeypatch.setattr(maintenance, "clean", lambda *a, **k: calls.append((a, k)) or {})
+    monkeypatch.setattr(sys, "argv", ["levi-clean"])
+    assert maintenance.main() == 0
+    assert calls == [((False,), {})]
+    for extra in (["--workspace", "/x"], ["--ws", "/x"], ["--root", "/x"], ["/x"]):
+        monkeypatch.setattr(sys, "argv", ["levi-clean", *extra])
+        with pytest.raises(SystemExit):
+            maintenance.main()
+
+
+def test_no_product_code_passes_an_explicit_workspace():
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    offenders = []
+    for folder in ("levi", "backend"):
+        for f in (root / folder).rglob("*.py"):
+            if f.name == "maintenance.py" and f.parent.name == "levi":
+                continue
+            text = f.read_text(encoding="utf8", errors="replace")
+            if "maintenance" not in text:
+                continue
+            for call in re.finditer(r"\b(?:clean|orphans)\(([^)]*)\)", text):
+                if re.search(r"\bws\b|Workspace", call.group(1)):
+                    offenders.append(f"{f.relative_to(root)}: {call.group(0)}")
+    assert offenders == []

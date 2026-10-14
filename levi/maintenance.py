@@ -83,6 +83,10 @@ def orphans(ws=None):
     leftovers become invisible: an empty shell directory, or a redirect that
     now leads nowhere. Reporting them is the point; only the empty shells are
     ever offered for removal.
+
+    An explicit ``ws`` is for tests and for callers registered for it later;
+    the CLI (``levi clean``) and the service never pass one, and
+    ``tests/test_workspace_explicit.py`` checks that nothing does.
     """
     from .catalog import aliases, datasets, read
 
@@ -164,6 +168,10 @@ def clean(apply=False, ws=None):
     they are never listed or removed. The training-pool sweep works on the
     process-wide workspace, so with an explicit ``ws`` it is skipped (reported as
     such) rather than run against a different workspace than the one named.
+
+    An explicit ``ws`` is for tests and for callers registered for it later;
+    the CLI (``levi clean``) and the service never pass one, and
+    ``tests/test_workspace_explicit.py`` checks that nothing does.
     """
     if ws is not None:
         ws = _refuse_unless_a_workspace(ws, apply)
