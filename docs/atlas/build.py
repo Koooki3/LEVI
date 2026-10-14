@@ -8,6 +8,14 @@ external image, no foreign object) so it renders the same on GitHub, in the
 Report page and in a browser, and diffs as text. Light and dark files exist
 because an <img> cannot inherit the page's colours; the README picks one with
 <picture>. Every figure states one claim in its <title> and <desc>.
+
+Design: flat vector first, in the manner of a paper's system-overview figure.
+Depth appears only where it carries meaning (group plates, the emphasised card,
+the pyramid and layer slabs) and uses at most a handful of filtered elements per
+figure. Motion is CSS only, 3 s or slower, and only where it carries meaning:
+the direction of data flow (figures 1, 5, 6), the GPU timeline's "now" marker
+(figure 5) and the contract boundary (figure 6). Under prefers-reduced-motion
+everything is static, and the static frame is the complete figure.
 """
 
 from __future__ import annotations
@@ -20,49 +28,83 @@ OUT = Path(__file__).resolve().parents[1] / "assets" / "atlas"
 FONT = "Inter, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', Helvetica, Arial, sans-serif"
 MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 
+# Neutrals lean slightly blue so cards, panel and text share one hue.
 PALETTE = {
     "light": dict(  # noqa: C408
         panel="#ffffff",
-        edge="#d0d7de",
-        ink="#1f2328",
-        soft="#59636e",
-        faint="#8c959f",
-        box="#f6f8fa",
-        boxedge="#d0d7de",
-        accent="#24292f",
+        panel2="#f6f8fc",
+        edge="#cfd8e3",
+        ink="#1b2430",
+        soft="#4f5b6c",
+        faint="#5b687a",
+        box="#f4f7fb",
+        boxedge="#c9d3df",
+        accent="#243040",
         on_accent="#ffffff",
-        model="#0969da",
-        model_bg="#ddf4ff",
-        person="#1a7f37",
-        person_bg="#dafbe1",
-        gate="#9a6700",
-        gate_bg="#fff8c5",
-        system="#8250df",
-        system_bg="#fbefff",
-        danger="#cf222e",
-        danger_bg="#ffebe9",
+        model="#0b64c6",
+        model_bg="#e1f0ff",
+        person="#1a7a38",
+        person_bg="#dff6e5",
+        gate="#8f5f00",
+        gate_bg="#fff6c9",
+        system="#7a45d6",
+        system_bg="#f6ecff",
+        danger="#c4242f",
+        danger_bg="#ffeceb",
+        sheen="#ffffff",
+        sheen_op=0.85,
+        shadow="#1b2a44",
+        shadow_op=0.16,
     ),
     "dark": dict(  # noqa: C408
-        panel="#0d1117",
-        edge="#30363d",
-        ink="#e6edf3",
-        soft="#9198a1",
-        faint="#6e7681",
-        box="#161b22",
-        boxedge="#4b535d",
-        accent="#e6edf3",
-        on_accent="#0d1117",
-        model="#58a6ff",
-        model_bg="#10243e",
-        person="#3fb950",
-        person_bg="#0f2d1a",
-        gate="#d29922",
-        gate_bg="#2d2308",
-        system="#bc8cff",
-        system_bg="#271a3d",
-        danger="#ff7b72",
-        danger_bg="#3d1418",
+        panel="#0e131b",
+        panel2="#0b0f16",
+        edge="#2c3644",
+        ink="#e6ecf4",
+        soft="#a3afc0",
+        faint="#8591a3",
+        box="#161d28",
+        boxedge="#47536a",
+        accent="#e6ecf4",
+        on_accent="#0e131b",
+        model="#62a8ff",
+        model_bg="#112640",
+        person="#47c15f",
+        person_bg="#10301c",
+        gate="#dca62c",
+        gate_bg="#2e2509",
+        system="#c29bff",
+        system_bg="#2a1c42",
+        danger="#ff8279",
+        danger_bg="#40161b",
+        sheen="#ffffff",
+        sheen_op=0.07,
+        shadow="#000000",
+        shadow_op=0.55,
     ),
+}
+TONES = ("model", "person", "gate", "system", "danger")
+
+
+def _rgb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i : i + 2], 16) for i in (0, 2, 4))
+
+
+def mix(a, b, t):
+    """Colour a moved fraction t of the way towards b."""
+    ra, rb = _rgb(a), _rgb(b)
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(ra, rb))
+
+
+ICONS = {  # 24-unit line icons, drawn with the tone colour
+    "doc": '<path d="M6 3h8l4 4v14H6z M14 3v4h4 M9 12h6 M9 16h6"/>',
+    "db": '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6 M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>',
+    "person": '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-4 3-6 7-6s7 2 7 6"/>',
+    "chip": '<rect x="6" y="6" width="12" height="12" rx="2"/><rect x="10" y="10" width="4" height="4"/>'
+    '<path d="M9 3v3 M15 3v3 M9 18v3 M15 18v3 M3 9h3 M3 15h3 M18 9h3 M18 15h3"/>',
+    "arm": '<path d="M4 21h9 M8.5 21v-7"/><circle cx="8.5" cy="12" r="2"/><path d="M10 10.5 15 6.5"/>'
+    '<circle cx="16.5" cy="5.5" r="1.8"/><path d="M17.6 7 20 10.5 M20 10.5l-1.6 2 M20 10.5l1.8 1.8"/>',
 }
 
 
@@ -73,19 +115,95 @@ class Fig:
         self.title, self.desc = title, desc
         self.parts: list[str] = []
         self.markers: set[str] = set()
+        self.grads: set[str] = set()
+        self.filters: set[str] = set()
+        self.rects: list[
+            tuple
+        ] = []  # (x, y, w, h, colours, opacity) for the contrast audit
+        self.texts: list[tuple] = []  # (x, y, size, fill, anchor)
+        self.flows = 0
+
+    # -- helpers -----------------------------------------------------------
+    def _paint(self, fill):
+        """Cards get a very soft vertical gradient; anything else stays flat."""
+        c = self.c
+        for tone in (*TONES, "box"):
+            key = c[tone + "_bg"] if tone != "box" else c["box"]
+            if fill == key:
+                self.grads.add(tone)
+                return f"url(#g_{tone})"
+        return fill
+
+    def _gradient_ends(self, tone):
+        c = self.c
+        base = c[tone + "_bg"] if tone != "box" else c["box"]
+        amt = 0.55 if self.theme == "light" else 0.045
+        return mix(base, "#ffffff", amt), base
+
+    def icon(self, name, x, y, tone, size=22):
+        col = self.c[tone] if tone else self.c["soft"]
+        s = size / 24
+        self.parts.append(
+            f'<g transform="translate({x} {y}) scale({s:.3f})" fill="none" stroke="{col}" '
+            f'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">{ICONS[name]}</g>'
+        )
 
     # -- primitives ------------------------------------------------------
     def rect(
-        self, x, y, w, h, fill=None, stroke=None, r=10, dash=False, sw=1.2, op=None
+        self,
+        x,
+        y,
+        w,
+        h,
+        fill=None,
+        stroke=None,
+        r=10,
+        dash=False,
+        sw=1.2,
+        op=None,
+        elev=0,
+        plain=False,
+        cls=None,
     ):
+        """elev 0 flat, 1 soft group shadow, 2 emphasis shadow. Few per figure on purpose."""
         c = self.c
         fill = fill or c["box"]
         stroke = stroke or c["boxedge"]
+        self.rects.append((x, y, w, h, fill, op))
+        paint = fill if plain else self._paint(fill)
         d = ' stroke-dasharray="5 4"' if dash else ""
         o = f' fill-opacity="{op}"' if op is not None else ""
+        flt = ""
+        if elev:
+            self.filters.add(f"sh{elev}")
+            flt = f' filter="url(#sh{elev})"'
+        k = f' class="{cls}"' if cls else ""
         self.parts.append(
-            f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" fill="{fill}"{o} '
-            f'stroke="{stroke}" stroke-width="{sw}"{d}/>'
+            f'<rect{k} x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" fill="{paint}"{o} '
+            f'stroke="{stroke}" stroke-width="{sw}"{d}{flt}/>'
+        )
+        if not dash and not plain and w > 24 and h > 24:
+            self.parts.append(
+                f'<rect x="{x + 1.5}" y="{y + 1.5}" width="{w - 3}" height="{h - 3}" rx="{max(r - 1.5, 1)}" '
+                f'fill="none" stroke="{c["sheen"]}" stroke-opacity="{c["sheen_op"] * 0.5:.3f}" stroke-width="1"/>'
+            )
+
+    def slab(self, x, y, w, h, r=14, depth=5):
+        """A pale group plate with a visible thickness: layering, not a heavy shadow."""
+        c = self.c
+        side = mix(c["boxedge"], c["panel"], 0.2)
+        self.parts.append(
+            f'<rect x="{x}" y="{y + depth}" width="{w}" height="{h}" rx="{r}" fill="{side}"/>'
+        )
+        top = (
+            mix(c["panel"], c["edge"], 0.38)
+            if self.theme == "light"
+            else mix(c["panel"], "#ffffff", 0.035)
+        )
+        self.rects.append((x, y, w, h, top, None))
+        self.parts.append(
+            f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" fill="{top}" '
+            f'stroke="{c["edge"]}" stroke-width="1"/>'
         )
 
     def text(
@@ -99,13 +217,16 @@ class Fig:
         fill=None,
         mono=False,
         op=None,
+        ls=None,
     ):
         fill = fill or self.c["ink"]
         fam = MONO if mono else FONT
         o = f' opacity="{op}"' if op is not None else ""
+        spacing = f' letter-spacing="{ls}"' if ls else ""
+        self.texts.append((x, y, size, fill, anchor, s))
         self.parts.append(
             f'<text x="{x}" y="{y}" font-family="{fam}" font-size="{size}" font-weight="{weight}" '
-            f'text-anchor="{anchor}" fill="{fill}"{o}>{html.escape(s)}</text>'
+            f'text-anchor="{anchor}" fill="{fill}"{o}{spacing}>{html.escape(s)}</text>'
         )
 
     def lines(self, x, y, items, size=13, gap=18, **kw):
@@ -125,13 +246,23 @@ class Fig:
         subsize=13,
         dash=False,
         align="start",
+        icon=None,
+        elev=0,
     ):
         c = self.c
         fill, stroke = (c["box"], c["boxedge"])
         if tone:
             fill, stroke = c[tone + "_bg"], c[tone]
         self.rect(
-            x, y, w, h, fill=fill, stroke=stroke, dash=dash, sw=1.4 if tone else 1.2
+            x,
+            y,
+            w,
+            h,
+            fill=fill,
+            stroke=stroke,
+            dash=dash,
+            sw=1.4 if tone else 1.2,
+            elev=elev,
         )
         tx = x + 14 if align == "start" else x + w / 2
         self.text(
@@ -146,6 +277,8 @@ class Fig:
         self.lines(
             tx, y + 45, list(sub), size=subsize, gap=18, anchor=align, fill=c["soft"]
         )
+        if icon:
+            self.icon(icon, x + w - 34, y + 9, tone)
 
     def pill(self, x, y, label, tone="model", w=None):
         c = self.c
@@ -173,6 +306,7 @@ class Fig:
         both=False,
         anchor="middle",
         lsize=12,
+        flow=False,
     ):
         c = self.c
         col = c[tone] if tone else c["soft"]
@@ -187,6 +321,13 @@ class Fig:
             f'<path d="{d}" fill="none" stroke="{col}" stroke-width="1.8" stroke-linejoin="round"{da} '
             f'marker-end="url(#{mid})"{start}/>'
         )
+        if flow:
+            # Direction of travel: small bright dots drift along the line, start to end.
+            self.flows += 1
+            self.parts.append(
+                f'<path class="flow" d="{d}" fill="none" stroke="{col}" stroke-width="3.4" '
+                f'stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="0.1 18"/>'
+            )
         if label:
             x0, y0 = pts[len(pts) // 2 - 1] if len(pts) > 2 else pts[0]
             x1, y1 = pts[len(pts) // 2]
@@ -195,6 +336,11 @@ class Fig:
             self.text(lx, ly, label, size=lsize, anchor=anchor, fill=col, weight=500)
 
     def heading(self, label, sub=None):
+        c = self.c
+        self.parts.append(
+            f'<rect x="32" y="14" width="30" height="3.5" rx="1.75" fill="{c["model"]}"/>'
+            f'<rect x="64" y="14" width="14" height="3.5" rx="1.75" fill="{c["system"]}"/>'
+        )
         self.text(32, 40, label, size=22, weight=700)
         if sub:
             self.text(32, 64, sub, size=13.5, fill=self.c["soft"])
@@ -205,6 +351,16 @@ class Fig:
         self.text(48, y + 21, s, size=13.5, weight=500, fill=c[tone])
 
     # -- output ----------------------------------------------------------
+    CSS = (
+        "@keyframes flow{to{stroke-dashoffset:-18}}"
+        "@keyframes now{from{transform:translateX(0)}to{transform:translateX(1120px)}}"
+        "@keyframes guard{0%,100%{opacity:.3}50%{opacity:.9}}"
+        ".flow{animation:flow 3s linear infinite}"
+        ".now{animation:now 12s linear infinite}"
+        ".guard{opacity:.6;animation:guard 5s ease-in-out infinite}"
+        "@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }"
+    )
+
     def svg(self) -> str:
         c = self.c
         defs = []
@@ -217,12 +373,30 @@ class Fig:
                 f'<marker id="{mid}" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" '
                 f'orient="{orient}"><path d="M1 1.5 L9 5 L1 8.5 Z" fill="{col}"/></marker>'
             )
+        for tone in sorted(self.grads):
+            top, bot = self._gradient_ends(tone)
+            defs.append(
+                f'<linearGradient id="g_{tone}" x1="0" y1="0" x2="0" y2="1">'
+                f'<stop offset="0" stop-color="{top}"/><stop offset="1" stop-color="{bot}"/></linearGradient>'
+            )
+        defs.append(
+            f'<linearGradient id="g_panel" x1="0" y1="0" x2="0" y2="1">'
+            f'<stop offset="0" stop-color="{c["panel"]}"/><stop offset="1" stop-color="{c["panel2"]}"/></linearGradient>'
+        )
+        sh = {"sh1": (1.5, 3, 0.55), "sh2": (3, 7, 0.9)}
+        for fid in sorted(self.filters):
+            dy, sd, k = sh[fid]
+            defs.append(
+                f'<filter id="{fid}" x="-8%" y="-20%" width="116%" height="150%">'
+                f'<feDropShadow dx="0" dy="{dy}" stdDeviation="{sd}" flood-color="{c["shadow"]}" '
+                f'flood-opacity="{c["shadow_op"] * k:.3f}"/></filter>'
+            )
         head = (
             f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {self.w} {self.h}" width="{self.w}" '
             f'height="{self.h}" role="img" aria-labelledby="t d">'
             f'<title id="t">{html.escape(self.title)}</title><desc id="d">{html.escape(self.desc)}</desc>'
-            f"<defs>{''.join(defs)}</defs>"
-            f'<rect x="0.6" y="0.6" width="{self.w - 1.2}" height="{self.h - 1.2}" rx="16" fill="{c["panel"]}" stroke="{c["edge"]}" stroke-width="1.2"/>'
+            f"<defs><style>{self.CSS}</style>{''.join(defs)}</defs>"
+            f'<rect x="0.6" y="0.6" width="{self.w - 1.2}" height="{self.h - 1.2}" rx="16" fill="url(#g_panel)" stroke="{c["edge"]}" stroke-width="1.2"/>'
         )
         return head + "".join(self.parts) + "</svg>\n"
 
@@ -244,7 +418,7 @@ def fig_context(t):
         "Data goes in, models propose, a person decides, curated training data comes out.",
     )
     # centre
-    f.rect(400, 150, 400, 400, fill=c["box"], stroke=c["accent"], r=16, sw=2)
+    f.rect(400, 150, 400, 400, fill=c["box"], stroke=c["accent"], r=16, sw=2, elev=2)
     f.text(600, 184, "LEVI workbench", size=18, weight=700, anchor="middle")
     f.text(600, 205, "runs on your machine", size=12.5, anchor="middle", fill=c["soft"])
     f.box(
@@ -288,7 +462,7 @@ def fig_context(t):
         size=13.5,
     )
     # inputs
-    f.text(32, 120, "IN", size=12, weight=700, fill=c["faint"])
+    f.text(32, 120, "IN", size=12, weight=700, fill=c["faint"], ls=1)
     ins = [
         ("Raw captures", "CSV + video or image folders"),
         ("LeRobot datasets", "v2.0 – v3.1, local or Hub"),
@@ -297,10 +471,10 @@ def fig_context(t):
     ]
     for i, (a, b) in enumerate(ins):
         y = 138 + i * 100
-        f.box(32, y, 280, 76, a, [b])
-        f.arrow([(312, y + 38), (400, 382 + i * 12)], tone=None)
+        f.box(32, y, 280, 76, a, [b], icon=("doc", "db", "arm", "db")[i])
+        f.arrow([(312, y + 38), (400, 382 + i * 12)], tone=None, flow=True)
     # outputs
-    f.text(888, 120, "OUT", size=12, weight=700, fill=c["faint"])
+    f.text(888, 120, "OUT", size=12, weight=700, fill=c["faint"], ls=1)
     outs = [
         ("LeRobot v2.1", "converted, source untouched"),
         ("RECAP value dataset", "per-frame value + advantage"),
@@ -309,8 +483,8 @@ def fig_context(t):
     ]
     for i, (a, b) in enumerate(outs):
         y = 138 + i * 100
-        f.box(888, y, 280, 76, a, [b])
-        f.arrow([(800, 382 + i * 12), (888, y + 38)], tone=None)
+        f.box(888, y, 280, 76, a, [b], icon=("db", "doc", "doc", "db")[i])
+        f.arrow([(800, 382 + i * 12), (888, y + 38)], tone=None, flow=True)
     # models (top) and person (bottom)
     f.box(
         400,
@@ -321,6 +495,7 @@ def fig_context(t):
         ["MCP agents · API models · local Ollama / vLLM · SAM3"],
         tone="model",
         size=13.5,
+        icon="chip",
     )
     f.arrow(
         [(600, 134), (600, 150)],
@@ -329,6 +504,7 @@ def fig_context(t):
         lx=720,
         ly=146,
         anchor="start",
+        flow=True,
     )
     f.box(
         400,
@@ -343,8 +519,9 @@ def fig_context(t):
         ],
         tone="person",
         size=13.5,
+        icon="person",
     )
-    f.arrow([(600, 574), (600, 550)], tone="person", dash=False)
+    f.arrow([(600, 574), (600, 550)], tone="person", dash=False, flow=True)
     f.text(
         1168,
         698,
@@ -427,8 +604,12 @@ def fig_pyramid(t):
         stroke = c[tone] if tone else c["boxedge"]
         d = f"M{x0t:.0f} {y:.0f} L{x1t:.0f} {y:.0f} L{x1b:.0f} {y + th - 6:.0f} L{x0b:.0f} {y + th - 6:.0f} Z"
         da = ' stroke-dasharray="6 4"' if dash else ""
+        # thickness: the same slab pushed down and right, in a darker tone
+        side = mix(stroke, c["panel"], 0.35)
+        f.parts.append(f'<path d="{d}" transform="translate(7 6)" fill="{side}"/>')
+        paint = f._paint(fill)
         f.parts.append(
-            f'<path d="{d}" fill="{fill}" stroke="{stroke}" stroke-width="1.5"{da}/>'
+            f'<path d="{d}" fill="{paint}" stroke="{stroke}" stroke-width="1.5"{da}/>'
         )
         f.text(
             cx,
@@ -477,7 +658,8 @@ def fig_layers(t):
         "Four interfaces, one capability layer for agent work, ten main modules, and the adapters beneath them.",
     )
     # layer bands
-    f.text(32, 98, "INTERFACES", size=11.5, weight=700, fill=c["faint"])
+    f.slab(20, 84, 1160, 94)
+    f.text(32, 98, "INTERFACES", size=11.5, weight=700, fill=c["faint"], ls=1)
     for i, (a, b) in enumerate(
         [
             ("Web UI", "Next.js · React · light and dark"),
@@ -495,8 +677,10 @@ def fig_layers(t):
         ly=188,
         anchor="start",
     )
-    f.text(32, 220, "BOUNDARY FOR AGENT WORK", size=11.5, weight=700, fill=c["faint"])
-    f.rect(32, 230, 1136, 96, fill=c["gate_bg"], stroke=c["gate"], r=12, sw=1.6)
+    f.text(
+        32, 220, "BOUNDARY FOR AGENT WORK", size=11.5, weight=700, fill=c["faint"], ls=1
+    )
+    f.rect(32, 230, 1136, 96, fill=c["gate_bg"], stroke=c["gate"], r=12, sw=1.6, elev=2)
     f.text(52, 256, "Agent capability layer", size=16, weight=700, fill=c["gate"])
     f.text(
         52,
@@ -520,7 +704,8 @@ def fig_layers(t):
         fill=c["soft"],
     )
     f.arrow([(600, 326), (600, 346)], tone="gate")
-    f.text(32, 370, "DOMAIN MODULES", size=11.5, weight=700, fill=c["faint"])
+    f.slab(20, 356, 1160, 180)
+    f.text(32, 370, "DOMAIN MODULES", size=11.5, weight=700, fill=c["faint"], ls=1)
     mods = [
         ("Conversion", "raw → v2.1 / RECAP"),
         ("Annotations", "sidecars · outcomes · undo"),
@@ -550,7 +735,8 @@ def fig_layers(t):
             subsize=12.5,
         )
     f.arrow([(600, 538), (600, 564)], tone=None)
-    f.text(32, 588, "ADAPTERS AND STORES", size=11.5, weight=700, fill=c["faint"])
+    f.slab(20, 576, 1160, 94)
+    f.text(32, 588, "ADAPTERS AND STORES", size=11.5, weight=700, fill=c["faint"], ls=1)
     ad = [
         ("Files + SQLite", "datasets are never rewritten"),
         ("FFmpeg", "one encode per camera; remux to retime"),
@@ -559,7 +745,7 @@ def fig_layers(t):
     ]
     for i, (a, b) in enumerate(ad):
         f.box(32 + i * 290, 598, 276, 62, a, [b], size=13.5, subsize=12.5)
-    f.rect(32, 680, 1136, 112, fill=c["box"], stroke=c["boxedge"], r=12)
+    f.rect(32, 682, 1136, 110, fill=c["box"], stroke=c["boxedge"], r=12, elev=1)
     f.text(52, 704, "Rules that hold in every layer", size=13.5, weight=700)
     f.lines(
         52,
@@ -605,6 +791,13 @@ def fig_workflow(t):
             op=0.55,
         )
         f.text(48, y + 22, name, size=13, weight=700, fill=c[tone])
+        f.icon(
+            {"Agent": "chip", "LEVI": "db", "Person": "person"}[name],
+            100,
+            y + 8,
+            tone,
+            size=18,
+        )
     steps = [
         ("1  Plan", "a task spec", "Agent", "model"),
         ("2  Check", "vs the catalog", "LEVI", "system"),
@@ -667,6 +860,7 @@ def fig_live(t):
         ["policy server infers on the GPU", "client writes rollout folders"],
         tone="gate",
         size=14,
+        icon="arm",
     )
     f.box(
         466,
@@ -677,6 +871,7 @@ def fig_live(t):
         ["its own workspace", "watcher · queue · GPU gate"],
         tone="system",
         size=14,
+        icon="db",
     )
     f.box(
         898,
@@ -687,10 +882,23 @@ def fig_live(t):
         ["vLLM · loopback · sleeps/stops idle", "Qwen3.8 judges and segments"],
         tone="model",
         size=14,
+        icon="chip",
     )
-    f.arrow([(302, 130), (466, 130)], "finished episode", tone="gate", lx=384, ly=122)
     f.arrow(
-        [(734, 130), (898, 130)], "frames + question", tone="system", lx=816, ly=122
+        [(302, 130), (466, 130)],
+        "finished episode",
+        tone="gate",
+        lx=384,
+        ly=122,
+        flow=True,
+    )
+    f.arrow(
+        [(734, 130), (898, 130)],
+        "frames + question",
+        tone="system",
+        lx=816,
+        ly=122,
+        flow=True,
     )
     f.arrow(
         [(898, 164), (734, 164)],
@@ -698,6 +906,7 @@ def fig_live(t):
         tone="model",
         lx=816,
         ly=184,
+        flow=True,
     )
     f.box(
         466,
@@ -717,6 +926,7 @@ def fig_live(t):
         lx=612,
         ly=216,
         anchor="start",
+        flow=True,
     )
     f.box(
         466,
@@ -736,9 +946,10 @@ def fig_live(t):
         lx=612,
         ly=318,
         anchor="start",
+        flow=True,
     )
     # GPU timeline
-    f.text(32, 432, "ONE GPU OVER TIME", size=11.5, weight=700, fill=c["faint"])
+    f.text(32, 432, "ONE GPU OVER TIME", size=11.5, weight=700, fill=c["faint"], ls=1)
     f.rect(32, 444, 1136, 56, fill=c["box"], stroke=c["boxedge"], r=10)
     segs = [
         ("policy infers", 32, 250, "gate"),
@@ -753,6 +964,12 @@ def fig_live(t):
         f.rect(
             x + 3, 450, w - 6, 44, fill=fill, stroke=stroke, r=8, dash=(tone is None)
         )
+    # "now": a marker sweeping the strip, behind the labels, so reading order is unchanged
+    f.parts.append(
+        f'<g class="now"><rect x="39" y="446" width="2" height="52" rx="1" fill="{c["accent"]}" fill-opacity="0.55"/>'
+        f'<path d="M33 511 L47 511 L40 500 Z" fill="{c["accent"]}"/></g>'
+    )
+    for label, x, w, tone in segs:
         f.text(
             x + w / 2,
             477,
@@ -809,6 +1026,7 @@ def fig_aeri(t):
         ],
         tone="model",
         size=15,
+        icon="doc",
     )
     f.box(
         435,
@@ -823,6 +1041,7 @@ def fig_aeri(t):
         ],
         tone="system",
         size=15,
+        icon="chip",
     )
     f.box(
         838,
@@ -837,8 +1056,15 @@ def fig_aeri(t):
         ],
         tone="danger",
         size=15,
+        icon="arm",
+        elev=2,
     )
-    f.arrow([(197, 130), (197, 104), (1003, 104), (1003, 130)], None, tone="model")
+    f.arrow(
+        [(197, 130), (197, 104), (1003, 104), (1003, 130)],
+        None,
+        tone="model",
+        flow=True,
+    )
     f.text(
         600,
         98,
@@ -879,7 +1105,13 @@ def fig_aeri(t):
         fill=c["soft"],
         mono=True,
     )
-    f.rect(32, 340, 1136, 92, fill=c["danger_bg"], stroke=c["danger"], r=12, sw=1.4)
+    f.rect(
+        32, 340, 1136, 92, fill=c["danger_bg"], stroke=c["danger"], r=12, sw=1.4, elev=1
+    )
+    f.parts.append(
+        f'<rect class="guard" x="32" y="340" width="1136" height="92" rx="12" fill="none" '
+        f'stroke="{c["danger"]}" stroke-width="3"/>'
+    )
     f.text(
         52, 366, "What the contract refuses", size=13.5, weight=700, fill=c["danger"]
     )

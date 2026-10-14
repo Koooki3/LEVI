@@ -39,7 +39,18 @@ def test_every_figure_has_both_themes_a_claim_and_nothing_executable():
             text = path.read_text(encoding="utf8")
             root = ET.fromstring(text)  # well-formed
             assert root.attrib["role"] == "img"
-            assert not re.search(r"<(script|foreignObject|style|image)\b", text)
+            # <style> is allowed now (CSS animation only); script, embeds and links never.
+            assert not re.search(r"<(script|foreignObject|image)\b", text)
+            assert not re.search(
+                r"\son[a-z]+\s*=|href\s*=|@import|url\(\s*['\"]?https?:", text
+            )
+            assert "@media (prefers-reduced-motion: reduce)" in text
+            assert "animation: none !important" in text
+            for period in re.findall(r"animation:\w+ ([\d.]+)s", text):
+                assert float(period) >= 3, (
+                    f"{path.name}: animation period {period}s < 3s"
+                )
+            assert len(re.findall(r'filter="url', text)) <= 12
             title = next(e for e in root.iter() if e.tag.endswith("title"))
             desc = next(e for e in root.iter() if e.tag.endswith("desc"))
             assert len(title.text) > 20 and len(desc.text) > 40
