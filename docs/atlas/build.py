@@ -23,6 +23,7 @@ from __future__ import annotations
 import html
 import sys
 from pathlib import Path
+from typing import ClassVar
 
 OUT = Path(__file__).resolve().parents[1] / "assets" / "atlas"
 FONT = "Inter, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', Helvetica, Arial, sans-serif"
@@ -122,6 +123,7 @@ class Fig:
         ] = []  # (x, y, w, h, colours, opacity) for the contrast audit
         self.texts: list[tuple] = []  # (x, y, size, fill, anchor)
         self.flows = 0
+        self.uses: set[str] = set()
 
     # -- helpers -----------------------------------------------------------
     def _paint(self, fill):
@@ -351,15 +353,25 @@ class Fig:
         self.text(48, y + 21, s, size=13.5, weight=500, fill=c[tone])
 
     # -- output ----------------------------------------------------------
-    CSS = (
-        "@keyframes flow{to{stroke-dashoffset:-18}}"
-        "@keyframes now{from{transform:translateX(0)}to{transform:translateX(1120px)}}"
-        "@keyframes guard{0%,100%{opacity:.3}50%{opacity:.9}}"
-        ".flow{animation:flow 3s linear infinite}"
-        ".now{animation:now 12s linear infinite}"
-        ".guard{opacity:.6;animation:guard 5s ease-in-out infinite}"
+    # One block per motion; a figure carries only the blocks it uses, then the
+    # reduced-motion rule. tests/test_atlas.py compares <style> with these constants.
+    CSS_PARTS: ClassVar[dict[str, str]] = {
+        "flow": "@keyframes flow{to{stroke-dashoffset:-18}}.flow{animation:flow 3s linear infinite}",
+        "now": "@keyframes now{from{transform:translateX(0)}to{transform:translateX(1120px)}}"
+        ".now{animation:now 12s linear infinite;animation-delay:-5.571s}",
+        "guard": "@keyframes guard{0%,100%{opacity:.3}50%{opacity:.9}}"
+        ".guard{opacity:.6;animation:guard 5s ease-in-out infinite}",
+    }
+    CSS_REDUCED = (
         "@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }"
     )
+
+    @property
+    def css(self) -> str:
+        used = [
+            k for k in self.CSS_PARTS if k in self.uses or (k == "flow" and self.flows)
+        ]
+        return "".join(self.CSS_PARTS[k] for k in used) + self.CSS_REDUCED
 
     def svg(self) -> str:
         c = self.c
@@ -395,7 +407,7 @@ class Fig:
             f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {self.w} {self.h}" width="{self.w}" '
             f'height="{self.h}" role="img" aria-labelledby="t d">'
             f'<title id="t">{html.escape(self.title)}</title><desc id="d">{html.escape(self.desc)}</desc>'
-            f"<defs><style>{self.CSS}</style>{''.join(defs)}</defs>"
+            f"<defs><style>{self.css}</style>{''.join(defs)}</defs>"
             f'<rect x="0.6" y="0.6" width="{self.w - 1.2}" height="{self.h - 1.2}" rx="16" fill="url(#g_panel)" stroke="{c["edge"]}" stroke-width="1.2"/>'
         )
         return head + "".join(self.parts) + "</svg>\n"
@@ -504,7 +516,6 @@ def fig_context(t):
         lx=720,
         ly=146,
         anchor="start",
-        flow=True,
     )
     f.box(
         400,
@@ -964,9 +975,10 @@ def fig_live(t):
         f.rect(
             x + 3, 450, w - 6, 44, fill=fill, stroke=stroke, r=8, dash=(tone is None)
         )
+    f.uses.add("now")
     # "now": a marker sweeping the strip, behind the labels, so reading order is unchanged
     f.parts.append(
-        f'<g class="now"><rect x="39" y="446" width="2" height="52" rx="1" fill="{c["accent"]}" fill-opacity="0.55"/>'
+        f'<g class="now" transform="translate(520 0)"><rect x="39" y="446" width="2" height="52" rx="1" fill="{c["accent"]}" fill-opacity="0.55"/>'
         f'<path d="M33 511 L47 511 L40 500 Z" fill="{c["accent"]}"/></g>'
     )
     for label, x, w, tone in segs:
@@ -1067,7 +1079,7 @@ def fig_aeri(t):
     )
     f.text(
         600,
-        98,
+        94,
         "event · judgement · scene  (A → C)",
         size=12,
         anchor="middle",
@@ -1108,6 +1120,7 @@ def fig_aeri(t):
     f.rect(
         32, 340, 1136, 92, fill=c["danger_bg"], stroke=c["danger"], r=12, sw=1.4, elev=1
     )
+    f.uses.add("guard")
     f.parts.append(
         f'<rect class="guard" x="32" y="340" width="1136" height="92" rx="12" fill="none" '
         f'stroke="{c["danger"]}" stroke-width="3"/>'
