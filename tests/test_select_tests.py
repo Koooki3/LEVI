@@ -118,3 +118,36 @@ def test_shared_frontend_files_widen(tmp_path):
     sel = load(tmp_path)
     files = write(tmp_path, {"src/styles/ds.css": "", "src/x/__tests__/a.test.ts": ""})
     assert sel.select(["src/styles/ds.css"], files)["bun"]["widen"]
+
+
+def test_a_test_that_asks_for_a_fixture_depends_on_what_the_fixture_imports(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {
+            "levi/service.py": "APP = 1\n",
+            "tests/conftest.py": (
+                "import pytest\n\n@pytest.fixture\ndef client():\n"
+                "    from levi import service\n    return service.APP\n"
+            ),
+            "tests/test_uses_client.py": "def test_x(client):\n    assert client\n",
+            "tests/test_plain.py": "def test_y():\n    pass\n",
+        },
+    )
+    out = sel.select(["levi/service.py"], files)
+    assert out["pytest"]["tests"] == ["tests/test_uses_client.py"]
+
+
+def test_a_module_named_in_a_string_is_started_not_imported(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {
+            "levi/service.py": "APP = 1\n",
+            "levi/core.py": "def run():\n    return 'levi.service:app'\n",
+            "tests/test_core.py": "from levi import core\n",
+        },
+    )
+    # core only names the service in a string: a service change does not reach it
+    # through core's importers.
+    assert sel.select(["levi/service.py"], files)["pytest"]["tests"] == []

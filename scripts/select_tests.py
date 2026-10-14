@@ -9,7 +9,8 @@
 
 How it decides. Python: an import graph of ``levi/``, ``backend/``, ``scripts/`` and
 ``tests/`` (static imports, relative imports, bare sibling imports that pytest's
-rootdir mode allows, and ``levi.x`` strings that a test hands to a subprocess).
+rootdir mode allows, what a conftest fixture imports for the tests that ask for
+it, and ``levi.x`` strings, which count as a weak link: started, not imported).
 A test is selected when a changed module is reachable from it. TypeScript: the
 same over ``src/`` with the ``@/`` alias. A changed data file selects the tests
 whose text names it. Anything this cannot place (pyproject, lock files, the root
@@ -95,8 +96,10 @@ class PyGraph:
         self.weak: dict[str, set[str]] = defaultdict(set)
         self.importers: dict[str, set[str]] = defaultdict(set)
         self.weak_importers: dict[str, set[str]] = defaultdict(set)
+        self.fixtures: dict[str, dict[str, tuple[set[str], set[str]]]] = {}
         for f in self.files:
             self._scan(f)
+        self._add_fixture_edges()
         for f, deps in self.imports.items():
             for d in deps:
                 self.importers[d].add(f)
@@ -113,6 +116,28 @@ class PyGraph:
                 return hit
             parts.pop()
         return None
+
+    def _record_fixtures(self, f: str, tree: ast.AST, pkg: str) -> None:
+        found: dict[str, tuple[set[str], set[str]]] = {}
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not any("fixture" in ast.unparse(d) for d in node.decorator_list):
+                continue
+            mods: set[str] = set()
+            for sub in ast.walk(node):
+                names: list[str] = []
+                if isinstance(sub, ast.Import):
+                    names = [a.name for a in sub.names]
+                elif isinstance(sub, ast.ImportFrom) and not sub.level and sub.module:
+                    names = [sub.module] + [f"{sub.module}.{a.name}" for a in sub.names]
+                for n in names:
+                    hit = self._resolve(n)
+                    if hit and hit != f:
+                        mods.add(hit)
+            params = {a.arg for a in node.args.args + node.args.kwonlyargs}
+            found[node.name] = (mods, params)
+        self.fixtures[f] = found
 
     def _scan(self, f: str) -> None:
         text = (ROOT / f).read_text(encoding="utf8", errors="replace")
@@ -139,6 +164,8 @@ class PyGraph:
             if (ROOT / cand).is_file() and cand.as_posix() != f:
                 deps.add(cand.as_posix())
 
+        if Path(f).name == "conftest.py":
+            self._record_fixtures(f, tree, pkg)
         lazy = {
             id(n)
             for fn in ast.walk(tree)
@@ -164,6 +191,9 @@ class PyGraph:
                     for a in node.names:  # `from levi import report` is a module
                         add(f"{prefix}.{a.name}")
             elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                # A module named in a string (uvicorn "levi.service:app", a
+                # subprocess "-m levi.cli") is started, not imported: weak.
+                deps = weak
                 for m in LEVI_STR_RE.findall(node.value):
                     add(m)
 
@@ -173,6 +203,39 @@ class PyGraph:
         for c in changed:
             out |= self.importers.get(c, set()) | self.weak_importers.get(c, set())
         return out
+
+    def _add_fixture_edges(self) -> None:
+        """A test that asks for a conftest fixture depends on what the fixture
+        imports, even when it does so inside its body (`client` imports the
+        service). Fixtures asking for fixtures are followed."""
+
+        def deps_of(conf: str, name: str, seen: set[str]) -> set[str]:
+            if name in seen or name not in self.fixtures.get(conf, {}):
+                return set()
+            seen.add(name)
+            mods, params = self.fixtures[conf][name]
+            out = set(mods)
+            for p in params:
+                out |= deps_of(conf, p, seen)
+            return out
+
+        for f in self.files:
+            if not is_test(f):
+                continue
+            try:
+                tree = ast.parse(self.text[f])
+            except SyntaxError:
+                continue
+            confs = [
+                c
+                for c in self.fixtures
+                if Path(f).as_posix().startswith(str(Path(c).parent.as_posix()) + "/")
+            ]
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    for arg in node.args.args + node.args.kwonlyargs:
+                        for c in confs:
+                            self.imports[f] |= deps_of(c, arg.arg, set())
 
     def closure(self, changed: set[str]) -> set[str]:
         """Strong imports are followed transitively; an importer that only reaches a
