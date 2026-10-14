@@ -437,13 +437,17 @@ def select(changed: list[str], files: list[str], graphs: tuple | None = None) ->
                             out["pytest"]["widen"].append(f"{c}: no longer exists and {g} imports it")
                         else:
                             named_by_deleted.update(t for t in all_py_tests if t.startswith(here + "/"))
+                            deleted_readers.add(g)  # and whatever imports that conftest
                     else:
                         deleted_readers.add(g)
-                # A mere mention selects the test that makes it; it is not an
-                # import, so it is neither followed nor a reason not to widen.
+                # A test that mentions it is selected (and, like any selected
+                # test, what imports that test). A source naming its full path
+                # may run it (a subprocess on scripts/x.py): followed too. A
+                # mention is never a reason not to widen.
                 named_by_deleted.update(
                     g for g in py.text if is_test(g) and names_deleted(py.text[g], c, g)
                 )
+                deleted_readers.update(g for g in py.text if not is_test(g) and g != c and c in py.text[g])
                 if readers:
                     out["other"].append(f"{c}: no longer exists; following the {len(readers)} files that import it")
                 elif not is_test(c):

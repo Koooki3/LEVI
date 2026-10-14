@@ -391,3 +391,18 @@ def test_tests_that_import_a_test_of_the_deleted_module_are_selected(tmp_path):
     )
     out = sel.select(["levi/gpumgr.py"], files)["pytest"]
     assert out["tests"] == ["tests/test_e2e.py", "tests/test_rec.py"]
+
+
+def test_a_source_that_runs_a_deleted_script_by_path_is_followed(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {
+            "scripts/real_reader.py": "import scripts.helper\n",
+            "levi/runner.py": "import subprocess\n\ndef go():\n    subprocess.run(['python3', 'scripts/helper.py'])\n",
+            "tests/test_runner.py": "from levi import runner\n",
+            "tests/test_reader.py": "from scripts import real_reader\n",
+        },
+    )
+    out = sel.select(["scripts/helper.py"], files)["pytest"]
+    assert "tests/test_runner.py" in out["tests"]
