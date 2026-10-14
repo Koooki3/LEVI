@@ -43,6 +43,6 @@ gh release create vX.Y.Z --repo Koooki3/LEVI --verify-tag \
   --title "LEVI vX.Y.Z" --notes-file "$LEVI_WORKSPACE/tmp/release-notes.md"
 ```
 
-Release notes are in `CHANGELOG.md` (the section named like the version). The tags `v0.2.0` and `v0.3.0` were created on 2026-10-07 at their release commits (`72489de`, `fa3c9f6`) and are pushed with `git push origin v0.2.0 v0.3.0`; a GitHub release page exists only after `gh release create`.
+Release notes are in `CHANGELOG.md` (the section named like the version; releases older than the previous one move to `docs/changelog/`). The tags `v0.2.0` and `v0.3.0` were created on 2026-10-07 at their release commits (`72489de`, `fa3c9f6`) and are pushed with `git push origin v0.2.0 v0.3.0`; a GitHub release page exists only after `gh release create`.
 
 GitHub provides source archives for the tag. This release is installed from source using uv and Bun; it does not claim a published PyPI package, container image or native installer. Docker, private Hub login and Hub upload require separate deployment validation as documented.

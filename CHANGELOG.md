@@ -1,6 +1,8 @@
 # Changelog
 
-All notable changes to LEVI. Versions follow the git tags (`v0.2.0`, `v0.3.0`; push a tag with `git push origin <tag>`); everything under **Unreleased** is on `main` but not yet in a tagged release.
+All notable changes to LEVI. Versions follow the git tags (`v0.2.0`, `v0.3.0`; push a tag with `git push origin <tag>`); everything under **Unreleased** is on `main` but not yet in a tagged release. Releases 0.2.0 and 0.1.0 are in [docs/changelog/0.1-0.2.md](docs/changelog/0.1-0.2.md).
+
+**Unreleased in one look:** automatic evaluation (AERI) with a launch wizard and run journal; the live annotation service with its GPU gate; the agent capability layer and harness; release-anchored review; fast instance segmentation, RECAP value labels and training manifests; the training pool; a design-system rebuild of every page; portable installation; and the documentation set (architecture atlas, citation, licence notices). The sections below give each in detail; fixes are last.
 
 ## Unreleased
 
@@ -223,19 +225,3 @@ All notable changes to LEVI. Versions follow the git tags (`v0.2.0`, `v0.3.0`; p
 - Added bounded LRU-style caches, in-flight Parquet request sharing, and authentication-change invalidation to prevent private-data leakage and unbounded browser memory growth.
 - Fixed task-filter navigation, empty-result handling, statistics counts, v3 episode-length support, language-instruction extraction, and review-tab state restoration.
 - Updated release metadata, validation records, and source notices for the v0.3.0 source release.
-
-## 0.2.0 — First public release
-
-- Bundled the complete capture pipeline with strict alignment, source-safe snapshots, configurable maps/thresholds, H.264 encoding and measured statistics.
-- Added CLI stages, source-change checks, structured reports and interrupted-job recovery.
-- Made workspace configuration portable and removed external project dependencies.
-- Consolidated docs and added explicit cache cleanup.
-
-## 0.1.0 — Initial development
-
-- Created LEVI from the Apache-2.0 LeRobot Dataset Visualizer baseline, retaining upstream functionality and attribution.
-- Added original visual design, Chinese-default/English interface and the requested strawberry demonstration cards.
-- Added independent uv environment, local Bun bootstrap, dual-service launcher and production packaging.
-- Added local dataset registration, Range serving, review manifests, version-aware diagnostics and conversion job integration.
-- Extended annotations to v2 metadata; added sidecar persistence, non-overwriting exports and stale-response protection.
-- Added backend tests, real-browser validation, conversion integration check, documentation and publishing CI.
