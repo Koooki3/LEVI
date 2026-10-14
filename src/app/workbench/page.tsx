@@ -587,7 +587,12 @@ export default function Workbench() {
             never modified.
           </T>
         </p>
-        <FormatsTable />
+        <details className="pg-formats">
+          <summary>
+            <T>Supported formats</T>
+          </summary>
+          <FormatsTable />
+        </details>
         <ConversionWizard
           jobs={jobs}
           refresh={refresh}
