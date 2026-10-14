@@ -30,7 +30,7 @@ PALETTE = {
     ),
     "dark": dict(  # noqa: C408
         panel="#0d1117", edge="#30363d", ink="#e6edf3", soft="#9198a1", faint="#6e7681",
-        box="#161b22", boxedge="#30363d", accent="#e6edf3", on_accent="#0d1117",
+        box="#161b22", boxedge="#4b535d", accent="#e6edf3", on_accent="#0d1117",
         model="#58a6ff", model_bg="#10243e", person="#3fb950", person_bg="#0f2d1a",
         gate="#d29922", gate_bg="#2d2308", system="#bc8cff", system_bg="#271a3d",
         danger="#ff7b72", danger_bg="#3d1418",
@@ -154,8 +154,8 @@ def fig_context(t):
     f.rect(400, 150, 400, 400, fill=c["box"], stroke=c["accent"], r=16, sw=2)
     f.text(600, 184, "LEVI workbench", size=18, weight=700, anchor="middle")
     f.text(600, 205, "runs on your machine", size=12.5, anchor="middle", fill=c["soft"])
-    f.box(424, 222, 352, 56, "Web UI · REST · MCP · CLI", ["one entry layer, same rules for all"], size=13.5)
-    f.box(424, 292, 352, 56, "Capability layer", ["permissions · revisions · undo · audit trail"], tone="gate", size=13.5)
+    f.box(424, 222, 352, 56, "Web UI · REST · MCP · CLI", ["four ways in; agent work goes through one layer"], size=13.5)
+    f.box(424, 292, 352, 56, "Agent capability layer", ["permissions · revisions · undo · audit trail"], tone="gate", size=13.5)
     f.box(424, 362, 352, 70, "Domains", ["convert · check · annotate · live labelling", "training pool · RECAP · harness · AERI"], size=13.5)
     f.box(424, 446, 352, 80, "Stores and workers", ["files + SQLite · FFmpeg", "model processes in their own environments"], size=13.5)
     # inputs
@@ -165,7 +165,7 @@ def fig_context(t):
     for i, (a, b) in enumerate(ins):
         y = 138 + i * 100
         f.box(32, y, 280, 76, a, [b])
-        f.arrow([(312, y + 38), (400, 250 + i * 66)], tone=None)
+        f.arrow([(312, y + 38), (400, 382 + i * 12)], tone=None)
     # outputs
     f.text(888, 120, "OUT", size=12, weight=700, fill=c["faint"])
     outs = [("LeRobot v2.1", "converted, source untouched"), ("RECAP value dataset", "per-frame value + advantage"),
@@ -173,13 +173,13 @@ def fig_context(t):
     for i, (a, b) in enumerate(outs):
         y = 138 + i * 100
         f.box(888, y, 280, 76, a, [b])
-        f.arrow([(800, 250 + i * 66), (888, y + 38)], tone=None)
+        f.arrow([(800, 382 + i * 12), (888, y + 38)], tone=None)
     # models (top) and person (bottom)
     f.box(400, 78, 400, 56, "Models propose", ["MCP agents · API models · local Ollama / vLLM · SAM3"], tone="model", size=13.5)
     f.arrow([(600, 134), (600, 150)], "suggestions cite frames", tone="model", lx=720, ly=146, anchor="start")
-    f.box(400, 574, 400, 90, "A person decides", ["approves plans, accepts pilots, commits, reviews every label;", "a commit can be undone through the same review"], tone="person", size=13.5)
+    f.box(400, 574, 400, 90, "A person decides", ["approves plans, accepts pilots, commits, reviews labels; a commit", "can be undone. The live service's audited auto-approver is the one exception."], tone="person", size=13.5)
     f.arrow([(600, 574), (600, 550)], tone="person", dash=False)
-    f.text(1168, 676, "Nothing leaves the machine unless you connect a remote model.", size=12, anchor="end", fill=c["soft"])
+    f.text(1168, 676, "Nothing leaves the machine unless you connect a remote model or run an explicit upload or push.", size=12, anchor="end", fill=c["soft"])
     return f
 
 
@@ -193,9 +193,9 @@ def fig_pyramid(t):
     tiers = [
         ("5", "A better policy", "Downstream training and real-robot evaluation (run by the user's team).", "Not established", "danger", True),
         ("4", "Curate for training", "Training pool · RECAP value and advantage labels · training manifests · reset export.", "Built · fixture-tested", None, False),
-        ("3", "Label and judge", "Agents and local vision-language models propose; a person reviews. Release-anchored review judges success.", "Measured on one task", "gate", False),
+        ("3", "Label and judge", "Agents and local vision-language models propose; a person reviews. Release-anchored review judges success.", "Measured on two tasks; bar met on one", "gate", False),
         ("2", "Check", "Structural quality checks · outcome labels · review flags · agent content review.", "Built · fixture-tested", None, False),
-        ("1", "Read and convert", "Browse LeRobot v2.0–v3.1 and raw captures; convert to LeRobot v2.1 or a RECAP value dataset.", "Built · fixture-tested", None, False),
+        ("1", "Read and convert", "Browse LeRobot v2.0–v3.1 and raw captures; convert to LeRobot v2.1 or a RECAP value dataset.", "Built · fixture and real-data checked", None, False),
     ]
     top, bottom = 96, 676
     th = (bottom - top) / len(tiers)
@@ -224,44 +224,45 @@ def fig_pyramid(t):
 
 
 def fig_layers(t):
-    f = Fig("03-layers", 1200, 800, t,
+    f = Fig("03-layers", 1200, 820, t,
             "LEVI's layers: one entry layer, one capability boundary, domain modules, adapters",
-            "The web UI, REST, MCP and CLI all go through one capability layer that enforces permissions, revisions and "
+            "Agent work from the web UI, REST, MCP and CLI goes through one capability layer that enforces permissions, revisions and "
             "undo; domain modules sit below it; stores, FFmpeg and model workers at the bottom, with heavy models in isolated environments.")
     c = f.c
-    f.heading("Layers of the workbench", "Four interfaces, one boundary, ten domain modules, adapters that can be swapped without touching the rules.")
+    f.heading("Layers of the workbench", "Four interfaces, one capability layer for agent work, ten main modules, and the adapters beneath them.")
     # layer bands
     f.text(32, 98, "INTERFACES", size=11.5, weight=700, fill=c["faint"])
     for i, (a, b) in enumerate([("Web UI", "Next.js · React · light and dark"), ("REST", "loopback API, token-gated"), ("MCP", "stdio, scoped grants"), ("CLI", "levi …  one command per group")]):
         f.box(32 + i * 290, 108, 276, 62, a, [b], size=14)
-    f.arrow([(600, 170), (600, 196)], "every call", tone=None, lx=612, ly=188, anchor="start")
-    f.text(32, 220, "BOUNDARY", size=11.5, weight=700, fill=c["faint"])
-    f.rect(32, 230, 1136, 78, fill=c["gate_bg"], stroke=c["gate"], r=12, sw=1.6)
-    f.text(52, 258, "Capability layer", size=16, weight=700, fill=c["gate"])
-    f.text(52, 280, "Permissions (read · draft · execute · person-only) · revision checks · idempotency keys · undo · audit trail", size=12.5, fill=c["ink"])
-    f.text(52, 298, "The same rules for the UI, REST, MCP and the CLI: an agent cannot reach a person-only action by another route.", size=12, fill=c["soft"])
-    f.arrow([(600, 308), (600, 334)], tone="gate")
-    f.text(32, 358, "DOMAIN MODULES", size=11.5, weight=700, fill=c["faint"])
+    f.arrow([(600, 170), (600, 196)], "agent work", tone=None, lx=612, ly=188, anchor="start")
+    f.text(32, 220, "BOUNDARY FOR AGENT WORK", size=11.5, weight=700, fill=c["faint"])
+    f.rect(32, 230, 1136, 96, fill=c["gate_bg"], stroke=c["gate"], r=12, sw=1.6)
+    f.text(52, 256, "Agent capability layer", size=16, weight=700, fill=c["gate"])
+    f.text(52, 277, "Permissions (read · draft · execute · approve · commit) · revision checks · idempotency keys · undo · audit trail", size=12.5, fill=c["ink"])
+    f.text(52, 296, "Used by the Agent Workbench, the agent REST routes, MCP and `levi agent`: a scoped agent connection cannot reach a person-only action by another route.", size=12, fill=c["soft"])
+    f.text(52, 314, "Direct routes (convert, pool, annotate, live, automatic) have their own checks: plan before run, same-origin writes, person-only routes refuse agent credentials.", size=12, fill=c["soft"])
+    f.arrow([(600, 326), (600, 346)], tone="gate")
+    f.text(32, 370, "DOMAIN MODULES", size=11.5, weight=700, fill=c["faint"])
     mods = [
         ("Conversion", "raw → v2.1 / RECAP"), ("Annotations", "sidecars · outcomes · undo"), ("Agents + harness", "plans · pilots · cost · memory"),
         ("Training pool", "index · recipes · exports"), ("RECAP value", "checkpoints · advantage"), ("Segmentation", "SAM3 student · masks"),
-        ("Live annotation", "rollouts · GPU gate"), ("Events (A)", "candidates · judgements"), ("Performance (B)", "leases · policy serving"),
-        ("Automatic eval (C)", "AERI · journal · authority"),
+        ("Live annotation", "rollouts · GPU gate"), ("Events (A)", "opt-in: candidates, judgements"), ("Performance (B)", "admission kernel, not wired"),
+        ("Automatic eval (C)", "AERI: journal, authority"),
     ]
     for i, (a, b) in enumerate(mods):
         col, row = i % 5, i // 5
         tone = "system" if a.startswith(("Events", "Performance", "Automatic")) else None
-        f.box(32 + col * 228, 368 + row * 78, 216, 66, a, [b], tone=tone, size=13.5, subsize=11.5)
-    f.arrow([(600, 526), (600, 552)], tone=None)
-    f.text(32, 576, "ADAPTERS AND STORES", size=11.5, weight=700, fill=c["faint"])
-    ad = [("Files + SQLite", "datasets are never rewritten"), ("FFmpeg", "one decode, one encode per camera"), ("Model servers", "Ollama · vLLM, loopback only"), ("Worker environments", "SAM3 · segmentation · RECAP")]
+        f.box(32 + col * 228, 380 + row * 78, 216, 66, a, [b], tone=tone, size=13.5, subsize=11.5)
+    f.arrow([(600, 538), (600, 564)], tone=None)
+    f.text(32, 588, "ADAPTERS AND STORES", size=11.5, weight=700, fill=c["faint"])
+    ad = [("Files + SQLite", "datasets are never rewritten"), ("FFmpeg", "decode once, encode once; remux to retime"), ("Model servers", "Ollama · vLLM, loopback only"), ("Worker environments", "SAM3 · segmentation · RECAP")]
     for i, (a, b) in enumerate(ad):
-        f.box(32 + i * 290, 586, 276, 62, a, [b], size=13.5, subsize=11.5)
-    f.rect(32, 668, 1136, 100, fill=c["box"], stroke=c["boxedge"], r=12)
-    f.text(52, 694, "Rules that hold in every layer", size=13.5, weight=700)
-    f.lines(52, 716, ["Source data is read-only: conversion and export write to new folders.   ·   The core never imports Torch: heavy models run in their own environments.",
-                      "Unknown is never success: an unavailable judge is reported as unavailable.   ·   A model's suggestion becomes a label only through a person's commit.",
-                      "Every long-running child process is registered and reclaimed on stop or restart."], size=12, gap=17, fill=c["soft"])
+        f.box(32 + i * 290, 598, 276, 62, a, [b], size=13.5, subsize=11.5)
+    f.rect(32, 680, 1136, 112, fill=c["box"], stroke=c["boxedge"], r=12)
+    f.text(52, 704, "Rules that hold in every layer", size=13.5, weight=700)
+    f.lines(52, 726, ["Source data is read-only: conversion and export write to new folders.   ·   The core never imports Torch: heavy models run in their own environments.",
+                      "Unknown is never success: an unavailable judge is reported as unavailable.   ·   Every long-running child process is registered and reclaimed on stop or restart.",
+                      "A model's suggestion becomes a label only through a person's commit; the live service's audited auto-approver is the one exception, and marks its labels `auto`."], size=12, gap=17, fill=c["soft"])
     return f
 
 
@@ -277,11 +278,11 @@ def fig_workflow(t):
         f.rect(32, y, 1136, 124, fill=c[tone + "_bg"], stroke=c[tone], r=12, sw=1.0, op=0.55)
         f.text(48, y + 22, name, size=13, weight=700, fill=c[tone])
     steps = [
-        ("1  Plan", "one sentence", "Agent", "model"), ("2  Check", "vs the catalog", "LEVI", "system"),
+        ("1  Plan", "a task spec", "Agent", "model"), ("2  Check", "vs the catalog", "LEVI", "system"),
         ("3  Approve", "plan, person-only", "Person", "gate"), ("4  Pilot", "a small sample", "Agent", "model"),
-        ("5  Accept", "pilot, person-only", "Person", "gate"), ("6  Remaining", "cites its frames", "Agent", "model"),
+        ("5  Accept", "pilot (default)", "Person", "gate"), ("6  Remaining", "cites its frames", "Agent", "model"),
         ("7  Review", "each suggestion", "Person", "person"), ("8  Commit", "undoable", "Person", "gate"),
-        ("9  Record", "cost · verified facts", "LEVI", "system"),
+        ("9  Record", "closes the task", "LEVI", "system"),
     ]
     W, STEP, X0 = 118, 125, 44
     pos = []
@@ -299,7 +300,7 @@ def fig_workflow(t):
 
 
 def fig_live(t):
-    f = Fig("05-live-gpu", 1200, 640, t,
+    f = Fig("05-live-gpu", 1200, 680, t,
             "Live annotation beside a robot evaluation: one GPU, shared by turns",
             "While a robot evaluation writes rollouts, the live service labels finished episodes with a local model, but only "
             "while the policy server is not inferring; its verdicts are automatic and unreviewed until a person reviews them.")
@@ -308,13 +309,13 @@ def fig_live(t):
     # components
     f.box(32, 96, 270, 92, "Robot evaluation", ["policy server infers on the GPU", "client writes rollout folders"], tone="gate", size=14)
     f.box(466, 96, 268, 92, "LEVI live service", ["its own workspace", "watcher · queue · GPU gate"], tone="system", size=14)
-    f.box(898, 96, 270, 92, "Local vision model", ["vLLM, loopback, sleeps when idle", "Qwen3.8 judges and segments"], tone="model", size=14)
+    f.box(898, 96, 270, 92, "Local vision model", ["vLLM, loopback, sleeps or stops when idle", "Qwen3.8 judges and segments"], tone="model", size=14)
     f.arrow([(302, 130), (466, 130)], "finished episode", tone="gate", lx=384, ly=122)
     f.arrow([(734, 130), (898, 130)], "frames + question", tone="system", lx=816, ly=122)
-    f.arrow([(898, 164), (734, 164)], "segments · outcome", tone="model", lx=816, ly=184)
+    f.arrow([(898, 164), (734, 164)], "time segments · outcome", tone="model", lx=816, ly=184)
     f.box(466, 232, 268, 64, "Automatic, unreviewed labels", ["never written as human labels"], tone="system", size=13.5, subsize=11.5)
     f.arrow([(600, 188), (600, 232)], "writes", tone="system", lx=612, ly=216, anchor="start")
-    f.box(466, 330, 268, 64, "A person reviews", ["in the normal viewer, then commits"], tone="person", size=13.5, subsize=11.5)
+    f.box(466, 330, 268, 64, "A person reviews", ["in the normal viewer; auto-approve is opt-in"], tone="person", size=13.5, subsize=11.5)
     f.arrow([(600, 296), (600, 330)], "to review", tone="person", lx=612, ly=318, anchor="start")
     # GPU timeline
     f.text(32, 432, "ONE GPU OVER TIME", size=11.5, weight=700, fill=c["faint"])
@@ -326,22 +327,23 @@ def fig_live(t):
         stroke = c[tone] if tone else c["boxedge"]
         f.rect(x + 3, 450, w - 6, 44, fill=fill, stroke=stroke, r=8, dash=(tone is None))
         f.text(x + w / 2, 477, label, size=12.5, weight=600, anchor="middle", fill=c[tone] if tone else c["soft"])
-    f.note(520, "The service yields the GPU when another process computes; it holds the shared lock file while its model server is up. Start it before the policy server.", tone="gate")
+    f.note(520, "The service yields the GPU when another process computes; with a shared lock file configured it holds it while its model server is up. Start it before the policy server.", tone="gate")
     f.note(560, "It never writes the rollout folders, never connects to the robot, never writes a human outcome label.", tone="danger")
+    f.note(600, "Status: the gate is verified with fakes; sleep and wake beside a real policy server are not yet verified with the real model.", tone="system")
     return f
 
 
 def fig_aeri(t):
-    f = Fig("06-aeri-authority", 1200, 620, t,
+    f = Fig("06-aeri-authority", 1200, 640, t,
             "Automatic evaluation (AERI): three parts joined by versioned messages, one part with motion authority",
             "A proposes events and judges goals and scenes, B grants resources and serves policy chunks, C alone may command "
             "motion and write the run journal. Messages from A or B carrying a robot or reset command are refused. "
             "Status: software with fake-I/O validation; hardware acceptance is pending.")
     c = f.c
     f.heading("Automatic evaluation: three parts, one authority", "The judge can say what happened; only one part can move the robot, and it writes the only journal.")
-    f.box(32, 130, 330, 130, "A  Event intelligence", ["proposes events from recorded signals", "judges goals and scenes", "may answer 'unavailable', never guesses"], tone="model", size=15)
+    f.box(32, 130, 330, 130, "A  Event intelligence", ["proposes events from recorded signals", "judges goals and scenes", "may answer 'unknown' or 'unavailable'"], tone="model", size=15)
     f.box(435, 130, 330, 130, "B  Performance runtime", ["grants resources (leases, admission)", "serves policy chunks", "reports pressure, acknowledges quiesce"], tone="system", size=15)
-    f.box(838, 130, 330, 130, "C  Automatic pipeline", ["the only part with motion authority", "the only writer of the run journal", "pauses, resets, resumes, stops"], tone="danger", size=15)
+    f.box(838, 130, 330, 130, "C  Automatic pipeline", ["designed as the only part with motion authority", "the only writer of the run journal", "pauses, resets, resumes, stops"], tone="danger", size=15)
     f.arrow([(197, 130), (197, 104), (1003, 104), (1003, 130)], None, tone="model")
     f.text(600, 98, "event · judgement · scene  (A → C)", size=12, anchor="middle", fill=c["model"], weight=500)
     f.arrow([(600, 260), (600, 290), (1003, 290), (1003, 260)], None, tone="system", both=True)
@@ -354,9 +356,9 @@ def fig_aeri(t):
     f.lines(52, 388, ["A robot or reset command key anywhere in a message from A or B (after Unicode normalisation)  →  E_CONTROL_FIELD.",
                       "A newer schema minor than the reader knows → refused (fail closed).   An unknown field, a duplicate key, NaN → refused.",
                       "An unknown or unavailable verdict is never turned into success; an unknown physical command result is never re-sent."], size=12, gap=17, fill=c["ink"])
-    f.box(32, 452, 552, 74, "Status today", ["software contracts and execution bridge, validated with fake I/O", "hardware acceptance pending: no claim of a real-robot result"], tone="gate", size=13.5, subsize=12)
-    f.box(616, 452, 552, 74, "Who may do what", ["A and B: read, judge, serve.   C: command, write the journal.", "A person: approve runs, take over, accept results."], tone="person", size=13.5, subsize=12)
-    f.note(546, "The same boundaries apply to the online page: it configures and shows, and cannot give A or B motion authority.", tone="gate")
+    f.box(32, 452, 552, 92, "Status today", ["software contracts and execution bridge, validated with fake I/O", "B is an admission kernel not installed in any service; A is opt-in", "hardware acceptance pending: no claim of a real-robot result"], tone="gate", size=13.5, subsize=12)
+    f.box(616, 452, 552, 92, "Who may do what", ["A and B: read, judge, serve.   C: command, write the journal.", "A person: approve runs, take over, accept results."], tone="person", size=13.5, subsize=12)
+    f.note(562, "AERI is this pipeline's code name. The launch wizard and run window configure and show; they cannot give A or B motion authority.", tone="gate")
     return f
 
 
@@ -379,13 +381,13 @@ def fig_evidence(t):
             f.text(x + 150 + 300 + 10, yy + 16, shown, size=12.5, weight=700, fill=c[tone])
 
     bars(32, 112, "Balanced accuracy of judging success", [
-        ("Plates: baseline", 0.81, "0.81", "gate"), ("Plates: anchored", 0.94, "0.94", "person"), ("Screws: anchored", 0.76, "0.76", "danger")])
+        ("Plates: from segments", 0.81, "0.81", "gate"), ("Plates: anchored", 0.94, "0.94", "person"), ("Screws: anchored", 0.76, "0.76", "danger")])
     bars(620, 112, "Failures judged as success (lower is better)", [
-        ("Plates: baseline", 0.385, "38.5%", "gate"), ("Plates: anchored", 0.128, "12.8%", "person"), ("Screws: anchored", 0.49, "49%", "danger")])
-    f.box(32, 292, 552, 96, "Time-segment labelling: parity", ["LEVI and a direct call of the same local model score alike", "against blind gold labels (segment F1 about 0.34).", "LEVI takes about 1.7x the wall time (3.6x before the speed-up)."], tone="model", size=13.5, subsize=12)
+        ("Plates: from segments", 0.385, "38.5%", "gate"), ("Plates: anchored", 0.128, "12.8%", "person"), ("Screws: anchored", 0.49, "49%", "danger")])
+    f.box(32, 292, 552, 96, "Time-segment labelling: parity", ["LEVI and a direct call of the same local model score alike", "against blind gold labels (segment F1 about 0.34).", "LEVI takes about 1.7x the wall time (development set, candidate configuration; 3.6x before the speed-up)."], tone="model", size=13.5, subsize=12)
     f.box(616, 292, 552, 96, "The second task did not meet the bar", ["Screws: balanced accuracy 0.76, 49% of failures judged successes.", "The quality gate for scaling up is not met, so scale-up has not started."], tone="danger", size=13.5, subsize=12)
-    f.box(32, 408, 1136, 84, "Not established", ["Whether training on LEVI-curated data improves a robot policy. A downstream training experiment is under way; there is no result yet.", "Automatic live verdicts are unreviewed and over-call success on tasks that place several objects."], tone="gate", size=14, subsize=12.5, dash=True)
-    f.note(512, "Plates: 60-episode blind test. Numbers come from the project's own experiment record; docs/VALIDATION.md documents the anchored-review re-run.", tone="system")
+    f.box(32, 408, 1136, 84, "Not established", ["Whether training on LEVI-curated data improves a robot policy. Training manifests are delivered; training and robot evaluation are the user's team's next step.", "Automatic live verdicts are unreviewed and over-call success on tasks that place several objects."], tone="gate", size=14, subsize=12.5, dash=True)
+    f.note(512, "Plates: 60-episode blind test. Project's own numbers; docs/VALIDATION.md records the 0.94 / 12.8% re-run. Some screws outcomes were seen by the coordinator; not used for tuning.", tone="system")
     f.note(552, "Automated tests use fixtures and stub models; no figure here is a real-robot policy result.", tone="gate")
     return f
 

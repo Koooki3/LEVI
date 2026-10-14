@@ -11,7 +11,7 @@ The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SV
   <img alt="LEVI in context: raw captures, LeRobot datasets, robot rollouts and the Hugging Face Hub go in; models propose; a person decides; LeRobot v2.1, RECAP value data, training manifests and pool exports come out." src="assets/atlas/01-system-context-light.svg">
 </picture>
 
-*Read it left to right.* Everything inside the frame runs on your machine. The entry layer (web UI, REST, MCP, CLI) goes through one capability layer, so the rules are the same whichever door an agent or a person uses. Models only propose; a person approves and commits. Source data is never modified.
+*Read it left to right.* Everything inside the frame runs on your machine. Agent work, through the web UI, REST, MCP or the CLI, goes through one capability layer, so its rules are the same whichever door it uses. Models propose; a person approves and commits (the live service's audited auto-approver is the one exception). Source data is never modified.
 
 ## 2 From raw data to a better policy
 
@@ -29,7 +29,7 @@ The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SV
   <img alt="Four interfaces, one capability layer, ten domain modules and the adapters and stores beneath them, with the rules that hold in every layer." src="assets/atlas/03-layers-light.svg">
 </picture>
 
-*Read it top to bottom.* The yellow band is the boundary that matters: permissions, revision checks, idempotency and undo live there, once. The purple modules (events, performance, automatic evaluation) are the three parts of the automatic evaluation pipeline, shown in figure 6. Heavy models run in their own environments and the core never imports Torch.
+*Read it top to bottom.* The yellow band is the boundary for agent work: permissions, revision checks, idempotency and undo live there, once; the direct routes (convert, pool, annotate, live, automatic) have their own checks. A scoped agent connection cannot reach a person-only action by another route; that is a rule for agents, not protection against programs on the same machine. The purple modules (events, performance, automatic evaluation) are the three parts of the automatic evaluation pipeline, shown in figure 6; events is opt-in and the performance part is an admission kernel not installed in any service. Heavy models run in their own environments and the core never imports Torch.
 
 ## 4 A task, step by step
 
@@ -47,7 +47,7 @@ The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SV
   <img alt="The live service labels finished rollout episodes with a local vision model while the policy server is idle; the GPU timeline alternates between the policy and the model; labels stay automatic and unreviewed until a person reviews them." src="assets/atlas/05-live-gpu-light.svg">
 </picture>
 
-*Read the top as data flow and the strip as time.* One GPU is shared by turns: the gate keeps the model out of the way while the policy infers, and the model sleeps when idle. The service never writes the rollout folders and never writes a human label. [Live annotation service](LIVE.md).
+*Read the top as data flow and the strip as time.* One GPU is shared by turns: the gate keeps the model out of the way while the policy infers, and the model sleeps or stops when idle. The gate is verified with fakes; sleep and wake beside a real policy server are not yet verified with the real model. The service never writes the rollout folders and never writes a human label. [Live annotation service](LIVE.md).
 
 ## 6 Automatic evaluation: three parts, one authority
 
@@ -56,7 +56,7 @@ The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SV
   <img alt="Three parts joined by versioned messages: A proposes events and judges, B grants resources and serves policy chunks, C alone commands motion and writes the run journal. Status: software with fake-I/O validation, hardware acceptance pending." src="assets/atlas/06-aeri-authority-light.svg">
 </picture>
 
-*Read the red box as the point of the design.* A and B can say what happened and what resources exist; they cannot carry a robot or reset command, and the contract refuses a message that does. Only C commands motion and writes the journal. **This pipeline is validated with fake I/O; hardware acceptance is pending.** [Automatic evaluation pipeline](AUTOMATIC_PIPELINE.md), [Event intelligence](EVENTS.md).
+*Read the red box as the point of the design.* A and B can say what happened and what resources exist; they cannot carry a robot or reset command, and the contract refuses a message that does. C is designed to be the only part that commands motion and writes the journal. **This pipeline is validated with fake I/O; hardware acceptance is pending.** [Automatic evaluation pipeline](AUTOMATIC_PIPELINE.md), [Event intelligence](EVENTS.md).
 
 ## 7 Evidence, with its limits
 
@@ -69,4 +69,4 @@ The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SV
 
 ---
 
-*How the figures were made.* Widely used agent diagramming skills and tools were surveyed first: Mermaid (versionable, rendered natively by GitHub), Excalidraw and draw.io (editable canvases). These figures are hand-laid SVG instead, because a README `<img>` cannot inherit theme colours and the figures need the pyramid, swim-lane and timeline forms that Mermaid does not draw well; the layout rules follow the inline-SVG guidance of the artifact-diagramming skill (one claim per figure, labelled arrows, a grid, no script).
+*Why hand-laid SVG.* A README `<img>` cannot inherit theme colours, and the pyramid, swim-lane and timeline forms are not what Mermaid draws well, so each figure is plain SVG generated by the script above. Mermaid, Excalidraw and draw.io are the usual alternatives when an editable canvas matters more than control of the drawing.

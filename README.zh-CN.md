@@ -2,7 +2,7 @@
 
 **LeRobot Exploration, Validation & Integration**
 
-> 在机器人数据训练下一个策略之前，先把它再看一遍：模型提出建议，人来决定，每一步都有实测记录。
+> 在机器人数据训练下一个策略之前，先把它再看一遍：模型提出建议，人来决定，每一步的成本都有记录，每个结果都连同它的局限一起报告。
 
 [![Checks](https://github.com/Koooki3/LEVI/actions/workflows/test.yml/badge.svg)](https://github.com/Koooki3/LEVI/actions/workflows/test.yml) [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) [![Version](https://img.shields.io/badge/LEVI-0.3.0-555555.svg)](CHANGELOG.md)
 
@@ -31,14 +31,14 @@ LEVI 是面向机器人学习数据的本地工作台：浏览 LeRobot 数据集
 
 另外五张图（分层、一个任务的步骤、机器人旁的实时标注、自动评测的权限划分、证据与局限）在[架构图集](docs/ARCHITECTURE.md)里（图中文字只有英文版）。
 
-## 新在哪里
+## main 上的新东西（未发布）
 
-- **释放事件锚定复核。** 在机器人自己的信号标出的时刻（每次夹爪张开）判断成败，每个事件只问一个窄问题。在叠盘子任务上，它把平衡准确率从 0.81 提到 0.94（[实测](#已经测到了什么)）。
-- **一个能力层。** 网页、REST、MCP 和命令行共用：模型的建议只有经人提交才变成标签，提交可以撤销（[分层图](docs/ARCHITECTURE.md#3-layers-of-the-workbench)）。
-- **每次运行都计成本。** 按 agent 和数据集记录 token 与时间，人工核实过的事实记忆是下一个任务的起点（[Agents](docs/AGENTS.md)）。
-- **在运行中的机器人旁标注。** 实时服务与策略服务器共用一块 GPU，策略推理时让出（[图](docs/ARCHITECTURE.md#5-live-annotation-beside-a-robot)）。
-- **自动评测的权限划分。** 只有一个部分能命令机器人并写日志，契约会拒绝来自判定和运行时的机器人或复位命令。软件已用假 I/O 验证；硬件验收待做（[图](docs/ARCHITECTURE.md#6-automatic-evaluation-three-parts-one-authority)）。
-- **证据不粉饰。** 负面结果一直摆在明处：第二个任务没达标，整理过的数据是否改善策略尚未证明（[证据图](docs/ARCHITECTURE.md#7-evidence-with-its-limits)）。在线**报告**页保持数字最新。
+- **释放事件锚定复核。** 在机器人自己的信号标出的时刻（每次夹爪张开）判断成败，每个事件只问一个窄问题。在叠盘子任务上，它把平衡准确率从 0.81 提到 0.94，在第二个任务上没有达标（[实测](#已经测到了什么)）。
+- **一个能力层，管 agent 的工作。** 网页、REST、MCP 和命令行共用：模型的建议只有经人提交才变成标签（实时服务里有审计的自动批准主体是唯一的例外），提交可以撤销（[分层图](docs/ARCHITECTURE.md#3-layers-of-the-workbench)）。
+- **每次运行都有记录的成本。** 按 agent 和数据集记录 token 与时间（实测、自报或下界），人工核实过的事实记忆是下一个任务的起点（[Agents](docs/AGENTS.md)）。
+- **在运行中的机器人旁标注。** 实时服务与策略服务器共用一块 GPU，策略推理时让出；闸门用假件验证过，还没有在真实的策略服务器旁验证（[图](docs/ARCHITECTURE.md#5-live-annotation-beside-a-robot)）。
+- **自动评测的权限划分。** 设计上只有一个部分能命令机器人并写日志，契约会拒绝来自判定和运行时的机器人或复位命令。软件已用假 I/O 验证；硬件验收待做，2026-10-13 的第一次有人监督的试验发现了问题，修复在审查中（[图](docs/ARCHITECTURE.md#6-automatic-evaluation-three-parts-one-authority)）。
+- **证据不粉饰。** 负面结果一直摆在明处：第二个任务没达标，整理过的数据是否改善策略尚未证明（[证据图](docs/ARCHITECTURE.md#7-evidence-with-its-limits)）。**报告**页显示你指定的那份报告。
 
 ## 它能做什么
 
@@ -135,7 +135,7 @@ docker run --rm -p 127.0.0.1:7860:7860 -v "$HOME/levi-data:/workspace" levi:loca
 
 ## 状态与限制
 
-当前发布版本是 **0.3.0**；`main` 带有 [变更记录](CHANGELOG.md) 中尚未发布的工作：agent harness 和本地模型、释放事件锚定复核、实时标注服务、快速实例分割、RECAP 价值标签、训练清单、训练池、重新设计的界面和报告页。
+当前发布版本是 **0.3.0**；`main` 带有 [变更记录](CHANGELOG.md) 中尚未发布的工作：agent harness 和本地模型、释放事件锚定复核、实时标注服务、快速实例分割、RECAP 价值标签、训练清单、训练池、自动评测流水线（AERI）、重新设计的界面和报告页。
 
 - **证据是抽样的。** 密集精修只看它被指向的地方，不能证明别处什么都没发生。
 - **质量按数据集实测，不作笼统宣称。** 自动化测试用的是夹具和替身模型。锚定复核规则在一个任务（叠盘子）上验证过，在第二个任务（screws）上没有达到质量门槛；快速分割的学生模型是对照 SAM3 的标签打分，不是人工标签；实时服务的自动判定未经审核，在需要放多个物体的任务上偏向判成功。用整理过的输入训练是否改善策略，这里没有证明。
