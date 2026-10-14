@@ -55,6 +55,19 @@ describe("the home page's first steps", () => {
     expect(steps[2].textContent).toContain("Connect a model or agent");
   });
 
+  test("opening a public dataset first does not take the steps away", async () => {
+    localStorage.setItem(
+      "levi-recent",
+      JSON.stringify([
+        { repo: "lerobot/svla_so101_pickplace", episode: 0, at: 1 },
+      ]),
+    );
+    serve([]);
+    const { host } = await render(<HomeDashboard />);
+    await flush(50);
+    expect(host.querySelector(".levi-home-first")).not.toBeNull();
+  });
+
   test("once there is a dataset the card is gone", async () => {
     serve([
       {

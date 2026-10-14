@@ -42,7 +42,10 @@ import {
   visitHref,
   type RecentVisit,
 } from "@/components/shell/recent";
-import { toggleAgentWorkbench } from "@/components/shell/shell-events";
+import {
+  openAgentConnections,
+  toggleAgentWorkbench,
+} from "@/components/shell/shell-events";
 import {
   STEP_LABEL,
   catalogDatasets,
@@ -324,7 +327,7 @@ function PendingCard({
             variant="secondary"
             size="sm"
             icon={Bot}
-            onClick={toggleAgentWorkbench}
+            onClick={openAgentConnections}
           >
             {t("Open the Agent Workbench")}
           </Button>
@@ -538,7 +541,7 @@ function FirstSteps() {
       title={t("home.firstSteps.title")}
       description={t("home.firstSteps.lead")}
     >
-      <ol className="levi-home-steps">
+      <ol className="levi-home-steps" role="list">
         {steps.map((step, index) => {
           const body = (
             <>
@@ -612,10 +615,10 @@ export function HomeDashboard() {
         />
       )}
 
-      {datasets !== undefined &&
+      {pool &&
+        datasets !== undefined &&
         datasets !== null &&
-        datasets.length === 0 &&
-        recent.length === 0 && <FirstSteps />}
+        datasets.length === 0 && <FirstSteps />}
 
       <h2 className="ds-sr-only">{t("Your work")}</h2>
       <div className="levi-home-grid">

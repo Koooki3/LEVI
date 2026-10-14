@@ -418,16 +418,6 @@
   line-height: 1.7;
 }
 
-.pg-pool-teaser {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-}
-.pg-pool-teaser h2 {
-  margin-bottom: 4px;
-}
 .pg-pool-scan-head {
   display: flex;
   justify-content: space-between;
@@ -2783,9 +2773,9 @@
   justify-content: flex-end;
   flex-wrap: wrap;
 }
-.pg-workbench .pg-count {
+.pg-workbench p.pg-count {
+  margin: 0 0 var(--ds-space-3);
   font-size: var(--ds-text-caption-size);
-  font-weight: var(--ds-weight-regular);
   color: var(--ds-text-secondary);
 }
 
@@ -2797,4 +2787,42 @@
 .pg-explore-search .pg-small {
   margin: var(--ds-space-2) 0 0;
   color: var(--ds-text-secondary);
+}
+
+/* /workbench dataset list on a phone: one card per dataset, not a squeezed table */
+@media (max-width: 640px) {
+  .pg-workbench .pg-datasets thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .pg-workbench .pg-datasets,
+  .pg-workbench .pg-datasets tbody,
+  .pg-workbench .pg-datasets tr,
+  .pg-workbench .pg-datasets td {
+    display: block;
+    width: 100%;
+  }
+  .pg-workbench .pg-datasets tr {
+    padding: var(--ds-space-3) 0;
+    border-bottom: 1px solid var(--ds-separator);
+  }
+  .pg-workbench .pg-datasets td {
+    padding: var(--ds-space-1) 0;
+    border: 0;
+    text-align: left;
+  }
+  .pg-workbench .pg-datasets .pg-format-cell {
+    min-width: 0;
+    max-width: none;
+  }
+  .pg-workbench .pg-datasets td[data-label]::before {
+    content: attr(data-label) ": ";
+    color: var(--ds-text-secondary);
+  }
+  .pg-workbench .pg-datasets .pg-row-actions {
+    justify-content: flex-start;
+  }
 }

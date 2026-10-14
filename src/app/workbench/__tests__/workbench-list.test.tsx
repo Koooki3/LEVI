@@ -155,6 +155,24 @@ describe("the Local datasets list", () => {
     expect(host.textContent).not.toContain("Show all");
   });
 
+  test("a filter left in the box does not keep hiding rows once the box is gone", async () => {
+    serve([...Array.from({ length: 7 }, (_, i) => own(i))]);
+    const { host } = await render(<Workbench />);
+    await waitFor(() => (rows(host).length ? true : false));
+    await typeInto(
+      host.querySelector('input[type="search"]') as HTMLInputElement,
+      "own3",
+    );
+    expect(names(host)).toHaveLength(1);
+    // the list drops to six: the box disappears, every dataset is back
+    serve([...Array.from({ length: 6 }, (_, i) => own(i))]);
+    await waitFor(() =>
+      host.querySelector('input[type="search"]') ? false : true,
+    );
+    expect(rows(host)).toHaveLength(6);
+    expect(host.textContent).not.toContain("No dataset matches");
+  });
+
   test("a short list has no filter box and no paging", async () => {
     serve([own(1), own(2)]);
     const { host } = await render(<Workbench />);

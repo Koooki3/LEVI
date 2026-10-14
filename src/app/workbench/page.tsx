@@ -167,7 +167,10 @@ export default function Workbench() {
   // one page of rows unless a filter is typed or "show all" is pressed.
   const DATASET_PAGE = 12;
   const everyDataset = catalog?.local ?? [];
-  const query = filter.trim().toLowerCase();
+  // The filter box exists only for a longer list; with it gone a stale filter
+  // must not keep hiding rows.
+  const filterOn = everyDataset.length > DATASET_PAGE / 2;
+  const query = filterOn ? filter.trim().toLowerCase() : "";
   const matching = [...everyDataset]
     .sort((a, b) => Number(!!a.linked) - Number(!!b.linked))
     .filter(
@@ -222,15 +225,14 @@ export default function Workbench() {
       <section className="pg-box">
         <h2>
           <T>Local datasets</T>
-          {everyDataset.length > 0 && (
-            <span className="pg-count">
-              {" "}
-              {t("workbench.datasets.counts")
-                .replace("{own}", String(everyDataset.length - linkedCount))
-                .replace("{linked}", String(linkedCount))}
-            </span>
-          )}
         </h2>
+        {everyDataset.length > 0 && (
+          <p className="pg-count">
+            {t("workbench.datasets.counts")
+              .replace("{own}", String(everyDataset.length - linkedCount))
+              .replace("{linked}", String(linkedCount))}
+          </p>
+        )}
         <form
           className="pg-row"
           onSubmit={(e) => {
@@ -359,7 +361,7 @@ export default function Workbench() {
             <Skeleton height={96} radius="md" />
           </div>
         )}
-        {everyDataset.length > DATASET_PAGE / 2 && (
+        {filterOn && (
           <div className="pg-row pg-gap-top">
             <input
               className="ds-input ds-focus grow"
@@ -371,9 +373,9 @@ export default function Workbench() {
             />
           </div>
         )}
-        {catalog && catalog.local.length !== 0 && (
+        {catalog && matching.length !== 0 && (
           <div className="ds-table-wrap pg-gap-top">
-            <table className="ds-table ds-table--compact">
+            <table className="ds-table ds-table--compact pg-datasets">
               <thead>
                 <tr>
                   <th>
@@ -427,7 +429,7 @@ export default function Workbench() {
                     <td className="pg-format-cell">
                       <DatasetFormatBadge format={d.format} />
                     </td>
-                    <td className="ds-num">
+                    <td className="ds-num" data-label={t("Episodes")}>
                       {d.format?.episodes ?? d.info?.total_episodes ?? "—"}
                     </td>
                     <td>
@@ -505,7 +507,7 @@ export default function Workbench() {
           </div>
         )}
         {catalog && matching.length === 0 && everyDataset.length > 0 && (
-          <p className="pg-small pg-mt-3">
+          <p className="pg-small pg-mt-3" role="status">
             {t("workbench.datasets.none").replace("{query}", filter.trim())}
           </p>
         )}
@@ -519,7 +521,7 @@ export default function Workbench() {
                     String(matching.length),
                   )}
             </Button>
-            <span className="pg-small">
+            <span className="pg-small" role="status">
               {t("workbench.datasets.showing")
                 .replace("{shown}", String(shownDatasets.length))
                 .replace("{total}", String(matching.length))}
