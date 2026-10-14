@@ -11,7 +11,9 @@ ATLAS = ROOT / "docs" / "assets" / "atlas"
 
 
 def build_module(out: Path):
-    spec = importlib.util.spec_from_file_location("atlas_build", ROOT / "docs/atlas/build.py")
+    spec = importlib.util.spec_from_file_location(
+        "atlas_build", ROOT / "docs/atlas/build.py"
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module.OUT = out
