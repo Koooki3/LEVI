@@ -15,6 +15,20 @@ LEVI 是面向机器人学习数据的本地工作台：浏览 LeRobot 数据集
 
 机器人策略的好坏取决于它学习的数据，而数据里有失败的、漂移的、标错的片段。LEVI 回答一个问题：**在算力、人工审核和机器人时间都有限时，对机器人数据做什么，下一个策略才会真的变好？** 它重新检查数据、修复标签、改变数据进入训练的方式，并记录每一步花了多少、有没有用。
 
+## 架构一览
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/01-system-context-dark.svg">
+  <img alt="LEVI 的上下文：数据进来，模型提出建议，由人决定，整理好的训练数据出去。" src="docs/assets/atlas/01-system-context-light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/02-pyramid-dark.svg">
+  <img alt="从原始数据到更好的策略，五层金字塔；最顶层尚未证明。" src="docs/assets/atlas/02-pyramid-light.svg">
+</picture>
+
+另外五张图（分层、一个任务的步骤、机器人旁的实时标注、自动评测的权限划分、证据与局限）在[架构图集](docs/ARCHITECTURE.md)里（图中文字只有英文版）。
+
 ## 它能做什么
 
 | | |
@@ -93,7 +107,7 @@ LEVI 会对照目录检查任务规格，并在运行前等你批准。每个任
 
 ## 文档
 
-先看[安装](INSTALL.zh-CN.md)、[工作区](docs/WORKSPACE.md)、[Agents](docs/AGENTS.md)、[实时标注服务](docs/LIVE.zh-CN.md)、[训练池](docs/TRAINING_POOL.md)、[API](docs/API.md)和[验证](docs/VALIDATION.md)。完整索引（数据、agent 与模型、标注方法、参考）在 [docs/README.zh-CN.md](docs/README.zh-CN.md)（English：[docs/README.md](docs/README.md)）。**报告**页显示一份实时技术报告，目录由 `LEVI_REPORT_DIR` 指定（只读，可以在工作区之外）；见 [API](docs/API.md#technical-report--技术报告)。
+先看[安装](INSTALL.zh-CN.md)、[架构图集](docs/ARCHITECTURE.md)、[工作区](docs/WORKSPACE.md)、[Agents](docs/AGENTS.md)、[实时标注服务](docs/LIVE.zh-CN.md)、[训练池](docs/TRAINING_POOL.md)、[API](docs/API.md)和[验证](docs/VALIDATION.md)。完整索引（数据、agent 与模型、标注方法、参考）在 [docs/README.zh-CN.md](docs/README.zh-CN.md)（English：[docs/README.md](docs/README.md)）。**报告**页显示一份实时技术报告，目录由 `LEVI_REPORT_DIR` 指定（只读，可以在工作区之外）；见 [API](docs/API.md#technical-report--技术报告)。
 
 ## 工作区、安全与部署
 

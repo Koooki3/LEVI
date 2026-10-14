@@ -4,7 +4,7 @@
 
 | 主题 | 指南 |
 | --- | --- |
-| **开始** | [安装](../INSTALL.zh-CN.md) · [English](../INSTALL.md) · [给 agent](../INSTALL.agent.md) · [工作区](WORKSPACE.md) · [设计系统](DESIGN.zh-CN.md) · [English](DESIGN.md) |
+| **开始** | [架构图集（英文）](ARCHITECTURE.md) · [安装](../INSTALL.zh-CN.md) · [English](../INSTALL.md) · [给 agent](../INSTALL.agent.md) · [工作区](WORKSPACE.md) · [设计系统](DESIGN.zh-CN.md) · [English](DESIGN.md) |
 | **数据** | [转换](CONVERSION.md) · [数据质量](QUALITY.md) · [训练池](TRAINING_POOL.md) · [复位导出](RESET_EXPORT.zh-CN.md) · [训练清单](TRAINING_MANIFEST.md) · [RECAP](RECAP.md) · [反事实数据](COUNTERFACTUAL.zh-CN.md) · [English](COUNTERFACTUAL.md) |
 | **Agent 与模型** | [Agents](AGENTS.md) · [本地模型](OLLAMA.zh-CN.md) · [English](OLLAMA.md) · [vLLM](VLLM.zh-CN.md) · [English](VLLM.md) · [崩溃恢复](SUPERVISION.md) · [Pilot](PILOT.zh-CN.md) · [English](PILOT.md) · [内置知识](KNOWLEDGE.md) |
 | **开发用技能** | [Codex 与 Claude Code 使用 Skill Loom](SKILL_LOOM.zh-CN.md) · [English](SKILL_LOOM.md) |

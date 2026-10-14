@@ -4,7 +4,7 @@ Every guide in one place. English and 中文 editions sit side by side where bot
 
 | Topic | Guides |
 | --- | --- |
-| **Start** | [Install](../INSTALL.md) · [中文](../INSTALL.zh-CN.md) · [for agents](../INSTALL.agent.md) · [Workspace](WORKSPACE.md) · [Design system](DESIGN.md) · [中文](DESIGN.zh-CN.md) |
+| **Start** | [Architecture atlas](ARCHITECTURE.md) · [Install](../INSTALL.md) · [中文](../INSTALL.zh-CN.md) · [for agents](../INSTALL.agent.md) · [Workspace](WORKSPACE.md) · [Design system](DESIGN.md) · [中文](DESIGN.zh-CN.md) |
 | **Data** | [Conversion](CONVERSION.md) · [Data quality](QUALITY.md) · [Training pool](TRAINING_POOL.md) · [Reset export](RESET_EXPORT.md) · [中文](RESET_EXPORT.zh-CN.md) · [Training manifests](TRAINING_MANIFEST.md) · [RECAP](RECAP.md) · [Counterfactual data](COUNTERFACTUAL.md) · [中文](COUNTERFACTUAL.zh-CN.md) |
 | **Agents and models** | [Agents](AGENTS.md) · [Local models](OLLAMA.md) · [中文](OLLAMA.zh-CN.md) · [vLLM](VLLM.md) · [中文](VLLM.zh-CN.md) · [Crash recovery](SUPERVISION.md) · [Pilot](PILOT.md) · [中文](PILOT.zh-CN.md) · [Built-in knowledge](KNOWLEDGE.md) |
 | **Coding-agent skills** | [Skill Loom for Codex and Claude Code](SKILL_LOOM.md) · [中文](SKILL_LOOM.zh-CN.md) |

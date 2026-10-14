@@ -15,6 +15,20 @@ LEVI is a local workbench for robot-learning data. It browses LeRobot datasets a
 
 A robot policy is only as good as the data it learns from, and the data is full of episodes that failed, drifted or were mislabelled. LEVI answers one question: **with limited compute, human review and robot time, what should be done with robot data so that the next policy gets better?** It inspects data again, repairs labels, changes how data enters training, and keeps a measured record of what each step cost and whether it helped.
 
+## Architecture at a glance
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/01-system-context-dark.svg">
+  <img alt="LEVI in context: data goes in, models propose, a person decides, curated training data comes out." src="docs/assets/atlas/01-system-context-light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/02-pyramid-dark.svg">
+  <img alt="From raw data to a better policy, as a five-tier pyramid; the top tier is not established." src="docs/assets/atlas/02-pyramid-light.svg">
+</picture>
+
+Five more figures (layers, a task step by step, live annotation beside a robot, the automatic evaluation authority split, and the evidence with its limits) are in the [architecture atlas](docs/ARCHITECTURE.md).
+
 ## What it does
 
 | | |
@@ -93,7 +107,7 @@ Around every task the **harness** records tokens and time per agent and per data
 
 ## Documentation
 
-Start with [Install](INSTALL.md), [Workspace](docs/WORKSPACE.md), [Agents](docs/AGENTS.md), [Live annotation](docs/LIVE.md), [Training pool](docs/TRAINING_POOL.md), [API](docs/API.md) and [Validation](docs/VALIDATION.md). The full index, with every data, agent, model, labelling-method and reference guide, is [docs/README.md](docs/README.md) (中文: [docs/README.zh-CN.md](docs/README.zh-CN.md)). The **Report** page shows a live technical report from a folder you name with `LEVI_REPORT_DIR` (read-only, may be outside the workspace); see [API](docs/API.md#technical-report--技术报告).
+Start with [Install](INSTALL.md), the [architecture atlas](docs/ARCHITECTURE.md), [Workspace](docs/WORKSPACE.md), [Agents](docs/AGENTS.md), [Live annotation](docs/LIVE.md), [Training pool](docs/TRAINING_POOL.md), [API](docs/API.md) and [Validation](docs/VALIDATION.md). The full index, with every data, agent, model, labelling-method and reference guide, is [docs/README.md](docs/README.md) (中文: [docs/README.zh-CN.md](docs/README.zh-CN.md)). The **Report** page shows a live technical report from a folder you name with `LEVI_REPORT_DIR` (read-only, may be outside the workspace); see [API](docs/API.md#technical-report--技术报告).
 
 ## Workspace, security and deployment
 
