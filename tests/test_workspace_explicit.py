@@ -180,6 +180,36 @@ def test_a_state_outside_the_root_is_refused_even_when_it_exists(tmp_path):
     root = tmp_path / "victim"
     (root / ".cache/levi").mkdir(parents=True)
     ws = Workspace(root, other.state, root / ".cache/levi")
-    with pytest.raises(ValueError, match="lies outside it"):
+    with pytest.raises(ValueError, match="not the standard layout"):
         maintenance.clean(True, ws)
     assert (root / ".cache/levi").is_dir()
+
+
+def test_a_sibling_folder_is_refused_unless_it_is_a_levi_workspace(tmp_path):
+    # Somebody else's folder on the shared account: state == root, no catalog.
+    other = tmp_path / "someone"
+    (other / ".cache/levi").mkdir(parents=True)
+    with pytest.raises(ValueError, match="not the standard layout"):
+        maintenance.clean(True, Workspace(other, other, other / ".cache/levi"))
+    # The standard layout without LEVI's catalog is not enough to remove anything.
+    ws = Workspace.at(other)
+    ws.state.mkdir(parents=True)
+    with pytest.raises(ValueError, match="not a LEVI workspace"):
+        maintenance.clean(True, ws)
+    assert (other / ".cache/levi").is_dir()
+
+
+def test_orphans_called_directly_checks_the_workspace_too(tmp_path):
+    p = tmp_path / "p"
+    p.mkdir()
+    with pytest.raises(ValueError):
+        maintenance.orphans(Workspace(p, p, p / "c"))
+
+
+def test_a_symlinked_folder_under_the_state_is_not_followed(tmp_path):
+    ws = make_workspace(tmp_path / "ws", registered=[], leftovers=[])
+    outside = tmp_path / "outside" / "empty_shell"
+    outside.mkdir(parents=True)
+    (ws.state / "views").symlink_to(tmp_path / "outside")
+    maintenance.clean(True, ws)
+    assert outside.is_dir()

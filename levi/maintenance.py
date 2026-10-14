@@ -90,6 +90,7 @@ def orphans(ws=None):
         # Legacy path: the catalog's own module-level STATE (tests patch it).
         registered, links, state = datasets(), aliases(), STATE
     else:
+        ws = _refuse_unless_a_workspace(ws, apply=False)
         registered = read(ws.state / "datasets.json", {})
         links = read(ws.state / "dataset_aliases.json", {})
         state = ws.state
@@ -98,10 +99,11 @@ def orphans(ws=None):
     empty, occupied = [], []
     for family in PER_DATASET:
         root = state / family
-        if not root.is_dir():
+        # A symlinked folder leads outside the workspace: never followed.
+        if root.is_symlink() or not root.is_dir():
             continue
         for child in sorted(root.iterdir()):
-            if not child.is_dir() or child.name in known:
+            if child.is_symlink() or not child.is_dir() or child.name in known:
                 continue
             entry = {
                 "path": str(child),
@@ -122,23 +124,33 @@ def orphans(ws=None):
 
 
 def _refuse_unless_a_workspace(ws, apply):
-    """A ``Workspace`` is not validated when it is built, so an explicit one is
-    checked before anything under it is read or removed: its root is never the
-    filesystem root, a home folder or a folder above one (HOME may be changed,
-    so the account's own home counts too); its state lies inside its root; and
-    removing anything needs the state folder to exist already."""
+    """Check an explicit ``Workspace`` before anything under it is read or
+    removed, and return it with resolved paths (used from then on).
+
+    A ``Workspace`` is not validated when it is built, and on this machine one
+    OS account is shared by several people, so ownership tells nobody apart.
+    The root is never the filesystem root, a home folder or a folder above one
+    (HOME may be changed, so the account's own home counts too); the state is
+    the standard layout under the root (``<root>/outputs/LEVI/workbench``);
+    and removing anything needs the catalog LEVI itself writes there."""
     import pwd
+
+    from .workspace import STATE_REL
 
     root = Path(ws.root).resolve()
     homes = {Path.home().resolve(), Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()}
     if root == Path("/") or any(home.is_relative_to(root) for home in homes):
         raise ValueError(f"Refusing to clean {ws.root}: not a LEVI workspace root")
-    if not Path(ws.state).resolve().is_relative_to(root):
-        raise ValueError(f"Refusing to clean {ws.root}: its state {ws.state} lies outside it")
-    if apply and not Path(ws.state).is_dir():
+    state = Path(ws.state).resolve()
+    if state != (root / STATE_REL).resolve():
         raise ValueError(
-            f"Refusing to clean {ws.root}: {ws.state} does not exist, so it is not a LEVI workspace"
+            f"Refusing to clean {ws.root}: its state {ws.state} is not the standard layout {root / STATE_REL}"
         )
+    if apply and not (state / "datasets.json").is_file():
+        raise ValueError(
+            f"Refusing to clean {ws.root}: {state / 'datasets.json'} does not exist, so it is not a LEVI workspace"
+        )
+    return Workspace(root=root, state=state, cache=Path(ws.cache))
 
 
 def clean(apply=False, ws=None):
@@ -154,7 +166,7 @@ def clean(apply=False, ws=None):
     such) rather than run against a different workspace than the one named.
     """
     if ws is not None:
-        _refuse_unless_a_workspace(ws, apply)
+        ws = _refuse_unless_a_workspace(ws, apply)
     state = _workspace(ws).state
     marker = state / "server.pid"
     if marker.exists():

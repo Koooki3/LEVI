@@ -163,17 +163,18 @@ def test_clean_reports_artifacts_left_by_a_removed_dataset(tmp_path):
     from levi import maintenance
     from levi.workspace import Workspace
 
-    ws = Workspace(tmp_path, tmp_path, tmp_path / "cache")
-    (tmp_path / "datasets.json").write_text(
+    ws = Workspace.at(tmp_path)
+    ws.state.mkdir(parents=True)
+    (ws.state / "datasets.json").write_text(
         json.dumps({"kept": {"path": str(tmp_path / "kept")}})
     )
-    (tmp_path / "dataset_aliases.json").write_text(
+    (ws.state / "dataset_aliases.json").write_text(
         json.dumps({"0badc0de": "gone", "old": "kept"})
     )
-    (tmp_path / "annotations/kept").mkdir(parents=True)
-    (tmp_path / "annotations/gone").mkdir(parents=True)
-    (tmp_path / "object_annotations/empty_shell").mkdir(parents=True)
-    (tmp_path / "annotations/gone/episode_000000.json").write_text("{}")
+    (ws.state / "annotations/kept").mkdir(parents=True)
+    (ws.state / "annotations/gone").mkdir(parents=True)
+    (ws.state / "object_annotations/empty_shell").mkdir(parents=True)
+    (ws.state / "annotations/gone/episode_000000.json").write_text("{}")
 
     report = maintenance.orphans(ws)
     assert [row["dataset"] for row in report["removable_empty"]] == ["empty_shell"]
@@ -190,12 +191,13 @@ def test_clean_removes_only_the_empty_shells(tmp_path):
     from levi import maintenance
     from levi.workspace import Workspace
 
-    ws = Workspace(tmp_path, tmp_path, tmp_path / "cache")
-    (tmp_path / "datasets.json").write_text(json.dumps({}))
-    (tmp_path / "annotations/empty_shell").mkdir(parents=True)
-    (tmp_path / "annotations/has_work").mkdir(parents=True)
-    (tmp_path / "annotations/has_work/episode_000000.json").write_text("{}")
+    ws = Workspace.at(tmp_path)
+    ws.state.mkdir(parents=True)
+    (ws.state / "datasets.json").write_text(json.dumps({}))
+    (ws.state / "annotations/empty_shell").mkdir(parents=True)
+    (ws.state / "annotations/has_work").mkdir(parents=True)
+    (ws.state / "annotations/has_work/episode_000000.json").write_text("{}")
 
     maintenance.clean(apply=True, ws=ws)
-    assert not (tmp_path / "annotations/empty_shell").exists()
-    assert (tmp_path / "annotations/has_work/episode_000000.json").is_file()
+    assert not (ws.state / "annotations/empty_shell").exists()
+    assert (ws.state / "annotations/has_work/episode_000000.json").is_file()
