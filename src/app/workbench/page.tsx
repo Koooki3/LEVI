@@ -72,6 +72,12 @@ const JOB_TONE: Record<string, "success" | "warning" | "danger" | "info"> = {
   cancelled: "warning",
   interrupted: "warning",
 };
+/** Position of a task status in JOB_TONE's order; unknown ones last. */
+function statusRank(status: string): number {
+  const order = Object.keys(JOB_TONE);
+  const i = order.indexOf(status);
+  return i < 0 ? order.length : i;
+}
 
 export default function Workbench() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -190,14 +196,11 @@ export default function Workbench() {
   // A task that needs a look (failed, interrupted, still running) is always on
   // the first page; the rest of it is the newest finished ones.
   const attention = history.filter((j) => j.status !== "succeeded");
-  const firstPage = new Set(
-    [...attention, ...history.filter((j) => j.status === "succeeded")]
-      .slice(0, Math.max(JOB_PAGE, attention.length))
-      .map((j) => j.id),
-  );
-  const shownJobs = showAllJobs
-    ? history
-    : history.filter((j) => firstPage.has(j.id));
+  const firstPage = [
+    ...attention,
+    ...history.filter((j) => j.status === "succeeded"),
+  ].slice(0, Math.max(JOB_PAGE, attention.length));
+  const shownJobs = showAllJobs ? history : firstPage;
   const jobTotals = history.reduce<Record<string, number>>((m, j) => {
     m[j.status] = (m[j.status] ?? 0) + 1;
     return m;
@@ -786,7 +789,10 @@ export default function Workbench() {
               .replace("{total}", String(history.length))
               .replace(
                 "{outcomes}",
+                // A fixed order (JOB_TONE's), so the line does not reshuffle
+                // as tasks finish.
                 Object.entries(jobTotals)
+                  .sort(([a], [b]) => statusRank(a) - statusRank(b))
                   .map(([status, n]) => `${n} ${t(status)}`)
                   .join(" · "),
               )}
@@ -852,7 +858,7 @@ export default function Workbench() {
             </div>
           </details>
         ))}
-        {history.length > JOB_PAGE && (
+        {firstPage.length < history.length && (
           <div className="pg-row pg-mt-3">
             <Button size="sm" onClick={() => setShowAllJobs((v) => !v)}>
               {showAllJobs

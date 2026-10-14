@@ -202,16 +202,11 @@ describe("the Local datasets list", () => {
     const items = () => host.querySelectorAll("details.pg-history-item");
     await waitFor(() => (items().length ? true : false));
     expect(items().length).toBe(8);
-    // the failed and the interrupted one are on the first page although they
-    // are the oldest in the list
-    expect(
-      host.querySelector("details.pg-history-item")!.parentElement!.textContent,
-    ).toContain("failed");
-    expect(
-      [...items()].filter((d) =>
-        /failed|interrupted/.test(d.textContent ?? ""),
-      ),
-    ).toHaveLength(2);
+    // the failed and the interrupted one come first although they are the
+    // oldest in the list
+    expect(items()[0].textContent).toMatch(/failed|interrupted/);
+    expect(items()[1].textContent).toMatch(/failed|interrupted/);
+    expect(items()[2].textContent).toContain("succeeded");
     expect(host.textContent).toContain(
       "13 tasks: 11 succeeded · 1 failed · 1 interrupted",
     );
@@ -220,5 +215,27 @@ describe("the Local datasets list", () => {
     )!;
     await click(all);
     expect(items().length).toBe(13);
+  });
+});
+
+describe("the task history paging control", () => {
+  test("no Show all when the first page already holds every task", async () => {
+    const job = (i: number, status: string) => ({
+      id: `20261014-${String(i).padStart(4, "0")}`,
+      status,
+      stage: "Build browsing view",
+      log: "",
+      output: "",
+      progress: null,
+    });
+    serve(
+      [own(1)],
+      Array.from({ length: 9 }, (_, i) => job(i, "failed")),
+    );
+    const { host } = await render(<Workbench />);
+    const items = () => host.querySelectorAll("details.pg-history-item");
+    await waitFor(() => (items().length ? true : false));
+    expect(items().length).toBe(9);
+    expect(host.textContent).not.toContain("Show all 9 tasks");
   });
 });
