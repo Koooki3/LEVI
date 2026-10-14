@@ -156,14 +156,14 @@ def test_clean_survives_a_corrupt_pid_file(tmp_path, monkeypatch):
     assert maintenance.main() == 0
 
 
-def test_clean_reports_artifacts_left_by_a_removed_dataset(tmp_path, monkeypatch):
+def test_clean_reports_artifacts_left_by_a_removed_dataset(tmp_path):
     """Nobody's review work is deleted with its dataset, so it must be visible."""
     import json
 
-    from levi import catalog, maintenance
+    from levi import maintenance
+    from levi.workspace import Workspace
 
-    monkeypatch.setattr(maintenance, "STATE", tmp_path)
-    monkeypatch.setattr(catalog, "STATE", tmp_path)
+    ws = Workspace(tmp_path, tmp_path, tmp_path / "cache")
     (tmp_path / "datasets.json").write_text(
         json.dumps({"kept": {"path": str(tmp_path / "kept")}})
     )
@@ -175,7 +175,7 @@ def test_clean_reports_artifacts_left_by_a_removed_dataset(tmp_path, monkeypatch
     (tmp_path / "object_annotations/empty_shell").mkdir(parents=True)
     (tmp_path / "annotations/gone/episode_000000.json").write_text("{}")
 
-    report = maintenance.orphans()
+    report = maintenance.orphans(ws)
     assert [row["dataset"] for row in report["removable_empty"]] == ["empty_shell"]
     kept = report["keeps_content"]
     assert [row["dataset"] for row in kept] == ["gone"]
@@ -184,18 +184,18 @@ def test_clean_reports_artifacts_left_by_a_removed_dataset(tmp_path, monkeypatch
     assert report["stale_aliases"] == {"0badc0de": "gone"}
 
 
-def test_clean_removes_only_the_empty_shells(tmp_path, monkeypatch):
+def test_clean_removes_only_the_empty_shells(tmp_path):
     import json
 
-    from levi import catalog, maintenance
+    from levi import maintenance
+    from levi.workspace import Workspace
 
-    monkeypatch.setattr(maintenance, "STATE", tmp_path)
-    monkeypatch.setattr(catalog, "STATE", tmp_path)
+    ws = Workspace(tmp_path, tmp_path, tmp_path / "cache")
     (tmp_path / "datasets.json").write_text(json.dumps({}))
     (tmp_path / "annotations/empty_shell").mkdir(parents=True)
     (tmp_path / "annotations/has_work").mkdir(parents=True)
     (tmp_path / "annotations/has_work/episode_000000.json").write_text("{}")
 
-    maintenance.clean(apply=True)
+    maintenance.clean(apply=True, ws=ws)
     assert not (tmp_path / "annotations/empty_shell").exists()
     assert (tmp_path / "annotations/has_work/episode_000000.json").is_file()
