@@ -56,11 +56,30 @@ const STEPS = [
 
 // The home page card's first three steps (home.firstSteps.*), for a reader who
 // arrived here first; the fourth ("read the guide") is this page.
-const FIRST_STEPS = [
-  { key: "explore", icon: Compass, href: "/explore" },
-  { key: "register", icon: FolderOpen, href: "/workbench" },
-  { key: "connect", icon: Bot, href: null },
-] as const;
+const firstSteps = (t: (key: string) => string) =>
+  [
+    {
+      key: "explore",
+      icon: Compass,
+      href: "/explore",
+      title: t("home.firstSteps.explore.title"),
+      body: t("home.firstSteps.explore.body"),
+    },
+    {
+      key: "register",
+      icon: FolderOpen,
+      href: "/workbench",
+      title: t("home.firstSteps.register.title"),
+      body: t("home.firstSteps.register.body"),
+    },
+    {
+      key: "connect",
+      icon: Bot,
+      href: null,
+      title: t("home.firstSteps.connect.title"),
+      body: t("home.firstSteps.connect.body"),
+    },
+  ] as const;
 
 const SECTIONS: [string, string][] = [
   [
@@ -199,7 +218,7 @@ export default function Guide() {
             </ul>
             <h2 className="levi-guide-sub">{t("home.firstSteps.title")}</h2>
             <ol className="levi-guide-first" role="list">
-              {FIRST_STEPS.map((step, index) => {
+              {firstSteps(t).map((step, index) => {
                 const inner = (
                   <>
                     <span className="levi-guide-first__n" aria-hidden="true">
@@ -207,8 +226,8 @@ export default function Guide() {
                     </span>
                     <Icon icon={step.icon} />
                     <span className="levi-guide-first__text">
-                      <strong>{t(`home.firstSteps.${step.key}.title`)}</strong>
-                      <span>{t(`home.firstSteps.${step.key}.body`)}</span>
+                      <strong>{step.title}</strong>
+                      <span>{step.body}</span>
                     </span>
                   </>
                 );
