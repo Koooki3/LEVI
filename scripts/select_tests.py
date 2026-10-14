@@ -84,7 +84,10 @@ def git(*args: str, strict: bool = True) -> str:
 
 
 def tracked() -> list[str]:
-    return [p for p in git("ls-files").splitlines() if (ROOT / p).is_file()]
+    # Untracked, not ignored files count: a new test or module written but not
+    # yet added is part of the tree the diff will run against.
+    listed = git("ls-files", "--cached", "--others", "--exclude-standard").splitlines()
+    return sorted({p for p in listed if (ROOT / p).is_file()})
 
 
 # ----------------------------------------------------------------------- python
@@ -130,6 +133,11 @@ class PyGraph:
         self.fixtures: dict[str, dict[str, tuple[set[str], set[str]]]] = {}
         self.autouse: dict[str, set[str]] = {}
         self.test_stems: dict[str, set[str]] = defaultdict(set)
+        # Every dotted name a file imports (relative imports made absolute,
+        # resolved or not) and every bare name a test imports: a deleted module
+        # is in no graph, so these are how its importers are still found.
+        self.targets: dict[str, set[str]] = defaultdict(set)
+        self.bares: dict[str, set[str]] = defaultdict(set)
         for f in self.files:
             if f.startswith("tests/") and not is_test(f) and Path(f).name != "conftest.py":
                 self.test_stems[Path(f).stem].add(f)
@@ -192,6 +200,7 @@ class PyGraph:
         deps = strong
 
         def add(dotted: str) -> None:
+            self.targets[f].add(dotted)
             hit = self._resolve(dotted)
             if hit and hit != f:
                 deps.add(hit)
@@ -205,6 +214,7 @@ class PyGraph:
         def bare(name: str) -> None:
             # pytest's rootdir mode puts the test file's directory on sys.path.
             stem = name.split(".")[0]
+            self.bares[f].add(stem)
             cand = Path(sibling_dir) / (stem + ".py")
             if (ROOT / cand).is_file() and cand.as_posix() != f:
                 deps.add(cand.as_posix())
@@ -396,20 +406,28 @@ def select(changed: list[str], files: list[str], graphs: tuple | None = None) ->
         if c.endswith(".py") and c.split("/")[0] in PY_DIRS:
             if c in py.imports and "*" in py.imports[c]:
                 out["pytest"]["widen"].append(f"{c}: cannot be parsed")
-            if c not in py.text and not is_test(c):
-                # Deleted or renamed away: it is in no import graph, so whatever
-                # still names it must be found by text. A test that names it is
-                # selected; a source that names it is followed like a changed
-                # file, so the tests that import that source are selected too.
-                readers = [f for f in py.text if names_deleted(py.text[f], c, f)]
-                named_by_deleted.update(f for f in readers if is_test(f))
-                deleted_readers.update(f for f in readers if not is_test(f))
+            if c not in py.text:
+                # Deleted or renamed away: it is in no import graph. Its
+                # importers are found from the import targets each file
+                # recorded (and, for a tests/ helper or test, the bare names
+                # tests import); they are followed like changed files. Text
+                # that merely mentions it adds to the selection but never
+                # stands in for an import, so it cannot switch the widen off.
+                mod, stem = module_of(c), Path(c).stem
+                readers = {
+                    g
+                    for g in py.text
+                    if any(t == mod or t.startswith(mod + ".") for t in py.targets[g])
+                }
+                if c.startswith("tests/"):
+                    readers |= {g for g in py.text if g.startswith("tests/") and stem in py.bares[g]}
+                mentions = {g for g in py.text if names_deleted(py.text[g], c, g)}
+                for g in readers | mentions:
+                    (named_by_deleted if is_test(g) else deleted_readers).add(g)
                 if readers:
-                    out["other"].append(
-                        f"{c}: no longer exists; selected what still names it ({len(readers)} files)"
-                    )
+                    out["other"].append(f"{c}: no longer exists; following the {len(readers)} files that import it")
                 else:
-                    out["pytest"]["widen"].append(f"{c}: no longer exists and nothing names it")
+                    out["pytest"]["widen"].append(f"{c}: no longer exists and no import of it was found")
             py_changed.add(c)
             named_by_path.append(c)
         elif re.search(r"\.(tsx?|css)$", c) and c.startswith("src/"):

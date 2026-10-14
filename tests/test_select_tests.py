@@ -186,7 +186,7 @@ def test_importing_a_submodule_depends_on_its_parent_package_init(tmp_path):
     ]
 
 
-def test_a_deleted_module_nobody_names_widens_and_one_a_test_names_does_not(tmp_path):
+def test_a_deleted_module_nobody_imports_widens_even_when_a_test_mentions_it(tmp_path):
     sel = load(tmp_path)
     files = write(
         tmp_path,
@@ -194,8 +194,9 @@ def test_a_deleted_module_nobody_names_widens_and_one_a_test_names_does_not(tmp_
     )
     assert sel.select(["levi/gone.py"], files)["pytest"]["widen"]
     named = sel.select(["levi/old_name.py"], files)["pytest"]
-    assert not named["widen"]
-    # ... and the test that still names it is selected, not just left unwidened.
+    # A mention in a comment is not an import: it selects that test but
+    # does not stand in for finding the importers, so the suite still widens.
+    assert named["widen"]
     assert named["tests"] == ["tests/test_a.py"]
 
 
@@ -276,9 +277,63 @@ def test_a_deleted_module_imported_from_its_package_or_relatively_is_found(tmp_p
     assert out["tests"] == ["tests/test_e.py", "tests/test_f.py", "tests/test_g.py"]
 
 
-def test_a_deleted_test_file_is_not_listed_and_does_not_widen(tmp_path):
+def test_a_deleted_test_file_other_tests_import_by_bare_name_selects_them(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {
+            "tests/test_uses.py": "from test_gone import NAME\n",
+            "tests/test_other.py": "def test_x():\n    pass\n",
+        },
+    )
+    out = sel.select(["tests/test_gone.py"], files)["pytest"]
+    assert out["tests"] == ["tests/test_uses.py"]
+    assert not out["widen"]
+
+
+def test_a_deleted_test_file_nothing_imports_widens_and_is_not_listed(tmp_path):
     sel = load(tmp_path)
     files = write(tmp_path, {"tests/test_i.py": "# see test_gone.py\n"})
     out = sel.select(["tests/test_gone.py"], files)["pytest"]
     assert "tests/test_gone.py" not in out["tests"]
+    assert out["widen"]
+
+
+def test_a_deleted_module_imported_relatively_from_another_package_is_followed(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {
+            "levi/__init__.py": "",
+            "levi/events/__init__.py": "",
+            "levi/agent/__init__.py": "",
+            "levi/agent/signals.py": "from ..events import gripper\n",
+            "levi/top.py": "from .events.gripper import X\n",
+            "tests/test_signals.py": "from levi.agent import signals\n",
+            "tests/test_top.py": "from levi import top\n",
+            # A mention alone must not switch the widen off or stand in for these.
+            "tests/test_note.py": "# levi.events.gripper was here\n",
+        },
+    )
+    out = sel.select(["levi/events/gripper.py"], files)["pytest"]
+    assert {"tests/test_signals.py", "tests/test_top.py"} <= set(out["tests"])
     assert not out["widen"]
+
+
+def test_a_deleted_module_only_mentioned_in_text_still_widens(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {"levi/a.py": "", "tests/test_z.py": "# levi.old is gone\n"},
+    )
+    out = sel.select(["levi/old.py"], files)["pytest"]
+    assert out["widen"]
+
+
+def test_untracked_files_are_part_of_the_tree(tmp_path):
+    import subprocess
+
+    sel = load(tmp_path)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    write(tmp_path, {"levi/a.py": "", "tests/test_new.py": "from levi import a\n"})
+    assert {"levi/a.py", "tests/test_new.py"} <= set(sel.tracked())
