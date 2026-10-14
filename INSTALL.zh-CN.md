@@ -111,3 +111,22 @@ loginctl enable-linger "$USER"     # 注销后继续运行（可能需要管理�
 | `~/.levi-live/` | 实时服务的状态、pid 文件和默认工作区 |
 
 `levi clean` 预览可重建的缓存（服务停止后 `--apply` 删除）。Docker 镜像（`Dockerfile`）只包含核心，维护者没有构建过。
+
+## 7. 命令一览
+
+每组命令都有自己的 `--help`；下面是需要知道的几条。原来在仓库 README 里，现移到这里。
+
+```bash
+uv run levi doctor              # 这台机器是否就绪（只读；--json）
+uv run levi stop                # 停止共享服务及其工作进程；有作业运行时拒绝（--wait [分钟]、--force；--all：连 LEVI 的 Ollama 一起停）
+uv run levi clean               # 预览可再生的缓存（需先停服务）；--apply 才删除
+uv run levi migrate             # 预览升级旧工作区；--apply 才执行
+uv run levi convert --help
+uv run levi agent --help        # 在终端里管理任务、连接、审核、记忆、改进
+uv run levi namespace --help    # 同一数据集上相互隔离的实验
+uv run levi recap --help        # RECAP 价值检查点和优势标签
+uv run levi export --help       # 训练清单
+uv run levi pool --help         # 训练池：扫描、配方、导出、远程传输
+uv run levi live --help         # 后台实时标注服务
+uv run levi docs check          # 文档与代码是否一致（docs sync 重新生成）
+```

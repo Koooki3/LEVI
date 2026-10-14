@@ -111,3 +111,22 @@ loginctl enable-linger "$USER"     # keep it running after logout (may need an a
 | `~/.levi-live/` | the live service's status, pid file and default workspace |
 
 `levi clean` previews regenerable caches (`--apply` removes them, with the service stopped). The Docker image (`Dockerfile`) covers the core only and has not been built by the maintainers.
+
+## 7. Command reference
+
+Every command group has its own `--help`; these are the ones to know. Moved here from the repository README.
+
+```bash
+uv run levi doctor              # is this machine ready (read only; --json)
+uv run levi stop                # stop the shared service and its workers; refuses while jobs run (--wait [min], --force; --all: also LEVI's Ollama)
+uv run levi clean               # preview regenerable caches (service stopped); --apply to remove
+uv run levi migrate             # preview upgrading an older workspace; --apply to apply
+uv run levi convert --help
+uv run levi agent --help        # tasks, connections, reviews, memory, improvements from a terminal
+uv run levi namespace --help    # isolated experiments over one dataset
+uv run levi recap --help        # RECAP value checkpoints and advantage labels
+uv run levi export --help       # training manifests
+uv run levi pool --help         # training pool: scan, recipes, exports, remote push
+uv run levi live --help         # the background live annotation service
+uv run levi docs check          # documentation against the code (docs sync regenerates)
+```
