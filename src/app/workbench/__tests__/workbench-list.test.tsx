@@ -182,19 +182,6 @@ describe("the Local datasets list", () => {
     expect(host.textContent).not.toContain("Show all");
   });
 
-  test("the formats table sits in a closed section, so the conversion wizard is the first thing under the heading", async () => {
-    serve([own(1)]);
-    const { host } = await render(<Workbench />);
-    await waitFor(() => (rows(host).length ? true : false));
-    const formats =
-      host.querySelector<HTMLDetailsElement>("details.pg-formats")!;
-    expect(formats).toBeTruthy();
-    expect(formats.open).toBe(false);
-    expect(formats.querySelector("summary")!.textContent).toBe(
-      "Supported formats",
-    );
-  });
-
   test("the task history shows the newest page with totals by outcome and a way to see all", async () => {
     const job = (i: number, status: string) => ({
       id: `20261014-${String(i).padStart(4, "0")}`,
