@@ -619,20 +619,33 @@ def diagnostics(payload: Diagnostic):
     if root is None:
         if not re.fullmatch(r"[\w.-]+/[\w.-]+", payload.repo_id):
             raise ValueError("Invalid Hub dataset ID")
-        from huggingface_hub import snapshot_download
+        from huggingface_hub import HfApi, snapshot_download
+        from huggingface_hub.utils import filter_repo_objects
 
+        from .auth import credential_scope
         from .hub_snapshots import snapshot
 
         # Metadata plus parquet; video download is explicit and can be large.
         patterns = ["meta/**", "data/**/*.parquet"]
         if payload.decode_video:
             patterns.append("videos/**")
+        # Every diagnostic asks the Hub, with the caller's credential, which commit
+        # is current and how large the files are: a changed dataset is a new
+        # snapshot, and a credential without access fails here as before.
+        credential = token()
+        info = HfApi().dataset_info(
+            payload.repo_id, token=credential, files_metadata=True
+        )
+        files = filter_repo_objects(
+            info.siblings or [], allow_patterns=patterns, key=lambda s: s.rfilename
+        )
 
         def download(folder):
             snapshot_download(
                 payload.repo_id,
-                token=token(),
+                token=credential,
                 repo_type="dataset",
+                revision=info.sha,
                 local_dir=folder,
                 allow_patterns=patterns,
             )
@@ -644,7 +657,9 @@ def diagnostics(payload: Diagnostic):
             patterns,
             download,
             CACHE,
-            whole_budget=payload.decode_video,
+            revision=info.sha,
+            sizes=[s.size or 0 for s in files],
+            scope=credential_scope(credential),
         ) as (folder, note):
             report = _inspect(payload, folder)
             if note:
