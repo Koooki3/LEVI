@@ -43,6 +43,9 @@ const CATEGORY_SHORT: Record<string, string> = {
   archive: "Archive",
 };
 
+/** Tasks drawn before "Show all" (a pool can hold hundreds). */
+const TASK_PAGE = 60;
+
 /** Per task: episodes by category, frames and success rate; add a task to
  * the composition (a task with many episodes opens a chooser for how many,
  * which outcomes and how to pick) or focus the episode table on it. */
@@ -89,6 +92,16 @@ export function TaskTable({
     }
   }
 
+  const [showAll, setShowAll] = useState(false);
+  // A long list renders one page; the focused task and the one being chosen
+  // stay in view wherever they are in the list.
+  const shown =
+    showAll || tasks.length <= TASK_PAGE
+      ? tasks
+      : tasks.filter(
+          (row, index) =>
+            index < TASK_PAGE || row.task === focus || row.task === open?.task,
+        );
   const columns = CATEGORIES.filter((c) =>
     tasks.some((row) => row.categories[c]),
   );
@@ -97,187 +110,208 @@ export function TaskTable({
     (row) => Object.keys(row.policy_methods || {}).length > 0,
   );
   return (
-    <div
-      className="pg-pool-table-wrap"
-      tabIndex={0}
-      role="region"
-      aria-label={t("Scrollable table")}
-    >
-      <table className="ds-table ds-table--compact pg-pool-table">
-        <caption className="sr-only">{t("Tasks")}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{t("Task")}</th>
-            {columns.map((c) => (
-              <th
-                scope="col"
-                key={c}
-                className="num"
-                title={t(CATEGORY_LABELS[c])}
-              >
-                {t(CATEGORY_SHORT[c])}
+    <>
+      <div
+        className="pg-pool-table-wrap"
+        tabIndex={0}
+        role="region"
+        aria-label={t("Scrollable table")}
+      >
+        <table className="ds-table ds-table--compact pg-pool-table">
+          <caption className="sr-only">{t("Tasks")}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{t("Task")}</th>
+              {columns.map((c) => (
+                <th
+                  scope="col"
+                  key={c}
+                  className="num"
+                  title={t(CATEGORY_LABELS[c])}
+                >
+                  {t(CATEGORY_SHORT[c])}
+                </th>
+              ))}
+              <th scope="col" className="num">
+                {t("Episodes")}
               </th>
-            ))}
-            <th scope="col" className="num">
-              {t("Episodes")}
-            </th>
-            <th scope="col" className="num">
-              {t("Frames")}
-            </th>
-            <th scope="col" className="num">
-              {t("Success rate")}
-            </th>
-            {showMethods && <th scope="col">{t("How it was run")}</th>}
-            <th scope="col">
-              <span className="sr-only">{t("Actions")}</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {tasks.map((row) => {
-            const added = chosen.includes(row.task);
-            const chooser = open?.task === row.task ? open : null;
-            return (
-              <Fragment key={row.task}>
-                <tr className={focus === row.task ? "pg-pool-focus" : ""}>
-                  <td>
-                    <button
-                      type="button"
-                      className="pg-pool-task"
-                      title={row.spellings.join("\n")}
-                      aria-pressed={focus === row.task}
-                      onClick={() =>
-                        onFocus(focus === row.task ? null : row.task)
-                      }
-                    >
-                      {row.task}
-                    </button>
-                    {row.spellings.length > 1 && (
-                      <span className="pg-pool-muted">
-                        {" "}
-                        · {row.spellings.length} {t("spellings")}
-                      </span>
-                    )}
-                  </td>
-                  {columns.map((c) => (
-                    <td key={c} className="num tabular">
-                      {row.categories[c]
-                        ? row.categories[c].toLocaleString()
-                        : "·"}
-                    </td>
-                  ))}
-                  <td className="num tabular">
-                    {row.episodes.toLocaleString()}
-                  </td>
-                  <td className="num tabular">{row.frames.toLocaleString()}</td>
-                  <td
-                    className="num tabular"
-                    title={`${row.success} / ${row.success + row.failure}`}
-                  >
-                    {row.success_rate === null
-                      ? "—"
-                      : `${Math.round(row.success_rate * 100)}%`}
-                  </td>
-                  {showMethods && (
-                    <td className="pg-pool-methods">
-                      {POLICY_METHODS.filter(
-                        (m) => row.policy_methods?.[m],
-                      ).map((m) => (
-                        <span key={m} className="pg-pool-badge">
-                          {t(METHOD_LABELS[m])} {row.policy_methods?.[m]}
-                        </span>
-                      ))}
-                    </td>
-                  )}
-                  <td>
-                    <Button
-                      size="sm"
-                      variant={added ? "ghost" : "secondary"}
-                      icon={added ? Check : Plus}
-                      loading={busy === row.task}
-                      disabled={added}
-                      aria-expanded={chooser ? true : undefined}
-                      aria-label={`${t("Add to composition")}: ${row.task}`}
-                      onClick={() => void add(row)}
-                    >
-                      {added ? t("Added") : t("Add")}
-                    </Button>
-                  </td>
-                </tr>
-                {chooser && (
-                  <tr className="pg-pool-chooser-row">
-                    <td colSpan={columns.length + 5 + (showMethods ? 1 : 0)}>
-                      <div
-                        className="pg-pool-chooser"
-                        role="group"
-                        aria-label={`${t("Choose episodes")}: ${row.task}`}
-                        onKeyDown={(e) => {
-                          if (e.key === "Escape") setOpen(null);
-                        }}
+              <th scope="col" className="num">
+                {t("Frames")}
+              </th>
+              <th scope="col" className="num">
+                {t("Success rate")}
+              </th>
+              {showMethods && <th scope="col">{t("How it was run")}</th>}
+              <th scope="col">
+                <span className="sr-only">{t("Actions")}</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((row) => {
+              const added = chosen.includes(row.task);
+              const chooser = open?.task === row.task ? open : null;
+              return (
+                <Fragment key={row.task}>
+                  <tr className={focus === row.task ? "pg-pool-focus" : ""}>
+                    <td>
+                      <button
+                        type="button"
+                        className="pg-pool-task"
+                        title={row.spellings.join("\n")}
+                        aria-pressed={focus === row.task}
+                        onClick={() =>
+                          onFocus(focus === row.task ? null : row.task)
+                        }
                       >
-                        <strong>{t("Choose episodes")}</strong>
-                        <SelectionFields
-                          available={chooser.info.available}
-                          successes={chooser.info.successes}
-                          failures={chooser.info.failures}
-                          unknown={chooser.info.unknown}
-                          value={chooser.draft}
-                          onChange={(patch) =>
-                            setOpen({
-                              ...chooser,
-                              draft: { ...chooser.draft, ...patch },
-                            })
-                          }
-                        />
-                        {chooser.info.earlier_counts.length > 0 && (
-                          <p className="pg-pool-hint">
-                            {t(
-                              "Suggested count: the median of the tasks already added.",
-                            )}
-                          </p>
-                        )}
-                        <div className="pg-row">
-                          <Button
-                            variant="primary"
-                            icon={Plus}
-                            autoFocus
-                            onClick={() => {
-                              onAdd(chooser.draft);
-                              setOpen(null);
-                            }}
-                          >
-                            {t("Add to composition")}
-                          </Button>
-                          <Button variant="ghost" onClick={() => setOpen(null)}>
-                            {t("Cancel")}
-                          </Button>
-                        </div>
-                      </div>
+                        {row.task}
+                      </button>
+                      {row.spellings.length > 1 && (
+                        <span className="pg-pool-muted">
+                          {" "}
+                          · {row.spellings.length} {t("spellings")}
+                        </span>
+                      )}
+                    </td>
+                    {columns.map((c) => (
+                      <td key={c} className="num tabular">
+                        {row.categories[c]
+                          ? row.categories[c].toLocaleString()
+                          : "·"}
+                      </td>
+                    ))}
+                    <td className="num tabular">
+                      {row.episodes.toLocaleString()}
+                    </td>
+                    <td className="num tabular">
+                      {row.frames.toLocaleString()}
+                    </td>
+                    <td
+                      className="num tabular"
+                      title={`${row.success} / ${row.success + row.failure}`}
+                    >
+                      {row.success_rate === null
+                        ? "—"
+                        : `${Math.round(row.success_rate * 100)}%`}
+                    </td>
+                    {showMethods && (
+                      <td className="pg-pool-methods">
+                        {POLICY_METHODS.filter(
+                          (m) => row.policy_methods?.[m],
+                        ).map((m) => (
+                          <span key={m} className="pg-pool-badge">
+                            {t(METHOD_LABELS[m])} {row.policy_methods?.[m]}
+                          </span>
+                        ))}
+                      </td>
+                    )}
+                    <td>
+                      <Button
+                        size="sm"
+                        variant={added ? "ghost" : "secondary"}
+                        icon={added ? Check : Plus}
+                        loading={busy === row.task}
+                        disabled={added}
+                        aria-expanded={chooser ? true : undefined}
+                        aria-label={`${t("Add to composition")}: ${row.task}`}
+                        onClick={() => void add(row)}
+                      >
+                        {added ? t("Added") : t("Add")}
+                      </Button>
                     </td>
                   </tr>
-                )}
-              </Fragment>
-            );
-          })}
-          {tasks.length === 0 && (
-            <tr>
-              <td
-                colSpan={columns.length + 5 + (showMethods ? 1 : 0)}
-                className="pg-pool-muted"
-              >
-                {t("No tasks match these filters.")}
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-      {problem && (
-        <RequestProblem
-          action="The task could not be added"
-          message={problem}
-        />
+                  {chooser && (
+                    <tr className="pg-pool-chooser-row">
+                      <td colSpan={columns.length + 5 + (showMethods ? 1 : 0)}>
+                        <div
+                          className="pg-pool-chooser"
+                          role="group"
+                          aria-label={`${t("Choose episodes")}: ${row.task}`}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") setOpen(null);
+                          }}
+                        >
+                          <strong>{t("Choose episodes")}</strong>
+                          <SelectionFields
+                            available={chooser.info.available}
+                            successes={chooser.info.successes}
+                            failures={chooser.info.failures}
+                            unknown={chooser.info.unknown}
+                            value={chooser.draft}
+                            onChange={(patch) =>
+                              setOpen({
+                                ...chooser,
+                                draft: { ...chooser.draft, ...patch },
+                              })
+                            }
+                          />
+                          {chooser.info.earlier_counts.length > 0 && (
+                            <p className="pg-pool-hint">
+                              {t(
+                                "Suggested count: the median of the tasks already added.",
+                              )}
+                            </p>
+                          )}
+                          <div className="pg-row">
+                            <Button
+                              variant="primary"
+                              icon={Plus}
+                              autoFocus
+                              onClick={() => {
+                                onAdd(chooser.draft);
+                                setOpen(null);
+                              }}
+                            >
+                              {t("Add to composition")}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              onClick={() => setOpen(null)}
+                            >
+                              {t("Cancel")}
+                            </Button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+            {tasks.length === 0 && (
+              <tr>
+                <td
+                  colSpan={columns.length + 5 + (showMethods ? 1 : 0)}
+                  className="pg-pool-muted"
+                >
+                  {t("No tasks match these filters.")}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+        {problem && (
+          <RequestProblem
+            action="The task could not be added"
+            message={problem}
+          />
+        )}
+      </div>
+      {tasks.length > TASK_PAGE && (
+        <div className="pg-row pg-mt-3">
+          <Button size="sm" onClick={() => setShowAll((v) => !v)}>
+            {showAll
+              ? t("Show fewer")
+              : t("Show all {n}").replace("{n}", String(tasks.length))}
+          </Button>
+          <span className="pg-small" role="status">
+            {t("workbench.datasets.showing")
+              .replace("{shown}", String(shown.length))
+              .replace("{total}", String(tasks.length))}
+          </span>
+        </div>
       )}
-    </div>
+    </>
   );
 }
 
