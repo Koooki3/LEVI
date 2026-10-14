@@ -37,7 +37,7 @@ LEVI 是面向机器人学习数据的本地工作台：浏览 LeRobot 数据集
 - **一个能力层，管 agent 的工作。** 网页、REST、MCP 和命令行共用：模型的建议只有经人提交才变成标签（实时服务里有审计的自动批准主体是唯一的例外），提交可以撤销（[分层图](docs/ARCHITECTURE.md#3-layers-of-the-workbench)）。
 - **每次运行都有记录的成本。** 按 agent 和数据集记录 token 与时间（实测、自报或下界），人工核实过的事实记忆是下一个任务的起点（[Agents](docs/AGENTS.md)）。
 - **在运行中的机器人旁标注。** 实时服务与策略服务器共用一块 GPU，策略推理时让出；闸门用假件验证过，还没有在真实的策略服务器旁验证（[图](docs/ARCHITECTURE.md#5-live-annotation-beside-a-robot)）。
-- **自动评测的权限划分。** 设计上只有一个部分能命令机器人并写日志，契约会拒绝来自判定和运行时的机器人或复位命令。软件已用假 I/O 验证；硬件验收待做，2026-10-13 的第一次有人监督的试验发现了问题，修复在审查中（[图](docs/ARCHITECTURE.md#6-automatic-evaluation-three-parts-one-authority)）。
+- **自动评测的权限划分。** 设计上只有一个部分能命令机器人并写日志，契约会拒绝来自判定和运行时的机器人或复位命令。软件已用假 I/O 验证；硬件验收待做（[图](docs/ARCHITECTURE.md#6-automatic-evaluation-three-parts-one-authority)）。
 - **证据不粉饰。** 负面结果一直摆在明处：第二个任务没达标，整理过的数据是否改善策略尚未证明（[证据图](docs/ARCHITECTURE.md#7-evidence-with-its-limits)）。**报告**页显示你指定的那份报告。
 
 ## 它能做什么
