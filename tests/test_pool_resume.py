@@ -796,14 +796,23 @@ def test_maintenance_clean_covers_the_pool(tmp_path, monkeypatch):
     # and is refused whenever a product LEVI is running from that checkout.
     monkeypatch.setattr(maintenance, "STATE", tmp_path / "ws")
     # `candidates()` binds the checkout's PROJECT/ROOT at import: without this,
-    # clean(True) below removes the real checkout's caches. Only the pool sweep
-    # is under test here.
-    monkeypatch.setattr(maintenance, "candidates", lambda *args, **kwargs: [])
+    # clean(True) below removes the real checkout's caches (or, with a .env or
+    # LEVI_WORKSPACE naming a real workspace, that workspace's .cache/levi).
+    # Only the pool sweep is under test here, so the caches come from tmp_path.
+    original = maintenance.candidates
+    (tmp_path / "proj").mkdir()
+    (tmp_path / "ws" / ".cache/levi").mkdir(parents=True)
+    monkeypatch.setattr(
+        maintenance, "candidates", lambda: original(tmp_path / "proj", tmp_path / "ws")
+    )
     monkeypatch.setenv("LEVI_EXPORT_ROOTS", str(tmp_path / "exports"))
     monkeypatch.setenv("LEVI_POOL_JOB_TTL", "1d")
     old = time.time() - 3 * 86400
     _record("export-z", status="failed", finished_at=old)
     report = maintenance.clean(False)
+    assert report["entries"] and all(
+        Path(e["path"]).is_relative_to(tmp_path) for e in report["entries"]
+    )
     assert report["pool"]["dry_run"] and settings.job_path("export-z").exists()
     assert any(r["id"] == "export-z" for r in report["pool"]["removed"])
     maintenance.clean(True)
