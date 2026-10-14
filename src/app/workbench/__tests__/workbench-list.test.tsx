@@ -53,9 +53,10 @@ const linked = (i: number) => ({
   },
 });
 
-function serve(local: unknown[]) {
+function serve(local: unknown[], jobList: unknown[] = []) {
   globalThis.fetch = mock((input: RequestInfo | URL) => {
     const path = String(input);
+    if (path.includes("/jobs")) return Promise.resolve(json(jobList));
     if (path.includes("/convert/formats"))
       return Promise.resolve(
         json({ inputs: [], outputs: [], unsupported: [] }),
@@ -179,5 +180,45 @@ describe("the Local datasets list", () => {
     await waitFor(() => (rows(host).length ? true : false));
     expect(host.querySelector('input[type="search"]')).toBeNull();
     expect(host.textContent).not.toContain("Show all");
+  });
+
+  test("the task history shows the newest page with totals by outcome and a way to see all", async () => {
+    const job = (i: number, status: string) => ({
+      id: `20261014-${String(i).padStart(4, "0")}`,
+      status,
+      stage: "Build browsing view",
+      log: "",
+      output: "",
+      progress: null,
+    });
+    const jobList = [
+      ...Array.from({ length: 11 }, (_, i) => job(i, "succeeded")),
+      job(11, "failed"),
+      job(12, "interrupted"),
+    ];
+    serve([own(1)], jobList);
+    const { host } = await render(<Workbench />);
+    await waitFor(() => (rows(host).length ? true : false));
+    const items = () => host.querySelectorAll("details.pg-history-item");
+    await waitFor(() => (items().length ? true : false));
+    expect(items().length).toBe(8);
+    // the failed and the interrupted one are on the first page although they
+    // are the oldest in the list
+    expect(
+      host.querySelector("details.pg-history-item")!.parentElement!.textContent,
+    ).toContain("failed");
+    expect(
+      [...items()].filter((d) =>
+        /failed|interrupted/.test(d.textContent ?? ""),
+      ),
+    ).toHaveLength(2);
+    expect(host.textContent).toContain(
+      "13 tasks: 11 succeeded · 1 failed · 1 interrupted",
+    );
+    const all = [...host.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Show all 13 tasks"),
+    )!;
+    await click(all);
+    expect(items().length).toBe(13);
   });
 });

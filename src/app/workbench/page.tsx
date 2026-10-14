@@ -102,6 +102,7 @@ export default function Workbench() {
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const [showAllJobs, setShowAllJobs] = useState(false);
   const refresh = useCallback(async () => {
     const [c, j, st] = await Promise.all([
       leviApi<Catalog>("catalog"),
@@ -183,6 +184,24 @@ export default function Workbench() {
   const shownDatasets =
     query || showAll ? matching : matching.slice(0, DATASET_PAGE);
   const linkedCount = everyDataset.filter((d) => d.linked).length;
+  // Task history: the newest page of tasks, with the totals by outcome.
+  const JOB_PAGE = 8;
+  const history = jobs.filter((j) => j.status !== "planned");
+  // A task that needs a look (failed, interrupted, still running) is always on
+  // the first page; the rest of it is the newest finished ones.
+  const attention = history.filter((j) => j.status !== "succeeded");
+  const firstPage = new Set(
+    [...attention, ...history.filter((j) => j.status === "succeeded")]
+      .slice(0, Math.max(JOB_PAGE, attention.length))
+      .map((j) => j.id),
+  );
+  const shownJobs = showAllJobs
+    ? history
+    : history.filter((j) => firstPage.has(j.id));
+  const jobTotals = history.reduce<Record<string, number>>((m, j) => {
+    m[j.status] = (m[j.status] ?? 0) + 1;
+    return m;
+  }, {});
   return (
     <main className="ds-root pg-workbench">
       <h1>
@@ -761,71 +780,90 @@ export default function Workbench() {
             {t("No conversion has run yet. Runs and their logs appear here.")}
           </EmptyLine>
         )}
-        {jobs
-          .filter((j) => j.status !== "planned")
-          .map((j) => (
-            <details key={j.id} className="pg-history-item">
-              <summary>
-                <Badge
-                  tone={JOB_TONE[j.status] ?? "neutral"}
-                  className="pg-mr-3"
-                >
-                  <T>{j.status}</T>
-                </Badge>
-                <T>{j.stage}</T>
-                <code className="pg-ml-3 pg-small">
-                  <T>{j.id}</T>
-                </code>
+        {history.length > 0 && (
+          <p className="pg-count" role="status">
+            {t("workbench.history.totals")
+              .replace("{total}", String(history.length))
+              .replace(
+                "{outcomes}",
+                Object.entries(jobTotals)
+                  .map(([status, n]) => `${n} ${t(status)}`)
+                  .join(" · "),
+              )}
+          </p>
+        )}
+        {shownJobs.map((j) => (
+          <details key={j.id} className="pg-history-item">
+            <summary>
+              <Badge tone={JOB_TONE[j.status] ?? "neutral"} className="pg-mr-3">
+                <T>{j.status}</T>
+              </Badge>
+              <T>{j.stage}</T>
+              <code className="pg-ml-3 pg-small">
+                <T>{j.id}</T>
+              </code>
+            </summary>
+            <JobProgress job={j} />
+            {j.error && (
+              <RequestProblem
+                action="The conversion did not finish"
+                message={j.error}
+                fix={t("Open the log below for the step that failed.")}
+              />
+            )}
+            <details>
+              <summary className="pg-small">
+                <T>Log</T>
               </summary>
-              <JobProgress job={j} />
-              {j.error && (
-                <RequestProblem
-                  action="The conversion did not finish"
-                  message={j.error}
-                  fix={t("Open the log below for the step that failed.")}
-                />
-              )}
-              <details>
-                <summary className="pg-small">
-                  <T>Log</T>
-                </summary>
-                <pre>{j.log || t("Waiting for logs…")}</pre>
-              </details>
-              {j.exit_code !== undefined && (
-                <p>
-                  <T>Exit code</T>: {j.exit_code}
-                </p>
-              )}
-              {j.result && (
-                <details>
-                  <summary>
-                    <T>Structured report</T>
-                  </summary>
-                  <pre>{JSON.stringify(j.result, null, 2)}</pre>
-                </details>
-              )}
-              <div className="pg-row pg-mt-4">
-                <Button
-                  disabled={j.status !== "succeeded" || !j.output_exists}
-                  onClick={() => {
-                    setSource(j.output);
-                    setPlan(null);
-                  }}
-                >
-                  <T>Use output as next input</T>
-                </Button>
-                {j.dataset && (
-                  <Link
-                    className="ds-btn ds-btn--secondary ds-focus"
-                    href={`/${j.dataset}`}
-                  >
-                    <T>Review converted dataset</T>
-                    <Icon icon={ArrowUpRight} />
-                  </Link>
-                )}
-              </div>
+              <pre>{j.log || t("Waiting for logs…")}</pre>
             </details>
-          ))}
+            {j.exit_code !== undefined && (
+              <p>
+                <T>Exit code</T>: {j.exit_code}
+              </p>
+            )}
+            {j.result && (
+              <details>
+                <summary>
+                  <T>Structured report</T>
+                </summary>
+                <pre>{JSON.stringify(j.result, null, 2)}</pre>
+              </details>
+            )}
+            <div className="pg-row pg-mt-4">
+              <Button
+                disabled={j.status !== "succeeded" || !j.output_exists}
+                onClick={() => {
+                  setSource(j.output);
+                  setPlan(null);
+                }}
+              >
+                <T>Use output as next input</T>
+              </Button>
+              {j.dataset && (
+                <Link
+                  className="ds-btn ds-btn--secondary ds-focus"
+                  href={`/${j.dataset}`}
+                >
+                  <T>Review converted dataset</T>
+                  <Icon icon={ArrowUpRight} />
+                </Link>
+              )}
+            </div>
+          </details>
+        ))}
+        {history.length > JOB_PAGE && (
+          <div className="pg-row pg-mt-3">
+            <Button size="sm" onClick={() => setShowAllJobs((v) => !v)}>
+              {showAllJobs
+                ? t("workbench.datasets.fewer")
+                : t("workbench.history.all").replace(
+                    "{count}",
+                    String(history.length),
+                  )}
+            </Button>
+          </div>
+        )}
       </section>
       <p>
         <T>

@@ -1738,6 +1738,8 @@
   "workbench.datasets.all": "显示全部 {count} 个数据集",
   "workbench.datasets.fewer": "收起",
   "workbench.datasets.showing": "显示 {shown} / {total}",
+  "workbench.history.totals": "共 {total} 个任务：{outcomes}",
+  "workbench.history.all": "显示全部 {count} 个任务",
   "Original human capture": "原始人工采集",
   "Original rollout": "原始 rollout",
   "Outcome filter": "结局筛选",

@@ -1738,6 +1738,8 @@
   "workbench.datasets.all": "Show all {count} datasets",
   "workbench.datasets.fewer": "Show fewer",
   "workbench.datasets.showing": "Showing {shown} of {total}",
+  "workbench.history.totals": "{total} tasks: {outcomes}",
+  "workbench.history.all": "Show all {count} tasks",
   "Original human capture": "Original human capture",
   "Original rollout": "Original rollout",
   "Outcome filter": "Outcome filter",
