@@ -18,8 +18,9 @@ conftest, build config, shared styles or catalogues, an unmapped data file) is
 reported as ``widen`` with the reason: the suggestion then is the whole suite,
 never a guess. "Not recognised" must not read as "not affected".
 
-It only suggests. Use the full suite before a merge until the evaluation in
-``--eval-history`` has been compared with full runs over enough changes.
+It only suggests. ``--eval-history`` counts the tests that changed *with* the code
+that it names; it cannot see a test that broke without being edited, so it does not
+prove the suggestion complete. Use the full suite before a merge.
 """
 
 from __future__ import annotations
