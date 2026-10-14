@@ -817,6 +817,7 @@ def test_maintenance_clean_covers_the_pool(tmp_path, monkeypatch):
     assert any(r["id"] == "export-z" for r in report["pool"]["removed"])
     maintenance.clean(True)
     assert not settings.job_path("export-z").exists()
+    assert not (tmp_path / "ws" / ".cache/levi").exists()
 
 
 # ------------------------------------------------------------------------ API
