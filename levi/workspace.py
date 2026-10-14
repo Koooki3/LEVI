@@ -27,7 +27,7 @@ class Workspace:
     def at(cls, root: str | Path) -> "Workspace":
         """The workspace rooted at ``root`` (resolved), with the standard layout."""
         base = Path(root).expanduser().resolve()
-        return cls(root=base, state=base / STATE_REL, cache=base / CACHE_REL)
+        return cls(root=base, state=(base / STATE_REL).resolve(), cache=(base / CACHE_REL).resolve())
 
     @classmethod
     def default(cls) -> "Workspace":

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .paths import PROJECT, ROOT, STATE
-from .workspace import Workspace
+from .workspace import CACHE_REL, Workspace
 
 
 def candidates(project=PROJECT, root=ROOT):
@@ -67,7 +67,7 @@ def _workspace(ws):
     Reading the globals at call time keeps a caller (or test) that sets
     ``maintenance.STATE`` working; new callers pass a ``Workspace`` instead.
     """
-    return ws if ws is not None else Workspace(ROOT, STATE, ROOT / ".cache/levi")
+    return ws if ws is not None else Workspace(ROOT, STATE, ROOT / CACHE_REL)
 
 
 def orphans(ws=None):
@@ -119,9 +119,13 @@ def orphans(ws=None):
 def clean(apply=False, ws=None):
     """Plan (or with ``apply`` do) the bounded clean-up of one workspace.
 
-    ``ws`` names the workspace whose datasets, running-service marker and orphans
-    are examined. The training-pool sweep at the end still works on the
-    process-wide workspace; making it explicit is a later slice.
+    ``ws`` names the workspace whose datasets, running-service marker, orphans and
+    ``<root>/.cache/levi`` are examined (``ws.cache`` is not consulted yet). The
+    checkout's own regenerable caches (``.next/cache``, ``__pycache__``,
+    ``.ruff_cache``...) are listed with every workspace because they belong to the
+    project, not to a workspace. The training-pool sweep works on the
+    process-wide workspace, so with an explicit ``ws`` it is skipped (reported as
+    such) rather than run against a different workspace than the one named.
     """
     state = _workspace(ws).state
     marker = state / "server.pid"
@@ -182,7 +186,10 @@ def clean(apply=False, ws=None):
     # touched; the service is stopped here anyway).
     from .pool import cleanup as pool_cleanup
 
-    pool = pool_cleanup.sweep(dry_run=not apply)
+    if ws is None:
+        pool = pool_cleanup.sweep(dry_run=not apply)
+    else:
+        pool = {"bytes": 0, "skipped": "the pool sweep is process-wide; not run for an explicit workspace"}
     return {
         "applied": apply,
         "bytes": sum(r["bytes"] for r in entries) + pool["bytes"],

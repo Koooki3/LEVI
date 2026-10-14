@@ -81,3 +81,32 @@ def test_clean_checks_the_given_workspace_for_a_running_service(tmp_path):
     quiet = make_workspace(tmp_path / "q", registered=[], leftovers=[])
     report = maintenance.clean(False, quiet)
     assert report["applied"] is False and report["orphans"]["removable_empty"] == []
+
+
+def test_the_layout_is_the_documented_one_not_just_a_shared_constant():
+    from levi import workspace
+
+    assert workspace.STATE_REL == "outputs/LEVI/workbench"
+    assert workspace.CACHE_REL == ".cache/levi"
+
+
+def test_clean_with_apply_touches_only_the_given_workspace_and_skips_the_pool_sweep(
+    tmp_path, monkeypatch
+):
+    project = tmp_path / "proj"
+    project.mkdir()
+    monkeypatch.setattr(maintenance, "PROJECT", project)
+    a = make_workspace(tmp_path / "a", registered=[], leftovers=["empty_a"])
+    b = make_workspace(tmp_path / "b", registered=[], leftovers=["empty_b"])
+    for ws, name in ((a, "mine"), (b, "theirs")):
+        (ws.root / ".cache/levi").mkdir(parents=True)
+        (ws.root / ".cache/levi" / name).write_text("x")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep")
+
+    report = maintenance.clean(True, a)
+
+    assert not (a.root / ".cache/levi").exists()
+    assert (b.root / ".cache/levi/theirs").exists() and outside.exists()
+    assert (b.state / "annotations/empty_b").exists()
+    assert report["pool"]["bytes"] == 0 and "skipped" in report["pool"]
