@@ -28,7 +28,7 @@ VERSION = "hub-snapshot-2"
 FOLDER = "hub-snapshots"
 FALLBACK_REASONS = {"too_large", "busy", "unavailable", "lock_timeout"}
 # huggingface_hub's own bookkeeping under <folder>/.cache/huggingface: a metadata file per downloaded file
-# and a listing of the whole repository tree (every file, matched or not, about 300 bytes each)
+# and a listing of the whole repository tree (every file, matched or not, about 290 bytes plus the path each)
 ALLOWANCE = 64 * 1024
 PER_FILE = 4 * 1024
 PER_LISTED_FILE = 512

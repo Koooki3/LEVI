@@ -187,25 +187,86 @@ def test_the_reservation_counts_the_listing_of_the_whole_repository():
     assert reserve_for([10], listed=1000) >= reserve_for([10]) + 1000 * 300
 
 
-def test_an_unreachable_hub_inspects_an_earlier_download(
-    client, dataset, tmp_path, monkeypatch
+def hub_error(kind):
+    import httpx
+    from huggingface_hub.errors import (
+        HfHubHTTPError,
+        OfflineModeIsEnabled,
+        RepositoryNotFoundError,
+    )
+
+    request = httpx.Request("GET", "https://huggingface.co/api/datasets/org/ds")
+
+    def status(cls, code):
+        return cls(f"{code}", response=httpx.Response(code, request=request))
+
+    return {
+        "offline": lambda: OfflineModeIsEnabled("offline"),
+        "connect": lambda: httpx.ConnectError("refused", request=request),
+        "timeout": lambda: httpx.ReadTimeout("slow", request=request),
+        "503": lambda: status(HfHubHTTPError, 503),
+        "401": lambda: status(HfHubHTTPError, 401),
+        "404": lambda: status(RepositoryNotFoundError, 404),
+    }[kind]()
+
+
+@pytest.mark.parametrize(
+    ("kind", "falls_back"),
+    [
+        ("offline", True),
+        ("connect", True),
+        ("timeout", True),
+        ("503", True),
+        ("401", False),
+        ("404", False),
+    ],
+)
+def test_an_unreachable_hub_inspects_an_earlier_download_but_access_errors_fail(
+    client, dataset, tmp_path, monkeypatch, kind, falls_back
 ):
     import shutil
 
     import huggingface_hub
-    from huggingface_hub.errors import OfflineModeIsEnabled
 
     from levi import service
 
-    def offline(self, *args, **kwargs):
-        raise OfflineModeIsEnabled("offline")
+    def failing(self, *args, **kwargs):
+        raise hub_error(kind)
 
-    monkeypatch.setattr(huggingface_hub.HfApi, "dataset_info", offline)
+    monkeypatch.setattr(huggingface_hub.HfApi, "dataset_info", failing)
     monkeypatch.setattr(service, "CACHE", tmp_path / "cache")
     body = {"repo_id": "org/ds", "max_episodes": 1}
-    with pytest.raises(OfflineModeIsEnabled):
+    with pytest.raises(type(hub_error(kind))):  # no earlier download: it fails
         client.post("/api/levi/diagnostics", json=body)
     shutil.copytree(dataset, tmp_path / "cache" / "org__ds")
+    if not falls_back:
+        with pytest.raises(type(hub_error(kind))):
+            client.post("/api/levi/diagnostics", json=body)
+        return
     response = client.post("/api/levi/diagnostics", json=body)
     assert response.status_code == 200, response.text
     assert response.json()["cache_note"].startswith("Hub unreachable")
+
+
+def test_the_diagnostic_reserves_for_the_whole_repository_listing(
+    client, dataset, tmp_path, monkeypatch
+):
+    from levi import hub_snapshots, service
+
+    seen = []
+    real = hub_snapshots.reserve_for
+
+    def spy(sizes, listed=0):
+        seen.append((list(sizes), listed))
+        return real(sizes, listed)
+
+    calls = []
+    fake_hub(monkeypatch, dataset, calls, ["c1"])
+    monkeypatch.setattr(hub_snapshots, "reserve_for", spy)
+    monkeypatch.setattr(service, "CACHE", tmp_path / "cache")
+    response = client.post(
+        "/api/levi/diagnostics", json={"repo_id": "org/ds", "max_episodes": 1}
+    )
+    assert response.status_code == 200, response.text
+    # two files match meta/** and data/**/*.parquet; the listing has all three
+    assert seen == [([1000, 1000], 3)]
