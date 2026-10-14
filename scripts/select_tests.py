@@ -93,6 +93,29 @@ def module_of(path: str) -> str:
     return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
 
 
+def names_deleted(text: str, gone: str, reader: str) -> bool:
+    """Whether ``reader``'s text still names the deleted module ``gone``: by its
+    dotted name or file name, as ``from <package> import <leaf>`` (also inside
+    parentheses), or, from the same directory, by a relative or bare import."""
+    mod = module_of(gone)
+    if mod in text or Path(gone).name in text:
+        return True
+    parent, _, leaf = mod.rpartition(".")
+    word = rf"\b{re.escape(leaf)}\b"
+    if parent and re.search(
+        rf"from\s+{re.escape(parent)}\s+import\s+(\([^)]*{word}|[^\n]*{word})", text
+    ):
+        return True
+    return Path(reader).parent == Path(gone).parent and bool(
+        re.search(
+            rf"from\s+\.\s+import\s+(\([^)]*{word}|[^\n]*{word})"
+            rf"|from\s+\.{re.escape(leaf)}\b|^\s*(from|import)\s+{re.escape(leaf)}\b",
+            text,
+            re.MULTILINE,
+        )
+    )
+
+
 class PyGraph:
     def __init__(self, files: list[str]):
         self.files = [f for f in files if f.endswith(".py") and f.split("/")[0] in PY_DIRS]
@@ -364,6 +387,7 @@ def select(changed: list[str], files: list[str], graphs: tuple | None = None) ->
     data_changed: list[str] = []
     named_by_path: list[str] = []
     named_by_deleted: set[str] = set()
+    deleted_readers: set[str] = set()
     for c in changed:
         if any(c == w or c.startswith(w) for w in PY_WIDEN):
             out["pytest"]["widen"].append(f"{c}: shared by every Python test")
@@ -372,12 +396,20 @@ def select(changed: list[str], files: list[str], graphs: tuple | None = None) ->
         if c.endswith(".py") and c.split("/")[0] in PY_DIRS:
             if c in py.imports and "*" in py.imports[c]:
                 out["pytest"]["widen"].append(f"{c}: cannot be parsed")
-            if c not in py.text:
-                # deleted or renamed away: whatever still names it must be found
-                hits = [t for t in all_py_tests if module_of(c) in py.text[t] or Path(c).name in py.text[t]]
-                named_by_deleted.update(hits)
-                if not hits:
-                    out["pytest"]["widen"].append(f"{c}: no longer exists and no test names it")
+            if c not in py.text and not is_test(c):
+                # Deleted or renamed away: it is in no import graph, so whatever
+                # still names it must be found by text. A test that names it is
+                # selected; a source that names it is followed like a changed
+                # file, so the tests that import that source are selected too.
+                readers = [f for f in py.text if names_deleted(py.text[f], c, f)]
+                named_by_deleted.update(f for f in readers if is_test(f))
+                deleted_readers.update(f for f in readers if not is_test(f))
+                if readers:
+                    out["other"].append(
+                        f"{c}: no longer exists; selected what still names it ({len(readers)} files)"
+                    )
+                else:
+                    out["pytest"]["widen"].append(f"{c}: no longer exists and nothing names it")
             py_changed.add(c)
             named_by_path.append(c)
         elif re.search(r"\.(tsx?|css)$", c) and c.startswith("src/"):
@@ -394,7 +426,7 @@ def select(changed: list[str], files: list[str], graphs: tuple | None = None) ->
             for key in ("pytest", "bun"):
                 out[key]["widen"].append(f"{c}: not mapped to a test group")
 
-    selected = py.closure(py_changed)
+    selected = py.closure(py_changed | deleted_readers)
     # A deleted or renamed module is in no import graph, but a test that still
     # names it is the first to break.
     selected |= named_by_deleted
@@ -441,7 +473,8 @@ def select(changed: list[str], files: list[str], graphs: tuple | None = None) ->
     # Guards that scan every shipped file run whenever shipped code or data changes.
     if any(not is_test(c) and not is_ts_test(c) for c in changed):
         selected |= {t for t in ALWAYS if t in py.text}
-    out["pytest"]["tests"] = sorted(t for t in selected if is_test(t))
+    # A deleted test file cannot be run, and nothing else breaks because it is gone.
+    out["pytest"]["tests"] = sorted(t for t in selected if is_test(t) and t in py.text)
     out["bun"]["tests"] = sorted(t for t in ts_sel if is_ts_test(t))
     return out
 

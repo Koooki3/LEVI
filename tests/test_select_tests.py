@@ -241,3 +241,44 @@ def test_a_git_failure_is_an_error_not_an_empty_answer(tmp_path):
     sel = load(tmp_path)
     with pytest.raises(SystemExit):
         sel.git("rev-parse", "--verify", "no-such-ref-anywhere")
+
+
+def test_a_deleted_module_a_source_still_imports_selects_the_tests_of_that_source(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {
+            "levi/b.py": "from levi.old import X\n",
+            "tests/test_b.py": "from levi.b import f\n",
+            "tests/test_z.py": "# mentions levi.old in a comment\n",
+        },
+    )
+    out = sel.select(["levi/old.py"], files)["pytest"]
+    # test_b breaks at import through levi/b.py; a stray mention must not hide it.
+    assert out["tests"] == ["tests/test_b.py", "tests/test_z.py"]
+    assert not out["widen"]
+
+
+def test_a_deleted_module_imported_from_its_package_or_relatively_is_found(tmp_path):
+    sel = load(tmp_path)
+    files = write(
+        tmp_path,
+        {
+            "levi/p/__init__.py": "",
+            "levi/p/sib.py": "from . import old\n",
+            "tests/test_e.py": "import levi.p.old\n",
+            "tests/test_f.py": "from levi.p import (\n    other,\n    old,\n)\n",
+            "tests/test_g.py": "from levi.p import sib\n",
+            "tests/test_h.py": "from levi.p import older\n",
+        },
+    )
+    out = sel.select(["levi/p/old.py"], files)["pytest"]
+    assert out["tests"] == ["tests/test_e.py", "tests/test_f.py", "tests/test_g.py"]
+
+
+def test_a_deleted_test_file_is_not_listed_and_does_not_widen(tmp_path):
+    sel = load(tmp_path)
+    files = write(tmp_path, {"tests/test_i.py": "# see test_gone.py\n"})
+    out = sel.select(["tests/test_gone.py"], files)["pytest"]
+    assert "tests/test_gone.py" not in out["tests"]
+    assert not out["widen"]
