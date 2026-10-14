@@ -586,6 +586,83 @@ function DatasetsCard({
   );
 }
 
+/** A new workspace (no dataset, nothing opened in this browser) gets four
+ * first steps; with a dataset the card is gone. */
+function FirstSteps() {
+  const { t } = useLocale();
+  const steps = [
+    {
+      key: "explore",
+      icon: Compass,
+      href: "/explore",
+      title: t("home.firstSteps.explore.title"),
+      body: t("home.firstSteps.explore.body"),
+    },
+    {
+      key: "register",
+      icon: FolderOpen,
+      href: "/workbench",
+      title: t("home.firstSteps.register.title"),
+      body: t("home.firstSteps.register.body"),
+    },
+    {
+      key: "connect",
+      icon: Bot,
+      href: null,
+      title: t("home.firstSteps.connect.title"),
+      body: t("home.firstSteps.connect.body"),
+    },
+    {
+      key: "guide",
+      icon: BookOpen,
+      href: "/guide",
+      title: t("home.firstSteps.guide.title"),
+      body: t("home.firstSteps.guide.body"),
+    },
+  ] as const;
+  return (
+    <Card
+      className="levi-home-card levi-home-first"
+      title={t("home.firstSteps.title")}
+      description={t("home.firstSteps.lead")}
+    >
+      <ol className="levi-home-steps">
+        {steps.map((step, index) => {
+          const body = (
+            <>
+              <span className="levi-home-steps__n" aria-hidden="true">
+                {index + 1}
+              </span>
+              <Icon icon={step.icon} />
+              <span className="levi-home-list__main">
+                <strong>{step.title}</strong>
+                <span className="levi-home-meta">{step.body}</span>
+              </span>
+            </>
+          );
+          return (
+            <li key={step.key}>
+              {step.href ? (
+                <Link href={step.href} className="levi-home-step ds-focus">
+                  {body}
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  className="levi-home-step ds-focus"
+                  onClick={toggleAgentWorkbench}
+                >
+                  {body}
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </Card>
+  );
+}
+
 export function HomeDashboard() {
   const { t } = useLocale();
   const { enabled, embedded } = useLivePulse();
@@ -622,6 +699,11 @@ export function HomeDashboard() {
           now={now}
         />
       )}
+
+      {datasets !== undefined &&
+        datasets !== null &&
+        datasets.length === 0 &&
+        recent.length === 0 && <FirstSteps />}
 
       <h2 className="ds-sr-only">{t("Your work")}</h2>
       <div className="levi-home-grid">

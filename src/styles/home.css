@@ -335,3 +335,44 @@
     display: none;
   }
 }
+
+/* First steps of a new workspace */
+.levi-home-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: var(--ds-space-3);
+}
+.levi-home-step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ds-space-3);
+  width: 100%;
+  height: 100%;
+  padding: var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+  color: var(--ds-text-primary);
+  text-align: left;
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.levi-home-step:hover {
+  background: var(--ds-surface-hover);
+}
+.levi-home-steps__n {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--ds-radius-full);
+  background: var(--ds-surface-sunken);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-semibold);
+}
