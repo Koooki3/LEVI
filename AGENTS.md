@@ -57,24 +57,16 @@ the user approves installation.
 
 Always use **bun** (`bun install`, `bun dev`, `bun run build`, `bun run test`). Never use npm or yarn.
 
-## Post-process — run after every code change
+## Verification tiers — what to run, and when
 
-After making any code changes, always run these commands in order and fix any errors before finishing:
+Measured on 2026-10-14 (afb465e4, 4 cores at nice 19): the whole frontend check takes about 25 s; the Python suite takes about 20 minutes. So the frontend is always run in full, and the Python suite is run in full only before a merge.
 
-```
-bun run format        # auto-fix formatting (prettier)
-bun run type-check    # TypeScript: app + test files
-bun run lint          # ESLint
-bun run test          # unit tests, one bun process per file (scripts/test-isolated.ts)
-```
+- **edit** (while iterating): `python3 scripts/select_tests.py` lists the Python and Bun test files a diff can reach (it widens to the whole suite when it cannot tell), and runs nothing; run what it prints, plus `uv run ruff check` on changed Python.
+- **commit** (before each commit): `bun run format && bun run validate` (type-check, lint, format check, one Bun process per test file), `uv run levi docs check`, `uv run levi dev check-contracts`, and the Python tests the selector named for the diff.
+- **merge** (before a fast-forward to main, one run at a time, through the resource driver in the maintainer's workspace): everything CI runs — `bun run validate`, `bun run build`, `uv run ruff check .`, `uv run levi dev check-contracts --base origin/main`, and the full `uv run pytest` (also with `--extra agent`). The selector is a suggestion, never a substitute for this tier.
+- **acceptance**: real data, real model or real robot, per capability, as the workspace manual requires.
 
-Or run them all at once (format first, then the full validate suite):
-
-```
-bun run format && bun run validate
-```
-
-`bun run validate` runs: type-check → lint → format:check → test (each test file in its own process: `mock.module` leaks between files in one process, which made the result depend on file order)
+`scripts/dev-env.sh` gives a new worktree its own `.venv` and `node_modules` in about a second; `python3 scripts/inventory.py --diff <earlier.json>` shows whether a refactor lost a route, capability, CLI command, setting, test id, prompt or schema file.
 
 ## Key scripts
 
