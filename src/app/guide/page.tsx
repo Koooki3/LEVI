@@ -6,7 +6,16 @@
  */
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowRight, Eye, List, Microscope, Sparkles } from "lucide-react";
+import {
+  ArrowRight,
+  Bot,
+  Compass,
+  Eye,
+  FolderOpen,
+  List,
+  Microscope,
+  Sparkles,
+} from "lucide-react";
 import { Icon } from "@/components/ds";
 import { T, useLocale } from "@/components/levi-locale";
 import {
@@ -15,6 +24,7 @@ import {
   stickyTop,
 } from "@/components/report/active-section";
 import { LeviMark } from "@/components/shell/brand";
+import { toggleAgentWorkbench } from "@/components/shell/shell-events";
 import { DemoThumb } from "./demo-thumb";
 import "@/styles/reading.css";
 import "@/styles/home.css";
@@ -43,6 +53,14 @@ const STEPS = [
     body: "Convert with the built-in pipeline. Review, diagnose and export.",
   },
 ];
+
+// The home page card's first three steps (home.firstSteps.*), for a reader who
+// arrived here first; the fourth ("read the guide") is this page.
+const FIRST_STEPS = [
+  { key: "explore", icon: Compass, href: "/explore" },
+  { key: "register", icon: FolderOpen, href: "/workbench" },
+  { key: "connect", icon: Bot, href: null },
+] as const;
 
 const SECTIONS: [string, string][] = [
   [
@@ -179,6 +197,40 @@ export default function Guide() {
                 </li>
               ))}
             </ul>
+            <h2 className="levi-guide-sub">{t("home.firstSteps.title")}</h2>
+            <ol className="levi-guide-first" role="list">
+              {FIRST_STEPS.map((step, index) => {
+                const inner = (
+                  <>
+                    <span className="levi-guide-first__n" aria-hidden="true">
+                      {index + 1}
+                    </span>
+                    <Icon icon={step.icon} />
+                    <span className="levi-guide-first__text">
+                      <strong>{t(`home.firstSteps.${step.key}.title`)}</strong>
+                      <span>{t(`home.firstSteps.${step.key}.body`)}</span>
+                    </span>
+                  </>
+                );
+                return (
+                  <li key={step.key}>
+                    {step.href ? (
+                      <Link href={step.href} className="ds-focus">
+                        {inner}
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        className="ds-focus"
+                        onClick={toggleAgentWorkbench}
+                      >
+                        {inner}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
             <h2 className="levi-guide-sub">
               {t("Start from a public dataset")}
             </h2>

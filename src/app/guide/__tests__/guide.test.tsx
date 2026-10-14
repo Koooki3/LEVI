@@ -116,3 +116,22 @@ describe("the guide's example thumbnails", () => {
     expect((zh as Record<string, string>)[body]).toContain("「分析」");
   });
 });
+
+describe("the guide's first steps", () => {
+  test("open with the same three steps as the home page, linked, in order", async () => {
+    const { default: Guide } = await import("../page");
+    const { host } = await render(<Guide />);
+    const items = Array.from(
+      host.querySelectorAll<HTMLElement>(".levi-guide-first > li"),
+    );
+    expect(items).toHaveLength(3);
+    expect(items[0].textContent).toContain("Open a public dataset");
+    expect(items[0].querySelector("a")!.getAttribute("href")).toBe("/explore");
+    expect(items[1].querySelector("a")!.getAttribute("href")).toBe(
+      "/workbench",
+    );
+    // Connecting a model has no page of its own: a button, not a link.
+    expect(items[2].querySelector("button")).toBeTruthy();
+    expect(items[2].querySelector("a")).toBeNull();
+  });
+});
