@@ -11,17 +11,22 @@ from .paths import PROJECT, ROOT, STATE
 from .workspace import CACHE_REL, Workspace
 
 
-def candidates(project=PROJECT, root=ROOT):
-    paths = [
-        project / ".next/cache",
-        project / ".pytest_cache",
-        project / ".ruff_cache",
-        project / "tsconfig.tsbuildinfo",
-        project / "tsconfig.test.tsbuildinfo",
-        root / ".cache/levi",
-    ]
-    for directory in ["levi", "backend", "tests", "scripts"]:
-        paths.extend((project / directory).rglob("__pycache__"))
+def candidates(project=PROJECT, root=ROOT, with_project=True):
+    """The regenerable paths a clean may remove. ``with_project=False`` leaves out
+    the checkout's own caches and lists only what lives under ``root``."""
+    paths = []
+    if with_project:
+        paths += [
+            project / ".next/cache",
+            project / ".pytest_cache",
+            project / ".ruff_cache",
+            project / "tsconfig.tsbuildinfo",
+            project / "tsconfig.test.tsbuildinfo",
+        ]
+    paths.append(root / ".cache/levi")
+    if with_project:
+        for directory in ["levi", "backend", "tests", "scripts"]:
+            paths.extend((project / directory).rglob("__pycache__"))
     # Only the pinned Bun installer archives, never a general downloads folder.
     for platform in ["linux-x64", "linux-aarch64", "darwin-x64", "darwin-aarch64"]:
         paths.append(root / "tmp/downloads" / f"bun-{platform}.zip")
@@ -122,8 +127,9 @@ def clean(apply=False, ws=None):
     ``ws`` names the workspace whose datasets, running-service marker, orphans and
     ``<root>/.cache/levi`` are examined (``ws.cache`` is not consulted yet). The
     checkout's own regenerable caches (``.next/cache``, ``__pycache__``,
-    ``.ruff_cache``...) are listed with every workspace because they belong to the
-    project, not to a workspace. The training-pool sweep works on the
+    ``.ruff_cache``...) belong to the project, not to a workspace, and the
+    running-service check above looks only at ``ws``: so with an explicit ``ws``
+    they are never listed or removed. The training-pool sweep works on the
     process-wide workspace, so with an explicit ``ws`` it is skipped (reported as
     such) rather than run against a different workspace than the one named.
     """
@@ -146,9 +152,15 @@ def clean(apply=False, ws=None):
     leftovers = orphans(ws)
     from .catalog import read
 
-    # A given workspace names its own root; otherwise `candidates()` keeps the
-    # defaults it was imported with (a test may replace the function).
-    find = candidates if ws is None else (lambda: candidates(PROJECT, ws.root))
+    # A given workspace names its own root and only its own root: the checkout's
+    # caches are not touched on the strength of a service check made elsewhere.
+    # Otherwise `candidates()` keeps the defaults it was imported with (a test
+    # may replace the function).
+    find = (
+        candidates
+        if ws is None
+        else (lambda: candidates(PROJECT, ws.root, with_project=False))
+    )
     registered = [
         Path(item["path"]).resolve()
         for item in read(state / "datasets.json", {}).values()
@@ -189,7 +201,12 @@ def clean(apply=False, ws=None):
     if ws is None:
         pool = pool_cleanup.sweep(dry_run=not apply)
     else:
-        pool = {"bytes": 0, "skipped": "the pool sweep is process-wide; not run for an explicit workspace"}
+        pool = {
+            "dry_run": not apply,
+            "removed": [],
+            "bytes": 0,
+            "skipped": "the pool sweep is process-wide; not run for an explicit workspace",
+        }
     return {
         "applied": apply,
         "bytes": sum(r["bytes"] for r in entries) + pool["bytes"],

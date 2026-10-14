@@ -130,5 +130,16 @@ def test_clean_with_apply_and_an_explicit_workspace_never_runs_the_process_wide_
     assert calls == []
     # the legacy call still sweeps, with the apply flag it was given
     monkeypatch.setattr(maintenance, "STATE", ws.state)
+    # The legacy call lists the checkout's real caches; none may be removed here.
+    monkeypatch.setattr(maintenance, "candidates", lambda *args, **kwargs: [])
     maintenance.clean(True)
     assert calls == [False]
+
+
+def test_an_explicit_workspace_never_lists_the_checkouts_own_caches(tmp_path):
+    ws = make_workspace(tmp_path / "ws", registered=[], leftovers=[])
+    (ws.root / ".cache/levi").mkdir(parents=True)
+    report = maintenance.clean(False, ws)
+    listed = {entry["path"] for entry in report["entries"]}
+    assert listed == {str(ws.root / ".cache/levi")}
+    assert report["pool"]["removed"] == [] and report["pool"]["dry_run"] is True
