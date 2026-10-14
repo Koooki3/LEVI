@@ -13,6 +13,7 @@ const strip = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
 /** The files that make the Agent Workbench's four sections. */
 const CONTENT = [
   "agent-workbench.tsx",
+  "agent-provider-form.tsx",
   "agent-activity.tsx",
   "agent-connections.tsx",
   "agent-definitions.tsx",

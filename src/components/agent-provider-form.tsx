@@ -2,7 +2,9 @@
 /**
  * The Agent Workbench's model settings: the provider profile being edited
  * (its fields, and filling them from a saved profile) and the form that saves
- * it. Moved verbatim out of agent-workbench.tsx.
+ * it. Moved out of agent-workbench.tsx; the save callback (`onSaved`) and the
+ * two hints' explicit `t()` (the workbench's `<T>` cannot reach inside this
+ * component) are the only changes.
  */
 import { useState } from "react";
 import { Save } from "lucide-react";
@@ -271,15 +273,17 @@ export function ProviderForm({
       )}
       {providerKind === "ollama" && (
         <Hint>
-          Save this connection, then inspect and bind the installed model in
-          Accounts & connections. No API key is required.
+          {t(
+            "Save this connection, then inspect and bind the installed model in Accounts & connections. No API key is required.",
+          )}
         </Hint>
       )}
       {providerKind === "openai-local" && (
         <>
           <Hint>
-            Use the server root without /v1. Save this connection, then inspect
-            and bind the served model in Accounts & connections.
+            {t(
+              "Use the server root without /v1. Save this connection, then inspect and bind the served model in Accounts & connections.",
+            )}
           </Hint>
           <Field label={t("API-key environment variable (optional)")} required>
             <Input value={keyEnv} onChange={(e) => setKeyEnv(e.target.value)} />

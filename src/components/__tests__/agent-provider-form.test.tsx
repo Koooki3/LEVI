@@ -1,5 +1,6 @@
 import { fire, flush, render, setupDom } from "@/components/ds/__tests__/dom";
 import { afterEach, describe, expect, test } from "bun:test";
+import { LocaleProvider } from "../levi-locale";
 import { act } from "react";
 import {
   ProviderForm,
@@ -121,29 +122,121 @@ describe("the model settings form", () => {
       form().fill({
         name: "vllm-local",
         kind: "openai-local",
+        model_digest: "sha256:abc",
         base_url: "http://127.0.0.1:8100",
         model: "qwen",
         key_env: "LEVI_LOCAL_MODEL_KEY",
         vision: true,
-        tools: false,
+        tools: true,
         allow_localhost: true,
         context_tokens: 16384,
-        requests_in_flight: 2,
+        max_images: 4,
+        image_max_side: 896,
         think: true,
+        fold_system: true,
+        prompt_style: "lean",
+        requests_in_flight: 2,
       } as Provider),
     );
     expect(form()).toMatchObject({
       name: "vllm-local",
       providerKind: "openai-local",
+      modelDigest: "sha256:abc",
       url: "http://127.0.0.1:8100",
       model: "qwen",
+      keyEnv: "LEVI_LOCAL_MODEL_KEY",
       vision: true,
+      supportsTools: true,
       allowLocal: true,
       contextTokens: 16384,
-      inFlight: 2,
+      maxImages: 4,
+      imageMaxSide: 896,
       think: true,
-      foldSystem: false,
-      promptStyle: "full",
+      foldSystem: true,
+      promptStyle: "lean",
+      inFlight: 2,
     });
+  });
+
+  test("local-only settings are sent as set for vLLM and dropped for a cloud API", async () => {
+    const calls = core([]);
+    const { host, form } = await show();
+    const local = {
+      name: "v",
+      kind: "openai-local",
+      base_url: "http://127.0.0.1:8100",
+      model: "m",
+      key_env: "LEVI_LOCAL_MODEL_KEY",
+      vision: false,
+      tools: false,
+      allow_localhost: true,
+      max_images: 4,
+      image_max_side: 896,
+      think: true,
+      fold_system: true,
+      prompt_style: "lean",
+      requests_in_flight: 2,
+    } as Provider;
+    const submit = () =>
+      fire(
+        host.querySelector("form"),
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    await act(async () => form().fill(local));
+    await submit();
+    await flush(20);
+    expect(calls.filter((c) => c.method === "POST")[0].body).toMatchObject({
+      structured_output: true,
+      max_images: 4,
+      image_max_side: 896,
+      think: true,
+      fold_system: true,
+      prompt_style: "lean",
+      requests_in_flight: 2,
+    });
+    await act(async () => form().fill({ ...local, kind: "openai-compatible" }));
+    await submit();
+    await flush(20);
+    expect(calls.filter((c) => c.method === "POST")[1].body).toMatchObject({
+      structured_output: false,
+      max_images: null,
+      image_max_side: null,
+      think: false,
+      fold_system: false,
+      prompt_style: "full",
+      requests_in_flight: 1,
+    });
+  });
+
+  test("Chinese: the Ollama and vLLM hints are translated", async () => {
+    localStorage.setItem("levi-language", "zh");
+    try {
+      let form: ProviderFormState | null = null;
+      function Harness() {
+        const f = useProviderForm();
+        form = f;
+        return (
+          <ProviderForm
+            form={f}
+            act={async () => {}}
+            busy={false}
+            providers={[]}
+            onSaved={() => {}}
+          />
+        );
+      }
+      const { host } = await render(
+        <LocaleProvider>
+          <Harness />
+        </LocaleProvider>,
+      );
+      await flush(20);
+      await act(async () => form!.setProviderKind("ollama"));
+      expect(host.textContent).not.toContain("Save this connection");
+      await act(async () => form!.setProviderKind("openai-local"));
+      expect(host.textContent).not.toContain("Use the server root");
+    } finally {
+      localStorage.removeItem("levi-language");
+    }
   });
 });
