@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from .paths import PROJECT, ROOT, STATE
+from .workspace import Workspace
 
 
 def candidates(project=PROJECT, root=ROOT):
@@ -60,7 +61,16 @@ PER_DATASET = (
 )
 
 
-def orphans():
+def _workspace(ws):
+    """The explicit workspace, or the module's own ``ROOT``/``STATE`` read now.
+
+    Reading the globals at call time keeps a caller (or test) that sets
+    ``maintenance.STATE`` working; new callers pass a ``Workspace`` instead.
+    """
+    return ws if ws is not None else Workspace(ROOT, STATE, ROOT / ".cache/levi")
+
+
+def orphans(ws=None):
     """Artifacts and links left behind by datasets that are no longer registered.
 
     Removing a dataset from the catalog deliberately keeps its annotations --
@@ -69,15 +79,20 @@ def orphans():
     now leads nowhere. Reporting them is the point; only the empty shells are
     ever offered for removal.
     """
-    from .catalog import aliases, datasets
+    from .catalog import aliases, datasets, read
 
-    known = set(datasets())
-    stale_links = {
-        old: target for old, target in aliases().items() if target not in known
-    }
+    if ws is None:
+        # Legacy path: the catalog's own module-level STATE (tests patch it).
+        registered, links, state = datasets(), aliases(), STATE
+    else:
+        registered = read(ws.state / "datasets.json", {})
+        links = read(ws.state / "dataset_aliases.json", {})
+        state = ws.state
+    known = set(registered)
+    stale_links = {old: target for old, target in links.items() if target not in known}
     empty, occupied = [], []
     for family in PER_DATASET:
-        root = STATE / family
+        root = state / family
         if not root.is_dir():
             continue
         for child in sorted(root.iterdir()):
@@ -101,8 +116,15 @@ def orphans():
     }
 
 
-def clean(apply=False):
-    marker = STATE / "server.pid"
+def clean(apply=False, ws=None):
+    """Plan (or with ``apply`` do) the bounded clean-up of one workspace.
+
+    ``ws`` names the workspace whose datasets, running-service marker and orphans
+    are examined. The training-pool sweep at the end still works on the
+    process-wide workspace; making it explicit is a later slice.
+    """
+    state = _workspace(ws).state
+    marker = state / "server.pid"
     if marker.exists():
         try:
             pid = int(marker.read_text())
@@ -117,16 +139,19 @@ def clean(apply=False):
                 f"Stop the LEVI service before cleaning caches. It is running "
                 f"as PID {pid}; stop it with: uv run levi stop"
             )
-    leftovers = orphans()
+    leftovers = orphans(ws)
     from .catalog import read
 
+    # A given workspace names its own root; otherwise `candidates()` keeps the
+    # defaults it was imported with (a test may replace the function).
+    find = candidates if ws is None else (lambda: candidates(PROJECT, ws.root))
     registered = [
         Path(item["path"]).resolve()
-        for item in read(STATE / "datasets.json", {}).values()
+        for item in read(state / "datasets.json", {}).values()
     ]
     eligible = [
         p
-        for p in candidates()
+        for p in find()
         if not any(
             r == p.resolve() or r.is_relative_to(p.resolve()) for r in registered
         )
@@ -136,7 +161,7 @@ def clean(apply=False):
         for row in entries:
             path = Path(row["path"])
             # Re-evaluate allowlist immediately before deleting; symlinks are never followed.
-            if path not in candidates():
+            if path not in find():
                 continue
             if path.is_dir():
                 shutil.rmtree(path)
@@ -148,7 +173,7 @@ def clean(apply=False):
             # Only ever an empty directory, and only under the workbench.
             if (
                 shell.is_dir()
-                and shell.is_relative_to(STATE)
+                and shell.is_relative_to(state)
                 and not any(shell.rglob("*"))
             ):
                 shell.rmdir()

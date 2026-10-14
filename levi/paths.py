@@ -6,6 +6,8 @@ from pathlib import Path
 PROJECT = Path(__file__).resolve().parents[1]
 from dotenv import load_dotenv
 
+from .workspace import CACHE_REL, STATE_REL
+
 load_dotenv(PROJECT / ".env", override=False)
 
 
@@ -30,8 +32,8 @@ def inside(path: str | Path, base: Path | None = None) -> Path:
     return result
 
 
-STATE = inside(ROOT / "outputs/LEVI/workbench")
-CACHE = inside(ROOT / ".cache/levi")
+STATE = inside(ROOT / STATE_REL)
+CACHE = inside(ROOT / CACHE_REL)
 EXPORTS = inside(ROOT / "outputs/LEVI/exports")
 CHECKPOINTS = inside(ROOT / "checkpoints")
 SAM3_CHECKPOINT_DIR = inside(CHECKPOINTS / "sam3")
