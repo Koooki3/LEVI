@@ -23,7 +23,7 @@ LEVI 是面向机器人学习数据的本地工作台：浏览 LeRobot 数据集
 | **转换** | 把原始采集数据（CSV + 视频或图像文件夹）和 LeRobot v2.x 转成 **LeRobot v2.1** 或 **RECAP（π\*0.6）价值数据集**，转换前先检查并列出输入满足哪些要求。 |
 | **检查与整理** | 结构性质量检查、成败标签、审核标记、由 agent 驱动的内容审核，以及**释放事件锚定复核**：在机器人自己的信号标出的时刻（例如每次夹爪张开）判断成败，每个事件只问一个窄问题。 |
 | **用 agent 标注** | 外部 MCP agent（Claude Code、Codex 等）、API 模型或**本地模型**（Ollama 或 vLLM）提出时间片段、事件和物体掩码，再由人审核、提交，可撤销。 |
-| **为实时评测标注** | 后台服务在机器人评测还在写 rollout 时就标注，并给策略让出 GPU。（见[下文](#机器人评测的实时标注)）。 |
+| **为实时评测标注** | 后台服务在机器人评测还在写 rollout 时就标注，并给策略让出 GPU（见[下文](#机器人评测的实时标注)）。 |
 | **训练池** | 对 `LEVI_POOL_ROOTS` 指定的只读文件夹下的所有数据集逐片段建索引，副本归组，冻结测试片段强制留出；按选定顺序组合任务，导出带来源记录的合并 LeRobot v2.1、RECAP 价值或原始采集数据集。 |
 | **快速物体分割** | 从 SAM3 蒸馏出的小型学生模型在片段播放时实时勾出并跟踪物体，也可离线标注整个数据集；结果在人审核之前都是“建议”标注。 |
 | **服务训练** | RECAP 价值模型给出逐帧价值和优势标签；训练清单写明哪些帧进入学习器的损失、权重多少。 |
@@ -70,7 +70,7 @@ uv run levi                                   # 启动网页和 API
 
 ## 机器人评测的实时标注
 
-`levi live` 是独立的后台 LEVI，有自己的工作区。它监视机器人评测写入的目录，用本地模型（vLLM 上的 Qwen3.8）标注每个已完成的片段：时间片段、各时间片段的成败，以及整个片段是否成功。它从不写 rollout 目录、连接机器人或写人工成败标签；它的判定在所有地方都是自动、未经审核的，你在普通查看器里审核。`--auto-approve` 让服务里有审计的自动批准主体，只在它自己的工作区里，批准并提交它自己那次运行的时间片段，并标记 `auto`；不加它，每个批次最多要等人过三道关。它与机器人的策略服务器共用一块 GPU（“闸门”保证策略推理时模型不工作，空闲时 vLLM 睡眠；请在策略服务器之前启动它），需要 vLLM 环境、权重，以及能在策略旁边放下模型的 NVIDIA GPU。命令（`levi live init`、`doctor`、`start --daemon --auto-approve --prewarm`、`status`、`stop`）、设置、GPU 规则和审计记录见[实时标注服务](docs/LIVE.zh-CN.md)（[English](docs/LIVE.md)）、[vLLM](docs/VLLM.zh-CN.md)。
+`levi live` 是独立的后台 LEVI，有自己的工作区。它监视机器人评测写入的目录，用本地模型（vLLM 上的 Qwen3.8）标注每个已完成的片段：时间片段、各时间片段的成败，以及整个片段是否成功。它从不写 rollout 目录、连接机器人或写人工成败标签；它的判定在所有地方都是自动、未经审核的，你在普通查看器里审核。`--auto-approve` 让服务里有审计的自动批准主体，只在它自己的工作区里，批准并提交它自己那次运行的时间片段，并标记 `auto`；不加它，每个批次最多要等人过三道关。它与机器人的策略服务器共用一块 GPU（“闸门”保证策略推理时模型不工作，空闲时 vLLM 睡眠；请在策略服务器之前启动它），需要 vLLM 环境和权重（`uv run levi install --profile live`），以及能在策略旁边放下模型的 NVIDIA GPU。**实时评测**页显示进度。命令（`levi live init`、`doctor`、`start --daemon --auto-approve --prewarm`、`status`、`stop`）、设置、GPU 规则和审计记录见[实时标注服务](docs/LIVE.zh-CN.md)（[English](docs/LIVE.md)）、[vLLM](docs/VLLM.zh-CN.md)。
 
 ## Agent 辅助，人负责
 
@@ -93,13 +93,13 @@ LEVI 会对照目录检查任务规格，并在运行前等你批准。每个任
 
 ## 文档
 
-先看[安装](INSTALL.zh-CN.md)、[工作区](docs/WORKSPACE.md)、[Agents](docs/AGENTS.md)、[实时标注服务](docs/LIVE.zh-CN.md)、[训练池](docs/TRAINING_POOL.md)、[API](docs/API.md)和[验证](docs/VALIDATION.md)。完整索引（数据、agent 与模型、标注方法、参考，以及各中文版）在 [docs/README.md](docs/README.md)。**报告**页显示一份实时技术报告，目录由 `LEVI_REPORT_DIR` 指定（只读，可以在工作区之外）；见 [API](docs/API.md#technical-report--技术报告)。
+先看[安装](INSTALL.zh-CN.md)、[工作区](docs/WORKSPACE.md)、[Agents](docs/AGENTS.md)、[实时标注服务](docs/LIVE.zh-CN.md)、[训练池](docs/TRAINING_POOL.md)、[API](docs/API.md)和[验证](docs/VALIDATION.md)。完整索引（数据、agent 与模型、标注方法、参考）在 [docs/README.zh-CN.md](docs/README.zh-CN.md)（English：[docs/README.md](docs/README.md)）。**报告**页显示一份实时技术报告，目录由 `LEVI_REPORT_DIR` 指定（只读，可以在工作区之外）；见 [API](docs/API.md#technical-report--技术报告)。
 
 ## 工作区、安全与部署
 
-`LEVI_WORKSPACE` 存放数据和状态，可以放在检出目录之外（默认 `.state/`）：数据集直接放在它下面，LEVI 自己的状态在 `outputs/LEVI/`，模型权重在 `checkpoints/`。LEVI 运行时跟随工作区（复制进来的数据集自动登记，改动的刷新，删掉的移除）。**命名空间**（`uv run levi namespace create <dataset> <name>`）让多个实验共用同一份源数据集而不复制；要与其他工具共用一块 GPU，把 `LEVI_GPU_LOCK_FILE` 设为它们也遵守的锁文件。DROID 原始文件夹只是“浏览并标注”的输入，不是受支持的训练转换，可选的 DROID 测试样本只在你要求时才下载（约 11.6 GiB）。见[工作区](docs/WORKSPACE.md)和[转换](docs/CONVERSION.md#droid-raw-browsing-view)。
+`LEVI_WORKSPACE` 存放数据和状态，可以放在检出目录之外（默认 `.state/`）：数据集直接放在它下面，LEVI 自己的状态在 `outputs/LEVI/`，模型权重在 `checkpoints/`。LEVI 运行时跟随工作区（复制进来的数据集自动登记，改动的刷新，删掉的移除）。**命名空间**（`uv run levi namespace create <dataset> <name>`）让多个实验共用同一份源数据集而不复制；要与其他工具共用一块 GPU，把 `LEVI_GPU_LOCK_FILE` 设为它们也遵守的锁文件。DROID 原始文件夹只是“浏览并标注”的输入，不是受支持的训练转换，可选的 DROID 测试样本（约 11.6 GiB）只在你运行 `levi sample fetch droid` 或设置 `LEVI_DROID_SAMPLE=on` 时才下载。见[工作区](docs/WORKSPACE.md)和[转换](docs/CONVERSION.md#droid-raw-browsing-view)。
 
-LEVI 是单用户、能访问本地文件的工作台；Hugging Face 登录只控制 Hub 访问，不是 LEVI 的权限。不要提交凭据或 `.env`。任何共享部署都应放在带认证的反向代理后面，为 HTTPS 或 Space 嵌入设置 `LEVI_SECURE_COOKIES=1`，并把它的主机名列入 `LEVI_UI_ALLOWED_HOSTS`（网页接受任意端口上的 `127.0.0.1`、`localhost`、`[::1]`；只接受来自 LEVI 自己页面的修改，脚本请用 `levi` 命令行）。这防的是其他网页，不防本机程序（[信任边界](docs/API.md#trust-boundary-of-the-web-bridge--网页桥接的信任边界)）。上传到 Hub 是明确的 API 动作；转换和保存从不上传。
+LEVI 是单用户、能访问本地文件的工作台；Hugging Face 登录只控制 Hub 访问，不是 LEVI 的权限。不要提交凭据或 `.env`。任何共享部署都应放在带认证的反向代理后面，为 HTTPS 或 Space 嵌入设置 `LEVI_SECURE_COOKIES=1`，并把它的主机名或局域网地址列入 `LEVI_UI_ALLOWED_HOSTS`，例如 `LEVI_UI_ALLOWED_HOSTS=levi.example.org`（网页接受任意端口上的 `127.0.0.1`、`localhost`、`[::1]`；只接受来自 LEVI 自己页面的修改，脚本请用 `levi` 命令行）。这防的是其他网页，不防本机程序（[信任边界](docs/API.md#trust-boundary-of-the-web-bridge--网页桥接的信任边界)）。上传到 Hub 是明确的 API 动作；转换和保存从不上传。
 
 ```bash
 docker build -t levi:local .
@@ -122,11 +122,11 @@ docker run --rm -p 127.0.0.1:7860:7860 -v "$HOME/levi-data:/workspace" levi:loca
 
 ## 常见问题
 
-- **`{"detail":"Not Found"}` 或 API 说明页** — 你访问到了 7861 端口；请打开 7860，并检查端口转发的目标是服务器的 7860 端口。
+- **`{"detail":"Not Found"}` 或 API 说明页** — 你访问到了 7861 端口；请打开 7860，并检查 SSH 或编辑器的端口转发目标是服务器的 7860 端口。
 - **本地路径被拒绝** — 它必须是 LeRobot 数据集（`meta/info.json`）或可识别的原始采集（`task/demo_NNNN` 或 DROID 的 `demo_NNNN/trajectory.h5`），并且真实路径必须在 `LEVI_WORKSPACE` 之内。
 - **转换失败** — 看检查清单和作业日志。帧编号重复或缺失、夹爪指令未知、视频数量对不上，都会在发布任何东西之前停下；源数据从不被修改。
 - **本地模型运行被阻塞** — 原因里会写出占用 GPU 的进程；GPU 空闲满 `LEVI_GPU_QUIET_SECONDS` 后会继续。
-- **SAM3、分割或 RECAP 操作提示 worker 缺失** — 每个模型在自己的环境里运行（`integrations/sam3`、`integrations/segmentation`、`integrations/recap_value`）；核心从不导入 Torch。见 [SAM3](docs/SAM3.md)、[快速分割](docs/SEGMENTATION.md)、[RECAP](docs/RECAP.md)。
+- **SAM3、分割或 RECAP 操作提示 worker 缺失** — 每个模型在自己的环境里运行（`integrations/sam3`、`integrations/segmentation`、`integrations/recap_value`，各有自己的 `setup.sh` 或 README）；核心从不导入 Torch。见 [SAM3](docs/SAM3.md)、[快速分割](docs/SEGMENTATION.md)、[RECAP](docs/RECAP.md)。
 - **重启后被中断** — 作业会被标记为中断，不会自己继续写入；请重新规划。
 
 ## 开发与引用
@@ -134,9 +134,11 @@ docker run --rm -p 127.0.0.1:7860:7860 -v "$HOME/levi-data:/workspace" levi:loca
 ```bash
 uv sync --locked --group dev --extra agent
 uv run levi check                                 # 前端验证、Ruff、文档检查
+mkdir -p "$LEVI_WORKSPACE/tmp/build"
 uv run pytest --basetemp="$LEVI_WORKSPACE/tmp/build/pytest"
-bun run format && bun run validate                # 类型检查、lint、格式、前端测试（Bun 由 `levi setup` 安装）
+export PATH="$(ls -d "$PWD"/.runtime/bun-*):$PATH"   # `levi setup` 安装的 Bun
+bun run format && bun run validate                # 类型检查、lint、格式、前端测试
 uv run levi build
 ```
 
-`uv run levi docs sync` 重新生成自动生成的文档部分；CI 运行同样的检查和生产构建。提交改动前请读 [CONTRIBUTING](CONTRIBUTING.md)；问题请提到 [Issues](https://github.com/Koooki3/LEVI/issues)。LEVI 采用 Apache-2.0 许可证，保留上游的 `LICENSE`、`NOTICE` 和[署名](docs/UPSTREAM.md)（[第三方声明](THIRD_PARTY_NOTICES.md)）。LEVI 对你的工作有帮助的话，欢迎引用：GitHub 的“Cite this repository”按钮读取 [`CITATION.cff`](CITATION.cff)；[docs/REFERENCES.md](docs/REFERENCES.md) 给出 BibTeX，以及 LEVI 所基于的工作和它们的引用方式。请引用你所用的版本（`v0.3.0`；之后的改动见[变更记录](CHANGELOG.md)的 Unreleased）。
+`uv run levi docs sync` 重新生成自动生成的文档部分；CI 运行同样的检查和生产构建。提交改动前请读 [CONTRIBUTING](CONTRIBUTING.md)；问题请提到 [Issues](https://github.com/Koooki3/LEVI/issues)。LEVI 采用 Apache-2.0 许可证，保留上游的 `LICENSE`、`NOTICE` 和[署名](docs/UPSTREAM.md)（[第三方声明](THIRD_PARTY_NOTICES.md)）。LEVI 对你的工作有帮助的话，欢迎引用：GitHub 的“Cite this repository”按钮读取 [`CITATION.cff`](CITATION.cff)；[docs/REFERENCES.md](docs/REFERENCES.md) 给出 BibTeX，以及 LEVI 所基于的工作（LeRobot、SAM 3、RF-DETR、RECAP/π\*0.6、openpi、vLLM、CAST、DROID 等）、它们的许可证和引用方式。请引用你所用的版本（`v0.3.0`；之后的改动见[变更记录](CHANGELOG.md)的 Unreleased）。

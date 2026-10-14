@@ -10,7 +10,7 @@ About description:
 
 Topics: `lerobot`, `robotics`, `robot-learning`, `dataset-visualization`, `data-annotation`, `dataset-conversion`, `data-quality`, `imitation-learning`, `data-curation`, `mcp`, `ollama`, `huggingface`, `nextjs`, `fastapi`, `uv`.
 
-README.md is the English project landing page and `README.zh-CN.md` is the Chinese companion; the two are updated together. Guides live in `docs/`; the [README](../README.md#documentation) lists them. No hosted demo or deployment URL is claimed.
+README.md is the English project landing page and `README.zh-CN.md` is the Chinese companion; the two are updated together. Guides live in `docs/`; the [documentation index](README.md) lists them. No hosted demo or deployment URL is claimed.
 README.md 是英文项目首页，README.zh-CN.md 是中文版本，两者同步更新；不声称有托管演示或部署网址，也不把本地服务地址当作公开演示网址。
 
 ## Release checklist

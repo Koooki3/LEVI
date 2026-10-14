@@ -61,7 +61,7 @@ Day to day: `uv run levi stop` (refuses while jobs run), `uv run levi clean` (pr
 
 ## The interface
 
-The LEVI mark opens **Home** (what needs you, what is running); the header opens **Live evaluation**, **Explore**, **Conversion & review**, **Training pool**, **Guide** and **Report**, plus Jobs, the **Agent Workbench**, settings, theme and language. `Ctrl+K` (⌘K on macOS) opens the command palette; `G` then `H`, `E`, `W`, `P`, `L`, `R` or `U` jumps to a page; `?` lists the shortcuts. Light or dark, system fonts only, reduced-motion setting ([Design system](docs/DESIGN.md)).
+The LEVI mark opens **Home** (what needs you, what is running); the header opens **Live evaluation**, **Explore**, **Conversion & review**, **Training pool**, **Guide** and **Report**, plus Jobs, the **Agent Workbench**, settings, theme and language. `Ctrl+K` (⌘K on macOS) opens the command palette (pages, datasets, actions); `G` then `H`, `E`, `W`, `P`, `L`, `R` or `U` jumps to a page; `?` lists the shortcuts. Light or dark, system fonts only, reduced-motion setting ([Design system](docs/DESIGN.md)).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/ui-home-en-dark.png">
@@ -70,7 +70,7 @@ The LEVI mark opens **Home** (what needs you, what is running); the header opens
 
 ## Live annotation of robot evaluations
 
-`levi live` is a separate background LEVI with its own workspace. It watches the folders a robot evaluation writes and labels each finished episode with a local model (Qwen3.8 on vLLM): time segments, segment outcomes and a whole-episode success verdict. It never writes the rollout folders, connects to the robot or writes human outcome labels; its verdicts are automatic and unreviewed everywhere they appear, and you review them in the normal viewer. `--auto-approve` lets the service's audited automatic approver commit the time segments of its own runs, in its own workspace only, marked `auto`; without it each batch waits for a person at up to three gates. It shares one GPU with the robot's policy server (a gate keeps the model idle while the policy infers, vLLM sleeps when idle; start it before the policy server) and needs the vLLM environment, weights and an NVIDIA GPU with room beside the policy. Commands (`levi live init`, `doctor`, `start --daemon --auto-approve --prewarm`, `status`, `stop`), settings, GPU rules and the audit trail: [Live annotation service](docs/LIVE.md) ([中文](docs/LIVE.zh-CN.md)), [vLLM](docs/VLLM.md).
+`levi live` is a separate background LEVI with its own workspace. It watches the folders a robot evaluation writes and labels each finished episode with a local model (Qwen3.8 on vLLM): time segments, segment outcomes and a whole-episode success verdict. It never writes the rollout folders, connects to the robot or writes human outcome labels; its verdicts are automatic and unreviewed everywhere they appear, and you review them in the normal viewer. `--auto-approve` lets the service's audited automatic approver commit the time segments of its own runs, in its own workspace only, marked `auto`; without it each batch waits for a person at up to three gates. It shares one GPU with the robot's policy server (a gate keeps the model idle while the policy infers, vLLM sleeps when idle; start it before the policy server) and needs the vLLM environment and weights (`uv run levi install --profile live`) and an NVIDIA GPU with room beside the policy. The **Live evaluation** page shows progress. Commands (`levi live init`, `doctor`, `start --daemon --auto-approve --prewarm`, `status`, `stop`), settings, GPU rules and the audit trail: [Live annotation service](docs/LIVE.md) ([中文](docs/LIVE.zh-CN.md)), [vLLM](docs/VLLM.md).
 
 ## Agents, with a person in charge
 
@@ -93,13 +93,13 @@ Around every task the **harness** records tokens and time per agent and per data
 
 ## Documentation
 
-Start with [Install](INSTALL.md), [Workspace](docs/WORKSPACE.md), [Agents](docs/AGENTS.md), [Live annotation](docs/LIVE.md), [Training pool](docs/TRAINING_POOL.md), [API](docs/API.md) and [Validation](docs/VALIDATION.md). The full index, with every data, agent, model, labelling-method and reference guide and the 中文 editions, is [docs/README.md](docs/README.md). The **Report** page shows a live technical report from a folder you name with `LEVI_REPORT_DIR` (read-only, may be outside the workspace); see [API](docs/API.md#technical-report--技术报告).
+Start with [Install](INSTALL.md), [Workspace](docs/WORKSPACE.md), [Agents](docs/AGENTS.md), [Live annotation](docs/LIVE.md), [Training pool](docs/TRAINING_POOL.md), [API](docs/API.md) and [Validation](docs/VALIDATION.md). The full index, with every data, agent, model, labelling-method and reference guide, is [docs/README.md](docs/README.md) (中文: [docs/README.zh-CN.md](docs/README.zh-CN.md)). The **Report** page shows a live technical report from a folder you name with `LEVI_REPORT_DIR` (read-only, may be outside the workspace); see [API](docs/API.md#technical-report--技术报告).
 
 ## Workspace, security and deployment
 
-`LEVI_WORKSPACE` holds data and state and can live outside the checkout (default `.state/`): datasets directly under it, LEVI's own state under `outputs/LEVI/`, model weights under `checkpoints/`. LEVI follows the workspace while it runs (datasets copied in are registered, changed ones refreshed, removed ones dropped). A **namespace** (`uv run levi namespace create <dataset> <name>`) lets several experiments share one source dataset without copying it; to share one GPU with other tools, set `LEVI_GPU_LOCK_FILE` to a lock file they also honour. DROID raw folders are a browse-and-annotate input, not a supported training conversion, and the optional DROID test sample downloads only when asked for (about 11.6 GiB). See [Workspace](docs/WORKSPACE.md) and [Conversion](docs/CONVERSION.md#droid-raw-browsing-view).
+`LEVI_WORKSPACE` holds data and state and can live outside the checkout (default `.state/`): datasets directly under it, LEVI's own state under `outputs/LEVI/`, model weights under `checkpoints/`. LEVI follows the workspace while it runs (datasets copied in are registered, changed ones refreshed, removed ones dropped). A **namespace** (`uv run levi namespace create <dataset> <name>`) lets several experiments share one source dataset without copying it; to share one GPU with other tools, set `LEVI_GPU_LOCK_FILE` to a lock file they also honour. DROID raw folders are a browse-and-annotate input, not a supported training conversion, and the optional DROID test sample (about 11.6 GiB) is downloaded only when you run `levi sample fetch droid` or set `LEVI_DROID_SAMPLE=on`. See [Workspace](docs/WORKSPACE.md) and [Conversion](docs/CONVERSION.md#droid-raw-browsing-view).
 
-LEVI is a single-user local workbench with file access; Hugging Face sign-in controls Hub access, not LEVI permissions. Never commit credentials or `.env`. Put any shared deployment behind an authenticated reverse proxy, set `LEVI_SECURE_COOKIES=1` for HTTPS or Space embeds, and list its host name in `LEVI_UI_ALLOWED_HOSTS` (the page answers `127.0.0.1`, `localhost` and `[::1]` on any port; changes are accepted only from LEVI's own page, so scripts use the `levi` CLI). This guards against other web pages, not against programs on this machine ([Trust boundary](docs/API.md#trust-boundary-of-the-web-bridge--网页桥接的信任边界)). Hub upload is an explicit API action; conversion and saving never upload.
+LEVI is a single-user local workbench with file access; Hugging Face sign-in controls Hub access, not LEVI permissions. Never commit credentials or `.env`. Put any shared deployment behind an authenticated reverse proxy, set `LEVI_SECURE_COOKIES=1` for HTTPS or Space embeds, and list its host name or LAN address in `LEVI_UI_ALLOWED_HOSTS`, e.g. `LEVI_UI_ALLOWED_HOSTS=levi.example.org` (the page answers `127.0.0.1`, `localhost` and `[::1]` on any port; changes are accepted only from LEVI's own page, so scripts use the `levi` CLI). This guards against other web pages, not against programs on this machine ([Trust boundary](docs/API.md#trust-boundary-of-the-web-bridge--网页桥接的信任边界)). Hub upload is an explicit API action; conversion and saving never upload.
 
 ```bash
 docker build -t levi:local .
@@ -122,11 +122,11 @@ Details: [Validation](docs/VALIDATION.md).
 
 ## Troubleshooting
 
-- **`{"detail":"Not Found"}` or the API landing page** — you reached port 7861; open 7860 and check that your port forwarding targets server port 7860.
+- **`{"detail":"Not Found"}` or the API landing page** — you reached port 7861; open 7860 and check that your SSH or editor port forwarding targets server port 7860.
 - **A local path is refused** — it must be a LeRobot dataset (`meta/info.json`) or a recognised raw capture (`task/demo_NNNN` or a DROID `demo_NNNN/trajectory.h5`), and its real path must be inside `LEVI_WORKSPACE`.
 - **A conversion fails** — read the inspection checklist and the job log; duplicate or missing frame ids, unknown gripper commands or video count mismatches stop it before anything is published, and the source is never modified.
 - **A local-model run is blocked** — the reason names the process using the GPU; the run resumes once the GPU has been free for `LEVI_GPU_QUIET_SECONDS`.
-- **A SAM3, segmentation or RECAP action says the worker is missing** — each model runs in its own environment (`integrations/sam3`, `integrations/segmentation`, `integrations/recap_value`); the core never imports Torch. See [SAM3](docs/SAM3.md), [Fast segmentation](docs/SEGMENTATION.md), [RECAP](docs/RECAP.md).
+- **A SAM3, segmentation or RECAP action says the worker is missing** — each model runs in its own environment (`integrations/sam3`, `integrations/segmentation`, `integrations/recap_value`, each with its own `setup.sh` or README); the core never imports Torch. See [SAM3](docs/SAM3.md), [Fast segmentation](docs/SEGMENTATION.md), [RECAP](docs/RECAP.md).
 - **Interrupted after a restart** — jobs are marked interrupted and never resume writing on their own; plan again.
 
 ## Development and citing
@@ -134,9 +134,11 @@ Details: [Validation](docs/VALIDATION.md).
 ```bash
 uv sync --locked --group dev --extra agent
 uv run levi check                                 # frontend validation, Ruff, docs check
+mkdir -p "$LEVI_WORKSPACE/tmp/build"
 uv run pytest --basetemp="$LEVI_WORKSPACE/tmp/build/pytest"
-bun run format && bun run validate                # type check, lint, format, frontend tests (Bun: `levi setup` installs it)
+export PATH="$(ls -d "$PWD"/.runtime/bun-*):$PATH"   # the Bun that `levi setup` installed
+bun run format && bun run validate                # type check, lint, format, frontend tests
 uv run levi build
 ```
 
-`uv run levi docs sync` regenerates the generated doc sections; CI runs the same checks and a production build. Read [CONTRIBUTING](CONTRIBUTING.md) before submitting changes and report problems in [Issues](https://github.com/Koooki3/LEVI/issues). LEVI is licensed under Apache-2.0 and keeps the upstream `LICENSE`, `NOTICE` and [attribution](docs/UPSTREAM.md) ([third-party notices](THIRD_PARTY_NOTICES.md)). If LEVI helps your work, please cite it: GitHub's "Cite this repository" button reads [`CITATION.cff`](CITATION.cff), and [docs/REFERENCES.md](docs/REFERENCES.md) has a BibTeX entry plus the works LEVI builds on and how to cite them. Cite the version you used (`v0.3.0`; later changes are under "Unreleased" in the [changelog](CHANGELOG.md)).
+`uv run levi docs sync` regenerates the generated doc sections; CI runs the same checks and a production build. Read [CONTRIBUTING](CONTRIBUTING.md) before submitting changes and report problems in [Issues](https://github.com/Koooki3/LEVI/issues). LEVI is licensed under Apache-2.0 and keeps the upstream `LICENSE`, `NOTICE` and [attribution](docs/UPSTREAM.md) ([third-party notices](THIRD_PARTY_NOTICES.md)). If LEVI helps your work, please cite it: GitHub's "Cite this repository" button reads [`CITATION.cff`](CITATION.cff), and [docs/REFERENCES.md](docs/REFERENCES.md) has a BibTeX entry plus the works LEVI builds on (LeRobot, SAM 3, RF-DETR, RECAP/π\*0.6, openpi, vLLM, CAST, DROID and others), their licences and how to cite them. Cite the version you used (`v0.3.0`; later changes are under "Unreleased" in the [changelog](CHANGELOG.md)).

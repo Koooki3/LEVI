@@ -239,4 +239,4 @@ Preserve the light and dark themes, keyboard access and responsive layouts when 
 - `levi/agent/detection.py`: model-free candidate regions for object annotation (colour quantisation plus connected components). It measures, it does not recognise.
 - `src/utils/serviceToken.ts`: the UI token for the loopback API, read from the file the service owns so a Core restart does not strand the frontend. `authHeaders(url)` attaches it only to LEVI's own file service — never to a Hugging Face request.
 
-See docs/AGENTS.md (agents and harness), docs/QUALITY.md, docs/WORKSPACE.md and docs/VALIDATION.md for guarantees and verified limits, and the README's documentation index for the rest.
+See docs/AGENTS.md (agents and harness), docs/QUALITY.md, docs/WORKSPACE.md and docs/VALIDATION.md for guarantees and verified limits, and the documentation index (docs/README.md) for the rest.
