@@ -363,6 +363,7 @@ def select(changed: list[str], files: list[str], graphs: tuple | None = None) ->
     ts_changed: set[str] = set()
     data_changed: list[str] = []
     named_by_path: list[str] = []
+    named_by_deleted: set[str] = set()
     for c in changed:
         if any(c == w or c.startswith(w) for w in PY_WIDEN):
             out["pytest"]["widen"].append(f"{c}: shared by every Python test")
@@ -374,6 +375,7 @@ def select(changed: list[str], files: list[str], graphs: tuple | None = None) ->
             if c not in py.text:
                 # deleted or renamed away: whatever still names it must be found
                 hits = [t for t in all_py_tests if module_of(c) in py.text[t] or Path(c).name in py.text[t]]
+                named_by_deleted.update(hits)
                 if not hits:
                     out["pytest"]["widen"].append(f"{c}: no longer exists and no test names it")
             py_changed.add(c)
@@ -393,6 +395,9 @@ def select(changed: list[str], files: list[str], graphs: tuple | None = None) ->
                 out[key]["widen"].append(f"{c}: not mapped to a test group")
 
     selected = py.closure(py_changed)
+    # A deleted or renamed module is in no import graph, but a test that still
+    # names it is the first to break.
+    selected |= named_by_deleted
     # Helper and tool scripts under tests/ and scripts/ are often started by path
     # (a subprocess), which no import shows: a test that names the file counts.
     for c in py_changed:

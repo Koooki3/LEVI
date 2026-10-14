@@ -193,7 +193,10 @@ def test_a_deleted_module_nobody_names_widens_and_one_a_test_names_does_not(tmp_
         {"levi/a.py": "", "tests/test_a.py": "# mentions levi.old_name in a message\n"},
     )
     assert sel.select(["levi/gone.py"], files)["pytest"]["widen"]
-    assert not sel.select(["levi/old_name.py"], files)["pytest"]["widen"]
+    named = sel.select(["levi/old_name.py"], files)["pytest"]
+    assert not named["widen"]
+    # ... and the test that still names it is selected, not just left unwidened.
+    assert named["tests"] == ["tests/test_a.py"]
 
 
 def test_an_unmapped_file_widens_both_groups(tmp_path):
