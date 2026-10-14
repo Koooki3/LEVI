@@ -14,6 +14,9 @@ jobs:
     timeout-minutes: 20
     env:
       NEXT_TELEMETRY_DISABLED: "1"
+      # The frontend tests' wait helper reads this (src/components/ds/__tests__/dom.ts);
+      # it was set for the validate step when that ran in the matrix job below.
+      LEVI_TEST_TIME_SCALE: "2"
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2.2.0
