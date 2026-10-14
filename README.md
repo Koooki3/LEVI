@@ -33,7 +33,7 @@ Five more figures (layers, a task step by step, live annotation beside a robot, 
 
 ## What is new on main (unreleased)
 
-- **Release-anchored review.** It judges success at the moments the robot's own signals mark (each gripper opening), one narrow question per event. On the plates task it raised balanced accuracy from 0.81 to 0.94 on the plates task and did not reach the bar on the second task ([measured](#what-has-been-measured)).
+- **Release-anchored review.** It judges success at the moments the robot's own signals mark (each gripper opening), one narrow question per event. On the plates task it raised balanced accuracy from 0.81 to 0.94, and it did not reach the bar on the second task ([measured](#what-has-been-measured)).
 - **One capability layer for agent work.** The web UI, REST, MCP and the CLI share it: a model's suggestion becomes a label only through a person's commit (the live service's audited auto-approver is the one exception), and a commit can be undone ([layers](docs/ARCHITECTURE.md#3-layers-of-the-workbench)).
 - **Every run has a recorded cost.** Tokens and time are recorded per agent and per dataset (metered, reported, or a lower bound), and a memory of what a person verified starts the next task ([agents](docs/AGENTS.md)).
 - **Labelling beside a running robot.** The live service shares one GPU with the policy server and yields when the policy infers; the gate is verified with fakes, not yet beside a real policy server ([figure](docs/ARCHITECTURE.md#5-live-annotation-beside-a-robot)).
