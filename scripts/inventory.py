@@ -38,11 +38,16 @@ HASHED_DIRS = (
     "levi/agent/anchored_specs",
     "docs/architecture",
     "integrations/training_manifest",
+    "levi/live/specs",
+    "levi/automatic/campaign/templates",
+    "levi/events/third_party.json",
 )
 
 
 def python() -> str:
     """The tree's own environment when it has one (scripts/dev-env.sh makes it)."""
+    if os.environ.get("LEVI_INVENTORY_PYTHON"):
+        return os.environ["LEVI_INVENTORY_PYTHON"]
     venv = ROOT / ".venv/bin/python"
     return str(venv) if venv.exists() else sys.executable
 
@@ -62,8 +67,25 @@ def _str(node: ast.AST) -> str | None:
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
 
-def routes(files: list[str]) -> dict[str, str]:
-    """`METHOD /path` -> where. Decorators on app/router objects."""
+def _router_prefixes(tree: ast.AST) -> dict[str, str]:
+    """`name = APIRouter(prefix="/x")` -> {name: "/x"} (literals only)."""
+    out: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Call)
+        ):
+            for kw in node.value.keywords:
+                if kw.arg == "prefix" and (v := _str(kw.value)) is not None:
+                    out[node.targets[0].id] = v
+    return out
+
+
+def mounts(files: list[str]) -> dict[str, str]:
+    """`app.mount("/x", ...)` and `include_router(r, prefix="/x")` -> where. A router
+    mounted under a changed prefix breaks every client even if no route key moves."""
     found: dict[str, str] = {}
     for f in files:
         if not f.endswith(".py") or f.split("/")[0] not in ("levi", "backend"):
@@ -72,6 +94,31 @@ def routes(files: list[str]) -> dict[str, str]:
             tree = ast.parse(read(f))
         except SyntaxError:
             continue
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+                continue
+            if node.func.attr == "mount" and node.args and (v := _str(node.args[0])) is not None:
+                found[f"mount {v}"] = f
+            elif node.func.attr == "include_router":
+                prefix = next((_str(k.value) for k in node.keywords if k.arg == "prefix"), None)
+                target = ast.unparse(node.args[0]) if node.args else "?"
+                found[f"include_router {target} prefix={prefix or ''}"] = f
+    return dict(sorted(found.items()))
+
+
+def routes(files: list[str]) -> dict[str, str]:
+    """`METHOD /prefix/path` -> where. Decorators on app/router objects, with the
+    router's own `prefix=` literal. Two routers that yield the same key (a bare
+    `GET /status` in two files) are told apart by the file: `KEY @file`."""
+    pairs: list[tuple[str, str]] = []
+    for f in files:
+        if not f.endswith(".py") or f.split("/")[0] not in ("levi", "backend"):
+            continue
+        try:
+            tree = ast.parse(read(f))
+        except SyntaxError:
+            continue
+        prefixes = _router_prefixes(tree)
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -82,6 +129,8 @@ def routes(files: list[str]) -> dict[str, str]:
                 path = _str(dec.args[0]) if dec.args else None
                 if path is None:
                     continue
+                owner = dec.func.value.id if isinstance(dec.func.value, ast.Name) else ""
+                path = prefixes.get(owner, "") + path
                 if attr in ROUTE_METHODS:
                     methods = [attr.upper()]
                 elif attr == "api_route":
@@ -92,7 +141,13 @@ def routes(files: list[str]) -> dict[str, str]:
                 else:
                     continue
                 for m in methods:
-                    found[f"{m} {path}"] = f"{f}:{node.name}"
+                    pairs.append((f"{m} {path}", f"{f}:{node.name}"))
+    count: dict[str, int] = defaultdict(int)
+    for key, _ in pairs:
+        count[key] += 1
+    found = {}
+    for key, where in pairs:
+        found[key if count[key] == 1 else f"{key} @{where.split(':')[0]}"] = where
     return dict(sorted(found.items()))
 
 
@@ -112,15 +167,18 @@ def capabilities() -> dict[str, str]:
     return dict(sorted(json.loads(run.stdout).items()))
 
 
-def cli_commands(files: list[str]) -> dict[str, str]:
-    """`file name` -> where, for every argparse sub-command."""
-    found: dict[str, str] = {}
+def cli_commands(files: list[str]) -> dict[str, list[str]]:
+    """sub-command name -> the files that define one, once per definition. Keyed by
+    name, so moving a command to another file is not a loss, but deleting one of
+    two same-named commands is (the list gets shorter). Parsers named by a
+    variable are not seen."""
+    found: dict[str, list[str]] = defaultdict(list)
     pat = re.compile(r"add_parser\(\s*[\"']([\w:-]+)[\"']")
     for f in files:
         if f.endswith(".py") and f.split("/")[0] in ("levi", "backend", "scripts"):
             for m in pat.finditer(read(f)):
-                found[f"{f} {m.group(1)}"] = f
-    return dict(sorted(found.items()))
+                found[m.group(1)].append(f)
+    return {k: sorted(v) for k, v in sorted(found.items())}
 
 
 def settings(files: list[str]) -> dict[str, list[str]]:
@@ -146,10 +204,10 @@ def frontend(files: list[str]) -> dict:
         if path.is_file():
             catalogs[lang] = sorted(json.loads(path.read_text(encoding="utf8")))
     titles = []
-    title_pat = re.compile(r"""\b(?:test|it)(?:\.\w+)?\(\s*(["'`])((?:\\.|(?!\1).)*)\1""")
+    title_pat = re.compile(r"""\b(?:test|it)(?:\.\w+)?\(\s*(["'`])((?:\\.|(?!\1).)*)\1|\b(?:test|it)\.each\([^)]*\)\(\s*(["'`])((?:\\.|(?!\3).)*)\3""")
     for f in files:
         if re.search(r"\.test\.tsx?$", f):
-            titles += [f"{f}::{m.group(2)}" for m in title_pat.finditer(read(f))]
+            titles += [f"{f}::{m.group(2) or m.group(4)}" for m in title_pat.finditer(read(f))]
     return {"pages": pages, "i18n": catalogs, "test_titles": sorted(titles)}
 
 
@@ -167,6 +225,10 @@ def dependencies() -> dict:
     py = tomllib.loads(read("pyproject.toml"))
     pkg = json.loads(read("package.json"))
     return {
+        "python_groups": {
+            k: sorted(x for x in v if isinstance(x, str))
+            for k, v in sorted(py.get("dependency-groups", {}).items())
+        },
         "python": sorted(py["project"].get("dependencies", [])),
         "python_extras": {
             k: sorted(v) for k, v in sorted(py["project"].get("optional-dependencies", {}).items())
@@ -193,13 +255,17 @@ def pytest_ids() -> list[str]:
              f"--basetemp={tmp}/pt"],
             cwd=ROOT, env=env, text=True, capture_output=True, check=False,
         )
-    return sorted(l for l in run.stdout.splitlines() if "::" in l)
+    ids = sorted(line for line in run.stdout.splitlines() if "::" in line)
+    if run.returncode not in (0,) or not ids:
+        return [f"__error__ pytest collection failed (exit {run.returncode})"]
+    return ids
 
 
 def build(with_tests: bool) -> dict:
     files = git_files()
     inv = {
         "routes": routes(files),
+        "mounts": mounts(files),
         "capabilities": capabilities(),
         "cli": cli_commands(files),
         "settings": settings(files),
@@ -214,19 +280,36 @@ def build(with_tests: bool) -> dict:
 
 
 # ------------------------------------------------------------------------- diff
+def _multiset(items) -> set[str]:
+    """Repeated identities (two tests with one title, two commands with one name)
+    become `x#1`, `x#2`, so deleting one of them shows up as a loss."""
+    seen: dict[str, int] = defaultdict(int)
+    out = set()
+    for item in items:
+        seen[item] += 1
+        out.add(f"{item}#{seen[item]}")
+    return out
+
+
 def flatten(inv: dict) -> dict[str, set[str]]:
     """Section -> the set of identities a caller or reader depends on."""
     f = inv.get("frontend", {})
+    d = inv.get("dependencies", {})
     flat = {
         "routes": set(inv.get("routes", {})),
+        "mounts": set(inv.get("mounts", {})),
         "capabilities": set(inv.get("capabilities", {})),
-        "cli": set(inv.get("cli", {})),
+        "cli": _multiset(n for n, files in inv.get("cli", {}).items() for _ in files),
         "settings": set(inv.get("settings", {})),
         "frontend.pages": set(f.get("pages", [])),
-        "frontend.test_titles": set(f.get("test_titles", [])),
-        "docs": set(inv.get("docs", {})),
-        "python_deps": set(inv.get("dependencies", {}).get("python", [])),
-        "node_deps": set(inv.get("dependencies", {}).get("node", {})),
+        "frontend.test_titles": _multiset(f.get("test_titles", [])),
+        # a document is its file and each of its headings (a dropped section shows)
+        "docs": {f"{name} heading#{i}" for name, n in inv.get("docs", {}).items() for i in range(max(n, 1))},
+        "python_deps": set(d.get("python", [])),
+        "python_groups": {f"{g}: {x}" for g, xs in d.get("python_groups", {}).items() for x in xs},
+        "python_extras": {f"{g}: {x}" for g, xs in d.get("python_extras", {}).items() for x in xs},
+        "node_deps": set(d.get("node", {})),
+        "node_dev_deps": set(d.get("node_dev", {})),
     }
     for lang, keys in f.get("i18n", {}).items():
         flat[f"i18n.{lang}"] = set(keys)
@@ -237,14 +320,19 @@ def flatten(inv: dict) -> dict[str, set[str]]:
 
 def diff(old: dict, new: dict) -> tuple[list[str], list[str]]:
     lost, notes = [], []
+    for name, getter in (
+        ("capabilities", lambda i: i.get("capabilities", {})),
+        ("pytest_ids", lambda i: {x: 1 for x in i.get("pytest_ids", [])}),
+    ):
+        for side, inv in (("old", old), ("new", new)):
+            if any(str(k).startswith("__error__") for k in getter(inv)):
+                lost.append(f"cannot compare {name}: the {side} inventory recorded an error")
     a, b = flatten(old), flatten(new)
     for section in sorted(a):
-        if section not in b:
-            notes.append(f"{section}: not measured now")
-            continue
-        for item in sorted(a[section] - b[section]):
+        # A section missing on the new side lost everything it had.
+        for item in sorted(a[section] - b.get(section, set())):
             lost.append(f"lost {section}: {item}")
-        added = b[section] - a[section]
+        added = b.get(section, set()) - a[section]
         if added:
             notes.append(f"{section}: +{len(added)} new")
     for path, digest in old.get("hashed_files", {}).items():
@@ -253,8 +341,6 @@ def diff(old: dict, new: dict) -> tuple[list[str], list[str]]:
             lost.append(f"lost file: {path}")
         elif now != digest:
             lost.append(f"changed file: {path}")
-    for lang, count in {k: len(v) for k, v in old.get("frontend", {}).get("i18n", {}).items()}.items():
-        notes.append(f"i18n.{lang}: {count} -> {len(new.get('frontend', {}).get('i18n', {}).get(lang, []))} keys")
     return lost, notes
 
 
