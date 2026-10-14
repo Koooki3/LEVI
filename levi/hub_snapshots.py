@@ -27,14 +27,16 @@ from .performance.budget import META_MAX, BudgetRejected, DiskBudget
 VERSION = "hub-snapshot-2"
 FOLDER = "hub-snapshots"
 FALLBACK_REASONS = {"too_large", "busy", "unavailable", "lock_timeout"}
-# huggingface_hub keeps a small metadata file per downloaded file under <folder>/.cache/huggingface
+# huggingface_hub's own bookkeeping under <folder>/.cache/huggingface: a metadata file per downloaded file
+# and a listing of the whole repository tree (every file, matched or not, about 300 bytes each)
 ALLOWANCE = 64 * 1024
 PER_FILE = 4 * 1024
+PER_LISTED_FILE = 512
 
 
-def reserve_for(sizes: list[int]) -> int:
-    """Bytes to reserve for downloading files of these sizes, with huggingface_hub's own bookkeeping."""
-    return sum(sizes) + ALLOWANCE + PER_FILE * len(sizes)
+def reserve_for(sizes: list[int], listed: int = 0) -> int:
+    """Bytes to reserve for downloading files of these sizes from a repository of ``listed`` files."""
+    return sum(sizes) + ALLOWANCE + PER_FILE * len(sizes) + PER_LISTED_FILE * listed
 
 
 @contextlib.contextmanager
@@ -44,39 +46,33 @@ def snapshot(
     download: Callable[[Path], None],
     cache: Path,
     *,
-    revision: str,
-    sizes: list[int],
+    revision: str | None,
+    sizes: list[int | None],
+    listed: int = 0,
     scope: str = "anonymous",
     cap_gb: float | None = None,
 ) -> Iterator[tuple[Path, str]]:
     """Yield ``(folder, note)`` holding ``repo_id`` at ``revision`` downloaded with ``patterns``.
 
     ``download(folder)`` fills a folder with that revision. ``sizes`` are the sizes of the files it will
-    download, ``scope`` names the credential (``auth.credential_scope``). ``note`` is "" for a cached snapshot,
-    or says why the old unbounded folder under ``cache`` was used instead.
+    download (``None`` when the Hub did not say), ``listed`` the number of files in the whole repository, ``scope``
+    names the credential (``auth.credential_scope``). ``note`` is "" for a cached snapshot, or says why the old
+    unbounded folder under ``cache`` was used instead. Without a revision or with a size unknown the snapshot is
+    not cached: neither a key nor a reservation would be right.
     """
     kwargs = {} if cap_gb is None else {"cap_gb": cap_gb}
     key = f"{repo_id}@{revision}|{scope}|" + ",".join(sorted(patterns))
-    reserve = reserve_for(sizes)
     lease = None
-    fallback = ""
-    try:
-        budget = DiskBudget.from_cap_gb(cache / FOLDER, version=VERSION, **kwargs)
-        lease = budget.get(key)
-        if lease is None:
-            if reserve > budget.max_bytes - META_MAX:
-                raise BudgetRejected(
-                    "too_large", f"{reserve} bytes > limit {budget.max_bytes}"
-                )
-            with budget.writing(key, reserve=reserve) as folder:
-                download(folder)
-            lease = budget.get(key)
-            if lease is None:  # evicted between commit and read
-                fallback = "evicted at once"
-    except BudgetRejected as rejected:
-        if rejected.reason not in FALLBACK_REASONS:
-            raise
-        fallback = rejected.reason
+    fallback = "no commit from the Hub" if not revision else ""
+    if None in sizes:
+        fallback = "size unknown"
+    if not fallback:
+        try:
+            lease, fallback = _cached(key, sizes, listed, download, cache, kwargs)
+        except BudgetRejected as rejected:
+            if rejected.reason not in FALLBACK_REASONS:
+                raise
+            fallback = rejected.reason
     if lease is None:
         folder = cache / repo_id.replace("/", "__")
         download(folder)
@@ -84,3 +80,21 @@ def snapshot(
         return
     with lease:
         yield lease.path, ""
+
+
+def _cached(key, sizes, listed, download, cache, kwargs):
+    """(lease, "") for the entry ``key``, downloading it first when missing; (None, why) if it went at once."""
+    reserve = reserve_for(sizes, listed)
+    budget = DiskBudget.from_cap_gb(cache / FOLDER, version=VERSION, **kwargs)
+    lease = budget.get(key)
+    if lease is not None:
+        return lease, ""
+    if reserve > budget.max_bytes - META_MAX:
+        raise BudgetRejected("too_large", f"{reserve} bytes > limit {budget.max_bytes}")
+    with budget.writing(key, reserve=reserve) as folder:
+        download(folder)
+    lease = budget.get(key)
+    return (
+        lease,
+        "" if lease is not None else "evicted at once",
+    )  # evicted between commit and read

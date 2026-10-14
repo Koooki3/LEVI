@@ -164,3 +164,48 @@ def test_a_hub_diagnostic_downloads_once_per_commit_into_the_budget(
     # the snapshots are in the size-limited cache, not in the old per-dataset folder
     assert (tmp_path / "cache" / "hub-snapshots").is_dir()
     assert not (tmp_path / "cache" / "org__ds").exists()
+
+
+@pytest.mark.parametrize(
+    ("revision", "sizes", "why"),
+    [(None, [10], "no commit from the Hub"), ("r1", [10, None], "size unknown")],
+)
+def test_without_a_commit_or_a_size_the_snapshot_is_not_cached(
+    tmp_path, revision, sizes, why
+):
+    calls = []
+    with take("org/ds", calls, tmp_path, revision=revision, sizes=sizes) as (
+        folder,
+        note,
+    ):
+        assert folder == tmp_path / "org__ds"
+        assert note.startswith(f"not cached ({why})")
+    assert len(calls) == 1
+
+
+def test_the_reservation_counts_the_listing_of_the_whole_repository():
+    assert reserve_for([10], listed=1000) >= reserve_for([10]) + 1000 * 300
+
+
+def test_an_unreachable_hub_inspects_an_earlier_download(
+    client, dataset, tmp_path, monkeypatch
+):
+    import shutil
+
+    import huggingface_hub
+    from huggingface_hub.errors import OfflineModeIsEnabled
+
+    from levi import service
+
+    def offline(self, *args, **kwargs):
+        raise OfflineModeIsEnabled("offline")
+
+    monkeypatch.setattr(huggingface_hub.HfApi, "dataset_info", offline)
+    monkeypatch.setattr(service, "CACHE", tmp_path / "cache")
+    body = {"repo_id": "org/ds", "max_episodes": 1}
+    with pytest.raises(OfflineModeIsEnabled):
+        client.post("/api/levi/diagnostics", json=body)
+    shutil.copytree(dataset, tmp_path / "cache" / "org__ds")
+    response = client.post("/api/levi/diagnostics", json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["cache_note"].startswith("Hub unreachable")

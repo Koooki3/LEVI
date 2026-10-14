@@ -619,7 +619,9 @@ def diagnostics(payload: Diagnostic):
     if root is None:
         if not re.fullmatch(r"[\w.-]+/[\w.-]+", payload.repo_id):
             raise ValueError("Invalid Hub dataset ID")
+        import httpx
         from huggingface_hub import HfApi, snapshot_download
+        from huggingface_hub.errors import OfflineModeIsEnabled
         from huggingface_hub.utils import filter_repo_objects
 
         from .auth import credential_scope
@@ -633,9 +635,19 @@ def diagnostics(payload: Diagnostic):
         # is current and how large the files are: a changed dataset is a new
         # snapshot, and a credential without access fails here as before.
         credential = token()
-        info = HfApi().dataset_info(
-            payload.repo_id, token=credential, files_metadata=True
-        )
+        try:
+            info = HfApi().dataset_info(
+                payload.repo_id, token=credential, files_metadata=True
+            )
+        except (OfflineModeIsEnabled, httpx.ConnectError, httpx.TimeoutException):
+            # Hub unreachable: like before, an earlier download is inspected as
+            # it is. Access errors (401, 404) are not caught: they still fail.
+            old = CACHE / payload.repo_id.replace("/", "__")
+            if not (old / "meta" / "info.json").is_file():
+                raise
+            report = _inspect(payload, old)
+            report["cache_note"] = f"Hub unreachable: inspected {old}"
+            return report
         files = filter_repo_objects(
             info.siblings or [], allow_patterns=patterns, key=lambda s: s.rfilename
         )
@@ -658,7 +670,8 @@ def diagnostics(payload: Diagnostic):
             download,
             CACHE,
             revision=info.sha,
-            sizes=[s.size or 0 for s in files],
+            sizes=[s.size for s in files],
+            listed=len(info.siblings or []),
             scope=credential_scope(credential),
         ) as (folder, note):
             report = _inspect(payload, folder)

@@ -78,7 +78,7 @@ python -m levi.performance pixel-compare <视频或文件夹> [...] [--cores 4]
 
 `levi.performance.budget.DiskBudget` 让一个缓存目录自己守住字节上限（可选再加条目数上限）。原因是只增不减的缓存迟早写满磁盘：几百个片段的证据是几 GB，几千个是几十 GB，而每出现一个新的 schema、模型或提示词版本，就又是一份。上限在写入时由写入者自己执行，而不是靠一个可能来得太晚的清理器。
 
-第一个使用者是 Hugging Face 数据集的诊断（`levi/hub_snapshots.py`）：下载的元数据、parquet 以及（勾选时）视频放在 `<工作区>/.cache/levi/hub-snapshots/`，最多 20 GiB，先淘汰最久没用的快照，正在检查的快照不会被淘汰；一个快照对应一个 Hub 提交和一个凭据，数据集变了或换了账号都会重新下载；每次诊断仍用调用者的凭据向 Hub 查询当前提交和文件大小。预留量就是这个确切大小，所以放不下的快照在下载前就能知道，只下载一次到原来按数据集命名的目录，并在响应里注明（`cache_note`，不写进保存的报告文件）。旧版本留下的目录不会迁移，`levi clean` 会删除它们。`DiskBudget` 没有设置项，只用标准库，不导入 LEVI 的其他模块。需要本地文件系统（用到 `flock` 和 `rename`），不支持网络文件系统。
+第一个使用者是 Hugging Face 数据集的诊断（`levi/hub_snapshots.py`）：下载的元数据、parquet 以及（勾选时）视频放在 `<工作区>/.cache/levi/hub-snapshots/`，最多 20 GiB，先淘汰最久没用的快照，正在检查的快照不会被淘汰；一个快照对应一个 Hub 提交和一个凭据，数据集变了或换了账号都会重新下载；每次诊断仍用调用者的凭据向 Hub 查询当前提交和文件大小。预留量就是这个确切大小，所以放不下的快照在下载前就能知道，只下载一次到原来按数据集命名的目录，并在响应里注明（`cache_note`，不写进保存的报告文件）。与原来的目录相比有两点代价：新提交会整份重新下载（原来的目录只下载变化的文件），下载中断后要从头开始。连不上 Hub 时，按原样检查原来目录里的旧下载（`cache_note` 会注明）；没有访问权限仍然失败。旧版本留下的目录不会迁移，`levi clean` 会删除它们。`DiskBudget` 没有设置项，只用标准库，不导入 LEVI 的其他模块。需要本地文件系统（用到 `flock` 和 `rename`），不支持网络文件系统。
 
 ```python
 from levi.performance.budget import DiskBudget, BudgetRejected
