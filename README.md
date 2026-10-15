@@ -56,6 +56,11 @@ Six more figures (layers, a task step by step, live annotation beside a robot, t
 
 ## What has been measured
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/07-evidence-dark.svg">
+  <img alt="Dot plots: on plates release-anchored review meets the scale-up quality bar (balanced accuracy 0.94, 12.8% of failures judged as success); on screws it misses it (0.76, 48.7%)." src="docs/assets/atlas/07-evidence-light.svg">
+</picture>
+
 The numbers below come from the project's own experiments on one task family (plates stacking) unless stated otherwise; they come from the project's own experiment record, which is not shipped in this repository; [Validation](docs/VALIDATION.md) documents the anchored-review re-run.
 
 - **Judging success is the clear gain.** Release-anchored review raised balanced accuracy on a blind 60-episode test set from 0.81 to 0.94 and cut "failure judged as success" from 38.5% to 12.8%, without missing a real success.

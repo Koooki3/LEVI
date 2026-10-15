@@ -56,6 +56,11 @@ LEVI 是面向机器人学习数据的本地工作台：浏览 LeRobot 数据集
 
 ## 已经测到了什么
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/07-evidence-dark.svg">
+  <img alt="点线图：在 plates 上锚定复核达到扩大规模的质量门槛（平衡准确率 0.94，12.8% 的失败被判成成功）；在 screws 上没达到（0.76，48.7%）。" src="docs/assets/atlas/07-evidence-light.svg">
+</picture>
+
 下面的数字来自本项目自己的实验，除非另有说明，都是一个任务族（叠盘子）上的结果；它们来自本项目自己的实验记录，该记录不随本仓库发布；[验证](docs/VALIDATION.md) 记录了锚定复核的重跑。
 
 - **判断成败是明确的提升。** 释放事件锚定复核把盲测 60 个片段上的平衡准确率从 0.81 提到 0.94，“失败被判成功”从 38.5% 降到 12.8%，没有漏掉任何真成功。

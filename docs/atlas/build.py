@@ -1288,118 +1288,218 @@ def fig_evidence(t):
     f = Fig(
         "07-evidence",
         1200,
-        640,
+        700,
         t,
-        "What has been measured, and what has not",
-        "On the plates task, release-anchored review raised balanced accuracy from 0.81 to 0.94 and cut failures judged as success from "
-        "38.5% to 12.8%; on the screws task it reached 0.76 with 49% of failures judged successes; time-segment labelling is at parity "
-        "with a direct call; whether curated data improves a policy is not established.",
+        "Judging success: one task meets the bar, one does not",
+        "Dot plots on blind 60-episode test sets with the scale-up quality bar drawn in. Plates: release-anchored review "
+        "reaches balanced accuracy 0.936 (LEVI from segments 0.808, a direct call 0.782) and judges 12.8% of failures as "
+        "successes (38.5%, 43.6%); both meet the bar of 0.90 and 15%. Screws: 0.756 and 48.7%, both miss it. Time-segment "
+        "labelling is at parity with a direct call; whether curated data improves a policy is not established.",
     )
     c = f.c
     f.heading(
-        "Evidence, with its limits",
-        "The project's own experiments on blind test sets, one task family unless stated. The experiment record is not shipped.",
+        "Judging success: one task meets the bar, one does not",
+        "Same local model, blind gold labels, 60 episodes per task. The project's own experiments; the record is not shipped.",
+    )
+    # legend: hollow = direct call, grey = LEVI from segments, solid = anchored review
+    lx, ly = 32, 98
+    f.parts.append(
+        f'<circle cx="{lx + 8}" cy="{ly}" r="7" fill="{c["panel"]}" stroke="{c["faint"]}" stroke-width="2.5"/>'
+    )
+    f.text(lx + 22, ly + 5, "direct call", size=14, fill=c["soft"])
+    f.parts.append(f'<circle cx="{lx + 128}" cy="{ly}" r="7" fill="{c["faint"]}"/>')
+    f.text(lx + 142, ly + 5, "LEVI, from segments", size=14, fill=c["soft"])
+    f.parts.append(f'<circle cx="{lx + 308}" cy="{ly}" r="9" fill="{c["system"]}"/>')
+    f.text(lx + 324, ly + 5, "release-anchored review", size=14, fill=c["soft"])
+    f.text(
+        1168,
+        ly + 5,
+        "change vs LEVI, from segments",
+        size=13,
+        fill=c["faint"],
+        anchor="end",
     )
 
-    def bars(x, y, title, rows):
-        f.text(x, y, title, size=13.5, weight=700)
-        for i, (label, v, shown, tone) in enumerate(rows):
-            yy = y + 18 + i * 44
-            f.text(x, yy + 15, label, size=12, fill=c["soft"])
-            f.rect(x + 150, yy, 300, 22, fill=c["box"], stroke=c["boxedge"], r=6)
-            f.rect(
-                x + 150,
-                yy,
-                max(6, 300 * v),
-                22,
-                fill=c[tone + "_bg"],
-                stroke=c[tone],
-                r=6,
+    ax0, ax1 = 230, 1030
+
+    def chart(
+        y0,
+        title,
+        sub,
+        rows,
+        lo,
+        hi,
+        ticks,
+        bar,
+        bar_label,
+        lower_better,
+        fmt,
+        delta_fmt,
+    ):
+        def X(v):
+            return ax0 + (ax1 - ax0) * (v - lo) / (hi - lo)
+
+        f.text(32, y0, title, size=19, weight=700)
+        f.text(32 + 11 * len(title) + 24, y0, sub, size=14, fill=c["soft"])
+        top, rowh = y0 + 30, 62
+        bottom = top + rowh * len(rows)
+        for v in ticks:
+            f.parts.append(
+                f'<line x1="{X(v):.1f}" y1="{top}" x2="{X(v):.1f}" y2="{bottom}" stroke="{c["edge"]}" stroke-width="1.2"/>'
             )
             f.text(
-                x + 150 + 300 + 10, yy + 16, shown, size=12.5, weight=700, fill=c[tone]
+                round(X(v), 1),
+                bottom + 20,
+                fmt(v),
+                size=13.5,
+                fill=c["faint"],
+                anchor="middle",
             )
+        gx = round(X(bar), 1)
+        f.parts.append(
+            f'<line x1="{gx}" y1="{top - 6}" x2="{gx}" y2="{bottom}" stroke="{c["gate"]}" '
+            f'stroke-width="2.5" stroke-dasharray="7 5"/>'
+        )
+        f.text(gx + 7, top + 6, bar_label, size=13.5, weight=700, fill=c["gate"])
+        for i, (name, vals) in enumerate(rows):
+            cy = top + rowh * i + rowh / 2 + 4
+            f.text(32, cy + 6, name, size=17, weight=700)
+            a = vals["anchored"]
+            ok = a <= bar if lower_better else a >= bar
+            col = c["system"] if ok else c["danger"]
+            base = [vals[k] for k in ("direct", "levi") if vals.get(k) is not None]
+            if base:
+                lo_v, hi_v = min([*base, a]), max([*base, a])
+                f.parts.append(
+                    f'<line x1="{X(lo_v):.1f}" y1="{cy}" x2="{X(hi_v):.1f}" y2="{cy}" stroke="{c["boxedge"]}" '
+                    f'stroke-width="7" stroke-linecap="round"/>'
+                )
+                f.parts.append(
+                    f'<circle cx="{X(vals["direct"]):.1f}" cy="{cy}" r="8" fill="{c["panel"]}" '
+                    f'stroke="{c["faint"]}" stroke-width="2.5"/>'
+                )
+                f.parts.append(
+                    f'<circle cx="{X(vals["levi"]):.1f}" cy="{cy}" r="8" fill="{c["faint"]}"/>'
+                )
+                d = a - vals["levi"]
+                f.text(
+                    1168,
+                    cy + 7,
+                    ("+" if d > 0 else "\u2212") + delta_fmt(abs(d)),
+                    size=19,
+                    weight=700,
+                    fill=col,
+                    anchor="end",
+                )
+            else:
+                f.text(
+                    1168,
+                    cy + 6,
+                    "other arms did not finish",
+                    size=13,
+                    fill=c["faint"],
+                    anchor="end",
+                )
+            f.parts.append(f'<circle cx="{X(a):.1f}" cy="{cy}" r="10.5" fill="{col}"/>')
+            f.text(
+                round(X(a), 1),
+                cy - 15,
+                fmt(a),
+                size=15,
+                weight=700,
+                fill=col,
+                anchor="middle",
+            )
+            f.text(
+                round(X(a), 1),
+                cy + 27,
+                "meets the bar" if ok else "misses the bar",
+                size=13,
+                weight=600,
+                fill=col,
+                anchor="middle",
+            )
+        return bottom + 20
 
-    bars(
-        32,
-        112,
-        "Balanced accuracy of judging success",
+    def acc(v):
+        return f"{v:.2f}"
+
+    def pct(v):
+        x = round(v * 100, 1)
+        return f"{x:.0f}%" if x == int(x) else f"{x}%"
+
+    y = chart(
+        150,
+        "Balanced accuracy",
+        "higher is better; the axis starts at 0.5, the chance level",
         [
-            ("Plates: from segments", 0.81, "0.81", "gate"),
-            ("Plates: anchored", 0.94, "0.94", "person"),
-            ("Screws: anchored", 0.76, "0.76", "danger"),
+            ("Plates", {"direct": 0.782, "levi": 0.808, "anchored": 0.936}),
+            ("Screws", {"anchored": 0.756}),
         ],
+        0.5,
+        1.0,
+        [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+        0.90,
+        "scale-up bar 0.90",
+        False,
+        acc,
+        acc,
     )
-    bars(
-        620,
-        112,
-        "Failures judged as success (lower is better)",
+    y = chart(
+        y + 50,
+        "Failures judged as success",
+        "lower is better",
         [
-            ("Plates: from segments", 0.385, "38.5%", "gate"),
-            ("Plates: anchored", 0.128, "12.8%", "person"),
-            ("Screws: anchored", 0.49, "49%", "danger"),
+            ("Plates", {"direct": 0.436, "levi": 0.385, "anchored": 0.128}),
+            ("Screws", {"anchored": 0.487}),
         ],
+        0.0,
+        0.6,
+        [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+        0.15,
+        "bar 15%",
+        True,
+        pct,
+        lambda d: f"{d * 100:.1f} pts",
     )
     f.box(
         32,
-        292,
+        y + 24,
         552,
-        112,
+        78,
         "Time-segment labelling: parity",
         [
-            "LEVI and a direct call of the same local model score alike",
-            "on blind gold labels (segment F1 about 0.34). Wall time is",
-            "about 1.7x a direct call (development set, candidate",
-            "configuration; 3.6x before the speed-up).",
+            "LEVI and a direct call of the same model score alike (segment F1",
+            "about 0.34 on plates); LEVI takes about 1.7x the direct call's time.",
         ],
         tone="model",
-        size=14,
-        subsize=13,
+        size=15,
+        subsize=13.5,
     )
     f.box(
         616,
-        292,
+        y + 24,
         552,
-        112,
-        "The second task did not meet the bar",
-        [
-            "Screws: balanced accuracy 0.76, 49% of failures judged successes.",
-            "The quality gate for scaling up is not met, so scale-up has not started.",
-        ],
-        tone="danger",
-        size=13.5,
-        subsize=13,
-    )
-    f.box(
-        32,
-        422,
-        1136,
-        84,
+        78,
         "Not established",
         [
-            "Whether training on LEVI-curated data improves a robot policy. Training manifests are delivered; training and robot evaluation are the user's team's next step.",
-            "Automatic live verdicts are unreviewed and over-call success on tasks that place several objects.",
+            "Whether training on LEVI-curated data improves a robot policy.",
+            "Automatic live verdicts are unreviewed and over-call success.",
         ],
         tone="gate",
-        size=14,
-        subsize=12.5,
+        size=15,
+        subsize=13.5,
         dash=True,
     )
-    f.note(
-        518,
-        "Plates: 60-episode blind test. Project's own numbers; docs/VALIDATION.md records the 0.94 / 12.8% re-run.",
-        tone="system",
+    f.text(
+        32,
+        y + 132,
+        "Plates re-run: docs/VALIDATION.md. Some screws outcomes reached the coordinator through annotator replies; "
+        "not used for tuning. No figure here is a real-robot policy result.",
+        size=12.5,
+        fill=c["faint"],
     )
-    f.note(
-        556,
-        "Some screws outcomes were seen by the coordinator through annotator replies; they were not used for tuning.",
-        tone="system",
-    )
-    f.note(
-        594,
-        "Automated tests use fixtures and stub models; no figure here is a real-robot policy result.",
-        tone="gate",
-    )
+    f.h = int(y + 156)
     return f
 
 
