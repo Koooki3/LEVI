@@ -90,4 +90,13 @@ console.log(
   `\n${pass} pass, ${fail} fail across ${files.length} files, ${jobs} at a time` +
     (bad.length ? `; failing files: ${bad.map((r) => r.file).join(", ")}` : ""),
 );
+// A run where every file passed but nothing was counted means bun's summary
+// changed format (colour once turned every count into 0): say so and fail
+// instead of reporting "0 pass" as success.
+if (!bad.length && pass === 0) {
+  console.error(
+    "no test results were counted although every file exited 0: bun's summary format changed (see count() above)",
+  );
+  process.exit(1);
+}
 process.exit(bad.length ? 1 : 0);
