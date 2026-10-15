@@ -439,4 +439,5 @@ ZH = {
     "Only terminal D sends motion and releases a round; the page and the vision model only show what they see.": "只有终端 D 发送运动指令、放行一轮；页面和视觉模型只显示它们看到的东西。",
     "Software tested with fakes and offline runs; hardware acceptance pending.": "软件已用假件和离线运行测试；硬件验收待做。",
     "On main the terminal asks you to type resume; one key is on the integration branch.": "main 上终端要求键入 resume；单键操作在集成分支上。",
+    "Real-robot runs are on hold until this release lands in main.": "真机运行暂缓，直到这一版本进入 main。",
 }

@@ -2080,7 +2080,7 @@ def fig_aeri_lite(t):
     f = Fig(
         "10-aeri-lite",
         1200,
-        576,
+        600,
         t,
         "An AERI run in four stages: prepare, start in terminal D, every round, end",
         "Prepare the robot stack, the live service, the job, binding and scene contract, and run the read-only "
@@ -2191,14 +2191,22 @@ def fig_aeri_lite(t):
     )
     f.text(
         32,
-        526,
+        522,
+        "Real-robot runs are on hold until this release lands in main.",
+        size=16,
+        weight=600,
+        fill=c["danger"],
+    )
+    f.text(
+        32,
+        552,
         "Software tested with fakes and offline runs; hardware acceptance pending.",
         size=15,
         fill=c["faint"],
     )
     f.text(
         32,
-        550,
+        576,
         "On main the terminal asks you to type resume; one key is on the integration branch.",
         size=15,
         fill=c["faint"],
