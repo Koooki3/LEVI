@@ -62,7 +62,8 @@ def est(s, size, en_factor):
     """Estimated drawn width: the English pass keeps its old per-character factor."""
     if LANG == "en":
         return len(s) * en_factor
-    return sum(size * (1.0 if ord(ch) >= 0x2E80 else 0.56) for ch in tr(s))
+    # rounded so Python 3.11 and 3.12 (compensated float sum) write the same file
+    return round(sum(size * (1.0 if ord(ch) >= 0x2E80 else 0.56) for ch in tr(s)), 2)
 
 # Neutrals lean slightly blue so cards, panel and text share one hue.
 PALETTE = {
@@ -465,7 +466,7 @@ class Fig:
     def tag(self, right, y, kind):
         """A status badge, right-aligned at `right`, centred on the line y."""
         label, tone = self.TAGS[kind]
-        w = len(label) * 6.6 + 14
+        w = est(label, 11.5, 6.6) + 14
         self.rect(
             right - w, y - 8, w, 16, fill=self.c[tone + "_bg"], stroke=self.c[tone],
             r=8, sw=1.1, plain=True,
@@ -1567,7 +1568,7 @@ def fig_aeri_flow(t):
         ("branch", "on the integration branch, not yet in main"),
         ("planned", "designed, not built (dashed)"),
     ):
-        w = f.tag(x + len(f.TAGS[kind][0]) * 6.6 + 14, 86, kind)
+        w = f.tag(x + est(f.TAGS[kind][0], 11.5, 6.6) + 14, 86, kind)
         f.text(x + w + 8, 90.5, words, size=12, fill=c["soft"])
         x += w + 8 + est(words, 12, 6.3) + 22
     f.text(1168, 90.5, "No badge: outside LEVI.  The dot marks the current step.", size=12, anchor="end", fill=c["soft"])

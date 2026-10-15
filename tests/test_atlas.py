@@ -110,3 +110,18 @@ def test_chinese_variants_translate_every_drawn_string():
     ) == (
         "Data goes in, models propose, a person decides, curated training data comes out."
     )  # the English pass is the default
+
+
+def test_chinese_status_badges_use_the_readme_words():
+    """Badges read main / 集成分支 / 计划中 in Chinese, the words README.zh-CN.md uses."""
+    badges = set()
+    for path in ATLAS.glob("*-zh-*.svg"):
+        text = path.read_text(encoding="utf8")
+        # a badge is the 16-unit-high pill Fig.tag draws, followed by its label
+        badges |= set(
+            re.findall(
+                r'height="16" rx="8"[^>]*/><text [^>]*font-weight="700"[^>]*>([^<]*)</text>',
+                text,
+            )
+        )
+    assert badges == {"main", "集成分支", "计划中"}
