@@ -111,11 +111,13 @@ The LEVI mark opens **Home** (what needs you, what is running); the header opens
 
 Open the figure for full size.
 
+> **Real-robot runs are on hold** until the terminal-only release lands in main. From then on only terminal D answers the scene question and releases a round; the page and the vision model only show what they see.
+
 1. Start the robot stack (arm, gripper, robot server, health monitor) and the live service; write the job file (the launch wizard can), the binding and the scene contract.
 2. `python scripts/aeri.py check --config JOB --binding BINDING`: a read-only preflight that prints the plan and binding digests.
 3. In terminal D, `python scripts/aeri.py execute --config JOB --binding BINDING --expect-plan PLAN_SHA --expect-binding BINDING_SHA`, then type the `execute <run id>` phrase it asks for. Only this process moves the robot.
-4. Each round (R1–R8 in the figure): reset the scene, press Enter in D, answer the scene question (`y`, `n` or `u`) in D or on the page. The one-key console is on the integration branch; on main the terminal asks for a typed `resume`.
-5. Follow progress, answer and label on the page; stop from the page or with Ctrl+C in D. A fault locks the run: read the reason in the journal and start a new run.
+4. Each round (R1–R8 in the figure): reset the scene, press Enter in D, answer the scene question (`y`, `n` or `u`) in D; the page shows the question, and the answer that releases the round is typed in D. The one-key console is on the integration branch; on main the terminal asks for a typed `resume`.
+5. Follow progress and label on the page; stop from the page or with Ctrl+C in D. A fault locks the run: read the reason in the journal and start a new run.
 
 New to AERI? Do the five-minute [dry run with fakes](docs/AERI_QUICKSTART.md) first: no robot, every command and result you will meet later. Software only, tested with fakes; hardware acceptance is pending. Details: [Automatic evaluation pipeline](docs/AUTOMATIC_PIPELINE.md) ([中文](docs/AUTOMATIC_PIPELINE.zh-CN.md)).
 
