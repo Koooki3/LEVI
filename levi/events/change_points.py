@@ -23,7 +23,12 @@ Guards against over-cutting, each tested:
 - no segment is shorter than ``min_seconds`` (in rows, from the median
   sampling step);
 - a series longer than ``MAX_ROWS`` is searched in blocks, so the time is
-  bounded (the search is quadratic in the worst case);
+  bounded (the search is quadratic in the worst case). A block keeps its
+  rows' count, sum and sum of squares (``Blocks``), so a run of blocks costs
+  exactly its rows' squared error; ``n`` in the penalty is still the number
+  of rows. The search then solves the unbinned problem with change points
+  restricted to block starts (tested against unpruned partitioning), and
+  the minimum length holds in rows;
 - at most ``max_per_minute`` change points per minute of episode: past it the
   penalty is raised until the result fits, keeping exactly the strongest
   ``limit`` when equally strong changes would all vanish at once; the result
@@ -50,6 +55,12 @@ MAX_PER_MINUTE = 30.0
 MAX_ROWS = 3000
 # Raise the penalty by this factor, at most this many times, to meet the cap.
 RAISE, MAX_RAISES = 1.5, 30
+# How change points are found, as an on plan freezes it
+# (``candidates.algorithm``). Raise it with any change to the search, its
+# cost or its blocks that the constants above do not show. v2 (2026-10-15):
+# blocks keep their sufficient statistics and the penalty counts rows (v1
+# scaled block means by the root of their length and counted blocks).
+VERSION = "levi.events.change_points.v2"
 
 
 @dataclass
@@ -65,7 +76,8 @@ class Result:
     features: list[str] = field(default_factory=list)
     capped: bool = False
     # Rows per block the search ran on (1: every row); change points then
-    # fall on block starts and gains are in block units.
+    # fall on block starts. Gains are in row units either way, and
+    # ``min_size`` is in rows (a multiple of ``bin_rows`` when binned).
     bin_rows: int = 1
 
 
@@ -100,26 +112,90 @@ def scale(x):
     return (x - np.median(x)) / spread
 
 
-def _cost(s1, s2, starts, end):
-    """Squared error of the mean model on rows ``[start, end)`` for each
-    start, from cumulative sums."""
-    m = (end - starts).astype(float)
+@dataclass(frozen=True)
+class Blocks:
+    """Consecutive blocks of rows, each kept as its sufficient statistics:
+    the first row (``starts``), the number of rows ``W`` (``counts``), their
+    sum ``S`` (``sums``, one per feature) and the sum of their squared norms
+    ``Q`` (``squares``). The squared error of the rows of blocks ``[a, c)``
+    about their mean is ``sum(Q) - |sum(S)|^2 / sum(W)``: exactly the rows'
+    own, whatever the block lengths."""
+
+    starts: np.ndarray
+    counts: np.ndarray
+    sums: np.ndarray
+    squares: np.ndarray
+
+
+def _rows(x):
+    x = np.asarray(x, dtype=float)
+    return x[:, None] if x.ndim == 1 else x
+
+
+def blocks(x, starts):
+    """``x`` in blocks beginning at the rows ``starts`` (the first is 0)."""
+    x = _rows(x)
+    starts = np.asarray(starts, dtype=int)
+    return Blocks(
+        starts=starts,
+        counts=np.diff(np.append(starts, len(x))).astype(float),
+        sums=np.add.reduceat(x, starts, axis=0),
+        squares=np.add.reduceat(np.sum(x * x, axis=1), starts),
+    )
+
+
+def binned(x, rows):
+    """``x`` in blocks of ``rows`` rows; the last block takes the rows left
+    over, so it has ``rows`` to ``2 * rows - 1`` (every block has at least
+    ``rows``, which keeps a minimum segment length in rows)."""
+    x = _rows(x)
+    rows = max(1, int(rows))
+    return blocks(x, np.arange(max(1, len(x) // rows)) * rows)
+
+
+def _cumulative(b):
+    """Cumulative ``W``, ``S`` and ``Q`` (a leading zero), for costs of runs."""
+    return (
+        np.concatenate([[0.0], np.cumsum(b.counts)]),
+        np.vstack([np.zeros(b.sums.shape[1]), np.cumsum(b.sums, axis=0)]),
+        np.concatenate([[0.0], np.cumsum(b.squares)]),
+    )
+
+
+def _cost(acc, starts, end):
+    """Squared error of the mean model on blocks ``[start, end)`` for each
+    start, from cumulative statistics."""
+    w, s1, s2 = acc
+    m = w[end] - w[starts]
     diff = s1[end] - s1[starts]
     return s2[end] - s2[starts] - np.sum(diff * diff, axis=1) / m
+
+
+def cost(b, a, c):
+    """Squared error of the rows in blocks ``[a, c)`` of ``b``."""
+    return float(_cost(_cumulative(b), np.array([a]), c)[0])
+
+
+def _each_row(x):
+    x = _rows(x)
+    return blocks(x, np.arange(len(x)))
 
 
 def segment(x, beta, min_size):
     """Rows where a new segment starts (not 0) minimising the squared error
     plus ``beta`` per change, no segment shorter than ``min_size`` rows."""
-    x = np.asarray(x, dtype=float)
-    if x.ndim == 1:
-        x = x[:, None]
-    n = len(x)
+    return search(_each_row(x), beta, min_size)
+
+
+def search(b, beta, min_size):
+    """Blocks of ``b`` where a new segment starts (not 0) minimising the
+    squared error of the rows plus ``beta`` per change, no segment shorter
+    than ``min_size`` blocks. One row per block is ``segment``."""
+    n = len(b.starts)
     min_size = max(1, int(min_size))
     if n < 2 * min_size:
         return []
-    s1 = np.vstack([np.zeros(x.shape[1]), np.cumsum(x, axis=0)])
-    s2 = np.concatenate([[0.0], np.cumsum(np.sum(x * x, axis=1))])
+    acc = _cumulative(b)
     best = np.full(n + 1, np.inf)
     best[0] = -beta
     last = np.zeros(n + 1, dtype=int)
@@ -132,7 +208,7 @@ def segment(x, beta, min_size):
         if new >= min_size:
             starts = np.append(starts, new)
             failed = np.append(failed, -1)
-        total = best[starts] + _cost(s1, s2, starts, t) + beta
+        total = best[starts] + _cost(acc, starts, t) + beta
         k = int(np.argmin(total))
         best[t], last[t] = total[k], starts[k]
         # Delayed pruning. A start s with F(s) + C(s, t) > F(t) can never be
@@ -154,32 +230,20 @@ def segment(x, beta, min_size):
 def gains(x, rows):
     """Cost saved by each change point against merging it with its
     neighbours' segments."""
-    x = np.asarray(x, dtype=float)
-    if x.ndim == 1:
-        x = x[:, None]
-    s1 = np.vstack([np.zeros(x.shape[1]), np.cumsum(x, axis=0)])
-    s2 = np.concatenate([[0.0], np.cumsum(np.sum(x * x, axis=1))])
-    edges = [0, *rows, len(x)]
+    return _gains(_each_row(x), rows)
+
+
+def _gains(b, at):
+    """``gains`` of the change points at blocks ``at`` of ``b`` (row units)."""
+    acc = _cumulative(b)
+    edges = [0, *at, len(b.starts)]
     out = []
     for i in range(1, len(edges) - 1):
-        a, b, c = edges[i - 1], edges[i], edges[i + 1]
-        whole = _cost(s1, s2, np.array([a]), c)[0]
-        parts = _cost(s1, s2, np.array([a]), b)[0] + _cost(s1, s2, np.array([b]), c)[0]
+        a, m, c = edges[i - 1], edges[i], edges[i + 1]
+        whole = _cost(acc, np.array([a]), c)[0]
+        parts = _cost(acc, np.array([a]), m)[0] + _cost(acc, np.array([m]), c)[0]
         out.append(float(max(0.0, whole - parts)))
     return out
-
-
-def binned(x, rows):
-    """``x`` averaged over blocks of ``rows`` rows (the last may be shorter),
-    each block mean times the square root of its length, so that a block's
-    squared error weighs as its rows did and the penalty keeps its meaning."""
-    if rows <= 1:
-        return x
-    n = len(x)
-    edges = np.arange(0, n, rows)
-    sums = np.add.reduceat(x, edges, axis=0)
-    counts = np.diff(np.append(edges, n)).astype(float)[:, None]
-    return sums / counts * np.sqrt(counts)
 
 
 def detect(
@@ -190,15 +254,12 @@ def detect(
     penalty=PENALTY,
     min_seconds=MIN_SECONDS,
     max_per_minute=MAX_PER_MINUTE,
-    _span=None,
 ):
     """Change points of a series ``x`` (rows x features, already on
     comparable scales) recorded at ``times`` (seconds). A series longer than
     ``MAX_ROWS`` is searched in blocks (``binned``); ``bin_rows`` says so."""
     times = np.asarray(times, dtype=float)
-    x = np.asarray(x, dtype=float)
-    if x.ndim == 1:
-        x = x[:, None]
+    x = _rows(x)
     n, d = x.shape
     names = list(names or [f"f{i}" for i in range(d)])
     finite_t = times[np.isfinite(times)]
@@ -209,30 +270,35 @@ def detect(
     empty = Result([], [], penalty, 0.0, min_size, names)
     if n < 2 * min_size or d == 0 or len(finite_t) < 2:
         return empty
+    # Blocks of ``bin_rows`` rows (the last takes the rest). Each keeps its
+    # rows' sufficient statistics, so the search minimises the rows' own
+    # squared error with change points restricted to block starts; the
+    # penalty counts rows, so it is the same objective as unbinned. A
+    # segment of ``min_blocks`` blocks has at least ``min_size`` rows.
     bin_rows = max(1, math.ceil(n / MAX_ROWS))
-    if bin_rows > 1:
-        full = detect(
-            times[::bin_rows],
-            binned(x, bin_rows),
-            names=names,
-            penalty=penalty,
-            min_seconds=min_seconds,
-            max_per_minute=max_per_minute,
-            _span=(finite_t, dt),
-        )
-        full.rows = [r * bin_rows for r in full.rows]
-        full.min_size *= bin_rows
-        full.bin_rows = bin_rows
-        return full
-    # The episode lasts from its first sample to one step past its last
-    # (of the unbinned table when searching in blocks).
-    span_t, span_dt = _span or (finite_t, dt)
-    minutes = max(float(span_t[-1] - span_t[0]) + span_dt, span_dt) / 60
+    b = binned(x, bin_rows)
+    min_blocks = max(1, math.ceil(min_size / bin_rows))
+    min_size = max(min_size, min_blocks * bin_rows)
+    # The episode lasts from its first sample to one step past its last.
+    minutes = max(float(finite_t[-1] - finite_t[0]) + dt, dt) / 60
     limit = max(1, math.floor(max_per_minute * minutes + 1e-9))
+
+    def found(at, effective, beta, capped=False):
+        return Result(
+            [int(b.starts[i]) for i in at],
+            _gains(b, at),
+            effective,
+            beta,
+            min_size,
+            names,
+            capped,
+            bin_rows,
+        )
+
     beta = penalty * (d + 1) * math.log(n)
-    rows = segment(x, beta, min_size)
+    rows = search(b, beta, min_blocks)
     if len(rows) <= limit:
-        return Result(rows, gains(x, rows), penalty, beta, min_size, names)
+        return found(rows, penalty, beta)
     # Over the cap: raise the penalty until the count fits. Equally strong
     # changes vanish together, so a raise can jump from too many to too few;
     # then the strongest ``limit`` of the last result over the cap are kept
@@ -242,18 +308,18 @@ def detect(
     for _ in range(MAX_RAISES):
         effective *= RAISE
         beta = effective * (d + 1) * math.log(n)
-        rows = segment(x, beta, min_size)
+        rows = search(b, beta, min_blocks)
         if len(rows) == limit:
-            return Result(rows, gains(x, rows), effective, beta, min_size, names, True)
+            return found(rows, effective, beta, True)
         if len(rows) < limit:
             break
         over = (rows, effective, beta)
     rows, effective, beta = over
-    saved = gains(x, rows)
+    saved = _gains(b, rows)
     top = max(saved) or 1.0
     order = sorted(range(len(rows)), key=lambda i: (-round(saved[i] / top, 9), rows[i]))
     rows = sorted(rows[i] for i in order[:limit])
-    return Result(rows, gains(x, rows), effective, beta, min_size, names, True)
+    return found(rows, effective, beta, True)
 
 
 # --- features of one actor ----------------------------------------------------

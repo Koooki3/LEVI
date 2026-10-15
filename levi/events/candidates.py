@@ -203,6 +203,7 @@ def algorithm():
         "change_points.MAX_ROWS": change_points.MAX_ROWS,
         "change_points.RAISE": change_points.RAISE,
         "change_points.MAX_RAISES": change_points.MAX_RAISES,
+        "change_points.VERSION": change_points.VERSION,
         "gripper.LOW": gripper.LOW,
         "gripper.HIGH": gripper.HIGH,
         "gripper.START_SAMPLES": gripper.START_SAMPLES,

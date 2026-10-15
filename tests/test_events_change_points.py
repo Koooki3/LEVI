@@ -445,6 +445,167 @@ def test_binning_still_finds_steps_at_their_rows():
     assert cp.detect(np.arange(300) / 10, cp.scale(x[:300])[:, None]).bin_rows == 1
 
 
+def _sse(x):
+    x = np.asarray(x, dtype=float)
+    return float(((x - x.mean(axis=0)) ** 2).sum()) if len(x) else 0.0
+
+
+def _mixed(rng, n, d):
+    """Noise, steps, or a non-constant series with constant stretches (a
+    flat run inside motion is what the old block transform turned into a
+    change)."""
+    kind = rng.integers(0, 3)
+    if kind == 0:
+        x = rng.normal(0, 1, (n, d))
+    elif kind == 1:
+        x = np.stack([_series(rng, "steps", n) for _ in range(d)], axis=1)
+    else:
+        x = rng.normal(0, 1, (n, d))
+        for _ in range(int(rng.integers(1, 4))):
+            a = int(rng.integers(0, n))
+            b = int(rng.integers(a, n + 1))
+            x[a:b] = rng.normal(0, 3, d)
+    return x
+
+
+def test_a_block_costs_what_its_rows_cost():
+    # Review 2026-10-15: a block keeps its rows' count, sum and
+    # sum of squares, so the cost of any run of blocks is the squared error of
+    # the rows in it, whatever the block lengths. Unequal blocks, several
+    # features, constant stretches inside a moving series.
+    rng = np.random.default_rng(11)
+    cases = 0
+    for _ in range(300):
+        n = int(rng.integers(2, 90))
+        d = int(rng.integers(1, 4))
+        x = _mixed(rng, n, d)
+        inner = rng.choice(np.arange(1, n), size=int(rng.integers(0, n)), replace=False)
+        starts = np.array([0, *sorted(int(s) for s in inner)])
+        blocks = cp.blocks(x, starts)
+        ends = [*starts[1:], n]
+        assert blocks.counts.sum() == n
+        for a in range(len(starts)):
+            for c in range(a + 1, len(starts) + 1):
+                rows = x[starts[a] : ends[c - 1]]
+                assert cp.cost(blocks, a, c) == pytest.approx(_sse(rows), abs=1e-7)
+                cases += 1
+    assert cases > 10000
+
+
+def test_blocks_of_a_fixed_size_absorb_the_rest_into_the_last():
+    rng = np.random.default_rng(12)
+    for _ in range(200):
+        size = int(rng.integers(2, 9))
+        n = int(rng.integers(size, 200))
+        x = _mixed(rng, n, 2)
+        blocks = cp.binned(x, size)
+        assert len(blocks.starts) == n // size
+        assert list(blocks.starts) == list(range(0, (n // size) * size, size))
+        assert blocks.counts[:-1].tolist() == [size] * (n // size - 1)
+        assert size <= blocks.counts[-1] < 2 * size
+        assert cp.cost(blocks, 0, len(blocks.starts)) == pytest.approx(_sse(x))
+
+
+def test_the_reviewers_counterexample_costs_nothing():
+    # review_repros.py: [1, 1, 1, 1, 1] in blocks of 4 and 1 rows. The old
+    # transform (block mean times the root of its length) gave [2, 1], cost
+    # 0.5; constant rows cost nothing.
+    ones = np.ones((5, 1))
+    blocks = cp.blocks(ones, [0, 4])
+    assert blocks.counts.tolist() == [4, 1]
+    assert cp.cost(blocks, 0, 2) == pytest.approx(0.0, abs=1e-12)
+    assert cp.cost(cp.binned(ones, 4), 0, 1) == pytest.approx(0.0, abs=1e-12)
+    # A flat stretch inside a series that moves: blocks of it cost nothing.
+    x = np.array([0.0, 2.0, 1.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0])[:, None]
+    flat = cp.blocks(x, [0, 3, 7, 9])
+    assert cp.cost(flat, 1, 4) == pytest.approx(0.0, abs=1e-12)
+
+
+def _block_optimum(x, starts, beta, min_blocks):
+    """Unpruned optimal partitioning over the block starts, every segment
+    costed on its rows directly (independent of the block statistics)."""
+    edge = [*starts, len(x)]
+    m = len(starts)
+    best = [math.inf] * (m + 1)
+    best[0] = -beta
+    for t in range(min_blocks, m + 1):
+        for s in [0, *range(min_blocks, t - min_blocks + 1)]:
+            total = best[s] + _sse(x[edge[s] : edge[t]]) + beta
+            best[t] = min(best[t], total)
+    return best[m]
+
+
+def test_the_block_search_is_the_row_optimum_on_block_starts():
+    # Searching blocks solves the row problem with change points restricted
+    # to block starts: same objective, same penalty, pruning still exact.
+    rng = np.random.default_rng(13)
+    cases = 0
+    for _ in range(600):
+        size = int(rng.integers(2, 6))
+        min_blocks = int(rng.integers(1, 5))
+        n = int(rng.integers(2 * min_blocks * size, 40 * size))
+        x = _mixed(rng, n, int(rng.integers(1, 3)))
+        blocks = cp.binned(x, size)
+        beta = float(rng.uniform(0.5, 12))
+        found = cp.search(blocks, beta, min_blocks)
+        rows = [int(blocks.starts[i]) for i in found]
+        assert _total(x, rows, beta) == pytest.approx(
+            _block_optimum(x, blocks.starts, beta, min_blocks), abs=1e-6
+        )
+        edges = [0, *rows, n]
+        assert all(b - a >= min_blocks * size for a, b in pairwise(edges))
+        cases += 1
+    assert cases >= 500
+
+
+def test_a_long_flat_level_makes_no_change_at_the_last_block():
+    # 3001 rows in blocks of 2: the last block has 3 rows. Under the old
+    # transform a constant level weighed sqrt(2) times more in a full block
+    # than in the last one, which made a change there.
+    n = 3001
+    times = np.arange(n) / 10
+    x = np.zeros((n, 1))
+    x[1500:] = 40.0
+    result = cp.detect(times, x)
+    assert result.bin_rows == 2
+    assert result.rows == [1500]
+    # Gains are in row units: the same as on the rows themselves.
+    assert result.gains == pytest.approx(cp.gains(x, result.rows))
+
+
+def test_the_penalty_counts_rows_not_blocks():
+    n = 9000
+    x = np.random.default_rng(14).normal(0, 1, (n, 2))
+    result = cp.detect(np.arange(n) / 30, x)
+    assert result.bin_rows == 3
+    assert result.beta == pytest.approx(result.penalty * 3 * math.log(n))
+
+
+def test_binned_segments_keep_the_minimum_length_in_rows():
+    # A spike in the last rows of a binned series: no segment, the last one
+    # included, is shorter than min_seconds in rows.
+    n = 3001
+    times = np.arange(n) / 10
+    x = np.zeros((n, 1))
+    x[-7:] = 50.0
+    x[1000:1003] = 50.0  # a 3-row spike, shorter than 0.5 s
+    result = cp.detect(times, x, min_seconds=0.5)
+    assert result.bin_rows == 2
+    assert result.min_size >= 5 and result.min_size % 2 == 0
+    edges = [0, *result.rows, n]
+    assert all(b - a >= result.min_size for a, b in pairwise(edges))
+    assert result.rows  # the spike at the end is found
+
+
+def test_the_change_point_version_is_approved_with_an_on_plan(monkeypatch):
+    from levi.events import candidates
+
+    before = candidates.algorithm()
+    assert before["constants"]["change_points.VERSION"] == cp.VERSION
+    monkeypatch.setattr(cp, "VERSION", "levi.events.change_points.v1")
+    assert candidates.algorithm()["sha256"] != before["sha256"]
+
+
 def _dev_gold(folder, source, frames, **extra):
     import json
 
