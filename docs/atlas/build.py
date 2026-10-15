@@ -1591,8 +1591,8 @@ def fig_aeri_flow(t):
         ),
         (
             "Stop at any time", "person", "main",
-            ["Ctrl+C or q in D, or Stop on the", "page: no further motion; the run",
-             "waits or ends. Resume only by a key", "in D (branch), never from the page."],
+            ["Ctrl+C in D (q on the branch), or", "Stop on the page: no more motion;",
+             "the run waits or ends. Resume by a", "key in D (branch); never the page."],
         ),
     ]
     f.uses.add("drift")
