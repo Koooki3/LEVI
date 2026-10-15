@@ -133,9 +133,22 @@ def _rows(x):
 
 
 def blocks(x, starts):
-    """``x`` in blocks beginning at the rows ``starts`` (the first is 0)."""
+    """``x`` in blocks beginning at the rows ``starts``: the first is 0, they
+    strictly increase and every one is a row of ``x`` (so no block is
+    empty). Anything else raises ``ValueError``."""
     x = _rows(x)
     starts = np.asarray(starts, dtype=int)
+    if (
+        starts.ndim != 1
+        or len(starts) == 0
+        or starts[0] != 0
+        or np.any(np.diff(starts) <= 0)
+        or starts[-1] >= len(x)
+    ):
+        raise ValueError(
+            "block starts must begin at 0, strictly increase and lie inside "
+            f"the {len(x)} rows; got {starts.tolist()}"
+        )
     return Blocks(
         starts=starts,
         counts=np.diff(np.append(starts, len(x))).astype(float),
@@ -147,10 +160,13 @@ def blocks(x, starts):
 def binned(x, rows):
     """``x`` in blocks of ``rows`` rows; the last block takes the rows left
     over, so it has ``rows`` to ``2 * rows - 1`` (every block has at least
-    ``rows``, which keeps a minimum segment length in rows)."""
+    ``rows``, which keeps a minimum segment length in rows). ``x`` must have
+    at least ``rows`` rows (``ValueError`` otherwise)."""
     x = _rows(x)
     rows = max(1, int(rows))
-    return blocks(x, np.arange(max(1, len(x) // rows)) * rows)
+    if len(x) < rows:
+        raise ValueError(f"binned needs at least {rows} rows, got {len(x)}")
+    return blocks(x, np.arange(len(x) // rows) * rows)
 
 
 def _cumulative(b):

@@ -711,3 +711,17 @@ def test_the_choice_respects_the_noise_floor():
     assert choose(sweep, [0.3, 0.75, 2.0]) == 0.3
     assert noise_rate(cp.PENALTY) <= NOISE_PER_MINUTE
     assert noise_rate(0.1) > NOISE_PER_MINUTE
+
+
+def test_blocks_refuse_starts_that_do_not_tile_the_rows():
+    # Review NIT N1/N2: blocks start at row 0, strictly increase and stay
+    # inside the rows; binned needs at least one full block of rows.
+    x = np.arange(10.0)
+    for bad in ([1, 4], [0, 4, 4], [0, 6, 3], [0, 10], [0, -1], []):
+        with pytest.raises(ValueError, match="block starts"):
+            cp.blocks(x, bad)
+    with pytest.raises(ValueError, match="at least"):
+        cp.binned(x, 11)
+    with pytest.raises(ValueError, match="at least"):
+        cp.binned(np.zeros((0, 2)), 3)
+    assert cp.binned(x, 10).counts.tolist() == [10]
