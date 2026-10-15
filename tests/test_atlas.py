@@ -65,7 +65,10 @@ def test_committed_figures_are_what_the_generator_makes(tmp_path):
 def test_every_figure_has_both_themes_a_claim_and_nothing_executable():
     module = build_module(ATLAS)
     names = {re.sub(r"-(light|dark)\.svg$", "", p.name) for p in ATLAS.glob("*.svg")}
-    assert len(names) == 8
+    assert len(names) == 16  # eight figures, English and Chinese
+    assert {n for n in names if not n.endswith("-zh")} == {
+        n[:-3] for n in names if n.endswith("-zh")
+    }
     for name in names:
         for theme in ("light", "dark"):
             path = ATLAS / f"{name}-{theme}.svg"
@@ -76,7 +79,10 @@ def test_every_figure_has_both_themes_a_claim_and_nothing_executable():
             check_executable_free(path.name, text, module)
             title = next(e for e in root.iter() if e.tag.endswith("title"))
             desc = next(e for e in root.iter() if e.tag.endswith("desc"))
-            assert len(title.text) > 20 and len(desc.text) > 40
+            short, long = (
+                (8, 20) if name.endswith("-zh") else (20, 40)
+            )  # Chinese says it in fewer characters
+            assert len(title.text) > short and len(desc.text) > long
 
 
 def test_the_pages_that_show_the_atlas_link_files_that_exist():
@@ -85,3 +91,22 @@ def test_the_pages_that_show_the_atlas_link_files_that_exist():
         base = (ROOT / page).parent
         for target in re.findall(r"(?:srcset|src)=\"([^\"]+\.svg)\"", text):
             assert (base / target).is_file(), (page, target)
+
+
+def test_chinese_variants_translate_every_drawn_string():
+    """The zh pass draws only table entries; no English sentence is left in a zh figure."""
+    module = build_module(ATLAS)
+    zh = {p.name for p in ATLAS.glob("*-zh-*.svg")}
+    assert len(zh) == 16
+    for name in zh:
+        text = (ATLAS / name).read_text(encoding="utf8")
+        drawn = re.findall(r"<text [^>]*>([^<]*)</text>", text)
+        assert drawn, name
+        assert not [
+            s for s in drawn if re.search(r"[A-Za-z]{3,} [a-z]{3,} [a-z]{3,}", s)
+        ], name
+    assert module.tr(
+        "Data goes in, models propose, a person decides, curated training data comes out."
+    ) == (
+        "Data goes in, models propose, a person decides, curated training data comes out."
+    )  # the English pass is the default

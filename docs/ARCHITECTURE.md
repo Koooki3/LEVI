@@ -1,6 +1,6 @@
 # Architecture atlas
 
-Eight figures that let a newcomer see how LEVI is built and what it has shown, in the order a reader usually asks: where it sits, what it is for, how it is layered, how a task runs, how it shares a GPU with a robot, who may move the robot, what the evidence is, and how one automatic real-robot evaluation runs from start to finish. English only, because the labels are part of the drawing. Each figure has a light and a dark file; the page picks the one that matches your theme.
+Eight figures that let a newcomer see how LEVI is built and what it has shown, in the order a reader usually asks: where it sits, what it is for, how it is layered, how a task runs, how it shares a GPU with a robot, who may move the robot, what the evidence is, and how one automatic real-robot evaluation runs from start to finish. Each figure has a light and a dark file, and the page picks the one that matches your theme; the Chinese README uses a Chinese version of each (`*-zh-light.svg`, `*-zh-dark.svg`), drawn from the same script with the text table in [`docs/atlas/zh.py`](atlas/zh.py).
 
 The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SVG with no script and no external image, so they diff as text and render the same on GitHub and in a browser. A test regenerates them and fails when a committed file is out of date. Edit the script, run `python3 docs/atlas/build.py`, commit the result.
 

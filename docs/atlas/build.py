@@ -21,6 +21,7 @@ everything is static, and the static frame is the complete figure.
 from __future__ import annotations
 
 import html
+import importlib.util
 import itertools
 import sys
 from pathlib import Path
@@ -29,6 +30,39 @@ from typing import ClassVar
 OUT = Path(__file__).resolve().parents[1] / "assets" / "atlas"
 FONT = "Inter, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', Helvetica, Arial, sans-serif"
 MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+FONT_ZH = "'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Microsoft YaHei', " + FONT
+LANG = "en"  # main() renders every figure once per language; zh text comes from zh.py
+
+
+def tr(s):
+    """The drawn string in the current language; a string without a zh entry stops the build."""
+    if LANG == "en":
+        return s
+    ZH = _zh_table()
+    if s not in ZH:
+        raise KeyError(f"docs/atlas/zh.py has no entry for {s!r}")
+    return ZH[s]
+
+
+def _zh_table():
+    """docs/atlas/zh.py, loaded by path so the tests can import this file from anywhere."""
+    global _ZH
+    if _ZH is None:
+        spec = importlib.util.spec_from_file_location("atlas_zh", Path(__file__).with_name("zh.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _ZH = module.ZH
+    return _ZH
+
+
+_ZH = None
+
+
+def est(s, size, en_factor):
+    """Estimated drawn width: the English pass keeps its old per-character factor."""
+    if LANG == "en":
+        return len(s) * en_factor
+    return sum(size * (1.0 if ord(ch) >= 0x2E80 else 0.56) for ch in tr(s))
 
 # Neutrals lean slightly blue so cards, panel and text share one hue.
 PALETTE = {
@@ -301,7 +335,8 @@ class Fig:
         ls=None,
     ):
         fill = fill or self.c["ink"]
-        fam = MONO if mono else FONT
+        s = tr(s)
+        fam = MONO if mono else (FONT_ZH if LANG == "zh" else FONT)
         o = f' opacity="{op}"' if op is not None else ""
         spacing = f' letter-spacing="{ls}"' if ls else ""
         self.texts.append((x, y, size, fill, anchor, s))
@@ -363,7 +398,7 @@ class Fig:
 
     def pill(self, x, y, label, tone="model", w=None):
         c = self.c
-        w = w or (len(label) * 6.9 + 22)
+        w = w or (est(label, 12, 6.9) + 22)
         self.rect(x, y, w, 24, fill=c[tone + "_bg"], stroke=c[tone], r=12, sw=1.2)
         self.text(
             x + w / 2,
@@ -513,7 +548,7 @@ class Fig:
         head = (
             f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {self.w} {self.h}" width="{self.w}" '
             f'height="{self.h}" role="img" aria-labelledby="t d">'
-            f'<title id="t">{html.escape(self.title)}</title><desc id="d">{html.escape(self.desc)}</desc>'
+            f'<title id="t">{html.escape(tr(self.title))}</title><desc id="d">{html.escape(tr(self.desc))}</desc>'
             f"<defs><style>{self.css}</style>{''.join(defs)}</defs>"
             f'<rect x="0.6" y="0.6" width="{self.w - 1.2}" height="{self.h - 1.2}" rx="16" fill="url(#g_panel)" stroke="{c["edge"]}" stroke-width="1.2"/>'
         )
@@ -1340,7 +1375,7 @@ def fig_evidence(t):
             return ax0 + (ax1 - ax0) * (v - lo) / (hi - lo)
 
         f.text(32, y0, title, size=19, weight=700)
-        f.text(32 + 11 * len(title) + 24, y0, sub, size=14, fill=c["soft"])
+        f.text(32 + est(title, 19, 11) + 24, y0, sub, size=14, fill=c["soft"])
         top, rowh = y0 + 30, 62
         bottom = top + rowh * len(rows)
         for v in ticks:
@@ -1534,7 +1569,7 @@ def fig_aeri_flow(t):
     ):
         w = f.tag(x + len(f.TAGS[kind][0]) * 6.6 + 14, 86, kind)
         f.text(x + w + 8, 90.5, words, size=12, fill=c["soft"])
-        x += w + 8 + len(words) * 6.3 + 22
+        x += w + 8 + est(words, 12, 6.3) + 22
     f.text(1168, 90.5, "No badge: outside LEVI.  The dot marks the current step.", size=12, anchor="end", fill=c["soft"])
     f.text(
         32, 111, "Keys in D:  Enter = scene reset  ·  y / n / u = scene ready?  ·  Ctrl+C (q on the branch) = stop",
@@ -1755,12 +1790,19 @@ FIGURES = [
 
 
 def main() -> int:
+    global LANG
     OUT.mkdir(parents=True, exist_ok=True)
-    for make in FIGURES:
-        for theme in ("light", "dark"):
-            fig = make(theme)
-            (OUT / f"{fig.name}-{theme}.svg").write_text(fig.svg(), encoding="utf8")
-    print(f"wrote {len(FIGURES) * 2} files to {OUT}")
+    try:
+        for lang in ("en", "zh"):
+            LANG = lang
+            suffix = "" if lang == "en" else "-zh"
+            for make in FIGURES:
+                for theme in ("light", "dark"):
+                    fig = make(theme)
+                    (OUT / f"{fig.name}{suffix}-{theme}.svg").write_text(fig.svg(), encoding="utf8")
+    finally:
+        LANG = "en"
+    print(f"wrote {len(FIGURES) * 4} files to {OUT}")
     return 0
 
 
