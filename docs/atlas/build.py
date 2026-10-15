@@ -21,6 +21,7 @@ everything is static, and the static frame is the complete figure.
 from __future__ import annotations
 
 import html
+import itertools
 import sys
 from pathlib import Path
 from typing import ClassVar
@@ -150,10 +151,10 @@ def af_loop_path():
     centres = [(af_cx(k), af_row(i) + AF_BOXH // 2) for i, (k, *_) in enumerate(AF_LOOP)]
     start = (af_x(AF_LOOP[2][0]) - 34, centres[2][1])
     pts = [start, centres[2]]
-    for a, b in zip(centres[2:], centres[3:]):
+    for a, b in itertools.pairwise(centres[2:]):
         pts += [b] if a[0] == b[0] else [(a[0], b[1]), b]
     pts += [(AF_RET_X, centres[-1][1]), (AF_RET_X, AF_TOP3), (centres[0][0], AF_TOP3)]
-    for a, b in zip(centres[:2], centres[1:3]):
+    for a, b in itertools.pairwise(centres[:3]):
         pts += [a] if not pts or pts[-1] != a else []
         pts += [b] if a[0] == b[0] else [(a[0], b[1])]
     pts += [start]
@@ -163,11 +164,11 @@ def af_loop_path():
 def af_step_delays():
     """Seconds after the dot sets off at which it enters each step's box."""
     pts = af_loop_path()
-    total = sum(abs(x1 - x0) + abs(y1 - y0) for (x0, y0), (x1, y1) in zip(pts, pts[1:]))
+    total = sum(abs(x1 - x0) + abs(y1 - y0) for (x0, y0), (x1, y1) in itertools.pairwise(pts))
     order = list(range(2, len(AF_LOOP))) + [0, 1]  # the route enters R3 first
     boxes = [(af_x(AF_LOOP[i][0]), af_row(i)) for i in order]
     delays, s, nxt = [], 0, 0
-    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+    for (x0, y0), (x1, y1) in itertools.pairwise(pts):
         n = abs(x1 - x0) + abs(y1 - y0)
         for j in range(n):
             x, y = x0 + (x1 - x0) * j / n, y0 + (y1 - y0) * j / n
