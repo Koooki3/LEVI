@@ -1581,7 +1581,7 @@ def fig_aeri_flow(t):
         1200,
         1424,
         t,
-        "An AERI run, start to finish: one terminal drives the robot, the page and the vision model watch, answer and label",
+        "An AERI run, start to finish: one terminal drives the robot, the page and the vision model watch and label",
         "A swim-lane flow of one real-robot evaluation with the automatic pipeline (AERI). Prepare: the robot stack, the job, "
         "binding and contract, a read-only check. Start: the typed execute phrase, a start summary, the start-pose check and the "
         "policy warm-up. Every round: set the scene, answer the scene question, the policy acts, an event candidate, the vision "
@@ -1595,7 +1595,7 @@ def fig_aeri_flow(t):
     c = f.c
     f.heading(
         "An AERI run, start to finish",
-        "Terminal D runs the whole session and alone moves the robot; the page and the vision model watch, answer and label.",
+        "Terminal D runs the whole session, alone moves the robot and alone releases a round; the page and the vision model watch and label.",
     )
     # legend: what the badges mean
     x = 32
@@ -1626,7 +1626,7 @@ def fig_aeri_flow(t):
     lane_top, lane_bottom = 124, 1118
     lanes = [
         ("Operator", "you, at the robot", "person", "person"),
-        ("Web page", "watch, answer, label", None, "doc"),
+        ("Web page", "watch, label", None, "doc"),
         ("Terminal D", "scripts/aeri.py", "danger", "term"),
         ("Policy service", "the policy under test", "system", "chip"),
         ("Vision judge", "local vision model", "model", "eye"),
@@ -1809,11 +1809,11 @@ def fig_aeri_flow(t):
     box(
         1,
         rows[1],
-        "Or answer here",
-        ("the scene question;", "first answer counts"),
-        "main",
+        "Shows the question",
+        ("the releasing answer", "is typed in D only"),
+        "planned",
     )
-    f.arrow([(af_x(1), mid(rows[1])), (af_x(0) + AF_BOXW, mid(rows[1]))])
+    f.arrow([(af_x(0) + AF_BOXW, mid(rows[1])), (af_x(1), mid(rows[1]))])
     box(5, rows[2], "Arm moves", ("only on D's guarded,", "acknowledged steps"), "main")
     f.arrow(
         [(af_x(3) + AF_BOXW, mid(rows[2])), (af_x(5), mid(rows[2]))],
@@ -1930,8 +1930,11 @@ def fig_aeri_flow(t):
             "main",
         ),
         (
-            "A page or model answer only reports what it sees: it never sends motion, starts a run or clears a fault.",
-            "main",
+            (
+                "The page and the vision model show what they see; only terminal D's answer releases a round "
+                "(in main once the terminal-only release lands)."
+            ),
+            "planned",
         ),
         (
             "A stopped real run resumes only by a key in D; the page's resume button is refused for it.",
@@ -2072,6 +2075,137 @@ def fig_perf(t):
     return f
 
 
+def fig_aeri_lite(t):
+    """README version of figure 8: four stages, large text, the keys a newcomer needs."""
+    f = Fig(
+        "10-aeri-lite",
+        1200,
+        576,
+        t,
+        "An AERI run in four stages: prepare, start in terminal D, every round, end",
+        "Prepare the robot stack, the live service, the job, binding and scene contract, and run the read-only "
+        "check. Start in terminal D with aeri.py execute and the typed confirmation phrase. Every round: reset "
+        "the scene and press Enter, answer whether it is ready, the policy acts and the model judges, then stop, "
+        "home and verify. End with a summary, the run journal and blind labels on the page. Only terminal D "
+        "sends motion and releases a round; the page and the vision model only show what they see. Software "
+        "tested with fakes and offline runs; hardware acceptance pending; real-robot runs are on hold until the "
+        "terminal-only release lands in main.",
+    )
+    c = f.c
+    f.parts.append(
+        f'<rect x="32" y="14" width="30" height="3.5" rx="1.75" fill="{c["model"]}"/>'
+        f'<rect x="64" y="14" width="14" height="3.5" rx="1.75" fill="{c["system"]}"/>'
+    )
+    f.text(32, 50, "An AERI run in four stages", size=30, weight=700)
+    f.text(
+        32,
+        82,
+        "One terminal moves the robot; each round you reset the scene and answer one question in it.",
+        size=18,
+        fill=c["soft"],
+    )
+    cards = [
+        (
+            "1  Prepare",
+            "person",
+            [
+                "robot stack and",
+                "live service up",
+                "job, binding and",
+                "scene contract",
+                "read-only check",
+            ],
+        ),
+        (
+            "2  Start",
+            "danger",
+            ["in terminal D:", "aeri.py execute", "type the phrase", "it asks for"],
+        ),
+        (
+            "3  Every round",
+            "system",
+            [
+                "reset the scene,",
+                "Enter in D",
+                "ready? y / n / u in D",
+                "policy acts, model",
+                "judges; stop, home",
+            ],
+        ),
+        (
+            "4  End",
+            "person",
+            [
+                "summary line and",
+                "the run journal;",
+                "label the rounds",
+                "blind, on the page",
+            ],
+        ),
+    ]
+    w, gap, y, h = 262, 29, 116, 214
+    for i, (title, tone, lines) in enumerate(cards):
+        x = 32 + i * (w + gap)
+        f.rect(x, y, w, h, fill=c[tone + "_bg"], stroke=c[tone], sw=1.6)
+        f.text(x + 18, y + 38, title, size=22, weight=700, fill=c[tone])
+        f.lines(x + 18, y + 74, lines, size=18, gap=27, fill=c["ink"])
+        if i < len(cards) - 1:
+            ay = y + h / 2
+            f.arrow([(x + w + 3, ay), (x + w + gap - 3, ay)], tone="soft")
+    # the round loops back to itself until the last round
+    rx = 32 + 2 * (w + gap)
+    f.arrow(
+        [
+            (rx + w - 40, y + h),
+            (rx + w - 40, y + h + 26),
+            (rx + 40, y + h + 26),
+            (rx + 40, y + h + 4),
+        ],
+        tone="system",
+    )
+    f.text(
+        rx + w / 2,
+        y + h + 50,
+        "next round",
+        size=17,
+        weight=600,
+        fill=c["system"],
+        anchor="middle",
+    )
+
+    f.rect(32, 404, 1136, 58, fill=c["box"], stroke=c["boxedge"])
+    f.text(
+        52,
+        440,
+        "Keys in terminal D:  Enter = scene reset  ·  y / n / u = ready / not ready / unsure  ·  Ctrl+C = stop",
+        size=18,
+        weight=600,
+    )
+    f.text(
+        32,
+        496,
+        "Only terminal D sends motion and releases a round; the page and the vision model only show what they see.",
+        size=18,
+        weight=600,
+        fill=c["danger"],
+    )
+    f.text(
+        32,
+        526,
+        "Software tested with fakes and offline runs; hardware acceptance pending.",
+        size=15,
+        fill=c["faint"],
+    )
+    f.text(
+        32,
+        550,
+        "On main the terminal asks you to type resume; one key is on the integration branch.",
+        size=15,
+        fill=c["faint"],
+    )
+    return f
+
+
 def _wrap(s, n):
     words, out, cur = s.split(), [], ""
     for w in words:
@@ -2095,6 +2229,7 @@ FIGURES = [
     fig_evidence,
     fig_aeri_flow,
     fig_perf,
+    fig_aeri_lite,
 ]
 
 
