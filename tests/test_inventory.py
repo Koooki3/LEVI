@@ -55,7 +55,9 @@ def test_identical_inventories_lose_nothing(tmp_path):
     assert inv.diff(same, same)[0] == []
 
 
-def test_a_router_prefix_is_part_of_the_route_and_colliding_keys_name_their_file(tmp_path):
+def test_a_router_prefix_is_part_of_the_route_and_colliding_keys_name_their_file(
+    tmp_path,
+):
     (tmp_path / "levi").mkdir()
     (tmp_path / "levi/pool.py").write_text(
         "router = APIRouter(prefix='/api/levi/pool')\n@router.get('/status')\ndef s(): ...\n"
@@ -85,7 +87,10 @@ def test_a_missing_section_a_dropped_heading_and_a_dev_dependency_are_losses(tmp
     old = {
         "frontend": {"i18n": {"en": ["k"], "zh": ["k"]}},
         "docs": {"docs/A.md": 12},
-        "dependencies": {"node_dev": {"prettier": "3"}, "python_groups": {"dev": ["pytest"]}},
+        "dependencies": {
+            "node_dev": {"prettier": "3"},
+            "python_groups": {"dev": ["pytest"]},
+        },
     }
     new = {
         "frontend": {"i18n": {"en": ["k"]}},
@@ -101,11 +106,17 @@ def test_a_missing_section_a_dropped_heading_and_a_dev_dependency_are_losses(tmp
 
 def test_deleting_one_of_two_same_named_commands_or_titles_is_a_loss(tmp_path):
     inv = load(tmp_path)
-    old = {"cli": {"list": ["a.py", "b.py"]}, "frontend": {"test_titles": ["f::t", "f::t"]}}
+    old = {
+        "cli": {"list": ["a.py", "b.py"]},
+        "frontend": {"test_titles": ["f::t", "f::t"]},
+    }
     new = {"cli": {"list": ["a.py"]}, "frontend": {"test_titles": ["f::t"]}}
     lost, _ = inv.diff(old, new)
     assert "lost cli: list#2" in lost and "lost frontend.test_titles: f::t#2" in lost
-    moved = {"cli": {"list": ["c.py", "d.py"]}, "frontend": {"test_titles": ["f::t", "f::t"]}}
+    moved = {
+        "cli": {"list": ["c.py", "d.py"]},
+        "frontend": {"test_titles": ["f::t", "f::t"]},
+    }
     assert inv.diff(old, moved)[0] == []
 
 

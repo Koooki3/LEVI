@@ -80,7 +80,11 @@ def test_a_data_file_no_test_names_widens(tmp_path):
     sel = load(tmp_path)
     files = write(
         tmp_path,
-        {"levi/specs/x.json": "{}", "levi/a.py": "", "tests/test_a.py": "import levi.a"},
+        {
+            "levi/specs/x.json": "{}",
+            "levi/a.py": "",
+            "tests/test_a.py": "import levi.a",
+        },
     )
     assert sel.select(["levi/specs/x.json"], files)["pytest"]["widen"]
 
@@ -244,7 +248,9 @@ def test_a_git_failure_is_an_error_not_an_empty_answer(tmp_path):
         sel.git("rev-parse", "--verify", "no-such-ref-anywhere")
 
 
-def test_a_deleted_module_a_source_still_imports_selects_the_tests_of_that_source(tmp_path):
+def test_a_deleted_module_a_source_still_imports_selects_the_tests_of_that_source(
+    tmp_path,
+):
     sel = load(tmp_path)
     files = write(
         tmp_path,
@@ -299,7 +305,9 @@ def test_a_deleted_test_file_nothing_imports_does_not_widen_and_is_not_listed(tm
     assert not out["widen"]
 
 
-def test_a_deleted_module_imported_relatively_from_another_package_is_followed(tmp_path):
+def test_a_deleted_module_imported_relatively_from_another_package_is_followed(
+    tmp_path,
+):
     sel = load(tmp_path)
     files = write(
         tmp_path,

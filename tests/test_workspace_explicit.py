@@ -14,7 +14,9 @@ from levi import maintenance
 from levi.workspace import Workspace
 
 
-def make_workspace(root: Path, registered: list[str], leftovers: list[str]) -> Workspace:
+def make_workspace(
+    root: Path, registered: list[str], leftovers: list[str]
+) -> Workspace:
     ws = Workspace.at(root)
     ws.state.mkdir(parents=True)
     (ws.state / "datasets.json").write_text(
@@ -31,9 +33,18 @@ def test_importing_the_workspace_module_reads_no_dotenv_and_creates_nothing(tmp_
         "import sys, levi.workspace;"
         "print('levi.paths' in sys.modules, 'dotenv' in sys.modules)"
     )
-    env = {**os.environ, "LEVI_WORKSPACE": str(tmp_path / "ws"), "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
+    env = {
+        **os.environ,
+        "LEVI_WORKSPACE": str(tmp_path / "ws"),
+        "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+    }
     out = subprocess.run(
-        [sys.executable, "-c", code], cwd=tmp_path, env=env, text=True, capture_output=True, check=True
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
     ).stdout.split()
     assert out == ["False", "False"]
     assert not (tmp_path / "ws").exists()
@@ -47,13 +58,21 @@ def test_the_layout_matches_the_process_default(tmp_path):
 
 def test_two_workspaces_in_one_process_do_not_interfere(tmp_path):
     a = make_workspace(tmp_path / "a", registered=["kept_a"], leftovers=["gone_a"])
-    b = make_workspace(tmp_path / "b", registered=["kept_b"], leftovers=["gone_b1", "gone_b2"])
+    b = make_workspace(
+        tmp_path / "b", registered=["kept_b"], leftovers=["gone_b1", "gone_b2"]
+    )
     results = {}
 
     def run(key, ws):
-        results[key] = [row["dataset"] for row in maintenance.orphans(ws)["keeps_content"] + maintenance.orphans(ws)["removable_empty"]]
+        results[key] = [
+            row["dataset"]
+            for row in maintenance.orphans(ws)["keeps_content"]
+            + maintenance.orphans(ws)["removable_empty"]
+        ]
 
-    threads = [threading.Thread(target=run, args=(k, w)) for k, w in (("a", a), ("b", b))]
+    threads = [
+        threading.Thread(target=run, args=(k, w)) for k, w in (("a", a), ("b", b))
+    ]
     for t in threads:
         t.start()
     for t in threads:
@@ -65,8 +84,12 @@ def test_two_workspaces_in_one_process_do_not_interfere(tmp_path):
 def test_the_explicit_and_the_module_global_paths_agree(tmp_path, monkeypatch):
     from levi import catalog
 
-    ws = make_workspace(tmp_path / "w", registered=["kept"], leftovers=["gone", "other"])
-    (ws.state / "dataset_aliases.json").write_text(json.dumps({"old": "kept", "dead": "gone"}))
+    ws = make_workspace(
+        tmp_path / "w", registered=["kept"], leftovers=["gone", "other"]
+    )
+    (ws.state / "dataset_aliases.json").write_text(
+        json.dumps({"old": "kept", "dead": "gone"})
+    )
     explicit = maintenance.orphans(ws)
     monkeypatch.setattr(maintenance, "STATE", ws.state)
     monkeypatch.setattr(catalog, "STATE", ws.state)
@@ -121,7 +144,9 @@ def test_clean_with_apply_and_an_explicit_workspace_never_runs_the_process_wide_
 
     calls = []
     monkeypatch.setattr(
-        pool_cleanup, "sweep", lambda dry_run=True: calls.append(dry_run) or {"bytes": 1}
+        pool_cleanup,
+        "sweep",
+        lambda dry_run=True: calls.append(dry_run) or {"bytes": 1},
     )
     monkeypatch.setattr(maintenance, "PROJECT", tmp_path / "proj")
     (tmp_path / "proj").mkdir()
@@ -168,11 +193,21 @@ def test_a_root_above_a_home_folder_or_a_moved_home_is_refused(tmp_path, monkeyp
     real_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
     above = real_home.parent
     with pytest.raises(ValueError, match="not a LEVI workspace root"):
-        maintenance.clean(False, Workspace(above, above / "outputs/LEVI/workbench", above / ".cache/levi"))
+        maintenance.clean(
+            False,
+            Workspace(above, above / "outputs/LEVI/workbench", above / ".cache/levi"),
+        )
     # HOME pointing elsewhere does not unprotect the account's real home.
     monkeypatch.setenv("HOME", str(tmp_path))
     with pytest.raises(ValueError, match="not a LEVI workspace root"):
-        maintenance.clean(False, Workspace(real_home, real_home / "outputs/LEVI/workbench", real_home / ".cache/levi"))
+        maintenance.clean(
+            False,
+            Workspace(
+                real_home,
+                real_home / "outputs/LEVI/workbench",
+                real_home / ".cache/levi",
+            ),
+        )
 
 
 def test_a_state_outside_the_root_is_refused_even_when_it_exists(tmp_path):
@@ -217,7 +252,9 @@ def test_a_symlinked_folder_under_the_state_is_not_followed(tmp_path):
 
 def test_the_cli_offers_no_way_to_pass_a_workspace(monkeypatch):
     calls = []
-    monkeypatch.setattr(maintenance, "clean", lambda *a, **k: calls.append((a, k)) or {})
+    monkeypatch.setattr(
+        maintenance, "clean", lambda *a, **k: calls.append((a, k)) or {}
+    )
     monkeypatch.setattr(sys, "argv", ["levi-clean"])
     assert maintenance.main() == 0
     assert calls == [((False,), {})]
@@ -245,7 +282,9 @@ def test_no_product_code_passes_an_explicit_workspace():
     assert offenders == []
 
 
-def test_the_catalog_reads_an_explicit_workspace_and_defaults_to_its_own(tmp_path, monkeypatch):
+def test_the_catalog_reads_an_explicit_workspace_and_defaults_to_its_own(
+    tmp_path, monkeypatch
+):
     from levi import catalog
 
     own = make_workspace(tmp_path / "own", registered=["mine"], leftovers=[])
