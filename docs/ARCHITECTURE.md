@@ -1,6 +1,6 @@
 # Architecture atlas
 
-Eight figures that let a newcomer see how LEVI is built and what it has shown, in the order a reader usually asks: where it sits, what it is for, how it is layered, how a task runs, how it shares a GPU with a robot, who may move the robot, what the evidence is, and how one automatic real-robot evaluation runs from start to finish. Each figure has a light and a dark file, and the page picks the one that matches your theme; the Chinese README uses a Chinese version of each (`*-zh-light.svg`, `*-zh-dark.svg`), drawn from the same script with the text table in [`docs/atlas/zh.py`](atlas/zh.py).
+Nine figures that let a newcomer see how LEVI is built and what it has shown, in the order a reader usually asks: where it sits, what it is for, how it is layered, how a task runs, how it shares a GPU with a robot, who may move the robot, what the evidence is, how one automatic real-robot evaluation runs from start to finish, and what the code costs to check today. Each figure has a light and a dark file, and the page picks the one that matches your theme; the Chinese README uses a Chinese version of each (`*-zh-light.svg`, `*-zh-dark.svg`), drawn from the same script with the text table in [`docs/atlas/zh.py`](atlas/zh.py).
 
 The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SVG with no script and no external image, so they diff as text and render the same on GitHub and in a browser. A test regenerates them and fails when a committed file is out of date. Edit the script, run `python3 docs/atlas/build.py`, commit the result.
 
@@ -75,6 +75,16 @@ The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SV
 </picture>
 
 *Read it top to bottom, lane by lane; the loop in part 3 (R1–R8) is one round, and the bottom row can happen at any time.* Terminal D (`scripts/aeri.py execute`) runs the whole session and is the only part that sends motion; the page and the vision model watch, answer scene questions and take labels. The keys in D are Enter (the scene is reset), `y`/`n`/`u` (is the scene ready?) and Ctrl+C (`q` on the branch) to stop. An unknown verdict is never a success, a fault locks the run, and a stop is possible at any time. Each card has a badge: **main** is in the main branch; **branch** is on the integration branch and not yet in main (the one-terminal console with one-key answers, the start-pose check and policy warm-up, a policy unit that D starts itself, and resuming a stopped real run only from D); **planned** is designed but not built for real runs (pausing the policy while the model judges, and handling other event-adapter errors). **Software only: tested with fakes and offline runs; hardware acceptance is pending.** [Automatic evaluation pipeline](AUTOMATIC_PIPELINE.md).
+
+
+## 9 Lighter without losing anything
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/atlas/09-lightweight-dark.svg">
+  <img alt="Measured baseline: the whole Python suite about 21 minutes for 6,118 test cases, the frontend check about 25 s, importing the service core 0.77 s and 176 MB, 147,234 lines of Python source. Guards on the integration branch: the agent workbench component split from 1,699 to 1,343 lines, a test selector that missed none of 619 deletion scenarios, and an inventory that fails when anything disappears." src="assets/atlas/09-lightweight-light.svg">
+</picture>
+
+*A baseline, not a speed-up.* The left half is what checking one change costs today; the right half is how the slimming work proves it lost nothing: a smaller component with the same behaviour, a test selector checked against deliberate deletions, and an inventory of every route, command, setting, page and test that fails when one disappears. The three guards are on the integration branch, not yet in main. No before-and-after timing is shown, because the suite grew by about 900 test cases between the two timed runs.
 
 ---
 

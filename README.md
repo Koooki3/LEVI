@@ -29,7 +29,7 @@ A robot policy is only as good as the data it learns from, and the data is full 
   <img alt="From raw data to a better policy, as a five-tier pyramid; the top tier is not established." src="docs/assets/atlas/02-pyramid-light.svg">
 </picture>
 
-Six more figures (layers, a task step by step, live annotation beside a robot, the automatic evaluation authority split, the evidence with its limits, and an AERI run from start to finish) are in the [architecture atlas](docs/ARCHITECTURE.md).
+Seven more figures (layers, a task step by step, live annotation beside a robot, the automatic evaluation authority split, the evidence with its limits, an AERI run from start to finish, and what the code costs to check today) are in the [architecture atlas](docs/ARCHITECTURE.md).
 
 ## What is new on main (unreleased)
 

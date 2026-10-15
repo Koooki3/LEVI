@@ -1765,6 +1765,128 @@ def fig_aeri_flow(t):
     return f
 
 
+def fig_perf(t):
+    f = Fig(
+        "09-lightweight",
+        1200,
+        640,
+        t,
+        "Lighter without losing anything: the measured baseline and the guards that keep it lossless",
+        "Measured on the project's machine: the whole Python suite about 21 minutes for 6,118 test cases, the frontend "
+        "check about 25 s, importing the service core 0.77 s and 176 MB, 147,234 lines of Python source. On the "
+        "integration branch: the agent workbench component split from 1,699 to 1,343 lines, a test selector that "
+        "missed none of 619 deletion scenarios, and an inventory that fails when any route, command, setting, page or "
+        "test disappears. No before-and-after timing is claimed.",
+    )
+    c = f.c
+    f.heading(
+        "Lighter without losing anything",
+        "What one change costs to check today, and the guards that make slimming the code safe.",
+    )
+    f.text(
+        32,
+        102,
+        "MEASURED BASELINE",
+        size=12.5,
+        weight=700,
+        fill=c["faint"],
+        ls="0.08em",
+    )
+    tiles = [
+        ("about 21 min", "whole Python suite", "6,118 test cases, 2026-10-15"),
+        ("about 25 s", "whole frontend check", "types, lint, format, 161 test files"),
+        ("0.77 s · 176 MB", "import of the service core", "time and resident memory"),
+        ("147,234 lines", "Python source", "plus 116,263 lines of tests"),
+    ]
+    for i, (big, what, cond) in enumerate(tiles):
+        x, y = 32 + (i % 2) * 282, 118 + (i // 2) * 132
+        f.rect(x, y, 266, 116, fill=c["box"], stroke=c["boxedge"])
+        f.text(x + 18, y + 44, big, size=26, weight=700, fill=c["system"])
+        f.text(x + 18, y + 74, what, size=15, weight=600)
+        f.text(x + 18, y + 97, cond, size=13, fill=c["soft"])
+
+    gx = 620
+    f.text(
+        gx,
+        102,
+        "GUARDS FOR LOSSLESS SLIMMING",
+        size=12.5,
+        weight=700,
+        fill=c["faint"],
+        ls="0.08em",
+    )
+    # the biggest frontend component, before and after its split
+    f.rect(gx, 118, 548, 116, fill=c["box"], stroke=c["boxedge"])
+    f.text(gx + 18, 146, "Agent workbench component, lines", size=15, weight=600)
+    f.tag(gx + 530, 138, "branch")
+    scale = 330 / 1699
+    for j, (label, n, tone) in enumerate(
+        (("before", 1699, "faint"), ("after the split", 1343, "system"))
+    ):
+        y = 166 + j * 30
+        f.text(gx + 18, y + 14, label, size=13, fill=c["soft"])
+        f.parts.append(
+            f'<rect x="{gx + 130}" y="{y}" width="{n * scale:.1f}" height="18" rx="4" fill="{c[tone]}" fill-opacity="0.85"/>'
+        )
+        f.text(
+            gx + 130 + n * scale + 8,
+            y + 14,
+            f"{n:,}",
+            size=13.5,
+            weight=700,
+            fill=c[tone],
+        )
+    for k, (title, line) in enumerate(
+        (
+            (
+                "Test selector: 0 of 619 deletions missed",
+                "runs only the tests a change can affect",
+            ),
+            (
+                "Inventory with --diff",
+                "fails when a route, command, setting, page or test disappears",
+            ),
+        )
+    ):
+        y = 250 + k * 92
+        f.rect(gx, y, 548, 76, fill=c["box"], stroke=c["boxedge"])
+        f.text(gx + 18, y + 30, title, size=15, weight=600)
+        f.text(gx + 18, y + 54, line, size=13, fill=c["soft"])
+        f.tag(gx + 530, y + 20, "branch")
+
+    f.box(
+        32,
+        420,
+        1136,
+        84,
+        "Why there is no before-and-after timing yet",
+        [
+            "The suite grew from about 5,200 to 6,118 test cases between the two timed runs, and the machine load differed;",
+            "a speed-up will be claimed only from a baseline and a re-run with the same script on the same machine.",
+        ],
+        tone="gate",
+        size=15,
+        subsize=13.5,
+        dash=True,
+    )
+    f.text(
+        32,
+        538,
+        "Python suite: integration line, one run with no other heavy job, 6,085 passed, 8 known failures, 25 skipped.",
+        size=12.5,
+        fill=c["faint"],
+    )
+    f.text(
+        32,
+        558,
+        "Frontend check, import and line counts: a separate checkout of main as of 2026-10-13; the frontend check on 4 cores at low priority.",
+        size=12.5,
+        fill=c["faint"],
+    )
+    f.h = 590
+    return f
+
+
 def _wrap(s, n):
     words, out, cur = s.split(), [], ""
     for w in words:
@@ -1787,6 +1909,7 @@ FIGURES = [
     fig_aeri,
     fig_evidence,
     fig_aeri_flow,
+    fig_perf,
 ]
 
 

@@ -65,7 +65,7 @@ def test_committed_figures_are_what_the_generator_makes(tmp_path):
 def test_every_figure_has_both_themes_a_claim_and_nothing_executable():
     module = build_module(ATLAS)
     names = {re.sub(r"-(light|dark)\.svg$", "", p.name) for p in ATLAS.glob("*.svg")}
-    assert len(names) == 16  # eight figures, English and Chinese
+    assert len(names) == 2 * len(module.FIGURES)  # every figure in English and Chinese
     assert {n for n in names if not n.endswith("-zh")} == {
         n[:-3] for n in names if n.endswith("-zh")
     }
@@ -97,7 +97,7 @@ def test_chinese_variants_translate_every_drawn_string():
     """The zh pass draws only table entries; no English sentence is left in a zh figure."""
     module = build_module(ATLAS)
     zh = {p.name for p in ATLAS.glob("*-zh-*.svg")}
-    assert len(zh) == 16
+    assert len(zh) == 4 * len(module.FIGURES) // 2  # two themes per figure
     for name in zh:
         text = (ATLAS / name).read_text(encoding="utf8")
         drawn = re.findall(r"<text [^>]*>([^<]*)</text>", text)
