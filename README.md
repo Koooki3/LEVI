@@ -117,7 +117,7 @@ Open the figure for full size.
 4. Each round (R1–R8 in the figure): reset the scene, press Enter in D, answer the scene question (`y`, `n` or `u`) in D or on the page. The one-key console is on the integration branch; on main the terminal asks for a typed `resume`.
 5. Follow progress, answer and label on the page; stop from the page or with Ctrl+C in D. A fault locks the run: read the reason in the journal and start a new run.
 
-Software only, tested with fakes; hardware acceptance is pending. Details: [Automatic evaluation pipeline](docs/AUTOMATIC_PIPELINE.md) ([中文](docs/AUTOMATIC_PIPELINE.zh-CN.md)).
+New to AERI? Do the five-minute [dry run with fakes](docs/AERI_QUICKSTART.md) first: no robot, every command and result you will meet later. Software only, tested with fakes; hardware acceptance is pending. Details: [Automatic evaluation pipeline](docs/AUTOMATIC_PIPELINE.md) ([中文](docs/AUTOMATIC_PIPELINE.zh-CN.md)).
 
 ## Agents, with a person in charge
 

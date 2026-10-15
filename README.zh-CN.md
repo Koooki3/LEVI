@@ -117,7 +117,7 @@ uv run levi                                   # 启动网页和 API
 4. 每一轮（图中 R1–R8）：复位场景，在 D 里按 Enter，在 D 或页面上回答场景问题（`y`、`n` 或 `u`）。单键控制台在集成分支上；main 上终端要求键入 `resume`。
 5. 在页面上看进度、答题、打标签。要停止：在页面上点停止，或在 D 里按 Ctrl+C。出故障时运行被锁定：在运行日志（journal）里看原因，再开一次新的运行。
 
-目前只是软件，用假件测试；硬件验收待做。详见[自动评测流水线](docs/AUTOMATIC_PIPELINE.zh-CN.md)（[English](docs/AUTOMATIC_PIPELINE.md)）。
+第一次接触 AERI？先花五分钟[用假件空跑一次](docs/AERI_QUICKSTART.zh-CN.md)：不需要机器人，之后会遇到的命令和结果都能先见到。目前只是软件，用假件测试；硬件验收待做。详见[自动评测流水线](docs/AUTOMATIC_PIPELINE.zh-CN.md)（[English](docs/AUTOMATIC_PIPELINE.md)）。
 
 ## Agent 辅助，人负责
 
