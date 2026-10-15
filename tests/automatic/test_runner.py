@@ -106,6 +106,23 @@ def send(run_dir, value, timeout=30):
     )
 
 
+def audited(run_dir, command_id, timeout=30):
+    """Wait for a command's audit note in the journal. The pump links the
+    result before it appends that note (``control.CommandPump._finish``), so
+    an ``expected_seq`` read as soon as the result is there can be one line
+    short and be refused as ``stale_sequence``."""
+    marker = f" {command_id} by "
+    return wait_until(
+        lambda: any(
+            e.record == "note"
+            and e.note.code == "operator_command"
+            and marker in e.note.detail
+            for e in Journal.read(run_dir).events
+        ),
+        timeout,
+    )
+
+
 def resume_cmd(run_dir, command_id="resume-1", seq=None):
     seq = len(Journal.read(run_dir).events) if seq is None else seq
     return control.command(
@@ -195,11 +212,26 @@ def test_a_resume_processed_again_is_repeated_not_redone(tmp_path, fake_systemd)
     served.finish(0, "exited", "")
 
 
-def test_a_stale_expected_seq_is_refused(tmp_path, fake_systemd):
+@pytest.mark.parametrize("note_delay_s", [0.0, 0.3])
+def test_a_stale_expected_seq_is_refused(
+    tmp_path, fake_systemd, monkeypatch, note_delay_s
+):
+    if note_delay_s:
+        # The pump writes a result before its audit note reaches the journal
+        # (control.CommandPump._finish); widen that window so the test does
+        # not depend on winning the race.
+        original = control.CommandPump._note
+
+        def late_note(self, record):
+            time.sleep(note_delay_s)
+            original(self, record)
+
+        monkeypatch.setattr(control.CommandPump, "_note", late_note)
     _, run_dir, served = waiting_run(tmp_path, fake_systemd)
     result = send(run_dir, resume_cmd(run_dir, "resume-old", seq=3))
     assert not result["ok"] and result["code"] == "stale_sequence"
     assert state_of(run_dir) == "WAIT_HUMAN"
+    audited(run_dir, "resume-old")
     result = send(run_dir, resume_cmd(run_dir, "resume-new"))
     assert result["code"] == "resumed"
     served.join()
