@@ -531,7 +531,7 @@ class Fig:
     CSS_PARTS: ClassVar[dict[str, str]] = {
         "flow": "@keyframes flow{to{stroke-dashoffset:-18}}.flow{animation:flow 3s linear infinite}",
         "now": "@keyframes now{from{transform:translateX(0)}to{transform:translateX(1120px)}}"
-        ".now{animation:now 12s linear infinite;animation-delay:-5.571s}",
+        ".now{animation:now 12s linear infinite;animation-delay:-3.996s}",
         "guard": "@keyframes guard{0%,100%{opacity:.3}50%{opacity:.9}}"
         ".guard{opacity:.6;animation:guard 5s ease-in-out infinite}",
         # figure 8: one dot travels the round loop, the step it is in lights up,
@@ -858,7 +858,7 @@ def fig_layers(t):
             ("CLI", "levi …  one command per group"),
         ]
     ):
-        f.box(32 + i * 290, 108, 276, 62, a, [b], size=14)
+        f.box(32 + i * 288, 108, 272, 62, a, [b], size=14)  # 4 x 272 + 3 x 16 = 1136
     f.arrow(
         [(600, 170), (600, 196)],
         "agent work",
@@ -914,9 +914,9 @@ def fig_layers(t):
             "system" if a.startswith(("Events", "Performance", "Automatic")) else None
         )
         f.box(
-            32 + col * 228,
+            32 + col * 229.6,
             380 + row * 78,
-            216,
+            217.6,  # 5 x 217.6 + 4 x 12 = 1136
             66,
             a,
             [b],
@@ -934,7 +934,7 @@ def fig_layers(t):
         ("Worker environments", "SAM3 · segmentation · RECAP"),
     ]
     for i, (a, b) in enumerate(ad):
-        f.box(32 + i * 290, 598, 276, 62, a, [b], size=13.5, subsize=12.5)
+        f.box(32 + i * 288, 598, 272, 62, a, [b], size=13.5, subsize=12.5)
     f.rect(32, 682, 1136, 110, fill=c["box"], stroke=c["boxedge"], r=12, elev=1)
     f.text(52, 704, "Rules that hold in every layer", size=13.5, weight=700)
     f.lines(
@@ -1155,9 +1155,10 @@ def fig_live(t):
             x + 3, 450, w - 6, 44, fill=fill, stroke=stroke, r=8, dash=(tone is None)
         )
     f.uses.add("now")
-    # "now": a marker sweeping the strip, behind the labels, so reading order is unchanged
+    # "now": a marker sweeping the strip, behind the labels, so reading order is unchanged;
+    # at rest (reduced motion) it stands in the gap between "idle" and "model labels" (x = 412)
     f.parts.append(
-        f'<g class="now" transform="translate(520 0)"><rect x="39" y="446" width="2" height="52" rx="1" fill="{c["accent"]}" fill-opacity="0.55"/>'
+        f'<g class="now" transform="translate(373 0)"><rect x="39" y="446" width="2" height="52" rx="1" fill="{c["accent"]}" fill-opacity="0.55"/>'
         f'<path d="M33 511 L47 511 L40 500 Z" fill="{c["accent"]}"/></g>'
     )
     for label, x, w, tone in segs:
