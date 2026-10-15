@@ -65,7 +65,7 @@ def test_committed_figures_are_what_the_generator_makes(tmp_path):
 def test_every_figure_has_both_themes_a_claim_and_nothing_executable():
     module = build_module(ATLAS)
     names = {re.sub(r"-(light|dark)\.svg$", "", p.name) for p in ATLAS.glob("*.svg")}
-    assert len(names) == 7
+    assert len(names) == 8
     for name in names:
         for theme in ("light", "dark"):
             path = ATLAS / f"{name}-{theme}.svg"

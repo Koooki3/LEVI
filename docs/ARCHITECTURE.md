@@ -1,6 +1,6 @@
 # Architecture atlas
 
-Seven figures that let a newcomer see how LEVI is built and what it has shown, in the order a reader usually asks: where it sits, what it is for, how it is layered, how a task runs, how it shares a GPU with a robot, who may move the robot, and what the evidence is. English only, because the labels are part of the drawing. Each figure has a light and a dark file; the page picks the one that matches your theme.
+Eight figures that let a newcomer see how LEVI is built and what it has shown, in the order a reader usually asks: where it sits, what it is for, how it is layered, how a task runs, how it shares a GPU with a robot, who may move the robot, what the evidence is, and how one automatic real-robot evaluation runs from start to finish. English only, because the labels are part of the drawing. Each figure has a light and a dark file; the page picks the one that matches your theme.
 
 The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SVG with no script and no external image, so they diff as text and render the same on GitHub and in a browser. A test regenerates them and fails when a committed file is out of date. Edit the script, run `python3 docs/atlas/build.py`, commit the result.
 
@@ -66,6 +66,15 @@ The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SV
 </picture>
 
 *Read the red and dashed boxes first.* Judging success improved on the plates task and missed the quality bar on the second task; time-segment labelling is at parity with a direct call; whether curated data improves a policy is not established. The numbers are the project's own, on blind test sets; the experiment record is not shipped. [Validation](VALIDATION.md) documents the anchored-review re-run.
+
+## 8 An AERI run, start to finish
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/atlas/08-aeri-flow-dark.svg">
+  <img alt="Swim lanes for the operator, the web page, terminal D, the policy service, the vision judge and the robot stack. Prepare, start, an eight-step round loop, what happens when something goes wrong, and the end. Only terminal D sends motion. Badges mark what is in main, what is on the integration branch and what is planned; hardware acceptance pending." src="assets/atlas/08-aeri-flow-light.svg">
+</picture>
+
+*Read it top to bottom, lane by lane; the loop in part 3 is one round.* Terminal D (`scripts/aeri.py execute`) runs the whole session and is the only part that sends motion; the page and the vision model watch, answer scene questions and take labels. An unknown verdict is never a success, a fault locks the run, and a stop is possible at any time. Each card has a badge: **main** is in the main branch; **branch** is on the integration branch and not yet in main (the one-terminal console with one-key answers, the start-pose check and policy warm-up, a policy unit that D starts itself, and resuming a stopped real run only from D); **planned** is designed but not built for real runs (pausing the policy while the model judges, and handling other event-adapter errors). **Software only: tested with fakes and offline runs; hardware acceptance is pending.** [Automatic evaluation pipeline](AUTOMATIC_PIPELINE.md).
 
 ---
 

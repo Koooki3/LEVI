@@ -29,7 +29,7 @@ LEVI 是面向机器人学习数据的本地工作台：浏览 LeRobot 数据集
   <img alt="从原始数据到更好的策略，五层金字塔；最顶层尚未证明。" src="docs/assets/atlas/02-pyramid-light.svg">
 </picture>
 
-另外五张图（分层、一个任务的步骤、机器人旁的实时标注、自动评测的权限划分、证据与局限）在[架构图集](docs/ARCHITECTURE.md)里（图中文字只有英文版）。
+另外六张图（分层、一个任务的步骤、机器人旁的实时标注、自动评测的权限划分、证据与局限、一次 AERI 评测的全流程）在[架构图集](docs/ARCHITECTURE.md)里（图中文字只有英文版）。
 
 ## main 上的新东西（未发布）
 
@@ -96,6 +96,21 @@ uv run levi                                   # 启动网页和 API
 ## 机器人评测的实时标注
 
 `levi live` 是独立的后台 LEVI，有自己的工作区。它监视机器人评测写入的目录，用本地模型（vLLM 上的 Qwen3.8）标注每个已完成的片段：时间片段、各时间片段的成败，以及整个片段是否成功。它从不写 rollout 目录、连接机器人或写人工成败标签；它的判定在所有地方都是自动、未经审核的，你在普通查看器里审核。`--auto-approve` 让服务里有审计的自动批准主体，只在它自己的工作区里，批准并提交它自己那次运行的时间片段，并标记 `auto`；不加它，每个批次最多要等人过三道关。它与机器人的策略服务器共用一块 GPU（“闸门”保证策略推理时模型不工作，空闲时 vLLM 睡眠；请在策略服务器之前启动它），需要 vLLM 环境和权重（`uv run levi install --profile live`），以及能在策略旁边放下模型的 NVIDIA GPU。**实时评测**页显示进度。命令（`levi live init`、`doctor`、`start --daemon --auto-approve --prewarm`、`status`、`stop`）、设置、GPU 规则和审计记录见[实时标注服务](docs/LIVE.zh-CN.md)（[English](docs/LIVE.md)）、[vLLM](docs/VLLM.zh-CN.md)。
+
+## 运行一次 AERI 评测
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/08-aeri-flow-dark.svg">
+  <img alt="一次 AERI 真机评测的泳道图：准备、启动、八步的每轮循环、出错时的分支和结束；只有终端 D 发送运动指令。硬件验收待做。" src="docs/assets/atlas/08-aeri-flow-light.svg">
+</picture>
+
+1. 启动机器人栈（机械臂、夹爪、robot server、健康监视器）和实时服务；写好作业文件（可用启动向导）、binding 和场景契约。
+2. `python scripts/aeri.py check --config JOB --binding BINDING`：只读预检，打印计划和 binding 的摘要。
+3. 在终端 D 运行 `python scripts/aeri.py execute --config JOB --binding BINDING --expect-plan PLAN_SHA --expect-binding BINDING_SHA`，按提示输入 `execute <run id>`。只有这个进程能让机器人动。
+4. 每一轮：复位场景，在 D 里按 Enter，在 D 或页面上回答场景问题（`y`、`n` 或 `u`）。单键控制台在集成分支上；main 上终端要求键入 `resume`。
+5. 在页面上看进度、答题、打标签；在页面或 D 里按 Ctrl+C 停止。出故障时运行被锁定：在运行日志（journal）里看原因，再开一次新的运行。
+
+目前只是软件，用假件测试；硬件验收待做。详见[自动评测流水线](docs/AUTOMATIC_PIPELINE.zh-CN.md)（[English](docs/AUTOMATIC_PIPELINE.md)）。
 
 ## Agent 辅助，人负责
 

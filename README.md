@@ -29,7 +29,7 @@ A robot policy is only as good as the data it learns from, and the data is full 
   <img alt="From raw data to a better policy, as a five-tier pyramid; the top tier is not established." src="docs/assets/atlas/02-pyramid-light.svg">
 </picture>
 
-Five more figures (layers, a task step by step, live annotation beside a robot, the automatic evaluation authority split, and the evidence with its limits) are in the [architecture atlas](docs/ARCHITECTURE.md).
+Six more figures (layers, a task step by step, live annotation beside a robot, the automatic evaluation authority split, the evidence with its limits, and an AERI run from start to finish) are in the [architecture atlas](docs/ARCHITECTURE.md).
 
 ## What is new on main (unreleased)
 
@@ -96,6 +96,21 @@ The LEVI mark opens **Home** (what needs you, what is running); the header opens
 ## Live annotation of robot evaluations
 
 `levi live` is a separate background LEVI with its own workspace. It watches the folders a robot evaluation writes and labels each finished episode with a local model (Qwen3.8 on vLLM): time segments, segment outcomes and a whole-episode success verdict. It never writes the rollout folders, connects to the robot or writes human outcome labels; its verdicts are automatic and unreviewed everywhere they appear, and you review them in the normal viewer. `--auto-approve` lets the service's audited automatic approver commit the time segments of its own runs, in its own workspace only, marked `auto`; without it each batch waits for a person at up to three gates. It shares one GPU with the robot's policy server (a gate keeps the model idle while the policy infers, vLLM sleeps when idle; start it before the policy server) and needs the vLLM environment and weights (`uv run levi install --profile live`) and an NVIDIA GPU with room beside the policy. The **Live evaluation** page shows progress. Commands (`levi live init`, `doctor`, `start --daemon --auto-approve --prewarm`, `status`, `stop`), settings, GPU rules and the audit trail: [Live annotation service](docs/LIVE.md) ([中文](docs/LIVE.zh-CN.md)), [vLLM](docs/VLLM.md).
+
+## Running an AERI evaluation
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/08-aeri-flow-dark.svg">
+  <img alt="One AERI real-robot run in swim lanes: prepare, start, an eight-step round loop, exceptions and the end; only terminal D sends motion. Hardware acceptance pending." src="docs/assets/atlas/08-aeri-flow-light.svg">
+</picture>
+
+1. Start the robot stack (arm, gripper, robot server, health monitor) and the live service; write the job file (the launch wizard can), the binding and the scene contract.
+2. `python scripts/aeri.py check --config JOB --binding BINDING`: a read-only preflight that prints the plan and binding digests.
+3. In terminal D, `python scripts/aeri.py execute --config JOB --binding BINDING --expect-plan PLAN_SHA --expect-binding BINDING_SHA`, then type the `execute <run id>` phrase it asks for. Only this process moves the robot.
+4. Each round: reset the scene, press Enter in D, answer the scene question (`y`, `n` or `u`) in D or on the page. The one-key console is on the integration branch; on main the terminal asks for a typed `resume`.
+5. Follow progress, answer and label on the page; stop from the page or with Ctrl+C in D. A fault locks the run: read the reason in the journal and start a new run.
+
+Software only, tested with fakes; hardware acceptance is pending. Details: [Automatic evaluation pipeline](docs/AUTOMATIC_PIPELINE.md) ([中文](docs/AUTOMATIC_PIPELINE.zh-CN.md)).
 
 ## Agents, with a person in charge
 
