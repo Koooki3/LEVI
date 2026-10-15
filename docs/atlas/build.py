@@ -1596,7 +1596,7 @@ def fig_aeri_flow(t):
     c = f.c
     f.heading(
         "An AERI run, start to finish",
-        "Terminal D runs the whole session, alone moves the robot and alone releases a round; the page and the vision model watch and label.",
+        "Terminal D runs the whole session and alone moves the robot; the page and the vision model watch and label.",
     )
     # legend: what the badges mean
     x = 32
