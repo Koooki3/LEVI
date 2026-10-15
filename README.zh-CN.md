@@ -101,14 +101,16 @@ uv run levi                                   # 启动网页和 API
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/08-aeri-flow-dark.svg">
-  <img alt="一次 AERI 真机评测的泳道图：准备、启动、八步的每轮循环、出错时的分支和结束；只有终端 D 发送运动指令。硬件验收待做。" src="docs/assets/atlas/08-aeri-flow-light.svg">
+  <img alt="一次 AERI 真机评测的泳道图：准备、启动、八步的每轮循环（R1–R8）、结束，以及随时可能出现的出错分支；只有终端 D 发送运动指令。硬件验收待做。" src="docs/assets/atlas/08-aeri-flow-light.svg">
 </picture>
+
+点开图片看原尺寸。
 
 1. 启动机器人栈（机械臂、夹爪、robot server、健康监视器）和实时服务；写好作业文件（可用启动向导）、binding 和场景契约。
 2. `python scripts/aeri.py check --config JOB --binding BINDING`：只读预检，打印计划和 binding 的摘要。
 3. 在终端 D 运行 `python scripts/aeri.py execute --config JOB --binding BINDING --expect-plan PLAN_SHA --expect-binding BINDING_SHA`，按提示输入 `execute <run id>`。只有这个进程能让机器人动。
-4. 每一轮：复位场景，在 D 里按 Enter，在 D 或页面上回答场景问题（`y`、`n` 或 `u`）。单键控制台在集成分支上；main 上终端要求键入 `resume`。
-5. 在页面上看进度、答题、打标签；在页面或 D 里按 Ctrl+C 停止。出故障时运行被锁定：在运行日志（journal）里看原因，再开一次新的运行。
+4. 每一轮（图中 R1–R8）：复位场景，在 D 里按 Enter，在 D 或页面上回答场景问题（`y`、`n` 或 `u`）。单键控制台在集成分支上；main 上终端要求键入 `resume`。
+5. 在页面上看进度、答题、打标签。要停止：在页面上点停止，或在 D 里按 Ctrl+C。出故障时运行被锁定：在运行日志（journal）里看原因，再开一次新的运行。
 
 目前只是软件，用假件测试；硬件验收待做。详见[自动评测流水线](docs/AUTOMATIC_PIPELINE.zh-CN.md)（[English](docs/AUTOMATIC_PIPELINE.md)）。
 

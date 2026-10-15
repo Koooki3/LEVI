@@ -114,19 +114,19 @@ ICONS = {  # 24-unit line icons, drawn with the tone colour
 # loop's motion CSS (where the dot is when each step lights up) is computed from
 # it, and Fig.CSS_PARTS has to hold that CSS before any figure is drawn.
 AF_COL0, AF_COLW, AF_BOXW, AF_BOXH = 52, 186, 168, 54
-AF_TOP3, AF_RET_X, AF_ROW1, AF_PITCH = 460, 40, 472, 66
+AF_TOP3, AF_RET_X, AF_ROW1, AF_PITCH = 480, 40, 492, 66
 AF_PERIOD = 32  # seconds per round of the dot
 # (lane, title, sub lines, status): lanes 0 operator, 1 page, 2 terminal D,
 # 3 policy service, 4 vision judge, 5 robot stack
 AF_LOOP = [
-    (0, "1 Set the scene", ("reset it, then Enter", "in D; frames follow"), "branch"),
-    (0, "2 Scene ready?", ("y / n / u, one key", "n or u: reset again"), "branch"),
-    (3, "3 Policy acts", ("action chunks;", "D sends each step"), "main"),
-    (2, "4 Event candidate", ("e.g. the gripper", "opens or closes"), "main"),
-    (4, "5 Judge", ("frames of the event;", "final verdict at end"), "main"),
-    (2, "6 Stop when done", ("confirmed goal or", "the step limit"), "main"),
-    (5, "7 Home, verify", ("pose and open gripper", "checked after homing"), "main"),
-    (2, "8 Prompt the reset", ("[Round n/N] reset,", "then press Enter"), "branch"),
+    (0, "R1 Set the scene", ("reset it, then Enter", "in D; frames follow"), "branch"),
+    (0, "R2 Scene ready?", ("y ready · n not ready", "u unsure (n, u: reset)"), "branch"),
+    (3, "R3 Policy acts", ("action chunks;", "D sends each step"), "main"),
+    (2, "R4 Event candidate", ("e.g. the gripper", "opens or closes"), "main"),
+    (4, "R5 Judge", ("frames of the event;", "final verdict at end"), "main"),
+    (2, "R6 Stop when done", ("confirmed goal or", "the step limit"), "main"),
+    (5, "R7 Home, verify", ("pose and open gripper", "checked after homing"), "main"),
+    (2, "R8 Prompt the reset", ("prints [Round n/N]", "and asks for a reset"), "branch"),
 ]
 
 
@@ -145,14 +145,18 @@ def af_row(i):
 
 def af_loop_path():
     """The dot's closed route: box centre to box centre along the arrows, then
-    back up the left margin to step 1. Starts halfway up the return line, so
-    the still frame shows the dot on the way to the next round."""
+    back up the left margin to R1. It starts on the arrow into R3 (the policy
+    acting), so the still frame shows the dot inside a round, about to run it."""
     centres = [(af_cx(k), af_row(i) + AF_BOXH // 2) for i, (k, *_) in enumerate(AF_LOOP)]
-    start = (AF_RET_X, (AF_TOP3 + centres[-1][1]) // 2)
-    pts = [start, (AF_RET_X, AF_TOP3), (centres[0][0], AF_TOP3), centres[0]]
-    for a, b in zip(centres, centres[1:]):
+    start = (af_x(AF_LOOP[2][0]) - 34, centres[2][1])
+    pts = [start, centres[2]]
+    for a, b in zip(centres[2:], centres[3:]):
         pts += [b] if a[0] == b[0] else [(a[0], b[1]), b]
-    pts += [(AF_RET_X, centres[-1][1]), start]
+    pts += [(AF_RET_X, centres[-1][1]), (AF_RET_X, AF_TOP3), (centres[0][0], AF_TOP3)]
+    for a, b in zip(centres[:2], centres[1:3]):
+        pts += [a] if not pts or pts[-1] != a else []
+        pts += [b] if a[0] == b[0] else [(a[0], b[1])]
+    pts += [start]
     return pts
 
 
@@ -160,7 +164,8 @@ def af_step_delays():
     """Seconds after the dot sets off at which it enters each step's box."""
     pts = af_loop_path()
     total = sum(abs(x1 - x0) + abs(y1 - y0) for (x0, y0), (x1, y1) in zip(pts, pts[1:]))
-    boxes = [(af_x(k), af_row(i)) for i, (k, *_) in enumerate(AF_LOOP)]
+    order = list(range(2, len(AF_LOOP))) + [0, 1]  # the route enters R3 first
+    boxes = [(af_x(AF_LOOP[i][0]), af_row(i)) for i in order]
     delays, s, nxt = [], 0, 0
     for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
         n = abs(x1 - x0) + abs(y1 - y0)
@@ -172,7 +177,7 @@ def af_step_delays():
                 nxt += 1
         s += n
     assert len(delays) == len(AF_LOOP), delays
-    return delays
+    return [delays[order.index(i)] for i in range(len(AF_LOOP))]
 
 
 AF_STEP_CSS = (
@@ -1401,7 +1406,7 @@ def fig_aeri_flow(t):
     f = Fig(
         "08-aeri-flow",
         1200,
-        1404,
+        1424,
         t,
         "An AERI run, start to finish: one terminal drives the robot, the page and the vision model watch, answer and label",
         "A swim-lane flow of one real-robot evaluation with the automatic pipeline (AERI). Prepare: the robot stack, the job, "
@@ -1430,8 +1435,12 @@ def fig_aeri_flow(t):
         f.text(x + w + 8, 90.5, words, size=12, fill=c["soft"])
         x += w + 8 + len(words) * 6.3 + 22
     f.text(1168, 90.5, "No badge: outside LEVI.  The dot marks the current step.", size=12, anchor="end", fill=c["soft"])
+    f.text(
+        32, 111, "Keys in D:  Enter = scene reset  ·  y / n / u = scene ready?  ·  Ctrl+C (q on the branch) = stop",
+        size=12, fill=c["soft"],
+    )
 
-    lane_top, lane_bottom = 104, 1098
+    lane_top, lane_bottom = 124, 1118
     lanes = [
         ("Operator", "you, at the robot", "person", "person"),
         ("Web page", "watch, answer, label", None, "doc"),
@@ -1456,7 +1465,7 @@ def fig_aeri_flow(t):
             f'<path d="M{60 + w + 8} {y + 12} L1160 {y + 12}" stroke="{c["edge"]}" stroke-width="1" stroke-dasharray="2 4"/>'
         )
 
-    def box(lane, y, title, sub, status=None, tone="lane"):
+    def box(lane, y, title, sub, status=None, tone="lane", badge=True):
         """A step card; the badge sits on its top edge, right of centre, clear of an arrow into the top."""
         tone = tones[lane] if tone == "lane" else tone
         x, w = af_x(lane), AF_BOXW
@@ -1472,7 +1481,7 @@ def fig_aeri_flow(t):
         f.text(x + 12, y + 19, title, size=12.5, weight=600, fill=c[tone] if tone else c["ink"])
         for j, line in enumerate(sub):
             f.text(x + 12, y + 35 + j * 14, line, size=11.5, fill=c["soft"])
-        if status:
+        if status and badge:
             f.tag(x + w - 8, y, status)
 
     def mid(y):
@@ -1482,19 +1491,19 @@ def fig_aeri_flow(t):
         return y + AF_BOXH
 
     # 1 Prepare
-    phase(158, "1  Prepare")
-    r = 192
+    phase(178, "1  Prepare")
+    r = 212
     box(0, r, "Pick the job", ("plan, binding and the", "scene contract"), "main")
     box(1, r, "Job wizard", ("writes the job file;", "dry runs only here"), "main")
     box(2, r, "aeri.py check", ("read-only preflight,", "prints the digests"), "main")
     box(4, r, "Live service up", ("serves the vision", "model; you start it"), "main")
     box(5, r, "Stack running", ("arm, gripper, robot", "server, health monitor"))
     f.arrow([(af_x(1) + AF_BOXW, mid(r)), (af_x(2), mid(r))])
-    ra, rb = 290, 358
+    ra, rb = 310, 378
     f.arrow([(af_cx(2), bottom(r)), (af_cx(2), ra)])
 
     # 2 Start
-    phase(258, "2  Start")
+    phase(278, "2  Start")
     box(0, ra, "Type execute <id>", ("confirms the plan and", "binding digests"), "main")
     box(2, ra, "Start checks", ("summary, start pose,", "policy warm-up"), "branch")
     box(3, rb, "Own unit, warmed", ("started by D, or the", "service you run"), "branch")
@@ -1507,7 +1516,7 @@ def fig_aeri_flow(t):
     f.text(af_cx(2), AF_TOP3 - 6, "round 1", size=12, anchor="middle", fill=c["soft"], weight=500)
 
     # 3 Every round
-    phase(424, "3  Every round")
+    phase(444, "3  Every round")
     rows = [af_row(i) for i in range(len(AF_LOOP))]
     for i, (k, title, sub, status) in enumerate(AF_LOOP):
         if i:  # arrow from the previous step, along the dot's route
@@ -1521,7 +1530,7 @@ def fig_aeri_flow(t):
     f.arrow(
         [(af_x(k8), mid(rows[-1])), (AF_RET_X, mid(rows[-1])), (AF_RET_X, AF_TOP3), (af_cx(0), AF_TOP3), (af_cx(0), rows[0])]
     )
-    f.text(AF_RET_X + 14, mid(rows[-1]) - 8, "y: next round", size=12, fill=c["soft"], weight=500)
+    f.text(AF_RET_X + 22, mid(rows[-1]) - 8, "next round", size=12, fill=c["soft"], weight=500)
     # the dot, under the cards: it disappears into the step it is in, and that step lights up.
     # pathLength scales the dash in browsers; the gap is longer than the path so a renderer
     # without pathLength still draws one dot
@@ -1532,12 +1541,14 @@ def fig_aeri_flow(t):
         f'stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="0.1 9999"/>'
     )
     for i, (k, title, sub, status) in enumerate(AF_LOOP):
-        box(k, rows[i], title, sub, status)
+        box(k, rows[i], title, sub, status, badge=False)
     for i, (k, *_) in enumerate(AF_LOOP):
         f.parts.append(
             f'<rect class="st s{i}" x="{af_x(k) - 2.5}" y="{rows[i] - 2.5}" width="{AF_BOXW + 5}" height="{AF_BOXH + 5}" '
             f'rx="11" fill="none" stroke="{c["accent"]}" stroke-width="2.5"/>'
         )
+    for i, (k, *_, status) in enumerate(AF_LOOP):  # badges above the highlight rings
+        f.tag(af_x(k) + AF_BOXW - 8, rows[i], status)
     # what happens beside the loop
     box(1, rows[1], "Or answer here", ("the scene question;", "first answer counts"), "main")
     f.arrow([(af_x(1), mid(rows[1])), (af_x(0) + AF_BOXW, mid(rows[1]))])
@@ -1547,8 +1558,8 @@ def fig_aeri_flow(t):
     f.arrow([(af_x(4) + AF_BOXW, mid(rows[4])), (af_x(5), mid(rows[4]))], dash=True)
 
     # 5 End
-    phase(1000, "5  End")
-    re_ = 1032
+    phase(1020, "4  End")
+    re_ = 1052
     box(2, re_, "Run ends", ("summary line and a", "clear exit status"), "branch")
     box(1, re_, "Results", ("metrics, labels and", "the run journal"), "main")
     box(0, re_, "Label the rounds", ("blind, on the page;", "keys in D (opt-in)"), "main")
@@ -1560,16 +1571,16 @@ def fig_aeri_flow(t):
     f.arrow([(af_x(0) + AF_BOXW, mid(re_)), (af_x(1), mid(re_))], tone="person")
 
     # 4 When something goes wrong
-    f.pill(222, 1110, "4  When something goes wrong", tone="danger")
-    by, bw = 1148, 267
+    f.pill(196, 1130, "Any time: when something goes wrong", tone="danger")
+    by, bw = 1168, 267
     branches = [
         (
-            "Event source fails (step 4)", "model", "main",
+            "Event source fails (R4)", "model", "main",
             ["Contract violations: events off for", "this round, noted; the round goes",
              "on. Other adapter errors: the same", "handling is planned."],
         ),
         (
-            "Verdict unknown (step 5)", "model", "main",
+            "Verdict unknown (R5)", "model", "main",
             ["Never counted as success: noted, the", "round runs to its step limit, your",
              "blind label decides. Pause-to-judge", "mode locks instead (planned)."],
         ),
@@ -1597,7 +1608,7 @@ def fig_aeri_flow(t):
         f.arrow([(ax, lane_bottom + 2), (ax, by - 9)], dash=True, cls="drift")
 
     # who may move the robot
-    ay = 1266
+    ay = 1286
     f.rect(32, ay, 1136, 84, fill=c["danger_bg"], stroke=c["danger"], r=12, sw=1.4, elev=1)
     f.text(52, ay + 23, "Who may move the robot", size=13.5, weight=700, fill=c["danger"])
     rules = [
@@ -1609,7 +1620,7 @@ def fig_aeri_flow(t):
         f.tag(120, ay + 39 + j * 17, status)
         f.text(132, ay + 43 + j * 17, line, size=12.5, fill=c["ink"])
     f.note(
-        1362,
+        1382,
         "Status: software, tested with fakes and offline runs. Pausing the policy to judge stays refused for real runs. "
         "Hardware acceptance pending.",
         tone="system",
