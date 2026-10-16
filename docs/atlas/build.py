@@ -1958,8 +1958,8 @@ def fig_perf(t):
         t,
         "Lighter without losing anything: the measured baseline and the guards that keep it lossless",
         "Measured on the project's machine: the whole Python suite about 21 minutes for 6,118 test cases, the frontend "
-        "check about 25 s, importing the service core 0.77 s and 176 MB, 147,234 lines of Python source. On the "
-        "integration branch: the agent workbench component split from 1,699 to 1,343 lines, a test selector that "
+        "check about 25 s, importing the service core 0.77 s and 176 MB, 147,234 lines of Python source. Now in "
+        "main: the agent workbench component split from 1,699 to 1,343 lines, a test selector that "
         "missed none of 619 deletion scenarios, and an inventory that fails when any route, command, setting, page or "
         "test disappears. No before-and-after timing is claimed.",
     )
@@ -2003,7 +2003,7 @@ def fig_perf(t):
     # the biggest frontend component, before and after its split
     f.rect(gx, 118, 548, 116, fill=c["box"], stroke=c["boxedge"])
     f.text(gx + 18, 146, "Agent workbench component, lines", size=15, weight=600)
-    f.tag(gx + 530, 138, "branch")
+    f.tag(gx + 530, 138, "main")
     scale = 330 / 1699
     for j, (label, n, tone) in enumerate(
         (("before", 1699, "faint"), ("after the split", 1343, "system"))
@@ -2037,7 +2037,7 @@ def fig_perf(t):
         f.rect(gx, y, 548, 76, fill=c["box"], stroke=c["boxedge"])
         f.text(gx + 18, y + 30, title, size=15, weight=600)
         f.text(gx + 18, y + 54, line, size=13, fill=c["soft"])
-        f.tag(gx + 530, y + 20, "branch")
+        f.tag(gx + 530, y + 20, "main")
 
     f.box(
         32,

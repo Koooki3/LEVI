@@ -81,10 +81,10 @@ The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SV
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/atlas/09-lightweight-dark.svg">
-  <img alt="Measured baseline: the whole Python suite about 21 minutes for 6,118 test cases, the frontend check about 25 s, importing the service core 0.77 s and 176 MB, 147,234 lines of Python source. Guards on the integration branch: the agent workbench component split from 1,699 to 1,343 lines, a test selector that missed none of 619 deletion scenarios, and an inventory that fails when anything disappears." src="assets/atlas/09-lightweight-light.svg">
+  <img alt="Measured baseline: the whole Python suite about 21 minutes for 6,118 test cases, the frontend check about 25 s, importing the service core 0.77 s and 176 MB, 147,234 lines of Python source. Guards now in main: the agent workbench component split from 1,699 to 1,343 lines, a test selector that missed none of 619 deletion scenarios, and an inventory that fails when anything disappears." src="assets/atlas/09-lightweight-light.svg">
 </picture>
 
-*A baseline, not a speed-up.* The left half is what checking one change costs today; the right half is how the slimming work proves it lost nothing: a smaller component with the same behaviour, a test selector checked against deliberate deletions, and an inventory of every route, command, setting, page and test that fails when one disappears. The three guards are on the integration branch, not yet in main. No before-and-after timing is shown, because the suite grew by about 900 test cases between the two timed runs.
+*A baseline, not a speed-up.* The left half is what checking one change costs today; the right half is how the slimming work proves it lost nothing: a smaller component with the same behaviour, a test selector checked against deliberate deletions, and an inventory of every route, command, setting, page and test that fails when one disappears. The three guards are in main. No before-and-after timing is shown, because the suite grew by about 900 test cases between the two timed runs.
 
 ---
 
