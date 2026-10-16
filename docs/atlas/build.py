@@ -160,12 +160,12 @@ AF_PERIOD = 32  # seconds per round of the dot
 # (lane, title, sub lines, status): lanes 0 operator, 1 page, 2 terminal D,
 # 3 policy service, 4 vision judge, 5 robot stack
 AF_LOOP = [
-    (0, "R1 Set the scene", ("reset it, then Enter", "in D; frames follow"), "branch"),
+    (0, "R1 Set the scene", ("reset it, then Enter", "in D; frames follow"), "main"),
     (
         0,
         "R2 Scene ready?",
         ("y ready · n not ready", "u unsure (n, u: reset)"),
-        "branch",
+        "main",
     ),
     (3, "R3 Policy acts", ("action chunks;", "D sends each step"), "main"),
     (2, "R4 Event candidate", ("e.g. the gripper", "opens or closes"), "main"),
@@ -176,7 +176,7 @@ AF_LOOP = [
         2,
         "R8 Prompt the reset",
         ("prints [Round n/N]", "and asks for a reset"),
-        "branch",
+        "main",
     ),
 ]
 
@@ -1588,10 +1588,11 @@ def fig_aeri_flow(t):
         "policy warm-up. Every round: set the scene, answer the scene question, the policy acts, an event candidate, the vision "
         "judgement, stop when done, home and verify, the reset prompt. Exceptions: an unknown verdict is never a success, event "
         "contract violations turn events off for the round, a fault locks the run, a stop is possible at any time. End: summary, "
-        "metrics, labels and the run journal. Only terminal D sends motion. Status: the round loop, judging, the home check and "
-        "page tracking are in main; the one-terminal console, the start checks, the policy unit D starts itself and terminal-only "
-        "resume are on the integration branch, not yet in main; pausing the policy to judge and the handling of other event "
-        "adapter errors are planned; hardware acceptance pending.",
+        "metrics, labels and the run journal. Only terminal D sends motion. Status: the round loop, judging, the home check, "
+        "page tracking, the one-terminal console, the start checks, the policy unit D starts itself, the terminal-only release "
+        "of a round and terminal-only resume are in main; pausing the policy to judge and the handling of other event adapter "
+        "errors are planned; a real-robot run needs the go-ahead of the person responsible for the robot, in person; hardware "
+        "acceptance pending.",
     )
     c = f.c
     f.heading(
@@ -1619,7 +1620,7 @@ def fig_aeri_flow(t):
     f.text(
         32,
         111,
-        "Keys in D:  Enter = scene reset  ·  y / n / u = scene ready?  ·  Ctrl+C (q on the branch) = stop",
+        "Keys in D:  Enter = scene reset  ·  y / n / u = scene ready?  ·  Ctrl+C = stop (q too, at the reset prompt)",
         size=12,
         fill=c["soft"],
     )
@@ -1721,10 +1722,8 @@ def fig_aeri_flow(t):
     box(
         0, ra, "Type execute <id>", ("confirms the plan and", "binding digests"), "main"
     )
-    box(2, ra, "Start checks", ("summary, start pose,", "policy warm-up"), "branch")
-    box(
-        3, rb, "Own unit, warmed", ("started by D, or the", "service you run"), "branch"
-    )
+    box(2, ra, "Start checks", ("summary, start pose,", "policy warm-up"), "main")
+    box(3, rb, "Own unit, warmed", ("started by D, or the", "service you run"), "main")
     box(1, rb, "Run appears", ("registered by D;", "reads its journal"), "main")
     f.arrow([(af_x(0) + AF_BOXW, mid(ra)), (af_x(2), mid(ra))], tone="person")
     f.arrow(
@@ -1812,7 +1811,7 @@ def fig_aeri_flow(t):
         rows[1],
         "Shows the question",
         ("the releasing answer", "is typed in D only"),
-        "planned",
+        "main",
     )
     f.arrow([(af_x(0) + AF_BOXW, mid(rows[1])), (af_x(1), mid(rows[1]))])
     box(5, rows[2], "Arm moves", ("only on D's guarded,", "acknowledged steps"), "main")
@@ -1834,7 +1833,7 @@ def fig_aeri_flow(t):
     # 5 End
     phase(1020, "4  End")
     re_ = 1052
-    box(2, re_, "Run ends", ("summary line and a", "clear exit status"), "branch")
+    box(2, re_, "Run ends", ("summary line and a", "clear exit status"), "main")
     box(1, re_, "Results", ("metrics, labels and", "the run journal"), "main")
     box(
         0,
@@ -1888,9 +1887,9 @@ def fig_aeri_flow(t):
             "main",
             [
                 "Home not verified, a policy error or",
-                "a gripper reply unconfirmed (branch)",
-                "holds the arm; D prints a fault",
-                "summary (branch). New run, new id.",
+                "a gripper reply unconfirmed holds",
+                "the arm; D prints a fault summary.",
+                "New run, new id.",
             ],
         ),
         (
@@ -1898,10 +1897,10 @@ def fig_aeri_flow(t):
             "person",
             "main",
             [
-                "Ctrl+C in D (q on the branch), or",
-                "Stop on the page: no more motion;",
+                "Ctrl+C in D (q at the reset prompt)",
+                "or Stop on the page: no more motion;",
                 "the run waits or ends. Resume by a",
-                "key in D (branch); never the page.",
+                "key in D only; never the page.",
             ],
         ),
     ]
@@ -1931,15 +1930,12 @@ def fig_aeri_flow(t):
             "main",
         ),
         (
-            (
-                "The page and the vision model show what they see; only terminal D's answer releases a round "
-                "(in main once the terminal-only release lands)."
-            ),
-            "planned",
+            "The page and the vision model show what they see; only terminal D's answer releases a round.",
+            "main",
         ),
         (
             "A stopped real run resumes only by a key in D; the page's resume button is refused for it.",
-            "branch",
+            "main",
         ),
     ]
     for j, (line, status) in enumerate(rules):
@@ -2089,8 +2085,8 @@ def fig_aeri_lite(t):
         "the scene and press Enter, answer whether it is ready, the policy acts and the model judges, then stop, "
         "home and verify. End with a summary, the run journal and blind labels on the page. Only terminal D "
         "sends motion and releases a round; the page and the vision model only show what they see. Software "
-        "tested with fakes and offline runs; hardware acceptance pending; real-robot runs are on hold until the "
-        "terminal-only release lands in main.",
+        "tested with fakes and offline runs; hardware acceptance pending; a real-robot run starts only with a "
+        "person's go-ahead at the robot.",
     )
     c = f.c
     f.parts.append(
@@ -2193,7 +2189,7 @@ def fig_aeri_lite(t):
     f.text(
         32,
         522,
-        "Real-robot runs are on hold until this release lands in main.",
+        "A real-robot run starts only with a person's go-ahead at the robot.",
         size=16,
         weight=600,
         fill=c["danger"],
@@ -2208,7 +2204,7 @@ def fig_aeri_lite(t):
     f.text(
         32,
         576,
-        "On main the terminal asks you to type resume; one key is on the integration branch.",
+        "Each answer is one key; at the reset prompt q also stops the run.",
         size=15,
         fill=c["faint"],
     )

@@ -83,14 +83,14 @@ The outputs above were recorded on 2026-10-15 with these exact files. The plan h
 
 ## 2 Your first real-robot run
 
-> **Real-robot runs are on hold** until the terminal-only release lands in main. From then on only terminal D answers the scene question and releases a round; the page and the vision model only show what they see.
+> **Real-robot runs need a person's go-ahead at the robot.** Only terminal D's answer releases a round; the page and the vision model only show what they see. Whether and when a real-robot run starts is decided in person by whoever is responsible for the robot.
 
 **Status.** The steps below are software tested with fakes and offline runs; hardware acceptance is pending. A real run needs a person at the robot with the emergency stop at hand, and is never started over HTTP.
 
 1. Start the robot stack (arm control, gripper, robot server, health monitor) and the live service; write the job file, the binding and the scene contract, and have a person confirm the contract.
 2. Run the read-only preflight `python scripts/aeri.py check --config JOB --binding BINDING`. It prints the plan and binding digests.
 3. In one terminal (terminal D in figure 8), run `python scripts/aeri.py execute …` with the digests from step 2, and type the confirmation phrase it asks for. Only this process sends motion.
-4. Each round: reset the scene, then answer whether it is ready in terminal D. The page shows the question; the answer that releases the round is typed in terminal D. On main the terminal asks for a typed `resume`; the one-key console (Enter, `y` / `n` / `u`) is on the integration branch.
+4. Each round: reset the scene, then answer whether it is ready in terminal D. The page shows the question; the answer that releases the round is typed in terminal D. Each answer is one key (Enter, `y` / `n` / `u`); at the reset prompt `q` also stops the run.
 5. Follow progress and label on the page. To end only the round under way with your own verdict, press `s` (success), `f` (failure) or `d` (discard) in terminal D while it runs: the arm holds and goes home as usual and the next round follows; a discarded round does not count and one more round replaces it, up to the run's number of rounds ("Ending a round early with a verdict" in [AUTOMATIC_PIPELINE.md](AUTOMATIC_PIPELINE.md)). Stop the whole run from the page or with Ctrl+C in terminal D. A fault locks the run: read the reason in the journal and start a new run.
 
 The details of each step, the error cases and the commands for stopping and resuming are in [Automatic evaluation pipeline](AUTOMATIC_PIPELINE.md); the README section [Running an AERI evaluation](../README.md#running-an-aeri-evaluation) has the same five steps next to figure 8.
