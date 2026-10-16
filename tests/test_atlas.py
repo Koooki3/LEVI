@@ -242,7 +242,10 @@ def test_chinese_variants_translate_every_drawn_string():
 
 
 def test_chinese_status_badges_use_the_readme_words():
-    """Badges read main / 集成分支 / 计划中 in Chinese, the words README.zh-CN.md uses."""
+    """Chinese badges use only main / 集成分支 / 计划中, never the English
+    "branch" or "planned" (the words came from README.zh-CN.md). When nothing
+    is on the integration branch no figure draws 集成分支, so only main and
+    计划中 must appear."""
     badges = set()
     for path in ATLAS.glob("*-zh-*.svg"):
         text = path.read_text(encoding="utf8")
@@ -253,4 +256,4 @@ def test_chinese_status_badges_use_the_readme_words():
                 text,
             )
         )
-    assert badges == {"main", "集成分支", "计划中"}
+    assert {"main", "计划中"} <= badges <= {"main", "集成分支", "计划中"}, badges

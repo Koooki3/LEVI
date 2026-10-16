@@ -261,7 +261,6 @@ ZH = {
     "main": "main",
     "in the main branch": "已在 main 分支",
     "branch": "集成分支",
-    "on the integration branch, not yet in main": "在集成分支上，尚未进 main",
     "planned": "计划中",
     "designed, not built (dashed)": "已设计，未实现（虚线）",
     "No badge: outside LEVI.  The dot marks the current step.": "无徽标：不属于 LEVI。圆点标出当前步骤。",

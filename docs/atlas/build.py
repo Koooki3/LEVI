@@ -1604,7 +1604,6 @@ def fig_aeri_flow(t):
     x = 32
     for kind, words in (
         ("main", "in the main branch"),
-        ("branch", "on the integration branch, not yet in main"),
         ("planned", "designed, not built (dashed)"),
     ):
         w = f.tag(x + est(f.TAGS[kind][0], 11.5, 6.6) + 14, 86, kind)
