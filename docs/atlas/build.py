@@ -520,6 +520,10 @@ class Fig:
         if sub:
             self.text(32, 64, sub, size=13.5, fill=self.c["soft"])
 
+    def footnote(self, y, s):
+        """A caveat or status line: neutral, no plate (STYLE.md: colour means one thing)."""
+        self.text(32, y, s, size=13.5, fill=self.c["faint"])
+
     def note(self, y, s, tone="gate"):
         c = self.c
         self.rect(32, y, self.w - 64, 32, fill=c[tone + "_bg"], stroke=c[tone], r=8)
@@ -1029,7 +1033,7 @@ def fig_live(t):
     f = Fig(
         "05-live-gpu",
         1200,
-        680,
+        630,
         t,
         "Live annotation beside a robot evaluation: one GPU, shared by turns",
         "While a robot evaluation writes rollouts, the live service labels finished episodes with a local model, but only "
@@ -1173,18 +1177,16 @@ def fig_live(t):
         )
     f.note(
         520,
-        "The service yields the GPU when another process computes; with a shared lock file configured it holds it while its model server is up. Start it before the policy server.",
-        tone="gate",
-    )
-    f.note(
-        560,
         "It never writes the rollout folders, never connects to the robot, never writes a human outcome label.",
         tone="danger",
     )
-    f.note(
-        600,
+    f.footnote(
+        578,
+        "The service yields the GPU when another process computes; with a shared lock file configured it holds it while its model server is up. Start it before the policy server.",
+    )
+    f.footnote(
+        602,
         "Status: the gate is verified with fakes; sleep and wake beside a real policy server are not yet verified with the real model.",
-        tone="system",
     )
     return f
 
@@ -1193,7 +1195,7 @@ def fig_aeri(t):
     f = Fig(
         "06-aeri-authority",
         1200,
-        640,
+        606,
         t,
         "Automatic evaluation (AERI): three parts joined by versioned messages, one part with motion authority",
         "A proposes events and judges goals and scenes, B grants resources and serves policy chunks, C alone may command "
@@ -1349,10 +1351,9 @@ def fig_aeri(t):
         size=13.5,
         subsize=13,
     )
-    f.note(
-        562,
+    f.footnote(
+        578,
         "AERI is this pipeline's code name. The launch wizard and run window configure and show; they cannot give A or B motion authority.",
-        tone="gate",
     )
     return f
 
