@@ -1930,7 +1930,7 @@ def fig_aeri_flow(t):
             "main",
         ),
         (
-            "The page and the vision model show what they see; only terminal D's answer releases a round.",
+            "Only terminal D's answer releases a round; the page and the vision model cannot.",
             "main",
         ),
         (
@@ -2084,7 +2084,7 @@ def fig_aeri_lite(t):
         "check. Start in terminal D with aeri.py execute and the typed confirmation phrase. Every round: reset "
         "the scene and press Enter, answer whether it is ready, the policy acts and the model judges, then stop, "
         "home and verify. End with a summary, the run journal and blind labels on the page. Only terminal D "
-        "sends motion and releases a round; the page and the vision model only show what they see. Software "
+        "sends motion and releases a round; the page and the vision model cannot. Software "
         "tested with fakes and offline runs; hardware acceptance pending; a real-robot run starts only with a "
         "person's go-ahead at the robot.",
     )
@@ -2181,7 +2181,7 @@ def fig_aeri_lite(t):
     f.text(
         32,
         496,
-        "Only terminal D sends motion and releases a round; the page and the vision model only show what they see.",
+        "Only terminal D sends motion and releases a round; the page and the vision model cannot.",
         size=18,
         weight=600,
         fill=c["danger"],

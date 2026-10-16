@@ -83,7 +83,7 @@ The outputs above were recorded on 2026-10-15 with these exact files. The plan h
 
 ## 2 Your first real-robot run
 
-> **Real-robot runs need a person's go-ahead at the robot.** Only terminal D's answer releases a round; the page and the vision model only show what they see. Whether and when a real-robot run starts is decided in person by whoever is responsible for the robot.
+> **Real-robot runs need a person's go-ahead at the robot.** Only terminal D's answer releases a round; the page and the vision model cannot. Whether and when a real-robot run starts is decided in person by whoever is responsible for the robot.
 
 **Status.** The steps below are software tested with fakes and offline runs; hardware acceptance is pending. A real run needs a person at the robot with the emergency stop at hand, and is never started over HTTP.
 
