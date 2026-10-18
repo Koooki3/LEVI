@@ -56,17 +56,25 @@ Whether a scene may skip a reset is decided by the Initial State Contract
 strategy (``reset_manager``), both T-C-08.
 """
 
+import contextlib
+import hashlib
+import json
 import math
+import os
+import re
 import threading
+import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from levi.domain import aeri
 
+from . import camera_meta
 from . import reset_manager as rm
 from . import scene_assessment as sa
 from . import state_machine as sm
+from . import subtask_loop as st
 from .adapters import events as ev
 from .adapters.owned_calls import OwnedCalls
 from .intervention import InferenceCycle, InterventionStopped, InterventionUnproven
@@ -93,12 +101,35 @@ MEMORY_NOTES = 5_000
 # verdict.
 IMPORTANT_NOTES = frozenset(
     {
+        "reverse_human_requested",
         "orchestrator_exception",
         "hold_failed",
         "motion_unacknowledged",
+        "motion_refused",
         "recorder_error",
         "early_stop_disputed",
         "stop_command_lost",
+        "home_measured",
+        "home_failed_detail",
+        "robot_homed",
+        "start_pose_checked",
+        # Which camera stopped (frame bus): it explains a camera_stale wait.
+        "camera_stale",
+        # A camera seq repeated on K steps (recorded only, never a stop).
+        "camera_seq_repeat",
+        "policy_unavailable",
+        "gripper_reply_queued",
+        "gripper_reply_confirmed",
+        "action_guard_refused",
+        # The bridge emits at most eight bounded diagnostic chunks.
+        "action_guard_detail_0000",
+        "action_guard_detail_0001",
+        "action_guard_detail_0002",
+        "action_guard_detail_0003",
+        "action_guard_detail_0004",
+        "action_guard_detail_0005",
+        "action_guard_detail_0006",
+        "action_guard_detail_0007",
     }
 )
 # Actions that stop motion: they act before the backlog of notes is written.
@@ -108,6 +139,25 @@ STOP_LOCK_WAIT_S = 0.05
 # A person's scene check is collected in slices this long (a stop is seen
 # between two).
 HUMAN_SLICE_NS = 500_000_000
+# An operator's verdict on the forward episode under way (terminal D's s/f/d,
+# L2-AERI-OPERATOR-EARLY-STOP): it ends this episode only; the run goes on.
+VERDICT_LABELS = ("success", "failure", "discard")
+VERDICT_SOURCES = ("terminal",)
+# The operator label it becomes once the episode's result is committed
+# (``metrics.label_operator``; ``discarded`` is left out of every truth).
+OPERATOR_LABEL_OF_VERDICT = {
+    "success": "success",
+    "failure": "failure",
+    "discard": "discarded",
+}
+VERDICT_NOTE = "operator_verdict"
+VERDICT_DROPPED_NOTE = "operator_verdict_dropped"
+VERDICT_LABEL_FAILED_NOTE = "operator_verdict_label_failed"
+# A verdict before the first step: the round never ran, there is no rollout
+# to label (the verdict's own note stays).
+VERDICT_NOT_LABELLED_NOTE = "operator_verdict_not_labelled"
+DISCARD_LIMIT_NOTE = "discard_limit_reached"
+_VERDICT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
 
 class ConfigError(ValueError):
@@ -137,6 +187,7 @@ class RunConfig:
     # After an operator's stop: home first (the design's path), or wait for
     # a person where the arm stands. The home still passes the safety check.
     home_after_operator_stop: bool = True
+    start_home: bool = False
     control_period_ns: int = 100_000_000
     chunk_timeout_ns: int = 500_000_000
     chunk_failure_limit: int = 3
@@ -165,6 +216,55 @@ class RunConfig:
     # waits up to ``human_scene_timeout_ns``, then counts as unavailable.
     scene_check: str = "provider"
     human_scene_timeout_ns: int = 600_000_000_000
+    # Rounds the operator discarded with ``d`` (L2-AERI-OPERATOR-EARLY-STOP)
+    # do not count towards ``episodes``: one more round replaces each, at
+    # most this many in a run (None: ``episodes``). Beyond it a discarded
+    # round is not replaced (note ``discard_limit_reached``): it still uses
+    # up a round but stays out of every statistic, so the run ends with
+    # fewer valid rounds.
+    max_discarded_rounds: int | None = None
+    # --- reset_strategy subtask_loop (levi/automatic/subtask_loop.py) ---------
+    # The task name the VLM plans from (the job's task.instruction).
+    subtask_task: str | None = None
+    # One subtask is one episode of at most this many steps.
+    subtask_max_steps: int = 200
+    # A subtask whose check says false runs again at most this many times.
+    subtask_max_retries: int = 5
+    # Optional cap on the subtasks of one loop's plan (None: no cap).
+    max_subtasks_per_loop: int | None = None
+    # subtask.early_check (subtask_loop.EarlyCheck; None, the default: every
+    # subtask episode runs its whole step budget before its check).
+    subtask_early_check: st.EarlyCheck | None = None
+    # MemAvailable needed before a level-1 sleep (the weights go to pinned
+    # host memory that cannot be swapped: about 18.5-20 GiB).
+    vlm_min_free_mem_gib: float = 28.0
+    # What happens below it: wait for a person, sleep at level 2 (weights
+    # dropped, reloaded on wake), or keep the VLM awake and idle while the
+    # policy runs (only when the GPU has ``vlm_stay_awake_min_free_gpu_mib``).
+    vlm_sleep_fallback: str = "wait_human"
+    vlm_stay_awake_min_free_gpu_mib: int = 4096
+    # Free GPU memory (nvidia-smi) needed before a wake. None: derived from the
+    # VLM's profile (``vlm_power.wake_need_mib()``: its budget less what it
+    # keeps while asleep, plus the live service's wake margin), else
+    # ``subtask_loop.DEFAULT_WAKE_NEED_MIB``.
+    vlm_wake_min_free_gpu_mib: int | None = None
+    # Added to that need: the wake threshold is need + headroom (>= 1024 MiB,
+    # so a wake never leaves the card at the edge mid-round).
+    vlm_wake_headroom_mib: int = 1024
+    # sleep: the VLM sleeps whenever the policy runs (the default); co_resident:
+    # a smaller VLM stays loaded beside the policy, never put to sleep, and is
+    # sent no request while the policy runs (its GPU check is the startup's,
+    # for both models together).
+    vlm_alternation: str = "sleep"
+    # co_resident only: free GPU memory the startup check needs with both
+    # models (and anything else on the card) loaded.
+    vlm_co_resident_headroom_mib: int = 2048
+    # Home at the end of each loop (v1: always).
+    home_after_loop: bool = True
+    # Rollout folders of the forward and the reverse loop (None:
+    # ``<forward_folder>__subtask`` and ``<forward_folder>__reverse``).
+    subtask_forward_folder: str | None = None
+    subtask_reverse_folder: str | None = None
 
     def __post_init__(self):
         if type(self.episodes) is not int or self.episodes < 0:
@@ -188,11 +288,22 @@ class RunConfig:
             value = getattr(self, name)
             if type(value) is not int or value < 1:
                 raise ConfigError(f"{name} is a whole number >= 1")
+        if self.max_discarded_rounds is not None and (
+            type(self.max_discarded_rounds) is not int or self.max_discarded_rounds < 0
+        ):
+            raise ConfigError("max_discarded_rounds is a whole number >= 0 or None")
         if self.on_scene_unknown not in ("reset", "wait_human"):
             raise ConfigError("on_scene_unknown is reset or wait_human")
         if type(self.max_reset_attempts) is not int or self.max_reset_attempts < 0:
             raise ConfigError("max_reset_attempts is a whole number >= 0")
-        for name in ("reset_enabled", "home_after_operator_stop"):
+        if self.start_home and self.reset_strategy != "subtask_loop":
+            raise ConfigError("start_home requires subtask_loop")
+        if (
+            self.subtask_early_check is not None
+            and self.reset_strategy != "subtask_loop"
+        ):
+            raise ConfigError("subtask_early_check requires subtask_loop")
+        for name in ("reset_enabled", "home_after_operator_stop", "start_home"):
             if type(getattr(self, name)) is not bool:
                 raise ConfigError(f"{name} is true or false")
         if not isinstance(self.termination, TerminationConfig):
@@ -236,6 +347,8 @@ class RunConfig:
             self.strategy()
         except rm.StrategyError as exc:
             raise ConfigError(str(exc)) from None
+        if self.reset_strategy == "subtask_loop":
+            self._check_subtask_loop()
         if self.scene_check not in aeri.SCENE_CHECKS:
             raise ConfigError(f"scene_check is one of {', '.join(aeri.SCENE_CHECKS)}")
         if self.scene_check == "operator_attested":
@@ -249,6 +362,88 @@ class RunConfig:
                     "scene_check operator_attested needs an Initial State "
                     "Contract: the person answers its predicates"
                 )
+
+    def _check_subtask_loop(self) -> None:
+        for name in ("subtask_max_steps", "subtask_max_retries"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 1:
+                raise ConfigError(f"{name} is a whole number >= 1")
+        cap = self.max_subtasks_per_loop
+        if cap is not None and (type(cap) is not int or cap < 1):
+            raise ConfigError("max_subtasks_per_loop is a whole number >= 1 or None")
+        early = self.subtask_early_check
+        if isinstance(early, dict):
+            try:
+                early = st.EarlyCheck(**early)
+            except (TypeError, ValueError) as exc:
+                raise ConfigError(str(exc)) from None
+            object.__setattr__(self, "subtask_early_check", early)
+        if early is not None and not isinstance(early, st.EarlyCheck):
+            raise ConfigError("subtask_early_check is an EarlyCheck or None")
+        for name in ("vlm_min_free_mem_gib",):
+            value = getattr(self, name)
+            if (
+                type(value) not in (int, float)
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise ConfigError(f"{name} is a positive number (GiB)")
+        headroom = self.vlm_wake_headroom_mib
+        if type(headroom) is not int or headroom < 1024:
+            raise ConfigError("vlm_wake_headroom_mib is a whole number >= 1024 (MiB)")
+        need = self.vlm_wake_min_free_gpu_mib
+        if need is not None and (type(need) is not int or need < 1):
+            raise ConfigError("vlm_wake_min_free_gpu_mib is a whole number >= 1 (MiB)")
+        for name in (
+            "vlm_stay_awake_min_free_gpu_mib",
+            "vlm_co_resident_headroom_mib",
+        ):
+            value = getattr(self, name)
+            if type(value) is not int or value < 1:
+                raise ConfigError(f"{name} is a whole number >= 1 (MiB)")
+        if self.vlm_alternation not in ("sleep", "co_resident"):
+            raise ConfigError("vlm_alternation is sleep or co_resident")
+        if self.vlm_sleep_fallback not in ("wait_human", "level2", "stay_awake"):
+            raise ConfigError("vlm_sleep_fallback is wait_human, level2 or stay_awake")
+        if self.home_after_loop is not True:
+            raise ConfigError(
+                "home_after_loop must be true: each loop ends at home, where the "
+                "read-only start-pose check of the next loop finds the arm"
+            )
+        task = self.subtask_task
+        if not isinstance(task, str) or not task.strip() or len(task) > aeri.MAX_TEXT:
+            raise ConfigError(
+                "subtask_loop needs the task name (task.instruction) the VLM plans from"
+            )
+        if self.termination.inference_mode != "legacy_async":
+            raise ConfigError(
+                "subtask_loop runs each subtask as an ordinary episode "
+                "(legacy_async): event_pause_judge is refused"
+            )
+        if self.termination.allow_early_stop:
+            raise ConfigError(
+                "subtask_loop needs termination.allow_early_stop false: the VLM "
+                "sleeps while the policy runs, so nothing judges mid-episode"
+            )
+        if self.scene_check != "provider":
+            raise ConfigError("subtask_loop has no person's scene check")
+        if not self.reset_enabled:
+            raise ConfigError("subtask_loop needs reset enabled (its reverse loop)")
+        base = self.forward_folder
+        found = {
+            "subtask_forward_folder": self.subtask_forward_folder or f"{base}__subtask",
+            "subtask_reverse_folder": self.subtask_reverse_folder or f"{base}__reverse",
+        }
+        for name, value in found.items():
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", value):
+                raise ConfigError(f"{name} {value!r} is not a folder name")
+            object.__setattr__(self, name, value)
+        if found["subtask_forward_folder"] == found["subtask_reverse_folder"]:
+            raise ConfigError("the forward and the reverse loop need their own folders")
+
+    @property
+    def subtask_mode(self) -> bool:
+        return self.reset_strategy == "subtask_loop"
 
     @property
     def scene_wait_ns(self) -> int:
@@ -288,6 +483,14 @@ class Episode:
     scene_decision: str | None = None
     judgement_ids: list = field(default_factory=list)
     bounded_failure: bool = False
+    policy_exception_before_motion: bool = False
+    # The operator's verdict that ended this episode (``operator_verdict``).
+    verdict: dict | None = None
+    # subtask.early_check: the newest trigger event not yet checked, and the
+    # trigger that ended this episode for an early check (stop reason
+    # ``subtask_early_check``); steps on the attempt's scale.
+    early_pending: dict | None = None
+    early_trigger: dict | None = None
 
 
 @dataclass
@@ -336,6 +539,22 @@ def _scene_facts(message) -> dict:
     }
 
 
+def _discarded_by(event) -> str | None:
+    """The episode an ``operator_verdict`` note discards (``d``), if any."""
+    if event.record != "note" or event.note is None:
+        return None
+    if event.note.code != VERDICT_NOTE:
+        return None
+    try:
+        value = json.loads(event.note.detail)
+    except ValueError:
+        return None
+    if isinstance(value, dict) and value.get("label") == "discard":
+        episode = value.get("episode_id")
+        return episode if isinstance(episode, str) else None
+    return None
+
+
 def _code(text: str) -> str:
     cleaned = "".join(c if c.isalnum() or c == "_" else "_" for c in str(text).lower())
     cleaned = cleaned.strip("_") or "unspecified"
@@ -363,9 +582,19 @@ class Orchestrator:
         evidence=True,
         intervention: InferenceCycle | None = None,
         owned_calls: OwnedCalls | None = None,
+        subtask_vlm=None,
+        vlm_power=None,
+        gate=None,
     ):
-        self._check_intervention(config, clock, intervention)
+        self._check_intervention(config, clock, intervention, robot)
         self._check_owned_calls(owned_calls, intervention)
+        self._check_subtask_parts(config, policy, subtask_vlm, vlm_power, gate)
+        # subtask_loop (levi/automatic/subtask_loop.py): the VLM's three
+        # questions, its sleep/wake, and terminal D's two questions.
+        self.subvlm = subtask_vlm
+        self.power = vlm_power
+        self.gate = gate
+        self.sub = st.SubtaskState() if config.subtask_mode else None
         self.owned_calls = owned_calls
         self.intervention = intervention
         self.journal = journal
@@ -398,11 +627,37 @@ class Orchestrator:
         self._stop_gen = 0
         # Stop ids consumed since the last resume (``repeated`` if sent again).
         self._consumed_stops: set = set()
+        # The operator's verdict on the forward episode under way, not yet
+        # taken by the loop (one at most), and every verdict id seen.
+        # Guarded by ``_stop_lock`` too.
+        self._verdict: dict | None = None
+        self._verdict_ids: set = set()
+        self._reverse_window: dict | None = None
+        self._reverse_requests: dict = {}
+        self._reverse_pending: dict | None = None
         self._violation_hold = False
+        # Set by a closed-gate home the bridge refused before its first command
+        # (home_not_executed): the next hook use first rebuilds the binding's
+        # closed interval with stop_admission.
+        self._rebuild_admission = False
+        # Set with it: the arm did not go home, so the next preflight checks the
+        # start pose once, read-only (Robot.start_pose), before anything runs.
+        # Episode history proves startup has ended after a process restart.
+        # A startup crash without any episode remains closed to replay/resume.
+        self.startup_home_active = config.start_home and not any(
+            event.episode_id is not None for event in journal.events
+        )
+        self.startup_home_ready = None
+        self._startup_gate_mark = None
+        self._startup_stop_gen = None
+        self._startup_failed = False
+        self.startup_stop_seen = threading.Event()
+        self._check_start_pose = False
         self._scene_violations = 0
         self._reset_attempts = 0
         self._last_forward: str | None = None
         self.halted: str | None = None
+        self.fault_reason: str | None = None
         self.ctx: Episode | None = None
         self.recovery = None
         # Scene evidence (T-CL-04): ``True`` keeps it in the run's folder,
@@ -429,7 +684,7 @@ class Orchestrator:
     # --- construction --------------------------------------------------------------
 
     @staticmethod
-    def _check_intervention(config, clock, intervention):
+    def _check_intervention(config, clock, intervention, robot=None):
         if (
             config.termination.inference_mode != "event_pause_judge"
             and intervention is not None
@@ -451,6 +706,37 @@ class Orchestrator:
                 raise ConfigError(
                     "event_pause_judge requires the owned provider scene path"
                 )
+            # A finished paused episode is homed under the closed gate: a robot
+            # without that entry would leave the arm where the judgement found it.
+            if not callable(getattr(robot, "home_under_closed_gate", None)):
+                raise ConfigError(
+                    "event_pause_judge requires a robot with home_under_closed_gate"
+                )
+
+    @staticmethod
+    def _check_subtask_parts(config, policy, subtask_vlm, vlm_power, gate):
+        given = (subtask_vlm, vlm_power, gate)
+        if not config.subtask_mode:
+            if any(part is not None for part in given):
+                raise ConfigError(
+                    "subtask parts belong only to reset_strategy subtask_loop"
+                )
+            return
+        if any(part is None for part in given):
+            raise ConfigError(
+                "subtask_loop needs the subtask VLM, its sleep/wake (vlm_power) "
+                "and terminal D's gate"
+            )
+        import inspect
+
+        try:
+            accepts = "prompt" in inspect.signature(policy.acquire).parameters
+        except (TypeError, ValueError):
+            accepts = False
+        if not accepts:
+            raise ConfigError(
+                "subtask_loop needs a policy whose acquire takes the episode's prompt"
+            )
 
     @staticmethod
     def _check_owned_calls(owned_calls, intervention):
@@ -470,7 +756,9 @@ class Orchestrator:
         """Start a run: its header names the reset mode and the scene check;
         ``plan`` (the job's normalised plan, hashing to the config's
         ``plan_sha256``) is kept as the run folder's ``plan.json``."""
-        cls._check_intervention(config, parts["clock"], parts.get("intervention"))
+        cls._check_intervention(
+            config, parts["clock"], parts.get("intervention"), parts.get("robot")
+        )
         cls._check_owned_calls(parts.get("owned_calls"), parts.get("intervention"))
         clock = parts["clock"]
         process = process_identity()
@@ -497,7 +785,9 @@ class Orchestrator:
         first (never replays anything). A config whose reset mode or scene
         check differs from the run header's is refused (``E_PLAN``, with a
         ``run_header_mismatch`` note)."""
-        cls._check_intervention(config, parts["clock"], parts.get("intervention"))
+        cls._check_intervention(
+            config, parts["clock"], parts.get("intervention"), parts.get("robot")
+        )
         cls._check_owned_calls(parts.get("owned_calls"), parts.get("intervention"))
         clock = parts["clock"]
         journal = Journal.open(
@@ -516,9 +806,30 @@ class Orchestrator:
             **orchestrator._crash_result(),
         )
         orchestrator.recovery = found
+        orchestrator._restore_home_wait()
         orchestrator._recover_rollouts()
         orchestrator._tell(orchestrator.state)
         return orchestrator
+
+    def _restore_home_wait(self) -> None:
+        """A restart while the run waited on a home that sent nothing
+        (``home_not_executed``) or on its failed pose check
+        (``home_pose_not_reached``) keeps both duties of that wait: the start
+        pose check before going on and the binding's interval rebuild. Taken
+        from the journal: the last committed move into WAIT_HUMAN has one of
+        those reasons and no episode started after it (an episode start comes
+        after the rebuild). Re-checking a pose that already passed is harmless."""
+        waiting = False
+        for event in self.journal.events:
+            if event.record != "committed":
+                continue
+            if event.to_state == "WAIT_HUMAN":
+                waiting = event.reason in ("home_not_executed", "home_pose_not_reached")
+            elif event.to_state in ("FORWARD_ACTIVE", "RESET_ACTIVE"):
+                waiting = False
+        if waiting:
+            self._check_start_pose = True
+            self._rebuild_admission = True
 
     def _recover_rollouts(self) -> None:
         """Rollouts whose seal the journal did not commit become
@@ -561,14 +872,61 @@ class Orchestrator:
         self.numbers = {"forward": 0, "reset": 0}
         self.policy_epoch = 0
         self.completed_forward = 0
+        # Rounds discarded with ``d`` and replaced by another round (at most
+        # ``discard_limit``); the journal's ``operator_verdict`` notes say
+        # which, in the same order as the live run decided it.
+        self.discarded_forward = 0
+        # Discarded rounds beyond the limit: not replaced, never valid.
+        self.discarded_beyond_limit = 0
+        discards: set = set()
+        if self.config.subtask_mode:
+            self._read_back_subtasks()
         for event in self.journal.events:
             if event.episode_id:
                 _, role, number = aeri.episode_parts(event.episode_id)
                 self.numbers[role] = max(self.numbers[role], number)
             if event.policy_epoch is not None:
                 self.policy_epoch = max(self.policy_epoch, event.policy_epoch)
-            if self._counts(event):
-                self.completed_forward += 1
+            discarded = _discarded_by(event)
+            if discarded is not None:
+                discards.add(discarded)
+            if self._counts(event) and not self.config.subtask_mode:
+                if (
+                    event.episode_id in discards
+                    and self.discarded_forward < self.discard_limit
+                ):
+                    self.discarded_forward += 1
+                else:
+                    self.completed_forward += 1
+                    if event.episode_id in discards:
+                        self.discarded_beyond_limit += 1
+
+    @property
+    def discard_limit(self) -> int:
+        """How many discarded rounds a run replaces (``max_discarded_rounds``,
+        by default the run's number of rounds)."""
+        limit = self.config.max_discarded_rounds
+        return self.config.episodes if limit is None else limit
+
+    def _replaces(self, ctx: Episode) -> bool:
+        """This sealed round was discarded with ``d`` and another round
+        replaces it (within ``discard_limit``). Beyond the limit it is not
+        replaced: it uses up one of the run's rounds but stays out of every
+        statistic, so the run ends with fewer valid rounds
+        (``discard_limit_reached`` says so)."""
+        verdict = ctx.verdict
+        if verdict is None or verdict.get("label") != "discard":
+            return False
+        if self.discarded_forward < self.discard_limit:
+            return True
+        self.discarded_beyond_limit += 1
+        self.journal.note(
+            DISCARD_LIMIT_NOTE,
+            f"{ctx.episode_id}: discarded, not replaced (limit "
+            f"{self.discard_limit}); the run ends with fewer valid rounds",
+            authority=self._auth(),
+        )
+        return False
 
     def _crash_result(self) -> dict:
         """The result of the episode a crash cut short, for the recovery's
@@ -606,11 +964,7 @@ class Orchestrator:
             for e in mine
         )
         _, role, number = aeri.episode_parts(episode)
-        folder = (
-            self.config.forward_folder
-            if role == "forward"
-            else self.config.reset_folder
-        )
+        folder = self._folder(role)
         return {
             "episode_id": episode,
             "episode_role": role,
@@ -672,6 +1026,10 @@ class Orchestrator:
 
     # --- notes ---------------------------------------------------------------------
 
+    def note(self, code: str, detail: str = "") -> None:
+        """A fact from the entry point (start pose, warm-up) for the journal."""
+        self._note(code, detail)
+
     def _note(self, code: str, detail: str = "") -> None:
         """Count a note; it reaches the journal at the next flush."""
         code = _code(code)
@@ -731,6 +1089,8 @@ class Orchestrator:
         evidence=(),
         expected_seq: int | None = None,
     ) -> TxResult:
+        if to not in ("RESET_ACTIVE", "RESET_VERIFY", "RESET_FINALIZE"):
+            self._close_reverse_window()
         auth = authority or self._auth()
         non_idempotent = kind in sm.NON_IDEMPOTENT_KINDS
         role = ctx.role if ctx else None
@@ -834,6 +1194,13 @@ class Orchestrator:
     ) -> None:
         """Lock the run. An episode still open gets its result (unknown,
         stopped by ``reason``)."""
+        self._close_reverse_window()
+        self.fault_reason = reason
+        # A verdict registered for the episode the fault ends is never taken
+        # (it would block the next episode's verdict): cleared now, noted
+        # after the lock's hold.
+        with self._stop_lock:
+            dropped, self._verdict = self._verdict, None
         ctx = self.ctx
         if ctx is not None and ctx.rollout is not None and ctx.sealed is None:
             try:
@@ -865,6 +1232,15 @@ class Orchestrator:
             authority=self._auth("safety_guard" if guard else "orchestrator"),
         )
         self.ctx = None
+        # Again once FAULT_LOCKED is committed: a verdict registered in the
+        # gap before the commit (the state still FORWARD_ACTIVE) is cleared
+        # too; none can be registered from now on.
+        with self._stop_lock:
+            late, self._verdict = self._verdict, None
+        for found in (dropped, late):
+            if found is not None:
+                with contextlib.suppress(Exception):  # the lock matters more
+                    self._drop_verdict_note(found, f"the run locked ({reason})")
 
     def _fault_result(
         self, ctx: Episode, reason: str, stop_reason: str | None = None
@@ -874,11 +1250,7 @@ class Orchestrator:
         stop = stop_reason or reason
         if stop not in aeri.STOP_REASONS:
             stop = "watchdog_timeout"
-        folder = (
-            self.config.forward_folder
-            if ctx.role == "forward"
-            else self.config.reset_folder
-        )
+        folder = self._folder(ctx.role)
         return {
             "task_outcome": "unknown",
             "stop_reason": stop,
@@ -899,6 +1271,7 @@ class Orchestrator:
     def _contain(self, exc: Exception) -> None:
         """An exception escaped the loop: no motion stays authorised, the
         robot holds, the run locks (or the orchestrator halts in memory)."""
+        self._close_reverse_window()
         self.fence.revoke()
         if self.intervention is not None:
             self.intervention.interrupt(
@@ -954,6 +1327,163 @@ class Orchestrator:
 
     # --- operator commands ------------------------------------------------------------
 
+    def request_start_home(self, command_id, *, expected_seq, confirmation):
+        """Explicit first-start-only home; no episode, retries or fault rearm."""
+        with self._lock:
+            if self.journal.by_command(command_id):
+                return CommandResult(False, "command_used", self.state, True)
+            if type(command_id) is not str or not command_id or len(command_id) > 128:
+                return CommandResult(False, "bad_command", self.state)
+            if type(expected_seq) is not int or expected_seq != self.journal.next_seq:
+                return CommandResult(False, "stale_sequence", self.state)
+            if (
+                not self.config.start_home
+                or not self.startup_home_active
+                or self.state != "PREFLIGHT"
+                or self.ctx is not None
+            ):
+                return CommandResult(False, "startup_home_unavailable", self.state)
+            # A restart never authorizes replay, even after a generic resume.
+            if self.recovery is not None or any(
+                e.episode_id is not None
+                or e.reason == "recovery_ambiguous"
+                or (e.reason == "startup_home_requested" and e.record == "committed")
+                for e in self.journal.events
+            ):
+                return CommandResult(False, "startup_home_already_used", self.state)
+            if (
+                not isinstance(confirmation, dict)
+                or set(confirmation)
+                != {"object_handled", "path_clear", "gripper_will_open"}
+                or any(v is not True for v in confirmation.values())
+            ):
+                return CommandResult(False, "confirmations_missing", self.state)
+            if not self._startup_ready():
+                return CommandResult(False, "startup_safety_not_ready", self.state)
+
+            def perform():
+                if self.robot.admission_snapshot().mode != "open":
+                    return CommandResult(False, "startup_gate_not_owned", self.state)
+                with self._stop_lock:
+                    if self._stops or self.startup_stop_seen.is_set():
+                        return CommandResult(
+                            False, "startup_stop_before_home", self.state
+                        )
+                    generation = self._stop_gen
+                    closure = self.robot.close_admission_if_open()
+                before = self._gate_counts()
+                if before is None or not self.robot.admission_snapshot().closed:
+                    raise ValueError("startup home closure or counters unavailable")
+
+                reached = False
+
+                def act(prepared):
+                    nonlocal reached
+                    ready = (
+                        self._startup_ready()
+                    )  # potentially slow health I/O outside stop lock
+                    with self._stop_lock:
+                        snap = self.robot.admission_snapshot()
+                        if (
+                            snap.generation,
+                            snap.closed_from_ns,
+                        ) != closure or not snap.closed:
+                            return "no", "none", "startup_closure_changed"
+                        if (
+                            not ready
+                            or self._stops
+                            or self.startup_stop_seen.is_set()
+                            or self._stop_gen != generation
+                        ):
+                            return "no", "none", "startup_stop_before_home"
+                        token = self.fence.issue(
+                            sm.MotionToken(
+                                run_id=self.config.run_id,
+                                transaction_id=prepared.transaction_id,
+                                control_epoch=prepared.control_epoch,
+                                kind="home",
+                                episode_id=self.config.run_id + ":startup-home",
+                                policy_epoch=None,
+                                expires_mono_ns=self._now()
+                                + self.config.home_timeout_ns,
+                            )
+                        )
+                    try:
+                        reached = True
+                        result = self.robot.home_under_closed_gate(token=token)
+                    finally:
+                        self.fence.revoke()
+                    self._result_notes(result)
+                    if result.executed == "yes" and (
+                        not self._startup_ready() or not self._start_pose_ok()
+                    ):
+                        return (
+                            "unknown",
+                            "robot_server",
+                            "startup_home_postcheck_failed",
+                        )
+                    return result.executed, "robot_server", result.detail
+
+                tx = self._tx(
+                    "PREFLIGHT",
+                    "startup_home_requested",
+                    kind="home",
+                    act=act,
+                    authority=self._auth("operator", command_id),
+                    expected_seq=expected_seq,
+                    step=expected_seq,
+                )
+                self.fence.revoke()
+                if tx.executed != "yes":
+                    self._startup_failed = True
+                    self._note("home_failed_detail", tx.detail)
+                    if (
+                        tx.executed == "no"
+                        and reached
+                        and self._home_sent_nothing(before)
+                    ):
+                        self._to_human("startup_home_not_executed")
+                    else:
+                        self._fault("home_failed")
+                    return CommandResult(False, tx.detail, self.state)
+                self._startup_stop_gen = generation
+                self._startup_gate_mark = self.robot.admission_snapshot()
+                mark = self._startup_gate_mark
+                if (
+                    not mark.closed
+                    or mark.mode != "closed"
+                    or mark.generation != closure[0] + 2
+                    or mark.home_only_from_ns is None
+                    or mark.home_only_from_ns < closure[1]
+                    or self._stop_gen != generation
+                ):
+                    self._startup_gate_mark = None
+                    raise ValueError("startup home did not preserve the owned closure")
+                self._note(
+                    "startup_home_completed",
+                    "gate closed; independent round release required",
+                )
+                return CommandResult(True, "startup_home_completed", self.state)
+
+            try:
+                return self._guarded(perform)
+            except JournalRefused as exc:
+                if exc.code == "E_SEQ":
+                    return CommandResult(False, "stale_sequence", self.state)
+                raise
+
+    def _startup_ready(self):
+        try:
+            return (
+                callable(self.startup_home_ready)
+                and self.startup_home_ready() is True
+                and not self.robot.stopped()
+                and not self.robot.latch_state()
+                and self.robot.health()["state"] == "ok"
+            )
+        except Exception:  # noqa: BLE001 - missing safety evidence refuses motion
+            return False
+
     def resume(
         self,
         command_id: str,
@@ -965,6 +1495,15 @@ class Orchestrator:
         """WAIT_HUMAN or FAULT_LOCKED -> PREFLIGHT. Repeating a command
         returns its first result; a stale ``expected_seq`` is refused."""
         with self._lock:
+            if self.config.start_home and (
+                self._startup_gate_mark is not None
+                or self._startup_failed
+                or (self.startup_home_active and self.recovery is not None)
+                or any(
+                    e.reason == "startup_home_not_executed" for e in self.journal.events
+                )
+            ):
+                return CommandResult(False, "startup_new_run_required", self.state)
             with self._stop_lock:
                 # Stops registered from now on are later than this resume.
                 generation = self._stop_gen
@@ -1077,6 +1616,8 @@ class Orchestrator:
             self._violation_hold = False
             self._scene_violations = 0
             self._reset_attempts = 0
+            # subtask_loop: a resume never continues a round (R13).
+            self._abandon_round("human_resumed")
             if event_mode:
                 record_outcome("resume_rearm_accepted", "resumed")
             return CommandResult(
@@ -1108,6 +1649,9 @@ class Orchestrator:
         with self._stop_lock:
             self._stop_gen += 1
             self._stops[command_id] = self._stop_gen  # the loop sees it now
+            if self.startup_home_active:
+                self.startup_stop_seen.set()
+                self.fence.revoke()
             if self.intervention is not None:
                 self.intervention.note_operator_stop()
         if self.intervention is not None:
@@ -1133,6 +1677,249 @@ class Orchestrator:
             return CommandResult(True, "stop_requested", self.state)
         finally:
             self._lock.release()
+
+    def stop_requested(self) -> bool:
+        """An operator's stop is registered and not yet consumed. Read-only
+        and thread safe: an adapter that waits inside a transaction (a policy
+        service switch) polls it to give up promptly."""
+        return self._first_stop() is not None
+
+    def reverse_human_scope(self) -> dict | None:
+        """Snapshot of the current reverse-only terminal request window."""
+        with self._stop_lock:
+            return dict(self._reverse_window) if self._reverse_window else None
+
+    def reverse_human_request(
+        self,
+        command_id: str,
+        *,
+        run_id: str,
+        round_no: int,
+        episode_id: str,
+        policy_epoch: int,
+        source: str = "terminal",
+        by: str = "operator",
+    ) -> CommandResult:
+        """Register a scoped ordinary stop without waiting for adapters.
+
+        Already admitted step calls (potentially several robot POSTs) may
+        finish. Acceptance never means the robot is safe to approach.
+        No token is revoked here: the owning loop quiesces and seals first.
+        """
+        from . import metrics
+
+        if (
+            not isinstance(command_id, str)
+            or not _VERDICT_ID.fullmatch(command_id)
+            or source != "terminal"
+            or not isinstance(by, str)
+            or not metrics.PRINCIPAL.fullmatch(by)
+            or not isinstance(run_id, str)
+            or not isinstance(episode_id, str)
+            or type(round_no) is not int
+            or round_no < 1
+            or type(policy_epoch) is not int
+            or policy_epoch < 1
+        ):
+            return CommandResult(False, "invalid", self.state)
+        scope = {
+            "run_id": run_id,
+            "round_no": round_no,
+            "episode_id": episode_id,
+            "policy_epoch": policy_epoch,
+        }
+        payload = dict(scope, source=source, by=by)
+        journal_used = bool(self.journal.by_command(command_id))
+        with self._stop_lock:
+            prior = self._reverse_requests.get(command_id)
+            if prior is not None:
+                if prior[0] != payload:
+                    return CommandResult(False, "command_used", self.state)
+                return prior[1]
+            if self.sub is None or self.intervention is not None:
+                return CommandResult(False, "not_supported", self.state)
+            if self._reverse_window != scope or self.state not in (
+                "RESET_ACTIVE",
+                "RESET_VERIFY",
+                "RESET_FINALIZE",
+            ):
+                return CommandResult(False, "stale_reverse", self.state)
+            if (
+                journal_used
+                or command_id in self._verdict_ids
+                or command_id in self._consumed_stops
+                or command_id in self._stops
+            ):
+                return CommandResult(False, "command_used", self.state)
+            if self._stops:
+                return CommandResult(False, "stop_pending", self.state)
+            # Memory only under this lock. In particular, no _lock, journal,
+            # listener or adapter call: _tx may be waiting inside an adapter.
+            self._stop_gen += 1
+            self._stops[command_id] = self._stop_gen
+            answer = CommandResult(True, "reverse_human_requested", self.state)
+            self._reverse_requests[command_id] = (payload, answer)
+            self._reverse_pending = dict(
+                payload, command_id=command_id, step=self.ctx.last_step
+            )
+            return answer
+
+    def _close_reverse_window(self) -> dict | None:
+        # Closing and selecting the pending request is one linearization
+        # point, before any next-subtask decision or terminal notification.
+        with self._stop_lock:
+            self._reverse_window = None
+            pending, self._reverse_pending = self._reverse_pending, None
+            command = min(self._stops, key=self._stops.get) if self._stops else None
+        if pending is not None:
+            self._note("reverse_human_requested", json.dumps(pending, sort_keys=True))
+        return self._auth("operator", command) if command is not None else None
+
+    def episode_verdict(
+        self,
+        command_id: str,
+        label: str,
+        *,
+        source: str = "terminal",
+        by: str = "operator",
+        wall_ns: int | None = None,
+    ) -> CommandResult:
+        """An operator's verdict on the forward episode under way (terminal
+        D's ``s``/``f``/``d``, L2-AERI-OPERATOR-EARLY-STOP): ``success``,
+        ``failure`` or ``discard``. Like ``stop`` it only registers and never
+        waits for the state lock; the loop takes it at its next step, after
+        the latch and health check, and ends *this episode* with
+        ``operator_verdict`` through the ordinary hold, quiesce, seal and home
+        (no new motion, no skipped check). The run then goes on to the next
+        episode; a stop (``stop``) still ends the run and wins over a verdict.
+
+        Taken only while a forward episode runs (``FORWARD_ACTIVE``) of a
+        ``legacy_async`` run, from the terminal only (``source``; the page
+        and the command channel have no route to it), one per episode.
+        Refused: ``invalid`` (label, source, id or principal), ``not_supported``
+        (event_pause_judge), ``command_used``, ``stop_pending``,
+        ``not_in_forward``, ``verdict_pending``. The same id again is
+        ``repeated``. ``verdict_requested`` means it will be taken unless the
+        episode ends first (then it is dropped, ``operator_verdict_dropped``)."""
+        from . import metrics
+
+        if (
+            label not in VERDICT_LABELS
+            or source not in VERDICT_SOURCES
+            or not isinstance(command_id, str)
+            or not _VERDICT_ID.fullmatch(command_id)
+            or not isinstance(by, str)
+            or not metrics.PRINCIPAL.fullmatch(by)
+        ):
+            return CommandResult(False, "invalid", self.state)
+        if self.intervention is not None:
+            return CommandResult(False, "not_supported", self.state)
+        with self._stop_lock:
+            if command_id in self._verdict_ids:
+                return CommandResult(True, "repeated", self.state, True)
+            used = command_id in self._stops or command_id in self._consumed_stops
+        if used or self.journal.by_command(command_id):
+            return CommandResult(False, "command_used", self.state)
+        wall_ns = time.time_ns() if wall_ns is None else int(wall_ns)
+        with self._stop_lock:
+            if command_id in self._verdict_ids:
+                return CommandResult(True, "repeated", self.state, True)
+            if self._stops:
+                return CommandResult(False, "stop_pending", self.state)
+            ctx = self.ctx
+            if self.state != "FORWARD_ACTIVE" or ctx is None or ctx.role != "forward":
+                return CommandResult(False, "not_in_forward", self.state)
+            if self._verdict is not None or ctx.verdict is not None:
+                return CommandResult(False, "verdict_pending", self.state)
+            self._verdict_ids.add(command_id)
+            self._verdict = {
+                "command_id": command_id,
+                "label": label,
+                "source": source,
+                "by": by,
+                "wall_ns": wall_ns,
+                "episode_id": ctx.episode_id,
+                # Where the episode was when the key came: its control step
+                # and the index of the last frame recorded (-1: none yet).
+                "step": ctx.last_step,
+                "frame_index": ctx.steps_done - 1,
+            }
+        return CommandResult(True, "verdict_requested", self.state)
+
+    def _take_verdict(self, ctx: Episode) -> dict | None:
+        """The registered verdict for this episode, taken (``None``: none)."""
+        with self._stop_lock:
+            found, self._verdict = self._verdict, None
+        if found is None:
+            return None
+        if found["episode_id"] != ctx.episode_id:
+            self._drop_verdict_note(found, "another episode")
+            return None
+        return found
+
+    def _drop_verdict(self, why: str) -> None:
+        """A verdict the loop will not take (the episode ended first)."""
+        with self._stop_lock:
+            found, self._verdict = self._verdict, None
+        if found is not None:
+            self._drop_verdict_note(found, why)
+
+    def _drop_verdict_note(self, found: dict, why: str) -> None:
+        self.journal.note(
+            VERDICT_DROPPED_NOTE,
+            f"{found['label']} for {found['episode_id']} at step {found['step']}: "
+            f"{why}"[:300],
+            authority=self._auth("operator"),
+        )
+
+    def _record_verdict(self, ctx: Episode, verdict: dict, taken_step: int) -> None:
+        """The ``operator_verdict`` journal note: the person's verdict, kept
+        apart from the model's judgements (``judgement_*`` notes, the episode
+        result) and written before the episode is brought to its end."""
+        verdict["taken_step"] = taken_step
+        fields = {
+            k: verdict[k]
+            for k in (
+                "label",
+                "source",
+                "episode_id",
+                "step",
+                "frame_index",
+                "taken_step",
+                "wall_ns",
+                "command_id",
+            )
+        }
+        detail = json.dumps(fields, separators=(",", ":"), sort_keys=True)
+        if len(detail) > 300:
+            # The id is in the transition's authority as well.
+            fields.pop("command_id")
+            detail = json.dumps(fields, separators=(",", ":"), sort_keys=True)
+        self.journal.note(VERDICT_NOTE, detail[:300], authority=self._auth("operator"))
+        ctx.verdict = verdict
+
+    def _label_verdict(self, ctx: Episode) -> None:
+        """Once the episode's result is committed: the verdict becomes the
+        operator's label of the episode (``labels/operator_label.jsonl``,
+        apart from the journal; ``discard`` -> ``discarded``, left out of
+        every truth and rate). A label that cannot be written is noted; the
+        run goes on."""
+        from . import metrics
+
+        verdict = ctx.verdict
+        try:
+            metrics.label_operator(
+                self.journal.directory,
+                ctx.episode_id,
+                OPERATOR_LABEL_OF_VERDICT[verdict["label"]],
+                by=verdict["by"],
+                note=(
+                    f"{VERDICT_NOTE} {verdict['source']} step {verdict['step']} "
+                    f"frame {verdict['frame_index']}"
+                ),
+            )
+        except (metrics.LabelRefused, OSError) as exc:
+            self._note(VERDICT_LABEL_FAILED_NOTE, f"{ctx.episode_id}: {exc}")
 
     def _registered(self, command_id: str) -> bool:
         with self._stop_lock:
@@ -1173,6 +1960,30 @@ class Orchestrator:
                 # call; finding one here means a chain broke off.
                 self._fault("watchdog_timeout")
 
+    def _start_pose_ok(self) -> bool:
+        """The start gate's own read-only check (``Robot.start_pose``: the bound
+        home pose, the home tolerance and the open gripper; it sends nothing).
+        Only ``ok is True`` passes; anything else, a missing method or an
+        exception is a refusal. The measurement goes to ``start_pose_checked``."""
+        check = getattr(self.robot, "start_pose", None)
+        if not callable(check):
+            self._note("start_pose_checked", "refused: the robot has no start_pose")
+            return False
+        try:
+            found = check()
+        except Exception as exc:  # noqa: BLE001 - unreadable pose: do not resume
+            self._note("start_pose_checked", f"refused: {type(exc).__name__}: {exc}")
+            return False
+        ok = isinstance(found, dict) and found.get("ok") is True
+        text = found.get("text") if isinstance(found, dict) else None
+        self._note(
+            "start_pose_checked",
+            ("" if ok else "refused: ") + str(text if text is not None else found),
+        )
+        if ok:
+            self._check_start_pose = False
+        return ok
+
     def _operator(self) -> dict | None:
         """The authority of the oldest stop not yet consumed, if any."""
         command = self._first_stop()
@@ -1183,6 +1994,45 @@ class Orchestrator:
     def _preflight(self) -> None:
         report = self.robot.preflight()
         if report["ok"]:
+            if self.startup_home_active and not self._startup_ready():
+                self._note(
+                    "startup_safety_not_ready",
+                    "Startup refused: terminal, signal handlers and successful live heartbeat required; no home sent",
+                )
+                self._to_human("preflight_failed")
+                return
+            if self.startup_home_active and self._startup_failed:
+                self._to_human("startup_home_not_executed")
+                return
+            if (
+                self.startup_home_active
+                and self.ctx is None
+                and not self._start_pose_ok()
+            ):
+                prompt = getattr(self.gate, "confirm_start_home", None)
+                if not callable(prompt) or not self._startup_ready():
+                    self._to_human("home_pose_not_reached")
+                    return
+                self._flush_notes()
+                sequence = self.journal.next_seq
+                confirmation = prompt()
+                found = self.request_start_home(
+                    f"startup-home-{sequence}",
+                    expected_seq=sequence,
+                    confirmation=confirmation,
+                )
+                if not found.ok and self.state == "PREFLIGHT":
+                    self._to_human("home_pose_not_reached")
+                return
+            if self.startup_home_active and self._startup_gate_mark is None:
+                # Already home: no startup motion/closure to authorize. Later
+                # round stop/resume semantics stay exactly as before.
+                self.startup_home_active = False
+            if self._check_start_pose and not self._start_pose_ok():
+                # The arm is not proven at home after a home that sent nothing:
+                # the person brings it home; the next resume checks again.
+                self._to_human("home_pose_not_reached")
+                return
             self._tx("VERIFY_INITIAL", "preflight_passed")
         elif self.robot.latch_state() or self.robot.health()["state"] == "red":
             self._fault("safety_stop", guard=True)
@@ -1190,6 +2040,9 @@ class Orchestrator:
             self._to_human("preflight_failed")
 
     def _decide(self) -> None:
+        if self.sub is not None:
+            self._decide_subtask()
+            return
         if self._stop_before_start():
             return
         # A provider that broke the contract is looked at by a person before
@@ -1244,6 +2097,1197 @@ class Orchestrator:
         self._to_human("operator_stop", authority=operator)
         return True
 
+    # --- subtask_loop (levi/automatic/subtask_loop.py) ---------------------------------
+
+    def _sidecar(self, name: str, value: dict) -> dict:
+        """``value`` in full under ``<run_dir>/subtasks/``: ``{"file",
+        "file_sha256"}`` for the note that refers to it (``{"file": None}``
+        when it cannot be written: noted, the run goes on)."""
+        data = (
+            json.dumps(value, indent=1, sort_keys=True, default=str) + "\n"
+        ).encode()
+        relative = f"{st.SIDECAR_DIR}/{self.journal.next_seq:06d}-{name}.json"
+        try:
+            path = self.journal.directory / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError as exc:
+            self._note("evidence_write_failed", f"{relative}: {exc}")
+            return {"file": None}
+        return {"file": relative, "file_sha256": hashlib.sha256(data).hexdigest()}
+
+    def _sub_note(self, code: str, detail: dict, *, sidecar: dict | None = None):
+        """One ``subtask_*``/``vlm_*`` journal note, its detail JSON. A
+        ``sidecar`` (the request record, the plan) is written in full and
+        named in the note; a detail over 300 characters keeps its short fields
+        and moves the whole into a sidecar too."""
+        detail = dict(detail)
+        if sidecar is not None:
+            detail.update(self._sidecar(code, sidecar))
+        text = json.dumps(detail, separators=(",", ":"), sort_keys=True, default=str)
+        if len(text) > 300:
+            short = {
+                k: v
+                for k, v in detail.items()
+                if v is None
+                or isinstance(v, bool | int | float)
+                or (isinstance(v, str) and len(v) <= 80)
+            }
+            if sidecar is None:
+                short.update(self._sidecar(code + "-detail", detail))
+            text = json.dumps(short, separators=(",", ":"), sort_keys=True)
+            if len(text) > 300:
+                text = json.dumps(
+                    {k: short.get(k) for k in ("file", "file_sha256")},
+                    separators=(",", ":"),
+                )
+        self.journal.note(code, text, authority=self._auth())
+        # Also in memory, for the terminal's recent-notes lines.
+        self.notes.append((code, text))
+        return detail
+
+    def _read_back_subtasks(self) -> None:
+        """The frozen whitelist and the rounds the forward loops ended, from the
+        journal (a restart never continues a round)."""
+        sub = self.sub
+        for event in self.journal.events:
+            if event.record != "note" or event.note is None:
+                continue
+            code = event.note.code
+            if code not in (st.NOTE_INVENTORY_CONFIRMED, st.NOTE_LOOP_DONE):
+                continue
+            try:
+                detail = json.loads(event.note.detail)
+            except ValueError:
+                continue
+            if code == st.NOTE_INVENTORY_CONFIRMED:
+                sub.inventory = self._inventory_from(detail)
+                sub.whitelist_sha256 = detail.get("sha256")
+            elif detail.get("loop") == "forward":
+                self._count_round(detail.get("outcome"))
+
+    def _inventory_from(self, detail: dict):
+        """The confirmed inventory from its sidecar (checked by its sha256)."""
+        try:
+            path = self.journal.directory / detail["file"]
+            data = path.read_bytes()
+            if hashlib.sha256(data).hexdigest() != detail["file_sha256"]:
+                return None
+            objects = json.loads(data)["objects"]
+            found = st.parse_inventory(json.dumps({"objects": objects}))
+        except (OSError, KeyError, TypeError, ValueError):
+            return None
+        if st.whitelist_sha256(found.whitelist) != detail.get("sha256"):
+            return None
+        return found
+
+    def _count_round(self, outcome) -> None:
+        """A forward loop ended: a round, or a discarded one (replaced within
+        ``discard_limit``)."""
+        if outcome == "discard" and self.discarded_forward < self.discard_limit:
+            self.discarded_forward += 1
+            return
+        self.completed_forward += 1
+        if outcome == "discard":
+            self.discarded_beyond_limit += 1
+
+    def _abandon_round(self, why: str) -> None:
+        """A resume (or a restart) never continues a round: the next one starts
+        with the start-pose check and terminal D's release (R13)."""
+        sub = self.sub
+        if sub is None or (sub.phase == "idle" and not sub.plan):
+            return
+        self._sub_note(
+            st.NOTE_ROUND_ABANDONED,
+            {"round": sub.round_no, "phase": sub.phase, "why": why},
+        )
+        sub.phase, sub.plan, sub.index, sub.attempt = "idle", [], 0, 1
+
+    @staticmethod
+    def _reading(probe):
+        try:
+            value = probe()
+        except Exception:  # noqa: BLE001 - an unreadable reading is None
+            return None
+        if type(value) not in (int, float) or not math.isfinite(value):
+            return None
+        return round(value, 2) if isinstance(value, float) else value
+
+    def _wake_need_mib(self) -> int:
+        """Free GPU memory a wake needs: the configured value, else the VLM
+        profile's (``vlm_power.wake_need_mib``), else the default. A provider
+        may report zero additional memory; the headroom guard still applies."""
+        if self.config.vlm_wake_min_free_gpu_mib is not None:
+            return self.config.vlm_wake_min_free_gpu_mib
+        probe = getattr(self.power, "wake_need_mib", None)
+        found = self._reading(probe) if callable(probe) else None
+        if type(found) is int and found >= 0:
+            return found
+        return st.DEFAULT_WAKE_NEED_MIB
+
+    def _gpu_totals(self):
+        """``[used, total]`` MiB (nvidia-smi, read-only) or None."""
+        probe = getattr(self.power, "gpu_totals", None)
+        if probe is None:
+            return None
+        try:
+            used, total = probe()
+        except Exception:  # noqa: BLE001 - a reading only
+            return None
+        return [used, total] if all(type(v) is int for v in (used, total)) else None
+
+    def _power(self, call) -> bool:
+        try:
+            return call() is True
+        except Exception as exc:  # noqa: BLE001 - a failure is a refusal
+            self._note("vlm_power_error", f"{type(exc).__name__}: {exc}")
+            return False
+
+    def _vlm_wake(self) -> str | None:
+        """Before every VLM call: the VLM awake (``None``), or why the run waits
+        (R7: never woken into a GPU short of memory; a failed or timed-out wake
+        moves nothing)."""
+        sub, cfg = self.sub, self.config
+        if sub.vlm in ("awake", "idle_awake") or cfg.vlm_alternation == "co_resident":
+            sub.last_wake = {"was": sub.vlm, "wake_ms": 0}
+            sub.vlm = "awake"
+            return None
+        free = self._reading(self.power.free_gpu_mib)
+        need = self._wake_need_mib()
+        threshold = need + cfg.vlm_wake_headroom_mib
+        # R7: the one comparison that decides whether the VLM may wake.
+        if free is None or free < threshold:
+            self._sub_note(
+                st.NOTE_VLM_WAKE_REFUSED,
+                {
+                    "reason": "gpu_unreadable" if free is None else "gpu_memory_short",
+                    "free_mib": free,
+                    "need_mib": need,
+                    "headroom_mib": cfg.vlm_wake_headroom_mib,
+                    "threshold_mib": threshold,
+                    "decision": "refused",
+                },
+            )
+            return st.R_VLM_UNAVAILABLE
+        before = self._reading(self.power.mem_available_gib)
+        gpu_before = self._gpu_totals()
+        began = time.monotonic()
+        ok = self._power(self.power.wake)
+        ms = int((time.monotonic() - began) * 1000)
+        self._sub_note(
+            st.NOTE_VLM_WAKE,
+            {
+                "ok": ok,
+                "mem_available_gib": before,
+                "mem_after_gib": self._reading(self.power.mem_available_gib),
+                "ms": ms,
+                "wake_s": round(ms / 1000, 3),
+                "free_mib": free,
+                "need_mib": need,
+                "threshold_mib": threshold,
+                "decision": "woken" if ok else "failed",
+                "gpu_before": gpu_before,
+                "gpu_after": self._gpu_totals(),
+                "was": sub.vlm,
+            },
+        )
+        if not ok:
+            self._sub_note(
+                st.NOTE_VLM_WAKE_FAILED,
+                {
+                    "reason": getattr(self.power, "last_refusal", None)
+                    or "wake_failed_or_timeout",
+                    "ms": ms,
+                },
+            )
+            sub.vlm = "unknown"
+            return st.R_VLM_UNAVAILABLE
+        sub.last_wake = {"was": sub.vlm, "wake_ms": ms}
+        sub.vlm = "awake"
+        return None
+
+    def _vlm_sleep(self) -> str | None:
+        """Before every policy episode: the VLM asleep (``None``), or why the
+        run waits. A level-1 sleep moves the weights to pinned host memory, so
+        MemAvailable is checked first; below ``vlm_min_free_mem_gib`` the
+        fallback decides (R7)."""
+        sub, cfg = self.sub, self.config
+        if sub.vlm == "asleep":
+            return None
+        if cfg.vlm_alternation == "co_resident":
+            # Loaded beside the policy: no sleep, and no request until the
+            # episode has ended (every question sits between episodes).
+            sub.vlm = "idle_awake"
+            return None
+        mem = self._reading(self.power.mem_available_gib)
+        level = 1
+        if mem is None or mem < cfg.vlm_min_free_mem_gib:
+            fallback = cfg.vlm_sleep_fallback
+            if fallback == "wait_human":
+                self._sub_note(
+                    st.NOTE_VLM_SLEEP_REFUSED,
+                    {
+                        "reason": "host_memory_short",
+                        "mem_available_gib": mem,
+                        "need_gib": cfg.vlm_min_free_mem_gib,
+                    },
+                )
+                return st.R_VLM_UNAVAILABLE
+            if fallback == "stay_awake":
+                free = self._reading(self.power.free_gpu_mib)
+                need = cfg.vlm_stay_awake_min_free_gpu_mib
+                if free is None or free < need:
+                    self._sub_note(
+                        st.NOTE_VLM_SLEEP_REFUSED,
+                        {
+                            "reason": "stay_awake_gpu_short",
+                            "mem_available_gib": mem,
+                            "free_mib": free,
+                            "need_mib": need,
+                        },
+                    )
+                    return st.R_VLM_UNAVAILABLE
+                self._sub_note(
+                    st.NOTE_VLM_SLEEP,
+                    {
+                        "ok": True,
+                        "level": "stay_awake",
+                        "mem_available_gib": mem,
+                        "ms": 0,
+                        "free_mib": free,
+                    },
+                )
+                # Awake but idle: no VLM request is made while the policy runs.
+                sub.vlm = "idle_awake"
+                return None
+            level = 2
+        began = time.monotonic()
+        ok = self._power(lambda: self.power.sleep(level))
+        ms = int((time.monotonic() - began) * 1000)
+        self._sub_note(
+            st.NOTE_VLM_SLEEP,
+            {
+                "ok": ok,
+                "level": level,
+                "mem_available_gib": mem,
+                "mem_after_gib": self._reading(self.power.mem_available_gib),
+                "ms": ms,
+            },
+        )
+        if not ok:
+            self._sub_note(
+                st.NOTE_VLM_SLEEP_REFUSED,
+                {
+                    "reason": getattr(self.power, "last_refusal", None)
+                    or "sleep_failed",
+                    "level": level,
+                },
+            )
+            sub.vlm = "unknown"
+            return st.R_VLM_UNAVAILABLE
+        sub.vlm = "asleep"
+        return None
+
+    def _sub_wait(self, reason: str, *, ctx=None, result=None) -> None:
+        """Hold, no motion, and wait for a person (subtask_loop)."""
+        self._close_reverse_window()
+        try:
+            self.robot.hold()
+        except Exception as exc:  # noqa: BLE001 - the wait still happens
+            self._note("hold_failed", f"{type(exc).__name__}: {exc}")
+        self._tx("WAIT_HUMAN", reason, ctx=ctx, result=result)
+        self._close_episode()
+        self.ctx = None
+
+    def _capture(self, purpose: str):
+        try:
+            frames = self.subvlm.capture(purpose)
+        except Exception as exc:  # noqa: BLE001 - no frames: no answer
+            self._note("subtask_capture_failed", f"{type(exc).__name__}: {exc}")
+            return None
+        if not isinstance(frames, list) or not frames:
+            return None
+        return frames
+
+    def _ask_vlm(self, kind: str, call, record: dict, *, episode_id=None):
+        """One VLM request (the VLM is awake by now); the raw answer, or None
+        (timeout, exception). ``record`` gets the analysis fields
+        (Lynx AERI-VLM-ANALYSIS-PLAN-20261017.md §1)."""
+        # Host-owned association for future visibility checks, never from a
+        # provider report or inferred from the numeric round. Inventory is run
+        # scoped even when the previous round is still present in self.sub.
+        context = None
+        round_id = getattr(self.sub, "round_id", None)
+        if kind == "inventory":
+            context = {"kind": kind, "round_id": None, "episode_id": None}
+        elif isinstance(round_id, str) and round_id:
+            if kind in ("plan-forward", "plan-reverse") and record.get(
+                "loop"
+            ) == kind.removeprefix("plan-"):
+                context = {"kind": kind, "round_id": round_id, "episode_id": None}
+            elif (
+                kind == "check"
+                and isinstance(episode_id, str)
+                and episode_id
+                and record.get("episode_id") == episode_id
+                and record.get("loop") == self.sub.loop_name()
+                and record.get("loop") in ("forward", "reverse")
+            ):
+                context = {
+                    "kind": f"check-{record['loop']}",
+                    "round_id": round_id,
+                    "episode_id": episode_id,
+                }
+        record.update(
+            kind=kind,
+            request_wall_ns=time.time_ns(),
+            vllm_state=(getattr(self.sub, "last_wake", None) or {}).get("was"),
+            wake_ms=(getattr(self.sub, "last_wake", None) or {}).get("wake_ms"),
+        )
+        began = time.monotonic()
+        try:
+            reply = call()
+        except Exception as exc:  # noqa: BLE001 - an exception is no answer
+            reply = None
+            record["error"] = f"{type(exc).__name__}: {exc}"[:300]
+        record["latency_ms"] = int((time.monotonic() - began) * 1000)
+        record["response_wall_ns"] = time.time_ns()
+        raw = reply
+        if isinstance(reply, st.VlmReply):
+            raw = reply.raw
+            record.update(
+                prompt_sha256=reply.prompt_sha256,
+                prompt_tokens=reply.prompt_tokens,
+                completion_tokens=reply.completion_tokens,
+                usage_source=reply.usage_source,
+                finish_reason=reply.finish_reason,
+                vlm_request_id=reply.request_id,
+                request_id=reply.client_request_id,
+                image_refs=reply.image_refs,
+                timeout_s=reply.timeout_s,
+                response_schema_ok=reply.response_schema_ok,
+            )
+            if reply.image_meta:
+                # Only with frame metadata: older records keep their keys.
+                record["image_meta"] = reply.image_meta
+            if reply.error:
+                record["error"] = reply.error
+            if reply.latency_ms is not None:
+                record["latency_ms"] = reply.latency_ms
+        if isinstance(raw, bytes | bytearray):
+            raw = bytes(raw).decode("utf-8", "replace")
+        from .external_report import text_snapshot
+
+        answer_evidence = text_snapshot(raw)
+        record["raw_content"] = raw[:20000] if isinstance(raw, str) else None
+        # Separate, non-detail sidecar: existing subtask_view deliberately does
+        # not unfold this reference. Free text is not exposed before a future
+        # API implements exact round/member visibility checks.
+        private_evidence = {
+            "schema": "levi.aeri.request_evidence.v1",
+            "evidence_context": context,
+            "request_id": record.get("request_id"),
+            "vlm_request_id": record.get("vlm_request_id"),
+            "frames": record.get("frames", []),
+            "image_refs": record.get("image_refs"),
+            "prompt_sha256": record.get("prompt_sha256"),
+            "prompt_text": reply.prompt_text
+            if isinstance(reply, st.VlmReply)
+            else None,
+            "prompt_bytes": reply.prompt_bytes
+            if isinstance(reply, st.VlmReply)
+            else None,
+            "prompt_text_truncated": reply.prompt_text_truncated
+            if isinstance(reply, st.VlmReply)
+            else False,
+            "external_evidence": reply.external_evidence
+            if isinstance(reply, st.VlmReply)
+            else None,
+            "raw_content": answer_evidence["text"],
+            "raw_content_truncated": answer_evidence["truncated"],
+            "answer_content_sha256": answer_evidence["sha256"],
+            "answer_bytes": answer_evidence["bytes"],
+        }
+        if record.get("image_meta"):
+            # Frame bus: the camera frame (seq, t_capture_ns) of each image.
+            private_evidence["image_meta"] = record["image_meta"]
+        record["request_evidence"] = self._sidecar("request-evidence", private_evidence)
+        # Even valid JSON can be an incomplete answer when the provider hit
+        # its output limit. Keep the raw evidence, but never validate it as a
+        # complete inventory/plan/check; the existing refusal path waits.
+        if isinstance(reply, st.VlmReply) and reply.finish_reason == "length":
+            return None
+        return raw
+
+    def _refused(self, record: dict, exc: st.SubtaskRefused) -> None:
+        record.update(
+            valid=False,
+            outcome="refused",
+            reason=exc.code,
+            detail=exc.detail,
+            whitelist_violations=[exc.detail] if exc.code == "not_whitelisted" else [],
+        )
+
+    def _decide_subtask(self) -> None:
+        """VERIFY_INITIAL / SCENE_ASSESS of a subtask_loop run."""
+        sub = self.sub
+        if self._stop_before_start():
+            return
+        if sub.phase == "forward":
+            self._dispatch_subtask("forward")
+            return
+        if sub.phase == "reverse":
+            self._dispatch_subtask("reset")
+            return
+        if sub.phase == "reverse_pending":
+            self._plan_reverse()
+            return
+        if self.completed_forward >= self.config.episodes:
+            self._tx("COMPLETED", "run_completed")
+            return
+        if not self._subtask_inventory():
+            return
+        # R11: the read-only start-pose check before every round.
+        if not self._start_pose_ok():
+            self._sub_wait("home_pose_not_reached")
+            return
+        round_no = self.completed_forward + self.discarded_forward + 1
+        released = self.gate.release_round(round_no, self.config.episodes)
+        # R1: only terminal D's release starts a round's forward loop.
+        if released != "released":
+            if not self._stop_before_start():
+                self._sub_wait(st.R_NOT_RELEASED)
+            return
+        if self._startup_gate_mark is not None:
+            # A delayed observation must never prevent stop registration.
+            # The original stop generation is checked after these reads.
+            safe = self._startup_ready() and self._start_pose_ok()
+            with self._stop_lock:
+                if (
+                    not safe
+                    or self._stops
+                    or self.startup_stop_seen.is_set()
+                    or self._stop_gen != self._startup_stop_gen
+                ):
+                    raise ValueError("startup home closure lost before round release")
+                mark = self._startup_gate_mark
+                self.robot.reopen_admission_if(
+                    generation=mark.generation,
+                    closed_from_ns=mark.closed_from_ns,
+                )
+                self._startup_gate_mark = None
+                self.startup_home_active = False
+        sub.round_id = f"{self.config.run_id}:round{round_no}:s{self.journal.next_seq}"
+        sub.round_labelled = False
+        self._sub_note(
+            st.NOTE_ROUND_RELEASED,
+            {"round": round_no, "by": "terminal", "round_id": sub.round_id},
+        )
+        if self._stop_before_start():
+            return
+        sub.round_no = round_no
+        self._plan_forward()
+
+    def _alternation_admitted(self) -> bool:
+        """Once per run: journal the alternation mode; co_resident needs the
+        measured GPU use of everything loaded (policy, VLM, others) plus
+        ``vlm_co_resident_headroom_mib`` within the card (nvidia-smi totals)."""
+        sub, cfg = self.sub, self.config
+        if sub.alternation_checked:
+            return True
+        detail = {"mode": cfg.vlm_alternation, "ok": True}
+        if cfg.vlm_alternation == "co_resident":
+            totals = self._gpu_totals()
+            headroom = None if totals is None else totals[1] - totals[0]
+            need = cfg.vlm_co_resident_headroom_mib
+            detail.update(
+                used_mib=None if totals is None else totals[0],
+                total_mib=None if totals is None else totals[1],
+                headroom_mib=headroom,
+                need_mib=need,
+            )
+            if headroom is None or headroom < need:
+                detail["ok"] = False
+                self._sub_note(st.NOTE_ALTERNATION, detail)
+                self._sub_note(
+                    st.NOTE_VLM_WAKE_REFUSED,
+                    {
+                        "reason": "co_resident_gpu_short",
+                        "free_mib": headroom,
+                        "need_mib": need,
+                    },
+                )
+                self._sub_wait(st.R_VLM_UNAVAILABLE)
+                return False
+        self._sub_note(st.NOTE_ALTERNATION, detail)
+        sub.alternation_checked = True
+        return True
+
+    def _subtask_inventory(self) -> bool:
+        """The run's whitelist: the VLM's inventory that terminal D confirmed
+        (R2). ``False``: the run waits for a person (or stops)."""
+        sub = self.sub
+        if not self._alternation_admitted():
+            return False
+        if sub.inventory is not None:
+            return True
+        why = self._vlm_wake()
+        if why is not None:
+            self._sub_wait(why)
+            return False
+        frames = self._capture("inventory")
+        record = {"frames": st.frames_brief(frames or [])}
+        raw = (
+            None
+            if frames is None
+            else self._ask_vlm(
+                "inventory", lambda: self.subvlm.inventory(frames=frames), record
+            )
+        )
+        try:
+            found = st.parse_inventory(raw)
+        except st.SubtaskRefused as exc:
+            self._refused(record, exc)
+            self._sub_note(
+                st.NOTE_INVENTORY_REJECTED,
+                {"by": "validator", "reason": exc.code},
+                sidecar=record,
+            )
+            self._sub_wait(st.R_INVENTORY_REJECTED)
+            return False
+        record.update(valid=True, outcome="asked", parsed=found.describe())
+        self._sub_note(
+            st.NOTE_INVENTORY,
+            {"items": list(found.ids), "frames": st.frames_brief(frames)},
+            sidecar=record,
+        )
+        if self._stop_before_start():
+            return False
+        answer = self.gate.confirm_inventory(found.describe())
+        if answer == "yes":
+            sha = st.whitelist_sha256(found.whitelist)
+            self._sub_note(
+                st.NOTE_INVENTORY_CONFIRMED,
+                {"items": list(found.whitelist), "by": "terminal", "sha256": sha},
+                sidecar={
+                    "objects": found.describe(),
+                    "whitelist": list(found.whitelist),
+                    "graspable": list(found.graspable),
+                },
+            )
+            sub.inventory, sub.whitelist_sha256 = found, sha
+            return True
+        if self._stop_before_start():
+            return False
+        self._sub_note(
+            st.NOTE_INVENTORY_REJECTED, {"items": list(found.ids), "by": "terminal"}
+        )
+        self._sub_wait(st.R_INVENTORY_REJECTED)
+        return False
+
+    def _plan_forward(self) -> None:
+        sub, cfg = self.sub, self.config
+        why = self._vlm_wake()
+        if why is not None:
+            self._sub_wait(why)
+            return
+        frames = self._capture(f"r{sub.round_no}-start")
+        # The round-start frames: the reference layout the reverse loop restores.
+        sub.reference = frames or []
+        record = {
+            "round": sub.round_no,
+            "loop": "forward",
+            "frames": st.frames_brief(sub.reference),
+        }
+        raw = (
+            None
+            if frames is None
+            else self._ask_vlm(
+                "plan-forward",
+                lambda: self.subvlm.plan(
+                    loop="forward",
+                    task=cfg.subtask_task,
+                    whitelist=sub.inventory.whitelist,
+                    frames=frames,
+                    round_no=sub.round_no,
+                ),
+                record,
+            )
+        )
+        plan = self._accept_plan(raw, record, "forward", cfg.subtask_task)
+        if plan is None:
+            return
+        sub.start_loop("forward", cfg.subtask_task, plan)
+        if self._stop_before_start():
+            return
+        self._dispatch_subtask("forward")
+
+    def _plan_reverse(self) -> None:
+        sub, cfg = self.sub, self.config
+        # R11: the read-only start-pose check before the reverse loop.
+        if not self._start_pose_ok():
+            self._sub_wait("home_pose_not_reached")
+            return
+        why = self._vlm_wake()
+        if why is not None:
+            self._sub_wait(why)
+            return
+        frames = self._capture(f"r{sub.round_no}-reverse")
+        task = st.reverse_task(cfg.subtask_task)
+        record = {
+            "round": sub.round_no,
+            "loop": "reverse",
+            "frames": st.frames_brief(frames or []),
+            "reference": st.frames_brief(sub.reference),
+        }
+        raw = (
+            None
+            if frames is None or not sub.reference
+            else self._ask_vlm(
+                "plan-reverse",
+                lambda: self.subvlm.plan(
+                    loop="reverse",
+                    task=task,
+                    whitelist=sub.inventory.whitelist,
+                    frames=frames,
+                    reference=sub.reference,
+                    round_no=sub.round_no,
+                ),
+                record,
+            )
+        )
+        plan = self._accept_plan(raw, record, "reverse", task)
+        if plan is None:
+            return
+        if not plan:
+            # An empty reverse plan: the scene is as the round started. The
+            # arm is home (checked above); the next round needs its release.
+            sub.start_loop("reverse", task, [])
+            self._loop_done_note("reverse", "already_restored")
+            self._round_members()
+            sub.phase, sub.plan, sub.index, sub.attempt = "idle", [], 0, 1
+            return
+        sub.start_loop("reverse", task, plan)
+        if self._stop_before_start():
+            return
+        self._dispatch_subtask("reset")
+
+    def _accept_plan(self, raw, record: dict, loop: str, task: str):
+        """The plan, validated against the frozen whitelist and the template
+        (R2, R3, R4), or ``None`` after a hold and a wait for a person."""
+        sub = self.sub
+        try:
+            plan = st.parse_plan(
+                raw,
+                sub.inventory,
+                loop=loop,
+                max_subtasks=self.config.max_subtasks_per_loop,
+            )
+        except st.SubtaskRefused as exc:
+            self._refused(record, exc)
+            self._sub_note(
+                st.NOTE_PLAN_REFUSED,
+                {"round": sub.round_no, "loop": loop, "reason": exc.code},
+                sidecar=record,
+            )
+            self._sub_wait(st.R_PLAN_REFUSED)
+            return None
+        record.update(
+            valid=True, outcome="accepted", parsed=[s.describe() for s in plan]
+        )
+        kept = self._sidecar(
+            f"r{sub.round_no:03d}-{loop}-plan",
+            {
+                "round": sub.round_no,
+                "loop": loop,
+                "task": task,
+                "templates": st.INSTRUCTION_TEMPLATES,
+                "whitelist_sha256": sub.whitelist_sha256,
+                "subtasks": [s.describe() for s in plan],
+                "reference": st.frames_brief(sub.reference),
+                "request": record,
+            },
+        )
+        self._sub_note(
+            st.NOTE_PLAN,
+            {
+                "round": sub.round_no,
+                "loop": loop,
+                "task": task,
+                "n": len(plan),
+                "plan_file": kept.get("file"),
+                "sha256": kept.get("file_sha256"),
+            },
+        )
+        return plan
+
+    def _dispatch_subtask(self, role: str) -> None:
+        """One subtask as one ordinary episode with its rendered prompt."""
+        sub = self.sub
+        task = sub.current()
+        # R7: the VLM sleeps before the policy runs.
+        why = self._vlm_sleep()
+        if why is not None:
+            self._sub_wait(why)
+            return
+        # R8: a stop wins over a subtask already planned.
+        if self._stop_before_start():
+            return
+        # R3: the prompt is a template text from the frozen whitelist only.
+        if not st.instruction_allowed(task.instruction, sub.inventory):
+            self._sub_note(
+                st.NOTE_PLAN_REFUSED,
+                {
+                    "round": sub.round_no,
+                    "loop": sub.loop_name(),
+                    "reason": "not_template",
+                },
+            )
+            self._sub_wait(st.R_PLAN_REFUSED)
+            return
+        number = self.numbers[role] + 1
+        info = {
+            "round": sub.round_no,
+            "loop": sub.loop_name(),
+            "index": task.index,
+            "attempt": sub.attempt,
+            "instruction": task.instruction,
+            "episode_id": f"{self.config.run_id}.{role}.{number:04d}",
+        }
+        if sub.segment > 1:
+            # subtask.early_check: this episode continues the attempt (only
+            # then: a first episode's note and metadata are as before).
+            info.update(
+                segment=sub.segment,
+                continues=sub.continues,
+                max_steps=self._max_steps(role),
+            )
+        self._sub_note(st.NOTE_STARTED, info)
+        if sub.segment == 1:
+            sub.dispatched += 1
+        self._start(
+            role,
+            st.R_DISPATCHED,
+            prompt=task.instruction,
+            subtask={
+                **info,
+                "task": sub.task,
+                "done_when": [list(f) for f in task.done_when],
+            },
+        )
+
+    def _check_subtask(self, ctx, *, early=None):
+        """The VLM's answer to this subtask's ``done_when`` on still frames,
+        asked once the arm is held and the policy quiesced (R6): ``True``,
+        ``False``, ``None`` (null, malformed, timeout) or a wait reason.
+        ``early``: the trigger of an early check (subtask.early_check); the
+        same question, journaled with its trigger and step."""
+        sub = self.sub
+        task = sub.current()
+        why = self._vlm_wake()
+        if why is not None:
+            return why
+        frames = self._capture(f"check-{ctx.episode_id}")
+        record = {
+            "round": sub.round_no,
+            "loop": sub.loop_name(),
+            "index": task.index,
+            "attempt": sub.attempt,
+            "episode_id": ctx.episode_id,
+            "steps": ctx.steps_done,
+            "facts": task.facts_text(),
+            "frames": st.frames_brief(frames or []),
+        }
+        if early is not None:
+            record["early"] = dict(early)
+        raw = (
+            None
+            if frames is None
+            else self._ask_vlm(
+                "check",
+                lambda: self.subvlm.check(subtask=task, frames=frames),
+                record,
+                episode_id=ctx.episode_id,
+            )
+        )
+        try:
+            value = st.parse_check(raw, task)
+            record.update(valid=True, parsed=json.loads(raw), decision=value)
+        except st.SubtaskRefused as exc:
+            value = None
+            self._refused(record, exc)
+            record["decision"] = None
+        sub.checks += 1
+        outcomes = (
+            {True: "next", False: "retry", None: "person"}
+            if early is None
+            else {True: "next", False: "continue", None: "continue"}
+        )
+        record["outcome"] = outcomes[value]
+        detail = {
+            "round": sub.round_no,
+            "loop": sub.loop_name(),
+            "index": task.index,
+            "attempt": sub.attempt,
+            "episode_id": ctx.episode_id,
+            "value": value,
+            "frames": st.frames_brief(frames or []),
+        }
+        if early is not None:
+            # Only an early check carries these: the ordinary check's note
+            # is exactly as before.
+            detail.update(early=True, trigger=early["trigger"], step=early["step"])
+        self._sub_note(st.NOTE_CHECK, detail, sidecar=record)
+        return value
+
+    def _label_round(self, verdict: dict) -> None:
+        """m30: the operator's s/f/d is the ROUND's verdict: one record in
+        ``labels/round_label.jsonl`` (``metrics.label_round``) listing the
+        round's forward subtask episodes that ran; none of them is labelled
+        on its own (m31). A round none of whose episodes ran keeps no record
+        (the rule of 6c30bf8d)."""
+        from . import metrics
+
+        sub = self.sub
+        if not sub.round_episodes:
+            self._note(VERDICT_NOT_LABELLED_NOTE, f"{sub.round_id}: no step ran")
+            return
+        try:
+            metrics.label_round(
+                self.journal.directory,
+                sub.round_id,
+                OPERATOR_LABEL_OF_VERDICT[verdict["label"]],
+                by=verdict["by"],
+                forward=sub.round_episodes,
+                note=f"{VERDICT_NOTE} {verdict['source']} via {verdict['episode_id']}",
+            )
+            sub.round_labelled = True
+        except (metrics.LabelRefused, OSError) as exc:
+            self._note(VERDICT_LABEL_FAILED_NOTE, f"{sub.round_id}: {exc}")
+
+    def _round_members(self) -> None:
+        """The reverse episodes of a labelled round, once the reverse loop ended."""
+        from . import metrics
+
+        sub = self.sub
+        if not sub.round_labelled:
+            return
+        try:
+            metrics.round_members(
+                self.journal.directory, sub.round_id, sub.reverse_episodes
+            )
+        except OSError as exc:
+            self._note(VERDICT_LABEL_FAILED_NOTE, f"{sub.round_id} members: {exc}")
+
+    def _home_after_subtask(self, ctx, reason: str = "robot_home_reached") -> bool:
+        """ROBOT_HOME -> SCENE_ASSESS with the safe home (the end of a forward
+        loop: ``subtask_forward_done``; a stop, a policy failure:
+        ``robot_home_reached``)."""
+        if not self._safe_to_home():
+            return False
+        found = self._tx(
+            "SCENE_ASSESS",
+            reason,
+            kind="home",
+            act=self._home(ctx),
+            authority=ctx.stop_authority,
+            ctx=ctx,
+            step=1,
+        )
+        if found.executed != "yes":
+            self._note("home_failed_detail", found.detail)
+            self._fault("home_failed")
+            return False
+        self._close_episode()
+        self.ctx = None
+        return True
+
+    def _after_forward_subtask(self, ctx, reason: str) -> None:
+        """ROBOT_HOME after a forward subtask's seal (the arm held, the policy
+        quiesced, the rollout sealed)."""
+        verdict = ctx.verdict
+        if ctx.steps_done > 0:
+            self.sub.round_episodes.append(ctx.episode_id)
+        # R9: s/f/d ends the forward loop; the reverse loop still restores.
+        if verdict is not None:
+            self._label_round(verdict)
+            self._end_forward_loop(ctx, verdict["label"])
+            return
+        if reason == "policy_error":
+            if self._home_after_subtask(ctx):
+                self._to_human("policy_error")
+            return
+        early = (
+            self._early_note(ctx)
+            if reason == st.R_EARLY_CHECK and ctx.early_trigger is not None
+            else None
+        )
+        value = self._check_subtask(ctx, early=early)
+        if self.state == "FAULT_LOCKED":
+            return
+        operator = self._operator()
+        if operator is not None:
+            # R8: a stop during the check wins: home, then the stop waits there.
+            if self.config.home_after_operator_stop:
+                self._home_after_subtask(ctx)
+            else:
+                self._close_episode()
+                self.ctx = None
+                self._tx("WAIT_HUMAN", "operator_stop", authority=operator)
+            return
+        if early is not None and value is not True:
+            # false, null, or no answer (the VLM could not be woken): the
+            # subtask goes on; its ordinary check still comes at the end.
+            self._continue_subtask(ctx, value)
+            return
+        if isinstance(value, str):
+            self._sub_wait(value)
+            return
+        self._next_subtask(ctx, value)
+
+    def _next_subtask(self, ctx, value, *, result=None, home=None) -> None:
+        """After a check: the next subtask, the same one again, the loop's end
+        or a person. ``result``: a reverse subtask's result (committed here)."""
+        sub, cfg = self.sub, self.config
+        if value is None:
+            # R4: null, unreadable or no answer: a person, never done.
+            self._sub_wait(
+                st.R_CHECK_UNAVAILABLE, ctx=ctx if result else None, result=result
+            )
+            return
+        if value is True:
+            sub.index += 1
+            sub.attempt = 1
+            sub.new_attempt()
+            if sub.index >= len(sub.plan):
+                self._end_loop(ctx, result=result, home=home)
+                return
+        else:
+            # R5: at most subtask_max_retries resends of one subtask.
+            if sub.attempt > cfg.subtask_max_retries:
+                self._sub_wait(
+                    st.R_RETRY_LIMIT, ctx=ctx if result else None, result=result
+                )
+                return
+            sub.attempt += 1
+            sub.retries += 1
+            sub.new_attempt()
+            self._sub_note(
+                st.NOTE_RETRY,
+                {
+                    "round": sub.round_no,
+                    "loop": sub.loop_name(),
+                    "index": sub.index,
+                    "attempt": sub.attempt,
+                },
+            )
+        self._tx("SCENE_ASSESS", st.R_CONTINUE, ctx=ctx, result=result)
+        self._close_episode()
+        self.ctx = None
+
+    def _end_loop(self, ctx, *, result=None, home=None) -> None:
+        if self.sub.phase == "forward":
+            self._end_forward_loop(ctx, "done")
+        else:
+            self._end_reverse_loop(ctx, result, home)
+
+    def _loop_done_note(self, loop: str, outcome: str) -> None:
+        sub = self.sub
+        self._sub_note(
+            st.NOTE_LOOP_DONE,
+            {
+                "round": sub.round_no,
+                "loop": loop,
+                "subtasks": sub.dispatched,
+                "retries": sub.retries,
+                "checks": sub.checks,
+                "outcome": outcome,
+            },
+        )
+
+    def _end_forward_loop(self, ctx, outcome: str) -> None:
+        """The forward loop ended (all done, or the operator's s/f/d): home
+        (R11), the round counts (a ``d`` is replaced), the reverse loop next."""
+        sub = self.sub
+        replaced = outcome == "discard" and self.discarded_forward < self.discard_limit
+        if not self._home_after_subtask(ctx, st.R_FORWARD_DONE):
+            return
+        self._loop_done_note("forward", outcome)
+        if outcome == "discard" and not replaced:
+            self._replaces(ctx)  # notes discard_limit_reached
+        self._count_round(outcome)
+        sub.phase, sub.outcome = "reverse_pending", outcome
+
+    def _end_reverse_loop(self, ctx, result, home) -> None:
+        sub = self.sub
+        if not self._safe_to_home():
+            return
+        home["done"] = "succeeded"
+        found = self._tx(
+            "VERIFY_INITIAL",
+            st.R_REVERSE_DONE,
+            kind="home",
+            act=self._home(ctx),
+            ctx=ctx,
+            step=1,
+            result=result,
+        )
+        if found.executed != "yes":
+            self._note("home_failed_detail", found.detail)
+            self._fault("home_failed")
+            return
+        self._close_episode()
+        self.ctx = None
+        self._loop_done_note("reverse", "done")
+        self._round_members()
+        sub.phase, sub.plan, sub.index, sub.attempt = "idle", [], 0, 1
+
+    def _reverse_stop_guard(self) -> bool:
+        """A human wait needs a clear safety guard even when no home is due.
+
+        Observe outside the registry lock; this neither checks arrival at
+        home nor authorizes or performs any motion.
+        """
+        if self.robot.latch_state() or self.robot.health()["state"] == "red":
+            self._fault("safety_stop", guard=True)
+            return False
+        return True
+
+    def _finish_reverse_subtask(self, ctx, reason: str) -> None:
+        """A reverse subtask episode ends: hold and quiesce, seal, then its
+        check on still frames (R6); never the reset policy's scene check."""
+        auth = ctx.stop_authority
+        found = self._tx(
+            "RESET_VERIFY",
+            st.R_ENDED,
+            kind="policy_quiesce",
+            act=self._quiesce(ctx),
+            authority=auth,
+            ctx=ctx,
+        )
+        if found.executed != "yes":
+            self._fault("policy_error")
+            return
+        sealed: dict = {}
+        ran = ctx.steps_done > 0
+        if ran:
+            self.sub.reverse_episodes.append(ctx.episode_id)
+        found = self._tx(
+            "RESET_FINALIZE",
+            st.R_ENDED,
+            kind="recorder_seal" if ran else "recorder_abort",
+            act=self._seal(ctx, sealed) if ran else self._discard(ctx, sealed),
+            authority=auth,
+            ctx=ctx,
+        )
+        if found.executed != "yes":
+            self._fault("recorder_failed")
+            return
+        stop = "horizon_exhausted" if reason == "reset_horizon_exhausted" else reason
+        home = {"done": "not_attempted"}
+
+        def result():
+            return {
+                "task_outcome": "unknown",
+                "stop_reason": stop,
+                "goal_verification": "unavailable",
+                "robot_home": home["done"],
+                "scene_reset": "unknown",
+                "label_kind": "autonomous_verdict",
+                "judgement_ids": [],
+                "rollout": {
+                    "task_folder": self._folder("reset"),
+                    "demo": f"demo_{ctx.number:04d}",
+                    "sealed": sealed.get("sealed", "incomplete"),
+                },
+            }
+
+        operator = self._stays_put(ctx, reason, auth)
+        if operator is not None:
+            self._close_reverse_window()
+            if not self._reverse_stop_guard():
+                return
+            stop = "operator_stop"
+            self._tx(
+                "WAIT_HUMAN",
+                "operator_stop",
+                ctx=ctx,
+                result=result,
+                authority=operator,
+            )
+            self._close_episode()
+            self.ctx = None
+            return
+        if reason == camera_meta.REASON:
+            # No VLM check on frozen frames and no home: a person first.
+            self._close_reverse_window()
+            if not self._reverse_stop_guard():
+                return
+            self._tx("WAIT_HUMAN", camera_meta.REASON, ctx=ctx, result=result)
+            self._close_episode()
+            self.ctx = None
+            return
+        value = None
+        early = None
+        if reason != "policy_error" and self._operator() is None:
+            if reason == st.R_EARLY_CHECK and ctx.early_trigger is not None:
+                early = self._early_note(ctx)
+            value = self._check_subtask(ctx, early=early)
+            if self.state == "FAULT_LOCKED":
+                return
+        operator = self._close_reverse_window()
+        # Ordinary run-level stops remain valid after the reverse-only window
+        # closes; a reverse request cannot appear after this decision point.
+        operator = operator or self._operator()
+        if operator is not None:
+            if not self._reverse_stop_guard():
+                return
+            stop = "operator_stop"
+            if self._stays_put(ctx, "operator_stop", operator) is not None:
+                self._tx(
+                    "WAIT_HUMAN",
+                    "operator_stop",
+                    ctx=ctx,
+                    result=result,
+                    authority=operator,
+                )
+                self._close_episode()
+                self.ctx = None
+                return
+        if reason == "policy_error" or operator is not None:
+            # A stop (R8) or a policy failure: home, then a person.
+            if not self._safe_to_home():
+                return
+            home["done"] = "succeeded"
+            found = self._tx(
+                "WAIT_HUMAN",
+                "operator_stop" if operator is not None else "policy_error",
+                kind="home",
+                act=self._home(ctx),
+                ctx=ctx,
+                step=1,
+                result=result,
+                authority=operator,
+            )
+            if found.executed != "yes":
+                self._note("home_failed_detail", found.detail)
+                self._fault("home_failed")
+                return
+            self._close_episode()
+            self.ctx = None
+            return
+        if early is not None and value is not True:
+            # As in the forward loop: the reverse subtask goes on.
+            self._continue_subtask(ctx, value, result=result)
+            return
+        if isinstance(value, str):
+            self._sub_wait(value, ctx=ctx, result=result)
+            return
+        self._next_subtask(ctx, value, result=result, home=home)
+
     # --- scene assessment ---------------------------------------------------------------
 
     def _assess(self, target: str, episode_id: str) -> str:
@@ -1284,6 +3328,7 @@ class Orchestrator:
         try:
             if self.intervention is not None:
                 self.robot.hold()
+                self._rebuild_admission_interval(episode_id, self.policy_epoch)
                 deadline = self._now() + self.config.scene_timeout_ns
                 if self.owned_calls is None:
                     decision, reason, message = self.intervention.invoke(
@@ -1464,8 +3509,15 @@ class Orchestrator:
         ``stopped``). A person's check (``operator_attested``) may take
         minutes: it is collected in slices, and an operator's stop ends the
         wait at once (the stop then takes effect before anything starts)."""
-        wait = self.config.scene_wait_ns
-        if self.config.scene_check != "operator_attested" and self.intervention is None:
+        person = self.config.scene_check == "operator_attested" or (
+            # A provider's answer that a person confirms at the terminal
+            # (console.ConfirmedScene, L2-UI2-PROVIDER-RELEASE).
+            getattr(self.scene, "person_answers", False) is True
+        )
+        wait = (
+            self.config.human_scene_timeout_ns if person else self.config.scene_wait_ns
+        )
+        if not person and self.intervention is None:
             raw = self.scene.collect(ticket, timeout_ns=wait)
             return (raw, None) if raw is not None else (None, "timeout")
         start = self._now()
@@ -1489,7 +3541,9 @@ class Orchestrator:
 
     # --- episodes ------------------------------------------------------------------------
 
-    def _start(self, role: str, reason: str) -> None:
+    def _start(
+        self, role: str, reason: str, *, prompt: str | None = None, subtask=None
+    ) -> None:
         number = self.numbers[role] + 1
         self.numbers[role] = number
         self.policy_epoch += 1
@@ -1497,13 +3551,17 @@ class Orchestrator:
             role, f"{self.config.run_id}.{role}.{number:04d}", number, self.policy_epoch
         )
         self.ctx = ctx
+        if role == "reset" and self.sub is not None and self.intervention is None:
+            with self._stop_lock:
+                self._reverse_window = {
+                    "run_id": self.config.run_id,
+                    "round_no": self.sub.round_no,
+                    "episode_id": ctx.episode_id,
+                    "policy_epoch": ctx.policy_epoch,
+                }
         self._episode_note_lines = 0
         self._suppressed = 0
-        folder = (
-            self.config.forward_folder
-            if role == "forward"
-            else self.config.reset_folder
-        )
+        folder = self._folder(role)
         problem = {}
 
         def act(_):
@@ -1511,6 +3569,13 @@ class Orchestrator:
                 problem["what"] = "operator"
                 return "no", "none", "operator_stop"
             if self.intervention is not None:
+                # After a home that sent nothing the interval is rebuilt first,
+                # so the observation below is later than the closure it reopens.
+                # Not reached in the current flow: every _start follows
+                # _decide's _assess, which rebuilds first; kept so a path that
+                # starts without a scene check cannot skip the rebuild (tested
+                # directly in test_fr3_intervention).
+                self._rebuild_admission_interval(ctx.episode_id, ctx.policy_epoch)
                 before = self._now()
                 observed = self.robot.observe()
                 if (
@@ -1527,14 +3592,30 @@ class Orchestrator:
                     is not True
                 ):
                     raise InterventionUnproven("initial policy admission unproven")
-            handle = self.policy.acquire(role, policy_epoch=ctx.policy_epoch)
+            if prompt is None:
+                handle = self.policy.acquire(role, policy_epoch=ctx.policy_epoch)
+            else:
+                # subtask_loop: this episode's own prompt, rendered by code from
+                # the template; both loops run the evaluation policy.
+                handle = self.policy.acquire(
+                    "forward", policy_epoch=ctx.policy_epoch, prompt=prompt
+                )
             if handle.get("kind") == "unavailable":
+                if handle.get("fault") is True:
+                    # The adapter cannot say what state it left its resources
+                    # in (a policy service switch): lock, never a human wait.
+                    problem["what"] = "policy_fault"
+                    self._note(str(handle.get("code")), handle.get("detail", ""))
+                    return "no", "policy_adapter", "policy_switch_fault"
                 problem["what"] = "policy"
                 return "no", "policy_adapter", "policy_unavailable"
             try:
                 tell = getattr(self.recorder, "before_forward", None)
                 if role == "forward" and tell is not None:
                     tell(ctx.episode_id, **self._preceding())
+                describe = getattr(self.recorder, "describe_episode", None)
+                if subtask is not None and describe is not None:
+                    describe(ctx.episode_id, subtask)
                 ctx.rollout = self.recorder.open(
                     task_folder=folder, episode_id=ctx.episode_id, number=number
                 )
@@ -1552,6 +3633,8 @@ class Orchestrator:
             self.ctx = None
             if problem.get("what") == "recorder":
                 self._fault("recorder_failed")
+            elif problem.get("what") == "policy_fault":
+                self._fault("policy_error")
             elif problem.get("what") == "operator":
                 self._to_human("operator_stop", authority=self._operator())
             else:
@@ -1623,12 +3706,124 @@ class Orchestrator:
             found = "none"
         return {"preceded_by": found, "human_resets": human}
 
+    def _folder(self, role: str) -> str:
+        cfg = self.config
+        if cfg.subtask_mode:
+            if role == "forward":
+                return cfg.subtask_forward_folder
+            return cfg.subtask_reverse_folder
+        return cfg.forward_folder if role == "forward" else cfg.reset_folder
+
     def _max_steps(self, role: str) -> int:
+        if self.config.subtask_mode:
+            # subtask.early_check: an episode that continues a subtask after an
+            # early check gets what is left of the attempt's step budget (an
+            # early check is never due within cooldown_steps of its end).
+            used = self.sub.used_steps if self.sub is not None else 0
+            return max(1, self.config.subtask_max_steps - used)
         return (
             self.config.forward_max_steps
             if role == "forward"
             else self.config.reset_max_steps
         )
+
+    # --- subtask.early_check (subtask_loop.EarlyCheck) ----------------------------------
+
+    def _early_event(self, ctx, raw) -> None:
+        """A trigger event of this episode (the stream the arbiter reads):
+        the newest one not yet checked waits in ``ctx.early_pending``. A
+        message the arbiter refuses is ignored here too; a retraction drops
+        the event it retracts. Only ever makes a check due, never moves."""
+        early = self.config.subtask_early_check
+        if self.sub is None or early is None or not early.on_events:
+            return
+        try:
+            event = aeri.parse(raw, "event")
+        except aeri.AeriError:
+            return
+        if event.episode_id != ctx.episode_id:
+            return
+        pending = ctx.early_pending
+        if event.status == "retracted":
+            if pending is not None and pending["event_id"] == event.retracts:
+                ctx.early_pending = None
+            return
+        if event.event_type not in early.event_types:
+            return
+        step = self.sub.used_steps + event.step
+        last = self.sub.early_last
+        if last is not None and step <= last:
+            return
+        if pending is None or step >= pending["step"]:
+            ctx.early_pending = {
+                "event_type": event.event_type,
+                "event_id": event.event_id,
+                "step": step,
+            }
+
+    def _early_due(self, ctx, step: int) -> dict | None:
+        early = self.config.subtask_early_check
+        sub = self.sub
+        if sub is None or early is None:
+            return None
+        return st.early_due(
+            early,
+            step=sub.used_steps + step,
+            budget=self.config.subtask_max_steps,
+            checks=sub.early_checks,
+            last_check=sub.early_last,
+            pending=ctx.early_pending,
+        )
+
+    def _early_note(self, ctx) -> dict:
+        """Journal the early check about to be asked and count it towards
+        the attempt's ``max_checks`` (also when the VLM cannot answer)."""
+        sub = self.sub
+        trigger = dict(ctx.early_trigger)
+        sub.early_checks += 1
+        sub.early_last = trigger["step"]
+        self._sub_note(
+            st.NOTE_EARLY_CHECK,
+            {
+                "round": sub.round_no,
+                "loop": sub.loop_name(),
+                "index": sub.index,
+                "attempt": sub.attempt,
+                "segment": sub.segment,
+                "episode_id": ctx.episode_id,
+                "steps": ctx.steps_done,
+                "n": sub.early_checks,
+                **trigger,
+            },
+        )
+        return trigger
+
+    def _continue_subtask(self, ctx, value, *, result=None) -> None:
+        """After an early check that was not true (false, null, no answer):
+        the same subtask, same attempt, goes on in a new episode with the rest
+        of its step budget, without a home (``subtask_continue``). No retry is
+        counted; the ordinary check still comes at the budget's end."""
+        sub = self.sub
+        sub.used_steps += ctx.last_step
+        sub.segment += 1
+        sub.continues = ctx.episode_id
+        self._sub_note(
+            st.NOTE_CONTINUED,
+            {
+                "round": sub.round_no,
+                "loop": sub.loop_name(),
+                "index": sub.index,
+                "attempt": sub.attempt,
+                "segment": sub.segment,
+                "after": ctx.episode_id,
+                "value": value if value in (True, False, None) else None,
+                "used_steps": sub.used_steps,
+                "remaining_steps": self.config.subtask_max_steps - sub.used_steps,
+            },
+        )
+        self._tx("SCENE_ASSESS", st.R_CONTINUE, ctx=ctx, result=result)
+        self._close_episode()
+        self.ctx = None
 
     def _issue_intervention_motion(self, ctx, found):
         # Registration and issuing share the small stop-registry lock. A stop
@@ -1709,6 +3904,12 @@ class Orchestrator:
             found = self.intervention.pause(
                 ctx.episode_id, old_epoch, ctx.policy_epoch, deadline_ns=deadline
             )
+            # The pause fence alone does not acknowledge the last released
+            # gripper command. Reuse the existing final quiesce/ACK check in
+            # this policy_quiesce transaction before judging or sealing.
+            executed, _, detail = self._quiesce(ctx)(None)
+            if executed != "yes":
+                raise InterventionUnproven("paused final quiesce/ACK: " + detail)
             from dataclasses import asdict
 
             proof.update(asdict(found))
@@ -1884,6 +4085,9 @@ class Orchestrator:
     def _seal_intervention(self, ctx, reason, message):
         if self._intervention_interrupted():
             raise InterventionStopped("stop before sealing judgement")
+        if ctx.role == "forward":
+            self._finish_paused_forward(ctx, reason, message)
+            return
         sealed = {}
         verification = verification_of(message)
 
@@ -1897,9 +4101,7 @@ class Orchestrator:
                 "label_kind": "autonomous_verdict",
                 "judgement_ids": ctx.judgement_ids[-64:],
                 "rollout": {
-                    "task_folder": self.config.forward_folder
-                    if ctx.role == "forward"
-                    else self.config.reset_folder,
+                    "task_folder": self._folder(ctx.role),
                     "demo": f"demo_{ctx.number:04d}",
                     "sealed": sealed.get("sealed", "incomplete"),
                 },
@@ -1923,6 +4125,258 @@ class Orchestrator:
             self.completed_forward += 1
         self._close_episode()
         self.ctx = None
+
+    def _finish_paused_forward(self, ctx, reason, message):
+        """A forward episode ended by its paused judgement: finalize, seal the
+        result, then home under the closed gate and hand over to the ordinary
+        scene assessment. The judgement already in hand is the verdict (no
+        second goal request); the policy stays fenced throughout and nothing
+        but the home moves the arm."""
+        found = self._tx(
+            "FORWARD_FINALIZE",
+            reason,
+            kind="policy_quiesce",
+            act=self._quiesce(ctx),
+            ctx=ctx,
+        )
+        if found.executed != "yes":
+            self._fault("policy_error")
+            return
+        verification = verification_of(message)
+        sealed: dict = {}
+        ran = ctx.steps_done > 0
+
+        def result():
+            return {
+                "task_outcome": aeri.OUTCOME_OF_VERIFICATION[verification],
+                "stop_reason": reason,
+                "goal_verification": verification,
+                "robot_home": "not_attempted",
+                "scene_reset": "unknown",
+                "label_kind": "autonomous_verdict",
+                "judgement_ids": ctx.judgement_ids[-64:],
+                "rollout": {
+                    "task_folder": self._folder("forward"),
+                    "demo": f"demo_{ctx.number:04d}",
+                    "sealed": sealed.get("sealed", "incomplete"),
+                },
+            }
+
+        found = self._tx(
+            "ROBOT_HOME",
+            reason,
+            kind="recorder_seal" if ran else "recorder_abort",
+            act=self._seal(ctx, sealed) if ran else self._discard(ctx, sealed),
+            ctx=ctx,
+            result=result,
+            evidence=ctx.judgement_ids[-64:],
+        )
+        if found.executed != "yes":
+            self._fault("recorder_failed")
+            return
+        if ran:
+            self.completed_forward += 1
+        # A stop after the seal leaves the arm where it stands, whatever
+        # home_after_operator_stop says: the result is kept, nothing moves.
+        if self._stay_after_seal(ctx):
+            return
+        if not self._safe_to_home():
+            return
+        gate_before = self._gate_counts()
+        reached = {}
+        found = self._tx(
+            "SCENE_ASSESS",
+            "robot_home_reached",
+            kind="home",
+            act=self._home_closed_gate(ctx, reached),
+            ctx=ctx,
+            step=1,
+        )
+        if found.executed != "yes":
+            # Nothing was sent (a stop before the token, or before the first
+            # POST): the arm stays where it stands, as for any stop after the seal.
+            if found.executed == "no" and self._stay_after_seal(ctx):
+                return
+            self._note("home_failed_detail", found.detail)
+            if (
+                found.executed == "no"
+                and reached.get("robot")
+                and self._home_sent_nothing(gate_before)
+            ):
+                # Decision 2026-10-14 21:1x (L2-HOME-EXECNO-ORCH): the bridge
+                # refused the home before its first command, by its own counters
+                # not one fenced home POST: no lock, the gate stays closed, a
+                # person checks and resumes. The binding's interval is rebuilt
+                # (stop_admission) before its next hook, since the home window
+                # left a new interval that the binding does not follow.
+                self._rebuild_admission = True
+                self._check_start_pose = True
+                self._close_episode()
+                self.ctx = None
+                self._tx("WAIT_HUMAN", "home_not_executed")
+                return
+            self._fault("home_failed")
+            return
+        self._note(
+            "robot_homed",
+            # No verdict here: it is in the episode result, which the operator's
+            # label must not be shown against before it is given.
+            f"episode={ctx.episode_id} sealed={ctx.sealed} "
+            f"{self._gate_facts(gate_before)} next=scene_assess",
+        )
+        self._close_episode()
+        self.ctx = None
+
+    def _gate_counts(self):
+        """The robot's cumulative home-only counters, or None without them."""
+        read = getattr(self.robot, "admission_snapshot", None)
+        if not callable(read):
+            return None
+        try:
+            snap = read()
+            return (
+                snap.home_pose_released,
+                snap.home_gripper_released,
+                snap.home_gate_rejected,
+            )
+        except Exception:  # noqa: BLE001 - a note never stops the run
+            return ()
+
+    def _home_sent_nothing(self, before) -> bool:
+        """True only when the robot's own home-only counters say the home sent
+        nothing: readable integers before and after, not one home pose or
+        gripper POST released and none refused inside the window, the gate
+        closed again, no fault latch, no red light and no latched or open
+        intervention. Anything unreadable or inconsistent counts as executed."""
+        if not before or len(before) != 3:
+            return False
+        try:
+            snap = self.robot.admission_snapshot()
+            after = (
+                snap.home_pose_released,
+                snap.home_gripper_released,
+                snap.home_gate_rejected,
+            )
+            if not (
+                all(type(v) is int for v in (*before, *after))
+                and after == tuple(before)
+                and snap.mode == "closed"
+                and snap.closed is True
+            ):
+                return False
+            if self.robot.latch_state() or self.robot.health()["state"] == "red":
+                return False
+            # A stop or signal the robot sees (Robot.stopped(), e.g. SIGINT)
+            # is not a refusal to wait on: it locks as before.
+            stopped = getattr(self.robot, "stopped", None)
+            if callable(stopped) and stopped():
+                return False
+        except Exception:  # noqa: BLE001 - unreadable: taken as executed
+            return False
+        cycle = self.intervention
+        return cycle is None or not (
+            cycle.failed or cycle.proof_failed or cycle.request_open
+        )
+
+    def _rebuild_admission_interval(self, episode_id: str, epoch: int) -> None:
+        """After a home that sent nothing: the binding adopts the gate's current
+        closed interval (``adopt_unexecuted_home``), only if it continues the
+        closure the binding made (its own continuity checks; a refusal closes
+        the gate and latches the binding), so the next hook can follow it. A
+        binding without the entry, an exception or any answer but True is an
+        unproven fact: ``InterventionUnproven`` and the run locks."""
+        if not self._rebuild_admission or self.intervention is None:
+            return
+        adopt = getattr(self.intervention.hooks, "adopt_unexecuted_home", None)
+        if not callable(adopt):
+            raise InterventionUnproven("the binding cannot adopt the home interval")
+        try:
+            adopted = adopt(episode_id, epoch - 1, epoch)
+        except InterventionUnproven:
+            raise
+        except Exception as exc:  # any failure is unproven
+            raise InterventionUnproven(
+                f"admission interval not rebuilt after home: {type(exc).__name__}"
+            ) from exc
+        if adopted is not True:
+            raise InterventionUnproven("admission interval not rebuilt after home")
+        self._rebuild_admission = False
+
+    def _gate_facts(self, before) -> str:
+        """The admission gate after a home, for the journal note: the robot's
+        own snapshot when it has one (counters are this window's increments,
+        not the robot's running totals), else the bare fact that it is closed."""
+        if before is None:
+            return "gate=closed"
+        try:
+            snap = self.robot.admission_snapshot()
+            pose, gripper, rejected = (
+                now - was
+                for now, was in zip(
+                    (
+                        snap.home_pose_released,
+                        snap.home_gripper_released,
+                        snap.home_gate_rejected,
+                    ),
+                    before,
+                    strict=True,
+                )
+            )
+            return (
+                f"gate={snap.mode} home_only_from_ns={snap.home_only_from_ns} "
+                f"home_pose_released={pose} home_gripper_released={gripper} "
+                f"home_gate_rejected={rejected}"
+            )
+        except Exception:  # noqa: BLE001 - a note never stops the run
+            return "gate=unreadable"
+
+    def _stay_after_seal(self, ctx) -> bool:
+        operator = self._operator()
+        if operator is None:
+            return False
+        self._close_episode()
+        self.ctx = None
+        self._tx("WAIT_HUMAN", "operator_stop", authority=operator)
+        return True
+
+    def _home_closed_gate(self, ctx, reached=None):
+        """The home of a paused episode: the token is issued under the stop
+        registry's lock, so a stop cannot revoke it and then see it restored,
+        and never while a stop, a failed proof or an open role request exists.
+        ``reached["robot"]`` is set once the robot's home was called."""
+        reached = {} if reached is None else reached
+
+        def act(prepared):
+            with self._stop_lock:
+                if self._stops:
+                    return "no", "none", "stop_before_home"
+                if self.intervention.failed or self.intervention.proof_failed:
+                    return "no", "none", "intervention_failed_before_home"
+                if self.intervention.request_open:
+                    return "no", "none", "role_request_open_before_home"
+                token = self.fence.issue(
+                    sm.MotionToken(
+                        run_id=self.config.run_id,
+                        transaction_id=prepared.transaction_id,
+                        control_epoch=prepared.control_epoch,
+                        kind="home",
+                        episode_id=ctx.episode_id,
+                        policy_epoch=ctx.policy_epoch,
+                        expires_mono_ns=self._now() + self.config.home_timeout_ns,
+                    )
+                )
+            # Defence in depth: the refusals above return "no" without calling
+            # the robot (counters unchanged too), and must keep locking; only a
+            # home the robot itself refused may become home_not_executed.
+            reached["robot"] = True
+            try:
+                found = self.robot.home_under_closed_gate(token=token)
+            finally:
+                self.fence.revoke()
+            self._result_notes(found)
+            return found.executed, "robot_server", found.detail
+
+        return act
 
     def _drive_intervention(self, ctx):
         cfg = self.config
@@ -1982,9 +4436,11 @@ class Orchestrator:
                 if self._intervention_interrupted():
                     raise InterventionStopped("stop after policy inference")
                 result = self.robot.step(buffer.pop(0), token=ctx.token)
+                self._result_notes(result)
                 if result.executed != "yes":
                     raise InterventionUnproven(
-                        "motion acknowledgement unproven; no retry"
+                        "motion acknowledgement unproven; no retry: "
+                        + str(result.detail)[:200]
                     )
                 ctx.steps_done += 1  # waits and refused/unknown motions never count
                 self.recorder.commit(ctx.rollout, result)
@@ -2035,6 +4491,14 @@ class Orchestrator:
         next_index = 0
         chunk_failures = 0
         last_frames, stalled = None, 0
+        # Frame bus: the same camera seq on K consecutive steps (K from the
+        # robot adapter; no image_meta, no check) is recorded once per run of
+        # repeats and never stops the episode (user 2026-10-18: a dropped
+        # frame under CPU/GPU load is normal; record, do not stop).
+        seq_repeat = False
+        seq_watch = camera_meta.SeqWatch(
+            getattr(self.robot, "camera_stale_steps", camera_meta.DEFAULT_STALE_STEPS)
+        )
         stop_reason = None
         for step in range(self._max_steps(ctx.role)):
             ctx.last_step = step
@@ -2045,7 +4509,35 @@ class Orchestrator:
             if self.robot.latch_state() or self.robot.health()["state"] == "red":
                 self._fault("safety_stop", guard=True)
                 return
-            obs = self.robot.observe()
+            # The operator's verdict (terminal s/f/d): after the stop and the
+            # safety checks above, so neither loses its priority to it. It
+            # ends this episode only; the run goes on.
+            verdict = self._take_verdict(ctx) if ctx.role == "forward" else None
+            if verdict is not None:
+                self._record_verdict(ctx, verdict, step)
+                stop_reason = "operator_verdict"
+                ctx.stop_authority = self._auth("operator", verdict["command_id"])
+                break
+            # subtask.early_check: after the stop, the safety checks and the
+            # operator's verdict (none loses its priority to it), before the
+            # next observation and step. The episode ends the ordinary way
+            # (hold, quiesce, seal); its check follows on still frames.
+            trigger = self._early_due(ctx, step)
+            if trigger is not None:
+                ctx.early_trigger = trigger
+                stop_reason = st.R_EARLY_CHECK
+                break
+            try:
+                obs = self.robot.observe()
+            except camera_meta.CameraStale as exc:
+                ctx.evidence_ok = False
+                self._note(camera_meta.REASON, f"step {step}: {exc}")
+                stop_reason = camera_meta.REASON
+                break
+            stale = seq_watch.update(obs.get("image_meta"))
+            if stale is not None and not seq_repeat:
+                self._note(camera_meta.SEQ_REPEAT, f"step {step}: {stale}")
+            seq_repeat = stale is not None
             frames = tuple(sorted(obs["frames"].items()))
             stalled = stalled + 1 if frames == last_frames else 0
             last_frames = frames
@@ -2066,6 +4558,7 @@ class Orchestrator:
                 ):
                     for note in arbiter.on_event(raw):
                         self._note(note.code, note.detail)
+                    self._early_event(ctx, raw)
                     if arbiter.events_disabled:
                         # Cut off: the rest of this batch is not even read.
                         self._note(
@@ -2102,7 +4595,12 @@ class Orchestrator:
                     ctx.stop_judgement = verdict.judgement_id
             if stop_reason is not None:
                 break
-            want = arbiter.want_request(step) if ctx.evidence_ok else None
+            # subtask_loop: the VLM sleeps while the policy runs (never asked).
+            want = (
+                arbiter.want_request(step)
+                if ctx.evidence_ok and self.sub is None
+                else None
+            )
             if want is not None:
                 request = ev.make_request(
                     run_id=cfg.run_id,
@@ -2129,6 +4627,9 @@ class Orchestrator:
             if not buffer:
                 chunk = self._chunk(ctx, step, next_index)
                 if chunk is None:
+                    if ctx.policy_exception_before_motion:
+                        stop_reason = "policy_error"
+                        break
                     chunk_failures += 1
                     ctx.bounded_failure = True
                     if chunk_failures >= cfg.chunk_failure_limit:
@@ -2138,17 +4639,27 @@ class Orchestrator:
                     continue
                 chunk_failures = 0
                 buffer = chunk
+            # Admission is after all observation/policy waits. A request
+            # linearized later may allow this ONE step to finish, but never
+            # the next one. Do not hold the registry lock across robot I/O.
+            if ctx.role == "reset" and self.sub is not None:
+                with self._stop_lock:
+                    stopped = bool(self._stops)
+                if stopped:
+                    stop_reason, ctx.stop_authority = "operator_stop", self._operator()
+                    break
             action = buffer.pop(0)
             result = self.robot.step(action, token=ctx.token)
+            self._result_notes(result)
             if result.executed == "unknown":
                 self._note("motion_unacknowledged", f"step {step}: {result.detail}")
                 self._fault("watchdog_timeout")
                 return
             if result.executed != "yes":
+                self._note("motion_refused", f"step {step}: {result.detail}")
                 if self.robot.latch_state():
                     self._fault("safety_stop", guard=True)
                     return
-                self._note("motion_refused", f"step {step}: {result.detail}")
                 stop_reason = "policy_error"
                 break
             ctx.steps_done += 1
@@ -2260,14 +4771,26 @@ class Orchestrator:
         request_id = request["request_id"]
         ticket = self.policy.request(request)
         if isinstance(ticket, dict):
-            self._note("policy_unavailable", f"{request_id}: {ticket.get('code')}")
+            self._note(
+                "policy_unavailable",
+                f"{request_id}: {ticket.get('code')}: {ticket.get('detail', '')}",
+            )
             return None
         raw = self.policy.collect(ticket, timeout_ns=cfg.chunk_timeout_ns)
         if raw is None:
             self._note("chunk_timeout", request_id)
             return None
         if raw.get("kind") == "unavailable":
-            self._note("policy_unavailable", f"{request_id}: {raw.get('code')}")
+            if (
+                ctx.role == "forward"
+                and ctx.steps_done == 0
+                and raw.get("code") == "policy_error"
+            ):
+                ctx.policy_exception_before_motion = True
+            self._note(
+                "policy_unavailable",
+                f"{request_id}: {raw.get('code')}: {raw.get('detail', '')}",
+            )
             return None
         return self.accept_chunk(ctx, raw, request)
 
@@ -2327,6 +4850,14 @@ class Orchestrator:
             self.robot.hold()
             ack = self.policy.quiesce(policy_epoch=ctx.policy_epoch)
             if ack.get("ok"):
+                confirm = getattr(self.robot, "confirm_pending_gripper", None)
+                if confirm is not None:
+                    try:
+                        for code, detail in confirm():
+                            self._note(code, detail)
+                    except Exception as exc:  # noqa: BLE001 - unproven final acknowledgement blocks closure
+                        self._note("motion_unacknowledged", str(exc))
+                        return "unknown", "robot_server", str(exc)
                 return "yes", "policy_adapter", "quiesced"
             return "unknown", "policy_adapter", "quiesce_unconfirmed"
 
@@ -2370,6 +4901,12 @@ class Orchestrator:
 
         return act
 
+    def _result_notes(self, result) -> None:
+        """Facts the robot adapter attached to a step (raw gripper replies,
+        their confirmation), kept verbatim in the journal."""
+        for code, text in getattr(result, "notes", ()):
+            self._note(code, text)
+
     def _home(self, ctx):
         def act(prepared):
             token = self.fence.issue(
@@ -2387,6 +4924,7 @@ class Orchestrator:
                 found = self.robot.home(token=token)
             finally:
                 self.fence.revoke()
+            self._result_notes(found)
             return found.executed, "robot_server", found.detail
 
         return act
@@ -2667,6 +5205,9 @@ class Orchestrator:
             authority=auth,
             ctx=ctx,
         )
+        # Out of FORWARD_ACTIVE (or locked): no verdict is registered from
+        # now on; one that came after the loop's last check is not taken.
+        self._drop_verdict("the episode had ended (" + reason + ")")
         if found.executed != "yes":
             self._fault("watchdog_timeout")
             return
@@ -2681,7 +5222,18 @@ class Orchestrator:
         if found.executed != "yes":
             self._fault("policy_error")
             return
-        verification = self._verification(ctx, reason)
+        if (
+            ctx.steps_done == 0
+            and ctx.policy_exception_before_motion
+            and self._operator() is None
+        ):
+            # The first real inference failed. Hold and quiesce above, then
+            # lock without homing or creating another empty forward episode.
+            self._fault("policy_error")
+            return
+        # subtask_loop: no judgement of the whole task here (the subtask's own
+        # check follows the seal); the result says unavailable, never success.
+        verification = "unavailable" if self.sub else self._verification(ctx, reason)
         sealed: dict = {}
         ran = ctx.steps_done > 0
 
@@ -2695,7 +5247,9 @@ class Orchestrator:
                 "label_kind": "autonomous_verdict",
                 "judgement_ids": ctx.judgement_ids[-64:],
                 "rollout": {
-                    "task_folder": self.config.forward_folder,
+                    # The recorder's folder (``<forward_folder>__subtask`` in
+                    # subtask_loop), as the reverse side already records.
+                    "task_folder": self._folder("forward"),
                     "demo": f"demo_{ctx.number:04d}",
                     "sealed": sealed.get("sealed", "incomplete"),
                 },
@@ -2714,8 +5268,20 @@ class Orchestrator:
         if found.executed != "yes":
             self._fault("recorder_failed")
             return
-        if ran:
-            self.completed_forward += 1
+        if ran and self.sub is None:
+            if self._replaces(ctx):
+                self.discarded_forward += 1  # one more round replaces it
+            else:
+                self.completed_forward += 1
+        if ctx.verdict is not None and ran and self.sub is None:
+            # subtask_loop: no episode label; the round's (_label_round).
+            self._label_verdict(ctx)
+        elif ctx.verdict is not None:
+            self._note(
+                VERDICT_NOT_LABELLED_NOTE,
+                f"{ctx.episode_id}: no rollout (aborted before the first step), "
+                "not labelled",
+            )
         operator = self._stays_put(ctx, reason, auth)
         if operator is not None:
             # The arm did not move in this episode, or the operator wants it
@@ -2723,6 +5289,18 @@ class Orchestrator:
             self._close_episode()
             self.ctx = None
             self._tx("WAIT_HUMAN", "operator_stop", authority=operator)
+            return
+        if reason == camera_meta.REASON:
+            # The cameras stopped: no home (a person looks first), the arm
+            # stays where it is, the run waits.
+            if self.sub is not None and ctx.steps_done > 0:
+                self.sub.round_episodes.append(ctx.episode_id)
+            self._close_episode()
+            self.ctx = None
+            self._tx("WAIT_HUMAN", camera_meta.REASON)
+            return
+        if self.sub is not None and self._operator() is None:
+            self._after_forward_subtask(ctx, reason)
             return
         if not self._safe_to_home():
             return
@@ -2736,6 +5314,7 @@ class Orchestrator:
             step=1,
         )
         if found.executed != "yes":
+            self._note("home_failed_detail", found.detail)
             self._fault("home_failed")
             return
         self._close_episode()
@@ -2754,6 +5333,9 @@ class Orchestrator:
         return None
 
     def _finish_reset(self, ctx: Episode, reason: str) -> None:
+        if self.sub is not None:
+            self._finish_reverse_subtask(ctx, reason)
+            return
         auth = ctx.stop_authority
         found = self._tx(
             "RESET_VERIFY",
@@ -2838,6 +5420,7 @@ class Orchestrator:
             "policy_error",
             "watchdog_timeout",
             "reset_horizon_exhausted",
+            camera_meta.REASON,
         ):
             outcome = reason
         elif decision == "ready":
@@ -2873,7 +5456,7 @@ class Orchestrator:
                 "label_kind": "autonomous_verdict",
                 "judgement_ids": ctx.judgement_ids[-64:],
                 "rollout": {
-                    "task_folder": self.config.reset_folder,
+                    "task_folder": self._folder("reset"),
                     "demo": f"demo_{ctx.number:04d}",
                     "sealed": sealed.get("sealed", "incomplete"),
                 },
@@ -2889,6 +5472,13 @@ class Orchestrator:
                 result=result,
                 authority=operator,
             )
+            self._close_episode()
+            self.ctx = None
+            return
+        if outcome == camera_meta.REASON:
+            # No home on frozen cameras: a person checks the scene first.
+            home["done"] = "not_attempted"
+            self._tx("WAIT_HUMAN", camera_meta.REASON, ctx=ctx, result=result)
             self._close_episode()
             self.ctx = None
             return
@@ -2916,6 +5506,7 @@ class Orchestrator:
             authority=auth if to == "WAIT_HUMAN" else None,
         )
         if found.executed != "yes":
+            self._note("home_failed_detail", found.detail)
             self._fault("home_failed")
             return
         self._close_episode()

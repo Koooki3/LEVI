@@ -182,11 +182,37 @@ class HumanAssistedReset:
         return TO_PERSON  # never reached: this strategy runs no reset
 
 
+@dataclass(frozen=True)
+class SubtaskLoopReset:
+    """No reset policy and no scene check: the VLM plans subtasks that the
+    evaluation policy runs, a forward loop and a reverse loop that restores
+    the round-start layout (``levi/automatic/subtask_loop.py``). The
+    orchestrator drives it itself; asked as a strategy it only ever hands the
+    scene to a person."""
+
+    name: str = "subtask_loop"
+
+    def plan(self, decision: str, attempts: int) -> ResetPlan:
+        if decision == "ready":
+            return ResetPlan(FORWARD, "scene_ready")
+        return ResetPlan(WAIT_HUMAN, _scene_reason(decision))
+
+    def after_reset(self, outcome: str, attempts: int, stop_pending: bool) -> str:
+        return TO_PERSON
+
+
+# Strategies outside the reset-mode matrix (``STRATEGIES`` keeps the two the
+# matrix compares).
+OTHER_STRATEGIES = ("subtask_loop",)
+
+
 def strategy_for(name: str, *, enabled=True, max_attempts=1, on_unknown="reset"):
     if name == "single_reset_policy":
         return SingleResetPolicy(enabled, max_attempts, on_unknown)
     if name == "human_assisted":
         return HumanAssistedReset()
+    if name == "subtask_loop":
+        return SubtaskLoopReset()
     if name in LATER:
         raise StrategyError(f"{name} is planned (pipeline §6.4), not available in v1")
     raise StrategyError(

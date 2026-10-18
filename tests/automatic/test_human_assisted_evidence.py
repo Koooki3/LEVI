@@ -269,7 +269,7 @@ def test_the_card_says_what_a_person_needs(tmp_path):
     contract = card["contract"]
     assert contract["key"] == "stack-plates-initial@1"
     assert contract["status"] == "draft" and contract["unconfirmed"]
-    assert "HA-23" in contract["notice"] and "未经用户确认" in contract["notice"]
+    assert "HA-23" not in contract["notice"] and "未经用户确认" in contract["notice"]
     assert [p["text"] for p in contract["predicates"]] == [
         "object at source",
         "gripper open",

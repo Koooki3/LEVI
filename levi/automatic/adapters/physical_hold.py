@@ -10,6 +10,7 @@ from numbers import Real
 
 import numpy as np
 
+from levi.automatic.fr3_bridge import AdmissionSnapshot
 from levi.automatic.intervention import (
     InterventionUnproven,
     PhysicalHoldProof,
@@ -325,3 +326,172 @@ class MeasuredPhysicalHold:
                     "measured hold observer unavailable"
                 ) from exc
             raise
+
+
+class RobotAdmissionWitness:
+    """observe_admission source backed by the bridge admission gate.
+
+    Built from ``mark``, the snapshot ``Robot.stop_admission()`` returned. Each
+    call takes a fresh atomic ``Robot.admission_snapshot()`` and issues an
+    AdmissionClosedProof only if ALL of these hold; otherwise it raises
+    InterventionUnproven and stays failed (no default allow, no repair):
+
+    * the gate is closed (not open, not in a home-only window) and is the very
+      closure of ``mark`` (same generation and closure time), so it was never
+      reopened, not even reopened and re-closed, and no home-only window has
+      opened since: a window changes the generation, so a witness made before
+      it fails for good even though the gate is closed again afterwards;
+    * the pose, gripper and home-only released-command counters equal the mark's,
+      so no command passed the gate inside [closed_from, observed_through];
+    * the MotionFence holds no current token (revoked). MotionFence keeps no
+      revocation time or generation, so this is a point-in-time fact at
+      observed_through; the gate, not the fence, covers the interval;
+    * the robot clock domain equals this clock's and time never goes backwards;
+    * the episode and policy epoch stay those of the first call.
+
+    What this does NOT prove: that the last released action finished or that the
+    arm is still. Counters mark when a command STARTED through the gate. A command
+    released just before ``stop_admission`` may still be executing in the
+    controller or reach the arm later, and ``Robot.hold()`` only sets ``held``, a
+    flag that is no evidence either. ``Robot.observe()["observed_ns"]`` is the
+    host time the read finished, not the physical capture time of pose or images.
+    Settling is therefore established only by MeasuredPhysicalHold's measured
+    window; this witness proves only that no NEW command could have started.
+    """
+
+    def __init__(self, robot, fence, clock, mark, *, run_id, plan_sha256, validity_ns):
+        if (
+            not callable(getattr(robot, "admission_snapshot", None))
+            or not callable(getattr(fence, "check", None))
+            or not hasattr(fence, "current")
+            or not isinstance(mark, AdmissionSnapshot)
+            or mark.closed is not True
+            or mark.closed_from_ns is None
+            or mark.generation < 1
+            or type(validity_ns) is not int
+            or validity_ns < 1
+            or not isinstance(run_id, str)
+            or not run_id
+            or not isinstance(plan_sha256, str)
+            or len(plan_sha256) != 64
+            or any(c not in "0123456789abcdef" for c in plan_sha256)
+            or not isinstance(getattr(clock, "domain", None), str)
+            or not clock.domain
+            or mark.clock_domain != clock.domain
+        ):
+            raise InterventionUnproven(
+                "closed admission mark, fence, matching clock and validity required"
+            )
+        self.robot, self.fence, self.clock, self.mark = robot, fence, clock, mark
+        self.run_id, self.plan_sha256 = run_id, plan_sha256
+        self.validity_ns = validity_ns
+        self.failed = False
+        self._binding = None
+        self._last_through = mark.read_ns
+
+    def _fail(self, why):
+        self.failed = True
+        raise InterventionUnproven("admission closure unproven: " + why)
+
+    def __call__(self, episode, epoch, deadline):
+        if self.failed:
+            raise InterventionUnproven("admission witness previously failed")
+        try:
+            return self._observe(episode, epoch, deadline)
+        except InterventionUnproven:
+            self.failed = True
+            raise
+        except BaseException as exc:
+            self.failed = True
+            raise InterventionUnproven("admission witness unavailable") from exc
+
+    def _observe(self, episode, epoch, deadline):
+        if type(epoch) is not int or type(deadline) is not int:
+            self._fail("episode/epoch/deadline types")
+        if self._binding is None:
+            self._binding = (episode, epoch)
+        elif self._binding != (episode, epoch):
+            self._fail("episode or policy epoch changed")
+        snap, mark = self.robot.admission_snapshot(), self.mark
+        through = snap.read_ns
+        if (
+            type(through) is not int
+            or snap.clock_domain != self.clock.domain
+            or through < self._last_through
+        ):
+            self._fail("clock domain changed or time went backwards")
+        if not snap.closed or snap.mode != "closed":
+            self._fail("gate is open or in a home-only window")
+        if (
+            snap.generation != mark.generation
+            or snap.closed_from_ns != mark.closed_from_ns
+        ):
+            self._fail("gate was reopened; closure interval is not continuous")
+        if (
+            snap.pose_released != mark.pose_released
+            or snap.gripper_released != mark.gripper_released
+        ):
+            self._fail("a pose/gripper command was released inside the interval")
+        if (
+            snap.home_pose_released != mark.home_pose_released
+            or snap.home_gripper_released != mark.home_gripper_released
+        ):
+            self._fail("a home command was released inside the interval")
+        if self.fence.current is not None:
+            self._fail("motion fence token is not revoked")
+        expires = min(deadline, through + self.validity_ns)
+        if expires <= through:
+            self._fail("no validity left before the deadline")
+        self._last_through = through
+        return AdmissionClosedProof(
+            self.run_id,
+            episode,
+            epoch,
+            self.plan_sha256,
+            snap.clock_domain,
+            mark.closed_from_ns,
+            through,
+            expires,
+            True,
+            True,
+        )
+
+
+def assemble_measured_hold(
+    robot,
+    bridge_robot,
+    fence,
+    clock,
+    config,
+    mark,
+    *,
+    run_id,
+    plan_sha256,
+    validity_ns,
+    interrupted,
+):
+    """MeasuredPhysicalHold whose observe_admission is a RobotAdmissionWitness.
+
+    ``robot`` supplies observe() (the measured source); ``bridge_robot`` is the
+    fr3_bridge.Robot that owns the gate (they may be the same object). Config,
+    validity, identities and the interrupt callback are all caller-injected, with
+    no defaults. The witness is ``hold.observe_admission``.
+    """
+    witness = RobotAdmissionWitness(
+        bridge_robot,
+        fence,
+        clock,
+        mark,
+        run_id=run_id,
+        plan_sha256=plan_sha256,
+        validity_ns=validity_ns,
+    )
+    return MeasuredPhysicalHold(
+        robot,
+        clock,
+        config,
+        run_id=run_id,
+        plan_sha256=plan_sha256,
+        observe_admission=witness,
+        interrupted=interrupted,
+    )

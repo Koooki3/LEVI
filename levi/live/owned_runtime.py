@@ -65,7 +65,13 @@ def _inherited_flock(pid, owner_pid, path):
     """
     stat = path.stat()
     for info in Path(f"/proc/{pid}/fdinfo").iterdir():
-        for line in info.read_text().splitlines():
+        try:
+            text = info.read_text()
+        except FileNotFoundError:
+            # The listing itself borrows a descriptor that is closed again
+            # before it is read; a vanished entry cannot be the lock row.
+            continue
+        for line in text.splitlines():
             if not line.startswith("lock:"):
                 continue
             values = line.split()

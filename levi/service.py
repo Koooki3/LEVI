@@ -467,10 +467,22 @@ def sync_now():
 @app.api_route("/api/levi/files/{slug}/{path:path}", methods=["GET", "HEAD"])
 def dataset_file(slug: str, path: str):
     root = local_root("local/" + slug)
-    full = inside(path, root)
-    if not path.startswith(
-        ("meta/", "data/", "videos/", "images/")
-    ) or full.suffix not in (
+    # The route parameter is already URL-decoded. Check components before
+    # Path/resolve can erase traversal, including private runs under assets.
+    assets = {"meta", "data", "videos", "images"}
+    parts = path.split("/")
+    if parts[0] not in assets or any(p in {".", "..", ".aeri"} for p in parts):
+        raise HTTPException(403, "Not a dataset asset")
+    try:
+        full = inside(path, root)
+        relative = full.relative_to(root.resolve())
+    except (ValueError, OSError) as exc:
+        raise HTTPException(403, "Not a dataset asset") from exc
+    # Allow links between public asset directories, but never links into a
+    # private sidecar tree, including a registered root already inside one.
+    if not relative.parts or relative.parts[0] not in assets or ".aeri" in full.parts:
+        raise HTTPException(403, "Not a dataset asset")
+    if full.suffix not in (
         ".json",
         ".jsonl",
         ".parquet",

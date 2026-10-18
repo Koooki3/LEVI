@@ -909,3 +909,447 @@ def test_slow_gpu_admission_is_inside_actual_request_deadline(setup):
     while judge._busy.locked() and time.monotonic() < deadline:
         time.sleep(0.01)
     assert not judge._busy.locked() and gate.admitted == gate.completed == 1
+
+
+# --- Explicit forward success specification (T-C-JUDGEFLOW) --------------------------
+
+
+def forward_spec(tmp_path, base):
+    from test_session_requirements import SUCCESS, write
+
+    from levi.automatic import cli
+
+    job = cli.load_job(
+        write(tmp_path, success=f'"{SUCCESS}"', name=base.value["run_id"])
+    )
+    old = base.value
+    settings = {
+        key: old[key]
+        for key in (
+            "id",
+            "version",
+            "run_id",
+            "provider",
+            "image_budget",
+            "max_output_tokens",
+            "observation_max_age_ns",
+            "validity_ns",
+        )
+    }
+    settings["deadlines_ns"] = {
+        "forward_final": 5_000_000_000,
+        "forward_active": 3_000_000_000,
+    }
+    settings["observations"] = {
+        "preferred": ["side"],
+        "require_visible_evidence": True,
+        "min_evidence_refs": 1,
+        "require_all_views": True,
+    }
+    return pm.freeze_forward(job, settings), job, settings
+
+
+def forward_payload(setup, spec, *, final=True):
+    item = payload(setup, "reset_judgement")
+    item["kind"] = "forward_judgement"
+    req = item["request"]
+    req.update(
+        episode_id="test-run.forward.0001",
+        episode_role="forward",
+        target="forward_goal",
+        phase="forward_final" if final else "forward_active",
+        spec_sha256=spec.sha256,
+        plan_sha256=spec.value["plan_sha256"],
+    )
+    req["deadline_due_ns"] = (
+        req["submitted_ns"] + spec.value["deadlines_ns"][req["phase"]]
+    )
+    contract = spec.contract
+    item["contract"] = {
+        "id": contract.contract_id,
+        "version": contract.contract_version,
+        "required": list(contract.required),
+        "optional": list(contract.optional),
+    }
+    return item
+
+
+def forward_answer(spec, item, value=True):
+    refs = [{"ref": f["ref"], "sha256": f["sha256"]} for f in item["frames"]]
+    return json.dumps(
+        {
+            "schema": pm.ANSWER_SCHEMA,
+            "spec_sha256": spec.sha256,
+            "model_digest": spec.value["provider"]["model_digest"],
+            "observed_ns": item["observed_ns"],
+            "predicates": [
+                {
+                    "name": "task_success_condition",
+                    "required": True,
+                    "value": value,
+                    "evidence_refs": refs if value is not None else [],
+                }
+            ],
+        }
+    )
+
+
+def test_forward_spec_uses_actual_frozen_job_not_initial_state(setup, tmp_path):
+    spec, job, _ = forward_spec(tmp_path, setup[0])
+    assert type(spec) is pm.FrozenSpec
+    assert spec.value["schema"] == pm.FORWARD_SPEC_SCHEMA
+    assert pm.canonical(spec.value["frozen_plan"]) == pm.canonical(job["plan"])
+    assert spec.value["plan_sha256"] == job["plan_sha256"]
+    assert spec.value["definitions"] == {
+        "task_success_condition": job["spec"].task.success_condition,
+    }
+    prompt = pm.question(spec, forward_payload(setup, spec))
+    assert job["spec"].task.instruction in prompt
+    assert job["spec"].task.success_condition in prompt
+    assert "object_at_source" not in prompt
+    assert pm.FrozenSpec.load(spec.value) == spec
+
+
+@pytest.mark.parametrize(
+    "value,decision", [(True, "confirmed"), (False, "rejected"), (None, "unknown")]
+)
+@pytest.mark.parametrize("final", [True, False])
+def test_forward_result_retains_role_window_and_three_way_answer(
+    setup, tmp_path, value, decision, final
+):
+    spec, _, _ = forward_spec(tmp_path, setup[0])
+    item = forward_payload(setup, spec, final=final)
+    now = item["observed_ns"]
+    result = pm.model_result(
+        spec, item, forward_answer(spec, item, value), produced_ns=now
+    )
+    message = pm.validate_result(spec, item, result, now_ns=now)
+    assert message.decision == decision
+    assert (message.episode_role, message.target) == ("forward", "forward_goal")
+    assert message.observed_through_ns == now
+    assert message.observed_through_step == item["request"]["observed_through_step"]
+    if value is None:
+        assert message.unknown_reason == "model_undecided"
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "missing_success",
+        "blank_success",
+        "missing_task",
+        "changed_plan",
+        "changed_success",
+        "changed_task",
+        "config_digest",
+    ],
+)
+def test_forward_freezing_rejects_missing_or_changed_job_source(setup, tmp_path, fault):
+    from copy import deepcopy
+
+    _spec, job, settings = forward_spec(tmp_path, setup[0])
+    job = dict(job, plan=deepcopy(job["plan"]))
+    if fault == "missing_success":
+        job["plan"].pop("success_condition")
+    elif fault == "blank_success":
+        job["plan"]["success_condition"] = "   "
+    elif fault == "missing_task":
+        job["plan"]["texts"].pop("forward")
+    elif fault == "changed_plan":
+        job["plan"]["seed"] += 1
+    elif fault == "changed_success":
+        job["plan"]["success_condition"] = "Different criterion."
+    elif fault == "changed_task":
+        job["plan"]["texts"]["forward"] = "Different task."
+    else:
+        job["plan_sha256"] = "c" * 64
+    with pytest.raises((ValueError, TypeError)):
+        pm.freeze_forward(job, settings)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "role",
+        "target",
+        "episode",
+        "phase",
+        "plan",
+        "spec",
+        "window",
+        "time",
+        "deadline",
+        "scene",
+        "reset",
+    ],
+)
+def test_forward_input_does_not_adopt_reset_or_foreign_source(setup, tmp_path, fault):
+    spec, _, _ = forward_spec(tmp_path, setup[0])
+    item = forward_payload(setup, spec)
+    req = item["request"]
+    changes = {
+        "role": ("episode_role", "reset"),
+        "target": ("target", "reset_goal"),
+        "episode": ("episode_id", "test-run.reset.0001"),
+        "phase": ("phase", "reset_final"),
+        "plan": ("plan_sha256", "c" * 64),
+        "spec": ("spec_sha256", "d" * 64),
+        "window": ("observed_from_step", 2),
+        "time": ("observed_through_ns", 0),
+        "deadline": ("deadline_due_ns", req["submitted_ns"]),
+    }
+    if fault in changes:
+        key, value = changes[fault]
+        req[key] = value
+    else:
+        item["kind"] = "scene" if fault == "scene" else "reset_judgement"
+    with pytest.raises((ValueError, TypeError)):
+        pm.validate_input(spec, item, now_ns=item["observed_ns"])
+
+
+def test_forward_file_worker_advertises_only_explicit_capability(setup, tmp_path):
+    spec, _, _ = forward_spec(tmp_path, setup[0])
+    _, root, evidence, _, judge, _ = setup
+    judge.register_aeri_spec(spec)
+    item = forward_payload(setup, spec)
+    name = submit(root, item)
+
+    def ask(spec, item, folder, names, cancel):
+        assert Path(folder, names[0]).read_bytes().startswith(b"\xff\xd8")
+        return forward_answer(spec, item), {}
+
+    with pw.Worker(
+        root, spec, evidence, aeri_online.SharedChannel(judge, ask=ask)
+    ) as worker:
+        ready = json.loads((root / "READY.json").read_text())
+        assert ready["capabilities"] == ["forward_judgement"]
+        assert worker.poll() == 1
+        result = read_response(root, item, name)
+        assert result.decision == "confirmed"
+        assert result.episode_role == "forward"
+        assert worker.poll() == 0  # one completed request, no repeated inference
+
+
+@pytest.mark.parametrize("field", ["final", "active"])
+def test_forward_deadlines_are_the_actual_frozen_job_limits(setup, tmp_path, field):
+    _, job, settings = forward_spec(tmp_path, setup[0])
+    phase = "forward_" + field
+    settings["deadlines_ns"][phase] += 1
+    with pytest.raises(ValueError, match="deadlines"):
+        pm.freeze_forward(job, settings)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "success",
+        "task",
+        "plan_run",
+        "source",
+        "definition",
+        "required",
+        "descriptor",
+        "missing_view",
+        "duplicate_view",
+        "evidence_disabled",
+        "min_evidence",
+        "image_budget",
+    ],
+)
+def test_forward_loaded_spec_rejects_unbound_or_unobservable_source(
+    setup, tmp_path, fault
+):
+    spec, _, _ = forward_spec(tmp_path, setup[0])
+    value = spec.value
+    if fault == "success":
+        value["frozen_plan"]["success_condition"] = "Different criterion."
+    elif fault == "task":
+        value["frozen_plan"]["texts"]["forward"] = "Different task."
+    elif fault == "plan_run":
+        value["frozen_plan"]["run"]["run_id"] = "other"
+    elif fault == "source":
+        value["source"]["sha256"] = "c" * 64
+    elif fault == "definition":
+        value["definitions"]["task_success_condition"] = "Guess from task."
+    elif fault == "required":
+        value["contract"]["predicates"]["required"] = []
+    elif fault == "descriptor":
+        value["contract"]["id"] = "other"
+    elif fault == "missing_view":
+        value["contract"]["observations"]["preferred"] = []
+    elif fault == "duplicate_view":
+        value["contract"]["observations"]["preferred"] = ["side", "side"]
+    elif fault == "evidence_disabled":
+        value["contract"]["observations"]["require_visible_evidence"] = False
+    elif fault == "min_evidence":
+        value["contract"]["observations"]["min_evidence_refs"] = 0
+    else:
+        value["contract"]["observations"]["min_evidence_refs"] = 3
+    with pytest.raises(ValueError):
+        pm.freeze(value)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "episode_role",
+        "target",
+        "observed_from_step",
+        "observed_through_step",
+        "observed_through_ns",
+        "event_ids",
+        "model_digest",
+        "spec_id",
+        "produced_ns",
+        "valid_until_ns",
+    ],
+)
+def test_forward_response_is_refenced_independently_of_producer(setup, tmp_path, field):
+    spec, _, _ = forward_spec(tmp_path, setup[0])
+    item = forward_payload(setup, spec)
+    now = item["observed_ns"]
+    result = pm.model_result(spec, item, forward_answer(spec, item), produced_ns=now)
+    changes = {
+        "episode_role": "reset",
+        "target": "reset_goal",
+        "observed_from_step": 1,
+        "observed_through_step": 2,
+        "observed_through_ns": now - 1,
+        "event_ids": ["foreign-event"],
+        "model_digest": "c" * 64,
+        "spec_id": "foreign",
+        "produced_ns": now + 1,
+        "valid_until_ns": now + spec.value["validity_ns"] + 1,
+    }
+    result[field] = changes[field]
+    with pytest.raises((ValueError, aeri.AeriError)):
+        pm.validate_result(spec, item, result, now_ns=now)
+
+
+def test_forward_unread_or_insufficient_current_evidence_is_never_confirmed(
+    setup, tmp_path
+):
+    spec, _, _ = forward_spec(tmp_path, setup[0])
+    value = spec.value
+    value["contract"]["observations"]["preferred"] = ["wrist"]
+    spec = pm.freeze(value)
+    item = forward_payload(setup, spec)
+    now = item["observed_ns"]
+    result = pm.model_result(spec, item, forward_answer(spec, item), produced_ns=now)
+    assert result["decision"] == "unknown"
+    assert result["unknown_reason"] == "insufficient_evidence"
+    pm.validate_result(spec, item, result, now_ns=now)
+
+
+# Independent review: actual RunConfig limits also bind the forward spec.
+
+
+@pytest.mark.parametrize(
+    "phase,field",
+    [
+        ("forward_final", "final_judge_timeout_ns"),
+        ("forward_active", "judge_request_timeout_ns"),
+    ],
+)
+def test_forward_freezing_rejects_actual_config_deadline_drift(
+    setup, tmp_path, phase, field
+):
+    from dataclasses import replace
+
+    _, job, settings = forward_spec(tmp_path, setup[0])
+    job = dict(job, config=replace(job["config"], **{field: 1}))
+    assert getattr(job["config"], field) != settings["deadlines_ns"][phase]
+    with pytest.raises(ValueError, match="deadline"):
+        pm.freeze_forward(job, settings)
+
+
+@pytest.mark.parametrize(
+    "phase,field",
+    [
+        ("forward_final", "final_judge_timeout_ns"),
+        ("forward_active", "judge_request_timeout_ns"),
+    ],
+)
+def test_forward_freezing_rejects_rehashed_plan_deadline_upgrade(
+    setup, tmp_path, phase, field
+):
+    from copy import deepcopy
+    from dataclasses import replace
+
+    _, job, settings = forward_spec(tmp_path, setup[0])
+    plan = deepcopy(job["plan"])
+    plan["run"][field] += 1
+    sha = hashlib.sha256(
+        json.dumps(plan, sort_keys=True, default=str).encode()
+    ).hexdigest()
+    job = dict(
+        job, plan=plan, plan_sha256=sha, config=replace(job["config"], plan_sha256=sha)
+    )
+    settings = deepcopy(settings)
+    settings["deadlines_ns"][phase] += 1
+    assert getattr(job["config"], field) < settings["deadlines_ns"][phase]
+    with pytest.raises(ValueError, match="deadline"):
+        pm.freeze_forward(job, settings)
+
+
+@pytest.mark.parametrize(
+    "phase,field",
+    [
+        ("forward_final", "final_judge_timeout_ns"),
+        ("forward_active", "judge_request_timeout_ns"),
+    ],
+)
+def test_forward_freezing_accepts_explicitly_matching_actual_plan_settings_limits(
+    setup, tmp_path, phase, field
+):
+    from copy import deepcopy
+    from dataclasses import replace
+
+    _, job, settings = forward_spec(tmp_path, setup[0])
+    plan = deepcopy(job["plan"])
+    plan["run"][field] += 1
+    sha = hashlib.sha256(
+        json.dumps(plan, sort_keys=True, default=str).encode()
+    ).hexdigest()
+    job = dict(
+        job,
+        plan=plan,
+        plan_sha256=sha,
+        config=replace(job["config"], plan_sha256=sha, **{field: plan["run"][field]}),
+    )
+    settings = deepcopy(settings)
+    settings["deadlines_ns"][phase] = plan["run"][field]
+    spec = pm.freeze_forward(job, settings)
+    assert spec.value["deadlines_ns"][phase] == getattr(job["config"], field)
+
+
+@pytest.mark.parametrize(
+    "phase,field",
+    [
+        ("forward_final", "final_judge_timeout_ns"),
+        ("forward_active", "judge_request_timeout_ns"),
+    ],
+)
+@pytest.mark.parametrize("bad", [None, True])
+def test_forward_freezing_rejects_missing_or_bool_plan_budget(
+    setup, tmp_path, phase, field, bad
+):
+    from copy import deepcopy
+    from dataclasses import replace
+
+    _, job, settings = forward_spec(tmp_path, setup[0])
+    plan = deepcopy(job["plan"])
+    plan["run"][field] = bad
+    sha = hashlib.sha256(
+        json.dumps(plan, sort_keys=True, default=str).encode()
+    ).hexdigest()
+    job = dict(
+        job,
+        plan=plan,
+        plan_sha256=sha,
+        config=replace(job["config"], plan_sha256=sha, **{field: 1}),
+    )
+    settings = deepcopy(settings)
+    settings["deadlines_ns"][phase] = 1
+    with pytest.raises(ValueError, match="deadline"):
+        pm.freeze_forward(job, settings)

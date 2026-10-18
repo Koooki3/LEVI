@@ -242,10 +242,13 @@
             "goal_verified",
             "horizon_exhausted",
             "operator_stop",
+            "operator_verdict",
+            "subtask_early_check",
             "safety_stop",
             "policy_error",
             "watchdog_timeout",
             "orchestrator_crash",
+            "camera_stale",
             "recorder_failed",
             "home_failed"
           ],
@@ -391,7 +394,8 @@
             {
               "enum": [
                 "single_reset_policy",
-                "human_assisted"
+                "human_assisted",
+                "subtask_loop"
               ],
               "type": "string"
             },
@@ -632,7 +636,25 @@
             "recorder_failed",
             "human_resumed",
             "run_completed",
-            "contract_violation_limit"
+            "contract_violation_limit",
+            "home_not_executed",
+            "home_pose_not_reached",
+            "startup_home_requested",
+            "startup_home_not_executed",
+            "camera_stale",
+            "operator_verdict",
+            "subtask_dispatched",
+            "subtask_continue",
+            "subtask_ended",
+            "subtask_forward_done",
+            "subtask_reverse_done",
+            "subtask_check_unavailable",
+            "subtask_retry_limit",
+            "subtask_plan_refused",
+            "subtask_inventory_rejected",
+            "subtask_not_released",
+            "vlm_unavailable",
+            "subtask_early_check"
           ],
           "type": "string"
         },

@@ -3,7 +3,10 @@
 // operator_attested`): the frames the system just grabbed and, for each
 // required predicate, a true / false / cannot-tell answer. Only the answers
 // and the question's own ids are sent; the question is answered once.
-import { ScanEye } from "lucide-react";
+// A real-robot run (`terminalOnly`, decision UI-2) shows the question and
+// its frames only: the answer that releases motion is typed at the terminal,
+// so nothing here can be chosen or sent.
+import { ScanEye, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button, Radio } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
@@ -29,10 +32,12 @@ export function SceneCheck({
   runId,
   question,
   onAnswered,
+  terminalOnly = false,
 }: {
   runId: string;
   question: SceneQuestion;
   onAnswered?: () => void;
+  terminalOnly?: boolean;
 }) {
   const { t } = useLocale();
   const [chosen, setChosen] = useState<Record<string, SceneAnswer | undefined>>(
@@ -61,7 +66,7 @@ export function SceneCheck({
     .map((predicate) => predicate.name);
   const left = sceneSecondsLeft(question.asked_at, question.timeout_s, now);
   const expired = left <= 0;
-  const locked = submitted || expired;
+  const locked = submitted || expired || terminalOnly;
 
   const submit = async () => {
     if (inFlight.current || locked || !sceneComplete(required, chosen)) return;
@@ -125,7 +130,18 @@ export function SceneCheck({
           </fieldset>
         </div>
       ))}
-      {expired && !submitted && (
+      {terminalOnly && (
+        <Note
+          tone="warning"
+          icon={TriangleAlert}
+          title={t("automatic.run.scene.terminal_title")}
+          role="status"
+          id={`${id}-terminal`}
+        >
+          {t("automatic.run.scene.terminal_detail").replace("{run}", runId)}
+        </Note>
+      )}
+      {expired && !submitted && !terminalOnly && (
         <Note tone="warning" role="status">
           {t("automatic.run.scene.expired")}
         </Note>
@@ -144,6 +160,7 @@ export function SceneCheck({
         <Button
           variant="primary"
           disabled={locked || !sceneComplete(required, chosen)}
+          aria-describedby={terminalOnly ? `${id}-terminal` : undefined}
           onClick={() => void submit()}
         >
           {t("automatic.run.scene.submit")}

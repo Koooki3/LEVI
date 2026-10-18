@@ -501,12 +501,86 @@ export async function getParquetFileIndex(
   return index;
 }
 
+/** A requested episode range cannot be proven from the file's real index. */
+export class ParquetIndexRangeError extends Error {
+  constructor(detail: string) {
+    super(
+      `Parquet frame range unavailable: ${detail}; no partial episode was used.`,
+    );
+    this.name = "ParquetIndexRangeError";
+  }
+}
+
+export function requireParquetGlobalIndex(value: unknown): number {
+  const number = typeof value === "bigint" ? Number(value) : value;
+  if (
+    typeof number !== "number" ||
+    !Number.isSafeInteger(number) ||
+    number < 0
+  ) {
+    throw new ParquetIndexRangeError("missing or invalid global frame index");
+  }
+  return number;
+}
+
+function checkGlobalRange(fromIndex: number, toIndex: number): void {
+  if (typeof fromIndex !== "number" || typeof toIndex !== "number") {
+    throw new ParquetIndexRangeError(
+      "range bounds must be safe integer numbers",
+    );
+  }
+  requireParquetGlobalIndex(fromIndex);
+  requireParquetGlobalIndex(toIndex);
+  if (toIndex < fromIndex) {
+    throw new ParquetIndexRangeError("range end precedes its start");
+  }
+}
+
+/** Select by real index, never by row position; unrelated indexed rows are OK. */
+export function selectParquetRowsByGlobalIndex(
+  rows: Record<string, unknown>[],
+  fromIndex: number,
+  toIndex: number,
+  indexColumn = "index",
+): Record<string, unknown>[] {
+  checkGlobalRange(fromIndex, toIndex);
+  if (fromIndex === toIndex) return [];
+  const selected: { index: number; row: Record<string, unknown> }[] = [];
+  for (const row of rows) {
+    // A row without a reliable index cannot be classified as outside the range.
+    const index = requireParquetGlobalIndex(row[indexColumn]);
+    if (index >= fromIndex && index < toIndex) selected.push({ index, row });
+  }
+  selected.sort((a, b) => a.index - b.index);
+  if (
+    selected.length !== toIndex - fromIndex ||
+    selected.some((item, offset) => item.index !== fromIndex + offset)
+  ) {
+    throw new ParquetIndexRangeError(
+      `incomplete or duplicate indexes in [${fromIndex}, ${toIndex})`,
+    );
+  }
+  return selected.map((item) => item.row);
+}
+
+function assertRangeReadAllowed(plan: ParquetRangePlan, what: string): void {
+  if (
+    !Number.isFinite(plan.bytes) ||
+    plan.bytes > parquetLimits.fullReadBytes
+  ) {
+    throw new ParquetTooLargeError(
+      what,
+      plan.bytes,
+      parquetLimits.fullReadBytes,
+    );
+  }
+}
+
 /**
- * Read the rows whose global frame index lies in [fromIndex, toIndex) from a
- * v3 data file: locate them through the row-group index and read only that
- * range. Returns `null` when the file cannot be located this way (no `index`
- * column, empty file) so the caller can decide on a fallback; throws
- * ParquetTooLargeError when the selected row groups are above the read cap.
+ * A complete global [fromIndex, toIndex) range, or null for a capped fallback.
+ * The local offset planner may clip; this API must not. Suspect cached indexes
+ * are rebuilt from the current buffer at most once, including same-size rewrites.
+ * An explicitly empty request returns [] without reading the buffer.
  */
 export async function readParquetRowsByGlobalIndex(
   url: string,
@@ -516,47 +590,78 @@ export async function readParquetRowsByGlobalIndex(
   toIndex: number,
   indexColumn = "index",
 ): Promise<Record<string, unknown>[] | null> {
-  const index = await getParquetFileIndex(url, file);
-  if (index.numRows === 0) return null;
-  if (index.firstIndex === undefined) {
-    const first = await readParquetAsObjects(file, [indexColumn], {
-      rowStart: 0,
-      rowEnd: 1,
-    });
-    const value = first[0]?.[indexColumn];
-    index.firstIndex =
-      value === undefined || value === null ? null : Number(value);
-    if (index.firstIndex !== null && !Number.isFinite(index.firstIndex)) {
-      index.firstIndex = null;
+  checkGlobalRange(fromIndex, toIndex);
+  if (fromIndex === toIndex) return [];
+  // Verification is mandatory even when the caller did not project index.
+  const projected =
+    columns.length === 0 ? [] : [...new Set([...columns, indexColumn])];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const index = await getParquetFileIndex(url, file);
+    if (Number.isSafeInteger(index.numRows) && index.numRows > 0) {
+      if (index.firstIndex === undefined) {
+        assertRangeReadAllowed(
+          planParquetRowRange(index, 0, 1, [indexColumn]),
+          `Locating global indexes of ${url}`,
+        );
+        const first = await readParquetAsObjects(file, [indexColumn], {
+          rowStart: 0,
+          rowEnd: 1,
+        });
+        try {
+          index.firstIndex = requireParquetGlobalIndex(first[0]?.[indexColumn]);
+        } catch (error) {
+          if (!(error instanceof ParquetIndexRangeError)) throw error;
+          index.firstIndex = null;
+        }
+      }
+      if (index.firstIndex !== null && index.firstIndex !== undefined) {
+        const localFrom = fromIndex - index.firstIndex;
+        const localTo = toIndex - index.firstIndex;
+        if (localFrom >= 0 && localTo <= index.numRows) {
+          const plan = planParquetRowRange(
+            index,
+            localFrom,
+            localTo,
+            projected,
+          );
+          if (plan.firstGroup >= 0) {
+            assertRangeReadAllowed(
+              plan,
+              `Rows ${fromIndex}-${toIndex} of ${url}`,
+            );
+            const rows = await readParquetAsObjects(file, projected, {
+              rowStart: plan.rowStart,
+              rowEnd: plan.rowEnd,
+            });
+            try {
+              if (rows.length !== toIndex - fromIndex) {
+                throw new ParquetIndexRangeError("short row-range read");
+              }
+              const verified = selectParquetRowsByGlobalIndex(
+                rows,
+                fromIndex,
+                toIndex,
+                indexColumn,
+              );
+              if (columns.length === 0 || columns.includes(indexColumn))
+                return verified;
+              return verified.map((row) => {
+                const copy = { ...row };
+                delete copy[indexColumn];
+                return copy;
+              });
+            } catch (error) {
+              if (!(error instanceof ParquetIndexRangeError)) throw error;
+            }
+          }
+        }
+      }
     }
+    // The index can outlive its cached bytes. Retry once using this buffer,
+    // not the clipped offsets or first index from the old file.
+    parquetFileIndexes.delete(url);
   }
-  if (index.firstIndex === null) return null;
-  const localFrom = Math.max(0, fromIndex - index.firstIndex);
-  const localTo = Math.max(localFrom, toIndex - index.firstIndex);
-  const plan = planParquetRowRange(index, localFrom, localTo, columns);
-  if (plan.firstGroup < 0) return [];
-  if (plan.bytes > parquetLimits.fullReadBytes) {
-    throw new ParquetTooLargeError(
-      `Rows ${fromIndex}-${toIndex} of ${url}`,
-      plan.bytes,
-      parquetLimits.fullReadBytes,
-    );
-  }
-  const rows = await readParquetAsObjects(file, columns, {
-    rowStart: plan.rowStart,
-    rowEnd: plan.rowEnd,
-  });
-  // The index outlives the cached bytes: if the file behind this URL was
-  // rewritten (same length, other frames), the first row will not be the one
-  // asked for. Forget the index and let the caller read without it.
-  if (rows.length > 0 && columns.includes(indexColumn)) {
-    const expected = index.firstIndex + plan.rowStart;
-    if (Number(rows[0][indexColumn]) !== expected) {
-      parquetFileIndexes.delete(url);
-      return null;
-    }
-  }
-  return rows;
+  return null;
 }
 
 // Read specific columns from the Parquet file

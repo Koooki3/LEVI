@@ -10,8 +10,10 @@ import type {
   LaunchPlan,
   MetricsReport,
   OperatorLabel,
+  RolloutsResponse,
   RunSnapshot,
   RunSummary,
+  SubtasksResponse,
 } from "./types";
 
 const BASE = "/api/levi/automatic";
@@ -115,6 +117,14 @@ export const automaticApi = {
     ),
   metrics: (id: string, signal?: AbortSignal) =>
     call<MetricsReport>("GET", `${run(id)}/metrics`, undefined, signal),
+  /** Read-only: a subtask-loop run's notes and plan files. There is no
+   * write for a subtask or a round: the operator acts at the terminal. */
+  subtasks: (id: string, signal?: AbortSignal) =>
+    call<SubtasksResponse>("GET", `${run(id)}/subtasks`, undefined, signal),
+  /** Read-only: the run's rollout sets (round -> forward / reverse set ->
+   * subtask -> attempts). Nothing on that view writes. */
+  rollouts: (id: string, signal?: AbortSignal) =>
+    call<RolloutsResponse>("GET", `${run(id)}/rollouts`, undefined, signal),
   stop: (id: string, commandId: string) =>
     call<CommandResult>("POST", `${run(id)}/stop`, {
       command_id: commandId,

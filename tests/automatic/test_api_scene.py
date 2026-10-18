@@ -114,6 +114,32 @@ def test_an_answer_is_written_for_the_provider(ask):
     assert again.json() == response.json() and transport.take_answers() == []
 
 
+def test_a_real_runs_question_is_answered_only_at_its_terminal(ask, monkeypatch):
+    """Decision UI-2: for a run with the same criterion as the terminal-only
+    resume (registered by scripts/aeri.py) the page's answer is refused
+    before anything is written; the snapshot says so for the page."""
+    client, run_dir, transport, question = ask
+    monkeypatch.setattr(api, "_terminal_resume_only", lambda run: True)
+    snap = client.get(f"{BASE}/runs/r-scene").json()
+    assert snap["scene_answer_terminal_only"] is True
+    assert snap["scene_question"]["request_id"] == "scene-q1"  # still shown
+    response = answer(client)
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "scene_answer_terminal_only"
+    assert "UI-2" in detail["message"] and "scripts/aeri.py" in detail["message"]
+    assert transport.take_answers() == []
+    assert not list((run_dir / "scene" / "answers").glob("**/*.json"))
+
+
+def test_a_run_that_is_not_real_still_takes_the_pages_answer(ask):
+    client, run_dir, transport, question = ask
+    assert client.get(f"{BASE}/runs/r-scene").json()["scene_answer_terminal_only"] is (
+        False
+    )
+    assert answer(client).status_code == 202
+
+
 @pytest.mark.parametrize(
     "over",
     [
@@ -187,3 +213,39 @@ def test_only_a_person_answers(ask):
     client.headers.pop("x-levi-ui-token")
     assert answer(client).status_code == 401
     assert transport.take_answers() == []
+
+
+def test_the_page_cannot_send_an_episode_verdict(ask, monkeypatch):
+    """L2-AERI-OPERATOR-EARLY-STOP, as UI-2: the operator's s/f/d is typed at
+    the run's terminal only. There is no route for it, and the command
+    channel refuses one (real run or not) before any inbox file exists."""
+    from levi.automatic import control
+
+    client, run_dir, transport, question = ask
+    for real in (False, True):
+        monkeypatch.setattr(api, "_terminal_resume_only", lambda run, real=real: real)
+        body = {"command_id": "verdict-page", "label": "success"}
+        response = client.post(f"{BASE}/runs/r-scene/episode-verdict", json=body)
+        assert response.status_code in (404, 405)
+        value = {
+            "schema": control.COMMAND_SCHEMA,
+            "command_id": "verdict-page",
+            "kind": "episode_verdict",
+            "principal_id": "operator",
+            "issued_wall_ns": 1,
+        }
+        with pytest.raises(control.CommandError) as refused:
+            control.write_command(run_dir, value)
+        assert refused.value.code == "terminal_only"
+    inbox = run_dir / "control" / "inbox"
+    assert not list(inbox.glob("verdict-page*")) if inbox.exists() else True
+    # A file put in the inbox by hand is refused by the runner, not carried out.
+    inbox.mkdir(parents=True, exist_ok=True)
+    (inbox / "verdict-hand.json").write_text(
+        json.dumps({**value, "command_id": "verdict-hand"})
+    )
+    found = control.wait_result(run_dir, "verdict-hand", 10)
+    assert (
+        found is not None and found["ok"] is False and found["code"] == "terminal_only"
+    )
+    assert "terminal" in found["detail"]

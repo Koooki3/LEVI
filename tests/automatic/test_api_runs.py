@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import scaled
 from test_api_common import (
     REQ,
     client,
@@ -24,7 +25,7 @@ from test_api_common import (
 )
 from test_launch import FAKE_SYSTEMD
 
-from levi.automatic import api, control, launch, runner
+from levi.automatic import api, control, launch, recorder, runner, scene_assessment
 from levi.automatic.journal import Journal
 
 BASE = "/api/levi/automatic"
@@ -233,7 +234,8 @@ def waiting(client, roots, tmp_path, fake_systemd):
         f"{BASE}/runs/r-wait/stop",
         json={"command_id": "stop-cleanup", "confirm": "stop"},
     )
-    served.thread.join(30)
+    served.thread.join(scaled(60))
+    assert not served.thread.is_alive(), "the served run did not end after the stop"
 
 
 def test_the_waiting_snapshot_carries_the_card_and_a_challenge(waiting):
@@ -377,3 +379,26 @@ def test_attach_is_refused_while_a_runner_lives(waiting):
     alive = client.post(url, json={"request_id": "req-att-1", "confirm": "attach"})
     assert alive.status_code == 409
     assert alive.json()["detail"]["code"] == "runner_alive"
+
+
+def test_pending_card_presentation_preserves_frozen_contract(waiting):
+    client, run_id, _, _, run_dir = waiting
+    contract_path = run_dir / recorder.EVIDENCE / recorder.INITIAL_STATE
+    frozen = contract_path.read_bytes()
+    described = json.loads(frozen)
+    assert described["format"] == scene_assessment.FORMAT_STATUS
+    assert described["view_rule"] == scene_assessment.VIEW_RULE
+    digest = Journal.read(run_dir).events[0].header.plan_sha256
+
+    response = client.get(f"{BASE}/runs/{run_id}")
+    assert response.status_code == 200, response.text
+    shown = response.json()["pending_card"]["contract"]
+    assert shown == {
+        "id_version": f"{described['id']}@{described['version']}",
+        "status": described["status"],
+        "predicates": described["required"] + described["optional"],
+    }
+    for field in ("format", "view_rule"):
+        assert described[field] not in response.text
+    assert contract_path.read_bytes() == frozen
+    assert Journal.read(run_dir).events[0].header.plan_sha256 == digest

@@ -4,7 +4,7 @@ Instructions for any coding agent working in this repository (Claude Code, Codex
 
 Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 
-**In the maintainer's workspace** this checkout is one of several projects, and everything LEVI-derived (the experiment ledger, evaluation harness, gold tools, evaluation and live workspaces, serving tools, worktrees) lives in this checkout's git-ignored `lab/` folder (index: `lab/README.md`). There, first read the workspace manual `../AGENTS.md` (start protocol, standing rules, the driver lock that decides who may restart the running service or merge, pause/resume, roles). Codex loads instructions only from the git root downwards, so it does not pick that file up by itself when started here: read it explicitly. Outside that workspace, ignore this paragraph.
+**In the maintainer's workspace** this checkout is one of several projects, and everything LEVI-derived (the experiment ledger, evaluation harness, gold tools, evaluation and live workspaces, serving tools, worktrees) lives in this checkout's git-ignored `lab/` folder (index: `lab/README.md`). There, first read the workspace manual `lab/AGENTS.md` (start protocol, standing rules, the driver lock that decides who may restart the running service or merge, pause/resume, roles). Codex loads instructions only from the git root downwards, so it does not pick that file up by itself when started here: read it explicitly. Outside that workspace, ignore this paragraph.
 
 LEVI is a standalone bilingual workbench derived from LeRobot Dataset Visualizer.
 Read README.md (English primary), README.zh-CN.md and docs/CONVERSION.md before changing data workflows.

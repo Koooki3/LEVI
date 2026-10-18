@@ -11,6 +11,7 @@ import {
   loadEpisodeDataV3,
   CROSS_EPISODE_DEFAULTS,
 } from "@/app/[org]/[dataset]/[episode]/fetch-data";
+import * as parquet from "@/utils/parquetUtils";
 import type { ChartRow } from "@/app/[org]/[dataset]/[episode]/fetch-data";
 import {
   clearParquetFileCache,
@@ -753,6 +754,224 @@ describe("loadEpisodeDataV3 — oversized data file", () => {
       expect(result.dataNotice).toContain("limit");
     } finally {
       warn.mockRestore();
+    }
+  });
+});
+
+describe("v3 fallback preserves episode identity", () => {
+  const info = {
+    fps: 10,
+    features: { value: { dtype: "float64", shape: [1], names: null } },
+  } as unknown as DatasetMetadata;
+  const episode = {
+    episode_index: 0,
+    data_chunk_index: 0,
+    data_file_index: 0,
+    dataset_from_index: 10,
+    dataset_to_index: 12,
+  } as never;
+
+  function readers(
+    rows: Record<string, unknown>[],
+    metadata: Record<string, unknown>[] = [],
+  ) {
+    // Synthetic object rows, not generated or read from a real Parquet dataset.
+    const dataFile = { byteLength: 1, slice: () => new ArrayBuffer(0) };
+    const metaFile = { byteLength: 2, slice: () => new ArrayBuffer(0) };
+    const fetch = spyOn(parquet, "fetchParquetFile").mockImplementation(
+      async (url) => {
+        if (url.includes("/meta/episodes/")) {
+          if (url.endsWith("chunk-000/file-000.parquet")) return metaFile;
+          throw new Error("end of synthetic metadata");
+        }
+        return dataFile;
+      },
+    );
+    const indexed = spyOn(
+      parquet,
+      "readParquetRowsByGlobalIndex",
+    ).mockResolvedValue(null);
+    const full = spyOn(parquet, "readParquetAsObjects").mockImplementation(
+      async (file) => (file === metaFile ? metadata : rows),
+    );
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    return {
+      dataFile,
+      indexed,
+      full,
+      restore: () => {
+        fetch.mockRestore();
+        indexed.mockRestore();
+        full.mockRestore();
+        warn.mockRestore();
+      },
+    };
+  }
+
+  function frame(index: number, value: number, label: string) {
+    return {
+      index,
+      value,
+      timestamp: value / 10,
+      language_instruction: label,
+      language_persistent: [
+        { role: "annotator", content: label, style: "subtask" },
+      ],
+    };
+  }
+
+  test("unordered shared file fallback excludes neighbouring charts, language and timestamps", async () => {
+    const mock = readers([
+      frame(12, 900, "neighbour-after"),
+      frame(11, 2, "selected"),
+      frame(9, 800, "neighbour-before"),
+      frame(10, 1, "selected"),
+    ]);
+    try {
+      const result = await loadEpisodeDataV3(
+        "local/shared",
+        "v3.0",
+        info,
+        episode,
+      );
+      expect(result.flatChartData.map((row) => row.value)).toEqual([1, 2]);
+      expect(result.frameTimestamps).toEqual([0.1, 0.2]);
+      expect(result.task).toContain("selected");
+      expect(result.task).not.toContain("neighbour");
+      expect(result.languageAtoms?.map((atom) => atom.content)).toEqual([
+        "selected",
+      ]);
+      expect(result.dataNotice).toBeUndefined();
+      expect(mock.full.mock.calls[0].length).toBe(2); // no offsets bypass the whole-file cap
+    } finally {
+      mock.restore();
+    }
+  });
+
+  for (const [caseIndex, rows] of [
+    [{ index: 10, value: 1 }],
+    [
+      { index: 10, value: 1 },
+      { index: 10, value: 2 },
+    ],
+    [{ value: 1 }, { value: 2 }],
+    [
+      { index: 9, value: 1 },
+      { index: 12, value: 2 },
+    ],
+  ].entries()) {
+    test(`unproven shared-file selection ${caseIndex} produces a visible notice, not partial charts`, async () => {
+      const mock = readers(rows);
+      try {
+        const result = await loadEpisodeDataV3(
+          "local/unproven",
+          "v3.0",
+          info,
+          episode,
+        );
+        expect(result.flatChartData).toEqual([]);
+        expect(result.chartDataGroups).toEqual([]);
+        expect(result.dataNotice).toContain("frame range unavailable");
+        expect(result.frameTimestamps).toBeUndefined();
+        expect(result.languageAtoms).toBeUndefined();
+      } finally {
+        mock.restore();
+      }
+    });
+  }
+
+  test("range and fallback byte-cap failures never become successful empty episodes", async () => {
+    for (const failFast of [true, false]) {
+      const mock = readers([]);
+      const error = new parquet.ParquetTooLargeError(
+        "synthetic file",
+        200,
+        100,
+      );
+      if (failFast) mock.indexed.mockRejectedValue(error);
+      else mock.full.mockRejectedValue(error);
+      try {
+        const result = await loadEpisodeDataV3(
+          "local/capped",
+          "v3.0",
+          info,
+          episode,
+        );
+        expect(result.dataNotice).toContain("limit");
+        expect(result.flatChartData).toEqual([]);
+        if (failFast) expect(mock.full).not.toHaveBeenCalled();
+      } finally {
+        mock.restore();
+      }
+    }
+  });
+
+  test("an explicit empty metadata range is not replaced by a one-frame request", async () => {
+    const mock = readers([]);
+    mock.indexed.mockResolvedValue([]);
+    try {
+      const empty = {
+        episode_index: 0,
+        data_chunk_index: 0,
+        data_file_index: 0,
+        dataset_from_index: 10,
+        dataset_to_index: 10,
+      } as never;
+      const result = await loadEpisodeDataV3(
+        "local/empty",
+        "v3.0",
+        info,
+        empty,
+      );
+      expect(mock.indexed.mock.calls[0].slice(3, 5)).toEqual([10, 10]);
+      expect(mock.full).not.toHaveBeenCalled();
+      expect(result.flatChartData).toEqual([]);
+      expect(result.dataNotice).toBeUndefined();
+    } finally {
+      mock.restore();
+    }
+  });
+
+  test("cross-episode fallback validates selected ranges without requiring unsampled gaps", async () => {
+    const metadata = [
+      { episode_index: 0, dataset_from_index: 10, dataset_to_index: 12 },
+      { episode_index: 1, dataset_from_index: 20, dataset_to_index: 22 },
+    ];
+    const rows = [
+      { index: 21, action: [12, 0] },
+      { index: 10, action: [1, 0] },
+      { index: 999, action: [999, 0] },
+      { index: 20, action: [10, 0] },
+      { index: 11, action: [3, 0] },
+    ];
+    for (const missing of [false, true]) {
+      const mock = readers(
+        missing ? rows.filter((row) => row.index !== 11) : rows,
+        metadata,
+      );
+      try {
+        const result = await loadCrossEpisodeActionVariance(
+          "local/cross",
+          "v3.0",
+          actionDatasetInfo(2),
+          10,
+          { maxEpisodes: null, numTimeBins: 2 },
+        );
+        if (missing)
+          expect(result).toBeNull(); // whole invalid file skipped, no partial accumulation
+        else {
+          expect(result?.numEpisodes).toBe(2);
+          expect(result?.variance).toEqual([
+            [20.25, 0],
+            [20.25, 0],
+          ]);
+          expect(
+            result?.lowMovementEpisodes.map((item) => item.totalMovement),
+          ).toEqual([2, 2]);
+        }
+      } finally {
+        mock.restore();
+      }
     }
   });
 });

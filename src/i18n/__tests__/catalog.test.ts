@@ -109,6 +109,28 @@ const TEMPLATE_KEYS: Record<string, string[]> = {
   "report.milestone.": ["done", "current", "next"],
   // The kinds of a workspace change (`SyncChange["kind"]`, workbench/page.tsx).
   "sync.": ["added", "removed", "updated", "rebuilding", "failed", "skipped"],
+  // The VLM provider mode of a subtask run (subtask-loop.tsx: frozen plan's
+  // mode, anything else shows as unknown).
+  "automatic.subtask.provider.": ["local", "external", "unknown"],
+  // The two sets of a round (levi/automatic/rollout_view.py SETS).
+  "automatic.rollouts.set.": ["forward", "reverse"],
+  // Request kinds of the evidence view (levi/automatic/request_evidence_view.py KINDS).
+  "automatic.subtask.evidence.kind.": [
+    "plan-forward",
+    "plan-reverse",
+    "check-forward",
+    "check-reverse",
+  ],
+  // Per-request report fields of the evidence view (subtask-loop.tsx token and timing rows).
+  "automatic.subtask.evidence.": [
+    "input_new",
+    "output",
+    "cache_read",
+    "cache_write",
+    "client_latency_ms",
+    "bridge_wait_ms",
+    "self_reported_elapsed_ms",
+  ],
 };
 /** Templates the locale's own patterns turn into the other language
  * (`Episode 3` → `片段 3`, levi-locale.tsx). */

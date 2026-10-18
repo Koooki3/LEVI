@@ -34,6 +34,14 @@ describe("the run list", () => {
             episodes_done: 10,
             episodes_total: 10,
           },
+          {
+            run_id: "run-c",
+            state: "FORWARD_ACTIVE",
+            reset_mode: "subtask_loop",
+            execution_mode: "dry_run",
+            episodes_done: 1,
+            episodes_total: 3,
+          },
         ],
       }),
     });
@@ -44,6 +52,9 @@ describe("the run list", () => {
     expect(text).toContain("Manual reset (evaluated policy only)");
     expect(text).toContain("Reset policy");
     expect(text).toContain("Waiting for you");
+    // A subtask loop counts rounds, not episodes.
+    expect(text).toContain("Subtask loop (no reset policy)");
+    expect(text).toContain("Rounds 1 of 3");
     expect(host.querySelector("a")!.getAttribute("href")).toBe(
       "/automatic/runs/run-a",
     );

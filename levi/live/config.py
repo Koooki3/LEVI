@@ -57,6 +57,7 @@ OMIT_AT_DEFAULT = frozenset(
     {
         ("gpu", "quiet_states"),
         ("gpu", "quiet_pause_s"),
+        ("gpu", "policy_extra_ports"),
         ("vllm", "nice"),
         ("vllm", "cpus"),
         ("vllm", "gpu_retry_s"),
@@ -180,6 +181,16 @@ class Gpu:
     # Ports of a robot-side policy server. Only ever looked up in the kernel's
     # socket table, never connected to.
     policy_ports: list = field(default_factory=lambda: [8000])
+    # Ports of further policy servers of the same evaluation (for example the
+    # reset policy on 8001). Their GPU memory is not "someone else's"
+    # (``foreign_gpu``); unlike ``policy_ports`` a listener there is not a
+    # ``deployment`` and does not feed the budget. Empty: as before.
+    policy_extra_ports: list = field(default_factory=list)
+    # Who is exempt from ``foreign_gpu`` on ``policy_ports`` and
+    # ``policy_extra_ports``: only the GPU processes in the cgroup.procs of one
+    # of our own ``levi-aeri-policy-*`` user units that listens there, within
+    # ``policy_budget_mib`` (``levi.own_units``). Another person's process is
+    # never looked at; an unreadable cgroup exempts nothing.
     # flock file shared with the machine's other GPU users (the same file they
     # take with ``flock``); empty: no shared lock.
     lock_file: str = ""
@@ -599,6 +610,36 @@ class Config:
                 problems.append(
                     f"service.{name} {port} is reserved (robot servers, product LEVI)"
                 )
+        if any(
+            not isinstance(x, int) or isinstance(x, bool) or not 1 <= x <= 65535
+            for x in g.policy_extra_ports
+        ):
+            problems.append("gpu.policy_extra_ports must be ports 1-65535")
+        else:
+            taken = {
+                5000: "the robot server port 5000",
+                5001: "the robot server port 5001",
+                5100: "the robot tunnel port 5100",
+                7470: "the learner port 7470",
+                7860: "the product UI port 7860",
+                7861: "the product core port 7861",
+                s.ui_port: "service.ui_port",
+                s.core_port: "service.core_port",
+                v.port: "vllm.port",
+                self.online.port: "online.port",
+            }
+            for x in g.policy_extra_ports:
+                if int(x) in taken:
+                    problems.append(
+                        f"gpu.policy_extra_ports must not list {int(x)}: it is "
+                        f"{taken[int(x)]}"
+                    )
+        if (
+            not isinstance(g.policy_budget_mib, int)
+            or isinstance(g.policy_budget_mib, bool)
+            or g.policy_budget_mib < 0
+        ):
+            problems.append("gpu.policy_budget_mib must be a number of MiB, 0 or more")
         if any(int(x) in (5000,) for x in g.policy_ports):
             problems.append("gpu.policy_ports must not list the robot server port 5000")
         if not 0.05 <= v.gpu_memory_utilization <= 0.98:
@@ -1081,6 +1122,7 @@ def checks(config: "Config", *, watching: bool = True) -> list:
                 )
             )
     out.extend(_quiet_checks(c))
+    out.extend(_policy_extra_checks(c))
     out.extend(_launch_prefix_checks(c))
     out.extend(_pressure_checks(c))
     # The shared GPU lock.
@@ -1149,6 +1191,27 @@ def allowed_cpus() -> set | None:
         return set(os.sched_getaffinity(0))
     except (AttributeError, OSError):
         return None
+
+
+def _policy_extra_checks(c) -> list:
+    """``gpu.policy_extra_ports``: listed, with who is exempt from
+    ``foreign_gpu`` there (nothing is listed while the setting is empty)."""
+    g = c.gpu
+    if not g.policy_extra_ports:
+        return []
+    ports = ", ".join(str(int(p)) for p in g.policy_extra_ports)
+    ports_all = ", ".join(str(int(p)) for p in [*g.policy_ports, *g.policy_extra_ports])
+    limit = f"{g.policy_budget_mib} MiB" if g.policy_budget_mib else "no limit"
+    return [
+        _check(
+            "ok",
+            "gpu.policy_extra_ports",
+            f"policy ports {ports_all}: the GPU processes of one of our own "
+            f"levi-aeri-policy-* units listening there, at most {limit} per unit "
+            f"(gpu.policy_budget_mib), are not counted as foreign_gpu; extra "
+            f"ports {ports} are not a deployment",
+        )
+    ]
 
 
 def _quiet_checks(c) -> list:

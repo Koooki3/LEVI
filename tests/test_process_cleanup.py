@@ -122,11 +122,13 @@ def test_the_service_lifespan_stops_what_it_started(client):
 
 
 class SlowModel(http.server.BaseHTTPRequestHandler):
-    """An Ollama that takes a minute to answer."""
+    """An Ollama that takes a minute to answer, or until the test releases it."""
+
+    release = threading.Event()
 
     def do_POST(self):
         self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        time.sleep(60)
+        self.release.wait(60)
 
     def log_message(self, *args):
         pass
@@ -134,11 +136,18 @@ class SlowModel(http.server.BaseHTTPRequestHandler):
 
 @pytest.fixture
 def slow_model():
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), SlowModel)
-    server.daemon_threads = True
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    # The handler waits on this fixture's own event, and closing the server
+    # joins the handler threads, so no request thread outlives the test.
+    handler = type("SlowModel", (SlowModel,), {"release": threading.Event()})
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    server.daemon_threads = False
+    serving = threading.Thread(target=server.serve_forever, daemon=True)
+    serving.start()
     yield f"http://127.0.0.1:{server.server_address[1]}"
+    handler.release.set()
     server.shutdown()
+    server.server_close()
+    serving.join(timeout=10)
 
 
 def test_pausing_a_run_cuts_its_model_request(slow_model):

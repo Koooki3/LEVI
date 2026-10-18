@@ -80,7 +80,7 @@ def test_rejected_signal_candidate_resumes_at_same_step_with_fresh_observation(
             return wires
 
         events.poll = poll
-        assert r.orch.run() == "WAIT_HUMAN"
+        assert r.orch.run() == "COMPLETED"
         assert r.robot.step_calls == runtime.SECOND_CANDIDATE_STEP
         same_step = [row for row in polled if row[0] == runtime.CANDIDATE_STEP]
         assert len(same_step) == 2

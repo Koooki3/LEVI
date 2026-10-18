@@ -1,9 +1,12 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import * as hyparquet from "hyparquet";
 import type { AsyncBuffer } from "hyparquet";
 import { FIXTURE_B64 } from "./parquetFixture";
 import {
   ParquetBufferCache,
   ParquetTooLargeError,
+  ParquetIndexRangeError,
+  selectParquetRowsByGlobalIndex,
   buildParquetFileIndex,
   fetchParquetFile,
   clearParquetFileCache,
@@ -333,7 +336,7 @@ describe("row-group index", () => {
         500,
         510,
       ),
-    ).toEqual([]);
+    ).toBeNull();
   });
 
   test("a file rewritten under the same URL and length is not read through a stale index", async () => {
@@ -598,6 +601,151 @@ describe("whole-file read cap", () => {
       expect(cancelled).toBe(true);
     } finally {
       globalThis.fetch = realFetch;
+      clearParquetFileCache();
+    }
+  });
+});
+
+describe("complete global frame ranges", () => {
+  test("relocates once when an old firstIndex would clip a same-size rewrite to empty", async () => {
+    clearParquetFileCache();
+    const oldFile = bufferOf(REWRITE_A_B64);
+    const current = bufferOf(REWRITE_B_B64);
+    expect(oldFile.byteLength).toBe(current.byteLength);
+    await readParquetRowsByGlobalIndex(
+      "new-range-after-rewrite",
+      oldFile,
+      ["index"],
+      105,
+      108,
+    );
+    const rows = await readParquetRowsByGlobalIndex(
+      "new-range-after-rewrite",
+      current,
+      ["index"],
+      205,
+      208,
+    );
+    expect(rows?.map((row) => Number(row.index))).toEqual([205, 206, 207]);
+  });
+
+  test("an explicit empty interval does not touch even an unreadable buffer", async () => {
+    const file = fakeFile(9999);
+    expect(
+      await readParquetRowsByGlobalIndex("empty", file, ["index"], 7, 7),
+    ).toEqual([]);
+    expect(file.requests).toBe(0);
+  });
+
+  test.each([
+    [-1, 1],
+    [2, 1],
+    [0.5, 1],
+    [0, NaN],
+    [0, Infinity],
+    [0, Number.MAX_SAFE_INTEGER + 1],
+  ])("invalid bounds %s..%s fail before reading", async (from, to) => {
+    const file = fakeFile(100);
+    await expect(
+      readParquetRowsByGlobalIndex("bad-range", file, ["index"], from, to),
+    ).rejects.toBeInstanceOf(ParquetIndexRangeError);
+    expect(file.requests).toBe(0);
+  });
+
+  test("only the requested projection is returned after hidden index verification", async () => {
+    clearParquetFileCache();
+    const rows = await readParquetRowsByGlobalIndex(
+      "value-only",
+      fixtureBuffer(),
+      ["value"],
+      112,
+      115,
+    );
+    expect(rows?.map((row) => row.value)).toEqual([6, 6.5, 7]);
+    expect(rows?.every((row) => !("index" in row))).toBe(true);
+  });
+
+  test("a correct first row cannot conceal a wrong middle index", async () => {
+    clearParquetFileCache();
+    const read = spyOn(hyparquet, "parquetReadObjects").mockImplementation(
+      async (options) =>
+        options.rowStart === 0 && options.rowEnd === 1
+          ? [{ index: 100n }]
+          : [{ index: 102n }, { index: 999n }, { index: 104n }],
+    );
+    try {
+      expect(
+        await readParquetRowsByGlobalIndex(
+          "wrong-middle",
+          fixtureBuffer(),
+          ["index"],
+          102,
+          105,
+        ),
+      ).toBeNull();
+      expect(read).toHaveBeenCalledTimes(4); // preview + range, then one rebuild only
+    } finally {
+      read.mockRestore();
+      clearParquetFileCache();
+    }
+  });
+
+  test("fallback selects real indexes and sorts without requiring unrelated gaps", () => {
+    const rows = [
+      { index: 900, value: "outside" },
+      { index: 12n },
+      { index: 10 },
+      { index: 11 },
+    ];
+    expect(
+      selectParquetRowsByGlobalIndex(rows, 10, 13).map((row) =>
+        Number(row.index),
+      ),
+    ).toEqual([10, 11, 12]);
+  });
+
+  for (const [caseIndex, rows] of [
+    [{ index: 10 }, { index: 12 }],
+    [{ index: 10 }, { index: 10 }, { index: 12 }],
+    [{ index: 10 }, { index: 11 }, {}],
+    [{ index: 10 }, { index: 11 }, { index: null }],
+    [{ index: 10 }, { index: 11 }, { index: true }],
+    [{ index: 10 }, { index: 11 }, { index: NaN }],
+    [{ index: 10 }, { index: 11 }, { index: Number.MAX_SAFE_INTEGER + 1 }],
+    [{ index: 10 }, { index: 11 }, { index: 9007199254740993n }],
+  ].entries()) {
+    test(`incomplete or unidentifiable rows fail closed (${caseIndex})`, () => {
+      expect(() => selectParquetRowsByGlobalIndex(rows, 10, 13)).toThrow(
+        ParquetIndexRangeError,
+      );
+    });
+  }
+
+  test("the verification index column is included in the byte cap", async () => {
+    clearParquetFileCache();
+    const saved = parquetLimits.fullReadBytes;
+    const file = fixtureBuffer();
+    await readParquetRowsByGlobalIndex(
+      "verification-cap",
+      file,
+      ["index"],
+      100,
+      101,
+    );
+    const index = await getParquetFileIndex("verification-cap", file);
+    parquetLimits.fullReadBytes = index.rowGroups[1].columnBytes.value;
+    try {
+      await expect(
+        readParquetRowsByGlobalIndex(
+          "verification-cap",
+          file,
+          ["value"],
+          112,
+          115,
+        ),
+      ).rejects.toBeInstanceOf(ParquetTooLargeError);
+    } finally {
+      parquetLimits.fullReadBytes = saved;
       clearParquetFileCache();
     }
   });

@@ -188,7 +188,7 @@ class RequestCallbackTests(unittest.TestCase):
     def test_actual_orchestrator_success_and_fault_reuse_original_containment(self):
         r = self.make(goal_script=[{"decision": "rejected"}, {"decision": "confirmed"}])
         self.token_entry(r)
-        self.assertEqual(r.orch.run(), "WAIT_HUMAN")
+        self.assertEqual(r.orch.run(), "COMPLETED")
         # rejected at step 8, then the newer candidate at step 14 pauses again
         self.assertEqual(r.robot.step_calls, 14)
         self.assertEqual(len(self.received), len(self.fixture.grants))

@@ -455,11 +455,13 @@ def test_the_report_head_names_the_mode_and_the_comparable_fields():
 # --- fake-driven runs of both modes ----------------------------------------------------------------
 
 
-def two_episodes(tmp_path, reset_mode):
+def two_episodes(tmp_path, reset_mode, *, discard_first=False):
     """Episode 1, then a scene that is not ready, then episode 2: the reset
     policy puts it back (single_reset_policy) or a person does in 7 s
     (human_assisted). Fake timings: a scene check 300 ms, a reset episode
-    1580 ms from its start to its end."""
+    1580 ms from its start to its end. ``discard_first``: the operator
+    discards forward episode 1 with ``d`` at its third step (terminal s/f/d),
+    so one more forward episode replaces it."""
     clock = fake.FakeClock()
     scene = ev.FakeSceneAssessor(
         [{"decision": "ready", "evidence": 2}, {"decision": "reset_required"}],
@@ -482,17 +484,30 @@ def two_episodes(tmp_path, reset_mode):
         reset_folder=FOLDERS["reset"],
     )
     r = build_run(tmp_path, clock=clock, cfg=cfg, scene=scene, events=events)
+    if discard_first:
+        original, calls = r.robot.step, {"n": 0}
+
+        def step(act, *, token):
+            calls["n"] += 1
+            if calls["n"] == 3:
+                assert r.orch.episode_verdict("verdict-d", "discard").ok
+            return original(act, token=token)
+
+        r.robot.step = step
     state = r.orch.run()
-    if reset_mode == "human_assisted":
-        assert state == "WAIT_HUMAN"
+    resumes = 0
+    while reset_mode == "human_assisted" and state == "WAIT_HUMAN":
+        resumes += 1
         clock.advance(7_000 * MS)
         assert r.orch.resume(
-            "c-1",
+            f"c-{resumes}",
             expected_seq=r.orch.journal.next_seq,
             environment_handled=True,
             health_rechecked=True,
         ).ok
         state = r.orch.run()
+    if not discard_first:
+        assert resumes == (1 if reset_mode == "human_assisted" else 0)
     assert state == "COMPLETED"
     manifest = json.loads((r.directory / MANIFEST).read_text())
     return r, M.report(
@@ -538,6 +553,10 @@ def test_both_modes_against_hand_computed_values(tmp_path, reset_mode):
     assert found["scene_decisions_by_human"]["decisions"] == 0
     assert found["autonomous"]["forward_episodes"] == 2
     assert found["early_termination"]["early_stops"] == 2
+    # No s/f/d key in either mode: no verdict, nothing discarded.
+    assert found["operator_verdicts"]["episodes"] == 0
+    assert found["operator_verdicts"]["excluded"] == []
+    assert found["discarded_beyond_limit"] == 0
     assert found["scene_check"] == "provider"
     # A minor-0 header has no scene_check (the default); minor 1 names it.
     assert found["mode_source"]["scene_check"] in ("default", "run_header")
@@ -548,6 +567,24 @@ def test_both_modes_against_hand_computed_values(tmp_path, reset_mode):
     assert "not ground truth" in found["note"]
     assert {f"metrics:{k}" for k in found} == set(METRICS)
     json.dumps(found)
+
+
+@pytest.mark.mode_matrix(
+    "metrics:operator_verdicts", "metrics:discarded_beyond_limit", "metrics:autonomous"
+)
+def test_a_discarded_episode_counts_the_same_in_both_modes(tmp_path, reset_mode):
+    """MODE_MATRIX says SAME for the s/f/d keys: a ``d`` on forward episode 1
+    is excluded, replaced, and leaves the same two valid episodes whatever
+    the reset mode (L2-AERI-OPERATOR-EARLY-STOP)."""
+    r, found = two_episodes(tmp_path, reset_mode, discard_first=True)
+    first = ep(1)
+    v = found["operator_verdicts"]
+    assert v["labels"] == {"success": 0, "failure": 0, "discard": 1}
+    assert v["excluded"] == [first]
+    assert found["discarded_beyond_limit"] == 0
+    assert found["autonomous"]["forward_episodes"] == 2
+    assert found["autonomous"]["autonomous_success_rate"]["of"] == 2
+    assert r.orch.discarded_forward == 1
 
 
 @pytest.mark.mode_matrix("metrics:reset_mode", "metrics:mode_source")

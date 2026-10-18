@@ -12,19 +12,24 @@ service is a transient user unit ``levi-policy-<campaign>-<arm>.service``:
   command comes from an injected recipe (the launch recipes of the setup
   registry, T-SU); without one nothing is started (``no_recipe``). A port
   already held by another process is a mismatch.
-- ``passive_ready(arm)``: **reads only**: the unit is active, and every
-  process listening on the arm's port belongs to that unit
-  (``/proc/<pid>/cgroup``) and runs the arm's config and checkpoint
-  (``/proc/<pid>/cmdline``). Listeners are found through
-  ``/proc/net/tcp{,6}`` and the socket inodes under ``/proc/<pid>/fd``.
+- ``passive_ready(arm)``: **reads only**: the unit is active, every socket
+  listening on the arm's port is held by a process of that unit, and the
+  unit was started with the arm's config and checkpoint (its ``ExecStart``
+  as systemd recorded it). Listeners are found through ``/proc/net/tcp{,6}``;
+  their owners only among the pids in the unit's own ``cgroup.procs``
+  (``systemctl --user show -p ControlGroup``), whose ``/proc/<pid>/fd`` are
+  read. ``/proc`` is never listed and no other process is opened (root
+  AGENTS.md execution boundary, user 2026-10-14).
   Nothing here opens a socket: the policy port (8000 on the robot machine)
   is never connected to; the real handshake is the child run's PREFLIGHT.
 
-A listener whose owner cannot be read (another user's process) counts as a
-mismatch: unknown is never ready.
+A listener not held by our unit (another person's process, or an owner that
+cannot be read) counts as a mismatch, and its pid is never looked up:
+unknown is never ready.
 """
 
 import os
+import re
 import subprocess
 import time
 from collections.abc import Callable
@@ -36,6 +41,7 @@ from .conductor import ArmRef, HostResult, Readiness
 
 LISTEN = "0A"
 PROC_NET = ("net/tcp", "net/tcp6")
+WHITESPACE = re.compile(r"\s")
 
 
 class Systemd(Protocol):
@@ -72,20 +78,56 @@ class UserSystemd:
 class Listener:
     port: int
     inode: int
-    pids: tuple  # every process holding the socket (empty: owner unknown)
+    # Processes of OUR units (their cgroup.procs) holding the socket. Empty: not
+    # ours, a foreign or unknown owner (never looked up; we do not open other
+    # people's /proc entries). One holder of ours is enough to count the socket
+    # as ours: a foreign process sharing the same socket (an inherited fd) is
+    # not seen, which is looser than the old whole-/proc scan. We accept that:
+    # telling it apart would mean opening other people's processes, and such a
+    # sharer could only arise from a process our unit itself spawned.
+    pids: tuple
+    # When ``pids`` is empty: the units asked about whose own cgroup could not
+    # be read, so the owner is unknown rather than known to be foreign.
+    unknown: tuple = ()
+
+    def not_ours(self) -> str:
+        """Why this listener is not ours, for an operator."""
+        if self.unknown:
+            return (
+                f"port {self.port}: owner unknown: "
+                + ", ".join(self.unknown)
+                + " cgroup unreadable"
+            )
+        return f"port {self.port} is held by a process that is not ours"
+
+
+CGROUP_ROOT = "/sys/fs/cgroup"
 
 
 class ProcView:
-    """Read-only view of ``/proc`` (a fake tree in tests)."""
+    """Read-only view of this run's own processes: the kernel-wide socket tables
+    and the ``fd`` entries of the pids in our own units' ``cgroup.procs`` (from
+    ``systemctl --user show -p ControlGroup``). It never lists ``/proc`` and never
+    opens another person's ``/proc/<pid>`` (root AGENTS.md execution boundary,
+    user 2026-10-14). ``root``/``cgroup_root`` are fake trees in tests."""
 
-    def __init__(self, root="/proc"):
-        self.root = Path(root)
+    def __init__(self, root=None, *, systemd=None, cgroup_root=CGROUP_ROOT):
+        # None: the real kernel paths, built one entry at a time (never a
+        # "/proc" root that could be listed).
+        self.root = None if root is None else Path(root)
+        self.systemd = systemd or UserSystemd()
+        self.cgroup_root = str(cgroup_root)
+
+    def path(self, *parts) -> Path:
+        """One entry: ("net/tcp",) or (pid, "fd")."""
+        rel = "/".join(str(p) for p in parts)
+        return Path(f"/proc/{rel}") if self.root is None else self.root / rel
 
     def listening_inodes(self, port: int) -> list[int]:
         found = []
         for name in PROC_NET:
             try:
-                lines = (self.root / name).read_text().splitlines()[1:]
+                lines = self.path(name).read_text().splitlines()[1:]
             except OSError:
                 continue
             for line in lines:
@@ -101,59 +143,85 @@ class ProcView:
                     found.append(inode)
         return sorted(set(found))
 
-    def _pids(self) -> list[int]:
-        try:
-            return sorted(int(p.name) for p in self.root.iterdir() if p.name.isdigit())
-        except OSError:
+    def unit_pids(self, unit: str) -> list[int]:
+        """The pids in our unit's ``cgroup.procs`` ([] when the unit has no
+        cgroup: nothing runs in it). Raises ``OSError`` when it cannot be read.
+        Only the top-level ``cgroup.procs`` is read: no start command of ours
+        delegates the cgroup (``Delegate=``), so the unit's processes stay in it."""
+        code, out = self.systemd.run(
+            [
+                "systemctl",
+                "--user",
+                "show",
+                "-p",
+                "ControlGroup",
+                "--value",
+                f"{unit}.service",
+            ]
+        )
+        if code != 0:
+            raise OSError(f"systemctl show {unit}: exit {code}")
+        group = out.strip()
+        if not group:
             return []
+        if not group.startswith("/") or ".." in group.split("/"):
+            raise OSError(f"unexpected control group of {unit}: {group!r}")
+        text = Path(self.cgroup_root + group + "/cgroup.procs").read_text()
+        try:
+            return sorted({int(x) for x in text.split()})
+        except ValueError:
+            raise OSError(f"malformed cgroup.procs of {unit}") from None
 
-    def owners(self, inodes) -> dict[int, list[int]]:
+    def owners(self, inodes, units) -> tuple[dict[int, list[int]], tuple]:
+        """For each socket inode, the processes of ``units`` that hold it, and
+        the units whose cgroup could not be read. Such a unit owns nothing
+        (fail closed: not ours)."""
         wanted = {f"socket:[{inode}]": inode for inode in inodes}
         out: dict[int, list[int]] = {inode: [] for inode in inodes}
+        unreadable: list[str] = []
         if not wanted:
-            return out
-        for pid in self._pids():
-            folder = self.root / str(pid) / "fd"
+            return out, ()
+        for unit in units:
             try:
-                entries = list(folder.iterdir())
+                pids = self.unit_pids(unit)
             except OSError:
-                continue  # gone, or not ours to read
-            for entry in entries:
+                unreadable.append(unit)
+                continue
+            for pid in pids:
                 try:
-                    target = os.readlink(entry)
+                    entries = list(self.path(pid, "fd").iterdir())
                 except OSError:
-                    continue
-                if target in wanted:
-                    out[wanted[target]].append(pid)
+                    continue  # gone
+                for entry in entries:
+                    try:
+                        target = os.readlink(entry)
+                    except OSError:
+                        continue
+                    if target in wanted:
+                        out[wanted[target]].append(pid)
+        return out, tuple(unreadable)
+
+    def listeners(self, port: int, units=()) -> list[Listener]:
+        """Every listening socket on ``port``; ``pids`` are its holders among
+        ``units``' processes (empty: not ours; ``unknown`` names the units
+        whose cgroup could not be read)."""
+        inodes = self.listening_inodes(port)
+        owners, unreadable = self.owners(inodes, units)
+        out = []
+        for i in inodes:
+            pids = tuple(sorted(set(owners[i])))
+            out.append(Listener(port, i, pids, () if pids else unreadable))
         return out
 
-    def listeners(self, port: int) -> list[Listener]:
-        inodes = self.listening_inodes(port)
-        owners = self.owners(inodes)
-        return [Listener(port, i, tuple(sorted(set(owners[i])))) for i in inodes]
 
-    def cgroup(self, pid: int) -> str:
-        try:
-            return (self.root / str(pid) / "cgroup").read_text()
-        except OSError:
-            return ""
-
-    def cmdline(self, pid: int) -> list[str]:
-        try:
-            raw = (self.root / str(pid) / "cmdline").read_bytes()
-        except OSError:
-            return []
-        return [part.decode(errors="replace") for part in raw.split(b"\0") if part]
-
-
-def in_unit(cgroup: str, unit: str) -> bool:
-    """Whether a process's cgroup is the unit's (or below it)."""
-    name = f"/{unit}.service"
-    for line in cgroup.splitlines():
-        path = line.split(":", 2)[-1]
-        if path.endswith(name) or f"{name}/" in path:
-            return True
-    return False
+def exec_argv(text: str) -> list[str]:
+    """The argv of ``systemctl show -p ExecStart --value`` (what systemd-run was
+    given for our unit: our own record, not the process's /proc cmdline)."""
+    _, sep, rest = text.partition("argv[]=")
+    if not sep:
+        return []
+    argv, _, _ = rest.partition(" ; ")
+    return argv.split()
 
 
 def _values(argv: list[str]) -> list[str]:
@@ -194,7 +262,8 @@ class SystemdPolicyHost:
         self,
         *,
         systemd: Systemd | None = None,
-        proc_root="/proc",
+        proc_root=None,
+        cgroup_root=CGROUP_ROOT,
         recipe: Callable[[ArmRef], list] | None = None,
         stop_timeout_s: float = 60.0,
         poll_s: float = 0.5,
@@ -202,7 +271,7 @@ class SystemdPolicyHost:
         sleep: Callable[[float], None] = time.sleep,
     ):
         self.systemd = systemd or UserSystemd()
-        self.proc = ProcView(proc_root)
+        self.proc = ProcView(proc_root, systemd=self.systemd, cgroup_root=cgroup_root)
         self.recipe = recipe
         self.stop_timeout_s = stop_timeout_s
         self.poll_s = poll_s
@@ -223,11 +292,21 @@ class SystemdPolicyHost:
         )
         return out.strip() if code == 0 and out.strip() else "unknown"
 
-    def _ours(self, listener: Listener, units) -> bool:
-        return bool(listener.pids) and all(
-            any(in_unit(self.proc.cgroup(pid), unit) for unit in units)
-            for pid in listener.pids
+    def runs(self, arm: ArmRef) -> bool:
+        """Our unit was started with the arm's config and checkpoint (systemd's
+        ExecStart record of the unit)."""
+        code, out = self.systemd.run(
+            [
+                "systemctl",
+                "--user",
+                "show",
+                "-p",
+                "ExecStart",
+                "--value",
+                f"{arm.unit}.service",
+            ]
         )
+        return code == 0 and runs_arm(exec_argv(out), arm)
 
     def stop(self, arms: list) -> HostResult:
         units = [arm.unit for arm in arms]
@@ -243,15 +322,14 @@ class SystemdPolicyHost:
         ports = sorted({arm.port for arm in arms})
         deadline = self._clock() + self.stop_timeout_s
         while True:
-            left = [lsn for port in ports for lsn in self.proc.listeners(port)]
-            foreign = [lsn for lsn in left if not self._ours(lsn, units)]
+            left = [lsn for port in ports for lsn in self.proc.listeners(port, units)]
+            foreign = [lsn for lsn in left if not lsn.pids]
             if foreign:
-                pids = sorted({p for lsn in foreign for p in lsn.pids})
                 return HostResult(
                     "yes",
                     "foreign_listener",
                     mismatch=True,
-                    detail=f"port {foreign[0].port} held by pids {pids or 'unknown'}",
+                    detail=foreign[0].not_ours(),
                 )
             if not left:
                 break
@@ -263,14 +341,9 @@ class SystemdPolicyHost:
         return HostResult("yes", "stopped")
 
     def start(self, arm: ArmRef) -> HostResult:
-        held = self.proc.listeners(arm.port)
+        held = self.proc.listeners(arm.port, (arm.unit,))
         if held:
-            ours = all(
-                in_unit(self.proc.cgroup(pid), arm.unit)
-                and runs_arm(self.proc.cmdline(pid), arm)
-                for lsn in held
-                for pid in lsn.pids
-            ) and all(lsn.pids for lsn in held)
+            ours = all(lsn.pids for lsn in held) and self.runs(arm)
             if ours and self.unit_state(arm.unit) == "active":
                 return HostResult("yes", "already_running")
             return HostResult(
@@ -281,6 +354,15 @@ class SystemdPolicyHost:
         command = list(self.recipe(arm))
         if not command:
             return HostResult("no", "no_recipe")
+        if any(not isinstance(a, str) or WHITESPACE.search(a) for a in command):
+            # systemd records ExecStart space-separated and passive_ready
+            # splits it on whitespace: such a unit could never be ours.
+            return HostResult(
+                "no",
+                "recipe_unsafe",
+                detail="the launch recipe has an argument with whitespace, which "
+                "the passive identity check (ExecStart) cannot tell apart",
+            )
         code, _ = self.systemd.run(
             [
                 "systemd-run",
@@ -298,22 +380,17 @@ class SystemdPolicyHost:
 
     def passive_ready(self, arm: ArmRef) -> Readiness:
         state = self.unit_state(arm.unit)
-        held = self.proc.listeners(arm.port)
+        held = self.proc.listeners(arm.port, (arm.unit,))
         if held:
             for listener in held:
                 if not listener.pids:
-                    return Readiness("mismatch", f"port {arm.port}: owner unknown")
-                for pid in listener.pids:
-                    if not in_unit(self.proc.cgroup(pid), arm.unit):
-                        return Readiness(
-                            "mismatch", f"port {arm.port}: pid {pid} is not {arm.unit}"
-                        )
-                    if not runs_arm(self.proc.cmdline(pid), arm):
-                        return Readiness(
-                            "mismatch",
-                            f"pid {pid} does not run {arm.config} with "
-                            f"{Path(arm.checkpoint_dir).name}",
-                        )
+                    return Readiness("mismatch", listener.not_ours())
+            if not self.runs(arm):
+                return Readiness(
+                    "mismatch",
+                    f"{arm.unit} does not run {arm.config} with "
+                    f"{Path(arm.checkpoint_dir).name}",
+                )
         if state != "active":
             return Readiness("not_ready", f"unit {state}")
         if not held:

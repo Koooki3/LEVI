@@ -805,3 +805,51 @@ def test_candidates_stay_inside_the_approved_scope(lab):
 def test_the_contract_object_round_trips():
     block = EventIntelligence(mode="candidates", sources=["gripper"], max_windows=2)
     assert EventIntelligence.model_validate(block.model_dump()) == block
+
+
+def test_event_refinement_batches_respect_the_actual_request_image_cap(
+    lab, monkeypatch
+):
+    from levi.agent import observations
+
+    wb, repo, provider = lab
+    original = provider.generate
+
+    def generate(config, instruction, summary, evidence, artifacts, budget):
+        output, usage = original(
+            config, instruction, summary, evidence, artifacts, budget
+        )
+        if summary.get("phase") == "boundary_refinement":
+            window = summary["refine_only"]
+            rows = [
+                {**row, "evidence_ids": [evidence[0]["id"]]}
+                for row in summary["candidate_draft"]["proposals"]
+                if window["start"] <= row["start"] < window["end"]
+            ]
+        else:
+            template = output.proposals[0].model_dump()
+            rows = [
+                {**template, "start": start, "end": end, "content": name}
+                for start, end, name in (
+                    (0.0, 0.2, "First"),
+                    (0.2, 3.0, "Middle"),
+                    (3.0, summary["end"], "Last"),
+                )
+            ]
+        return ModelOutput(summary="fixture", proposals=rows), usage
+
+    monkeypatch.setattr(provider, "generate", generate)
+    monkeypatch.setattr(observations, "image_limit", lambda *args, **kwargs: 11)
+    run = run_once(wb, temporal(repo, event_intelligence=ON))
+    assert run["status"] == "waiting_for_review", run.get("reason")
+    refined = [
+        call
+        for call in provider.calls
+        if call["summary"].get("phase") == "boundary_refinement"
+    ]
+    assert len(refined) > 1
+    assert all(len(call["evidence"]) <= 11 for call in refined)
+    assert sum(call["summary"]["refine_only"]["proposals"] for call in refined) == 3
+    assert events_of(wb, run, "event_candidates")
+    assert run["requests"] == len(provider.calls)
+    assert run["requests"] <= run["context"]["budget"]["max_calls"]

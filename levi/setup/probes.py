@@ -1343,6 +1343,8 @@ def _build_context() -> Context:
             disks.append((f"rollout_root_{n}", str(Path(rollout).expanduser())))
         for port in config.gpu.policy_ports:
             ports.setdefault(int(port), "policy_server")
+        for port in config.gpu.policy_extra_ports:
+            ports.setdefault(int(port), "policy_server_extra")
         ports.setdefault(int(config.vllm.port), "vllm")
         ports.setdefault(int(config.online.port), "online_judge")
     disks.append(("tmp", _tmp_dir()))

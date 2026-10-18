@@ -329,3 +329,102 @@
   outline: 2px solid var(--ds-focus-ring, currentColor);
   outline-offset: 2px;
 }
+
+/* Subtask loop (reset mode subtask_loop): read-only rounds, loops, subtasks. */
+.ar-subtask-round,
+.ar-subtask-loop,
+.ar-subtask-inventory {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  margin-top: var(--ds-space-3);
+  min-width: 0;
+}
+.ar-subtask-round h3,
+.ar-subtask-loop h4,
+.ar-subtask-inventory h3 {
+  margin: 0;
+}
+.ar-subtask-loop p,
+.ar-subtask-inventory p {
+  margin: 0;
+}
+.ar-subtask-items {
+  margin: 0;
+  padding-left: var(--ds-space-5);
+}
+.ar-subtask-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+.ar-subtask {
+  padding: var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ar-subtask[aria-current="step"] {
+  border-width: 2px;
+  border-color: var(--ds-accent);
+}
+.ar-subtask__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.ar-subtask-attempts {
+  margin: var(--ds-space-2) 0 0;
+  padding-left: var(--ds-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  font-size: var(--ds-text-caption-size);
+}
+.ar-subtask-attempts li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-1) var(--ds-space-3);
+}
+
+/* Rollout sets (GET runs/{id}/rollouts): read-only rounds, sets, attempts. */
+.ar-rollouts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  margin-top: var(--ds-space-3);
+  min-width: 0;
+}
+.ar-rollout-list {
+  margin: var(--ds-space-2) 0 0;
+  padding-left: var(--ds-space-5);
+  overflow-wrap: anywhere;
+}
+.ar-rollout-attempts {
+  list-style: none;
+  margin: var(--ds-space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+.ar-rollout-attempt {
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border-left: 2px solid var(--ds-separator-strong);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ar-rollout-player {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  margin-top: var(--ds-space-2);
+  max-width: 56rem;
+  min-width: 0;
+}

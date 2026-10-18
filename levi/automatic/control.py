@@ -47,6 +47,11 @@ from .journal import Journal, JournalError, fsync_dir, line_sha, process_identit
 COMMAND_SCHEMA = "levi.aeri.command.v1"
 RESULT_SCHEMA = "levi.aeri.command_result.v1"
 KINDS = ("stop", "resume", "scene_answer")
+# Commands only the run's own terminal gives (L2-AERI-OPERATOR-EARLY-STOP): the
+# operator's s/f/d verdict on the forward episode under way goes straight from
+# terminal D to the orchestrator (``Orchestrator.episode_verdict``). No page,
+# API call or inbox file can send one; the page only shows the journal note.
+TERMINAL_ONLY_KINDS = ("episode_verdict",)
 POLL_S = 0.05
 MAX_BYTES = 64 * 1024
 CONTROL = "control"
@@ -137,6 +142,12 @@ def validate(value) -> dict:
     if not isinstance(value, dict):
         raise CommandError("invalid", "a command is a JSON object")
     kind = value.get("kind")
+    if kind in TERMINAL_ONLY_KINDS:
+        raise CommandError(
+            "terminal_only",
+            f"{kind} is typed at the run's terminal (s/f/d while a forward "
+            "round runs), never sent through the command channel or the page",
+        )
     if kind not in KINDS:
         raise CommandError("invalid", f"kind is one of {', '.join(KINDS)}")
     expected = set(COMMON) | set(FIELDS[kind])
@@ -453,10 +464,13 @@ class CommandPump(threading.Thread):
             return
         except (CommandError, OSError) as exc:
             detail = exc.detail if isinstance(exc, CommandError) else str(exc)
+            code = "invalid"
+            if isinstance(exc, CommandError) and exc.code == "terminal_only":
+                code = exc.code  # a terminal's command, never carried out here
             self._refused.add(name)
             self._finish(
                 {"command_id": command_id, "kind": None, "principal_id": None},
-                {"ok": False, "code": "invalid", "detail": detail[:300]},
+                {"ok": False, "code": code, "detail": detail[:300]},
             )
             return
         if self._closing:

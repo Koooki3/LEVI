@@ -3,9 +3,11 @@
 import contextlib
 import json
 import pickle
+import subprocess
 import sys
 import threading
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -383,3 +385,31 @@ def test_active_observation_refuses_unknown_previously_seen_descendant(
     )
     with pytest.raises(ValueError, match="identity is unknown"):
         owned.OwnedModelWorker._healthy(receipt)
+
+
+FDINFO_PROBE = """
+import fcntl, os, sys
+from pathlib import Path
+from levi.live import owned_runtime as owned
+lock = Path(sys.argv[1]); lock.touch()
+other = lock.with_name("other.lock"); other.touch()
+# A descriptor above the one the fdinfo directory listing borrows, in a fresh
+# process, so the result does not depend on pytest's own descriptor numbers.
+fd = os.open(lock, os.O_RDWR); os.dup2(fd, 200); os.close(fd)
+fcntl.flock(200, fcntl.LOCK_EX)
+me = os.getpid()
+print(owned._inherited_flock(me, me, lock),
+      owned._inherited_flock(me, me + 1, lock),
+      owned._inherited_flock(me, me, other))
+"""
+
+
+def test_inherited_flock_skips_fdinfo_entries_that_vanish(tmp_path):
+    result = subprocess.run(
+        [sys.executable, "-c", FDINFO_PROBE, str(tmp_path / "gpu.lock")],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=Path(__file__).resolve().parents[2],
+    )
+    assert result.stdout.split() == ["True", "False", "False"], result.stderr

@@ -845,6 +845,21 @@ def test_context_from_a_live_workspace(tmp_path, monkeypatch):
     assert not (ws / "live" / "effective.toml").exists()
 
 
+def test_context_lists_the_extra_policy_ports_of_a_live_workspace(
+    tmp_path, monkeypatch
+):
+    from levi.live import locate
+
+    ws = tmp_path / "live-ws"
+    (ws / "live").mkdir(parents=True)
+    (ws / "live.toml").write_text("[gpu]\npolicy_extra_ports = [8001]\n")
+    monkeypatch.setattr(locate, "find", lambda own: locate.Found(ws, "env"))
+    monkeypatch.setattr(locate, "is_live", lambda w: True)
+    monkeypatch.setenv(locate.ENV_HOME, str(tmp_path / "home"))
+    ports = dict(P._build_context().ports)
+    assert ports[8001] == "policy_server_extra" and ports[8000] == "policy_server"
+
+
 def test_context_without_a_live_workspace(monkeypatch, tmp_path):
     from levi.live import locate
 

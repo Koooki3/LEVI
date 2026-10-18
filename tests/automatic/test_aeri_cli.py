@@ -251,7 +251,7 @@ def test_status_is_read_only_even_on_a_torn_or_corrupt_journal(job, capsys, tmp_
 
 
 @pytest.mark.mode_matrix("cli:doctor", modes=("single_reset_policy",))
-def test_doctor_reads_only_and_says_a_real_run_is_not_available(job, capsys):
+def test_doctor_reads_only_and_does_not_authorize_a_real_run(job, capsys):
     before = sorted(p.name for p in job.parent.rglob("*"))
     code, found = as_json(capsys, "doctor", "--config", str(job))
     assert code == 0 and found["ok"]
@@ -259,6 +259,8 @@ def test_doctor_reads_only_and_says_a_real_run_is_not_available(job, capsys):
     assert checks["contract snapshots"]["ok"] and checks["job file"]["ok"]
     assert not checks["real robot adapter"]["ok"]
     assert not checks["real robot adapter"]["required"]
+    assert "not checked by doctor" in checks["real robot adapter"]["detail"]
+    assert "a real run could be launched" not in checks["launch"]["detail"]
     assert checks["rollout root"]["ok"]
     assert sorted(p.name for p in job.parent.rglob("*")) == before
     job.write_text("schema_version: nope\n")
@@ -279,6 +281,8 @@ def test_every_help_is_bilingual():
         "status",
         "report",
         "label",
+        # Read-only rollout sets (levi/automatic/rollouts.py).
+        "rollouts",
         # Launched runs (T-CL-09).
         "plan",
         "runs",

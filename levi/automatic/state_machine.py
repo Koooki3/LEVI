@@ -59,8 +59,16 @@ FORWARD_STOPS = frozenset(
         "goal_verified",
         "horizon_exhausted",
         "operator_stop",
+        # The operator's s/f/d on terminal D: this episode only, the run goes on.
+        "operator_verdict",
         "policy_error",
         "watchdog_timeout",
+        # subtask_loop's subtask.early_check: the episode ends for the VLM's
+        # done check; the ordinary hold, quiesce and seal follow.
+        "subtask_early_check",
+        # The camera frames stopped (same seq on K steps, or openpi's
+        # StaleFrameError): no action on that observation, then a person.
+        "camera_stale",
     }
 )
 RESET_STOPS = frozenset(
@@ -70,6 +78,7 @@ RESET_STOPS = frozenset(
         "operator_stop",
         "policy_error",
         "watchdog_timeout",
+        "camera_stale",
     }
 )
 RESET_OUTCOMES = frozenset(
@@ -81,8 +90,12 @@ RESET_OUTCOMES = frozenset(
         "operator_stop",
         "policy_error",
         "watchdog_timeout",
+        "camera_stale",
     }
 )
+# Frozen cameras: the run waits for a person where the arm stands (no home
+# on a scene nobody can see), after the episode's seal.
+CAMERA_TO_HUMAN = frozenset({"camera_stale"})
 TO_HUMAN = frozenset(
     {
         "scene_reset_required",
@@ -92,7 +105,20 @@ TO_HUMAN = frozenset(
         "contract_violation_limit",
         "operator_stop",
         "reset_horizon_exhausted",
+        # PREFLIGHT after a home that sent nothing: the arm is not proven home.
+        "home_pose_not_reached",
+        "startup_home_not_executed",
+        # subtask_loop: a plan or the inventory refused, a round not released
+        # at terminal D, the VLM could not be woken or put to sleep.
+        "subtask_plan_refused",
+        "subtask_inventory_rejected",
+        "subtask_not_released",
+        "vlm_unavailable",
     }
+)
+# subtask_loop: after a subtask episode, why the run waits for a person.
+SUBTASK_TO_HUMAN = frozenset(
+    {"subtask_check_unavailable", "subtask_retry_limit", "vlm_unavailable"}
 )
 FAULT_REASONS = {
     "orchestrator": frozenset(
@@ -119,6 +145,9 @@ RESULT_TRANSITIONS = frozenset(
         ("RESET_JUDGING", "WAIT_HUMAN"),
         ("RESET_FINALIZE", "VERIFY_INITIAL"),
         ("RESET_FINALIZE", "WAIT_HUMAN"),
+        # subtask_loop: a reverse subtask whose check sends the run on to the
+        # next (or the same) reverse subtask, without a home.
+        ("RESET_FINALIZE", "SCENE_ASSESS"),
     }
 )
 
@@ -145,6 +174,11 @@ def _table() -> dict:
 
     def add(a, b, rule):
         t.setdefault((a, b), []).append(rule)
+
+    def add_first(a, b, rule):
+        # A subtask_loop rule beside an older one: checked first, so a move
+        # the older rule refuses still reports the older rule's refusal.
+        t.setdefault((a, b), []).insert(0, rule)
 
     quiet = ("none", "notify")
     for role in ("forward", "reset"):
@@ -174,6 +208,25 @@ def _table() -> dict:
                 role=role,
             ),
         )
+    # event_pause_judge: a paused forward episode that the judgement ended goes
+    # on through the ordinary finalize and home states (the result still
+    # commits on FORWARD_FINALIZE -> ROBOT_HOME). The reset role has no such
+    # edge: its paused judgement still waits for a person.
+    add(
+        "FORWARD_JUDGING",
+        "FORWARD_FINALIZE",
+        _r(
+            {"goal_verified", "horizon_exhausted", "operator_stop"},
+            ORCH_OR_OPERATOR,
+            {"policy_quiesce"},
+            role="forward",
+        ),
+    )
+    add(
+        "PREFLIGHT",
+        "PREFLIGHT",
+        _r({"startup_home_requested"}, OPERATOR, {"home"}, command=True),
+    )
     add("PREFLIGHT", "VERIFY_INITIAL", _r({"preflight_passed"}, ORCH, {"none"}))
     for start in ("VERIFY_INITIAL", "SCENE_ASSESS"):
         add(
@@ -194,6 +247,65 @@ def _table() -> dict:
         add(start, "COMPLETED", _r({"run_completed"}, ORCH, {"none"}))
     for start in ("PREFLIGHT", "VERIFY_INITIAL", "SCENE_ASSESS"):
         add(start, "WAIT_HUMAN", _r(TO_HUMAN, ORCH_OR_OPERATOR, quiet))
+    # subtask_loop (levi/automatic/subtask_loop.py). A subtask episode starts
+    # from a scene state once its instruction is rendered and the VLM sleeps;
+    # after the episode's seal (the arm held, the policy quiesced) the VLM's
+    # check sends the run on to the next subtask without a home
+    # (``subtask_continue``), home at the end of a loop, or to a person.
+    for start in ("VERIFY_INITIAL", "SCENE_ASSESS"):
+        add_first(
+            start,
+            "FORWARD_ACTIVE",
+            _r({"subtask_dispatched"}, ORCH, {"policy_steps"}, role="forward"),
+        )
+        add_first(
+            start,
+            "RESET_ACTIVE",
+            _r({"subtask_dispatched"}, ORCH, {"policy_steps"}, role="reset"),
+        )
+    add_first(
+        "ROBOT_HOME",
+        "SCENE_ASSESS",
+        _r({"subtask_continue"}, ORCH, {"none"}, role="forward"),
+    )
+    add_first("ROBOT_HOME", "WAIT_HUMAN", _r(SUBTASK_TO_HUMAN, ORCH, quiet))
+    add_first(
+        "RESET_ACTIVE",
+        "RESET_VERIFY",
+        _r({"subtask_ended"}, ORCH_OR_OPERATOR, {"policy_quiesce"}, role="reset"),
+    )
+    add_first(
+        "RESET_VERIFY",
+        "RESET_FINALIZE",
+        _r(
+            {"subtask_ended"},
+            ORCH_OR_OPERATOR,
+            {"recorder_seal", "recorder_abort"},
+            role="reset",
+        ),
+    )
+    add_first(
+        "RESET_FINALIZE",
+        "SCENE_ASSESS",
+        _r({"subtask_continue"}, ORCH, {"none"}, role="reset"),
+    )
+    add_first(
+        "RESET_FINALIZE",
+        "VERIFY_INITIAL",
+        _r({"subtask_reverse_done"}, ORCH, {"home"}, role="reset"),
+    )
+    # The forward loop's end (all subtasks done, or the operator's s/f/d):
+    # the safe home, then the reverse loop.
+    add_first(
+        "ROBOT_HOME",
+        "SCENE_ASSESS",
+        _r({"subtask_forward_done"}, ORCH_OR_OPERATOR, {"home"}, role="forward"),
+    )
+    add_first(
+        "RESET_FINALIZE",
+        "WAIT_HUMAN",
+        _r(SUBTASK_TO_HUMAN, ORCH, {"none"}, role="reset"),
+    )
     add(
         "FORWARD_ACTIVE",
         "FORWARD_STOPPING",
@@ -228,6 +340,15 @@ def _table() -> dict:
         "WAIT_HUMAN",
         _r({"operator_stop"}, OPERATOR, {"none"}, command=True),
     )
+    # A closed-gate home refused before its first command (the bridge counted
+    # no fenced home POST, the arm did not move): a person checks and resumes
+    # (decision 2026-10-14 21:1x, L2-HOME-EXECNO-ORCH).
+    add(
+        "ROBOT_HOME",
+        "WAIT_HUMAN",
+        _r({"home_not_executed"}, ORCH, quiet),
+    )
+    add("ROBOT_HOME", "WAIT_HUMAN", _r(CAMERA_TO_HUMAN, ORCH, quiet))
     add(
         "RESET_ACTIVE",
         "RESET_VERIFY",
@@ -257,11 +378,16 @@ def _table() -> dict:
         "RESET_FINALIZE",
         "WAIT_HUMAN",
         _r(
-            RESET_OUTCOMES - {"reset_verified"},
+            RESET_OUTCOMES - {"reset_verified"} - CAMERA_TO_HUMAN,
             ORCH_OR_OPERATOR,
             {"home"},
             role="reset",
         ),
+    )
+    add(
+        "RESET_FINALIZE",
+        "WAIT_HUMAN",
+        _r(CAMERA_TO_HUMAN, ORCH, {"none"}, role="reset"),
     )
     # After an operator's stop, a person takes over without the reset's home
     # (the episode ran no step, or staying put is configured).

@@ -3,6 +3,7 @@ fake ``/proc``: stop, start, passive readiness, foreign listeners, and the
 conductor driving it. No socket is opened (the guard in conftest fails a
 test that connects to 5000/5001/5100/7470/8000) and no real unit tool runs."""
 
+import shutil
 import socket
 from pathlib import Path
 
@@ -16,9 +17,19 @@ from levi.automatic.campaign.conductor import ArmRef, Conductor
 from levi.automatic.campaign.switch import (
     ProcView,
     SystemdPolicyHost,
-    in_unit,
     runs_arm,
 )
+
+
+def exec_start_value(argv):
+    """What ``systemctl show -p ExecStart --value`` prints for a started unit."""
+    if not argv:
+        return ""
+    return (
+        f"{{ path={argv[0]} ; argv[]={' '.join(argv)} ; ignore_errors=no ; "
+        "start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }"
+    )
+
 
 HEADER = (
     "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when "
@@ -32,8 +43,11 @@ class FakeProc:
 
     def __init__(self, root: Path):
         self.root = Path(root)
+        # The unit cgroups (``/sys/fs/cgroup`` in production).
+        self.cgroup_root = self.root.parent / "cgroup"
         (self.root / "net").mkdir(parents=True, exist_ok=True)
         self.sockets = {}  # inode -> port
+        self.cgroups = {}  # pid -> cgroup path
         self.next_pid = 1000
         self.next_inode = 50_000
         self._write_net()
@@ -60,6 +74,8 @@ class FakeProc:
         (folder / "fd").mkdir(parents=True)
         (folder / "cmdline").write_bytes(b"\0".join(a.encode() for a in argv) + b"\0")
         (folder / "cgroup").write_text(cgroup + "\n")
+        self.cgroups[pid] = cgroup.split(":", 2)[-1]
+        self._write_procs(self.cgroups[pid])
         os_link = folder / "fd" / "0"
         os_link.symlink_to("/dev/null")
         if port is not None:
@@ -76,10 +92,27 @@ class FakeProc:
             target = str(link.readlink())
             if target.startswith("socket:["):
                 self.sockets.pop(int(target[8:-1]), None)
-        import shutil
-
         shutil.rmtree(folder)
+        group = self.cgroups.pop(pid, None)
+        if group is not None:
+            self._write_procs(group)
         self._write_net()
+
+    def _procs_file(self, group):
+        return self.cgroup_root / group.lstrip("/") / "cgroup.procs"
+
+    def _write_procs(self, group):
+        members = sorted(p for p, g in self.cgroups.items() if g == group)
+        f = self._procs_file(group)
+        if members:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("".join(f"{p}\n" for p in members))
+        elif f.exists():
+            shutil.rmtree(f.parent)
+
+    def control_group(self, unit):
+        group = f"/user.slice/user@1000.service/app.slice/{unit}.service"
+        return group if self._procs_file(group).exists() else ""
 
     def unlisted_listener(self, port):
         """A socket nobody visible holds (another user's process)."""
@@ -101,6 +134,7 @@ class FakeSystemd:
         self.linger = linger  # polls before a stopped unit lets go
         self.fail = set(fail)
         self._lingering = {}
+        self.exec_start = {}  # unit -> the argv systemd records as ExecStart
 
     def run(self, argv):
         self.calls.append(list(argv))
@@ -110,10 +144,15 @@ class FakeSystemd:
                 return 1, ""
             command = argv[argv.index("--") + 1 :]
             cgroup = f"0::/user.slice/user@1000.service/app.slice/{unit}.service"
+            self.exec_start[unit] = command
             self.units[unit] = self.proc.spawn(command, cgroup, self.port_of(unit))
             return 0, f"Running as unit: {unit}.service\n"
         assert argv[:2] == ["systemctl", "--user"], argv
         unit = argv[-1].removesuffix(".service")
+        if argv[2] == "show" and "ControlGroup" in argv:
+            return 0, self.proc.control_group(unit) + "\n"
+        if argv[2] == "show" and "ExecStart" in argv:
+            return 0, exec_start_value(self.exec_start.get(unit)) + "\n"
         if argv[2] == "show":
             return 0, ("active\n" if unit in self.units else "inactive\n")
         if argv[2] == "stop":
@@ -176,6 +215,7 @@ def host_for(proc, systemd, **over):
     return SystemdPolicyHost(
         systemd=systemd,
         proc_root=proc.root,
+        cgroup_root=proc.cgroup_root,
         recipe=over.pop("recipe", recipe),
         clock=lambda: now[0],
         sleep=sleep,
@@ -208,7 +248,7 @@ def test_stop_waits_for_the_port_to_be_free(proc):
     host.start(a)
     result = host.stop([a, b])
     assert result.executed == "yes" and result.detail_code == "stopped"
-    assert ProcView(proc.root).listeners(8000) == []
+    assert ProcView(proc.root, systemd=systemd).listeners(8000) == []
     stops = [c for c in systemd.calls if c[2] == "stop"]
     assert stops == [["systemctl", "--user", "stop", "levi-policy-c1-A.service"]]
 
@@ -269,10 +309,7 @@ def test_a_failed_systemd_run_is_not_executed(proc):
     assert host.start(arm()).executed == "no"
 
 
-def test_cgroup_and_command_line_matching():
-    cgroup = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/levi-policy-c1-A.service\n"
-    assert in_unit(cgroup, "levi-policy-c1-A")
-    assert not in_unit(cgroup, "levi-policy-c1-A2")
+def test_command_line_matching():
     a = arm(ckpt="/home/x/openpi/checkpoints/pi05_fr3_all_step49999")
     relative = [
         "serve",
@@ -403,3 +440,133 @@ def test_t1_a_hand_started_server_with_the_same_config_is_not_ready(proc):
     systemd.units[a.unit] = proc.spawn(["sleep"])  # the unit is active
     proc.spawn(recipe(a), port=8000)  # same command line, outside the unit
     assert host.passive_ready(a).status == "mismatch"
+
+
+def _record_root_listings(monkeypatch, root):
+    seen = []
+    real = Path.iterdir
+
+    def iterdir(self):
+        if Path(self) == Path(root):
+            seen.append(self)
+        return real(self)
+
+    monkeypatch.setattr(Path, "iterdir", iterdir)
+    return seen
+
+
+def test_ownership_never_lists_the_proc_root(proc, monkeypatch):
+    # The root AGENTS.md execution boundary: only our own unit's cgroup.procs.
+    systemd = FakeSystemd(proc)
+    host = host_for(proc, systemd)
+    a = arm()
+    host.start(a)
+    stranger = proc.spawn(["nc", "-l", "9000"], port=9000)
+    seen = _record_root_listings(monkeypatch, proc.root)
+    assert host.passive_ready(a).status == "ready"
+    held = ProcView(proc.root, systemd=systemd, cgroup_root=proc.cgroup_root).listeners(
+        8000, (a.unit,)
+    )
+    assert [lsn.pids for lsn in held] == [(systemd.units[a.unit],)]
+    assert host.stop([a]).detail_code == "stopped"
+    assert seen == []
+    assert stranger in proc.cgroups  # untouched
+
+
+def test_a_visible_foreign_listener_is_refused_without_naming_its_pid(proc):
+    # Its fd folder is readable, but it is not in our unit: never ours.
+    stranger = proc.spawn(["python", "serve_policy.py", "--port", "8000"], port=8000)
+    systemd = FakeSystemd(proc)
+    host = host_for(proc, systemd)
+    a = arm()
+    result = host.stop([a])
+    assert result.mismatch and result.detail_code == "foreign_listener"
+    assert str(stranger) not in (result.detail or "")
+    assert host.start(a).mismatch
+    ready = host.passive_ready(a)
+    assert ready.status == "mismatch" and str(stranger) not in ready.detail
+    assert not any(c[0] == "systemd-run" for c in systemd.calls)
+
+
+def test_a_foreign_process_beside_our_unit_on_the_port_is_refused(proc):
+    systemd = FakeSystemd(proc)
+    host = host_for(proc, systemd)
+    a = arm()
+    host.start(a)
+    proc.spawn(["nc", "-l", "8000"], port=8000)  # a second listener, not ours
+    assert host.passive_ready(a).status == "mismatch"
+    assert host.start(a).mismatch
+
+
+def test_an_unreadable_unit_cgroup_owns_nothing(proc):
+    systemd = FakeSystemd(proc)
+    host = host_for(proc, systemd)
+    a = arm()
+    host.start(a)
+    shutil.rmtree(proc.cgroup_root)  # ControlGroup named, cgroup.procs unreadable
+    systemd.proc.control_group = lambda unit: "/gone/x.service"
+    ready = host.passive_ready(a)
+    assert ready.status == "mismatch"
+    # Our own cgroup could not be read: say so, not "a foreign process".
+    assert "owner unknown: levi-policy-c1-A cgroup unreadable" in ready.detail
+    assert "not levi-policy-c1-A" not in ready.detail
+
+
+def test_a_lingering_listener_with_an_unreadable_cgroup_is_owner_unknown(proc):
+    systemd = FakeSystemd(proc, linger=3)
+    host = host_for(proc, systemd)
+    a = arm()
+    host.start(a)
+    real = systemd.run
+
+    def broken(argv):
+        if "ControlGroup" in argv:
+            return 1, ""
+        return real(argv)
+
+    systemd.run = broken
+    result = host.stop([a])
+    assert result.mismatch and result.detail_code == "foreign_listener"
+    assert result.detail == (
+        "port 8000: owner unknown: levi-policy-c1-A cgroup unreadable"
+    )
+
+
+def test_a_foreign_listener_detail_says_not_ours(proc):
+    proc.spawn(["nc", "-l", "8000"], port=8000)
+    host = host_for(proc, FakeSystemd(proc))
+    result = host.stop([arm()])
+    assert result.detail == "port 8000 is held by a process that is not ours"
+
+
+def test_a_recipe_with_whitespace_is_refused(proc):
+    # systemd records ExecStart space-separated; passive readiness splits it
+    # on whitespace, so such an argument could never be recognised as ours.
+    systemd = FakeSystemd(proc)
+    host = host_for(proc, systemd, recipe=lambda a: [*recipe(a), "--note=a b"])
+    result = host.start(arm())
+    assert (result.executed, result.detail_code) == ("no", "recipe_unsafe")
+    assert "whitespace" in result.detail
+    assert not any(c[0] == "systemd-run" for c in systemd.calls)
+
+
+def test_the_start_command_never_delegates_the_cgroup(proc):
+    # Ownership reads only the unit's top-level cgroup.procs: a delegated unit
+    # could move its processes into sub-cgroups we would not see.
+    systemd = FakeSystemd(proc)
+    host_for(proc, systemd).start(arm())
+    (started,) = [c for c in systemd.calls if c[0] == "systemd-run"]
+    assert not any("Delegate" in part for part in started)
+
+
+@pytest.mark.parametrize(
+    "group", ["user.slice/x.service", "/user.slice/../x.service", "/a/../../etc"]
+)
+def test_an_odd_control_group_is_unreadable(proc, group):
+    class Show:
+        def run(self, argv):
+            return 0, group + "\n"
+
+    view = ProcView(proc.root, systemd=Show(), cgroup_root=proc.cgroup_root)
+    with pytest.raises(OSError):
+        view.unit_pids("levi-policy-c1-A")

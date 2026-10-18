@@ -115,6 +115,43 @@ RESET_POLICY_FIELDS = (
     "reset_horizon_completion",
     "reset_settle",
 )
+# RunConfig fields only the subtask_loop strategy reads: left out of every
+# other plan, so their digests stay as they were.
+SUBTASK_FIELDS = (
+    "subtask_task",
+    "subtask_max_steps",
+    "subtask_max_retries",
+    "max_subtasks_per_loop",
+    "vlm_min_free_mem_gib",
+    "vlm_sleep_fallback",
+    "vlm_stay_awake_min_free_gpu_mib",
+    "vlm_wake_min_free_gpu_mib",
+    "vlm_wake_headroom_mib",
+    "vlm_alternation",
+    "vlm_co_resident_headroom_mib",
+    "home_after_loop",
+    "subtask_forward_folder",
+    "subtask_reverse_folder",
+    "subtask_early_check",
+)
+# JobSubtask key -> RunConfig field.
+SUBTASK_KEYS = {
+    "max_steps": "subtask_max_steps",
+    "max_retries": "subtask_max_retries",
+    "max_subtasks_per_loop": "max_subtasks_per_loop",
+    "vlm_min_free_mem_gib": "vlm_min_free_mem_gib",
+    "vlm_sleep_fallback": "vlm_sleep_fallback",
+    "vlm_wake_min_free_gpu_mib": "vlm_wake_min_free_gpu_mib",
+    "vlm_wake_headroom_mib": "vlm_wake_headroom_mib",
+    "vlm_stay_awake_min_free_gpu_mib": "vlm_stay_awake_min_free_gpu_mib",
+    "vlm_alternation": "vlm_alternation",
+    "vlm_co_resident_headroom_mib": "vlm_co_resident_headroom_mib",
+    "start_home": "start_home",
+    "home_after_loop": "home_after_loop",
+    "forward_folder": "subtask_forward_folder",
+    "reverse_folder": "subtask_reverse_folder",
+    "early_check": "subtask_early_check",
+}
 
 
 def _relative(path: Path, value: str) -> Path:
@@ -158,14 +195,31 @@ def load_job(path) -> dict:
             raise JobError(f"task.initial_state_spec: {exc}") from None
         contract_sha = hashlib.sha256(data).hexdigest()
     human = spec.human_assisted
+    subtask = spec.subtask_loop
     steps = {}
     if spec.policies.forward and spec.policies.forward.max_steps is not None:
         steps["forward_max_steps"] = spec.policies.forward.max_steps
-    if not human and spec.policies.reset and spec.policies.reset.max_steps is not None:
+    if (
+        not human
+        and not subtask
+        and spec.policies.reset
+        and spec.policies.reset.max_steps is not None
+    ):
         steps["reset_max_steps"] = spec.policies.reset.max_steps
     folders = {"forward_folder": spec.forward_folder}
     reset = {}
-    if not human:
+    sub = {}
+    if subtask:
+        sub["subtask_task"] = spec.task.instruction
+        for key, name in SUBTASK_KEYS.items():
+            value = getattr(spec.subtask, key)
+            if key == "early_check" and value is not None:
+                # subtask_loop.EarlyCheck checks the values; a key left out
+                # keeps its default there.
+                value = value.model_dump(exclude_none=True)
+            if value is not None:
+                sub[name] = value
+    if not human and not subtask:
         folders["reset_folder"] = spec.reset_folder
         reset = {
             key: value
@@ -184,6 +238,9 @@ def load_job(path) -> dict:
     attested = spec.reset.scene_check == "operator_attested"
     try:
         given = spec.termination.model_dump(exclude_none=True)
+        if subtask:
+            # The VLM sleeps while the policy runs: nothing judges mid-episode.
+            given.setdefault("allow_early_stop", False)
         if "goal_event_types" in given:
             given["goal_event_types"] = tuple(given["goal_event_types"])
         term = TerminationConfig(**given)
@@ -199,20 +256,31 @@ def load_job(path) -> dict:
             **folders,
             **reset,
             **steps,
+            **sub,
         )
     except (ConfigError, TypeError, ValueError) as exc:
         raise JobError(str(exc)) from None
     texts = {"forward": spec.task.instruction or spec.forward_folder}
-    if not human:
+    if subtask:
+        from .subtask_loop import reverse_task
+
+        texts["reset"] = reverse_task(spec.task.instruction)
+    elif not human:
         texts["reset"] = spec.task.reset_instruction or spec.reset_folder
     root = spec.recording.rollout_root
     root = os.path.realpath(_relative(path, root)) if root is not None else None
     run = _plain(config)
-    if human:
+    if human or subtask:
         for name in RESET_POLICY_FIELDS:
             run.pop(name)
+    if not subtask:
+        for name in SUBTASK_FIELDS:
+            run.pop(name, None)
     if not attested:
         run.pop("human_scene_timeout_ns")
+    if run.get("max_discarded_rounds") is None:
+        # The default (as many as the run's rounds): a job keeps its digest.
+        run.pop("max_discarded_rounds", None)
     described = None
     if contract is not None:
         described = {**contract.describe(), "sha256": contract_sha}
@@ -231,6 +299,20 @@ def load_job(path) -> dict:
         },
         "texts": texts,
     }
+    if subtask:
+        from .subtask_loop import INSTRUCTION_TEMPLATES
+
+        # The task name is in texts; the per-subtask instructions are not
+        # (they come from the VLM's plans at run time, by this template).
+        vlm = (spec.subtask.vlm or aeri.JobSubtaskVlm()).model_dump()
+        # Optional declarations must not change legacy plan digests when absent.
+        for field in ("inventory_max_tokens", "provider_mode"):
+            if vlm[field] is None:
+                vlm.pop(field)
+        plan["subtask"] = {
+            "templates": INSTRUCTION_TEMPLATES,
+            "vlm": vlm,
+        }
     if spec.task.success_condition is not None:
         # Only when given: a job without it keeps its plan digest.
         plan["success_condition"] = spec.task.success_condition
@@ -242,7 +324,7 @@ def load_job(path) -> dict:
         )
         if policy is not None
         and policy.deployment is not None
-        and (role == "forward" or not human)
+        and (role == "forward" or not (human or subtask))
     }
     if deployments:
         plan["deployments"] = deployments
@@ -294,8 +376,42 @@ SCENE_NOT_HUMAN = (
 
 
 def _warnings(config, contract) -> list:
-    """What the operator must know (review C3 fixes, I-b)."""
+    """What the operator must know (review C3 fixes, I-b). A subtask_loop
+    run has no Initial State Contract: terminal D releases each round."""
+    if config.reset_strategy == "subtask_loop":
+        return []
     return [NO_CONTRACT] if contract is None else []
+
+
+def subtask_summary(config, *, plan=None) -> str:
+    """The subtask_loop settings, one line each (``""`` for other modes)."""
+    if config.reset_strategy != "subtask_loop":
+        return ""
+    cap = config.max_subtasks_per_loop
+    vlm = ((plan or {}).get("subtask") or {}).get("vlm") or {}
+    budget = vlm.get("inventory_max_tokens")
+    inventory = (
+        f"\nsubtask_loop: inventory output budget {budget} tokens (explicit override)"
+        if budget is not None
+        else ""
+    )
+    return (
+        f"\nsubtask_loop: task {config.subtask_task!r}; each subtask at most "
+        f"{config.subtask_max_steps} steps, at most {config.subtask_max_retries} "
+        f"retries, {'no cap' if cap is None else f'at most {cap}'} subtasks per loop"
+        f"\nsubtask_loop: VLM alternation {config.vlm_alternation}; sleep needs "
+        f"MemAvailable >= {config.vlm_min_free_mem_gib} GiB (else "
+        f"{config.vlm_sleep_fallback}); wake needs >= "
+        + (
+            "the VLM profile's wake budget"
+            if config.vlm_wake_min_free_gpu_mib is None
+            else f"{config.vlm_wake_min_free_gpu_mib} MiB"
+        )
+        + f" + {config.vlm_wake_headroom_mib} MiB headroom free GPU; home after each loop: "
+        f"{config.home_after_loop}"
+        f"\nsubtask_loop: rollouts in {config.subtask_forward_folder} (forward) and "
+        f"{config.subtask_reverse_folder} (reverse)" + inventory
+    )
 
 
 def scene_provider_problems(config, scene_provider) -> list:
@@ -352,6 +468,12 @@ def _fields(config) -> dict:
 def _plain(config) -> dict:
     out = {}
     for name, value in _fields(config).items():
+        if name == "start_home" and value is False:
+            continue  # Preserve all existing default plan digests.
+        if name == "subtask_early_check":
+            if value is None:
+                continue  # Off (the default): every plan digest stays as it was.
+            value = value.describe()
         if name == "specs":
             continue
         if name in ("termination", "reset_settle") and value is not None:
@@ -373,6 +495,11 @@ def _plain(config) -> dict:
 def session_folders(config) -> dict:
     """The C2 session file of each role that runs: no reset role in the
     human-assisted mode (design X2 G2)."""
+    if config.reset_strategy == "subtask_loop":
+        return {
+            "forward": config.subtask_forward_folder,
+            "reset": config.subtask_reverse_folder,
+        }
     folders = {"forward": config.forward_folder}
     if config.reset_strategy != "human_assisted":
         folders["reset"] = config.reset_folder
@@ -493,6 +620,14 @@ class DryRun:
             texts=job["texts"],
         )
         build = Orchestrator.restore if restore else Orchestrator.create
+        parts = {}
+        if cfg.reset_strategy == "subtask_loop":
+            from .subtask_loop import dry_run_parts
+
+            vlm, power, gate = dry_run_parts()
+            parts = {"subtask_vlm": vlm, "vlm_power": power, "gate": gate}
+            # The fake arm is at home: the read-only start-pose check passes.
+            self.robot.start_pose = lambda: {"ok": True, "text": "dry run: at home"}
         self.orch = build(
             self.directory,
             cfg,
@@ -516,6 +651,7 @@ class DryRun:
             clock=clock,
             fence=fence,
             listener=self.sessions,
+            **parts,
         )
 
     def run(self) -> dict:
@@ -608,7 +744,7 @@ def cmd_doctor(args) -> int:
     check(
         "real robot adapter",
         False,
-        "not in this version: a real run is refused, use run --dry-run",
+        "not checked by doctor: no robot connection, motion or launch authorization",
         required=False,
     )
     if args.config:
@@ -619,7 +755,8 @@ def cmd_doctor(args) -> int:
             check(
                 "launch",
                 not problems,
-                "; ".join(problems) or "a real run could be launched",
+                "; ".join(problems)
+                or "configuration launch checks passed; robot readiness and launch authorization not verified",
                 required=False,
             )
             root = job["rollout_root"]
@@ -679,6 +816,7 @@ def cmd_validate(args) -> int:
             f"{job['contract'].key if job['contract'] else 'none (no scene is ever ready)'}, "
             f"plan {job['plan_sha256'][:12]}"
         )
+        + subtask_summary(job["config"], plan=job["plan"])
         + "".join(f"\nwarning: {w}" for w in job["warnings"])
         + "".join(
             f"\nignored: {k} ({why})" for k, why in sorted(job["ignored"].items())
@@ -1209,11 +1347,128 @@ def _refuse(args, message: str) -> int:
     return EXIT_REFUSED
 
 
+def _confirm(args, question: str) -> bool:
+    if not sys.stdin.isatty():
+        return False
+    print(question, end="", file=sys.stderr, flush=True)
+    try:
+        answer = input()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return answer.strip() == args.value
+
+
+def cmd_label_rounds(args) -> int:
+    """subtask_loop (user 2026-10-17): the rounds of a run, to label them
+    after it (``--list-rounds``), or one round's post-run label
+    (``--round``). An operator's action: ``--by`` names the person and is
+    required; an agent never runs it on a person's behalf."""
+    run_dir = Path(args.run_dir)
+    try:
+        events = Journal.read(run_dir).events
+        rounds = metrics.rounds_of(events)
+        labels = metrics.round_labels(run_dir)
+    except OSError as exc:
+        return _refuse(args, f"{run_dir}: {exc.strerror or exc}")
+    if args.list_rounds:
+        lines = []
+        for round_id, found in rounds.items():
+            current = labels.get(round_id, {}).get("value")
+            lines.append(
+                f"{round_id}  round {found['round']}  label {current or '-'}  "
+                f"ran {len(found['forward'])} forward / {len(found['reverse'])} reverse"
+            )
+            for sub in found["subtasks"]:
+                lines.append(
+                    f"  {sub['loop']} #{sub['index']} try {sub['attempt']}: "
+                    f"{sub['instruction']} ({sub['episode_id']}"
+                    + ("" if sub["ran"] else ", ran no step")
+                    + ")"
+                )
+            for check in found["checks"]:
+                lines.append(
+                    f"  VLM check {check['loop']} #{check['index']} try "
+                    f"{check['attempt']}: {check['value']}"
+                )
+        value = {
+            "ok": True,
+            "rounds": {
+                k: {**v, "label": labels.get(k, {}).get("value")}
+                for k, v in rounds.items()
+            },
+        }
+        _print(value, args.json, "\n".join(lines) or "no rounds")
+        return EXIT_OK
+    if not args.by:
+        return _refuse(
+            args,
+            "--by is required: a round label is a person's, and records who "
+            "/ 必须用 --by 写明标注者（不透明 ID）",
+        )
+    if args.value not in metrics.ROUND_VALUES:
+        return _refuse(args, f"--value is one of {', '.join(metrics.ROUND_VALUES)}")
+    current = labels.get(args.round, {}).get("value")
+    if not _confirm(
+        args,
+        f"Label round {args.round} as {args.value}; current: {current or 'none'} "
+        f"/ 当前：{current or '未标'}. Type {args.value} to confirm / 输入 "
+        f"{args.value} 确认: ",
+    ):
+        return _refuse(
+            args,
+            "not confirmed at a terminal; nothing was written / 未在终端确认，未写入",
+        )
+    try:
+        record = metrics.label_round_after(
+            run_dir, args.round, args.value, by=args.by, note=args.note
+        )
+    except metrics.LabelRefused as exc:
+        return _refuse(args, str(exc))
+    text = f"labelled round {args.round}: {args.value} (by {args.by}" + (
+        f", replaces {current})" if current else ")"
+    )
+    _print({"ok": True, "record": record}, args.json, text)
+    return EXIT_OK
+
+
+def cmd_rollouts(args) -> int:
+    """subtask_loop: the run's demos as rounds -> forward/reverse sets ->
+    subtasks -> attempts (``levi.aeri.rollouts.v1``). Reads only, unless
+    ``--write`` keeps ``<run_dir>/rollouts.json``."""
+    from . import rollouts
+
+    run_dir = Path(args.run_dir)
+    if not (run_dir / rollouts.JOURNAL).is_file():
+        return _refuse(args, f"{run_dir}: no {rollouts.JOURNAL}")
+    root = (
+        Path(args.rollout_root) if args.rollout_root else rollouts.default_root(run_dir)
+    )
+    try:
+        if args.write:
+            path = rollouts.write_rollouts(run_dir, root)
+            found = json.loads(path.read_text())
+        else:
+            path, found = None, rollouts.build_rollouts(run_dir, root)
+    except OSError as exc:
+        return _refuse(args, f"{run_dir}: {exc.strerror or exc}")
+    text = rollouts.summary(found) + (f"\nwritten: {path}" if path else "")
+    _print(found, args.json, text)
+    return EXIT_OK
+
+
 def cmd_label(args) -> int:
     """An operator's outcome label for an ended forward episode (T-CL-14),
     confirmed by typing the value at a terminal. The automatic verdict is
     never shown here (the operator judges first); only
-    ``labels/operator_label.jsonl`` is written."""
+    ``labels/operator_label.jsonl`` is written. ``--round`` /
+    ``--list-rounds``: a subtask_loop round (``cmd_label_rounds``)."""
+    picked = [bool(args.episode), bool(args.round), bool(args.list_rounds)]
+    if sum(picked) != 1:
+        return _refuse(args, "give exactly one of --episode, --round, --list-rounds")
+    if args.round or args.list_rounds:
+        return cmd_label_rounds(args)
+    if args.value is None:
+        return _refuse(args, "--value is required")
     run_dir = Path(args.run_dir)
     if not metrics.PRINCIPAL.fullmatch(args.principal):
         return _refuse(
@@ -1607,6 +1862,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report.set_defaults(func=cmd_report)
 
+    rollouts_cmd = sub.add_parser(
+        "rollouts",
+        help="subtask_loop: demos as rounds, forward/reverse sets, subtasks and "
+        "attempts / 子任务循环：按轮、正向/逆向集、子任务、尝试组织片段",
+        description="Build the run's rollout manifest (levi.aeri.rollouts.v1) "
+        "from its journal and the demos' metadata.json and print a summary. "
+        "Reads only; --write keeps <run dir>/rollouts.json (the only file "
+        "written). check is the VLM's judgement, not an operator label. / "
+        "由运行日志和片段的 metadata.json 生成 rollout 清单并打印摘要；只读，"
+        "--write 才写 <运行目录>/rollouts.json（唯一写入的文件）；check 是 VLM "
+        "的判断，不是操作员标签。",
+    )
+    rollouts_cmd.add_argument(
+        "--run-dir", required=True, help="<root>/.aeri/runs/<run id> / 运行目录"
+    )
+    rollouts_cmd.add_argument(
+        "--rollout-root",
+        help="recording root (default: the run's launch.json or plan, else "
+        "<root>) / 录制根目录（默认取 launch.json 或计划，否则 <root>）",
+    )
+    rollouts_cmd.add_argument(
+        "--write",
+        action="store_true",
+        help="write <run dir>/rollouts.json / 写入 <运行目录>/rollouts.json",
+    )
+    rollouts_cmd.add_argument("--json", action="store_true", help=json_help)
+    rollouts_cmd.set_defaults(func=cmd_rollouts)
+
     label = sub.add_parser(
         "label",
         help="an operator's outcome label for an ended episode / 操作员给已结束片段的成败标签",
@@ -1624,12 +1907,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     label.add_argument(
         "--episode",
-        required=True,
         help="forward episode id (<run id>.forward.NNNN) / forward 片段 ID",
     )
     label.add_argument(
+        "--round",
+        help="subtask_loop: a round id (from --list-rounds) to label after the run "
+        "/ 子任务循环：要在运行后标注的轮次 ID",
+    )
+    label.add_argument(
+        "--list-rounds",
+        action="store_true",
+        help="subtask_loop: list each round's id, subtasks and VLM checks / "
+        "列出各轮的 ID、子任务和 VLM 判定",
+    )
+    label.add_argument(
+        "--by",
+        help="subtask_loop round label: opaque id of the person who labels "
+        "(required) / 轮次标注者的不透明 ID（必填）",
+    )
+    label.add_argument(
         "--value",
-        required=True,
         choices=metrics.OPERATOR_VALUES,
         help="the operator's judgement / 操作员的判定",
     )

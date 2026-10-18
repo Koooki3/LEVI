@@ -31,7 +31,9 @@ def test_the_reset_only_transitions_are_those_touching_a_reset_state():
     assert modes.RESET_ONLY_TRANSITIONS == derived
     for a, b in sm.TRANSITIONS:
         cell = modes.MODE_MATRIX[f"transition:{a}->{b}"][modes.HUMAN]
-        assert (modes.kind(cell) == "n/a") == ((a, b) in modes.RESET_ONLY_TRANSITIONS)
+        # A subtask_loop-only edge is n/a in every mode of this matrix.
+        not_here = modes.RESET_ONLY_TRANSITIONS | modes.SUBTASK_ONLY_TRANSITIONS
+        assert (modes.kind(cell) == "n/a") == ((a, b) in not_here)
 
 
 def test_the_snapshot_is_current():
@@ -244,7 +246,12 @@ def test_human_assisted_reaches_the_reset_policy_mode_minus_its_reset_transition
 ):
     single = reached_by(modes.SINGLE, tmp_path_factory)
     human = reached_by(modes.HUMAN, tmp_path_factory)
-    assert single == set(sm.TRANSITIONS) - modes.EVENT_PAUSE_TRANSITIONS
+    assert (
+        single
+        == set(sm.TRANSITIONS)
+        - modes.EVENT_PAUSE_TRANSITIONS
+        - modes.SUBTASK_ONLY_TRANSITIONS
+    )
     assert human == single - modes.RESET_ONLY_TRANSITIONS
 
 
@@ -303,9 +310,34 @@ def test_every_sentence_has_its_chinese_wording():
 
 
 def event_pause_expected(mode):
-    return modes.EVENT_PAUSE_TRANSITIONS - (
-        modes.RESET_ONLY_TRANSITIONS if mode == modes.HUMAN else set()
+    return (
+        modes.EVENT_PAUSE_TRANSITIONS
+        - modes.EVENT_PAUSE_LEGACY
+        - (modes.RESET_ONLY_TRANSITIONS if mode == modes.HUMAN else set())
     )
+
+
+@pytest.mark.mode_matrix(
+    *(f"transition:{a}->{b}" for a, b in sorted(modes.EVENT_PAUSE_LEGACY))
+)
+def test_legacy_event_pause_edges_stay_legal_but_are_not_taken(reset_mode):
+    """A forward judgement ends in FORWARD_FINALIZE now; the old move to
+    WAIT_HUMAN stays in the table so journals written before still check."""
+    for a, b in modes.EVENT_PAUSE_LEGACY:
+        assert sm.legal(a, b)
+        rule = sm.check_transition(
+            a,
+            b,
+            reason="goal_verified",
+            principal_kind="orchestrator",
+            command_id=None,
+            action_kind="recorder_seal",
+            non_idempotent=False,
+            step=None,
+            episode_role="forward",
+            episode_result=True,
+        )
+        assert rule.role == "forward"
 
 
 @pytest.mark.parametrize(

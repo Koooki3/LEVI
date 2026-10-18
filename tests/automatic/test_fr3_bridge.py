@@ -1,6 +1,8 @@
 """The actual bridge on fake imported modules: no socket or robot SDK is used."""
 
+import contextlib
 import hashlib
+import io
 import json
 import socket
 import threading
@@ -13,6 +15,7 @@ import numpy as np
 import pytest
 from aeri_harness import fake
 
+from levi.automatic import console as C
 from levi.automatic import fr3_bridge as B
 from levi.automatic import fr3_run as R
 from levi.automatic import scene_assessment as sa
@@ -36,7 +39,70 @@ def no_network(monkeypatch, tmp_path):
     monkeypatch.setattr(socket, "create_connection", refuse)
 
 
+class _Screen(io.StringIO):
+    def isatty(self):
+        return True
+
+
+class AgreeingKeys:
+    """Keys typed by a person who answers every predicate as the model's
+    answer printed last says (``ready``: y, ``reset_required``: n, else u)."""
+
+    def __init__(self, out):
+        self.out = out
+
+    def poll(self, timeout=0.0):
+        text = self.out.getvalue()
+        at = text.rfind(AGREEING_MARK)
+        if at < 0:
+            return None
+        word = text[at + len(AGREEING_MARK) :]
+        if word.startswith("就绪"):
+            return "y"
+        return "n" if word.startswith("需复位") else "u"
+
+    def flush(self):
+        pass
+
+    def cbreak(self):
+        return contextlib.nullcontext()
+
+
+AGREEING_MARK = "模型判断："
+
+
+class AgreeingOperator(C.Console):
+    """The operator terminal of rig-based tests (a real run has one,
+    L2-UI2-PROVIDER-RELEASE): the person agrees with the model at every
+    scene question, the reset prompt passes at once, and a wait for a person
+    ends the entry as the plain entry without a terminal did (it returns
+    WAIT_HUMAN). Tests of the terminal itself (test_console) install a
+    Console with scripted keys instead."""
+
+    def __init__(self, **kw):
+        out = _Screen()
+        super().__init__(AgreeingKeys(out), out, **kw)
+
+    def reset_prompt(self, request):
+        return None
+
+    def wait_human(self):
+        return False
+
+
+def without_a_terminal(monkeypatch):
+    """The entry as it was before L2-UI2-PROVIDER-RELEASE for a provider
+    scene check: no console, the provider's answer used as it comes. A real
+    run cannot get here any more (``fr3_run`` refuses a run without the
+    operator terminal); this keeps the old no-console code (the plain
+    WAIT_HUMAN prompt, the tracked select wait) under test while it exists."""
+    monkeypatch.setattr(C, "from_environment", lambda **kw: None)
+    monkeypatch.setattr(R, "_scene_terminal_required", lambda cfg, operator: None)
+    monkeypatch.setattr(C, "confirmed_scene", lambda console, model, *a, **kw: model)
+
+
 def rig(tmp_path, monkeypatch, mode="human_assisted", *, faults=(), scenes=()):
+    monkeypatch.setattr(C, "from_environment", lambda **kw: AgreeingOperator(**kw))
     contract = sa.InitialStateContract(
         contract_id="initial",
         contract_version="1",
@@ -1043,7 +1109,7 @@ def test_different_run_roots_and_both_ports_share_the_physical_arm_lock(
     r = rig(tmp_path, monkeypatch)
     held, release = threading.Event(), threading.Event()
     result = []
-    monkeypatch.setattr(R, "assembled", lambda *a: "COMPLETED")
+    monkeypatch.setattr(R, "assembled", lambda *a, **kw: "COMPLETED")
 
     def importing(binding):
         held.set()
@@ -1247,3 +1313,277 @@ def test_recorder_close_preserves_first_error_and_still_closes_media(monkeypatch
     with pytest.raises(OSError, match="first recorder error"):
         recorder.close()
     assert seen == ["recorder", "media"]
+
+
+# --- Robot.reopen_admission_if: the specific reopen of one named closed interval -------
+
+
+def gate_state(robot):
+    s = robot.admission_snapshot()
+    return (s.mode, s.generation, s.closed_from_ns, s.home_only_from_ns)
+
+
+def closed_gate_rig():
+    from test_fr3_home_gate import Rig as GateRig
+
+    g = GateRig()
+    mark = g.close()
+    return g, mark
+
+
+def test_reopen_admission_if_reopens_exactly_the_named_interval():
+    g, mark = closed_gate_rig()
+    g.robot.reopen_admission_if(
+        generation=mark.generation, closed_from_ns=mark.closed_from_ns
+    )
+    after = g.snap()
+    assert (after.mode, after.closed_from_ns) == ("open", None)
+    assert after.generation == mark.generation + 1
+
+
+@pytest.mark.parametrize("delta", [-1, 1, 2])
+def test_reopen_admission_if_refuses_a_stale_generation(delta):
+    g, mark = closed_gate_rig()
+    before = gate_state(g.robot)
+    with pytest.raises(B.AdmissionRefused):
+        g.robot.reopen_admission_if(
+            generation=mark.generation + delta, closed_from_ns=mark.closed_from_ns
+        )
+    assert gate_state(g.robot) == before
+
+
+@pytest.mark.parametrize("delta", [-1, 1])
+def test_reopen_admission_if_refuses_a_stale_closure_time(delta):
+    g, mark = closed_gate_rig()
+    before = gate_state(g.robot)
+    with pytest.raises(B.AdmissionRefused):
+        g.robot.reopen_admission_if(
+            generation=mark.generation, closed_from_ns=mark.closed_from_ns + delta
+        )
+    assert gate_state(g.robot) == before
+
+
+def test_reopen_admission_if_refuses_a_closure_that_was_reopened_and_closed_again():
+    g, mark = closed_gate_rig()
+    g.robot.reopen_admission()
+    g.clock.advance(5)
+    g.robot.stop_admission()
+    before = gate_state(g.robot)
+    with pytest.raises(B.AdmissionRefused):
+        g.robot.reopen_admission_if(
+            generation=mark.generation, closed_from_ns=mark.closed_from_ns
+        )
+    assert gate_state(g.robot) == before
+
+
+def test_reopen_admission_if_refuses_an_open_gate():
+    g, mark = closed_gate_rig()
+    g.robot.reopen_admission()
+    before = gate_state(g.robot)
+    assert before[0] == "open"
+    for generation, closed_from in (
+        (mark.generation, mark.closed_from_ns),
+        (before[1], mark.closed_from_ns),
+    ):
+        with pytest.raises(B.AdmissionRefused):
+            g.robot.reopen_admission_if(
+                generation=generation, closed_from_ns=closed_from
+            )
+        assert gate_state(g.robot) == before
+
+
+@pytest.mark.parametrize("stop_inside", [False, True])
+def test_reopen_admission_if_is_refused_inside_the_home_only_window(stop_inside):
+    """Called from go_home: the window's mode, and a stop inside the window that
+    makes the gate "closed" while the home is still running, are both refused."""
+    from test_fr3_home_gate import HOME
+    from test_fr3_home_gate import Rig as GateRig
+
+    seen = {}
+
+    def go_home(g):
+        def run(env, args):
+            if stop_inside:
+                g.clock.advance(3)
+                g.robot.stop_admission()
+            s = g.snap()
+            seen["before"] = gate_state(g.robot)
+            seen["mode"] = s.mode
+            try:
+                g.robot.reopen_admission_if(
+                    generation=s.generation,
+                    closed_from_ns=s.closed_from_ns
+                    if s.closed_from_ns is not None
+                    else seen["mark"].closed_from_ns,
+                )
+            except B.AdmissionRefused as exc:
+                seen["refused"] = str(exc)
+            seen["after"] = gate_state(g.robot)
+            if not stop_inside:
+                env.step(np.array(HOME))
+
+        return run
+
+    g = GateRig(go_home=go_home)
+    seen["mark"] = g.close()
+    g.robot.home_under_closed_gate(token=g.token())
+    assert "home-only window" in seen["refused"]
+    assert seen["mode"] == ("closed" if stop_inside else "home_only")
+    assert seen["after"] == seen["before"]
+    assert g.snap().mode == "closed"  # the window ends closed, never reopened
+
+
+@pytest.mark.parametrize(
+    "generation, closed_from",
+    [("bool", "ok"), ("float", "ok"), ("none", "ok"), ("ok", "none"), ("ok", "bool")],
+)
+def test_reopen_admission_if_refuses_bool_none_or_non_int_arguments(
+    generation, closed_from
+):
+    g, mark = closed_gate_rig()
+    assert mark.generation == 1  # so True == generation and 1.0 == generation
+    gen = {"bool": True, "float": 1.0, "none": None, "ok": mark.generation}[generation]
+    start = {"none": None, "bool": True, "ok": mark.closed_from_ns}[closed_from]
+    before = gate_state(g.robot)
+    with pytest.raises(B.AdmissionRefused):
+        g.robot.reopen_admission_if(generation=gen, closed_from_ns=start)
+    assert gate_state(g.robot) == before
+
+
+@pytest.mark.parametrize(
+    "component,note",
+    [
+        (0, "max_xy"),
+        (2, "min_z"),
+        (0, "max_step_m"),
+        (3, "rx_range"),
+        (4, "ry_range"),
+        (5, "rz_range"),
+        (3, "max_step_rad"),
+    ],
+)
+def test_clamp_refusal_preserves_diagnostics_without_motion(component, note):
+    from fr3_real_support import HOME, build, token
+
+    r = build()
+    original = [*HOME, 0.6]
+    r.robot.args.binarize_gripper = True
+    normalized = [*HOME, 1.0]
+    clamped = list(normalized)
+    clamped[component] += 0.1
+    r.robot.client._clamp_action = lambda *a: (clamped, [note])
+    result = r.robot.step(original, token=token(r, "policy_steps"))
+    assert result.executed == "no" and r.robot.latched
+    diagnostic = json.loads(
+        "".join(
+            text
+            for code, text in result.notes
+            if code.startswith("action_guard_detail_")
+        )
+    )
+    assert all(len(text) <= 300 for _, text in result.notes)
+    assert diagnostic == {
+        "original": original,
+        "normalized": normalized,
+        "clamped": clamped,
+        "changed_components": [component],
+        "clamp_notes": [note],
+    }
+    assert "pose" not in r.env.routes and "clearerr" not in r.env.routes
+    assert r.robot.step(original, token=token(r, "policy_steps")).executed == "no"
+    assert "pose" not in r.env.routes
+
+
+@pytest.mark.parametrize("bad_notes", [False, True])
+def test_clamp_note_alone_or_failed_diagnostics_still_refuses(bad_notes):
+    from fr3_real_support import HOME, build, token
+
+    r = build()
+    action = [*HOME, 1.0]
+    notes = [object()] if bad_notes else ["workspace guard"]
+    r.robot.client._clamp_action = lambda *a: (action, notes)
+    result = r.robot.step(action, token=token(r, "policy_steps"))
+    assert result.executed == "no" and r.robot.latched
+    detail = "".join(
+        text for code, text in result.notes if code.startswith("action_guard_detail_")
+    )
+    if bad_notes:
+        assert json.loads(detail)["status"] == "unavailable"
+    else:
+        assert json.loads(detail)["clamp_notes"] == notes
+    assert "pose" not in r.env.routes
+
+
+@pytest.mark.parametrize("grip,normalized", [(0.4, 0.0), (0.5, 1.0), (0.6, 1.0)])
+def test_reviewed_gripper_binarization_is_not_a_clamp_refusal(grip, normalized):
+    from fr3_real_support import HOME, build, token
+
+    r = build()
+    r.robot.args.binarize_gripper = True
+    r.robot.client._clamp_action = lambda *a: ([*HOME, normalized], [])
+    result = r.robot.step([*HOME, grip], token=token(r, "policy_steps"))
+    assert result.executed == "yes" and r.robot.latched is None
+    assert "action_guard_refused" not in dict(result.notes)
+    assert r.env.routes.count("pose") == 1
+
+
+@pytest.mark.parametrize("exhausted", [False, True])
+@pytest.mark.parametrize(
+    "case", ["normal", "multi", "oversized", "non_json", "encoded_overflow"]
+)
+def test_guard_diagnostics_survive_journal_note_budget(tmp_path, exhausted, case):
+    from aeri_harness import build as build_run
+    from aeri_harness import config
+    from fr3_real_support import HOME, build, token
+
+    r = build()
+    action = [*HOME, 1.0]
+    fixed = list(action)
+    fixed[2] += 0.1
+    clamp_notes = {
+        "normal": ["min_z", "rotation"],
+        "multi": ["x" * 190] * 8,
+        "oversized": ["x" * 241],
+        "non_json": [object()],
+        "encoded_overflow": ["\u0001" * 240] * 8,
+    }[case]
+    r.robot.client._clamp_action = lambda *a: (fixed, clamp_notes)
+    result = r.robot.step(action, token=token(r, "policy_steps"))
+    assert result.executed == "no" and r.robot.latched
+    assert "pose" not in r.env.routes and "clearerr" not in r.env.routes
+    assert len(result.notes) <= 9
+    assert all(len(text) <= 240 for _, text in result.notes)
+    if case == "multi":
+        assert result.notes[-1][0] == "action_guard_detail_0007"
+    run = build_run(tmp_path, cfg=config(episodes=1, note_lines_per_episode=1))
+    if exhausted:
+        run.orch.note("noise", "consume the only ordinary note")
+        run.orch._flush_notes()
+    run.orch._result_notes(result)
+    run.orch.note("action_guard_detail_0008", "not in the finite allowlist")
+    run.orch._flush_notes(final=True)
+    found = Journal.read(run.directory)
+    assert found.corrupt is None
+    written = {
+        event.note.code: event.note.detail
+        for event in found.events
+        if event.record == "note"
+    }
+    assert all(written[code] == text for code, text in result.notes)
+    if exhausted:
+        assert "action_guard_detail_0008" not in written
+    diagnostic = json.loads(
+        "".join(
+            written[code]
+            for code, _ in result.notes
+            if code.startswith("action_guard_detail_")
+        )
+    )
+    if case in ("normal", "multi"):
+        assert diagnostic["original"] == action
+        assert diagnostic["clamped"] == fixed
+        assert diagnostic["clamp_notes"] == clamp_notes
+    else:
+        assert diagnostic["status"] == (
+            "truncated" if case == "encoded_overflow" else "unavailable"
+        )

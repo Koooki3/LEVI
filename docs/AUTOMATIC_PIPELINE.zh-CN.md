@@ -165,6 +165,13 @@ VERIFY_INITIAL / SCENE_ASSESS -> RESET_ACTIVE -> RESET_VERIFY -> RESET_FINALIZE
 
 ## 复位仲裁（`scene_assessment.py`、`reset_manager.py`）
 
+机器契约与展示文案分离：`describe()`（含 `format`、`view_rule`）、
+`plan.contract` 和计划摘要保持冻结的机器/审计数据，CLI JSON 保留原值。
+计划 API 只投影契约标识、版本、状态，待办卡只投影标识、状态和谓词；
+界面通过中英文词条展示状态，不翻译或重写冻结描述。目前这两个视图均不展示
+`FORMAT_STATUS` 或 `VIEW_RULE`。此边界已有回归候选，但不代表已完成运行验证，
+也不代表当前存在用户可见缺陷。
+
 **只有证据足够的 `ready` 场景才能跳过复位。** 场景评估只是提供方的说法；`scene_assessment.arbitrate` 按任务的**初始状态契约**（Initial State Contract，`RunConfig.initial_state`）读它：
 
 | 评估 | 结论 |
@@ -335,6 +342,111 @@ reset:
 
 **已知局限。** 还没有回答场景题的页面（只有协议和 Fake）。契约格式没有文字字段之前，谓词文字就是把名字里的下划线换成空格（HA-23）。人工核对的质量取决于相机给出的画面；仲裁的视角和证据规则同样适用。指标还不区分计划内和计划外的干预（模式矩阵任务）。
 
+## 子任务循环（`reset_strategy: subtask_loop`）
+
+不用复位策略的运行：只有测评策略和本地 VLM。操作员只设任务名（`task.instruction`）和轮数（`experiment.episodes`）；VLM 规划 pick-and-place 子任务，策略把每个子任务当作一个普通片段执行，逆向循环把场景恢复成本轮开始时的布局。代码：`levi/automatic/subtask_loop.py`（note 代码、模板、校验器、fake）、编排器的 `_decide_subtask` 及其后的方法、`levi/automatic/subtask_vlm.py`（真实 VLM 客户端与睡眠/唤醒）。**已接线，但没有在真机、真实策略服务或真实 vLLM 上验证过**：所有测试都跑在 fake 上。
+
+**一次运行：**
+
+1. 开始时 VLM 在两路相机画面上列出物体（`inventory`，用 Lynx 的提示和结构：`pink_plate_1` 这样的 id、各自位置、能否抓取）。终端 D 显示清单；`y` 确认，`n` 否决（`WAIT_HUMAN`，`subtask_inventory_rejected`）。确认后的清单加 `table` 冻结为本次运行的白名单（note `subtask_inventory_confirmed`，带 sha256 和旁路文件）。
+2. 每轮：先做只读的起始位姿检查，再由操作员在终端 D 按 Enter 放行本轮。只有它能放行：页面、命令收件箱、VLM、超时都不能。本轮开始的画面作为证据保存（ref 和 sha256），就是参考布局。
+3. 正向规划：VLM 拿到任务名、白名单和当前画面，回答 `{"steps": [{"pick", "place", "instruction", "done_when": [{"fact", "subject", "target"}]}]}`。`pick` 必须是白名单里可抓取的 id，`place` 是另一个白名单 id 或 `table`，每条事实（`on`、`in`、`in_gripper`、`gripper_empty`）只能引用白名单 id。策略指令**由代码**用 `pick`、`place` 和三个固定模板之一生成（`INSTRUCTION_TEMPLATES`，一张常量表）：`on` -> `put the {pick} on the {place}`，`in`（容器）-> `put the {pick} into the {place}`，放到桌上 -> `put the {pick} on the table`。关系取自计划里关于这一对 `pick`、`place` 的 `on`/`in` 事实；没有写关系的子任务被拒（`no_relation`）。id 变成词（`pink_plate_2` -> `pink plate`）。两个同色物体读起来一样：一份计划里若同一条指令对应两个不同的动作，整份计划被拒（`ambiguous_instruction`；2026-10-17 的取舍，白名单名称不改）。VLM 自己写的 `instruction` 只留作分析，从不发给策略。超出白名单的 id、格式错误、空的**正向**计划、超过 `max_subtasks_per_loop` 的计划、超时或异常：保持不动、不发动作、`WAIT_HUMAN`（`subtask_plan_refused`）。每条请求记录都保留本客户端的请求 id、输入画面 ref、超时、HTTP 回答结构是否正确及原因。桥在策略接受指令前再查一次（`prompt_allowed`：只接受冻结白名单生成的模板文本）。
+4. 正向循环：每个子任务是一个正向片段，至多 `subtask_max_steps` 步（默认 200），用它自己的指令；按步数上限或操作员结束，走常规的 hold -> quiesce -> seal。子任务之间不回 Home。之后 VLM 在静止画面上回答这个子任务的事实（`check`），结论由代码推出：全部为 true -> 下一个子任务；有 false -> 重发同一个子任务（至多 `subtask_max_retries` 次，默认 5，超过则 `WAIT_HUMAN`，`subtask_retry_limit`）；null、格式错误、超时 -> `WAIT_HUMAN`（`subtask_check_unavailable`）。VLM 的回答只推动流程：它是写在 `subtask_check` note 里的模型判断，从不当作操作员标签、真值或指标里的成功（每个子任务片段的结果都写 `goal_verification: unavailable`）。
+5. 正向循环在 Home 结束（沿用现有安全回位）。然后做起始位姿检查、逆向规划（当前侧视画面加本轮开始的侧视画面，校验相同；任务名由代码生成：`undo: <任务名>`），逆向子任务作为 `reset` 片段执行（同一个策略、同样的逐子任务循环），最后再回 Home。空的**逆向**计划表示场景已经复原：不跑逆向子任务，机械臂留在 Home，下一轮仍要做起始位姿检查并重新放行。正向结束提交 `subtask_forward_done`，逆向结束提交 `subtask_reverse_done`。
+
+**任务完成后及时确认（`subtask.early_check`，默认关闭）。** 不开时，每个正向和逆向子任务都要跑满步数（200 步，2026-10-18 实测约 26 秒）才问 VLM 是否已完成。打开后，子任务很可能已经完成时就停下来问同一个问题：
+
+- **触发。** `on_events: true`：绑定文件 `signal_events` 事件流（终止仲裁器读的同一个带画面的事件流；subtask_loop 的绑定只能为这个用途声明它，`on_events: true` 时必须声明）里出现 `event_types` 中的事件（默认 `gripper_open`，即松开夹爪），过 `settle_steps`（默认 8）步后检查到期，让物体落稳、机械臂移开。被撤回的事件不触发。`every_steps: N`（N ≥ 40）：从本次尝试开始或上次检查起每 N 步也到期，作为没有事件时的兜底。两者可同时开，至少开一个。本次尝试的前 `min_steps`（20）步内不查；距上次检查或距步数上限不足 `cooldown_steps`（20）步不查（那时普通检查马上就来）；每次尝试最多 `max_checks`（3）次。
+- **停止。** 检查点在一个控制步的开头，排在操作员停止、锁存/红色健康检查和操作员 s/f/d 之后（它们的优先级都不让给它），在下一次观测之前。片段以停止原因 `subtask_early_check` 走普通的 hold → quiesce → seal 结束；没有新增运动路径、令牌或守卫。随后唤醒 VLM（照常检查显存），在静止画面上问该子任务的 `done_when`，提示词和结构与步数用完时完全相同。外部模式下，代理像回答其他请求一样回答它。
+- **回答。** true：子任务完成，立刻进入下一个子任务（或循环结束、回 Home）。false、null 或没有回答（VLM 唤醒失败、回答格式不对）：同一个子任务、同一次尝试，在新片段里用剩下的步数接着跑（不回 Home，不计重发，转换原因 `subtask_continue`）；步数用完时的普通检查照常决定，重发和转人工规则不变。检查期间收到停止仍然优先（回 Home，再等人）；锁存或红色健康在续跑片段的第一步之前就被拦下。
+- **记录。** `subtask_early_check` note（触发原因：`trigger` 为 `event` 时带 `event_type`、`event_id`、`event_step`，为 `interval` 时带 `every_steps`；本次尝试的 `step`、`n`）、带 `early: true`、`trigger`、`step` 的 `subtask_check` note，以及续跑时的 `subtask_continued` note（`after`、`segment`、`used_steps`、`remaining_steps`）。续跑片段的 `subtask_started` note 和 rollout 元数据带 `segment` 与 `continues`（前一个片段）；指标把它算作同一个子任务。每一段都是单独封存的 rollout。终端 D 只显示是什么触发了暂停，从不显示 VLM 的回答。
+
+为什么结束片段而不是在片段里暂停：片段内暂停时策略片段仍未关闭（状态机认为策略可能在推理），却要问 VLM；还需要更长的或第二个运动令牌；一个 rollout 里会留下时间空档。结束再续跑只用已有的转换。代价是续跑的尝试会变成几段较短的 rollout。尚未在真机上验证。
+
+**s / f / d。** 正向子任务片段进行中：`s` 或 `f` 给**本轮**打标签并结束正向循环。判定属于整轮，不属于某个子任务：它是 `<run_dir>/labels/round_label.jsonl` 里的一条记录（`metrics.label_round`：`round_id` 与 `subtask_round_released` note 一致，`success`/`failure`/`discarded`、`by`、时间，以及成员片段：本轮实际跑过的正向子任务片段，之后另有一行 `members` 写逆向片段）。子任务片段都没有自己的成败标签（`label_operator` 拒绝任何 subtask_loop 片段，无论从哪条途径来），所以不会有逐片段的结局流入 `levi export`、训练池或数据整理，`raw.demo_outcome`（它们读取的机器人标志）也从不给子任务 rollout 结局。一个片段都没跑过的轮次不留记录。成功率按轮计算，在报告的 `rounds` 小节（`success_rate` 只算 success 和 failure，`discarded` 不进分母；没有自动的轮次判定，所以没有一致率和提前停止）。操作员也可以运行中一个键都不按，运行后逐轮标注：`levi automatic label --run-dir RUN --list-rounds` 列出每轮的 ID、子任务（含各片段是否跑过）和 VLM 的判定；`levi automatic label --run-dir RUN --round ROUND_ID --value success|failure|discarded --by PRINCIPAL [--note TEXT]` 在终端再输入一次该值确认后，写入同样格式的记录（`source: post_run`）。`--by` 必填并记录在案；同一轮之后的标签覆盖之前的，两条都留在文件里；未知的轮次、或正向片段一步都没跑过的轮次被拒绝，subtask_loop 运行里任何片段级的成败标签也被拒绝。这是操作员的动作：agent 从不代人执行；机械臂回 Home，逆向循环照常复位场景。`d` 作废本轮：回 Home、跑逆向循环，本轮由新的一轮替换（不超过 `max_discarded_rounds`）。逆向循环中 `s`/`f`/`d` 不起作用（终端提示"逆向循环正在复位场景：这个键在这里不起作用"）；停止始终有效。停止在每个阶段都优先：清单之前、放行时、规划中、VLM 唤醒或睡眠时、策略运行时、判定时、重发前、逆向循环中；停止一经登记，已规划的子任务不再发出。
+
+**VLM 和策略从不同时工作。** 每个策略片段前让 VLM 睡眠；每次 VLM 请求前唤醒它。唤醒要求空闲显存不少于 `vlm_wake_min_free_gpu_mib`（`nvidia-smi --query-gpu` 只读总量；不设时按 VLM 配置用 `levi live` 计算唤醒的同一公式 `gpumgr.need_mib(wake=True)`：预算减去睡眠中 vLLM 仍占的 2200 MiB，再加 850 MiB 唤醒余量，0.70 在 32607 MiB 的卡上约 21.1 GB；没有配置或读数时才用 23000）。唤醒阈值 = 这个需求 + `vlm_wake_headroom_mib`（默认也是下限 1024）。不够或读不到：不唤醒，`vlm_wake_refused` 记 `free_mib`、`need_mib`、`headroom_mib`、`threshold_mib` 和 `decision`，`WAIT_HUMAN`（`vlm_unavailable`）。每次 `/sleep` 和 `/wake_up` 之前都核对 VLM 端口的监听者是本方记录的单元（pid 和 starttime，R15）；不是则什么都不发（`not_our_unit`），运行等待人工。唤醒失败或超时：`vlm_wake_failed`，`WAIT_HUMAN`，策略不动。一级睡眠把权重（约 18.5-20 GiB）移到不可换出的锁页内存，所以 MemAvailable 必须不少于 `vlm_min_free_mem_gib`（默认 28）；低于它由 `vlm_sleep_fallback` 决定：`wait_human`（默认：`vlm_sleep_refused`，`WAIT_HUMAN`）、`level2`（丢弃权重，下次唤醒时重新加载；更慢，唤醒时间未实测）或 `stay_awake`（VLM 保持运行，策略运行期间不发请求；仅当显存还有 `vlm_stay_awake_min_free_gpu_mib`）。`vlm_alternation: co_resident` 用于足够小、能与策略同驻的 VLM：从不睡眠，策略运行时仍然不发请求，并且只有在运行的第一次检查发现所有模型加载后空闲不少于 `vlm_co_resident_headroom_mib`（默认 2048）时才允许。这个模式在日志里记一次（`subtask_alternation`）。每条 `vlm_sleep`/`vlm_wake` note 都记前后的 MemAvailable、唤醒前后 nvidia-smi 的 used/total 和耗时。
+
+**录制。** 正向子任务片段录在 `<forward_folder>__subtask`，逆向的录在 `<forward_folder>__reverse`（可用 `subtask.forward_folder` / `subtask.reverse_folder` 改）；每个 rollout 的 `metadata.json` 有 `eval.aeri.subtask`（round、loop、index、attempt、instruction、task、done_when），其 `task_description` 是子任务的指令，所以实时标注服务和以后的数据集能把子任务 rollout 与整任务 rollout 分开。
+
+**这个模式下终端 D 的等待。** 每种子任务等待都打印自己的一行，原因取自对应 note（计划被拒及原因、判定看不清、重发达到上限、VLM 没有唤醒并给出空闲和阈值 MiB、唤醒失败、睡眠被拒并给出 MemAvailable），再打印一行说明停在哪里：第 N 轮的正向循环中或其后（"本轮的逆向复位没有执行：按 Enter 之前请手动恢复场景（拿不准就按 q）"）、逆向循环中（"场景只复位了一部分"），或本轮还没有任何东西动过。`vlm_unavailable`（唤醒、睡眠、内存）和 `subtask_retry_limit` 需要先按 Enter 再按 `y`（只按 Enter 不会续跑）；计划被拒、判定看不清、清单被否决、本轮未放行只需一次 Enter。近期 note 行会显示 `subtask_*` 和 `vlm_*` note，`subtask_check` 除外（VLM 的回答在本轮标注之前不显示）。
+
+**续跑从不接着上一轮**（`subtask_round_abandoned`）：下一轮从起始位姿检查和新的放行开始。重启后读回冻结的白名单和已结束正向循环的轮数；运行像任何崩溃之后一样处于 `FAULT_LOCKED`。
+
+**日志 note**（详情都是 JSON；过长时保留短字段，并写出 `<run_dir>/subtasks/` 下旁路文件的路径和 sha256）：
+
+| Note | 内容 |
+| --- | --- |
+| `subtask_alternation` | `mode`（`sleep` / `co_resident`）、`ok`、co_resident 的 used/total/余量 MiB |
+| `subtask_inventory` | `items`（id）、`frames`（ref、sha256）；旁路文件：请求记录 |
+| `subtask_inventory_confirmed` | `items`（白名单）、`by: terminal`、`sha256`；旁路文件：物体 |
+| `subtask_inventory_rejected` | `by`（`terminal` / `validator`）、`reason` |
+| `subtask_round_released` | `round`、`by: terminal` |
+| `subtask_plan` | `round`、`loop`、`task`、`n`、`plan_file`、`sha256`（计划文件：子任务及其生成的指令、模板、参考画面、请求记录） |
+| `subtask_plan_refused` | `round`、`loop`、`reason`（`not_whitelisted`、`bad_json`、`empty_plan`、`timeout` 等） |
+| `subtask_started` | `round`、`loop`、`index`、`attempt`、`instruction`、`episode_id` |
+| `subtask_check` | `round`、`loop`、`index`、`attempt`、`episode_id`、`value`（true/false/null）、`frames`；旁路文件：请求记录 |
+| `subtask_early_check` | `round`、`loop`、`index`、`attempt`、`segment`、`episode_id`、`steps`、`n`、`trigger`（`event`：`event_type`、`event_id`、`event_step`；`interval`：`every_steps`）、`step` |
+| `subtask_continued` | `round`、`loop`、`index`、`attempt`、`segment`、`after`、`value`、`used_steps`、`remaining_steps` |
+| `subtask_retry` | `round`、`loop`、`index`、`attempt` |
+| `subtask_loop_done` | `round`、`loop`、`subtasks`、`retries`、`checks`、`outcome`（`done` / `success` / `failure` / `discard` / `already_restored`） |
+| `subtask_round_abandoned` | `round`、`phase`、`why` |
+| `vlm_sleep` / `vlm_wake` | `ok`、`level`、`mem_available_gib`、`mem_after_gib`、`ms`（唤醒另有 `wake_s`、`free_mib`、`gpu_before`、`gpu_after`、`was`） |
+| `vlm_wake_refused` / `vlm_wake_failed` / `vlm_sleep_refused` | `reason` 和读数 |
+
+请求记录（旁路文件）包含分析所需字段（Lynx AERI-VLM-ANALYSIS-PLAN-20261017.md）：kind、round、index、attempt、画面、提示 sha256、请求与响应时间、延迟、提示与生成 token 数、原始回答、解析结果、是否合法、白名单越界、结果及原因、请求前 VLM 的状态和唤醒时间。页面从这些 note 读取循环阶段（`GET .../runs/{id}` 快照里的 `subtask`，来自 `metrics.subtask_progress`）；指标报告有 `subtasks`（轮数、循环、子任务、重发、判定回答；从不算成功）。
+
+**任务文件**（`subtask:` 小节；每个键都可省略）：
+
+| 键 | 默认 | 含义 |
+| --- | --- | --- |
+| `max_steps` | 200 | 一个子任务片段的步数 |
+| `max_retries` | 5 | 判定为 false 的子任务最多重发次数 |
+| `max_subtasks_per_loop` | 无 | 一份计划的子任务上限 |
+| `vlm_min_free_mem_gib` | 28 | 一级睡眠前要求的 MemAvailable |
+| `vlm_sleep_fallback` | `wait_human` | `wait_human`、`level2` 或 `stay_awake` |
+| `vlm_wake_min_free_gpu_mib` | 按 VLM 配置（兜底 23000） | 唤醒所需的空闲显存 |
+| `vlm_wake_headroom_mib` | 1024（下限） | 加在上面之上，即唤醒阈值 |
+| `vlm_stay_awake_min_free_gpu_mib` | 4096 | `stay_awake` 要求的空闲显存 |
+| `vlm_alternation` | `sleep` | `sleep` 或 `co_resident` |
+| `vlm_co_resident_headroom_mib` | 2048 | co_resident 启动时的余量 |
+| `home_after_loop` | true | 必须为 true（每个循环在 Home 结束） |
+| `forward_folder`、`reverse_folder` | `<forward_folder>__subtask`、`__reverse` | rollout 文件夹 |
+| `early_check` | 不写（关闭） | `on_events`（false）、`event_types`（`[gripper_open]`）、`settle_steps`（8）、`every_steps`（无，≥ 40）、`min_steps`（20）、`cooldown_steps`（20）、`max_checks`（3）：见上文“任务完成后及时确认”；不写时计划摘要不变 |
+| `vlm` | | `model`、`served_name`、`port`（8100）、`gpu_memory_utilization`（0.70）、`max_model_len` / `min_model_len`（16384）、`sleep_mode`（true）、`prewarm`（true）、`fallback_gpu_memory_utilization`（0.72）、`request_timeout_s`、`wake_timeout_s`（60） |
+
+`task.instruction` 必填；这里 `termination.allow_early_stop` 默认为 false（策略运行时没有判定），写 `true` 会被拒绝，`event_pause_judge` 和 `home_after_loop: false` 也一样。复位策略的键被忽略；其他策略忽略 `subtask:` 键（它们的计划摘要不变）。计划里保存任务名、模板和 VLM 配置，从不保存某个子任务的文本。
+
+任务文件和绑定文件示例见英文版本节。绑定文件（`levi.aeri.fr3.binding.v1`）用 `subtask_vlm` 代替 `providers`，只有 `forward` 一个策略（两个循环都用它）：`"subtask_vlm": {"base_url": "http://127.0.0.1:8100", "model": "<服务名>", "service": {...}}`（可选 `extra_body`、`gpu_index`，以及图片上限 `max_images` 1–8、默认 2 和 `history_frames` 0–4、默认 0，见下文相机帧总线）；端口必须是任务文件的 `subtask.vlm.port`，`service` 必填（见下）。带只含 forward 的 `policy_swap` 块时，运行自己启动和停止策略服务。操作员在终端 D 按常规顺序运行：`python scripts/aeri.py check --config JOB --binding BINDING`，然后 `python scripts/aeri.py execute --config JOB --binding BINDING --expect-plan <计划 sha256> --expect-binding <绑定 sha256>`。
+
+**终端 D 管理 VLM 服务**：依据绑定文件必填的 `subtask_vlm.service` 块（`unit` 为 `levi-aeri-vlm-*` 名称，`argv` 为绝对路径程序加普通参数，可选 `env`，`gpu_lock` 为 LEVI 的 `.gpu.lock` 绝对路径，`need_policy_mib`，可选 `ready_timeout_s`）；配只含 forward 的 `policy_swap` 时也管理策略服务（`levi/automatic/subtask_units.py`）。argv 必须与任务文件的 `subtask.vlm` 一致：`model`（这里必填）作为参数、`--port`、`--max-model-len`、`--gpu-memory-utilization`，任务文件写了服务名时还有 `--served-model-name`；不一致在任何东西启动前拒绝运行。每一步打印 `n/7 正在做什么 / 你要做什么 / 怎么停止` 和通过或失败，写入 `<rollout_root>/.aeri/units/<run>-steps.jsonl`，运行日志建立后也写成 `subtask_service_step` note：
+
+1. 预检：LEVI 的 GPU flock（一直持有到结束）、策略加 VLM 所需的空闲显存（两个数都打印）、MemAvailable、端口 8000 和 8100；上次运行留下的本方 VLM 单元只在记录的身份仍然一致时才停止；
+2. 以本方单元启动 VLM（`systemd-run --user`），单元处于 active、端口由它自己 cgroup 里的进程监听、`/health` 回答时算就绪；身份（单元、pid、starttime）立即记录；
+3. 让 VLM 睡眠（先查 MemAvailable）；
+4. 启动策略服务（只含 forward 的 `policy_swap` 单元），和以前一样在任何机械臂 I/O 之前；
+5. 物体清单与确认；6. 各轮；
+7. 收尾：停止策略单元和 VLM 单元（VLM 只在身份一致时停止，否则保留并由操作员决定），然后做释放核对（本方 pid 已不在 nvidia-smi 里、显存回落），核对之后才释放锁；核对不过会报告。
+
+物体清单放在策略启动之后，而不是最初建议的之前：它需要相机，而桥只在策略服务启动并核对之后才打开机器人环境；峰值相同（策略加载时 VLM 在睡眠）。端口被任何不是本方已记录单元的进程占用时，拒绝启动、什么都不停：本运行和产品 `levi live` 的 vLLM 在 :8100 上互斥，停止实时服务（`levi live stop`）是操作员的步骤。任何一步失败只停止本运行启动的单元并打印是哪些。z 下限：每个子任务指令都用绑定文件的 `safety.min_z`（AERI 桥不用客户端按任务的下限表，VLM 的任何回答都到不了限位），与整任务运行相同。
+
+### Rollout 集（`levi/automatic/rollouts.py`）
+
+策略只在每个子任务片段里运行，每个片段各存成一个 demo 目录（正向在 `<forward_folder>__subtask/demo_NNNN`，逆向在 `<forward_folder>__reverse/demo_NNNN`）。所以一轮包含一个正向集和一个逆向集，各有一个或多个子任务；重试的子任务有多次尝试，也就有多个 demo。运行目录里的 `rollouts.json`（`levi.aeri.rollouts.v1`）把它们组织成：轮 → 集（`forward`、`reverse`）→ 子任务（序号、指令、pick、place）→ 尝试（片段 ID、相对录制根目录的 `demo`、帧数、起止时间、秒数、停止原因、`check`）。它是派生文件，随时可以删掉重建；不复制、不移动任何 demo。
+
+- 只从运行已经写下的内容生成：运行日志（不拿锁读取，从不写入）、日志里点名的 `subtasks/` 附属文件、`plan.json`、`labels/` 和每个 demo 的 `metadata.json`。一次尝试对应一条 `subtask_started` note；它的 demo 是 `eval.aeri.episode_id` 与该片段 ID 完全相同的目录（存成 Python repr 的值用 `ast.literal_eval` 读取，从不 `eval`）。没有 demo 的尝试、对不上任何尝试的 demo（`unmatched_demos`）都列进 `problems`，不猜。仍叫 `incomplete_*` 的 demo（录制未封存）记为 `demo: null`，并在 `incomplete` 里说明原因。
+- `check` 是 VLM 对子任务的判断（`subtask_check`，`by: vlm`），不是操作员标签，也不是结局。人的标签只在存在时出现：轮的 `operator_label` 来自 `labels/round_label.jsonl`，尝试的来自 `labels/operator_label.jsonl`。
+- 轮的 `outcome` 取 `forward_done`、`forward_failed`、`discarded`、`abandoned`（`subtask_round_abandoned`，例如恢复之后）、`locked`（这一轮里运行进入 `FAULT_LOCKED`）或 `incomplete`（日志在正向循环结束前就结束了）；每个集另有自己的 `outcome`。`motion_refused` 等 note 留在发生时所在的轮里。
+- 运行收尾时（subtask_loop 运行，`fr3_run`）尽力写一次该文件：失败只留一条 `rollouts_write_failed` 日志 note，不改变任何运动、状态或退出码。
+- `levi automatic rollouts --run-dir D [--rollout-root R] [--write] [--json]`（也可 `python scripts/aeri.py rollouts ...`）打印摘要（各轮、每个集的子任务 × 尝试、problems）。只读；`--write` 才写 `rollouts.json`（先写临时文件再改名），不写别的。`--rollout-root` 默认取运行的 `launch.json` 或计划。读取方用 `rollouts.load_or_build`：文件比日志新时读文件，否则在内存里现算。
+
+
+### 运行窗口里的 rollout 集
+
+子任务循环运行每个策略推理段录一个 demo，所以一轮会留下很多 demo：正向集（每个子任务一个或多个 demo）和逆向集（同样，重试也各录一个）。这种运行的运行窗口有一个 **Rollout 集** 区块，默认折叠，打开后按 轮 -> 正向集 / 逆向集 -> 子任务 -> 尝试 显示。每次尝试显示指令、帧数、片段墙钟时间（从下发到结果，含检查时间，不是策略推理时间）、停止原因、模型的检查结果（一律写明是模型判断，从不写成成功；正向尝试的检查结果、停止原因和由它得出的结果，要等操作员给这一轮打标签后才显示）、操作员标签（有才显示），以及用查看器的视频组件播放的两路相机视频。这个区块只读，没有任何控件。
+
+数据来自下面的 `GET runs/{id}/rollouts`：`levi.automatic.rollouts.load_or_build` 返回的 rollout 清单 `levi.aeri.rollouts.v1`（`rollouts.json` 比日志新时读它，否则在内存里现算，不写文件）。这个接口从不提供视频文件：按尝试的 demo 在 `metadata.json` 里的片段 ID，把它对到 LEVI 已经在提供的数据集（LEVI 自己的原始采集，或浏览视图已就绪的关联实时数据集 `live.<group>__<task folder>`），视频地址走数据集文件服务（`/api/levi/files/<名称>/videos/…`），由它做自己的检查。没有这样的数据集时，尝试只保留 demo 路径，并显示“视频不可用”和原因。
+
 ## 复位模式矩阵（`levi/automatic/modes.py`）
 
 “仅测评策略”模式（`reset.strategy: human_assisted`）与有复位策略的模式是同一条流水线，不是另一条；靠一张登记表长期保持这一点。`MODE_MATRIX` 给运行的每项能力在每种复位模式下各写一格：`same`、`differs:<一句话>` 或 `n/a:<原因>`（原因必填）。能力由 `modes.SOURCES` 里的函数从代码枚举：状态机的每个转换（`transition:A->B`）、复位仲裁（`arbitration:plan:<决定>`、`arbitration:after_reset:<结果>`）、`metrics.report` 的每个顶层键（`metrics:<键>`）、`levi automatic` 的每个子命令（`cli:<名>`）。尚未枚举、由创建它们的任务追加到 `SOURCES` 的有：录制器的会话角色与 manifest 字段、`/api/levi/automatic/*` 路由、作业文件的键。
@@ -354,6 +466,7 @@ AERI 改动合并前的独立审查要核对 `MODE_MATRIX` 已更新、两种模
 <!-- levi:generated aeri-reset-modes -->
 | 能力 | `single_reset_policy` | `human_assisted` |
 | --- | --- | --- |
+| `arbitration:after_reset:camera_stale` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
 | `arbitration:after_reset:operator_stop` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
 | `arbitration:after_reset:policy_error` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
 | `arbitration:after_reset:reset_horizon_exhausted` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
@@ -371,6 +484,7 @@ AERI 改动合并前的独立审查要核对 `MODE_MATRIX` 已更新、两种模
 | `cli:plan` | 相同 | 不同：真实模式还会因为没有能作答的场景提供方被拒绝；试运行的计划相同 |
 | `cli:report` | 相同 | 相同 |
 | `cli:resume` | 相同 | 相同 |
+| `cli:rollouts` | 相同 | 相同 |
 | `cli:run` | 相同 | 不同：试运行中场景不就绪时，运行停在 WAIT_HUMAN |
 | `cli:runs` | 相同 | 相同 |
 | `cli:scene-answer` | 不同：不会请人核对场景：运行器回复 not_supported | 不同：scene_check 为 operator_attested 时转给人工场景核对；机器提供方时回复 not_supported |
@@ -381,16 +495,20 @@ AERI 改动合并前的独立审查要核对 `MODE_MATRIX` 已更新、两种模
 | `metrics:automation` | 不同：所有干预都是计划外 | 不同：场景核对把运行交给人，属于计划内干预 |
 | `metrics:autonomous` | 相同 | 相同 |
 | `metrics:comparable` | 相同 | 相同 |
+| `metrics:discarded_beyond_limit` | 相同 | 相同 |
 | `metrics:early_termination` | 相同 | 相同 |
 | `metrics:human_minutes_per_valid_episode` | 相同 | 相同 |
 | `metrics:mode_source` | 相同 | 相同 |
 | `metrics:mode_specific` | 相同 | 相同 |
 | `metrics:note` | 相同 | 相同 |
+| `metrics:operator_verdicts` | 相同 | 相同 |
 | `metrics:reset` | 相同 | 不同：没有复位片段：复位次数和耗时恒为 0；跳过决策只统计前向开始 |
 | `metrics:reset_mode` | 相同 | 相同 |
+| `metrics:rounds` | 相同 | 相同 |
 | `metrics:scene_check` | 相同 | 相同 |
 | `metrics:scene_decisions_by_human` | 相同 | 相同 |
 | `metrics:schema` | 相同 | 相同 |
+| `metrics:subtasks` | 相同 | 相同 |
 | `metrics:time_per_valid_episode_ms` | 相同 | 相同 |
 | `metrics:truth` | 相同 | 相同 |
 | `metrics:truth_labels` | 相同 | 相同 |
@@ -404,16 +522,19 @@ AERI 改动合并前的独立审查要核对 `MODE_MATRIX` 已更新、两种模
 | `transition:FORWARD_FINALIZE->ROBOT_HOME` | 相同 | 相同 |
 | `transition:FORWARD_JUDGING->FAULT_LOCKED` | 相同 | 相同 |
 | `transition:FORWARD_JUDGING->FORWARD_ACTIVE` | 相同 | 相同 |
+| `transition:FORWARD_JUDGING->FORWARD_FINALIZE` | 相同 | 相同 |
 | `transition:FORWARD_JUDGING->WAIT_HUMAN` | 相同 | 相同 |
 | `transition:FORWARD_STOPPING->FAULT_LOCKED` | 相同 | 相同 |
 | `transition:FORWARD_STOPPING->FORWARD_FINALIZE` | 相同 | 相同 |
 | `transition:PREFLIGHT->FAULT_LOCKED` | 相同 | 相同 |
+| `transition:PREFLIGHT->PREFLIGHT` | 不适用：只有子任务循环策略（subtask_loop，不在本表比较之列）才有 | 不适用：只有子任务循环策略（subtask_loop，不在本表比较之列）才有 |
 | `transition:PREFLIGHT->VERIFY_INITIAL` | 相同 | 相同 |
 | `transition:PREFLIGHT->WAIT_HUMAN` | 相同 | 相同 |
 | `transition:RESET_ACTIVE->FAULT_LOCKED` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
 | `transition:RESET_ACTIVE->RESET_JUDGING` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
 | `transition:RESET_ACTIVE->RESET_VERIFY` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
 | `transition:RESET_FINALIZE->FAULT_LOCKED` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
+| `transition:RESET_FINALIZE->SCENE_ASSESS` | 不适用：只有子任务循环策略（subtask_loop，不在本表比较之列）才有 | 不适用：只有子任务循环策略（subtask_loop，不在本表比较之列）才有 |
 | `transition:RESET_FINALIZE->VERIFY_INITIAL` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
 | `transition:RESET_FINALIZE->WAIT_HUMAN` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
 | `transition:RESET_JUDGING->FAULT_LOCKED` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
@@ -448,6 +569,7 @@ levi automatic run      --config F --dry-run [--episodes N] [--scenes S] [--keep
 levi automatic status   --run-dir D [--json]
 levi automatic report   --run-dir D [--config F] [--truth T] [--format md|json]
 levi automatic label    --run-dir D --episode ID --value success|failure|discarded|unclear [--principal P] [--note N] [--json]
+levi automatic rollouts --run-dir D [--rollout-root R] [--write] [--json]
 levi automatic plan     --config F [--mode M] [--episodes N] [--scenes S] [--keep DIR] [--json]
 levi automatic run      --config F --mode M --detach|--foreground [--expect-plan SHA] [--wait S]
 levi automatic runs     [--json]
@@ -539,10 +661,12 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 | `GET runs`、`GET runs/{id}` | 读 | 摘要；快照：状态、`seq`、片段、计数、等待卡、打开的场景问题、一次性 `challenge`（绑定 `seq`，60 秒，只在内存里）、运行器，以及 `requirements` 和 `progress`（见下） |
 | `GET runs/{id}/events?after=&limit=` | 读 | 某序号之后的日志转移和备注 |
 | `GET runs/{id}/metrics` | 读 | `metrics.report` |
+| `GET runs/{id}/subtasks` | 读 | `subtask_loop` 运行的笔记（`subtask_*`、`vlm_*`），detail 已解析：detail 指向 `subtasks/…-detail.json` 附属文件时，若该文件在运行目录之下且 SHA-256 一致，就读出完整 detail（否则标 `sidecar_problem`）；解析不了的 detail 返回 `null` 并标 `unparsed`。每个画面为 `{ref, sha256, stored}`（`stored`：在 `evidence/frames/` 下，可由 `GET frames/{sha256}` 取到）。`subtask_plan` 笔记指向的子任务计划文件逐个按 SHA-256 核对（`plans[sha256].ok`，否则 `problem` 为 `bad_path`、`missing`、`sha256_mismatch`、`bad_shape`）。其他运行返回空。只读：页面只显示一轮，放行在终端里由操作员做 |
+| `GET runs/{id}/rollouts` | 读 | 运行的 rollout 集（`levi.automatic.rollouts.load_or_build` 返回的 `levi.aeri.rollouts.v1`，不写文件）：各轮（`outcome`、`notes`、`abandoned`、`locked`、本轮 `operator_label`），每轮有 `sets.forward` / `sets.reverse`（这一侧没执行时为 `null`；`plan_file`、`task`、`outcome`、`subtasks`），每个子任务有 `attempts`（`episode_id`、`demo`、`instruction`、`frames`、`seconds`、`started_at`、`ended_at`、`stop_reason`、`check`、`sealed`、`incomplete`、`operator_label`、`media`）。只输出这些字段：`check` 只留 `value`（模型判断）；私有请求证据文件名换成 `<private>`；文本里的绝对路径被替换。这一轮打标签前，检查结果、停止原因和结局照常显示：维护者 2026-10-18 关掉了 rollout 集的盲规则（L2-AERI-SUBTASK-CHECK-BLIND），这个接口不再给 `rollout_view.project` 传 `blind`（传了 `blind` 的调用方仍会得到隐藏后的结果：`check: {hidden_until_labelled: true}`、盲集停止原因和正向结局）。`media` 为 `{available: true, dataset, episode_index, viewer, videos: [{camera, url}]}`（地址走文件服务），或 `{available: false, reason}`（`no_demo`、`no_episode_id`、`no_dataset`、`no_browsing_view`、`not_in_view`、`no_video`）。未知运行 `404`，没有生成器 `503 rollouts_unavailable`，生成失败 `409 rollouts_unreadable` |
 | `POST runs/{id}/stop` | 人 | `{command_id, confirm: "stop"}`，走命令通道：`result` 为 `applied`、`repeated` 或 `refused`（运行器三秒内没回复时为 `queued`，状态码 202）；`409 not_running`；该运行上另一个操作未结束时 `423` |
-| `POST runs/{id}/resume` | 人 | `{command_id, expected_seq, environment_handled, health_rechecked, challenge}`：`409 not_waiting`/`confirmations_missing`/`stale_sequence`（challenge 错误或过期也是） |
+| `POST runs/{id}/resume` | 人 | `{command_id, expected_seq, environment_handled, health_rechecked, challenge}`：`409 not_waiting`/`confirmations_missing`/`stale_sequence`（challenge 错误或过期也是）；已登记的独立真机运行一律 `403 terminal_resume_required`（见下文） |
 | `POST runs/{id}/labels` | 人 | 操作员对已结束的前向片段的盲标：`{label, revealed, card}` |
-| `POST runs/{id}/scene-answer` | 人 | 回答打开的场景问题（`adapters.human` 的文件协议；请求 ID、nonce 和画面必须对得上：`409 unsolicited`） |
+| `POST runs/{id}/scene-answer` | 人 | 回答打开的场景问题（`adapters.human` 的文件协议；请求 ID、nonce 和画面必须对得上：`409 unsolicited`）；已登记的独立真机运行一律 `409 scene_answer_terminal_only`（见下文） |
 | `POST runs/{id}/attach` | 人 | `{request_id, confirm: "attach"}`：为运行器已退出的运行启动新运行器（`409 runner_alive`、`409 run_completed`）；`arm`/`disarm` 返回 `501` |
 | `GET runs/{id}/evidence/{eid}`、`GET runs/{id}/frames/{sha256}` | 读 | 场景评估记录、采集的画面（只在 `evidence/` 之下，不跟随符号链接） |
 | `GET setup-guide` | 读 | 来自操作手册配方和只读探针（`LEVI_SETUP_RECIPES`、`LEVI_SETUP_DOC`）的有序 `SetupStep` 列表；不执行任何东西，标为 `execute` 的配方按 `copy` 显示，手册哈希与记录一致时才显示命令 |
@@ -627,7 +751,8 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 不能修改已冻结的作业，也不能替人把草稿合约改成 confirmed。桥拒绝 shadow 模式
 和已有运行目录，不自动重放之前的运动。
 
-操作者在冻结作业之外准备 JSON binding 文件，全部顶层字段必须明确：
+操作者在冻结作业之外准备 JSON binding 文件。下表为必填项；顶层
+`policy_warmup_timeout_s` 可选：
 
 | 字段 | 实际来源 |
 | --- | --- |
@@ -636,9 +761,20 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 | `robot_url` | 已人工审阅的回环运动端点 `http://127.0.0.1:5000/` 或 `:5001/`，终端确认之后才连接 |
 | `health_file` | 正在运行的 C3 监视文件绝对路径，创建环境前必须读到新鲜绿色健康结果 |
 | `cameras` | 恰好 `side` 和 `wrist`，填写不同的真实数字序列号字符串 |
-| `safety` | 恰好 `min_z`、`max_xy`、`max_step_m`、`max_step_rad`、`home_pose`（六项米/弧度）、`home_duration_s`、`home_tolerance_mm`、`rx_range`、`ry_range`、`rz_range`（各为两项递增且跨度不超过 2π 的区间）、`binarize_gripper`（显式布尔值）；取现场审阅的范围，不猜值。归位时长必须小于冻结的归位超时 |
-| `policies` | 恰好 `forward`，策略复位另加 `reset`；每项为 `{"host":"127.0.0.1","port": PORT}`，指向已单独审阅并运行的策略服务 |
+| `safety` | 必填 `min_z`、`max_xy`、`max_step_m`、`max_step_rad`、`home_pose`（六项米/弧度）、`home_duration_s`、`home_tolerance_mm`、`rx_range`、`ry_range`、`rz_range`（各为两项递增且跨度不超过 2π 的区间）、`binarize_gripper`（显式布尔值）；取现场审阅的范围，不猜值。归位时长加等待收敛预算必须小于冻结的归位超时。可选正有限值 `home_settle_timeout_s`（默认 5 秒）、`settle_poll_s`（默认 0.1 秒，最大 1 秒）、`gripper_confirm_timeout_s`（默认 2 秒）仅限制等待，不放宽阈值。相机帧总线的可选键（见下）：`max_frame_age_ms`（正数，最大 10000；复制进 openpi 每台相机的 `camera_kwargs`）、`camera_stale_steps`（整数 2–100，默认 3） |
+| `policies` | 恰好 `forward`，策略复位另加 `reset`；每项为 `{"host":"127.0.0.1","port": PORT}`，指向已单独审阅并运行的策略服务（声明下文可选的 `policy_swap` 时，由本次运行自己启动） |
 | `providers` | `{"online_url":"http://127.0.0.1:7882","file_root":"/absolute/provider-directory"}` |
+
+**相机帧总线**（`levi/automatic/camera_meta.py`）。openpi 的 `RobotEnv.get_observation()` 返回 `image_meta`（每台相机的 `seq`、`t_capture_ns`、`t_arrival_ns`、`age_ms`）时，AERI 能知道每一步、每段录制、每次 VLM 请求用的是哪一帧。没有它时一切照旧。有它时：
+
+- 桥接按 `side`/`wrist` 视角原样透传 `image_meta`；
+- 同一台相机的 `seq` 连续 `camera_stale_steps` 个控制步（默认 3）不变：只记录，不停。每段连续重复记一条备注 `camera_seq_repeat`（写明哪台相机、`seq` 和帧龄），片段照常继续（CPU/GPU 负载下丢帧是正常的；维护者 2026-10-18 决定）；
+- 只有设置了 `max_frame_age_ms`（AERI 作业都没设）时 openpi 才会抛出 `StaleFrameError`：在对这次观测采取任何动作之前结束本片段。片段照常封存，运行在**机械臂原地**（不回 Home）等人处理，原因 `camera_stale`（备注 `camera_stale` 写明哪台相机、它的 `seq` 和帧龄）。终端续跑前要按 `y` 确认；
+- 设置了 `max_frame_age_ms` 而观测没有 `image_meta` 时拒绝该观测（旧版 openpi 会悄悄忽略这个上限）；
+- `frames.csv` 和 `aeri_steps.csv` 在所有旧列之后增加 `side_seq`、`side_t_capture_ns`、`side_age_ms`、`wrist_seq`、`wrist_t_capture_ns`、`wrist_age_ms` 列（没有 `image_meta` 时为空）；
+- VLM（`subtask_vlm`）和文件判定方按 `(view, seq)` 每帧只编码一次 JPEG，并在请求证据里给每帧记 `seq`/`t_capture_ns`（请求记录里的 `image_meta`）。每次请求最多发 `max_images` 张图；`history_frames` 大于 0 时，在同一上限内为每个已发视角补发至多这么多张来自 openpi `frame_history` 的更早帧（本地与外部模式走同一段代码）。
+
+`t_capture_ns` 属于主机墙钟时间域，只与其他 `t_capture_ns` 比较；`t_arrival_ns` 和 `age_ms` 是单调时钟。openpi 现在每帧共享一个只读数组（`flags.writeable` 为 false）：LEVI 的 AERI 路径只读取或编码它。
 
 在既有可运行 openpi 的 Python 环境（同时可导入 LEVI、OpenCV、NumPy、SciPy）
 执行页面给出的 `--check`。它只读文件、检查 binding，不导入 SDK、不连接设备、
@@ -646,7 +782,62 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 操作者审阅正在运行的机器人、健康监视器、相机、策略身份、限制和提供方后，把
 这两个摘要填入 `--execute` 模板。每次启动都要求真实终端输入
 `execute <run_id>`；确认后再读一次配置。配置项或旧日志不能替代这次人工确认。
-桥不启动机器人、策略、健康或判定服务。
+桥不启动机器人、策略、健康或判定服务；唯一例外是可选 `policy_swap` 声明的策略服务（见下文“策略切换”）。
+
+创建运行日志或录制器前，先读取并核对绑定的归位位姿与实测张开夹爪，再热身同一个
+已验证的正向策略客户端，热身后再核对初态，防止等待期间位姿或夹爪变化。
+**首轮回位候选（仅软件，默认关闭）。** 作业 `subtask.start_home: true` 仅支持
+`reset.strategy: subtask_loop`，其他策略指定该设置会被拒绝。省略、null 或 false
+保留旧 plan 哈希与普通只读启动拒绝；启用值进入冻结 plan，FR3 入口在取得机械臂锁前
+拒绝配置与 plan 不一致，不能用单独 binding 开关绕过。Job schema minor 2 增加此字段。
+
+可读但偏离 Home 的位姿可进入 PREFLIGHT，须依次新鲜确认：安全处理夹持物后按 `o`，
+检查完整返回路径后按 `p`，确认回位会开爪并授权本次回位按 `h`。每步清除旧键，Enter
+及续跑的 `y` 不算回位确认。终端、信号处理、停止探针与已成功且存活的心跳就绪前不允许
+回位，等待超时不是就绪。命令先核对 command_id 与日志序号，再记 PREFLIGHT 自环的
+非幂等 prepared，之后才可签 startup token 并调用唯一的 `home_under_closed_gate`；
+没有伪造片段、结果或 rollout，退出必撤销 token。首轮准备生命周期内，停止登记永久置位该阶段停止探针
+并撤销 token，回位途中也有效。成功独立放行或初态已在 Home 而无需回位后结束该生命周期，
+不通过清除标记复活取消的首轮回位。后续普通轮的停止、续跑与恢复保持原语义；恢复时已有
+片段历史即证明首轮准备结束。健康与位姿在停止锁外读取，随后仍核对原停止代次。
+
+只能原子认领 OPEN→CLOSED 的门。成功后仍闭门，独立 `release_round` 才能凭原闭门
+代次/时间与未变化的 stop generation 一次性重开，并重查位姿、停止、锁存和健康。
+闭门变化、stop、resume 或重启不能刷新许可。计数证明零发送的拒绝进入 WAIT_HUMAN，
+本候选不允许同运行重试或续跑，须结束运行、人工处理后新建运行重新确认。
+部分/未知发送及 prepared/execute/ack 后崩溃均锁定，恢复不重放首轮回位。
+不清除锁存，不在红灯下回位，不添加低位恢复策略；实际启用、部署与真机验收仍另审。
+
+`Robot.start_pose()` 从同一次观测返回只读诊断：`target_pose`、`measured_pose`、
+`error_mm`、`rotation_rad`、`gripper`、三个阈值 `tolerance_mm`、`rotation_tol_rad`、
+`gripper_min`、具体未满足项 `unmet` 及 `unreadable_reason`。不可用或非有限诊断值
+记为 null；原有阈值与 `ok` 判定不变。启动拒绝发生在 journal/session 创建之前，
+不占用 run ID。提示明确未发送动作，回位会打开夹爪，须先安全处理夹持物并检查
+返回路径；不增加自动归位或清除锁存。归位等待在返回成功前检查停止、锁存、健康及
+当前未过期的 home token，即使同次观测已满足位姿与夹爪阈值也不能跳过。
+顶层可选 `policy_warmup_timeout_s` 是正有限秒数（默认 30）；
+拒绝布尔、零和非有限值。热身动作全部丢弃，不发送运动。失败或超时关闭环境，
+不占用 run id。超时查询保持占用原查询槽，直到实际查询结束；超时不代表后端取消，
+也不允许重发或切换到另一角色推理。该桥核对冻结的部署身份，不拥有或启动既有策略服务。
+
+声明 `policy_swap` 时，正向服务由本次运行自己启动，其启动热身就是切换器的热身：
+服务在任何会话出现前只被查询一次，切换器另核对动作、运动步数和运动围栏。
+这里的拒绝与上文一样是启动拒绝（停掉该单元，run id 不占用）。
+`policy_warmup_timeout_s` 在此不适用，两者同时给出时绑定被拒绝；请改用 `policy_swap.warmup_timeout_s`。
+
+开始与归位检查保持绑定的位置容差、0.05 rad 旋转容差及归一化实测夹爪 >= 0.9，
+拒绝非有限或超出归一化范围的测量。观测与解析后的目标位姿必须为既有的六项或七项表示，
+聚合误差前逐项检查有限值；JSON 绑定的归位位姿仍为六项。最后一条归位指令后只读轮询，等待预算用完、
+停止请求或健康转红即停止等待。夹爪排队文字本身不证明送达：仅识别已审阅的精确文字，
+在后续运动前用稳定实测位置确认；最后一次应答也在保持、策略静默确认后，
+终局判定与封存前完成同样的检查。终检不发运动，未证明送达即锁定收尾，
+应答原文与实测值进入日志和终端。保留在队列的目标若原先就在目标侧，须实测到移动后
+才能确认。故障摘要显示原因、最近备注细节和日志路径。确认预算默认仍为 2 秒；稳定目标采样的读取完成时间早于或恰好等于截止时间可以确认，超过截止时间则拒绝。停止、锁存、健康转红与非法读数优先于确认，截止时也如此；截止时尚未确认则失败，不再轮询。
+动作守卫拒绝时，在 `action_guard_detail_NNNN` 日志备注中保存原动作、已审阅规范化动作、裁剪动作、发生变化的分量索引（从零开始）及客户端 clamp notes；按编号拼接即为 JSON 诊断。最多八段、每段 240 字符，加一条拒绝备注，通过有限白名单保留，不受普通片段备注预算耗尽影响。序列化前限制诊断输入规模；超限或非 JSON 输入改为明确的 JSON 省略摘要，不声称保留完整诊断。`action_guard_refused` 保存拒绝原因。诊断序列化失败时记录不可用标记，仍拒绝并锁存，绝不发送裁剪动作。
+日志备注保持既有 300 字符上限。正向策略第一次执行推理抛出真实 `policy_error`、
+且尚未执行任何动作时，先保持并确认策略静默，再转 `FAULT_LOCKED`，
+不自动归位或重试。同时发生的操作员停止仍沿原人工处理路径；正常判定失败、
+视觉 unknown 和已经执行动作后的异常保持原处理方式。
 
 正向目标判定复用既有 C5 在线接口与客户端，提交实际已录制帧及静默后的新鲜末态
 观测，不把操作者结局标签交给模型。所有角色的服务元数据都必须准确匹配冻结的
@@ -716,6 +907,86 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 才报告首个错误。`--scene-question` 不能与 `--check`、`--execute`、作业或绑定
 选项混用，保持 `--check` 只读。
 
+### 策略切换（可选 `policy_swap`）
+
+前向和复位两个策略服务按审定的显存比例 `.22` 合计约 15 GB，实时服务里清醒的
+视觉模型约 24 GB，一张 32 GB 的卡放不下。所以 `single_reset_policy` 的 binding
+可以声明可选的 `policy_swap` 块。声明后运行中最多只有一个策略服务：本次运行自己
+启动前向服务；在转入 `FORWARD_ACTIVE` 或 `RESET_ACTIVE` 的事务里，先停掉正在运行
+的服务，再启动另一个。视觉模型不受影响。不带这个键的 binding 仍按上文的约定：
+接受的键、`--check` 输出不变，两个服务都要事先在运行。
+
+每个字段都必填，没有默认值（下面的数值只是示例，不是实测或批准的设置）：
+
+```json
+"policy_swap": {
+  "schema": "levi.aeri.fr3.policy_swap.v1",
+  "services": {
+    "forward": {"unit": "levi-aeri-policy-forward",
+                "argv": ["/abs/openpi/.venv/bin/python", "scripts/serve_policy.py", "--port", "8000",
+                         "policy:checkpoint", "--policy.config", "<冻结的 config>",
+                         "--policy.dir", "<冻结的绝对 checkpoint_dir>"],
+                "working_directory": "/abs/openpi", "mem_fraction": 0.22},
+    "reset": {"unit": "levi-aeri-policy-reset", "argv": ["..."],
+              "working_directory": "/abs/openpi", "mem_fraction": 0.22}
+  },
+  "vision_mem_fraction": 0.74, "max_total_fraction": 0.98, "gpu_margin_mib": 1024,
+  "stop_timeout_s": 60, "start_timeout_s": 300, "handshake_timeout_s": 30,
+  "warmup_timeout_s": 120, "start_retries": 1,
+  "still_window_ms": 500, "still_tolerance_mm": 1.0, "still_tolerance_rad": 0.01
+}
+```
+
+`--check` 只读文件检查这个块：两个单元名不同且以 `levi-aeri-policy-` 开头；
+`argv[0]` 是绝对路径的可执行文件；`working_directory` 存在；argv 带该角色端点的
+`--port`、该角色冻结的 `deployment.config` 和绝对 `checkpoint_dir`，且不含 `$`、
+`%` 和控制字符（systemd 不做任何展开）；每个角色
+`mem_fraction + vision_mem_fraction <= max_total_fraction <= 1`；`start_retries`
+只能是 0 或 1；静止容差不超过回位容差。通过后输出多一个 `policy_swap` 键，列出
+单元、端口、显存比例和超时。它不运行 `systemctl`、`systemd-run`、`nvidia-smi`，
+不连接任何端口。
+
+一次切换的顺序（`levi/automatic/fr3_policy_swap.py`）：
+
+1. 没有运动令牌（事务开始时已撤销，片段的令牌在切换之后才签发）；桥不再发新的
+   位姿指令（不向机器人发送任何东西）；手臂在审定的回位位姿，并在
+   `still_window_ms` 内静止。不满足就在动任何服务之前拒绝。
+2. 在 `<rollout_root>/.aeri/policy-swap/<run_id>.jsonl` 写 `prepared`。
+3. 对旧单元执行 `systemctl --user stop`，等到单元不再 active、端口无监听者、
+   事先从 `/proc/*/cgroup` 记下的进程都已退出，并且
+   `nvidia-smi --query-compute-apps` 不再列出它们。只停 binding 声明的单元，
+   从不按 PID 发信号。
+4. `nvidia-smi --query-gpu=memory.total,memory.free`：空闲显存要够
+   `mem_fraction × total + gpu_margin_mib`。
+5. `systemd-run --user --unit=<unit> --collect --property=KillMode=control-group
+   --property=TimeoutStopSec=<停止超时> --working-directory=<dir>
+   --setenv=XLA_PYTHON_CLIENT_MEM_FRACTION=<比例> -- <argv>`；确定失败的启动最多
+   重试 `start_retries` 次。
+6. 被动就绪只读 `/proc`：单元 active，端口上每个监听进程都在该单元的 cgroup 里、
+   命令行含冻结的 config 和检查点。之后才构造客户端（openpi 客户端在构造时连接），
+   核对元数据、身份和客户端合同。
+7. 用当前观测做一次预热推理，结果丢弃：冷启动的 JAX 服务第一次请求要编译，
+   比默认 500 ms 的分块超时长。
+8. 核对没有计入运动步、手臂没有移动，写 `committed`。
+
+拒绝、超时、操作员停止或任何不确定，都会停掉本次切换启动的单元，记下服务状态
+是否确定，并让运行转入 `FAULT_LOCKED`（`policy_error`，备注
+`policy_switch_fault`）；本进程之后的切换一律拒绝，不重试运动。运行结束时停掉
+本次运行启动过的单元并确认释放。启动时发现遗留单元或端口被占，就拒绝并给出
+`systemctl --user stop` 命令让操作员处理，运行本身不去停它。若同一记录根目录下
+有切换日志的事务没有结束（崩溃、断电）、有损坏行或最后的服务状态不是 `none`，
+下一次 `--execute` 会先列出这些日志，确认短语变为
+`execute <run_id> after policy switch check`，确认后在这些日志里记一笔已确认。
+在任何机械臂 I/O 之前被拒绝的启动不会占用 run id。
+
+场景在切换之前判定，切换后不再重判；切换只核对手臂没有移动，不能发现有人挪动
+物体。实时服务把 `[gpu] policy_ports` 上的监听进程当作策略服务：复位端口与前向
+不同时要加进去。`systemd-run --user` 启动的单元用的是用户管理器的环境，不是终端
+的环境：argv 写绝对路径的解释器，不用 `uv run`。fake I/O 测试覆盖切换顺序、每次
+调用单元工具时最多一个策略监听者、切换期间无令牌、幂等、端口和显存未释放、
+显存预算、外来监听者、命令行和元数据不符、重试、超时、停止、中断的切换，以及
+不带该键时约定不变。切换耗时、显存占用和单元本身都还没有在本机运行过。
+
 ## 有界复位后的最终验证
 
 `reset.horizon_completion: wait_human` 仍是默认行为。复位达到步数上限仍记录
@@ -771,8 +1042,28 @@ worker、OnlineVerifier 和日志，只注入 SDK I/O 与模型回答。它验�
 经人工授权的独立运行登记到 `LEVI_AERI_HOME`，明确标记
 `origin: operator_terminal`、实际执行模式，并绑定输入摘要、规范记录路径、
 日志头、冻结计划和进程身份。原页面和 CLI 读取同一份经过验证的登记与日志。
-关闭页面不停止运行器，重新打开会读取当前状态。停止、恢复和初态回答复用
-原命令队列、序号检查、人工确认与幂等协议。真实运行不能自动重放或 attach；
+关闭页面不停止运行器，重新打开会读取当前状态。停止和初态回答复用
+原命令队列、序号检查、人工确认与幂等协议。这类运行不能通过 HTTP 恢复：
+`POST runs/{id}/resume` 返回 `403 terminal_resume_required`（在动 challenge、
+命令文件和日志之前拒绝，运行保持 `WAIT_HUMAN`；快照带
+`resume_terminal_only: true`，页面据此显示提示而不是恢复表单）。须在终端恢复：
+在 `scripts/aeri.py` 进程的终端输入 `resume`（驱动自己调用 `robot.health()`
+复查）。不提供 `levi automatic resume` 作为这类运行的恢复方式：它只靠键入确认，
+不会复查 `robot.health()`（问题 L2-SCRIPT-CLIRESUME）。这类运行的场景题也不能通过
+HTTP 作答（取舍 UI-2）：`POST runs/{id}/scene-answer` 在写任何答复文件之前返回
+`409 scene_answer_terminal_only`，快照带 `scene_answer_terminal_only: true`，页面据此只显示
+题目、不给作答表单。须在终端键入 `y`/`n`/`u` 作答。场景核对为 `provider` 的真机运行同样
+每轮由终端放行（L2-UI2-PROVIDER-RELEASE，用户 2026-10-15 决定；`console.ConfirmedScene`）：
+forward 片段结束后先等复位提示的 `Enter`（之后才拍证据帧），再问 provider 并等它的答案
+（`scene_timeout_s`），终端打印“模型判断：就绪 / 需复位 / 不确定 / 无答案（仅供参考……）”，
+然后在终端问与 `operator_attested` 相同的场景题，只认终端的 `y`/`n`/`u`。运行采用的是人的
+判断（`provider: human`）：每个必答条件都是 `y` 才开始这一轮，`n` 或 `u` 走原有路线（由
+reset 策略复位，或进入 `WAIT_HUMAN`）。provider 的答案从不单独放行运动；与人的判断不一致时
+记一条 `scene_model_disagreed` 备注（含双方答案 `model=... operator=...`），以人的判断为准。
+这道题最多等 `human_scene_timeout_s`，分段等待，收到停止立即结束。离线和 fake 运行不变：
+provider 的答案就是判断。判断依据是
+经验证的登记（`backend: standalone`、`origin: operator_terminal`），不看名称
+或路径；试运行和 HTTP 启动的运行恢复方式不变。真实运行不能自动重放或 attach；
 故障仍走原人工审核，真实 HTTP 启动继续拒绝。
 
 CPU SDK mock 仅证明接口接线，不证明真机就绪或模型互斥激活。forward、VLM、
@@ -780,6 +1071,119 @@ reset 的静默交接仍依赖经审核的 Performance Architecture 集成。真
 必须冻结成功判定规格和物理绑定；普通向导不能替代这些事实。
 
 磁盘日志损坏或不完整时不能恢复。共享控制泵和终端恢复都会重新核对磁盘与当前写入器；损坏会锁住写入器，停止仍可提交。旧的未认证 dry-run 登记须保留计划及一致的有效日志头，才能由 CLI/API 读取。新的 dry-run 启动用现有核心密钥认证冻结计划，因此真正已启动但尚未写入日志头的短暂状态仍可查看。
+
+## 真机运行的操作员终端（`levi/automatic/console.py`）
+
+一个终端跑完整场真机运行：`python scripts/aeri.py execute ...`（即 `fr3_run --execute`
+路径），标准输入输出都是终端时启用。先打印开始摘要，再要求键入原有的
+`execute <run id>` 确认语句；在这里按 Ctrl+C 或输入结束会在连接任何设备之前取消
+（退出码 130）。此后每个提示都是一行：`[第 2/5 轮] 机械臂已回位。请复位环境，完成后按
+[Enter]（q 结束）`（第几轮、刚才发生了什么、现在要做什么）。这行字来自一张状态与提交
+原因表（`STATUS`、`WAIT_REASONS`），所以回位验证分支的原因（`robot_home_reached`、
+`robot_homed`、单片段成功后直接完成、多片段的 `scene_reset_required`）以及以后新增的原因
+只是加一行，不用改逻辑。不含复位策略模式下每轮一次 Enter 加一次 `y`：复位环境，按
+Enter（证据帧在此之后才取），回答场景题。
+
+| 按键 | 位置 | 作用 |
+| --- | --- | --- |
+| `Enter` | 复位提示 | 环境已复位，此时才取证据帧。同时写一条日志备注 `operator_reset_confirmed`（操作员身份，写明本轮片段），因为 `y` 直接进入下一轮，不再有 `WAIT_HUMAN` 能证明人复位过环境。 |
+| `Enter` | `WAIT_HUMAN` | 续跑，先重新做健康检查；监控为红则不续跑（提示说明原因，继续等待）。原因为 `operator_stop`、`contract_violation_limit`、`policy_error` 时一次 `Enter` 不够，见下一行。 |
+| `Enter`，再按 `y` | 原因为 `operator_stop`、`contract_violation_limit`、`policy_error` 的 `WAIT_HUMAN` | 第一次 `Enter` 先清空键盘缓冲（`keys.flush()`），再提示确认。只有 `y` 才算确认（`Enter` 和其他键都忽略；`n` 取消并继续等待，`q` 结束）。所以快速连按两次 `Enter`，或把 `y` 和 `Enter` 一起按下，都不会续跑。确认后的续跑与原来一样（`resume_checked`，再经 `PREFLIGHT`）。其他等待原因仍是单键。 |
+| `y` `n` `u` | 场景题 | 条件成立 / 不成立 / 看不清，每个必答条件按一个键，`b` 返回上一项。`Enter` 从不作答。`y` 放行下一轮，`n` 或 `u` 进入 `WAIT_HUMAN`（复位后按 `Enter`）。只有这些按键能作答（取舍 UI-2）：页面照样显示题目和证据帧，但页面上的回答会被移走、记一条 `scene_answer_page_ignored` 备注，不会放行运动，终端也会提示这一点。第 1 轮的 `initial_state` 题同样如此。 |
+| `s` `f` `d` | forward 一轮进行中（`FORWARD_ACTIVE`） | 对正在进行的这一轮给出人工判定：成功、失败或作废。它只提前结束**这一轮**，运行接着进入下一轮（见下文“按人工判定提前结束一轮”）。始终可用；开轮前敲的键、其他键，以及回位、复位、等待人工时敲的键都不起作用。 |
+| `s` `f` `u` `d` | 复位提示、`WAIT_HUMAN` | 仅在 `LEVI_AERI_CONSOLE_LABELS=1` 时可用：对刚结束的一轮打可选的操作员标签（成功、失败、不确定、作废），先于 `Enter`。 |
+| `q` | 各提示 | 结束运行（停止，不是故障）。 |
+| Ctrl+C | 任何时候 | 入口保持机械臂并登记停止，不再下发运动指令。控制台打印一行并写入 `operator_interrupt` 备注（信号、人当时在哪个提示、状态、轮次）；退出码为 128 加信号号。在提示处，运行以 `WAIT_HUMAN` 或 `COMPLETED`（`operator_stop`）结束。策略运行中，运动指令在停止标志下被拒绝，目前会以 `safety_stop` 锁定运行（屏幕会说明这是 Ctrl+C 引起的）；已锁定的运行需用新的 run id。 |
+
+`Enter` 声明了什么（上述三种原因是 `Enter` 加 `y`）：真机运行里，在 `WAIT_HUMAN` 按这个键一律以
+`environment_handled=True`、`health_rechecked=True` 调用续跑，也就是说按下它就是声明场景
+已复位；这个声明由在机器人旁的操作员负责，AERI 不核验。续跑仍会经过 `PREFLIGHT`，它重新
+检查健康监控与锁存，任一不通过就不会开始运动（运行回到 `WAIT_HUMAN` 的
+`preflight_failed`，机器人已锁存则以 `safety_stop` 锁定；日志里保留这次续跑和拒绝），但
+`PREFLIGHT` 不检查场景是否真的复位。复位提示处的 `Enter` 同理：随后的证据帧和场景题才是
+对场景的核对，`y` 是操作员的回答。
+
+**按人工判定提前结束一轮**（L2-AERI-OPERATOR-EARLY-STOP，沿用旧测评客户端的
+`s`/`f`/`d`）。forward 一轮进行中，控制台按单键读取（cbreak，对文件描述符 `os.read`，
+由入口的心跳线程每 50 ms 做一次不阻塞的 `select`）。一轮开始时（`FORWARD_ACTIVE` 提交）
+先清空开轮前敲进的键，再打印一行说明哪些键有效；运行离开 `FORWARD_ACTIVE` 时终端退出
+cbreak 并再清空一次，所以回位、复位或等待人工期间敲的键不会结束任何一轮。`s`、`f`、`d`
+调用 `Orchestrator.episode_verdict`（label 为 `success`、`failure` 或 `discard`，来源
+`terminal`），它和停止一样只做登记。循环在下一步、在停止检查和锁存/健康检查之后（两者
+优先级不变）以停止原因 `operator_verdict` 结束这一轮，走的是普通的 `FORWARD_STOPPING`
+保持、静默、封存和回位：不新增运动权限，不跳过任何检查。之后运行像判定模型提前结束后
+那样进入下一轮，不进入 `WAIT_HUMAN` 或 `COMPLETED`。停止仍然结束整次运行，并且优先于
+尚未生效的人工判定（返回 `stop_pending`，或该判定被丢弃并记一条
+`operator_verdict_dropped` 备注）；在这一轮最后一步之后才到的按键也这样丢弃。每轮只收
+一次判定；事件暂停判定（`event_pause_judge`）运行不收（`not_supported`）。
+
+人工判定与模型判定分开存放。日志里记一条 `operator_verdict` 备注，内容是 JSON：`label`、
+`source`、`episode_id`、`step` 与 `frame_index`（按键时的控制步和最后一帧的索引）、
+`taken_step`、`wall_ns`、`command_id`。片段结果仍是运行自己的判定
+（`label_kind: autonomous_verdict`，终局判定照常进行），`stop_reason` 为
+`operator_verdict`。结果提交后，这个判定还会写成该轮的操作员标签
+（`labels/operator_label.jsonl`：`success`、`failure`，`d` 写 `discarded`）；作废的一轮没有
+真值，不进任何比率，指标报告的 `operator_verdicts` 列出各次判定，作废的标 `excluded: true`。
+作废的一轮不计入运行的轮数，自动补跑一轮（用户 2026-10-16 裁定），第一步之前就给出的判定结束的是一轮没跑过的，不计入轮数，运行照常继续；也不写操作员标签（记 `operator_verdict_not_labelled` 备注）；也不进自动成功率、一致率和真值统计。补跑有上限 `max_discarded_rounds`（运行配置，默认等于运行轮数；作业文件暂不能设置，默认值不改变计划摘要）：作废永远不算真值，也不进任何分母；超过上限后，作废的一轮只是不再补跑：它占掉运行的一轮，记一条 `discard_limit_reached` 备注（“not replaced (limit X); the run ends with fewer valid rounds”），运行照常结束，有效轮数少于 N，指标报告用 `discarded_beyond_limit` 给出这个数。运行进程在一轮中被强杀或崩溃后，终端可能停在 cbreak（不回显、不能行编辑）：在该终端运行 `stty sane` 恢复。双标签对比里 `operator_verdict` 与 `operator_stop` 归为一类
+（由人结束）。页面能显示这条备注和停止原因，但不能发出判定：没有对应的接口，指令通道对
+任何运行都拒绝 `episode_verdict` 这种指令（`terminal_only`），与取舍 UI-2 的场景题作答相同。
+
+盲性：操作员对某一轮的标签落盘之前，不显示自动判定，也不显示该轮如何结束。允许提前
+结束时，轮次行在此之前既不显示步数也不显示原因，任何时候都不显示内部状态名
+（`ROBOT_HOME`、`FINALIZE`）。不允许提前结束时，与旧客户端一样显示步数和结束方式。
+
+允许提前结束时，运行中那一轮的进度行在该片段的标签落盘之前只写“第 n/N 轮 运行中”，
+不带步数（步数不到上限就会暴露已提前结束）。`WAIT_HUMAN` 提示下面和故障摘要里打印的
+备注来自一张可显示的备注码白名单（`console.py` 的 `DISPLAY_NOTES`：机器人、录制器、
+策略分块、会话文件等运行事实）；`early_stop_disputed`（含终局判定）这类判定备注只留在
+日志和页面里，新增的备注码在加入白名单之前不显示。策略适配器或策略服务给出的错误原文
+（`policy_unavailable`，例如 `websocket closed (1011)`）是单独的一类
+（`POLICY_ERROR_NOTES`）：控制字符（0x00–0x1f、0x7f）先换成空格，再截到 300 字符（`POLICY_ERROR_LIMIT`）后显示在控制台故障摘要、
+`WAIT_HUMAN` 提示下面以及旧手敲路径的 `print_fault` 里。
+
+**`scripts/aeri.py execute` / `fr3_run --execute` 的退出码**（行为变化：被 Ctrl+C 或
+SIGTERM 安全停止的运行以前和其他未完成的运行一样退出 1）：
+
+| 退出码 | 含义 |
+| --- | --- |
+| 0 | 运行以 `COMPLETED` 结束，包括在等待时被人停止的运行（`COMPLETED` `operator_stop`；没有单独的“已停止”状态）。**退出码 0 不等于跑完了全部片段**：在等待处输错（不是 `resume`，或确认时不是 `y`）也会停止运行并得到 0，要看最终状态的原因是不是 `operator_stop` |
+| 1 | 运行以其他状态（`WAIT_HUMAN`、`FAULT_LOCKED`）结束，且不是信号造成的 |
+| 2 | 在运行之前或之外被拒绝或失败（摘要不一致、没有终端、确认语句不对、作业有误） |
+| 130 | 在 `execute <run id>` 确认语句处按 Ctrl+C 或输入结束：连接任何设备之前取消 |
+| 128 + n | 运行被信号 n 安全停止（SIGINT 为 `130`，SIGTERM 为 `143`）；stderr 写“已被信号 n 停止；最终状态 S”（随控制台语言 `LEVI_AERI_CONSOLE_LANG`，默认中文） |
+
+运行结束时的收尾顺序：先通知心跳线程停止并让机械臂保持（`emergency_hold`）；接着
+`FAULT_LOCKED` 的运行把故障摘要打印到 stderr，这次打印失败（stderr 已断开，`EIO`）会被
+忽略；然后等心跳线程结束、关闭控制台，再释放运动围栏、编排器和录制器（前一项失败也照样
+尝试后一项），最后恢复 SIGINT/SIGTERM 处理器。控制台关闭失败（终端已断开）时其余资源照样
+释放，能写就先在日志里补一条 `console_close_failed` 备注，再往 stderr 写警告；stderr 也
+断开时警告直接丢弃。这两种失败都不改变运行状态和退出码（`COMPLETED` 的运行仍是 `0`）。
+
+**手敲的旧路径。** 没有控制台时（stdout 或 stdin 不是终端，例如 `... | tee run.log`，
+或 `LEVI_AERI_CONSOLE=0`），真机运行无论场景核对方式都在加载或连接任何东西之前被拒绝：
+`operator_attested` 的场景题否则只能在页面上作答（取舍 UI-2），`provider` 的场景否则会只凭
+provider 的答案放行（L2-UI2-PROVIDER-RELEASE，用户 2026-10-15 决定）。所以真机运行不再走到
+下面这条路径；代码仍在，测试照旧覆盖。它的 `WAIT_HUMAN` 打印一行提示并读一行输入；stdin 不是终端时直接
+返回。stdin 是终端时先冲刷输入（`termios.tcflush(TCIFLUSH)`），运行期间预先敲进去的行
+（比如提前输入的 `resume`）不会回答这次等待，并在这一刻记下这次等待的日志序号。输入
+`resume` 续跑（带着这个序号调用 `resume_checked`，再进 `PREFLIGHT`）；其他任何输入、空行或
+输入结束（EOF）都停止运行（`terminal-stop`：`COMPLETED` `operator_stop`）。原因属于
+`console.py` 的 `CONFIRM_REASONS`（`operator_stop`、`contract_violation_limit`、
+`policy_error`）时只输入 `resume` 不够：提示要求二次确认，再冲刷一次输入，只有输入一行
+`y`（或 `Y`，即 `CONFIRM_KEYS`）才续跑；其他任何输入、空行或输入结束都停止运行。其他原因
+仍是一次 `resume`。由 `main()` 启动的运行总会登记，所以两行输入都用 `select` 等待，而不是
+阻塞在 `input()`：页面恢复了运行、状态或日志有了变化（故障锁定、写入了新行）、停止探针或
+信号让机械臂停下时，这次等待直接结束，本终端不会续跑；日志变化之后才输入的 `y` 会被
+`stale_sequence` 拒绝。冲刷依赖终端的规范（行）模式（ICANON）：这时预先敲入的行还在内核
+队列里，冲刷能清掉。终端关闭了 ICANON 时 stderr 会给一条警告，因为 Python 可能已经把这些
+行读进了自己的缓冲；这时请只在提示出现后输入。
+
+环境变量：`LEVI_AERI_CONSOLE=0` 关闭控制台（回到上面手敲的旧路径），
+`LEVI_AERI_CONSOLE_LABELS=1` 启用可选的标签键，`LEVI_AERI_CONSOLE_PRINCIPAL` 指定标注者
+（默认 `operator`），`LEVI_AERI_CONSOLE_LANG=en` 把整个终端切成英文（默认 `zh`）。没有终端
+就没有控制台。已知限制：录制器的 `preceded_by` / `after_human_resets` 元数据目前只读
+`WAIT_HUMAN` 行，所以用 `Enter` 确认的复位暂时以 `operator_reset_confirmed` 备注为准，
+直到录制器也读取它。
 
 ## 显式事件暂停判定（默认关闭）
 
@@ -789,11 +1193,37 @@ reset 的静默交接仍依赖经审核的 Performance Architecture 集成。真
 
 过期的恢复序号不会重新开放推理周期：只有日志 prepare 的序号比较交换及恢复事务持久提交成功后，才在停止代次检查下 rearm。后到的停止保留锁定；rearm 时发现证明失败则重新进入故障隔离，不发送动作。已提交的事件模式恢复接受及拒绝结果都在返回前持久关联到准确事务及命令；重试（包括重开日志后）保留已记录结果，不依赖后续周期状态。缺少结果标记（包括接受/拒绝标记写失败或旧的未标记事件模式日志）返回 `command_used`：该 ID 已用但结果未知，不重放动作。legacy 保留原有未标记重复合同。存储失败仍抛异常，并可能阻止后续日志写入；故障隔离撤销运动权限，但不保证结果已保存。
 
-确认成功直接封存并进入 `WAIT_HUMAN`，原地等待人工自由复位，不执行 Home。明确未成功且实际动作数不足上限时，重新取观测并暂存，重新认领新代次的策略；`inference_resumed` 是一个新的 `policy_steps` 日志事务，只从它签发新的运动令牌。旧缓存、旧请求和旧代次的迟到应答不能复用。判定等待不计动作；达到上限后在保持状态做终局判断，再封存并等待人。停止注册立即撤销新模式的运动围栏和模型结果权限，不等模型完成或后台排空；证明不足仍保留后台所有权。
+暂停的既有 `policy_quiesce` 事务还复用 `_quiesce`，在目标判定和封存前确认策略已静默，并终检最后一个 pending 夹爪命令的 ACK。quiesce 结果未知或末 ACK 未证实时，已准备的暂停事务记执行未知并 abort，周期闭锁；不授权目标请求、封存或 Home。适配器 quiesce 不等于 native 模型／后端静默证明；原 `InferenceCycle` 权限仍须独立验证请求停止、worker 退出及整个群组静默。
+
+**终局 Home（仅软件）。** 暂停判定结束的前向片段（确认成功，或动作数达到上限）现在走边 `FORWARD_JUDGING -> FORWARD_FINALIZE`（`policy_quiesce`，再次确认末次夹爪 ACK），再 `FORWARD_FINALIZE -> ROBOT_HOME`（封存录像；片段结果在这里按已保留的暂停判定写入，此时 Home 尚未执行，所以 `robot_home: not_attempted`），再 `ROBOT_HOME -> SCENE_ASSESS`（Home，由 `Robot.home_under_closed_gate` 在关闭的准入闸下执行）。不再发第二次目标请求：不调用旧 `_verification`。回位完成后日志里有 note `robot_homed`（片段、`sealed`，不含任何判定结论（结论只在片段结果里，操作员标注之前不会随 note 显示）；机器人有 `admission_snapshot` 时附闸门事实 `gate`、`home_only_from_ns` 以及本窗口的 `home_pose_released`、`home_gripper_released`、`home_gate_rejected`（是本窗口的增量，不是机器人的累计值；快照读取失败写 `gate=unreadable`），否则只写 `gate=closed`；最后是 `next=scene_assess`）和已提交的原因 `robot_home_reached`；之后由既有场景评估决定下一步：场景就绪则开始下一片段（恢复钩子以更新的代次重开准入），场景需要复位则交给复位策略或人（`WAIT_HUMAN`，`scene_reset_required`），片段数够了则结束（`COMPLETED`）。封存之后登记的停止让手臂留在原地（`ROBOT_HOME -> WAIT_HUMAN`，`operator_stop`），不受 `home_after_operator_stop` 影响。Home 失败或结果不明则以 `home_failed` 锁定，保留已封存的结果，不重试；唯一的例外是机器人在第一条命令之前就拒绝的 Home，它进入等待（`home_not_executed`，见下文恢复钩子一节）。unknown、超时或证据不足的判定不变：`FAULT_LOCKED`（`judgement_unproven`），不封存、不回位。复位角色同样不变：暂停的复位判定仍封存后进入 `WAIT_HUMAN`，不回位。机器人没有可调用的 `home_under_closed_gate` 时编排器拒绝构造（`ConfigError`）。旧边 `FORWARD_JUDGING -> WAIT_HUMAN` 为旧日志保留合法，但不再有代码走它。真实事件模式入口仍然拒绝（`test_real_binding_refuses_mode_before_reading_binding_or_robot`）：以上内容没有在真机上运行过。
+
+以下内容没有被证明：
+
+1. “自暂停起准入连续关闭”只覆盖到 `home_only_from_ns`；回位后闸门重新关闭，是新的关闭区间（新的代次和关闭时间）。
+2. 物理保持证明只对被判定的那一帧成立。Home 会让手臂运动，所以没有“事件之后手臂一直静止”的证明。
+3. Home 计数记录的是命令开始通过闸门，不证明已送达或手臂到位；到位只靠 `_settle_home` 的实测。
+4. 本地闸门只约束本进程的 `env._post`（窗口内只有打开它的线程能通过），不排除其他进程直连机器人服务（已有的局限）。
+5. 不证明后端静默，Home-only 窗口也不提供新的后端证明。
+6. 暂停判定针对回位前的画面；回位可能扰动场景，之后的场景评估是新的请求。
+7. 真实客户端 `_go_home` 实际发哪些路由：只读过检出的客户端源码（`examples/fr3_local/run_robotiq_client.py` 的 `_go_home` 经 `RobotEnv.step` 逐步发送，它 POST `clearerr`、`pose`，只有测得夹爪尚未张开时才 POST `open_gripper`；Home 位姿要求夹爪张开，所以不会走到 `close_gripper`、`move_gripper`）。没有在真机上运行过，其他版本的客户端可能不同；`pose`/`clearerr`/`open_gripper` 之外的路由会在闸门被拒，运行以 `home_failed` 锁定。
+8. 真实的 `stop_admission`／`resume_admission` 钩子绑定现在已有软件实现（`levi/automatic/fr3_intervention.py`，见下一节），但只在测试里装配，真实入口不使用。Home 之后的场景评估所用的保持钩子，需要用新的封闭区间建立见证，因为 Home 之前建立的见证会永久失败；绑定只在自封闭起恰好发生过一次封闭准入下的 Home 窗口时才接纳这个新区间。
+9. `Robot._sending` 和 `Robot._step_notes` 是 `step()` 与 Home 共用的实例字段。目前只有编排器线程一个调用者；机器人适配器不支持两个并发调用者，也没有对此加保护。
+10. Home 期间崩溃时，恢复把运行锁定为 `FAULT_LOCKED`（`recovery_ambiguous`），该片段保留唯一的一份结果，`robot_home` 仍是 `not_attempted`，与旧路径一致，不会改写为 `failed`；未完成的 Home 事务可在日志中看到。
+11. 停止在受闸 Home 发出第一条命令之前撤销了 Home 令牌，结果是 `no`，不会锁存机器人，所以停止之后人工的 `PREFLIGHT` 可以通过；命令已发出之后再撤销则是 `unknown`，会锁存且不重试。旧的 `Robot.home()` 对任何撤销仍然锁存。窗口打开期间再次调用 `home_under_closed_gate`（无论是否同一线程）会在任何其他检查之前被拒绝，不改变任何状态（不做围栏检查，不读健康状态）。Home 是否已发出命令，按“通过围栏的 POST 计数”判断，而不是 `_sending` 标志（别的线程调用 `step()` 会清掉它）。
+12. 需要知道的行为变化：停止在第一条命令之前撤销令牌后，机器人不再被锁定，所以人工恢复之后手臂可能不在 Home 位姿。`robot.start_pose()` 只在 `fr3_run.py` 调用一次，`VERIFY_INITIAL` 不会重查，因此这依赖人工的 `environment_handled` 声明。令牌过期或被撤销、没有登记操作员停止、且按机器人自己的计数在第一条命令之前就被拒时，现在进入等待（`home_not_executed`，见下文恢复钩子一节），不再锁定；发出过命令之后仍记 `home_failed` 并锁定。这种等待里机械臂没有回 Home，仍停在上一片段结束的位置。所以续跑时会用 `Robot.start_pose`（启动关口的检查和容差）只读检查一次起始位姿，不在 Home 就回到等待（`home_pose_not_reached`）；终端提示按 `setup.md` 手动回 Home。
+13. `Robot.stop_admission()` 本身不是异常安全的（先改模式和代次，最后才读时钟），是既有代码，未改动。Home-only 窗口关闭时如果读不到时钟，闸门以“没有关闭时间”的状态关闭，因此无法在这一区间上建立见证。窗口即使被打断（例如 `KeyboardInterrupt`）也会先关闭闸门并清理状态，之后才重新抛出该中断，此时 `hold()` 同样会执行。非 `Exception` 的中断会使清理重试，最多三次；清理中的普通 `Exception` 不重试，因此调用方的 `hold()` 一定会执行到。打开窗口时会清除 `closed_from`，所以窗口内 `stop_admission()` 读时钟失败时不会留下窗口之前的关闭时间（而是没有时间），离开窗口时再写入当前时间；见证不可能从 Home 命令之前开始。重试用尽后闸门保持拒绝策略命令（fail-closed）：窗口标志仍在，`reopen_admission()` 被拒，再次调用 `home_under_closed_gate` 也被拒，只能重启进程恢复。
+14. 上述时钟失败之后闸门已经是 `closed`，`stop_admission()` 因此是空操作，无法开始新的区间：关闭时间保持 `None`，必须先 `reopen_admission()` 再 `stop_admission()` 才能得到新区间并建立见证。这是当前行为，由测试固定；改变规则需要作者决定。
+15. `self._motion_posts += 1` 不在准入锁内。并发的 `step()` 可能使计数落后，或使 Home 被误判为“已发出命令”而实际是那个 step 发的（偏保守的方向：调用结果是 `unknown` 并锁定，不会误报干净的 `no`）。
+
+确认成功按上文封存并回位。明确未成功且实际动作数不足上限时，重新取观测并暂存，重新认领新代次的策略；`inference_resumed` 是一个新的 `policy_steps` 日志事务，只从它签发新的运动令牌。旧缓存、旧请求和旧代次的迟到应答不能复用。判定等待不计动作；达到上限后在保持状态做终局判断，再像确认成功一样封存并回位（复位片段仍封存后等待人）。停止注册立即撤销新模式的运动围栏和模型结果权限，不等模型完成或后台排空；证明不足仍保留后台所有权。
 
 证明 hook 抛异常或异常逃出编排循环后，注入周期永久标记失败，立即撤销当前请求的结果权限，不等后台排空。所有者和退出证明不足的请求槽继续保留。人工恢复可以整理环境，但不能复用这个失败周期或恢复旧模型权限；需要新的冻结运行或重新建立真实权限。已准备的暂停/恢复事务先记录未知应答并中止，再进入故障状态。旧 C2 协议的分时门中，两种判定状态保守映射为 `running`，其中 `RESET_JUDGING` 写 reset 角色文件；后台标注继续关闭，判定由原角色权限内核执行。这里的旧状态值表达判定期间的关门。
 
 注入式 `MeasuredPhysicalHold` 观察器在完整冻结的 `SettleConfig` 窗口内采集新鲜 `Robot.observe` XYZ／Euler 姿态和独立实测夹爪位置。任意两次采样都必须满足位置、跨 ±π 归一化的 Euler 旋转及夹爪容差；采样起点和测量时间的间隔不能超过冻结值。每次采样以及最终发布前均核对单调的 `getstate/gripper_pos` route／generation／读取时间来源、与实测机器人状态相等的值、非布尔有限数值、时钟身份，以及整个窗口持续关闭的策略入口和运动权限。`AdmissionClosedProof` 回调是明确的注入合同，构造一个声明对象本身不构成证明。缺失、过时、中断或异常的观测会永久拒绝该观察器。现有 FR3 源码暴露实测夹爪来源，但实际 `cartesian_position` 仍需要另行审查的姿态 route 与持续关闭绑定；该软件适配器没有安装这种真实绑定。
+
+**准入闸与 `AdmissionClosedProof` 来源（仅软件）。** `fr3_bridge.Robot.stop_admission()` 关闭可选的本地闸：此后所有 `pose`、`clearerr`、`open_gripper`、`close_gripper`、`close_gripper_slow`、`move_gripper` 的 POST 都在发出 HTTP 之前以 `AdmissionRefused` 拒绝；`Robot.step` 返回 `executed="no"` 且不锁存，`Robot.home` 在尚未发出任何命令时同样返回 `no`。姿态（含 `clearerr`）与夹爪命令各有单调递增的尝试数和闸拒绝数；`admission_snapshot()` 原子读取闸状态、代次和计数，`reopen_admission()` 重新打开闸并改变代次。闸默认打开，旧路径不变。`adapters/physical_hold.py` 的 `RobotAdmissionWitness`／`assemble_measured_hold` 只有在以下条件全部成立时才签发 `AdmissionClosedProof`：闸仍是 `stop_admission` 所返回标记对应的那一次关闭（从未重开，重开后再关也不行）、已放行命令计数与标记相同、`MotionFence` 当前没有令牌、时钟域一致且时间不倒退、片段与策略 epoch 不变。任何一项不满足即抛出 `InterventionUnproven` 并保持失败。有效期和全部 `SettleConfig` 限值都由调用方注入，没有默认值。限制：计数记录的是命令通过闸的开始，因此该见证只证明没有新命令开始；不能证明最后一个已放行的动作已经完成或机械臂已静止。`Robot.hold()` 只设置标志，`Robot.observe()["observed_ns"]` 是主机读取完成的时间，不是物理采集时间。`MotionFence` 不记录吊销时间，其吊销状态只是时间点事实。静止只能由 `MeasuredPhysicalHold` 的实测窗口证明。未使用也未审查任何真机、端口或绑定。
+
+**Home-only 准入（仅软件）。** 闸门有三种模式：`open`（默认）、`closed`（`stop_admission()`）和 `home_only`，后者只存在于 `Robot.home_under_closed_gate(*, token)` 内部。进入需要：模式为 `closed`；令牌是 `MotionFence` 接受且为当前令牌的 `kind="home"` 令牌；没有停止、没有锁存、健康为绿。否则在发送任何 HTTP 之前返回 `executed="no"`，也不锁存；闸门开着同样被拒。窗口内只放行 `pose`、`clearerr`、`open_gripper`，并且只来自这次 Home 自己的发送路径、持该令牌、且来自打开窗口的那个线程（本进程内其他线程的命令一律被拒并计数）；`Robot.step`（策略动作）、`close_gripper`、`close_gripper_slow`、`move_gripper` 和恢复类路由一律被拒，旧的 `Robot.home()` 在闸门关闭时仍然返回 `no`。窗口的命令单独计数（`home_pose_released`、`home_gripper_released`、`home_gate_rejected`），不影响 pose／gripper 计数；`AdmissionSnapshot` 增加 `mode` 和 `home_only_from_ns`，窗口内 `closed` 为假。只要 `home_under_closed_gate` 调用还在进行（即使窗口内先调用过 `stop_admission()`），`reopen_admission()` 就被拒；窗口内调用 `stop_admission()` 立即关闭闸门。无论成功、失败、异常或停止，`finally` 都把闸门恢复为 `closed`：若此时模式不是 `closed`，则强制关闭为新的区间，并换新代次和新的 `closed_from_ns`，再调用 `hold()`。进入和离开各改变一次代次，所以窗口之前建立的 `RobotAdmissionWitness` 永久失败；见证还检查 `mode == "closed"` 和 Home 计数。Home 之后场景评估所需的关闭证明，必须从新的 `stop_admission()` 标记开始。`MotionFence`、开启或关闭状态下的 `stop_admission`，以及 `legacy_async` 路径均不变。
 
 **实现边界：**当前只提供可注入的软件协调核和进程内 fake 回归。实际 FR3 工厂没有提供 owned policy 群组、真实后台 barrier、独立物理稳定 observer，以及暂停帧与 FileEvents/OnlineVerifier 事件窗口的可信绑定；缺少任一接口，构造编排器前就拒绝新模式。`Robot.held`、`Policy.ticket.done`、HTTP 成功或 client 返回不是这些证明。真实 paused 帧必须进入当前片段的保留证据窗口，不能复用触发前画面。实际配置、HTTP 真机启动、GPU 模型和机器人均未启用或验证；真实接线和跨分支共用内核组合回归仍需独立验收。
 
@@ -801,10 +1231,79 @@ reset 的静默交接仍依赖经审核的 Performance Architecture 集成。真
 
 保持采样把目标节奏安排在冻结的最大采样间隔内，给时钟、关闭观察器、测量和睡眠开销留出余量。实际采样起点和测量时间戳的间隔仍必须分别满足原上限；截止时间、完整稳定窗口、任意两采样的容差及最多1000次观测均严格保留。内部节奏使用精确整数运算，让长窗口能够在有界采样数内覆盖；不保证任意慢I/O或没有证明开销余量的窗口都能成功。`SettleConfig` 接受的配置仍可能不可达：采样间隔1 ms、稳定窗口及最长等待999.5 ms时，1000次观测最多只有999个间隔，只能覆盖999 ms。本观察器明确拒绝这一边界，不修改冻结字段或计划摘要。真实FR3入口继续拒绝。
 
+**FR3 介入钩子（切片 D，仅软件）。** `levi/automatic/fr3_intervention.py` 把 FR3 对象放到 `InferenceCycle` 的七个 `InterventionHooks` 后面；它不增加调度器或权限。`Fr3InterventionHooks(...).as_hooks()` 返回该数据类；`bindings()` 列出每个钩子绑定到什么。
+
+| 钩子 | 绑定到 | 何时失败（抛 `InterventionUnproven`） |
+| --- | --- | --- |
+| `stop_admission` | `Robot.stop_admission()`（封闭标记）、旧代次的 `Policy.quiesce`、唯一客户端证明 | 标记不是本时钟下的封闭快照、仍有运动令牌、旧代次未被隔离、证明失败、参数不对。闸门先关（在检查参数之前），失败后也保持关闭 |
+| `resume_admission` | 只用 `Robot.reopen_admission_if(generation, closed_from_ns)` | 有角色请求占着槽、证明失败、闸门被别人关着、区间内放行过策略命令、区间不是本次介入关的那个（重开又关；或自封闭起不是恰好一次封闭准入下的 Home 窗口）、观测早于区间、run 不同。封闭准入下的 Home 一条命令都没发出时改抛 `InterventionStopped`（不闭锁，见下） |
+| `observe_hold` | `MeasuredPhysicalHold` 加 `RobotAdmissionWitness`，每次封闭一个观测器（`hold_factory`；真实的由 `measured_hold_factory` 构造） | 观测器失败或没返回 `PhysicalHoldProof`、保持超过截止时间。闸门开着且没有封闭时，先关闸再保持；不属于本次介入的封闭一律拒绝 |
+| `observe_runtime` | `runtime_probe`（可信 `RuntimeObservation`）、唯一客户端证明 | 观测不属于 `RuntimeOwnership` 运行时令牌的租约和 worker、探针失败 |
+| `role_window` | 给 `RuntimeOwnership.begin_role_request` 的 `RoleWindow` | 角色未知、`judge` 在开着的闸门上或 `forward`/`reset` 在关着的闸门上、窗口超出租约、证明失败 |
+| `stop_proof` | `stop_probe` 与槽中那个请求的 `RequestStopProof` | 请求不是槽里的、探针答复不恰好是 `(True, True)`（绝不返回假标志）、超过截止时间 |
+| `prepare_evidence` | `PausedFrames.prepare_evidence`（`signal_events` 账本） | 返回不是 `True` |
+
+`physical_hold` 是 `termination.physical_hold` 的限值加 `MeasuredPhysicalHold`／`RobotAdmissionWitness` 这一对；`signal_events` 是 `SignalEvents` 经 `event_window.Ledger` 进入 `PausedFrames`。
+
+`resume_admission` 是特定重开。`Robot.reopen_admission_if` 只在闸门仍是按代次和关闭时间指名的那个封闭区间时才重开；绑定从不调用泛化的 `reopen_admission()`（测试让它抛异常来保证）。没有被本次介入关闭任何东西、闸门开着时，只是允许开始。封闭准入下的 Home 之后闸门是新区间（代次 +2）；只有自封闭起确实打开过 Home-only 窗口（`home_only_from_ns` 不早于封闭时间）、Home 的 pose 计数增加且代次恰好移动 2，绑定才跟进。Home 在发出首条命令前被拒（executed=no，臂没动；2026-10-14 21:1x 决定）时，只凭桥自己的 Home-only 计数器判断：代次恰好 +2，`home_pose_released`、`home_gripper_released` 都没变，且自封闭起确实打开过 Home-only 窗口（先用通用重开再 stop 同样是 +2、没有 Home POST，但没有窗口，照旧锁存）。此时 `resume_admission` 和 `observe_hold` 抛 `InterventionStopped`：绑定不闭锁、不跟进、不重开，闸门保持关闭。其余任何差异都闭锁，包括窗口放行了夹爪命令却没有 pose 的情形。绑定的区间不变，所以经同一绑定的 resume 仍以同样方式被拒，直到绑定接管新区间（`adopt_unexecuted_home`，见下）或开新 run。编排器（L2-HOME-EXECNO-ORCH）按同样的事实处理：有操作员停止时照旧进入等待（`ROBOT_HOME -> WAIT_HUMAN`，`operator_stop`）；没有操作员停止时，若机器人的 Home 确实被调用并返回 executed=no，且机器人自己的 Home-only 计数（`home_pose_released`、`home_gripper_released`、`home_gate_rejected`，Home 前后各读一次）都是可读的整数且没有变化、闸门已重新关闭、没有故障闩锁、红灯或机器人停止/信号（`Robot.stopped()`）、介入周期未闭锁且没有占用中的请求，也进入等待（`ROBOT_HOME -> WAIT_HUMAN`，原因 `home_not_executed`，终端显示“Home 在发出首条命令前被拒：机械臂没有回 Home，仍停在上一片段结束的位置”，并提示续跑前会自动检查是否在 Home，请按 `setup.md` 手动回 Home，然后按 Enter 再按 `y`），拒绝原因记在 note `home_failed_detail`。等待期间没有任何东西重开闸门。操作员续跑后，第一次用到钩子时（`VERIFY_INITIAL` 的场景核对，或下一片段开始）先请绑定接管闸门当前的封闭区间（`adopt_unexecuted_home`，FR3 绑定的额外入口，不是第八个钩子）：只接受未变的区间，或那一个没有发出命令的 Home 窗口，并且 pose、gripper 放行计数都等于封闭点的值；否则关闸并闭锁。随后场景保持或 `resume_admission` 跟进接管的区间。绑定没有这个入口、抛异常或返回 `True` 以外的任何值，运行都以 `FAULT_LOCKED` 锁定，闸门保持关闭。片段开始处的重建在当前流程里走不到（每次开始都在场景核对之后，场景核对已先重建），由直接测试覆盖。在这之前，这种等待之后的第一次 `PREFLIGHT` 会用 `Robot.start_pose` 只读检查一次起始位姿（与 `fr3_run` 启动关口相同的检查和容差：绑定的 Home 位姿、Home 的位置与旋转容差、测得夹爪张开；不发任何命令），测量结果记在 note `start_pose_checked`。只有 `ok` 恰好为 `True` 才继续（`VERIFY_INITIAL`）；不在 Home、读不到位姿、抛异常、机器人没有 `start_pose` 或其他任何返回值，都走 `PREFLIGHT -> WAIT_HUMAN`，原因 `home_pose_not_reached`（终端显示“机械臂不在 Home 位姿（误差见下方 start_pose_checked），未续跑”，按 Enter 再按 `y`），下次续跑再查一次。重启之后（重启先锁定，`recovery_ambiguous`），只要最后一次提交进入 `WAIT_HUMAN` 的原因是 `home_not_executed` 或 `home_pose_not_reached`，且之后没有开始过片段，`Orchestrator.restore` 就把两项重新置上，所以续跑时仍会检查位姿并重建区间。计数增加、结果不明、机器人闩锁，或计数读不到、前后不一致，一律按已执行处理：`home_failed`，`FAULT_LOCKED`，与原来相同。重建标记和位姿检查在重启后从日志恢复（见下）。
+
+探针。`runtime_probe` 和 `stop_probe` 在 daemon 线程里调用；该线程不持有绑定、机器人或内核的任何锁，也不向机器人发任何东西。探针在 `probe_wait_s`（默认 `budget_ns`；`stop_probe` 最多到它的截止时间）内没有返回，绑定闭锁；操作员停止会立即结束等待并抛 `InterventionStopped`（不闭锁），所以编排器循环和停止路径不会被挂起的探针阻塞。Python 线程无法强杀：迟到的答复落进每次调用独有、没人再读的一次性槽，不改变任何状态。绑定按钩子记住它放弃的探针线程；同一钩子下次调用时若该线程仍在运行，无论是否已过等待时限，本次调用都被拒绝并闭锁，不再启动新的探针（过了时限即判为挂住，决定 4）。该线程结束后，下次调用才运行自己的探针。
+
+失败方向。钩子抛异常、超出时间上限（`budget_ns` 或它自己的截止时间）、或其事实未被证明，都会先调用 `robot.stop_admission()`（所以任何看到闸门开着的拒绝都会把它关上；闸门已关时没有影响），再让该绑定闭锁：之后每个钩子都会再关一次闸并抛异常。若 `stop_admission` 本身失败（包括 `BaseException`），抛出的仍是原来的拒绝，文本末尾写明 “the gate could not be closed: <类型>”。`InferenceCycle` 把它变成不可逆闭锁，编排器进入 `FAULT_LOCKED`、撤销围栏并保持机械臂，不再发出任何步（每个钩子各有一个测试，另有内核拒绝窗口、超出时间上限、运行中失去证明三个测试）。操作员停止（`InterventionStopped`）不闭锁；停止期间 `stop_admission` 仍然关闸，且没有任何东西会把它重开。
+
+唯一客户端（G1），用计数比对。账号与他人共用，所以守卫从不查看别人的进程。`N` 是内核全局表 `/proc/net/tcp{,6}` 里连到策略端口的连接数；`M` 是其中客户端一端被本次运行自己的进程（本进程及其子进程，只读它们的 `/proc/<pid>/fd`）打开的个数。`N != M` 即有外来客户端，证明失败。另外要求：端口不是共享端口（8000、5000、5001、5100、7470、8100 和 LEVI 的端口在构造时即被拒绝）；每个监听都只绑定回环；监听套接字和每个已接受的套接字都在本次运行启动的单元（`policy_swap` 单元，读该单元的 `cgroup.procs`）的进程里打开；每个连接都是回环连接且有本地客户端一端。只统计对端是回环地址的客户端一端（连到别的主机上同号端口的连接不算客户端）；孤儿套接字（最后一个描述符关闭后留下、inode 为 0、处于 FIN_WAIT1、FIN_WAIT2、LAST_ACK 或 CLOSING）既不计数，也不当作“单元之外的服务端一端”，所以任一方正常关闭连接都不会让证明失败（FIN_WAIT1、CLOSING 的孤儿只在发送队列为空、`tx_queue` 为 0 时才排除，队列里还有数据就计数）；`tcp6` 中的 IPv4 映射地址按 IPv4 比较。单元名必须是 `levi-aeri-policy-<name>`（`policy_swap` 的命名）；从会话 scope 启动时找不到单元的 `cgroup.procs`，证明会写明原因并要求传入 `unit_procs_file`。不列 `/proc`，也不打开其他任何 `/proc/<pid>/`（测试记录它触碰的每个 pid）。读不到表、`cgroup.procs` 或本方 pid，证明失败。`SlotBoundPolicy` 包装策略，使 `request` 只在证明成立、且 `RuntimeOwnership` 槽里有本请求自己角色、片段和代次的、已授权未撤销的请求时运行。`stop_admission`、`observe_runtime`、`role_window`、`stop_proof` 都会重复该证明。这是时间点证明：两次检查之间连上来的进程由下一次检查发现，而不是被阻止；它也不证明服务端行为正确。手工启动的服务无法被证明是私有的。已知限制：守卫不核对单元的 `InvocationID`，所以无法区分在本次运行之外重启的同名单元；这需要 `policy_swap` 交出它启动的那次 invocation。
+
+`--check --hooks` 保留为独立开关（裸 `--check` 的输出逐字节是既有契约，不变）。没有封闭时，`observe_hold` 在闸门开着的情况下先关闸再保持（第一次场景判定发生在 `resume_admission` 之前，更早无法证明封闭；这是安全方向）。`fr3_run.py --check --hooks` 先以 JSON 打印这份报告（`hooks_report`：七个钩子的 `implemented`、`bound_to`、各自需要什么以及作业／binding 是否声明，另有 `physical_hold`、`signal_events`、`sole_client`、`complete`、`real_entry`）。它不连接任何东西。真实入口不变：`load_binding` 仍拒绝 `event_pause_judge`，所以对事件模式作业运行 `--check --hooks` 会先打印报告，再以退出码 2 给出拒绝。钩子只在测试里装配，用 `GateFakeRobot`（带闸门记录的 fake）。
+
 `InferenceCycle.invoke` 必须显式提供且仅提供一个执行入口：兼容的无参数 `call()`，或 `request_call(request)`。forward、reset和judge角色在入口缺失、重复或不可调用时，均在模型授权前拒绝。原 `RuntimeOwnership.begin_role_request` 授权后，`request_call` 收到它直接返回的那个 `RequestToken` 对象，包含角色、片段和策略代次；回调只能借用该请求，不能再次begin或finish。Cycle仍独自负责begin、停止证明和finish。回调异常（包括 `TypeError`）沿原不可逆闭锁撤销结果发布，保留尚无真实停止证明的原请求槽，不做签名猜测或重试。这个接口为已审查owned worker的CPU请求分发准备接线，不安装SDK worker、transport或真实FR3绑定；真实入口继续关闭。
 
 可选的显式 `completion_adapter(request, returned_completion)` 只能与 `request_call` 同时使用，非法组合在授权前拒绝。它必须返回冻结的 `CompletionEvidence(request, result, stop_proof, observation)`，收据及停止证明均绑定本轮授权的原请求对象。Cycle独自把证明交给原权限内核，最终核对租约、角色、完整组、时钟及新鲜空闲观测后才发布结果。不提供适配器时保留原证明hook。回调或适配器异常沿原闭锁保留已撤销的请求槽，不接受tuple、bool、隐式识别或失败回退。SDK ACK来源由注入的借用执行器检查，不能从HTTP或客户端结束推断。
 
 显式注入 `Orchestrator(owned_calls=OwnedCalls(...))` 后，场景、暂停目标与策略chunk均经 `request_call` 借用同一原Cycle权限、runtime和租约。必填CPU准备回调返回不可变 `PreparedCall` bytes，包含原AERI请求、观测来源时间、片段/角色/代次/时钟及payload哈希。场景在保持与授权后采集新帧，分发前保留JPEG证据；目标准备必须使用现有 `PausedFrames.freeze` 窗口；策略明确接收当轮刚stage的新观测，不暗取后来覆盖的 `robot.raw`。借用执行器检查SDK ACK来源。CPU解码只在Cycle完成后运行，输出场景/目标bytes或chunk dict，再交原AERI解析、仲裁、日志和动作检查。显式注入后的绑定、准备、完成或codec错误均不回退旧provider或HTTP；不注入时保留原路径。生产冻结prompt/spec、场景/暂停窗口/策略codec及SDK factories尚未安装，注入合同和CPU fake不构成真实硬件证明；真实FR3入口继续关闭。
 
+`levi/automatic/adapters/vlm_codec.py` 提供 judge 角色的场景与暂停目标回调（`VlmCodec.prepare_scene/prepare_goal/decode_scene/decode_goal`），与外部 C5 和文件 provider 共用同一份冻结合同：`provider_model` 的 `FrozenSpec`、`question`、`model_result` 和 `validate_result`。冻结规格、时钟（本机时钟域）、场景视角、图像最长边、JPEG 质量和 `PausedFrames.freeze` 回调全部由调用方注入，没有默认值，缺失或非法在构造时拒绝（并重新校验规格哈希与规范形式）。场景帧由刚观测的 BGR 数组缩小（不放大）后编码为 JPEG；目标帧取自保留的暂停窗口图片，并对照冻结证明哈希与暂停绑定（run、片段、角色、策略代次、时钟域、提交时间）。跨 IPC 的调用是一个 `bytes` 信封（规范 JSON 头加 JPEG 字节，worker 内工厂用 `unpack_payload` 读取），`PreparedCall` 携带原请求、`SourceBinding` 与保留帧。解码时从 payload 重新推导问题、schema、规格哈希、请求身份、帧和来源，只接受一条文本答案，并只返回 `model_result` 与 `validate_result` 都通过的结果：读不出的谓词保持 `unknown`（`model_undecided`）；字段缺失、多余或格式错误，规格、模型、观测时间或帧不符，超过截止时间或观测过旧，一律抛 `InterventionUnproven`，不会折叠为成功或失败。编解码器无状态、不写文件、不记日志，自动判定只返回给 orchestrator。冻结的复位规格只判复位目标，前向目标会被拒绝。前向判定必须显式启用：`provider_model.freeze_forward(job, settings)` 消费真实 `cli.load_job` 返回值，在同一 `FrozenSpec` 类型中生成 `levi.aeri.forward_goal_model_spec.v1`。规格冻结完整作业计划及其准确摘要、前向任务原文，并将操作员的 `task.success_condition` 原文作为唯一必需谓词 `task_success_condition`。来源缺失或空白会拒绝，不用 instruction、策略文件夹名或 ISC 谓词代填成功条件。显式 `forward_final`、`forward_active` 期限必须同时等于冻结计划和实际 `RunConfig` 的对应限制。此规格只接受当前 forward 片段的 `forward_goal`，拒绝 scene 和 reset 请求；保留既有暂停证据、原 owned 请求、模型／帧／时间检查及三值答案。编解码器只提供判定，不生成状态迁移、操作员标签或物理证明。本模块仅 CPU，并用 fake 执行器与 worker 验证：真实 worker 内 VLM 工厂、真实冻结规格和物理绑定尚未安装，真实 FR3 入口继续关闭。
+
 暂停后的目标判定取帧只能在暂停事务提交后开始。观测时间戳必须是整数，并落在调用 Robot.observe 前后读取的原运行时钟区间内；等于调用前时间合法。旧帧、完整回放旧观测、未来时间、缺时间或布尔值均在 recorder 入库、证据准备及判定授权前拒绝。owned 目标来源以独立记录的取帧开始时间为下界，不能用帧自身时间证明自己新鲜。
+
+## 新鲜采集源合同（`adapters/fresh_capture.py`）
+
+`fr3_bridge.Robot.observe` 的图像来自 `env.get_observation()`。其下的读取线程只缓存最新一帧，`read()` 不返回帧号、硬件时间戳或到达时间，所以本地读完时间或图片哈希不能证明图像是授权之后才采集的。`levi.automatic.adapters.fresh_capture` 规定采集源必须提供什么才能证明，并拒绝其余一切。它不 import 任何相机 SDK，不打开设备，不使用机器人端口；`fr3_run` 目前不使用它。
+
+- `CapturedFrame`：相机 id（serial）、单调 `frame_number`、整数 `device_timestamp_ns`（None 表示没有）、`timestamp_domain`、`host_clock_domain`、`host_arrival_ns`（帧到达进程时的主机单调时钟）、`image_sha256` 和可选 `image_bytes`（必须与哈希一致）。
+- `FreshCaptureBinding`：相机 serial 集合、主机时钟域、时间戳域、时间戳语义（例如曝光开始）、`max_latency_ns`、`max_frame_interval_ns`、`min_frames_per_camera` 和 `DeviceClockAlignment`（偏移、偏移不确定度、ppm 漂移界、参考设备时刻）。所有字段由调用方注入、没有默认值；字段缺失、非法或未声明对齐，构造时即拒绝。
+- `FreshCaptureVerifier(binding).verify(grant_ns, host_clock_domain, frames, previous=None)` 返回 `FreshCaptureProof` 或抛 `FreshCaptureUnproven`。拒绝的情形：缺少或非整数的设备时间戳；时间戳域或主机时钟域与 binding 不同；缺相机或出现未绑定相机；帧数不足；帧号或设备时间戳不递增；帧间隔超过 `max_frame_interval_ns`；帧在授权之前到达；最早可能采集时刻（`device_ns + offset - uncertainty`）早于授权；采集时刻晚于到达；延迟超过 `max_latency_ns`；图像哈希与上一帧相同（停滞）。`previous` 是每个相机授权前最后一帧的可选基线，只用于序列检查。证明对象按相机列出帧号、设备时间戳、到达时间和图像哈希，并带 binding 哈希。
+- `FakeCamera` 是测试用的确定性内存相机，不证明任何硬件事实。
+
+RealSense 映射（只是对照表，这里不 import `pyrealsense2`）：
+
+| `CapturedFrame` 字段 | RealSense 来源 | 说明 |
+| --- | --- | --- |
+| `camera_id` | `device.get_info(camera_info.serial_number)` | 不用 USB 路径或枚举序号 |
+| `frame_number` | `frame.get_frame_number()` | 每路流各自计数；跳号表示丢帧；管线重启会归零，重启后须重建基线 |
+| `device_timestamp_ns` | `round(frame.get_timestamp() * 1e6)` | `get_timestamp()` 是毫秒浮点数；拿不到则为 None |
+| `timestamp_domain` | `frame.get_frame_timestamp_domain()`（`hardware_clock`、`system_time`、`global_time`） | 与 serial 一起记录；只接受 binding 指定的域 |
+| `host_arrival_ns` | 帧到达进程时读取的主机单调时钟 | 不是 `get_timestamp()`；必须用 `host_clock_domain` 指定的时钟 |
+| `image_sha256` / `image_bytes` | `get_data()` 缓冲区的哈希 | |
+
+必须在现场测量并人工审核，不能假设：每台相机的 serial 及其在机位中的位置；已部署固件和驱动实际报告哪个时间戳域、标记哪个时刻（曝光开始、曝光中点、读出）；设备时钟与主机单调时钟之间的偏移、不确定度和漂移界（用 `global_time` 时还要确认设备与主机同步已开启）；真实负载下的最大延迟和最大帧间隔；采集路径交付的是每一帧及其元数据，而不是缓存的最新帧。binding 必须先经人工审核才能使用；本模块只拒绝与声明相矛盾的情形，不验证声明本身。
+
+`OwnedCalls` 的 forward（策略）编解码器在 `levi/automatic/adapters/forward_codec.py`：`ForwardCodec(ForwardCodecConfig(...))` 的 `.prepare_chunk` / `.decode_chunk`，以及 `make_completion_adapter(verify_ack=..., roles=...)`。仅用 CPU 与 NumPy，所有物理和模型参数都没有默认值：图像尺寸、状态和动作维度、horizon 上限、prompt、`model_version`、`action_contract` 与墙钟都必须由调用方注入，缺失或格式不对即拒绝。`prepare_chunk` 用当轮刚 stage 的观测构造与评测客户端 `_query_policy` 相同的 infer 输入（`view1`、`hand` 由 BGR 转 RGB，`observation/state` 取自 `robot_state.cartesian_position`，加 `prompt`），返回 `PreparedCall`：payload 为 bytes（worker 内用 `decode_infer_input` 还原字典），`SourceBinding` 的来源类型为 `policy`。它拒绝非 forward 片段、`obs_ns` 不是本次观测、状态新鲜度未被证明、图像尺寸或 dtype 不符、状态非有限值以及任何前缀条件。`decode_chunk` 按 `fr3_bridge.Policy.request` 的字段把 worker 结果转成 `chunk_response`，并拒绝 `unavailable`、形状错误、超过 horizon 上限、非数值/NaN/无穷的动作、`action_contract` 或 `model_version` 不一致，以及在请求截止时间或之后才到的答案。适配器只在结果对应的请求就是 `InferenceCycle.invoke` 传入的同一对象（身份而非相等）、注入的 `verify_ack` 接受 SDK ack、停止证明指向同一请求且结果为 CPU 数据时才返回 `CompletionEvidence`。这是用 fake worker 测过的软件合同；prompt、部署参数、真实 JAX/Torch worker、相机时间戳语义与 binding 审核均未安装也未证明，真实 FR3 入口继续关闭。
+
+
+时间戳语义目前只支持准确值 `start_of_exposure`（曝光开始）。曝光结束、曝光中点、读出、到达或未知语义在创建绑定时拒绝；准入后的时间戳不能证明曝光在准入后才开始。其他语义需要另行审核能够计算曝光开始下界的映射，本契约尚未提供。
+
+### 逆向子任务中明确请求人工复位
+
+`subtask_loop` 终端的 **m** 请求停止自动逆向复位并等待人工处理。
+当前反向 episode 的动作、策略停用、记录封存和 VLM 判定期间均可请求；
+Enter 和 s/f/d 不触发此请求。请求绑定 run、轮次、episode 和 policy epoch；
+已关闭或旧窗口不能停止下一 episode。同命令及完整参数重发只返回原接受结果，
+不会再次登记停止。
+
+这是普通停止，**不是急停**：已准入的 step 可以完成，其中可能包含多次机器人
+POST；请求后不再准入下一 step。**接受请求不代表可以接近机械臂**。
+后续沿用策略停止、记录封存和 `home_after_operator_stop` 配置规定的保持或回位；
+安全守卫或确认失败会锁定运行。结果保持 `scene_reset=unknown`，不产生成功或失败
+标签。人工处理场景并检查安全后，resume 放弃中断的本轮、进入 PREFLIGHT，仍需独立
+放行下一轮。此入口不添加自动无进展判断，不修改重试策略，不自动清锁存，也不新增
+运动路径。

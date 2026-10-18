@@ -181,6 +181,17 @@ def test_vllm_sleeps_when_its_memory_is_wanted():
 
 
 def test_the_policy_server_s_memory_is_found_through_its_listening_socket():
+    from levi.own_units import OwnUnits
+
+    class OurUnit(OwnUnits):
+        """This test process stands for our levi-aeri-policy unit's only pid."""
+
+        def policy_units(self):
+            return ["levi-aeri-policy-test"]
+
+        def unit_pids(self, unit):
+            return {os.getpid()}
+
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen()
@@ -193,9 +204,10 @@ def test_the_policy_server_s_memory_is_found_through_its_listening_socket():
                 out = ""
             return subprocess.CompletedProcess(argv, 0, out, "")
 
-        assert gpumgr.policy_vram_mib([port], runner=runner) == 7685
+        view = OurUnit()
+        assert gpumgr.policy_vram_mib([port], runner=runner, view=view) == 7685
         assert (
-            gpumgr.policy_vram_mib([port + 1], runner=runner) is None
+            gpumgr.policy_vram_mib([port + 1], runner=runner, view=view) is None
         )  # nobody listens there
 
 
@@ -2517,6 +2529,7 @@ BASE_COMMIT = "d68f656"
 NEW_KEYS = (
     ("gpu", "quiet_states"),
     ("gpu", "quiet_pause_s"),
+    ("gpu", "policy_extra_ports"),
     ("vllm", "nice"),
     ("vllm", "cpus"),
     ("vllm", "gpu_retry_s"),
@@ -2580,6 +2593,7 @@ def test_a_new_setting_is_written_only_when_set(old_config, tmp_path):
     c = live_config.Config()
     c.gpu.quiet_states = ["homing"]
     c.gpu.quiet_pause_s = 120.0
+    c.gpu.policy_extra_ports = [8001]
     c.vllm.nice = 19
     c.vllm.cpus = "2-3"
     c.vllm.gpu_retry_s = 30.0

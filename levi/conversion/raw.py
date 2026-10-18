@@ -424,6 +424,11 @@ def demo_outcome(demo: Path) -> str | None:
         return None
     if meta.get("data_source") != "policy_rollout":
         return None
+    aeri_meta = (meta.get("eval") or {}).get("aeri")
+    if isinstance(aeri_meta, dict) and "subtask" in aeri_meta:
+        # An AERI subtask_loop rollout: its outcome belongs to the round (the
+        # run's round_label), never to this one subtask episode.
+        return None
     outcome = meta.get("eval", {}).get("outcome")
     if outcome in ("success", "failure"):
         return outcome

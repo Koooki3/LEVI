@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ListChecks } from "lucide-react";
 import { EmptyState, Progress } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
+import { progressKey } from "./run-logic";
 import { ModeChips, Note, stateName } from "./run-parts";
 import { useRunList } from "./run-poll";
 import type { RunSummary } from "./types";
@@ -29,7 +30,7 @@ export function RunRows({ runs }: { runs: RunSummary[] }) {
               <Progress
                 value={run.episodes_done}
                 max={total || 1}
-                label={t("automatic.run.list.progress")
+                label={t(progressKey(run.reset_mode))
                   .replace("{done}", String(run.episodes_done))
                   .replace("{total}", String(total))}
               />

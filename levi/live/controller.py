@@ -150,6 +150,7 @@ class Probes:
         ports=gpumgr.listening_ports,
         holders=gpumgr.gpu_holders,
         policy_vram=gpumgr.policy_vram_mib,
+        policy_pids=None,
         apps=None,
         ports_strict=None,
     ):
@@ -157,6 +158,13 @@ class Probes:
         self.ports = ports
         self.holders = holders
         self.policy_vram = policy_vram
+        # Which of the GPU's processes are the policy server (a replaced
+        # ``policy_vram`` is a fake machine: it answers for them too).
+        self.policy_pids = policy_pids or (
+            gpumgr.policy_gpu_pids
+            if policy_vram is gpumgr.policy_vram_mib
+            else (lambda ports, apps, **kw: set())
+        )
         # The yield rules read the machine strictly: a failure raises (and
         # is a reason to yield). A replaced ``ports``/``holders`` (a test's
         # fake machine) answers for them too.
@@ -227,6 +235,9 @@ class Controller:
         self._gate_lock = threading.Lock()
         self.gate_history: list = gating.history(config.live_dir, GATE_HISTORY_SHOWN)
         self._policy_mib = (0.0, None)
+        # Our own units' read-only view (levi.own_units); tests hand in a fake
+        # kernel tree. None: the real one.
+        self.own_view = None
         self.idle_since: float | None = None
         self._gate_opened_at: float | None = None
         self._waiting_since: dict = {}
@@ -553,6 +564,27 @@ class Controller:
                         lock_error = True
                 else:
                     lock_pids = [p for p in found if p not in ours]
+        policy_pids = set()
+        if apps:
+            # Our own policy server is what is evaluated, not "someone else"
+            # (``deployment`` says it is there): its memory is not foreign. It
+            # must be shown to be ours (its pids in the cgroup of one of our
+            # ``levi-aeri-policy-*`` units, within ``gpu.policy_budget_mib``):
+            # the machine is shared, and another person's server on the same
+            # port stays foreign.
+            try:
+                policy_pids = set(
+                    self.probes.policy_pids(
+                        [
+                            *(int(p) for p in c.gpu.policy_ports),
+                            *(int(p) for p in c.gpu.policy_extra_ports),
+                        ],
+                        apps,
+                        budget_mib=int(c.gpu.policy_budget_mib),
+                    )
+                )
+            except Exception:  # noqa: BLE001 - unknown: it counts as foreign
+                policy_pids = set()
         return gpumgr.yield_reasons(
             c,
             ports=self._ports_now,
@@ -561,6 +593,7 @@ class Controller:
             apps=apps,
             apps_error=apps_error,
             ours=ours,
+            policy_pids=policy_pids,
             lock_pids=lock_pids,
             lock_error=lock_error,
             check_gpu=looking,
@@ -647,11 +680,54 @@ class Controller:
         if not self.policy_up:
             return None
         if now - self._policy_mib[0] > ttl:
-            value = self.probes.policy_vram(
-                [int(p) for p in self.config.gpu.policy_ports]
-            )
+            value = self._policy_vram([int(p) for p in self.config.gpu.policy_ports])
             self._policy_mib = (now, value)
         return self._policy_mib[1]
+
+    def _view(self):
+        return self.own_view or gpumgr.OwnUnits()
+
+    def _own_vllm_pids(self, view) -> set:
+        """This process and the vLLM it started: the recorded leader (alive
+        with its recorded identity, checked before and after) and its
+        descendants from our own pids' ``task/*/children``. Never a listing of
+        ``/proc`` and never another pid's entry. Raises when it cannot be told."""
+        pids = {os.getpid()}
+        record = self.vllm._record()
+        leader = record.get("pid") if record else None
+        if not leader:
+            return pids
+        identity = record.get("identity")
+        if gpumgr.process_state(leader, identity) != "alive":
+            return pids
+        members = view.descendants(int(leader))
+        if gpumgr.process_state(leader, identity) != "alive":
+            raise ValueError("model owner identity changed while it was read")
+        return pids | members
+
+    def _policy_vram(self, ports, holders=None):
+        """The policy memory on ``ports`` (``gpumgr.policy_vram_mib``), with
+        this service's own GPU processes (its vLLM) left out of the upper
+        bound used when the listener is not one of our units. The own pids are
+        looked up only then (lazily), never while our unit serves the port."""
+        if self.probes.policy_vram is not gpumgr.policy_vram_mib:
+            return self.probes.policy_vram(ports)
+        view = self._view()
+
+        def ours():
+            try:
+                return self._own_vllm_pids(view), ""
+            except Exception as exc:  # noqa: BLE001 - a larger bound is the safe side
+                # Degraded: only this process is left out, so our own vLLM's
+                # memory is counted too and the bound is larger (vLLM sleeps
+                # sooner); said in the reason so it is not mistaken for a
+                # larger foreign server.
+                return {os.getpid()}, (
+                    "our own vLLM's processes could not be read "
+                    f"({type(exc).__name__}), so its memory is counted too"
+                )
+
+        return gpumgr.policy_vram_mib(ports, holders=holders, view=view, exclude=ours)
 
     def _need(self, profile, now, asleep=False) -> int:
         total = (self._vram[1] or {}).get("total_mib") or 32607
@@ -1459,7 +1535,67 @@ class Controller:
             # judgement is no reason to wake the model on top of them. (A
             # deployment is what it is for, and its own gate decides.)
             return False, "no_room", "yield: " + (self.yield_text() or "")
-        policy = self.policy_mib(now)
+        # A policy server that listens but holds less than
+        # ``gpu.policy_loaded_min_mib`` is still preallocating (or unreadable):
+        # waking vLLM's ~21 GB on top could squeeze it out. The batch path
+        # waits for it too (``_resident_step``); read now, not the 30 s cache.
+        # A server on ``policy_extra_ports`` is no deployment (``policy_up``
+        # stays False, and the budget planning is unchanged), but it holds
+        # the card the same way: each listening one is judged on its own.
+        listening = self._ports_now or ()
+        extra_up = [int(p) for p in c.gpu.policy_extra_ports if int(p) in listening]
+        if self.probes.policy_vram is gpumgr.policy_vram_mib and extra_up:
+            # The real lookup: one nvidia-smi (10 s timeout) for every port,
+            # not one per port inside the GPU mutex.
+            shared = gpumgr.gpu_holders()
+
+            def read(ports):
+                return self._policy_vram(ports, holders=shared)
+
+        else:
+            read = self._policy_vram
+        if self.policy_up:
+            policy = read([int(p) for p in c.gpu.policy_ports])
+            self._policy_mib = (now, policy)
+        else:
+            policy = None
+        main = ",".join(f":{int(p)}" for p in c.gpu.policy_ports)
+        for label, up, held_mib in (
+            ("", self.policy_up, policy),
+            *((f" on port {p}", True, read([p])) for p in extra_up),
+        ):
+            if up and isinstance(held_mib, gpumgr.ForeignEstimate):
+                where = label.replace(" on port ", ":") if label else main
+                return (
+                    False,
+                    "no_room",
+                    (
+                        f"the listener on {where} is not one of our "
+                        "levi-aeri-policy-* units (started by hand? see setup.md): "
+                        f"up to {int(held_mib)} MiB of the GPU is not ours, "
+                        "not waking vLLM beside it"
+                        + (f" ({held_mib.note})" if held_mib.note else "")
+                    ),
+                )
+            held = gpumgr.policy_loaded(c, up, held_mib)
+            if held == "loading":
+                return (
+                    False,
+                    "no_room",
+                    (
+                        f"the policy server{label} is listening but holds only "
+                        f"{held_mib} MiB: still loading"
+                    ),
+                )
+            if held == "unknown":
+                return (
+                    False,
+                    "no_room",
+                    (
+                        f"the policy server{label} is listening but its GPU memory "
+                        "cannot be read (unknown): not waking vLLM beside it"
+                    ),
+                )
         blocked = gpumgr.should_sleep(c, mode, free_mib=None, policy_mib=policy)
         if blocked:
             return False, "no_room", blocked[1]
@@ -1946,6 +2082,11 @@ class Controller:
                 "idle": idle,
                 "opened_at": self._gate_opened_at,
                 "policy_ports": [int(p) for p in self.config.gpu.policy_ports],
+                # Listed for the reader only: not a deployment, and not part
+                # of the stale-gate fallback (gating.closed reads policy_ports).
+                "policy_extra_ports": [
+                    int(p) for p in self.config.gpu.policy_extra_ports
+                ],
                 "updated_at": now,
             },
         )

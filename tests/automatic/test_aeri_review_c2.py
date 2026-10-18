@@ -449,8 +449,13 @@ def test_an_episode_ended_by_a_safety_stop_keeps_a_result(tmp_path):
     assert (
         result.rollout.sealed == "incomplete" and result.robot_home == "not_attempted"
     )
-    last = r.orch.journal.events[-1]
+    events = r.orch.journal.events
+    last = [e for e in events if e.record == "committed"][-1]
     assert last.to_state == "FAULT_LOCKED" and last.episode_result == result
+    # The lock acts first; the refusal that caused it is noted right after.
+    assert events[-2] is last
+    assert events[-1].note.code == "motion_refused"
+    assert "latched" in events[-1].note.detail
 
 
 def test_a_reset_whose_home_fails_keeps_a_result(tmp_path):

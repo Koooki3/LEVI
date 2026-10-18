@@ -62,7 +62,15 @@ RESET_ONLY_TRANSITIONS = frozenset(
         ("RESET_FINALIZE", "VERIFY_INITIAL"),
         ("RESET_FINALIZE", "WAIT_HUMAN"),
         ("RESET_FINALIZE", "FAULT_LOCKED"),
+        # subtask_loop only (outside this matrix): a reverse subtask goes on
+        # to the next without a home.
+        ("RESET_FINALIZE", "SCENE_ASSESS"),
     }
+)
+# Edges only the subtask_loop strategy takes (no fake run of these two modes
+# reaches them; tests/automatic/test_aeri_subtask_loop.py covers them).
+SUBTASK_ONLY_TRANSITIONS = frozenset(
+    {("RESET_FINALIZE", "SCENE_ASSESS"), ("PREFLIGHT", "PREFLIGHT")}
 )
 # The event-pause inference mode adds these edges independently of reset mode.
 # Legacy asynchronous fake runs cannot reach them; dedicated owned-runtime
@@ -75,7 +83,14 @@ EVENT_PAUSE_TRANSITIONS = frozenset(
         for role in ("FORWARD", "RESET")
         for target in (f"{role}_ACTIVE", "WAIT_HUMAN", "FAULT_LOCKED")
     }
+    # A paused forward judgement that ended the episode goes on to the
+    # ordinary finalize and home states; the reset role keeps waiting for a person.
+    | {("FORWARD_JUDGING", "FORWARD_FINALIZE")}
 )
+# Edges kept legal for journals written before a forward judgement went on to
+# FORWARD_FINALIZE. The orchestrator no longer takes them, so no run reaches
+# them; a dedicated test covers their cells.
+EVENT_PAUSE_LEGACY = frozenset({("FORWARD_JUDGING", "WAIT_HUMAN")})
 SNAPSHOT_SCHEMA = "levi.aeri.mode_matrix.v1"
 DOCS_SECTION = "aeri-reset-modes"
 DOCS_FILES = {
@@ -106,6 +121,11 @@ def _transition(a: str, b: str) -> str:
     return f"transition:{a}->{b}"
 
 
+# Capabilities only the subtask_loop strategy has (it is outside this matrix,
+# levi/automatic/subtask_loop.py): n/a in both modes compared here.
+_SUBTASK_ONLY = na("only the subtask_loop strategy (outside this matrix) has it")
+
+
 # --- the matrix ----------------------------------------------------------------------------------
 
 _NO_RESET = na("no reset policy runs: a scene that is not ready waits for a person")
@@ -131,6 +151,7 @@ _SAME_TRANSITIONS = (
     ("FORWARD_ACTIVE", "FORWARD_STOPPING"),
     ("FORWARD_ACTIVE", "FORWARD_JUDGING"),
     ("FORWARD_JUDGING", "FORWARD_ACTIVE"),
+    ("FORWARD_JUDGING", "FORWARD_FINALIZE"),
     ("FORWARD_JUDGING", "WAIT_HUMAN"),
     ("FORWARD_JUDGING", "FAULT_LOCKED"),
     ("FORWARD_ACTIVE", "FAULT_LOCKED"),
@@ -160,6 +181,11 @@ MODE_MATRIX: dict = {
         _transition(a, b): _per(_RESET_ONLY, _NO_RESET)
         for a, b in sorted(RESET_ONLY_TRANSITIONS)
     },
+    _transition("RESET_FINALIZE", "SCENE_ASSESS"): _both(_SUBTASK_ONLY),
+    # subtask.start_home (subtask_loop only): the prepared first-round home is a
+    # PREFLIGHT self-loop record (orchestrator.py); unregistered, test_mode_matrix
+    # and the guard failed on 7c4ea3df (validation 2026-10-18).
+    _transition("PREFLIGHT", "PREFLIGHT"): _both(_SUBTASK_ONLY),
     # The reset arbitration (reset_manager.check_plan / check_after).
     "arbitration:plan:ready": _both(SAME),
     "arbitration:plan:reset_required": _per(
@@ -184,6 +210,8 @@ MODE_MATRIX: dict = {
             "operator_stop",
             "policy_error",
             "watchdog_timeout",
+            # Frozen camera frames (camera_meta.py): a person, without a home.
+            "camera_stale",
         )
     },
     # metrics.report: every top-level key.
@@ -218,6 +246,14 @@ MODE_MATRIX: dict = {
     "metrics:scene_decisions_by_human": _both(SAME),
     # The operator's label against the automatic verdict (T-CL-14).
     "metrics:agreement": _both(SAME),
+    # The operator's early verdicts (terminal s/f/d, L2-AERI-OPERATOR-EARLY-STOP)
+    # and the discarded rounds the run could not replace.
+    "metrics:operator_verdicts": _both(SAME),
+    "metrics:discarded_beyond_limit": _both(SAME),
+    # subtask_loop's own counts: present and zero in both modes compared here.
+    "metrics:subtasks": _both(SAME),
+    # subtask_loop's per-round labels and rate (present, empty, in both modes).
+    "metrics:rounds": _both(SAME),
     # levi automatic subcommands (cli.build_parser).
     "cli:doctor": _per(
         SAME,
@@ -237,6 +273,8 @@ MODE_MATRIX: dict = {
     "cli:status": _both(SAME),
     "cli:report": _both(SAME),
     "cli:label": _both(SAME),
+    # Read-only rollout sets (subtask_loop notes; none here, so no rounds).
+    "cli:rollouts": _both(SAME),
     # Launched runs (T-CL-09: launch.py, runner.py, control.py).
     "cli:plan": _per(
         SAME,
@@ -465,6 +503,7 @@ _WORDS = {
 # The Chinese documentation's wording of every sentence in MODE_MATRIX (a
 # test requires one for each; a missing one would print the English).
 ZH = {
+    "only the subtask_loop strategy (outside this matrix) has it": "只有子任务循环策略（subtask_loop，不在本表比较之列）才有",
     "a real mode is refused for want of a scene provider that can answer too; "
     "a dry run plans the same way": (
         "真实模式还会因为没有能作答的场景提供方被拒绝；试运行的计划相同"

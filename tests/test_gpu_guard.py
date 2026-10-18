@@ -19,7 +19,6 @@ def guarded(monkeypatch, tmp_path):
     monkeypatch.delenv("LEVI_GPU_SHARING", raising=False)
     monkeypatch.setattr(gpu, "_state_dir", lambda: tmp_path / "models")
     monkeypatch.setattr(gpu.shutil, "which", lambda _: "/usr/bin/nvidia-smi")
-    monkeypatch.setattr(gpu, "_parent", lambda pid: None)
 
 
 def config(url="http://127.0.0.1:11435"):
@@ -40,7 +39,11 @@ def on_gpu(monkeypatch, apps, commands, total=16000, used=None, util=5, at=None)
 
     def smi(query, fields):
         if query == "compute-apps":
-            return [[str(pid), "python3", str(mib)] for pid, mib in apps]
+            # process_name: the executable's path (nvidia-smi's own column).
+            return [
+                [str(pid), (commands.get(pid) or "python3").split(" ")[0], str(mib)]
+                for pid, mib in apps
+            ]
         return [[str(total), str(used), str(util)]]
 
     monkeypatch.setattr(gpu, "_smi", smi)
@@ -86,9 +89,26 @@ def test_ollamas_own_model_process_is_not_someone_else(monkeypatch):
             810188: "/opt/ollama/bin/ollama serve",
         },
     )
-    monkeypatch.setattr(gpu, "_parent", lambda pid: 810188)
     assert gpu.sample()["processes"] == []
     assert gpu.require_free(config())["state"] == "free"
+
+
+def test_ollama_is_told_from_nvidia_smis_process_name_alone(monkeypatch):
+    # No /proc of the process (or of its parent) is read to tell Ollama.
+    on_gpu(monkeypatch, [(7, 3900)], {})
+    monkeypatch.setattr(
+        gpu,
+        "_smi",
+        lambda q, f: (
+            [["7", "/usr/local/lib/ollama/llama-server", "3900"]]
+            if q == "compute-apps"
+            else [["16000", "4400", "5"]]
+        ),
+    )
+    assert gpu.sample()["processes"] == []
+    assert not hasattr(gpu, "_parent")
+    assert gpu._is_ollama("/usr/bin/ollama") and not gpu._is_ollama("llama-server")
+    assert not gpu._is_ollama("/home/x/lib/llama-server")
 
 
 def test_a_process_merely_named_like_a_runner_is_not_trusted(monkeypatch):
@@ -97,7 +117,6 @@ def test_a_process_merely_named_like_a_runner_is_not_trusted(monkeypatch):
         [(5, 3900)],
         {5: "/home/bofang/llama-server --model x", 1: "/sbin/init"},
     )
-    monkeypatch.setattr(gpu, "_parent", lambda pid: 1)
     assert [row["pid"] for row in gpu.sample()["processes"]] == [5]
 
 
@@ -279,15 +298,27 @@ def vllm(url="http://127.0.0.1:8000"):
 
 
 def serving(monkeypatch, port=8000, listener=100, family=None):
-    """A server whose process ``listener`` listens on ``port``; ``family``
-    maps pid -> parent."""
+    """A server on ``port`` run by our own model unit: ``listener`` and the
+    pids that ``family`` (pid -> parent) leads to it are that unit's
+    cgroup.procs. ``gpu._served_pids`` is where ownership is decided (from
+    our own units only, tests/test_live_noroom_own.py)."""
+    family = family or {}
+
+    def ours(pid):
+        for _ in range(8):
+            if pid == listener:
+                return True
+            pid = family.get(pid)
+            if not pid:
+                return False
+        return False
+
+    unit = {listener} | {p for p in family if ours(p)}
     monkeypatch.setattr(
-        gpu, "_listening", lambda ports: {"4242"} if port in ports else set()
+        gpu,
+        "_served_pids",
+        lambda servers, view=None: set(unit) if port in servers else set(),
     )
-    monkeypatch.setattr(
-        gpu, "_socket_inodes", lambda pid: {"4242"} if pid == listener else set()
-    )
-    monkeypatch.setattr(gpu, "_parent", lambda pid: (family or {}).get(pid))
 
 
 def test_the_local_server_a_profile_points_at_is_ours(monkeypatch):
@@ -426,19 +457,22 @@ def test_any_spelling_of_this_machine_is_guarded(url, local):
     assert gpu.local_endpoint(url) is local
 
 
-def test_a_listening_socket_is_found_through_proc():
+def test_a_listening_socket_of_our_own_process_is_found_through_proc():
     import os
     import socket
 
+    from levi.own_units import OwnUnits
+
     if not os.path.exists("/proc/net/tcp"):
         pytest.skip("needs Linux /proc")
+    view = OwnUnits()
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen()
         port = listener.getsockname()[1]
-        inodes = gpu._listening({port})
-        assert inodes and inodes <= gpu._socket_inodes(os.getpid())
-        assert gpu._serves(os.getpid(), inodes)
+        inodes = view.listening_inodes({port})
+        # Our own pid's fds only: nobody else's process is read.
+        assert inodes and view.holds(os.getpid(), inodes) is True
     assert gpu.server_ports(vllm(), config()) == {8000}
 
 

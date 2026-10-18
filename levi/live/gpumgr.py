@@ -29,6 +29,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..own_units import OwnUnits
 from . import jsonio
 from .config import cpu_text, parse_cpus
 
@@ -247,6 +248,7 @@ def yield_reasons(
     apps: list | None,
     apps_error: str = "",
     ours: set = frozenset(),
+    policy_pids: set = frozenset(),
     lock_pids: list | None = None,
     lock_error: bool = False,
     check_gpu: bool = True,
@@ -256,8 +258,10 @@ def yield_reasons(
     ``ports``/``apps`` are None when they could not be read (then
     ``probe_error``); ``check_gpu`` False leaves the two GPU reasons out (the
     caller did not look: nothing is queued, no model is wanted).
-    ``lock_pids`` are the holders of ``gpu.lock_file`` other than this
-    service (None with ``lock_error``: the table could not be read)."""
+    ``policy_pids`` are the GPU processes of the policy server (the one
+    being evaluated, already expressed by ``deployment``): their memory is
+    not someone else's. ``lock_pids`` are the holders of ``gpu.lock_file``
+    other than this service (None with ``lock_error``: the table could not be read)."""
     y = config.gpu.yield_
     out: list = []
     if ports is None:
@@ -319,7 +323,9 @@ def yield_reasons(
                 )
             )
         else:
-            others = [a for a in apps if a["pid"] not in ours]
+            others = [
+                a for a in apps if a["pid"] not in ours and a["pid"] not in policy_pids
+            ]
             unknown = [a for a in others if a["memory_mib"] is None]
             used = sum(a["memory_mib"] or 0 for a in others)
             if used > y.foreign_gpu_mib or unknown:
@@ -653,6 +659,17 @@ def _witnesses(sessions, policy_since) -> bool:
     return False
 
 
+def _bound_text(policy_mib) -> str:
+    """What a ``ForeignEstimate`` adds to a reason that quotes it."""
+    if not isinstance(policy_mib, ForeignEstimate):
+        return ""
+    text = (
+        " (an upper bound: the listener is not one of our levi-aeri-policy-* "
+        "units, so every GPU process not ours is counted"
+    )
+    return text + (f"; {policy_mib.note})" if policy_mib.note else ")")
+
+
 def should_sleep(config, mode, *, free_mib: int | None, policy_mib: int | None):
     """``(code, why)`` a resident, awake vLLM must go to sleep, or None.
 
@@ -670,7 +687,7 @@ def should_sleep(config, mode, *, free_mib: int | None, policy_mib: int | None):
                 f"the policy server holds {policy_mib} MiB, over "
                 f"gpu.policy_budget_mib ({budget} MiB): it cannot share the card "
                 "with an awake vLLM; start it with "
-                "XLA_PYTHON_CLIENT_MEM_FRACTION=.22 (7.6 GB)"
+                "XLA_PYTHON_CLIENT_MEM_FRACTION=.22 (7.6 GB)" + _bound_text(policy_mib)
             ),
         )
     if free_mib is not None and free_mib < config.gpu.min_free_mib:
@@ -678,65 +695,109 @@ def should_sleep(config, mode, *, free_mib: int | None, policy_mib: int | None):
     return None
 
 
-def policy_vram_mib(
-    ports, *, tables=("/proc/net/tcp", "/proc/net/tcp6"), runner=subprocess.run
-):
-    """VRAM (MiB) held by the process that listens on one of ``ports``, from
-    the kernel's socket table, /proc/<pid>/fd and ``nvidia-smi``; None when
-    it cannot be told. Read-only: nothing connects to the port."""
-    inodes = set()
-    for table in tables:
-        try:
-            lines = Path(table).read_text().splitlines()[1:]
-        except OSError:
+def policy_gpu_pids(ports, apps, *, budget_mib, view=None) -> set:
+    """Pids among the GPU ``apps`` (rows with a ``pid`` and ``memory_mib``)
+    that are *our* policy server, not merely something listening on one of
+    ``ports``. The machine is shared: another person may serve a policy on the
+    same port, so ownership is decided only from our own registry
+    (``levi.own_units``): a GPU process counts only when
+
+    * its pid is in the ``cgroup.procs`` of one of our ``levi-aeri-policy-*``
+      units, and one of that unit's processes holds a socket listening on one
+      of ``ports`` (the kernel's socket table and the fds of our own pids), and
+    * the unit's GPU processes together hold at most ``budget_mib`` MiB
+      (``gpu.policy_budget_mib``; 0: no limit); an amount that cannot be read
+      fails the whole unit. Each unit is its own server with its own budget.
+
+    No other pid's ``/proc`` entry is read. A unit whose cgroup cannot be
+    read, or a systemd that cannot be asked, raises ``OSError``: the caller
+    exempts nothing (the memory stays foreign). Nothing connects."""
+    view = view or OwnUnits()
+    inodes = view.listening_inodes(ports)
+    if not inodes:
+        return set()
+    found = set()
+    for pids in view.servers(view.policy_units(), inodes).values():
+        members = [a for a in apps if a["pid"] in pids]
+        amounts = [a.get("memory_mib") for a in members]
+        if not members or any(m is None for m in amounts):
             continue
-        for line in lines:
-            fields = line.split()
-            if len(fields) < 10 or fields[3] != "0A":
-                continue
-            try:
-                port = int(fields[1].rsplit(":", 1)[1], 16)
-            except (IndexError, ValueError):
-                continue
-            if port in ports:
-                inodes.add(fields[9])
+        if budget_mib > 0 and sum(amounts) > budget_mib:
+            continue
+        found.update(a["pid"] for a in members)
+    return found
+
+
+class ForeignEstimate(int):
+    """A policy server's VRAM that is only an upper bound: something listens
+    on a policy port but is not one of our ``levi-aeri-policy-*`` units (or
+    their cgroups cannot be read), so its own memory cannot be told without
+    reading another process's ``/proc``. The bound is the GPU memory of every
+    process that is not ours (nvidia-smi's aggregate rows only). It counts for
+    ``should_sleep`` (``policy_large``) and the budget like a reading; an
+    online judgement refuses beside it (``Controller._online_wake``).
+    ``note``: why the bound is larger than it might be (our own pids could
+    not be told), said in the reasons that quote it."""
+
+    note = ""
+
+    @classmethod
+    def of(cls, mib: int, note: str = "") -> "ForeignEstimate":
+        out = cls(mib)
+        out.note = note
+        return out
+
+
+def policy_vram_mib(
+    ports, *, runner=subprocess.run, holders=None, view=None, exclude=()
+):
+    """VRAM (MiB) held by our policy unit(s) serving one of ``ports``: the
+    GPU processes in the ``cgroup.procs`` of a ``levi-aeri-policy-*`` unit
+    that listens there (``policy_gpu_pids``' rule, without the budget).
+
+    When something listens there but no unit of ours does (a server started
+    by hand, another person's, or cgroups that cannot be read): a
+    ``ForeignEstimate``, the sum of the GPU memory of every process not in
+    ``exclude`` (our own pids, for example our vLLM's; a callable is called
+    only then, so no own-pid lookup happens while our unit serves the port, and
+    may return ``(pids, note)``), a conservative upper
+    bound. None when it cannot be told at all (nobody listens, no GPU row).
+    Read-only: nothing connects, and no other pid's ``/proc`` entry is read.
+    ``holders``: an earlier ``gpu_holders()`` result to reuse (one nvidia-smi
+    for several lookups)."""
+    view = view or OwnUnits()
+    inodes = view.listening_inodes(ports)
     if not inodes:
         return None
-    holders = {h["pid"]: h["memory_mib"] for h in gpu_holders(runner)}
+    holders = {
+        h["pid"]: h["memory_mib"]
+        for h in (gpu_holders(runner) if holders is None else holders)
+    }
     if not holders:
         return None
+    try:
+        servers = view.servers(view.policy_units(), inodes)
+    except OSError:
+        servers = {}
+    if not servers:
+        note = ""
+        mine = exclude
+        if callable(exclude):
+            mine = exclude()
+            if isinstance(mine, tuple):
+                mine, note = mine
+        mine = set(mine)
+        return ForeignEstimate.of(
+            sum(m or 0 for pid, m in holders.items() if pid not in mine), note
+        )
     total, seen = 0, False
-    for pid, mib in holders.items():
-        if mib is None:
-            continue
-        if _serves(pid, inodes):
-            total += mib
-            seen = True
+    for pids in servers.values():
+        for pid in pids:
+            mib = holders.get(pid)
+            if mib is not None:
+                total += mib
+                seen = True
     return total if seen else None
-
-
-def _serves(pid, inodes, depth=6) -> bool:
-    """True when ``pid`` or an ancestor holds a listening socket in ``inodes``."""
-    for _ in range(depth):
-        if not pid or pid <= 1:
-            return False
-        try:
-            for fd in os.scandir(f"/proc/{pid}/fd"):
-                try:
-                    link = os.readlink(fd.path)
-                except OSError:
-                    continue
-                if link.startswith("socket:[") and link[8:-1] in inodes:
-                    return True
-        except OSError:
-            pass
-        try:
-            pid = int(
-                Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[1]
-            )
-        except (OSError, ValueError, IndexError):
-            return False
-    return False
 
 
 # --- host pressure (the online judgement's optional refusal) ----------------------

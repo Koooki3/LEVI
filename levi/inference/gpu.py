@@ -12,9 +12,10 @@ What it knows, from sampling ``nvidia-smi`` (no probing of anyone's process):
   arguments, so an actor restarted with a new checkpoint is still the same
   workload. Each signature's appearances are kept as intervals. A local
   OpenAI-compatible server a profile points at (vLLM) is that profile's own
-  model: its processes are recognised by the socket listening on the
-  profile's port, never by name, and that profile's requests do not wait for
-  them. To Ollama, and to a profile on another port, it is someone else's
+  model: its processes are the ``cgroup.procs`` of LEVI's own ``levi-live``
+  unit when a process of that unit holds the socket listening on the
+  profile's port (never by name, never by reading another process's
+  ``/proc``), and that profile's requests do not wait for them. To Ollama, and to a profile on another port, it is someone else's
   work.
 - **What kind of work it is.** A policy (``models/gpu-policy.json``) classes
   signatures as ``protect`` (never share: latency-sensitive work such as a
@@ -87,19 +88,15 @@ class GpuBusy(ValueError):
 
 
 def _cmdline(pid):
+    # Remaining "A" read (root AGENTS.md boundary, user 2026-10-14): the
+    # command line of every GPU process, other people's included, feeds
+    # ``signature``. Still to be replaced by our own registry (scheduled
+    # separately, docs/LIVE.md limits); ownership is never decided from it.
     try:
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError:
         return ""
     return raw.replace(b"\0", b" ").decode(errors="replace").strip()
-
-
-def _parent(pid):
-    try:
-        fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
-        return int(fields[1])
-    except (OSError, IndexError, ValueError):
-        return None
 
 
 def server_ports(*configs):
@@ -121,71 +118,97 @@ def server_ports(*configs):
     return ports
 
 
-def _listening(ports):
-    """Inodes of the TCP sockets listening (state 0A) on ``ports``."""
-    inodes = set()
-    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
-        try:
-            lines = Path(table).read_text().splitlines()[1:]
-        except OSError:
-            continue
-        for line in lines:
-            fields = line.split()
-            if len(fields) < 10 or fields[3] != "0A":
-                continue
-            try:
-                port = int(fields[1].rsplit(":", 1)[1], 16)
-            except (IndexError, ValueError):
-                continue
-            if port in ports:
-                inodes.add(fields[9])
-    return inodes
+def model_units() -> list:
+    """LEVI's own model-server units: the ``levi-live`` unit
+    (``LEVI_LIVE_UNIT``, default ``levi-live.service``), whose vLLM runs in
+    its cgroup. A name that is not a ``levi-live*`` unit is ignored."""
+    from levi.live.service_control import (
+        DEFAULT_UNIT,
+        ENV_UNIT,
+        FORBIDDEN_IN_UNIT,
+        UNIT_NAME,
+    )
+
+    name = (os.environ.get(ENV_UNIT) or DEFAULT_UNIT).strip()
+    if name and not name.endswith(".service"):
+        name += ".service"
+    if not UNIT_NAME.fullmatch(name) or FORBIDDEN_IN_UNIT in name:
+        return []  # never the product's own unit
+    return [name]
 
 
-def _socket_inodes(pid):
-    inodes = set()
+def _live_vllm_records() -> list:
+    """Where the live service records the vLLM it started (``vllm.json`` in
+    the workspace its home names): our own registry for a service started in
+    a terminal (``levi live start --daemon``), whose vLLM is in no unit."""
     try:
-        fds = list(Path(f"/proc/{pid}/fd").iterdir())
-    except OSError:
-        return inodes
-    for fd in fds:
+        from levi.live import locate
+
+        named, _ = locate.remembered(locate.home())
+    except Exception:  # noqa: BLE001 - no record: nothing is ours
+        return []
+    return [Path(named) / "live" / "vllm.json"] if named else []
+
+
+def _recorded_vllm_pids(view, records=None) -> set:
+    """The recorded vLLM leader and its descendants, when the record's pid is
+    still the process recorded (its identity: start time and boot). Only our
+    own recorded pid and its children are read. Anything unreadable: none."""
+    from levi.live import gpumgr, jsonio
+
+    found = set()
+    for path in _live_vllm_records() if records is None else records:
         try:
-            link = os.readlink(fd)
-        except OSError:
+            record = jsonio.read(path)
+            pid = int(record["pid"])
+            identity = record.get("identity")
+            if pid <= 1 or gpumgr.process_state(pid, identity) != "alive":
+                continue
+            pids = view.descendants(pid)
+            if gpumgr.process_state(pid, identity) != "alive":
+                continue  # replaced while its children were read
+            found |= pids
+        except Exception:  # noqa: BLE001, S112 - unreadable: not ours
             continue
-        if link.startswith("socket:["):
-            inodes.add(link[8:-1])
-    return inodes
+    return found
 
 
-def _serves(pid, inodes, depth=8):
-    """True when ``pid`` or one of its ancestors (``depth`` in all) holds a
-    listening socket in ``inodes``: the process is part of that server --
-    vLLM's engine core is a child of the API server that listens."""
-    for _ in range(depth):
-        if not pid or pid <= 1:
-            return False
-        if _socket_inodes(pid) & inodes:
-            return True
-        pid = _parent(pid)
-    return False
+def _served_pids(servers, view=None, records=None) -> set:
+    """Pids of LEVI's own model server listening on one of ``servers``: the
+    ``cgroup.procs`` of one of our ``model_units()`` one of whose processes
+    holds that listening socket. Only the kernel's socket tables and the fds
+    of our own pids are read, never another process's ``/proc`` entry; a
+    unit that cannot be read serves nothing (its processes count as someone
+    else's work, so the profile waits)."""
+    from levi.own_units import OwnUnits
+
+    view = view or OwnUnits()
+    inodes = view.listening_inodes(servers)
+    if not inodes:
+        return set()
+    served = set()
+    try:
+        found = view.servers(model_units(), inodes)
+        served = set().union(*found.values()) if found else set()
+    except OSError:
+        pass
+    # The live service's own vLLM outside any unit: its recorded pids, when
+    # one of them holds the listening socket.
+    recorded = _recorded_vllm_pids(view, records)
+    if any(view.holds(p, inodes) is True for p in sorted(recorded)):
+        served |= recorded
+    return served
 
 
-def _is_ollama(pid, command):
-    """Ollama's own model process: `ollama runner` in older releases,
-    `llama-server` started by `ollama serve` in newer ones. Recognised by
-    being Ollama's binary, living in Ollama's install tree, or having an
-    `ollama` parent -- never by a name alone that anyone could reuse."""
-    program = command.split(" ", 1)[0] if command else ""
+def _is_ollama(process_name):
+    """Ollama's own model process, from nvidia-smi's ``process_name`` (the
+    executable's full path; no process is read): `ollama runner` in older
+    releases, `llama-server` from Ollama's install tree in newer ones -- never
+    by a name alone that anyone could reuse."""
+    program = (process_name or "").strip()
     if os.path.basename(program).startswith("ollama"):
         return True
-    if "/ollama" in program and "/lib/" in program:
-        return True
-    parent = _parent(pid) if pid else None
-    if parent:
-        parent_program = _cmdline(parent).split(" ", 1)[0]
-        return os.path.basename(parent_program).startswith("ollama")
-    return False
+    return "/ollama" in program and "/lib/" in program
 
 
 def signature(command):
@@ -249,18 +272,18 @@ def sample(servers=()):
             "ours": [],
         }
     processes, ours, served = [], [], []
-    inodes = _listening(set(servers)) if servers else set()
+    served_pids = _served_pids(set(servers)) if servers else set()
     for parts in apps:
         if len(parts) < 3 or not parts[0].isdigit():
             continue
         pid = int(parts[0])
         command = _cmdline(pid) or parts[1]
         row = {"pid": pid, "command": command[:200], "memory_mib": _int(parts[2])}
-        if _is_ollama(pid, command):
+        if _is_ollama(parts[1]):
             ours.append(row)
             continue
         row["signature"] = signature(command)
-        if inodes and _serves(pid, inodes):
+        if pid in served_pids:
             served.append(row)
             continue
         processes.append(row)

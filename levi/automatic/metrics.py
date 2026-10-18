@@ -127,6 +127,11 @@ _ENDED_OF_STOP = {
     "horizon_exhausted": "budget",
     "goal_verified": "early_stop",
     "operator_stop": "operator_stop",
+    # A person ended the episode with a verdict (terminal s/f/d): like a stop,
+    # it does not carry over to unattended runs.
+    "operator_verdict": "operator_stop",
+    # subtask_loop: ended before its budget for the VLM's done check.
+    "subtask_early_check": "early_stop",
 }
 # The automatic verdict for the agreement, from the final judgement:
 # decided (success, failure), left undecided, or none (not judged).
@@ -143,6 +148,8 @@ AGREEMENT_MIN_N = 10
 TRUTH = ("adjudicated_then_operator", "adjudicated")
 LABEL_SCHEMA = "levi.aeri.label.v1"
 RESET_MODES = ("single_reset_policy", "human_assisted")  # = modes.RESET_MODES
+# Every mode a run header may name (subtask_loop is outside the matrix).
+KNOWN_RESET_MODES = (*RESET_MODES, "subtask_loop")
 SCENE_CHECKS = ("provider", "operator_attested")
 # A scene check sending the run to a person: the human_assisted mode's reset.
 SCENE_STATES = frozenset({"VERIFY_INITIAL", "SCENE_ASSESS"})
@@ -436,7 +443,15 @@ def label_operator(run_dir, episode_id: str, value: str, *, by: str, note="") ->
         raise LabelRefused(
             f"{episode_id} is a {role} episode: only forward episodes are labelled"
         )
-    if episode_id not in ended_forward(Journal.read(Path(run_dir)).events):
+    events = Journal.read(Path(run_dir)).events
+    if getattr(_header(events), "reset_mode", None) == "subtask_loop":
+        # m31: a subtask episode carries no outcome of its own; the operator's
+        # verdict belongs to the round (``label_round``, round_label.jsonl).
+        raise LabelRefused(
+            f"{episode_id} is a subtask_loop episode: the outcome belongs to its "
+            "round (round_label), never to one subtask episode"
+        )
+    if episode_id not in ended_forward(events):
         raise LabelRefused(
             f"{episode_id} has not ended in this run (no result in its journal): "
             "only an ended forward episode takes a label"
@@ -444,6 +459,267 @@ def label_operator(run_dir, episode_id: str, value: str, *, by: str, note="") ->
     return LabelStore(run_dir).add(
         "operator_label", episode_id, value, by=by, note=note, supersede=True
     )
+
+
+# --- subtask_loop: the operator's verdict is the ROUND's ---------------------------------------------
+
+ROUND_LABEL_FILE = "round_label.jsonl"
+ROUND_LABEL_SCHEMA = "levi.aeri.round_label.v1"
+ROUND_VALUES = ("success", "failure", "discarded")
+
+
+def label_round(
+    run_dir,
+    round_id: str,
+    value: str,
+    *,
+    by: str,
+    forward: list,
+    note: str = "",
+    reverse: list | None = None,
+    source: str = "terminal",
+) -> dict:
+    """The operator's verdict on one subtask_loop round (terminal s/f/d), in
+    ``labels/round_label.jsonl``, apart from every per-episode label: the
+    round's forward subtask episodes that ran are listed as its members
+    (``members.forward``; the reverse episodes follow in a ``members`` line,
+    ``round_members``) and none of them gets a success/failure of its own, so
+    nothing per-episode reaches export, the pool or curation. ``discarded`` is
+    out of every rate. Refused without a member (a round aborted before any
+    step has no verdict to keep)."""
+    if value not in ROUND_VALUES:
+        raise LabelRefused(
+            f"{value!r} is not a round label ({', '.join(ROUND_VALUES)})"
+        )
+    if not isinstance(by, str) or not PRINCIPAL.fullmatch(by):
+        raise LabelRefused("by is an opaque principal id (no names, no addresses)")
+    if not forward:
+        raise LabelRefused(f"{round_id}: no forward episode of the round ran")
+    record = {
+        "schema": ROUND_LABEL_SCHEMA,
+        "kind": "round_label",
+        "record": "label",
+        "round_id": round_id,
+        "value": value,
+        "by": by,
+        "note": str(note)[:300],
+        "at_wall_ns": time.time_ns(),
+        "members": {"forward": list(forward), "reverse": list(reverse or [])},
+        # "terminal" (s/f/d during the run) or "post_run" (levi automatic
+        # label --round): both are a person's; a later line supersedes.
+        "source": source,
+        "supersedes": sum(
+            1
+            for line in _round_lines(run_dir)
+            if line.get("record") == "label" and line.get("round_id") == round_id
+        ),
+    }
+    return _append_round(run_dir, record)
+
+
+def _round_lines(run_dir) -> list:
+    path = Path(run_dir) / "labels" / ROUND_LABEL_FILE
+    try:
+        data = path.read_bytes()
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+    out = []
+    for line in data.split(b"\n")[:-1]:
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(value, dict) and value.get("kind") == "round_label":
+            out.append(value)
+    return out
+
+
+def rounds_of(events) -> dict:
+    """``{round_id: {"round", "subtasks", "checks", "forward", "reverse"}}``
+    of a subtask_loop journal: each released round, its started subtasks
+    (loop, index, attempt, instruction, episode, ran), the VLM's checks, and
+    its forward/reverse episodes that **ran** (``_ran``)."""
+    ran = _ran(events)
+    out: dict = {}
+    current = None
+    for event in events:
+        if event.record != "note" or event.note is None:
+            continue
+        code = event.note.code
+        if code not in ("subtask_round_released", "subtask_started", "subtask_check"):
+            continue
+        try:
+            detail = json.loads(event.note.detail)
+        except ValueError:
+            continue
+        if not isinstance(detail, dict):
+            continue
+        if code == "subtask_round_released":
+            current = detail.get("round_id")
+            if isinstance(current, str):
+                out[current] = {
+                    "round": detail.get("round"),
+                    "subtasks": [],
+                    "checks": [],
+                    "forward": [],
+                    "reverse": [],
+                }
+            continue
+        found = out.get(current)
+        if found is None:
+            continue
+        if code == "subtask_started":
+            episode = detail.get("episode_id")
+            loop = detail.get("loop")
+            found["subtasks"].append(
+                {
+                    "loop": loop,
+                    "index": detail.get("index"),
+                    "attempt": detail.get("attempt"),
+                    "instruction": detail.get("instruction"),
+                    "episode_id": episode,
+                    "ran": episode in ran,
+                }
+            )
+            if episode in ran:
+                found["forward" if loop == "forward" else "reverse"].append(episode)
+        else:
+            found["checks"].append(
+                {k: detail.get(k) for k in ("loop", "index", "attempt", "value")}
+            )
+    return out
+
+
+def _ran(events) -> set:
+    """m32: the episodes that ran a step: their result committed a sealed
+    (``complete``) rollout. An episode aborted before its first step has an
+    ``incomplete`` one and is no member of anything."""
+    return {
+        event.episode_id
+        for event in events
+        if event.record == "committed"
+        and event.episode_result is not None
+        and event.episode_result.rollout.sealed == "complete"
+    }
+
+
+def label_round_after(run_dir, round_id: str, value: str, *, by, note="") -> dict:
+    """An operator's post-run label of a subtask_loop round (``levi automatic
+    label --round``): the same record as the terminal's, ``source
+    post_run``, members from the journal. Refused: not a subtask_loop run, an
+    unknown round, a round none of whose forward episodes ran, a missing or
+    malformed principal. A later label supersedes, both stay on file."""
+    from .journal import Journal
+
+    if not isinstance(by, str) or not PRINCIPAL.fullmatch(by):
+        raise LabelRefused(
+            "--by is required: the opaque id of the person who labels "
+            "(no names, no addresses)"
+        )
+    events = Journal.read(Path(run_dir)).events
+    if getattr(_header(events), "reset_mode", None) != "subtask_loop":
+        raise LabelRefused("round labels belong to subtask_loop runs only")
+    rounds = rounds_of(events)
+    if round_id not in rounds:
+        raise LabelRefused(f"{round_id!r} is not a round of this run")
+    found = rounds[round_id]
+    if not found["forward"]:
+        raise LabelRefused(f"{round_id}: no forward episode of the round ran a step")
+    return label_round(
+        run_dir,
+        round_id,
+        value,
+        by=by,
+        forward=found["forward"],
+        reverse=found["reverse"],
+        note=note,
+        source="post_run",
+    )
+
+
+def round_members(run_dir, round_id: str, reverse: list) -> dict:
+    """The reverse episodes of a labelled round (they run after the verdict)."""
+    record = {
+        "schema": ROUND_LABEL_SCHEMA,
+        "kind": "round_label",
+        "record": "members",
+        "round_id": round_id,
+        "at_wall_ns": time.time_ns(),
+        "members": {"reverse": list(reverse)},
+    }
+    return _append_round(run_dir, record)
+
+
+def _append_round(run_dir, record) -> dict:
+    folder = Path(run_dir) / "labels"
+    folder.mkdir(parents=True, exist_ok=True)
+    line = (json.dumps(record, sort_keys=True) + "\n").encode()
+    with (folder / ".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        descriptor = os.open(
+            folder / ROUND_LABEL_FILE, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644
+        )
+        try:
+            os.write(descriptor, line)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    return record
+
+
+def round_labels(run_dir) -> dict:
+    """``{round_id: {"value", "by", "members": {"forward", "reverse"}}}``, the
+    last label line of a round winning; a torn last line is ignored."""
+    path = Path(run_dir) / "labels" / ROUND_LABEL_FILE
+    try:
+        data = path.read_bytes()
+    except (FileNotFoundError, NotADirectoryError):
+        return {}
+    out: dict = {}
+    for line in data.split(b"\n")[:-1]:
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(value, dict) or value.get("kind") != "round_label":
+            continue
+        found = out.setdefault(
+            value["round_id"],
+            {"value": None, "by": None, "members": {"forward": [], "reverse": []}},
+        )
+        if value.get("record") == "label":
+            found["value"], found["by"] = value.get("value"), value.get("by")
+            found["source"] = value.get("source", "terminal")
+            found["members"]["forward"] = list(value["members"].get("forward", []))
+            if value["members"].get("reverse"):
+                found["members"]["reverse"] = list(value["members"]["reverse"])
+        else:
+            found["members"]["reverse"] = list(value["members"].get("reverse", []))
+    return out
+
+
+def round_summary(events, run_dir=None) -> dict:
+    """Per ROUND (subtask_loop): the operator's round labels against the
+    rounds the forward loops ended; a round with more subtasks weighs the
+    same. ``discarded`` is out of the success rate's denominator. There is
+    no automatic round verdict (the VLM's checks only drive the flow), so
+    agreement and early stop do not exist here."""
+    labels = round_labels(run_dir) if run_dir is not None else {}
+    counts = {v: 0 for v in ROUND_VALUES}
+    for found in labels.values():
+        if found["value"] in counts:
+            counts[found["value"]] += 1
+    ended = subtask_summary(events)["rounds"]
+    return {
+        "rounds_ended": ended,
+        "labelled": sum(counts.values()),
+        "outcomes": counts,
+        "unlabelled": max(0, ended - sum(counts.values())),
+        "success_rate": share(counts["success"], counts["success"] + counts["failure"]),
+        "agreement": None,
+        "early_stop": None,
+        "note": "per round, from the operator's s/f/d; subtask episodes carry no outcome",
+    }
 
 
 # --- what the journal says --------------------------------------------------------------------------
@@ -742,6 +1018,74 @@ def agreement(records, lines) -> dict:
         ),
         "total": _agree(forward, view),
         "by_ended_by": {name: _agree(groups[name], view) for name in ENDED_BY},
+    }
+
+
+VERDICT_NOTE = "operator_verdict"
+
+
+def operator_verdicts(events) -> list:
+    """The operator's verdicts that ended a forward episode early (terminal
+    s/f/d, journal note ``operator_verdict``), in journal order: ``label``
+    (``success``/``failure``/``discard``), ``episode_id``, ``step`` and
+    ``frame_index`` when the key came, ``taken_step``, ``wall_ns``,
+    ``source``, and ``excluded`` (a ``discard``: left out of the statistics;
+    its operator label is ``discarded``). Kept apart from the model's
+    judgements; a note that cannot be read is skipped."""
+    out = []
+    for event in events:
+        if event.record != "note" or event.note is None:
+            continue
+        if event.note.code != VERDICT_NOTE:
+            continue
+        try:
+            value = json.loads(event.note.detail)
+        except ValueError:
+            continue
+        if not isinstance(value, dict) or value.get("label") not in (
+            "success",
+            "failure",
+            "discard",
+        ):
+            continue
+        out.append(
+            {
+                "episode_id": value.get("episode_id"),
+                "label": value["label"],
+                "step": value.get("step"),
+                "frame_index": value.get("frame_index"),
+                "taken_step": value.get("taken_step"),
+                "wall_ns": value.get("wall_ns"),
+                "source": value.get("source"),
+                "excluded": value["label"] == "discard",
+            }
+        )
+    return out
+
+
+def verdict_summary(events) -> dict:
+    """Counts of ``operator_verdicts`` and the episodes left out (``discard``)."""
+    events = list(events)
+    found = operator_verdicts(events)
+    return {
+        "label_kind": "operator_label",
+        "source": VERDICT_NOTE,
+        "episodes": len(found),
+        "labels": {
+            k: sum(v["label"] == k for v in found)
+            for k in ("success", "failure", "discard")
+        },
+        "excluded": [v["episode_id"] for v in found if v["excluded"]],
+        # Discarded rounds the run did not replace (``max_discarded_rounds``
+        # reached): the run has this many valid rounds fewer than planned.
+        "discarded_beyond_limit": sum(
+            1
+            for event in events
+            if event.record == "note"
+            and event.note is not None
+            and event.note.code == "discard_limit_reached"
+        ),
+        "verdicts": found,
     }
 
 
@@ -1095,7 +1439,7 @@ def mode_of(
     human_assisted; else the mode is unknown (every intervention then
     counts as unplanned)."""
     for name, value, allowed in (
-        ("reset_mode", reset_mode, RESET_MODES),
+        ("reset_mode", reset_mode, KNOWN_RESET_MODES),
         ("scene_check", scene_check, SCENE_CHECKS),
     ):
         if value is not None and value not in allowed:
@@ -1105,7 +1449,7 @@ def mode_of(
     source = {}
     if reset_mode is not None:
         source["reset_mode"] = "argument"
-    elif getattr(header, "reset_mode", None) in RESET_MODES:
+    elif getattr(header, "reset_mode", None) in KNOWN_RESET_MODES:
         reset_mode, source["reset_mode"] = header.reset_mode, "run_header"
     elif manifest.get("reset_mode") in RESET_MODES:
         reset_mode, source["reset_mode"] = manifest["reset_mode"], "manifest"
@@ -1125,6 +1469,111 @@ def mode_of(
         # Before contract minor 1 only machine providers existed.
         scene_check, source["scene_check"] = "provider", "default"
     return {"reset_mode": reset_mode, "scene_check": scene_check, "source": source}
+
+
+def subtask_summary(events) -> dict:
+    """The subtask_loop run's own counts, from its journal notes
+    (``levi/automatic/subtask_loop.py``): loops, subtasks dispatched, retries
+    and the VLM's check answers. A check answer is a model judgement that
+    drives the flow only: it is never a success here or anywhere else (the
+    rounds' labels are the operator's s/f/d)."""
+    loops, answers = [], {"true": 0, "false": 0, "null": 0}
+    started = retries = 0
+    for event in events:
+        if event.record != "note" or event.note is None:
+            continue
+        code = event.note.code
+        if code not in (
+            "subtask_loop_done",
+            "subtask_check",
+            "subtask_started",
+            "subtask_retry",
+        ):
+            continue
+        try:
+            detail = json.loads(event.note.detail)
+        except ValueError:
+            continue
+        if not isinstance(detail, dict):
+            continue
+        if code == "subtask_loop_done":
+            loops.append(
+                {
+                    k: detail.get(k)
+                    for k in (
+                        "round",
+                        "loop",
+                        "subtasks",
+                        "retries",
+                        "checks",
+                        "outcome",
+                    )
+                }
+            )
+        elif code == "subtask_check":
+            value = detail.get("value")
+            answers[
+                "true" if value is True else "false" if value is False else "null"
+            ] += 1
+        elif code == "subtask_started":
+            # An episode continuing an attempt after an early check
+            # (``segment`` > 1) is not another subtask.
+            if not (type(detail.get("segment")) is int and detail["segment"] > 1):
+                started += 1
+        else:
+            retries += 1
+    return {
+        "rounds": sum(1 for loop in loops if loop["loop"] == "forward"),
+        "loops": loops,
+        "subtasks": started,
+        "retries": retries,
+        "checks": answers,
+        "note": "check answers are the VLM's, never a success or a label",
+    }
+
+
+def subtask_progress(events) -> dict:
+    """Where a subtask_loop run is (read-only, from its notes): ``phase``
+    (idle | forward | reverse_pending | reverse), the round, and the latest
+    subtask started and checked. For the page; it decides nothing."""
+    phase, latest, check, rounds = "idle", None, None, 0
+    for event in events:
+        if event.record != "note" or event.note is None:
+            continue
+        code = event.note.code
+        if code not in ("subtask_started", "subtask_check", "subtask_loop_done"):
+            continue
+        try:
+            detail = json.loads(event.note.detail)
+        except ValueError:
+            continue
+        if not isinstance(detail, dict):
+            continue
+        if code == "subtask_started":
+            latest = detail
+            phase = "reverse" if detail.get("loop") == "reverse" else "forward"
+        elif code == "subtask_check":
+            check = detail
+        else:
+            if detail.get("loop") == "forward":
+                rounds += 1
+                phase = "reverse_pending"
+            else:
+                phase = "idle"
+    return {
+        "phase": phase,
+        "rounds_ended": rounds,
+        "round": (latest or {}).get("round"),
+        "subtask": None
+        if latest is None
+        else {
+            k: latest.get(k)
+            for k in ("loop", "index", "attempt", "instruction", "episode_id")
+        },
+        "last_check": None
+        if check is None
+        else {k: check.get(k) for k in ("loop", "index", "attempt", "value")},
+    }
 
 
 def _count(values) -> dict:
@@ -1149,8 +1598,15 @@ def report(
     from. ``reset_mode``/``scene_check``: the run's, when the caller knows
     them (its job plan); otherwise read from the run (``mode_of``)."""
     events = list(events)
-    records = episodes(events, manifest=manifest, termination=termination)
+    every = episodes(events, manifest=manifest, termination=termination)
+    # Rounds the operator discarded with ``d`` (L2-AERI-OPERATOR-EARLY-STOP)
+    # are no rounds: out of the counts, the autonomous rate's denominator,
+    # the agreement and the truth; ``operator_verdicts`` still lists them.
+    verdicts = verdict_summary(events)
+    excluded = set(verdicts["excluded"])
+    records = [r for r in every if r.episode_id not in excluded]
     outcome_truth = labels.truth("task_outcome", truth) if labels else {}
+    outcome_truth = {e: v for e, v in outcome_truth.items() if e not in excluded}
     scene_truth = labels.truth("initial_state", truth) if labels else {}
     mode = mode_of(
         events, manifest=manifest, reset_mode=reset_mode, scene_check=scene_check
@@ -1175,7 +1631,7 @@ def report(
         "early_termination": early_termination(
             records, outcome_truth, max_steps=max_steps
         ),
-        "reset": reset(records, decisions, scene_truth, events, by_human=by_human),
+        "reset": reset(every, decisions, scene_truth, events, by_human=by_human),
         "automation": run_automation,
         "turnaround": turnaround(events),
         "time_per_valid_episode_ms": time_per_valid_episode(events, records),
@@ -1185,5 +1641,13 @@ def report(
         "scene_decisions_by_human": scene_by_human(decisions, mode["scene_check"]),
         "agreement": agreement(
             records, labels.lines("operator_label") if labels else []
+        ),
+        # The person's early verdicts (terminal s/f/d), apart from the run's
+        # own: a discard is excluded (its operator label is ``discarded``).
+        "operator_verdicts": verdicts,
+        "discarded_beyond_limit": verdicts["discarded_beyond_limit"],
+        "subtasks": subtask_summary(events),
+        "rounds": round_summary(
+            events, labels.folder.parent if labels is not None else None
         ),
     }

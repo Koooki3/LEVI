@@ -798,7 +798,7 @@ def plan(request: LaunchRequest, *, now_ns=None, path=None, key=None) -> LaunchP
                 "W_CONTRACT_DRAFT",
                 False,
                 f"Initial State Contract {described['id']}@{described['version']} "
-                f"is {described['status']}: not confirmed by the user (HA-23)",
+                f"is {described['status']}: scene contract has not been confirmed by the user",
                 severity="warning",
             )
     for problem in cli.launch_problems(

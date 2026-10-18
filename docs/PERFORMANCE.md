@@ -464,7 +464,7 @@ transforms) has not been frozen; per-array readiness is insufficient. The new
 adapters also provide no physical robot-hold or paused-camera proof.
 
 The current operator session is outside the writable user-manager delegation,
-and the trusted delegated supervisor bootstrap has not been installed. A future
+and the trusted delegated supervisor bootstrap is installed nowhere (its software candidate is in the next section). A future
 explicit deployment must preserve the canonical driver/child ancestry and locked
 open-file descriptor inside an approved delegated supervisor; this software
 candidate does not create cgroups or systemd units. CPU fake tests exercise the
@@ -567,3 +567,108 @@ Owned workers expose `collect_sdk_completion(request)` returning the original su
 The dedicated `test_borrowed_cycle_execution.py` check requires a fresh interpreter and explicit `LEVI_JOINT_KERNEL_ROOT`. It loads the original Kernel/Cycle and candidate owned files from their recorded source paths. CPU fake IPC verifies exactly one original begin/finish, genuine matching SDK receipt structure, and an independent final whole-group observation. A peer becoming busy after the receipt prevents publication and retains the original slot. This is software combination evidence, without a production provider, real SDK/native bootstrap, physical hold or Orchestrator mount.
 
 Borrowed execution requires the exact Kernel queries described in the runtime ownership section above. Equal token copies are rejected before observer, worker or revoke side effects. Dispatch/result permission uses `accepts_exact_request`; collection and revocation require `owns_exact_request` for the same original object. Revoked/late originals may still drain genuine ACKs with result None. A Kernel missing the exact contract is refused; there is no value-acceptance fallback.
+
+
+## Host supervisor entry (software candidate, opt-in)
+
+`python -m levi.live.owned_supervisor --config <file.json>` is the entry that the
+resource driver's run wrapper (`scheduler.py run`) starts as the lease child. It
+is not installed anywhere, creates no cgroup, unit or lock, imports no model
+library before its checks pass, and contains no model: the factory
+specification comes from a caller-supplied `setup` hook (`module:callable`
+returning a `SupervisorPlan`).
+
+Order of work, each refusal logging `owned-supervisor: REFUSED [stage] reason` on
+stderr and exiting with its own code:
+
+| Exit | Stage | Meaning |
+| --- | --- | --- |
+| 0 | - | stop requested; every worker stopped and confirmed exited |
+| 2 | config | config unreadable, unknown key, bad `ResidentGroupSpec`, bad timings |
+| 10 | evidence | lease row missing, `launch_phase != "registered"`, lease not active or cancelled, `LEVI_GPU_LOCK_*` unset or not the scheduler's `.gpu.lock`, supervisor not a descendant of the driver wrapper / registered child, flock holder not the driver or the inherited open-file description not held (`ResourceDriverObserver.require_held`) |
+| 11 | cgroup | not launched into the delegated root, an extra process in the root, a role leaf missing or not empty, cgroup v2 absent (`CgroupGroupScope` / `CgroupScope`) |
+| 12 | setup | setup hook missing, failing, or its factory differs from the declared capability |
+| 13 | launch | a worker did not start; those already started are stopped first |
+| 14 | worker | a worker left while the supervisor was running; the rest are stopped |
+| 15 | stop | exit initially unconfirmed; returned only after fresh complete worker and containment exit evidence |
+| 16 | lease | lease released, cancelled or flock/containment lost while running; workers are stopped |
+
+While it runs it keeps the inherited flock descriptor and the cgroup root open
+and rechecks `ResourceDriverObserver.require_held`, the root membership and each
+worker's PID/start/boot identity every `poll_s`. On SIGTERM/SIGINT or any of the
+failures above it first sends `stop` to every worker, waits `stop_grace_s`, then
+sends SIGKILL only to the process group of a worker that is alive with the
+recorded identity, then waits `kill_wait_s`. If exit is still unconfirmed, it
+stays alive, retains the inherited flock, and rechecks every original worker's
+`exited()` (dead leader, empty leaf, known descendants gone) and the complete
+original group every `poll_s`. Only the supervisor may remain in the root; all
+declared leaves, including unstarted roles, must be empty. A dead leader's bare
+PGID is never signalled; unresolved descendants or unreadable evidence can
+therefore retain the lock indefinitely. Repeated SIGTERM/SIGINT and lease loss
+do not shorten this wait.
+
+Each observation atomically updates `stop-receipt.json` in `state_dir`, with
+`phase="holding_exit"` or `"exit_confirmed"`, per-role `exited`,
+`containment_confirmed`, and `observed_monotonic_ns`. Exit code 15 remains sticky
+if shutdown needed this retention wait, even after evidence recovers; a normal
+confirmed stop still returns 0. `ready.json` is written once every worker has its
+SDK ready ACK. The receipt is an operator aid, not a proof: the group exit proof
+is `OwnedGroupObserver.exit_proof`, which requires the original supervisor to be
+gone, so a surviving trusted process collects it
+(`Supervisor.collect_exit_proof` delegates to it).
+
+The run wrapper sets the launch environment the supervisor reads and requires:
+`LEVI_LEASE_ID`, `LEVI_LEASE_GENERATION`, `LEVI_SESSION_ID`, `LEVI_GPU_LOCK_HELD`
+(must be `1`) and `LEVI_GPU_LOCK_FD`. They are set by the scheduler, not by users.
+
+Config keys: `scheduler_root`, `clock_domain`, `cgroup_root`, `group_id`,
+`state_dir`, `roles` (a list of `role`, `capability_id`, `leaf`), optional
+`setup`, `poll_s`, `stop_grace_s`, `kill_wait_s`, `launch_timeout_s`. Unknown keys
+are refused; physical parameters have no defaults here because there are none.
+
+**Upstream defect fixed.** `owned_runtime._inherited_flock` listed `/proc/<pid>/fdinfo` and then read every entry, but the listing borrows the lowest free descriptor, which is closed again before it is read; a lock descriptor numbered above it raised `FileNotFoundError`, so `ResourceDriverObserver` could not succeed for a real inherited lock. It now skips vanished entries; the match criteria are unchanged. A fresh-process regression test covers it.
+
+### Process topology with `fr3_run` (decision needed from T8)
+
+Constraints: the supervisor must descend from the lease's registered child and
+share the driver's flock open-file description; its cgroup root may hold only
+the supervisor; and `OwnedModelWorker` holds the parent end of a private
+`multiprocessing.Pipe` plus the in-process `WorkloadBroker`/`RuntimeOwnership`
+objects. Today there is no cross-process request path: whoever calls
+`submit`/`collect_sdk_completion` must be the process that launched the workers.
+`fr3_run` takes `RobotLock` (`/tmp/levi-aeri-fr3-arm.lock`, `O_CLOEXEC`, so no child
+inherits it) in `execute()` and reads the operator confirmation and `WAIT_HUMAN`
+answers with `input()` on its own tty; it also replaces SIGINT/SIGTERM while running.
+
+| Option | RobotLock | Terminal confirmation | Result |
+| --- | --- | --- | --- |
+| Supervisor is the parent of a separate `fr3_run` | taken by the child; the supervisor never holds it | needs the tty passed through | rejected: the child would sit in the delegated root (the root must contain only the supervisor) and cannot reach the workers' private pipes without a new IPC |
+| Supervisor is a child of `fr3_run` | held by `fr3_run`, not inherited, so the arm lock outlives the supervisor if `fr3_run` waits for it | stays on `fr3_run`'s tty (supervisor gets `/dev/null`) | needs `fr3_run` to pass the lock fd (`pass_fds`) and to start the child inside the delegated root, and still needs an IPC for requests; if `fr3_run` is killed the supervisor loses the registered-child ancestry, sees the lease as lost (exit 16) and stops its workers |
+| Scheduler starts both side by side (two leases) | separate processes, clean | clean | rejected for now: the supervisor would need its own GPU lease, and requests again need an authenticated IPC |
+
+**Recommendation: one process.** The registered lease child is a process that
+runs this supervisor's checks and launch (as a library, entered through
+`main(setup=...)` whose `on_ready` runs the existing `fr3_run` flow) and then
+`fr3_run`'s Orchestrator in the same process. That keeps the only supported
+request path (private pipes plus in-process broker), keeps the delegated root
+single-process, keeps the tty and `RobotLock` exactly as `fr3_run` has them
+today, and needs no new IPC or trust boundary. Costs: `fr3_run`'s own SIGINT/SIGTERM
+handler must be merged with the supervisor's so the robot stop path runs first and
+`Supervisor.shutdown` runs after it; launching workers before the operator
+confirmation phrase means the GPU is held while the operator reads, so the
+alternative is to start workers right after the confirmation but before taking
+`RobotLock` (T8 chooses; a refusal then costs the robot lock nothing in both
+orders). This changes `fr3_run`, which this task did not do.
+
+On-site items (not verified here): whether this account may use a user cgroup
+delegation at all; how the supervisor is placed into the delegated root
+(`systemd-run --user --scope -p Delegate=yes` and the like was not run); that the
+scheduler's gate-exec keeps the supervisor's PID equal to the registered child;
+the real worker launch (`OwnedModelWorker.launch`) with a real factory and GPU;
+stop timing of a real vLLM engine; the SIGTERM merge with `fr3_run`.
+
+The tests (`tests/live/test_owned_supervisor.py`) use real CPU processes, a real
+`flock` and `/proc` ancestry, a temporary fake cgroup tree and fake workers that
+are real `python` children; they cover every refusal above, SIGTERM ordering,
+SIGKILL escalation, an unconfirmable exit, early worker exit and lease loss. They
+do not create a cgroup, use a GPU or a model library, or touch a robot port.

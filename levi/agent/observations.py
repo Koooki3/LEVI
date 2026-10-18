@@ -296,6 +296,12 @@ def plan_refinement(wb, run, episode, proposals, limit, observed, *, candidates=
             except ContextOverflow:
                 if not group:
                     break
+                # A split does not make an oversized proposal fit. Retry the
+                # whole partition at a coarser spacing before returning batches.
+                try:
+                    frame_scope(context, root, episode, [proposal], spacing, limit)
+                except ContextOverflow:
+                    break
                 batches.append(group)
                 group = [proposal]
         else:

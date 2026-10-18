@@ -814,7 +814,12 @@ def cancel(job_id: str) -> dict:
         except (ProcessLookupError, PermissionError):
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.kill(group, signal.SIGTERM)
-        threading.Timer(ESCALATE_SECONDS, _escalate, (job_id, group)).start()
+        threading.Thread(
+            target=_escalate_unless_gone,
+            args=(job_id, group),
+            name=f"pool-escalate-{job_id}",
+            daemon=True,
+        ).start()
         return {**get(job_id), "status": "cancelling"}
     if status in STOPPED or status == "planned":
         _cleanup_after_cancel(job)
@@ -823,6 +828,39 @@ def cancel(job_id: str) -> dict:
         _sweep_quietly()
         return get(job_id)
     raise ValueError("The job is not running")
+
+
+def _group_alive(group: int) -> bool:
+    try:
+        os.killpg(group, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _escalate_unless_gone(job_id: str, group: int) -> None:
+    """Wait up to ``ESCALATE_SECONDS`` for the cancelled group to exit, then
+    escalate. Returns as soon as the group is gone or the job has stopped
+    (not live, or its worker exited: ``_escalate`` would kill nothing then),
+    so a worker that obeys SIGTERM leaves no waiting thread behind."""
+    deadline = time.monotonic() + ESCALATE_SECONDS
+    try:
+        pgid = os.getpgid(group)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        pgid = group
+    path = _path(job_id)
+    while time.monotonic() < deadline:
+        if not _group_alive(pgid):
+            return
+        job = read(path, {}) or {}
+        if normalize(job.get("status")) not in LIVE or not worker_alive(job):
+            return
+        time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
+    _escalate(job_id, group)
 
 
 def _escalate(job_id: str, group: int) -> None:

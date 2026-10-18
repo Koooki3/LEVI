@@ -15,6 +15,7 @@ from pathlib import Path
 
 from levi.domain import aeri
 
+from . import camera_meta
 from .adapters import legacy_live
 from .journal import write_durable
 
@@ -121,6 +122,15 @@ def retained_hash(path):
         os.close(fd)
 
 
+def _encode_jpeg(pixels):
+    import cv2
+
+    ok, data = cv2.imencode(".jpg", pixels)
+    if not ok:
+        raise ValueError("current camera frame encoding failed")
+    return data.tobytes()
+
+
 class FileProvider:
     def __init__(self, root, kind, robot, clock, contract, *, model_spec=None):
         self.root, self.kind = Path(root), kind
@@ -128,6 +138,9 @@ class FileProvider:
         self.store = None
         self.model_spec = model_spec
         self.pending = {}
+        # One JPEG per camera frame (view, seq): a frame shared by two
+        # requests is encoded once (frame bus; no metadata: every time).
+        self._jpeg = camera_meta.JpegCache(_encode_jpeg)
 
     def use_evidence(self, store):
         self.store = store
@@ -168,18 +181,14 @@ class FileProvider:
         if self.model_spec is not None and self.kind == "reset_judgement":
             request["observed_through_ns"] = observed["observed_ns"]
         frames = []
-        import cv2
-
+        meta = observed.get("image_meta")
         failure = None
         if self.store is None:
             failure = "current evidence store is missing"
         else:
             try:
                 for view, pixels in observed["images_bgr"].items():
-                    ok, data = cv2.imencode(".jpg", pixels)
-                    if not ok:
-                        raise ValueError("current camera frame encoding failed")
-                    encoded = data.tobytes()
+                    encoded = self._jpeg.get(view, pixels, (meta or {}).get(view))
                     saved = self.store.keep_frame(
                         view + ":" + key(request["request_id"])[:16], encoded
                     )
@@ -196,7 +205,13 @@ class FileProvider:
                         raise ValueError(
                             "current camera evidence was not durably retained"
                         )
-                    frames.append({"view": view, **saved})
+                    frames.append(
+                        {
+                            "view": view,
+                            **saved,
+                            **camera_meta.frame_fields(meta, view),
+                        }
+                    )
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 failure = str(exc)
         if not frames and failure is None:

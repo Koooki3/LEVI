@@ -1,9 +1,11 @@
 "use client";
 // The window of one run: the 15-state graph, the current episode and counters,
-// what the run needs from a person, the event timeline, the metrics and a
-// stop button. Everything on it comes from the run's own files through the
-// read-only API; the only writes are a person's (stop, label, resume, scene
-// answer), each behind its own control.
+// what the run needs from a person, the subtask-loop view (reset mode
+// `subtask_loop`, read-only), its rollout sets (forward / reverse set per
+// round, every attempt with its videos; read-only), the event timeline, the
+// metrics and a stop button. Everything on it comes from the run's own files
+// through the read-only API; the only writes are a person's (stop, label,
+// resume, scene answer), each behind its own control.
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { ArrowLeft, CircleAlert } from "lucide-react";
@@ -13,19 +15,28 @@ import { automaticApi, newRequestId } from "./api";
 import { errorText } from "./launch-panel";
 import { PendingCard } from "./pending-card";
 import { RequirementsCard } from "./requirements-card";
+import { RolloutSetsSection } from "./rollout-sets";
 import {
   currentEpisodeText,
   isBlind,
   stepProgressText,
   mergeCard,
+  progressKey,
   resultDone,
   resultKey,
 } from "./run-logic";
 import { ModeChips, Note, StateGraph, stateName } from "./run-parts";
-import { useRunEvents, useRunMetrics, useRunSnapshot } from "./run-poll";
+import {
+  useRunEvents,
+  useRunMetrics,
+  useRunSnapshot,
+  useRunSubtasks,
+} from "./run-poll";
 import { RunMetrics } from "./run-metrics";
 import { RunTimeline } from "./run-timeline";
 import { SceneCheck } from "./scene-check";
+import { hiddenEpisodesOf, isSubtaskLoop } from "./subtask-logic";
+import { SubtaskLoopView } from "./subtask-loop";
 import type { PendingCard as PendingCardData } from "./types";
 
 export function RunWindow({ runId }: { runId: string }) {
@@ -34,6 +45,8 @@ export function RunWindow({ runId }: { runId: string }) {
   const snapshot = poll.data;
   const events = useRunEvents(runId, snapshot?.seq);
   const metrics = useRunMetrics(runId, snapshot?.seq);
+  const subtaskLoop = isSubtaskLoop(snapshot?.reset_mode);
+  const subtasks = useRunSubtasks(runId, snapshot?.seq, subtaskLoop);
   const { confirm, dialog } = useConfirm();
   const [posted, setPosted] = useState<PendingCardData | null>(null);
   const [stopping, setStopping] = useState(false);
@@ -163,7 +176,7 @@ export function RunWindow({ runId }: { runId: string }) {
             <Progress
               value={snapshot.episodes.done}
               max={Math.max(snapshot.episodes.total, 1)}
-              label={t("automatic.run.list.progress")
+              label={t(progressKey(snapshot.reset_mode))
                 .replace("{done}", String(snapshot.episodes.done))
                 .replace("{total}", String(snapshot.episodes.total))}
             />
@@ -210,6 +223,7 @@ export function RunWindow({ runId }: { runId: string }) {
               runId={runId}
               question={snapshot.scene_question}
               onAnswered={poll.refresh}
+              terminalOnly={snapshot.scene_answer_terminal_only === true}
             />
           )}
           {card && (
@@ -217,8 +231,30 @@ export function RunWindow({ runId }: { runId: string }) {
               runId={runId}
               card={card}
               challenge={snapshot.challenge}
+              terminalOnly={snapshot.resume_terminal_only === true}
               onLabelled={setPosted}
               onChanged={poll.refresh}
+            />
+          )}
+
+          {subtaskLoop && (
+            <SubtaskLoopView
+              runId={runId}
+              data={subtasks.data}
+              error={subtasks.error}
+              hiddenEpisodes={hiddenEpisodesOf(card)}
+              progress={snapshot.subtask ?? null}
+              provider={snapshot.subtask_provider ?? null}
+              maxRetries={
+                snapshot.requirements?.subtask_loop?.subtask_max_retries ?? null
+              }
+            />
+          )}
+          {subtaskLoop && (
+            <RolloutSetsSection
+              runId={runId}
+              seq={snapshot.seq}
+              hiddenEpisodes={hiddenEpisodesOf(card)}
             />
           )}
 
@@ -226,6 +262,11 @@ export function RunWindow({ runId }: { runId: string }) {
             <h2 id="ar-graph-title">{t("automatic.run.graph")}</h2>
             {snapshot.reset_mode === "human_assisted" && (
               <p className="ar-muted">{t("automatic.run.graph.manual_note")}</p>
+            )}
+            {subtaskLoop && (
+              <p className="ar-muted">
+                {t("automatic.run.graph.subtask_note")}
+              </p>
             )}
             <StateGraph
               state={snapshot.state}

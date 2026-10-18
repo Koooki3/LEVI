@@ -404,3 +404,53 @@ def test_rebuild_keeps_lessons_and_never_writes_into_a_ledger(bench, dataset):
     _, after = closed(wb, agent, run)
     assert after["schema"] == "levi.harness.ledger.v1"
     assert after["run_id"] == before["run_id"]
+
+
+@pytest.mark.parametrize("middle", [False, True], ids=["tail", "middle"])
+@pytest.mark.parametrize("limit", [6, 4], ids=["coarsen", "cannot-fit"])
+def test_a_split_rechecks_its_new_singleton(tmp_path, monkeypatch, middle, limit):
+    from types import SimpleNamespace
+
+    import numpy as np
+    import pandas as pd
+
+    from levi.agent import observations
+    from levi.agent.schema import TaskContext
+
+    context = TaskContext(
+        repo_id="local/fixture",
+        episodes=[0],
+        instruction="Refine the draft",
+        provider="external",
+        cameras=["camera"],
+        workflow={
+            "kind": "temporal",
+            "boundary_window_seconds": 0.2,
+            "boundary_tolerance_seconds": 0.1,
+            "max_evidence_frames": 100,
+        },
+    )
+    times = np.arange(61) / 10
+    table = pd.DataFrame({"timestamp": times, "frame_index": range(len(times))})
+    monkeypatch.setattr(observations, "episode_times", lambda *args: (table, times))
+    wb = SimpleNamespace(store=SimpleNamespace(run_dir=lambda _: tmp_path))
+    run = {"id": "fixture", "context": context.model_dump()}
+    large = observations.Candidate(2.0)
+    large.end = 2.4
+    draft = [observations.Candidate(0.0), large]
+    if middle:
+        draft.append(observations.Candidate(4.0))
+    if limit == 4:
+        with pytest.raises(observations.ContextOverflow, match="even one attempt"):
+            observations.plan_refinement(wb, run, 0, draft, limit, 0)
+        return
+    batches = observations.plan_refinement(wb, run, 0, draft, limit, 0)
+    assert len(batches) > 1
+    assert [p for batch in batches for p in batch.boundaries] == draft
+    assert all(batch.spacing == 0.2 for batch in batches)
+    for batch in batches:
+        frames = observations.frame_scope(
+            context, tmp_path / "input", 0, batch.boundaries, batch.spacing, limit
+        )
+        assert len(frames) <= limit
+    assert all(a.end == b.start for a, b in itertools.pairwise(batches))

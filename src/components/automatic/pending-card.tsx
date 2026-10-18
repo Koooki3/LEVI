@@ -192,12 +192,15 @@ export function PendingCard({
   runId,
   card,
   challenge,
+  terminalOnly = false,
   onLabelled,
   onChanged,
 }: {
   runId: string;
   card: PendingCardData;
   challenge: string;
+  /** Standalone real run: no resume form, only the terminal instruction. */
+  terminalOnly?: boolean;
   /** The card the label call returned (shown until a poll catches up). */
   onLabelled: (card: PendingCardData) => void;
   onChanged: () => void;
@@ -374,12 +377,23 @@ export function PendingCard({
         </section>
       )}
 
-      <div className="ar-actions">
-        <Button variant="primary" onClick={() => setResuming(true)}>
-          {t("automatic.run.resume.open")}
-        </Button>
-      </div>
-      {resuming && (
+      {terminalOnly ? (
+        <Note
+          tone="warning"
+          icon={TriangleAlert}
+          title={t("automatic.run.resume.terminal_title")}
+          role="status"
+        >
+          {t("automatic.run.resume.terminal_detail").replace("{run}", runId)}
+        </Note>
+      ) : (
+        <div className="ar-actions">
+          <Button variant="primary" onClick={() => setResuming(true)}>
+            {t("automatic.run.resume.open")}
+          </Button>
+        </div>
+      )}
+      {resuming && !terminalOnly && (
         <ResumeDialog
           runId={runId}
           expectedSeq={card.resume_seq}

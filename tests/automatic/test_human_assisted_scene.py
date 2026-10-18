@@ -492,6 +492,40 @@ def test_the_file_transport_round_trip(tmp_path):
     assert not (root / "questions" / "q-1.json").exists()
 
 
+def test_the_page_channel_of_a_real_run_asks_but_never_answers(tmp_path):
+    """Decision UI-2: on a real-robot run the page's file channel shows the
+    question and its frames, but its answers are moved away, noted and
+    never produce an assessment; only the other channel answers."""
+    root = tmp_path / "scene"
+    ignored = []
+    page = human.AskOnlyTransport(human.FileTransport(root), on_ignored=ignored.append)
+    terminal = human.QueueTransport()
+    rig = person_run(tmp_path, human.BothTransport(page, terminal))
+    request = {
+        "request_id": f"{RUN}.forward.0001:scene1",
+        "run_id": RUN,
+        "episode_id": f"{RUN}.forward.0001",
+        "target": "initial_state",
+    }
+    ticket = rig.scene.submit(request)
+    shown = json.loads(
+        (root / "questions" / f"{request['request_id']}.json").read_text()
+    )
+    assert shown["frames"] and shown["nonce"]  # the page still shows it
+    yes = {"object_at_source": True, "gripper_open": True}
+    human.write_answer(root, shown, yes)
+    assert rig.scene.collect(ticket, timeout_ns=10**9) is None
+    assert list((root / "answers").glob("*.json")) == []  # moved, never re-read
+    assert ignored == [request["request_id"]]
+    assert ("scene_answer_page_ignored", f"page: {request['request_id']}") in (
+        rig.scene.drain_notes()
+    )
+    terminal.answer(request["request_id"], yes)
+    raw = rig.scene.collect(ticket, timeout_ns=10**9)
+    assert json.loads(raw)["decision"] == "ready"
+    assert not (root / "questions" / f"{request['request_id']}.json").exists()
+
+
 def test_a_new_provider_withdraws_questions_left_by_a_dead_process(tmp_path):
     root = tmp_path / "scene"
     human.FileTransport(root).ask({"request_id": "old", "predicates": []})

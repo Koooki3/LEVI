@@ -135,6 +135,30 @@ def test_n_rounds_forward_home_scene_reset_next(tmp_path):
     assert found["automation"]["interventions"] == 0
 
 
+def test_an_offline_provider_ready_still_releases_without_a_terminal(tmp_path):
+    """L2-UI2-PROVIDER-RELEASE changes the real-robot entry only: an offline
+    (fake) run's provider answer is the decision, waited for scene_timeout_ns
+    in one collect, with no person and no terminal."""
+    waits = []
+
+    class Recorded(ev.FakeSceneAssessor):
+        def collect(self, ticket, *, timeout_ns):
+            waits.append(timeout_ns)
+            return super().collect(ticket, timeout_ns=timeout_ns)
+
+    w = world(
+        tmp_path,
+        cfg=make_config(episodes=1),
+        scene=lambda clock: Recorded([], clock, RUN, default=READY),
+    )
+    assert w.orch.run() == "COMPLETED"
+    assert ("VERIFY_INITIAL", "FORWARD_ACTIVE") in [
+        (a, b) for a, b, _ in committed(w.orch)
+    ]
+    assert waits and set(waits) == {w.r.config.scene_timeout_ns}
+    assert w.r.config.scene_timeout_ns != w.r.config.human_scene_timeout_ns
+
+
 def test_a_seeded_run_replays_byte_for_byte(tmp_path):
     first = world(tmp_path / "a", seed=11)
     second = world(tmp_path / "b", seed=11)

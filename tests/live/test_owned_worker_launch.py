@@ -139,12 +139,38 @@ def test_worker_executes_the_supervisor_levi_origin_not_a_shadow(tmp_path):
     assert str(worker) in result.stderr
 
 
-def test_worker_refuses_levi_modules_outside_its_pinned_root(tmp_path):
-    from levi.live import owned_worker
+_ORIGIN_PROBE = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from levi.live import owned_worker
+try:
+    owned_worker._require_origin(sys.argv[2])
+except ValueError as exc:
+    print("ValueError", exc)
+else:
+    print("ok")
+"""
 
-    with pytest.raises(ValueError, match="origin"):
-        owned_worker._require_origin(str(tmp_path))
-    owned_worker._require_origin(str(Path(owned.__file__).resolve().parents[2]))
+
+def _origin_check(root, check_root):
+    # A fresh interpreter: the pytest process holds unrelated levi.* modules
+    # (e.g. namespace packages without a source loader) that the check rejects.
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", _ORIGIN_PROBE, str(root), str(check_root)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+def test_worker_refuses_levi_modules_outside_its_pinned_root(tmp_path):
+    real = Path(owned.__file__).resolve().parents[2]
+    assert _origin_check(real, real) == "ok"
+    refused = _origin_check(real, tmp_path)
+    assert refused.startswith("ValueError") and "origin" in refused
 
 
 def _factory_root(root):

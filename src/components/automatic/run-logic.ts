@@ -90,7 +90,12 @@ export function stateGraph(
 ): GraphLane[] {
   const lanes: GraphLane[] = STATE_LANES.map((lane) => ({
     id: lane.id,
-    key: lane.key,
+    // A subtask loop has no reset policy: its reverse loop's subtasks are
+    // the reset episodes.
+    key:
+      lane.id === "reset" && mode === "subtask_loop"
+        ? "automatic.run.lane.reset_subtask"
+        : lane.key,
     nodes: lane.states.map((name) => ({
       state: name,
       status:
@@ -121,7 +126,15 @@ export const EXECUTION_MODE_LABEL: Record<ExecutionMode, string> = {
 export const RESET_MODE_LABEL: Record<ResetMode, string> = {
   single_reset_policy: "automatic.run.reset.single_reset_policy",
   human_assisted: "automatic.run.reset.human_assisted",
+  subtask_loop: "automatic.run.reset.subtask_loop",
 };
+/** The progress label of a run: a subtask loop counts rounds, not episodes
+ * (its `episodes.done` / `episodes_done` is the rounds ended). */
+export function progressKey(mode: string | null | undefined): string {
+  return mode === "subtask_loop"
+    ? "automatic.run.list.progress_rounds"
+    : "automatic.run.list.progress";
+}
 /** Modes that move the robot (the first release has no adapter for them). */
 export function movesRobot(mode: ExecutionMode | string | undefined): boolean {
   return !!mode && mode !== "dry_run" && mode !== "shadow";

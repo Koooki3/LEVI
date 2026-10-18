@@ -182,6 +182,11 @@ class FakeRobot:
         self.home_calls = 0
         self.observe_calls = 0
         self.holds = 0
+        # The admission gate, as the real bridge keeps it: "open" (default),
+        # "closed" (stop_admission), "home_only" (inside home_under_closed_gate).
+        self.admission = "open"
+        self.gate_windows = 0  # home-only windows opened
+        self.gate_refused: list = []  # why home_under_closed_gate said no
         self._503 = 0
         self._stale = 0
         self._frozen = False
@@ -234,6 +239,16 @@ class FakeRobot:
     def _latch(self, why: str) -> None:
         self.latched = self.latched or why
 
+    def stop_admission(self) -> None:
+        """Close the gate (a pause); a home-only window ends at once."""
+        self.admission = "closed"
+
+    def reopen_admission(self) -> None:
+        """Reopen the gate (a resume); refused inside a home-only window."""
+        if self.admission == "home_only":
+            raise RuntimeError("home-only window open: admission is not reopened")
+        self.admission = "open"
+
     def step(self, action, *, token) -> StepResult:
         with self._lock:
             number = self.step_calls
@@ -244,6 +259,9 @@ class FakeRobot:
             except Exception as exc:  # noqa: BLE001 - the fence's refusal
                 self.refused.append(("policy_steps", getattr(exc, "code", str(exc))))
                 return StepResult("no", "token_refused", number)
+            if self.admission != "open":
+                self.refused.append(("policy_steps", "admission_" + self.admission))
+                return StepResult("no", "admission_" + self.admission, number)
             if "red_light" in faults:
                 self.red_light = True
                 self._latch("red_light")
@@ -283,6 +301,15 @@ class FakeRobot:
             return StepResult("yes", "ok", number)
 
     def home(self, *, token) -> HomeResult:
+        return self._home(token, gated=False)
+
+    def home_under_closed_gate(self, *, token) -> HomeResult:
+        """The home that runs while admission is closed: it needs the closed
+        mode, a current home token, no latch and no red light; it opens a
+        home-only window for its own duration and always leaves it closed."""
+        return self._home(token, gated=True)
+
+    def _home(self, token, *, gated: bool) -> HomeResult:
         with self._lock:
             number = self.home_calls
             self.home_calls += 1
@@ -291,19 +318,141 @@ class FakeRobot:
                 self.authorize(token, "home", self.clock.now())
             except Exception as exc:  # noqa: BLE001
                 self.refused.append(("home", getattr(exc, "code", str(exc))))
+                if gated:
+                    self.gate_refused.append("token_refused")
                 return HomeResult("no", "token_refused", None)
-            if self.latched:
+            # The old home needs an open gate (the real bridge refuses it on a
+            # closed one); the gated home needs a closed gate.
+            if self.admission != ("closed" if gated else "open"):
+                self.refused.append(("home", "admission_" + self.admission))
+                if gated:
+                    self.gate_refused.append("admission_" + self.admission)
+                return HomeResult("no", "admission_" + self.admission, None)
+            if self.latched or (gated and self.red_light):
                 self.refused.append(("home", "latched"))
+                if gated:
+                    self.gate_refused.append("latched")
                 return HomeResult("no", "latched", None)
-            self.motions.append(("home", token.episode_id, token.transaction_id))
-            if "crash_after_send" in faults:
-                raise SimulatedCrash("crash after home was sent")
-            if "no_reply" in faults:
-                return HomeResult("unknown", "no_reply", None)
-            if "home_miss" in faults:
-                return HomeResult("no", "home_out_of_tolerance", 12.0)
-            self.pose = list(HOME_POSE)
-            return HomeResult("yes", "ok", 0.4)
+            if gated:
+                self.admission = "home_only"
+                self.gate_windows += 1
+            try:
+                return self._home_motion(token, faults)
+            finally:
+                if gated:
+                    self.admission = "closed"
+
+    def _home_motion(self, token, faults) -> HomeResult:
+        self.motions.append(("home", token.episode_id, token.transaction_id))
+        if "crash_after_send" in faults:
+            raise SimulatedCrash("crash after home was sent")
+        if "no_reply" in faults:
+            return HomeResult("unknown", "no_reply", None)
+        if "home_miss" in faults:
+            return HomeResult("no", "home_out_of_tolerance", 12.0)
+        self.pose = list(HOME_POSE)
+        return HomeResult("yes", "ok", 0.4)
+
+
+class GateFakeRobot(FakeRobot):
+    """FakeRobot that also keeps the bridge's admission-gate record: generation,
+    closure time, pose counters and a snapshot, and a specific reopen of one named
+    interval that raises the bridge's refusal type. A closed-gate home is a
+    home-only window as in ``Robot.home_under_closed_gate``: entering is +1, a stop
+    inside it is +1 and starts the closure at the stop, leaving a gate that is not
+    yet closed is +1 with the leaving time; so a window ends as a new closed
+    interval (generation +2). For the tests of the FR3 intervention hooks; the
+    plain FakeRobot has no snapshot, and tests rely on that."""
+
+    def __init__(self, *args, snapshot_type, refused_type, **kwargs):
+        # The snapshot and refusal classes are injected (fr3_bridge.AdmissionSnapshot
+        # and AdmissionRefused): this module imports nothing from levi.
+        super().__init__(*args, **kwargs)
+        self._snapshot_type = snapshot_type
+        self._refused_type = refused_type
+        self._gate_lock = threading.Lock()
+        self._generation = 0
+        self._closed_from = None
+        self._pose_attempts = self._pose_rejected = self._home_count = 0
+        self._home_only_from = None
+
+    def stop_admission(self):
+        with self._gate_lock:
+            if self.admission != "closed":
+                super().stop_admission()
+                self._generation += 1
+                self._closed_from = self.clock.now()
+        return self.admission_snapshot()
+
+    def reopen_admission(self) -> None:
+        was = self.admission
+        super().reopen_admission()  # refused inside a home-only window
+        with self._gate_lock:
+            if was == "closed":
+                self._generation += 1
+                self._closed_from = None
+
+    def reopen_admission_if(self, *, generation, closed_from_ns) -> None:
+        with self._gate_lock:
+            if (
+                self.admission != "closed"
+                or type(generation) is not int
+                or type(closed_from_ns) is not int
+                or self._generation != generation
+                or self._closed_from != closed_from_ns
+            ):
+                raise self._refused_type("admission is not the closed interval named")
+            self.admission = "open"
+            self._generation += 1
+            self._closed_from = None
+
+    def admission_snapshot(self):
+        return self._snapshot_type(
+            self.admission == "closed",
+            self._generation,
+            self._closed_from,
+            self.clock.now(),
+            self.clock.domain,
+            self._pose_attempts,
+            self._pose_rejected,
+            0,
+            0,
+            self.admission,
+            self._home_only_from,
+            self._home_count,
+            0,
+            0,
+        )
+
+    def step(self, action, *, token) -> StepResult:
+        result = super().step(action, token=token)
+        with self._gate_lock:
+            self._pose_attempts += 1
+            if result.detail.startswith("admission_"):
+                self._pose_rejected += 1
+        return result
+
+    def _home_motion(self, token, faults) -> HomeResult:
+        if self.admission == "home_only":  # the window opened: entering is +1
+            with self._gate_lock:
+                self._generation += 1
+                self._closed_from = None
+                self._home_only_from = self.clock.now()
+                self._home_count += 1  # the home's commands pass the window
+        return super()._home_motion(token, faults)
+
+    def _home(self, token, *, gated: bool) -> HomeResult:
+        windows = self.gate_windows
+        try:
+            return super()._home(token, gated=gated)
+        finally:
+            if gated and self.gate_windows != windows:
+                with self._gate_lock:
+                    # Leaving: a stop inside the window closed it already (keep
+                    # that interval); otherwise a new closure starts now.
+                    if self._closed_from is None:
+                        self._generation += 1
+                        self._closed_from = self.clock.now()
 
 
 # --- the policy server ------------------------------------------------------------------
@@ -355,9 +504,13 @@ class FakePolicy:
         self.fenced_epoch = -1
         self.inflight: dict[str, _Ticket] = {}
         self.acquired: list = []
+        # The prompt of the episode acquired last (None: the run's fixed one),
+        # and (request_id, prompt) of every chunk request.
+        self.prompt = None
+        self.prompts: list = []
         self._lock = threading.Lock()
 
-    def acquire(self, role: str, *, policy_epoch: int):
+    def acquire(self, role: str, *, policy_epoch: int, prompt: str | None = None):
         with self._lock:
             if self.acquire_fails or self.crashed:
                 return {"kind": "unavailable", "code": "server_error"}
@@ -365,7 +518,9 @@ class FakePolicy:
                 "handle_id": f"h-{role}-{policy_epoch}",
                 "role": role,
                 "policy_epoch": policy_epoch,
+                "prompt": prompt,
             }
+            self.prompt = prompt
             self.acquired.append(handle)
             return handle
 
@@ -373,6 +528,7 @@ class FakePolicy:
         with self._lock:
             number = self.requests
             self.requests += 1
+            self.prompts.append((req.get("request_id"), self.prompt))
             if self.crashed:
                 return {"kind": "unavailable", "code": "server_error"}
             faults = self.faults.take(number)
@@ -502,6 +658,8 @@ class FakeRecorder:
         self._lock = threading.Lock()
         self._thread = None
         self._numbers: dict[str, int] = {}
+        # episode id -> what the orchestrator said of it (subtask_loop).
+        self.described: dict[str, dict] = {}
         if threaded:
             self._thread = threading.Thread(
                 target=self._writer, name="fake-recorder", daemon=True
@@ -532,6 +690,9 @@ class FakeRecorder:
                 rollout.errors.append(f"write {number}: no space left on device")
                 return
             rollout.written += 1
+
+    def describe_episode(self, episode_id: str, info: dict) -> None:
+        self.described[episode_id] = dict(info)
 
     def open(self, *, task_folder: str, episode_id: str, number: int) -> FakeRollout:
         if self.open_fails:

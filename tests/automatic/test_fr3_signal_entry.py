@@ -438,10 +438,23 @@ def test_signal_wrapper_stop_probe_reaches_bottom_robot_before_any_action(
     query = client._query_policy
 
     def stop_inside_query(*args):
-        signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+        # The startup warm-up also queries the policy, before the run installs
+        # its handler (getsignal then returns signal.SIG_DFL). Only the first
+        # real query, with the handler installed, delivers the stop.
+        handler = signal.getsignal(signal.SIGTERM)
+        if callable(handler):
+            handler(signal.SIGTERM, None)
         return query(*args)
 
     client._query_policy = stop_inside_query
+    # The heartbeat thread also reacts to the signal flag (emergency_hold and
+    # orchestrator stop), 50 ms later and unordered against the control loop.
+    # Silence both so only the stop probe can stop the bottom robot here.
+    from levi.automatic import fr3_bridge as B
+    from levi.automatic.orchestrator import Orchestrator
+
+    monkeypatch.setattr(B.Robot, "emergency_hold", lambda self: None)
+    monkeypatch.setattr(Orchestrator, "stop", lambda self, command_id: None)
     state = R.execute(r.job, r.binding, load_modules=lambda b: r.modules)
     assert state == "FAULT_LOCKED"
     # Existing stop/fault handling is preserved; no pose or home was sent.

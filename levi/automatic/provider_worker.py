@@ -247,7 +247,7 @@ class Worker:
                 "schema": "levi.aeri.provider_ready.v1",
                 "contract_id": contract.contract_id,
                 "contract_version": contract.contract_version,
-                "capabilities": ["scene", "reset_judgement"],
+                "capabilities": list(self.spec.capabilities),
                 "updated_wall_ns": time.time_ns(),
                 "identity": process_identity(),
                 "run_id": self.spec.value["run_id"],
@@ -309,7 +309,7 @@ class Worker:
                 os.close(fd)
 
     def process(self, kind, name):
-        if kind not in ("scene", "reset_judgement") or not __import__("re").fullmatch(
+        if kind not in self.spec.capabilities or not __import__("re").fullmatch(
             r"[a-f0-9]{64}\.json", name
         ):
             raise ValueError("invalid worker request path")
@@ -437,7 +437,7 @@ class Worker:
 
     def poll(self):
         count = 0
-        for kind in ("scene", "reset_judgement"):
+        for kind in self.spec.capabilities:
             try:
                 parent, _leaf = parent_at(self.fd, kind + "/requests/item", create=True)
                 names = os.listdir(parent)

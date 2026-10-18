@@ -282,6 +282,7 @@
           "enum": [
             "single_reset_policy",
             "human_assisted",
+            "subtask_loop",
             "scripted_safe_reset",
             "atomic_skill_sequence",
             "single_policy",
@@ -346,6 +347,459 @@
         "gripper_tolerance"
       ],
       "title": "JobResetSettle",
+      "type": "object"
+    },
+    "JobSubtask": {
+      "additionalProperties": false,
+      "description": "The ``subtask_loop`` strategy's settings (``RunConfig`` fields of the\nsame names, ``levi/automatic/subtask_loop.py``); ignored by every other\nstrategy.",
+      "properties": {
+        "early_check": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JobSubtaskEarlyCheck"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "forward_folder": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Forward Folder"
+        },
+        "home_after_loop": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Home After Loop"
+        },
+        "max_retries": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Retries"
+        },
+        "max_steps": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Steps"
+        },
+        "max_subtasks_per_loop": {
+          "anyOf": [
+            {
+              "maximum": 64,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Subtasks Per Loop"
+        },
+        "reverse_folder": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reverse Folder"
+        },
+        "start_home": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Home"
+        },
+        "vlm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JobSubtaskVlm"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "vlm_alternation": {
+          "anyOf": [
+            {
+              "enum": [
+                "sleep",
+                "co_resident"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vlm Alternation"
+        },
+        "vlm_co_resident_headroom_mib": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vlm Co Resident Headroom Mib"
+        },
+        "vlm_min_free_mem_gib": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 4096,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vlm Min Free Mem Gib"
+        },
+        "vlm_sleep_fallback": {
+          "anyOf": [
+            {
+              "enum": [
+                "wait_human",
+                "level2",
+                "stay_awake"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vlm Sleep Fallback"
+        },
+        "vlm_stay_awake_min_free_gpu_mib": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vlm Stay Awake Min Free Gpu Mib"
+        },
+        "vlm_wake_headroom_mib": {
+          "anyOf": [
+            {
+              "minimum": 1024,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vlm Wake Headroom Mib"
+        },
+        "vlm_wake_min_free_gpu_mib": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vlm Wake Min Free Gpu Mib"
+        }
+      },
+      "title": "JobSubtask",
+      "type": "object"
+    },
+    "JobSubtaskEarlyCheck": {
+      "additionalProperties": false,
+      "description": "``subtask.early_check`` (``subtask_loop.EarlyCheck``, whose checks\napply too): when a running subtask stops for the VLM's done check.",
+      "properties": {
+        "cooldown_steps": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cooldown Steps"
+        },
+        "event_types": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                "type": "string"
+              },
+              "maxItems": 9,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Types"
+        },
+        "every_steps": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 40,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Every Steps"
+        },
+        "max_checks": {
+          "anyOf": [
+            {
+              "maximum": 20,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Checks"
+        },
+        "min_steps": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Steps"
+        },
+        "on_events": {
+          "default": false,
+          "title": "On Events",
+          "type": "boolean"
+        },
+        "settle_steps": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Settle Steps"
+        }
+      },
+      "title": "JobSubtaskEarlyCheck",
+      "type": "object"
+    },
+    "JobSubtaskVlm": {
+      "additionalProperties": false,
+      "description": "The local VLM a subtask_loop run starts, sleeps and wakes (served by\nvLLM; launch parameters as ``levi live``'s VLM manager takes them).\nDefaults: the Lynx manager's profile for the policy beside it\n(programs/lynx/VLLM-AERI-LAUNCH-20261017.md): 0.70 with 16384 tokens.",
+      "properties": {
+        "fallback_gpu_memory_utilization": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 0.95,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 0.72,
+          "title": "Fallback Gpu Memory Utilization"
+        },
+        "gpu_memory_utilization": {
+          "default": 0.7,
+          "exclusiveMinimum": 0,
+          "maximum": 0.95,
+          "title": "Gpu Memory Utilization",
+          "type": "number"
+        },
+        "inventory_max_tokens": {
+          "anyOf": [
+            {
+              "maximum": 4096,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inventory Max Tokens"
+        },
+        "max_model_len": {
+          "default": 16384,
+          "maximum": 262144,
+          "minimum": 1024,
+          "title": "Max Model Len",
+          "type": "integer"
+        },
+        "min_model_len": {
+          "default": 16384,
+          "maximum": 262144,
+          "minimum": 1024,
+          "title": "Min Model Len",
+          "type": "integer"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "maxLength": 4096,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "port": {
+          "default": 8100,
+          "maximum": 65535,
+          "minimum": 1024,
+          "title": "Port",
+          "type": "integer"
+        },
+        "prewarm": {
+          "default": true,
+          "title": "Prewarm",
+          "type": "boolean"
+        },
+        "provider_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "local",
+                "external"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Mode"
+        },
+        "request_timeout_s": {
+          "default": 60,
+          "maximum": 600,
+          "minimum": 1,
+          "title": "Request Timeout S",
+          "type": "integer"
+        },
+        "served_name": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Served Name"
+        },
+        "sleep_mode": {
+          "default": true,
+          "title": "Sleep Mode",
+          "type": "boolean"
+        },
+        "wake_timeout_s": {
+          "default": 60,
+          "maximum": 600,
+          "minimum": 1,
+          "title": "Wake Timeout S",
+          "type": "integer"
+        }
+      },
+      "title": "JobSubtaskVlm",
       "type": "object"
     },
     "JobTask": {
@@ -624,6 +1078,9 @@
       "title": "Schema Version",
       "type": "string"
     },
+    "subtask": {
+      "$ref": "#/$defs/JobSubtask"
+    },
     "task": {
       "$ref": "#/$defs/JobTask"
     },
@@ -646,7 +1103,7 @@
     "reset.on_unknown"
   ],
   "x-levi-major": 1,
-  "x-levi-minor": 0,
+  "x-levi-minor": 4,
   "x-levi-reset-strategy-aliases": {
     "atomic_skills": "atomic_skill_sequence",
     "scripted_safe": "scripted_safe_reset",

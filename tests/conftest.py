@@ -2,7 +2,10 @@ import importlib.util
 import json
 import os
 import shutil
+import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -100,6 +103,81 @@ def _child_log_size():
         return os.path.getsize(os.environ.get(netguard.LOG_ENV, ""))
     except OSError:
         return 0
+
+
+def _new_live_threads(before):
+    return [t for t in threading.enumerate() if t not in before and t.is_alive()]
+
+
+@pytest.fixture(autouse=True)
+def _no_leaked_threads():
+    """Fail the test that leaves a thread running after its own teardown.
+
+    A thread that outlives its test is not harmless: ``levi.live.owned_runtime``
+    refuses an idle ack while any other thread lives in the process
+    ("model still has local request threads"), so a leaked recorder, server or
+    Starlette portal thread makes unrelated tests in tests/live fail later in
+    the same pytest run. Fix the leaking test, not the check: close the
+    ``TestClient`` with ``with``, call the fake's ``close()``/``shutdown()``, or
+    join the thread in a fixture finalizer. This fixture is set up before the
+    test's other function fixtures, so it is torn down after them.
+    """
+    before = set(threading.enumerate())
+    # Read the scale before the test runs: a test may set LEVI_TEST_TIME_SCALE
+    # to an invalid value, and its monkeypatch is undone only after this
+    # fixture's teardown.
+    budget = scaled(2)
+    yield
+    deadline = time.monotonic() + budget
+    leaked = _new_live_threads(before)
+    while leaked and time.monotonic() < deadline:
+        for thread in leaked:
+            thread.join(timeout=0.05)
+        leaked = _new_live_threads(before)
+    if leaked:
+        lines = "\n".join(
+            f"  {t.name!r} daemon={t.daemon} target={getattr(t, '_target', None)!r}"
+            for t in leaked
+        )
+        pytest.fail(
+            f"left {len(leaked)} thread(s) running after teardown:\n{lines}",
+            pytrace=False,
+        )
+
+
+@pytest.fixture(autouse=True)
+def _close_fake_recorders(monkeypatch, _no_leaked_threads):
+    """Close every ``FakeRecorder`` a test builds, closed by the test or not.
+
+    ``FakeRecorder`` (integrations/fr3_automatic/fake.py, loaded by
+    tests/automatic/aeri_harness.py as ``fr3_automatic_fake``) starts a
+    ``fake-recorder`` writer thread when built. The AERI rigs build many, and
+    ``rig(recorder={...})`` builds one itself, so tests cannot all close theirs;
+    an open one lives to the end of the pytest process. ``close()`` is
+    idempotent. Requesting ``_no_leaked_threads`` makes pytest tear this one
+    down first (autouse fixtures are otherwise ordered by name), so the
+    recorders are closed before that guard looks.
+    """
+    fake = sys.modules.get("fr3_automatic_fake")
+    built = []
+    before = set(threading.enumerate())
+    if fake is not None:
+        original = fake.FakeRecorder.__init__
+
+        def init(self, *args, **kwargs):
+            original(self, *args, **kwargs)
+            built.append(self)
+
+        monkeypatch.setattr(fake.FakeRecorder, "__init__", init)
+    yield
+    for recorder in built:
+        recorder.close()
+    # The module was first imported during this test (a file run on its
+    # own), so __init__ was not wrapped: close the recorders by their threads.
+    for thread in set(threading.enumerate()) - before:
+        owner = getattr(getattr(thread, "_target", None), "__self__", None)
+        if thread.name == "fake-recorder" and hasattr(owner, "close"):
+            owner.close()
 
 
 @pytest.fixture(autouse=True)

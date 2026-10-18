@@ -938,6 +938,23 @@ def diagnose(config) -> dict:
         )
     gpu = {"vram": gpumgr.vram(), "processes": gpumgr.gpu_holders()}
     report["gpu"] = gpu
+    # Which of them are exempt from ``foreign_gpu`` right now (read-only: the
+    # socket table, our own units' cgroup.procs and the fds of those pids;
+    # None when that cannot be told).
+    try:
+        exempt = gpumgr.policy_gpu_pids(
+            [*config.gpu.policy_ports, *config.gpu.policy_extra_ports],
+            gpu["processes"],
+            budget_mib=int(config.gpu.policy_budget_mib),
+        )
+        report["policy_exempt"] = {
+            "pids": sorted(exempt),
+            "memory_mib": sum(
+                h["memory_mib"] or 0 for h in gpu["processes"] if h["pid"] in exempt
+            ),
+        }
+    except Exception:  # noqa: BLE001 - say it cannot be told
+        report["policy_exempt"] = None
     vllm = ((value or {}).get("gpu") or {}).get("vllm") or {}
     report["vllm"] = vllm
     if vllm.get("state") == "error" or (value or {}).get("attention"):
@@ -963,6 +980,9 @@ def diagnose(config) -> dict:
     ports = gpumgr.listening_ports()
     policy = [int(p) for p in config.gpu.policy_ports if int(p) in ports]
     report["policy_ports_listening"] = policy
+    report["policy_extra_ports_listening"] = [
+        int(p) for p in config.gpu.policy_extra_ports if int(p) in ports
+    ]
     gate = ((value or {}).get("gpu") or {}).get("gate") or {}
     report["gate"] = gate
     report["notes"] = [
@@ -1139,8 +1159,26 @@ def cmd_doctor(args) -> int:
                 or "nothing"
             )
         )
+        extra = (
+            f"; extra policy ports {[int(p) for p in config.gpu.policy_extra_ports]} "
+            f"listening: {report['policy_extra_ports_listening']}"
+            if config.gpu.policy_extra_ports
+            else ""
+        )
         print(
-            f"vllm       {report['vllm'].get('state')} profile {report['vllm'].get('profile')}; policy ports listening: {report['policy_ports_listening']}; gate {'open' if (report['gate'] or {}).get('open', True) else 'CLOSED'} ({(report['gate'] or {}).get('reason', '')})"
+            f"vllm       {report['vllm'].get('state')} profile {report['vllm'].get('profile')}; policy ports listening: {report['policy_ports_listening']}{extra}; gate {'open' if (report['gate'] or {}).get('open', True) else 'CLOSED'} ({(report['gate'] or {}).get('reason', '')})"
+        )
+        exempt = report.get("policy_exempt")
+        print(
+            "exempt     "
+            + (
+                "cannot be told which GPU processes are exempt from foreign_gpu"
+                if exempt is None
+                else (
+                    f"{len(exempt['pids'])} GPU process(es) exempt from foreign_gpu "
+                    f"as our policy server: {exempt['pids']}, {exempt['memory_mib']} MiB"
+                )
+            )
         )
         for note in report["notes"]:
             print(f"note       {note}")

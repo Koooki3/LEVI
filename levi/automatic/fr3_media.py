@@ -5,6 +5,7 @@ import os
 import time
 from pathlib import Path
 
+from . import camera_meta
 from .recorder import RolloutRecorder
 
 
@@ -41,6 +42,9 @@ class Media:
                 "success_flag",
                 "wrist_video",
                 "side_video",
+                # Frame bus (camera_meta.CSV_COLUMNS): which camera frame each
+                # row is; empty cells when openpi gives no image_meta.
+                *camera_meta.CSV_COLUMNS,
             ],
             "end_effector_pose.csv": [
                 "timestamp_sec",
@@ -143,7 +147,14 @@ class Media:
         pose = obs["pose"]
         quat = self.rotation.from_euler("xyz", pose[3:6]).as_quat().tolist()
         row["csv"]["frames.csv"].writerow(
-            [stamp, n, 0, "wrist_camera.mp4", "side_camera.mp4"]
+            [
+                stamp,
+                n,
+                0,
+                "wrist_camera.mp4",
+                "side_camera.mp4",
+                *camera_meta.csv_cells(obs.get("image_meta")),
+            ]
         )
         row["csv"]["end_effector_pose.csv"].writerow([*prefix, *pose[:3], *quat])
         width = float(obs["robot_state"]["gripper_position"]) * 0.085

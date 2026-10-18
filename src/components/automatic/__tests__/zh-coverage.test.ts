@@ -34,6 +34,22 @@ const TRANSITION_REASONS = [
   "human_resumed",
   "run_completed",
   "contract_violation_limit",
+  "home_not_executed",
+  "home_pose_not_reached",
+  "camera_stale",
+  "operator_verdict",
+  "subtask_dispatched",
+  "subtask_continue",
+  "subtask_ended",
+  "subtask_forward_done",
+  "subtask_reverse_done",
+  "subtask_check_unavailable",
+  "subtask_retry_limit",
+  "subtask_plan_refused",
+  "subtask_inventory_rejected",
+  "subtask_not_released",
+  "vlm_unavailable",
+  "subtask_early_check",
 ];
 
 describe("every journal reason has words in both languages", () => {

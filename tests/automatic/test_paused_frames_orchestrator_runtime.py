@@ -113,7 +113,7 @@ class PausedFramesOrchestratorTests(unittest.TestCase):
 
     def test_complete_not_goal_chain_uses_actual_journal_kernel_and_media(self):
         r = self.make(rejected=True)
-        self.assertEqual(r.orch.run(), "WAIT_HUMAN")
+        self.assertEqual(r.orch.run(), "COMPLETED")
         self.assertEqual(r.robot.step_calls, SECOND_CANDIDATE_STEP)
         self.assertEqual(len(self.payloads), 2)
         paused = [
@@ -162,10 +162,11 @@ class PausedFramesOrchestratorTests(unittest.TestCase):
             )
         )
 
-    def test_confirmed_seals_actual_paused_endpoint_without_reset_motion(self):
+    def test_confirmed_seals_then_homes_the_actual_paused_endpoint(self):
         r = self.make()
-        self.assertEqual(r.orch.run(), "WAIT_HUMAN")
+        self.assertEqual(r.orch.run(), "COMPLETED")
         self.assertEqual(r.robot.step_calls, CANDIDATE_STEP)
+        self.assertEqual(r.robot.home_calls, 1)  # the paused endpoint is homed once
         self.assertEqual(len(self.payloads), 1)
         self.assertEqual(self.payloads[0].binding.role, "forward")
         self.assertIsNone(r.fence.current)
@@ -192,18 +193,21 @@ class PausedFramesOrchestratorTests(unittest.TestCase):
         self.assertIsNone(r.fence.current)
 
     def test_multiple_forward_episodes_never_reuse_old_stream_or_payload(self):
-        r = self.make(episodes=2)
-        for number in (1, 2):
-            self.assertEqual(r.orch.run(), "WAIT_HUMAN")
-            self.assertEqual(r.orch.completed_forward, number)
-            resume = r.orch.resume(
-                "frame-episode-" + str(number),
-                expected_seq=r.orch.journal.next_seq,
-                environment_handled=True,
-                health_rechecked=True,
-            )
-            self.assertTrue(resume.ok)
+        r = self.make(
+            episodes=2,
+            scene_script=[{"decision": "ready"}, {"decision": "reset_required"}],
+        )
+        self.assertEqual(r.orch.run(), "WAIT_HUMAN")
+        self.assertEqual(r.orch.completed_forward, 1)
+        resume = r.orch.resume(
+            "frame-episode-1",
+            expected_seq=r.orch.journal.next_seq,
+            environment_handled=True,
+            health_rechecked=True,
+        )
+        self.assertTrue(resume.ok)
         self.assertEqual(r.orch.run(), "COMPLETED")
+        self.assertEqual(r.orch.completed_forward, 2)
         self.assertEqual(len(self.payloads), 2)
         first, second = self.payloads
         self.assertNotEqual(first.binding.episode_id, second.binding.episode_id)

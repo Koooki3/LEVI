@@ -539,3 +539,86 @@ def test_old_idle_proof_cannot_release_new_reservation_even_at_same_clock_tick()
     next_lease = grant(b, spec("next"))
     with pytest.raises(ValueError):
         b.release_unstarted(next_lease, previous_idle, now_ns=NOW)
+
+
+def test_stale_lease_cannot_cancel_same_name_new_owner_for_any_class():
+    b = ready()
+    old = grant(b, spec("w", "judge_critical"))
+    identity = worker()
+    b.bind_worker(old, identity, now_ns=NOW)
+    b.release_after_exit(old, exited(b, old, identity), now_ns=NOW)
+    new = grant(b, spec("w", "judge_critical"))
+    b.bind_worker(new, worker(200), now_ns=NOW)
+    with pytest.raises(ValueError):
+        b.cancel("w", now_ns=NOW, lease=old)
+    assert b.accepts_result(new, now_ns=NOW)
+    assert b.preemption_request() is None
+    assert b.cancel("w", now_ns=NOW, lease=new)
+    assert not b.accepts_result(new, now_ns=NOW)
+
+
+@pytest.mark.parametrize(
+    "workload_class", ["judge_critical", "background_annotation", "policy_realtime"]
+)
+@pytest.mark.parametrize("neighbour_active", [False, True])
+def test_stale_lease_cannot_cancel_same_name_queued_request(
+    workload_class, neighbour_active
+):
+    b = ready()
+    old = grant(b)
+    b.release_unstarted(old, idle(b), now_ns=NOW)
+    neighbour = grant(b, spec("neighbour")) if neighbour_active else None
+    assert submit(b, spec("w", workload_class)) is None
+    with pytest.raises(ValueError):
+        b.cancel("w", now_ns=NOW, lease=old)
+    assert b.snapshot(now_ns=NOW)["queued"] == 1
+    if neighbour is not None:
+        with pytest.raises(ValueError):
+            b.cancel("w", now_ns=NOW, lease=neighbour)
+        assert b.snapshot(now_ns=NOW)["active"]["lease_id"] == neighbour.lease_id
+        assert b.preemption_request() is None
+    assert b.cancel("w", now_ns=NOW)
+    assert b.snapshot(now_ns=NOW)["queued"] == 0
+
+
+def test_expiry_revokes_with_lease_expired_reason_and_result_deadline_is_redundant():
+    b = ready()
+    lease = grant(b)
+    b.bind_worker(lease, worker(), now_ns=NOW)
+    assert b.accepts_result(lease, now_ns=lease.expires_ns - 1)
+    assert b.preemption_request() is None
+    assert not b.accepts_result(lease, now_ns=lease.expires_ns)
+    assert b.preemption_request()["reason"] == "lease_expired"
+    # accepts_result's `now <= due_ns` is redundant with the lease window: admit()
+    # bounds expires_ns by the deadline, so no now inside the lease window can
+    # pass the deadline.  Assert that invariant instead of a distinguishing case.
+    assert lease.expires_ns <= NOW + 500 * 1_000_000  # == deadline due_ns
+
+
+def test_return_unstarted_requeues_the_original_request_at_its_priority():
+    b = ready()
+    assert submit(b, spec("background", "background_annotation")) is None
+    assert submit(b, spec("judge", "judge_critical")) is None
+    lease = b.admit(pressure(), window(b), now_ns=NOW)
+    assert lease.workload_id == "judge"
+    bad_proofs = (
+        idle(b, lease_epoch=lease.lease_epoch + 1),
+        idle(b, workers_exited=None),
+        idle(b, broker_id="broker:old"),
+    )
+    before = b.snapshot(now_ns=NOW)
+    for proof in bad_proofs:
+        with pytest.raises(ValueError):
+            b.return_unstarted(lease, proof, now_ns=NOW)
+        assert b.snapshot(now_ns=NOW) == before
+    stale = lease.model_copy(update={"lease_epoch": lease.lease_epoch + 1})
+    with pytest.raises(ValueError):
+        b.return_unstarted(stale, idle(b), now_ns=NOW)
+    assert b.snapshot(now_ns=NOW) == before
+    b.return_unstarted(lease, idle(b, lease_epoch=lease.lease_epoch), now_ns=NOW)
+    assert b.snapshot(now_ns=NOW)["active"] is None
+    assert b.snapshot(now_ns=NOW)["queued"] == 2
+    again = b.admit(pressure(), window(b), now_ns=NOW)
+    assert isinstance(again, aeri.ResourceLease)
+    assert again.workload_id == "judge" and again.lease_id != lease.lease_id
+    assert not b.accepts_result(lease, now_ns=NOW)

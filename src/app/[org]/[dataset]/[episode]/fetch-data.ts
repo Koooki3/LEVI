@@ -5,6 +5,9 @@ import {
   fetchParquetFile,
   formatStringWithVars,
   ParquetTooLargeError,
+  ParquetIndexRangeError,
+  requireParquetGlobalIndex,
+  selectParquetRowsByGlobalIndex,
   readParquetAsObjects,
   readParquetRowsByGlobalIndex,
 } from "@/utils/parquetUtils";
@@ -903,6 +906,34 @@ async function getEpisodeDataV3(
   };
 }
 
+/** Candidate rows only: callers must select and verify each requested range. */
+async function loadV3RangeCandidates(
+  url: string,
+  file: Awaited<ReturnType<typeof fetchParquetFile>>,
+  columns: string[],
+  fromIndex: number,
+  toIndex: number,
+): Promise<Record<string, unknown>[]> {
+  let rows: Record<string, unknown>[] | null = null;
+  try {
+    rows = await readParquetRowsByGlobalIndex(
+      url,
+      file as AsyncBuffer,
+      columns,
+      fromIndex,
+      toIndex,
+    );
+  } catch (error) {
+    if (
+      error instanceof ParquetTooLargeError ||
+      error instanceof ParquetIndexRangeError
+    )
+      throw error;
+  }
+  // Never pass row offsets here: the existing whole-file byte cap must apply.
+  return rows ?? (await readParquetAsObjects(file, columns));
+}
+
 // Load episode data for v3.0 charts
 export async function loadEpisodeDataV3(
   repoId: string,
@@ -962,30 +993,23 @@ export async function loadEpisodeDataV3(
       ]),
     );
     // Extract the episode-specific data slice
-    const fromIndex = bigIntToNumber(episodeMetadata.dataset_from_index, 0);
-    let toIndex = bigIntToNumber(episodeMetadata.dataset_to_index, fromIndex);
-    if (toIndex <= fromIndex) {
-      toIndex = fromIndex + 1;
-    }
+    const fromIndex = requireParquetGlobalIndex(
+      episodeMetadata.dataset_from_index,
+    );
+    const toIndex = requireParquetGlobalIndex(episodeMetadata.dataset_to_index);
 
-    // Locate the episode's rows through the file's row-group index and read
-    // only that range. A file that cannot be located this way is read whole,
-    // which fails with ParquetTooLargeError above the read cap rather than
-    // loading a huge file into memory.
-    let episodeRows: Record<string, unknown>[] | null = null;
-    try {
-      episodeRows = await readParquetRowsByGlobalIndex(
-        dataUrl,
-        parquetFile as AsyncBuffer,
-        v3DataColumns,
-        fromIndex,
-        toIndex,
-      );
-    } catch (error) {
-      if (error instanceof ParquetTooLargeError) throw error;
-      // Fall back to a full read if row-range selection fails.
-    }
-    episodeRows ??= await readParquetAsObjects(parquetFile, v3DataColumns);
+    const candidates = await loadV3RangeCandidates(
+      dataUrl,
+      parquetFile,
+      v3DataColumns,
+      fromIndex,
+      toIndex,
+    );
+    const episodeRows = selectParquetRowsByGlobalIndex(
+      candidates,
+      fromIndex,
+      toIndex,
+    );
 
     // Extract frame timestamps from the *full* (non-sampled) row set so the
     // annotations editor can snap to the exact frame the user is on.
@@ -1060,7 +1084,10 @@ export async function loadEpisodeDataV3(
       frameTimestamps,
     };
   } catch (error) {
-    if (error instanceof ParquetTooLargeError) {
+    if (
+      error instanceof ParquetTooLargeError ||
+      error instanceof ParquetIndexRangeError
+    ) {
       console.warn(error.message);
       return {
         chartDataGroups: [],
@@ -2767,33 +2794,30 @@ export async function loadCrossEpisodeActionVariance(
             : ["index", actionKey];
           // Only the frames of the sampled episodes, located through the
           // row-group index; a whole-file read is the capped fallback.
-          const rows =
-            (await readParquetRowsByGlobalIndex(
-              buildVersionedUrl(repoId, normalizedVersion, dataPath),
-              buf as AsyncBuffer,
-              crossColumns,
-              Math.min(...eps.map((ep) => ep.from)),
-              Math.max(...eps.map((ep) => ep.to)),
-            ).catch((error) => {
-              if (error instanceof ParquetTooLargeError) throw error;
-              return null;
-            })) ?? (await readParquetAsObjects(buf, crossColumns));
-          const fileStart =
-            rows.length > 0 && rows[0].index !== undefined
-              ? (toFiniteNumber(rows[0].index) ?? 0)
-              : 0;
-
-          for (const ep of eps) {
-            const localFrom = Math.max(0, ep.from - fileStart);
-            const localTo = Math.min(rows.length, ep.to - fileStart);
+          const rows = await loadV3RangeCandidates(
+            buildVersionedUrl(repoId, normalizedVersion, dataPath),
+            buf,
+            crossColumns,
+            Math.min(...eps.map((ep) => ep.from)),
+            Math.max(...eps.map((ep) => ep.to)),
+          );
+          // Validate each selected episode, not gaps between sampled episodes.
+          // Prepare all selections before appending results: one invalid range
+          // keeps the existing skip-file policy, never a partial file analysis.
+          const selected = eps.map((ep) =>
+            selectParquetRowsByGlobalIndex(rows, ep.from, ep.to),
+          );
+          for (let i = 0; i < eps.length; i++) {
+            const ep = eps[i];
+            const episodeRows = selected[i];
             const actions: number[][] = [];
             const states: number[][] = [];
-            for (let r = localFrom; r < localTo; r++) {
-              const raw = rows[r]?.[actionKey];
+            for (const row of episodeRows) {
+              const raw = row[actionKey];
               if (Array.isArray(raw))
                 actions.push(raw.map((value) => toFiniteNumber(value) ?? 0));
               if (stateKey) {
-                const sRaw = rows[r]?.[stateKey];
+                const sRaw = row[stateKey];
                 if (Array.isArray(sRaw))
                   states.push(sRaw.map((value) => toFiniteNumber(value) ?? 0));
               }
@@ -2813,7 +2837,9 @@ export async function loadCrossEpisodeActionVariance(
             }
           }
         } catch (error) {
-          // Skip the file; say so when it was skipped for being too large.
+          // Skip the file; invalid identity must not produce mixed episodes.
+          if (error instanceof ParquetIndexRangeError)
+            console.warn(error.message);
           if (error instanceof ParquetTooLargeError) {
             console.warn(error.message);
             tooLarge.episodes += eps.length;

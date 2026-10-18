@@ -59,6 +59,7 @@ from typing import Protocol
 
 from levi.domain import aeri
 
+from .. import console_text
 from .. import scene_assessment as sa
 from ..journal import fsync_dir
 from .events import Ticket
@@ -275,6 +276,286 @@ class FileTransport:
             self._move(path, "taken")
             out.append(found)
         return out
+
+
+IGNORED = "_ignored"
+
+
+class AskOnlyTransport:
+    """A channel that shows a question but whose answers never count (the
+    page's file protocol on a real-robot run, decision UI-2: answering on the
+    page is not a release; only the operator terminal releases motion).
+
+    ``ask``, ``withdraw`` and ``clear`` go to the channel unchanged, so the
+    page still shows the question and its frames. ``take_answers`` still
+    takes what arrived (the files are moved away, never left to count
+    later) and returns only markers ``{"_ignored": source, "request_id":
+    ...}``: the provider notes them (``scene_answer_page_ignored``) and
+    never reads their predicates. ``on_ignored(request_id)`` is called for
+    each, for example to tell the terminal."""
+
+    def __init__(self, channel, *, source="page", on_ignored=None):
+        self.channel = channel
+        self.source = source
+        self.on_ignored = on_ignored
+
+    def reachable(self):
+        return self.channel.reachable()
+
+    def clear(self) -> None:
+        clear = getattr(self.channel, "clear", None)
+        if clear is not None:
+            clear()
+
+    def ask(self, question: dict) -> None:
+        self.channel.ask(question)
+
+    def withdraw(self, request_id: str, reason: str) -> None:
+        self.channel.withdraw(request_id, reason)
+
+    def take_answers(self) -> list:
+        out = []
+        for answer in self.channel.take_answers():
+            request_id = answer.get("request_id") if isinstance(answer, dict) else None
+            request_id = str(request_id)[:120] if request_id is not None else None
+            out.append({IGNORED: self.source, "request_id": request_id})
+            if self.on_ignored is not None:
+                self.on_ignored(request_id)
+        return out
+
+
+class BothTransport:
+    """Several channels for one question (the page's file protocol and the
+    terminal): every question goes to all of them, answers are taken from all
+    of them. Which answer counts is decided by ``HumanSceneProvider`` (first
+    to arrive; the later one is dropped and noted), not here. On a real-robot
+    run the page's channel is wrapped in ``AskOnlyTransport``, so only the
+    terminal's answers reach the provider."""
+
+    def __init__(self, *channels):
+        self.channels = channels
+
+    def reachable(self):
+        for channel in self.channels:
+            found = channel.reachable()
+            if found is not True:
+                return found
+        return True
+
+    def clear(self) -> None:
+        for channel in self.channels:
+            clear = getattr(channel, "clear", None)
+            if clear is not None:
+                clear()
+
+    def ask(self, question: dict) -> None:
+        for channel in self.channels:
+            channel.ask(question)
+
+    def withdraw(self, request_id: str, reason: str) -> None:
+        for channel in self.channels:
+            channel.withdraw(request_id, reason)
+
+    def take_answers(self) -> list:
+        out = []
+        for channel in self.channels:
+            out.extend(channel.take_answers())
+        return out
+
+
+ANSWER_KEYS = {"y": True, "n": False, "u": None}
+
+
+class TerminalTransport:
+    """A person answering at the operator terminal, one key per predicate.
+
+    ``keys`` is a key source (``poll(timeout_s) -> str | None``, ``flush()``,
+    ``cbreak()`` as a context manager); ``say(text)`` prints a line.
+    ``ask`` prints the question (text, each required predicate with its
+    meaning, the evidence frame files) and ``take_answers`` reads the keys
+    that arrived without ever blocking (the orchestrator's collect loop
+    polls it): ``y`` the predicate holds, ``n`` it does not, ``u`` cannot
+    tell; ``b`` goes back one predicate. **Enter never answers**: a question
+    that releases motion is answered by an explicit key. The answer sent is
+    the same mapping the page sends (``answer_for``), so the provider's
+    rules (first answer wins, later ones are dropped and noted) apply
+    unchanged and nothing here decides anything.
+
+    ``stopped()`` ends the reading at once (a stop or signal); ``status()``
+    may return a warning line (for example a red health monitor), printed
+    when it changes. ``run_dir`` turns the frames' run-relative files into
+    paths the person can open. ``text`` is the sentence catalogue
+    (``console_text.Texts``, Chinese by default); ``tag()`` returns the
+    "round n of N" prefix of a question (it is given the question's target)."""
+
+    def __init__(
+        self, keys, say, *, run_dir=None, stopped=None, status=None, text=None, tag=None
+    ):
+        self.keys = keys
+        self.say = say
+        self.t = text or console_text.Texts()
+        self.tag = tag or (lambda target=None: "")
+        self.run_dir = None if run_dir is None else Path(run_dir)
+        self.stopped = stopped or (lambda: False)
+        self.status = status or (lambda: None)
+        self._lock = threading.Lock()
+        self._pending: dict | None = None
+        self._cbreak = None
+        self._ready: list = []
+        self._delivered: set = set()
+        self._last_status = None
+
+    def reachable(self):
+        return True
+
+    def waiting(self) -> bool:
+        """Whether a question is waiting for this terminal's answer."""
+        return self._pending is not None
+
+    # -- the question
+
+    def ask(self, question: dict) -> None:
+        required = [p for p in question["predicates"] if p["required"]]
+        with self._lock:
+            self._pending = {
+                "question": question,
+                "required": required,
+                "values": {},
+                "index": 0,
+            }
+        # Old keystrokes are not answers to this question.
+        self.keys.flush()
+        self._enter_raw()
+        self.say(self._screen(question, required))
+        self._prompt()
+
+    def _screen(self, question: dict, required: list) -> str:
+        t = self.t
+        head = t(
+            "scene_head",
+            question=t("target_" + question["target"])
+            if "target_" + question["target"] in console_text.TEXT["zh"]
+            else question["target"],
+        )
+        lines = [
+            "",
+            (self.tag(question["target"]) + " " + head).strip(),
+            t("scene_frames"),
+        ]
+        for frame in question["frames"]:
+            where = frame.get("file")
+            if where and self.run_dir is not None:
+                where = str(self.run_dir / where)
+            lines.append(
+                t(
+                    "scene_frame",
+                    view=frame["view"],
+                    where=where or t("scene_frame_missing"),
+                )
+            )
+        lines.append(t("scene_keys"))
+        return "\n".join(lines)
+
+    def _prompt(self) -> None:
+        pending = self._pending
+        if pending is None or pending["index"] >= len(pending["required"]):
+            return
+        predicate = pending["required"][pending["index"]]
+        self.say(
+            self.t(
+                "scene_ask",
+                number=pending["index"] + 1,
+                total=len(pending["required"]),
+                name=predicate["name"],
+                text=predicate["text"],
+            )
+        )
+
+    def withdraw(self, request_id: str, reason: str) -> None:
+        with self._lock:
+            pending = self._pending
+            if pending is None or pending["question"]["request_id"] != request_id:
+                return
+            self._pending = None
+            ours = request_id in self._delivered
+        self._leave_raw()
+        if ours:
+            return
+        if reason in ("answered", "timeout", "stopped"):
+            self.say(self.t("scene_withdrawn_" + reason))
+        else:
+            self.say(self.t("scene_withdrawn_other", reason=reason))
+
+    def take_answers(self) -> list:
+        if self._pending is not None and not self.stopped():
+            self._poll()
+        warning = self.status()
+        if warning != self._last_status:
+            self._last_status = warning
+            if warning:
+                self.say(warning)
+        with self._lock:
+            out, self._ready = self._ready, []
+        return out
+
+    def _poll(self) -> None:
+        while self._pending is not None:
+            key = self.keys.poll(0)
+            if key is None:
+                return
+            self._handle(key)
+
+    def _handle(self, key: str) -> None:
+        pending = self._pending
+        names = [p["name"] for p in pending["required"]]
+        low = key.lower()
+        if low in ANSWER_KEYS:
+            name = names[pending["index"]]
+            pending["values"][name] = ANSWER_KEYS[low]
+            word = self.t(
+                {
+                    True: "scene_word_true",
+                    False: "scene_word_false",
+                    None: "scene_word_unknown",
+                }[ANSWER_KEYS[low]]
+            )
+            self.say(self.t("scene_answered", name=name, word=word))
+            pending["index"] += 1
+            if pending["index"] < len(names):
+                self._prompt()
+                return
+            self._finish(pending)
+        elif low == "b" and pending["index"] > 0:
+            pending["index"] -= 1
+            pending["values"].pop(names[pending["index"]], None)
+            self._prompt()
+        elif key in ("\n", "\r"):
+            self.say(self.t("scene_enter_ignored"))
+
+    def _finish(self, pending: dict) -> None:
+        question = pending["question"]
+        answer = answer_for(question, dict(pending["values"]))
+        with self._lock:
+            self._pending = None
+            self._delivered.add(question["request_id"])
+            self._ready.append(answer)
+        self._leave_raw()
+        self.say(self.t("scene_recorded"))
+
+    # -- terminal mode
+
+    def _enter_raw(self) -> None:
+        if self._cbreak is None:
+            self._cbreak = self.keys.cbreak()
+            self._cbreak.__enter__()
+
+    def _leave_raw(self) -> None:
+        cbreak, self._cbreak = self._cbreak, None
+        if cbreak is not None:
+            cbreak.__exit__(None, None, None)
+
+    def close(self) -> None:
+        self._leave_raw()
 
 
 def _read_regular(path: Path) -> bytes:
@@ -548,6 +829,13 @@ class HumanSceneProvider:
         """Route the answers that arrived. Notes are written after the lock
         is released (the lock is never taken twice)."""
         for answer in self.transport.take_answers():
+            if isinstance(answer, dict) and IGNORED in answer:
+                # Shown on a channel whose answers never count (UI-2).
+                self._note(
+                    "scene_answer_page_ignored",
+                    f"{answer[IGNORED]}: {answer.get('request_id')}",
+                )
+                continue
             if not isinstance(answer, dict) or "_refused" in answer:
                 detail = answer.get("_refused") if isinstance(answer, dict) else ""
                 self._note("scene_answer_refused", str(detail))

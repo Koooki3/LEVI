@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import os
 import threading
 import time
 from pathlib import Path
@@ -9,16 +10,20 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from test_api_common import client, home, roots  # noqa: F401 - HTTP fixtures
 from test_fr3_bridge import (  # noqa: F401 - imported pytest safety fixture
     no_network,
     rig,
+    without_a_terminal,
 )
 from test_launch import (  # noqa: F401 - isolated fake launcher fixture
     fake_systemd,
     write_job,
 )
 
+from levi import children
 from levi.automatic import api, cli, control, fr3_run, launch
+from levi.automatic.journal import Journal
 
 
 def script():
@@ -39,9 +44,14 @@ def test_thin_script_dispatches_to_original_entry(monkeypatch):
     assert calls[-1] == ["runs", "--json"]
 
 
-def tracked(tmp_path, monkeypatch, **kwargs):
+def tracked(tmp_path, monkeypatch, *, plain_wait=False, **kwargs):
+    """``plain_wait``: the old no-console WAIT_HUMAN path (the tracked select
+    wait), unreachable on a real run since L2-UI2-PROVIDER-RELEASE and kept
+    under test while its code exists (``without_a_terminal``)."""
     monkeypatch.setenv("LEVI_AERI_HOME", str(tmp_path / "aeri-home"))
     world = rig(tmp_path, monkeypatch, **kwargs)
+    if plain_wait:
+        without_a_terminal(monkeypatch)
     world.job["standalone_inputs"] = {
         "job": {"sha256": "a" * 64},
         "binding_sha256": "b" * 64,
@@ -112,7 +122,7 @@ def test_standalone_registration_does_not_trust_fabricated_or_changed_files(
 def test_standalone_keeps_driving_without_a_page_and_uses_original_command_pump(
     tmp_path, monkeypatch
 ):
-    world = tracked(tmp_path, monkeypatch, scenes=("unknown",))
+    world = tracked(tmp_path, monkeypatch, plain_wait=True, scenes=("unknown",))
     monkeypatch.setattr(fr3_run.sys.stdin, "isatty", lambda: True)
 
     def no_terminal_input(*args):
@@ -170,6 +180,37 @@ def test_standalone_keeps_driving_without_a_page_and_uses_original_command_pump(
             thread.join(3)
 
 
+@pytest.mark.parametrize("signum", ["SIGTERM", "SIGINT"])
+def test_signal_in_tracked_wait_human_never_blocks_in_input(
+    tmp_path, monkeypatch, signum
+):
+    import signal
+
+    world = tracked(tmp_path, monkeypatch, plain_wait=True, scenes=("unknown",))
+    monkeypatch.setattr(fr3_run.sys.stdin, "isatty", lambda: True)
+    sent = []
+
+    def deliver_signal_instead_of_terminal_input(*args):
+        if not sent:
+            sent.append(signum)
+            number = getattr(signal, signum)
+            signal.getsignal(number)(number, None)
+        return [], [], []
+
+    def forbidden_input(*args):
+        pytest.fail("a signalled WAIT_HUMAN run fell into the blocking input()")
+
+    monkeypatch.setattr(
+        fr3_run.select, "select", deliver_signal_instead_of_terminal_input
+    )
+    monkeypatch.setattr("builtins.input", forbidden_input)
+    fr3_run.execute(
+        world.job, world.binding, load_modules=lambda binding: world.modules
+    )
+    assert sent == [signum]
+    assert world.calls[-1][0] == "closed"
+
+
 def test_fabricated_unknown_directory_is_not_a_registered_run(tmp_path, monkeypatch):
     monkeypatch.setenv("LEVI_AERI_HOME", str(tmp_path / "home"))
     launch.ensure_home()
@@ -198,6 +239,26 @@ def test_runner_identity_is_bound_to_registered_writer(tmp_path, monkeypatch):
     launch.write_record(directory / launch.RUNNER_RECORD, runner)
     assert not api._locate("real-test").runner()["alive"]
     assert not launch.registered_runner_alive(entry, runner)
+
+
+def test_runner_record_must_match_registered_plan_even_if_process_is_alive(
+    tmp_path, monkeypatch
+):
+    world = tracked(tmp_path, monkeypatch)
+    fr3_run.execute(
+        world.job, world.binding, load_modules=lambda binding: world.modules
+    )
+    entry, _ = launch.registered_run("real-test")
+    # A live process (this one) with a self-consistent identity, but a plan the
+    # registration never named, must not count as the registered writer.
+    me = {"pid": os.getpid(), "identity": children.identity(os.getpid())}
+    runner = dict(entry["runner"], state="running", **me)
+    assert launch.runner_alive(runner)
+    other = dict(entry, registration=dict(entry["registration"], **me))
+    assert launch.registered_runner_alive(
+        other, dict(runner, plan_sha256=other["registration"]["plan_sha256"])
+    )
+    assert not launch.registered_runner_alive(other, dict(runner, plan_sha256="0" * 64))
 
 
 def test_faulted_standalone_stays_locked_and_cannot_be_replayed(tmp_path, monkeypatch):
@@ -249,7 +310,7 @@ def test_real_standalone_cannot_be_downgraded_to_an_unsigned_dry_launch(
 def test_active_writer_rejects_disk_corruption_before_resume(
     tmp_path, monkeypatch, tail
 ):
-    world = tracked(tmp_path, monkeypatch, scenes=("unknown",))
+    world = tracked(tmp_path, monkeypatch, plain_wait=True, scenes=("unknown",))
     monkeypatch.setattr(fr3_run.sys.stdin, "isatty", lambda: True)
 
     def no_input(*args):
@@ -422,3 +483,97 @@ def test_only_authentic_dry_starting_record_is_visible(tmp_path, monkeypatch, ch
     launch.write_record(directory / launch.LAUNCH_RECORD, record)
     with pytest.raises(HTTPException):
         api._locate(handle.run_id)
+
+
+def test_http_resume_of_a_standalone_real_run_is_refused_and_writes_nothing(
+    client,  # noqa: F811 - fixture
+    tmp_path,
+    monkeypatch,
+):
+    """User decision 2026-10-13: a registered standalone real run is resumed
+    only at its terminal (robot.health() rechecked by the driver), never by
+    the page's self-attested checkboxes."""
+    world = tracked(tmp_path, monkeypatch, plain_wait=True, scenes=("unknown",))
+    monkeypatch.setattr(fr3_run.sys.stdin, "isatty", lambda: True)
+
+    def no_terminal_input(*args):
+        time.sleep(0.01)
+        return [], [], []
+
+    monkeypatch.setattr(fr3_run.select, "select", no_terminal_input)
+    result = []
+    thread = threading.Thread(
+        target=lambda: result.append(
+            fr3_run.execute(
+                world.job, world.binding, load_modules=lambda binding: world.modules
+            )
+        )
+    )
+    thread.start()
+    directory = launch.run_dir_of(Path(world.job["rollout_root"]), "real-test")
+    base = "/api/levi/automatic/runs/real-test"
+    try:
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            try:
+                run = api._locate("real-test")
+                if run.state == "WAIT_HUMAN" and run.runner()["alive"]:
+                    break
+            except HTTPException:
+                pass
+            time.sleep(0.01)
+        else:
+            pytest.fail("standalone never reached registered waiting state")
+        snap = client.get(base).json()
+        assert snap["state"] == "WAIT_HUMAN" and snap["resume_terminal_only"] is True
+        # Decision UI-2: nor is a scene question answered from the page.
+        assert snap["scene_answer_terminal_only"] is True
+        scene = client.post(
+            f"{base}/scene-answer",
+            json={
+                "request_id": "scene-any",
+                "nonce": "n",
+                "frames_sha256": "ab" * 32,
+                "predicates": {"object_at_source": True},
+            },
+        )
+        assert scene.status_code == 409, scene.text
+        assert scene.json()["detail"]["code"] == "scene_answer_terminal_only"
+        lines_before = len(Journal.read(directory).events)
+        commands = directory / "control"
+        before = (
+            sorted(p.name for p in commands.rglob("*")) if commands.exists() else []
+        )
+        body = {
+            "command_id": "resume-web",
+            "expected_seq": snap["seq"],
+            "environment_handled": True,
+            "health_rechecked": True,
+            "challenge": snap["challenge"],
+        }
+        refused = client.post(f"{base}/resume", json=body)
+        assert refused.status_code == 403, refused.text
+        detail = refused.json()["detail"]
+        assert detail["code"] == "terminal_resume_required"
+        assert "scripts/aeri.py" in detail["message"]
+        assert "levi automatic resume" not in detail["message"]
+        # Nothing was consumed or written: same challenge still held, no
+        # command file, journal unchanged, the run still waits.
+        assert api._CHALLENGES.by_run["real-test"][snap["challenge"]][0] == snap["seq"]
+        after = sorted(p.name for p in commands.rglob("*")) if commands.exists() else []
+        assert after == before
+        assert len(Journal.read(directory).events) == lines_before
+        assert api._locate("real-test").state == "WAIT_HUMAN"
+        # Stopping from the page stays possible.
+        stop = client.post(
+            f"{base}/stop", json={"command_id": "stop-web", "confirm": "stop"}
+        )
+        assert stop.status_code == 200 and stop.json()["result"] == "applied"
+        thread.join(3)
+        assert not thread.is_alive()
+    finally:
+        if thread.is_alive():
+            control.write_command(
+                directory, control.command("stop", "cleanup-stop", "operator")
+            )
+            thread.join(3)

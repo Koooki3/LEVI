@@ -5,7 +5,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AutomaticApiError, automaticApi } from "./api";
 import { nextPollDelay } from "./run-logic";
-import type { MetricsReport, RunEvent, RunSnapshot, RunSummary } from "./types";
+import type {
+  MetricsReport,
+  RolloutsResponse,
+  RunEvent,
+  RunSnapshot,
+  RunSummary,
+  SubtasksResponse,
+} from "./types";
 
 export interface Polled<T> {
   data: T | null;
@@ -148,6 +155,97 @@ export function useRunEvents(runId: string, seq: number | undefined) {
     };
   }, [runId, seq]);
   return events;
+}
+
+/** A subtask-loop run's notes and plan files, fetched again when the run's
+ * `seq` moves. `enabled` false (any other reset mode) fetches nothing. */
+export function useRunSubtasks(
+  runId: string,
+  seq: number | undefined,
+  enabled: boolean,
+) {
+  const [data, setData] = useState<SubtasksResponse | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (seq === undefined || !enabled) return;
+    let stopped = false;
+    const controller = new AbortController();
+    automaticApi
+      .subtasks(runId, controller.signal)
+      .then((value) => {
+        if (stopped) return;
+        setData(value);
+        setError("");
+      })
+      .catch((caught) => {
+        if (stopped || caught?.name === "AbortError") return;
+        setError(caught instanceof Error ? caught.message : String(caught));
+      });
+    return () => {
+      stopped = true;
+      controller.abort();
+    };
+  }, [runId, seq, enabled]);
+  return { data, error };
+}
+
+/** The rollout sets, fetched once `enabled` (the view is open) and again
+ * when the run's `seq` moved and at least `ROLLOUTS_REFRESH_MS` passed: the
+ * manifest is rebuilt from every demo's metadata, so it is not re-read on
+ * every journal line. */
+export const ROLLOUTS_REFRESH_MS = 15_000;
+export function useRunRollouts(
+  runId: string,
+  seq: number | undefined,
+  enabled: boolean,
+) {
+  const [data, setData] = useState<RolloutsResponse | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const last = useRef<{ at: number; seq: number | undefined } | null>(null);
+  // A seq change inside the refresh window skips a fetch, so it must not
+  // cancel the one in flight: only unmounting or another run does.
+  const request = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      request.current?.abort();
+      request.current = null;
+      last.current = null;
+    },
+    [runId],
+  );
+  useEffect(() => {
+    if (!enabled) return;
+    const now = Date.now();
+    const before = last.current;
+    if (before && (before.seq === seq || now - before.at < ROLLOUTS_REFRESH_MS))
+      return;
+    last.current = { at: now, seq };
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
+    setLoading(true);
+    automaticApi
+      .rollouts(runId, controller.signal)
+      .then((value) => {
+        if (request.current !== controller) return;
+        setData(value);
+        setError("");
+      })
+      .catch((caught) => {
+        if (request.current !== controller || caught?.name === "AbortError")
+          return;
+        // Let the next open or seq change try again.
+        last.current = null;
+        setError(caught instanceof Error ? caught.message : String(caught));
+      })
+      .finally(() => {
+        if (request.current !== controller) return;
+        request.current = null;
+        setLoading(false);
+      });
+  }, [runId, seq, enabled]);
+  return { data, error, loading };
 }
 
 /** The metrics report, fetched again when the run's `seq` moves. */

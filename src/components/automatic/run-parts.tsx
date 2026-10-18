@@ -134,17 +134,21 @@ export function Note({
   icon,
   children,
   role,
+  id,
 }: {
   tone?: "warning" | "danger" | "info";
   title?: ReactNode;
   icon?: LucideIcon;
   children?: ReactNode;
   role?: "status" | "alert";
+  /** For a control that names this note as its description. */
+  id?: string;
 }) {
   return (
     <section
       className={`ar-note ${tone ? `ar-note--${tone}` : ""}`}
       role={role}
+      id={id}
     >
       {title && (
         <strong>

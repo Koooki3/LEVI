@@ -406,13 +406,20 @@ def test_row10_a_failed_home_locks_and_nothing_moves_again(tmp_path):
 def test_row11_estop_or_fr3_fault_locks_by_the_safety_guard(tmp_path, fault):
     r = build(tmp_path, cfg=one_episode(), robot={"step_faults": {5: fault}})
     assert r.orch.run() == "FAULT_LOCKED"
-    last = r.orch.journal.events[-1]
+    events = r.orch.journal.events
+    # The lock acts first and the notes follow it (Orchestrator._tx, urgent
+    # branch): the refusal that caused the lock is journalled right after it.
+    last = [e for e in events if e.record == "committed"][-1]
     assert (last.from_state, last.to_state, last.reason) == (
         "FORWARD_ACTIVE",
         "FAULT_LOCKED",
         "safety_stop",
     )
     assert last.authority.principal_kind == "safety_guard"
+    assert events[-2] is last
+    refusal = events[-1].note
+    assert refusal is not None and refusal.code == "motion_refused"
+    assert "latched" in refusal.detail
     (rollout,) = r.recorder.rollouts.values()
     assert rollout.state == "incomplete" and not rollout.complete_marker
     # Resuming does not clear the hardware: the preflight locks again.

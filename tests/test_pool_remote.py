@@ -6,6 +6,7 @@ import json
 import os
 import stat
 import subprocess
+import threading
 import time
 
 import pytest
@@ -341,3 +342,63 @@ def test_real_ssh_push_to_localhost(exports, tmp_path):
     result = remote.push(exports["folder"], target)
     assert result["ok"], result.get("error")
     assert (landing / "mix-v1" / "data.bin").is_file()
+
+
+def test_cancel_escalation_leaves_no_thread_once_the_group_exits(monkeypatch):
+    """The escalation watcher returns as soon as the cancelled group is gone
+    (it used to be a 15 s Timer that outlived every cancelled job)."""
+    monkeypatch.setattr(jobs, "ESCALATE_SECONDS", 30.0)
+    proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    escalated = []
+    monkeypatch.setattr(jobs, "_escalate", lambda *args: escalated.append(args))
+    watcher = threading.Thread(
+        target=jobs._escalate_unless_gone, args=("job-x", proc.pid)
+    )
+    watcher.start()
+    proc.terminate()
+    proc.wait(timeout=10)
+    watcher.join(timeout=5)
+    assert not watcher.is_alive() and not escalated
+
+
+def _cancelling(monkeypatch, state):
+    monkeypatch.setattr(jobs, "read", lambda path, default=None: dict(state))
+    monkeypatch.setattr(jobs, "worker_alive", lambda job: True)
+
+
+def test_cancel_escalation_kills_a_group_that_stays(monkeypatch):
+    monkeypatch.setattr(jobs, "ESCALATE_SECONDS", 0.3)
+    _cancelling(monkeypatch, {"status": "cancelling"})
+    proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    escalated = []
+    monkeypatch.setattr(jobs, "_escalate", lambda *args: escalated.append(args))
+    try:
+        jobs._escalate_unless_gone("job-y", proc.pid)
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)
+    assert escalated == [("job-y", proc.pid)]
+
+
+def test_cancel_escalation_stops_waiting_once_the_job_has_stopped(monkeypatch):
+    """A group member may outlive the job (slow exit under load): the job
+    is no longer live, so there is nothing to escalate and no thread stays."""
+    monkeypatch.setattr(jobs, "ESCALATE_SECONDS", 30.0)
+    state = {"status": "cancelling"}
+    _cancelling(monkeypatch, state)
+    proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    escalated = []
+    monkeypatch.setattr(jobs, "_escalate", lambda *args: escalated.append(args))
+    watcher = threading.Thread(
+        target=jobs._escalate_unless_gone, args=("job-z", proc.pid)
+    )
+    try:
+        watcher.start()
+        time.sleep(0.3)
+        assert watcher.is_alive()
+        state["status"] = "cancelled"
+        watcher.join(timeout=5)
+        assert not watcher.is_alive() and not escalated
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)

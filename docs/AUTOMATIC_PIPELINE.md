@@ -476,6 +476,16 @@ The defaults are not calibrated on any data.
 
 ## Reset arbitration (`scene_assessment.py`, `reset_manager.py`)
 
+The machine contract and its presentation are separate. `describe()` (including
+`format` and `view_rule`), `plan.contract`, and the plan digest remain frozen
+machine/audit data; CLI JSON preserves those values. The plan API exposes only
+contract identity/version/status, and the pending card exposes identity/status
+and predicates. The UI renders status through its English/Chinese catalogue,
+not by translating or rewriting the frozen description. Currently neither
+`FORMAT_STATUS` nor `VIEW_RULE` is displayed by these views. This boundary has
+regression candidates; it does not establish runtime validation or a current
+user-visible defect.
+
 **Only a `ready` scene with enough evidence skips a reset.** A scene
 assessment is the provider's claim; `scene_assessment.arbitrate` reads it
 against the task's **Initial State Contract** (`RunConfig.initial_state`):
@@ -870,6 +880,26 @@ back to `WAIT_HUMAN`. There is no way around the second check.
 | `provider` (default) | the machine scene provider | a human-assisted launch is refused without a provider whose `reachable()` answers `True` (no such check counts as unreachable; `E_SCENE_PROVIDER_MISSING`, `cli.scene_provider_problems`), so the run can never loop between `WAIT_HUMAN` and `VERIFY_INITIAL` with nobody able to answer |
 | `operator_attested` | a person (`adapters/human.py`, `HumanSceneProvider`, `provider: human`) | `human_assisted` only, with an Initial State Contract |
 
+**On a real run (`fr3_run --execute`) the terminal releases every round,
+whatever the scene check** (L2-UI2-PROVIDER-RELEASE, decision 2026-10-15;
+`console.ConfirmedScene`). With `provider`, before each round: after a
+forward episode the reset prompt waits for `Enter` (the frames are taken
+after it); the provider is asked and waited for (`scene_timeout_s`); its
+answer is printed as `Model's view: ready / reset needed / uncertain / no
+answer (for reference only ...)`; then the same question as with
+`operator_attested` is asked at the terminal and only its `y` / `n` / `u`
+keys answer it (the page shows it, its answers never count). The
+assessment the run uses is the person's (`provider: human`): `y` on every
+required predicate starts the round, `n` or `u` take the usual routes (a
+reset by the reset policy, or `WAIT_HUMAN`). The provider's answer never
+releases motion; when it differs from the person's a
+`scene_model_disagreed` note records both (`model=... operator=...`) and the
+person's decision stands. The question waits up to
+`human_scene_timeout_s`, in slices, so a stop ends it at once. A real run
+without the terminal is refused before any connection (see "The old typed
+path" below). Offline and fake runs are unchanged: the provider's answer is
+the decision.
+
 With `operator_attested` the check captures the current camera frames
 first (after the resume and its preflight), keeps them in the run's
 evidence store, then asks one question: the request id (asked once), a
@@ -983,6 +1013,421 @@ check is as good as the frames the cameras give; the arbitration's view
 and evidence rules apply to it unchanged. Metrics do not yet tell planned
 from unplanned interventions (the mode-matrix work).
 
+## Subtask loop (`reset_strategy: subtask_loop`)
+
+A run without a reset policy: only the evaluation policy and the local VLM.
+The operator sets the task name (`task.instruction`) and the number of rounds
+(`experiment.episodes`); the VLM plans pick-and-place subtasks, the policy runs
+each one as an ordinary episode, and a reverse loop restores the round-start
+layout. Code: `levi/automatic/subtask_loop.py` (note codes, template,
+validators, fakes), the orchestrator's `_decide_subtask` and the methods after
+it, `levi/automatic/subtask_vlm.py` (the real VLM client and its sleep/wake).
+**Wired but not verified on the real robot, a real policy server or a real
+vLLM**: every test runs on fakes.
+
+**One run.**
+
+1. At the start, the VLM lists the objects on both cameras (`inventory`, the
+   Lynx prompt and schema: ids such as `pink_plate_1`, where each one is,
+   whether it can be picked). Terminal D shows the list; `y` confirms it,
+   `n` rejects it (`WAIT_HUMAN`, `subtask_inventory_rejected`). The confirmed
+   list plus `table` is frozen as the run's whitelist (note
+   `subtask_inventory_confirmed` with its sha256 and a sidecar file).
+2. Each round: the read-only start-pose check, then the operator presses
+   Enter in terminal D to release the round. Nothing else releases it: not the
+   page, the command inbox, the VLM or a timeout. The round-start frames are
+   kept as evidence (refs and sha256): they are the reference layout.
+3. Forward plan: the VLM gets the task name, the whitelist and the current
+   frames and answers `{"steps": [{"pick", "place", "instruction",
+   "done_when": [{"fact", "subject", "target"}]}]}`. `pick` must be a
+   graspable whitelist id, `place` another whitelist id or `table`, every fact
+   (`on`, `in`, `in_gripper`, `gripper_empty`) names whitelist ids only. The
+   policy prompt is **rendered by code** from `pick` and `place` with one of
+   three fixed templates (`INSTRUCTION_TEMPLATES`, one constant table): `on`
+   -> `put the {pick} on the {place}`, `in` (a container) -> `put the {pick}
+   into the {place}`, the table -> `put the {pick} on the table`. The
+   relation is the plan's own `on`/`in` fact about exactly `pick` and `place`;
+   a subtask that states none is refused (`no_relation`). Ids become words
+   (`pink_plate_2` -> `pink plate`). Two same-colour items read the same: a
+   plan in which one instruction would stand for two different moves is
+   refused (`ambiguous_instruction`; decision 2026-10-17, the whitelist names
+   are not changed). The VLM's own `instruction` field is kept for the
+   analysis and never sent. An id outside the whitelist, a malformed plan, an
+   empty **forward** plan, an over-long one (`max_subtasks_per_loop`), a
+   timeout or an exception: hold, no motion, `WAIT_HUMAN`
+   (`subtask_plan_refused`). Every request record keeps this client's request
+   id, the input frame refs, the timeout, whether the HTTP answer had the
+   expected shape and why not. The bridge checks the prompt again
+   before the policy accepts it (`prompt_allowed`: only template texts of the
+   frozen whitelist).
+4. Forward loop: each subtask is one forward episode of at most
+   `subtask_max_steps` steps (default 200) with its own prompt, ended by the
+   step budget or the operator, through the usual hold -> quiesce -> seal. No
+   home between subtasks. Then the VLM answers the subtask's facts on still
+   frames (`check`); the decision is derived in code: all facts true -> the
+   next subtask; any false -> the same subtask again (at most
+   `subtask_max_retries`, default 5, then `WAIT_HUMAN`
+   `subtask_retry_limit`); null, malformed, timeout -> `WAIT_HUMAN`
+   (`subtask_check_unavailable`). The VLM's answer only drives the flow: it is
+   a model judgement in `subtask_check` notes, never an operator label, a
+   truth or a success in the metrics (every subtask episode's result says
+   `goal_verification: unavailable`).
+5. The forward loop ends at home (the existing safe home). Then the start-pose
+   check, the reverse plan (the current side frame and the round-start side
+   frame, the same validation; its task name is made by code, `undo: <task>`)
+   and the reverse subtasks as `reset` episodes (the same policy, the same
+   per-subtask loop), and home again. An empty **reverse** plan means the
+   scene is already as the round started: no reverse subtask, the arm stays
+   home, and the next round still needs its start-pose check and its release.
+   The forward end commits `subtask_forward_done`, the reverse end
+   `subtask_reverse_done`.
+
+**Early done check (`subtask.early_check`, off by default).** Without it
+every forward and reverse subtask runs its whole step budget (200 steps, about
+26 s on 2026-10-18) before the VLM is asked whether it is done. With it, a
+running subtask stops for that same check when the subtask has probably
+finished:
+
+- **Trigger.** `on_events: true`: an event of `event_types` (default
+  `gripper_open`, a release) from the binding's `signal_events` stream (the
+  same frame-bearing stream the termination arbiter reads; a subtask_loop
+  binding may declare it only for this, and `on_events: true` requires it)
+  makes a check due `settle_steps` (default 8) steps later, so the object has
+  dropped and the arm moved off. A retracted event makes nothing due.
+  `every_steps: N` (N >= 40): a check is also due N steps after the attempt
+  started or after its last check, the fallback without events. Both may be
+  on; at least one must be. Never before `min_steps` (20) steps of the
+  attempt, never within `cooldown_steps` (20) of the last check or of the
+  budget's end (the ordinary check comes then anyway), at most `max_checks`
+  (3) per attempt.
+- **Stop.** The check point is taken at the top of a control step, after the
+  operator's stop, the latch/red-health check and the operator's s/f/d (none
+  loses its priority to it), before the next observation. The episode ends
+  with stop reason `subtask_early_check` through the ordinary hold ->
+  quiesce -> seal; no new motion path, token or guard exists. The VLM is
+  woken (the usual GPU check) and asked the subtask's `done_when` with the
+  same prompt and schema as at the budget's end, on still frames. External
+  mode answers it like any other request.
+- **Answer.** True: the subtask is done, the next subtask (or the loop's end
+  and home) follows at once. False, null or no answer (the VLM could not be
+  woken, a malformed reply): the same subtask, same attempt, continues in a
+  new episode with the rest of its step budget (no home, no retry counted,
+  transition `subtask_continue`); its ordinary check at the budget's end still
+  decides, with the usual retry and person rules. A stop during the check
+  wins as before (home, then a person); a latch or red health is caught
+  before the continued episode's first step.
+- **Records.** `subtask_early_check` note (what triggered it: `trigger`
+  `event` with `event_type`, `event_id`, `event_step`, or `interval` with
+  `every_steps`; the attempt `step`, `n`), the `subtask_check` note with
+  `early: true`, `trigger` and `step`, and a `subtask_continued` note when the
+  subtask goes on (`after`, `segment`, `used_steps`, `remaining_steps`).
+  A continued episode's `subtask_started` note and rollout metadata carry
+  `segment` and `continues` (the episode before); the metrics count it as the
+  same subtask. Each part is its own sealed rollout. Terminal D prints which
+  trigger paused the subtask, never the VLM's answer.
+
+Why the episode ends instead of pausing inside it: an in-episode pause would
+ask the VLM while the policy episode is still open (the state machine says a
+policy may infer), would need a longer or a second motion token, and would
+leave a time gap inside one rollout. Ending and continuing reuses only
+transitions that already exist. Cost: a continued attempt is several shorter
+rollouts. Not verified on the real robot.
+
+**s / f / d.** During a forward subtask episode: `s` or `f` labels the
+**round** and ends the forward loop. The verdict is about the round, not about
+one subtask: it is one record in `<run_dir>/labels/round_label.jsonl`
+(`metrics.label_round`: `round_id` as in the `subtask_round_released` note,
+`success`/`failure`/`discarded`, `by`, the time, and the member episodes: the
+round's forward subtask episodes that ran, then a `members` line with its
+reverse episodes). No subtask episode gets a success/failure label of its own
+(`label_operator` refuses every subtask_loop episode, whatever route asks), so
+nothing per-episode reaches `levi export`, the training pool or curation, and
+`raw.demo_outcome` (the robot flag they read) never gives a subtask rollout an
+outcome. A round none of whose episodes ran keeps no record. Rates are per
+round in the report's `rounds` section (`success_rate` over success and
+failure; `discarded` is out of the denominator; there is no automatic round
+verdict, so no agreement or early stop). The operator may also press no key
+during the run and label each round afterwards: `levi automatic label
+--run-dir RUN --list-rounds` shows each round's id, its subtasks (with
+whether each episode ran) and the VLM's checks; `levi automatic label
+--run-dir RUN --round ROUND_ID --value success|failure|discarded --by
+PRINCIPAL [--note TEXT]` writes the same record (`source: post_run`) after
+the value is typed again at a terminal. `--by` is required and recorded; a
+later label of the same round supersedes the earlier one and both stay on
+file; an unknown round, or one none of whose forward episodes ran a step, is
+refused, and so is any episode-level outcome label in a subtask_loop run. It
+is an operator's action: an agent never runs it on a person's behalf; the arm goes home and the reverse loop still restores the scene.
+`d` discards the round: home, reverse loop, and the round is replaced (within
+`max_discarded_rounds`). During the reverse loop `s`/`f`/`d` do nothing (the
+terminal says "the reverse loop is restoring; this key does nothing here");
+stop always works. A stop wins in every phase: before the inventory, at the
+release, during planning, while the VLM wakes or sleeps, while the policy runs,
+during a check, before a retry, in the reverse loop; once a stop is registered
+no planned subtask is dispatched.
+
+**The VLM and the policy never work at the same time.** Before every policy
+episode the VLM is put to sleep; before every VLM request it is woken. A wake
+needs `vlm_wake_min_free_gpu_mib` free GPU memory (`nvidia-smi --query-gpu`,
+aggregate only); left unset it comes from the VLM profile the way `levi live`
+computes a wake (`gpumgr.need_mib(wake=True)`: the budget less the 2200 MiB a
+sleeping vLLM keeps, plus the 850 MiB wake margin; about 21.1 GB for 0.70 on a
+32607 MiB card), and 23000 only when no profile or reading is there. The wake
+threshold is that need plus `vlm_wake_headroom_mib` (default and minimum
+1024). Short or unreadable: no wake, `vlm_wake_refused` with `free_mib`,
+`need_mib`, `headroom_mib`, `threshold_mib` and `decision`, `WAIT_HUMAN`
+(`vlm_unavailable`). Before every `/sleep` and `/wake_up` the listener on the
+VLM port must be our own recorded unit (pid and starttime, R15); otherwise
+nothing is sent (`not_our_unit`) and the run waits. A failed or timed-out
+wake: `vlm_wake_failed`, `WAIT_HUMAN`, the policy does not move. A level-1
+sleep moves the weights (about 18.5-20 GiB) into pinned host memory, so
+MemAvailable must be at least `vlm_min_free_mem_gib` (default 28); below it
+`vlm_sleep_fallback` decides: `wait_human` (default: `vlm_sleep_refused`,
+`WAIT_HUMAN`), `level2` (the weights are dropped and reloaded at the next
+wake; slower, wake time not measured) or `stay_awake` (the VLM stays up and
+gets no request while the policy runs; only when the GPU has
+`vlm_stay_awake_min_free_gpu_mib`). `vlm_alternation: co_resident` is for a
+VLM small enough to stay beside the policy: never put to sleep, still no
+request while the policy runs, and allowed only when the run's first check
+finds `vlm_co_resident_headroom_mib` (default 2048) free with everything
+loaded. The mode is journaled once (`subtask_alternation`). Every
+`vlm_sleep`/`vlm_wake` note records MemAvailable before and after, the
+nvidia-smi used/total before and after a wake, and the time it took.
+
+**Recording.** Forward subtask episodes are recorded in
+`<forward_folder>__subtask`, reverse ones in `<forward_folder>__reverse`
+(`subtask.forward_folder` / `subtask.reverse_folder` override them); each
+rollout's `metadata.json` has `eval.aeri.subtask` (round, loop, index,
+attempt, instruction, task, done_when) and its `task_description` is the
+subtask's instruction, so the live service and later datasets can tell
+subtask rollouts from whole-task rollouts.
+
+**Terminal D's waits in this mode.** Each subtask wait prints its own line
+with the concrete cause from its note (the plan refused and why, the check
+unreadable, the retry limit reached, the VLM not woken with free and threshold
+MiB, the wake failed, the sleep refused with MemAvailable), then one line
+saying where the run stopped: in the forward loop of round N or after it
+("the reverse reset did not run: restore the scene by hand before Enter (q if
+unsure)"), in the reverse loop ("the scene is only partly restored"), or
+before anything of the round moved. `vlm_unavailable` (wake, sleep, memory)
+and `subtask_retry_limit` need Enter and then `y` (Enter alone never
+resumes them); a refused plan, an unreadable check, a rejected list and an
+unreleased round take one Enter. The recent-notes lines show the `subtask_*`
+and `vlm_*` notes, except `subtask_check` (the VLM's answer stays off the
+screen until the round is labelled).
+
+**A resume never continues a round** (`subtask_round_abandoned`): the next
+round starts with the start-pose check and a new release. A restart reads back
+the frozen whitelist and the rounds the forward loops ended; the run is
+`FAULT_LOCKED` as after any crash.
+
+**Journal notes** (each detail is JSON; a long one keeps its short fields and
+names a sidecar file under `<run_dir>/subtasks/` with its sha256):
+
+| Note | Detail |
+| --- | --- |
+| `subtask_alternation` | `mode` (`sleep` / `co_resident`), `ok`, co_resident's used/total/headroom MiB |
+| `subtask_inventory` | `items` (ids), `frames` (ref, sha256); sidecar: the request record |
+| `subtask_inventory_confirmed` | `items` (whitelist), `by: terminal`, `sha256`; sidecar: the objects |
+| `subtask_inventory_rejected` | `by` (`terminal` / `validator`), `reason` |
+| `subtask_round_released` | `round`, `by: terminal` |
+| `subtask_plan` | `round`, `loop`, `task`, `n`, `plan_file`, `sha256` (the plan file: subtasks with their rendered instructions, the template, the reference frames, the request record) |
+| `subtask_plan_refused` | `round`, `loop`, `reason` (`not_whitelisted`, `bad_json`, `empty_plan`, `timeout`, ...) |
+| `subtask_started` | `round`, `loop`, `index`, `attempt`, `instruction`, `episode_id` |
+| `subtask_check` | `round`, `loop`, `index`, `attempt`, `episode_id`, `value` (true/false/null), `frames`; sidecar: the request record |
+| `subtask_early_check` | `round`, `loop`, `index`, `attempt`, `segment`, `episode_id`, `steps`, `n`, `trigger` (`event`: `event_type`, `event_id`, `event_step`; `interval`: `every_steps`), `step` |
+| `subtask_continued` | `round`, `loop`, `index`, `attempt`, `segment`, `after`, `value`, `used_steps`, `remaining_steps` |
+| `subtask_retry` | `round`, `loop`, `index`, `attempt` |
+| `subtask_loop_done` | `round`, `loop`, `subtasks`, `retries`, `checks`, `outcome` (`done` / `success` / `failure` / `discard` / `already_restored`) |
+| `subtask_round_abandoned` | `round`, `phase`, `why` |
+| `vlm_sleep` / `vlm_wake` | `ok`, `level`, `mem_available_gib`, `mem_after_gib`, `ms` (wake: `wake_s`, `free_mib`, `gpu_before`, `gpu_after`, `was`) |
+| `vlm_wake_refused` / `vlm_wake_failed` / `vlm_sleep_refused` | `reason` and the readings |
+
+A request record (sidecar) holds what the analysis needs (Lynx
+AERI-VLM-ANALYSIS-PLAN-20261017.md): kind, round, index, attempt, frames,
+prompt sha256, request and response times, latency, prompt and completion
+tokens, the raw answer, the parsed answer, valid or not, whitelist violations,
+the outcome and its reason, the VLM's state before the request and the wake
+time. The page reads the loop phase from these notes (`GET
+.../runs/{id}` snapshot: `subtask`, from `metrics.subtask_progress`); the
+metrics report has `subtasks` (rounds, loops, subtasks, retries, check
+answers; never a success).
+
+**Job file** (`subtask:` section; every key optional):
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `max_steps` | 200 | steps of one subtask episode |
+| `max_retries` | 5 | resends of a subtask whose check said false |
+| `max_subtasks_per_loop` | none | cap on one plan's subtasks |
+| `vlm_min_free_mem_gib` | 28 | MemAvailable before a level-1 sleep |
+| `vlm_sleep_fallback` | `wait_human` | `wait_human`, `level2` or `stay_awake` |
+| `vlm_wake_min_free_gpu_mib` | from the VLM profile (fallback 23000) | free GPU memory a wake needs |
+| `vlm_wake_headroom_mib` | 1024 (minimum) | added to that need: the wake threshold |
+| `vlm_stay_awake_min_free_gpu_mib` | 4096 | free GPU memory for `stay_awake` |
+| `vlm_alternation` | `sleep` | `sleep` or `co_resident` |
+| `vlm_co_resident_headroom_mib` | 2048 | co_resident's startup headroom |
+| `home_after_loop` | true | must be true (each loop ends at home) |
+| `forward_folder`, `reverse_folder` | `<forward_folder>__subtask`, `__reverse` | rollout folders |
+| `early_check` | absent (off) | `on_events` (false), `event_types` (`[gripper_open]`), `settle_steps` (8), `every_steps` (none, >= 40), `min_steps` (20), `cooldown_steps` (20), `max_checks` (3): the early done check above; absent keeps the plan digest |
+| `vlm` | | `model`, `served_name`, `port` (8100), `gpu_memory_utilization` (0.70), `max_model_len` / `min_model_len` (16384), `sleep_mode` (true), `prewarm` (true), `fallback_gpu_memory_utilization` (0.72), `request_timeout_s`, `wake_timeout_s` (60) |
+
+`task.instruction` is required; `termination.allow_early_stop` defaults to
+false here (nothing judges while the policy runs) and `true` is refused, as
+are `event_pause_judge` and `home_after_loop: false`. Reset-policy keys are
+ignored; `subtask:` keys are ignored by the other strategies (their plan
+digests do not change). The plan keeps the task name, the template and the
+VLM profile, never a subtask's text.
+
+```yaml
+schema_version: levi.aeri.job.v1
+experiment:
+  name: r20261017-plates-sub
+  episodes: 5
+  execution_mode: assisted
+policies:
+  forward:
+    deployment:
+      checkpoint_id: pi05_fr3_all_step49999
+      config: pi05_fr3_all_state
+      checkpoint_dir: /abs/path/to/checkpoints/pi05_fr3_all_step49999
+task:
+  instruction: stack the plates of same color together
+reset:
+  strategy: subtask_loop
+subtask:
+  max_steps: 200
+  max_retries: 5
+  vlm:
+    model: RedHatAI/Qwen3.8-27B-INT4
+    served_name: qwen3.8-27b
+recording:
+  rollout_root: /abs/path/to/online_rollout_data
+```
+
+The binding (`levi.aeri.fr3.binding.v1`) has `subtask_vlm` instead of
+`providers`, and only the `forward` policy (both loops use it):
+`"subtask_vlm": {"base_url": "http://127.0.0.1:8100", "model": "<served
+name>", "service": {...}}` (optional `extra_body`, `gpu_index`, and the image
+cap `max_images` 1–8, default 2, and `history_frames` 0–4, default 0: see the
+camera frame bus below); the port must
+be the job's `subtask.vlm.port`, and `service` is required (below). A
+forward-only `policy_swap` block lets the run start and stop its policy
+service itself. The operator runs the usual sequence in terminal
+D: `python scripts/aeri.py check --config JOB --binding BINDING`, then
+`python scripts/aeri.py execute --config JOB --binding BINDING
+--expect-plan <plan sha256> --expect-binding <binding sha256>`.
+
+**Terminal D runs the VLM service** from the binding's required
+`subtask_vlm.service` block (`unit` a `levi-aeri-vlm-*` name, `argv` an
+absolute program and plain arguments, optional `env`, `gpu_lock` LEVI's
+absolute `.gpu.lock`, `need_policy_mib`, optional `ready_timeout_s`), and the
+policy too with a forward-only `policy_swap` (`levi/automatic/subtask_units.py`).
+The argv must match the job's `subtask.vlm`: the `model` (required here) as an
+argument, `--port`, `--max-model-len`, `--gpu-memory-utilization` and, when
+the job names one, `--served-model-name`; a mismatch refuses the run before
+anything starts.
+Each step prints `n/7 what happens / what to do / how to stop` with a pass or
+fail line and goes to `<rollout_root>/.aeri/units/<run>-steps.jsonl` and, once
+the run journal exists, to `subtask_service_step` notes:
+
+1. preflight: LEVI's GPU flock (held to the end), free GPU memory for the
+   policy plus the VLM (both numbers printed), MemAvailable, ports 8000 and
+   8100; a leftover VLM unit of ours is stopped only when its recorded
+   identity still matches;
+2. the VLM as our unit (`systemd-run --user`), ready when the unit is active,
+   listens from inside its own cgroup and answers `/health`; its identity
+   (unit, pid, starttime) is recorded at once;
+3. the VLM to sleep (MemAvailable checked first);
+4. the policy service (the forward-only `policy_swap` unit), before any arm
+   I/O as before;
+5. the inventory and its confirmation; 6. the rounds;
+7. shutdown: the policy unit and the VLM unit are stopped (the VLM only while
+   its identity matches; otherwise it is left and the operator decides), then
+   the release check (our pids gone from nvidia-smi, the memory back), and
+   only then the lock is released; a failed check is reported.
+
+The inventory comes after the policy start, not before it as first proposed:
+it needs the cameras, which the bridge opens only after the policy service is
+up and checked, and the peak is the same (the VLM sleeps while the policy
+loads). A port held by anything that is not our recorded unit refuses the
+start and stops nothing: this run and the product's `levi live` vLLM exclude
+each other on :8100, and stopping the live service (`levi live stop`) is the
+operator's step. A failure at any step stops only the units this run started
+and prints which. The z floor is the binding's `safety.min_z` for every
+subtask prompt (the AERI bridge does not use the client's per-task floor
+table, and nothing the VLM answers reaches the clamp), as for whole-task runs.
+
+### Rollout sets (`levi/automatic/rollouts.py`)
+
+The policy runs only during each subtask episode, and each episode is its own
+demo folder (`<forward_folder>__subtask/demo_NNNN` forward,
+`<forward_folder>__reverse/demo_NNNN` reverse). A round is therefore a forward
+set and a reverse set, each with one or more subtasks; a retried subtask has
+several attempts, so several demos. `rollouts.json` in the run folder
+(`levi.aeri.rollouts.v1`) organises them as rounds -> sets (`forward`,
+`reverse`) -> subtasks (index, instruction, pick, place) -> attempts
+(episode id, `demo` relative to the recording root, frames, start and end
+time, seconds, stop reason, `check`). It is derived and can be deleted and
+rebuilt at any time: no demo is copied or moved.
+
+- Built only from what the run already wrote: the journal (read without its
+  lock, never written), the `subtasks/` sidecars it names, `plan.json`,
+  `labels/` and each demo's `metadata.json`. An attempt is one
+  `subtask_started` note; its demo is the folder whose
+  `eval.aeri.episode_id` is that episode id, exactly (a value stored as a
+  Python repr is read with `ast.literal_eval`, never `eval`). An attempt
+  without a demo, or a demo that matches no attempt (`unmatched_demos`), is
+  listed in `problems`; nothing is guessed. A demo still named
+  `incomplete_*` (never sealed) is `demo: null` with an `incomplete` entry
+  that says why.
+- `check` is the VLM's judgement of the subtask (`subtask_check`, `by:
+  vlm`). It is never an operator label nor an outcome. A person's labels
+  appear only where they exist: `operator_label` on a round from
+  `labels/round_label.jsonl`, on an attempt from
+  `labels/operator_label.jsonl`.
+- A round's `outcome` is `forward_done`, `forward_failed`, `discarded`,
+  `abandoned` (`subtask_round_abandoned`, e.g. after a resume), `locked`
+  (the run went to `FAULT_LOCKED` during it) or `incomplete` (the journal
+  ends before its forward loop did); each set has its own `outcome`.
+  `motion_refused` and similar notes stay on the round they happened in.
+- At run close (subtask_loop runs, `fr3_run`) the file is written once,
+  best effort: a failure leaves a `rollouts_write_failed` journal note and
+  changes no motion, state or exit code.
+- `levi automatic rollouts --run-dir D [--rollout-root R] [--write]
+  [--json]` (also `python scripts/aeri.py rollouts ...`) prints a summary
+  (rounds, per set subtasks x attempts, problems). It reads only; `--write`
+  writes `rollouts.json` (temporary file, then rename) and nothing else.
+  `--rollout-root` defaults to the run's `launch.json` or plan. Readers use
+  `rollouts.load_or_build`: the file when it is newer than the journal, else
+  a fresh build in memory.
+
+### Rollout sets in the run window
+
+A subtask-loop run records one demo per policy segment, so one round leaves
+many demos: a forward set (one or more demos per subtask) and a reverse set
+(the same, retries included). The run window of such a run has a
+**Rollouts** section, closed until a person opens it, that shows them as
+round -> forward set / reverse set -> subtask -> attempts. Each attempt shows
+its instruction, frames, episode wall time (from dispatch to result, checks
+included; not policy time), stop reason, the model's check (always named a
+model judgement, never a success; for a forward attempt it, the stop reason
+and the outcomes derived from it show only after the operator labels the
+round), the operator's label when there is one,
+and the two camera videos with the viewer's video player. The section only
+reads: it has no control.
+
+The data is `GET runs/{id}/rollouts` (below), the rollout manifest
+`levi.aeri.rollouts.v1` that `levi.automatic.rollouts.load_or_build` returns
+(the stored `rollouts.json` when it is newer than the journal, else built in
+memory; nothing is written). Videos are never served by this route: an
+attempt's demo is matched, by the episode id in its `metadata.json`, to a
+dataset LEVI already serves (a raw capture of its own or a linked live
+dataset `live.<group>__<task folder>` with a ready browsing view), and the
+URLs go through the dataset file service (`/api/levi/files/<name>/videos/…`)
+with its own checks. Without such a dataset the attempt keeps its demo path
+and says "Video not available" with the reason.
+
+
 ## Reset-mode matrix (`levi/automatic/modes.py`)
 
 The "policy evaluation only" mode (`reset.strategy: human_assisted`) is
@@ -1039,6 +1484,7 @@ updated and both modes have tests.
 <!-- levi:generated aeri-reset-modes -->
 | Capability | `single_reset_policy` | `human_assisted` |
 | --- | --- | --- |
+| `arbitration:after_reset:camera_stale` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `arbitration:after_reset:operator_stop` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `arbitration:after_reset:policy_error` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `arbitration:after_reset:reset_horizon_exhausted` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
@@ -1056,6 +1502,7 @@ updated and both modes have tests.
 | `cli:plan` | same | differs: a real mode is refused for want of a scene provider that can answer too; a dry run plans the same way |
 | `cli:report` | same | same |
 | `cli:resume` | same | same |
+| `cli:rollouts` | same | same |
 | `cli:run` | same | differs: a dry-run scene that is not ready ends the run in WAIT_HUMAN |
 | `cli:runs` | same | same |
 | `cli:scene-answer` | differs: no person is asked about the scene: the runner answers not_supported | differs: relayed to the person's scene check with scene_check operator_attested (not_supported with a machine provider) |
@@ -1066,16 +1513,20 @@ updated and both modes have tests.
 | `metrics:automation` | differs: every intervention is unplanned | differs: a scene check sending the run to a person is planned |
 | `metrics:autonomous` | same | same |
 | `metrics:comparable` | same | same |
+| `metrics:discarded_beyond_limit` | same | same |
 | `metrics:early_termination` | same | same |
 | `metrics:human_minutes_per_valid_episode` | same | same |
 | `metrics:mode_source` | same | same |
 | `metrics:mode_specific` | same | same |
 | `metrics:note` | same | same |
+| `metrics:operator_verdicts` | same | same |
 | `metrics:reset` | same | differs: no reset episodes: resets and their durations stay 0; skip decisions count forward starts only |
 | `metrics:reset_mode` | same | same |
+| `metrics:rounds` | same | same |
 | `metrics:scene_check` | same | same |
 | `metrics:scene_decisions_by_human` | same | same |
 | `metrics:schema` | same | same |
+| `metrics:subtasks` | same | same |
 | `metrics:time_per_valid_episode_ms` | same | same |
 | `metrics:truth` | same | same |
 | `metrics:truth_labels` | same | same |
@@ -1089,16 +1540,19 @@ updated and both modes have tests.
 | `transition:FORWARD_FINALIZE->ROBOT_HOME` | same | same |
 | `transition:FORWARD_JUDGING->FAULT_LOCKED` | same | same |
 | `transition:FORWARD_JUDGING->FORWARD_ACTIVE` | same | same |
+| `transition:FORWARD_JUDGING->FORWARD_FINALIZE` | same | same |
 | `transition:FORWARD_JUDGING->WAIT_HUMAN` | same | same |
 | `transition:FORWARD_STOPPING->FAULT_LOCKED` | same | same |
 | `transition:FORWARD_STOPPING->FORWARD_FINALIZE` | same | same |
 | `transition:PREFLIGHT->FAULT_LOCKED` | same | same |
+| `transition:PREFLIGHT->PREFLIGHT` | n/a: only the subtask_loop strategy (outside this matrix) has it | n/a: only the subtask_loop strategy (outside this matrix) has it |
 | `transition:PREFLIGHT->VERIFY_INITIAL` | same | same |
 | `transition:PREFLIGHT->WAIT_HUMAN` | same | same |
 | `transition:RESET_ACTIVE->FAULT_LOCKED` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `transition:RESET_ACTIVE->RESET_JUDGING` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `transition:RESET_ACTIVE->RESET_VERIFY` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `transition:RESET_FINALIZE->FAULT_LOCKED` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
+| `transition:RESET_FINALIZE->SCENE_ASSESS` | n/a: only the subtask_loop strategy (outside this matrix) has it | n/a: only the subtask_loop strategy (outside this matrix) has it |
 | `transition:RESET_FINALIZE->VERIFY_INITIAL` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `transition:RESET_FINALIZE->WAIT_HUMAN` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `transition:RESET_JUDGING->FAULT_LOCKED` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
@@ -1133,6 +1587,7 @@ levi automatic run      --config F --dry-run [--episodes N] [--scenes S] [--keep
 levi automatic status   --run-dir D [--json]
 levi automatic report   --run-dir D [--config F] [--truth T] [--format md|json]
 levi automatic label    --run-dir D --episode ID --value success|failure|discarded|unclear [--principal P] [--note N] [--json]
+levi automatic rollouts --run-dir D [--rollout-root R] [--write] [--json]
 levi automatic plan     --config F [--mode M] [--episodes N] [--scenes S] [--keep DIR] [--json]
 levi automatic run      --config F --mode M --detach|--foreground [--expect-plan SHA] [--wait S]
 levi automatic runs     [--json]
@@ -1369,10 +1824,12 @@ are scrubbed from every text that leaves.
 | `GET runs`, `GET runs/{id}` | read | summaries; the snapshot: state, `seq`, episodes, counters, the waiting card, the open scene question, a one-time `challenge` (bound to `seq`, 60 s, memory only), the runner, `requirements` and `progress` (below) |
 | `GET runs/{id}/events?after=&limit=` | read | journal transitions and notes after a sequence |
 | `GET runs/{id}/metrics` | read | `metrics.report` |
+| `GET runs/{id}/subtasks` | read | a `subtask_loop` run's notes (`subtask_*`, `vlm_*`) with their detail parsed: a detail that names a `subtasks/…-detail.json` sidecar is read whole from it when the sidecar is below the run folder and matches its SHA-256 (else `sidecar_problem`); a detail that does not parse is `null` with `unparsed`. Each frame is `{ref, sha256, stored}` (`stored`: under `evidence/frames/`, so `GET frames/{sha256}` serves it). The plan files the `subtask_plan` notes name are checked against their SHA-256 (`plans[sha256].ok`, else `problem`: `bad_path`, `missing`, `sha256_mismatch`, `bad_shape`). Empty for any other run. Read-only: the page shows a round, the operator releases it at the terminal |
+| `GET runs/{id}/rollouts` | read | the run's rollout sets (`levi.aeri.rollouts.v1` from `levi.automatic.rollouts.load_or_build`; nothing is written): rounds (`outcome`, `notes`, `abandoned`, `locked`, round `operator_label`), each with `sets.forward` / `sets.reverse` (`null` when that side never ran; `plan_file`, `task`, `outcome`, `subtasks`), each subtask with its `attempts` (`episode_id`, `demo`, `instruction`, `frames`, `seconds`, `started_at`, `ended_at`, `stop_reason`, `check`, `sealed`, `incomplete`, `operator_label`, `media`). Only these fields leave: a `check` keeps its `value` (the model's judgement); private request-evidence names become `<private>`; texts are path-scrubbed. Checks, stop reasons and outcomes are shown before the round is labelled: the maintainer turned the rollout-set blind rule (L2-AERI-SUBTASK-CHECK-BLIND) off on 2026-10-18, so this route passes no `blind` to `rollout_view.project` (which still hides them for a caller that does: `check: {hidden_until_labelled: true}` and the blind stop reasons, with the forward outcomes). `media` is `{available: true, dataset, episode_index, viewer, videos: [{camera, url}]}` with file-service URLs, or `{available: false, reason}` (`no_demo`, `no_episode_id`, `no_dataset`, `no_browsing_view`, `not_in_view`, `no_video`). `404` for an unknown run, `503 rollouts_unavailable` without the generator, `409 rollouts_unreadable` when it fails |
 | `POST runs/{id}/stop` | person | `{command_id, confirm: "stop"}` through the command channel: `result` is `applied`, `repeated` or `refused` (`queued`, 202, when the runner has not answered within three seconds); `409 not_running`; `423` while another operation on the run is in progress |
-| `POST runs/{id}/resume` | person | `{command_id, expected_seq, environment_handled, health_rechecked, challenge}`: `409 not_waiting`/`confirmations_missing`/`stale_sequence` (also for a wrong or expired challenge) |
+| `POST runs/{id}/resume` | person | `{command_id, expected_seq, environment_handled, health_rechecked, challenge}`: `409 not_waiting`/`confirmations_missing`/`stale_sequence` (also for a wrong or expired challenge); `403 terminal_resume_required` for a registered standalone real run (see below) |
 | `POST runs/{id}/labels` | person | the operator's blind label of an ended forward episode: `{label, revealed, card}` |
-| `POST runs/{id}/scene-answer` | person | the answer to the open scene question (file protocol of `adapters.human`; request id, nonce and frames must match: `409 unsolicited`) |
+| `POST runs/{id}/scene-answer` | person | the answer to the open scene question (file protocol of `adapters.human`; request id, nonce and frames must match: `409 unsolicited`); `409 scene_answer_terminal_only` for a registered standalone real run (see below) |
 | `POST runs/{id}/attach` | person | `{request_id, confirm: "attach"}`: a runner for a run whose runner is gone (`409 runner_alive`, `409 run_completed`); `arm`/`disarm` answer `501` |
 | `GET runs/{id}/evidence/{eid}`, `GET runs/{id}/frames/{sha256}` | read | a scene assessment record, a captured frame (below `evidence/` only; links are never followed) |
 | `GET setup-guide` | read | the ordered `SetupStep` list from the operator guide's recipes and the read-only probes (`LEVI_SETUP_RECIPES`, `LEVI_SETUP_DOC`); nothing is executed, a recipe marked `execute` is shown as `copy`, and a command is shown only while the guide still hashes as recorded |
@@ -1557,7 +2014,8 @@ an absolute `recording.rollout_root`, and each discovered policy's frozen
 Do not edit an already frozen job or declare its draft contract confirmed on
 behalf of the operator. The bridge refuses shadow mode and existing run folders.
 
-The operator prepares a JSON binding file outside the frozen job. Required keys:
+The operator prepares a JSON binding file outside the frozen job. Required keys
+are below; the additional top-level `policy_warmup_timeout_s` is optional:
 
 | Key | Actual source |
 | --- | --- |
@@ -1566,9 +2024,44 @@ The operator prepares a JSON binding file outside the frozen job. Required keys:
 | `robot_url` | Reviewed loopback robot endpoint, `http://127.0.0.1:5000/` or `:5001/`; used only after terminal confirmation |
 | `health_file` | Absolute current C3 monitor file; a fresh green guard reading is mandatory before creating the environment |
 | `cameras` | Exactly `side` and `wrist`, distinct actual numeric serial strings |
-| `safety` | Exactly `min_z`, `max_xy`, `max_step_m`, `max_step_rad`, `home_pose` (six metres/radians), `home_duration_s`, `home_tolerance_mm`, `rx_range`, `ry_range`, `rz_range` (each a two-value increasing interval of at most 2π), `binarize_gripper` (explicit boolean); use reviewed site limits, not guessed values. Home duration must fit the frozen home timeout |
-| `policies` | Exactly `forward`, plus `reset` for policy reset; each is `{"host":"127.0.0.1","port": PORT}` for an already running, independently reviewed server |
+| `safety` | Required: `min_z`, `max_xy`, `max_step_m`, `max_step_rad`, `home_pose` (six metres/radians), `home_duration_s`, `home_tolerance_mm`, `rx_range`, `ry_range`, `rz_range` (each a two-value increasing interval of at most 2π), `binarize_gripper` (explicit boolean); use reviewed site limits, not guessed values. Home duration plus the settle budget must fit the frozen home timeout. Optional positive finite `home_settle_timeout_s` (default 5 s), `settle_poll_s` (default 0.1 s, at most 1 s), and `gripper_confirm_timeout_s` (default 2 s) bound waits without changing thresholds. Optional camera frame bus keys (below): `max_frame_age_ms` (positive, at most 10000; copied into every camera's openpi `camera_kwargs`) and `camera_stale_steps` (whole number 2–100, default 3) |
+| `policies` | Exactly `forward`, plus `reset` for policy reset; each is `{"host":"127.0.0.1","port": PORT}` for an already running, independently reviewed server (or, with the optional `policy_swap` below, a server this run starts itself) |
 | `providers` | `{"online_url":"http://127.0.0.1:7882","file_root":"/absolute/provider-directory"}` |
+
+**Camera frame bus** (`levi/automatic/camera_meta.py`). An openpi whose
+`RobotEnv.get_observation()` returns `image_meta` (per camera `seq`,
+`t_capture_ns`, `t_arrival_ns`, `age_ms`) lets AERI tell which camera frame
+each step, recording and VLM request used. Without it everything behaves as
+before. With it:
+
+- the bridge passes `image_meta` through under the views `side`/`wrist`;
+- the same `seq` of one camera on `camera_stale_steps` consecutive control
+  steps (default 3) is only recorded: one note `camera_seq_repeat` per run of
+  repeats names the camera, its `seq` and age, and the episode goes on (a
+  dropped frame under CPU/GPU load is normal; maintainer decision
+  2026-10-18);
+- openpi's `StaleFrameError`, raised only when `max_frame_age_ms` is set (no
+  AERI job sets it), ends the episode before any action is taken on that
+  observation. The episode is sealed and the run waits for a person **where
+  the arm stands** (no home), reason `camera_stale` (note `camera_stale`
+  names the camera, its `seq` and age). The terminal asks for `y` before
+  resuming;
+- with `max_frame_age_ms` set, an observation without `image_meta` is refused
+  (an older openpi would silently ignore the limit);
+- `frames.csv` and `aeri_steps.csv` get the columns `side_seq`,
+  `side_t_capture_ns`, `side_age_ms`, `wrist_seq`, `wrist_t_capture_ns`,
+  `wrist_age_ms` after all old columns (empty without `image_meta`);
+- the VLM (`subtask_vlm`) and the file providers encode one JPEG per
+  `(view, seq)` and record `seq`/`t_capture_ns` with each frame of the
+  request evidence (`image_meta` in the request record). A request sends at
+  most `max_images` images; `history_frames` > 0 adds up to that many earlier
+  frames per sent view from openpi's `frame_history`, within the same cap
+  (local and external mode use the same code).
+
+`t_capture_ns` is in the host's wall-clock domain and is compared only with
+other `t_capture_ns`; `t_arrival_ns` and `age_ms` are monotonic. openpi now
+shares one read-only array per frame (`flags.writeable` false): LEVI's AERI
+paths only read or encode it.
 
 Run the copied `--check` command in the existing openpi-capable Python environment
 (with LEVI, OpenCV, NumPy and SciPy available). It reads files and validates the
@@ -1579,7 +2072,98 @@ limits and providers, fill the copied `--execute` template with those exact
 digests. Each invocation requires a real terminal and the typed phrase
 `execute <run_id>`. Configuration is re-read after confirmation. Neither a
 configuration flag nor a previous run's journal can replace this confirmation.
-The bridge does not launch robot, policy, health, or judge services.
+The bridge does not launch robot, policy, health, or judge services, except the
+policy services of an optional `policy_swap` block ("Policy switching" below).
+
+Before creating the run journal or recorder, execution reads the bound home pose
+and measured open gripper, then warms the same validated forward policy client
+and rechecks the initial pose and gripper after that wait.
+**Candidate opt-in startup home (software only).** Job `subtask.start_home: true`
+is supported only with `reset.strategy: subtask_loop`; other strategies reject
+the setting. Omitted, null and false preserve existing plan hashes and the
+ordinary read-only startup refusal. The enabled setting is frozen in the plan;
+the FR3 entry rejects a config/plan mismatch before taking the robot lock. The
+binding still authorizes the same frozen plan and safety limits; no binding-only
+flag can enable this path. Job schema minor 2 adds the optional field.
+
+A readable off-home pose may enter PREFLIGHT, but cannot advance without a fresh
+terminal confirmation: `o` after handling any held object safely, `p` after
+checking the entire return path, then `h` acknowledging the gripper will open
+and authorizing this home. Each prompt clears stale keys; Enter and resume's
+`y` do not confirm. The terminal, installed signal handlers, stop probe and a
+successful live heartbeat must be ready first; a timeout is not readiness.
+The command checks its id and expected journal sequence before any token. A
+PREFLIGHT-to-PREFLIGHT non-idempotent transaction is prepared before motion,
+uses no episode/result/rollout, and calls only `home_under_closed_gate` with a
+startup token revoked on exit. During the startup lifecycle, stop registration permanently flags its stop
+probe and revokes the token, including during the home. Successful independent
+release, or finding the arm already home without startup motion, ends this
+lifecycle without clearing a cancelled startup flag. Later rounds retain their
+existing stop/resume and recovery behavior; any episode history marks startup
+finished on recovery. Health and pose reads happen outside the stop registry
+lock, followed by a check against the original stop generation.
+
+Only an atomically claimed OPEN-to-CLOSED gate belongs to this request. On
+success the same home closure remains closed; a separate `release_round`
+confirmation consumes it once using its generation/time and unchanged stop
+generation, with fresh pose, stop, latch and health checks. Changed closure,
+stop, resume or recovery cannot refresh this permission. A proven zero-send
+refusal enters WAIT_HUMAN with admission closed; this candidate requires ending
+the run, manual handling and a new run, and offers no same-run retry/resume.
+Partial/unknown delivery or a crash after prepare/execute/ack locks the run;
+recovery never replays startup home, even after a generic resume. No fault latch
+is cleared, no red-health home is allowed, and no low-pose recovery policy is
+added. This candidate has only static review until tests and separately approved
+real deployment/robot acceptance are completed.
+
+`Robot.start_pose()` also returns read-only diagnostics from that same observation:
+`target_pose`, `measured_pose`, `error_mm`, `rotation_rad`, `gripper`, the three
+thresholds (`tolerance_mm`, `rotation_tol_rad`, `gripper_min`), `unmet` and
+`unreadable_reason`. Unavailable/non-finite diagnostic values are null; the
+existing acceptance thresholds and `ok` decision are unchanged. Startup refusal
+happens before a journal/session is created and consumes no run ID. Its message
+states that no motion was sent and that homing opens the gripper: a person must
+first handle any held object safely and check the return path. No automatic
+home or latch clearing is introduced. Home settling checks stop, latch, health
+and the current unexpired home token before returning success, even when the
+same observation is already within all pose and gripper thresholds.
+
+Optional top-level `policy_warmup_timeout_s` is a positive finite number of seconds
+(default 30); booleans, zero and non-finite values are refused. Warm-up actions
+are discarded and no motion is sent. A failure or timeout closes the environment
+without using the run id. The outstanding query keeps its slot until it actually
+ends: timeout is neither backend cancellation nor permission to retry or infer
+with another role. This bridge checks frozen deployment identity; it does not
+own or start the existing policy server.
+
+With `policy_swap` the forward service is one this run started, and its start-up
+warm-up is the switcher's: the service is queried once, before any session
+exists, and the switcher also checks the actions, the motion count and the
+motion fence. A refusal there is a start refusal like the one above (the unit
+is stopped, the run id stays unused). `policy_warmup_timeout_s` does not apply
+and the binding is refused when both are given; use `policy_swap.warmup_timeout_s`.
+
+Initial and final home checks retain the bound position tolerance, 0.05 rad
+rotation tolerance and normalized measured gripper threshold >= 0.9; non-finite
+or out-of-range measured values are refused. Observed and resolved home poses
+must contain six or seven finite components, checked individually before
+aggregation; the JSON home-pose binding remains six components. After the last
+home command,
+read-only polling stops at the settle budget, stop request or red health.
+A queued gripper reply is not delivery proof: its exact reviewed queue text
+must be confirmed by stable measured position before another motion and, after
+hold plus policy quiescence, before final judgement or sealing. Confirmation
+never sends motion; unknown delivery locks closure and its original reply and
+measured values reach the journal and terminal. A retained target already on
+the target side requires measured movement before confirmation. Fault output
+includes the reason, recent note details and journal path. The confirmation budget remains 2 s by default. A stable target sample whose read finishes at or before the deadline can confirm; a read finishing later cannot. Stop, latch, red health and invalid readings take precedence, including at the deadline. A sample that is still unconfirmed at the deadline fails without another poll.
+Action guard refusals keep the original, reviewed-normalized and clamped vectors, changed component indices (zero-based), and the client's clamp notes in `action_guard_detail_NNNN` journal notes. Concatenate those ordered chunks for the JSON diagnostic. At most eight chunks of 240 characters and one refusal note bypass the ordinary episode note budget through a finite allowlist. Diagnostic inputs are bounded before serialization; oversized or non-JSON inputs produce an explicit JSON omission summary instead of a full diagnostic. `action_guard_refused` carries the refusal reason. A diagnostic serialization failure records an unavailable marker and still refuses and latches. No clamped action is sent.
+Journal notes keep their existing 300-character limit. A forward policy query
+that raises a real `policy_error` before the first executed action holds and
+quiesces, then enters `FAULT_LOCKED` without homing or automatic retry.
+A concurrent operator stop keeps the existing human-review path; normal
+judgement failures, unknown visual outcomes and errors after executed actions
+retain their existing handling.
 
 For forward goal judgement, the existing C5 endpoint and online client must be
 available. The adapter submits actual recorded frames plus a fresh terminal
@@ -1674,6 +2258,104 @@ Events beyond 1000 consumed files remain readable. Media shutdown attempts every
 writer/file before reporting the first error. `--scene-question` cannot be mixed
 with `--check`, `--execute`, job or binding options, so `--check` stays read-only.
 
+### Policy switching (optional `policy_swap`)
+
+A forward and a reset policy server at the reviewed memory fraction `.22`
+need about 15 GB together, and the awake vision model of the live service
+about 24 GB, which exceeds one 32 GB GPU. With `single_reset_policy` the
+binding may therefore declare an optional `policy_swap` block. The run then
+keeps at most one policy service running: it starts the forward service
+itself and, inside the move into `FORWARD_ACTIVE` or `RESET_ACTIVE`, stops the
+running service and starts the other one. The vision model is not touched.
+A binding without the key keeps the contract above unchanged: the same
+accepted keys, the same `--check` output and both servers already running.
+
+Every field is required; none has a default (the values below are examples,
+not measured or approved settings):
+
+```json
+"policy_swap": {
+  "schema": "levi.aeri.fr3.policy_swap.v1",
+  "services": {
+    "forward": {"unit": "levi-aeri-policy-forward",
+                "argv": ["/abs/openpi/.venv/bin/python", "scripts/serve_policy.py", "--port", "8000",
+                         "policy:checkpoint", "--policy.config", "<frozen config>",
+                         "--policy.dir", "<frozen absolute checkpoint_dir>"],
+                "working_directory": "/abs/openpi", "mem_fraction": 0.22},
+    "reset": {"unit": "levi-aeri-policy-reset", "argv": ["..."],
+              "working_directory": "/abs/openpi", "mem_fraction": 0.22}
+  },
+  "vision_mem_fraction": 0.74, "max_total_fraction": 0.98, "gpu_margin_mib": 1024,
+  "stop_timeout_s": 60, "start_timeout_s": 300, "handshake_timeout_s": 30,
+  "warmup_timeout_s": 120, "start_retries": 1,
+  "still_window_ms": 500, "still_tolerance_mm": 1.0, "still_tolerance_rad": 0.01
+}
+```
+
+`--check` validates the block from files only: unit names start with
+`levi-aeri-policy-` and differ; `argv[0]` is an absolute executable;
+`working_directory` exists; the argv passes `--port` of that role's endpoint,
+the role's frozen `deployment.config` and its absolute `checkpoint_dir`, and
+contains no `$`, `%` or control characters (systemd expands nothing);
+`mem_fraction + vision_mem_fraction <= max_total_fraction <= 1` for each role;
+`start_retries` is 0 or 1; the stillness tolerances are within the home
+tolerance. Its output then has one more key, `policy_swap`, with the units,
+ports, memory fractions and timeouts. It runs no `systemctl`, `systemd-run`
+or `nvidia-smi` and connects to nothing.
+
+One switch, in order (`levi/automatic/fr3_policy_swap.py`):
+
+1. No motion token exists (the transaction revoked it; the episode's token is
+   issued only after the switch); the bridge stops issuing new pose commands
+   (this sends nothing to the robot); the arm is at the reviewed home pose and
+   still across `still_window_ms`. Otherwise the switch is refused before any
+   service is touched.
+2. `prepared` is written to `<rollout_root>/.aeri/policy-swap/<run_id>.jsonl`.
+3. `systemctl --user stop` of the old unit; the run waits until the unit is
+   inactive, nothing listens on its port, its processes (read from
+   `/proc/*/cgroup` beforehand) are gone, and `nvidia-smi --query-compute-apps`
+   lists none of them. Only the binding's own units are stopped; no process is
+   signalled by PID.
+4. `nvidia-smi --query-gpu=memory.total,memory.free`: free memory must cover
+   `mem_fraction * total + gpu_margin_mib`.
+5. `systemd-run --user --unit=<unit> --collect --property=KillMode=control-group
+   --property=TimeoutStopSec=<stop timeout> --working-directory=<dir>
+   --setenv=XLA_PYTHON_CLIENT_MEM_FRACTION=<fraction> -- <argv>`; a start that
+   definitely failed is retried at most `start_retries` times.
+6. Passive readiness from `/proc` only: the unit is active and every listener
+   on the port is in the unit's cgroup and runs the frozen config and
+   checkpoint. Only then is the client built (the openpi client connects in
+   its constructor) and the metadata, identity and client contract checked.
+7. One warm-up inference on the current observation, its actions dropped: a
+   cold JAX server compiles on its first query, which is longer than the
+   default 500 ms chunk timeout.
+8. No motion step was counted and the arm did not move; `committed`.
+
+A refusal, timeout, operator stop or any uncertainty stops the unit the
+switch started, records whether the service state is known, and moves the
+run to `FAULT_LOCKED` (`policy_error`, note `policy_switch_fault`); the
+switcher refuses every later switch in this process. Nothing retries motion.
+At the end of the run the units this run started are stopped and the release
+confirmed. A leftover unit or a held port at startup is refused with the
+`systemctl --user stop` command for the operator; the run does not stop it.
+A switch log whose transaction never ended (crash, power loss), with a torn
+line, or whose last service state is not `none` is listed before the next
+`--execute` in the same rollout root, and the confirmation phrase becomes
+`execute <run_id> after policy switch check`; those logs are then marked as
+acknowledged. A start refused before any arm I/O keeps the run id usable.
+
+The scene is judged before a switch and not judged again after it; the switch
+checks that the arm did not move, not that nobody moved an object. The live
+service treats processes listening on `[gpu] policy_ports` as policies: add
+the reset port there when it differs from the forward port. A unit started by
+`systemd-run --user` has the user manager's environment, not the terminal's:
+name an absolute interpreter (not `uv run`). Fake-I/O tests cover the switch
+order, at most one policy listener at every unit call, no token during a
+switch, idempotence, unreleased ports and GPU memory, budget, foreign
+listeners, wrong command lines and metadata, retries, timeouts, stops,
+interrupted switches and the unchanged contract without the key. Switch
+times, memory use and the units themselves have not run on this machine.
+
 ## Bounded reset with final verification
 
 `reset.horizon_completion: wait_human` remains the default. Reaching the reset
@@ -1750,8 +2432,24 @@ An operator-authorized standalone run registers in `LEVI_AERI_HOME` with
 canonical recording location, journal header, retained plan and process identity.
 The existing page and CLI read the same authenticated registration and journal.
 Closing the page does not own or stop the runner; reconnecting reads its current
-state. Stop/resume and scene answers use the existing command inbox, sequence
-checks, human confirmations and idempotency. Real replay/attach remains refused;
+state. Stop and scene answers use the existing command inbox, sequence
+checks, human confirmations and idempotency. Resume of such a run is not
+available over HTTP: `POST runs/{id}/resume` answers `403
+terminal_resume_required` (before the challenge, the command file or the journal
+is touched; the run stays in `WAIT_HUMAN`, and the snapshot carries
+`resume_terminal_only: true`, on which the page shows the instruction instead of
+the resume form). It is resumed at the terminal: type `resume` at the
+`scripts/aeri.py` process (the driver rechecks `robot.health()` itself). The
+`levi automatic resume` command is not offered for it, because it confirms only
+with typed words and does not recheck `robot.health()` (issue L2-SCRIPT-CLIRESUME).
+Its scene questions are not answered over HTTP either (decision UI-2): `POST
+runs/{id}/scene-answer` answers `409 scene_answer_terminal_only` before any
+answer file is written, and the snapshot carries `scene_answer_terminal_only:
+true`, on which the page shows the question without an answer form. They are
+answered with `y`/`n`/`u` at the terminal.
+The rule keys on the
+authenticated registration (`backend: standalone`, `origin: operator_terminal`),
+not on names or paths; dry runs and HTTP-launched runs resume as before. Real replay/attach remains refused;
 a fault still requires the existing human review. HTTP real launch stays refused.
 
 CPU SDK mocks validate this wiring, not hardware readiness or exclusive model
@@ -1762,13 +2460,204 @@ wizard alone does not establish those facts.
 
 A damaged or incomplete on-disk journal cannot resume. Both the shared control pump and terminal resume recheck it against the active writer; corruption locks that writer and leaves stop available. Legacy unsigned dry-run lookup requires a retained plan and matching valid journal header. New dry launches sign their frozen plan under the existing core key, so a genuine starting run remains visible before its first header exists.
 
+## Operator terminal for real runs (`levi/automatic/console.py`)
+
+One terminal runs a whole real session: `python scripts/aeri.py execute ...`
+(the `fr3_run --execute` path) with stdin and stdout on a terminal. It prints a
+start summary, then asks for the usual `execute <run id>` phrase; Ctrl+C or
+end-of-input there cancels before anything connects (exit code 130). From then
+on every prompt is one line: `[Round 2/5] The arm is home. Reset the
+environment, then press [Enter] (q ends)` (the round, what just happened, what
+to do now). The line comes from one table of states and committed reasons
+(`STATUS`, `WAIT_REASONS`), so the reasons of the home-verification branch
+(`robot_home_reached`, `robot_homed`, a run that completes right after a
+single segment, `scene_reset_required` in a multi-segment run) and any new one
+are a row, not new logic. In the mode without a reset policy a round needs one
+Enter and one `y`: reset the environment, press Enter (the evidence frames are
+taken after it), answer the scene question.
+
+| Key | Where | Effect |
+| --- | --- | --- |
+| `Enter` | reset prompt | The environment is reset; the evidence frames are taken now. A journal note `operator_reset_confirmed` (operator authority, names the round's episode) records it, because `y` goes straight to the next round and no `WAIT_HUMAN` remains to say a person reset the scene. |
+| `Enter` | `WAIT_HUMAN` | Resume, after a fresh health check; a red monitor never resumes (the line says why and the run keeps waiting). For the reasons `operator_stop`, `contract_violation_limit` and `policy_error` one `Enter` is not enough, see the next row. |
+| `Enter`, then `y` | `WAIT_HUMAN` for `operator_stop`, `contract_violation_limit`, `policy_error` | The first `Enter` empties the keyboard buffer (`keys.flush()`), then the line says to confirm. Only `y` confirms (`Enter` and any other key are ignored; `n` cancels and the run keeps waiting, `q` ends). So a double press, or an `y` typed together with the `Enter`, does not resume. The confirmed resume is the normal one (`resume_checked`, then `PREFLIGHT`). Other wait reasons keep the single key. |
+| `y` `n` `u` | scene question | The condition holds / does not hold / cannot be told, one key per required condition, `b` goes back. `Enter` never answers it. `y` releases the next round, `n` or `u` ends in `WAIT_HUMAN` (reset, then `Enter`). Only these keys answer it (decision UI-2): the page shows the question and its frames, but an answer sent there is moved away, noted `scene_answer_page_ignored` and never releases motion, and the terminal says so. This holds for the first round's `initial_state` question too. |
+| `s` `f` `d` | while a forward round runs (`FORWARD_ACTIVE`) | The operator's verdict on the round under way: success, failure or discard. It ends **this round only** early, the run goes on with the next one (see "Ending a round early with a verdict" below). Always on; keys typed before the round, other keys and keys typed while homing, resetting or waiting do nothing. |
+| `s` `f` `u` `d` | reset prompt, `WAIT_HUMAN` | Only with `LEVI_AERI_CONSOLE_LABELS=1`: the optional operator label of the round that just ended (success, failure, unclear, discarded), written before `Enter`. |
+| `q` | prompts | End the run (a stop, not a fault). |
+| Ctrl+C | anywhere | The entry holds the arm and registers the stop; no further motion command is sent. The console prints one line and writes an `operator_interrupt` note (signal, where the person was, state, round); the exit status is 128 + the signal number. At a prompt the run ends in `WAIT_HUMAN` or `COMPLETED` (`operator_stop`). While the policy runs, the motion refused under the stop flag locks the run with `safety_stop` today (the screen says the lock came from Ctrl+C); a locked run needs a new run id. |
+
+What `Enter` declares (for the three reasons above, `Enter` then `y`): on a real run the key at `WAIT_HUMAN` always calls the
+resume with `environment_handled=True` and `health_rechecked=True`, so pressing
+it states that the scene has been put back; the person at the robot answers for
+that statement and AERI does not verify it. The resume still goes through
+`PREFLIGHT`, which rechecks the health monitor and the latches and refuses to
+start motion when either fails (the run returns to `WAIT_HUMAN`
+`preflight_failed`, or locks with `safety_stop` if the robot is latched; the
+journal keeps the resume and the refusal), but `PREFLIGHT` does not check that
+the scene was really reset. The same holds for the `Enter` at the reset prompt:
+the evidence frames and the scene question that follow are the check of the
+scene, and `y` is the person's answer.
+
+**Ending a round early with a verdict** (L2-AERI-OPERATOR-EARLY-STOP, as the
+old evaluation client's `s`/`f`/`d`). While a forward round runs the console
+reads single keys (cbreak, `os.read` on the descriptor, a non-blocking
+`select` every 50 ms from the entry's heartbeat). When the round starts
+(`FORWARD_ACTIVE` committed) the keys typed before it are flushed and a line
+says which keys count; when the run leaves `FORWARD_ACTIVE` the terminal leaves
+cbreak and the keys are flushed again, so a key typed while the arm homes, a
+reset runs or the run waits never ends a round. `s`, `f` or `d` calls
+`Orchestrator.episode_verdict` (label `success`, `failure` or `discard`, source
+`terminal`); it only registers, like a stop. At its next step the loop, after
+the stop check and the latch and health check (both keep their priority), ends
+the round with the stop reason `operator_verdict` through the ordinary
+`FORWARD_STOPPING` hold, quiesce, seal and home: no new motion permission and no
+skipped check. The run then goes on to the next round as after an early stop by
+the judge; it does not enter `WAIT_HUMAN` or `COMPLETED`. A stop still ends the
+whole run and wins over a pending verdict (`stop_pending`, or the verdict is
+dropped with a note `operator_verdict_dropped`); a key that comes after the
+round's last step is dropped the same way. One verdict per round; event-pause
+runs (`event_pause_judge`) take none (`not_supported`).
+
+The verdict is kept apart from the model's judgement. The journal gets a note
+`operator_verdict` whose detail is JSON: `label`, `source`, `episode_id`, `step`
+and `frame_index` (the control step and the last recorded frame when the key
+came), `taken_step`, `wall_ns`, `command_id`. The episode result keeps the run's
+own verdict (`label_kind: autonomous_verdict`, the final judgement still runs)
+with `stop_reason: operator_verdict`. Once the result is committed the verdict
+also becomes the operator's label of the round (`labels/operator_label.jsonl`:
+`success`, `failure`, or `discarded` for `d`); a discarded round has no truth
+and is left out of every rate, and the metrics report lists the verdicts with
+`excluded: true` for a discard (`operator_verdicts`). A discarded round does
+not count towards the run's number of rounds and one more round replaces it
+(user decision 2026-10-16); a verdict before the first step ends a round that never
+ran; it is not counted and the run goes on; it takes no operator label (note
+`operator_verdict_not_labelled`); it is also left out of the autonomous rate, the
+agreement and the truth. The replacements are capped by `max_discarded_rounds`
+(run configuration, default: the run's number of rounds; the job file does not
+set it yet, and the default leaves the plan digest unchanged). A discard is
+never a truth and never in any denominator; beyond the cap a discarded round is
+only not replaced: it uses up one of the run's rounds, a note
+`discard_limit_reached` says "not replaced (limit X); the run ends with fewer
+valid rounds", the run ends as usual with fewer than N valid rounds, and the
+metrics report gives the number as `discarded_beyond_limit`. A runner killed or
+crashed during a round can leave the terminal in cbreak (keys not echoed, no
+line editing): run `stty sane` in it. In the dual-label comparison
+`operator_verdict` counts with `operator_stop` (a person ended the round). The
+page shows the note and the stop reason but cannot send a verdict: there is no
+route for it, and the command channel refuses the kind `episode_verdict`
+(`terminal_only`) for every run, as for the scene answer of decision UI-2.
+
+Blindness: the automatic verdict and how an episode ended are not shown before
+the operator's label of that episode exists. With an early stop allowed, the
+round line shows neither steps nor reason until then, and it never shows
+internal state names (`ROBOT_HOME`, `FINALIZE`). Without an early stop it shows
+the step count and how the episode ended, as the old client did.
+
+While an early stop is allowed, the progress line of a running round says only
+`round n/N running` (no step count, which would show an early end) until the
+label of that episode exists. The notes printed under a `WAIT_HUMAN` line and in
+the fault summary come from a whitelist of operational codes (`DISPLAY_NOTES` in
+`console.py`: robot, recorder, policy-chunk and session-file facts); judgement
+notes such as `early_stop_disputed` (which carries the final judgement) stay in
+the journal and on the page, and a new note code is hidden until it is listed.
+The error text the policy adapter or service gave (`policy_unavailable`, for
+example `websocket closed (1011)`) is a separate class (`POLICY_ERROR_NOTES`):
+it is printed, with control characters (0x00-0x1f, 0x7f) replaced by spaces and
+cut to 300 characters (`POLICY_ERROR_LIMIT`), in the console fault
+summary, under `WAIT_HUMAN` and in the plain `print_fault` of the old typed path.
+
+**Exit status of `scripts/aeri.py execute` / `fr3_run --execute`** (behaviour
+change: a run stopped by Ctrl+C or SIGTERM used to exit with 1 like any other
+unfinished run):
+
+| Status | Meaning |
+| --- | --- |
+| 0 | The run ended `COMPLETED`, including a run a person stopped at a wait (`COMPLETED` `operator_stop`; there is no separate stopped state). **Exit status 0 does not mean every episode ran**: a wrong answer at a wait (not `resume`, or not `y` at the confirmation) also stops the run with 0; check whether the final reason is `operator_stop` |
+| 1 | The run ended in another state (`WAIT_HUMAN`, `FAULT_LOCKED`) without a signal |
+| 2 | Refused or failed before or outside the run (digest mismatch, no terminal, wrong phrase, bad job) |
+| 130 | Ctrl+C or end-of-input at the `execute <run id>` phrase: cancelled before anything connected |
+| 128 + n | The run was stopped safely by signal n (`130` for SIGINT, `143` for SIGTERM); stderr says `Stopped by signal n; final state S` (in the console language: `LEVI_AERI_CONSOLE_LANG`, default Chinese) |
+
+Order of the cleanup when the run ends: the heartbeat is told to stop and the
+arm is held (`emergency_hold`) first; then a `FAULT_LOCKED` run prints its
+fault summary to stderr, and a failure of that print (a dead stderr, `EIO`) is
+ignored; then the heartbeat is joined, the console closes, and the fence, the
+orchestrator and the recorder are released, each attempted even if an earlier
+one failed, and the SIGINT/SIGTERM handlers are restored. If closing the
+console fails (a dead terminal), the rest is still released, a
+`console_close_failed` journal note is written first if possible, then a
+warning goes to stderr; when stderr is gone as well the warning is dropped.
+Neither failure changes the run's state or its exit status (`0` for a
+`COMPLETED` run).
+
+**The old typed path.** Without a console (stdout or stdin not a terminal, for
+example `... | tee run.log`, or `LEVI_AERI_CONSOLE=0`) a real run is refused
+before anything is loaded or connected, whatever its scene check: an
+`operator_attested` run's questions would otherwise be answered on the page only
+(decision UI-2), and a `provider` run's scene would be released by the
+provider's answer alone (L2-UI2-PROVIDER-RELEASE, decision 2026-10-15). The
+path below is therefore no longer reached by a real run; its code remains and
+is still tested. Its `WAIT_HUMAN` prints one
+line and reads a typed line; with stdin not a terminal it returns at once. On a
+terminal, stdin is flushed first (`termios.tcflush(TCIFLUSH)`), so lines typed
+while the run moved (a `resume` typed ahead) do not answer the wait, and the
+journal sequence of the wait is taken right then. `resume` resumes
+(`resume_checked` with that sequence, then `PREFLIGHT`); any other line, an
+empty line or end-of-input stops the run (`terminal-stop`: `COMPLETED`
+`operator_stop`). For the reasons of `CONFIRM_REASONS` in `console.py`
+(`operator_stop`, `contract_violation_limit`, `policy_error`) `resume` is not
+enough: the line asks for a second confirmation, stdin is flushed again, and
+only a line `y` (or `Y`, `CONFIRM_KEYS`) resumes; any other line, an empty line
+or end-of-input stops the run. Other reasons keep the single `resume`. A run
+started by `main()` is always registered, so both lines are awaited with
+`select` rather than a blocking `input()`: when the page resumes the run, the
+state or the journal moves on (a fault locks the run, a line is written), the
+stop probe or a signal stops the robot, the wait ends without a resume from
+this terminal, and a `y` typed after the journal moved on is refused as
+`stale_sequence`. The flush relies on the terminal's canonical (line) mode
+(ICANON): there the lines typed ahead are still in the kernel queue it empties.
+A terminal without ICANON gets a warning on stderr, because Python may already
+have buffered those lines; type only after the prompt then.
+
+Settings: `LEVI_AERI_CONSOLE=0` turns the console off (the old typed path above),
+`LEVI_AERI_CONSOLE_LABELS=1` enables the optional label keys,
+`LEVI_AERI_CONSOLE_PRINCIPAL` names the labeller (default `operator`),
+`LEVI_AERI_CONSOLE_LANG=en` switches the whole terminal to English (default
+`zh`). Without a terminal there is no console. Known limit: the recorder's
+`preceded_by` / `after_human_resets` metadata still read only `WAIT_HUMAN`
+lines, so the `operator_reset_confirmed` notes are the record of resets
+confirmed with `Enter` until the recorder reads them.
+
 ## Explicit event-pause judging (off by default)
 
 `termination.inference_mode` defaults to `legacy_async`, preserving the existing asynchronous judgement/action loop. Explicit `event_pause_judge` and every `termination.physical_hold` condition enter the normalized plan digest; an old approval digest cannot authorize the new mode. Sampling interval, stable window, maximum wait and position/rotation/gripper tolerances must be supplied explicitly. This mode requires `confirmations: 1`, early stopping, no control group and at most 400 acknowledged executed actions per episode. `on_unknown: continue_to_horizon` applies only to the legacy mode. Unknown, timeout or unproven evidence/hold locks the new mode; it never treats uncertainty as failure and continues motion.
 
 The coordinator uses the ORIGINAL `RuntimeOwnership` and `WorkloadBroker` role request slot, with no additional scheduler. Initial scene assessment, forward/reset inference and goal judgement share that authority. Each scene assessment reserves and durably journals its own policy epoch before a role grant; starting a policy episode allocates a strictly newer epoch, including an initial scene that requires reset. Restart reconstructs the counter from these journal entries. As soon as a candidate appears (`max_requests` caps pauses per episode in this mode, default 20 (legacy default 6); after it the policy runs on to its natural end or `max_steps` and then gets the final judgement; `min_steps`, `settle_steps` and `cooldown_steps` are ignored here, and a new candidate must be at a step later than the last judged one), no new policy request or action is issued; a rejected candidate is spent and only a newer event can pause again; old action buffers are discarded, the policy epoch advances, admission closes and a journal transaction enters `FORWARD_JUDGING` or `RESET_JUDGING`. Before VLM inference, independent frozen-condition physical hold proof and all-owned-backend idle proof are both required. Publication requires backend request stop, exit of all local request workers and a fresh complete group idle barrier. Hold and judgement evidence must be retained. An operator's stop latches the inference cycle; `resume` reopens it only when no proof failed and the request slot is confirmed released, otherwise it is refused with `intervention_latched`; a failed proof stays latched (resume is accepted, the next run faults again without motion). Evidence preparation, retained evidence, post-judge observations and policy admission share the irreversible proof latch. A concurrent operator stop cannot turn any of these failures into a recoverable stop.
 
-Confirmed success seals the episode and enters `WAIT_HUMAN` where it stands for a free human reset, without Home. An explicit rejection below the action limit requires a new observation/stage, a new policy epoch/acquisition and a new journal `policy_steps` transaction with reason `inference_resumed`; only that transaction issues its new motion token. No old buffer, ticket or late epoch response is reused. Judgement waits count no actions. The horizon is judged while held, then sealed for a person. Stop registration revokes motion and model-result authority immediately without waiting for a model or drainer; unproven backend ownership remains retained.
+The committed pause's existing `policy_quiesce` action also reuses `_quiesce` to confirm policy quiescence and the final pending gripper acknowledgement before goal judgement or recording seal. An unknown quiesce or unproven final acknowledgement aborts that prepared pause with unknown execution and locks the cycle; no goal request, seal or home is authorized. Adapter quiesce is not the native model/backend idle barrier: the original `InferenceCycle` authority still requires its independent request-stop and worker/group proofs.
+
+**Terminal Home (software only).** A forward episode that its paused judgement ended (confirmed, or the action limit reached) now takes the edge `FORWARD_JUDGING -> FORWARD_FINALIZE` (a `policy_quiesce` that checks the final gripper acknowledgement again), then `FORWARD_FINALIZE -> ROBOT_HOME` (recorder seal; the episode result is written here from the retained paused judgement, with `robot_home: not_attempted` because the home has not run yet), then `ROBOT_HOME -> SCENE_ASSESS` (the home, run under the closed gate by `Robot.home_under_closed_gate`). No second goal request is made: legacy `_verification` is not called. Once the arm is home the journal holds the note `robot_homed` (episode, `sealed`, and, without any verdict (the verdict is only in the episode result, so it is not shown before the operator labels the episode), when the robot has an `admission_snapshot`, the gate facts `gate`, `home_only_from_ns` and this window's `home_pose_released`, `home_gripper_released`, `home_gate_rejected` (increments of the window, not the robot's running totals; `gate=unreadable` if the snapshot fails); otherwise just `gate=closed`; then `next=scene_assess`) and the committed reason `robot_home_reached`; the ordinary scene assessment then decides what follows: a ready scene starts the next episode (the resume hook reopens admission with a newer generation), a scene that needs a reset goes to the reset policy or to a person (`WAIT_HUMAN`, `scene_reset_required`), and enough episodes end the run (`COMPLETED`). A stop registered after the seal leaves the arm where it stands (`ROBOT_HOME -> WAIT_HUMAN`, `operator_stop`), whatever `home_after_operator_stop` says. A home that fails or is unknown locks the run with `home_failed`, keeps the sealed result and is never retried; the one exception is a home the robot refused before its first command, which waits (`home_not_executed`, see the resume hook below). Unknown, timed-out or unproven judgements are unchanged: `FAULT_LOCKED` (`judgement_unproven`), no seal, no home. The reset role is unchanged too: a paused reset judgement still seals into `WAIT_HUMAN` without a home. The orchestrator refuses (`ConfigError`) a robot without a callable `home_under_closed_gate`. The older edge `FORWARD_JUDGING -> WAIT_HUMAN` stays legal for journals written before, but nothing takes it any more. Real event-mode entry is still refused (`test_real_binding_refuses_mode_before_reading_binding_or_robot`): none of this has run on a robot.
+
+What this does not establish:
+
+1. "Admission was closed continuously since the pause" holds only up to `home_only_from_ns`; after the home the gate is closed again as a new interval (a new generation and closure time).
+2. The physical hold proof holds only for the frame that was judged. The home moves the arm, so there is no proof that the arm stayed still after the event.
+3. The home counters record that a command started through the gate, not that it was delivered or that the arm arrived; arrival rests only on the measured `_settle_home` check.
+4. The local gate constrains only this process's `env._post` (inside the window only the thread that opened it passes); it does not exclude another process talking to the robot service directly (a limit that already existed).
+5. It does not prove the backend is quiet, and the home-only window adds no backend proof.
+6. The paused judgement was made on the frame before the home; the home may disturb the scene, and the scene assessment afterwards is a new request.
+7. Which routes the real client's `_go_home` sends: read from the checked-out client source only (`examples/fr3_local/run_robotiq_client.py` `_go_home` steps through `RobotEnv.step`, which posts `clearerr`, `pose` and, only when the gripper is not already measured open, `open_gripper`; `close_gripper` and `move_gripper` are not reached because the home pose commands an open gripper). Not run against a robot, and a different client revision may differ; a route outside `pose`/`clearerr`/`open_gripper` is refused at the gate, which locks the run with `home_failed`.
+8. The real `stop_admission`/`resume_admission` hook binding now exists as software (`levi/automatic/fr3_intervention.py`, section below) but is assembled only by tests; nothing real uses it. The hold hook of the scene assessment after a home needs a witness built from the new closed interval, because a witness made before the home fails for good; the binding adopts that interval only when exactly one closed-gate home window has happened since.
+9. `Robot._sending` and `Robot._step_notes` are instance fields shared by `step()` and the home. There is a single caller today (the orchestrator thread); two concurrent callers of the robot adapter are not supported and are not guarded.
+10. After a crash during the home, recovery locks the run as `FAULT_LOCKED` (`recovery_ambiguous`) and the episode keeps its one result with `robot_home: not_attempted`, as on the older path; it is not rewritten to `failed`. The unfinished home transaction is visible in the journal.
+11. A stop that revokes the home token before the gated home sent its first command is reported as `no` and does not latch the robot, so the person's `PREFLIGHT` after the stop can pass. A revoke after a command went out is `unknown`, latches and is not retried. The older `Robot.home()` keeps latching on any revoke. A second `home_under_closed_gate` call made while a window is open (same thread or not) is refused before any other check and changes nothing (no fence check, no health read). Whether the home sent a command is judged by a counter of POSTs that passed the fence, not by the `_sending` flag, which `step()` on another thread can clear.
+12. Behaviour change to know: after a stop that revokes the token before the first command, the robot is not locked, so after the person resumes the arm may stand off the home pose. `robot.start_pose()` is called once (`fr3_run.py`), `VERIFY_INITIAL` does not re-check it, so this relies on the person's `environment_handled` declaration. An expired or revoked token with no operator stop registered, refused before the first command by the robot's own counters, now waits (`home_not_executed`, see the resume hook below) instead of locking; after a command it is still `home_failed` and a lock. In that wait the arm did not go home: it stands where the last episode ended. The resume therefore checks the start pose once, read-only (`Robot.start_pose`, the start gate's check and tolerance), and goes back to waiting (`home_pose_not_reached`) unless the arm is home; the terminal asks the person to home the arm by hand as `setup.md` says.
+13. `Robot.stop_admission()` itself is not exception-safe (it changes the mode and generation first and reads the clock last). This is existing code and is unchanged. If the clock cannot be read when a home-only window closes, the gate is closed with no closure time, so no witness can be built on that interval. The window closes the gate and clears its state even if it is interrupted (for example by `KeyboardInterrupt`) and raises the interrupt only afterwards, and `hold()` runs in that case too. An interrupt that is not an `Exception` makes the cleanup run again, at most three times; an ordinary `Exception` from the cleanup is not retried, so the caller's `hold()` is always reached. Opening the window clears `closed_from`, so a `stop_admission()` inside the window whose clock read fails leaves no time (not the closure time from before the window) and leaving the window then writes the current time; a witness cannot start before the home commands. If the retries are used up, the gate keeps refusing policy commands (fail-closed): `reopen_admission()` stays refused while the window flag is set and a new `home_under_closed_gate` is refused, so only a process restart recovers.
+14. After that clock failure the gate is already `closed`, so `stop_admission()` is a no-op and cannot start a new interval: the closure time stays `None` and no witness can be built until `reopen_admission()` and a new `stop_admission()` give a new interval. This is the current behaviour, pinned by a test; a different rule needs the author's decision.
+15. `self._motion_posts += 1` is not made under the admission lock. A concurrent `step()` can make the count lag behind, or make a home look as if it had sent a command when only that step did (the conservative direction: the call then ends in `unknown` and a lock, never in a wrongly clean `no`).
+
+Confirmed success seals the episode and homes it as described above. An explicit rejection below the action limit requires a new observation/stage, a new policy epoch/acquisition and a new journal `policy_steps` transaction with reason `inference_resumed`; only that transaction issues its new motion token. No old buffer, ticket or late epoch response is reused. Judgement waits count no actions. The horizon is judged while held, then sealed and homed like a confirmed success (a reset episode is sealed for a person instead). Stop registration revokes motion and model-result authority immediately without waiting for a model or drainer; unproven backend ownership remains retained.
 
 Proof-hook exceptions and escaped orchestrator exceptions irreversibly fail the injected cycle and revoke any active request result without a backend wait. The owner and an unproven request slot remain retained. Human resume may arrange the environment but cannot reuse that failed cycle or restore its old model authority; a fresh frozen run or newly established real authority is required. A prepared pause/resume transaction is acknowledged unknown and aborted before faulting. For the legacy C2 timeshare gate, both judging states map conservatively to `running` (the reset role for `RESET_JUDGING`), keeping background annotation closed while the original role authority runs the judge. This legacy value represents a closed gate during judging.
 
@@ -1782,10 +2671,85 @@ The injected `PausedFrames` adapter reuses `EventObserver` and the existing even
 
 Measured-hold scheduling targets an earlier cadence inside the frozen maximum sample interval, allowing bounded clock, admission-observer, measurement and sleep overhead. Actual capture-start and measurement-stamp gaps still must both stay within that unchanged maximum; deadline, complete stable window, all-pair tolerances and the 1000-observation bound remain strict. The internal cadence uses exact integer arithmetic and allows long windows to span the bounded sample count. It cannot guarantee success with arbitrarily slow I/O or a window with no time for proof overhead. A config accepted by `SettleConfig` can still be unreachable: with interval 1 ms and stable window / maximum wait 999.5 ms, 1000 observations have at most 999 gaps and can span only 999 ms. This observer explicitly refuses that boundary without changing frozen fields or the plan digest. Real FR3 entry remains refused.
 
+**Admission gate and `AdmissionClosedProof` source (software only).** `fr3_bridge.Robot.stop_admission()` closes an opt-in local gate: afterwards every `pose`, `clearerr`, `open_gripper`, `close_gripper`, `close_gripper_slow` and `move_gripper` POST is refused with `AdmissionRefused` before any HTTP, `Robot.step` returns `executed="no"` without latching, and `Robot.home` likewise reports `no` when nothing was sent. Pose (with `clearerr`) and gripper commands have separate monotonic counters of attempts and gate rejections; `admission_snapshot()` reads gate state, generation and counters atomically, and `reopen_admission()` reopens the gate and changes the generation. The gate is open by default, so the legacy path is unchanged. `RobotAdmissionWitness` / `assemble_measured_hold` (in `adapters/physical_hold.py`) issue an `AdmissionClosedProof` only if the gate is still the closure named by the mark `stop_admission` returned (never reopened, not even reopened and re-closed), the released-command counters equal the mark's, the `MotionFence` holds no current token, the clock domain matches and time never goes backwards, and the episode and policy epoch do not change. Any failure raises `InterventionUnproven` and stays failed. Validity and every `SettleConfig` limit are caller-injected with no defaults. Limits: the counters record when a command started through the gate, so the witness proves no NEW command started; it cannot prove that the last released action finished or that the arm is still. `Robot.hold()` only sets a flag, and `Robot.observe()["observed_ns"]` is when the host finished reading, not the physical capture time. `MotionFence` records no revocation time, so its revoked state is a point-in-time fact. Stillness comes only from the `MeasuredPhysicalHold` window. No real robot, port or binding was used or reviewed.
+
+**Home-only admission (software only).** The gate has three modes: `open` (default), `closed` (`stop_admission()`) and `home_only`, which exists only inside `Robot.home_under_closed_gate(*, token)`. Entry needs the `closed` mode, a `kind="home"` token that the `MotionFence` accepts and holds as its current token, no stop, no latch and green health; otherwise it returns `executed="no"` before any HTTP and without latching, and an open gate is refused. Inside the window the gate lets through only `pose`, `clearerr` and `open_gripper`, only from the home's own send path, under that token and from the thread that opened the window (a command from any other thread in this process is refused and counted); `Robot.step` (policy steps), `close_gripper`, `close_gripper_slow`, `move_gripper` and the recovery routes are refused, and the old `Robot.home()` still reports `no` on a closed gate. The window counts its commands apart (`home_pose_released`, `home_gripper_released`, `home_gate_rejected`) and never touches the pose/gripper counters; `AdmissionSnapshot` gains `mode` and `home_only_from_ns`, and `closed` is false inside a window. `reopen_admission()` is refused for as long as a `home_under_closed_gate` call is in progress (even after a `stop_admission()` inside it), and `stop_admission()` inside the window closes the gate at once. Whatever happens (success, failure, exception, stop), a `finally` returns the gate to `closed`, forcing it shut as a new interval if its mode is anything else by then, with a new generation, a new `closed_from_ns` and `hold()`. Entering and leaving each change the generation, so a `RobotAdmissionWitness` made before a window fails for good, and the witness also checks `mode == "closed"` and the home counters. Closure proof for the scene assessment after a home has to start from a new `stop_admission()` mark. `MotionFence`, `stop_admission` on an open or closed gate and the `legacy_async` path are unchanged.
+
+**FR3 intervention hooks (slice D, software only).** `levi/automatic/fr3_intervention.py` puts FR3 objects behind the seven `InterventionHooks` of `InferenceCycle`; it adds no scheduler or authority. `Fr3InterventionHooks(...).as_hooks()` returns the dataclass; `bindings()` names what each hook is bound to.
+
+| Hook | Bound to | Fails (raises `InterventionUnproven`) when |
+| --- | --- | --- |
+| `stop_admission` | `Robot.stop_admission()` (closure mark), `Policy.quiesce` of the old epoch, sole-client proof | the mark is not a closed snapshot of this clock, a motion token is current, the old epoch is not fenced, the proof fails, the arguments are bad. The gate is closed first (before the arguments are checked) and stays closed on failure |
+| `resume_admission` | `Robot.reopen_admission_if(generation, closed_from_ns)` only | a role request holds the slot, the proof fails, the gate is closed by someone else, a policy command was released inside the interval, the interval differs from the one this intervention closed (reopened and closed again; or not exactly one closed-gate home window since), the observation predates the interval, the run differs. A closed-gate home that sent no command raises `InterventionStopped` instead (no latch, see below) |
+| `observe_hold` | `MeasuredPhysicalHold` over `RobotAdmissionWitness`, one observer per closure (`hold_factory`; `measured_hold_factory` builds the real one) | the observer fails or returns no `PhysicalHoldProof`, the hold ran past its deadline. A hold under a gate that is open with no closure closes it first; a closed gate this intervention does not own is refused |
+| `observe_runtime` | `runtime_probe` (trusted `RuntimeObservation`), sole-client proof | the observation is not of the `RuntimeOwnership` runtime token's lease and worker, the probe fails |
+| `role_window` | a `RoleWindow` for `RuntimeOwnership.begin_role_request` | unknown role, `judge` on an open gate or `forward`/`reset` on a closed one, the window would outlive the lease, the proof fails |
+| `stop_proof` | `stop_probe` and a `RequestStopProof` of the exact request in the slot | the request is not the slot's, the probe does not answer exactly `(True, True)` (a false flag is never returned), past the deadline |
+| `prepare_evidence` | `PausedFrames.prepare_evidence` (the `signal_events` ledger) | anything but `True` |
+
+`physical_hold` is the `termination.physical_hold` limits plus the `MeasuredPhysicalHold`/`RobotAdmissionWitness` pair; `signal_events` is `SignalEvents` through `event_window.Ledger` into `PausedFrames`.
+
+`resume_admission` is a specific reopen. `Robot.reopen_admission_if` reopens only when the gate is still the closed interval named by generation and closing time; the generic `reopen_admission()` is never called by the binding (a test makes it raise). An open gate with nothing closed by this intervention is simply allowed to start. After the closed-gate home the gate is a new interval (generation +2); the binding follows it only when a home-only window opened after the closure (`home_only_from_ns` not earlier than the closure), the home pose counter grew and the generation moved by exactly 2. A home refused before its first command (executed=no, the arm did not move; decision 2026-10-14 21:1x) is told apart by the bridge's own home-only counters alone: generation exactly +2, `home_pose_released` and `home_gripper_released` unchanged, and a home-only window opened after the closure (a generic reopen followed by a stop is also +2 without a home POST, but has no window, and latches). Then `resume_admission` and `observe_hold` raise `InterventionStopped`: the binding does not latch, does not follow and reopens nothing, and the gate stays closed. Every other difference latches, also a window that passed a gripper command but no pose. The bound interval is not changed, so a resume through the same binding is refused the same way until the binding adopts the new interval (`adopt_unexecuted_home`, below) or a new run starts. The orchestrator (L2-HOME-EXECNO-ORCH) acts on the same facts: after an operator stop it waits as before (`ROBOT_HOME -> WAIT_HUMAN`, `operator_stop`); without one, when the robot's home ran and returned executed=no, and the robot's own home-only counters (`home_pose_released`, `home_gripper_released`, `home_gate_rejected`, read before and after the home) are readable integers that did not change, the gate is closed again, there is no fault latch, red light or robot stop/signal (`Robot.stopped()`), and the cycle is not latched and holds no request, it waits too (`ROBOT_HOME -> WAIT_HUMAN`, reason `home_not_executed`, terminal: "Home was refused before its first command: the arm did not go home and stands where the last episode ended", and the person is told that the resume checks automatically that the arm is home, to home it by hand as `setup.md` says, then Enter and `y`), with the refusal in the note `home_failed_detail`. Nothing reopens the gate while it waits. After the operator's resume the first hook use (the scene check of `VERIFY_INITIAL`, or the start of the next episode) first asks the binding to adopt the gate's current closed interval (`adopt_unexecuted_home`, an extra entry of the FR3 binding, not an eighth hook): it accepts only the unchanged interval or the one home window that sent nothing, with the pose and gripper released counters equal to the closure mark's, and otherwise closes the gate and latches; then the scene hold or `resume_admission` follows the adopted interval. A binding without the entry, an exception, or any answer but `True` locks the run (`FAULT_LOCKED`) with the gate closed. The rebuild in the episode start is not reached in the current flow (every start follows a scene check, which rebuilds first) and is tested directly. Before any of this, the first `PREFLIGHT` after such a wait checks the start pose once, read-only, with `Robot.start_pose` (the check and tolerance the start gate of `fr3_run` uses: bound home pose, home position and rotation tolerance, measured open gripper; it sends nothing). The measurement goes to the note `start_pose_checked`. Only `ok` exactly `True` lets the run go on (`VERIFY_INITIAL`); off home, an unreadable pose, an exception, a robot without `start_pose` or any other answer is `PREFLIGHT -> WAIT_HUMAN`, reason `home_pose_not_reached` (terminal: "The arm is not at the home pose (the error is in start_pose_checked below); not resumed", Enter then `y`), and the next resume checks again. After a restart (which locks first, `recovery_ambiguous`), `Orchestrator.restore` sets both again when the last committed move into `WAIT_HUMAN` was `home_not_executed` or `home_pose_not_reached` and no episode started after it, so the resume still checks the pose and rebuilds the interval. A home whose counters grew, an unknown result, a robot latch, or counters that cannot be read or do not agree are taken as executed: `home_failed`, `FAULT_LOCKED`, as before. The rebuild flag and the pose check are restored from the journal after a restart (below).
+
+Probes. `runtime_probe` and `stop_probe` are called in a daemon thread that holds no lock of the binding, the robot or the kernel and sends nothing to the robot. If the probe has not returned within `probe_wait_s` (default `budget_ns`; for `stop_probe` at most the time to its deadline) the binding latches; an operator stop ends the wait at once as `InterventionStopped` (no latch), so the orchestrator loop and the stop path are never blocked by a hung probe. A Python thread cannot be killed: a late answer lands in a one-shot per-call slot that nobody reads any more and changes no state. The binding remembers, per hook, the thread of a probe it abandoned; if the next call of that hook finds it still running, the call is refused and latches without starting another one, inside the probe's wait as well as after it (past the wait the probe is hung, decision 4). Once that thread has ended, the next call runs its own probe.
+
+Failure direction. A hook that raises, runs past its time bound (`budget_ns`, or its own deadline), or finds its fact unproven first calls `robot.stop_admission()` (so any refusal that saw the gate open leaves it closed; idempotent on a closed gate) and latches the binding: every later hook closes the gate again and raises too. If `stop_admission` itself fails (also with a `BaseException`), the refusal is still the error raised and its text ends with "the gate could not be closed: <type>". `InferenceCycle` turns that into its irreversible latch, the orchestrator into `FAULT_LOCKED` with the fence revoked and the arm held, and no further step is sent (one test per hook, plus a kernel-rejected window, a hook past its budget and a proof lost mid-run). An operator stop (`InterventionStopped`) does not latch; `stop_admission` still closes the gate during a stop and nothing reopens it.
+
+Sole client (G1), by counting. The account is shared with other people, so the guard never looks at other processes. `N` is the number of connections to the policy port in the kernel-wide `/proc/net/tcp{,6}`; `M` is how many of those client ends are open in this run's own processes (this process and its descendants; only their `/proc/<pid>/fd` are read). `N != M` means a foreign client and the proof fails. Also required: the port is not a shared one (8000, 5000, 5001, 5100, 7470, 8100 and the LEVI ports are refused at construction); every listener is bound to loopback only; the listener and every accepted socket are open in a process of the unit this run started (`policy_swap` unit; read from that unit's `cgroup.procs`); every connection is a loopback connection with a local client end. Only client ends whose peer is a loopback address are counted (a connection to the same port number on another host is not a client); an orphan socket (inode 0 in FIN_WAIT1, FIN_WAIT2, LAST_ACK or CLOSING, left after the last descriptor was closed) is not counted and not taken for a server end outside the unit, so a normal close by either side does not fail the proof (an orphan in FIN_WAIT1 or CLOSING only with an empty send queue, `tx_queue` = 0: with bytes still queued it is counted); IPv4-mapped addresses from `tcp6` compare as IPv4. The unit must be named `levi-aeri-policy-<name>` (the `policy_swap` pattern); from a session scope, where the unit's `cgroup.procs` cannot be located, the proof says so and asks for `unit_procs_file`. No `/proc` listing and no other `/proc/<pid>/` is opened (the test records every pid it touches). An unreadable table, `cgroup.procs` or own pid fails the proof. `SlotBoundPolicy` wraps the policy so that `request` runs only with the proof and a granted, unrevoked `RuntimeOwnership` slot of the request's own role, episode and epoch. The proof is repeated by `stop_admission`, `observe_runtime`, `role_window` and `stop_proof`. It is a point-in-time proof: a process that connects between two checks is caught by the next check, not prevented, and it does not prove the server behaves. A server started by hand cannot be proven private. Known limitation: the guard does not check the unit's `InvocationID`, so a unit of the same name restarted outside this run is not told apart; that needs `policy_swap` to hand over the invocation it started.
+
+`--check --hooks` stays a separate switch (plain `--check` output is a byte-for-byte contract and does not change). `observe_hold` closes an open gate before holding when no closure exists (the first scene check happens before `resume_admission`, so closure cannot be proven earlier; this is the safe direction). `fr3_run.py --check --hooks` first prints this report as JSON (`hooks_report`: the seven hooks, `implemented`, `bound_to`, what each needs and whether the job/binding declares it, `physical_hold`, `signal_events`, `sole_client`, `complete`, `real_entry`). It connects to nothing. The real entry is unchanged: `load_binding` still refuses `event_pause_judge`, so `--check --hooks` on an event-mode job prints the report and then exits 2 with the refusal. The hooks are assembled only by tests, with `GateFakeRobot` (the fake with the gate record).
+
 `InferenceCycle.invoke` accepts exactly one explicit execution entry: the compatible zero-argument `call()` or `request_call(request)`. For forward, reset and judge, invalid, missing or dual callbacks are refused before a model grant. After the original `RuntimeOwnership.begin_role_request` grants permission, `request_call` receives that exact `RequestToken` object with its role, episode and policy epoch; it must borrow this request without another begin or finish. Cycle alone retains ownership of begin, stop proof and finish. Callback errors, including `TypeError`, revoke publication and retain any unproven original request slot through the existing irreversible containment; they never cause signature inference or retry. This interface prepares CPU payload dispatch for a reviewed owned worker. It does not install an SDK worker, transport or real FR3 binding, and the real entry gate remains closed.
 
 An optional explicit `completion_adapter(request, returned_completion)` belongs only to `request_call`; invalid combinations fail before authorization. It must return frozen `CompletionEvidence(request, result, stop_proof, observation)` with the exact granted request object in both receipt and stop proof. Cycle alone passes these proofs to the original authority for final lease, role, group, clock and fresh-idle validation before publishing the result. Without this adapter the original proof hooks remain unchanged. Callback or adapter errors retain the revoked request slot through existing containment; tuples, booleans, implicit receipt detection and fallback are not accepted. SDK ACK authenticity must be established by the injected borrowed executor, not inferred from HTTP or client completion.
 
 Explicit `Orchestrator(owned_calls=OwnedCalls(...))` injection routes scene, paused goal and policy chunks through `request_call` and the same original Cycle authority/runtime/lease. Required CPU preparers return immutable `PreparedCall` bytes with the exact AERI request, observed source time, episode/role/epoch/clock binding and payload hash. Scene capture runs after hold and grant and retains its JPEG evidence before dispatch; goal preparation must use the existing `PausedFrames.freeze` window; policy receives the actual newly staged observation instead of reading a later `robot.raw`. The injected borrowed executor validates SDK ACK provenance. CPU decoders run only after Cycle finishes and return scene/goal bytes or a chunk dict for the original AERI parsers, arbiter, notes and action checks. An explicit invalid binding, preparation, completion or codec never falls back to old providers or HTTP. No injection preserves the previous path. Production frozen prompt/spec/scene/paused-window/policy codecs and SDK factories remain uninstalled: injectable contracts and CPU fakes do not establish real hardware support; real FR3 stays closed.
 
+`levi/automatic/adapters/vlm_codec.py` provides the judge-role scene and paused-goal callbacks (`VlmCodec.prepare_scene/prepare_goal/decode_scene/decode_goal`) over the same frozen contract as the external C5 and file providers: `FrozenSpec`, `question`, `model_result` and `validate_result` from `provider_model`. The caller injects the frozen spec, the clock (this host's clock domain), the scene views, the longest image side, the JPEG quality and the `PausedFrames.freeze` callable; none has a default and a missing or invalid value is refused at construction (the spec hash and canonical form are re-verified). Scene frames are shrunk (never enlarged) and JPEG-encoded from the freshly observed BGR arrays; goal frames are the retained paused-window pictures, checked against the freeze proof hashes and the pause binding (run, episode, role, policy epoch, clock domain, commit time). Across IPC the call is one `bytes` envelope (canonical header plus the JPEG bytes; `unpack_payload` is what a worker-side factory reads) and `PreparedCall` carries the exact request, a `SourceBinding` and the retained frames. Decoding re-derives the question, schema, spec hash, request identity, frames and source from the payload, accepts one text answer, and returns only what `model_result` and `validate_result` accept: an unreadable predicate stays `unknown` (`model_undecided`), while a malformed, extra or missing field, a foreign spec, model, observation time or frame, an expired deadline or a stale observation raise `InterventionUnproven` and are never turned into success or failure. The codec holds no state, writes nothing and logs nothing, so an automatic judgement is returned only to the orchestrator. The frozen reset spec judges the reset goal only; a forward goal is refused. Forward judgement is an explicit opt-in: `provider_model.freeze_forward(job, settings)` consumes the actual `cli.load_job` result and creates `levi.aeri.forward_goal_model_spec.v1` in the same `FrozenSpec` type. It freezes the full job plan and its exact digest, the forward task text and the operator's `task.success_condition` as one required `task_success_condition` predicate. Missing or blank source text is refused; no instruction, policy-folder name or ISC predicate substitutes for the success condition. Explicit `forward_final` and `forward_active` deadlines must equal both the frozen plan and actual `RunConfig` limits. Only `forward_goal` for the current forward episode is supported by this spec; scene and reset requests are refused. The existing paused evidence, original owned request, model/frame/time checks and three-way answer are retained. This codec supplies a judgement, not a state transition, operator label or physical proof. This is CPU-only and exercised with fake execution and workers: the real worker-side VLM factory, a real frozen spec and the physical bindings are not installed, and real FR3 stays closed.
+
 Paused goal capture starts only after the pause transaction commits. Its integer observation timestamp must fall between the original run clock readings immediately before and after Robot.observe; equality at the capture start is valid. Old, replayed, future, missing or boolean timestamps fail before recorder staging, evidence preparation or judge authorization. The owned goal source uses that independently recorded capture start as its lower bound; a frame timestamp cannot certify its own freshness.
+
+## Fresh-capture source contract (`adapters/fresh_capture.py`)
+
+`fr3_bridge.Robot.observe` takes its images from `env.get_observation()`. The reader thread under it caches only the latest frame and `read()` returns no frame number, hardware timestamp or arrival time, so a local read time or an image hash cannot prove the image was captured after a grant. `levi.automatic.adapters.fresh_capture` defines what a source must deliver to prove it, and refuses everything else. It imports no camera SDK, opens no device and uses no robot port; `fr3_run` does not use it yet.
+
+- `CapturedFrame`: camera id (serial), monotonic `frame_number`, integer `device_timestamp_ns` (None = not provided), `timestamp_domain`, `host_clock_domain`, `host_arrival_ns` (host monotonic clock when the frame reached the process), `image_sha256` and optional `image_bytes` (which must hash to it).
+- `FreshCaptureBinding`: camera serial set, host clock domain, timestamp domain, timestamp semantics (only the exact value `start_of_exposure` is supported), `max_latency_ns`, `max_frame_interval_ns`, `min_frames_per_camera` and a `DeviceClockAlignment` (offset, offset uncertainty, drift bound in ppm, reference device instant). Every field is injected by the caller and has no default; a missing or invalid field, or an undeclared alignment, is rejected at construction.
+- `FreshCaptureVerifier(binding).verify(grant_ns, host_clock_domain, frames, previous=None)` returns a `FreshCaptureProof` or raises `FreshCaptureUnproven`. It rejects a missing or non-integer device timestamp, a timestamp or host clock domain different from the binding, a missing or unbound camera, too few frames, a non-increasing frame number or device timestamp, a gap above `max_frame_interval_ns`, a frame that arrived before the grant, a frame whose earliest possible capture time (`device_ns + offset - uncertainty`) is before the grant, a capture that appears to follow arrival, latency above `max_latency_ns`, and an image hash equal to the previous frame (stall). `previous` is an optional last pre-grant frame per camera, used as a baseline for the sequence checks only. The proof lists, per camera, the frame numbers, device timestamps, arrival times and image hashes, plus the binding hash.
+- `FakeCamera` is a deterministic in-memory source for tests. It proves nothing about hardware.
+
+Exposure-end, mid-exposure, readout, arrival and unknown timestamp semantics are refused at binding construction. A timestamp after a grant cannot certify an exposure that began before the grant. Supporting another semantic requires a separately reviewed lower-bound mapping; this contract supplies none.
+
+RealSense mapping (a table only; nothing here imports `pyrealsense2`):
+
+| `CapturedFrame` field | RealSense source | Note |
+| --- | --- | --- |
+| `camera_id` | `device.get_info(camera_info.serial_number)` | Never a USB path or enumeration index |
+| `frame_number` | `frame.get_frame_number()` | Per stream; gaps mean dropped frames; resets when the pipeline restarts, so a restart needs a new baseline |
+| `device_timestamp_ns` | `round(frame.get_timestamp() * 1e6)` | `get_timestamp()` is a float in milliseconds; None when unavailable |
+| `timestamp_domain` | `frame.get_frame_timestamp_domain()` (`hardware_clock`, `system_time`, `global_time`) | Recorded with the serial; only the domain the binding names is accepted |
+| `host_arrival_ns` | host monotonic clock read when the frame reaches the process | Not `get_timestamp()`; must use the clock named by `host_clock_domain` |
+| `image_sha256` / `image_bytes` | hash of the `get_data()` buffer | |
+
+Measured and reviewed on site, never assumed: the serial of every camera and its place in the rig; which timestamp domain the deployed firmware and driver report, and what instant (start of exposure, mid-exposure, readout) it marks; the offset, its uncertainty and the drift bound between the device clock and the host monotonic clock (with `global_time`, whether device-host sync is on); the maximum latency and frame interval under real load; and that the capture path delivers every frame with metadata instead of a cached latest frame. A person reviews the binding before anything uses it; the module only refuses what the declaration contradicts and does not validate the declaration itself.
+
+The forward (policy) codec for `OwnedCalls` is `levi/automatic/adapters/forward_codec.py`: `ForwardCodec(ForwardCodecConfig(...)).prepare_chunk` / `.decode_chunk` and `make_completion_adapter(verify_ack=..., roles=...)`. It is CPU and NumPy only and has no default for any physical or model parameter: image shape, state and action dimensions, horizon bound, prompt, `model_version`, `action_contract` and the wall clock must be injected, and a missing or malformed value is refused. `prepare_chunk` builds the same infer input as `_query_policy` in the evaluation client (BGR `view1` and `hand` reversed to RGB, `observation/state` from `robot_state.cartesian_position`, `prompt`) from the newly staged observation, and returns a `PreparedCall` whose payload is bytes (`decode_infer_input` rebuilds the dict inside the worker) with a `SourceBinding` of kind `policy`. It refuses a non-forward episode, an `obs_ns` that is not this observation, a state not proven current, wrong image size or dtype, a non-finite state and any prefix conditioning. `decode_chunk` turns the worker result into a `chunk_response` like `fr3_bridge.Policy.request` and refuses `unavailable`, a wrong shape, a horizon above the bound, a non-numeric, NaN or infinite action, a differing `action_contract` or `model_version`, and an answer at or after the request deadline. The adapter returns `CompletionEvidence` only when the result is the same request object that `InferenceCycle.invoke` passed (identity, not equality), the injected `verify_ack` accepts the SDK ack, the stop proof names the same request and the result is CPU data. This is a software contract tested with a fake worker. The prompt, deployment values, a real JAX or Torch worker, camera timestamp semantics and binding review are not installed or proven, and real FR3 entry stays closed.
+
+### Explicit request for human reset during a reverse subtask
+
+In a `subtask_loop` terminal, **m** requests stopping automatic reverse reset
+and waiting for human intervention. It is available during the current reverse
+episode's actions, quiescence, sealing and VLM check. Enter and s/f/d do not
+request human reset. Each request binds the run, round, episode and policy epoch;
+a closed or old window cannot stop the next episode. Repeating the same command
+and payload returns its original acceptance without registering another stop.
+
+This is an ordinary stop, not an emergency stop. A step already admitted may
+finish, including multiple robot POSTs; no next step is admitted after the
+request. Acceptance is **not permission to approach the arm**. The existing
+quiesce/seal chain and `home_after_operator_stop` setting determine the subsequent
+hold/home; safety or acknowledgement failures lock the run. The episode keeps
+`scene_reset=unknown` and receives no success/failure label. After handling the
+scene and checking safety, resume abandons the interrupted round, enters PREFLIGHT
+and still requires an independent round release. No automatic progress heuristic,
+retry change, automatic unlatch or new motion path is introduced.

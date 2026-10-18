@@ -113,12 +113,19 @@ def test_complete_file_worker_reset_without_events(
     r = rig(run, monkeypatch, "single_reset_policy")
     original_env = r.modules[2].RobotEnv
 
+    def bad_source():
+        # The start pose check (open gripper, fr3_run.start_gate) and the
+        # earlier states read the same source: a bad reading there is refused
+        # before any reset starts. The source fault under test is injected
+        # only while the reset settle reads it.
+        return bool(orch_ref) and orch_ref[0].state == "RESET_VERIFY"
+
     class MeasuredEnv(original_env):
         def _post(self, route, payload=None):
             response = super()._post(route, payload)
             if route == "getstate":
                 self.measurement_count = getattr(self, "measurement_count", 0) + 1
-                if attack == "fallback_gripper":
+                if attack == "fallback_gripper" and bad_source():
                     return response
                 value = (
                     0.0
@@ -131,9 +138,9 @@ def test_complete_file_worker_reset_without_events(
                     value = self.measurement_count % 2
                 if attack == "boolean_source":
                     value = True
-                if attack == "nonfinite_source":
+                if attack == "nonfinite_source" and bad_source():
                     value = float("nan")
-                if attack == "out_of_range_source":
+                if attack == "out_of_range_source" and bad_source():
                     value = 1.1
                 response["gripper_pos"] = value
             return response
@@ -141,7 +148,8 @@ def test_complete_file_worker_reset_without_events(
         def get_observation(self):
             response = (
                 {}
-                if attack in {"missing_getstate", "stale_generation"}
+                if attack == "stale_generation"
+                or (attack == "missing_getstate" and bad_source())
                 else self._post("getstate")
             )
             observed = super().get_observation()
@@ -150,7 +158,7 @@ def test_complete_file_worker_reset_without_events(
                 if attack == "stale_generation"
                 else float(response.get("gripper_pos", 0.0))
             )
-            if attack == "mismatched_gripper":
+            if attack == "mismatched_gripper" and bad_source():
                 observed["robot_state"]["gripper_position"] = 0.0
             return observed
 
@@ -500,6 +508,19 @@ def test_complete_file_worker_reset_without_events(
     else:
         assert state in {"WAIT_HUMAN", "FAULT_LOCKED"}
         assert not any(e.to_state == "FORWARD_ACTIVE" for e in scan.events)
+    if attack in {
+        "missing_getstate",
+        "fallback_gripper",
+        "mismatched_gripper",
+        "boolean_source",
+        "nonfinite_source",
+        "out_of_range_source",
+    }:
+        # Refused by the reset settle itself, not by an earlier gate.
+        assert any(
+            e.note is not None and e.note.code == "reset_settle_unavailable"
+            for e in scan.events
+        )
     assert not list(
         Path(r.binding["providers"]["file_root"]).glob("events/**/event-*.json")
     )

@@ -354,6 +354,11 @@ class ActualBorrowedTests(unittest.TestCase):
 
         def stop_admission(episode, old, new):
             r.policy.quiesce(policy_epoch=old)
+            r.robot.stop_admission()  # the fake robot keeps the gate like the bridge
+            return True
+
+        def reopen(*args):
+            r.robot.reopen_admission()
             return True
 
         def unused_stop(*args):
@@ -364,7 +369,7 @@ class ActualBorrowedTests(unittest.TestCase):
             runtime=runner.runtime,
             hooks=InterventionHooks(
                 stop_admission,
-                lambda *args: True,
+                reopen,
                 physical,
                 observe_runtime,
                 window,

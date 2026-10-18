@@ -1,0 +1,19 @@
+{
+  "schema": "levi.aeri.agent_log_export.v1",
+  "source": "synthetic",
+  "redacted": true,
+  "report": {
+    "schema": "levi.aeri.external_report.v1",
+    "request_id": "request-synthetic",
+    "answer_sha256": "ed219a125d23d7bd553c04a3793bddeb70f57ba1feae492ac6bdc8e8c7e0a8b2",
+    "agent_id": "synthetic-agent",
+    "agent_notes": "Synthetic fixture only; no private session content.",
+    "elapsed_ms": 12,
+    "tokens": {
+      "input_new": 0,
+      "output": 3,
+      "cache_read": null,
+      "cache_write": 0
+    }
+  }
+}

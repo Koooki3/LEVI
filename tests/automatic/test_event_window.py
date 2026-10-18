@@ -479,10 +479,16 @@ def test_assembled_entry_uses_cached_event_window_after_failed_chunk(
     query, queries = client._query_policy, []
 
     def failed_first_query(*args):
+        # Query 1 is the startup warm-up (fr3_run refuses a failed warm-up) and
+        # query 2 the first chunk. A failure before any action locks the run
+        # (policy_exception_before_motion), so the first chunk is cut to one
+        # action and the next query, made after motion started, is the one that
+        # fails and is retried.
         queries.append(1)
-        if len(queries) == 1:
+        if len(queries) == 3:
             raise OSError("injected recoverable chunk failure")
-        return query(*args)
+        actions = query(*args)
+        return actions[:1] if len(queries) == 2 else actions
 
     client._query_policy = failed_first_query
     frozen = []
@@ -496,9 +502,12 @@ def test_assembled_entry_uses_cached_event_window_after_failed_chunk(
     monkeypatch.setattr(W.Ledger, "freeze", tracking)
     state = R.execute(r.job, r.binding, load_modules=lambda binding: r.modules)
     assert state == "COMPLETED"
+    assert len(queries) >= 4  # warm-up, chunk, the failed chunk, a recovered one
     assert frozen and actual_model_calls
+    # A frame staged for the step whose chunk failed was never recorded, yet
+    # the event window cached it and it is a pick.
     assert any(
-        p.source.control_step == 0 and p.source.recording_row is None
+        p.source.control_step > 0 and p.source.recording_row is None
         for proof in frozen
         for p in proof.picks
     )
@@ -511,6 +520,12 @@ def test_assembled_entry_uses_cached_event_window_after_failed_chunk(
     )
     events = Journal.read(Path(r.job["rollout_root"]) / ".aeri/runs/real-test").events
     assert any(e.reason == "goal_verified" for e in events)
+    assert any(
+        e.note is not None
+        and e.note.code == "policy_unavailable"
+        and "injected recoverable chunk failure" in e.note.detail
+        for e in events
+    )
     assert gate.admitted == gate.completed
 
 

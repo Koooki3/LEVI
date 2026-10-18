@@ -103,6 +103,12 @@ class InferenceCycle:
         self.proof_failed = False  # a proof failed: never rearmed
         self.revocation_error = None
 
+    @property
+    def request_open(self) -> bool:
+        """A role request is still granted (its slot is not released)."""
+        with self._lock:
+            return self._request is not None
+
     def validate(self, config, clock):
         if (
             self.run_id != config.run_id

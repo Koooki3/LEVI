@@ -73,6 +73,7 @@ from typing import Protocol
 
 from levi.domain import aeri
 
+from . import camera_meta
 from . import scene_assessment as sa
 from .adapters import legacy_live
 from .journal import fsync_dir
@@ -148,6 +149,9 @@ class Rollout:
     started_wall: float = 0.0
     # Forward episodes: what put the scene back before it (PRECEDED_BY).
     preceded_by: str | None = None
+    # subtask_loop: round, loop, index, attempt, instruction, task and the
+    # done_when facts of this episode (``describe_episode``).
+    subtask: dict | None = None
     handle: object = field(default=None, repr=False)
     # Per camera: (last frame value, observations it has not changed).
     frames: dict = field(default_factory=dict, repr=False)
@@ -205,6 +209,8 @@ class RolloutRecorder:
         self.rollouts: dict[str, Rollout] = {}
         # Forward episode id -> what preceded it (``before_forward``).
         self._preceding: dict[str, dict] = {}
+        # Episode id -> its subtask (``describe_episode``), until ``open``.
+        self._subtasks: dict[str, dict] = {}
         self.manifest = self._load_manifest()
 
     def close(self) -> None:
@@ -294,6 +300,33 @@ class RolloutRecorder:
             "after_human_resets": [dict(item) for item in human_resets][-64:],
         }
 
+    def describe_episode(self, episode_id: str, info: dict) -> None:
+        """subtask_loop: the subtask the episode about to open runs (round,
+        loop, index, attempt, instruction, task, done_when). ``open`` writes it
+        into the manifest entry and the rollout's metadata
+        (``eval.aeri.subtask``), and the instruction becomes the episode's
+        ``task_description``: the live service and later datasets tell a
+        subtask rollout from a whole-task one."""
+        keep = {
+            k: info[k]
+            for k in (
+                "round",
+                "loop",
+                "index",
+                "attempt",
+                "instruction",
+                "task",
+                "done_when",
+                # subtask.early_check: an episode continuing the attempt.
+                "segment",
+                "continues",
+            )
+            if k in info
+        }
+        if not isinstance(keep.get("instruction"), str) or not keep["instruction"]:
+            raise RecorderError("a subtask episode needs its instruction")
+        self._subtasks[episode_id] = json.loads(json.dumps(keep))
+
     def open(self, *, task_folder: str, episode_id: str, number: int) -> Rollout:
         # Only what this call created is cleaned up after a failure.
         fresh = self._entry(episode_id) is None
@@ -363,6 +396,9 @@ class RolloutRecorder:
                 "after_human_resets": [],
             }
             entry.update(preceding)
+        subtask = self._subtasks.pop(episode_id, None)
+        if subtask is not None:
+            entry["subtask"] = subtask
         # The manifest knows the folder before it exists.
         self.manifest["episodes"].append(entry)
         if role == "reset":
@@ -390,6 +426,7 @@ class RolloutRecorder:
             path,
             started_wall=now,
             preceded_by=preceding["preceded_by"] if preceding else None,
+            subtask=subtask,
         )
         self._json(path / "metadata.json", self._metadata(rollout, finished=False))
         self._durable(
@@ -398,7 +435,13 @@ class RolloutRecorder:
         )
         self._io("write", path / STEPS)
         handle = (path / STEPS).open("w", newline="")
-        handle.write("step,observed_ns,executed,detail,pose\n")
+        # The frame-bus columns come after the old ones (empty without
+        # image_meta), so a reader by position or by name is unaffected.
+        handle.write(
+            "step,observed_ns,executed,detail,pose,"
+            + ",".join(camera_meta.CSV_COLUMNS)
+            + "\n"
+        )
         rollout.handle = handle
         self.media.open(path)
         self.rollouts[f"{task_folder}/{demo}"] = rollout
@@ -408,7 +451,9 @@ class RolloutRecorder:
     def _metadata(self, rollout: Rollout, *, finished: bool, media=None, reason=None):
         meta = {
             "data_source": "policy_rollout",
-            "task_description": self.texts.get(rollout.role, rollout.task_folder),
+            "task_description": rollout.subtask["instruction"]
+            if rollout.subtask
+            else self.texts.get(rollout.role, rollout.task_folder),
             "demo_index": rollout.number,
             "created_at": iso(rollout.started_wall),
             "frame_count": rollout.steps,
@@ -427,6 +472,8 @@ class RolloutRecorder:
         }
         if rollout.preceded_by is not None:
             meta["eval"]["aeri"]["preceded_by"] = rollout.preceded_by
+        if rollout.subtask is not None:
+            meta["eval"]["aeri"]["subtask"] = dict(rollout.subtask)
         if reason:
             meta["eval"]["abort_reason"] = reason
         if finished:
@@ -473,6 +520,7 @@ class RolloutRecorder:
                 getattr(result, "executed", ""),
                 getattr(result, "detail", ""),
                 json.dumps(obs.get("pose", [])),
+                *camera_meta.csv_cells(obs.get("image_meta")),
             ]
         )
         try:
@@ -998,7 +1046,7 @@ def evidence_records(run_dir) -> list:
     return sorted(out, key=lambda r: (r.get("journal_seq", 0), r.get("request_id", "")))
 
 
-DRAFT_NOTICE = "not confirmed by the user (HA-23) / 未经用户确认，HA-23"
+DRAFT_NOTICE = "Scene contract is a draft, not confirmed by the user / 场景契约仍为草稿，未经用户确认"
 
 
 HIDDEN_UNTIL_LABELLED = "hidden_until_labelled"

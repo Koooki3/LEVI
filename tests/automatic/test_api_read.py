@@ -17,13 +17,14 @@ from test_api_common import (
     write_job,
 )
 
-from levi.automatic import api, launch
+from levi.automatic import api, launch, scene_assessment
 
 BASE = "/api/levi/automatic"
 RUN_KEYS = {
     "run_id", "state", "seq", "reset_mode", "scene_check", "execution_mode",
     "episodes", "counters", "pending_card", "scene_question", "challenge",
-    "runner", "updated_at", "requirements", "progress",
+    "runner", "updated_at", "requirements", "progress", "resume_terminal_only",
+    "scene_answer_terminal_only",
 }  # fmt: skip
 
 
@@ -34,7 +35,11 @@ def test_capabilities_say_only_a_dry_run_launches(client):
         assert body["modes"][mode]["available"] is False
         assert body["modes"][mode]["reason"]
     assert {a["kind"] for a in body["adapters"]} == {"fake", "robot"}
-    assert body["reset_modes"] == ["single_reset_policy", "human_assisted"]
+    assert body["reset_modes"] == [
+        "single_reset_policy",
+        "human_assisted",
+        "subtask_loop",
+    ]
     assert body["scene_checks"] == ["provider", "operator_attested"]
     assert set(body["defaults"]) == {"max_steps", "episodes", "reset_wait_s"}
 
@@ -173,6 +178,9 @@ def test_snapshot_events_metrics_of_a_finished_run(client, tmp_path, roots):
 
     snap = client.get(f"{BASE}/runs/{name}").json()
     assert set(snap) == RUN_KEYS
+    # Only a run registered by scripts/aeri.py needs a terminal to resume.
+    assert snap["resume_terminal_only"] is False
+    assert snap["scene_answer_terminal_only"] is False
     assert snap["state"] == "COMPLETED" and snap["pending_card"] is None
     assert snap["runner"]["alive"] is False and snap["scene_question"] is None
     assert set(snap["counters"]) == {
@@ -300,3 +308,47 @@ def test_the_run_index_cannot_point_outside(client, tmp_path, roots, home):
         json.dumps({"run_id": "r-evil", "run_dir": str(other)})
     )
     assert client.get(f"{BASE}/runs/r-evil").status_code == 404
+
+
+@pytest.mark.parametrize("status", ["draft", "confirmed"])
+def test_plan_presentation_preserves_machine_contract(client, tmp_path, roots, status):
+    path = write_job(roots, tmp_path, name="contract-view")
+    contract_path = roots / "initial-state.yaml"
+    contract_path.write_text(
+        contract_path.read_text().replace(
+            "initial_state:\n", f"initial_state:\n  status: {status}\n"
+        )
+    )
+    source = contract_path.read_bytes()
+    request = launch.LaunchRequest(job_path=str(path), execution_mode="dry_run")
+    before = launch.normalise(request)
+    described = before["contract"].describe()
+    assert described["status"] == status
+    assert described["format"] == scene_assessment.FORMAT_STATUS
+    assert described["view_rule"] == scene_assessment.VIEW_RULE
+    frozen = json.dumps(before["plan"], sort_keys=True, default=str).encode()
+    digest = before["plan_sha256"]
+
+    response = client.post(
+        f"{BASE}/plan",
+        json={
+            "job_id": job_id_of(client, "contract-view"),
+            "execution_mode": "dry_run",
+        },
+    )
+    assert response.status_code == 200, response.text
+    shown = response.json()
+    assert shown["isc"] == {
+        "id": described["id"],
+        "version": described["version"],
+        "status": status,
+    }
+    assert shown["plan_sha256"] == digest
+    for field in ("format", "view_rule"):
+        assert described[field] not in response.text
+
+    after = launch.normalise(request)
+    assert contract_path.read_bytes() == source
+    assert after["contract"].describe() == described
+    assert json.dumps(after["plan"], sort_keys=True, default=str).encode() == frozen
+    assert after["plan_sha256"] == digest

@@ -15,7 +15,7 @@ from levi.live.runtime_ownership import (
     RuntimeObservation,
     RuntimeOwnership,
 )
-from levi.live.workload_broker import ExitProof, SafeWindow, WorkerIdentity
+from levi.live.workload_broker import ExitProof, IdleProof, SafeWindow, WorkerIdentity
 
 
 @dataclass(frozen=True)
@@ -205,6 +205,29 @@ class RuntimeBridge:
                 return rejected
             admitted = self.broker.admit(pressure, window, now_ns=now)
             if isinstance(admitted, aeri.ResourceLease):
+                if admitted.workload_id != spec.workload_id:
+                    # The shared queue granted a higher-priority neighbour. The
+                    # bridge never started anything for it: hand the reservation
+                    # back to the queue (not dropped) and withdraw our own queued request instead of
+                    # binding a lease that is not ours.
+                    now = self.clock()
+                    try:
+                        self.broker.return_unstarted(
+                            admitted,
+                            IdleProof(
+                                self.broker.broker_id,
+                                now,
+                                self.broker.clock_domain,
+                                True,
+                                True,
+                                True,
+                                lease_epoch=admitted.lease_epoch,
+                            ),
+                            now_ns=now,
+                        )
+                    finally:
+                        self.broker.cancel(spec.workload_id, now_ns=self.clock())
+                    raise ValueError("admitted lease belongs to another workload")
                 self._lease = admitted
             return admitted
 

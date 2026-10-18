@@ -186,7 +186,7 @@ def test_dataset_asset_symlink_is_not_an_escape(client, dataset, tmp_path):
     (dataset / "meta/escape.json").symlink_to(secret)
     repo = client.post("/api/levi/catalog", json={"path": str(dataset)}).json()["id"]
     response = client.get(f"/api/levi/files/{repo.split('/')[1]}/meta/escape.json")
-    assert response.status_code == 400
+    assert response.status_code == 403
     assert "private" not in response.text
 
 

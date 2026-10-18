@@ -1,5 +1,9 @@
 {
  "matrix": {
+  "arbitration:after_reset:camera_stale": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
   "arbitration:after_reset:operator_stop": {
    "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
    "single_reset_policy": "differs:only this mode runs reset episodes"
@@ -68,6 +72,10 @@
    "human_assisted": "same",
    "single_reset_policy": "same"
   },
+  "cli:rollouts": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
   "cli:run": {
    "human_assisted": "differs:a dry-run scene that is not ready ends the run in WAIT_HUMAN",
    "single_reset_policy": "same"
@@ -108,6 +116,10 @@
    "human_assisted": "same",
    "single_reset_policy": "same"
   },
+  "metrics:discarded_beyond_limit": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
   "metrics:early_termination": {
    "human_assisted": "same",
    "single_reset_policy": "same"
@@ -128,11 +140,19 @@
    "human_assisted": "same",
    "single_reset_policy": "same"
   },
+  "metrics:operator_verdicts": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
   "metrics:reset": {
    "human_assisted": "differs:no reset episodes: resets and their durations stay 0; skip decisions count forward starts only",
    "single_reset_policy": "same"
   },
   "metrics:reset_mode": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "metrics:rounds": {
    "human_assisted": "same",
    "single_reset_policy": "same"
   },
@@ -145,6 +165,10 @@
    "single_reset_policy": "same"
   },
   "metrics:schema": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
+  "metrics:subtasks": {
    "human_assisted": "same",
    "single_reset_policy": "same"
   },
@@ -200,6 +224,10 @@
    "human_assisted": "same",
    "single_reset_policy": "same"
   },
+  "transition:FORWARD_JUDGING->FORWARD_FINALIZE": {
+   "human_assisted": "same",
+   "single_reset_policy": "same"
+  },
   "transition:FORWARD_JUDGING->WAIT_HUMAN": {
    "human_assisted": "same",
    "single_reset_policy": "same"
@@ -215,6 +243,10 @@
   "transition:PREFLIGHT->FAULT_LOCKED": {
    "human_assisted": "same",
    "single_reset_policy": "same"
+  },
+  "transition:PREFLIGHT->PREFLIGHT": {
+   "human_assisted": "n/a:only the subtask_loop strategy (outside this matrix) has it",
+   "single_reset_policy": "n/a:only the subtask_loop strategy (outside this matrix) has it"
   },
   "transition:PREFLIGHT->VERIFY_INITIAL": {
    "human_assisted": "same",
@@ -239,6 +271,10 @@
   "transition:RESET_FINALIZE->FAULT_LOCKED": {
    "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
    "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
+  "transition:RESET_FINALIZE->SCENE_ASSESS": {
+   "human_assisted": "n/a:only the subtask_loop strategy (outside this matrix) has it",
+   "single_reset_policy": "n/a:only the subtask_loop strategy (outside this matrix) has it"
   },
   "transition:RESET_FINALIZE->VERIFY_INITIAL": {
    "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
@@ -342,6 +378,7 @@
   "RESET_ACTIVE->RESET_JUDGING",
   "RESET_ACTIVE->RESET_VERIFY",
   "RESET_FINALIZE->FAULT_LOCKED",
+  "RESET_FINALIZE->SCENE_ASSESS",
   "RESET_FINALIZE->VERIFY_INITIAL",
   "RESET_FINALIZE->WAIT_HUMAN",
   "RESET_JUDGING->FAULT_LOCKED",

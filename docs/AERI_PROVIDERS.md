@@ -8,7 +8,7 @@ This provider executes a real predicate model call through the existing live onl
 
 The existing `human_assisted` / `operator_attested` path retains the operator scene gate and the forward C5 final-state judgement. It needs no scene model worker. Do not add a reset policy to get past a missing provider. A reset model instead reads the confirmed Initial State Contract (ISC); `generic-final` remains exclusively the forward final-state rule.
 
-The new worker has `scene` and `reset_judgement` capabilities. **It has no events capability.** The existing FileEvents request has no observation frames, so this worker cannot implement visual events. A model-worker job must explicitly freeze `termination.allow_early_stop: false` in a new plan. A job retaining the old true default is blocked; this implementation never rewrites it silently. A future event channel or longer model deadline requires a new reviewed plan/spec and its own tests.
+A worker with the original ISC spec has `scene` and `reset_judgement` capabilities. **It has no events capability.** The existing FileEvents request has no observation frames, so this worker cannot implement visual events. A model-worker job must explicitly freeze `termination.allow_early_stop: false` in a new plan. A job retaining the old true default is blocked; this implementation never rewrites it silently. A future event channel or longer model deadline requires a new reviewed plan/spec and its own tests.
 
 ## Freeze a complete model specification
 
@@ -38,6 +38,15 @@ python -m levi.automatic.provider_worker check --spec /absolute/path/frozen-mode
 
 The model profile must include every `ProviderConfig` field; omitted-field defaults cannot substitute for frozen configuration. Every field is checked against the actual shared Judge profile.
 
+## Explicit forward goal specification
+
+Forward task success uses a separate opt-in schema, `levi.aeri.forward_goal_model_spec.v1`, in the same `FrozenSpec` type. `freeze_forward(job, settings)` requires the actual `cli.load_job` result: its parsed task, run configuration, frozen plan and `plan_sha256` must agree. Both the task instruction and `task.success_condition` must be present and nonblank. The complete plan is retained as `frozen_plan`; its digest uses `cli.load_job`'s exact JSON serialization. The helper freezes the operator's success condition verbatim as the sole required predicate `task_success_condition`, without splitting it or inventing physical parameters. ISC predicates continue to define initial/reset readiness and do not define forward success.
+
+`settings` must explicitly supply `id`, `version`, `run_id`, the complete `provider` profile, `deadlines_ns`, `observations`, `image_budget`, `max_output_tokens`, `observation_max_age_ns` and `validity_ns`. `deadlines_ns` has exactly `forward_final` and `forward_active`, equal to both the actual `RunConfig` and frozen plan's `final_judge_timeout_ns` and `judge_request_timeout_ns`. Replacing a configuration deadline or rehashing a plan without matching the actual configuration is refused; plan budgets must be integers. `observations` has explicit `preferred` views, `require_visible_evidence: true`, `min_evidence_refs` and `require_all_views`; evidence requirements must fit the declared image budget. The helper derives the goal descriptor, definition, source binding and prompt/schema hashes from these inputs. All original model, request, retained-frame and freshness checks apply.
+
+This spec advertises only `forward_judgement`. Its file tickets use `forward_judgement/requests`, responses and cancellations under the same capability directory, with the existing request-ID hash filenames and idempotency. The original ISC spec still advertises exactly `scene` and `reset_judgement`, and still refuses forward goals. Forward requests require a forward episode and `forward_goal`, preserve the observed step window and event IDs, and use the selected active/final deadline. One current whole-condition reading gives `confirmed`, `rejected` or `unknown`; unreadable or insufficient visible evidence remains `unknown`. No operator label enters the prompt.
+
+The shared online Judge registration and file worker reuse the same frozen spec and model arbitration. The worker does not gain an events capability or create another model service. This is a software codec/provider path: real `event_pause_judge` remains refused, and production assembly, role scheduling and physical/runtime proofs require their own reviewed bindings.
 ## Runtime worker and evidence
 
 The shared online Judge must explicitly register the same frozen spec before a worker starts. The new `/v1/aeri/provider` route accepts its registered SHA, request, current JPEGs and cancellation identity; it accepts no caller prompt or replacement specification. `/v1/aeri/cancel` only cancels the matching request identity. Both inherit the loopback Host/Origin/body-limit checks.
@@ -63,11 +72,11 @@ python -m levi.automatic.provider_worker run \
 
 The worker file root already exists and belongs to the executing identity. A new run evidence directory may be absent: bootstrap opens and checks only an existing owned ancestor without symlinks; it creates neither a run nor evidence. READY describes the model channel, never physical scene readiness. After execute creates the fresh run, the first ticket rechecks the complete authorized path. Replacement, symlinks or changed ownership block it. Evidence root is explicitly authorized and must match the request. The worker opens every directory component without following symlinks, reads owned regular request/JPEG files within byte limits, verifies frame hashes before and after inference, and replaces/fsyncs responses atomically. Images are temporary on the online Judge; the retained originals remain in the run's evidence store.
 
-Requests live under `scene/requests` or `reset_judgement/requests`; their filenames are SHA256 of the request ID. Responses and cancellations use the same filename in their respective directories. The bridge supplies `run_id`, `plan_sha256`, `spec_sha256`, phase, monotonic `submitted_ns` and absolute `deadline_due_ns`. The deadline cannot exceed the frozen phase limit. Missing bindings, wrong identity/clock, old/future observations, changed or unretained hashes, incomplete predicates and downgraded required flags never grant readiness or reset confirmation.
+Original ISC requests live under `scene/requests` or `reset_judgement/requests`; their filenames are SHA256 of the request ID. Responses and cancellations use the same filename in their respective directories. The bridge supplies `run_id`, `plan_sha256`, `spec_sha256`, phase, monotonic `submitted_ns` and absolute `deadline_due_ns`. The deadline cannot exceed the frozen phase limit. Missing bindings, wrong identity/clock, old/future observations, changed or unretained hashes, incomplete predicates and downgraded required flags never grant readiness or reset confirmation.
 
 The model returns only true/false/null for the complete frozen predicate set, current frame ref/hash citations, the spec/model identity and the captured observation time. Code computes `ready/reset_required/unknown` or `confirmed/rejected/unknown`. Optional predicates never decide. Every non-null reading needs current evidence; preferred views and minimum visible evidence also govern a reset confirmation. There is no invented calibrated confidence.
 
-READY is published only after an actual live channel/profile check succeeds. It binds PID, process start ticks, boot ID, run/plan/spec/model and the two implemented capabilities. Stale, dead or reused process identity is refused on the model path. Channel/gate failures remove readiness. Stopping the worker removes READY. One directory lock prevents competing worker instances. Heartbeat does not mistake this worker's own legal in-flight request for external busy and remove existing READY. Its original ten-second age bound remains; no new readiness evidence is fabricated. A progressing poll cursor prevents the first thousand historical tickets from starving new ones, without deleting history.
+READY is published only after an actual live channel/profile check succeeds. It binds PID, process start ticks, boot ID, run/plan/spec/model and the capabilities of its explicit spec. Stale, dead or reused process identity is refused on the model path. Channel/gate failures remove readiness. Stopping the worker removes READY. One directory lock prevents competing worker instances. Heartbeat does not mistake this worker's own legal in-flight request for external busy and remove existing READY. Its original ten-second age bound remains; no new readiness evidence is fabricated. A progressing poll cursor prevents the first thousand historical tickets from starving new ones, without deleting history.
 
 ## Cancellation and recovery
 
@@ -94,3 +103,63 @@ verification and retains its shared GPU/cancellation gates.
 The tests exercise actual file worker, JPEG retention, AERI/ISC contracts, bridge request/collect paths and shared online Judge using injected models and fake HTTP. They include invalid JSON/spec/model/ref/hash/time/identity, missing or downgraded predicates, gate closure, cancellation, late models, restart ambiguity, no-network/no-write file check and explicit plan/deadline binding.
 
 No real model inference, GPU latency measurement, robot SDK/network, physical parameters or onsite execution was performed for this change. Model quality and completing within 5/3 seconds remain unmeasured. Physical definitions, checkpoint/model digest, camera views, safety and onsite approval are operator gates. Do not report this mock verification as a robot-ready system.
+
+## Subtask-loop response accounting
+
+The subtask-loop chat adapter preserves token counts only when each supplied
+`usage.prompt_tokens` or `usage.completion_tokens` value is a nonnegative integer
+(excluding booleans). A reported zero remains zero. Missing, null or invalid
+fields remain null independently; no total or model-name estimate fills them.
+Per-question evidence records `usage_source: provider_reported` when at least
+one count is valid, otherwise `unavailable`. This is response metadata, not a
+model answer or a state-transition input. External bridges without measured
+usage should omit `usage`. Old evidence without `usage_source` remains usable;
+its missing source is unknown, not proof of zero usage.
+
+A provider may report `wake_need_mib() == 0` for no additional local GPU
+budget. The configured positive override still wins, and unreadable GPU memory
+or insufficient configured headroom still refuses a wake. Missing or invalid
+provider budgets use the existing fallback. Both forward and reverse planning
+prompts specify the fact contract: `in_gripper` uses an object subject and
+`target: "-"`; `gripper_empty` uses `subject: "-"` or `"gripper"` and
+`target: "-"`. The parser and structured-output schema are unchanged.
+
+## Subtask inventory budget and truncated responses
+
+The default inventory output limit remains 400 tokens. To request a larger
+limit, set it in the job before reviewing and freezing the plan:
+
+```yaml
+subtask:
+  vlm:
+    inventory_max_tokens: 1024
+```
+
+`inventory_max_tokens` accepts an integer from 1 through 4096, smaller than
+`min_model_len`; booleans and coerced strings are refused. The ceiling bounds
+output cost, not recognition quality or request latency. The explicit value
+appears in the frozen plan and the validation summary and changes the plan
+SHA. An omitted or null value keeps the previous plan representation and SHA.
+The binding obtains the value from that plan; it is not a separate binding
+override. `extra_body.max_tokens` and `extra_body.max_completion_tokens` are
+refused, including when constructing the adapter directly. Plan and check
+limits remain 500 and 200 tokens, and the model profile is unchanged. The job
+schema adds this optional field in minor version 1, still `levi.aeri.job.v1`.
+
+A response with `choices[0].finish_reason: length` is incomplete even when its
+content is valid JSON. The adapter keeps its text, finish reason, usage and
+`response truncated: finish_reason=length` error in the per-question evidence;
+the orchestrator passes no answer to the existing validator, which takes the
+existing refusal/unknown path to `WAIT_HUMAN`. This applies to inventory,
+planning and checks. It does not reinterpret other finish reasons or retry
+with a larger budget automatically. Existing raw-evidence size limits remain.
+
+Each planning request now includes only its own direction's instructions.
+Forward uses the current side and wrist images and asks for every object
+still needing to move for the task, leaving already-positioned objects in
+place. Reverse uses the current side image and the round-start side image to
+restore moved objects to that round's initial positions. Both reuse the same
+fact contract. The on/in meaning, check prompt and true/false/null rule are
+unchanged. A larger inventory limit and clearer direction instructions are
+software controls, not evidence of improved object recognition or robot
+readiness; those outcomes still require separate evaluation.

@@ -57,7 +57,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from levi.domain import aeri
 
-from . import cli, control, jobs_wizard, launch, metrics, policies
+from . import (
+    cli,
+    control,
+    jobs_wizard,
+    launch,
+    metrics,
+    policies,
+    rollout_view,
+    subtask_view,
+)
 from .journal import Journal, JournalError, read_plan
 from .recorder import EVIDENCE, FRAMES, MANIFEST, pending_card
 
@@ -86,7 +95,13 @@ LAUNCH_DEADLINE_S: float | None = None
 STATES = aeri.AERI_STATES
 WAITING = ("WAIT_HUMAN", "FAULT_LOCKED")
 # Why an episode ended: not shown before the operator's own label.
-BLIND_REASONS = ("goal_verified", "horizon_exhausted", "operator_stop")
+BLIND_REASONS = (
+    "goal_verified",
+    "horizon_exhausted",
+    "operator_stop",
+    "operator_verdict",
+    "subtask_early_check",
+)
 HIDDEN = "hidden_until_labelled"
 MODES = launch.MODES
 LABEL_VALUES = metrics.OPERATOR_VALUES
@@ -725,7 +740,11 @@ def requirements_of(plan) -> dict | None:
     deployments = (
         plan.get("deployments") if isinstance(plan.get("deployments"), dict) else {}
     )
-    human = (plan.get("reset_mode") or run.get("reset_strategy")) == "human_assisted"
+    mode = plan.get("reset_mode") or run.get("reset_strategy")
+    subtask = mode == "subtask_loop"
+    # No reset policy runs in a manual reset or a subtask loop (its reverse
+    # loop puts the scene back with the evaluated policy's subtasks).
+    human = mode == "human_assisted" or subtask
 
     def policy(role):
         value = deployments.get(role)
@@ -737,7 +756,7 @@ def requirements_of(plan) -> dict | None:
         }
 
     early = term.get("allow_early_stop")
-    return {
+    found = {
         "task": {
             "instruction": _text_or_none(texts.get("forward")),
             "reset_instruction": None if human else _text_or_none(texts.get("reset")),
@@ -756,6 +775,32 @@ def requirements_of(plan) -> dict | None:
             "physical_hold": bool(term.get("physical_hold")),
         },
     }
+    if subtask:
+        found["subtask_loop"] = subtask_settings_of(run, texts)
+    return found
+
+
+def subtask_settings_of(run: dict, texts: dict) -> dict:
+    """A ``subtask_loop`` plan's settings as the page shows them (display
+    only): the task name, the rounds, the step and resend limits, the cap on
+    subtasks per loop (``null``: off; left out when the plan does not say),
+    homing after each loop and the free memory the VLM needs to wake."""
+    mem = run.get("vlm_min_free_mem_gib")
+    home = run.get("home_after_loop")
+    out = {
+        "task": _text_or_none(run.get("subtask_task"))
+        or _text_or_none(texts.get("forward")),
+        "rounds": _int_or_none(run.get("episodes")),
+        "subtask_max_steps": _int_or_none(run.get("subtask_max_steps")),
+        "subtask_max_retries": _int_or_none(run.get("subtask_max_retries")),
+        "home_after_loop": home if isinstance(home, bool) else None,
+        "vlm_min_free_mem_gib": mem
+        if isinstance(mem, (int, float)) and not isinstance(mem, bool)
+        else None,
+    }
+    if "max_subtasks_per_loop" in run:
+        out["max_subtasks_per_loop"] = _int_or_none(run["max_subtasks_per_loop"])
+    return out
 
 
 def _plan_view(job_id: str, found: launch.LaunchPlan) -> dict:
@@ -832,6 +877,13 @@ def _last_activity_ms(run: _Run) -> int | None:
     return _ms(run.entry.get("created_wall_ns"))
 
 
+def _episodes_done(run: _Run) -> int:
+    """Rounds done: in subtask_loop a round is a forward loop (many episodes)."""
+    if run.reset_mode == "subtask_loop":
+        return metrics.subtask_progress(run.events)["rounds_ended"]
+    return len(metrics.ended_forward(run.events))
+
+
 def _summary(run: _Run) -> dict:
     return {
         "run_id": run.run_id,
@@ -843,7 +895,7 @@ def _summary(run: _Run) -> dict:
             if run.entry.get("backend") == "standalone"
             else {}
         ),
-        "episodes_done": len(metrics.ended_forward(run.events)),
+        "episodes_done": _episodes_done(run),
         "episodes_total": run.episodes_total,
         "started_at": _ms(run.entry.get("created_wall_ns")),
         "updated_at": _last_activity_ms(run),
@@ -1057,9 +1109,20 @@ def progress_of(manifest, plan, *, alive: bool) -> dict:
     return out
 
 
+def subtask_provider_of(plan: dict) -> dict:
+    """Configuration declared in the digest-checked plan, not service identity.
+    Missing or malformed declarations are unknown, never inferred from names,
+    argv, model usage or another runtime file."""
+    subtask = plan.get("subtask")
+    vlm = subtask.get("vlm") if isinstance(subtask, dict) else None
+    mode = vlm.get("provider_mode") if isinstance(vlm, dict) else None
+    if mode in ("local", "external"):
+        return {"mode": mode, "source": "frozen_plan"}
+    return {"mode": "unknown", "source": "unavailable"}
+
+
 def snapshot_of(run: _Run) -> dict:
     committed = [e for e in run.events if e.record == "committed"]
-    ended = metrics.ended_forward(run.events)
     automation = metrics.automation(run.events, run.reset_mode)
     current = next((e.episode_id for e in reversed(committed) if e.episode_id), None)
     runner = run.runner()
@@ -1069,6 +1132,15 @@ def snapshot_of(run: _Run) -> dict:
         "seq": run.seq,
         "reset_mode": run.reset_mode,
         "scene_check": run.scene_check,
+        # subtask_loop: the loop phase and the subtask under way (read-only).
+        **(
+            {
+                "subtask": metrics.subtask_progress(run.events),
+                "subtask_provider": subtask_provider_of(run.plan),
+            }
+            if run.reset_mode == "subtask_loop"
+            else {}
+        ),
         "execution_mode": run.entry.get("execution_mode"),
         **(
             {"origin": run.entry["origin"]}
@@ -1076,7 +1148,7 @@ def snapshot_of(run: _Run) -> dict:
             else {}
         ),
         "episodes": {
-            "done": len(ended),
+            "done": _episodes_done(run),
             "total": run.episodes_total,
             "current": None if run.state == "COMPLETED" else current,
         },
@@ -1086,6 +1158,9 @@ def snapshot_of(run: _Run) -> dict:
             "faults": sum(1 for e in committed if e.to_state == "FAULT_LOCKED"),
         },
         "pending_card": card_of(run),
+        "resume_terminal_only": _terminal_resume_only(run),
+        # Decision UI-2: the page shows a real run's question, never answers it.
+        "scene_answer_terminal_only": _terminal_resume_only(run),
         "scene_question": scene_question_of(run),
         "challenge": None
         if run.scan.corrupt or run.scan.torn
@@ -1138,6 +1213,71 @@ def run_events(run_id: str, after: int = -1, limit: int = 200):
         if len(rows) >= limit:
             break
     return {"events": rows, "next": rows[-1]["seq"] if rows else max(after, -1)}
+
+
+@router.get("/runs/{run_id}/subtasks")
+def run_subtasks(run_id: str):
+    """Read-only: a ``subtask_loop`` run's notes (detail parsed) and the
+    plan files they name, each checked against its SHA-256. Empty for any
+    other run. Nothing here starts, releases or changes a round: the
+    operator does that at the run's terminal."""
+    run = _locate(run_id)
+    # Private request evidence and round labels share this bounded, no-symlink
+    # reader; the view authorizes disclosure before projecting free text.
+    found = subtask_view.view(
+        run.events,
+        run.run_dir,
+        lambda parts: _read_below(run.run_dir, parts, MAX_JSON_BYTES),
+        reset_mode=run.reset_mode,
+        stored=lambda sha: _frame_stored(run.run_dir, sha),
+    )
+    return scrub(found)
+
+
+@router.get("/runs/{run_id}/rollouts")
+def run_rollouts(run_id: str):
+    """Read-only: the run's rollout sets (``levi.aeri.rollouts.v1``: round ->
+    forward set / reverse set -> subtask -> attempts) from the generator's
+    ``load_or_build``, projected by ``rollout_view``. A check is the model's
+    judgement, never a label. Checks and stop reasons are shown before the
+    operator labels the round: the user turned the rollout-set blind rule
+    off on 2026-10-18 (``rollout_view`` keeps it for a caller that passes
+    ``blind``; events and metrics keep T-CL-14). Video URLs point only at
+    datasets LEVI's file service already serves; nothing here writes or
+    serves a file."""
+    run = _locate(run_id)
+    root = rollout_view.rollout_root_of(run.run_dir)
+    if root is None:
+        raise _fail(409, "no_rollout_root", "This run folder has no rollout root")
+    try:
+        build = rollout_view.generator().load_or_build
+    except (rollout_view.Unavailable, AttributeError):
+        raise _fail(
+            503, "rollouts_unavailable", "This LEVI has no rollout manifest generator"
+        ) from None
+    try:
+        manifest = build(run.run_dir, root)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise _fail(409, "rollouts_unreadable", scrub(str(exc))[:300]) from None
+    return rollout_view.project(
+        manifest,
+        run_id=run.run_id,
+        blind=None,
+        reasons=BLIND_REASONS,
+        media=rollout_view.Media(_read_below),
+        clean=scrub,
+    )
+
+
+def _frame_stored(run_dir: Path, sha256: str) -> bool:
+    """The frame is in the run's evidence folder (what ``run_frame`` serves)."""
+    for suffix in _FRAME_TYPES:
+        try:
+            os.close(_open_below(run_dir, (EVIDENCE, FRAMES, f"{sha256}{suffix}")))
+        except OSError:
+            continue
+        return True
+    return False
 
 
 WITHHELD = ("autonomous", "early_termination", "agreement.by_ended_by")
@@ -1420,6 +1560,33 @@ def _send(run: _Run, value: dict, wait_s: float):
     return queued, control.wait_result(run.run_dir, value["command_id"], wait_s)
 
 
+TERMINAL_RESUME = (
+    "A standalone real-robot run is resumed only at its terminal, never from "
+    "the page. Return to terminal D running scripts/aeri.py and follow its "
+    "current recovery prompts for run {run_id}; the driver rechecks robot health."
+)
+
+
+TERMINAL_SCENE_ANSWER = (
+    "A standalone real-robot run's scene question is answered only at its "
+    "terminal: an answer on the page does not release motion (decision UI-2). "
+    "Type y / n / u at the terminal of the scripts/aeri.py process for run "
+    "{run_id} / 真机独立运行的场景题只在其终端作答：页面上的回答不算放行"
+    "（取舍 UI-2）。请在运行 {run_id} 的 scripts/aeri.py 终端键入 y / n / u"
+)
+
+
+def _terminal_resume_only(run: _Run) -> bool:
+    """A run registered by ``scripts/aeri.py`` (``launch.register_standalone``;
+    ``_locate`` already authenticated its registration MAC) drives the real
+    robot. Its resume needs a person at a terminal, not page checkboxes
+    (decision 2026-10-13, L2-SCRIPT-HTTPRESUME)."""
+    return (
+        run.entry.get("backend") == "standalone"
+        and run.entry.get("origin") == launch.STANDALONE_ORIGIN
+    )
+
+
 def _require_runner(run: _Run) -> None:
     if not run.runner()["alive"] or run.state == "COMPLETED":
         raise _fail(
@@ -1466,6 +1633,14 @@ def resume_run(run_id: str, body: ResumeBody, request: Request):
             409,
             "journal_corrupt",
             "Journal is damaged or incomplete; only stop is allowed",
+        )
+    if _terminal_resume_only(run):
+        # Before the challenge, the memo, the command file and the journal.
+        raise _fail(
+            403,
+            "terminal_resume_required",
+            TERMINAL_RESUME.format(run_id=run_id),
+            state=run.state,
         )
     payload = body.model_dump()
     again = _MEMO.get(f"resume:{run_id}", body.command_id, payload)
@@ -1589,6 +1764,14 @@ def scene_answer(run_id: str, body: SceneAnswerBody, request: Request):
 
     _person(request)
     run = _locate(run_id)
+    if _terminal_resume_only(run):
+        # Before the memo, the question lookup and any answer file (UI-2).
+        raise _fail(
+            409,
+            "scene_answer_terminal_only",
+            TERMINAL_SCENE_ANSWER.format(run_id=run_id),
+            state=run.state,
+        )
     payload = body.model_dump()
     again = _MEMO.get(f"scene:{run_id}", body.request_id, payload)
     if again is not None:

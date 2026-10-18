@@ -340,7 +340,7 @@ SDK 超时、ACK 代次不符或观察未知时，原执行槽继续保留。已
 静默。这些适配也不提供机械臂物理保持或暂停相机帧的证明。
 
 当前操作会话不在可写的 user-manager 委派根中，可信委派 supervisor 的外层
-bootstrap 尚未安装。后续显式部署必须在获准的委派 supervisor 中保留 canonical
+bootstrap 尚未安装（软件候选见下一节）。后续显式部署必须在获准的委派 supervisor 中保留 canonical
 driver/子进程祖先关系与已锁定的 open-file descriptor；本软件候选不创建 cgroup
 或 systemd 单元。CPU fake 回归覆盖 SDK ACK 与原群组内核，没有运行 GPU 模型、
 真实进程组、已安装服务或机器人。
@@ -419,3 +419,93 @@ Owned worker 提供 `collect_sdk_completion(request)`，返回原提交 token、
 专属 `test_borrowed_cycle_execution.py` 检查要求新解释器和显式 `LEVI_JOINT_KERNEL_ROOT`，从记录的实际路径加载原 Kernel/Cycle 与候选 owned 文件。CPU 假 IPC 验证原 begin/finish 各一次、准确匹配的 SDK 收据结构，以及最后独立的完整整群观测。收据之后其他成员变忙会阻止发布并保留原槽。这是软件组合证据，未安装生产提供者、真实 SDK/native bootstrap、物理保持或 Orchestrator 挂载。
 
 Borrowed 执行必须使用前文运行权限一节所述的原 Kernel 精确查询。等值 token 副本在 observer、worker 或 revoke 副作用前拒绝。派发和结果许可使用 `accepts_exact_request`；收集及撤销须由 `owns_exact_request` 确认同一原对象。撤销或迟到的原对象仍可用真正 ACK 排空，结果为 None。缺少精确公开合同的 Kernel 拒绝，不回落到按值许可。
+
+
+## 宿主 supervisor 入口（软件候选，显式启用）
+
+`python -m levi.live.owned_supervisor --config <file.json>` 是资源 driver 的
+run wrapper（`scheduler.py run`）作为租约子进程启动的入口。它没有被安装到任何
+地方，不创建 cgroup、单元或锁，检查通过之前不导入任何模型库，也不内置模型：
+factory 规格由调用方提供的 `setup` 钩子（`module:callable`，返回
+`SupervisorPlan`）给出。
+
+工作顺序如下；任一拒绝都会在 stderr 记录
+`owned-supervisor: REFUSED [stage] reason` 并以各自的退出码退出：
+
+| 退出码 | 阶段 | 含义 |
+| --- | --- | --- |
+| 0 | - | 收到停止请求，所有 worker 已停止并确认退出 |
+| 2 | config | 配置不可读、有未知键、`ResidentGroupSpec` 或时间参数非法 |
+| 10 | evidence | 租约行缺失、`launch_phase != "registered"`、租约未激活或已取消、`LEVI_GPU_LOCK_*` 未设或不是调度器的 `.gpu.lock`、supervisor 不是 driver wrapper/已登记子进程的后代、flock 持有者不是 driver 或未持有继承来的同一 open-file description（`ResourceDriverObserver.require_held`） |
+| 11 | cgroup | 未被启动到委派根里、根里有额外进程、角色叶目录缺失或非空、没有 cgroup v2（`CgroupGroupScope` / `CgroupScope`） |
+| 12 | setup | setup 钩子缺失、失败，或其 factory 与声明的 capability 不符 |
+| 13 | launch | 某个 worker 没有启动；已启动的先被停止 |
+| 14 | worker | supervisor 运行期间某个 worker 退出；其余被停止 |
+| 15 | stop | 退出曾无法确认；取得新的完整 worker 与 containment 退出证据后才返回 |
+| 16 | lease | 运行中租约被释放/取消，或 flock/containment 丢失；worker 被停止 |
+
+运行时它持有继承来的 flock 描述符和 cgroup 根，并每隔 `poll_s` 复核
+`ResourceDriverObserver.require_held`、根目录成员和每个 worker 的 PID/启动时间/
+boot 身份。收到 SIGTERM/SIGINT 或出现上述任一故障时，它先给每个 worker 发
+`stop`，等待 `stop_grace_s`，然后只对"仍存活且身份与记录一致"的 worker 的进程组
+发 SIGKILL，再等 `kill_wait_s`。若退出仍未确认，它保持存活和继承的 flock，
+每隔 `poll_s` 重新检查每个原 worker 的 `exited()`（leader 已死、叶目录为空、
+已知后代全部消失）及完整的原群组。根目录只能剩 supervisor；所有声明的叶目录，
+包括尚未启动的角色，都必须为空。不对已死 leader 的裸 PGID 发信号，因此后代
+仍存活或证据不可读时，锁可能无限期保留。重复 SIGTERM/SIGINT 或租约丢失不会
+缩短等待。
+
+每次观测原子更新 `state_dir` 中的 `stop-receipt.json`，记录
+`phase="holding_exit"` 或 `"exit_confirmed"`、逐角色 `exited`、
+`containment_confirmed` 与 `observed_monotonic_ns`。若曾进入保留锁等待，即使证据
+随后恢复，最终退出码仍为 15；正常确认的停止仍返回 0。`ready.json` 在所有 worker
+取得 SDK ready ACK 后写入。回执只是运维辅助，不是证明：群组退出证明是
+`OwnedGroupObserver.exit_proof`，它要求原 supervisor 已退出，因此由仍存活的可信
+进程收集（`Supervisor.collect_exit_proof` 转调它）。
+
+run wrapper 设置、supervisor 读取并要求的启动环境变量：`LEVI_LEASE_ID`、
+`LEVI_LEASE_GENERATION`、`LEVI_SESSION_ID`、`LEVI_GPU_LOCK_HELD`（必须为 `1`）和
+`LEVI_GPU_LOCK_FD`。它们由调度器设置，不是用户设置。
+
+配置键：`scheduler_root`、`clock_domain`、`cgroup_root`、`group_id`、`state_dir`、
+`roles`（每项含 `role`、`capability_id`、`leaf`），可选 `setup`、`poll_s`、
+`stop_grace_s`、`kill_wait_s`、`launch_timeout_s`。未知键一律拒绝；这里没有物理
+参数，因此也没有默认的物理数值。
+
+**已修复的上游缺陷。** `owned_runtime._inherited_flock` 先列出 `/proc/<pid>/fdinfo` 再逐项读取，但列目录会临时占用最小的空闲描述符，读取前已被关闭；锁描述符编号大于它时会抛 `FileNotFoundError`，使 `ResourceDriverObserver` 对真实继承的锁无法成功。现在跳过已消失的条目，匹配判据不变；有全新进程的回归测试。
+
+### 与 `fr3_run` 的进程拓扑（需 T8 决定）
+
+约束：supervisor 必须是租约已登记子进程的后代并共享 driver 的 flock open-file
+description；它的 cgroup 根里只能有 supervisor；`OwnedModelWorker` 持有私有
+`multiprocessing.Pipe` 的父端，以及进程内的 `WorkloadBroker`/`RuntimeOwnership`
+对象。目前没有跨进程的请求通道：调用 `submit`/`collect_sdk_completion` 的必须是
+启动 worker 的那个进程。`fr3_run` 在 `execute()` 里取 `RobotLock`
+（`/tmp/levi-aeri-fr3-arm.lock`，`O_CLOEXEC`，子进程不继承），在自己的终端上用
+`input()` 读操作员确认和 `WAIT_HUMAN` 回答，运行中还会替换 SIGINT/SIGTERM。
+
+| 方案 | RobotLock | 终端确认 | 结论 |
+| --- | --- | --- | --- |
+| supervisor 是独立 `fr3_run` 的父进程 | 由子进程取得，supervisor 不持有 | 需要透传 tty | 否决：子进程会落在委派根里（根里只能有 supervisor），且没有新 IPC 就够不到 worker 的私有管道 |
+| supervisor 是 `fr3_run` 的子进程 | 由 `fr3_run` 持有且不被继承；`fr3_run` 等待子进程时机械臂锁比 supervisor 活得久 | 仍在 `fr3_run` 的 tty（supervisor 用 `/dev/null`） | 需要 `fr3_run` 用 `pass_fds` 传锁 fd、把子进程启动进委派根，仍需请求 IPC；`fr3_run` 被杀则 supervisor 失去已登记子进程祖先关系，判租约丢失（退出码 16）并停止 worker |
+| 由 scheduler 并列启动（两份租约） | 进程分离，干净 | 干净 | 暂不采用：supervisor 需要自己的 GPU 租约，请求仍要带鉴权的 IPC |
+
+**推荐：同一进程。** 已登记的租约子进程运行本 supervisor 的检查与启动（作为库，经
+`main(setup=...)` 进入，其 `on_ready` 运行现有的 `fr3_run` 流程），随后在同一进程内
+运行 `fr3_run` 的 Orchestrator。这样沿用唯一受支持的请求通道（私有管道加进程内
+broker），委派根保持单进程，tty 和 `RobotLock` 与 `fr3_run` 现状完全一致，不需要新
+的 IPC 或信任边界。代价：`fr3_run` 自己的 SIGINT/SIGTERM 处理要与 supervisor 的合并，
+先走机械臂停止路径，再执行 `Supervisor.shutdown`；若在操作员确认短语之前启动
+worker，则操作员阅读期间一直占着 GPU，备选是确认之后、取 `RobotLock` 之前启动
+worker（由 T8 决定；两种顺序下拒绝都不会占用机械臂锁）。这会改动 `fr3_run`，本任务
+没有做。
+
+现场项（本次未验证）：本账号是否允许用户 cgroup 委派；supervisor 如何被放入委派根
+（`systemd-run --user --scope -p Delegate=yes` 之类没有运行）；scheduler 的 gate-exec
+是否让 supervisor 的 PID 等于已登记子进程；用真实 factory 和 GPU 跑真实
+`OwnedModelWorker.launch`；真实 vLLM engine 的停止时长；与 `fr3_run` 的 SIGTERM 合并。
+
+测试（`tests/live/test_owned_supervisor.py`）使用真实 CPU 进程、真实 `flock` 与
+`/proc` 祖先关系、临时的假 cgroup 目录树，以及作为真实 `python` 子进程的假
+worker；覆盖上表所有拒绝、SIGTERM 顺序、SIGKILL 升级、无法确认的退出、worker 提前
+退出和租约丢失。不创建 cgroup，不使用 GPU 或模型库，不触碰机器人端口。

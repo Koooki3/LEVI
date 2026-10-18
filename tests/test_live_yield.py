@@ -570,3 +570,402 @@ def test_unknown_owned_group_yields_on_actual_tick_and_retains_lock(ctl, monkeyp
         assert ctl.vllm.record_path.exists()
         gate = jsonio.read(ctl.config.live_dir / "gate.json")
         assert not gate["open"] and gating.closed(gate, worker=True)
+
+
+# --- the policy server's own GPU memory is not "someone else" (L2-ONLINE-NOROOM) ----------
+
+POLICY_APP = {"pid": 841772, "name": "python", "memory_mib": 7660}
+FOREIGN_APP = {"pid": 999, "name": "train", "memory_mib": 9000}
+
+
+def test_the_policy_servers_own_processes_are_not_foreign_gpu():
+    # 7660 MiB > foreign_gpu_mib (2000), but it is the evaluated policy.
+    assert reasons(apps=[POLICY_APP], policy_pids={841772}) == []
+    found = reasons(apps=[POLICY_APP, FOREIGN_APP], policy_pids={841772})
+    assert codes(found) == ["foreign_gpu"] and "train(999)" in found[0].text
+    assert "841772" not in found[0].text and "7660" not in found[0].text
+    # Not named as the policy server's: it still counts.
+    assert codes(reasons(apps=[POLICY_APP], policy_pids={1})) == ["foreign_gpu"]
+
+
+def asleep_vllm(ctl, t):
+    ctl.rollouts.write(0)
+    up(ctl, t)
+    assert ctl.vllm.sleep() and ctl.vllm.state == "asleep"
+    ctl.machine.ports = {8000}
+    ctl.machine.policy_mib = POLICY_APP["memory_mib"]
+    ctl.probes.policy_pids = lambda ports, apps, **kw: {
+        a["pid"] for a in apps if a["pid"] == POLICY_APP["pid"]
+    }
+    fresh(ctl)
+
+
+def test_an_online_judgement_wakes_the_model_beside_the_policy_server(ctl):
+    t = time.time()
+    asleep_vllm(ctl, t)
+    add_apps(ctl, [POLICY_APP])
+    ctl.tick(t + 1)
+    # The deployment is a reason to yield the labelling, not to refuse this.
+    assert ctl.yield_state.active
+    assert {r.code for r in ctl.yield_state.reasons} == {"deployment"}
+    fresh(ctl)
+    assert ctl._online_wake(t + 2, "timeshare") is None
+    assert ctl.vllm.state == "ready"
+
+
+@pytest.mark.parametrize(
+    "held, word",
+    [(3000, "loading"), (None, "unknown"), (5999, "loading"), (6000, None)],
+)
+def test_an_online_wake_waits_for_a_policy_server_that_is_not_loaded(ctl, held, word):
+    # The exemption removes the foreign_gpu that used to stop this by accident
+    # while the policy server was still preallocating: the batch path waits
+    # for it (``policy_loaded``), so must this one.
+    t = time.time()
+    asleep_vllm(ctl, t)
+    ctl.machine.policy_mib = held
+    add_apps(ctl, [dict(POLICY_APP, memory_mib=held or 3000)])
+    ctl.tick(t + 1)
+    assert "foreign_gpu" not in {r.code for r in ctl.yield_state.reasons}
+    fresh(ctl)
+    answer = ctl._online_wake(t + 2, "timeshare")
+    if word is None:
+        assert answer is None and ctl.vllm.state == "ready"
+        return
+    ok, code, why = answer
+    assert (ok, code) == (False, "no_room")
+    assert "policy server" in why and word in why
+    assert ctl.vllm.state == "asleep"
+
+
+def only_extra_listening(ctl, t, held):
+    """Nothing on policy_ports, a reset policy on 8001 holding ``held`` MiB."""
+    asleep_vllm(ctl, t)
+    ctl.config.gpu.policy_extra_ports = [8001]
+    ctl.machine.ports, ctl.machine.policy_mib = {8001}, held
+    add_apps(ctl, [dict(POLICY_APP, memory_mib=held or 3000)])
+    ctl.tick(t + 1)
+    assert not ctl.policy_up  # 8001 is not a deployment
+    assert "foreign_gpu" not in {r.code for r in ctl.yield_state.reasons}
+    if ctl.vllm.state != "asleep":  # the batch path woke it: put it back
+        assert ctl.vllm.sleep()
+    assert ctl.vllm.state == "asleep"
+    fresh(ctl)
+
+
+@pytest.mark.parametrize(
+    "held, word", [(3000, "loading"), (None, "unknown"), (7660, None)]
+)
+def test_an_online_wake_waits_for_a_loading_policy_on_an_extra_port(ctl, held, word):
+    t = time.time()
+    only_extra_listening(ctl, t, held)
+    answer = ctl._online_wake(t + 2, "timeshare")
+    if word is None:
+        assert answer is None and ctl.vllm.state == "ready"
+        return
+    ok, code, why = answer
+    assert (ok, code) == (False, "no_room") and word in why
+    assert "8001" in why and ctl.vllm.state == "asleep"
+
+
+def test_each_policy_port_group_is_judged_on_its_own_memory(ctl):
+    t = time.time()
+    asleep_vllm(ctl, t)
+    ctl.config.gpu.policy_extra_ports = [8001]
+    ctl.machine.ports = {8000, 8001}
+    held = {8000: 7660, 8001: 3000}
+    ctl.probes.policy_vram = lambda ports: held[int(ports[0])]
+    add_apps(ctl, [POLICY_APP])
+    ctl.tick(t + 1)
+    fresh(ctl)
+    ok, code, why = ctl._online_wake(t + 2, "timeshare")
+    assert (ok, code) == (False, "no_room") and "8001" in why
+    held[8001] = 7660  # the reset policy has loaded
+    fresh(ctl)
+    assert ctl._online_wake(t + 3, "timeshare") is None
+
+
+def test_an_online_wake_asks_nvidia_smi_once_for_every_policy_port(ctl, monkeypatch):
+    t = time.time()
+    asleep_vllm(ctl, t)
+    ctl.config.gpu.policy_extra_ports = [8001, 8002]
+    ctl.machine.ports = {8000, 8001, 8002}
+    add_apps(ctl, [POLICY_APP])
+    ctl.tick(t + 1)
+    if ctl.vllm.state != "asleep":
+        assert ctl.vllm.sleep()
+    fresh(ctl)
+    calls = []
+
+    # The real memory lookup over a fake socket table and one fake nvidia-smi.
+    class OurUnit:
+        """Our policy unit holds the listening socket (tests/test_live_noroom_own.py
+        reads a fake kernel tree; here only the call count matters)."""
+
+        def listening_inodes(self, ports):
+            return {"1"}
+
+        def policy_units(self):
+            return ["levi-aeri-policy-test"]
+
+        def servers(self, units, inodes):
+            return {units[0]: {POLICY_APP["pid"]}}
+
+    monkeypatch.setattr(gpumgr, "OwnUnits", OurUnit)
+    monkeypatch.setattr(
+        gpumgr,
+        "gpu_holders",
+        lambda runner=None: calls.append(1) or [dict(POLICY_APP, memory_mib=7000)],
+    )
+    ctl.probes.policy_vram = gpumgr.policy_vram_mib
+    assert ctl._online_wake(t + 2, "timeshare") is None
+    assert len(calls) == 1
+
+
+def test_an_online_wake_reads_the_policy_memory_now_not_the_cache(ctl):
+    t = time.time()
+    asleep_vllm(ctl, t)
+    add_apps(ctl, [dict(POLICY_APP, memory_mib=3000)])
+    ctl.tick(t + 1)
+    # The last reading (a moment ago) was a loaded server; a new one has
+    # started since and holds 3000 MiB.
+    ctl.machine.policy_mib = 3000
+    ctl._policy_mib = (t + 1.9, 7660)
+    ctl._vram = (0.0, None)
+    ok, code, why = ctl._online_wake(t + 2, "timeshare")
+    assert (ok, code) == (False, "no_room") and "loading" in why
+    # And the other way: a stale None is not believed either.
+    ctl.machine.policy_mib = 7660
+    ctl._policy_mib = (t + 2.9, None)
+    assert ctl._online_wake(t + 3, "timeshare") is None
+
+
+def test_an_online_wake_without_a_policy_server_is_not_held_back(ctl):
+    t = time.time()
+    asleep_vllm(ctl, t)
+    ctl.machine.ports, ctl.machine.policy_mib = set(), None
+    add_apps(ctl, [])
+    ctl.tick(t + 1)
+    fresh(ctl)
+    assert ctl._online_wake(t + 2, "timeshare") is None
+
+
+def test_a_real_foreign_process_still_refuses_beside_the_policy_server(ctl):
+    t = time.time()
+    asleep_vllm(ctl, t)
+    add_apps(ctl, [POLICY_APP, FOREIGN_APP])
+    ctl.tick(t + 1)
+    ok, code, why = ctl._online_wake(t + 2, "timeshare")
+    assert (ok, code) == (False, "no_room") and "foreign_gpu_mib" in why
+    assert "train(999)" in why and ctl.vllm.state == "asleep"
+
+
+def test_too_little_free_vram_is_no_room_and_says_so_not_a_foreign_process(ctl):
+    t = time.time()
+    asleep_vllm(ctl, t)
+    add_apps(ctl, [POLICY_APP])
+    ctl.machine.free = 3000
+    ctl.tick(t + 1)
+    fresh(ctl)
+    ok, code, why = ctl._online_wake(t + 2, "timeshare")
+    assert (ok, code) == (False, "no_room")
+    assert "VRAM free" in why and "needed" in why and "other processes" not in why
+    assert ctl.vllm.state == "asleep"
+
+
+def test_extra_policy_ports_are_asked_for_with_the_policy_ports(ctl):
+    t = time.time()
+    asleep_vllm(ctl, t)
+    ctl.config.gpu.policy_extra_ports = [8001]
+    asked = []
+
+    def policy_pids(ports, apps, **kw):
+        asked.append((list(ports), kw))
+        return set()
+
+    ctl.probes.policy_pids = policy_pids
+    add_apps(ctl, [POLICY_APP])
+    ctl.tick(t + 1)
+    assert asked and asked[-1][0] == [8000, 8001]
+    # The budget comes from the configuration, not from the probe; ownership
+    # comes only from our own units (no folder rule).
+    assert asked[-1][1] == {"budget_mib": ctl.config.gpu.policy_budget_mib}
+    ctl.config.gpu.policy_budget_mib = 9000
+    ctl._apps = (0.0, None, "")
+    ctl.tick(t + 2)
+    assert asked[-1][1] == {"budget_mib": 9000}
+
+
+@pytest.mark.parametrize(
+    "error", [OSError("proc gone"), PermissionError("no"), KeyError("x")]
+)
+def test_a_failing_policy_probe_keeps_the_yield_and_the_refusal(ctl, error):
+    t = time.time()
+    asleep_vllm(ctl, t)
+
+    def broken(ports, apps, **kw):
+        raise error
+
+    ctl.probes.policy_pids = broken
+    add_apps(ctl, [POLICY_APP])
+    ctl.tick(t + 1)
+    assert "foreign_gpu" in {r.code for r in ctl.yield_state.reasons}
+    ok, code, why = ctl._online_wake(t + 2, "timeshare")
+    assert (ok, code) == (False, "no_room") and "foreign_gpu_mib" in why
+    assert ctl.vllm.state == "asleep"
+
+
+def test_an_unreadable_gpu_process_table_keeps_the_yield(ctl):
+    t = time.time()
+    asleep_vllm(ctl, t)
+
+    def broken():
+        raise OSError("nvidia-smi")
+
+    ctl.probes.apps = broken
+    ctl._apps = (0.0, None, "")
+    ctl.tick(t + 1)
+    assert "probe_error" in {r.code for r in ctl.yield_state.reasons}
+    ok, code, _ = ctl._online_wake(t + 2, "timeshare")
+    assert (ok, code) == (False, "no_room")
+
+
+def test_policy_extra_ports_default_off_and_are_validated(tmp_path):
+    import tomllib
+
+    default = live_config.Config()
+    assert default.gpu.policy_extra_ports == []
+    assert "policy_extra_ports" not in tomllib.loads(live_config.render(default))["gpu"]
+    c = live_config.Config()
+    c.gpu.policy_extra_ports = [8001]
+    path = tmp_path / "effective.toml"
+    path.write_text(live_config.render(c))
+    assert live_config.load(path).gpu.policy_extra_ports == [8001]
+    for bad in ([5000], [0], [70000]):
+        c.gpu.policy_extra_ports = bad
+        with pytest.raises(ValueError, match="policy_extra_ports"):
+            c.validate()
+
+
+@pytest.mark.parametrize(
+    "port, what",
+    [
+        (8100, "vllm.port"),
+        (7882, "online.port"),
+        (7880, "service.ui_port"),
+        (7881, "service.core_port"),
+        (5000, "5000"),
+        (5001, "5001"),
+        (5100, "5100"),
+        (7470, "7470"),
+        (7860, "7860"),
+        (7861, "7861"),
+    ],
+)
+def test_a_policy_extra_port_may_not_be_another_servers_port(port, what):
+    c = live_config.Config()
+    c.gpu.policy_extra_ports = [8001, port]
+    with pytest.raises(ValueError, match="policy_extra_ports") as found:
+        c.validate()
+    assert what in str(found.value)
+    c.gpu.policy_extra_ports = [8001, 8002]
+    c.validate()
+
+
+def test_the_doctor_lists_the_extra_policy_ports_and_who_is_exempt():
+    c = live_config.Config()
+
+    def keys():
+        return [
+            x
+            for x in live_config.checks(c, watching=False)
+            if x["key"] == "gpu.policy_extra_ports"
+        ]
+
+    assert keys() == []  # nothing set: nothing to list
+    c.gpu.policy_extra_ports = [8001]
+    (found,) = keys()
+    assert found["level"] == "ok"
+    for word in ("8001", "levi-aeri-policy-", "8500", "foreign_gpu"):
+        assert word in found["message"]
+
+
+def test_the_doctor_lists_who_is_exempt_with_the_default_configuration(
+    ctl, monkeypatch, capsys
+):
+    from types import SimpleNamespace
+
+    from levi.live import cli
+
+    c = ctl.config
+    assert c.gpu.policy_extra_ports == []  # the default
+    seen = {}
+
+    def exempt(ports, apps, **kw):
+        seen.update(ports=list(ports), apps=apps, **kw)
+        return {841772}
+
+    monkeypatch.setattr(cli.gpumgr, "vram", dict)
+    monkeypatch.setattr(cli.gpumgr, "gpu_holders", lambda *a, **k: [POLICY_APP])
+    monkeypatch.setattr(cli.gpumgr, "listening_ports", lambda *a, **k: {8000})
+    monkeypatch.setattr(cli.gpumgr, "policy_gpu_pids", exempt)
+    report = cli.diagnose(c)
+    assert report["policy_exempt"] == {"pids": [841772], "memory_mib": 7660}
+    assert seen["ports"] == [8000] and "roots" not in seen
+    assert seen["budget_mib"] == c.gpu.policy_budget_mib
+    monkeypatch.setattr(cli, "resolve_config", lambda args: c)
+    cli.cmd_doctor(SimpleNamespace(json=False))
+    out = capsys.readouterr().out
+    assert "foreign_gpu" in out and "841772" in out and "7660" in out
+
+    # An unreadable answer is said, not hidden.
+    def broken(*a, **k):
+        raise OSError("proc")
+
+    monkeypatch.setattr(cli.gpumgr, "policy_gpu_pids", broken)
+    assert cli.diagnose(c)["policy_exempt"] is None
+
+
+def test_doctor_status_and_gate_name_the_extra_policy_ports(ctl, monkeypatch):
+    from levi.live import cli
+
+    c = ctl.config
+    c.gpu.policy_extra_ports = [8001, 8002]
+    monkeypatch.setattr(cli.gpumgr, "vram", dict)
+    monkeypatch.setattr(cli.gpumgr, "gpu_holders", lambda *a, **k: [])
+    monkeypatch.setattr(cli.gpumgr, "listening_ports", lambda *a, **k: {8001, 9})
+    report = cli.diagnose(c)
+    assert report["policy_extra_ports_listening"] == [8001]
+    assert report["policy_ports_listening"] == []
+    t = time.time()
+    ctl.rollouts.write(0)
+    ctl.tick(t)
+    gate = jsonio.read(c.live_dir / "gate.json")
+    assert gate["policy_extra_ports"] == [8001, 8002]
+    # They are listed, but a listener there is still not a deployment and does
+    # not close the stale-gate fallback (that is policy_ports' job).
+    assert gate["policy_ports"] == [8000]
+
+
+def test_the_policy_budget_is_validated_and_there_is_no_folder_rule():
+    c = live_config.Config()
+    assert c.gpu.policy_budget_mib == 8500  # the existing setting, reused
+    assert not hasattr(c.gpu, "policy_roots")
+    for bad in (-1, "8500", True):
+        c.gpu.policy_budget_mib = bad
+        with pytest.raises(ValueError, match="policy_budget_mib"):
+            c.validate()
+    c.gpu.policy_budget_mib = 0
+    c.validate()
+
+
+@pytest.mark.parametrize("doc", ["docs/LIVE.md", "docs/LIVE.zh-CN.md"])
+def test_policy_extra_ports_are_documented(doc):
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / doc).read_text(encoding="utf-8")
+    assert "`gpu.policy_extra_ports" in text
+    # Who is exempt: our own levi-aeri-policy-* units, by their cgroup.procs;
+    # the folder rule is gone.
+    assert "levi-aeri-policy-" in text and "cgroup.procs" in text
+    assert "policy_roots" not in text

@@ -442,3 +442,100 @@ def test_robot_home_and_operator_rules():
         role="forward",
         result=True,
     )
+
+
+# --- the paused forward judgement may finish the episode (event_pause_judge) ----------
+
+
+@pytest.mark.parametrize(
+    "reason", ["goal_verified", "horizon_exhausted", "operator_stop"]
+)
+def test_forward_judging_finishes_into_finalize_with_a_quiesce(reason):
+    who = "operator" if reason == "operator_stop" else "orchestrator"
+    check(
+        "FORWARD_JUDGING",
+        "FORWARD_FINALIZE",
+        reason,
+        who=who,
+        command="s-1" if who == "operator" else None,
+        kind="policy_quiesce",
+        role="forward",
+    )
+    assert ("FORWARD_JUDGING", "FORWARD_FINALIZE") not in sm.RESULT_TRANSITIONS
+
+
+@pytest.mark.parametrize(
+    ("kw", "reason", "code"),
+    [
+        # Only the forward role takes the new edge.
+        ({"kind": "policy_quiesce", "role": "reset"}, "goal_verified", "E_EPISODE"),
+        ({"kind": "policy_quiesce"}, "goal_verified", "E_EPISODE"),
+        # Only the three stop reasons; a reset horizon is not a forward stop.
+        (
+            {"kind": "policy_quiesce", "role": "forward"},
+            "reset_horizon_exhausted",
+            "E_REASON",
+        ),
+        ({"kind": "policy_quiesce", "role": "forward"}, "policy_error", "E_REASON"),
+        # Only the quiesce action: a recorder or a home is not allowed here.
+        ({"kind": "recorder_seal", "role": "forward"}, "goal_verified", "E_ACTION"),
+        ({"kind": "none", "role": "forward"}, "goal_verified", "E_ACTION"),
+        (
+            {"kind": "home", "step": 1, "role": "forward"},
+            "goal_verified",
+            "E_ACTION",
+        ),
+        # The episode result stays on FINALIZE -> ROBOT_HOME.
+        (
+            {"kind": "policy_quiesce", "role": "forward", "result": True},
+            "goal_verified",
+            "E_RESULT",
+        ),
+    ],
+)
+def test_forward_judging_to_finalize_refuses_the_wrong_role_reason_action(
+    kw, reason, code
+):
+    with pytest.raises(sm.TransitionRefused) as exc:
+        check("FORWARD_JUDGING", "FORWARD_FINALIZE", reason, **kw)
+    assert exc.value.code == code
+
+
+def test_the_safety_guard_cannot_finish_a_judgement():
+    with pytest.raises(sm.TransitionRefused) as exc:
+        check(
+            "FORWARD_JUDGING",
+            "FORWARD_FINALIZE",
+            "goal_verified",
+            who="safety_guard",
+            kind="policy_quiesce",
+            role="forward",
+        )
+    assert exc.value.code == "E_AUTHORITY"
+
+
+def test_reset_judging_still_cannot_reach_finalize_or_home():
+    for target in ("RESET_FINALIZE", "FORWARD_FINALIZE", "ROBOT_HOME", "RESET_VERIFY"):
+        assert not sm.legal("RESET_JUDGING", target)
+    assert sm.successors("RESET_JUDGING") == {
+        "RESET_ACTIVE",
+        "WAIT_HUMAN",
+        "FAULT_LOCKED",
+    }
+    assert sm.successors("FORWARD_JUDGING") == {
+        "FORWARD_ACTIVE",
+        "FORWARD_FINALIZE",
+        "WAIT_HUMAN",
+        "FAULT_LOCKED",
+    }
+    # A judgement still cannot jump straight to the home.
+    assert not sm.legal("FORWARD_JUDGING", "ROBOT_HOME")
+    with pytest.raises(sm.TransitionRefused) as exc:
+        check(
+            "RESET_JUDGING",
+            "RESET_FINALIZE",
+            "goal_verified",
+            kind="policy_quiesce",
+            role="reset",
+        )
+    assert exc.value.code == "E_ILLEGAL"

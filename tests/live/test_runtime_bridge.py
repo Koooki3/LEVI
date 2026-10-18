@@ -34,6 +34,7 @@ class FakeObserver:
     def __init__(self, bridge):
         self.bridge = bridge
         self.over = {}
+        self.exit_over = {}
         self.exited = False
 
     def driver(self, now):
@@ -66,6 +67,9 @@ class FakeObserver:
         )
 
     def exit_proof(self, lease, worker):
+        return replace(self._exit_proof(lease, worker), **self.exit_over)
+
+    def _exit_proof(self, lease, worker):
         return ExitProof(
             self.bridge.broker.broker_id,
             lease.lease_id,
@@ -99,7 +103,7 @@ class FakeBackend:
         pass
 
 
-def assembled_fake(*, bind=True):
+def assembled_fake(*, bind=True, other_judge=False, admit=True):
     now = [NOW]
     broker = WorkloadBroker(run_id="run", clock_domain=CLOCK, profile_sha256=PROFILE)
     capability = BackendCapability("fake", "cd" * 32, True, True, True)
@@ -150,13 +154,29 @@ def assembled_fake(*, bind=True):
         policy_server_seen=False,
         age_ms=0,
     )
-    lease = bridge.admit_runtime(
+    if other_judge:
+        queued = broker.submit(
+            spec.model_copy(
+                update={
+                    "workload_id": "other-judge",
+                    "workload_class": "judge_critical",
+                }
+            ),
+            deadline,
+            profile_sha256=PROFILE,
+            now_ns=NOW,
+        )
+        assert queued is None
+    admission = (
         spec,
         deadline,
         pressure,
         bridge.observer.window(None, NOW),
         IdleProof(broker.broker_id, NOW, CLOCK, True, True, True),
     )
+    if not admit:
+        return bridge, admission
+    lease = bridge.admit_runtime(*admission)
     worker = WorkerIdentity(100, 123, "boot")
     if bind:
         bridge.bind_runtime(worker)
@@ -296,6 +316,78 @@ class RuntimeBridgeTests(unittest.TestCase):
         self.assertTrue(request.done.is_set())
         self.assertFalse(request.permitted)
         self.assertIsNone(bridge.broker.snapshot(now_ns=NOW)["active"])
+
+    def test_exit_refused_while_local_request_worker_is_alive(self):
+        bridge, _, _, _, _ = assembled_fake()
+        request = bridge.begin_request(due_ns=NOW + 300 * MS)
+        gate = threading.Event()
+        local = threading.Thread(target=lambda: gate.wait(2))
+        local.start()
+        try:
+            bridge.drain(request, (local,), lambda: None)
+            bridge.observer.exited = True
+            self.assertFalse(bridge.release_after_exit())
+            self.assertIsNotNone(bridge.broker.snapshot(now_ns=NOW)["active"])
+            self.assertFalse(request.done.is_set())
+        finally:
+            gate.set()
+            local.join(2)
+        self.assertTrue(request.done.wait(0.5))
+        bridge.observer.exited = True
+        self.assertTrue(bridge.release_after_exit())
+        self.assertIsNone(bridge.broker.snapshot(now_ns=NOW)["active"])
+
+    def test_exit_proof_with_unknown_or_false_flags_never_releases(self):
+        for flag in ("process_exited", "descendants_exited", "owned_gpu_released"):
+            for value in (None, False):
+                with self.subTest(flag=flag, value=value):
+                    bridge, _, _, _, _ = assembled_fake()
+                    bridge.observer.exited = True
+                    bridge.observer.exit_over = {flag: value}
+                    self.assertFalse(bridge.release_after_exit())
+                    self.assertIsNotNone(bridge.broker.snapshot(now_ns=NOW)["active"])
+                    bridge.observer.exit_over = {}
+                    self.assertTrue(bridge.release_after_exit())
+
+    def test_admit_never_binds_another_workloads_lease(self):
+        bridge, admission = assembled_fake(other_judge=True, admit=False)
+        with self.assertRaises(ValueError):
+            bridge.admit_runtime(*admission)
+        self.assertIsNone(bridge._lease)
+        snapshot = bridge.broker.snapshot(now_ns=NOW)
+        self.assertIsNone(snapshot["active"])
+        self.assertEqual(snapshot["queued"], 1)  # other-judge is not dropped
+        self.assertFalse(bridge.available())
+        with self.assertRaises(ValueError):
+            bridge.bind_runtime(WorkerIdentity(100, 123, "boot"))
+        neighbour = bridge.broker.admit(
+            admission[2], admission[3], now_ns=bridge.clock()
+        )
+        self.assertIsInstance(neighbour, aeri.ResourceLease)
+        self.assertEqual(neighbour.workload_id, "other-judge")
+
+    def test_admit_withdraws_own_request_when_neighbour_return_proof_fails(self):
+        bridge, admission = assembled_fake(other_judge=True, admit=False)
+        original = bridge.broker.return_unstarted
+
+        def reject_proof(lease, proof, *, now_ns):
+            return original(
+                lease, replace(proof, clock_domain="foreign-clock"), now_ns=now_ns
+            )
+
+        with (
+            patch.object(bridge.broker, "return_unstarted", side_effect=reject_proof),
+            patch.object(bridge.broker, "cancel", wraps=bridge.broker.cancel) as cancel,
+        ):
+            with self.assertRaises(ValueError):
+                bridge.admit_runtime(*admission)
+            cancel.assert_called_once_with("resident", now_ns=NOW)
+        snapshot = bridge.broker.snapshot(now_ns=NOW)
+        self.assertEqual(snapshot["queued"], 0)
+        self.assertEqual(snapshot["active"]["workload_id"], "other-judge")
+        self.assertIsNone(snapshot["worker"])
+        self.assertIsNone(bridge._lease)
+        self.assertFalse(bridge.available())
 
     def test_p0_close_and_exit_attempt_do_not_wait_for_shared_mutex(self):
         bridge, _, _, _, _ = assembled_fake()

@@ -249,6 +249,19 @@ describe("the run window", () => {
   });
 });
 
+describe("a standalone real run", () => {
+  test("shows the terminal instruction instead of a resume form", async () => {
+    open(snapshot({ pending_card: card(), resume_terminal_only: true }), {});
+    const { host } = await render(<RunWindow runId="run-1" />);
+    await waitFor(() =>
+      host.textContent?.includes("Resume this run at its terminal"),
+    );
+    expect(button(host, "Resume the run…")).toBeFalsy();
+    expect(host.textContent).toContain("scripts/aeri.py");
+    expect(host.textContent).not.toContain("levi automatic resume");
+  });
+});
+
 describe("the resume dialog", () => {
   async function opened(
     resume: (body: unknown) => unknown,
@@ -345,9 +358,13 @@ describe("the resume dialog", () => {
 });
 
 describe("the scene question", () => {
-  async function asked(over = {}) {
+  async function asked(over = {}, snap = {}) {
     const m = open(
-      snapshot({ state: "VERIFY_INITIAL", scene_question: question(over) }),
+      snapshot({
+        state: "VERIFY_INITIAL",
+        scene_question: question(over),
+        ...snap,
+      }),
       {
         "POST runs/run-1/scene-answer": () => ({}),
       },
@@ -392,6 +409,27 @@ describe("the scene question", () => {
     expect(
       m.calls.filter((c) => c.path === "runs/run-1/scene-answer").length,
     ).toBe(1);
+  });
+  test("a real run's question is shown but answered only at the terminal (UI-2)", async () => {
+    const { host, m } = await asked({}, { scene_answer_terminal_only: true });
+    expect(host.querySelectorAll(".ar-card img").length).toBe(1);
+    expect(host.textContent).toContain("the plate is on the rack");
+    expect(host.textContent).toContain("Answer at the terminal");
+    expect(host.textContent).toContain("does not release motion");
+    const send = button(host, "Send answers")!;
+    expect(send.disabled).toBe(true);
+    const reason = host.querySelector(
+      `[id="${send.getAttribute("aria-describedby")}"]`,
+    );
+    expect(reason?.textContent).toContain("scripts/aeri.py");
+    expect(
+      radio(host, "the plate is on the rack", "True").closest("fieldset")!
+        .disabled,
+    ).toBe(true);
+    await click(send);
+    expect(
+      m.calls.filter((c) => c.path === "runs/run-1/scene-answer").length,
+    ).toBe(0);
   });
   test("a timed-out question cannot be answered and says it is withdrawn", async () => {
     const { host } = await asked({

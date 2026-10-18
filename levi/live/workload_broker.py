@@ -473,11 +473,19 @@ class WorkloadBroker:
     def cancel(self, workload_id, *, now_ns, lease=None):
         with self._lock:
             self._tick(now_ns)
+            if lease is not None:
+                active = self._token(lease)
+                if active.request.spec.workload_id != workload_id:
+                    raise ValueError("lease belongs to another workload")
             if self._queue.pop(workload_id, None) is not None:
                 return True
             if self._active and self._active.request.spec.workload_id == workload_id:
-                if self._active.request.spec.workload_class == "resident_group":
-                    self._token(lease)  # A workload name cannot revoke a newer epoch.
+                if (
+                    lease is not None
+                    or self._active.request.spec.workload_class == "resident_group"
+                ):
+                    # A workload name cannot revoke a newer epoch.
+                    self._token(lease)
                 self._revoke("cancelled")
                 return True
             return False
@@ -555,29 +563,46 @@ class WorkloadBroker:
             self._active = None
             self._known_idle = True
 
+    def _unstarted_active(self, lease, proof: IdleProof, now_ns):
+        """Validated never-started active reservation; caller holds the lock."""
+        self._tick(now_ns)
+        active = self._token(lease)
+        if (
+            active.worker is not None
+            or proof.lease_epoch != active.lease.lease_epoch
+            or proof.broker_id != self.broker_id
+            or not self._fresh(proof.observed_ns, proof.clock_domain, now_ns)
+            or proof.observed_ns < active.lease.granted_ns
+            or any(
+                x is not True
+                for x in (
+                    proof.workers_exited,
+                    proof.descendants_exited,
+                    proof.owned_gpu_released,
+                )
+            )
+        ):
+            raise ValueError("fresh complete never-started reservation proof required")
+        return active
+
     def release_unstarted(self, lease, proof: IdleProof, *, now_ns):
         """Explicit confirmed never-started reservation, never inferred by expiry."""
         with self._lock:
-            self._tick(now_ns)
-            active = self._token(lease)
-            if (
-                active.worker is not None
-                or proof.lease_epoch != active.lease.lease_epoch
-                or proof.broker_id != self.broker_id
-                or not self._fresh(proof.observed_ns, proof.clock_domain, now_ns)
-                or proof.observed_ns < active.lease.granted_ns
-                or any(
-                    x is not True
-                    for x in (
-                        proof.workers_exited,
-                        proof.descendants_exited,
-                        proof.owned_gpu_released,
-                    )
-                )
-            ):
-                raise ValueError(
-                    "fresh complete never-started reservation proof required"
-                )
+            self._unstarted_active(lease, proof, now_ns)
+            self._active = None
+            self._known_idle = True
+
+    def return_unstarted(self, lease, proof: IdleProof, *, now_ns):
+        """Like release_unstarted, but the original request is requeued unchanged.
+
+        For a lease granted to a caller that turned out not to own it: the
+        request keeps its workload_id, spec, deadline, submitted_ns and order,
+        so priority selection finds it exactly where it was. The queue may
+        exceed max_queue by the one request admit() had removed.
+        """
+        with self._lock:
+            active = self._unstarted_active(lease, proof, now_ns)
+            self._queue[active.request.spec.workload_id] = active.request
             self._active = None
             self._known_idle = True
 

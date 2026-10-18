@@ -254,15 +254,59 @@ TRANSITION_REASONS = (
     "human_resumed",
     "run_completed",
     "contract_violation_limit",
+    # A closed-gate home the bridge refused before its first command (not one
+    # fenced home POST counted): the run waits for a person, it does not lock.
+    "home_not_executed",
+    # After it, the resume's read-only start pose check did not find the arm at
+    # home (or could not read it): the run waits again, nothing moves.
+    "home_pose_not_reached",
+    # subtask.start_home (default off): the operator confirmed o/p/h and the
+    # first-round home is requested; or that home sent nothing and the run waits
+    # for a person (orchestrator.py, state_machine.py). Missing here, every
+    # journal write of them was refused (validation of 7c4ea3df, 2026-10-18).
+    "startup_home_requested",
+    "startup_home_not_executed",
+    # The camera frames stopped (the same frame seq on K consecutive control
+    # steps, or openpi's StaleFrameError with max_frame_age_ms): the episode
+    # ends before any action on that observation and the run waits for a
+    # person where the arm stands (CAMERA-FRAME-BUS.md; levi/automatic/
+    # camera_meta.py, orchestrator.py, state_machine.py).
+    "camera_stale",
+    # The operator's verdict on the forward episode under way (terminal s/f/d,
+    # L2-AERI-OPERATOR-EARLY-STOP): that episode ends early, the run goes on.
+    "operator_verdict",
+    # The subtask_loop reset strategy (levi/automatic/subtask_loop.py): a
+    # subtask episode starts, the run goes on to the next (or the same)
+    # subtask without a home, a reverse subtask sealed, the reverse loop ended
+    # (home, next round); and why it waits for a person.
+    "subtask_dispatched",
+    "subtask_continue",
+    "subtask_ended",
+    "subtask_forward_done",
+    "subtask_reverse_done",
+    "subtask_check_unavailable",
+    "subtask_retry_limit",
+    "subtask_plan_refused",
+    "subtask_inventory_rejected",
+    "subtask_not_released",
+    "vlm_unavailable",
+    # subtask.early_check (default off): a subtask episode ended before its
+    # step budget for the VLM's done check (an event or the interval).
+    "subtask_early_check",
 )
 STOP_REASONS = (
     "goal_verified",
     "horizon_exhausted",
     "operator_stop",
+    "operator_verdict",
+    # subtask_loop: a subtask episode ended for an early done check.
+    "subtask_early_check",
     "safety_stop",
     "policy_error",
     "watchdog_timeout",
     "orchestrator_crash",
+    # The episode ended on frozen camera frames (as the transition reason).
+    "camera_stale",
     # An episode that ended in FAULT_LOCKED (its result is still written).
     "recorder_failed",
     "home_failed",
@@ -1075,7 +1119,7 @@ class ContractVersion(Part):
     minor: Annotated[int, Field(ge=0)]
 
 
-RESET_MODES = ("single_reset_policy", "human_assisted")
+RESET_MODES = ("single_reset_policy", "human_assisted", "subtask_loop")
 SCENE_CHECKS = ("provider", "operator_attested")
 
 
@@ -1199,7 +1243,7 @@ class RunEvent(Envelope):
 # plan, the journal and every contract carry the code names.
 
 JOB_SCHEMA = "levi.aeri.job.v1"
-JOB_MINOR = 0
+JOB_MINOR = 4  # Optional subtask.early_check; omitted defaults keep old plans.
 EXECUTION_MODES = ("shadow", "assisted", "autonomous")
 # Planned reset strategies (pipeline §6.4): named, refused in v1.
 LATER_STRATEGIES = ("scripted_safe_reset", "atomic_skill_sequence")
@@ -1217,6 +1261,8 @@ DEFAULT_HUMAN_SCENE_TIMEOUT_S = 600
 # Why a key of the job file is ignored (written, but not read: it is left
 # out of the plan and of its digest).
 IGNORED_HUMAN = "strategy human_assisted"
+IGNORED_SUBTASK = "strategy subtask_loop"
+IGNORED_NOT_SUBTASK = "strategy is not subtask_loop"
 IGNORED_PROVIDER = "scene_check provider"
 # The reset policy's keys: human_assisted runs no reset policy.
 HUMAN_IGNORED_KEYS = (
@@ -1335,6 +1381,97 @@ class JobReset(Part):
     human_scene_timeout_s: Annotated[int, Field(ge=1, le=86_400)] | None = None
 
 
+SUBTASK_INVENTORY_TOKEN_LIMIT = 4096
+
+
+class JobSubtaskVlm(Part):
+    """The local VLM a subtask_loop run starts, sleeps and wakes (served by
+    vLLM; launch parameters as ``levi live``'s VLM manager takes them).
+    Defaults: the Lynx manager's profile for the policy beside it
+    (programs/lynx/VLLM-AERI-LAUNCH-20261017.md): 0.70 with 16384 tokens."""
+
+    model: JobPath | None = None
+    served_name: JobFolder | None = None
+    port: Annotated[int, Field(ge=1024, le=65535)] = 8100
+    gpu_memory_utilization: Annotated[float, Field(gt=0, le=0.95)] = 0.70
+    max_model_len: Annotated[int, Field(ge=1024, le=262_144)] = 16384
+    min_model_len: Annotated[int, Field(ge=1024, le=262_144)] = 16384
+    sleep_mode: bool = True
+    prewarm: bool = True
+    # Used once by the startup if the manager reports insufficient_vram.
+    fallback_gpu_memory_utilization: Annotated[float, Field(gt=0, le=0.95)] | None = (
+        0.72
+    )
+    # Declared answer provider only; does not select or authenticate a service.
+    provider_mode: Literal["local", "external"] | None = None
+    # Opt-in output budget, kept in the frozen plan only when supplied.
+    inventory_max_tokens: (
+        Annotated[int, Field(ge=1, le=SUBTASK_INVENTORY_TOKEN_LIMIT)] | None
+    ) = None
+    request_timeout_s: Annotated[int, Field(ge=1, le=600)] = 60
+    wake_timeout_s: Annotated[int, Field(ge=1, le=600)] = 60
+
+    @model_validator(mode="after")
+    def _consistent(self):
+        if self.port in ROBOT_PORTS:
+            _bad("subtask.vlm.port names a robot or policy port")
+        if self.min_model_len > self.max_model_len:
+            _bad("subtask.vlm.min_model_len is above max_model_len")
+        if (
+            self.inventory_max_tokens is not None
+            and self.inventory_max_tokens >= self.min_model_len
+        ):
+            _bad("subtask.vlm.inventory_max_tokens must be below min_model_len")
+        return self
+
+
+class JobSubtaskEarlyCheck(Part):
+    """``subtask.early_check`` (``subtask_loop.EarlyCheck``, whose checks
+    apply too): when a running subtask stops for the VLM's done check."""
+
+    on_events: bool = False
+    event_types: (
+        Annotated[
+            list[Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{1,63}$")]],
+            Field(min_length=1, max_length=len(EVENT_TYPES)),
+        ]
+        | None
+    ) = None
+    settle_steps: Annotated[int, Field(ge=0, le=1_000_000)] | None = None
+    every_steps: Annotated[int, Field(ge=40, le=1_000_000)] | None = None
+    min_steps: Annotated[int, Field(ge=0, le=1_000_000)] | None = None
+    cooldown_steps: Annotated[int, Field(ge=1, le=1_000_000)] | None = None
+    max_checks: Annotated[int, Field(ge=1, le=20)] | None = None
+
+
+class JobSubtask(Part):
+    """The ``subtask_loop`` strategy's settings (``RunConfig`` fields of the
+    same names, ``levi/automatic/subtask_loop.py``); ignored by every other
+    strategy."""
+
+    max_steps: Annotated[int, Field(ge=1, le=1_000_000)] | None = None
+    max_retries: Annotated[int, Field(ge=1, le=100)] | None = None
+    max_subtasks_per_loop: Annotated[int, Field(ge=1, le=64)] | None = None
+    vlm_min_free_mem_gib: Annotated[float, Field(gt=0, le=4096)] | None = None
+    vlm_sleep_fallback: Literal["wait_human", "level2", "stay_awake"] | None = None
+    vlm_wake_min_free_gpu_mib: Annotated[int, Field(ge=1)] | None = None
+    vlm_wake_headroom_mib: Annotated[int, Field(ge=1024)] | None = None
+    vlm_stay_awake_min_free_gpu_mib: Annotated[int, Field(ge=1)] | None = None
+    vlm_alternation: Literal["sleep", "co_resident"] | None = None
+    vlm_co_resident_headroom_mib: Annotated[int, Field(ge=1)] | None = None
+    start_home: bool | None = None
+    home_after_loop: bool | None = None
+    forward_folder: JobFolder | None = None
+    reverse_folder: JobFolder | None = None
+    vlm: JobSubtaskVlm | None = None
+    early_check: JobSubtaskEarlyCheck | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _empty(cls, value):
+        return _sections_present(value, ("vlm", "early_check"))
+
+
 class JobRecording(Part):
     # Relative to the job file.
     rollout_root: JobPath | None = None
@@ -1387,13 +1524,22 @@ class JobSpec(AeriContract):
     termination: JobTermination = Field(default_factory=JobTermination)
     reset: JobReset = Field(default_factory=JobReset)
     recording: JobRecording = Field(default_factory=JobRecording)
+    subtask: JobSubtask = Field(default_factory=JobSubtask)
 
     @model_validator(mode="before")
     @classmethod
     def _empty(cls, value):
         return _sections_present(
             value,
-            ("experiment", "policies", "task", "termination", "reset", "recording"),
+            (
+                "experiment",
+                "policies",
+                "task",
+                "termination",
+                "reset",
+                "recording",
+                "subtask",
+            ),
         )
 
     @property
@@ -1405,6 +1551,10 @@ class JobSpec(AeriContract):
     @property
     def human_assisted(self) -> bool:
         return self.reset_strategy == "human_assisted"
+
+    @property
+    def subtask_loop(self) -> bool:
+        return self.reset_strategy == "subtask_loop"
 
     @property
     def forward_folder(self) -> str:
@@ -1423,11 +1573,16 @@ class JobSpec(AeriContract):
         """``{dotted key: why}`` of what the file says and the run never
         reads."""
         out = {}
-        if self.human_assisted:
+        if self.human_assisted or self.subtask_loop:
+            why = IGNORED_HUMAN if self.human_assisted else IGNORED_SUBTASK
             for key in HUMAN_IGNORED_KEYS:
                 section, name = key.split(".")
                 if getattr(getattr(self, section), name) is not None:
-                    out[key] = IGNORED_HUMAN
+                    out[key] = why
+        if not self.subtask_loop:
+            for name, value in self.subtask:
+                if value is not None:
+                    out[f"subtask.{name}"] = IGNORED_NOT_SUBTASK
         if (
             self.reset.scene_check == "provider"
             and self.reset.human_scene_timeout_s is not None
@@ -1437,6 +1592,10 @@ class JobSpec(AeriContract):
 
     @model_validator(mode="after")
     def _consistent(self):
+        if self.subtask.start_home is not None and not self.subtask_loop:
+            _bad("subtask.start_home is only allowed with subtask_loop")
+        if self.subtask.early_check is not None and not self.subtask_loop:
+            _bad("subtask.early_check is only allowed with subtask_loop")
         if self.reset.horizon_completion == "verify_final" and (
             self.human_assisted
             or self.reset.enabled is False
@@ -1460,7 +1619,19 @@ class JobSpec(AeriContract):
                     "policies.reset.max_steps is required by the reset strategy "
                     "single_reset_policy (human_assisted runs no reset policy)"
                 )
-        if not self.human_assisted and self.forward_folder == self.reset_folder:
+        if self.subtask_loop:
+            if not self.task.instruction or not self.task.instruction.strip():
+                _bad(
+                    "reset.strategy subtask_loop needs task.instruction: the task "
+                    "name the VLM plans the subtasks from"
+                )
+            if self.reset.scene_check != "provider":
+                _bad("reset.strategy subtask_loop has no person's scene check")
+        if (
+            not self.human_assisted
+            and not self.subtask_loop
+            and self.forward_folder == self.reset_folder
+        ):
             _bad("recording: forward and reset need their own folders")
         if self.reset.scene_check == "operator_attested":
             if not self.human_assisted:

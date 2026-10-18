@@ -67,15 +67,18 @@ def build(
     policy_fault=None,
     event_steps=None,
     max_requests=None,
+    episodes=1,
+    scene_script=None,
+    strategy="human_assisted",
 ):
     from aeri_harness import fake
 
     from levi.automatic.adapters import events as ev
 
     cfg = config(
-        episodes=1,
+        episodes=episodes,
         forward_max_steps=max_steps,
-        reset_strategy="human_assisted",
+        reset_strategy=strategy,
         termination=TerminationConfig(
             inference_mode="event_pause_judge",
             physical_hold=HOLD,
@@ -102,7 +105,15 @@ def build(
         clock=clock,
         verifier=verifier,
         create=False,
-        events=ev.FakeEventStream({"forward": event_items}, clock, cfg.run_id),
+        events=ev.FakeEventStream(
+            {
+                "forward": event_items,
+                "reset": [{"step": 4, "event_type": "object_settled"}],
+            },
+            clock,
+            cfg.run_id,
+        ),
+        scene=ev.FakeSceneAssessor(scene_script or [], clock, cfg.run_id),
         policy={"chunk_faults": policy_fault or {}},
     )
     authority = FakeAuthority()
@@ -129,10 +140,12 @@ def build(
     def pause(episode, old, new):
         hooks_log.append(("pause", old, new, r.robot.step_calls))
         r.policy.quiesce(policy_epoch=old)
+        r.robot.stop_admission()  # the fake robot keeps the gate like the bridge
         return True
 
     def resume(episode, epoch, obs):
         hooks_log.append(("resume", epoch, obs["observed_ns"], clock.now()))
+        r.robot.reopen_admission()
         return True
 
     def proof(request, deadline):
@@ -185,15 +198,112 @@ def test_missing_owned_hooks_refused_before_creating_journal(tmp_path):
     assert not r.directory.exists()
 
 
-def test_confirmed_pauses_then_seals_without_more_actions_or_home(tmp_path):
+def test_confirmed_pauses_then_seals_then_homes_once_under_the_closed_gate(tmp_path):
     r = build(tmp_path)
-    assert r.orch.run() == "WAIT_HUMAN"
-    assert r.robot.step_calls == 8 and r.robot.home_calls == 0
+    assert r.orch.run() == "COMPLETED"
+    assert r.robot.step_calls == 8 and r.robot.home_calls == 1
     assert results(r.orch)[0].task_outcome == "success"
     transitions = [e for e in r.orch.journal.events if e.record == "committed"]
     assert any(e.to_state == "FORWARD_JUDGING" for e in transitions)
     assert sm.check_journal(r.orch.journal.events) == []
     assert [c[1] for c in r.authority.calls if c[0] == "begin"].count("judge") == 2
+
+
+@pytest.mark.parametrize("event_step", [8, None])
+def test_terminal_pending_ack_failure_never_seals_or_homes(tmp_path, event_step):
+    r = build(tmp_path, event_step=event_step)
+    calls = []
+
+    def confirm():
+        calls.append("confirm")
+        raise ValueError("pending gripper final acknowledgement unproven")
+
+    seal = r.recorder.seal
+
+    def record_seal(*args, **kwargs):
+        calls.append("seal")
+        return seal(*args, **kwargs)
+
+    r.robot.confirm_pending_gripper = confirm
+    r.recorder.seal = record_seal
+    assert r.orch.run() == "FAULT_LOCKED"
+    assert calls == ["confirm"]
+    assert r.cycle.failed and r.cycle.proof_failed
+    pause = next(
+        e
+        for e in r.orch.journal.events
+        if e.record == "prepared" and e.reason == "inference_paused"
+    )
+    rows = [
+        e for e in r.orch.journal.events if e.transaction_id == pause.transaction_id
+    ]
+    assert any(e.ack is not None and e.ack.executed == "unknown" for e in rows)
+    assert any(e.record == "aborted" for e in rows)
+    assert not any(e.record == "committed" for e in rows)
+    assert r.robot.home_calls == 0 and r.orch.fence.current is None
+    assert results(r.orch)[0].task_outcome == "unknown"
+    assert results(r.orch)[0].rollout.sealed == "incomplete"
+    assert sm.check_journal(r.orch.journal.events) == []
+
+
+@pytest.mark.parametrize("event_step", [8, None])
+def test_terminal_ack_is_checked_while_paused_before_judge_and_seal(
+    tmp_path, event_step
+):
+    r = build(tmp_path, event_step=event_step)
+    calls = []
+    submit = r.verifier.submit
+    seal = r.recorder.seal
+
+    def confirm():
+        calls.append("confirm")
+        assert r.orch.fence.current is None
+        assert r.policy.fenced_epoch == r.orch.ctx.policy_epoch
+        return [("gripper_final_ack", "measured target reached")]
+
+    def judge(request):
+        calls.append("judge")
+        return submit(request)
+
+    def record_seal(*args, **kwargs):
+        calls.append("seal")
+        return seal(*args, **kwargs)
+
+    r.robot.confirm_pending_gripper = confirm
+    r.verifier.submit = judge
+    r.recorder.seal = record_seal
+    assert r.orch.run() == "COMPLETED"
+    # the final ACK is checked again by the finalize quiesce, before the seal
+    assert calls == ["confirm", "judge", "confirm", "seal"]
+    assert r.robot.home_calls == 1
+    assert results(r.orch)[0].task_outcome == "success"
+    assert any(
+        e.note is not None and e.note.code == "gripper_final_ack"
+        for e in r.orch.journal.events
+    )
+    assert sm.check_journal(r.orch.journal.events) == []
+
+
+def test_pause_quiesce_unknown_never_authorizes_goal_judge_or_seal(tmp_path):
+    r = build(tmp_path)
+    original = r.policy.quiesce
+    calls = []
+
+    def quiesce(*, policy_epoch):
+        out = original(policy_epoch=policy_epoch)
+        calls.append(policy_epoch)
+        if len(calls) == 2:  # hook fenced old epoch, terminal check fences new epoch
+            return {**out, "ok": False}
+        return out
+
+    r.policy.quiesce = quiesce
+    assert r.orch.run() == "FAULT_LOCKED"
+    assert r.robot.step_calls == 8 and r.robot.home_calls == 0
+    assert [c for c in r.authority.calls if c[:2] == ("begin", "judge")] == [
+        ("begin", "judge", 1)
+    ]  # only the initial scene judge ran
+    assert results(r.orch)[0].rollout.sealed == "incomplete"
+    assert sm.check_journal(r.orch.journal.events) == []
 
 
 @pytest.mark.parametrize("event_step", [1, 8])
@@ -202,14 +312,14 @@ def test_candidate_stops_new_actions_at_once_despite_legacy_delays(
 ):
     # build() freezes min_steps=5, settle_steps=3, cooldown_steps=5: none may delay a pause
     r = build(tmp_path, event_step=event_step)
-    assert r.orch.run() == "WAIT_HUMAN"
+    assert r.orch.run() == "COMPLETED"
     assert r.robot.step_calls == event_step
     assert next(h[3] for h in r.hooks_log if h[0] == "pause") == event_step
 
 
 def test_rejected_candidate_is_spent_and_cannot_loop_without_motion(tmp_path):
     r = build(tmp_path, script=[{"decision": "rejected"}, {"decision": "confirmed"}])
-    assert r.orch.run() == "WAIT_HUMAN"
+    assert r.orch.run() == "COMPLETED"
     assert next(h[3] for h in r.hooks_log if h[0] == "pause") == 8
     assert r.robot.step_calls == 40  # no second pause without a newer event
 
@@ -232,7 +342,7 @@ def test_candidates_after_max_requests_do_not_pause_and_actions_keep_counting(tm
         max_requests=2,
         script=[{"decision": "rejected"}, {"decision": "rejected"}],
     )
-    assert r.orch.run() == "WAIT_HUMAN"
+    assert r.orch.run() == "COMPLETED"
     pauses = [h[3] for h in r.hooks_log if h[0] == "pause"]
     assert pauses[:2] == [3, 6]
     # the third candidate (step 9) did not pause; the 40 steps run, then the final judge
@@ -268,7 +378,7 @@ def test_new_candidate_must_be_newer_than_the_last_judged_step():
 
 def test_rejected_uses_fresh_observation_new_transaction_epoch_and_chunk(tmp_path):
     r = build(tmp_path, script=[{"decision": "rejected"}, {"decision": "confirmed"}])
-    assert r.orch.run() == "WAIT_HUMAN"
+    assert r.orch.run() == "COMPLETED"
     assert r.policy.requests >= 3  # old chunk at pause is discarded
     resumes = [
         e
@@ -332,8 +442,8 @@ def test_400_counts_executed_actions_and_horizon_judges_while_held(tmp_path):
     r = build(
         tmp_path, max_steps=400, event_step=None, script=[{"decision": "rejected"}]
     )
-    assert r.orch.run() == "WAIT_HUMAN"
-    assert r.robot.step_calls == 400 and r.robot.home_calls == 0
+    assert r.orch.run() == "COMPLETED"
+    assert r.robot.step_calls == 400 and r.robot.home_calls == 1
     assert results(r.orch)[0].stop_reason == "horizon_exhausted"
     assert results(r.orch)[0].task_outcome == "failure"
     assert sm.check_journal(r.orch.journal.events) == []
@@ -341,7 +451,7 @@ def test_400_counts_executed_actions_and_horizon_judges_while_held(tmp_path):
 
 def test_old_chunk_epoch_is_rejected_after_pause(tmp_path):
     r = build(tmp_path, script=[{"decision": "rejected"}, {"decision": "confirmed"}])
-    assert r.orch.run() == "WAIT_HUMAN"
+    assert r.orch.run() == "COMPLETED"
     epoch_values = [c[2] for c in r.authority.calls if c[0] == "begin"]
     assert epoch_values == sorted(epoch_values)
     assert r.authority.last_authorization == len(epoch_values)

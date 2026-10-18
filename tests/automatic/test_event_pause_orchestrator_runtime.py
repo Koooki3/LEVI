@@ -276,6 +276,11 @@ class OrchestratorRuntimeTests(unittest.TestCase):
 
         def close(episode, old_epoch, new_epoch):
             r.policy.quiesce(policy_epoch=old_epoch)
+            r.robot.stop_admission()  # the fake robot keeps the gate like the bridge
+            return True
+
+        def reopen(*args):
+            r.robot.reopen_admission()
             return True
 
         cycle = InferenceCycle(
@@ -287,7 +292,7 @@ class OrchestratorRuntimeTests(unittest.TestCase):
             condition_sha256=hold_contract_sha256(HOLD),
             hooks=InterventionHooks(
                 close,
-                lambda *args: True,
+                reopen,
                 physical,
                 observe_runtime,
                 role_window,
@@ -358,6 +363,8 @@ class OrchestratorRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(r.orch.run(), "WAIT_HUMAN")
         self.assertGreater(r.robot.step_calls, 0)
+        # a paused reset episode still waits for a person: no home of its own
+        self.assertEqual((r.robot.home_calls, r.robot.gate_windows), (0, 0))
         reset_grants = [g for g in self.grants if g.role == "reset"]
         self.assertTrue(reset_grants)
         self.assertGreater(reset_grants[0].policy_epoch, self.grants[0].policy_epoch)
@@ -365,17 +372,25 @@ class OrchestratorRuntimeTests(unittest.TestCase):
         self.assertEqual(sm.check_journal(r.orch.journal.events), [])
 
     def test_no_reset_multiple_episodes_use_current_scene_and_policy_epochs(self):
-        r = self.make(episodes=2)
-        for number in (1, 2):
-            self.assertEqual(r.orch.run(), "WAIT_HUMAN")
-            self.assertEqual(r.orch.completed_forward, number)
-            r.orch._read_back()  # durable counter/epoch reconstruction, not fake runtime recreation
-            self.assertEqual(r.orch.completed_forward, number)
-            self.resume(r, f"resume-{number}")
+        # Each finished forward episode is sealed and homed; the scene check
+        # after the first home asks for a person's reset, the run waits, a resume
+        # starts the second episode, whose home ends the run.
+        r = self.make(
+            episodes=2,
+            scene_script=[{"decision": "ready"}, {"decision": "reset_required"}],
+        )
+        self.assertEqual(r.orch.run(), "WAIT_HUMAN")
+        self.assertEqual(r.orch.completed_forward, 1)
+        self.assertEqual(r.orch.journal.events[-1].reason, "scene_reset_required")
+        self.assertEqual(r.robot.home_calls, 1)
+        r.orch._read_back()  # durable counter/epoch reconstruction, not fake runtime recreation
+        self.assertEqual(r.orch.completed_forward, 1)
+        self.resume(r, "resume-1")
         self.assertEqual(r.orch.run(), "COMPLETED")
+        self.assertEqual(r.orch.completed_forward, 2)
         self.assertEqual(len(results(r.orch)), 2)
         self.assertEqual(r.robot.step_calls, 2 * CANDIDATE_STEP)
-        self.assertEqual(r.robot.home_calls, 0)
+        self.assertEqual(r.robot.home_calls, 2)
         self.assertFalse(any(g.role == "reset" for g in self.grants))
         for previous, current in zip(self.grants, self.grants[1:]):
             self.assertGreater(current.request_epoch, previous.request_epoch)
@@ -385,7 +400,7 @@ class OrchestratorRuntimeTests(unittest.TestCase):
 
     def test_not_goal_discards_buffer_and_resumes_new_logged_policy_epoch(self):
         r = self.make(goal_script=[{"decision": "rejected"}, {"decision": "confirmed"}])
-        self.assertEqual(r.orch.run(), "WAIT_HUMAN")
+        self.assertEqual(r.orch.run(), "COMPLETED")
         resumed = [
             e
             for e in r.orch.journal.events
@@ -671,7 +686,11 @@ class OrchestratorRuntimeTests(unittest.TestCase):
                     return submit(request)
 
                 r.verifier.submit = verify_with_real_session_gate
-                self.assertEqual(r.orch.run(), "WAIT_HUMAN")
+                # A forward episode is sealed and homed, the run completes; a
+                # reset episode still waits for a person.
+                self.assertEqual(
+                    r.orch.run(), "COMPLETED" if role == "forward" else "WAIT_HUMAN"
+                )
                 self.assertTrue(checked)
                 self.assertFalse(
                     any(
