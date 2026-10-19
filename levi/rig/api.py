@@ -233,3 +233,13 @@ def rig_status():
     ``levi-aeri-*`` units and an advisory busy/idle verdict
     (``levi.rig.status.v1``). Read-only; sampled when asked."""
     return collect()
+
+
+# The policy-server deploy and the model, site and command-preview routes
+# (``deploy_api.py``, ``catalog_api.py``). Their routers carry the full
+# ``/api/levi/rig`` prefix already, so their routes are added as they are:
+# ``include_router`` would put the prefix on twice.
+from . import catalog_api, deploy_api
+
+router.routes.extend(catalog_api.router.routes)
+router.routes.extend(deploy_api.router.routes)

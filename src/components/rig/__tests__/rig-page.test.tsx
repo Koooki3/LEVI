@@ -5,13 +5,19 @@ import {
   waitFor,
 } from "@/components/ds/__tests__/dom";
 import { act } from "react";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
 import { LocaleProvider } from "@/components/levi-locale";
 import { RIG_POLL_MS, RIG_REQUEST_MS } from "../rig-logic";
 import { quietRig, quietSetup, rigStatus, setupStatus } from "./fixtures";
 
+// This file is about the status cards. The action section at the end of the
+// page has its own tests (deploy-panel, command-panel, rig-actions-page); it is
+// left out here so that its requests and timers are not mixed into these.
+mock.module("@/components/rig/rig-actions", () => ({
+  RigActions: () => null,
+}));
 const { default: RigPage } = await import("@/app/rig/page");
 setupDom();
 
@@ -214,8 +220,11 @@ describe("the Rig console page", () => {
     const text = host.textContent!;
     expect(text).toContain(en["rig.scope.read_only"]);
     expect(text).toContain(en["rig.scope.no_connect"]);
+    expect(text).toContain(en["rig.scope.actions"]);
     expect(text).toContain(en["rig.scope.no_estop"]);
-    expect(en["rig.scope.read_only"]).toMatch(/^Read-only/);
+    expect(en["rig.scope.read_only"]).toMatch(
+      /^The status cards are read-only/,
+    );
     expect(en["rig.scope.no_connect"]).toContain("never connects");
     expect(en["rig.scope.no_estop"]).toContain("emergency stop");
     const buttons = Array.from(host.querySelectorAll("button")).map((b) =>

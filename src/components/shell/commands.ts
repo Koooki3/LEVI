@@ -51,7 +51,19 @@ export function navPages(options: { live: boolean; pool: boolean }): NavPage[] {
     {
       href: "/rig",
       label: "Rig console",
-      keywords: ["robot", "rig", "status", "机器人台", "状态"],
+      keywords: [
+        "robot",
+        "rig",
+        "status",
+        "deploy",
+        "policy server",
+        "demo client",
+        "机器人台",
+        "状态",
+        "部署",
+        "策略服务器",
+        "评测客户端",
+      ],
       header: false,
     },
     {

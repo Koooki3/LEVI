@@ -14,6 +14,16 @@ const SOURCES = [
   "components/rig/rig-say.ts",
   "components/rig/use-rig-poll.ts",
   "app/rig/page.tsx",
+  // The action cards.
+  "components/rig/action-parts.tsx",
+  "components/rig/catalog-logic.ts",
+  "components/rig/command-logic.ts",
+  "components/rig/command-panel.tsx",
+  "components/rig/deploy-logic.ts",
+  "components/rig/deploy-parts.tsx",
+  "components/rig/deploy-panel.tsx",
+  "components/rig/rig-actions.tsx",
+  "components/rig/rig-failure.ts",
 ];
 const named = new Set<string>();
 for (const file of SOURCES)

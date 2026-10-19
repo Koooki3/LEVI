@@ -149,3 +149,130 @@
 .rg-fact {
   display: contents;
 }
+
+/* The two action cards (Policy server, Client command). */
+.rg-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: var(--ds-space-4);
+  align-items: start;
+}
+.rg-action {
+  min-width: 0;
+}
+.rg-action p {
+  margin: 0;
+}
+.rg-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  margin-bottom: var(--ds-space-3);
+}
+.rg-unreadable {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  margin-bottom: var(--ds-space-3);
+}
+.rg-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  margin-top: var(--ds-space-3);
+}
+.rg-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2) var(--ds-space-3);
+}
+.rg-actions-row h4 {
+  margin: 0;
+}
+.rg-model {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-model__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+}
+.rg-presets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-presets ul {
+  margin-top: 0;
+}
+.rg-presets li[aria-current="true"] {
+  color: var(--ds-text-primary);
+  font-weight: var(--ds-weight-semibold);
+}
+.rg-details {
+  margin-top: var(--ds-space-3);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-details > summary {
+  cursor: pointer;
+  color: var(--ds-text-secondary);
+}
+.rg-checks {
+  list-style: none;
+  margin: var(--ds-space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  overflow-wrap: anywhere;
+}
+.rg-warn {
+  color: var(--ds-warning);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  margin-top: var(--ds-space-3);
+}
+.rg-result .pg-note {
+  margin: 0;
+}
+/* The unit's log and the command to copy: monospace, English, kept in lines,
+ * never wider than the card. */
+.rg-log,
+.rg-command {
+  margin: 0;
+  padding: var(--ds-space-2) var(--ds-space-3);
+  background: var(--ds-surface-sunken);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-xs);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-primary);
+}
+.rg-log {
+  max-height: 20rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.rg-command {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.rg-command--stale {
+  opacity: 0.6;
+}
+.rg-site-issue .pg-problem__fix {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}

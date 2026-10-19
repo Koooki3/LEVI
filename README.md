@@ -91,7 +91,7 @@ Day to day: `uv run levi stop` (refuses while jobs run), `uv run levi clean` (pr
 
 ## The interface
 
-The LEVI mark opens **Home** (what needs you, what is running); the header opens **Live evaluation**, **Explore**, **Conversion & review**, **Training pool**, **Guide** and **Report**, plus Jobs, the **Agent Workbench**, settings, theme and language. `Ctrl+K` (⌘K on macOS) opens the command palette (pages, datasets, actions); `G` then `H`, `E`, `W`, `P`, `L`, `C`, `R` or `U` jumps to a page; `?` lists the shortcuts. The read-only **Rig console** (is any robot activity to be seen?) is not a header link: open it from the palette or with `G` then `C`. Light or dark, system fonts only, reduced-motion setting ([Design system](docs/DESIGN.md)).
+The LEVI mark opens **Home** (what needs you, what is running); the header opens **Live evaluation**, **Explore**, **Conversion & review**, **Training pool**, **Guide** and **Report**, plus Jobs, the **Agent Workbench**, settings, theme and language. `Ctrl+K` (⌘K on macOS) opens the command palette (pages, datasets, actions); `G` then `H`, `E`, `W`, `P`, `L`, `C`, `R` or `U` jumps to a page; `?` lists the shortcuts. The **Rig console** (is any robot activity to be seen? It also has a policy server panel that starts and stops one policy server, and a client command panel that prepares the demo client command to copy; see the [setup wizard](docs/SETUP_WIZARD.md)) is not a header link: open it from the palette or with `G` then `C`. Light or dark, system fonts only, reduced-motion setting ([Design system](docs/DESIGN.md)).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/ui-home-en-dark.png">

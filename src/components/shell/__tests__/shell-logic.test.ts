@@ -199,6 +199,21 @@ describe("navigation and commands", () => {
     const zh = (text: string) => (text === "Report" ? "报告" : text);
     expect(filterCommands(commands, "报告", zh)[0].id).toBe("go-report");
   });
+  test("filter: the rig console is found by what its cards do", () => {
+    const commands = make();
+    for (const words of [
+      "deploy",
+      "policy server",
+      "demo client",
+      "部署",
+      "策略服务器",
+      "评测客户端",
+    ])
+      expect(
+        filterCommands(commands, words).map((c) => c.id),
+        words,
+      ).toContain("go-rig");
+  });
 });
 
 describe("jobs", () => {

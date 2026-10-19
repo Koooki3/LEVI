@@ -1,11 +1,14 @@
 "use client";
-// Rig console: one card per component of the real-robot stack and its
-// support services, from LEVI's two read-only status routes. The backend
-// reads files, the kernel's socket table and process lists and runs two
-// read-only queries (nvidia-smi, systemctl --user list-units); nothing here
-// connects to a robot port, sends a command or starts or stops anything. It
-// is not an emergency stop and not a safety interlock (docs/SETUP_WIZARD.md,
-// "Status probes").
+// Rig console. The status cards, one per component of the real-robot stack
+// and its support services, come from LEVI's two read-only status routes: the
+// backend reads files, the kernel's socket table and process lists and runs
+// two read-only queries (nvidia-smi, systemctl --user list-units); nothing in
+// them connects to a robot port, sends a command or starts or stops anything.
+// The action section at the end (rig-actions.tsx) has two cards that say
+// exactly what they do: one starts and stops the policy server unit this page
+// created, the other writes the demo client's command for a person to copy.
+// Nothing on the page is an emergency stop or a safety interlock
+// (docs/SETUP_WIZARD.md, "Status probes").
 import "@/components/pages-ui/pages.css";
 import "@/components/rig/rig-styles.css";
 import { useMemo } from "react";
@@ -16,6 +19,7 @@ import {
   IdleBannerView,
   RigCardView,
 } from "@/components/rig/rig-card";
+import { RigActions } from "@/components/rig/rig-actions";
 import { rigView } from "@/components/rig/rig-logic";
 import { sayText } from "@/components/rig/rig-say";
 import { useRigPoll } from "@/components/rig/use-rig-poll";
@@ -41,6 +45,7 @@ export default function RigPage() {
         <ul className="rg-scope">
           <li>{t("rig.scope.read_only")}</li>
           <li>{t("rig.scope.no_connect")}</li>
+          <li>{t("rig.scope.actions")}</li>
           <li>{t("rig.scope.no_estop")}</li>
         </ul>
       </Note>
@@ -78,6 +83,7 @@ export default function RigPage() {
               </div>
             </section>
           ))}
+          <RigActions />
         </>
       )}
     </main>
