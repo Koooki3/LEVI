@@ -801,7 +801,7 @@
     ],
     "log_id": "levi-aeri-policy-manual-rig-pi05-fr3-all-step49999-20261014T174640Z.log",
     "schema": "levi.rig.deploy_log.v1",
-    "size_bytes": 427
+    "size_bytes": 356
   },
   "models": {
     "defaults": {

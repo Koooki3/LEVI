@@ -8,7 +8,8 @@
 // the page does not guess. "stale" (the evidence is old) is kept apart from
 // "red" (the evidence says something is wrong). Text that came from a server
 // is passed on as written, in English: a part's `detail` and the health
-// file's reasons in a card's `notes`, and an idle reason whose `code` the
+// file's reasons in a card's `notes` (once the file has stopped updating, on
+// the monitor's own card only), and an idle reason whose `code` the
 // page does not know. A reason whose code it knows is worded from the
 // catalogue out of its `params`, and so is the note of a part the verdict
 // names with such a code. The summary and the facts of a card are catalogue
@@ -108,6 +109,9 @@ export interface RigBanner {
   reasons: RigIdleReason[];
   /** Why there is no answer (the route failed, the answer is malformed). */
   note: Say | null;
+  /** One line under the reasons: what the one reason there is probably
+   * means, when the rest of the page says so. */
+  hint: Say | null;
 }
 
 export interface RigGroup {
@@ -295,6 +299,14 @@ function healthNotes(health: Health): string[] {
   return found.slice(0, 4);
 }
 
+/** What a card that mirrors the monitor shows for the last reasons of a
+ * health file that stopped updating: one line saying they are on the
+ * monitor's own card, not the same lines on three cards. Nothing when the
+ * file lists none. */
+function sameAsMonitor(reasons: string[]): RigNote[] {
+  return reasons.length > 0 ? [k("rig.note.same_as_monitor")] : [];
+}
+
 /** The age of the health file, as a fact when it is known. */
 function ageFact(part: Rec | null): RigFact[] {
   const age = num(part?.age_s);
@@ -357,9 +369,9 @@ function deskCard(health: Health): RigCard {
       state: "stale",
       summary: k("rig.health.offline_for_others"),
       facts,
-      // Why it is offline (stopped updating, cannot be read), then the last
-      // reasons it wrote.
-      notes: [...detailOf(part), ...notes],
+      // Why it is offline (stopped updating, cannot be read), then where the
+      // last reasons it wrote are.
+      notes: [...detailOf(part), ...sameAsMonitor(notes)],
       hint,
     };
   if (health.state === "red")
@@ -394,12 +406,13 @@ function deskCard(health: Health): RigCard {
 /** The health monitor's reasons that only say the arm stack is not running
  * (fr3_health_monitor.py): no hardware interface loaded, one that is not
  * active (`hardware_interface=<state>`), a controller manager that does not
- * answer, no robot state arriving. A reason is told by its exact name, which
- * may be followed by a space, a bracket or a parenthesis (the seconds or the
- * note the monitor appends); a name that only starts like one is another
- * reason. */
+ * answer, no robot state arriving, or none yet
+ * (`waiting_for_first_robot_state`, while the monitor runs and has received
+ * nothing). A reason is told by its exact name, which may be followed by a
+ * space, a bracket or a parenthesis (the seconds or the note the monitor
+ * appends); a name that only starts like one is another reason. */
 const STACK_DOWN_REASON =
-  /^(?:hardware_interface=|(?:hardware_interface_missing|controller_manager_unreachable|robot_state_no_data)(?:$|[ (\[]))/;
+  /^(?:hardware_interface=|(?:hardware_interface_missing|controller_manager_unreachable|robot_state_no_data|waiting_for_first_robot_state)(?:$|[ (\[]))/;
 
 /** Whether the red light follows from terminal A not running: it has reasons,
  * all of them of the kinds above, the robot reports no error of its own, and
@@ -471,7 +484,9 @@ function armCard(health: Health, rig: Rec | null): RigCard {
     marker,
     ...ageFact(part),
   ];
-  const notes = [...healthNotes(health), ...markerNotes(rig)];
+  const reasons = healthNotes(health);
+  const markerNote = markerNotes(rig);
+  const notes = [...reasons, ...markerNote];
   if (health.state === "offline")
     return {
       id: "arm",
@@ -479,7 +494,7 @@ function armCard(health: Health, rig: Rec | null): RigCard {
       state: "stale",
       summary: k("rig.health.offline_for_others"),
       facts,
-      notes: [...detailOf(part), ...notes],
+      notes: [...detailOf(part), ...sameAsMonitor(reasons), ...markerNote],
       hint,
     };
   if (health.state === "red") {
@@ -1200,12 +1215,73 @@ function partsRead(rig: Rec): boolean {
   );
 }
 
-function bannerOf(rig: Rec | null, error: string | undefined): RigBanner {
+/** Whether an entry of the idle reasons, one the banner lists, says the
+ * arm-controller marker is there: the code `marker.present`, or a busy reason
+ * of the marker from an older server, which sends no code. A marker that is
+ * old, unreadable or without its folder is another reason and says so
+ * itself. */
+function isMarkerPresent(item: Rec | null): boolean {
+  return (
+    item?.source === "marker" &&
+    item.state === "busy" &&
+    str(item.text, 300) !== null &&
+    (item.code === undefined || item.code === "marker.present")
+  );
+}
+
+/** A marker younger than this is not called a leftover: setup.md has the
+ * operator touch it, wait 60 s and only then start the arm stack, so for that
+ * time the marker is there, the health monitor is not running and no robot
+ * process exists, and the hint would tell the operator to remove the marker
+ * they just placed. */
+export const MARKER_HINT_MIN_S = 600;
+
+/** How old the marker is, from the age the server gave its reason, or
+ * ``null`` when there is none the page can read. */
+function markerAgeS(item: Rec | null): number | null {
+  const age = rec(item?.params)?.age_s;
+  return typeof age === "number" && Number.isFinite(age) && age >= 0
+    ? age
+    : null;
+}
+
+/** The hint under a busy banner whose only reasons are a marker that is
+ * there for at least ``MARKER_HINT_MIN_S``, while the health monitor is not
+ * running (its file stopped updating, or is missing) in a sample that is not
+ * old: without the arm stack the marker is most likely one left behind when
+ * it was shut down. Nothing is said when anything else shows activity, the
+ * monitor reports, or the health file merely cannot be read. */
+function markerHint(
+  entries: unknown[],
+  state: IdleState,
+  health: Health,
+  old: boolean,
+): Say | null {
+  const monitorDown =
+    health.state === "missing" ||
+    (health.state === "offline" && num(health.part?.age_s) !== null);
+  const items = entries.map((entry) => rec(entry));
+  const onlyMarker =
+    items.length > 0 && items.every((item) => isMarkerPresent(item));
+  const ages = items.map((item) => markerAgeS(item));
+  const aged = ages.every((age) => age !== null && age >= MARKER_HINT_MIN_S);
+  return state === "busy" && !old && monitorDown && onlyMarker && aged
+    ? k("rig.hint.marker_leftover")
+    : null;
+}
+
+function bannerOf(
+  rig: Rec | null,
+  error: string | undefined,
+  health: Health,
+  old: boolean,
+): RigBanner {
   if (!rig)
     return {
       state: "unknown",
       reasons: [],
       note: join(k("rig.banner.no_answer"), error ? raw(error) : null),
+      hint: null,
     };
   const idle = rec(rig.robot_idle);
   const state = idle?.state;
@@ -1214,6 +1290,7 @@ function bannerOf(rig: Rec | null, error: string | undefined): RigBanner {
       state: "unknown",
       reasons: [],
       note: k("rig.banner.malformed"),
+      hint: null,
     };
   const found: Array<{ rank: number; reason: RigIdleReason }> = [];
   for (const entry of list(idle?.reasons)) {
@@ -1248,17 +1325,31 @@ function bannerOf(rig: Rec | null, error: string | undefined): RigBanner {
         state: "unknown",
         reasons,
         note: k("rig.banner.idle_schema"),
+        hint: null,
       };
-    // An idle verdict that lists a reason contradicts itself; the reasons
-    // stay on the page for the reader to weigh.
-    if (!partsRead(rig) || list(idle?.reasons).length > 0)
+    if (!partsRead(rig))
       return {
         state: "unknown",
         reasons,
         note: k("rig.banner.idle_unverified"),
+        hint: null,
+      };
+    // An idle verdict that lists a reason contradicts itself; the reasons
+    // stay on the page for the reader to weigh.
+    if (list(idle?.reasons).length > 0)
+      return {
+        state: "unknown",
+        reasons,
+        note: k("rig.banner.idle_with_reasons"),
+        hint: null,
       };
   }
-  return { state, reasons, note: null };
+  return {
+    state,
+    reasons,
+    note: null,
+    hint: markerHint(list(idle?.reasons), state, health, old),
+  };
 }
 
 // -- an old sample of the machine status
@@ -1333,7 +1424,7 @@ export function rigView(input: RigInput): RigView {
     aged(gpuCard(setup)),
   ];
   return {
-    banner: bannerOf(rig, input.rigError),
+    banner: bannerOf(rig, input.rigError, health, old !== null),
     groups: [
       { id: "robot", title: "rig.group.robot", cards: robot },
       { id: "host", title: "rig.group.host", cards: host },

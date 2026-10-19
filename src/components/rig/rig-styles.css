@@ -81,6 +81,13 @@
   font-size: var(--ds-text-caption-size);
   overflow-wrap: anywhere;
 }
+/* What the one reason above probably means; the advisory below is fainter. */
+.rg-banner__hint {
+  margin: 0;
+  padding-left: var(--ds-space-5);
+  font-size: var(--ds-text-callout-size);
+  overflow-wrap: anywhere;
+}
 .rg-muted {
   color: var(--ds-text-tertiary);
   font-size: var(--ds-text-caption-size);

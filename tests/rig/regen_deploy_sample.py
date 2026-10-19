@@ -45,6 +45,19 @@ def rig():
         yield Rig(Path(tmp), patch)
 
 
+def log_of(r) -> dict:
+    """The log answer with the size the file has when the fake machine's folder
+    is read as the template path. The real size counts the temporary folder's
+    name (a log line names the checkpoint folder), and that name carries the
+    checkout's path, so it would differ between checkouts."""
+    answer = r.sup.log(50)
+    shown = r.log_path().read_text()
+    for folder in sorted({str(r.tmp), str(r.tmp.resolve())}, key=len, reverse=True):
+        shown = shown.replace(folder, "/path/to")
+    answer["size_bytes"] = len(shown.encode())
+    return answer
+
+
 def view(r):
     r.sup.invalidate()
     return r.sup.status()
@@ -79,7 +92,7 @@ def deploy_samples() -> dict:
         view(r)  # the first look that sees it ready
         r.clock.advance(10)
         out["ready"] = view(r)
-        out["log_ready"] = r.sup.log(50)
+        out["log_ready"] = log_of(r)
         r.connect()
         out["ready_with_client"] = view(r)
         r.disconnect()
@@ -95,7 +108,7 @@ def deploy_samples() -> dict:
         r.log("INFO:root:Loading model...", OOM_LINE)
         r.units.clear()
         out["failed_oom"] = view(r)
-        out["log_oom"] = r.sup.log(50)
+        out["log_oom"] = log_of(r)
     with rig() as r:
         r.listen()
         out["foreign"] = view(r)

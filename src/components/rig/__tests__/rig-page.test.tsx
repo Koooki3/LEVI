@@ -273,6 +273,158 @@ describe("the Rig console page", () => {
     expect(banner.textContent).not.toContain("No robot activity seen");
   });
 
+  test("an idle answer that lists a reason says it contradicts itself, not that a part was unread", async () => {
+    serve(() => ({
+      [SETUP]: quietSetup(),
+      [RIG]: {
+        ...quietRig(),
+        robot_idle: {
+          state: "idle",
+          reasons: [
+            {
+              source: "marker",
+              state: "busy",
+              text: "the arm-controller marker is present (for 2 min)",
+            },
+          ],
+        },
+      },
+    }));
+    const { host } = await render(<RigPage />);
+    await loaded(host);
+    const banner = host.querySelector("[data-testid=rig-idle]")!;
+    expect(banner.getAttribute("data-state")).toBe("unknown");
+    expect(banner.textContent).toContain(en["rig.banner.idle_with_reasons"]);
+    expect(banner.textContent).not.toContain(en["rig.banner.idle_unverified"]);
+  });
+
+  describe("a health monitor that is not running", () => {
+    const REASONS = [
+      "controller_manager_unreachable 43s",
+      "robot_state_no_data 44s",
+    ];
+    const offline = () =>
+      setupStatus({
+        fr3_health: {
+          state: "offline",
+          detail: "the monitor stopped updating",
+          age_s: 43,
+          hardware_active: false,
+          controller_active: false,
+          reasons: REASONS,
+        },
+      });
+    const markerOnly = {
+      robot_idle: {
+        state: "busy",
+        reasons: [
+          {
+            source: "marker",
+            state: "busy",
+            text: "the arm-controller marker is present (for 30 min)",
+            code: "marker.present",
+            params: { age_s: 1800 },
+          },
+        ],
+      },
+    };
+    const card = (host: HTMLElement, id: string) =>
+      host.querySelector(`[data-testid=rig-card-${id}]`)!;
+
+    test("a marker as the only reason gets one hint line under it", async () => {
+      serve(() => ({ [SETUP]: offline(), [RIG]: rigStatus(markerOnly) }));
+      const { host } = await render(<RigPage />);
+      await loaded(host);
+      const banner = host.querySelector("[data-testid=rig-idle]")!;
+      expect(banner.getAttribute("data-state")).toBe("busy");
+      expect(banner.querySelectorAll("li")).toHaveLength(1);
+      // One line of its own, after the reason and before the advisory.
+      const hint = banner.querySelector("[data-testid=rig-idle-hint]")!;
+      expect(hint.textContent).toBe(en["rig.hint.marker_leftover"]);
+      expect(hint.previousElementSibling!.tagName).toBe("UL");
+      expect(hint.nextElementSibling!.textContent).toContain("Advisory only");
+    });
+
+    test("the hint is in Chinese on a Chinese page", async () => {
+      localStorage.setItem("levi-language", "zh");
+      serve(() => ({ [SETUP]: offline(), [RIG]: rigStatus(markerOnly) }));
+      const { host } = await render(
+        <LocaleProvider>
+          <RigPage />
+        </LocaleProvider>,
+      );
+      await loaded(host);
+      await waitFor(
+        () =>
+          host
+            .querySelector("[data-testid=rig-idle]")!
+            .textContent!.includes(zh["rig.hint.marker_leftover"]),
+        { label: "the Chinese hint" },
+      );
+      expect(
+        host.querySelector("[data-testid=rig-idle]")!.textContent,
+      ).not.toContain(en["rig.hint.marker_leftover"]);
+    });
+
+    test("no hint while the health monitor is running", async () => {
+      serve(() => ({ [SETUP]: setupStatus(), [RIG]: rigStatus(markerOnly) }));
+      const { host } = await render(<RigPage />);
+      await loaded(host);
+      expect(host.textContent).toContain("Controller marker");
+      expect(host.textContent).not.toContain(en["rig.hint.marker_leftover"]);
+    });
+
+    test("no hint when a unit or a session is busy as well", async () => {
+      serve(() => ({ [SETUP]: offline(), [RIG]: rigStatus() }));
+      const { host } = await render(<RigPage />);
+      await loaded(host);
+      expect(host.textContent).toContain("Controller marker");
+      expect(host.textContent).not.toContain(en["rig.hint.marker_leftover"]);
+    });
+
+    test("the reasons are on the Terminal M card; the Desk and Terminal A cards point to it", async () => {
+      serve(() => ({ [SETUP]: offline(), [RIG]: rigStatus() }));
+      const { host } = await render(<RigPage />);
+      await loaded(host);
+      for (const reason of REASONS)
+        expect(card(host, "monitor").textContent).toContain(reason);
+      for (const id of ["desk", "arm"]) {
+        const text = card(host, id).textContent!;
+        expect(text).toContain(en["rig.note.same_as_monitor"]);
+        // The server's sentence stays, the reason lines do not repeat.
+        expect(text).toContain("the monitor stopped updating");
+        for (const reason of REASONS) expect(text).not.toContain(reason);
+      }
+      expect(card(host, "monitor").textContent).not.toContain(
+        en["rig.note.same_as_monitor"],
+      );
+    });
+
+    test("with a red light all three cards list the reasons", async () => {
+      serve(() => ({
+        [SETUP]: setupStatus({
+          fr3_health: {
+            state: "red",
+            reasons: REASONS,
+            hardware_active: true,
+            controller_active: true,
+            robot_mode_name: "Idle",
+            robot_mode: 1,
+            age_s: 0.3,
+          },
+        }),
+        [RIG]: rigStatus(),
+      }));
+      const { host } = await render(<RigPage />);
+      await loaded(host);
+      for (const id of ["desk", "arm", "monitor"]) {
+        const text = card(host, id).textContent!;
+        for (const reason of REASONS) expect(text).toContain(reason);
+        expect(text).not.toContain(en["rig.note.same_as_monitor"]);
+      }
+    });
+  });
+
   const REASONS = {
     robot_idle: {
       state: "busy",

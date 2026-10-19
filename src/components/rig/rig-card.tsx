@@ -130,6 +130,11 @@ export function IdleBannerView({ banner }: { banner: RigBanner }) {
           ))}
         </ul>
       )}
+      {banner.hint && (
+        <p className="rg-banner__hint" data-testid="rig-idle-hint">
+          {sayText(banner.hint, t)}
+        </p>
+      )}
       <p className="rg-muted">{t("rig.idle.advisory")}</p>
     </section>
   );

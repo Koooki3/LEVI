@@ -27,6 +27,20 @@ def test_the_committed_samples_are_what_the_backend_builds():
     )
 
 
+def test_the_build_does_not_depend_on_the_checkouts_path(monkeypatch, tmp_path):
+    """The fake machines live in temporary folders whose names carry the
+    checkout's path (TMPDIR is inside it); a log line names such a folder, so
+    the file size of the log must be counted with the template path instead."""
+    expected = build()
+    long_tmp = tmp_path / ("x" * 37) / "deeper"
+    long_tmp.mkdir(parents=True)
+    monkeypatch.setenv("TMPDIR", str(long_tmp))
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", None)  # read TMPDIR again
+    assert build() == expected
+
+
 def test_the_build_does_not_depend_on_the_machines_time_zone(monkeypatch):
     expected = build()
     monkeypatch.setenv("TZ", "America/New_York")

@@ -336,9 +336,31 @@ that could not be read is worded the same way from `marker.unreadable`,
 those codes the part's `detail` is shown as written.
 
 *The banner.* It is downgraded to "cannot tell" when the marker, `eval_sessions`
-or `units` part of the same answer is `unknown`, when the answer's schema is
-present and is not `levi.rig.status.v1`, or when it says `idle` but still lists
-reasons.
+or `units` part of the same answer is `unknown` (the note says a part could not
+be read), when the answer's schema is present and is not `levi.rig.status.v1`
+(the note says the format is not known), or when it says `idle` but still lists
+reasons (the note says the answer lists reasons and so is not trusted; when a
+part was also unread, the note about the unread part is the one shown). The
+reasons stay listed in every case.
+
+*The leftover-marker hint.* When the verdict is `busy`, every reason is the
+arm-controller marker being there (code `marker.present`) and has been there for
+at least 10 minutes (its `age_s`; a marker whose age the page cannot read gets no
+hint), and the `fr3_health` part of the machine status is `missing`, or is
+`offline` with an age (the health file stopped updating: the health monitor is
+not running) in a sample that is not old, one extra line under the reason says:
+if the arm stack is down, this is probably a marker left over from the last
+session; remove it as the step "remove the marker after terminal A has exited" in
+setup.md says. The 10 minutes are there because setup.md has the operator touch
+the marker, wait 60 seconds and only then start the arm stack: for that time the
+marker is there, the monitor is not running and no robot process exists, and the
+hint would tell the operator to remove the marker they just placed. The line is
+not shown when any other reason is listed (a robot process, an evaluation unit or
+session, a marker that is 12 hours old or older or cannot be read), when the
+health file is `ok` or red, when it is `offline` only because it cannot be read
+(no age; the monitor may be running), when the status sample is old, or when the
+machine status has no readable health part. The page only says so; nothing on it
+removes the marker.
 
 *The cards.* The demo client card takes the first of these that holds:
 Fault when a session updated within the last 60 seconds reports a fault; OK when
@@ -352,14 +374,20 @@ may be incomplete and Not started would be the answer. A marker 12 hours old or
 older is shown as "may be a leftover of a crash or belong to a very long run".
 The health monitor turns the red light on by itself when the arm stack is not
 up; when the only reasons are `hardware_interface_missing`,
-`hardware_interface=`, `controller_manager_unreachable` or
-`robot_state_no_data`, the robot reports no error and the hardware interface is
+`hardware_interface=`, `controller_manager_unreachable`, `robot_state_no_data`
+or `waiting_for_first_robot_state` (the monitor runs but no robot state has
+reached it yet), the robot reports no error and the hardware interface is
 not reported active, the terminal A card says "not started" and notes that the
-red light follows from terminal A not running. With the hardware interface
-active, those reasons are a fault of the arm or its link and stay Fault,
-whatever the controller flag says. Nothing on the page is an emergency stop or
-a safety check, and a green card does not mean it is safe to approach the
-robot.
+red light follows from terminal A not running. A reason is told by its exact
+name: `waiting_for_first_robot_state_extra` is another reason and keeps the
+light red. With the hardware interface active, those reasons are a fault of the
+arm or its link and stay Fault, whatever the controller flag says. When the
+health file has stopped updating (Stale), the reasons it last wrote are listed
+on the terminal M card only: the Desk and terminal A cards keep the server's
+sentence about why it stopped and say "Same reasons as the Terminal M card."
+instead of repeating them. With the red light the reasons stay on all three
+cards. Nothing on the page is an emergency stop or a safety check, and a green
+card does not mean it is safe to approach the robot.
 
 ### Rig console: policy server panel and client command panel
 

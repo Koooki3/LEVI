@@ -205,10 +205,16 @@ describe("desk-side facts (health file: robot mode, FCI)", () => {
         }),
       );
       expect(stopped.state).toBe("stale");
-      expect(stopped.notes).toEqual([
-        "the monitor stopped updating",
-        "cartesian reflex",
-      ]);
+      // The monitor's own card lists its last reasons; the cards that mirror
+      // it say so instead of repeating them.
+      expect(stopped.notes).toEqual(
+        id === "monitor"
+          ? ["the monitor stopped updating", "cartesian reflex"]
+          : [
+              "the monitor stopped updating",
+              { key: "rig.note.same_as_monitor" },
+            ],
+      );
       const unreadable = card(
         id,
         setupStatus({
@@ -358,6 +364,108 @@ describe("terminal A, the arm stack (health file: hardware and controller)", () 
   });
 });
 
+describe("the reasons of a health file that stopped updating are listed once", () => {
+  const SAME = { key: "rig.note.same_as_monitor" };
+  const REASONS = [
+    "controller_manager_unreachable 43s",
+    "robot_state_no_data 44s",
+  ];
+  const health = (over: Record<string, unknown> = {}) =>
+    setupStatus({
+      fr3_health: healthPart({
+        state: "offline",
+        detail: "the monitor stopped updating",
+        reasons: REASONS,
+        hardware_active: false,
+        controller_active: false,
+        ...over,
+      }),
+    });
+
+  test("the monitor's card keeps them, the Desk and terminal A cards point to it", () => {
+    const found = cards(view(health()));
+    expect(found.monitor.notes).toEqual([
+      "the monitor stopped updating",
+      ...REASONS,
+    ]);
+    for (const id of ["desk", "arm"] as const) {
+      expect(found[id].state).toBe("stale");
+      // The server's sentence stays; the reason lines are replaced by one note.
+      expect(found[id].notes).toEqual(["the monitor stopped updating", SAME]);
+      expect(serverNotes(found[id])).not.toContain(REASONS[0]);
+    }
+  });
+
+  test("the reasons are not lost: they are on exactly one of the three cards", () => {
+    const found = cards(view(health()));
+    const listing = ["desk", "arm", "monitor"].filter((id) =>
+      serverNotes(found[id as RigCardId]).includes(REASONS[0]),
+    );
+    expect(listing).toEqual(["monitor"]);
+  });
+
+  test("current errors the file lists count as reasons: they go the same way", () => {
+    const found = cards(
+      view(health({ reasons: [], current_errors: ["reflex"] })),
+    );
+    expect(serverNotes(found.monitor)).toContain("reflex");
+    for (const id of ["desk", "arm"] as const)
+      expect(found[id].notes).toEqual(["the monitor stopped updating", SAME]);
+  });
+
+  test("without any reason there is nothing to point to", () => {
+    const found = cards(view(health({ reasons: [] })));
+    for (const id of ["desk", "arm"] as const)
+      expect(found[id].notes).toEqual(["the monitor stopped updating"]);
+    expect(found.monitor.notes).toEqual(["the monitor stopped updating"]);
+  });
+
+  test("terminal A keeps its own marker note after the pointer", () => {
+    const rig = rigStatus({
+      marker: { state: "unknown", detail: "SERVER marker sentence" },
+      robot_idle: { state: "unknown", reasons: [] },
+    });
+    expect(card("arm", health(), rig).notes).toEqual([
+      "the monitor stopped updating",
+      SAME,
+      "SERVER marker sentence",
+    ]);
+    expect(card("desk", health(), rig).notes).toEqual([
+      "the monitor stopped updating",
+      SAME,
+    ]);
+  });
+
+  test("a red light is a real light: all three cards list the reasons as written", () => {
+    const found = cards(
+      view(health({ state: "red", detail: undefined, hardware_active: true })),
+    );
+    for (const id of ["desk", "arm", "monitor"] as const) {
+      expect(found[id].state).toBe("red");
+      expect(found[id].notes).toEqual(REASONS);
+    }
+    // Also when the red light only follows from the stack not running.
+    const down = cards(view(health({ state: "red", detail: undefined })));
+    expect(down.arm.state).toBe("not_started");
+    for (const id of ["desk", "arm", "monitor"] as const)
+      expect(down[id].notes).toEqual(REASONS);
+  });
+
+  test("an old sample keeps what the cards say", () => {
+    const found = cards(view({ ...health(), age_s: 30 }));
+    expect(found.monitor.notes).toContain(REASONS[0]);
+    for (const id of ["desk", "arm"] as const)
+      expect(found[id].notes).toEqual(["the monitor stopped updating", SAME]);
+  });
+
+  test("the note has words in both languages", () => {
+    expect(en["rig.note.same_as_monitor"]).toBe(
+      "Same reasons as the Terminal M card.",
+    );
+    expect(zh["rig.note.same_as_monitor"]).toBe("原因同终端 M 的卡片。");
+  });
+});
+
 describe("terminal A when the red light only follows from the stack not running", () => {
   const red = (reasons: unknown[], over: Record<string, unknown> = {}) =>
     setupStatus({
@@ -374,6 +482,41 @@ describe("terminal A when the red light only follows from the stack not running"
     "controller_manager_unreachable 5769s",
     "robot_state_no_data",
   ];
+
+  test("a monitor that waits for the first robot state is the stack not running", () => {
+    // It runs, but no robot state has reached it: the arm stack is not up.
+    const found = cards(view(red(["waiting_for_first_robot_state"])));
+    expect(found.arm.state).toBe("not_started");
+    expect(summary(found.arm)).toBe("rig.arm.red_follows");
+    expect(found.arm.hint).toBe("rig.arm.hint_red_follows");
+    expect(found.arm.notes).toEqual(["waiting_for_first_robot_state"]);
+    // Alone or among the other stack-down reasons.
+    expect(
+      card("arm", red([...STACK_DOWN, "waiting_for_first_robot_state"])).state,
+    ).toBe("not_started");
+    // The Desk and monitor cards report the light as it is.
+    expect(found.desk.state).toBe("red");
+    expect(found.monitor.state).toBe("red");
+  });
+
+  test("a reason that is not stack-down next to it keeps the light red", () => {
+    expect(
+      card("arm", red(["waiting_for_first_robot_state", "cartesian reflex"]))
+        .state,
+    ).toBe("red");
+    expect(
+      card("arm", red(["waiting_for_first_robot_state_extra"])).state,
+    ).toBe("red");
+  });
+
+  test("with the hardware active it is a fault of the arm or its link", () => {
+    expect(
+      card(
+        "arm",
+        red(["waiting_for_first_robot_state"], { hardware_active: true }),
+      ).state,
+    ).toBe("red");
+  });
 
   test("only stack-down reasons: not started, with a hint that says why", () => {
     const setup = red(STACK_DOWN);
@@ -401,6 +544,9 @@ describe("terminal A when the red light only follows from the stack not running"
       "controller_manager_unreachable 3.5s",
       "robot_state_no_data",
       "robot_state_no_data 7s",
+      "waiting_for_first_robot_state",
+      "waiting_for_first_robot_state 3s",
+      "waiting_for_first_robot_state (the arm stack is not up)",
     ])
       expect(card("arm", red([reason])).state).toBe("not_started");
   });
@@ -414,6 +560,10 @@ describe("terminal A when the red light only follows from the stack not running"
       "controller_manager_unreachables",
       "robot_state_no_data_yet",
       "robot_state_no_data7s",
+      "waiting_for_first_robot_state_extra",
+      "waiting_for_first_robot_state7s",
+      "waiting_for_first_robot_states",
+      "waiting_for_first_robot",
     ]) {
       expect(card("arm", red([reason])).state).toBe("red");
       // One of those among real stack-down reasons is enough to keep it red.
@@ -1309,6 +1459,197 @@ describe("the robot idle? banner", () => {
   });
 });
 
+describe("the hint about a marker left over from the last session", () => {
+  const LEFTOVER = "rig.hint.marker_leftover";
+  const MARKER = {
+    source: "marker",
+    state: "busy",
+    text: "the arm-controller marker is present (for 30 min)",
+    code: "marker.present",
+    params: { age_s: 1800 },
+  };
+  const markerOf = (age: unknown) => ({ ...MARKER, params: { age_s: age } });
+  const OTHER = {
+    guard: {
+      source: "guard",
+      state: "busy",
+      text: "a robot-side process is running: franka_ros2",
+      code: "guard.robot_process",
+      params: { names: "franka_ros2" },
+    },
+    units: {
+      source: "units",
+      state: "busy",
+      text: "levi-aeri-policy-pi05.service is active (running)",
+      code: "units.active",
+      params: {
+        name: "levi-aeri-policy-pi05.service",
+        active: "active",
+        sub: "running",
+      },
+    },
+    eval_sessions: {
+      source: "eval_sessions",
+      state: "busy",
+      text: "evaluation session 'pi05_run_a' updated 12 s ago, running",
+      code: "sessions.recent",
+      params: { group: "pi05_run_a", age_s: 12, status: "running" },
+    },
+  };
+  const OFFLINE = healthPart({
+    state: "offline",
+    detail: "the monitor stopped updating",
+    reasons: ["controller_manager_unreachable 43s", "robot_state_no_data 44s"],
+  });
+  const MISSING = {
+    state: "missing",
+    detail: "no health file: the monitor is not running",
+  };
+  const banner = (
+    health: unknown,
+    reasons: unknown[],
+    state: string = "busy",
+  ) =>
+    view(
+      setupStatus({ fr3_health: health }),
+      rigStatus({ robot_idle: { state, reasons } }),
+    ).banner;
+
+  test("only a marker that is there, and the health monitor not running: one hint", () => {
+    for (const health of [OFFLINE, MISSING]) {
+      const found = banner(health, [MARKER]);
+      expect(found.state).toBe("busy");
+      expect(flat(found.hint!)).toBe(LEFTOVER);
+      // The reason itself is still listed, worded as before.
+      expect(found.reasons.map((r) => flat(r.source))).toEqual([
+        "rig.source.marker",
+      ]);
+    }
+  });
+
+  test("a busy marker reason from an older server, which sends no code and no age, gets no hint", () => {
+    const older = { source: "marker", state: "busy", text: MARKER.text };
+    expect(banner(OFFLINE, [older]).hint).toBeNull();
+  });
+
+  test("a marker younger than 10 minutes gets no hint: it is the one the operator just placed before the 60 s wait", () => {
+    // setup.md: touch the marker, sleep 60, then start the arm stack; for that
+    // time the monitor is not running and no robot process exists yet.
+    for (const age of [0, 5, 60, 95, 599.9])
+      expect(banner(OFFLINE, [markerOf(age)]).hint).toBeNull();
+    for (const age of [600, 601, 1800, 43000])
+      expect(flat(banner(OFFLINE, [markerOf(age)]).hint!)).toBe(LEFTOVER);
+    // An age the page cannot read is not an old marker.
+    for (const age of [undefined, null, "1800", Number.NaN, -5])
+      expect(banner(OFFLINE, [markerOf(age)]).hint).toBeNull();
+    expect(banner(OFFLINE, [{ ...MARKER, params: undefined }]).hint).toBeNull();
+  });
+
+  test("the health state of an old setup sample is not trusted: no hint", () => {
+    const rig = rigStatus({ robot_idle: { state: "busy", reasons: [MARKER] } });
+    expect(
+      view(setupStatus({ fr3_health: OFFLINE }), rig).banner.hint,
+    ).not.toBeNull();
+    for (const old of [{ stale: true }, { age_s: 40 }])
+      expect(
+        view(setupStatus({ fr3_health: OFFLINE, ...old }), rig).banner.hint,
+      ).toBeNull();
+  });
+
+  test("a health file that cannot be read is not a monitor that stopped: no hint", () => {
+    const unreadable = { state: "offline", detail: "health file unreadable" };
+    expect(banner(unreadable, [MARKER]).hint).toBeNull();
+  });
+
+  test("the health file is ok, red, unreadable or not in the answer: no hint", () => {
+    const gone = setupStatus();
+    delete gone.fr3_health;
+    for (const setup of [
+      setupStatus({ fr3_health: healthPart() }),
+      setupStatus({ fr3_health: healthPart({ state: "red", reasons: ["x"] }) }),
+      setupStatus({ fr3_health: { state: "unknown", detail: "x" } }),
+      gone,
+      null,
+    ])
+      expect(
+        view(
+          setup,
+          rigStatus({ robot_idle: { state: "busy", reasons: [MARKER] } }),
+        ).banner.hint,
+      ).toBeNull();
+  });
+
+  test.each(Object.keys(OTHER))(
+    "a %s reason next to the marker: no hint",
+    (source) => {
+      const other = OTHER[source as keyof typeof OTHER];
+      expect(banner(OFFLINE, [MARKER, other]).hint).toBeNull();
+      expect(banner(OFFLINE, [other, MARKER]).hint).toBeNull();
+      expect(banner(MISSING, [other]).hint).toBeNull();
+    },
+  );
+
+  test("the real busy sample (marker, session and unit) gets no hint", () => {
+    expect(
+      view(setupStatus({ fr3_health: OFFLINE }), rigStatus()).banner.hint,
+    ).toBeNull();
+  });
+
+  test("a marker reason that is not 'present' gets no hint", () => {
+    for (const reason of [
+      { ...MARKER, state: "unknown", code: "marker.old" },
+      { ...MARKER, state: "unknown", code: "marker.unreadable" },
+      { ...MARKER, state: "unknown", code: "marker.no_folder" },
+    ])
+      expect(banner(OFFLINE, [reason], "unknown").hint).toBeNull();
+    // The same with a busy verdict (the check is on the reason, not only on it).
+    expect(
+      banner(OFFLINE, [{ ...MARKER, code: "marker.old" }]).hint,
+    ).toBeNull();
+    expect(banner(OFFLINE, [{ ...MARKER, state: "unknown" }]).hint).toBeNull();
+    // A code the page does not know says nothing about a leftover.
+    expect(
+      banner(OFFLINE, [{ ...MARKER, code: "marker.something_new" }]).hint,
+    ).toBeNull();
+    // Nor an entry the page cannot read, next to a good one.
+    expect(banner(OFFLINE, [MARKER, null]).hint).toBeNull();
+    expect(banner(OFFLINE, [MARKER, { source: "marker" }]).hint).toBeNull();
+  });
+
+  test("no reasons, or a verdict that is not 'busy': no hint", () => {
+    expect(banner(OFFLINE, []).hint).toBeNull();
+    expect(banner(OFFLINE, [MARKER], "unknown").hint).toBeNull();
+    // An idle verdict that lists a reason is withdrawn, hint included.
+    const idle = banner(OFFLINE, [MARKER], "idle");
+    expect(idle.state).toBe("unknown");
+    expect(idle.hint).toBeNull();
+  });
+
+  test("a banner without an answer, a malformed one and a quiet one carry no hint", () => {
+    expect(view(setupStatus({ fr3_health: OFFLINE }), null).banner.hint).toBe(
+      null,
+    );
+    expect(
+      view(setupStatus({ fr3_health: OFFLINE }), { robot_idle: 3 }).banner.hint,
+    ).toBeNull();
+    expect(view(quietSetup(), quietRig()).banner.hint).toBeNull();
+  });
+
+  test("the words exist in both languages, without a path", () => {
+    expect(en["rig.hint.marker_leftover"]).toBe(
+      "If the arm stack is down, this is probably a marker left over from the last session. Remove it as the shutdown steps in setup.md say.",
+    );
+    expect(zh["rig.hint.marker_leftover"]).toBe(
+      "如果机械臂栈已经停了，这多半是上次运行结束后没删的标记。按 setup.md 里“终端 A 退出后删除标记”的那一步处理。",
+    );
+    for (const text of [
+      en["rig.hint.marker_leftover"],
+      zh["rig.hint.marker_leftover"],
+    ])
+      expect(text).not.toMatch(/\/(?:home|tmp|var|opt)\b|\.state|\.tmp/);
+  });
+});
+
 describe("an idle verdict is kept only while the parts under it are known", () => {
   const idle = (change: (rig: Record<string, unknown>) => void = () => {}) => {
     const rig = quietRig();
@@ -1421,10 +1762,36 @@ describe("an idle verdict is kept only while the parts under it are known", () =
       };
     });
     expect(banner.state).toBe("unknown");
-    expect(flat(banner.note!)).toBe("rig.banner.idle_unverified");
+    // The parts were read: "a part could not be read" would be the wrong
+    // explanation, the contradiction is the reason.
+    expect(flat(banner.note!)).toBe("rig.banner.idle_with_reasons");
     expect(banner.reasons.map((r) => r.text)).toEqual([
       "the arm-controller marker is present (for 2 min)",
     ]);
+  });
+
+  test("idle with reasons over a part nobody could read: the unread part is named", () => {
+    const banner = idle((rig) => {
+      rig.units = { state: "unknown", items: [], detail: "x" };
+      rig.robot_idle = {
+        state: "idle",
+        reasons: [{ source: "units", state: "unknown", text: "x" }],
+      };
+    });
+    expect(banner.state).toBe("unknown");
+    expect(flat(banner.note!)).toBe("rig.banner.idle_unverified");
+  });
+
+  test("the two notes are different sentences in both languages", () => {
+    expect(en["rig.banner.idle_with_reasons"]).toBe(
+      "The answer says idle but lists reasons, so it is not trusted.",
+    );
+    expect(zh["rig.banner.idle_with_reasons"]).toBeTruthy();
+    expect(zh["rig.banner.idle_with_reasons"]).not.toMatch(/[A-Za-z]/);
+    for (const catalogue of [en, zh] as Array<Record<string, string>>)
+      expect(catalogue["rig.banner.idle_with_reasons"]).not.toBe(
+        catalogue["rig.banner.idle_unverified"],
+      );
   });
 
   test("any entry in the list counts, even one the page cannot read", () => {
@@ -1432,7 +1799,7 @@ describe("an idle verdict is kept only while the parts under it are known", () =
       rig.robot_idle = { state: "idle", reasons: [null] };
     });
     expect(banner.state).toBe("unknown");
-    expect(flat(banner.note!)).toBe("rig.banner.idle_unverified");
+    expect(flat(banner.note!)).toBe("rig.banner.idle_with_reasons");
     expect(banner.reasons).toEqual([]);
   });
 
