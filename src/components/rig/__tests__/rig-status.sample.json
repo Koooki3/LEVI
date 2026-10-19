@@ -1,0 +1,68 @@
+{
+  "schema": "levi.rig.status.v1",
+  "sampled_at": "2026-10-19T15:30:00+08:00",
+  "marker": {
+    "state": "present",
+    "age_s": 95.0,
+    "detail": null
+  },
+  "eval_sessions": {
+    "state": "ok",
+    "roots": 1,
+    "sessions": [
+      {
+        "group": "pi05_run_a",
+        "age_s": 12.0,
+        "status": "running"
+      }
+    ],
+    "detail": null
+  },
+  "units": {
+    "state": "ok",
+    "items": [
+      {
+        "name": "levi-aeri-policy-pi05.service",
+        "active": "active",
+        "sub": "running"
+      }
+    ],
+    "detail": null
+  },
+  "robot_idle": {
+    "state": "busy",
+    "reasons": [
+      {
+        "source": "marker",
+        "state": "busy",
+        "text": "the arm-controller marker is present (for 2 min)",
+        "code": "marker.present",
+        "params": {
+          "age_s": 95.0
+        }
+      },
+      {
+        "source": "eval_sessions",
+        "state": "busy",
+        "text": "evaluation session 'pi05_run_a' updated 12 s ago, running",
+        "code": "sessions.recent",
+        "params": {
+          "group": "pi05_run_a",
+          "age_s": 12.0,
+          "status": "running"
+        }
+      },
+      {
+        "source": "units",
+        "state": "busy",
+        "text": "levi-aeri-policy-pi05.service is active (running)",
+        "code": "units.active",
+        "params": {
+          "name": "levi-aeri-policy-pi05.service",
+          "active": "active",
+          "sub": "running"
+        }
+      }
+    ]
+  }
+}

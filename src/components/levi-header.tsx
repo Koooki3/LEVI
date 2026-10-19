@@ -28,7 +28,7 @@ import { offersTrainingPool } from "./live/embedding";
 import { LiveNavLink } from "./live/live-nav";
 import { useLivePulse } from "./live/use-live-pulse";
 import { CommandPalette } from "./shell/command-palette";
-import { isCurrentPage, navPages } from "./shell/commands";
+import { headerPages, isCurrentPage, navPages } from "./shell/commands";
 import { isApplePlatform, paletteKeys } from "./shell/global-keys";
 import { JobsMenu } from "./shell/jobs-menu";
 import { useShell } from "./shell/shell-context";
@@ -101,7 +101,7 @@ export default function LeviHeader() {
           <LeviWordmark size={20} />
         </Link>
         <nav className="levi-shell-nav" aria-label={t("Main navigation")}>
-          {pages.map((page) =>
+          {headerPages(pages).map((page) =>
             page.href === "/live" ? (
               <LiveNavLink
                 key={page.href}

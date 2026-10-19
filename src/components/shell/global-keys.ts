@@ -7,7 +7,8 @@
  *   never while typing.
  *
  * - G, then a letter, goes to a page (G H home, G E explore, G W conversion &
- *   review, G P training pool, G L live evaluation, G R report, G U guide):
+ *   review, G P training pool, G L live evaluation, G C rig console, G R
+ *   report, G U guide):
  *   the second key must follow within CHORD_WINDOW_MS and never fires while
  *   typing.
  *
@@ -85,6 +86,7 @@ export const CHORD_PAGES: Record<string, { href: string; label: string }> = {
   w: { href: "/workbench", label: "Conversion & review" },
   p: { href: "/pool", label: "Training pool" },
   l: { href: "/live", label: "Live evaluation" },
+  c: { href: "/rig", label: "Rig console" },
   r: { href: "/report", label: "Report" },
   u: { href: "/guide", label: "Guide" },
 };

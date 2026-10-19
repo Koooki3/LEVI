@@ -30,6 +30,8 @@ export type NavPage = {
   href: string;
   label: string;
   keywords: string[];
+  /** `false`: in the palette and the go-to chords, not a header link. */
+  header?: boolean;
 };
 
 export function navPages(options: { live: boolean; pool: boolean }): NavPage[] {
@@ -45,6 +47,12 @@ export function navPages(options: { live: boolean; pool: boolean }): NavPage[] {
       href: "/automatic",
       label: "liveService.navAutomatic",
       keywords: ["automatic", "aeri", "evaluation", "自动测评", "自动评测"],
+    },
+    {
+      href: "/rig",
+      label: "Rig console",
+      keywords: ["robot", "rig", "status", "机器人台", "状态"],
+      header: false,
     },
     {
       href: "/explore",
@@ -76,6 +84,11 @@ export function navPages(options: { live: boolean; pool: boolean }): NavPage[] {
     },
   );
   return pages;
+}
+
+/** The pages the header shows as links (the palette offers all of them). */
+export function headerPages(pages: NavPage[]): NavPage[] {
+  return pages.filter((page) => page.header !== false);
 }
 
 /** Whether `href` is the page at `pathname` (or a page below it). */

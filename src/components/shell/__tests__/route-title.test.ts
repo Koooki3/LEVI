@@ -19,6 +19,7 @@ describe("tab titles", () => {
     expect(routeTitle("/workbench")).toBe("Conversion & review · LEVI");
     expect(routeTitle("/pool")).toBe("Training pool · LEVI");
     expect(routeTitle("/live")).toBe("Live evaluation · LEVI");
+    expect(routeTitle("/rig")).toBe("Rig console · LEVI");
     expect(routeTitle("/lerobot/aloha_static_coffee/episode_3")).toBe(
       "Episode viewer · lerobot/aloha_static_coffee · Episode 3 · LEVI",
     );
@@ -44,6 +45,7 @@ describe("tab titles", () => {
     expect(routeTitle("/explore", zhText)).toBe("探索数据 · LEVI");
     expect(routeTitle("/pool", zhText)).toBe("训练池 · LEVI");
     expect(routeTitle("/live", zhText)).toBe("实时评测 · LEVI");
+    expect(routeTitle("/rig", zhText)).toBe("机器人台 · LEVI");
     expect(routeTitle("/", zhText)).toBe("首页 · LEVI");
     expect(routeTitle("/org/ds/episode_0", zhText)).toBe(
       "片段查看器 · org/ds · 片段 0 · LEVI",

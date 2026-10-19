@@ -37,6 +37,8 @@ export function routePageName(pathname: string | null): string | null {
       return "Live evaluation";
     case "automatic":
       return "liveService.navAutomatic";
+    case "rig":
+      return "Rig console";
     case "design":
       return "Design system";
     default:

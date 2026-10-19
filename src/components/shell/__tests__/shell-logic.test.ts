@@ -9,6 +9,7 @@ import {
   buildCommands,
   filterCommands,
   isCurrentPage,
+  headerPages,
   navPages,
 } from "../commands";
 import {
@@ -119,9 +120,21 @@ describe("global shortcuts", () => {
 });
 
 describe("navigation and commands", () => {
+  test("the header leaves out pages that are in the palette only", () => {
+    const pages = navPages({ live: true, pool: true });
+    const all = pages.map((p) => p.href);
+    // The rig console is reached by Ctrl+K and G C: an eighth header link
+    // pushed Guide and Report out of view below 1500 px.
+    expect(all).toContain("/rig");
+    expect(headerPages(pages).map((p) => p.href)).toEqual(
+      all.filter((href) => href !== "/rig"),
+    );
+  });
+
   test("pages follow the live and pool offers, in navigation order", () => {
     expect(navPages({ live: false, pool: true }).map((p) => p.href)).toEqual([
       "/automatic",
+      "/rig",
       "/explore",
       "/workbench",
       "/pool",
@@ -131,6 +144,7 @@ describe("navigation and commands", () => {
     expect(navPages({ live: true, pool: false }).map((p) => p.href)).toEqual([
       "/live",
       "/automatic",
+      "/rig",
       "/explore",
       "/workbench",
       "/guide",

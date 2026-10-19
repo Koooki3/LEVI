@@ -1,0 +1,151 @@
+/* Styles of the Rig console (/rig). Classes start with `rg-`; colours come
+ * from the `--ds-*` tokens only, so the light and dark themes both work. A
+ * state is always told in words and by the badge's shape, never by colour
+ * alone; the coloured edge of a card only repeats it. */
+.rg-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-5);
+}
+.rg-page h1 {
+  margin: 0;
+}
+.rg-page h2 {
+  margin: 0;
+}
+.rg-page p {
+  margin: 0;
+}
+.rg-scope {
+  margin: 0;
+  padding-left: var(--ds-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+.rg-fresh {
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-caption-size);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.rg-bad {
+  color: var(--ds-danger);
+}
+.rg-banner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-4);
+  border: 1px solid var(--ds-separator);
+  border-left-width: 4px;
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+}
+.rg-banner--busy {
+  border-left-color: var(--ds-warning);
+  background: var(--ds-warning-bg);
+}
+.rg-banner--idle,
+.rg-banner--unknown {
+  border-left-color: var(--ds-separator-strong);
+}
+.rg-banner__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2) var(--ds-space-3);
+}
+.rg-banner__reasons {
+  margin: 0;
+  padding-left: var(--ds-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  font-size: var(--ds-text-callout-size);
+}
+.rg-source {
+  font-weight: var(--ds-weight-semibold);
+}
+/* What a reason says, in the page's words. */
+.rg-what {
+  display: block;
+  overflow-wrap: anywhere;
+}
+/* The server's own sentence, in English whatever the page's language. */
+.rg-server {
+  display: block;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  overflow-wrap: anywhere;
+}
+.rg-muted {
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  min-width: 0;
+}
+.rg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--ds-space-4);
+  align-items: start;
+}
+.rg-card {
+  border-left-width: 4px;
+  min-width: 0;
+}
+.rg-card--ok {
+  border-left-color: var(--ds-success);
+}
+.rg-card--red {
+  border-left-color: var(--ds-danger);
+}
+.rg-card--stale {
+  border-left-color: var(--ds-warning);
+}
+.rg-card--not_started,
+.rg-card--unknown {
+  border-left-color: var(--ds-separator-strong);
+}
+.rg-card .ds-card__header {
+  margin-bottom: var(--ds-space-3);
+}
+.rg-facts {
+  display: grid;
+  grid-template-columns: minmax(96px, 12rem) minmax(0, 1fr);
+  gap: var(--ds-space-1) var(--ds-space-3);
+  margin: 0;
+  font-size: var(--ds-text-caption-size);
+}
+.rg-facts dt {
+  color: var(--ds-text-tertiary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.rg-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.rg-notes {
+  margin: var(--ds-space-2) 0 0;
+  padding-left: var(--ds-space-5);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+  overflow-wrap: anywhere;
+}
+.rg-hint {
+  margin: var(--ds-space-3) 0 0;
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-tertiary);
+}
+.rg-fact {
+  display: contents;
+}
