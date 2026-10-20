@@ -1198,7 +1198,8 @@ def test_the_process_scan_cap_is_reported(proc, monkeypatch):
     out = probe().status(P.Context(proc=str(proc.root)))
     assert out["guard"]["quiet"] is None  # cannot tell: not every process was seen
     assert out["guard"]["truncated"] is True
-    assert out["ports"]["truncated"] is True
+    # port owners come only from our own units' cgroup.procs, never a /proc scan
+    assert out["ports"]["truncated"] is False
 
 
 def test_a_truncated_ros_log_is_reported(proc, tmp_path):
