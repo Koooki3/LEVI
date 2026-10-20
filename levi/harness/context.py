@@ -10,7 +10,11 @@ from its snapshot only (never from the live memory file), notes are those
 recorded at or before ``frozen_at``, and examples come only from episodes the
 snapshot lists as annotated (LITE-35). An example episode's segments are read
 from the live file, so a correction to an episode that was already annotated
-at plan time can still show; that cannot be frozen without copying it.
+at plan time can still show; that cannot be frozen without copying it. Snapshots carry the
+``annotated`` list since 8222614a (2026-09-23): a run frozen before that has no
+list and so gets no examples now (the safe side); replaying such an old run
+gives a different prompt than it had, and its recorded prompt stays the
+reference.
 
 Held-out rule: examples never come from an episode the run itself annotates --
 the learner must not be handed the answer. Teacher notes are general rules and
