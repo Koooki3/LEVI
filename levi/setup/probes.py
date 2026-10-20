@@ -5,12 +5,15 @@ takes a lock, writes a file or starts a process other than ``nvidia-smi``
 with query options (NVML; it creates no CUDA context):
 
 - listening ports: the LISTEN rows of ``/proc/net/tcp`` and ``tcp6``, their
-  socket inode matched to ``/proc/<pid>/fd`` (processes of the same user;
-  others are reported without an owner). **No connection is made**, not even
-  to LEVI's own ports;
+  socket inode matched to the ``/proc/<pid>/fd`` of OUR processes only: the
+  pids in our own ``levi-*`` systemd --user units (their ``cgroup.procs``,
+  ``own_pids``). Any other socket is reported without an owner; no other
+  process's ``/proc/<pid>`` is opened (RIG-01, root AGENTS.md boundary).
+  **No connection is made**, not even to LEVI's own ports;
 - GPU memory, utilisation and compute processes: ``nvidia-smi --query-gpu``
-  and ``--query-compute-apps``; a process is named by the port it (or a
-  parent) listens on, else ``other``;
+  and ``--query-compute-apps``; one of our processes is named by the port it
+  (or one of our parents) listens on; any other process keeps only its memory
+  (``external``, no pid, no name);
 - GPU lock holders: ``/proc/locks`` matched to the lock files' device and
   inode (the lock is never taken);
 - vLLM asleep/awake, the GPU gate and the admission decision: the live
@@ -70,7 +73,6 @@ from pathlib import Path
 DEFAULT_TTL_S = 2.0
 MIN_TTL_S = 1.0
 CONTEXT_TTL_S = 10.0
-OWNER_RESCAN_S = 30.0  # a full /proc/*/fd scan for sockets still without an owner
 ROBOT_SCAN_S = 5.0
 ROS_SCAN_S = 5.0
 DISK_SCAN_S = 10.0
@@ -140,6 +142,9 @@ class Context:
     (``context_from_environment``); tests build it by hand."""
 
     proc: str = "/proc"
+    # Our own processes: the levi-* units of this user's systemd instance.
+    cgroup_root: str = "/sys/fs/cgroup"
+    own_uid: int | None = None  # None: os.getuid()
     ports: tuple = PORTS
     live_status_file: str | None = None
     gpu_lock_files: tuple = ()  # (label, path)
@@ -243,6 +248,18 @@ def _ancestors(proc, pid, depth=6) -> list:
     return out
 
 
+def _own_chain(proc, pid, own, depth=6) -> list:
+    """``pid`` and its parents while they are ours, nearest first: only our
+    own processes' ``stat`` files are read."""
+    out = [pid]
+    while len(out) < depth:
+        parent = _parent(proc, out[-1])
+        if not parent or parent <= 1 or parent not in own:
+            break
+        out.append(parent)
+    return out
+
+
 def _comm(proc, pid) -> str | None:
     text = _read(f"{proc}/{pid}/comm", 256)
     return text.strip()[:64] if text else None
@@ -257,6 +274,42 @@ def _pids(proc) -> tuple:
         return [], False
     pids = sorted(int(n) for n in names if n.isdigit())
     return pids[:MAX_PIDS], len(pids) > MAX_PIDS
+
+
+OWN_UNIT_PREFIX = "levi-"
+
+
+def own_pids(cgroup_root="/sys/fs/cgroup", uid=None) -> set:
+    """Pids in OUR systemd --user units (names starting ``levi-``), from those
+    units' own ``cgroup.procs`` (sub-cgroups included). Nothing under /proc is
+    read; an unreadable tree is an empty set (every other process stays
+    unowned, which is the safe answer)."""
+    uid = os.getuid() if uid is None else uid
+    base = (
+        Path(cgroup_root) / "user.slice" / f"user-{uid}.slice" / f"user@{uid}.service"
+    )
+    out: set = set()
+    try:
+        parents = [base] + [d for d in base.iterdir() if d.name.endswith(".slice")]
+    except OSError:
+        return out
+    for parent in parents:
+        try:
+            units = [
+                d
+                for d in parent.iterdir()
+                if d.name.startswith(OWN_UNIT_PREFIX)
+                and d.name.endswith((".service", ".scope"))
+            ]
+        except OSError:
+            continue
+        for unit in units:
+            for listing in unit.rglob("cgroup.procs"):
+                try:
+                    out.update(int(x) for x in listing.read_text().split())
+                except (OSError, ValueError):
+                    continue
+    return out
 
 
 # ------------------------------------------------------------------ ports
@@ -373,10 +426,10 @@ class Probes:
     _inflight: dict = field(default_factory=dict)  # probe name -> _Task
     _cpu_prev: tuple | None = None
     _owners: dict = field(default_factory=dict)  # inode -> pid
-    _owner_scan_at: float = -1e18
     _owner_unresolved: set = field(default_factory=set)
-    _owner_truncated: bool = False
-    _owner_proc: str = ""
+    _owner_truncated: bool = (
+        False  # no full scan any more: always False (kept in the answer)
+    )
     _every: dict = field(default_factory=dict)
     _ros_files: dict = field(default_factory=dict)  # path -> (key, events, truncated)
     _controller_active: bool = False
@@ -523,43 +576,20 @@ class Probes:
         }
 
     # -- ports
-    def _resolve_owners(self, proc, inodes) -> None:
-        # Keep the owners still holding their socket; find the rest with a
-        # full scan: at once for a socket not seen before, else at most every
-        # OWNER_RESCAN_S (another user's sockets never resolve and must not
-        # cost a scan per request).
-        if proc != self._owner_proc:
-            self._owners.clear()
-            self._owner_unresolved = set()
-            self._owner_scan_at = -1e18
-            self._owner_proc = proc
-        for inode in list(self._owners):
-            if inode not in inodes:
-                del self._owners[inode]
-        checked: dict = {}
-        for inode, pid in list(self._owners.items()):
-            held = checked.get(pid)
-            if held is None:
-                held = checked[pid] = _socket_inodes(proc, pid) or set()
-            if inode not in held:
-                del self._owners[inode]
-        missing = inodes - set(self._owners)
-        self._owner_unresolved &= inodes
-        now = self.clock()
-        new = missing - self._owner_unresolved
-        if not missing or (not new and now - self._owner_scan_at < OWNER_RESCAN_S):
-            return
-        self._owner_scan_at = now
-        pids, self._owner_truncated = _pids(proc)
-        for pid in pids:
+    def _resolve_owners(self, proc, inodes, own) -> None:
+        """Owner of each wanted socket among OUR processes only (their own
+        /proc/<pid>/fd); another process's socket stays without an owner."""
+        self._owners = {}
+        missing = set(inodes)
+        for pid in sorted(own):
+            if not missing:
+                break
             held = _socket_inodes(proc, pid)
             if not held:
                 continue
             for inode in missing & held:
                 self._owners[inode] = pid
             missing -= held
-            if not missing:
-                break
         self._owner_unresolved = missing
 
     def _ports(self, c: Context) -> dict:
@@ -568,7 +598,7 @@ class Probes:
             return {"state": "unknown", "detail": "/proc/net/tcp cannot be read"}
         wanted = {port for port, _ in c.ports}
         inodes = {inode for port in wanted for _, inode in table.get(port, [])}
-        self._resolve_owners(c.proc, inodes)
+        self._resolve_owners(c.proc, inodes, own_pids(c.cgroup_root, c.own_uid))
         rows = []
         for port, role in c.ports:
             sockets = table.get(port, [])
@@ -631,6 +661,7 @@ class Probes:
             for r in rows
             if len(r) >= 5
         ]
+        own = own_pids(c.cgroup_root, c.own_uid)
         apps = []
         for r in (
             self._nvidia("--query-compute-apps=pid,process_name,used_memory") or []
@@ -638,12 +669,22 @@ class Probes:
             if len(r) < 3 or not r[0].isdigit():
                 continue
             pid = int(r[0])
+            if pid not in own:  # someone else's: its memory only (RIG-01)
+                apps.append(
+                    {
+                        "pid": None,
+                        "name": None,
+                        "memory_mib": num(r[2]),
+                        "external": True,
+                    }
+                )
+                continue
             apps.append(
                 {
                     "pid": pid,
                     "name": os.path.basename(r[1])[:60],
                     "memory_mib": num(r[2]),
-                    "_chain": _ancestors(c.proc, pid),
+                    "_chain": _own_chain(c.proc, pid, own),
                 }
             )
         return {"state": "ok", "gpus": gpus, "processes": apps}
@@ -661,7 +702,7 @@ class Probes:
         }
         named = []
         for app in gpu.get("processes", []):
-            chain = app.get("_chain") or [app["pid"]]
+            chain = app.get("_chain") or ([app["pid"]] if app.get("pid") else [])
             role = next((roles[p] for p in chain if p in roles), "other")
             named.append(
                 {k: v for k, v in app.items() if k != "_chain"} | {"role": role}
@@ -677,6 +718,7 @@ class Probes:
                 "locks": [],
             }
         table = _read(f"{c.proc}/locks", 4 << 20)
+        own = own_pids(c.cgroup_root, c.own_uid)
         out = []
         for label, path in c.gpu_lock_files:
             try:
@@ -707,7 +749,9 @@ class Probes:
                 holders.append(
                     {
                         "pid": pid if pid and pid > 0 else None,
-                        "process": _comm(c.proc, pid) if pid and pid > 0 else None,
+                        "process": _comm(c.proc, pid)
+                        if pid and pid > 0 and pid in own
+                        else None,
                         "kind": fields[1],
                         "mode": fields[3],
                     }

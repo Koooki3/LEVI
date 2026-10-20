@@ -44,7 +44,9 @@ class FakeProc:
 
     def __init__(self, root):
         self.root = root
+        self.cgroup = root.parent / "cgroup"
         root.mkdir(parents=True, exist_ok=True)
+        self.cgroup.mkdir(parents=True, exist_ok=True)
         (root / "net").mkdir(exist_ok=True)
         (root / "pressure").mkdir(exist_ok=True)
         (root / "self").mkdir(exist_ok=True)
@@ -73,6 +75,29 @@ class FakeProc:
         for n, inode in enumerate(sockets, start=3):
             os.symlink(f"socket:[{inode}]", d / "fd" / str(n))
         os.symlink("/dev/null", d / "fd" / "0")
+
+    def own(self, *pids, unit="levi-product.service"):
+        """Mark ``pids`` as ours: a levi-* unit of a fake systemd --user tree."""
+        d = (
+            self.cgroup
+            / "user.slice"
+            / "user-1000.slice"
+            / "user@1000.service"
+            / "app.slice"
+            / unit
+        )
+        d.mkdir(parents=True, exist_ok=True)
+        old = (
+            (d / "cgroup.procs").read_text().split()
+            if (d / "cgroup.procs").exists()
+            else []
+        )
+        (d / "cgroup.procs").write_text("\n".join(old + [str(x) for x in pids]) + "\n")
+
+    def ctx(self, **kw):
+        return P.Context(
+            proc=str(self.root), cgroup_root=str(self.cgroup), own_uid=1000, **kw
+        )
 
     def host(self, cpu=(100, 0, 100, 800, 0, 0, 0, 0), psi_cpu=1.0, swap_used_kib=0):
         (self.root / "loadavg").write_text("1.50 1.20 1.00 2/700 12345\n")
@@ -143,7 +168,9 @@ def test_ports_from_the_kernel_table_with_owners(proc):
     proc.listen(9999, "444")
     proc.process(50, "python", sockets=["111"])
     proc.process(60, "vllm", sockets=["999", "222"])
-    out = probe().status(P.Context(proc=str(proc.root)))["ports"]
+    proc.process(70, "theirs", sockets=["333"])  # someone else's: never opened
+    proc.own(50, 60)
+    out = probe().status(proc.ctx())["ports"]
     rows = {r["port"]: r for r in out["ports"]}
     assert rows[7861] == {
         "port": 7861,
@@ -172,39 +199,40 @@ def test_ipv6_any_and_non_listen_rows(proc):
     assert rows[8000]["listening"] is False  # ESTABLISHED, not LISTEN
 
 
-def test_owner_full_scan_is_rate_limited(proc, monkeypatch):
-    proc.listen(8000, "777")  # another user's socket: never resolves
+def test_only_our_processes_are_asked_for_their_sockets(proc, monkeypatch):
+    """RIG-01: owners are looked for among our own units' pids only; another
+    process's fd folder is never opened, and its socket stays unowned."""
+    proc.listen(8000, "777")
     for pid in range(100, 110):
-        proc.process(pid, "x")
-    scans = []
+        proc.process(pid, "x", sockets=["777"] if pid == 105 else ())
+    proc.process(60, "levi", sockets=["555"])
+    proc.own(60)
+    asked = []
     real = P._socket_inodes
     monkeypatch.setattr(
-        P, "_socket_inodes", lambda root, pid: scans.append(pid) or real(root, pid)
+        P, "_socket_inodes", lambda root, pid: asked.append(pid) or real(root, pid)
     )
     clock = Clock()
     p = probe(clock=clock)
-    ctx = P.Context(proc=str(proc.root))
-    p.status(ctx)
-    first = len(scans)
-    assert first >= 10
-    for _ in range(5):
+    for _ in range(3):
+        row = next(
+            r for r in p.status(proc.ctx())["ports"]["ports"] if r["port"] == 8000
+        )
+        assert row["pid"] is None and row["owner_known"] is False
         clock.t += P.DEFAULT_TTL_S + 0.1
-        p.status(ctx)
-    assert len(scans) == first  # no new full scan within OWNER_RESCAN_S
-    clock.t += P.OWNER_RESCAN_S
-    p.status(ctx)
-    assert len(scans) > first
+    assert asked and set(asked) == {60}
 
 
 def test_a_new_listener_is_resolved_at_once(proc):
     proc.listen(8000, "777")  # unresolvable
     clock = Clock()
     p = probe(clock=clock)
-    ctx = P.Context(proc=str(proc.root))
+    ctx = proc.ctx()
     p.status(ctx)
     proc.listen(8100, "888")
     proc.process(60, "vllm", sockets=["888"])
-    clock.t += P.DEFAULT_TTL_S + 0.1  # well within OWNER_RESCAN_S
+    proc.own(60)
+    clock.t += P.DEFAULT_TTL_S + 0.1
     row = next(r for r in p.status(ctx)["ports"]["ports"] if r["port"] == 8100)
     assert row["pid"] == 60
 
@@ -212,9 +240,10 @@ def test_a_new_listener_is_resolved_at_once(proc):
 def test_known_owner_is_rechecked_cheaply_and_dropped_when_gone(proc, tmp_path):
     proc.listen(7861, "111")
     proc.process(50, "python", sockets=["111"])
+    proc.own(50)
     clock = Clock()
     p = probe(clock=clock)
-    ctx = P.Context(proc=str(proc.root))
+    ctx = proc.ctx()
     assert p.status(ctx)["ports"]["ports"][5]["pid"] == 50
     os.unlink(proc.root / "50" / "fd" / "3")
     clock.t += P.DEFAULT_TTL_S + 0.1
@@ -230,10 +259,11 @@ def test_gpu_processes_are_named_by_the_port_their_parent_serves(proc):
     proc.process(70, "python", sockets=["333"])
     proc.process(71, "python", ppid=70)  # the policy server's worker
     proc.process(80, "isaac", ppid=1)
+    proc.own(70, 71)
     run = nvidia(
         apps=["71, /usr/bin/python3, 8000", "80, isaac-sim, 12000", "x, bad, 1"]
     )
-    out = probe(runner=run).status(P.Context(proc=str(proc.root)))["gpu"]
+    out = probe(runner=run).status(proc.ctx())["gpu"]
     assert out["gpus"][0] == {
         "index": 0,
         "name": "NVIDIA RTX 5090",
@@ -242,8 +272,16 @@ def test_gpu_processes_are_named_by_the_port_their_parent_serves(proc):
         "free_mib": 12607,
         "util_pct": 37,
     }
-    roles = {a["pid"]: (a["role"], a["name"]) for a in out["processes"]}
-    assert roles == {71: ("policy_server", "python3"), 80: ("other", "isaac-sim")}
+    ours, theirs = out["processes"]
+    assert (ours["pid"], ours["role"], ours["name"]) == (71, "policy_server", "python3")
+    # someone else's GPU process: its memory only, no pid, no name (RIG-01)
+    assert theirs == {
+        "pid": None,
+        "name": None,
+        "memory_mib": 12000,
+        "external": True,
+        "role": "other",
+    }
     assert all(c[0] == "nvidia-smi" for c in run.calls) and len(run.calls) == 2
 
 
@@ -271,13 +309,13 @@ def test_lock_holders_from_proc_locks(proc, tmp_path):
     st = os.stat(lock)
     key = f"{os.major(st.st_dev):02x}:{os.minor(st.st_dev):02x}:{st.st_ino}"
     proc.process(90, "flock")
+    proc.own(90)
     (proc.root / "locks").write_text(
         f"1: FLOCK  ADVISORY  WRITE 90 {key} 0 EOF\n"
         f"1: -> FLOCK  ADVISORY  WRITE 91 {key} 0 EOF\n"
         "2: POSIX  ADVISORY  READ 92 00:01:1 0 EOF\n"
     )
-    ctx = P.Context(
-        proc=str(proc.root),
+    ctx = proc.ctx(
         gpu_lock_files=(("levi", str(lock)), ("live", str(tmp_path / "absent.lock"))),
     )
     out = probe().status(ctx)["gpu_locks"]["locks"]
