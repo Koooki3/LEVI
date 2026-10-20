@@ -57,8 +57,8 @@ LEVI 是面向机器人学习数据的本地工作台：浏览 LeRobot 数据集
 ## 已经测到了什么
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/07-evidence-zh-dark.svg">
-  <img alt="点线图：在 plates 上锚定复核达到扩大规模的质量门槛（平衡准确率 0.94，12.8% 的失败被判成成功）；在 screws 上没达到（0.76，48.7%）。" src="docs/assets/atlas/07-evidence-zh-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/16-evidence-lite-zh-dark.svg">
+  <img alt="点线图：在 plates 上锚定复核达到扩大规模的质量门槛（平衡准确率 0.94，12.8% 的失败被判成成功）；在 screws 上没达到（0.76，48.7%）。" src="docs/assets/atlas/16-evidence-lite-zh-light.svg">
 </picture>
 
 下面的数字来自本项目自己的实验，除非另有说明，都是一个任务族（叠盘子）上的结果；它们来自本项目自己的实验记录，该记录不随本仓库发布；[验证](docs/VALIDATION.md) 记录了锚定复核的重跑。

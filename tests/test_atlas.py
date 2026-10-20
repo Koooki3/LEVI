@@ -260,7 +260,9 @@ def test_chinese_status_badges_use_the_readme_words():
 
 
 # README figures still waiting for a large-text version (PROMO-ATLAS-LEGIBILITY).
-README_SMALL_TEXT_PENDING = {"07-evidence"}
+README_SMALL_TEXT_PENDING: set[str] = (
+    set()
+)  # every README figure has a large-text version
 
 
 def test_readme_figures_are_large_enough_to_read():
@@ -283,3 +285,25 @@ def test_readme_figures_are_large_enough_to_read():
             assert min(sizes) >= 15, (page, target, min(sizes))
             large = sum(s >= 18 for s in sizes)
             assert large >= 0.6 * len(sizes), (page, target, large, len(sizes))
+
+
+# Every caveat of figure 7 (cost, limits, scope, source, blindness) must also be in
+# its README version: a shorter figure may drop words, never a limitation.
+EVIDENCE_CAVEATS = {
+    "": (
+        "1.7x",
+        "unreviewed",
+        "real-robot policy result",
+        "VALIDATION.md",
+        "coordinator",
+    ),
+    "-zh": ("1.7 倍", "未经审核", "真机策略结果", "VALIDATION.md", "协调者"),
+}
+
+
+@pytest.mark.parametrize("suffix", sorted(EVIDENCE_CAVEATS))
+def test_the_readme_evidence_figure_keeps_every_caveat_of_figure_7(suffix):
+    for name in ("07-evidence", "16-evidence-lite"):
+        text = (ATLAS / f"{name}{suffix}-light.svg").read_text(encoding="utf8")
+        missing = [c for c in EVIDENCE_CAVEATS[suffix] if c not in text]
+        assert not missing, (name + suffix, missing)

@@ -567,4 +567,12 @@ ZH = {
     # figures 5 and 6: design notes for the AERI subtask loop
     "In the AERI subtask loop (earlier versions: external mode only on the robot) the policy and the vision model take turns on the GPU by default.": "在 AERI 子任务闭环里（此前版本只在外部模式下上过真机），策略和视觉模型默认轮流使用 GPU。",
     "In the AERI subtask loop (earlier versions: external mode only on the robot) the vision model also plans subtasks; its “done” only moves the flow on.": "在 AERI 子任务闭环里（此前版本只在外部模式下上过真机），视觉模型还负责规划子任务；它判的“完成”只推进流程。",
+    # README version of figure 7 (16-evidence-lite)
+    "Judging success, README version: one task meets the bar, one does not": "判定成败（README 版）：一个任务达标，一个没有",
+    "Dot plots on blind 60-episode test sets with the scale-up quality bar drawn in. Plates: release-anchored review reaches balanced accuracy 0.936 (LEVI from segments 0.808, a direct call 0.782) and judges 12.8% of failures as successes (38.5%, 43.6%); both meet the bar of 0.90 and 15%. Screws: 0.756 and 48.7%, both miss it. The full version is figure 7 in the architecture atlas.": "60 个片段盲测集上的点线图，画出了扩大规模的质量门槛。plates：锚定复核的平衡准确率 0.936（LEVI 由时间片段推导 0.808，直接调用 0.782），失败被判成功的比例 12.8%（38.5%、43.6%），两项都达到 0.90 和 15% 的门槛。screws：0.756 和 48.7%，两项都没达到。完整版是架构图集的图 7。",
+    "Same local model, blind gold labels, 60 episodes per task.": "同一个本地模型，盲测金标准，每个任务 60 个片段。",
+    "Time-segment labelling is at parity with a direct call (segment F1 about 0.34 on plates) and takes about 1.7x its time.": "时间片段标注与直接调用持平（plates 上片段 F1 约 0.34），耗时约为直接调用的 1.7 倍。",
+    "No figure here is a real-robot policy result. Plates re-run: docs/VALIDATION.md.": "本图不含任何真机策略结果。plates 复跑见 docs/VALIDATION.md。",
+    "Not established: whether training on LEVI-curated data improves a robot policy.": "尚未证实：用 LEVI 整理过的数据训练能否改进机器人策略。",
+    "Some screws outcomes reached the coordinator through annotator replies; not used for tuning.": "部分 screws 结局经标注者回复被协调者看到，未用于调参。",
 }

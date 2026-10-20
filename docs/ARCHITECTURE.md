@@ -65,7 +65,7 @@ The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SV
   <img alt="Dot plots of balanced accuracy and failures judged as success on blind 60-episode test sets, with the scale-up quality bar drawn in: on plates release-anchored review meets the bar (0.94, 12.8%) against judging from segments (0.81, 38.5%) and a direct call (0.78, 43.6%); on screws it misses it (0.76, 48.7%). Below: time-segment labelling at parity, and what is not established." src="assets/atlas/07-evidence-light.svg">
 </picture>
 
-*Read the dashed bar line first.* A dot on the right side of the bar meets the scale-up quality gate. Judging success with release-anchored review meets it on the plates task and misses it on the second task; time-segment labelling is at parity with a direct call; whether curated data improves a policy is not established. The numbers are the project's own, on blind test sets; the experiment record is not shipped. [Validation](VALIDATION.md) documents the anchored-review re-run.
+*Read the dashed bar line first.* A dot on the right side of the bar meets the scale-up quality gate. Judging success with release-anchored review meets it on the plates task and misses it on the second task; time-segment labelling is at parity with a direct call; whether curated data improves a policy is not established. The numbers are the project's own, on blind test sets; the experiment record is not shipped. [Validation](VALIDATION.md) documents the anchored-review re-run. The README shows a larger version with the same two plots and numbers (`16-evidence-lite`).
 
 ## 8 An AERI run, start to finish
 

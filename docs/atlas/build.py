@@ -2427,6 +2427,214 @@ def fig_pyramid_lite(t):
     return f
 
 
+def fig_evidence_lite(t):
+    """README version of figure 7: the same two dot plots and numbers, larger text."""
+    f = Fig(
+        "16-evidence-lite",
+        1200,
+        700,
+        t,
+        "Judging success, README version: one task meets the bar, one does not",
+        "Dot plots on blind 60-episode test sets with the scale-up quality bar drawn in. Plates: release-anchored review "
+        "reaches balanced accuracy 0.936 (LEVI from segments 0.808, a direct call 0.782) and judges 12.8% of failures as "
+        "successes (38.5%, 43.6%); both meet the bar of 0.90 and 15%. Screws: 0.756 and 48.7%, both miss it. The full "
+        "version is figure 7 in the architecture atlas.",
+    )
+    c = f.c
+    _lite_heading(
+        f,
+        "Judging success: one task meets the bar, one does not",
+        "Same local model, blind gold labels, 60 episodes per task.",
+    )
+    lx, ly = 32, 122
+    legend = [
+        ("direct call", "hollow"),
+        ("LEVI, from segments", "grey"),
+        ("release-anchored review", "solid"),
+    ]
+    x = lx
+    for words, kind in legend:
+        if kind == "hollow":
+            f.parts.append(
+                f'<circle cx="{x + 9}" cy="{ly}" r="8" fill="{c["panel"]}" stroke="{c["faint"]}" stroke-width="2.5"/>'
+            )
+        elif kind == "grey":
+            f.parts.append(
+                f'<circle cx="{x + 9}" cy="{ly}" r="8" fill="{c["faint"]}"/>'
+            )
+        else:
+            f.parts.append(
+                f'<circle cx="{x + 9}" cy="{ly}" r="10" fill="{c["system"]}"/>'
+            )
+        f.text(x + 26, ly + 6, words, size=18, fill=c["soft"])
+        x += 26 + est(words, 18, 18 * 0.56) + 30
+    f.text(
+        1168,
+        ly + 6,
+        "change vs LEVI, from segments",
+        size=15,
+        fill=c["faint"],
+        anchor="end",
+    )
+
+    ax0, ax1 = 200, 1000
+
+    def chart(
+        y0,
+        title,
+        sub,
+        rows,
+        lo,
+        hi,
+        ticks,
+        bar,
+        bar_label,
+        lower_better,
+        fmt,
+        delta_fmt,
+    ):
+        def X(v):
+            return ax0 + (ax1 - ax0) * (v - lo) / (hi - lo)
+
+        f.text(32, y0, title, size=22, weight=700)
+        _fits(sub, 18, 1136 - est(title, 22, 22 * 0.6) - 24)
+        f.text(32 + est(title, 22, 22 * 0.6) + 24, y0, sub, size=18, fill=c["soft"])
+        top, rowh = y0 + 32, 72
+        bottom = top + rowh * len(rows)
+        for v in ticks:
+            f.parts.append(
+                f'<line x1="{X(v):.1f}" y1="{top}" x2="{X(v):.1f}" y2="{bottom}" stroke="{c["edge"]}" stroke-width="1.2"/>'
+            )
+            f.text(
+                round(X(v), 1),
+                bottom + 24,
+                fmt(v),
+                size=18,
+                fill=c["faint"],
+                anchor="middle",
+            )
+        gx = round(X(bar), 1)
+        f.parts.append(
+            f'<line x1="{gx}" y1="{top - 6}" x2="{gx}" y2="{bottom}" stroke="{c["gate"]}" '
+            f'stroke-width="2.5" stroke-dasharray="7 5"/>'
+        )
+        f.text(gx + 8, top + 8, bar_label, size=18, weight=700, fill=c["gate"])
+        for i, (name, vals) in enumerate(rows):
+            cy = top + rowh * i + rowh / 2 + 6
+            f.text(32, cy + 7, name, size=20, weight=700)
+            a = vals["anchored"]
+            ok = a <= bar if lower_better else a >= bar
+            col = c["system"] if ok else c["danger"]
+            base = [vals[k] for k in ("direct", "levi") if vals.get(k) is not None]
+            if base:
+                lo_v, hi_v = min([*base, a]), max([*base, a])
+                f.parts.append(
+                    f'<line x1="{X(lo_v):.1f}" y1="{cy}" x2="{X(hi_v):.1f}" y2="{cy}" stroke="{c["boxedge"]}" '
+                    f'stroke-width="8" stroke-linecap="round"/>'
+                )
+                f.parts.append(
+                    f'<circle cx="{X(vals["direct"]):.1f}" cy="{cy}" r="9" fill="{c["panel"]}" '
+                    f'stroke="{c["faint"]}" stroke-width="2.5"/>'
+                )
+                f.parts.append(
+                    f'<circle cx="{X(vals["levi"]):.1f}" cy="{cy}" r="9" fill="{c["faint"]}"/>'
+                )
+                d = a - vals["levi"]
+                f.text(
+                    1168,
+                    cy + 8,
+                    ("+" if d > 0 else "−") + delta_fmt(abs(d)),
+                    size=22,
+                    weight=700,
+                    fill=col,
+                    anchor="end",
+                )
+            else:
+                f.text(
+                    1168,
+                    cy + 7,
+                    "other arms did not finish",
+                    size=15,
+                    fill=c["faint"],
+                    anchor="end",
+                )
+            f.parts.append(f'<circle cx="{X(a):.1f}" cy="{cy}" r="12" fill="{col}"/>')
+            f.text(
+                round(X(a), 1),
+                cy - 18,
+                fmt(a),
+                size=18,
+                weight=700,
+                fill=col,
+                anchor="middle",
+            )
+            f.text(
+                round(X(a), 1),
+                cy + 32,
+                "meets the bar" if ok else "misses the bar",
+                size=18,
+                weight=600,
+                fill=col,
+                anchor="middle",
+            )
+        return bottom + 24
+
+    def acc(v):
+        return f"{v:.2f}"
+
+    def pct(v):
+        x = round(v * 100, 1)
+        return f"{x:.0f}%" if x == int(x) else f"{x}%"
+
+    y = chart(
+        176,
+        "Balanced accuracy",
+        "higher is better; the axis starts at 0.5, the chance level",
+        [
+            ("Plates", {"direct": 0.782, "levi": 0.808, "anchored": 0.936}),
+            ("Screws", {"anchored": 0.756}),
+        ],
+        0.5,
+        1.0,
+        [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+        0.90,
+        "scale-up bar 0.90",
+        False,
+        acc,
+        acc,
+    )
+    y = chart(
+        y + 54,
+        "Failures judged as success",
+        "lower is better",
+        [
+            ("Plates", {"direct": 0.436, "levi": 0.385, "anchored": 0.128}),
+            ("Screws", {"anchored": 0.487}),
+        ],
+        0.0,
+        0.6,
+        [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+        0.15,
+        "bar 15%",
+        True,
+        pct,
+        lambda d: f"{d * 100:.1f} pts",
+    )
+    # every caveat of figure 7 stays (tests/test_atlas.py pins them): cost, limits, scope, source
+    notes = [
+        "Time-segment labelling is at parity with a direct call (segment F1 about 0.34 on plates) and takes about 1.7x its time.",
+        "Not established: whether training on LEVI-curated data improves a robot policy.",
+        "Automatic live verdicts are unreviewed and over-call success.",
+        "Some screws outcomes reached the coordinator through annotator replies; not used for tuning.",
+        "No figure here is a real-robot policy result. Plates re-run: docs/VALIDATION.md.",
+    ]
+    for j, s in enumerate(notes):
+        _fits(s, 15, 1136)
+        f.text(32, y + 40 + j * 24, s, size=15, fill=c["faint"])
+    f.h = int(y + 40 + len(notes) * 24 + 8)
+    return f
+
+
 def fig_subtask_loop(t):
     """README figure for the AERI subtask loop (DECISIONS 9add8c2): a design, not yet run on the robot."""
     f = Fig(
@@ -2898,6 +3106,7 @@ FIGURES = [
     fig_context_lite,
     fig_pyramid_lite,
     fig_subtask_loop,
+    fig_evidence_lite,
     fig_subtask_flow,
     fig_aeri_terminals,
 ]
