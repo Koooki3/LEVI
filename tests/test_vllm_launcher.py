@@ -68,8 +68,16 @@ def test_the_default_launcher_is_the_shipped_script_and_it_is_executable():
     assert "/home/" not in text and "/Users/" not in text
 
 
-def test_the_shipped_launcher_keeps_the_contract_levi_live_relies_on(tmp_path, venv):
+def test_the_shipped_launcher_keeps_the_contract_levi_live_relies_on(
+    tmp_path, venv, monkeypatch
+):
     _, record = venv
+    # The CI runner has no nvidia-smi and the fake vllm is never on the GPU.
+    # stop() proves the exit with gpumgr.compute_apps() and fails closed when
+    # it cannot run, so this test failed in CI (L2-CI-MAIN-RED). The
+    # fail-closed path itself: test_failed_gpu_query_is_unknown in
+    # test_live_gpu_stop.py.
+    monkeypatch.setattr(gpumgr, "compute_apps", list)  # explicit fake GPU scan
     c = config_for(tmp_path)
     vllm = gpumgr.Vllm(c)
     profile = {**c.vllm_profile(), "max_model_len": 32768}
