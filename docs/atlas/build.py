@@ -1620,7 +1620,7 @@ def fig_aeri_flow(t):
     f.text(
         32,
         111,
-        "Keys in D:  Enter = scene reset  ·  y / n / u = scene ready?  ·  Ctrl+C = stop (q too, at a D prompt other than the scene question)",
+        "Keys in D: Enter = scene reset · y / n / u = scene ready? · s / f / d = your verdict, ends the round · Ctrl+C = stop (q too, at a D prompt other than the scene question)",
         size=12,
         fill=c["soft"],
     )
