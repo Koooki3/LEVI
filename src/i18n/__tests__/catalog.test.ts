@@ -325,6 +325,7 @@ function decodeEntities(text: string): string {
 /** Product names, paths and example values that read the same in both languages. */
 const SAME_IN_BOTH = [
   "Ollama",
+  "marvel0",
   "1038lab/sam3",
   "sam3.pt",
   "workspace/checkpoints/sam3/sam3.pt",

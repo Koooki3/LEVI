@@ -7,7 +7,7 @@ command comes next, what it touches, and whether the step it starts is
 already healthy. This page covers the two parts that exist so far: the
 **recipe registry**, which ties each step to the machine's own operator
 guide, and the **read-only status probes** behind `GET /api/levi/setup/status`.
-Neither starts, stops or connects to anything. The **Rig console** page builds
+Neither starts, stops or connects to anything. The **marvel0** page builds
 on the probes; it is described at the end of "Status probes": the status route
 is read-only, and the page's policy server panel starts and stops one policy
 server unit and nothing else.
@@ -157,12 +157,12 @@ a robot process was found). Only the last 256 KiB of a ROS log are read
 line, environment, token or path; `live.gate.reason` is the live service's
 own text, passed on (at most 200 characters).
 
-### Rig console (read-only)
+### marvel0 (read-only)
 
-`GET /api/levi/rig/status` (the same local authentication as the route above)
-answers one question for the **Rig console** page (`/rig`; it is not a header link: open it from the command palette, `Ctrl+K`, or with the go-to chord `G C`):
+`GET /api/levi/marvel0/status` (the same local authentication as the route above)
+answers one question for the **marvel0** page (`/marvel0`; it is not a header link: open it from the command palette, `Ctrl+K`, or with the go-to chord `G C`):
 is any robot activity to be seen? The document has the schema
-`levi.rig.status.v1` and four parts. As above, a part that cannot be read says
+`levi.marvel0.status.v1` and four parts. As above, a part that cannot be read says
 `unknown` with a `detail` and never fails the rest.
 
 | Part | Source |
@@ -229,7 +229,7 @@ of the case (`source.case`), and `params` is a flat object of strings and
 numbers with the values the case needs (names, ages in seconds, rounded to
 0.1 s; never a path), so a page can translate the case and fill in the values
 itself. `code` and `params` were added without changing the schema string
-`levi.rig.status.v1`: an older consumer still finds `source`, `state` and
+`levi.marvel0.status.v1`: an older consumer still finds `source`, `state` and
 `text`, and a consumer should treat the two new fields as optional. At most
 five sessions of each kind, five units of each kind and five process names
 are listed.
@@ -273,19 +273,19 @@ particular:
 **Passive only.** The route never connects to a robot port, starts, stops or
 writes anything, and never clears the marker. The only commands behind it are
 read-only queries: `nvidia-smi` (through the setup probes) and `systemctl
---user list-units` for `levi-aeri-*` units. The rig parts read no process
+--user list-units` for `levi-aeri-*` units. The marvel0 parts read no process
 directory of their own; the response holds no path. The `guard` part is the
 setup probes' own (`probes.status()`, cached together with
-`/api/levi/setup/status`), so a request to the rig route takes or reuses that
+`/api/levi/setup/status`), so a request to the marvel0 route takes or reuses that
 sample and inherits its sampling, including the process scan and the
-socket-owner scan described above. Each rig part reads in its own thread with
+socket-owner scan described above. Each marvel0 part reads in its own thread with
 a deadline. The results of `units` and `eval_sessions` are reused for 2
 seconds; a request arriving while a part is being read waits for that read
 (up to the part's deadline) and uses its result, and a part is declared stuck
 (`unknown`, answered at once) only after its deadline has passed.
 
 **Terminals A, B and C are not controlled.** The status route is read-only (the
-policy server panel at the end of this page is the one place the rig page starts
+policy server panel at the end of this page is the one place the marvel0 page starts
 anything, and only its own policy server unit). The arm stack (A), the gripper
 stack (B) and the robot server (C) are started and stopped by hand as setup.md
 describes. The terminal A and C cards show what the
@@ -303,7 +303,7 @@ the health monitor's red light (the sentences of the cards that mirror the
 monitor still say "red light"), a failed policy unit while no listening policy server is
 seen (also when the port table cannot be read), or a fault reported by an evaluation session.
 
-*Requests.* The page asks `/api/levi/setup/status` and `/api/levi/rig/status`
+*Requests.* The page asks `/api/levi/setup/status` and `/api/levi/marvel0/status`
 every 3 seconds while the tab is visible and not at all while it is hidden. A
 request that has not answered within 6.5 seconds is given up and aborted, so one
 that never answers cannot hold the polling; after a round in which both fail
@@ -317,7 +317,7 @@ later.
 `stale`, or its `age_s` is over 10 seconds), a note says so and every card read
 from it shows Stale and says how old the sample is (all cards except the
 terminal B gripper card, which has no source, and the demo client card, which
-is read from the rig status). What the sample said stays as the card's first
+is read from the marvel0 status). What the sample said stays as the card's first
 fact ("In that sample") and the readings stay below it, but none of it is the
 card's verdict now: a red light in an old sample is not shown as Fault. A card
 that had nothing to show stays Unknown. A setup status without `age_s` is not
@@ -337,7 +337,7 @@ those codes the part's `detail` is shown as written.
 
 *The banner.* It is downgraded to "cannot tell" when the marker, `eval_sessions`
 or `units` part of the same answer is `unknown` (the note says a part could not
-be read), when the answer's schema is present and is not `levi.rig.status.v1`
+be read), when the answer's schema is present and is not `levi.marvel0.status.v1`
 (the note says the format is not known), or when it says `idle` but still lists
 reasons (the note says the answer lists reasons and so is not trusted; when a
 part was also unread, the note about the unread part is the one shown). The
@@ -389,9 +389,9 @@ instead of repeating them. With the red light the reasons stay on all three
 cards. Nothing on the page is an emergency stop or a safety check, and a green
 card does not mean it is safe to approach the robot.
 
-### Rig console: policy server panel and client command panel
+### marvel0: policy server panel and client command panel
 
-Besides `GET /api/levi/rig/status`, the rig page has two panels that prepare a
+Besides `GET /api/levi/marvel0/status`, the marvel0 page has two panels that prepare a
 real-robot session, and routes behind them. The **policy server panel** starts,
 shows and stops **one** policy server: what a person otherwise types by hand in
 the policy server terminal (the openpi serving script with a checkpoint, a share
@@ -400,28 +400,28 @@ command for the demo client terminal (task instruction, steps, episodes,
 `--min-z`, RTC horizon, rollout group, note), checked against the site's limits
 and shown as **text to copy**.
 
-On the page (`/rig`) they are the two cards of the last section, **Policy server
+On the page (`/marvel0`) they are the two cards of the last section, **Policy server
 and demo client**, under the read-only status cards: the **Policy server** card
 and the **Demo client command** card. Nothing else on the page does anything.
 
 They use the same local authentication as the other `/api/levi` routes (the web
-UI token; an agent's Bearer credential is refused), and both need the **rig site
+UI token; an agent's Bearer credential is refused), and both need the **marvel0 site
 file** first. The two writes (deploy and stop) are a person's only.
 
 | Route | What it does |
 | --- | --- |
-| `GET /api/levi/rig/models` | the checkpoints the panel may deploy, each with its serving config, whether it takes a CFG scale, whether it is restricted to the known task instructions, the label `unverified`, its default rollout group, and `skipped`: why each other folder is not offered |
-| `GET /api/levi/rig/site` | the site file without any path: connection, serials, home pose, limits, caps, the fixed client flags, GPU fractions, unit settings and the folders' last names |
-| `POST /api/levi/rig/command/preview` | the demo client command for a form, validated and rendered as text to copy. Nothing is executed, started, connected to or written |
-| `GET /api/levi/rig/deploy` | the policy server panel's state (`idle`, `starting`, `ready`, `failed`, `dead`, `unknown`, `foreign_listener` or `stopping`), derived afresh from the unit's state, the kernel's socket table, the unit's log and the deploy record; the checks a deploy would meet; the GPU memory the server holds |
-| `POST /api/levi/rig/deploy` | starts one policy server as a transient `systemd --user` unit (person only) |
-| `POST /api/levi/rig/deploy/stop` | stops the unit this panel started (person only) |
-| `GET /api/levi/rig/deploy/log` | the tail of that unit's log, printable, with every path cut to its last name (`?lines=`, 1 to 200, default 80) |
+| `GET /api/levi/marvel0/models` | the checkpoints the panel may deploy, each with its serving config, whether it takes a CFG scale, whether it is restricted to the known task instructions, the label `unverified`, its default rollout group, and `skipped`: why each other folder is not offered |
+| `GET /api/levi/marvel0/site` | the site file without any path: connection, serials, home pose, limits, caps, the fixed client flags, GPU fractions, unit settings and the folders' last names |
+| `POST /api/levi/marvel0/command/preview` | the demo client command for a form, validated and rendered as text to copy. Nothing is executed, started, connected to or written |
+| `GET /api/levi/marvel0/deploy` | the policy server panel's state (`idle`, `starting`, `ready`, `failed`, `dead`, `unknown`, `foreign_listener` or `stopping`), derived afresh from the unit's state, the kernel's socket table, the unit's log and the deploy record; the checks a deploy would meet; the GPU memory the server holds |
+| `POST /api/levi/marvel0/deploy` | starts one policy server as a transient `systemd --user` unit (person only) |
+| `POST /api/levi/marvel0/deploy/stop` | stops the unit this panel started (person only) |
+| `GET /api/levi/marvel0/deploy/log` | the tail of that unit's log, printable, with every path cut to its last name (`?lines=`, 1 to 200, default 80) |
 
 #### What the panels never do
 
 The panel starts and stops **only the policy server unit it created**
-(`levi-aeri-policy-manual-rig-<model>`). It never starts the arm controller
+(`levi-aeri-policy-manual-marvel0-<model>`). It never starts the arm controller
 (terminal A), the gripper stack (terminal B), the robot server (terminal C), the
 health monitor or the demo client; those stay in real terminals as setup.md
 describes, and the client command is only text. **Nothing on the page is an
@@ -430,7 +430,7 @@ physical e-stop for every session. The Policy server card says: "This card only
 starts and stops the policy server unit it created. It does not start the arm
 stack, the gripper stack, the robot server or the demo client, and it is not an
 emergency stop. Keep a hand on the physical e-stop for every session." (The
-answer of `GET /api/levi/rig/deploy` carries a shorter `estop.text` to the same
+answer of `GET /api/levi/marvel0/deploy` carries a shorter `estop.text` to the same
 effect; the page shows its own sentence.) The stop buttons are labelled **Stop
 policy server**, never just "Stop".
 
@@ -445,16 +445,16 @@ off (forced with the extra phrase) is remembered in the deploy record, and the
 notice then stays also in the `idle` state after it, until the marker file is
 gone and no session is open; a reload of the page does not lose it.
 
-#### The rig site file (`LEVI_RIG_SITE`)
+#### The marvel0 site file (`LEVI_MARVEL0_SITE`)
 
 The values that belong to one machine (the openpi checkout and its python, the
 checkpoints folder, the rollout root, the lock files, the policy port, both
 camera serials, the home pose, the safety limits, the GPU fractions, the CPU
 settings of the policy server unit) are in a TOML file, never in the repository.
-`LEVI_RIG_SITE` names it (`~` and `~/...` mean the home folder of the user LEVI
+`LEVI_MARVEL0_SITE` names it (`~` and `~/...` mean the home folder of the user LEVI
 runs as; `~name` is never expanded, because it would reach another user's
 folder, and is reported as not absolute; the path must be absolute); without
-that setting it is `lab/rig/site.toml` of the main checkout
+that setting it is `lab/marvel0/site.toml` of the main checkout
 (also when LEVI runs from a worktree; `lab/` is git-ignored). The page reads it
 and never writes it. It must be a regular file of the user LEVI runs as, not
 writable by group or others (`chmod 644`), and at most 64 KiB; a link, folder or
@@ -482,7 +482,7 @@ policy server card and its Stop: the page cannot stop a server it started. The
 usual cause after an edit is `file: writable` (an editor saved the file with
 mode 0664 under umask 002): run `chmod 644` on it. To stop the server before
 that, in a terminal: `systemctl --user list-units 'levi-aeri-policy-*'` names the
-unit (`levi-aeri-policy-manual-rig-<model>`), then `systemctl --user stop
+unit (`levi-aeri-policy-manual-marvel0-<model>`), then `systemctl --user stop
 <unit>`. The invalid-file notice on the page says the same.
 
 Example values below are the ones of the template that ships with LEVI; every
@@ -490,7 +490,7 @@ path in it is a `/path/to/...` placeholder, so write this machine's own.
 
 | Section and key | Meaning | Example |
 | --- | --- | --- |
-| (top) `schema` | the format | `"levi.rig.site.v1"` |
+| (top) `schema` | the format | `"levi.marvel0.site.v1"` |
 | `[paths]` `openpi_checkout` | the openpi checkout: the unit's working directory and the folder the client command starts in | `/path/to/openpi` |
 | `python` | the checkout's own python, run directly (not through `uv run`) | `/path/to/openpi/.venv/bin/python` |
 | `checkpoints_root` | the folder the model list reads | `/path/to/openpi/checkpoints` |
@@ -502,7 +502,7 @@ path in it is a `/path/to/...` placeholder, so write this machine's own.
 | `remote_host`, `robot_server_url` | where the client finds the policy server and the robot server | `"127.0.0.1"`, `"http://127.0.0.1:5000/"` |
 | `[cameras]` `view`, `wrist` | the two D405 serials (6 to 16 digits, different), always written into the client command | `"262622274256"`, `"262622275490"` |
 | `[home]` `pose`, `duration_s` | the six-number home pose and how long the client takes to go there (1 to 30 seconds: a shorter time would make a large move fast) | `[0.481902, -0.011145, 0.235951, 3.119139, 0.008288, -0.883962]`, `3.0` |
-| `[safety]` `min_z_floor`, `min_z_default` | the lowest `--min-z` (the form can only raise it) and its default; both above 0 and below the home height. The template's `0.025` is below the table height the client measured (0.04658 m; the client's own floors are 0.075 for the screws instruction and 0.05325 for the plates one), so the default form carries the `min_z_below_task_table` warning; whether to keep it, or to set `min_z_default` to the client's floor and keep `0.025` only as the floor, is the rig owner's decision | `0.025`, `0.025` |
+| `[safety]` `min_z_floor`, `min_z_default` | the lowest `--min-z` (the form can only raise it) and its default; both above 0 and below the home height. The template's `0.025` is below the table height the client measured (0.04658 m; the client's own floors are 0.075 for the screws instruction and 0.05325 for the plates one), so the default form carries the `min_z_below_task_table` warning; whether to keep it, or to set `min_z_default` to the client's floor and keep `0.025` only as the floor, is the marvel0 owner's decision | `0.025`, `0.025` |
 | `max_xy`, `max_step_m`, `max_step_rad`, `rx_range`, `ry_range`, `rz_range` | the client's motion limits (a range is `[low, high]`); the file is refused when `max_xy` is not above 0 and at most 1.0, `max_step_m` above 0 and at most 0.2, or `max_step_rad` above 0 and at most 0.5 (the client's defaults are 0.85, 0.10 and 0.35) | `0.85`, `0.10`, `0.35`, `[1.50, 4.03]`, `[-0.74, 0.96]`, `[-2.44, 0.77]` |
 | `binarize_gripper`, `require_matching_server`, `allow_unknown_prompt` | the client's three switches | `true`, `true`, `false` |
 | `[caps]` `max_steps_default`, `max_steps_cap`, `eval_num_default`, `eval_num_cap` | steps per episode and number of episodes: default and the cap a form cannot pass | `500`, `3000`, `5`, `50` |
@@ -511,7 +511,7 @@ path in it is a `/path/to/...` placeholder, so write this machine's own.
 | `cfg_scale_default`, `cfg_scale_max` | the advantage-CFG guidance scale of a CFG model | `1.0`, `1.5` |
 | `[gpu]` `fraction_presets` | the memory shares the panel offers: one to four values, 0.05 to 0.45 (about 15 GB, the owner's limit), ascending | `[0.22, 0.30, 0.45]` |
 | `margin_mib`, `lock_hold_max_s` | free memory kept on top of the share (at least 1024); the longest the GPU lock is held while the server loads | `1024`, `600` |
-| `[unit]` `nice`, `cpu_affinity`, `cpu_quota_percent` | CPU settings of the policy server unit: nice 0 to 19, a `taskset` core list (choose cores the arm controller does not use; the template's `8-15` is a guess for a host with no CPU isolation, to be confirmed by the rig owner before the file is installed), a quota in percent (0 = none) | `10`, `"8-15"`, `0` |
+| `[unit]` `nice`, `cpu_affinity`, `cpu_quota_percent` | CPU settings of the policy server unit: nice 0 to 19, a `taskset` core list (choose cores the arm controller does not use; the template's `8-15` is a guess for a host with no CPU isolation, to be confirmed by the marvel0 owner before the file is installed), a quota in percent (0 = none) | `10`, `"8-15"`, `0` |
 | `stop_timeout_s`, `start_timeout_s` | how long a stop may take before systemd kills the unit (10 to 600); how long a start may stay unfinished before it is `failed` (30 to 1800) | `90`, `600` |
 | `[catalog]` `known_configs`, `cfg_configs` | the serving configs the panel accepts, and those of them that take a CFG scale | `["pi05_fr3_all_state", "pi05_fr3_all_state_cfg"]`, `["pi05_fr3_all_state_cfg"]` |
 | `restricted_prefixes`, `verified`, `excluded` | model families that take only the client's two task instructions; checkpoints with a recorded real-GPU serving check; checkpoints never offered | `["pi05_fr3_sp"]`, `["pi05_fr3_all_step49999"]`, `["reset_r1_step20000"]` |
@@ -595,7 +595,7 @@ than 10 seconds is not shown as current). A write that got no answer keeps its
 request id, so pressing the same button again repeats the same request, which is
 never carried out twice.
 
-**What one deploy does.** `POST /api/levi/rig/deploy` takes `request_id`,
+**What one deploy does.** `POST /api/levi/marvel0/deploy` takes `request_id`,
 `model_id`, `rtc`, `fraction` (one of the site's presets), `cfg_guidance_scale`
 (leave it null for a model without CFG; for a CFG model null means the site's
 default, and the flag is always passed), `accept_unverified` and `confirm`, which
@@ -683,9 +683,9 @@ GPU memory it holds (`ceil(fraction x total)` of the recorded deploy, the share
 it reserves, not a measurement; a question mark for a server it did not start)
 and that live annotation cannot start.
 
-**The unit.** `levi-aeri-policy-manual-rig-<slug>`, where the slug is the model id
+**The unit.** `levi-aeri-policy-manual-marvel0-<slug>`, where the slug is the model id
 in lower case with `_` as `-` (an id that does not reduce to that, or is longer
-than 36 characters, is cut and carries 8 characters of a hash of the whole id).
+than 32 characters, is cut and carries 8 characters of a hash of the whole id).
 It is a `levi-aeri-policy-*` unit, so the status route's units part and the
 live service see it like any policy server of AERI. The unit runs, from the
 openpi checkout, the checkout's python directly (not `uv run`):
@@ -705,7 +705,7 @@ The unit is started with `--collect`, so systemd forgets it as soon as it ends
 and no exit status is kept: a failure is read from the log, and a crash that
 logged nothing shows as `exited`.
 
-**States.** Every `GET /api/levi/rig/deploy` derives the state afresh from the
+**States.** Every `GET /api/levi/marvel0/deploy` derives the state afresh from the
 unit's state (`systemctl --user`), the listener (the kernel's socket table) and
 the deploy record; the answer is reused for 2 seconds and never fails because
 one source cannot be read.
@@ -756,7 +756,7 @@ an out-of-memory error or a traceback of one request on a server that is already
 the wording of a library changes, a healthy server may stay `starting` and then
 fail with `start_timeout`: the panel shows the log tail so a person can judge.
 
-**Stopping.** `POST /api/levi/rig/deploy/stop` takes `request_id`, `confirm`
+**Stopping.** `POST /api/levi/marvel0/deploy/stop` takes `request_id`, `confirm`
 (`stop policy server`) and, only to force a stop under a connected client,
 `client_override` (`stop with client connected`; any other non-empty value is
 refused). It stops only the unit recorded at deploy time:
@@ -824,7 +824,7 @@ own 422):
 | 502 | `start_failed`, `stop_failed`, `stop_incomplete` |
 
 **Records and logs.** They are in a private folder of the product workspace,
-`outputs/LEVI/workbench/rig/deploy/` (mode 0700, files 0600), never under a
+`outputs/LEVI/workbench/marvel0/deploy/` (mode 0700, files 0600), never under a
 rollout root or in source data; the folder is refused when it is a link or would
 lie inside the rollout root, the checkpoints folder or the openpi checkout.
 `record.json` is the one deploy the panel knows: unit name, request id, model,
@@ -857,14 +857,14 @@ fits the command (same model and RTC mode, still starting, not ready, another
 model, deployed without RTC, or started by hand and so unknown), and lists the
 warnings under "Check before you run it".
 
-`POST /api/levi/rig/command/preview` takes a closed form: `model_id` and `prompt`
+`POST /api/levi/marvel0/command/preview` takes a closed form: `model_id` and `prompt`
 (the task instruction), and optionally `max_steps`, `eval_num` (episodes),
 `min_z`, `rtc`, `rtc_horizon`, `rollout_group` and `note`. A field outside the
 form (`levi_mode`, `max_xy`, `allow_unknown_prompt`, ...) is refused; types are
 strict. Defaults come from the site file: steps and episodes, `min_z_default`,
 RTC on with the site's horizon (with RTC off, `rtc_horizon` is the open-loop
 horizon), the rollout group `<model>_rtc_demo` (`<model>_demo` without RTC) and
-the note `rig page: <model> rtc=on horizon=<n>`.
+the note `marvel0 page: <model> rtc=on horizon=<n>`.
 
 Bounds (a refusal is `422` with `{code, field, message}`): `max_steps` and
 `eval_num` are 1 to the site's cap (`max_steps_out_of_range`,
@@ -895,7 +895,7 @@ The unattended mode is never offered: `--levi-mode=off` is a constant, because
 are constants too. `--min-z` is always written, explicitly.
 
 **The command is text to copy and is never executed.** The answer
-(`levi.rig.command.v1`) holds `argv`, `env`, `cwd` and `command`, a text of the
+(`levi.marvel0.command.v1`) holds `argv`, `env`, `cwd` and `command`, a text of the
 form `cd <openpi checkout> && env -u VIRTUAL_ENV no_proxy=... uv run --no-sync
 --with pyrealsense2==2.55.1.6486 python examples/fr3_local/run_robotiq_client_collect_data.py ...`
 with one group of flags per line and every token shell-quoted, to paste into the
@@ -936,19 +936,19 @@ form allow is never shown (`500 command_self_check`). The answer also holds:
   terminal (python started, nothing listening yet) is invisible to every check,
   so the Deploy dialog says: "Do not press Deploy while a server is being
   started by hand in a terminal; the page can only see it once it listens."
-- **Status route.** While the panel's unit runs, `GET /api/levi/rig/status`
+- **Status route.** While the panel's unit runs, `GET /api/levi/marvel0/status`
   reports the robot as busy, as it does for any running `levi-aeri-*` unit.
 - **The GPU lock** is used as described above and only then. The panel reads no
   per-process GPU data.
 - **What only the machine can show.** The `systemd-run` properties, the user
   manager's real environment, the timing of the GPU memory and the exact log text
   of a server on this machine need one supervised run by a person; tests use
-  fakes only and connect to no port. The first real deploy is done with the rig
+  fakes only and connect to no port. The first real deploy is done with the marvel0
   owner present and the robot idle (no client, no arm stack), after the owner has
   confirmed `cpu_affinity`; a property systemd rejects shows up as `start_failed`
   with systemd-run's own words, and the verified list goes into the site file.
-- **The frontend samples.** `rig-deploy.samples.json` (parsed by the page's own
+- **The frontend samples.** `marvel0-deploy.samples.json` (parsed by the page's own
   readers in a test) is built from the backend on a fake machine;
-  `tests/rig/test_rig_deploy_sample.py` fails when it differs, naming the
+  `tests/marvel0/test_marvel0_deploy_sample.py` fails when it differs, naming the
   command that rewrites it, `uv run --no-sync python
-  tests/rig/regen_deploy_sample.py`.
+  tests/marvel0/regen_deploy_sample.py`.

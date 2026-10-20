@@ -123,18 +123,18 @@ describe("navigation and commands", () => {
   test("the header leaves out pages that are in the palette only", () => {
     const pages = navPages({ live: true, pool: true });
     const all = pages.map((p) => p.href);
-    // The rig console is reached by Ctrl+K and G C: an eighth header link
+    // The marvel0 is reached by Ctrl+K and G C: an eighth header link
     // pushed Guide and Report out of view below 1500 px.
-    expect(all).toContain("/rig");
+    expect(all).toContain("/marvel0");
     expect(headerPages(pages).map((p) => p.href)).toEqual(
-      all.filter((href) => href !== "/rig"),
+      all.filter((href) => href !== "/marvel0"),
     );
   });
 
   test("pages follow the live and pool offers, in navigation order", () => {
     expect(navPages({ live: false, pool: true }).map((p) => p.href)).toEqual([
       "/automatic",
-      "/rig",
+      "/marvel0",
       "/explore",
       "/workbench",
       "/pool",
@@ -144,7 +144,7 @@ describe("navigation and commands", () => {
     expect(navPages({ live: true, pool: false }).map((p) => p.href)).toEqual([
       "/live",
       "/automatic",
-      "/rig",
+      "/marvel0",
       "/explore",
       "/workbench",
       "/guide",
@@ -199,7 +199,7 @@ describe("navigation and commands", () => {
     const zh = (text: string) => (text === "Report" ? "报告" : text);
     expect(filterCommands(commands, "报告", zh)[0].id).toBe("go-report");
   });
-  test("filter: the rig console is found by what its cards do", () => {
+  test("filter: the marvel0 page is found by what its cards do", () => {
     const commands = make();
     for (const words of [
       "deploy",
@@ -212,7 +212,7 @@ describe("navigation and commands", () => {
       expect(
         filterCommands(commands, words).map((c) => c.id),
         words,
-      ).toContain("go-rig");
+      ).toContain("go-marvel0");
   });
 });
 

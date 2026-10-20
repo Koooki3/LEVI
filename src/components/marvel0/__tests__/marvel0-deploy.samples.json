@@ -1,0 +1,1888 @@
+{
+  "blocked_arm": {
+    "can_deploy": false,
+    "can_stop": false,
+    "checks": [
+      {
+        "code": "state_dir",
+        "level": "ok",
+        "params": {},
+        "text": "The folder for the deploy record is usable."
+      },
+      {
+        "code": "net_table",
+        "level": "ok",
+        "params": {},
+        "text": "The socket tables can be read."
+      },
+      {
+        "code": "port_free",
+        "level": "ok",
+        "params": {},
+        "text": "Nothing listens on the policy port."
+      },
+      {
+        "code": "no_client",
+        "level": "ok",
+        "params": {},
+        "text": "No client is connected to the policy port."
+      },
+      {
+        "code": "policy_units",
+        "level": "ok",
+        "params": {},
+        "text": "No policy server unit exists."
+      },
+      {
+        "code": "arm_lock",
+        "level": "refuse",
+        "params": {},
+        "text": "The arm lock is held: a run is using the arm"
+      },
+      {
+        "code": "gpu_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU lock is free or held by the live vision model server."
+      },
+      {
+        "code": "gpu_readable",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU's memory use can be read."
+      },
+      {
+        "code": "vram",
+        "level": "ok",
+        "params": {},
+        "text": "There is room for the smallest fraction."
+      }
+    ],
+    "confirm": {
+      "client_override": "stop with client connected",
+      "deploy": "deploy {model_id}",
+      "stop": "stop policy server"
+    },
+    "deploy": null,
+    "estop": {
+      "always": true,
+      "keep_hand": false,
+      "text": "Keep a hand on the physical e-stop for every session. This panel only starts and stops the policy server unit it created; it cannot stop the robot."
+    },
+    "failure": null,
+    "gpu": {
+      "free_mib": 23507,
+      "server_holds_basis": "reserved_fraction",
+      "server_holds_mib": null,
+      "state": "ok",
+      "total_mib": 32607,
+      "used_mib": 9100
+    },
+    "listener": {
+      "established": 0,
+      "ours": null,
+      "port": 8000,
+      "present": false
+    },
+    "live_annotation": null,
+    "notes": [
+      {
+        "code": "source_hash_unmanifested",
+        "text": "No source-hash manifest is named in the site file; the sha256 of the listed openpi files is recorded in the deploy record instead."
+      }
+    ],
+    "operation": null,
+    "readiness": {
+      "cfg": null,
+      "listening": null,
+      "norm_stats": null,
+      "rtc_enabled": null,
+      "rtc_warmup": null
+    },
+    "reason": null,
+    "sampled_at": "2026-10-15T01:46:40+08:00",
+    "schema": "levi.marvel0.deploy.v1",
+    "state": "idle",
+    "stop_blockers": [],
+    "unit": {
+      "state": "absent",
+      "sub": null
+    },
+    "vram": {
+      "hint": "Fractions 0.30 and 0.45 need the live vLLM asleep or stopped",
+      "margin_mib": 1024,
+      "presets": [
+        {
+          "enough": true,
+          "fraction": 0.22,
+          "required_mib": 8198
+        },
+        {
+          "enough": true,
+          "fraction": 0.3,
+          "required_mib": 10807
+        },
+        {
+          "enough": true,
+          "fraction": 0.45,
+          "required_mib": 15698
+        }
+      ]
+    }
+  },
+  "deployed": {
+    "created": true,
+    "deploy": {
+      "age_s": 0.0,
+      "cfg_guidance_scale": null,
+      "config": "pi05_fr3_all_state",
+      "fraction": 0.22,
+      "gpu_lock": "taken",
+      "model_id": "pi05_fr3_all_step49999",
+      "phase": "started",
+      "ready_at": null,
+      "request_id": "req-000001-aaaa",
+      "rtc": true,
+      "source_hash": {
+        "files": {
+          "scripts/serve_policy.py": "7b7d5e67f0240b3a566fbac5d8f74aa8e882353b3d58353db2e1bca51efd2c93",
+          "scripts/serve_policy_rtc.py": "53705f56e00fdbd77ef3043f40719b04a4d79f8f35071279e6f29b8974e67ef7",
+          "src/openpi/policies/policy_config.py": "edc513ca877c2076bc08b037e13a42d8928c4f56581513ed14f260165a6873dc",
+          "src/openpi/policies/rtc_policy.py": "4cfd01f8e74677432953b36012f4f7d2a955e31cde2a58a76808c161d6737034",
+          "src/openpi/training/config.py": "230981dbfcf12e4cd742f0a9ee4a9bdf8389a1d343acfa8c4d3d736e1a94ae8d"
+        },
+        "manifest": false
+      },
+      "started_at": "2026-10-15T01:46:40+08:00",
+      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999"
+    },
+    "gpu": {
+      "free_mib_at_final_check": 23507,
+      "lock": "taken",
+      "required_mib": 8198,
+      "total_mib": 32607
+    },
+    "next": "Watch the deploy state; the server is ready when the state is ready.",
+    "phase": "started",
+    "replayed": false,
+    "request_id": "req-000001-aaaa",
+    "schema": "levi.marvel0.deploy_result.v1",
+    "state": "starting"
+  },
+  "failed_oom": {
+    "can_deploy": true,
+    "can_stop": false,
+    "checks": [
+      {
+        "code": "state_dir",
+        "level": "ok",
+        "params": {},
+        "text": "The folder for the deploy record is usable."
+      },
+      {
+        "code": "net_table",
+        "level": "ok",
+        "params": {},
+        "text": "The socket tables can be read."
+      },
+      {
+        "code": "port_free",
+        "level": "ok",
+        "params": {},
+        "text": "Nothing listens on the policy port."
+      },
+      {
+        "code": "no_client",
+        "level": "ok",
+        "params": {},
+        "text": "No client is connected to the policy port."
+      },
+      {
+        "code": "policy_units",
+        "level": "ok",
+        "params": {},
+        "text": "No policy server unit exists."
+      },
+      {
+        "code": "arm_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The arm lock is free."
+      },
+      {
+        "code": "gpu_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU lock is free or held by the live vision model server."
+      },
+      {
+        "code": "gpu_readable",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU's memory use can be read."
+      },
+      {
+        "code": "vram",
+        "level": "ok",
+        "params": {},
+        "text": "There is room for the smallest fraction."
+      }
+    ],
+    "confirm": {
+      "client_override": "stop with client connected",
+      "deploy": "deploy {model_id}",
+      "stop": "stop policy server"
+    },
+    "deploy": {
+      "age_s": 0.0,
+      "cfg_guidance_scale": null,
+      "config": "pi05_fr3_all_state",
+      "fraction": 0.22,
+      "gpu_lock": "taken",
+      "model_id": "pi05_fr3_all_step49999",
+      "phase": "started",
+      "ready_at": null,
+      "request_id": "req-000001-aaaa",
+      "rtc": true,
+      "source_hash": {
+        "files": {
+          "scripts/serve_policy.py": "7b7d5e67f0240b3a566fbac5d8f74aa8e882353b3d58353db2e1bca51efd2c93",
+          "scripts/serve_policy_rtc.py": "53705f56e00fdbd77ef3043f40719b04a4d79f8f35071279e6f29b8974e67ef7",
+          "src/openpi/policies/policy_config.py": "edc513ca877c2076bc08b037e13a42d8928c4f56581513ed14f260165a6873dc",
+          "src/openpi/policies/rtc_policy.py": "4cfd01f8e74677432953b36012f4f7d2a955e31cde2a58a76808c161d6737034",
+          "src/openpi/training/config.py": "230981dbfcf12e4cd742f0a9ee4a9bdf8389a1d343acfa8c4d3d736e1a94ae8d"
+        },
+        "manifest": false
+      },
+      "started_at": "2026-10-15T01:46:40+08:00",
+      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999"
+    },
+    "estop": {
+      "always": true,
+      "keep_hand": false,
+      "text": "Keep a hand on the physical e-stop for every session. This panel only starts and stops the policy server unit it created; it cannot stop the robot."
+    },
+    "failure": {
+      "kind": "xla_oom",
+      "text": "The GPU ran out of memory while loading the model. Free memory, or pick a larger fraction."
+    },
+    "gpu": {
+      "free_mib": 23507,
+      "server_holds_basis": "reserved_fraction",
+      "server_holds_mib": null,
+      "state": "ok",
+      "total_mib": 32607,
+      "used_mib": 9100
+    },
+    "listener": {
+      "established": 0,
+      "ours": null,
+      "port": 8000,
+      "present": false
+    },
+    "live_annotation": null,
+    "notes": [
+      {
+        "code": "source_hash_unmanifested",
+        "text": "No source-hash manifest is named in the site file; the sha256 of the listed openpi files is recorded in the deploy record instead."
+      }
+    ],
+    "operation": null,
+    "readiness": {
+      "cfg": null,
+      "listening": false,
+      "norm_stats": false,
+      "rtc_enabled": false,
+      "rtc_warmup": false
+    },
+    "reason": null,
+    "sampled_at": "2026-10-15T01:46:40+08:00",
+    "schema": "levi.marvel0.deploy.v1",
+    "state": "failed",
+    "stop_blockers": [],
+    "unit": {
+      "state": "absent",
+      "sub": null
+    },
+    "vram": {
+      "hint": "Fractions 0.30 and 0.45 need the live vLLM asleep or stopped",
+      "margin_mib": 1024,
+      "presets": [
+        {
+          "enough": true,
+          "fraction": 0.22,
+          "required_mib": 8198
+        },
+        {
+          "enough": true,
+          "fraction": 0.3,
+          "required_mib": 10807
+        },
+        {
+          "enough": true,
+          "fraction": 0.45,
+          "required_mib": 15698
+        }
+      ]
+    }
+  },
+  "foreign": {
+    "can_deploy": false,
+    "can_stop": false,
+    "checks": [
+      {
+        "code": "state_dir",
+        "level": "ok",
+        "params": {},
+        "text": "The folder for the deploy record is usable."
+      },
+      {
+        "code": "net_table",
+        "level": "ok",
+        "params": {},
+        "text": "The socket tables can be read."
+      },
+      {
+        "code": "port_free",
+        "level": "refuse",
+        "params": {
+          "listeners": 1,
+          "ours": false,
+          "port": 8000
+        },
+        "text": "Something already listens on port 8000. If it is a server started by hand, press Ctrl+C in the terminal that runs it"
+      },
+      {
+        "code": "no_client",
+        "level": "ok",
+        "params": {},
+        "text": "No client is connected to the policy port."
+      },
+      {
+        "code": "policy_units",
+        "level": "ok",
+        "params": {},
+        "text": "No policy server unit exists."
+      },
+      {
+        "code": "arm_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The arm lock is free."
+      },
+      {
+        "code": "gpu_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU lock is free or held by the live vision model server."
+      },
+      {
+        "code": "gpu_readable",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU's memory use can be read."
+      },
+      {
+        "code": "vram",
+        "level": "ok",
+        "params": {},
+        "text": "There is room for the smallest fraction."
+      }
+    ],
+    "confirm": {
+      "client_override": "stop with client connected",
+      "deploy": "deploy {model_id}",
+      "stop": "stop policy server"
+    },
+    "deploy": null,
+    "estop": {
+      "always": true,
+      "keep_hand": false,
+      "text": "Keep a hand on the physical e-stop for every session. This panel only starts and stops the policy server unit it created; it cannot stop the robot."
+    },
+    "failure": null,
+    "gpu": {
+      "free_mib": 23507,
+      "server_holds_basis": "reserved_fraction",
+      "server_holds_mib": null,
+      "state": "ok",
+      "total_mib": 32607,
+      "used_mib": 9100
+    },
+    "listener": {
+      "established": 0,
+      "ours": false,
+      "port": 8000,
+      "present": true
+    },
+    "live_annotation": {
+      "blocked": true,
+      "text": "server holds ? MiB, live annotation cannot start"
+    },
+    "notes": [
+      {
+        "code": "source_hash_unmanifested",
+        "text": "No source-hash manifest is named in the site file; the sha256 of the listed openpi files is recorded in the deploy record instead."
+      }
+    ],
+    "operation": null,
+    "readiness": {
+      "cfg": null,
+      "listening": null,
+      "norm_stats": null,
+      "rtc_enabled": null,
+      "rtc_warmup": null
+    },
+    "reason": {
+      "code": "hand_started",
+      "text": "Something that is not a unit of this page listens on port 8000 (for example a server started by hand). This page does not touch it: press Ctrl+C in the terminal that runs it."
+    },
+    "sampled_at": "2026-10-15T01:46:40+08:00",
+    "schema": "levi.marvel0.deploy.v1",
+    "state": "foreign_listener",
+    "stop_blockers": ["foreign_listener"],
+    "unit": {
+      "state": "absent",
+      "sub": null
+    },
+    "vram": {
+      "hint": "Fractions 0.30 and 0.45 need the live vLLM asleep or stopped",
+      "margin_mib": 1024,
+      "presets": [
+        {
+          "enough": true,
+          "fraction": 0.22,
+          "required_mib": 8198
+        },
+        {
+          "enough": true,
+          "fraction": 0.3,
+          "required_mib": 10807
+        },
+        {
+          "enough": true,
+          "fraction": 0.45,
+          "required_mib": 15698
+        }
+      ]
+    }
+  },
+  "idle": {
+    "can_deploy": true,
+    "can_stop": false,
+    "checks": [
+      {
+        "code": "state_dir",
+        "level": "ok",
+        "params": {},
+        "text": "The folder for the deploy record is usable."
+      },
+      {
+        "code": "net_table",
+        "level": "ok",
+        "params": {},
+        "text": "The socket tables can be read."
+      },
+      {
+        "code": "port_free",
+        "level": "ok",
+        "params": {},
+        "text": "Nothing listens on the policy port."
+      },
+      {
+        "code": "no_client",
+        "level": "ok",
+        "params": {},
+        "text": "No client is connected to the policy port."
+      },
+      {
+        "code": "policy_units",
+        "level": "ok",
+        "params": {},
+        "text": "No policy server unit exists."
+      },
+      {
+        "code": "arm_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The arm lock is free."
+      },
+      {
+        "code": "gpu_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU lock is free or held by the live vision model server."
+      },
+      {
+        "code": "gpu_readable",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU's memory use can be read."
+      },
+      {
+        "code": "vram",
+        "level": "ok",
+        "params": {},
+        "text": "There is room for the smallest fraction."
+      }
+    ],
+    "confirm": {
+      "client_override": "stop with client connected",
+      "deploy": "deploy {model_id}",
+      "stop": "stop policy server"
+    },
+    "deploy": null,
+    "estop": {
+      "always": true,
+      "keep_hand": false,
+      "text": "Keep a hand on the physical e-stop for every session. This panel only starts and stops the policy server unit it created; it cannot stop the robot."
+    },
+    "failure": null,
+    "gpu": {
+      "free_mib": 23507,
+      "server_holds_basis": "reserved_fraction",
+      "server_holds_mib": null,
+      "state": "ok",
+      "total_mib": 32607,
+      "used_mib": 9100
+    },
+    "listener": {
+      "established": 0,
+      "ours": null,
+      "port": 8000,
+      "present": false
+    },
+    "live_annotation": null,
+    "notes": [
+      {
+        "code": "source_hash_unmanifested",
+        "text": "No source-hash manifest is named in the site file; the sha256 of the listed openpi files is recorded in the deploy record instead."
+      }
+    ],
+    "operation": null,
+    "readiness": {
+      "cfg": null,
+      "listening": null,
+      "norm_stats": null,
+      "rtc_enabled": null,
+      "rtc_warmup": null
+    },
+    "reason": null,
+    "sampled_at": "2026-10-15T01:46:40+08:00",
+    "schema": "levi.marvel0.deploy.v1",
+    "state": "idle",
+    "stop_blockers": [],
+    "unit": {
+      "state": "absent",
+      "sub": null
+    },
+    "vram": {
+      "hint": "Fractions 0.30 and 0.45 need the live vLLM asleep or stopped",
+      "margin_mib": 1024,
+      "presets": [
+        {
+          "enough": true,
+          "fraction": 0.22,
+          "required_mib": 8198
+        },
+        {
+          "enough": true,
+          "fraction": 0.3,
+          "required_mib": 10807
+        },
+        {
+          "enough": true,
+          "fraction": 0.45,
+          "required_mib": 15698
+        }
+      ]
+    }
+  },
+  "idle_after_stop": {
+    "can_deploy": true,
+    "can_stop": false,
+    "checks": [
+      {
+        "code": "state_dir",
+        "level": "ok",
+        "params": {},
+        "text": "The folder for the deploy record is usable."
+      },
+      {
+        "code": "net_table",
+        "level": "ok",
+        "params": {},
+        "text": "The socket tables can be read."
+      },
+      {
+        "code": "port_free",
+        "level": "ok",
+        "params": {},
+        "text": "Nothing listens on the policy port."
+      },
+      {
+        "code": "no_client",
+        "level": "ok",
+        "params": {},
+        "text": "No client is connected to the policy port."
+      },
+      {
+        "code": "policy_units",
+        "level": "ok",
+        "params": {},
+        "text": "No policy server unit exists."
+      },
+      {
+        "code": "arm_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The arm lock is free."
+      },
+      {
+        "code": "gpu_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU lock is free or held by the live vision model server."
+      },
+      {
+        "code": "gpu_readable",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU's memory use can be read."
+      },
+      {
+        "code": "vram",
+        "level": "ok",
+        "params": {},
+        "text": "There is room for the smallest fraction."
+      }
+    ],
+    "confirm": {
+      "client_override": "stop with client connected",
+      "deploy": "deploy {model_id}",
+      "stop": "stop policy server"
+    },
+    "deploy": {
+      "age_s": 10.3,
+      "cfg_guidance_scale": null,
+      "config": "pi05_fr3_all_state",
+      "fraction": 0.22,
+      "gpu_lock": "taken",
+      "model_id": "pi05_fr3_all_step49999",
+      "phase": "stopped",
+      "ready_at": "2026-10-15T01:46:40+08:00",
+      "request_id": "req-000001-aaaa",
+      "rtc": true,
+      "source_hash": {
+        "files": {
+          "scripts/serve_policy.py": "7b7d5e67f0240b3a566fbac5d8f74aa8e882353b3d58353db2e1bca51efd2c93",
+          "scripts/serve_policy_rtc.py": "53705f56e00fdbd77ef3043f40719b04a4d79f8f35071279e6f29b8974e67ef7",
+          "src/openpi/policies/policy_config.py": "edc513ca877c2076bc08b037e13a42d8928c4f56581513ed14f260165a6873dc",
+          "src/openpi/policies/rtc_policy.py": "4cfd01f8e74677432953b36012f4f7d2a955e31cde2a58a76808c161d6737034",
+          "src/openpi/training/config.py": "230981dbfcf12e4cd742f0a9ee4a9bdf8389a1d343acfa8c4d3d736e1a94ae8d"
+        },
+        "manifest": false
+      },
+      "started_at": "2026-10-15T01:46:40+08:00",
+      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999"
+    },
+    "estop": {
+      "always": true,
+      "keep_hand": false,
+      "text": "Keep a hand on the physical e-stop for every session. This panel only starts and stops the policy server unit it created; it cannot stop the robot."
+    },
+    "failure": null,
+    "gpu": {
+      "free_mib": 23507,
+      "server_holds_basis": "reserved_fraction",
+      "server_holds_mib": null,
+      "state": "ok",
+      "total_mib": 32607,
+      "used_mib": 9100
+    },
+    "listener": {
+      "established": 0,
+      "ours": null,
+      "port": 8000,
+      "present": false
+    },
+    "live_annotation": null,
+    "notes": [
+      {
+        "code": "source_hash_unmanifested",
+        "text": "No source-hash manifest is named in the site file; the sha256 of the listed openpi files is recorded in the deploy record instead."
+      }
+    ],
+    "operation": null,
+    "readiness": {
+      "cfg": null,
+      "listening": true,
+      "norm_stats": true,
+      "rtc_enabled": true,
+      "rtc_warmup": true
+    },
+    "reason": null,
+    "sampled_at": "2026-10-15T01:46:50+08:00",
+    "schema": "levi.marvel0.deploy.v1",
+    "state": "idle",
+    "stop_blockers": [],
+    "unit": {
+      "state": "absent",
+      "sub": null
+    },
+    "vram": {
+      "hint": "Fractions 0.30 and 0.45 need the live vLLM asleep or stopped",
+      "margin_mib": 1024,
+      "presets": [
+        {
+          "enough": true,
+          "fraction": 0.22,
+          "required_mib": 8198
+        },
+        {
+          "enough": true,
+          "fraction": 0.3,
+          "required_mib": 10807
+        },
+        {
+          "enough": true,
+          "fraction": 0.45,
+          "required_mib": 15698
+        }
+      ]
+    }
+  },
+  "log_empty": {
+    "classification": {
+      "cfg": null,
+      "failure": null,
+      "listening": false,
+      "norm_stats": false,
+      "rtc_enabled": false,
+      "rtc_warmup": false
+    },
+    "lines": [],
+    "log_id": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999-20261014T174640Z.log",
+    "schema": "levi.marvel0.deploy_log.v1",
+    "size_bytes": 0
+  },
+  "log_oom": {
+    "classification": {
+      "cfg": null,
+      "failure": "xla_oom",
+      "listening": false,
+      "norm_stats": false,
+      "rtc_enabled": false,
+      "rtc_warmup": false
+    },
+    "lines": [
+      "INFO:root:Loading model...",
+      "jaxlib.xla_extension.XlaRuntimeError: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 123 bytes"
+    ],
+    "log_id": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999-20261014T174640Z.log",
+    "schema": "levi.marvel0.deploy_log.v1",
+    "size_bytes": 134
+  },
+  "log_ready": {
+    "classification": {
+      "cfg": null,
+      "failure": null,
+      "listening": true,
+      "norm_stats": true,
+      "rtc_enabled": true,
+      "rtc_warmup": true
+    },
+    "lines": [
+      "INFO:root:Loading model...",
+      "INFO:root:Using norm stats shipped with the checkpoint: norm_stats.json",
+      "INFO:openpi:RTC enabled: max_guidance_weight=5.0, schedule=exp, plain policy",
+      "INFO:root:RTC warm-up: plain 812 ms, rtc 15400 ms (includes compilation)",
+      "INFO:websockets.server:server listening on 0.0.0.0:8000"
+    ],
+    "log_id": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999-20261014T174640Z.log",
+    "schema": "levi.marvel0.deploy_log.v1",
+    "size_bytes": 356
+  },
+  "models": {
+    "defaults": {
+      "cfg_guidance_scale": 1.0,
+      "fraction": 0.22,
+      "rtc": true
+    },
+    "models": [
+      {
+        "cfg_capable": false,
+        "config": "pi05_fr3_all_state",
+        "id": "pi05_fr3_all_step49999",
+        "labels": [],
+        "restricted_prompts": false,
+        "rollout_group_default": {
+          "plain": "pi05_fr3_all_step49999_demo",
+          "rtc": "pi05_fr3_all_step49999_rtc_demo"
+        },
+        "size_bytes": 3,
+        "step": null,
+        "variant": null,
+        "verified": true,
+        "version": null,
+        "warnings": []
+      },
+      {
+        "cfg_capable": true,
+        "config": "pi05_fr3_all_state_cfg",
+        "id": "recap_cfg_r1_step10000_jax",
+        "labels": ["unverified"],
+        "restricted_prompts": false,
+        "rollout_group_default": {
+          "plain": "recap_cfg_r1_step10000_jax_demo",
+          "rtc": "recap_cfg_r1_step10000_jax_rtc_demo"
+        },
+        "size_bytes": 54,
+        "step": 10000,
+        "variant": null,
+        "verified": false,
+        "version": null,
+        "warnings": []
+      },
+      {
+        "cfg_capable": true,
+        "config": "pi05_fr3_all_state_cfg",
+        "id": "recap_cfg_r2_best_step14300_jax",
+        "labels": ["unverified"],
+        "restricted_prompts": false,
+        "rollout_group_default": {
+          "plain": "recap_cfg_r2_best_step14300_jax_demo",
+          "rtc": "recap_cfg_r2_best_step14300_jax_rtc_demo"
+        },
+        "size_bytes": 70,
+        "step": 14300,
+        "variant": "best",
+        "verified": false,
+        "version": null,
+        "warnings": []
+      },
+      {
+        "cfg_capable": true,
+        "config": "pi05_fr3_all_state_cfg",
+        "id": "recap_cfg_r2_step15000_jax",
+        "labels": ["unverified"],
+        "restricted_prompts": false,
+        "rollout_group_default": {
+          "plain": "recap_cfg_r2_step15000_jax_demo",
+          "rtc": "recap_cfg_r2_step15000_jax_rtc_demo"
+        },
+        "size_bytes": 54,
+        "step": 15000,
+        "variant": null,
+        "verified": false,
+        "version": null,
+        "warnings": []
+      }
+    ],
+    "problems": [],
+    "schema": "levi.marvel0.models.v1",
+    "skipped": [
+      {
+        "id": "recap_cfg_r2_best_step_14300",
+        "reason": "not_deployable"
+      },
+      {
+        "id": "recap_global_step_10000",
+        "reason": "not_deployable"
+      },
+      {
+        "id": "reset_r1_step20000",
+        "reason": "excluded_by_site"
+      }
+    ]
+  },
+  "preview": {
+    "argv": [
+      "env",
+      "-u",
+      "VIRTUAL_ENV",
+      "no_proxy=localhost,127.0.0.1,::1",
+      "uv",
+      "run",
+      "--no-sync",
+      "--with",
+      "pyrealsense2==2.55.1.6486",
+      "python",
+      "examples/fr3_local/run_robotiq_client_collect_data.py",
+      "--remote-host=127.0.0.1",
+      "--remote-port=8000",
+      "--view-camera-id=262622274256",
+      "--wrist-camera-id=262622275490",
+      "--franka-server-url=http://127.0.0.1:5000/",
+      "--prompt=pick the eggplant in the blue plate",
+      "--max-timesteps=500",
+      "--eval-num=5",
+      "--min-z=0.025",
+      "--home-pose",
+      "0.481902",
+      "-0.011145",
+      "0.235951",
+      "3.119139",
+      "0.008288",
+      "-0.883962",
+      "--home-duration-s=3.0",
+      "--max-xy=0.85",
+      "--max-step-m=0.1",
+      "--max-step-rad=0.35",
+      "--rx-range",
+      "1.5",
+      "4.03",
+      "--ry-range",
+      "-0.74",
+      "0.96",
+      "--rz-range",
+      "-2.44",
+      "0.77",
+      "--binarize-gripper",
+      "--require-matching-server",
+      "--no-allow-unknown-prompt",
+      "--levi-mode=off",
+      "--new",
+      "--no-step-by-step",
+      "--rtc",
+      "--rtc-execute-horizon=6",
+      "--rollout-root=/path/to/rollouts",
+      "--rollout-group=pi05_fr3_all_step49999_rtc_demo",
+      "--eval-note=marvel0 page: pi05_fr3_all_step49999 rtc=on horizon=6"
+    ],
+    "command": "cd /path/to/openpi && \\\n  env -u VIRTUAL_ENV no_proxy=localhost,127.0.0.1,::1 \\\n  uv run --no-sync --with pyrealsense2==2.55.1.6486 python examples/fr3_local/run_robotiq_client_collect_data.py \\\n  --remote-host=127.0.0.1 --remote-port=8000 --view-camera-id=262622274256 --wrist-camera-id=262622275490 --franka-server-url=http://127.0.0.1:5000/ \\\n  '--prompt=pick the eggplant in the blue plate' \\\n  --max-timesteps=500 --eval-num=5 --min-z=0.025 \\\n  --home-pose 0.481902 -0.011145 0.235951 3.119139 0.008288 -0.883962 --home-duration-s=3.0 \\\n  --max-xy=0.85 --max-step-m=0.1 --max-step-rad=0.35 --rx-range 1.5 4.03 --ry-range -0.74 0.96 --rz-range -2.44 0.77 \\\n  --binarize-gripper --require-matching-server --no-allow-unknown-prompt \\\n  --levi-mode=off --new --no-step-by-step --rtc --rtc-execute-horizon=6 \\\n  --rollout-root=/path/to/rollouts --rollout-group=pi05_fr3_all_step49999_rtc_demo '--eval-note=marvel0 page: pi05_fr3_all_step49999 rtc=on horizon=6'",
+    "cwd": "/path/to/openpi",
+    "env": ["no_proxy=localhost,127.0.0.1,::1"],
+    "hands": "Keep a hand on the physical e-stop. This page never starts the arm stack or this client.",
+    "model": {
+      "config": "pi05_fr3_all_state",
+      "id": "pi05_fr3_all_step49999",
+      "restricted_prompts": false,
+      "verified": true
+    },
+    "ok": true,
+    "schema": "levi.marvel0.command.v1",
+    "server_requirements": {
+      "config": "pi05_fr3_all_state",
+      "model_id": "pi05_fr3_all_step49999",
+      "rtc": true
+    },
+    "warnings": [
+      {
+        "code": "min_z_below_task_table",
+        "text": "min-z 0.025 is below 0.05325, the floor the client measured for this task; the fingertips can reach the table."
+      }
+    ]
+  },
+  "preview_min_z": {
+    "body": {
+      "detail": {
+        "code": "min_z_below_floor",
+        "field": "min_z",
+        "floor": 0.025,
+        "message": "min_z cannot go below the site floor"
+      }
+    },
+    "status": 422
+  },
+  "preview_type": {
+    "body": {
+      "detail": [
+        {
+          "input": "5",
+          "loc": ["body", "max_steps"],
+          "msg": "Input should be a valid integer",
+          "type": "int_type"
+        }
+      ]
+    },
+    "status": 422
+  },
+  "preview_warn": {
+    "argv": [
+      "env",
+      "-u",
+      "VIRTUAL_ENV",
+      "no_proxy=localhost,127.0.0.1,::1",
+      "uv",
+      "run",
+      "--no-sync",
+      "--with",
+      "pyrealsense2==2.55.1.6486",
+      "python",
+      "examples/fr3_local/run_robotiq_client_collect_data.py",
+      "--remote-host=127.0.0.1",
+      "--remote-port=8000",
+      "--view-camera-id=262622274256",
+      "--wrist-camera-id=262622275490",
+      "--franka-server-url=http://127.0.0.1:5000/",
+      "--prompt=pick the eggplant in the blue plate",
+      "--max-timesteps=500",
+      "--eval-num=5",
+      "--min-z=0.03",
+      "--home-pose",
+      "0.481902",
+      "-0.011145",
+      "0.235951",
+      "3.119139",
+      "0.008288",
+      "-0.883962",
+      "--home-duration-s=3.0",
+      "--max-xy=0.85",
+      "--max-step-m=0.1",
+      "--max-step-rad=0.35",
+      "--rx-range",
+      "1.5",
+      "4.03",
+      "--ry-range",
+      "-0.74",
+      "0.96",
+      "--rz-range",
+      "-2.44",
+      "0.77",
+      "--binarize-gripper",
+      "--require-matching-server",
+      "--no-allow-unknown-prompt",
+      "--levi-mode=off",
+      "--new",
+      "--no-step-by-step",
+      "--rtc",
+      "--rtc-execute-horizon=8",
+      "--rollout-root=/path/to/rollouts",
+      "--rollout-group=recap_cfg_r2_best_step14300_jax_rtc_demo",
+      "--eval-note=marvel0 page: recap_cfg_r2_best_step14300_jax rtc=on horizon=8"
+    ],
+    "command": "cd /path/to/openpi && \\\n  env -u VIRTUAL_ENV no_proxy=localhost,127.0.0.1,::1 \\\n  uv run --no-sync --with pyrealsense2==2.55.1.6486 python examples/fr3_local/run_robotiq_client_collect_data.py \\\n  --remote-host=127.0.0.1 --remote-port=8000 --view-camera-id=262622274256 --wrist-camera-id=262622275490 --franka-server-url=http://127.0.0.1:5000/ \\\n  '--prompt=pick the eggplant in the blue plate' \\\n  --max-timesteps=500 --eval-num=5 --min-z=0.03 \\\n  --home-pose 0.481902 -0.011145 0.235951 3.119139 0.008288 -0.883962 --home-duration-s=3.0 \\\n  --max-xy=0.85 --max-step-m=0.1 --max-step-rad=0.35 --rx-range 1.5 4.03 --ry-range -0.74 0.96 --rz-range -2.44 0.77 \\\n  --binarize-gripper --require-matching-server --no-allow-unknown-prompt \\\n  --levi-mode=off --new --no-step-by-step --rtc --rtc-execute-horizon=8 \\\n  --rollout-root=/path/to/rollouts --rollout-group=recap_cfg_r2_best_step14300_jax_rtc_demo '--eval-note=marvel0 page: recap_cfg_r2_best_step14300_jax rtc=on horizon=8'",
+    "cwd": "/path/to/openpi",
+    "env": ["no_proxy=localhost,127.0.0.1,::1"],
+    "hands": "Keep a hand on the physical e-stop. This page never starts the arm stack or this client.",
+    "model": {
+      "config": "pi05_fr3_all_state_cfg",
+      "id": "recap_cfg_r2_best_step14300_jax",
+      "restricted_prompts": false,
+      "verified": false
+    },
+    "ok": true,
+    "schema": "levi.marvel0.command.v1",
+    "server_requirements": {
+      "config": "pi05_fr3_all_state_cfg",
+      "model_id": "recap_cfg_r2_best_step14300_jax",
+      "rtc": true
+    },
+    "warnings": [
+      {
+        "code": "unverified_model",
+        "text": "No real-GPU serving check is recorded for this model; watch the first steps with a hand on the physical e-stop."
+      },
+      {
+        "code": "rtc_margin_low",
+        "text": "Execute horizon 8 plus about 3 beats of inference latency reaches 11 of 10 actions per chunk, so the client may wait for chunks; use a smaller horizon if it does."
+      },
+      {
+        "code": "min_z_below_task_table",
+        "text": "min-z 0.03 is below 0.05325, the floor the client measured for this task; the fingertips can reach the table."
+      }
+    ]
+  },
+  "ready": {
+    "can_deploy": false,
+    "can_stop": true,
+    "checks": [
+      {
+        "code": "state_dir",
+        "level": "ok",
+        "params": {},
+        "text": "The folder for the deploy record is usable."
+      },
+      {
+        "code": "net_table",
+        "level": "ok",
+        "params": {},
+        "text": "The socket tables can be read."
+      },
+      {
+        "code": "port_free",
+        "level": "refuse",
+        "params": {},
+        "text": "The policy server of this page is already running; stop it first"
+      },
+      {
+        "code": "no_client",
+        "level": "ok",
+        "params": {},
+        "text": "No client is connected to the policy port."
+      },
+      {
+        "code": "policy_units",
+        "level": "refuse",
+        "params": {
+          "units": [
+            "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999.service"
+          ]
+        },
+        "text": "The policy server of this page is already running; stop it first"
+      },
+      {
+        "code": "arm_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The arm lock is free."
+      },
+      {
+        "code": "gpu_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU lock is free or held by the live vision model server."
+      },
+      {
+        "code": "gpu_readable",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU's memory use can be read."
+      },
+      {
+        "code": "vram",
+        "level": "ok",
+        "params": {},
+        "text": "There is room for the smallest fraction."
+      }
+    ],
+    "confirm": {
+      "client_override": "stop with client connected",
+      "deploy": "deploy {model_id}",
+      "stop": "stop policy server"
+    },
+    "deploy": {
+      "age_s": 10.0,
+      "cfg_guidance_scale": null,
+      "config": "pi05_fr3_all_state",
+      "fraction": 0.22,
+      "gpu_lock": "taken",
+      "model_id": "pi05_fr3_all_step49999",
+      "phase": "started",
+      "ready_at": "2026-10-15T01:46:40+08:00",
+      "request_id": "req-000001-aaaa",
+      "rtc": true,
+      "source_hash": {
+        "files": {
+          "scripts/serve_policy.py": "7b7d5e67f0240b3a566fbac5d8f74aa8e882353b3d58353db2e1bca51efd2c93",
+          "scripts/serve_policy_rtc.py": "53705f56e00fdbd77ef3043f40719b04a4d79f8f35071279e6f29b8974e67ef7",
+          "src/openpi/policies/policy_config.py": "edc513ca877c2076bc08b037e13a42d8928c4f56581513ed14f260165a6873dc",
+          "src/openpi/policies/rtc_policy.py": "4cfd01f8e74677432953b36012f4f7d2a955e31cde2a58a76808c161d6737034",
+          "src/openpi/training/config.py": "230981dbfcf12e4cd742f0a9ee4a9bdf8389a1d343acfa8c4d3d736e1a94ae8d"
+        },
+        "manifest": false
+      },
+      "started_at": "2026-10-15T01:46:40+08:00",
+      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999"
+    },
+    "estop": {
+      "always": true,
+      "keep_hand": false,
+      "text": "Keep a hand on the physical e-stop for every session. This panel only starts and stops the policy server unit it created; it cannot stop the robot."
+    },
+    "failure": null,
+    "gpu": {
+      "free_mib": 23507,
+      "server_holds_basis": "reserved_fraction",
+      "server_holds_mib": 7174,
+      "state": "ok",
+      "total_mib": 32607,
+      "used_mib": 9100
+    },
+    "listener": {
+      "established": 0,
+      "ours": true,
+      "port": 8000,
+      "present": true
+    },
+    "live_annotation": {
+      "blocked": true,
+      "text": "server holds 7174 MiB, live annotation cannot start"
+    },
+    "notes": [
+      {
+        "code": "source_hash_unmanifested",
+        "text": "No source-hash manifest is named in the site file; the sha256 of the listed openpi files is recorded in the deploy record instead."
+      }
+    ],
+    "operation": null,
+    "readiness": {
+      "cfg": null,
+      "listening": true,
+      "norm_stats": true,
+      "rtc_enabled": true,
+      "rtc_warmup": true
+    },
+    "reason": null,
+    "sampled_at": "2026-10-15T01:46:50+08:00",
+    "schema": "levi.marvel0.deploy.v1",
+    "state": "ready",
+    "stop_blockers": [],
+    "unit": {
+      "state": "active",
+      "sub": "running"
+    },
+    "vram": {
+      "hint": "Fractions 0.30 and 0.45 need the live vLLM asleep or stopped",
+      "margin_mib": 1024,
+      "presets": [
+        {
+          "enough": true,
+          "fraction": 0.22,
+          "required_mib": 8198
+        },
+        {
+          "enough": true,
+          "fraction": 0.3,
+          "required_mib": 10807
+        },
+        {
+          "enough": true,
+          "fraction": 0.45,
+          "required_mib": 15698
+        }
+      ]
+    }
+  },
+  "ready_cfg": {
+    "can_deploy": false,
+    "can_stop": true,
+    "checks": [
+      {
+        "code": "state_dir",
+        "level": "ok",
+        "params": {},
+        "text": "The folder for the deploy record is usable."
+      },
+      {
+        "code": "net_table",
+        "level": "ok",
+        "params": {},
+        "text": "The socket tables can be read."
+      },
+      {
+        "code": "port_free",
+        "level": "refuse",
+        "params": {},
+        "text": "The policy server of this page is already running; stop it first"
+      },
+      {
+        "code": "no_client",
+        "level": "ok",
+        "params": {},
+        "text": "No client is connected to the policy port."
+      },
+      {
+        "code": "policy_units",
+        "level": "refuse",
+        "params": {
+          "units": [
+            "levi-aeri-policy-manual-marvel0-recap-cfg-r2-best-step14300-jax.service"
+          ]
+        },
+        "text": "The policy server of this page is already running; stop it first"
+      },
+      {
+        "code": "arm_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The arm lock is free."
+      },
+      {
+        "code": "gpu_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU lock is free or held by the live vision model server."
+      },
+      {
+        "code": "gpu_readable",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU's memory use can be read."
+      },
+      {
+        "code": "vram",
+        "level": "ok",
+        "params": {},
+        "text": "There is room for the smallest fraction."
+      }
+    ],
+    "confirm": {
+      "client_override": "stop with client connected",
+      "deploy": "deploy {model_id}",
+      "stop": "stop policy server"
+    },
+    "deploy": {
+      "age_s": 10.0,
+      "cfg_guidance_scale": 1.0,
+      "config": "pi05_fr3_all_state_cfg",
+      "fraction": 0.22,
+      "gpu_lock": "taken",
+      "model_id": "recap_cfg_r2_best_step14300_jax",
+      "phase": "started",
+      "ready_at": "2026-10-15T01:46:50+08:00",
+      "request_id": "req-000001-aaaa",
+      "rtc": true,
+      "source_hash": {
+        "files": {
+          "scripts/serve_policy.py": "7b7d5e67f0240b3a566fbac5d8f74aa8e882353b3d58353db2e1bca51efd2c93",
+          "scripts/serve_policy_rtc.py": "53705f56e00fdbd77ef3043f40719b04a4d79f8f35071279e6f29b8974e67ef7",
+          "src/openpi/policies/policy_config.py": "edc513ca877c2076bc08b037e13a42d8928c4f56581513ed14f260165a6873dc",
+          "src/openpi/policies/rtc_policy.py": "4cfd01f8e74677432953b36012f4f7d2a955e31cde2a58a76808c161d6737034",
+          "src/openpi/training/config.py": "230981dbfcf12e4cd742f0a9ee4a9bdf8389a1d343acfa8c4d3d736e1a94ae8d"
+        },
+        "manifest": false
+      },
+      "started_at": "2026-10-15T01:46:40+08:00",
+      "unit": "levi-aeri-policy-manual-marvel0-recap-cfg-r2-best-step14300-jax"
+    },
+    "estop": {
+      "always": true,
+      "keep_hand": false,
+      "text": "Keep a hand on the physical e-stop for every session. This panel only starts and stops the policy server unit it created; it cannot stop the robot."
+    },
+    "failure": null,
+    "gpu": {
+      "free_mib": 23507,
+      "server_holds_basis": "reserved_fraction",
+      "server_holds_mib": 7174,
+      "state": "ok",
+      "total_mib": 32607,
+      "used_mib": 9100
+    },
+    "listener": {
+      "established": 0,
+      "ours": true,
+      "port": 8000,
+      "present": true
+    },
+    "live_annotation": {
+      "blocked": true,
+      "text": "server holds 7174 MiB, live annotation cannot start"
+    },
+    "notes": [
+      {
+        "code": "source_hash_unmanifested",
+        "text": "No source-hash manifest is named in the site file; the sha256 of the listed openpi files is recorded in the deploy record instead."
+      }
+    ],
+    "operation": null,
+    "readiness": {
+      "cfg": true,
+      "listening": true,
+      "norm_stats": true,
+      "rtc_enabled": true,
+      "rtc_warmup": true
+    },
+    "reason": null,
+    "sampled_at": "2026-10-15T01:46:50+08:00",
+    "schema": "levi.marvel0.deploy.v1",
+    "state": "ready",
+    "stop_blockers": [],
+    "unit": {
+      "state": "active",
+      "sub": "running"
+    },
+    "vram": {
+      "hint": "Fractions 0.30 and 0.45 need the live vLLM asleep or stopped",
+      "margin_mib": 1024,
+      "presets": [
+        {
+          "enough": true,
+          "fraction": 0.22,
+          "required_mib": 8198
+        },
+        {
+          "enough": true,
+          "fraction": 0.3,
+          "required_mib": 10807
+        },
+        {
+          "enough": true,
+          "fraction": 0.45,
+          "required_mib": 15698
+        }
+      ]
+    }
+  },
+  "ready_with_client": {
+    "can_deploy": false,
+    "can_stop": true,
+    "checks": [
+      {
+        "code": "state_dir",
+        "level": "ok",
+        "params": {},
+        "text": "The folder for the deploy record is usable."
+      },
+      {
+        "code": "net_table",
+        "level": "ok",
+        "params": {},
+        "text": "The socket tables can be read."
+      },
+      {
+        "code": "port_free",
+        "level": "refuse",
+        "params": {},
+        "text": "The policy server of this page is already running; stop it first"
+      },
+      {
+        "code": "no_client",
+        "level": "refuse",
+        "params": {
+          "established": 2
+        },
+        "text": "A client is connected to the policy port; end it first"
+      },
+      {
+        "code": "policy_units",
+        "level": "refuse",
+        "params": {
+          "units": [
+            "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999.service"
+          ]
+        },
+        "text": "The policy server of this page is already running; stop it first"
+      },
+      {
+        "code": "arm_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The arm lock is free."
+      },
+      {
+        "code": "gpu_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU lock is free or held by the live vision model server."
+      },
+      {
+        "code": "gpu_readable",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU's memory use can be read."
+      },
+      {
+        "code": "vram",
+        "level": "ok",
+        "params": {},
+        "text": "There is room for the smallest fraction."
+      }
+    ],
+    "confirm": {
+      "client_override": "stop with client connected",
+      "deploy": "deploy {model_id}",
+      "stop": "stop policy server"
+    },
+    "deploy": {
+      "age_s": 10.0,
+      "cfg_guidance_scale": null,
+      "config": "pi05_fr3_all_state",
+      "fraction": 0.22,
+      "gpu_lock": "taken",
+      "model_id": "pi05_fr3_all_step49999",
+      "phase": "started",
+      "ready_at": "2026-10-15T01:46:40+08:00",
+      "request_id": "req-000001-aaaa",
+      "rtc": true,
+      "source_hash": {
+        "files": {
+          "scripts/serve_policy.py": "7b7d5e67f0240b3a566fbac5d8f74aa8e882353b3d58353db2e1bca51efd2c93",
+          "scripts/serve_policy_rtc.py": "53705f56e00fdbd77ef3043f40719b04a4d79f8f35071279e6f29b8974e67ef7",
+          "src/openpi/policies/policy_config.py": "edc513ca877c2076bc08b037e13a42d8928c4f56581513ed14f260165a6873dc",
+          "src/openpi/policies/rtc_policy.py": "4cfd01f8e74677432953b36012f4f7d2a955e31cde2a58a76808c161d6737034",
+          "src/openpi/training/config.py": "230981dbfcf12e4cd742f0a9ee4a9bdf8389a1d343acfa8c4d3d736e1a94ae8d"
+        },
+        "manifest": false
+      },
+      "started_at": "2026-10-15T01:46:40+08:00",
+      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999"
+    },
+    "estop": {
+      "always": true,
+      "keep_hand": false,
+      "text": "Keep a hand on the physical e-stop for every session. This panel only starts and stops the policy server unit it created; it cannot stop the robot."
+    },
+    "failure": null,
+    "gpu": {
+      "free_mib": 23507,
+      "server_holds_basis": "reserved_fraction",
+      "server_holds_mib": 7174,
+      "state": "ok",
+      "total_mib": 32607,
+      "used_mib": 9100
+    },
+    "listener": {
+      "established": 2,
+      "ours": true,
+      "port": 8000,
+      "present": true
+    },
+    "live_annotation": {
+      "blocked": true,
+      "text": "server holds 7174 MiB, live annotation cannot start"
+    },
+    "notes": [
+      {
+        "code": "source_hash_unmanifested",
+        "text": "No source-hash manifest is named in the site file; the sha256 of the listed openpi files is recorded in the deploy record instead."
+      }
+    ],
+    "operation": null,
+    "readiness": {
+      "cfg": null,
+      "listening": true,
+      "norm_stats": true,
+      "rtc_enabled": true,
+      "rtc_warmup": true
+    },
+    "reason": null,
+    "sampled_at": "2026-10-15T01:46:50+08:00",
+    "schema": "levi.marvel0.deploy.v1",
+    "state": "ready",
+    "stop_blockers": ["client_connected"],
+    "unit": {
+      "state": "active",
+      "sub": "running"
+    },
+    "vram": {
+      "hint": "Fractions 0.30 and 0.45 need the live vLLM asleep or stopped",
+      "margin_mib": 1024,
+      "presets": [
+        {
+          "enough": true,
+          "fraction": 0.22,
+          "required_mib": 8198
+        },
+        {
+          "enough": true,
+          "fraction": 0.3,
+          "required_mib": 10807
+        },
+        {
+          "enough": true,
+          "fraction": 0.45,
+          "required_mib": 15698
+        }
+      ]
+    }
+  },
+  "refusals": {
+    "already_running": {
+      "detail": {
+        "code": "already_running",
+        "message": "The policy server of this page is already running; stop it first",
+        "units": [
+          "levi-aeri-policy-manual-marvel0-recap-cfg-r2-best-step14300-jax.service"
+        ]
+      },
+      "status": 409
+    },
+    "gpu_insufficient": {
+      "detail": {
+        "code": "gpu_insufficient",
+        "fraction": 0.3,
+        "free_mib": 5100,
+        "hint": "Put the live vLLM to sleep or stop it (/live), then try again.",
+        "margin_mib": 1024,
+        "message": "Fraction 0.30 of the 32607 MiB card needs 10807 MiB free (9783 + 1024); 5100 MiB are free. Put the live vLLM to sleep or stop it (/live), then try again.",
+        "required_mib": 10807,
+        "reserved_mib": 9783,
+        "total_mib": 32607
+      },
+      "status": 409
+    },
+    "port_taken": {
+      "detail": {
+        "code": "port_taken",
+        "listeners": 1,
+        "message": "Something already listens on port 8000. If it is a server started by hand, press Ctrl+C in the terminal that runs it",
+        "ours": false,
+        "port": 8000
+      },
+      "status": 409
+    },
+    "unverified_not_accepted": {
+      "detail": {
+        "code": "unverified_not_accepted",
+        "message": "This model has no recorded real-GPU serving check; accept that to deploy it"
+      },
+      "status": 409
+    }
+  },
+  "site": {
+    "cameras": {
+      "view": "262622274256",
+      "wrist": "262622275490"
+    },
+    "caps": {
+      "cfg_scale": {
+        "default": 1.0,
+        "max": 1.5
+      },
+      "eval_num": {
+        "cap": 50,
+        "default": 5
+      },
+      "max_steps": {
+        "cap": 3000,
+        "default": 500
+      },
+      "note_max_chars": 200,
+      "open_loop_horizon": {
+        "default": 6,
+        "max": 10
+      },
+      "prompt_max_chars": 300,
+      "rtc_horizon": {
+        "default": 6,
+        "max": 8
+      }
+    },
+    "fixed_flags": [
+      "--max-xy=0.85",
+      "--max-step-m=0.1",
+      "--max-step-rad=0.35",
+      "--rx-range 1.5 4.03",
+      "--ry-range -0.74 0.96",
+      "--rz-range -2.44 0.77",
+      "--binarize-gripper",
+      "--require-matching-server",
+      "--no-allow-unknown-prompt",
+      "--home-duration-s=3.0"
+    ],
+    "gpu": {
+      "fraction_presets": [0.22, 0.3, 0.45],
+      "margin_mib": 1024
+    },
+    "home": {
+      "duration_s": 3.0,
+      "pose": [0.481902, -0.011145, 0.235951, 3.119139, 0.008288, -0.883962]
+    },
+    "min_z": {
+      "default": 0.025,
+      "floor": 0.025
+    },
+    "names": {
+      "openpi_checkout": "openpi",
+      "rollout_root": "rollouts"
+    },
+    "prompts": {
+      "default": "pick the eggplant in the blue plate",
+      "known": [
+        "pick screws of same size into the empty slot of screw box",
+        "stack the plates of same color together",
+        "pick the eggplant in the blue plate",
+        "stack red plate on white plate then place eggplant on blue plate",
+        "place tomato on red plate then eggplant on blue plate"
+      ],
+      "restricted": [
+        "pick screws of same size into the empty slot of screw box",
+        "stack the plates of same color together"
+      ],
+      "restricted_prefixes": ["pi05_fr3_sp"]
+    },
+    "schema": "levi.marvel0.site_view.v1",
+    "server": {
+      "port": 8000,
+      "remote_host": "127.0.0.1",
+      "robot_server_url": "http://127.0.0.1:5000/"
+    },
+    "source": "env",
+    "source_hash": {
+      "files": 5,
+      "manifest": false
+    },
+    "unit": {
+      "cpu_affinity": "8-15",
+      "nice": 10,
+      "start_timeout_s": 600,
+      "stop_timeout_s": 90
+    }
+  },
+  "site_missing": {
+    "body": {
+      "detail": {
+        "code": "site_missing",
+        "looked_at": "/path/to/none.toml",
+        "message": "marvel0 site file missing",
+        "template": "# LEVI marvel0 site file. Machine values only; the page can read it and can never write it.\n# Point LEVI_MARVEL0_SITE at it, or save it as lab/marvel0/site.toml in the main LEVI checkout.\nschema = \"levi.marvel0.site.v1\"\n\n[paths]\nopenpi_checkout  = \"/path/to/openpi\"\npython           = \"/path/to/openpi/.venv/bin/python\"   # run directly, not through 'uv run'\ncheckpoints_root = \"/path/to/openpi/checkpoints\"\nrollout_root     = \"/path/to/rollouts\"                  # where the demo client writes episodes\ngpu_lock_file    = \"/path/to/levi-hub/.gpu.lock\"        # the physical GPU lock file\n\n[live]\nunit = \"levi-live.service\"          # the owner of the GPU lock while its vision model server exists\n\n[ros]\npath_prefixes = [\"/path/to/ros\", \"/path/to/franka_control\"]   # LD_LIBRARY_PATH entries under these are removed from the policy unit\n\n[server]\nport = 8000\nremote_host = \"127.0.0.1\"\nrobot_server_url = \"http://127.0.0.1:5000/\"\n\n[cameras]\nview  = \"262622274256\"   # side D405\nwrist = \"262622275490\"   # wrist D405\n\n[home]\npose = [0.481902, -0.011145, 0.235951, 3.119139, 0.008288, -0.883962]\nduration_s = 3.0               # 1 to 30 seconds\n\n[safety]\nmin_z_floor = 0.025            # the form can only raise it\nmin_z_default = 0.025          # the marvel0 owner decides: the client's own floors are 0.075 (screws) and 0.05325 (plates), so this default warns\nmax_xy = 0.85\nmax_step_m = 0.10\nmax_step_rad = 0.35\nrx_range = [1.50, 4.03]\nry_range = [-0.74, 0.96]\nrz_range = [-2.44, 0.77]\nbinarize_gripper = true\nrequire_matching_server = true\nallow_unknown_prompt = false\n\n[caps]\nmax_steps_default = 500\nmax_steps_cap = 3000\neval_num_default = 5\neval_num_cap = 50\nrtc_horizon_default = 6\nrtc_horizon_max = 8            # the preview warns above 7 (execute horizon + 3 beats of latency must stay <= 10)\nopen_loop_default = 6\nopen_loop_max = 10\nprompt_max_chars = 300\nnote_max_chars = 200\ncfg_scale_default = 1.0\ncfg_scale_max = 1.5\n\n[gpu]\nfraction_presets = [0.22, 0.30, 0.45]   # 0.05 to 0.45, ascending\nmargin_mib = 1024              # at least 1024\nlock_hold_max_s = 600\n\n[unit]\nnice = 10\ncpu_affinity = \"8-15\"          # a taskset list; choose cores the arm controller does not use (the marvel0 owner confirms them before the first deploy)\ncpu_quota_percent = 0          # 0 = no CPUQuota property\nstop_timeout_s = 90\nstart_timeout_s = 600\n\n[catalog]\nknown_configs = [\"pi05_fr3_all_state\", \"pi05_fr3_all_state_cfg\"]\ncfg_configs = [\"pi05_fr3_all_state_cfg\"]\nrestricted_prefixes = [\"pi05_fr3_sp\"]\nverified = [\"pi05_fr3_all_step49999\"]    # checkpoints with a recorded real-GPU serving check\nexcluded = [\"reset_r1_step20000\"]\n\n[prompts]\ndefault = \"pick the eggplant in the blue plate\"\nknown = [\n  \"pick screws of same size into the empty slot of screw box\",\n  \"stack the plates of same color together\",\n  \"pick the eggplant in the blue plate\",\n  \"stack red plate on white plate then place eggplant on blue plate\",\n  \"place tomato on red plate then eggplant on blue plate\",\n]\n\n[source]\nhash_files = [\n  \"scripts/serve_policy_rtc.py\",\n  \"scripts/serve_policy.py\",\n  \"src/openpi/policies/rtc_policy.py\",\n  \"src/openpi/policies/policy_config.py\",\n  \"src/openpi/training/config.py\",\n]\nmanifest = \"\"     # '' = none: the hashes are only recorded in the deploy record\n"
+      }
+    },
+    "status": 412
+  },
+  "starting": {
+    "can_deploy": false,
+    "can_stop": true,
+    "checks": [
+      {
+        "code": "state_dir",
+        "level": "ok",
+        "params": {},
+        "text": "The folder for the deploy record is usable."
+      },
+      {
+        "code": "net_table",
+        "level": "ok",
+        "params": {},
+        "text": "The socket tables can be read."
+      },
+      {
+        "code": "port_free",
+        "level": "ok",
+        "params": {},
+        "text": "Nothing listens on the policy port."
+      },
+      {
+        "code": "no_client",
+        "level": "ok",
+        "params": {},
+        "text": "No client is connected to the policy port."
+      },
+      {
+        "code": "policy_units",
+        "level": "refuse",
+        "params": {
+          "units": [
+            "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999.service"
+          ]
+        },
+        "text": "The policy server of this page is already running; stop it first"
+      },
+      {
+        "code": "arm_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The arm lock is free."
+      },
+      {
+        "code": "gpu_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU lock is free or held by the live vision model server."
+      },
+      {
+        "code": "gpu_readable",
+        "level": "ok",
+        "params": {},
+        "text": "The GPU's memory use can be read."
+      },
+      {
+        "code": "vram",
+        "level": "ok",
+        "params": {},
+        "text": "There is room for the smallest fraction."
+      }
+    ],
+    "confirm": {
+      "client_override": "stop with client connected",
+      "deploy": "deploy {model_id}",
+      "stop": "stop policy server"
+    },
+    "deploy": {
+      "age_s": 0.0,
+      "cfg_guidance_scale": null,
+      "config": "pi05_fr3_all_state",
+      "fraction": 0.22,
+      "gpu_lock": "taken",
+      "model_id": "pi05_fr3_all_step49999",
+      "phase": "started",
+      "ready_at": null,
+      "request_id": "req-000001-aaaa",
+      "rtc": true,
+      "source_hash": {
+        "files": {
+          "scripts/serve_policy.py": "7b7d5e67f0240b3a566fbac5d8f74aa8e882353b3d58353db2e1bca51efd2c93",
+          "scripts/serve_policy_rtc.py": "53705f56e00fdbd77ef3043f40719b04a4d79f8f35071279e6f29b8974e67ef7",
+          "src/openpi/policies/policy_config.py": "edc513ca877c2076bc08b037e13a42d8928c4f56581513ed14f260165a6873dc",
+          "src/openpi/policies/rtc_policy.py": "4cfd01f8e74677432953b36012f4f7d2a955e31cde2a58a76808c161d6737034",
+          "src/openpi/training/config.py": "230981dbfcf12e4cd742f0a9ee4a9bdf8389a1d343acfa8c4d3d736e1a94ae8d"
+        },
+        "manifest": false
+      },
+      "started_at": "2026-10-15T01:46:40+08:00",
+      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999"
+    },
+    "estop": {
+      "always": true,
+      "keep_hand": false,
+      "text": "Keep a hand on the physical e-stop for every session. This panel only starts and stops the policy server unit it created; it cannot stop the robot."
+    },
+    "failure": null,
+    "gpu": {
+      "free_mib": 23507,
+      "server_holds_basis": "reserved_fraction",
+      "server_holds_mib": 7174,
+      "state": "ok",
+      "total_mib": 32607,
+      "used_mib": 9100
+    },
+    "listener": {
+      "established": 0,
+      "ours": null,
+      "port": 8000,
+      "present": false
+    },
+    "live_annotation": {
+      "blocked": true,
+      "text": "server holds 7174 MiB, live annotation cannot start"
+    },
+    "notes": [
+      {
+        "code": "source_hash_unmanifested",
+        "text": "No source-hash manifest is named in the site file; the sha256 of the listed openpi files is recorded in the deploy record instead."
+      }
+    ],
+    "operation": null,
+    "readiness": {
+      "cfg": null,
+      "listening": false,
+      "norm_stats": false,
+      "rtc_enabled": false,
+      "rtc_warmup": false
+    },
+    "reason": null,
+    "sampled_at": "2026-10-15T01:46:40+08:00",
+    "schema": "levi.marvel0.deploy.v1",
+    "state": "starting",
+    "stop_blockers": [],
+    "unit": {
+      "state": "activating",
+      "sub": "start"
+    },
+    "vram": {
+      "hint": "Fractions 0.30 and 0.45 need the live vLLM asleep or stopped",
+      "margin_mib": 1024,
+      "presets": [
+        {
+          "enough": true,
+          "fraction": 0.22,
+          "required_mib": 8198
+        },
+        {
+          "enough": true,
+          "fraction": 0.3,
+          "required_mib": 10807
+        },
+        {
+          "enough": true,
+          "fraction": 0.45,
+          "required_mib": 15698
+        }
+      ]
+    }
+  },
+  "stopped": {
+    "client_override_used": false,
+    "created": true,
+    "next": "Watch the deploy state; the port is free when the state is idle.",
+    "replayed": false,
+    "request_id": "stop-request-1",
+    "schema": "levi.marvel0.stop_result.v1",
+    "state": "idle",
+    "stopped": true,
+    "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999"
+  }
+}

@@ -17,6 +17,11 @@ const nextConfig: NextConfig = {
     optimizePackageImports: ["react-icons", "recharts", "@huggingface/hub"],
   },
   generateBuildId: () => packageJson.version,
+  // The robot-station page was /rig until 2026-10-20; old bookmarks and the
+  // operator tutorial still point there. Temporary, so no browser keeps it.
+  async redirects() {
+    return [{ source: "/rig", destination: "/marvel0", permanent: false }];
+  },
 };
 
 export default nextConfig;

@@ -1,0 +1,285 @@
+/* Styles of the marvel0 (/marvel0). Classes start with `rg-`; colours come
+ * from the `--ds-*` tokens only, so the light and dark themes both work. A
+ * state is always told in words and by the badge's shape, never by colour
+ * alone; the coloured edge of a card only repeats it. */
+.rg-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-5);
+}
+.rg-page h1 {
+  margin: 0;
+}
+.rg-page h2 {
+  margin: 0;
+}
+.rg-page p {
+  margin: 0;
+}
+.rg-scope {
+  margin: 0;
+  padding-left: var(--ds-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+.rg-fresh {
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-caption-size);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.rg-bad {
+  color: var(--ds-danger);
+}
+.rg-banner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-4);
+  border: 1px solid var(--ds-separator);
+  border-left-width: 4px;
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+}
+.rg-banner--busy {
+  border-left-color: var(--ds-warning);
+  background: var(--ds-warning-bg);
+}
+.rg-banner--idle,
+.rg-banner--unknown {
+  border-left-color: var(--ds-separator-strong);
+}
+.rg-banner__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2) var(--ds-space-3);
+}
+.rg-banner__reasons {
+  margin: 0;
+  padding-left: var(--ds-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  font-size: var(--ds-text-callout-size);
+}
+.rg-source {
+  font-weight: var(--ds-weight-semibold);
+}
+/* What a reason says, in the page's words. */
+.rg-what {
+  display: block;
+  overflow-wrap: anywhere;
+}
+/* The server's own sentence, in English whatever the page's language. */
+.rg-server {
+  display: block;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  overflow-wrap: anywhere;
+}
+/* What the one reason above probably means; the advisory below is fainter. */
+.rg-banner__hint {
+  margin: 0;
+  padding-left: var(--ds-space-5);
+  font-size: var(--ds-text-callout-size);
+  overflow-wrap: anywhere;
+}
+.rg-muted {
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  min-width: 0;
+}
+.rg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--ds-space-4);
+  align-items: start;
+}
+.rg-card {
+  border-left-width: 4px;
+  min-width: 0;
+}
+.rg-card--ok {
+  border-left-color: var(--ds-success);
+}
+.rg-card--red {
+  border-left-color: var(--ds-danger);
+}
+.rg-card--stale {
+  border-left-color: var(--ds-warning);
+}
+.rg-card--not_started,
+.rg-card--unknown {
+  border-left-color: var(--ds-separator-strong);
+}
+.rg-card .ds-card__header {
+  margin-bottom: var(--ds-space-3);
+}
+.rg-facts {
+  display: grid;
+  grid-template-columns: minmax(96px, 12rem) minmax(0, 1fr);
+  gap: var(--ds-space-1) var(--ds-space-3);
+  margin: 0;
+  font-size: var(--ds-text-caption-size);
+}
+.rg-facts dt {
+  color: var(--ds-text-tertiary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.rg-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.rg-notes {
+  margin: var(--ds-space-2) 0 0;
+  padding-left: var(--ds-space-5);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+  overflow-wrap: anywhere;
+}
+.rg-hint {
+  margin: var(--ds-space-3) 0 0;
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-tertiary);
+}
+.rg-fact {
+  display: contents;
+}
+
+/* The two action cards (Policy server, Client command). */
+.rg-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: var(--ds-space-4);
+  align-items: start;
+}
+.rg-action {
+  min-width: 0;
+}
+.rg-action p {
+  margin: 0;
+}
+.rg-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  margin-bottom: var(--ds-space-3);
+}
+.rg-unreadable {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  margin-bottom: var(--ds-space-3);
+}
+.rg-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  margin-top: var(--ds-space-3);
+}
+.rg-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2) var(--ds-space-3);
+}
+.rg-actions-row h4 {
+  margin: 0;
+}
+.rg-model {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-model__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+}
+.rg-presets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-presets ul {
+  margin-top: 0;
+}
+.rg-presets li[aria-current="true"] {
+  color: var(--ds-text-primary);
+  font-weight: var(--ds-weight-semibold);
+}
+.rg-details {
+  margin-top: var(--ds-space-3);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-details > summary {
+  cursor: pointer;
+  color: var(--ds-text-secondary);
+}
+.rg-checks {
+  list-style: none;
+  margin: var(--ds-space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  overflow-wrap: anywhere;
+}
+.rg-warn {
+  color: var(--ds-warning);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  margin-top: var(--ds-space-3);
+}
+.rg-result .pg-note {
+  margin: 0;
+}
+/* The unit's log and the command to copy: monospace, English, kept in lines,
+ * never wider than the card. */
+.rg-log,
+.rg-command {
+  margin: 0;
+  padding: var(--ds-space-2) var(--ds-space-3);
+  background: var(--ds-surface-sunken);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-xs);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-primary);
+}
+.rg-log {
+  max-height: 20rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.rg-command {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.rg-command--stale {
+  opacity: 0.6;
+}
+.rg-site-issue .pg-problem__fix {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
