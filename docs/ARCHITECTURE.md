@@ -11,7 +11,7 @@ The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SV
   <img alt="LEVI in context: raw captures, LeRobot datasets, robot rollouts and the Hugging Face Hub go in; models propose; a person decides; LeRobot v2.1, RECAP value data, training manifests and pool exports come out." src="assets/atlas/01-system-context-light.svg">
 </picture>
 
-*Read it left to right.* Everything inside the frame runs on your machine. Agent work, through the web UI, REST, MCP or the CLI, goes through one capability layer, so its rules are the same whichever door it uses. Models propose; a person approves and commits (the live service's audited auto-approver is the one exception). Source data is never modified.
+*Read it left to right.* Everything inside the frame runs on your machine. Agent work, through the web UI, REST, MCP or the CLI, goes through one capability layer, so its rules are the same whichever door it uses. Models propose; a person approves and commits (the live service's audited auto-approver is the one exception). Source data is never modified. The README shows a larger version with three inputs and three outputs (`11-context-lite`).
 
 ## 2 From raw data to a better policy
 
@@ -20,7 +20,7 @@ The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SV
   <img alt="A five-tier pyramid: read and convert, check, label and judge, curate for training, and a better policy at the top, which is not established." src="assets/atlas/02-pyramid-light.svg">
 </picture>
 
-*Read it bottom to top.* Each tier depends on the one below it. The measured result sits at tier 3 (judging success on one task); the top tier is the goal and has no result yet. [Evidence](#7-evidence-with-its-limits) shows the numbers.
+*Read it bottom to top.* Each tier depends on the one below it. The measured result sits at tier 3 (judging success on one task); the top tier is the goal and has no result yet. [Evidence](#7-evidence-with-its-limits) shows the numbers. The README shows a larger version with each tier's name and status only (`12-pyramid-lite`).
 
 ## 3 Layers of the workbench
 
@@ -85,6 +85,20 @@ The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SV
 </picture>
 
 *A baseline, not a speed-up.* The left half is what checking one change costs today; the right half is how the slimming work proves it lost nothing: a smaller component with the same behaviour, a test selector checked against deliberate deletions, and an inventory of every route, command, setting, page and test that fails when one disappears. The three guards are in main. No before-and-after timing is shown, because the suite grew by about 900 test cases between the two timed runs.
+
+## 10 The AERI subtask loop (first real-robot runs in external mode)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/atlas/14-subtask-flow-dark.svg">
+  <img alt="Swim lanes for the operator, terminal D, the policy service, the vision model, the robot stack and the web page. Prepare, start with a confirmed object list, a round of release, planned subtasks, up to 200 steps each, a check and the next subtask or a retry, home, a reverse loop and home again, then the end. Only terminal D moves the robot; the model's done only moves the flow on." src="assets/atlas/14-subtask-flow-light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/atlas/15-aeri-terminals-dark.svg">
+  <img alt="Four robot-stack terminals A, B, C and M that you start, and terminal D, which in seven numbered steps checks the machine, starts the vision model and puts it to sleep, starts the policy service, lists the objects for you to confirm, runs the rounds and stops both models at the end." src="assets/atlas/15-aeri-terminals-light.svg">
+</picture>
+
+*Not a result yet.* A run with `reset_strategy: subtask_loop` needs no reset policy: you set a task name and the number of rounds, the vision model plans pick-and-place subtasks from the objects you confirmed, the policy runs each one, and a reverse loop puts the scene back. The vision model's "done" only moves the flow on; the result of a round is the s or f you press in terminal D. The policy and the vision model never compute at the same time. The code is in main. Earlier branch versions of it ran on the robot only in external mode, where an agent answered the vision model's questions; the version in main has not run on the robot, no round has an operator label, so there is no measured success rate, and the local vision model has not run on the robot. Hardware acceptance pending. The README shows a shorter version (`13-subtask-loop`). The run described in [section 8](#8-an-aeri-run-start-to-finish) stays as it is for runs with a reset policy. [Automatic evaluation pipeline](AUTOMATIC_PIPELINE.md).
 
 ---
 

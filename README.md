@@ -20,13 +20,13 @@ A robot policy is only as good as the data it learns from, and the data is full 
 ## Architecture at a glance
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/01-system-context-dark.svg">
-  <img alt="LEVI in context: data goes in, models propose, a person decides, curated training data comes out." src="docs/assets/atlas/01-system-context-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/11-context-lite-dark.svg">
+  <img alt="LEVI in context: data goes in, models propose, a person decides, curated training data comes out." src="docs/assets/atlas/11-context-lite-light.svg">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/02-pyramid-dark.svg">
-  <img alt="From raw data to a better policy, as a five-tier pyramid; the top tier is not established." src="docs/assets/atlas/02-pyramid-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/12-pyramid-lite-dark.svg">
+  <img alt="From raw data to a better policy, as a five-tier pyramid; the top tier is not established." src="docs/assets/atlas/12-pyramid-lite-light.svg">
 </picture>
 
 Seven more figures (layers, a task step by step, live annotation beside a robot, the automatic evaluation authority split, the evidence with its limits, an AERI run from start to finish, and what the code costs to check today) are in the [architecture atlas](docs/ARCHITECTURE.md).

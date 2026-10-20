@@ -1033,7 +1033,7 @@ def fig_live(t):
     f = Fig(
         "05-live-gpu",
         1200,
-        630,
+        654,
         t,
         "Live annotation beside a robot evaluation: one GPU, shared by turns",
         "While a robot evaluation writes rollouts, the live service labels finished episodes with a local model, but only "
@@ -1188,6 +1188,10 @@ def fig_live(t):
         602,
         "Status: the gate is verified with fakes; sleep and wake beside a real policy server are not yet verified with the real model.",
     )
+    f.footnote(
+        626,
+        "In the AERI subtask loop (earlier versions: external mode only on the robot) the policy and the vision model take turns on the GPU by default.",
+    )
     return f
 
 
@@ -1195,7 +1199,7 @@ def fig_aeri(t):
     f = Fig(
         "06-aeri-authority",
         1200,
-        606,
+        630,
         t,
         "Automatic evaluation (AERI): three parts joined by versioned messages, one part with motion authority",
         "A proposes events and judges goals and scenes, B grants resources and serves policy chunks, C alone may command "
@@ -1354,6 +1358,10 @@ def fig_aeri(t):
     f.footnote(
         578,
         "AERI is this pipeline's code name. The launch wizard and run window configure and show; they cannot give A or B motion authority.",
+    )
+    f.footnote(
+        602,
+        "In the AERI subtask loop (earlier versions: external mode only on the robot) the vision model also plans subtasks; its “done” only moves the flow on.",
     )
     return f
 
@@ -2211,6 +2219,658 @@ def fig_aeri_lite(t):
     return f
 
 
+def _fits(s, size, room):
+    """README versions: a line that would not fit its box stops the build."""
+    width = est(s, size, size * 0.56)
+    if width > room:
+        raise ValueError(f"{tr(s)!r} at {size} px needs ~{width:.0f} px, has {room}")
+
+
+def _lite_heading(f, title, sub):
+    """The README versions' heading: the same rule marks, larger type."""
+    c = f.c
+    f.parts.append(
+        f'<rect x="32" y="14" width="30" height="3.5" rx="1.75" fill="{c["model"]}"/>'
+        f'<rect x="64" y="14" width="14" height="3.5" rx="1.75" fill="{c["system"]}"/>'
+    )
+    f.text(32, 50, title, size=30, weight=700)
+    _fits(sub, 18, f.w - 64)
+    f.text(32, 82, sub, size=18, fill=c["soft"])
+
+
+def _lite_box(f, x, y, w, h, title, line, tone=None, icon=None):
+    """A README-version card: a 20 px title and at most one 18 px line under it."""
+    c = f.c
+    fill, stroke = (c[tone + "_bg"], c[tone]) if tone else (c["box"], c["boxedge"])
+    f.rect(x, y, w, h, fill=fill, stroke=stroke, sw=1.6 if tone else 1.3)
+    room = w - 36 - (34 if icon else 0)
+    _fits(title, 20, room)
+    f.text(
+        x + 18, y + 34, title, size=20, weight=700, fill=c[tone] if tone else c["ink"]
+    )
+    if line:
+        _fits(line, 18, w - 36)
+        f.text(x + 18, y + 62, line, size=18, fill=c["soft"])
+    if icon:
+        f.icon(icon, x + w - 44, y + 14, tone, size=26)
+
+
+def fig_context_lite(t):
+    """README version of figure 1: three inputs, three outputs, large text."""
+    f = Fig(
+        "11-context-lite",
+        1200,
+        620,
+        t,
+        "LEVI in context, README version: data in, models propose, a person decides, training data out",
+        "Raw captures, LeRobot datasets and robot rollouts enter LEVI on your machine; models propose; a "
+        "person decides and can undo; LeRobot v2.1, RECAP value data and training manifests and pool "
+        "exports leave. Source data is never modified. The full version is figure 1 in the architecture atlas.",
+    )
+    c = f.c
+    _lite_heading(
+        f,
+        "LEVI in context",
+        "Data goes in, models propose, a person decides, curated training data comes out.",
+    )
+    f.text(32, 120, "IN", size=15, weight=700, fill=c["faint"], ls=1)
+    f.text(848, 120, "OUT", size=15, weight=700, fill=c["faint"], ls=1)
+    ins = [
+        ("Raw captures", "CSV + video folders", "doc"),
+        ("LeRobot datasets", "v2.0 – v3.1, local or Hub", "db"),
+        ("Robot rollouts", "from a running evaluation", "arm"),
+    ]
+    outs = [
+        ("LeRobot v2.1", "converted, source untouched", "db"),
+        ("RECAP value dataset", "per-frame value + advantage", "doc"),
+        ("Training manifests", "and pool exports", "doc"),
+    ]
+    bw, bh = 320, 84
+    for i, (a, b, ic) in enumerate(ins):
+        y = 132 + i * 120
+        _lite_box(f, 32, y, bw, bh, a, b, icon=ic)
+        f.arrow([(32 + bw, y + bh / 2), (412, 290 + i * 18)], tone=None, flow=True)
+    for i, (a, b, ic) in enumerate(outs):
+        y = 132 + i * 120
+        _lite_box(f, 848, y, bw, bh, a, b, icon=ic)
+        f.arrow([(788, 290 + i * 18), (848, y + bh / 2)], tone=None, flow=True)
+    _lite_box(
+        f,
+        412,
+        112,
+        376,
+        84,
+        "Models propose",
+        "agents · API models · local VLMs",
+        "model",
+        "chip",
+    )
+    f.arrow([(600, 196), (600, 240)], tone="model")
+    f.rect(412, 240, 376, 130, fill=c["box"], stroke=c["accent"], r=16, sw=2, elev=2)
+    f.text(600, 276, "LEVI, on your machine", size=22, weight=700, anchor="middle")
+    for j, s in enumerate(("convert · check · label", "training pool · RECAP · AERI")):
+        _fits(s, 18, 340)
+        f.text(600, 312 + j * 28, s, size=18, anchor="middle", fill=c["soft"])
+    _lite_box(
+        f,
+        412,
+        418,
+        376,
+        84,
+        "A person decides",
+        "approves, reviews, can undo",
+        "person",
+        "person",
+    )
+    f.arrow([(600, 418), (600, 374)], tone="person", flow=True)
+    f.text(
+        32,
+        556,
+        "Source data is never modified; outputs go to new folders.",
+        size=15,
+        fill=c["faint"],
+    )
+    f.text(
+        32,
+        582,
+        "Nothing leaves the machine unless you connect a remote model or run an explicit upload or push.",
+        size=15,
+        fill=c["faint"],
+    )
+    return f
+
+
+def fig_pyramid_lite(t):
+    """README version of figure 2: five tiers, each a name and its status."""
+    f = Fig(
+        "12-pyramid-lite",
+        1200,
+        600,
+        t,
+        "What LEVI does with robot data, README version: five tiers from reading data to a better policy",
+        "Five tiers: read and convert, check, label and judge, curate for training, and a better policy at the "
+        "top. The first, second and fourth are built and tested on fixtures; label and judge is measured on two "
+        "tasks with the bar met on one; a better policy is not established. The full version is figure 2 in the "
+        "architecture atlas.",
+    )
+    c = f.c
+    _lite_heading(
+        f,
+        "From raw data to a better policy",
+        "Each tier rests on the one below it. The top tier is the goal, and it is not proven yet.",
+    )
+    tiers = [
+        ("5", "A better policy", "Not established", "danger", True),
+        ("4", "Curate for training", "Built · fixture-tested", None, False),
+        (
+            "3",
+            "Label and judge",
+            "Measured on two tasks; bar met on one",
+            "gate",
+            False,
+        ),
+        ("2", "Check", "Built · fixture-tested", None, False),
+        ("1", "Read and convert", "Built · fixture and real-data checked", None, False),
+    ]
+    top, th, cx, rx = 108, 84, 310, 640
+    for i, (n, name, status, tone, dash) in enumerate(tiers):
+        y = top + i * th
+        w_top, w_bot = 80 + i * 96, 80 + (i + 1) * 96
+        x0t, x1t = cx - w_top / 2, cx + w_top / 2
+        x0b, x1b = cx - w_bot / 2, cx + w_bot / 2
+        fill = c[tone + "_bg"] if tone else c["box"]
+        stroke = c[tone] if tone else c["boxedge"]
+        d = f"M{x0t:.0f} {y:.0f} L{x1t:.0f} {y:.0f} L{x1b:.0f} {y + th - 6:.0f} L{x0b:.0f} {y + th - 6:.0f} Z"
+        da = ' stroke-dasharray="6 4"' if dash else ""
+        side = mix(stroke, c["panel"], 0.35)
+        f.parts.append(f'<path d="{d}" transform="translate(7 6)" fill="{side}"/>')
+        f.parts.append(
+            f'<path d="{d}" fill="{f._paint(fill)}" stroke="{stroke}" stroke-width="1.5"{da}/>'
+        )
+        f.text(
+            cx,
+            y + th / 2 + 6,
+            n,
+            size=24,
+            weight=700,
+            anchor="middle",
+            fill=c[tone] if tone else c["ink"],
+        )
+        f.arrow(
+            [
+                (cx + (w_top + w_bot) / 4 + 10, y + th / 2 - 3),
+                (rx - 14, y + th / 2 - 3),
+            ],
+            tone=None,
+            dash=True,
+        )
+        _fits(name, 20, 1168 - rx)
+        _fits(status, 18, 1168 - rx)
+        f.text(
+            rx, y + 32, name, size=20, weight=700, fill=c[tone] if tone else c["ink"]
+        )
+        f.text(
+            rx,
+            y + 60,
+            status,
+            size=18,
+            weight=600 if tone else 400,
+            fill=c[tone] if tone else c["soft"],
+        )
+    f.text(
+        32,
+        572,
+        "Project's own experiments: plates stacking, blind 60-episode test.",
+        size=15,
+        fill=c["faint"],
+    )
+    return f
+
+
+def fig_subtask_loop(t):
+    """README figure for the AERI subtask loop (DECISIONS 9add8c2): a design, not yet run on the robot."""
+    f = Fig(
+        "13-subtask-loop",
+        1200,
+        600,
+        t,
+        "AERI subtask loop, one round: set up, forward loop, home, reverse loop",
+        "Earlier versions ran on the robot only in external mode, with an agent answering for the vision model; this version and the local vision model have not run on the robot. Set a task name and the number of rounds; the vision model "
+        "lists the objects and you confirm them. Each round: release in terminal D, the model plans "
+        "pick-and-place subtasks, the policy runs each for up to 200 steps, the model checks and moves on or "
+        "retries up to 5 times; the forward loop ends at home, and an s or f you press in D during it labels "
+        "the round; the reverse loop resets the scene the same way. By default the policy and the model take turns on the GPU. Only terminal D moves the "
+        "robot; the model's done only moves the flow on, the result is your label.",
+    )
+    c = f.c
+    _lite_heading(
+        f,
+        "AERI subtask loop",
+        "Set a task name and the number of rounds; the vision model plans each subtask.",
+    )
+    badge = "First robot runs: external mode · local vision model not yet on the robot"
+    bw = est(badge, 15, 15 * 0.56) + 28
+    f.rect(1168 - bw, 30, bw, 30, fill=c["gate_bg"], stroke=c["gate"], r=15, sw=1.3)
+    f.text(
+        1168 - bw / 2, 50, badge, size=15, weight=700, anchor="middle", fill=c["gate"]
+    )
+    cards = [
+        (
+            "1  Set up",
+            "person",
+            ["task name, rounds", "model lists objects,", "you confirm them"],
+        ),
+        (
+            "2  Forward loop",
+            "system",
+            ["model plans subtasks", "each ≤200 steps, then", "check: next or retry"],
+        ),
+        (
+            "3  Home",
+            "person",
+            ["forward loop ends;", "s / f in D during it", "labels the round"],
+        ),
+        (
+            "4  Reverse loop",
+            "system",
+            ["model plans the way", "back; same cycle,", "then home again"],
+        ),
+    ]
+    w, gap, y, h = 262, 29, 116, 190
+    for i, (title, tone, lines) in enumerate(cards):
+        x = 32 + i * (w + gap)
+        f.rect(x, y, w, h, fill=c[tone + "_bg"], stroke=c[tone], sw=1.6)
+        _fits(title, 22, w - 36)
+        f.text(x + 18, y + 38, title, size=22, weight=700, fill=c[tone])
+        for s in lines:
+            _fits(s, 18, w - 36)
+        f.lines(x + 18, y + 74, lines, size=18, gap=27, fill=c["ink"])
+        if i < len(cards) - 1:
+            f.arrow([(x + w + 3, y + h / 2), (x + w + gap - 3, y + h / 2)], tone="soft")
+    # each round starts again at the forward loop, after one release in D
+    x2, x4 = 32 + (w + gap) + w / 2, 32 + 3 * (w + gap) + w / 2
+    f.arrow(
+        [(x4, y + h), (x4, y + h + 26), (x2, y + h + 26), (x2, y + h + 4)],
+        tone="system",
+    )
+    f.text(
+        (x2 + x4) / 2,
+        y + h + 50,
+        "next round: release in D",
+        size=17,
+        weight=600,
+        fill=c["system"],
+        anchor="middle",
+    )
+    gpu = "By default the GPU takes turns: the policy acts while the model sleeps; the model wakes to plan and check."
+    _fits(gpu, 18, 1100)
+    f.rect(32, 384, 1136, 58, fill=c["box"], stroke=c["boxedge"])
+    f.text(52, 420, gpu, size=18, weight=600)
+    f.text(
+        32,
+        478,
+        "Only terminal D moves the robot and releases each forward loop.",
+        size=18,
+        weight=600,
+        fill=c["danger"],
+    )
+    f.text(
+        32,
+        504,
+        "The model's “done” only moves the flow on; the result is your s / f / d.",
+        size=16,
+        weight=600,
+        fill=c["danger"],
+    )
+    f.text(
+        32,
+        544,
+        "Up to 200 steps per subtask and 5 retries; an object or instruction outside the list makes the run wait for a person.",
+        size=15,
+        fill=c["faint"],
+    )
+    f.text(
+        32,
+        570,
+        "Only earlier versions ran on the robot, in external mode (an agent answered); no operator labels; hardware acceptance pending.",
+        size=15,
+        fill=c["faint"],
+    )
+    return f
+
+
+def fig_subtask_flow(t):
+    """Full swim-lane version of the AERI subtask loop (FIG14 spec in programs/levi-promo): a design."""
+    f = Fig(
+        "14-subtask-flow",
+        1200,
+        1124,
+        t,
+        "The AERI subtask loop, start to finish, in six lanes",
+        "Earlier versions ran on the robot only in external mode, with an agent answering for the vision model; this version and the local vision model have not run on the robot. Prepare: you start the robot stack; terminal D checks GPU, "
+        "memory and ports and starts the local vision model, which by default sleeps, and then the policy service. Start: the "
+        "model lists the objects, you confirm them with y and the list is frozen. Every round: you release it "
+        "with Enter in D; the model plans subtasks within the list; code writes each instruction from fixed "
+        "templates; the policy runs a subtask for up to 200 steps and holds; the model checks the facts on still "
+        "frames; D moves to the next subtask or retries up to 5 times; an s or f you press during the forward "
+        "loop labels the round; the arm homes; the reverse loop restores the scene the same way and homes "
+        "again. End: D stops both models and checks they are gone. The page only shows the run.",
+    )
+    c = f.c
+    f.heading(
+        "The AERI subtask loop, start to finish",
+        "Terminal D runs every step; the model plans and checks; only your release and your label decide whether a round starts and how it is scored.",
+    )
+    badge = "First robot runs: external mode · local vision model not yet on the robot"
+    bw = est(badge, 13.5, 13.5 * 0.56) + 24
+    f.rect(1168 - bw, 26, bw, 26, fill=c["gate_bg"], stroke=c["gate"], r=13, sw=1.2)
+    f.text(
+        1168 - bw / 2, 44, badge, size=13.5, weight=700, anchor="middle", fill=c["gate"]
+    )
+
+    lanes = [
+        ("Operator", "you, at the robot", "person"),
+        ("Terminal D", "aeri.py execute", "danger"),
+        ("Policy service", "the policy under test", "system"),
+        ("Vision model", "local; sleeps by default", "model"),
+        ("Robot stack", "started by you", None),
+        ("Web page", "shows the run", None),
+    ]
+    lw, top, bottom = 1136 / 6, 84, 1000
+    w, h = lw - 20, 52
+
+    def lx(i):
+        return 32 + i * lw
+
+    for i, (name, sub, tone) in enumerate(lanes):
+        f.rect(
+            lx(i) + 3,
+            top,
+            lw - 6,
+            bottom - top,
+            fill=c["panel2"],
+            stroke=c["edge"],
+            r=12,
+            plain=True,
+        )
+        _fits(name, 15, lw - 24)
+        _fits(sub, 12, lw - 24)
+        f.text(
+            lx(i) + 12,
+            top + 24,
+            name,
+            size=15,
+            weight=700,
+            fill=c[tone] if tone else c["ink"],
+        )
+        f.text(lx(i) + 12, top + 42, sub, size=12, fill=c["soft"])
+
+    def card(i, y, title, sub, tone=None, span=1):
+        x, cw = lx(i) + 10, w + (span - 1) * lw
+        fill, stroke = (c[tone + "_bg"], c[tone]) if tone else (c["box"], c["boxedge"])
+        f.rect(x, y, cw, h, fill=fill, stroke=stroke, sw=1.3)
+        _fits(title, 15, cw - 20)
+        _fits(sub, 13, cw - 20)
+        f.text(
+            x + 10,
+            y + 21,
+            title,
+            size=15,
+            weight=700,
+            fill=c[tone] if tone else c["ink"],
+        )
+        f.text(x + 10, y + 40, sub, size=13, fill=c["soft"])
+        return x, y, cw
+
+    def phase(y, label):
+        pw = est(label, 13, 7.3) + 22
+        f.rect(lx(0) + 10, y, pw, 22, fill=c["box"], stroke=c["accent"], r=11, sw=1.1)
+        f.text(
+            lx(0) + 10 + pw / 2, y + 15.5, label, size=13, weight=700, anchor="middle"
+        )
+
+    def down(a, b, label=None, tone=None, **kw):
+        """From the bottom of card a to the top of card b, with one horizontal run."""
+        (ax, ay, aw), (bx, by, bw_) = a, b
+        x0, x1, mid = ax + aw / 2, bx + bw_ / 2, (ay + h + by) / 2
+        pts = (
+            [(x0, ay + h), (x0, mid), (x1, mid), (x1, by)]
+            if x0 != x1
+            else [(x0, ay + h), (x1, by)]
+        )
+        f.arrow(pts, label, tone=tone, lsize=12, **kw)
+
+    def across(a, b, label=None, tone=None):
+        (ax, ay, aw), (bx, _by, bw_) = a, b
+        y = ay + h / 2
+        if bx > ax:
+            f.arrow([(ax + aw, y), (bx, y)], label, tone=tone, lsize=12)
+        else:
+            f.arrow([(ax, y), (bx + bw_, y)], label, tone=tone, lsize=12)
+
+    phase(146, "1  Prepare")
+    op = card(0, 176, "Start A, B, C, M", "task name, rounds", "person")
+    d14 = card(1, 176, "Steps 1–4", "checks; starts both", "danger")
+    vlm = card(3, 176, "Model up, asleep", "started by D", "model")
+    pol = card(2, 236, "Policy service up", "then, by D", "system")
+    card(4, 176, "Stack running", "started by you")
+    across(op, d14)
+    # D starts the vision model first (it goes to sleep), then the policy service
+    f.arrow(
+        [
+            (d14[0] + d14[2] / 2, 176),
+            (d14[0] + d14[2] / 2, 166),
+            (vlm[0] + w / 2, 166),
+            (vlm[0] + w / 2, 176),
+        ]
+    )
+    f.arrow(
+        [
+            (d14[0] + d14[2] / 2, 176 + h),
+            (d14[0] + d14[2] / 2, 236 + h / 2),
+            (pol[0], 236 + h / 2),
+        ]
+    )
+
+    phase(250, "2  Start")
+    lists = card(3, 270, "Lists objects", "on both cameras", "model")
+    confirm = card(0, 340, "Confirm list: y", "n waits for you", "person")
+    frozen = card(1, 340, "List frozen", "with its sha256", "danger")
+    down(vlm, lists)
+    f.arrow(
+        [
+            (lists[0], 270 + h / 2),
+            (confirm[0] + w / 2, 270 + h / 2),
+            (confirm[0] + w / 2, 340),
+        ]
+    )
+    across(confirm, frozen)
+
+    phase(400, "3  Every round")
+    release = card(0, 444, "Release: Enter", "in D, once a round", "person")
+    card(5, 444, "Shows the run", "cannot release")
+    plan = card(3, 514, "Plan subtasks", "within the list", "model")
+    prompt = card(1, 514, "Prompt by code", "fixed templates", "danger")
+    run = card(2, 584, "Run one subtask", "≤200 steps, hold", "system")
+    arm = card(4, 584, "Arm moves", "only through D")
+    check = card(3, 654, "Check the facts", "on still frames", "model")
+    nxt = card(1, 654, "Next or retry", "up to 5, then wait", "danger")
+    label = card(0, 654, "s / f during it", "labels the round", "person")
+    home = card(4, 724, "Home", "forward loop done")
+    rev = card(2, 794, "Reverse loop", "same cycle, undoes it", "system", span=2)
+    again = card(4, 864, "Home again", "next round: release")
+    f.arrow(
+        [
+            (frozen[0] + w / 2, 340 + h),
+            (frozen[0] + w / 2, 430),
+            (release[0] + w / 2, 430),
+            (release[0] + w / 2, 444),
+        ]
+    )
+    f.arrow(
+        [
+            (release[0] + w, 444 + h / 2),
+            (plan[0] + w / 2, 444 + h / 2),
+            (plan[0] + w / 2, 514),
+        ],
+        "wake",
+        tone="model",
+    )
+    across(plan, prompt)
+    down(prompt, run)
+    across(run, arm, "via D")
+    # the gap between these cards is 18 px: labels sit beside the line, not on it
+    down(
+        run,
+        check,
+        "sleep, then wake",
+        tone="model",
+        lx=run[0] + run[2] / 2 - 6,
+        ly=(584 + h + 654) / 2 + 4,
+        anchor="end",
+    )
+    across(check, nxt)
+    # back to the policy: the next subtask or the same one again
+    f.arrow(
+        [(nxt[0] + w / 2, 654), (nxt[0] + w / 2, 626), (run[0], 626)],
+        "next / retry",
+        tone="danger",
+        lx=nxt[0] + w / 2 + 6,
+        ly=620,
+        anchor="start",
+    )
+    across(label, nxt)
+    down(
+        nxt,
+        home,
+        "loop done",
+        lx=nxt[0] + nxt[2] / 2 + 6,
+        ly=(654 + h + 724) / 2 + 13,
+        anchor="start",
+    )
+    down(home, rev)
+    down(rev, again)
+    # the next round starts again at the release
+    f.arrow(
+        [
+            (again[0] + w / 2, 864 + h),
+            (again[0] + w / 2, 930),
+            (22, 930),
+            (22, 444 + h / 2),
+            (release[0], 444 + h / 2),
+        ],
+        tone="person",
+    )
+    f.text(30, 922, "next round", size=12, weight=600, fill=c["person"])
+
+    phase(944, "4  End")
+    stop = card(1, 940, "Step 7: stop both", "check they are gone", "danger")
+    summary = card(5, 940, "Summary, journal", "notes per subtask")
+    across(stop, summary)
+
+    f.text(
+        32,
+        1030,
+        "Only terminal D moves the robot and releases each round; the page cannot.",
+        size=14,
+        weight=600,
+        fill=c["danger"],
+    )
+    f.text(
+        32,
+        1054,
+        "The model's “done” only moves the flow on; the result is your s / f / d. Stop works at any time.",
+        size=14,
+        weight=600,
+        fill=c["danger"],
+    )
+    f.footnote(
+        1082,
+        "Out of list, malformed plan, unknown check, too many retries, no GPU or memory to wake: the run waits for a person.",
+    )
+    f.footnote(
+        1106,
+        "Only earlier versions ran on the robot, in external mode (an agent answered); no operator labels; hardware acceptance pending.",
+    )
+    return f
+
+
+def fig_aeri_terminals(t):
+    """Terminal layout of the subtask loop (DECISIONS b515172): A, B, C, M and terminal D."""
+    f = Fig(
+        "15-aeri-terminals",
+        1200,
+        556,
+        t,
+        "Terminals for the AERI subtask loop: four for the robot stack, terminal D for the run",
+        "Earlier versions ran on the robot only in external mode, with an agent answering for the vision model; this version and the local vision model have not run on the robot. You start four robot-stack terminals as before: A arm "
+        "stack, B gripper, C robot server, M health monitor. Terminal D runs aeri.py execute in seven numbered "
+        "steps: check GPU, memory and ports; start the local vision model and put it to sleep; start the policy "
+        "service; list the objects for you to confirm; run the rounds with one release per round; stop both and "
+        "check they are gone. A failed step stops only what this run started.",
+    )
+    c = f.c
+    _lite_heading(
+        f,
+        "Five terminals, one in charge",
+        "You start the robot stack; terminal D starts, watches and stops the two models.",
+    )
+    badge = "First robot runs: external mode · local vision model not yet on the robot"
+    bw = est(badge, 15, 15 * 0.56) + 28
+    f.rect(1168 - bw, 30, bw, 30, fill=c["gate_bg"], stroke=c["gate"], r=15, sw=1.3)
+    f.text(
+        1168 - bw / 2, 50, badge, size=15, weight=700, anchor="middle", fill=c["gate"]
+    )
+    stack = [
+        ("A  Arm stack", "started by you"),
+        ("B  Gripper", "started by you"),
+        ("C  Robot server", "started by you"),
+        ("M  Health monitor", "started by you"),
+    ]
+    w, gap = 262, 29
+    for i, (title, line) in enumerate(stack):
+        _lite_box(f, 32 + i * (w + gap), 112, w, 84, title, line)
+    f.rect(32, 228, 1136, 240, fill=c["danger_bg"], stroke=c["danger"], r=14, sw=1.8)
+    f.text(
+        56, 266, "D  AERI run · aeri.py execute", size=22, weight=700, fill=c["danger"]
+    )
+    steps = [
+        "1  checks GPU, memory and ports",
+        "2  starts the local vision model",
+        "3  puts the model to sleep",
+        "4  starts the policy service",
+        "5  lists the objects; you confirm",
+        "6  runs the rounds; you release each",
+        "7  stops both, checks they are gone",
+    ]
+    for j, s in enumerate(steps):
+        _fits(s, 18, 520)
+        f.text(56 + (j // 4) * 560, 306 + (j % 4) * 34, s, size=18, fill=c["ink"])
+    f.text(
+        56,
+        448,
+        "A failed step stops only what this run started; stop works at any time.",
+        size=18,
+        weight=600,
+        fill=c["danger"],
+    )
+    f.text(
+        32,
+        506,
+        "No other terminal is opened for the policy or the vision model in this mode.",
+        size=15,
+        fill=c["faint"],
+    )
+    f.text(
+        32,
+        532,
+        "Only earlier versions ran on the robot, in external mode (an agent answered); no operator labels; hardware acceptance pending.",
+        size=15,
+        fill=c["faint"],
+    )
+    return f
+
+
 def _wrap(s, n):
     words, out, cur = s.split(), [], ""
     for w in words:
@@ -2235,6 +2895,11 @@ FIGURES = [
     fig_aeri_flow,
     fig_perf,
     fig_aeri_lite,
+    fig_context_lite,
+    fig_pyramid_lite,
+    fig_subtask_loop,
+    fig_subtask_flow,
+    fig_aeri_terminals,
 ]
 
 

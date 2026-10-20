@@ -20,13 +20,13 @@ LEVI 是面向机器人学习数据的本地工作台：浏览 LeRobot 数据集
 ## 架构一览
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/01-system-context-zh-dark.svg">
-  <img alt="LEVI 的上下文：数据进来，模型提出建议，由人决定，整理好的训练数据出去。" src="docs/assets/atlas/01-system-context-zh-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/11-context-lite-zh-dark.svg">
+  <img alt="LEVI 的上下文：数据进来，模型提出建议，由人决定，整理好的训练数据出去。" src="docs/assets/atlas/11-context-lite-zh-light.svg">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/02-pyramid-zh-dark.svg">
-  <img alt="从原始数据到更好的策略，五层金字塔；最顶层尚未证明。" src="docs/assets/atlas/02-pyramid-zh-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/12-pyramid-lite-zh-dark.svg">
+  <img alt="从原始数据到更好的策略，五层金字塔；最顶层尚未证明。" src="docs/assets/atlas/12-pyramid-lite-zh-light.svg">
 </picture>
 
 另外七张图（分层、一个任务的步骤、机器人旁的实时标注、自动评测的权限划分、证据与局限、一次 AERI 评测的全流程、今天检查一次改动的成本）在[架构图集](docs/ARCHITECTURE.md)里。

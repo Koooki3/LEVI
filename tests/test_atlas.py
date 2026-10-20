@@ -257,3 +257,29 @@ def test_chinese_status_badges_use_the_readme_words():
             )
         )
     assert {"main", "计划中"} <= badges <= {"main", "集成分支", "计划中"}, badges
+
+
+# README figures still waiting for a large-text version (PROMO-ATLAS-LEGIBILITY).
+README_SMALL_TEXT_PENDING = {"07-evidence"}
+
+
+def test_readme_figures_are_large_enough_to_read():
+    """GitHub shows a README figure about 830-880 px wide, so a 1200-wide canvas
+    shrinks to ~0.7: body text needs 18 px there (~12.6 px on screen) and no
+    note may go below 15 px. The full figures stay in docs/ARCHITECTURE.md."""
+    for page in ("README.md", "README.zh-CN.md"):
+        text = (ROOT / page).read_text(encoding="utf8")
+        for target in sorted(
+            set(re.findall(r"(?:srcset|src)=\"([^\"]+\.svg)\"", text))
+        ):
+            figure = re.sub(r"(-zh)?-(light|dark)\.svg$", "", Path(target).name)
+            if figure in README_SMALL_TEXT_PENDING:
+                continue
+            svg = (ROOT / target).read_text(encoding="utf8")
+            sizes = [
+                float(s) for s in re.findall(r"<text [^>]*font-size=\"([\d.]+)\"", svg)
+            ]
+            assert sizes, target
+            assert min(sizes) >= 15, (page, target, min(sizes))
+            large = sum(s >= 18 for s in sizes)
+            assert large >= 0.6 * len(sizes), (page, target, large, len(sizes))
