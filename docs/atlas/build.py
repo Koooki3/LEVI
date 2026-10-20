@@ -1587,12 +1587,12 @@ def fig_aeri_flow(t):
         "A swim-lane flow of one real-robot evaluation with the automatic pipeline (AERI). Prepare: the robot stack, the job, "
         "binding and contract, a read-only check. Start: the typed execute phrase, a start summary, the start-pose check and the "
         "policy warm-up. Every round: set the scene, answer the scene question, the policy acts, an event candidate, the vision "
-        "judgement, stop when done, home and verify, the reset prompt. Exceptions: an unknown verdict is never a success, event "
-        "contract violations turn events off for the round, a fault locks the run, a stop is possible at any time. End: summary, "
+        "judgement, stop when done, home and verify, the reset prompt. Exceptions: an unknown verdict is never a success, repeated event "
+        "contract violations turn events off and the run then waits for a person, a fault locks the run, a stop is possible at any time. End: summary, "
         "metrics, labels and the run journal. Only terminal D sends motion. Status: the round loop, judging, the home check, "
         "page tracking, the one-terminal console, the start checks, the policy unit D starts itself, the terminal-only release "
-        "of a round and terminal-only resume are in main; pausing the policy to judge and the handling of other event adapter "
-        "errors are planned; a real-robot run needs the go-ahead of the person responsible for the robot, in person; hardware "
+        "of a round and terminal-only resume are in main; pausing the policy to judge is planned; other event adapter "
+        "errors fault-lock the run; a real-robot run needs the go-ahead of the person responsible for the robot, in person; hardware "
         "acceptance pending.",
     )
     c = f.c
@@ -1620,7 +1620,7 @@ def fig_aeri_flow(t):
     f.text(
         32,
         111,
-        "Keys in D:  Enter = scene reset  ·  y / n / u = scene ready?  ·  Ctrl+C = stop (q too, at the reset prompt)",
+        "Keys in D:  Enter = scene reset  ·  y / n / u = scene ready?  ·  Ctrl+C = stop (q too, at a D prompt other than the scene question)",
         size=12,
         fill=c["soft"],
     )
@@ -1864,10 +1864,10 @@ def fig_aeri_flow(t):
             "model",
             "main",
             [
-                "Contract violations: events off for",
-                "this round, noted; the round goes",
-                "on. Other adapter errors: the same",
-                "handling is planned.",
+                "Repeated contract violations: events",
+                "off for the episode; the round goes",
+                "on, then waits for a person. Other",
+                "adapter errors: fault-locked.",
             ],
         ),
         (
@@ -1897,7 +1897,7 @@ def fig_aeri_flow(t):
             "person",
             "main",
             [
-                "Ctrl+C in D (q at the reset prompt)",
+                "Ctrl+C in D (or q at a D prompt)",
                 "or Stop on the page: no more motion;",
                 "the run waits or ends. Resume by a",
                 "key in D only; never the page.",
@@ -2204,7 +2204,7 @@ def fig_aeri_lite(t):
     f.text(
         32,
         576,
-        "Each answer is one key; at the reset prompt q also stops the run.",
+        "Each answer is one key; at these prompts q also ends the run (not at the scene question).",
         size=15,
         fill=c["faint"],
     )
