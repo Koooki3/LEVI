@@ -143,11 +143,14 @@ def note_workspace(state, text, *, topic, run_id=None):
     return memory
 
 
-def workspace_notes(state, topic=None, limit=12):
+def workspace_notes(state, topic=None, limit=12, until=None):
+    """Workspace notes for ``topic``; with ``until`` (a run's ``frozen_at``),
+    only those recorded at or before it."""
     memory = read_json(memory_path(state, WORKSPACE)) or {}
     rows = [
         row
         for row in memory.get("teaching", [])
-        if topic is None or row.get("workflow") in (topic, None, "general")
+        if (topic is None or row.get("workflow") in (topic, None, "general"))
+        and (until is None or row.get("at", 0) <= until)
     ]
     return rows[:limit]

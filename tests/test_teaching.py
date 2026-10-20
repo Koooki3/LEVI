@@ -591,3 +591,65 @@ def test_uncertainty_notes_in_chinese_are_filed_like_english_ones():
     assert classify("夹爪遮挡了盘沿，看不清") == ["visual_ambiguity"]
     assert classify("粗采样之间可能漏掉了释放") == ["sampling_gap"]
     assert classify("盘子放歪了", "failure") == ["failure_reason"]
+
+
+def test_a_frozen_run_reads_nothing_written_after_it_was_frozen(tmp_path):
+    """LITE-35: profile, subtasks and lessons come from the run's snapshot only;
+    notes and example episodes recorded after ``frozen_at`` never reach it
+    (mutation: falling back to the live memory file for a frozen run must fail
+    here)."""
+    from levi.harness.teaching import WORKSPACE
+
+    state = tmp_path / "workbench"
+    write_json(
+        memory_path(state, "plates"),
+        {
+            "profile": {"task": "LIVE-PROFILE-AFTER"},
+            "subtasks": {"LIVE-SUBTASK-AFTER": {"outcomes": {"success": 1}}},
+            "lessons": [{"slug": "late", "text": "LIVE-LESSON-AFTER"}],
+            "episodes": {
+                "episode_000005": {"segments": [seg("place", 3, 4)]},
+                "episode_000009": {"segments": [seg("LIVE-EPISODE-AFTER", 1, 2)]},
+            },
+            "teaching": [
+                {"note": "NOTE-BEFORE", "workflow": "temporal", "count": 1, "at": 1.0},
+                {"note": "NOTE-AFTER", "workflow": "temporal", "count": 1, "at": 9.0},
+            ],
+        },
+    )
+    write_json(
+        memory_path(state, WORKSPACE),
+        {
+            "teaching": [
+                {"note": "WS-BEFORE", "workflow": "temporal", "at": 1.0},
+                {"note": "WS-AFTER", "workflow": "temporal", "at": 9.0},
+            ]
+        },
+    )
+    frozen = run(state, episodes=(0,), frozen_at=5.0)
+    frozen["harness"]["memory"] = {
+        "profile": {"task": "SNAPSHOT-PROFILE"},
+        "subtasks": {"place": {"outcomes": {"success": 3}}},
+        "lessons": [{"slug": "early", "text": "SNAPSHOT-LESSON"}],
+        "annotated": ["episode_000005"],
+    }
+    text = json.dumps(context.brief(state, frozen), ensure_ascii=False)
+    for later in (
+        "LIVE-PROFILE-AFTER",
+        "LIVE-SUBTASK-AFTER",
+        "LIVE-LESSON-AFTER",
+        "LIVE-EPISODE-AFTER",
+        "NOTE-AFTER",
+        "WS-AFTER",
+    ):
+        assert later not in text, later
+    for kept in ("SNAPSHOT-PROFILE", "SNAPSHOT-LESSON", "NOTE-BEFORE", "WS-BEFORE"):
+        assert kept in text, kept
+    assert '"episode": "episode_000005"' in text
+    # A frozen run whose snapshot is empty (no memory yet at plan time) gets no
+    # dataset memory at all, not today's file.
+    empty = run(state, episodes=(0,), frozen_at=5.0)
+    text = json.dumps(context.brief(state, empty), ensure_ascii=False)
+    assert "LIVE-PROFILE-AFTER" not in text and "episode_000005" not in text
+    # An unfrozen run (legacy) still reads the live file, as before.
+    assert "LIVE-PROFILE-AFTER" in json.dumps(context.brief(state, run(state)))
