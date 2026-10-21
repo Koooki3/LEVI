@@ -590,11 +590,11 @@ MUTATIONS = [
         (LOGIC, RUN),
     ),
     (
-        "card: the wait's words are quoted twice",
-        M + "autonomy-run-card.tsx",
-        '  const quoted = words !== "" && words.trim() === promptLine(run)?.trim();',
-        "  const quoted = false;",
-        (RUN,),
+        "resume: the first Enter's window says D resumes at once whatever the wait",
+        M + "autonomy-keys.tsx",
+        '    ? ["marvel0.autonomy.hazard.resume_ask_confirm"]',
+        '    ? ["marvel0.autonomy.hazard.resume_ask"]',
+        (CONFIRM,),
     ),
     # --- review R11 M4, L2: how often the page reads, what it loads -------------------
     (

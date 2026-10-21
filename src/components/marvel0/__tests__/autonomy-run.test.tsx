@@ -536,7 +536,7 @@ describe("a level B key stands behind a window", () => {
   });
 });
 
-describe("what the card says when it can only watch, and when words repeat", () => {
+describe("what the card says when it can only watch", () => {
   test("a run another core owns: its own sentence, Stop off with the backend's reason, no key", async () => {
     const { host } = await openStep({ run: runDoc("unknown_other_core") });
     expect(text($(host, "marvel0-autonomy-hint"))).toBe(
@@ -549,26 +549,6 @@ describe("what the card says when it can only watch, and when words repeat", () 
       E["marvel0.autonomy.err.driven_elsewhere"],
     );
     expect(host.querySelectorAll("div.rg-akey")).toHaveLength(0);
-  });
-
-  test("a wait whose words are the line already quoted above is not quoted twice", async () => {
-    const same = await openStep({
-      run: runDoc("await_resume", (doc) => {
-        doc.wait.text = doc.state.prompt.line;
-        doc.wait.todo = null;
-      }),
-    });
-    expect($(same.host, "marvel0-autonomy-prompt")).not.toBeNull();
-    expect($(same.host, "marvel0-autonomy-wait-text")).toBeNull();
-    const other = await openStep({
-      run: runDoc("await_resume", (doc) => {
-        doc.wait.text = "Another sentence of D";
-        doc.wait.todo = null;
-      }),
-    });
-    expect(text($(other.host, "marvel0-autonomy-wait-text"))).toBe(
-      "Another sentence of D",
-    );
   });
 });
 

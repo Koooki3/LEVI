@@ -4423,6 +4423,7 @@
   "marvel0.autonomy.hazard.verdict": "s 和 f 都会结束正向循环，逆向循环仍会复位场景。这个标签是你作为操作者的判定，不是视觉模型的判断。",
   "marvel0.autonomy.hazard.discard": "本轮作废：先复位场景，再重做这一轮。总轮数可能超过计划。",
   "marvel0.autonomy.hazard.resume_ask": "按下后终端 D 立即续跑，手臂可能动。只有在手动恢复场景之后才能按。",
+  "marvel0.autonomy.hazard.resume_ask_confirm": "这是两步中的第一步：之后 D 应当再要求一次确认。页面无法确定这是哪一种等待，所以请按真正续跑来对待：如果 D 直接续跑，手臂可能会动。",
   "marvel0.autonomy.hazard.resume_confirm": "这是第二次确认。手臂可能立即动。",
   "marvel0.autonomy.ack.estop": "手已放在物理急停上",
   "marvel0.autonomy.ack.scene_ok": "场景已按本次运行的要求摆好",

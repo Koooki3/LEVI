@@ -4423,6 +4423,7 @@
   "marvel0.autonomy.hazard.verdict": "Both s and f end the forward loop; the reverse loop still restores the scene. The label is yours as the operator, not a judgement of the vision model.",
   "marvel0.autonomy.hazard.discard": "The round is discarded: the scene is restored, then the round is repeated. The total can pass the plan.",
   "marvel0.autonomy.hazard.resume_ask": "D resumes at once after this key; the arm may move. Only press it after you restored the scene by hand.",
+  "marvel0.autonomy.hazard.resume_ask_confirm": "This is step 1 of 2: D should ask for a second confirmation next. The page cannot be sure which kind of wait this is, so treat it as the real one: if D resumes at once instead, the arm may move.",
   "marvel0.autonomy.hazard.resume_confirm": "This is the second confirmation. The arm may move at once.",
   "marvel0.autonomy.ack.estop": "A hand is on the physical e-stop",
   "marvel0.autonomy.ack.scene_ok": "The scene is placed as the run needs it",

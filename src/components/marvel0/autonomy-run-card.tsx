@@ -249,10 +249,7 @@ function WaitBlock({ run }: { run: RunView }) {
   const { t } = useLocale();
   const wait = run.wait;
   if (!wait) return null;
-  // D's own words for the wait, unless the quote of the prompt above already
-  // says exactly that.
   const words = [wait.text, wait.todo].filter(Boolean).join(" ");
-  const quoted = words !== "" && words.trim() === promptLine(run)?.trim();
   return (
     <div className="rg-await" data-testid="marvel0-autonomy-wait">
       {wait.reason && (
@@ -261,7 +258,7 @@ function WaitBlock({ run }: { run: RunView }) {
           {wordOf(t, "marvel0.autonomy.waitreason.", wait.reason)}
         </p>
       )}
-      {words !== "" && !quoted && (
+      {words !== "" && (
         // D's own words for what it waits for, in its console language.
         <blockquote
           className="rg-aprompt"

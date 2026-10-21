@@ -85,6 +85,18 @@ const KEY_HAZARD: Partial<Record<KeyId, string[]>> = {
   resume_confirm: ["marvel0.autonomy.hazard.resume_confirm"],
 };
 
+/** The sentences of a key's window. `resume_ask` has two: a wait that asks for
+ * a second confirmation (`confirm_reason`: the Enter is step 1 of 2) and one D
+ * resumes on at once. The backend says which from the profile's table of
+ * waits, which is an inference, so both carry the same level and delay; the
+ * window for the first says so, and that a D that resumes at once would move
+ * the arm. */
+function hazardsOf(key: KeyView): string[] {
+  return key.id === "resume_ask" && key.variant === "confirm_reason"
+    ? ["marvel0.autonomy.hazard.resume_ask_confirm"]
+    : (KEY_HAZARD[key.id] ?? []);
+}
+
 const MOTION_KEY: Record<KeyView["motion"], string | null> = {
   none: null,
   arm_moves: "marvel0.autonomy.motion.arm_moves",
@@ -236,7 +248,7 @@ export function KeyConfirm({
         ) : undefined
       }
       hazards={[
-        ...(key ? (KEY_HAZARD[key.id] ?? []) : []).map((hazard) => t(hazard)),
+        ...(key ? hazardsOf(key) : []).map((hazard) => t(hazard)),
         ...(key && MOTION_KEY[key.motion] ? [t(MOTION_KEY[key.motion]!)] : []),
       ]}
       notes={[

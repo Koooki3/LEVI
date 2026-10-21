@@ -365,3 +365,30 @@ describe("pressKey on its own", () => {
     expect(callsOf(f.state, "key")).toEqual([]);
   });
 });
+
+describe("the window of the Enter that asks to resume", () => {
+  // Both kinds of wait are level B now (which kind a wait is rests on an
+  // inference, so the asking Enter has the delay, the gap and the presence
+  // check too); the window must not say "D resumes at once" for the one that
+  // asks a second time, and must not hide it for the one that does.
+  test("a wait that asks again: step 1 of 2, with the warning that a D that resumes at once would move the arm", async () => {
+    const f = await openStep({ run: runDoc("await_resume") });
+    const key = f.state.run!.keys.find(
+      (k: { id: string }) => k.id === "resume_ask",
+    );
+    expect(key.level).toBe("B");
+    await pressKey(f.host, "resume_ask");
+    const d = text(dialog());
+    expect(d).toContain(E["marvel0.autonomy.hazard.resume_ask_confirm"]);
+    expect(d).not.toContain(E["marvel0.autonomy.hazard.resume_ask"]);
+    expect(d).toContain(E["marvel0.autonomy.motion.may_move"]);
+  });
+
+  test("a wait D resumes on at once: said so", async () => {
+    const f = await openStep({ run: runDoc("await_resume_direct") });
+    await pressKey(f.host, "resume_ask");
+    const d = text(dialog());
+    expect(d).toContain(E["marvel0.autonomy.hazard.resume_ask"]);
+    expect(d).not.toContain(E["marvel0.autonomy.hazard.resume_ask_confirm"]);
+  });
+});
