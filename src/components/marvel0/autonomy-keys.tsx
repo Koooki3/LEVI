@@ -30,12 +30,14 @@ import {
 } from "./confirm-window";
 import type { KeyId, KeyView, RunView } from "./autonomy-doc";
 import {
+  attestOf,
   groupBySlot,
   homingKey,
   homingStep,
   keyChecks,
   keyFitsPrompt,
   keyPhrase,
+  promptContext,
   promptLine,
   type KeyVM,
 } from "./autonomy-logic";
@@ -224,6 +226,13 @@ export function KeyConfirm({
     label: t(check.label),
   }));
   const line = promptLine(run);
+  // The two keys that answer the phrase prompt: what D printed above it is
+  // what the person confirms (the reviewed summary, and the logs of an earlier
+  // policy switch that did not end cleanly).
+  const context =
+    key && (key.id === "execute" || key.id === "execute_variant")
+      ? promptContext(run)
+      : [];
   const ready = vm?.mode === "ready" && actions.working === null;
   const waiting = vm?.mode === "wait";
   return (
@@ -237,14 +246,32 @@ export function KeyConfirm({
       }
       facts={
         // What D's screen says now, quoted: the person confirms this prompt.
-        line && key?.level === "C" ? (
-          <blockquote
-            className="rg-aprompt"
-            data-testid="marvel0-autonomy-key-prompt"
-            lang={run.profile?.consoleLang ?? undefined}
-          >
-            {line}
-          </blockquote>
+        (line && key?.level === "C") || context.length > 0 ? (
+          <>
+            {context.length > 0 && (
+              <>
+                <p className="rg-muted">
+                  {t("marvel0.autonomy.confirm.screen")}
+                </p>
+                <pre
+                  className="rg-acontext"
+                  data-testid="marvel0-autonomy-key-context"
+                  lang={run.profile?.consoleLang ?? undefined}
+                >
+                  {context.join("\n")}
+                </pre>
+              </>
+            )}
+            {line && key?.level === "C" && (
+              <blockquote
+                className="rg-aprompt"
+                data-testid="marvel0-autonomy-key-prompt"
+                lang={run.profile?.consoleLang ?? undefined}
+              >
+                {line}
+              </blockquote>
+            )}
+          </>
         ) : undefined
       }
       hazards={[
@@ -253,7 +280,15 @@ export function KeyConfirm({
       ]}
       notes={[
         t("marvel0.autonomy.gates_scope"),
-        ...(checks.length > 0 ? [t("marvel0.autonomy.confirm.checks")] : []),
+        ...(checks.length > 0
+          ? [
+              t(
+                key?.id === "release_round"
+                  ? "marvel0.autonomy.confirm.checks_release"
+                  : "marvel0.autonomy.confirm.checks",
+              ),
+            ]
+          : []),
       ]}
       attest={attest}
       confirmLabel={
@@ -275,13 +310,17 @@ export function KeyConfirm({
         ) : null
       }
       onCancel={onClose}
-      onConfirm={() => {
+      onConfirm={(ticked) => {
         if (!key || vm?.mode !== "ready") return;
         // The document's phrase for a level C key, word for word; none for the
         // others. A key the document gives no phrase for is refused by
         // `pressKey` and shown as the page's own mistake.
         const phrase = keyPhrase(key) ?? undefined;
-        return actions.pressKey(key, run, phrase).then((ok) => {
+        // ... and the codes of the ticks set in this window, all of them (the
+        // backend holds the same table). A missing tick leaves `attest` out,
+        // which `pressKey` refuses.
+        const attest = attestOf(key.id, ticked) ?? undefined;
+        return actions.pressKey(key, run, phrase, attest).then((ok) => {
           if (ok) onClose();
         });
       }}

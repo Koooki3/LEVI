@@ -11,6 +11,8 @@ import {
   LIVE_STOP_PHRASE,
   PREPARE_PHRASE,
   armKey,
+  attestComplete,
+  attestOf,
   blockingRows,
   exitKind,
   groupBySlot,
@@ -29,9 +31,11 @@ import {
   lockPhase,
   prepareBody,
   prepareErrors,
+  promptContext,
   promptLine,
   readyPaused,
   readyPollMs,
+  requiredAttest,
   runPageHref,
   runPollMs,
   startOff,
@@ -39,12 +43,20 @@ import {
   stateHintKey,
   stopControl,
   stopSeen,
+  stopWhyKey,
   visibleKeys,
   type KeyCtx,
   type PrepareForm,
   type SentKey,
 } from "../autonomy-logic";
-import { CODES, RUN_VIEWS, keyOf, readyDoc, runDoc } from "./autonomy-fixtures";
+import {
+  CODES,
+  RUN_VIEWS,
+  keyOf,
+  readyDoc,
+  reviewDoc,
+  runDoc,
+} from "./autonomy-fixtures";
 import { KEY_IDS } from "../autonomy-doc";
 
 const KNOWN = new Set(Object.keys(en));
@@ -429,7 +441,7 @@ describe("Stop", () => {
 
   test("it is off where the backend does not offer it, but still shown", () => {
     expect(stopControl(seenOf("fault_locked"), null)).toEqual({
-      mode: "ready",
+      mode: "off",
       enabled: false,
     });
     expect(stopControl(seenOf("stopping"), null).enabled).toBe(false);
@@ -463,6 +475,104 @@ describe("Stop", () => {
     expect(
       stopControl(seen, { runId: "an-earlier-run", phase: "idle" }).enabled,
     ).toBe(true);
+  });
+});
+
+describe("Stop, from the documents the second SAFETY review recorded (N2)", () => {
+  const recorded = (
+    name: Parameters<typeof reviewDoc>[0],
+    change?: Parameters<typeof reviewDoc>[1],
+  ) => runView(reviewDoc(name, change), KNOWN)!;
+
+  test("P1: an adopted D that did not answer the Ctrl+C and was offered no retry is not a Stop with 'one more try'", () => {
+    const run = recorded("p1_after_ack_window");
+    // The recorded document, field by field: this is what the backend said.
+    expect([
+      run.state.id,
+      run.stop.phase,
+      run.stop.allowed,
+      stopSeen(run).whyCode,
+    ]).toEqual(["orphaned", "unconfirmed", false, "stop_spent"]);
+    const { mode, enabled } = stopControl(stopSeen(run), null);
+    expect(enabled).toBe(false);
+    expect(mode).toBe("unoffered");
+    expect(mode).not.toBe("retry");
+  });
+
+  test("P1: the same document with the retry the backend now opens is a retry, on", () => {
+    const run = recorded("p1_after_ack_window", (doc) => {
+      doc.stop.allowed = true;
+      doc.stop.why_not = null;
+    });
+    expect(stopControl(stopSeen(run), null)).toEqual({
+      mode: "retry",
+      enabled: true,
+    });
+  });
+
+  test("P1, read at once after the adoption: the Ctrl+C was sent and not yet confirmed, whether or not another is offered", () => {
+    const run = recorded("p1_just_adopted");
+    expect(run.stop.phase).toBe("sent");
+    expect(stopControl(stopSeen(run), null)).toEqual({
+      mode: "sent",
+      enabled: false,
+    });
+  });
+
+  test("P3: a run another core owns, or whose site file is broken, is shown off with the backend's reason", () => {
+    const run = recorded("p3_site_broken");
+    expect([run.state.id, run.stop.phase, stopSeen(run).whyCode]).toEqual([
+      "unknown",
+      "idle",
+      "driven_elsewhere",
+    ]);
+    expect(stopControl(stopSeen(run), null)).toEqual({
+      mode: "off",
+      enabled: false,
+    });
+  });
+
+  test("a stop that is not allowed is never 'ready' or 'retry', whatever the phase says", () => {
+    for (const phase of ["idle", "unconfirmed"] as const) {
+      const run = recorded("p1_after_ack_window", (doc) => {
+        doc.stop.phase = phase;
+        doc.stop.allowed = false;
+      });
+      const { mode, enabled } = stopControl(stopSeen(run), null);
+      expect([phase, enabled]).toEqual([phase, false]);
+      expect(["ready", "retry"]).not.toContain(mode);
+    }
+  });
+
+  test("the sentence under the state badge does not promise a retry that is not offered", () => {
+    expect(stateHintKey("stopping", "unconfirmed", null, true)).toBe(
+      "marvel0.autonomy.hint.stopping_unconfirmed",
+    );
+    expect(stateHintKey("stopping", "unconfirmed", null, false)).toBe(
+      "marvel0.autonomy.hint.stopping_unoffered",
+    );
+    // The default is the old behaviour: a caller that does not know says nothing new.
+    expect(stateHintKey("stopping", "unconfirmed")).toBe(
+      "marvel0.autonomy.hint.stopping_unconfirmed",
+    );
+    expect(en["marvel0.autonomy.hint.stopping_unoffered"]).not.toMatch(
+      /One more try/,
+    );
+    expect(zh["marvel0.autonomy.hint.stopping_unoffered"]).not.toContain(
+      "再试一次",
+    );
+  });
+
+  test("the reason words exist for the three codes the review named, in both languages", () => {
+    for (const code of ["stop_spent", "driven_elsewhere", "d_gone"]) {
+      const key = stopWhyKey(code);
+      expect([code, key]).toEqual([code, `marvel0.autonomy.stop.why.${code}`]);
+      expect(en[key as keyof typeof en]).toBeTruthy();
+      expect(zh[key as keyof typeof zh]).toBeTruthy();
+    }
+    // A code with no sentence of its own is worded from the document.
+    expect(stopWhyKey("state_not_allowed")).toBeNull();
+    expect(stopWhyKey(null)).toBeNull();
   });
 });
 
@@ -834,11 +944,102 @@ describe("the checks in front of a level C key", () => {
     ]);
   });
 
-  test("end has the three alone (D asks nothing there); every other key has no tick", () => {
+  test("end has the three alone (D asks nothing there); the release of a round has the one D asks; every other key has no tick", () => {
     expect(keyChecks("end").map((c) => c.code)).toEqual([...WINDOW_CHECKS]);
+    expect(
+      keyChecks("release_round").map((c) => `${c.from}:${c.code}`),
+    ).toEqual(["terminal:scene_ready"]);
     for (const id of KEY_IDS)
-      if (id !== "execute" && id !== "execute_variant")
+      if (!["execute", "execute_variant", "release_round"].includes(id))
         expect([id, keyChecks(id)]).toEqual([id, []]);
+  });
+
+  test("the release tick is D's own ask, in every profile and both languages: 'when the scene is ready press Enter'", () => {
+    // SAFETY N5: `sub_release` is printed at every release prompt and asks for
+    // exactly one thing, that the scene is ready; the window had no tick for it.
+    const needle: Record<string, string> = {
+      en: "when the scene is ready press Enter",
+      zh: "确认场景就绪后按 Enter",
+    };
+    const profiles = Object.entries(PROMPTS.profiles);
+    expect(profiles.length).toBeGreaterThanOrEqual(3);
+    for (const [id, profile] of profiles)
+      for (const lang of ["en", "zh"])
+        expect([id, lang, profile.texts[lang].sub_release]).toEqual([
+          id,
+          lang,
+          expect.stringContaining(needle[lang]),
+        ]);
+    expect(TERMINAL_CHECKS.release).toEqual(["scene_ready"]);
+    // The tick says what a ready scene is: placed, clear, a hand on the e-stop.
+    expect(E["marvel0.autonomy.dcheck.scene_ready"]).toBe(
+      "The scene is set: objects placed, the area clear, a hand on the physical e-stop",
+    );
+    expect(Z["marvel0.autonomy.dcheck.scene_ready"]).toContain("物理急停");
+  });
+
+  test("what a request carries as `attest` is the key's required codes, all of them and in order, and nothing otherwise", () => {
+    expect(requiredAttest("execute")).toEqual([
+      "scene",
+      "limits",
+      "checkpoints",
+      "providers",
+      "hardware",
+      "estop_hand",
+      "hands_clear",
+      "no_client",
+    ]);
+    expect(requiredAttest("release_round")).toEqual(["scene_ready"]);
+    expect(requiredAttest("quit")).toEqual([]);
+    const all = Object.fromEntries(
+      requiredAttest("execute_variant").map((code) => [code, true]),
+    );
+    expect(attestOf("execute_variant", all)).toEqual(
+      requiredAttest("execute_variant"),
+    );
+    // One short, or an untouched box: no list at all, never a partial one.
+    expect(
+      attestOf("execute_variant", { ...all, switch_gpu: false }),
+    ).toBeNull();
+    expect(attestOf("execute", { scene: true })).toBeNull();
+    expect(attestOf("release_round", {})).toBeNull();
+    // A key with no ticks has an empty list (the body then leaves it out).
+    expect(attestOf("quit", {})).toEqual([]);
+    expect(attestComplete("release_round", ["scene_ready"])).toBe(true);
+    expect(attestComplete("release_round", [])).toBe(false);
+    expect(attestComplete("release_round", undefined)).toBe(false);
+    expect(attestComplete("release_round", ["scene_ready", "extra"])).toBe(
+      false,
+    );
+    expect(attestComplete("quit", undefined)).toBe(true);
+    expect(attestComplete("quit", ["scene_ready"])).toBe(false);
+    expect(attestComplete("execute", ["limits", "scene"])).toBe(false);
+  });
+
+  test("the lines D printed above a phrase prompt are quoted whole, without the prompt's own line, at most 30", () => {
+    const run = view("await_phrase", (doc) => {
+      doc.screen.tail = [
+        "",
+        "====",
+        "Run summary",
+        "  /logs/switch-1.log: did not end cleanly",
+        "Confirm the reviewed scene.",
+        doc.state.prompt.line,
+        "",
+      ];
+    });
+    expect(promptContext(run)).toEqual([
+      "",
+      "====",
+      "Run summary",
+      "  /logs/switch-1.log: did not end cleanly",
+      "Confirm the reviewed scene.",
+    ]);
+    const long = view("await_phrase", (doc) => {
+      doc.screen.tail = Array.from({ length: 60 }, (_, i) => `line ${i}`);
+    });
+    expect(promptContext(long)).toHaveLength(30);
+    expect(promptContext(long).at(-1)).toBe("line 59");
   });
 
   test("a tick has a sentence in both languages and no code is ticked twice", () => {
@@ -1042,11 +1243,19 @@ describe("what the page says after a Stop, by what D has said back", () => {
     expect(stateHintKey("unknown", "idle", "screen_drift")).toBe(
       "marvel0.autonomy.hint.unknown",
     );
-    const other = stateHintKey("unknown", "idle", "no_keyboard");
+    // `no_keyboard` is told by what the document says of Stop: refused (another
+    // core owns the run) or offered (a D the page cannot follow).
+    const other = stateHintKey("unknown", "idle", "no_keyboard", false);
     expect(other).toBe("marvel0.autonomy.hint.unknown_other_core");
+    const unfollowed = stateHintKey("unknown", "idle", "no_keyboard", true);
+    expect(unfollowed).toBe("marvel0.autonomy.hint.unknown_unfollowed");
     expect(E["marvel0.autonomy.hint.unknown"]).toMatch(/Only Stop is offered/);
     expect(E[other]).toMatch(/only watches it/);
     expect(E[other]).not.toMatch(/Only Stop is offered/);
+    // ... and the one for a D that is not followed does not say Stop is refused.
+    expect(E[unfollowed]).toMatch(/Stop is still offered/);
+    expect(E[unfollowed]).not.toMatch(/sends no Stop|cannot send a Stop/);
+    expect(Z[unfollowed]).toContain("仍然可用");
     // Only the state `unknown` is read by its reason.
     expect(stateHintKey("stopping", "acked", "no_keyboard")).toBe(
       "marvel0.autonomy.hint.stopping",

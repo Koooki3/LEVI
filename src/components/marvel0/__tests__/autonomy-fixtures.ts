@@ -36,6 +36,7 @@ const READY_FILE = load([
   join(root, "tests/marvel0/fixtures/aeri_ready.sample.json"),
 ]);
 const ANSWERS_FILE = load([join(here, "marvel0-aeri-run.answers.json")]);
+const REVIEW_FILE = load([join(here, "autonomy-review-docs.json")]);
 const CODES_FILE = load([join(root, "tests/marvel0/fixtures/aeri_codes.json")]);
 
 /** The backend's own answers to the writes of the hosted terminal D and its
@@ -60,6 +61,18 @@ export const LEFTOVERS_STOP: Doc = READY_FILE.value.leftovers_stop ?? {};
 export function runDoc(name = "idle", change?: (doc: Doc) => void): Doc {
   const doc = structuredClone(runs[name]);
   if (!doc) throw new Error(`no run view ${name}`);
+  change?.(doc);
+  return doc;
+}
+
+/** A copy of a document the second SAFETY review recorded from the real
+ * `Supervisor.view()` (autonomy-review-docs.json says how). */
+export type ReviewDoc =
+  | "p1_just_adopted"
+  | "p1_after_ack_window"
+  | "p3_site_broken";
+export function reviewDoc(name: ReviewDoc, change?: (doc: Doc) => void): Doc {
+  const doc = structuredClone(REVIEW_FILE.value.docs[name]) as Doc;
   change?.(doc);
   return doc;
 }

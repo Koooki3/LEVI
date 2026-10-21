@@ -20,7 +20,9 @@ import {
   KEY_SLOTS,
   STATE_IDS,
 } from "../autonomy-doc";
-import { LIMITS, prepareBody } from "../autonomy-logic";
+import { CODES } from "./autonomy-fixtures";
+import { LIMITS, prepareBody, requiredAttest } from "../autonomy-logic";
+import en from "@/i18n/en.json";
 
 // The page against the backend's own source: its routes, the closed models of
 // its bodies, its constants and its key table are read as text from
@@ -141,16 +143,27 @@ describe("the bodies are the closed models of the routes", () => {
   test("key, with `seen`, the token and the tab", () => {
     const seen = { run_id: "r", state_seq: 3, prompt_id: "p:1" };
     const body = keyBody("req-12345678", "quit", seen, "t", "tab");
-    expect(keys(body).filter((k) => k !== "confirm")).toEqual(
-      fields("KeyBody").filter((k) => k !== "confirm"),
+    const optional = ["confirm", "attest"];
+    expect(keys(body).filter((k) => !optional.includes(k))).toEqual(
+      fields("KeyBody").filter((k) => !optional.includes(k)),
     );
     expect(keys(body.seen as Record<string, unknown>)).toEqual(fields("Seen"));
-    // `confirm` is the one optional field, sent for a level C key only.
+    // `confirm` (a level C key only) and `attest` (a key with ticks only) are
+    // the two optional fields.
     expect(M.KeyBody).toContain("confirm");
+    expect(M.KeyBody).toContain("attest");
     expect(
       keys(keyBody("req-12345678", "execute", seen, "t", "tab", "execute n")),
     ).toContain("confirm");
+    expect(
+      keys(
+        keyBody("req-12345678", "release_round", seen, "t", "tab", undefined, [
+          "scene_ready",
+        ]),
+      ),
+    ).toEqual(["action", "attest", "request_id", "seen", "tab_id", "token"]);
     expect(keys(body)).not.toContain("confirm");
+    expect(keys(body)).not.toContain("attest");
     // `prompt_id` is a string in the backend's model, not an optional one.
     expect(run).toMatch(/class Seen\(Closed\):[\s\S]*?prompt_id: str\n/);
   });
@@ -167,9 +180,10 @@ describe("the bodies are the closed models of the routes", () => {
   });
 
   test("end, presence, live stop and leftovers stop", () => {
-    expect(keys(endBody("req-12345678", "end terminal D"))).toEqual(
-      fields("EndBody"),
-    );
+    expect(
+      keys(endBody("req-12345678", "end terminal D", requiredAttest("end"))),
+    ).toEqual(fields("EndBody"));
+    expect(fields("EndBody")).toContain("attest");
     expect(keys(presenceBody("tab", true))).toEqual(fields("PresenceBody"));
     expect(keys(confirmBody("req-12345678", "x"))).toEqual(
       fields("ConfirmBody"),
@@ -193,6 +207,66 @@ describe("the bodies are the closed models of the routes", () => {
     expect(Number.isInteger(body.steps)).toBe(true);
     expect(body.gripper_confirm_s).toBeNull();
     expect(prep).toMatch(/mode: Literal\["external", "local"\]/);
+  });
+});
+
+/** `aeri_state.KEY_ATTEST` as the Python source writes it: the named tuples,
+ * then the table that spreads them. */
+function backendAttest(): Record<string, string[]> {
+  const tuples: Record<string, string[]> = {};
+  for (const m of state.matchAll(/^([A-Z]+_ATTEST) = \(([^)]*)\)/gm))
+    tuples[m[1]] = [...m[2].matchAll(/"(\w+)"/g)].map((x) => x[1]);
+  const table = state.match(/^KEY_ATTEST = \{([\s\S]*?)\n\}/m)![1];
+  const out: Record<string, string[]> = {};
+  for (const line of table.split("\n")) {
+    const entry = line.match(/^\s+"(\w+)": (.+?),?$/);
+    if (!entry) continue; // a comment, or the blank line
+    const value = entry[2];
+    const spread = [...value.matchAll(/\*([A-Z_]+)/g)];
+    out[entry[1]] = spread.length
+      ? spread.flatMap((x) => tuples[x[1]])
+      : /^[A-Z_]+$/.test(value)
+        ? tuples[value]
+        : [...value.matchAll(/"(\w+)"/g)].map((x) => x[1]);
+  }
+  return out;
+}
+
+describe("the ticks of a window are the table the backend holds the key to (SAFETY N6)", () => {
+  const table = backendAttest();
+
+  test("the backend names the keys that have ticks: the page has ticks for exactly those", () => {
+    expect(Object.keys(table).sort()).toEqual([
+      "end",
+      "execute",
+      "execute_variant",
+      "release_round",
+    ]);
+    const withTicks = [...KEY_IDS, "end" as const].filter(
+      (id) => requiredAttest(id).length > 0,
+    );
+    expect([...withTicks].sort()).toEqual(Object.keys(table).sort());
+  });
+
+  test("the codes of each, in order, are the ones the page sends in `attest`", () => {
+    for (const [id, codes] of Object.entries(table))
+      expect([id, requiredAttest(id as never)]).toEqual([id, codes]);
+  });
+
+  test("the codes file the backend generates says the same", () => {
+    expect(CODES.key_attest).toEqual(table);
+  });
+
+  test("the route's closed list of ticks is the union of those, no more", () => {
+    const literal = run.match(/Tick = Literal\[([\s\S]*?)\]/)![1];
+    const listed = [...literal.matchAll(/"(\w+)"/g)].map((m) => m[1]);
+    const union = [...new Set(Object.values(table).flat())];
+    expect([...listed].sort()).toEqual([...union].sort());
+  });
+
+  test("a key that has ticks is refused by the page's body builder with fewer, and the backend names the refusal the page words", () => {
+    expect(state).toContain('"attest_incomplete"');
+    expect(typeof en["marvel0.autonomy.err.attest_incomplete"]).toBe("string");
   });
 });
 

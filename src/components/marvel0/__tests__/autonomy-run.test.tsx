@@ -2,7 +2,13 @@ import { act } from "react";
 import { afterEach, describe, expect, test } from "bun:test";
 import { click, press, setupDom, waitFor } from "@/components/ds/__tests__/dom";
 import en from "@/i18n/en.json";
-import { button, doubleClick, textFields, tick } from "./actions-helpers";
+import {
+  button,
+  doubleClick,
+  textFields,
+  tick,
+  tickAll,
+} from "./actions-helpers";
 import { stateHintKey } from "../autonomy-logic";
 import type { StopPhase } from "../autonomy-doc";
 import {
@@ -91,6 +97,7 @@ describe("every state of the backend's samples", () => {
             id as never,
             doc.stop.phase as StopPhase,
             doc.state.reason as string,
+            doc.stop.allowed as boolean,
           )
         ],
       );
@@ -361,6 +368,9 @@ describe("a level B key stands behind a window", () => {
       Array.from(dialog()!.querySelectorAll("button")).find((b) =>
         text(b).startsWith(label),
       )!;
+    // D asks for the scene to be ready: Confirm waits for that tick.
+    expect(confirm().disabled).toBe(true);
+    await tickAll(dialog()!);
     expect(confirm().disabled).toBe(false);
     await doubleClick(confirm());
     await tick(3, 10);
@@ -377,6 +387,8 @@ describe("a level B key stands behind a window", () => {
       },
     });
     expect(sent[0]).not.toHaveProperty("confirm");
+    // ... and the codes of what was ticked, exactly the key's required ticks.
+    expect(sent[0].attest).toEqual(["scene_ready"]);
     expect(dialog()).toBeNull();
   });
 
@@ -468,6 +480,7 @@ describe("a level B key stands behind a window", () => {
       Array.from(dialog()!.querySelectorAll("button")).find((b) =>
         text(b).startsWith(E["marvel0.autonomy.key.release_round"]),
       )!;
+    await tickAll(dialog()!);
     expect(confirm().disabled).toBe(false);
     f.state.run = null; // the reads fail from now on
     await wait(600);
@@ -484,6 +497,7 @@ describe("a level B key stands behind a window", () => {
         : { ok: true, status: 202, data: {} };
     await wait(200);
     await click(keyButton(f.host, "release_round"));
+    await tickAll(dialog()!);
     await click(
       Array.from(dialog()!.querySelectorAll("button")).find((b) =>
         text(b).startsWith(E["marvel0.autonomy.key.release_round"]),
@@ -545,8 +559,10 @@ describe("what the card says when it can only watch", () => {
     expect(
       ($(host, "marvel0-autonomy-stop") as HTMLButtonElement).disabled,
     ).toBe(true);
+    // The reason in the Stop frame's own words: the start refusal's sentence
+    // of the same code ("another terminal drives this run name") is not it.
     expect(text($(host, "marvel0-autonomy-stop-caption"))).toBe(
-      E["marvel0.autonomy.err.driven_elsewhere"],
+      `${E["marvel0.autonomy.stop.off"]} ${E["marvel0.autonomy.stop.why.driven_elsewhere"]}`,
     );
     expect(host.querySelectorAll("div.rg-akey")).toHaveLength(0);
   });

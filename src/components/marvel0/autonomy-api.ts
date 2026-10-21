@@ -118,6 +118,12 @@ export interface Seen {
   prompt_id: string;
 }
 
+/** `attest` is the codes of the ticks the person set in the key's window, the
+ * very codes of that key's required ticks (`requiredAttest`); sent for the keys
+ * that have ticks (`execute`, `execute_variant`, `release_round`) and for the
+ * forced end, and for no other key. The backend holds the same table and
+ * refuses a request without them (review N6: until then the ticks were only
+ * checked in the browser). */
 export const keyBody = (
   requestId: string,
   action: KeyId,
@@ -125,6 +131,7 @@ export const keyBody = (
   token: string,
   tabId: string,
   confirm?: string,
+  attest?: readonly string[],
 ): Record<string, unknown> => ({
   request_id: requestId,
   action,
@@ -132,6 +139,7 @@ export const keyBody = (
   token,
   tab_id: tabId,
   ...(confirm ? { confirm } : {}),
+  ...(attest && attest.length > 0 ? { attest: [...attest] } : {}),
 });
 
 /** A stop has no `seen` and no token: it must go whatever the page's view. */
@@ -142,7 +150,12 @@ export const stopBody = (requestId: string): Record<string, unknown> => ({
 export const endBody = (
   requestId: string,
   confirm: string,
-): Record<string, unknown> => ({ request_id: requestId, confirm });
+  attest?: readonly string[],
+): Record<string, unknown> => ({
+  request_id: requestId,
+  confirm,
+  ...(attest && attest.length > 0 ? { attest: [...attest] } : {}),
+});
 
 export const presenceBody = (
   tabId: string,

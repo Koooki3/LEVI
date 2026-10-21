@@ -60,6 +60,46 @@
   overflow-wrap: anywhere;
 }
 
+/* What D printed above the phrase prompt, quoted in the confirm window (a
+ * dialog is drawn outside the page's own container, so no `.rg-page` here).
+ * It has no scroll box of its own: the window's text scrolls, and a log path
+ * at the foot of a clipped box is the line a person would miss. */
+.rg-dialog .rg-acontext {
+  margin: 0;
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border-left: 3px solid var(--ds-separator-strong);
+  border-radius: var(--ds-radius-xs);
+  background: var(--ds-surface-sunken);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* The dock's reason for a Stop that is off: the dock's other note is hidden on a
+ * phone (marvel0-dock.css); this one is not, because it says why the button is
+ * off while the arm may still be moving. */
+.rg-page .rg-dock__note--why {
+  color: var(--ds-text-primary);
+}
+@media (max-width: 720px) {
+  .rg-page .rg-dock .rg-dock__note--why {
+    display: block;
+  }
+}
+/* The note that replaces Step 5 when it cannot load: paragraphs with a gap. */
+.rg-aloadfail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+.rg-aloadfail p {
+  margin: 0;
+}
+.rg-aloadfail code {
+  overflow-wrap: anywhere;
+}
+
 /* Stop: the whole row, 64 px high, in a place that does not move; the only
  * solid danger button of the card. Sticky at the top of the card on a phone. */
 .rg-astop {
@@ -73,7 +113,8 @@
 }
 .rg-astop[data-mode="sent"],
 .rg-astop[data-mode="acked"],
-.rg-astop[data-mode="spent"] {
+.rg-astop[data-mode="spent"],
+.rg-astop[data-mode="unoffered"] {
   border-color: var(--ds-warning);
   background: var(--ds-warning-bg);
 }
@@ -414,6 +455,13 @@
     position: sticky;
     top: calc(var(--levi-sticky-top, 56px) + var(--ds-space-2));
     z-index: var(--ds-z-dock);
+  }
+  /* A Stop that is off carries a long reason and has nothing to press: it stays
+   * in the flow (the dock repeats the reason when the card is out of view),
+   * instead of covering a quarter of the screen while it is scrolled past. */
+  .rg-arun .rg-astop[data-mode="off"],
+  .rg-arun .rg-astop[data-mode="unoffered"] {
+    position: static;
   }
   .rg-arun .ds-btn,
   .rg-aprepare .ds-btn {

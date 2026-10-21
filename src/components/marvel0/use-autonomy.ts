@@ -45,6 +45,7 @@ import {
   READY_FRESH_MS,
   RUN_FRESH_MS,
   armKey,
+  attestComplete,
   historySig,
   hostingOff,
   keyFitsPrompt,
@@ -276,9 +277,14 @@ export interface AutonomyActions {
   stopSent: StopSent | null;
   refused: AutonomyRefused | null;
   tabId: string;
-  pressKey: (key: KeyView, run: RunView, phrase?: string) => Promise<boolean>;
+  pressKey: (
+    key: KeyView,
+    run: RunView,
+    phrase?: string,
+    attest?: readonly string[],
+  ) => Promise<boolean>;
   stop: () => Promise<boolean>;
-  end: (phrase: string) => Promise<boolean>;
+  end: (phrase: string, attest?: readonly string[]) => Promise<boolean>;
   start: (name: string, attest: StartAttest) => Promise<boolean>;
   prepare: (form: PrepareForm) => Promise<boolean>;
   stopLive: () => Promise<boolean>;
@@ -342,7 +348,12 @@ export function useAutonomyActions(
   );
 
   const pressKey = useCallback(
-    (key: KeyView, view: RunView, phrase?: string) => {
+    (
+      key: KeyView,
+      view: RunView,
+      phrase?: string,
+      attest?: readonly string[],
+    ) => {
       const runId = view.runId;
       const promptId = view.state.prompt?.id ?? null;
       const refuse = (code: string, extra: Record<string, unknown> = {}) => {
@@ -371,6 +382,10 @@ export function useAutonomyActions(
           "confirm_required",
           key.phrase ? { phrase: key.phrase } : {},
         );
+      // A key that has ticks goes with exactly the codes of its ticks, all of
+      // them: a window sends them from what the person ticked, and a request
+      // built with fewer is a mistake of the page, never sent.
+      if (!attestComplete(key.id, attest)) return refuse("attest_incomplete");
       const record: SentKey = {
         runId,
         seq: view.state.seq,
@@ -394,6 +409,7 @@ export function useAutonomyActions(
               key.token as string,
               tabId,
               key.level === "C" ? phrase : undefined,
+              attest,
             ),
           );
           if (answer.ok) {
@@ -481,9 +497,26 @@ export function useAutonomyActions(
   );
 
   const end = useCallback(
-    (phrase: string) =>
-      write("end", (id) => api.end(endBody(id, phrase)), [() => run.refresh()]),
-    [api, write, run],
+    (phrase: string, attest?: readonly string[]) => {
+      // The forced end has its three ticks; a request without all of them is
+      // the page's own mistake and is not sent.
+      if (!attestComplete("end", attest)) {
+        fail("end", {
+          ok: false,
+          status: 0,
+          code: "attest_incomplete",
+          message: "",
+          extra: {},
+          field: null,
+          fields: [],
+        });
+        return Promise.resolve(false);
+      }
+      return write("end", (id) => api.end(endBody(id, phrase, attest)), [
+        () => run.refresh(),
+      ]);
+    },
+    [api, write, run, fail],
   );
 
   const start = useCallback(

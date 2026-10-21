@@ -10,6 +10,7 @@ import {
   READY_CODES,
   READY_LEVELS,
   STATE_IDS,
+  readyWordCode,
   STOP_PHASES,
 } from "../autonomy-doc";
 import {
@@ -76,7 +77,12 @@ describe("what the backend names by code is worded", () => {
       ),
       // ... and the one reason that changes what an unreadable D means: another
       // core of LEVI owns the run.
-      stateHintKey("unknown", "idle", "no_keyboard"),
+      stateHintKey("unknown", "idle", "no_keyboard", false),
+      // ... and a D alive that the page cannot follow, whose Stop is offered.
+      stateHintKey("unknown", "idle", "no_keyboard", true),
+      // ... and the Stop that D did not answer when the backend offers no
+      // retry (it must not promise "one more try").
+      stateHintKey("stopping", "unconfirmed", null, false),
     ];
     expect(missing(hints)).toEqual([]);
     sameSet(family("state."), STATE_IDS);
@@ -153,6 +159,63 @@ describe("what the backend names by code is worded", () => {
       expect(both(`${P}stop.${key}`)).toBe(true);
   });
 
+  test("the Stop frame when no Stop is offered: a sentence for the frame, for D's silence, and for each reason the review named", () => {
+    for (const key of [
+      "off",
+      "unoffered",
+      "unoffered_tail",
+      "why.stop_spent",
+      "why.driven_elsewhere",
+      "why.d_gone",
+    ])
+      expect(both(`${P}stop.${key}`)).toBe(true);
+    // The three codes are the ones the backend gives as `stop.why_not`.
+    for (const code of ["stop_spent", "driven_elsewhere", "d_gone"])
+      expect(CODES.why_not).toContain(code);
+    // No sentence of the silent Stop promises a retry; the one that is offered does.
+    expect(E[`${P}stop.unoffered`]).not.toMatch(/more try|last/i);
+    expect(E[`${P}stop.retry`]).toMatch(/One more try is offered/);
+    expect(Z[`${P}stop.unoffered`]).not.toContain("再试");
+    // The way out that works without this page is named with its exact name.
+    expect(E[`${P}stop.unoffered_tail`]).toContain(
+      "scripts/aeri_page_stop.py --again",
+    );
+  });
+
+  test("the notes of the switch turned off in the control file while D runs, and of the release tick, the screen quote and the page's own refusals", () => {
+    for (const key of [
+      "disabled.live",
+      "local.switched_off",
+      "dcheck.scene_ready",
+      "confirm.checks_release",
+      "confirm.screen",
+      "err.attest_incomplete",
+    ])
+      expect(both(`${P}${key}`)).toBe(true);
+    // The sentence for a live D does not say that nothing on the step acts:
+    // Stop and Force-end do.
+    expect(E[`${P}disabled.live`]).not.toMatch(/nothing on this step acts/);
+    expect(E[`${P}disabled.live`]).toMatch(/Stop and Force-end still work/);
+    expect(Z[`${P}disabled.live`]).toContain("仍然可用");
+  });
+
+  test("the note that replaces Step 5 when it cannot load names the exact command, what it needs and the physical e-stop", () => {
+    for (const key of [
+      "load_failed",
+      "load_failed_stop",
+      "load_failed_needs",
+      "load_failed_estop",
+    ])
+      expect(both(`${P}${key}`)).toBe(true);
+    for (const text of [E, Z]) {
+      expect(text[`${P}load_failed_needs`]).toContain("record.json");
+      expect(text[`${P}load_failed_needs`]).toContain("--workspace DIR");
+      expect(text[`${P}load_failed_needs`]).toContain("--again");
+    }
+    expect(E[`${P}load_failed_estop`]).toMatch(/physical e-stop/);
+    expect(Z[`${P}load_failed_estop`]).toContain("物理急停");
+  });
+
   test("the readiness rows: a sentence for each code the backend lists, and the levels", () => {
     const codes = (CODES as { readiness?: string[] }).readiness;
     const fromBackend = [...ready.matchAll(/_row\(\s*"(\w+)"/g)].map(
@@ -186,6 +249,40 @@ describe("what the backend names by code is worded", () => {
       READY_CODES,
     );
     sameSet(family("level."), READY_LEVELS);
+  });
+
+  test("the three sentences of the unit_timeout row, with the same facts in both languages; the closed code picks one by level and by what was sent", () => {
+    const keys = [
+      "ready.unit_timeout",
+      "ready.unit_timeout.ok",
+      "ready.unit_timeout.unknown",
+    ];
+    expect(missing(keys.map((key) => P + key))).toEqual([]);
+    // The warning names the value found and the time D needs; the other two
+    // need only the time (a unit that was not read has no value to name).
+    expect(E[`${P}ready.unit_timeout`]).toContain("{seconds}");
+    expect(E[`${P}ready.unit_timeout.ok`]).not.toContain("{seconds}");
+    expect(E[`${P}ready.unit_timeout.unknown`]).not.toContain("{seconds}");
+    for (const key of keys) {
+      expect(E[P + key]).toContain("levi-product.service");
+      expect(E[P + key]).toContain("{need_s}");
+    }
+    expect(E[`${P}ready.unit_timeout`]).toContain("levi stop");
+    expect(E[`${P}ready.unit_timeout.unknown`]).toContain("levi stop");
+    expect(readyWordCode("unit_timeout", "warn", { seconds: 15 })).toBe(
+      "unit_timeout",
+    );
+    expect(readyWordCode("unit_timeout", "warn", { need_s: 150 })).toBe(
+      "unit_timeout.unknown",
+    );
+    expect(readyWordCode("unit_timeout", "ok", { seconds: 180 })).toBe(
+      "unit_timeout.ok",
+    );
+    expect(readyWordCode("stack_ready", "warn", {})).toBe("stack_ready");
+    // The backend names the row and keeps it advice (never a refusal).
+    expect(ready).toContain('"unit_timeout"');
+    expect(ready).toMatch(/WARN_ROWS = \([^)]*"unit_timeout"/);
+    expect(READY_CODES).toContain("unit_timeout");
   });
 
   test("modes, exits, waits, locks, the homing steps and the acks", () => {

@@ -290,6 +290,13 @@ describe("Step 5 is loaded on demand, and a failure of it does not take the page
     expect(lazy).toContain(
       'import type { AutonomyStep } from "./autonomy-step"',
     );
+    // The note for a step that failed is drawn by the always-loaded wrapper
+    // itself: no value is imported from the step's chunk, so the note is there
+    // exactly when the chunk is not.
+    expect(lazy).not.toMatch(
+      /import \{[^}]*\} from "\.\/autonomy-(step|run-card|keys)"/,
+    );
+    expect(lazy).toContain("python3 -I scripts/aeri_page_stop.py");
   });
 
   test("a loading line first, then the step; its Stop is on the page as before", async () => {
@@ -345,8 +352,16 @@ describe("Step 5 is loaded on demand, and a failure of it does not take the page
         </main>,
       );
       const note = $(view.host, "marvel0-autonomy-load-failed");
-      expect(text(note)).toBe(E["marvel0.autonomy.load_failed"]);
-      expect(text(note)).toContain("scripts/aeri_page_stop.py");
+      // The way out that needs no page, precisely (review N11): the exact
+      // command, what it needs, and the physical e-stop, all drawn here.
+      expect(text(note)).toContain(E["marvel0.autonomy.load_failed"]);
+      expect(text($(view.host, "marvel0-autonomy-load-failed-cmd"))).toBe(
+        "python3 -I scripts/aeri_page_stop.py",
+      );
+      expect(text(note)).toContain(E["marvel0.autonomy.load_failed_stop"]);
+      expect(text(note)).toContain(E["marvel0.autonomy.load_failed_needs"]);
+      expect(text(note)).toContain(E["marvel0.autonomy.load_failed_estop"]);
+      expect(text(note)).toContain("record.json");
       expect(text($(view.host, "rest"))).toBe("the rest of the page");
     } finally {
       console.error = quiet;

@@ -80,6 +80,27 @@ describe("the stylesheet of the autonomy step", () => {
   });
 });
 
+describe("the dock's reason for a Stop that is off (SAFETY N2)", () => {
+  test("a phone keeps it: the dock's usual note is hidden there, this one is shown", () => {
+    const dock = readFileSync(join(here, "../marvel0-dock.css"), "utf8");
+    // The shared rule that hides the dock's note on a phone ...
+    expect(dock).toMatch(
+      /@media \(max-width: 720px\)[\s\S]*\.rg-dock__note:not\(\.rg-dock__note--lost\) \{\s*display: none/,
+    );
+    // ... and the rule of this step that shows the reason regardless.
+    expect(code).toMatch(
+      /@media \(max-width: 720px\) \{\s*\.rg-page \.rg-dock \.rg-dock__note--why \{\s*display: block/,
+    );
+    expect(source("autonomy-step.tsx")).toContain("rg-dock__note--why");
+  });
+
+  test("a Stop that is off does not stick to the top of a phone: its reason is long and it has nothing to press", () => {
+    expect(code).toMatch(
+      /\.rg-arun \.rg-astop\[data-mode="off"\],\s*\.rg-arun \.rg-astop\[data-mode="unoffered"\] \{\s*position: static/,
+    );
+  });
+});
+
 describe("the one solid danger button", () => {
   test("Stop is the only one: in the card and, repeated, in the dock; no key, no start, no end is solid red", () => {
     const solid = (file: string) =>

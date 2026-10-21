@@ -682,7 +682,11 @@ describe("the dead and the stuck", () => {
     await doubleClick(confirm);
     await tick(3, 10);
     expect(callsOf(f.state, "end")).toEqual([
-      { request_id: expect.any(String), confirm: "end terminal D" },
+      {
+        request_id: expect.any(String),
+        confirm: "end terminal D",
+        attest: ["estop_hand", "hands_clear", "no_client"],
+      },
     ]);
   });
 

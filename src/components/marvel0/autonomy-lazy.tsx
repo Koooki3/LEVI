@@ -6,8 +6,10 @@
 // Step 5: the chain, the arm stack, the evaluation client and its HOLD.
 //
 // The note says how to stop a terminal D that is running anyway (the script
-// that needs no page, and the physical e-stop): a step that cannot load is
-// exactly when its own Stop button is not there.
+// that needs no page, with its exact command and what it needs, and the
+// physical e-stop): a step that cannot load is exactly when its own Stop button
+// is not there. The note is drawn here, in the part of the page that is always
+// loaded, from catalogue sentences; it needs nothing from the step's chunk.
 import {
   Component,
   Suspense,
@@ -25,13 +27,30 @@ const Step = lazy(() =>
   })),
 );
 
+/** The command that works without the page: one SIGINT to the hosted D, read
+ * from the page's own run record (`scripts/aeri_page_stop.py`, run in the LEVI
+ * checkout the page is served from). */
+export const STOP_SCRIPT_COMMAND = "python3 -I scripts/aeri_page_stop.py";
+
 function Failed() {
   const { t } = useLocale();
   return (
     <Note tone="warning" role="alert">
-      <span data-testid="marvel0-autonomy-load-failed">
-        {t("marvel0.autonomy.load_failed")}
-      </span>
+      <div data-testid="marvel0-autonomy-load-failed" className="rg-aloadfail">
+        <p>{t("marvel0.autonomy.load_failed")}</p>
+        <p>{t("marvel0.autonomy.load_failed_stop")}</p>
+        <pre
+          className="rg-command"
+          lang="en"
+          data-testid="marvel0-autonomy-load-failed-cmd"
+        >
+          {STOP_SCRIPT_COMMAND}
+        </pre>
+        <p>{t("marvel0.autonomy.load_failed_needs")}</p>
+        <p>
+          <strong>{t("marvel0.autonomy.load_failed_estop")}</strong>
+        </p>
+      </div>
     </Note>
   );
 }

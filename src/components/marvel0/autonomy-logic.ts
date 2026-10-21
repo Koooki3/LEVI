@@ -176,18 +176,30 @@ export function stateHintKey(
   id: StateId,
   phase: StopPhase = "idle",
   reason: string | null = null,
+  /** Whether the document offers a Stop now. "One more try is offered" is said
+   * only when it does (review N2: the phase alone said it for an adopted D
+   * whose retry the backend had not opened). */
+  stopAllowed = true,
 ): string {
-  // Another live core of LEVI owns this run (`no_keyboard`): this page only
-  // watches it, so "only Stop is offered" would be false.
+  // `no_keyboard` is two different situations, told apart by the document's own
+  // word on Stop: another live core of LEVI owns the run (Stop refused,
+  // `driven_elsewhere`): this page only watches it; or the page cannot follow a
+  // D that is alive (a record of the first build with a site file that does not
+  // read): Stop is offered and goes to D's own process. "Sends no Stop from here"
+  // would be false for the second.
   if (id === "unknown" && reason === "no_keyboard")
-    return "marvel0.autonomy.hint.unknown_other_core";
+    return stopAllowed
+      ? "marvel0.autonomy.hint.unknown_unfollowed"
+      : "marvel0.autonomy.hint.unknown_other_core";
   const unconfirmed = stopUnacknowledged(phase);
   if (id === "stopping")
     return phase === "acked"
       ? "marvel0.autonomy.hint.stopping"
       : phase === "idle"
         ? "marvel0.autonomy.hint.stopping_ending"
-        : `marvel0.autonomy.hint.stopping_${phase}`;
+        : phase === "unconfirmed" && !stopAllowed
+          ? "marvel0.autonomy.hint.stopping_unoffered"
+          : `marvel0.autonomy.hint.stopping_${phase}`;
   if (id === "orphaned" && unconfirmed)
     return "marvel0.autonomy.hint.orphaned_unconfirmed";
   if (id === "stalled" && unconfirmed)
@@ -365,6 +377,12 @@ export interface KeyCheck {
 export const TERMINAL_CHECKS = {
   start: ["scene", "limits", "checkpoints", "providers", "hardware"],
   switch: ["switch_units", "switch_ports", "switch_gpu", "switch_home"],
+  /** `sub_release` (printed at every release prompt): "Round {n}/{total}: when
+   * the scene is ready press Enter to release this round's forward subtask
+   * loop". D asks for one thing, the scene, so there is one tick; its words
+   * also name the area and the e-stop because that is what a ready scene is
+   * (review N5: the release window had a delay and no check at all). */
+  release: ["scene_ready"],
 } as const;
 
 /** The three checks of the windows of the arm stack (start of C): a hand on
@@ -387,11 +405,14 @@ const windowCheck = (code: string): KeyCheck => ({
 });
 
 /** The ticks of the window of a key: none for the keys below level C (they have
- * their own sentences and the delay), and for each level C key everything the
- * terminal asks, in the order it asks it, then the three checks of the stack
- * windows. `end` is the third level C action: the terminal asks nothing there,
- * so it has the three alone. */
+ * their own sentences and the delay) except the release of a round, which has
+ * the one thing D itself asks there (the scene is ready); and for each level C
+ * key everything the terminal asks, in the order it asks it, then the three
+ * checks of the stack windows. `end` is the third level C action: the terminal
+ * asks nothing there, so it has the three alone. The codes are also what the
+ * backend is sent as `attest` (`attestOf`), so they are stable. */
 export function keyChecks(id: KeyId | "end"): KeyCheck[] {
+  if (id === "release_round") return TERMINAL_CHECKS.release.map(terminalCheck);
   const terminal: readonly string[] =
     id === "execute"
       ? TERMINAL_CHECKS.start
@@ -400,6 +421,52 @@ export function keyChecks(id: KeyId | "end"): KeyCheck[] {
         : [];
   if (id !== "execute" && id !== "execute_variant" && id !== "end") return [];
   return [...terminal.map(terminalCheck), ...WINDOW_CHECKS.map(windowCheck)];
+}
+
+/** The codes of the ticks a key's window requires, in order: what the backend
+ * is sent as `attest` (empty for a key with no ticks). */
+export const requiredAttest = (id: KeyId | "end"): string[] =>
+  keyChecks(id).map((check) => check.code);
+
+/** The `attest` of a key or end request from the ticks a window had set: all of
+ * the key's required codes, in order, or null when one is missing. Never a
+ * partial list. */
+export function attestOf(
+  id: KeyId | "end",
+  ticked: Record<string, boolean>,
+): string[] | null {
+  const required = requiredAttest(id);
+  return required.every((code) => ticked[code] === true) ? required : null;
+}
+
+/** Whether `given` is exactly the key's required codes (the second layer of
+ * `pressKey` and `end`: a request is never built with fewer). */
+export const attestComplete = (
+  id: KeyId | "end",
+  given: readonly string[] | undefined,
+): boolean => {
+  const required = requiredAttest(id);
+  return (
+    required.length === (given?.length ?? 0) &&
+    required.every((code, index) => given?.[index] === code)
+  );
+};
+
+/** The lines D printed above the prompt it waits on, verbatim: its screen's
+ * last lines, trailing blanks dropped. The document has no field for the
+ * reviewed summary or for the logs of an earlier policy switch that did not end
+ * cleanly (D prints both just above the phrase prompt), so a window that asks
+ * for the phrase quotes the screen itself instead of picking lines out of it
+ * (review N5). */
+export const CONTEXT_LINES = 30;
+export function promptContext(run: RunView, max = CONTEXT_LINES): string[] {
+  const tail = [...run.screen.tail];
+  while (tail.length > 0 && tail[tail.length - 1].trim() === "") tail.pop();
+  // The prompt's own line is quoted apart, right under this block.
+  const own = run.state.prompt?.line?.trim();
+  if (own && tail.length > 0 && tail[tail.length - 1].trim() === own)
+    tail.pop();
+  return tail.slice(-max);
 }
 
 /** The key this page sent and what it has seen of it. One key per prompt: as
@@ -514,6 +581,11 @@ export function keyVM(run: RunView, key: KeyView, ctx: KeyCtx): KeyVM {
         text: "state_not_allowed",
       },
     );
+  // Hosting switched off in the control file while D runs: a key that moves
+  // the arm stays off whatever the key says (the backend refuses it too, with
+  // `aeri_disabled`; this is the page's own second layer, review N3). Stop and
+  // End are not keys; a key that moves nothing is left to the backend.
+  if (!run.enabled && key.motion !== "none") return off(local("switched_off"));
   // The backend offers a key for its own prompt only; a document that offers
   // one for another prompt than the one D shows is not trusted (a window open
   // for one prompt must never send its key to the next).
@@ -555,12 +627,15 @@ export interface StopSeen {
   alive: boolean;
   allowed: boolean;
   phase: StopPhase;
+  /** The backend's code for why no Stop is offered (null when one is). */
+  whyCode: string | null;
 }
 export const stopSeen = (run: RunView): StopSeen => ({
   runId: run.runId,
   alive: run.d.alive,
   allowed: run.stop.allowed,
   phase: run.stop.phase,
+  whyCode: run.stop.whyCode,
 });
 
 /** A Stop this page sent: it stays off until the document shows the stop phase
@@ -570,18 +645,32 @@ export interface StopSent {
   phase: StopPhase;
 }
 
+/** What the Stop frame is in:
+ *  - `ready`: a Stop is offered and none was sent;
+ *  - `sent`, `acked`, `retried` (`spent`): what D has said back to a Stop that
+ *    was sent, by whom ever (the page's own click, the adoption of a run after
+ *    a restart, or `aeri_page_stop.py`);
+ *  - `retry`: D did not answer and the backend offers one more;
+ *  - `unoffered`: D did not answer and the backend offers no more (an adopted
+ *    D whose retry is not open, a run another core owns);
+ *  - `off`: no Stop is offered and none was sent (a D locked after a fault, a
+ *    run another core owns, a site file the backend cannot read). */
 export type StopMode =
   | "hidden"
   | "ready"
   | "sent"
   | "acked"
   | "retry"
-  | "spent";
+  | "spent"
+  | "unoffered"
+  | "off";
 
 /** The Stop frame: shown while D lives; clickable only while the backend
- * offers it and this page has not already sent it for that phase. The page
- * cannot send a second Stop of its own accord: a run gets one (and one retry
- * the backend opens when the first one was never acknowledged). */
+ * offers it and this page has not already sent it for that phase. The mode is
+ * derived from the stop phase AND from whether the backend offers a Stop now
+ * (review N2: a phase alone said "one more try is offered" next to a disabled
+ * button). The page cannot send a second Stop of its own accord: a run gets one
+ * (and one retry the backend opens when the first one was never acknowledged). */
 export function stopControl(
   seen: StopSeen | null,
   sent: StopSent | null,
@@ -591,9 +680,13 @@ export function stopControl(
     sent !== null && sent.runId === seen.runId && sent.phase === seen.phase;
   const mode: StopMode =
     seen.phase === "idle"
-      ? "ready"
+      ? seen.allowed || lockedHere
+        ? "ready"
+        : "off"
       : seen.phase === "unconfirmed"
-        ? "retry"
+        ? seen.allowed
+          ? "retry"
+          : "unoffered"
         : seen.phase === "retried"
           ? "spent"
           : seen.phase === "acked"
@@ -601,6 +694,16 @@ export function stopControl(
             : "sent";
   return { mode, enabled: seen.allowed && !lockedHere };
 }
+
+/** The sentence for why no Stop is offered, for the codes whose meaning on the
+ * Stop frame is not the meaning they have for a start (`driven_elsewhere` there
+ * is "another terminal drives this run name"). Null for the others: those are
+ * worded from the document itself. */
+const STOP_WHY = new Set(["stop_spent", "driven_elsewhere", "d_gone"]);
+export const stopWhyKey = (code: string | null): string | null =>
+  code !== null && STOP_WHY.has(code)
+    ? `marvel0.autonomy.stop.why.${code}`
+    : null;
 
 // -- the readiness rows and the start
 

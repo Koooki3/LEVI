@@ -32,6 +32,7 @@ import {
   LIMITS,
   RUN_FRESH_MS,
   STATE_TONE,
+  attestOf,
   exitKind,
   hasRun,
   isLive,
@@ -45,9 +46,11 @@ import {
   stateKey,
   stopControl,
   stopUnacknowledged,
+  stopWhyKey,
   visibleKeys,
   type KeyCtx,
   type Limits,
+  type StopMode,
 } from "./autonomy-logic";
 import {
   useArming,
@@ -64,6 +67,51 @@ const STOP_CAPTION: Record<string, string> = {
   spent: "marvel0.autonomy.stop.spent",
 };
 
+/** Why no Stop is offered, for a Stop frame that is off (`off`: none was sent;
+ * `unoffered`: one was, D did not answer, and no more is offered). The reason is
+ * the document's own code: the words of the three codes the Stop frame has
+ * its own sentences for, else the document's wording of it (a D locked after a
+ * fault is "Not offered while D is fault_locked"). It is read from the last good
+ * read, however old. */
+function StopReason({ poll }: { poll: AutonomyRunPoll }) {
+  const { t } = useLocale();
+  const key = stopWhyKey(poll.lastSeen?.whyCode ?? null);
+  if (key) return <>{t(key)}</>;
+  const worded = poll.value?.stop.whyNot ?? null;
+  return worded ? <WordedText worded={worded} /> : null;
+}
+
+/** The sentence under the Stop button, from the mode and the reason together
+ * (review N2: from the phase alone it said "one more try is offered" next to a
+ * button that was off). */
+export function StopCaption({
+  mode,
+  poll,
+  short = false,
+}: {
+  mode: StopMode;
+  poll: AutonomyRunPoll;
+  /** Without the way out that needs no page (the dock is small on a phone; the
+   * card holds the whole sentence). */
+  short?: boolean;
+}) {
+  const { t } = useLocale();
+  if (mode === "off")
+    return (
+      <>
+        {t("marvel0.autonomy.stop.off")} <StopReason poll={poll} />
+      </>
+    );
+  if (mode === "unoffered")
+    return (
+      <>
+        {t("marvel0.autonomy.stop.unoffered")} <StopReason poll={poll} />
+        {!short && ` ${t("marvel0.autonomy.stop.unoffered_tail")}`}
+      </>
+    );
+  return <>{t(STOP_CAPTION[mode])}</>;
+}
+
 /** Stop: Ctrl+C for the hosted D. A block of its own, full width and 64 px
  * high, in a place that does not move; on while D lives, by the last good read
  * and however old it is. Not an emergency stop, and the caption says so. */
@@ -78,13 +126,6 @@ export function StopFrame({
   const { mode, enabled } = stopControl(poll.lastSeen, actions.stopSent);
   if (mode === "hidden") return null;
   const refused = actions.refused?.key === "stop" ? actions.refused : null;
-  // Off while nothing was sent yet: the backend says why (a D that locked
-  // itself is already holding the arm, and one more Ctrl+C would only cut its
-  // wrap-up short).
-  const why =
-    mode === "ready" && !enabled && actions.stopSent === null
-      ? (poll.value?.stop.whyNot ?? null)
-      : null;
   return (
     <div
       className="rg-astop"
@@ -110,10 +151,8 @@ export function StopFrame({
       >
         {actions.stopping ? (
           t("marvel0.autonomy.stop.sending")
-        ) : why ? (
-          <WordedText worded={why} />
         ) : (
-          t(STOP_CAPTION[mode])
+          <StopCaption mode={mode} poll={poll} />
         )}
       </p>
       {refused && (
@@ -361,10 +400,12 @@ function EndForced({
           ) : null
         }
         onCancel={() => setAsking(false)}
-        onConfirm={() =>
-          actions.end(run.end.phrase).then((ok) => {
-            if (ok) setAsking(false);
-          })
+        onConfirm={(ticked) =>
+          actions
+            .end(run.end.phrase, attestOf("end", ticked) ?? undefined)
+            .then((ok) => {
+              if (ok) setAsking(false);
+            })
         }
       />
     </>
@@ -797,6 +838,7 @@ export function AutonomyRunCard({
                   run.state.id,
                   run.stop.phase,
                   run.state.reasonCode,
+                  run.stop.allowed,
                 ),
               )}
             </p>

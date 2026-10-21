@@ -139,7 +139,24 @@ export const READY_CODES = [
   "no_other_aeri",
   "monitor_green",
   "stack_ready",
+  "unit_timeout",
 ] as const;
+
+/** The catalogue code a readiness row is worded by. Most rows have one
+ * sentence; `unit_timeout` (the product's service unit must give a hosted D time
+ * to wrap up at a stop; it is only ever `ok` or `warn`) says three different
+ * things: the value it found and why that is too short, that the unit allows
+ * enough (or is not the unit that runs the product), and that the value could
+ * not be read. The third has no `seconds`. */
+export function readyWordCode(
+  code: string,
+  level: ReadyLevel,
+  params: Record<string, string | number>,
+): string {
+  if (code !== "unit_timeout") return code;
+  if (level === "ok") return "unit_timeout.ok";
+  return "seconds" in params ? "unit_timeout" : "unit_timeout.unknown";
+}
 
 export const MODES = ["external", "local"] as const;
 export type Mode = (typeof MODES)[number];
@@ -336,6 +353,9 @@ export interface RunView {
     phase: StopPhase;
     sentAt: number | null;
     whyNot: Worded<Say> | null;
+    /** The backend's code of `whyNot` (`stop_spent`, `driven_elsewhere`,
+     * `d_gone`, `state_not_allowed`): what the Stop caption is derived from. */
+    whyCode: string | null;
   };
   presence: { ok: boolean; ageS: number | null; needS: number | null } | null;
   end: { allowed: boolean; whyNot: Worded<Say> | null; phrase: string };
@@ -625,6 +645,7 @@ export function runView(raw: unknown, known: Known): RunView | null {
       phase: oneOf(STOP_PHASES, stop?.phase) ?? "idle",
       sentAt: timeOf(stop?.sent_at),
       whyNot: whyOf(stop?.why_not, ERR_PREFIXES, known),
+      whyCode: whyCodeOf(stop?.why_not),
     },
     presence: presence
       ? {
@@ -868,13 +889,14 @@ export function readyView(raw: unknown, known: Known): ReadyView | null {
       const code = str(item?.code, 80);
       if (!item || !code) return [];
       const params = paramsOf(item.params);
+      const level = oneOf(READY_LEVELS, item.level) ?? UNKNOWN;
       return [
         {
           code,
-          level: oneOf(READY_LEVELS, item.level) ?? UNKNOWN,
+          level,
           worded: codedSay(
             "marvel0.autonomy.ready.",
-            code,
+            readyWordCode(code, level, params),
             str(item.text, 300) ?? code,
             params,
             known,

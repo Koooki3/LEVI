@@ -18,7 +18,7 @@ import {
 } from "./autonomy-helpers";
 import { callsOf, fakeAutonomy, keyOf, runDoc } from "./autonomy-fixtures";
 import { runView, type KeyView } from "../autonomy-doc";
-import { keyChecks } from "../autonomy-logic";
+import { keyChecks, requiredAttest } from "../autonomy-logic";
 import {
   useAutonomyActions,
   type AutonomyActions,
@@ -143,14 +143,27 @@ describe("the window of execute", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0].confirm).toBe(phrase);
     expect(sent[0].action).toBe("execute");
-    // The closed body of the route: nothing typed, no byte.
+    // The closed body of the route: nothing typed, no byte, and the codes of
+    // the eight ticks (review N6: the server holds the same list).
     expect(Object.keys(sent[0]).sort()).toEqual([
       "action",
+      "attest",
       "confirm",
       "request_id",
       "seen",
       "tab_id",
       "token",
+    ]);
+    expect(sent[0].attest).toEqual(requiredAttest("execute"));
+    expect(sent[0].attest).toEqual([
+      "scene",
+      "limits",
+      "checkpoints",
+      "providers",
+      "hardware",
+      "estop_hand",
+      "hands_clear",
+      "no_client",
     ]);
   });
 
@@ -200,6 +213,14 @@ describe("the window of execute_variant", () => {
         .phrase,
     );
     expect(sent[0].confirm).toMatch(/ after policy switch check$/);
+    // The twelve ticks of the long variant, in the order of the window.
+    expect(sent[0].attest).toEqual(requiredAttest("execute_variant"));
+    expect((sent[0].attest as string[]).slice(0, 4)).toEqual([
+      "switch_units",
+      "switch_ports",
+      "switch_gpu",
+      "switch_home",
+    ]);
   });
 });
 
@@ -225,6 +246,7 @@ describe("the window of the forced end", () => {
       {
         request_id: expect.any(String),
         confirm: f.state.run!.end.phrase,
+        attest: ["estop_hand", "hands_clear", "no_client"],
       },
     ]);
   });
@@ -334,11 +356,86 @@ describe("pressKey on its own", () => {
     });
     expect(callsOf(f.state, "key")).toEqual([]);
     expect(seen.actions!.refused?.failure.code).toBe("confirm_required");
+    const ticks = requiredAttest("execute");
     await act(async () => {
-      expect(await seen.actions!.pressKey(key, view, key.phrase!)).toBe(true);
+      expect(await seen.actions!.pressKey(key, view, key.phrase!, ticks)).toBe(
+        true,
+      );
     });
     expect(callsOf(f.state, "key")).toHaveLength(1);
     expect(callsOf(f.state, "key")[0].confirm).toBe(key.phrase);
+  });
+
+  test("it sends a key that has ticks with all of their codes and nothing else (SAFETY N6)", async () => {
+    const { f, seen, element } = harness();
+    await render(element);
+    const view = viewOf("await_phrase");
+    const key = keyIn(view, "execute");
+    const ticks = requiredAttest("execute");
+    const wrong: Array<readonly string[] | undefined> = [
+      undefined,
+      [],
+      ticks.slice(1), // one short
+      ticks.slice(0, -1),
+      [...ticks, "scene_ready"], // one too many
+      [...ticks].reverse(), // the order is the window's
+      ticks.map((code) => (code === "scene" ? "limits" : code)),
+    ];
+    for (const attest of wrong) {
+      await act(async () => {
+        expect(
+          await seen.actions!.pressKey(key, view, key.phrase!, attest),
+        ).toBe(false);
+      });
+      expect(seen.actions!.refused?.failure.code).toBe("attest_incomplete");
+    }
+    expect(callsOf(f.state, "key")).toEqual([]);
+    // The release of a round: its one tick; a key with no ticks sends none.
+    const release = viewOf("await_release");
+    await act(async () => {
+      expect(
+        await seen.actions!.pressKey(keyIn(release, "release_round"), release),
+      ).toBe(false);
+    });
+    expect(seen.actions!.refused?.failure.code).toBe("attest_incomplete");
+    expect(callsOf(f.state, "key")).toEqual([]);
+    await act(async () => {
+      expect(
+        await seen.actions!.pressKey(
+          keyIn(release, "release_round"),
+          release,
+          undefined,
+          ["scene_ready"],
+        ),
+      ).toBe(true);
+    });
+    const inventory = viewOf("await_inventory");
+    await act(async () => {
+      expect(
+        await seen.actions!.pressKey(keyIn(inventory, "quit"), inventory),
+      ).toBe(true);
+    });
+    const sent = callsOf(f.state, "key");
+    expect(sent).toHaveLength(2);
+    expect(sent[0].attest).toEqual(["scene_ready"]);
+    expect(sent[1]).not.toHaveProperty("attest");
+  });
+
+  test("the forced end is not sent without its three ticks", async () => {
+    const { f, seen, element } = harness();
+    await render(element);
+    for (const attest of [
+      undefined,
+      [],
+      ["estop_hand"],
+      ["hands_clear", "estop_hand", "no_client"],
+    ]) {
+      await act(async () => {
+        expect(await seen.actions!.end("end terminal D", attest)).toBe(false);
+      });
+      expect(seen.actions!.refused?.failure.code).toBe("attest_incomplete");
+    }
+    expect(callsOf(f.state, "end")).toEqual([]);
   });
 
   test("it sends nothing while the prompt on D's screen is not the one of the key", async () => {

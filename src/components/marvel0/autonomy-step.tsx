@@ -6,9 +6,12 @@
 // shows it, and lets a person press D's keys with a click. A click stands for
 // the same key in the terminal; the terminal stays a valid way to run AERI.
 //
-// Everything on this step is off until the control file says so
+// Nothing on this step starts until the control file says so
 // (`[aeri] enabled = true`; a missing section is off, a malformed one is off
-// with an error, never on). Only a person clicks: an agent never calls the
+// with an error, never on). The switch is read when a run is prepared or
+// started; turning it off while a D runs does not stop D: the keys that move the
+// arm are refused from then on, and Stop and Force-end stay (the card says so).
+// Only a person clicks: an agent never calls the
 // write routes behind these buttons (in external mode it only answers the
 // vision-model queue files). The first real use is staged, with the owner
 // present and a hand on the physical e-stop.
@@ -24,7 +27,7 @@ import { useLocale } from "@/components/levi-locale";
 import { Note } from "@/components/pages-ui/feedback";
 import { WordedText } from "./action-parts";
 import { autonomyApi, type AutonomyApi } from "./autonomy-api";
-import { AutonomyRunCard } from "./autonomy-run-card";
+import { AutonomyRunCard, StopCaption } from "./autonomy-run-card";
 import { PrepareCard } from "./autonomy-prepare";
 import {
   LIMITS,
@@ -129,7 +132,15 @@ function StopDock({
             </span>
           )}
         </div>
-        <p className="rg-dock__note">{t("marvel0.autonomy.dock.note")}</p>
+        {mode === "off" || mode === "unoffered" ? (
+          // No Stop is offered: the dock says why, as the card does (the one
+          // note a phone keeps: the dock's usual note is hidden there).
+          <p className="rg-dock__note rg-dock__note--why">
+            <StopCaption mode={mode} poll={poll} short />
+          </p>
+        ) : (
+          <p className="rg-dock__note">{t("marvel0.autonomy.dock.note")}</p>
+        )}
       </div>
       <Button
         variant="secondary"
@@ -207,6 +218,7 @@ export function AutonomyStep({
     problem !== null && !("format" in problem) && problem.code === code;
   const disabled =
     ready.value?.enabled === false ||
+    runView?.enabled === false ||
     coded(ready.problem, "aeri_disabled") ||
     coded(run.problem, "aeri_disabled");
   // The site file has no `[aeri]` section, or a malformed one: nothing can be
@@ -239,12 +251,20 @@ export function AutonomyStep({
             </strong>
           </Note>
           {disabled && (
-            <Note tone="info" role="status">
+            // Switched off before a start, nothing on this step acts. Switched
+            // off while a D runs, the keys that move the arm are refused and
+            // Stop and Force-end stay: that is a different sentence (review N3).
+            <Note tone={runLive ? "warning" : "info"} role="status">
               <span
                 data-testid="marvel0-autonomy-disabled"
                 data-control={ready.value?.controlState}
+                data-live={runLive || undefined}
               >
-                {t(disabledKey(ready.value?.controlState))}
+                {t(
+                  runLive
+                    ? "marvel0.autonomy.disabled.live"
+                    : disabledKey(ready.value?.controlState),
+                )}
               </span>
             </Note>
           )}
