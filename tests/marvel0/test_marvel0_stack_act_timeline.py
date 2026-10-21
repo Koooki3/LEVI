@@ -2,8 +2,10 @@
 
 The page's real code runs: the real ticker loop (``Act._tick_loop``), the real
 operations on real threads, the checks side by side. What the machine does
-takes the time the owner measured on the real one: the check of the ROS graph
-about 3.4 s, the FCI check 1 s, A ready 5 s after it starts, B 2 s (the gripper
+takes the times below. The check of the ROS graph (about 3.4 s) is an
+**estimate** (the owner has not timed ``ros2 node list`` in a unit; the report and
+docs/MARVEL0_STACK.md say so); the others are the owner's measurements of the
+real machine: the FCI check 1 s, A ready 5 s after it starts, B 2 s (the gripper
 calibrates), the listing of the gripper controllers 1.2 s, the end-effector
 frame check 5 s, C 3 s. What these tests pin is what the page adds to those:
 nothing before A beyond the marker's minimum age and the check it needs, no
@@ -15,6 +17,7 @@ Nothing here starts a process, opens a socket or sleeps in real time."""
 import dataclasses
 import os
 import threading
+from itertools import pairwise
 
 import pytest
 from sim_time import Clock
@@ -35,7 +38,10 @@ NODES_S, FCI_S, LISTING_S, EE_S = 3.4, 1.0, 1.2, 5.0
 READY_S = {"a": 5.1, "b": 2.07, "c": 3.13}
 TICK_SLACK_S = (
     stack_act.SEQUENCE_TICK_S + 0.01
-)  # what a ready stage may wait to be seen
+)  # what a stage may wait to be seen while A has no unit
+ARM_TICK_SLACK_S = (
+    stack_act.SEQUENCE_TICK_ARM_S + 0.01
+)  # ... and once A has one (the control loop is live: fewer looks)
 
 
 class World:
@@ -80,9 +86,11 @@ class World:
 
         monkeypatch.setattr(m.act, "_do_touch", touch)
         advanced = m.act.advance
+        self.look_times = []
 
         def counted():
             self.passes += 1
+            self.look_times.append(self.clock.t)
             return advanced()
 
         monkeypatch.setattr(m.act, "advance", counted)
@@ -197,18 +205,25 @@ def test_the_whole_chain_takes_what_the_machine_takes_and_no_more(world):
     c_start, c_up = world.starts["c"], world.readied["c"]
     done = world.clock.t
     # each stage starts when the one before is seen ready: at most a pause of the
-    # ticker (a stage that is ready is only seen at the next look)
-    assert 0 <= b_start - a_up <= TICK_SLACK_S, world.after(b_start - a_up)
-    assert c_start - b_up <= EE_S + TICK_SLACK_S  # (the checks before C, side by side)
+    # ticker (a stage that is ready is only seen at the next look; A has a unit
+    # from here on, so the pause is the slow one)
+    assert 0 <= b_start - a_up <= ARM_TICK_SLACK_S, world.after(b_start - a_up)
+    assert (
+        c_start - b_up <= EE_S + ARM_TICK_SLACK_S
+    )  # (the checks before C, side by side)
     assert c_start - b_up >= EE_S  # (and not shorter than the slower of the two)
-    assert 0 <= done - c_up <= TICK_SLACK_S
+    assert 0 <= done - c_up <= ARM_TICK_SLACK_S
     # ... and every start-up took what it takes
     assert a_up - a_start == pytest.approx(READY_S["a"])
     assert b_up - b_start == pytest.approx(READY_S["b"])
     assert c_up - c_start == pytest.approx(READY_S["c"])
     total = world.after(done)
     machine = NODES_S + sum(READY_S.values()) + EE_S
-    assert machine <= total <= machine + 4 * TICK_SLACK_S, (total, machine)
+    # A stage that comes up between two looks is seen at the next one: at most a
+    # pause for each of A, B and C, and the fast pause before A
+    assert machine <= total <= machine + TICK_SLACK_S + 3 * ARM_TICK_SLACK_S
+    assert total < 22.5, "the key press to C ready stays near 20 s"
+    assert world.after(c_up) < 21.0, world.after(c_up)
 
 
 def test_the_checks_before_c_take_the_slower_of_the_two_not_the_sum(world):
@@ -227,9 +242,44 @@ def test_the_ticker_does_not_spin_while_the_machine_works(world):
     world.run()
     seconds = world.clock.t - world.t0
     looks_per_s = world.passes / seconds
-    # one look per 0.25 s of waiting, and a few at once when a step moved on
+    # at most one look per pause of waiting (0.25 s before A, 1 s after), and a
+    # few at once when a step moved on
     assert world.passes <= 4 * seconds + 60, (world.passes, seconds)
     assert looks_per_s < 8
+
+
+def test_the_looks_slow_down_once_a_has_a_unit_because_the_control_loop_is_live(
+    world,
+):
+    """Each look is about six forks of ``systemctl``; at 0.25 s that is some 28
+    fork/execs a second on a non-real-time kernel while the 1 kHz loop runs, and
+    nothing about it had been measured. After A's start the pause is 1 s."""
+    world.press()
+    world.run()
+    a_start, a_up = world.starts["a"], world.readied["a"]
+    # while A starts up nothing changes: the looks are one pause apart
+    during = [t for t in world.look_times if a_start < t < a_up]
+    gaps = [b - a for a, b in pairwise(during)]
+    assert len(during) >= 3 and gaps
+    assert all(
+        stack_act.SEQUENCE_TICK_ARM_S - 0.01 <= g <= ARM_TICK_SLACK_S for g in gaps
+    ), gaps
+    # ... and before A it stayed fast (the 3.4 s of the graph check in 0.25 s steps)
+    before = [t for t in world.look_times if t <= a_start and t > world.t0]
+    quick = [b - a for a, b in pairwise(before) if b - a > 0.01]
+    assert quick and max(quick) <= stack_act.SEQUENCE_TICK_S + 0.01, quick
+    # the looks from A's start to the end: well under the 4 a second of before
+    span = world.clock.t - a_start
+    after = [t for t in world.look_times if t >= a_start]
+    assert len(after) / span < 3.0, (len(after), span)
+
+
+def test_a_stage_that_is_ready_is_seen_within_one_slow_pause(world):
+    world.press()
+    world.run()
+    for key in ("a", "b"):
+        seen = next(t for t in world.look_times if t >= world.readied[key])
+        assert seen - world.readied[key] <= ARM_TICK_SLACK_S, key
 
 
 def test_every_step_says_how_long_it_took_and_they_add_up(world):
@@ -238,10 +288,10 @@ def test_every_step_says_how_long_it_took_and_they_add_up(world):
     took = {i["step"]: i["took_s"] for i in seq["steps"]}
     assert all(isinstance(v, float) for v in took.values()), took
     # the stages that wait for the machine took what it took (plus a look)
-    assert READY_S["a"] <= took["await_a"] <= READY_S["a"] + TICK_SLACK_S
-    assert READY_S["b"] <= took["b"] <= READY_S["b"] + TICK_SLACK_S
-    assert EE_S <= took["c_preflight"] <= EE_S + TICK_SLACK_S
-    assert READY_S["c"] <= took["c"] <= READY_S["c"] + TICK_SLACK_S
+    assert READY_S["a"] <= took["await_a"] <= READY_S["a"] + ARM_TICK_SLACK_S
+    assert READY_S["b"] <= took["b"] <= READY_S["b"] + ARM_TICK_SLACK_S
+    assert EE_S <= took["c_preflight"] <= EE_S + ARM_TICK_SLACK_S
+    assert READY_S["c"] <= took["c"] <= READY_S["c"] + ARM_TICK_SLACK_S
     assert took["marker"] == 0 and took["monitor"] == 0
     assert seq["took_s"] == pytest.approx(sum(took.values()), abs=0.02)
     assert seq["took_s"] <= world.after(world.clock.t)

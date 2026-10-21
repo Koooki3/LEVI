@@ -499,8 +499,10 @@ class ActMachine(Machine):
                 # (what systemd-run prints for a name that is in use)
                 return (
                     1,
-                    f"Failed to start transient service unit: Unit {unit}.service "
-                    "was already loaded or has a fragment file.",
+                    (
+                        f"Failed to start transient service unit: Unit {unit}.service "
+                        "was already loaded or has a fragment file."
+                    ),
                 )
             self.oneshot_units[unit] = {"stopped": False, "shows_left": 0}
             try:

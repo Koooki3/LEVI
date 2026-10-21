@@ -84,7 +84,18 @@ KEEP_LOGS = 10
 # It used to look every 2 s and move one step per look, so a chain that needed
 # ten steps lost 25 s doing nothing. While the sequence only waits for the
 # person (``waiting_confirm``) a slow look is enough.
+#
+# **Once A has a unit the 1 kHz control loop is live** (await_a, the check of B,
+# B, the checks before C, C, and the steps of a stop), and a look is about six
+# forks of ``systemctl``/``loginctl``: at 0.25 s that is some 28 fork/execs a
+# second on a non-real-time kernel, never measured against the loop. So the
+# short pause holds only until the look that sees A's unit; after that the pause
+# is ``SEQUENCE_TICK_ARM_S``. What it costs is the wait of a stage that came up
+# between two looks (at most one pause per stage, about 1.5 s on the whole
+# chain); the look right after a change and the wake-up when an operation ends
+# stay, so a check that finishes is still acted on at once.
 SEQUENCE_TICK_S = 0.25
+SEQUENCE_TICK_ARM_S = 1.0
 SEQUENCE_TICK_WAITING_S = 2.0
 SEQUENCE_BURST = 40  # looks in a row without a pause after a change, at most
 STEP_TIMEOUT_S = 600.0  # one automatic step of the guided start may take this long
@@ -1166,6 +1177,9 @@ class Act:
         # ticker, so the sequence looks again at once instead of after its pause.
         self._wake = threading.Event()
         self._progress = 0
+        # Did the last look of the sequence find a unit of A (True), none (False)
+        # or could not tell (None)? It sets the pause of the ticker.
+        self._a_unit = False
         # Called after such a change (the product sets it to forget the page's
         # cached read of the stack: ``stack_api.invalidate``).
         self.on_change = None
@@ -3499,6 +3513,15 @@ class Act:
         (``_poke``)."""
         self._wake.wait(seconds)
 
+    def _tick_s(self, seq) -> float:
+        """The pause before the next look of a live sequence: long while it
+        waits for the person, short only until A has a unit (nothing but
+        ``systemctl`` is asked then, and the control loop is not running), and
+        ``SEQUENCE_TICK_ARM_S`` once A has one, or cannot be told."""
+        if seq["state"] != "running":
+            return SEQUENCE_TICK_WAITING_S
+        return SEQUENCE_TICK_S if self._a_unit is False else SEQUENCE_TICK_ARM_S
+
     def _tick_loop(self) -> None:
         burst = 0
         while True:
@@ -3510,11 +3533,7 @@ class Act:
                     burst += 1  # (it moved: the next look may move it again)
                     continue
                 burst = 0
-                self._wait_tick(
-                    SEQUENCE_TICK_S
-                    if seq["state"] == "running"
-                    else SEQUENCE_TICK_WAITING_S
-                )
+                self._wait_tick(self._tick_s(seq))
                 continue
             with self._ticker_lock:
                 with self._seq_lock:
@@ -3543,6 +3562,7 @@ class Act:
                 return shown
             try:
                 ctx = self._context(self.stack._read())
+                self._a_unit = ctx.r["units"]["A"]
                 with self._seq_lock:
                     state = seq["state"]
                 if state == "running" and seq.get("kind") == "stop":

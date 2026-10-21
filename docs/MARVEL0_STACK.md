@@ -265,7 +265,7 @@ the chain to be compressed. What the chain adds to what the machine takes, old a
 | Marker wait before A | fixed `marker_wait_s`: 45-60 s (file floor 45, default 60) | marker age >= `marker_wait_s` (floor 2, default **3 s**) and no heavy job really running; 90 s cap; unknown: 45 s |
 | Check whether a gripper stack runs (A's start needs the answer: rule R) | `list_controllers`, about 21 s when no stack runs, **before** the marker | ROS graph, about 3.4 s (estimated, see below), **beside** the marker's age and the FCI check; the 20 s question only when the graph proves nothing |
 | FCI check | 1 s, before the marker; its socket (TIME_WAIT, 60 s) kept A from starting for a minute | 1 s, beside the marker's age; reset close, no socket left |
-| Ticker | one look every 2.0 s, one step per look (ten steps: 20 s and more of waiting) | a look 0.25 s after the last one, at once after any change (step moved, operation ended), woken by operations |
+| Ticker | one look every 2.0 s, one step per look (ten steps: 20 s and more of waiting) | a look 0.25 s after the last one **until A has a unit, then 1.0 s** (the 1 kHz loop is live), at once after any change (step moved, operation ended), woken by operations |
 | Page's cached read | 2 s after any change | dropped at each change (`on_change` -> `stack_api.invalidate`); 2 s kept for idle reads of several pages |
 | Checks before C | listing (1.2 s) then frame (5 s) one after the other | at the same time: 5 s |
 | Refresh of an old answer about B (5-10 min old) between A and B | a check of its own there (20 s, now 3 s) | made during A's start-up, for a start that goes on to B |
@@ -278,16 +278,22 @@ the retry of the listing before C (a hiccup costs the listing's 20 s bound); the
 marker release after a stop (not the start chain). **The expected timeline** with the timings above (the timing test
 `test_marvel0_stack_act_timeline.py` runs the real ticker on a clock it moves): A starts about 3.4 s after the press (the
 check of the graph), is ready about 5 s later, B starts within one look and is ready 2 s later, the checks before C take
-5 s, C starts and is ready 3 s later: about **19 s from the press to C ready** (about 100 s before). The ticker adds at most
-0.25 s per stage (it sees a stage ready at its next look). **The control file of the machine must say
+5 s, C starts and is ready 3 s later: about **20.5 s from the press to C ready** (about 100 s before; 19 s with 0.25 s looks
+throughout, which cost 28 fork/execs a second while the control loop ran). Before A the ticker adds at most 0.25 s (it sees a stage
+ready at its next look); once A has a unit the pause is 1 s, so A, B and C are each seen up to 1 s late (1.5 s on the chain in the
+timing test, 21.4 s to the end of the sequence). **The control file of the machine must say
 `marker_wait_s = 3` (or nothing)**: a file that says 45 keeps A back 45 s all the same.
 
 **Cost of the looks.** One look is one read of the stack: six `systemctl show` and some small reads, about 40 ms on the machine
 (measured 21 Oct, read-only), plus about 7 ms for the heavy jobs (one `systemctl show` of the gate's glob and the log's
-candidate scopes, the log parsed only when it changes). At one look per 0.25 s plus the looks that follow a change that is about 3-4 per second, a tenth of one
-core, on cores the control loop does not run on by any rule (this kernel is not real-time: it is a few short processes per look,
-not a thread of its own, and only while a guided start or stop runs; waiting for the person looks every 2 s). It has not been
-measured against the 1 kHz loop.
+candidate scopes, the log parsed only when it changes). **Before A has a unit** one look per 0.25 s plus the looks that follow a change
+is about 3-4 per second, a tenth of one core (nothing is running yet that the looks could disturb). **Once A has a unit the control loop
+is live and the pause is 1 s** (`SEQUENCE_TICK_ARM_S`): in the timing test 1.4 looks per second from A's start to the end, about 8
+fork/execs a second instead of some 28 (the alternative, one `systemctl show` for all four units, would have kept 12). The looks
+that follow a change and the wake-up when an operation ends stay, so a finished check is acted on at once; what the slow pause
+costs is at most one pause per stage that came up between two looks. The cores the control loop runs on are not reserved by any rule (this kernel is not real-time: it is a
+few short processes per look, not a thread of its own, and only while a guided start or stop runs; waiting for the person looks
+every 2 s). It has not been measured against the 1 kHz loop.
 
 ## What the gates are worth, and what nothing here is
 
@@ -596,7 +602,7 @@ after it is ready (no health source): a gripper driver that dies without a `proc
 | A 之前的标记等待 | 固定 `marker_wait_s`：45-60 秒（文件下限 45，默认 60） | 标记年龄 >= `marker_wait_s`（下限 2，默认 **3 秒**）且没有重任务真的在运行；上限 90 秒；读不出来：45 秒 |
 | 查有没有夹爪栈（A 的启动需要这个答案：规则 R） | `list_controllers`，没有夹爪栈时约 21 秒，在标记**之前** | ROS 图，约 3.4 秒（估计值，见下），与标记年龄、FCI 检查**同时**；只有图什么也证明不了时才问那个 20 秒的问题 |
 | FCI 检查 | 1 秒，在标记之前；它的套接字（TIME_WAIT，60 秒）让 A 在一分钟内启动不了 | 1 秒，与标记年龄同时；复位关闭，不留套接字 |
-| 定时器 | 每 2.0 秒看一次，每次只走一步（十步就是 20 秒以上的空等） | 上一次之后 0.25 秒再看，任何变化（步骤前进、操作结束）后立刻再看，操作结束时被唤醒 |
+| 定时器 | 每 2.0 秒看一次，每次只走一步（十步就是 20 秒以上的空等） | 上一次之后 0.25 秒再看，**A 有了单元之后改为 1.0 秒**（1 kHz 回路在运行），任何变化（步骤前进、操作结束）后立刻再看，操作结束时被唤醒 |
 | 页面缓存的读 | 变化之后还要 2 秒 | 每次变化就丢弃（`on_change` -> `stack_api.invalidate`）；空闲读仍缓存 2 秒，给多个打开的页面共用 |
 | C 之前的检查 | 先列表（1.2 秒）再坐标系（5 秒） | 同时：5 秒 |
 | 关于 B 的旧答案（5-10 分钟）在 A 和 B 之间的刷新 | 在那里单独做一次检查（20 秒，现在 3 秒） | 接着去 B 的启动在 A 启动期间就做 |
@@ -605,11 +611,13 @@ after it is ready (no health source): a gripper driver that dies without a `proc
 健康监视器每秒写两次健康文件（`--hz 2`，由 `stack.py` 启动它），所以每个等这个文件的“就绪”最多晚 0.5 秒才被看到；C 之前列表的重试（一次异常要付列表的 20 秒上限）；
 各种有效期（`FCI_TTL_S`、`B_PROBE_TTL_S`、`C_PREFLIGHT_TTL_S`：它们说一个答案管多久，没有任何东西在等它们）；停止之后每 2 秒一次的标记释放（不属于启动链）。**预期的时间线**，
 用上面的时间（时间测试 `test_marvel0_stack_act_timeline.py` 在一个由测试拨动的时钟上跑真实的定时器）：按键后约 3.4 秒启动 A（图检查的时间），约 5 秒后就绪，B 在一次查看之内启动、2 秒后就绪，
-C 之前的检查 5 秒，C 启动、3 秒后就绪：**从按键到 C 就绪约 19 秒**（以前约 100 秒）。定时器每个阶段最多多加 0.25 秒（它在下一次查看时才看到阶段就绪）。**本机的控制文件必须写
+C 之前的检查 5 秒，C 启动、3 秒后就绪：**从按键到 C 就绪约 20.5 秒**（以前约 100 秒；每次都 0.25 秒一看是 19 秒，但那在控制回路运行时每秒要 fork 约 28 次）。A 之前定时器最多多加 0.25 秒（它在下一次查看时才看到阶段就绪）；A 有了单元之后间隔是 1 秒，所以 A、B、C 各最多晚 1 秒被看到（时间测试里整条链共 1.5 秒，序列结束在 21.4 秒）。**本机的控制文件必须写
 `marker_wait_s = 3`（或者不写）**：写着 45 的文件照样让 A 等 45 秒。
 
 **查看的代价。** 一次查看是一次读栈：六次 `systemctl show` 加一些小的读取，本机上约 40 毫秒（10 月 21 日只读测得），重任务另加约 7 毫秒（对闸门的通配符和日志里的候选 scope 只做一次 `systemctl show`，日志只在变化时才重新解析）。
-每 0.25 秒一次加上变化之后的那几次，大约每秒 3-4 次，约占一个核的十分之一；没有任何规则保证它不落在控制回路的核上（这个内核不是实时的）：它是每次查看几个短进程，不是自己的线程，
+**A 有单元之前**每 0.25 秒一次加上变化之后的那几次，大约每秒 3-4 次，约占一个核的十分之一（那时还没有东西会被这些查看干扰）。**A 有了单元之后控制回路在运行，间隔改为 1 秒**
+（`SEQUENCE_TICK_ARM_S`）：时间测试里从 A 启动到结束每秒 1.4 次，约每秒 8 次 fork/exec，而不是约 28 次（另一个办法是四个单元合成一次 `systemctl show`，那样仍有 12 次）。变化之后的那几次查看
+和操作结束时的唤醒保留，所以做完的检查会立刻被处理；慢间隔的代价是每个恰好在两次查看之间就绪的阶段最多晚一个间隔。没有任何规则保证它不落在控制回路的核上（这个内核不是实时的）：它是每次查看几个短进程，不是自己的线程，
 而且只在引导式启动或停止运行时才有；等人确认时每 2 秒看一次。没有对着 1 kHz 回路测过。
 
 ## 这些门的分量，以及这里什么都不是

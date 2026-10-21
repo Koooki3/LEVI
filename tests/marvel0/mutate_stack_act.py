@@ -1661,6 +1661,20 @@ MUTATIONS = [
         FAST_REVIEW,
     ),
     (
+        "tick: the pause is the slow one once A has a unit",
+        "stack_act.py",
+        "        return SEQUENCE_TICK_S if self._a_unit is False else SEQUENCE_TICK_ARM_S",
+        "        return SEQUENCE_TICK_S",
+        TIMELINE,
+    ),
+    (
+        "tick: the look says whether A has a unit",
+        "stack_act.py",
+        '                self._a_unit = ctx.r["units"]["A"]\n',
+        "",
+        TIMELINE,
+    ),
+    (
         "marker: a start that ended before A gives the marker back",
         "stack_act.py",
         '            seq["_marker_given_back"] = True\n        for _ in range(3):',
@@ -1845,8 +1859,8 @@ MUTATIONS = [
     (
         "ticker: slow while the sequence waits for the person",
         "stack_act.py",
-        '                    SEQUENCE_TICK_S\n                    if seq["state"] == "running"\n                    else SEQUENCE_TICK_WAITING_S',
-        "                    SEQUENCE_TICK_S",
+        '        if seq["state"] != "running":\n            return SEQUENCE_TICK_WAITING_S',
+        '        if False:\n            return SEQUENCE_TICK_WAITING_S',
         FAST,
     ),
     (
