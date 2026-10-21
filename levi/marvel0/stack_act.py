@@ -794,8 +794,16 @@ def _same_path(a, b) -> bool:
     )
 
 
+# The reads the chain and the document work from are cached for about 2 s, so
+# ``now`` can be a little OLDER than a check that finished since: such a result is
+# fresh, not "from the future". Found on the first real use of Start whole stack
+# (21 Oct): the B probe finished, the next tick read a cached ``now`` 1 s before it,
+# the age came out negative, B read "unknown" and the chain ended b_not_seen.
+FRESH_SKEW_S = 5.0
+
+
 def _fresh(item, ttl, now) -> bool:
-    return bool(item) and 0 <= now - item.get("at", 0) <= ttl
+    return bool(item) and -FRESH_SKEW_S <= now - item.get("at", 0) <= ttl
 
 
 class Act:
@@ -1719,7 +1727,7 @@ class Act:
             return {
                 **item,
                 "age_s": round(max(0.0, now - item["at"]), 1),
-                "fresh": 0 <= now - item["at"] <= ttl,
+                "fresh": -FRESH_SKEW_S <= now - item["at"] <= ttl,
             }
 
         return {
