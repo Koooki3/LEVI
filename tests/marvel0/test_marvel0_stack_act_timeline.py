@@ -88,10 +88,18 @@ class World:
         advanced = m.act.advance
         self.look_times = []
 
+        self.trace = []  # one line per look, for the message of a failed assertion
+
         def counted():
             self.passes += 1
             self.look_times.append(self.clock.t)
-            return advanced()
+            before = round(self.clock.t - self.t0, 2)
+            out = advanced()
+            running = [o["kind"] for o in m.act._ops if o["state"] == "running"]
+            self.trace.append(
+                f"{before}: {out.get('state')}/{out.get('step')} ops={running}"
+            )
+            return out
 
         monkeypatch.setattr(m.act, "advance", counted)
         self._machine(m)
@@ -177,6 +185,16 @@ class World:
     def after(self, t):
         return round(t - self.t0, 2)
 
+    def why(self):
+        """What the looks saw, for the message of an assertion that fails."""
+        return "\n".join(
+            [
+                f"starts={ {k: self.after(v) for k, v in self.starts.items()} }",
+                f"readied={ {k: self.after(v) for k, v in self.readied.items()} }",
+                *self.trace,
+            ]
+        )
+
 
 @pytest.fixture
 def world(tmp_path, monkeypatch):
@@ -208,9 +226,8 @@ def test_the_whole_chain_takes_what_the_machine_takes_and_no_more(world):
     # ticker (a stage that is ready is only seen at the next look; A has a unit
     # from here on, so the pause is the slow one)
     assert 0 <= b_start - a_up <= ARM_TICK_SLACK_S, world.after(b_start - a_up)
-    assert (
-        c_start - b_up <= EE_S + ARM_TICK_SLACK_S
-    )  # (the checks before C, side by side)
+    # (the checks before C, side by side)
+    assert c_start - b_up <= EE_S + ARM_TICK_SLACK_S, world.why()
     assert c_start - b_up >= EE_S  # (and not shorter than the slower of the two)
     assert 0 <= done - c_up <= ARM_TICK_SLACK_S
     # ... and every start-up took what it takes
@@ -234,7 +251,7 @@ def test_the_checks_before_c_take_the_slower_of_the_two_not_the_sum(world):
     # started the moment B was ready, and C started after the end-effector check
     # alone (1.2 s of listing ran inside its 5 s)
     waited = world.starts["c"] - world.readied["b"]
-    assert EE_S <= waited < EE_S + LISTING_S, waited
+    assert EE_S <= waited < EE_S + LISTING_S, (waited, world.why())
 
 
 def test_the_ticker_does_not_spin_while_the_machine_works(world):
