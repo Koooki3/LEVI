@@ -53,7 +53,15 @@ from levi.live import gpumgr
 from levi.setup import probes
 from levi.workspace import Workspace
 
-from . import aeri_leftovers, aeri_prep, control_site, net, record, status
+from . import (
+    aeri_activity,
+    aeri_leftovers,
+    aeri_prep,
+    control_site,
+    net,
+    record,
+    status,
+)
 from . import site as marvel0_site
 
 SCHEMA = "levi.marvel0.aeri.v1"
@@ -65,6 +73,10 @@ PORTS = (8000, 8100, 8110)  # the policy server, the VLM, the bridge experiment
 MEM_NEED_MIB = 28 * 1024  # AERI.md section 2: available >= 28 GB
 SHOW_TIMEOUT_S = 3.0
 GPU_TIMEOUT_S = 5.0
+# The user unit that runs the product, and how long the page may trust one read of
+# its stop timeout (a unit file does not change under a running page).
+PRODUCT_UNIT = "levi-product.service"
+UNIT_CACHE_S = 60.0
 
 ROW_CODES = (
     "aeri_enabled",
@@ -90,9 +102,12 @@ ROW_CODES = (
     "no_other_aeri",
     "monitor_green",
     "stack_ready",
+    "unit_timeout",
 )
-# These never refuse: shown as ``warn`` when they cannot be fully confirmed.
-WARN_ROWS = ("stack_ready",)
+# These never block a start: ``stack_ready`` is shown as ``warn`` when it cannot be
+# fully confirmed; ``unit_timeout`` is ``ok`` or ``warn`` and nothing else (it is
+# advice about the product's service unit, not a condition of the run).
+WARN_ROWS = ("stack_ready", "unit_timeout")
 # The contract with the start gate (``aeri_run._start_gate``): a start needs
 # ``snapshot()["ready"] is True`` and no row below ``ok`` except these, which may
 # be ``warn`` (``stack_ready`` can only ever be ``warn`` when the stack is up: the
@@ -126,6 +141,8 @@ CHECK_OK = {
     "monitor_green": "The health monitor is fresh and green.",
     "stack_ready": "The arm stack looks up (the gripper stack and the controller "
     "are not observable from here).",
+    "unit_timeout": "The product's service unit allows its shutdown at least "
+    "{need_s} s (or the product does not run under that unit).",
 }
 CHECK_REFUSE = {
     "aeri_enabled": "AERI hosting is off in the control file.",
@@ -157,6 +174,11 @@ CHECK_REFUSE = {
     "no_other_aeri": "Another AERI run is alive.",
     "monitor_green": "The health monitor is not fresh and green ({state}).",
     "stack_ready": "A part of the arm stack is not up.",
+    # (shown as a warning, never a refusal) a hosted D's 7/7 wrap-up is cut short
+    # by a restart of the product that is not preceded by ``levi stop``
+    "unit_timeout": "The product's service unit stops after {seconds} s; a hosted "
+    "terminal D needs {need_s} s for its 7/7 wrap-up, so a direct systemctl stop "
+    "or restart while it runs cuts it. Raise TimeoutStopSec.",
 }
 CHECK_UNKNOWN = {
     "prompts_checked": "The AERI code could not be compared with the prompt "
@@ -180,6 +202,8 @@ CHECK_UNKNOWN = {
     "no_other_aeri": "The AERI run registry could not be read.",
     "monitor_green": "The health monitor could not be read.",
     "stack_ready": "The arm stack's state could not be read.",
+    "unit_timeout": "The product's service unit could not be asked how long it "
+    "waits at a stop.",
     "product": "Which instance this is could not be read.",
 }
 NOTICES = {
@@ -312,6 +336,81 @@ def live_state(shown):
     return None
 
 
+def parse_timespan(text) -> float | None:
+    """Seconds in a systemd timespan as ``systemctl show`` prints it (``2min 30s``,
+    ``15s``, ``1h 2min``, ``500ms``), ``float('inf')`` for ``infinity``; raises
+    ``ValueError`` for anything else."""
+    text = str(text).strip()
+    if text == "infinity":
+        return float("inf")
+    scale = {
+        "us": 1e-6,
+        "ms": 1e-3,
+        "s": 1.0,
+        "min": 60.0,
+        "h": 3600.0,
+        "d": 86400.0,
+        "w": 604800.0,
+    }
+    total, used = 0.0, 0
+    for number, unit in re.findall(r"(\d+(?:\.\d+)?)\s*([a-z]+)", text):
+        if unit not in scale:
+            raise ValueError(f"unknown unit {unit!r}")
+        total += float(number) * scale[unit]
+        used += 1
+    if not used or re.sub(r"(\d+(?:\.\d+)?)\s*[a-z]+|\s+", "", text):
+        raise ValueError(f"not a timespan: {text!r}")
+    return total
+
+
+_UNIT_SEEN: dict = {}
+
+
+def read_unit_timeout(
+    unit=PRODUCT_UNIT, run=aeri_prep.run_capture, clock=time.monotonic
+) -> dict | None:
+    """``{"load", "timeout_s"}`` of the product's user unit (one ``systemctl --user
+    show``, read only; ``timeout_s`` is ``inf`` for ``infinity`` and None for a unit
+    that is not loaded), or None when it could not be read. The answer, a failure
+    too, is kept for ``UNIT_CACHE_S``: a full read comes every second or so while
+    the arm controller runs."""
+    now = clock()
+    seen = _UNIT_SEEN.get(unit)
+    if seen is not None and now - seen[0] < UNIT_CACHE_S:
+        return seen[1]
+    value = None
+    try:
+        done = run(
+            [
+                "systemctl",
+                "--user",
+                "show",
+                unit,
+                "--property=LoadState",
+                "--property=TimeoutStopUSec",
+            ],
+            timeout=SHOW_TIMEOUT_S,
+        )
+        if done.returncode == 0:
+            table = dict(
+                line.partition("=")[::2]
+                for line in done.stdout.splitlines()
+                if "=" in line
+            )
+            load = table.get("LoadState", "").strip()
+            if load == "loaded":
+                value = {
+                    "load": load,
+                    "timeout_s": parse_timespan(table.get("TimeoutStopUSec", "")),
+                }
+            elif load:
+                value = {"load": load, "timeout_s": None}
+    except (OSError, subprocess.SubprocessError, ValueError):
+        value = None
+    _UNIT_SEEN[unit] = (now, value)
+    return value
+
+
 def _units():
     return status.units_part()
 
@@ -404,6 +503,7 @@ class Host:
     net_table: Callable = net.read
     flock: Callable = lambda path: gpumgr.flock_holders(path)
     unit_show: Callable = show_unit
+    unit_timeout: Callable = read_unit_timeout
     units: Callable = _units
     aeri_runs: Callable = _aeri_runs
     swap_pending: Callable = _swap_pending
@@ -448,6 +548,7 @@ UNREAD = {
     "e_hosted": None,
     "e_session": None,
     "d_hosted": None,
+    "unit_stop": None,
 }
 
 
@@ -586,6 +687,7 @@ def collect(host: Host) -> dict:
             "e_hosted": hosted_e,
             "e_session": _try(_e_session, host, main_site),
             "d_hosted": hosted_d,
+            "unit_stop": _try(host.unit_timeout),
         }
     )
     return facts
@@ -671,6 +773,36 @@ def row_prompts(facts):
     if reason == "unreadable":  # a file that cannot be read cannot be compared
         return row("prompts_checked", None, reason=reason, file=file or None)
     return row("prompts_checked", False, reason=reason, file=file or None)
+
+
+def row_unit(unit_stop):
+    """Advice, never a condition: the product's service unit must give a hosted
+    terminal D the time for its 7/7 wrap-up at a stop (``aeri_activity.
+    UNIT_STOP_TIMEOUT_S``). ``ok`` when the unit allows it, or is not the one that
+    runs the product (not loaded); ``warn`` when it allows less, or could not be
+    asked. It never refuses and never turns ``unknown`` (that refuses)."""
+    need = aeri_activity.UNIT_STOP_TIMEOUT_S
+    params = {"need_s": int(need)}
+    if not isinstance(unit_stop, dict):
+        return _warn("unit_timeout", CHECK_UNKNOWN, seconds=None, **params)
+    if unit_stop.get("load") != "loaded":
+        return row("unit_timeout", True, seconds=None, **params)
+    seconds = unit_stop.get("timeout_s")
+    if not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
+        return _warn("unit_timeout", CHECK_UNKNOWN, seconds=None, **params)
+    shown = None if seconds == float("inf") else round(seconds, 1)
+    if seconds >= need:
+        return row("unit_timeout", True, seconds=shown, **params)
+    return _warn("unit_timeout", CHECK_REFUSE, seconds=shown, **params)
+
+
+def _warn(code, table, **params) -> dict:
+    return {
+        "code": code,
+        "level": "warn",
+        "text": _fill(table[code], params),
+        "params": params,
+    }
 
 
 def row_stack(stack_doc):
@@ -858,6 +990,7 @@ def rows(facts) -> list:
         )
     )
     out.append(row_stack(stack_doc))
+    out.append(row_unit(facts["unit_stop"]))
     return out
 
 

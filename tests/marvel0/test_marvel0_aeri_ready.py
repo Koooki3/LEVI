@@ -17,9 +17,11 @@ import pytest
 from aeri_world import DEFAULT_PROFILES, NOW, World, installed_profiles
 
 from levi.marvel0 import (
+    aeri_activity,
     aeri_leftovers,
     aeri_prep,
     aeri_ready,
+    aeri_run,
     control_site,
     net,
     status,
@@ -1093,6 +1095,7 @@ SOURCES = (
     "net_table",
     "flock",
     "unit_show",
+    "unit_timeout",
     "units",
     "aeri_runs",
     "swap_pending",
@@ -1248,12 +1251,163 @@ def test_the_write_gates_of_a_light_read_do_not_start_a_batch(world):
 
 def test_the_rows_that_may_be_warn_are_named_and_no_other_is(world):
     """The contract with the start gate: ``warn`` only for ``WARN_OK``."""
-    assert aeri_ready.WARN_OK == aeri_ready.WARN_ROWS == ("stack_ready",)
+    assert aeri_ready.WARN_OK == aeri_ready.WARN_ROWS == ("stack_ready", "unit_timeout")
     assert set(aeri_ready.WARN_OK) <= set(aeri_ready.ROW_CODES)
     seen = set()
     for stack in (World.stack_doc(), World.stack_doc(a="unknown", c="unknown")):
-        world.facts["stack"] = stack
-        for r in aeri_ready.rows(facts_of(world)):
-            if r["level"] == "warn":
-                seen.add(r["code"])
-    assert seen == {"stack_ready"}
+        for unit in (
+            {"load": "loaded", "timeout_s": 15.0},
+            {"load": "loaded", "timeout_s": 150.0},
+            None,
+        ):
+            world.facts["stack"], world.facts["unit_stop"] = stack, unit
+            for r in aeri_ready.rows(facts_of(world)):
+                if r["level"] == "warn":
+                    seen.add(r["code"])
+    assert seen == {"stack_ready", "unit_timeout"}
+
+
+# --- the product's service unit must give the shutdown its time (second review N4) ----------------
+
+
+@pytest.mark.parametrize(
+    ("unit", "level", "seconds"),
+    [
+        ({"load": "loaded", "timeout_s": 150.0}, "ok", 150.0),
+        ({"load": "loaded", "timeout_s": 600.0}, "ok", 600.0),
+        ({"load": "loaded", "timeout_s": float("inf")}, "ok", None),
+        ({"load": "not-found", "timeout_s": None}, "ok", None),
+        ({"load": "loaded", "timeout_s": 15.0}, "warn", 15.0),
+        ({"load": "loaded", "timeout_s": 149.9}, "warn", 149.9),
+        ({"load": "loaded", "timeout_s": None}, "warn", None),
+        (None, "warn", None),
+        ("x", "warn", None),
+    ],
+)
+def test_the_unit_row_warns_when_the_stop_timeout_is_below_the_wrap_up(
+    world, unit, level, seconds
+):
+    """``levi-product.service`` with ``TimeoutStopSec=15`` cut a hosted D's 7/7
+    wrap-up at a direct ``systemctl stop``; the row says so, and never refuses."""
+    world.facts["unit_stop"] = unit
+    prepare(world)
+    got = rows_of(world)["unit_timeout"]
+    assert got["level"] == level
+    assert got["params"]["seconds"] == seconds
+    assert got["params"]["need_s"] == 150 == int(aeri_activity.UNIT_STOP_TIMEOUT_S)
+    assert got["text"]
+    # advice: the card is ready and a start passes with it
+    assert aeri_ready.is_ready(list(rows_of(world).values()))
+    assert aeri_run._row_passes(got) is True
+
+
+def test_the_unit_row_is_last_and_is_named_among_the_warnings():
+    assert aeri_ready.ROW_CODES[-1] == "unit_timeout"
+    assert "unit_timeout" in aeri_ready.WARN_OK
+    for table in (
+        aeri_ready.CHECK_OK,
+        aeri_ready.CHECK_REFUSE,
+        aeri_ready.CHECK_UNKNOWN,
+    ):
+        assert "unit_timeout" in table
+
+
+@pytest.mark.parametrize(
+    ("text", "seconds"),
+    [
+        ("2min 30s", 150.0),
+        ("15s", 15.0),
+        ("1min 30s", 90.0),
+        ("1h 2min", 3720.0),
+        ("500ms", 0.5),
+        ("2min 30.5s", 150.5),
+        ("infinity", float("inf")),
+    ],
+)
+def test_systemds_timespans_are_read(text, seconds):
+    assert aeri_ready.parse_timespan(text) == seconds
+
+
+@pytest.mark.parametrize("text", ["", "x", "5 parsecs", "10s junk", "min"])
+def test_a_timespan_that_is_not_one_is_refused(text):
+    with pytest.raises(ValueError):
+        aeri_ready.parse_timespan(text)
+
+
+class UnitRun:
+    """A stand-in ``systemctl`` that answers ``show`` and records its argv."""
+
+    def __init__(self, stdout="LoadState=loaded\nTimeoutStopUSec=2min 30s\n", rc=0):
+        self.stdout, self.rc, self.calls = stdout, rc, []
+
+    def __call__(self, argv, **kw):
+        self.calls.append(argv)
+        return aeri_prep.Ran(self.rc, self.stdout, "")
+
+
+def test_the_unit_is_asked_once_with_a_read_only_show_and_kept_for_a_minute():
+    run, now = UnitRun(), [100.0]
+    aeri_ready._UNIT_SEEN.clear()
+    first = aeri_ready.read_unit_timeout(run=run, clock=lambda: now[0])
+    assert first == {"load": "loaded", "timeout_s": 150.0}
+    assert run.calls == [
+        [
+            "systemctl",
+            "--user",
+            "show",
+            "levi-product.service",
+            "--property=LoadState",
+            "--property=TimeoutStopUSec",
+        ]
+    ]
+    now[0] += aeri_ready.UNIT_CACHE_S - 1
+    assert aeri_ready.read_unit_timeout(run=run, clock=lambda: now[0]) == first
+    assert len(run.calls) == 1, "kept"
+    now[0] += 2
+    aeri_ready.read_unit_timeout(run=run, clock=lambda: now[0])
+    assert len(run.calls) == 2, "and read again after a minute"
+    verbs = {w for call in run.calls for w in call}
+    assert not verbs & {"stop", "start", "restart", "kill", "reload", "enable"}
+    aeri_ready._UNIT_SEEN.clear()
+
+
+@pytest.mark.parametrize(
+    ("run", "want"),
+    [
+        (UnitRun("LoadState=not-found\nTimeoutStopUSec=1min 30s\n"), "not-found"),
+        (UnitRun("", rc=1), None),
+        (UnitRun("LoadState=loaded\nTimeoutStopUSec=soon\n"), None),
+        (UnitRun("LoadState=loaded\n"), None),
+        (UnitRun("garbage"), None),
+    ],
+)
+def test_a_unit_that_is_not_loaded_or_cannot_be_asked_is_told_apart(run, want):
+    aeri_ready._UNIT_SEEN.clear()
+    got = aeri_ready.read_unit_timeout(run=run, clock=lambda: 1.0)
+    assert (got["load"] if got else None) == want
+    if got:
+        assert got["timeout_s"] is None
+    aeri_ready._UNIT_SEEN.clear()
+
+
+def test_a_failing_systemctl_is_kept_too_so_it_is_not_asked_every_second():
+    aeri_ready._UNIT_SEEN.clear()
+
+    def broken(argv, **kw):
+        broken.calls += 1
+        raise OSError("no systemctl")
+
+    broken.calls = 0
+    for _ in range(3):
+        assert aeri_ready.read_unit_timeout(run=broken, clock=lambda: 5.0) is None
+    assert broken.calls == 1
+    aeri_ready._UNIT_SEEN.clear()
+
+
+def test_the_light_reads_do_not_ask_the_unit(world):
+    """Disabled and busy cost nothing: no ``systemctl`` for the unit either."""
+    world.facts["hosted_d"] = True
+    world.facts["hosted_e"] = True
+    host, calls = counting(world)
+    aeri_ready.Readiness(host).view()
+    assert "unit_timeout" not in calls

@@ -166,10 +166,18 @@
               "m": "running"
             }
           }
+        },
+        {
+          "code": "unit_timeout",
+          "level": "ok",
+          "params": {
+            "need_s": 150,
+            "seconds": 150.0
+          }
         }
       ],
       "sampled_at": "2026-10-21T20:00:00+08:00",
-      "sha256": "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d"
+      "sha256": "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e"
     },
     "stack_not_read": {
       "ready": false,
@@ -335,10 +343,18 @@
               "m": "running"
             }
           }
+        },
+        {
+          "code": "unit_timeout",
+          "level": "ok",
+          "params": {
+            "need_s": 150,
+            "seconds": 150.0
+          }
         }
       ],
       "sampled_at": "2026-10-21T20:00:00+08:00",
-      "sha256": "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c"
+      "sha256": "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d"
     },
     "stack_up": {
       "ready": true,
@@ -504,11 +520,19 @@
               "m": "running"
             }
           }
+        },
+        {
+          "code": "unit_timeout",
+          "level": "ok",
+          "params": {
+            "need_s": 150,
+            "seconds": 150.0
+          }
         }
       ],
       "sampled_at": "2026-10-21T20:00:00+08:00",
       "sha256": "0606060606060606060606060606060606060606060606060606060606060606"
     }
   },
-  "warn_ok": ["stack_ready"]
+  "warn_ok": ["stack_ready", "unit_timeout"]
 }

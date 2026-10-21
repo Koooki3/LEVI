@@ -170,6 +170,11 @@ def build_data(tmp):
     body = world.prepare_body(request_id="req-20261021-0001")
     ok_prepare = preparer.prepare(body)
     docs["prepared_ready"] = doc()
+    # the product's service unit gives a stop 15 s (a hosted D needs 150 s for its
+    # 7/7 wrap-up): one more warning row, the card is still ready
+    world.facts["unit_stop"] = {"load": "loaded", "timeout_s": 15.0}
+    docs["prepared_unit_short"] = doc()
+    world.facts["unit_stop"] = {"load": "loaded", "timeout_s": 150.0}
     snapshots = {"stack_up": gate_view(preparer)}
     world.facts["stack"] = World.stack_doc(a="unknown", c="unknown", health="unknown")
     snapshots["stack_not_read"] = gate_view(preparer)

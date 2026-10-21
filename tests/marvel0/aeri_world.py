@@ -180,6 +180,8 @@ class World:
             "product": True,
             "control": {"enabled": True},
             "matches": (True, "ok"),
+            # the product's user unit, asked how long it waits at a stop
+            "unit_stop": {"load": "loaded", "timeout_s": 150.0},
         }
         self.site = self._site()
         self.reads: dict = {}
@@ -347,6 +349,7 @@ class World:
             "net_table": self._table,
             "flock": flock,
             "unit_show": lambda unit: json.loads(self.live_file.read_text()),
+            "unit_timeout": lambda: self._count("unit_timeout", facts["unit_stop"]),
             "units": lambda: {"state": "ok", "items": list(facts["units"])},
             "aeri_runs": lambda: list(facts["aeri_runs"]),
             "stack_view": lambda: facts["stack"],

@@ -127,6 +127,7 @@ def test_the_states_cover_what_the_card_shows(sample):
         "blocked",
         "not_prepared",
         "prepared_ready",
+        "prepared_unit_short",
         "prepared_changed",
         "leftovers_present",
         "leftovers_blocked",
@@ -143,6 +144,15 @@ def test_the_states_cover_what_the_card_shows(sample):
     assert [r["code"] for r in docs["busy"]["readiness"]] == ["no_e_run"]
     assert docs["busy"]["live_service"] is None
     assert docs["prepared_ready"]["ready"] is True
+    # the product's service unit stops after 15 s: a warning row, the card still ready
+    short = docs["prepared_unit_short"]
+    unit = next(r for r in short["readiness"] if r["code"] == "unit_timeout")
+    assert short["ready"] is True and unit["level"] == "warn"
+    assert unit["params"] == {"seconds": 15.0, "need_s": 150}
+    ok = next(
+        r for r in docs["prepared_ready"]["readiness"] if r["code"] == "unit_timeout"
+    )
+    assert ok["level"] == "ok"
     assert docs["prepared_changed"]["prepared"]["problems"] == ["files_changed"]
     assert docs["blocked"]["live_service"]["state"] == "running"
     assert docs["blocked"]["live_service"]["can_stop"] is True

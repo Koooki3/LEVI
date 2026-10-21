@@ -68,7 +68,19 @@ def test_a_machine_that_is_ready_has_the_stack_warning_and_nothing_else(tmp_path
     assert {c: v for c, v in levels(snap).items() if v != "ok"} == {
         "stack_ready": "warn"
     }
-    assert aeri_ready.WARN_OK == ("stack_ready",)
+    assert aeri_ready.WARN_OK == ("stack_ready", "unit_timeout")
+
+
+def test_a_start_goes_through_with_the_unit_timeout_warning(m, tmp_path):
+    """Advice about the product's service unit (a stop gives a hosted D less time
+    than its wrap-up needs) is shown, and never keeps a run from starting."""
+    m.snap = real_snapshot(
+        tmp_path, {"unit_stop": {"load": "loaded", "timeout_s": 15.0}}
+    )
+    assert levels(m.snap)["unit_timeout"] == "warn" and m.snap["ready"] is True
+    ask(m)
+    answer = m.start()
+    assert answer["accepted"] is True and m.spawned
 
 
 def test_a_start_goes_through_on_the_rows_the_card_really_gives(m, tmp_path):
