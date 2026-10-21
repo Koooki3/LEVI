@@ -20,13 +20,13 @@ A robot policy is only as good as the data it learns from, and the data is full 
 ## Architecture at a glance
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/01-system-context-dark.svg">
-  <img alt="LEVI in context: data goes in, models propose, a person decides, curated training data comes out." src="docs/assets/atlas/01-system-context-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/11-context-lite-dark.svg">
+  <img alt="LEVI in context: data goes in, models propose, a person decides, curated training data comes out." src="docs/assets/atlas/11-context-lite-light.svg">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/02-pyramid-dark.svg">
-  <img alt="From raw data to a better policy, as a five-tier pyramid; the top tier is not established." src="docs/assets/atlas/02-pyramid-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/12-pyramid-lite-dark.svg">
+  <img alt="From raw data to a better policy, as a five-tier pyramid; the top tier is not established." src="docs/assets/atlas/12-pyramid-lite-light.svg">
 </picture>
 
 Seven more figures (layers, a task step by step, live annotation beside a robot, the automatic evaluation authority split, the evidence with its limits, an AERI run from start to finish, and what the code costs to check today) are in the [architecture atlas](docs/ARCHITECTURE.md).
@@ -57,8 +57,8 @@ Seven more figures (layers, a task step by step, live annotation beside a robot,
 ## What has been measured
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/07-evidence-dark.svg">
-  <img alt="Dot plots: on plates release-anchored review meets the scale-up quality bar (balanced accuracy 0.94, 12.8% of failures judged as success); on screws it misses it (0.76, 48.7%)." src="docs/assets/atlas/07-evidence-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/atlas/16-evidence-lite-dark.svg">
+  <img alt="Dot plots: on plates release-anchored review meets the scale-up quality bar (balanced accuracy 0.94, 12.8% of failures judged as success); on screws it misses it (0.76, 48.7%)." src="docs/assets/atlas/16-evidence-lite-light.svg">
 </picture>
 
 The numbers below come from the project's own experiments on one task family (plates stacking) unless stated otherwise; they come from the project's own experiment record, which is not shipped in this repository; [Validation](docs/VALIDATION.md) documents the anchored-review re-run.

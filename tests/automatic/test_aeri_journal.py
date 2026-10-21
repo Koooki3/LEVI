@@ -370,6 +370,69 @@ def test_racing_prepares_cannot_both_win(tmp_path):
     assert_sound(tmp_path)
 
 
+class _OtherThreadFirst:
+    """``Journal._mutex`` that, once armed, lets another thread write (and
+    finish) just before the next acquisition takes the real lock. A helper
+    that reads the journal before that acquisition reads it one write too
+    early; one that reads under the lock sees the write."""
+
+    def __init__(self, lock, write):
+        self._lock, self._write = lock, write
+        self.armed = False
+        self.errors = []
+
+    def _run(self):
+        try:
+            self._write()
+        except J.JournalError as exc:  # reported by the test
+            self.errors.append(exc)
+
+    def __enter__(self):
+        if self.armed:
+            self.armed = False
+            thread = threading.Thread(target=self._run)
+            thread.start()
+            thread.join()
+        return self._lock.__enter__()
+
+    def __exit__(self, *exc):
+        return self._lock.__exit__(*exc)
+
+
+@pytest.mark.parametrize("other", ["note", "transition"])
+def test_a_write_from_another_thread_cannot_go_between_prepare_and_its_line(
+    tmp_path, other
+):
+    """L2-AERI-JOURNAL-PREPARE-RACE: the terminal's interrupt note (heartbeat
+    thread) landed between ``prepare``'s reads and its line, and the move
+    into FAULT_LOCKED was refused (``a transaction is named after its
+    prepared line``). The name and from_state are read under the lock."""
+    journal = new(tmp_path)
+
+    def write():
+        if other == "note":
+            journal.note("operator_interrupt", "SIGINT", authority=who())
+        else:
+            step(journal, "VERIFY_INITIAL", "preflight_passed")
+
+    hook = _OtherThreadFirst(journal._mutex, write)
+    journal._mutex = hook
+    hook.armed = True
+    prepared = journal.prepare(
+        "WAIT_HUMAN", "operator_stop", kind="none", authority=who(), control_epoch=1
+    )
+    assert hook.errors == [] and not hook.armed
+    lines = {"note": 1, "transition": 2}[other]
+    assert prepared.sequence_no == 1 + lines
+    assert prepared.transaction_id == f"{RUN}:tx{prepared.sequence_no}"
+    after = {"note": "PREFLIGHT", "transition": "VERIFY_INITIAL"}[other]
+    assert prepared.from_state == after
+    journal.commit(authority=who())
+    assert journal.state == "WAIT_HUMAN"
+    journal.close()
+    assert len(assert_sound(tmp_path).events) == 1 + lines + 2
+
+
 # --- one writer -------------------------------------------------------------------------
 
 

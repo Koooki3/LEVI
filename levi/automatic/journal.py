@@ -560,7 +560,13 @@ class Journal:
         )
         self._clock = clock
         self.clock_domain = domain
-        self._mutex = threading.Lock()
+        # Reentrant: a helper below holds it across what it reads from the
+        # journal (line number, state, open transaction, epoch) and the
+        # ``append`` that writes the line. A plain Lock would deadlock there;
+        # the price of reentry is that a call back into the journal from
+        # inside ``append`` would pass silently, so ``append`` must never call
+        # out (no callback, listener or hook) while it holds the lock.
+        self._mutex = threading.RLock()
         self._broken: str | None = None
         self.snapshot_error: str | None = None
         self._fd = None
@@ -923,29 +929,34 @@ class Journal:
     ):
         """Open a transaction from the current state (synced on return:
         only now may the caller act)."""
-        sequence = self.next_seq
-        return self.append(
-            "prepared",
-            expected_seq=expected_seq,
-            transaction_id=f"{self.run_id}:tx{sequence}",
-            from_state=self.state,
-            to_state=to_state,
-            reason=reason,
-            authority=authority,
-            control_epoch=control_epoch,
-            policy_epoch=policy_epoch,
-            episode_id=episode_id,
-            episode_role=episode_role,
-            evidence_ids=list(evidence_ids),
-            action={
-                "kind": kind,
-                "idempotency_key": action_key(self.run_id, episode_id, kind, step),
-                "non_idempotent": non_idempotent,
-                "params_sha256": params_sha(params),
-                "step": step,
-                "retry_of": retry_of,
-            },
-        )
+        with self._mutex:
+            # The name is the line number and from_state the state at that
+            # line: read under the lock that assigns the line. A note from
+            # another thread in between got the move refused, a move into
+            # FAULT_LOCKED included.
+            sequence = self.next_seq
+            return self.append(
+                "prepared",
+                expected_seq=expected_seq,
+                transaction_id=f"{self.run_id}:tx{sequence}",
+                from_state=self.state,
+                to_state=to_state,
+                reason=reason,
+                authority=authority,
+                control_epoch=control_epoch,
+                policy_epoch=policy_epoch,
+                episode_id=episode_id,
+                episode_role=episode_role,
+                evidence_ids=list(evidence_ids),
+                action={
+                    "kind": kind,
+                    "idempotency_key": action_key(self.run_id, episode_id, kind, step),
+                    "non_idempotent": non_idempotent,
+                    "params_sha256": params_sha(params),
+                    "step": step,
+                    "retry_of": retry_of,
+                },
+            )
 
     def _open(self):
         tx = self._replay.open_tx
@@ -953,54 +964,66 @@ class Journal:
             raise JournalRefused("E_PROTOCOL", "no transaction is open")
         return tx
 
+    # The open transaction and the epoch are read under the lock too: an
+    # epoch read before another thread's higher one is "control_epoch went
+    # back".
+
     def acknowledge(self, executed: str, source: str, detail_code: str, *, authority):
-        tx = self._open()
-        return self.append(
-            "acknowledged",
-            transaction_id=tx.transaction_id,
-            authority=authority,
-            control_epoch=self.control_epoch,
-            episode_id=tx.episode_id,
-            episode_role=tx.episode_role,
-            ack={"executed": executed, "source": source, "detail_code": detail_code},
-        )
+        with self._mutex:
+            tx = self._open()
+            return self.append(
+                "acknowledged",
+                transaction_id=tx.transaction_id,
+                authority=authority,
+                control_epoch=self.control_epoch,
+                episode_id=tx.episode_id,
+                episode_role=tx.episode_role,
+                ack={
+                    "executed": executed,
+                    "source": source,
+                    "detail_code": detail_code,
+                },
+            )
 
     def commit(self, *, authority, episode_result=None):
-        tx = self._open()
-        return self.append(
-            "committed",
-            transaction_id=tx.transaction_id,
-            from_state=tx.from_state,
-            to_state=tx.to_state,
-            reason=tx.reason,
-            authority=authority,
-            control_epoch=self.control_epoch,
-            episode_id=tx.episode_id,
-            episode_role=tx.episode_role,
-            policy_epoch=tx.policy_epoch,
-            episode_result=episode_result,
-        )
+        with self._mutex:
+            tx = self._open()
+            return self.append(
+                "committed",
+                transaction_id=tx.transaction_id,
+                from_state=tx.from_state,
+                to_state=tx.to_state,
+                reason=tx.reason,
+                authority=authority,
+                control_epoch=self.control_epoch,
+                episode_id=tx.episode_id,
+                episode_role=tx.episode_role,
+                policy_epoch=tx.policy_epoch,
+                episode_result=episode_result,
+            )
 
     def abort(self, *, authority, reason: str | None = None):
-        tx = self._open()
-        return self.append(
-            "aborted",
-            transaction_id=tx.transaction_id,
-            reason=reason,
-            authority=authority,
-            control_epoch=self.control_epoch,
-            episode_id=tx.episode_id,
-            episode_role=tx.episode_role,
-        )
+        with self._mutex:
+            tx = self._open()
+            return self.append(
+                "aborted",
+                transaction_id=tx.transaction_id,
+                reason=reason,
+                authority=authority,
+                control_epoch=self.control_epoch,
+                episode_id=tx.episode_id,
+                episode_role=tx.episode_role,
+            )
 
     def note(self, code: str, detail: str = "", *, authority, transaction_id=None):
-        return self.append(
-            "note",
-            transaction_id=transaction_id,
-            authority=authority,
-            control_epoch=self.control_epoch,
-            note={"code": code, "detail": detail},
-        )
+        with self._mutex:
+            return self.append(
+                "note",
+                transaction_id=transaction_id,
+                authority=authority,
+                control_epoch=self.control_epoch,
+                note={"code": code, "detail": detail},
+            )
 
     # ---------------------------------------------------------- recovery
 

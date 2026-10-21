@@ -3,6 +3,7 @@ client writes rollouts (half-written ones included), the supervisor and its
 real worker process label them against a fake model server, and everything a
 person or the training pool would see is checked on disk."""
 
+import http.client
 import json
 import os
 import sqlite3
@@ -116,7 +117,10 @@ class Env:
     def state(self, name=NAME):
         return mirror.load_state(self.config, name)
 
-    def close(self):
+    def close(self, handlers_s=None):
+        """Stop the supervisors, their workers and the fake server, and wait
+        (``handlers_s``, default scaled(10)) for the server's request threads:
+        a request the fake is still answering must not outlive the test."""
         controllers, threads = self.controllers, self.threads
         self.controllers, self.threads = [], []
         try:
@@ -137,7 +141,20 @@ class Env:
                 except Exception as error:  # noqa: BLE001 (teardown goes on)
                     warnings.warn(f"a live supervisor did not shut down: {error!r}")
         finally:
+            # A request waiting out the fake's delay goes on at once; then no
+            # new request is taken, and the ones under way are waited for.
+            self.fake.stop()
             self.server.shutdown()
+            self.server.server_close()
+            left = self.server.join_handlers(
+                scaled(10) if handlers_s is None else handlers_s
+            )
+            if left:
+                # The timeout is failed by conftest's _no_leaked_threads; here
+                # only a warning, and the check is not relaxed.
+                warnings.warn(
+                    f"a fake model server request thread outlived teardown: {left}"
+                )
 
 
 @pytest.fixture
@@ -460,6 +477,71 @@ def test_teardown_goes_on_when_a_supervisor_fails_to_shut_down(env):
     with pytest.warns(UserWarning, match="did not shut down"):
         e.close()
     assert stopped == ["second", "server"]
+
+
+def _ask_in_background(e):
+    """One chat request to the fake server in a thread; returns the thread
+    once the fake has started answering it."""
+
+    def ask():
+        connection = http.client.HTTPConnection("127.0.0.1", e.port, timeout=300)
+        try:
+            body = json.dumps({"max_completion_tokens": 1})
+            connection.request(
+                "POST",
+                "/v1/chat/completions",
+                body=body,
+                headers={"Content-Type": "application/json", "Connection": "close"},
+            )
+            connection.getresponse().read()
+        except OSError:
+            pass  # the test checks the server's threads, not this answer
+        finally:
+            connection.close()
+
+    client = threading.Thread(target=ask, name="teardown-test-client")
+    client.start()
+    deadline = time.monotonic() + scaled(30)
+    while time.monotonic() < deadline and not e.fake.started:
+        time.sleep(0.02)
+    assert e.fake.started == 1
+    return client
+
+
+def test_teardown_waits_for_a_request_the_fake_is_still_answering(env):
+    """CI: a request sleeping in the fake's delay outlived teardown and the
+    thread check failed. Teardown cuts the delay short and waits for the
+    request thread, and does so well within the delay."""
+    after_stop = scaled(3)  # work left after the delay: only a join waits it
+    e = env(
+        delay=scaled(120),
+        fail=lambda n, payload: time.sleep(after_stop) or False,
+    )
+    client = _ask_in_background(e)
+    handlers = set(e.server.handler_threads)
+    assert handlers
+    began = time.monotonic()
+    e.close()
+    took = time.monotonic() - began
+    assert not [t for t in handlers if t.is_alive()]  # no join: still in fail()
+    assert e.fake.finished == 1
+    assert took < scaled(10)  # time.sleep(delay): about scaled(10), then fails
+    client.join(scaled(10))
+    assert not client.is_alive()
+
+
+def test_teardown_warns_about_a_request_thread_it_could_not_wait_for(env):
+    release = threading.Event()
+    e = env(fail=lambda n, payload: release.wait(scaled(60)) and False)
+    client = _ask_in_background(e)
+    try:
+        with pytest.warns(UserWarning, match="request thread outlived teardown"):
+            e.close(handlers_s=0.2)
+    finally:
+        release.set()
+    assert not e.server.join_handlers(scaled(10))
+    client.join(scaled(10))
+    assert not client.is_alive()
 
 
 def test_a_new_episode_cancels_the_request_in_flight_and_the_batch_resumes_after(env):

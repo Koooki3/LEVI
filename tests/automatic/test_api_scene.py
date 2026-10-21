@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 import pytest
+from conftest import scaled
 from test_api_common import (
     REQ,
     client,
@@ -22,6 +23,7 @@ from test_api_runs import (
     fake_systemd,
     plan_of,
     post_run,
+    stop_by_page,
 )
 
 from levi.automatic import api, launch
@@ -65,11 +67,13 @@ def ask(client, roots, tmp_path, fake_systemd):
     transport = human.FileTransport(run_dir / "scene")
     transport.ask(question)
     yield client, run_dir, transport, question
-    client.headers.update(REQ)
-    client.post(
-        f"{BASE}/runs/r-scene/stop", json={"command_id": "stop-end", "confirm": "stop"}
+    # The runner thread and its command pump end here, not after the
+    # thread check (CI: both outlived a 30 s join and failed the test). The
+    # stop is the path that stops the arm on the real robot: one that did not
+    # end the run fails the test (strict), after the threads are ended.
+    served.close(
+        stop_by_page(client, "r-scene", "stop-end"), timeout=scaled(15), strict=True
     )
-    served.thread.join(30)
 
 
 def answer(client, **over):
