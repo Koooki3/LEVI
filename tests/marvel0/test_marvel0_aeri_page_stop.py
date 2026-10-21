@@ -39,10 +39,11 @@ def identity(pid):
 def world(tmp_path):
     procs = []
 
-    def spawn(session=False):
+    def spawn(session=False, extra=(), program=None):
         log = tmp_path / f"signals{len(procs)}.log"
         proc = subprocess.Popen(
-            [sys.executable, "-c", TARGET, str(log)], start_new_session=session
+            [program or sys.executable, "-c", TARGET, str(log), *extra],
+            start_new_session=session,
         )
         procs.append(proc)
         deadline = time.monotonic() + scaled(10)
@@ -243,6 +244,7 @@ def test_the_script_is_stdlib_only_and_opens_no_socket(tmp_path):
     )
     assert imports <= {
         "argparse",
+        "errno",
         "fcntl",
         "json",
         "os",
@@ -352,10 +354,231 @@ def test_a_record_that_cannot_be_written_never_keeps_the_signal_from_going_out(
     world.write(runner=runner_of(proc))
     script = load_script()
 
-    def broken(path, when):
+    def broken(path, when, **kw):
         raise OSError(30, "Read-only file system")
 
     monkeypatch.setattr(script, "mark_sent", broken)
     assert script.main(["--record", str(world.record_path)]) == 0
     assert "will not know of this Stop" in capsys.readouterr().err
     assert world.signals(log) == [str(int(signal.SIGINT))]
+
+
+# --- the check and the write are one step under the record's lock (N13) ------------------------
+
+
+def test_a_stop_the_page_sent_after_the_script_read_the_record_is_not_doubled(
+    world, monkeypatch, capsys
+):
+    """Safety review 2 N13: the script read ``stop_sent_epoch`` (unset), the page's
+    Stop wrote it and signalled, then the script went on and signalled again. The
+    check is now repeated inside the lock, where the write is."""
+    proc, log = world.spawn()
+    world.write(runner=runner_of(proc))
+    script = load_script()
+    stale = json.loads(world.record_path.read_text())
+    reads = {"n": 0}
+    real = script.read_json
+
+    def read_json(path, limit=1 << 18):
+        reads["n"] += 1
+        if reads["n"] == 1:  # what main saw first, before the page's Stop
+            return stale
+        return real(path, limit)
+
+    monkeypatch.setattr(script, "read_json", read_json)
+    # ... and then the page wrote its Stop
+    page = json.loads(world.record_path.read_text())
+    page["stop_sent_epoch"] = 4321.0
+    world.record_path.write_text(json.dumps(page))
+    assert script.main(["--record", str(world.record_path)]) == 1
+    assert "already sent" in capsys.readouterr().err
+    assert world.signals(log) == [], "nothing was signalled"
+    assert json.loads(world.record_path.read_text())["stop_sent_epoch"] == 4321.0
+
+
+def test_again_is_still_allowed_after_a_stop_was_sent(world):
+    proc, log = world.spawn()
+    world.write(runner=runner_of(proc), stop_sent_epoch=1234.5)
+    assert world.run().returncode == 1
+    assert world.run("--again").returncode == 0
+    assert world.signals(log) == [str(int(signal.SIGINT))]
+    assert json.loads(world.record_path.read_text())["stop_sent_epoch"] > 1234.5
+
+
+def test_a_record_lock_someone_holds_does_not_keep_the_signal_back(
+    world, monkeypatch, capsys
+):
+    import fcntl
+
+    proc, log = world.spawn()
+    world.write(runner=runner_of(proc))
+    script = load_script()
+    monkeypatch.setattr(script, "LOCK_WAIT_S", 0.3)
+    held = os.open(str(world.record_path) + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(held, fcntl.LOCK_EX)
+    try:
+        started = time.monotonic()
+        assert script.main(["--record", str(world.record_path)]) == 0
+        assert time.monotonic() - started < 5
+    finally:
+        os.close(held)
+    assert "will not know of this Stop" in capsys.readouterr().err
+    assert world.signals(log) == [str(int(signal.SIGINT))]
+
+
+# --- the record cannot be read: terminal D by its systemd scope (N8) ------------------------------
+
+SCOPE = "levi-aeri-termd-marvel0-20261022T101500-a1b2c3.scope"
+
+
+def fake_cgroup(world, pids, unit=SCOPE, parent="app.slice", uid=None, name="cgroup"):
+    """A cgroup tree like the user manager's, with one scope listing ``pids``."""
+    uid = os.getuid() if uid is None else uid
+    root = world.tmp / name
+    folder = root / "user.slice" / f"user-{uid}.slice" / f"user@{uid}.service"
+    scope = folder / parent / unit
+    scope.mkdir(parents=True, exist_ok=True)
+    (scope / "cgroup.procs").write_text("".join(f"{pid}\n" for pid in pids))
+    return root
+
+
+def run_scope(world, root, *args):
+    return world.run("--scope", "--cgroup-root", str(root), *args)
+
+
+D_WORDS = ("scripts/aeri.py", "execute", "--config", "job.yaml")
+
+
+def test_an_unreadable_record_is_refused_and_the_scope_route_is_named(world):
+    _proc, log = world.spawn()
+    world.record_path.write_text("{not json")
+    done = world.run()
+    assert done.returncode == 2 and "cannot be read" in done.stderr
+    assert "--scope" in done.stderr, "the way on is named"
+    assert world.signals(log) == []
+
+
+def test_the_scope_route_signals_the_d_process_found_by_its_command_line(world):
+    d, d_log = world.spawn(extra=D_WORDS)
+    other, other_log = world.spawn(extra=("something", "else"))
+    root = fake_cgroup(world, [other.pid, d.pid])
+    world.record_path.write_text("{not json")
+    done = run_scope(world, root)
+    assert done.returncode == 0, done.stderr
+    assert f"pid {d.pid}" in done.stdout and SCOPE in done.stdout
+    assert "page will not know" in done.stdout
+    assert world.signals(d_log) == [str(int(signal.SIGINT))]
+    assert world.signals(other_log) == [], "nothing else in the scope was touched"
+    assert world.record_path.read_text() == "{not json", "and the record is left alone"
+
+
+def test_the_scope_route_does_not_signal_uv_which_has_the_same_words(world):
+    """``uv run ... python ... aeri.py execute ...``: uv's command line holds the
+    words of D's. Only the python process is terminal D."""
+    d, d_log = world.spawn(extra=D_WORDS)
+    bin_dir = world.tmp / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "uv").symlink_to(os.path.realpath(sys.executable))
+    uv, uv_log = world.spawn(extra=D_WORDS, program=str(bin_dir / "uv"))
+    root = fake_cgroup(world, [uv.pid, d.pid])
+    world.record_path.write_text("{not json")
+    done = run_scope(world, root)
+    assert done.returncode == 0, done.stderr
+    assert f"pid {d.pid}" in done.stdout
+    assert world.signals(d_log) == [str(int(signal.SIGINT))]
+    assert world.signals(uv_log) == []
+
+
+def test_the_scope_route_sends_to_the_group_when_d_is_not_there_yet(world):
+    launcher, log = world.spawn(session=True, extra=("hostchild.py", "spec.json"))
+    root = fake_cgroup(world, [launcher.pid])
+    world.record_path.write_text("{not json")
+    done = run_scope(world, root)
+    assert done.returncode == 0, done.stderr
+    assert "process group" in done.stdout
+    assert world.signals(log) == [str(int(signal.SIGINT))]
+
+
+def test_the_scope_route_does_not_send_to_a_launcher_that_is_not_a_group_leader(world):
+    launcher, log = world.spawn(session=False, extra=("hostchild.py", "spec.json"))
+    root = fake_cgroup(world, [launcher.pid])
+    world.record_path.write_text("{not json")
+    done = run_scope(world, root)
+    assert done.returncode == 1 and world.signals(log) == []
+
+
+def test_the_scope_route_refuses_when_two_processes_look_like_d(world):
+    one, log1 = world.spawn(extra=D_WORDS)
+    two, log2 = world.spawn(extra=D_WORDS)
+    root = fake_cgroup(world, [one.pid, two.pid])
+    world.record_path.write_text("{not json")
+    done = run_scope(world, root)
+    assert done.returncode == 2 and "more than one" in done.stderr
+    assert world.signals(log1) == [] and world.signals(log2) == []
+
+
+def test_the_scope_route_refuses_two_scopes_and_ignores_names_and_places_of_others(
+    world,
+):
+    d, log = world.spawn(extra=D_WORDS)
+    root = fake_cgroup(world, [d.pid])
+    other = "levi-aeri-termd-marvel0-20261022T111500-d4e5f6.scope"
+    fake_cgroup(world, [d.pid], unit=other)
+    world.record_path.write_text("{not json")
+    done = run_scope(world, root)
+    assert done.returncode == 2 and "more than one scope" in done.stderr
+    assert world.signals(log) == []
+    # not our unit names, not our user's subtree
+    wrong_name = fake_cgroup(
+        world, [d.pid], unit="levi-aeri-termd-marvel0-x.scope", name="c2"
+    )
+    assert run_scope(world, wrong_name).returncode == 1
+    wrong_user = fake_cgroup(world, [d.pid], uid=os.getuid() + 1, name="c3")
+    assert run_scope(world, wrong_user).returncode == 1
+    outside = world.tmp / "c4" / "other.slice" / SCOPE
+    outside.mkdir(parents=True)
+    (outside / "cgroup.procs").write_text(f"{d.pid}\n")
+    assert run_scope(world, world.tmp / "c4").returncode == 1
+    assert world.signals(log) == []
+
+
+def test_the_scope_route_is_only_for_a_record_that_cannot_be_read(world):
+    d, log = world.spawn(extra=D_WORDS)
+    root = fake_cgroup(world, [d.pid])
+    world.write(runner=runner_of(d))
+    done = run_scope(world, root)
+    assert done.returncode == 2 and "record can be read" in done.stderr
+    assert world.signals(log) == []
+    # no record at all is "the page has not hosted a run here", not a reason
+    world.record_path.unlink()
+    assert run_scope(world, root).returncode == 1
+    assert world.signals(log) == []
+
+
+def test_the_scope_route_dry_run_sends_nothing(world):
+    d, log = world.spawn(extra=D_WORDS)
+    root = fake_cgroup(world, [d.pid])
+    world.record_path.write_text("{not json")
+    done = run_scope(world, root, "--dry-run")
+    assert (
+        done.returncode == 0
+        and f"would send SIGINT to terminal D (pid {d.pid})" in (done.stdout)
+    )
+    assert world.signals(log) == []
+
+
+def test_the_scope_route_skips_a_pid_that_is_gone_or_not_a_number(world):
+    d, log = world.spawn(extra=D_WORDS)
+    root = fake_cgroup(world, [d.pid, 4_194_300, "x"])
+    world.record_path.write_text("{not json")
+    assert run_scope(world, root).returncode == 0
+    assert world.signals(log) == [str(int(signal.SIGINT))]
+
+
+def test_the_scope_route_runs_no_program_and_opens_no_socket():
+    """It reads the cgroup files of the user's own scope and ``/proc``; it does
+    not ask ``systemctl`` (a bus connection) and starts nothing."""
+    source = SCRIPT.read_text()
+    assert "import subprocess" not in source and "import socket" not in source
+    for call in ("os.system", "os.popen", "os.spawn", "os.exec", "Popen("):
+        assert call not in source, call
