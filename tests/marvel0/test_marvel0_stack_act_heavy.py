@@ -90,7 +90,8 @@ class Systemd:
 
     def __init__(self, scopes=None):
         self.scopes = scopes or {}
-        self.asked = []
+        self.asked = []  # the scopes named one by one (the log's candidates)
+        self.globs = []  # the globs (the second source: every heavy-gate scope)
         self.calls = []
         self.fail = None
 
@@ -102,7 +103,8 @@ class Systemd:
             "show",
             "--property=Id,LoadState,ActiveState,TasksCurrent",
         ], argv
-        self.asked.extend(argv[4:])
+        self.asked.extend(n for n in argv[4:] if "*" not in n)
+        self.globs.extend(n for n in argv[4:] if "*" in n)
         if self.fail == "error":
             return 1, "Failed to connect to bus"
         if self.fail == "raise":
@@ -138,7 +140,7 @@ def test_a_finished_job_is_not_running_and_systemd_is_not_asked(log):
         log,
         [*launched(900, u), record(60, "finish", u, exit_code=0, emptied=True)],
     )
-    systemd = Systemd({u + ".scope": ("loaded", "active", "9")})  # (a stale scope)
+    systemd = Systemd({u + ".scope": ("loaded", "active", "0")})  # (a stale scope)
     got = heavy(log, systemd)
     assert (got["state"], got["count"]) == ("clear", 0)
     assert systemd.asked == [], "a job that ended is not asked about"
@@ -189,7 +191,7 @@ def test_a_requeue_after_an_interrupt_is_not_a_running_job(log):
             record(100, "queued", u, requeue=True),
         ],
     )
-    systemd = Systemd({u + ".scope": ("loaded", "active", "4")})
+    systemd = Systemd({u + ".scope": ("loaded", "active", "0")})
     assert heavy(log, systemd)["state"] == "clear"
     assert systemd.asked == []
 
@@ -212,7 +214,7 @@ def test_a_job_last_heard_of_more_than_six_hours_ago_is_not_looked_at(log):
     )
     systemd = Systemd(
         {
-            old + ".scope": ("loaded", "active", "3"),
+            old + ".scope": ("loaded", "active", "0"),
             recent + ".scope": ("loaded", "active", "3"),
         }
     )
@@ -225,6 +227,177 @@ def test_units_that_are_not_the_gates_are_ignored(log):
     write_log(log, launched(30, "heavy-gate-probe-2876759-d59614"))
     systemd = Systemd()
     assert heavy(log, systemd)["state"] == "clear" and systemd.asked == []
+
+
+# --- the second source: the heavy-gate scopes systemd lists ------------------------------------
+
+GLOB_FIXTURE = Path(__file__).parent / "fixtures" / "systemctl_show_heavy_gate_glob.txt"
+
+
+def captured_glob():
+    """What ``systemctl --user show --property=Id,LoadState,ActiveState,TasksCurrent
+    'heavy-gate-*'`` printed on this machine (21 Oct 2026, systemd 255): 18
+    scopes, every one loaded and active with ``TasksCurrent=0`` (the stale ones the
+    gate left behind; nine of them probe scopes), the properties in systemd's
+    own order."""
+    return GLOB_FIXTURE.read_text()
+
+
+def running_in(text, unit, tasks=7):
+    """The same capture with ``unit``'s scope holding ``tasks`` processes (a
+    running unit prints ``TasksCurrent=<n>``, as ``init.scope`` did on the
+    machine)."""
+    block = f"TasksCurrent=0\nId={unit}.scope\n"
+    assert block in text, "the capture has no such scope"
+    return text.replace(block, f"TasksCurrent={tasks}\nId={unit}.scope\n")
+
+
+def raw(text):
+    """A runner whose answer to every ``systemctl show`` is ``text``."""
+    calls = []
+
+    def run(argv, timeout_s):
+        calls.append(list(argv))
+        return 0, text
+
+    run.calls = calls
+    return run
+
+
+def captured_job_units():
+    return [
+        line.split("=", 1)[1].removesuffix(".scope")
+        for line in captured_glob().splitlines()
+        if line.startswith("Id=heavy-gate-") and "-probe-" not in line
+    ]
+
+
+def test_the_stale_scopes_of_the_real_machine_are_not_jobs(log):
+    write_log(log, [])  # (a gate log with nothing in it)
+    run = raw(captured_glob())
+    got = heavy(log, run)
+    assert (got["state"], got["count"], got["why"]) == ("clear", 0, None)
+    assert got["empty"] == len(captured_job_units()) == 9
+    assert len(run.calls) == 1 and run.calls[0][-1] == "heavy-gate-*"
+    assert run.calls[0][:4] == [
+        "systemctl",
+        "--user",
+        "show",
+        "--property=Id,LoadState,ActiveState,TasksCurrent",
+    ]
+
+
+def test_a_job_of_a_gate_that_wrote_another_log_is_seen_through_systemd(log):
+    """A gate run with its own ``HEAVY_GATE_LOG`` (or another ``LEVI_HUB_DIR``)
+    still honours the fixed marker, and the page's log never names it."""
+    write_log(log, [])
+    unit = captured_job_units()[0]
+    got = heavy(log, raw(running_in(captured_glob(), unit)))
+    assert (got["state"], got["count"], got["why"]) == ("running", 1, None)
+    assert got["kinds"] == [re.match(r"heavy-gate-(.+?)-\d+-\d+-", unit).group(1)]
+    assert got["empty"] == 8
+
+
+def test_no_log_at_all_does_not_hide_a_job_systemd_shows(log):
+    unit = captured_job_units()[0]
+    got = heavy(log, raw(running_in(captured_glob(), unit)))  # (the log is not there)
+    assert (got["state"], got["count"]) == ("running", 1)
+    assert heavy(log, raw(captured_glob()))["why"] == "log_missing"  # (nothing seen)
+
+
+def test_a_job_started_more_than_six_hours_ago_is_still_a_job(log):
+    old = unit_name(1)
+    write_log(log, launched(stack_act.HEAVY_LOG_MAX_AGE_S + 3600, old))
+    got = heavy(log, Systemd({old + ".scope": ("loaded", "active", "3")}))
+    assert (got["state"], got["count"]) == ("running", 1)
+
+
+def test_a_job_logged_outside_the_part_of_the_log_that_is_read_is_still_a_job(
+    log, monkeypatch
+):
+    monkeypatch.setattr(stack_act, "HEAVY_LOG_TAIL_BYTES", 2000)
+    lost = unit_name(1)
+    filler = [record(5000, "queued", None, pad="x" * 80) for _ in range(60)]
+    write_log(log, [*launched(60, lost), *filler])
+    got = heavy(log, Systemd({lost + ".scope": ("loaded", "active", "3")}))
+    assert (got["state"], got["count"]) == ("running", 1)
+
+
+def test_a_probe_scope_with_processes_is_not_a_job(log):
+    write_log(log, [])
+    probe = "heavy-gate-probe-3742422-b812ec"
+    got = heavy(log, raw(running_in(captured_glob(), probe)))
+    assert (got["state"], got["count"]) == ("clear", 0)
+
+
+def test_what_the_log_and_systemd_both_name_is_one_job(log):
+    u = unit_name(1)
+    write_log(log, launched(30, u))
+    got = heavy(log, Systemd({u + ".scope": ("loaded", "active", "3")}))
+    assert got["count"] == 1 and got["kinds"] == ["pytest-dir"]
+
+
+def test_the_union_counts_the_job_of_each_source(log):
+    logged, other = unit_name(1), unit_name(2, "bun-test")
+    write_log(log, launched(30, logged))
+    systemd = Systemd(
+        {
+            logged + ".scope": ("loaded", "active", "3"),
+            other + ".scope": ("loaded", "active", "5"),
+        }
+    )
+    got = heavy(log, systemd)
+    assert got["count"] == 2 and got["kinds"] == ["bun-test", "pytest-dir"]
+    assert len(systemd.calls) == 1, "one systemctl for both sources"
+    assert systemd.globs == ["heavy-gate-*"] and systemd.asked == [logged + ".scope"]
+
+
+@pytest.mark.parametrize("state", ["inactive", "failed"])
+def test_a_scope_that_is_not_active_and_still_has_processes_is_a_job(log, state):
+    """The gate counts such a scope as not cleared (its processes are still
+    there, whatever the unit says): so does the page, through either source."""
+    u = unit_name(1)
+    write_log(log, launched(30, u))
+    systemd = Systemd({u + ".scope": ("loaded", state, "4")})
+    assert heavy(log, systemd)["state"] == "running"
+    write_log(log, [])  # (and seen by systemd alone)
+    assert heavy(log, systemd)["state"] == "running"
+    # ... and one with none is not
+    gone = Systemd({u + ".scope": ("loaded", state, "0")})
+    assert heavy(log, gone)["state"] == "clear"
+
+
+def test_a_systemd_that_does_not_answer_is_unknown_even_with_nothing_in_the_log(log):
+    write_log(log, [])
+    for how in ("error", "raise"):
+        systemd = Systemd()
+        systemd.fail = how
+        got = heavy(log, systemd)
+        assert (got["state"], got["why"]) == ("unknown", "systemd_unreadable")
+
+
+def test_a_glob_that_systemd_did_not_expand_proves_nothing(log):
+    """An old systemd treats the pattern as a unit name and prints a block for
+    that name: not a listing."""
+    write_log(log, [])
+    unexpanded = (
+        "TasksCurrent=[not set]\nId=heavy-gate-*.service\nLoadState=not-found\n"
+        "ActiveState=inactive\n"
+    )
+    got = heavy(log, raw(unexpanded))
+    assert (got["state"], got["why"]) == ("unknown", "systemd_unreadable")
+
+
+def test_a_listed_scope_without_a_task_count_is_unknown_but_a_job_seen_decides(log):
+    write_log(log, [])
+    unit = captured_job_units()[0]
+    text = captured_glob().replace(
+        f"TasksCurrent=0\nId={unit}.scope\n",
+        f"TasksCurrent=[not set]\nId={unit}.scope\n",
+    )
+    assert heavy(log, raw(text))["state"] == "unknown"
+    other = captured_job_units()[1]
+    assert heavy(log, raw(running_in(text, other)))["state"] == "running"
 
 
 # --- what cannot be told is never "clear" -------------------------------------------------------
@@ -332,7 +505,7 @@ def test_a_long_log_is_read_from_its_end(log, monkeypatch):
     assert log.stat().st_size > 2000
     systemd = Systemd(
         {
-            old + ".scope": ("loaded", "active", "3"),
+            old + ".scope": ("loaded", "active", "0"),
             now_u + ".scope": ("loaded", "active", "3"),
         }
     )
@@ -353,6 +526,7 @@ def test_a_log_that_has_not_changed_is_not_parsed_again(log, monkeypatch):
     assert heavy(log, systemd)["state"] == "running" and parsed == []
     with log.open("a") as handle:  # a record is appended: parsed again
         handle.write(json.dumps(record(1, "finish", u, emptied=True)) + "\n")
+    systemd.scopes[u + ".scope"] = ("loaded", "active", "0")  # (the job is gone)
     assert heavy(log, systemd)["state"] == "clear" and parsed
 
 
@@ -459,6 +633,36 @@ def test_a_stale_empty_scope_does_not_hold_a_back(m):
     assert not {"heavy_jobs_running", "marker_young"} & set(m.blockers("a"))
 
 
+def test_a_job_of_another_hub_holds_a_back_though_the_pages_log_is_empty(m):
+    """A gate run with another ``HEAVY_GATE_LOG`` honours the fixed marker, and
+    the page's log has nothing: only the scopes systemd lists show the job. A
+    must not start while it is still exiting."""
+    with_marker(m, age=10.0)
+    hub_log(m, [])
+    u = unit_name(1)
+    m.scopes[u + ".scope"] = ("loaded", "active", "6")
+    marker = m.doc()["marker"]
+    assert marker["heavy"]["state"] == "running" and marker["heavy"]["count"] == 1
+    assert marker["remaining_s"] is None
+    assert "heavy_jobs_running" in m.blockers("a")
+    m.scopes[u + ".scope"] = ("loaded", "active", "0")  # it exited
+    assert m.doc()["marker"]["heavy"]["state"] == "clear"
+    assert "heavy_jobs_running" not in m.blockers("a")
+
+
+def test_a_systemd_that_does_not_answer_gives_the_fixed_wait_of_old(m):
+    with_marker(m, age=10.0)
+    hub_log(m, [])  # (a log with nothing in it: only systemd could say)
+    m.scope_failing = True
+    marker = m.doc()["marker"]
+    assert (marker["heavy"]["state"], marker["heavy"]["why"]) == (
+        "unknown",
+        "systemd_unreadable",
+    )
+    assert marker["wait_s"] == control_site.LEGACY_MARKER_WAIT_S
+    assert "marker_young" in m.blockers("a")
+
+
 def test_without_a_log_the_fixed_wait_of_old_applies_and_the_document_says_so(m):
     with_marker(m, age=10.0)  # (no heavy-gate.jsonl in the hub)
     marker = m.doc()["marker"]
@@ -539,7 +743,7 @@ def test_the_page_never_asks_systemd_for_anything_but_a_show(m):
 def test_a_queued_record_with_a_unit_is_not_a_launch(log):
     u = unit_name(1)
     write_log(log, [record(50, "queued", u, requeue=True)])
-    systemd = Systemd({u + ".scope": ("loaded", "active", "4")})
+    systemd = Systemd({u + ".scope": ("loaded", "active", "0")})
     assert heavy(log, systemd)["state"] == "clear" and systemd.asked == []
 
 

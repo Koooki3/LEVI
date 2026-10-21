@@ -86,12 +86,19 @@ page), and while a member starts, which ready lines were seen and which are miss
   time a gate needs to see it) **and no heavy job of this computer really runs**; the page removes it once A's unit is gone
   and the arm's sockets are quiet. It used to wait a fixed 45-60 s whether a job ran or not. The jobs are those of the heavy-job gate
   (`levi-hub/heavy_gate.py`: pytest and bun runs; other programs on this computer do not honour the marker and are not looked
-  at), read from its log `heavy-gate.jsonl` and from systemd (`heavy_jobs_running`): a job is a scope launched in the last 6
+  at), read from **two sources whose union decides** (`heavy_jobs_running`, as `heavy_gate.py wait-clear` also uses its log and the
+  scopes systemd lists). The first is the gate's log `heavy-gate.jsonl` in the hub: a job is a scope launched in the last 6
   hours with no terminal record whose scope was confirmed empty (a `queued` after an `interrupted`, or a `not_empty`, change
-  nothing) **and** whose scope still holds a process (`TasksCurrent` > 0, from one `systemctl --user show` of all
-  candidates). The stale scopes the gate leaves behind (loaded, active, no task: seven on this machine on 21 Oct) are not jobs.
-  **What cannot be told is never "no job"**: a log that is missing or unreadable, a systemd that does not answer, a scope
-  without a task count, a job that ran without a scope, more than 64 candidates all read `unknown`, and then the fixed
+  nothing). The second is systemd: every loaded unit of the gate's naming (`heavy-gate-<kind>-<pid>-<n>-<hex>.scope`), whoever
+  launched it and wherever its gate logged. A gate run with another `HEAVY_GATE_LOG` or `LEVI_HUB_DIR` still honours the fixed
+  marker but never appears in the page's log; a job started more than 6 hours ago, or logged outside the last 4 MB that are
+  read, would be missed by the log alone and A could start while it was still exiting. A job counts only **while its scope still
+  holds a process** (`TasksCurrent` > 0; an inactive or failed scope that still has processes counts, as the gate counts it as
+  not cleared). Both sources are answered by one `systemctl --user show --property=Id,LoadState,ActiveState,TasksCurrent
+  'heavy-gate-*' <the log's candidates>` (about 7 ms; systemd 255 expands the glob itself). The stale scopes the gate leaves
+  behind (loaded, active, `TasksCurrent=0`: 18 on this machine on 21 Oct, 9 of them probe scopes) are not jobs.
+  **What cannot be told is never "no job"**: a log that is missing or unreadable, a systemd that does not answer (or a glob it
+  did not expand), a scope without a task count, a job that ran without a scope, more than 64 candidates all read `unknown`, and then the fixed
   wait of old applies (at least 45 s; the document shows `heavy.state` `unknown` and the reason). A job that is seen
   decides over one that cannot be told. Two looks in a row must find no job (as `heavy_gate.py wait-clear` wants). A job
   yields within about 30-40 s of the marker (the gate stops its own scope); while one runs the end of the wait is not known
@@ -276,8 +283,8 @@ check of the graph), is ready about 5 s later, B starts within one look and is r
 `marker_wait_s = 3` (or nothing)**: a file that says 45 keeps A back 45 s all the same.
 
 **Cost of the looks.** One look is one read of the stack: six `systemctl show` and some small reads, about 40 ms on the machine
-(measured 21 Oct, read-only), plus about 4 ms for the heavy jobs (one `systemctl show` of all candidate scopes, the log parsed
-only when it changes). At one look per 0.25 s plus the looks that follow a change that is about 3-4 per second, a tenth of one
+(measured 21 Oct, read-only), plus about 7 ms for the heavy jobs (one `systemctl show` of the gate's glob and the log's
+candidate scopes, the log parsed only when it changes). At one look per 0.25 s plus the looks that follow a change that is about 3-4 per second, a tenth of one
 core, on cores the control loop does not run on by any rule (this kernel is not real-time: it is a few short processes per look,
 not a thread of its own, and only while a guided start or stop runs; waiting for the person looks every 2 s). It has not been
 measured against the 1 kHz loop.
@@ -346,7 +353,7 @@ needs B known), **that discovery of the monitor's node within 2 s means a grippe
 canary is a proof of discovery, not of completeness), **what the arm's FCI server makes of a reset instead of a close**, the real
 timings of the chain, and the load of the faster looks on the 1 kHz loop. Verified on this machine without starting anything:
 the format of `systemctl --user show` for several scopes and for the stale scopes (`heavy_jobs_running` ran against the real log and
-systemd: `clear`, 7 stale scopes ignored, 4 ms), the kernel's table after a reset close. Not verified on the real machine either: the line patterns (they come from the franka_control sources, each with its source line
+systemd: `clear`, 18 stale scopes ignored, 7 ms per `show` of the glob), the kernel's table after a reset close. Not verified on the real machine either: the line patterns (they come from the franka_control sources, each with its source line
 in `stack_units.py`, and a test greps those sources; no real unit log has been read), the format of `ros2 control
 list_controllers` (read from `ros2controlcli/verb/list_controllers.py:34-36`, the source the installed egg-link runs;
 never run), A, B and C in a unit at all, FIFO 98 and `mlockall` inside a unit, the double SIGINT, the 10-11 s stop,
@@ -382,8 +389,9 @@ after it is ready (no health source): a gripper driver that dies without a `proc
   start, runs the check of the graph through a real one-shot behind `timeout` (stand-in output) and `_scopes_tasks` on a real scope that
   holds a process, on one that is not there and on the same one after it ended.
 - The fast start: `test_marvel0_stack_act_heavy.py` (the real `heavy_jobs_running` on log files in the gate's own shape and the real
-  `systemctl show` outputs, stale scopes, unreadable logs, a log longer than the tail read, the document and the gates behind
-  it), `test_marvel0_stack_act_fast.py` (the graph check and its fallback from the real `ros2 node list` format, the check of B
+  `systemctl show` outputs, among them the capture of `show 'heavy-gate-*'` with the machine's 18 stale scopes
+  (`fixtures/systemctl_show_heavy_gate_glob.txt`), the second source for a job of another hub or older than the log window,
+  unreadable logs, a log longer than the tail read, the document and the gates behind it), `test_marvel0_stack_act_fast.py` (the graph check and its fallback from the real `ros2 node list` format, the check of B
   as an operation beside others, the order, the marker given back, the checks before C side by side, the ticker, the page's
   cache, the step times, the control file's floor), `test_marvel0_stack_act_timeline.py` (the real ticker and threads on a
   clock the test moves, `sim_time.py`: A under 5 s, the whole chain, a heavy job that holds A back until it ends or the cap, the
@@ -469,10 +477,15 @@ after it is ready (no health source): a gripper driver that dies without a `proc
 - **标记文件。** 页面以独占方式创建 `.arm-controller-active`（记下 inode 和时间），**紧跟在 M 之后**，让它的年龄在做检查的同时走。A 要等标记满
   `marker_wait_s` 秒（控制文件：2 到 600 秒，默认 3：闸门看到它所需的时间）**并且本机没有重任务真的在运行**；A 的单元消失且机械臂的套接字安静后页面删除它。
   以前不管有没有任务都固定等 45-60 秒。这里的任务是重任务闸门（`levi-hub/heavy_gate.py`：pytest 和 bun 运行；本机其他程序不认标记，不去看它们）
-  的任务，从它的日志 `heavy-gate.jsonl` 和 systemd 读出（`heavy_jobs_running`）：最近 6 小时内启动的 scope，没有“已确认 scope 为空”的结束记录
-  （`interrupted` 之后的 `queued`、`not_empty` 都不改变这一点），**并且**它的 scope 里还有进程（`TasksCurrent` > 0，对所有候选只做一次
-  `systemctl --user show`）。闸门留下的陈旧 scope（已加载、active、没有任务：2026-10-21 本机有七个）不算任务。**读不出来的绝不当作“没有任务”**：
-  日志缺失或读不了、systemd 不回答、scope 没有任务计数、没有 scope 的任务、候选超过 64 个，都是 `unknown`，这时用旧的固定等待（至少 45 秒；文档里
+  的任务，从**两个来源读出，以两者的并集为准**（`heavy_jobs_running`；`heavy_gate.py wait-clear` 同样用它的日志加 systemd 列出的 scope）。第一个是
+  hub 里闸门的日志 `heavy-gate.jsonl`：最近 6 小时内启动的 scope，没有“已确认 scope 为空”的结束记录（`interrupted` 之后的 `queued`、
+  `not_empty` 都不改变这一点）。第二个是 systemd：每个已加载、符合闸门命名（`heavy-gate-<种类>-<pid>-<序号>-<十六进制>.scope`）的单元，不论是谁启动、
+  闸门把日志写在哪里。用别的 `HEAVY_GATE_LOG` 或 `LEVI_HUB_DIR` 运行的闸门同样遵守固定的标记，却不会出现在页面读的日志里；6 小时前启动的任务、或日志中不在
+  读取的最后 4 MB 里的任务，只看日志会漏掉，A 就可能在它还在退出时启动。任务**只在它的 scope 里还有进程时**才算（`TasksCurrent` > 0；
+  inactive 或 failed 但仍有进程的 scope 也算，闸门同样把它当作未清空）。两个来源由同一次 `systemctl --user show --property=Id,LoadState,ActiveState,TasksCurrent
+  'heavy-gate-*' <日志里的候选>` 回答（约 7 毫秒；systemd 255 自己展开通配符）。闸门留下的陈旧 scope（已加载、active、`TasksCurrent=0`：
+  2026-10-21 本机有 18 个，其中 9 个是探测 scope）不算任务。**读不出来的绝不当作“没有任务”**：
+  日志缺失或读不了、systemd 不回答（或没有展开通配符）、scope 没有任务计数、没有 scope 的任务、候选超过 64 个，都是 `unknown`，这时用旧的固定等待（至少 45 秒；文档里
   `heavy.state` 为 `unknown` 并给出原因）。看到了在运行的任务，就以它为准，即使另一个读不出来。要连续两次看到没有任务（`heavy_gate.py wait-clear` 也这样要求）。
   任务会在标记设置后约 30-40 秒内让出（闸门停自己的 scope）；有任务在运行时等待何时结束是未知的（`remaining_s` 为 null），文档说明有几个
   （`act.sequence.wait`、`act.marker.heavy`）；**满 `HEAVY_WAIT_CAP_S`（90 秒）启动就结束**，原因 `heavy_job_still_running`（个数在
@@ -594,7 +607,7 @@ after it is ready (no health source): a gripper driver that dies without a `proc
 C 之前的检查 5 秒，C 启动、3 秒后就绪：**从按键到 C 就绪约 19 秒**（以前约 100 秒）。定时器每个阶段最多多加 0.25 秒（它在下一次查看时才看到阶段就绪）。**本机的控制文件必须写
 `marker_wait_s = 3`（或者不写）**：写着 45 的文件照样让 A 等 45 秒。
 
-**查看的代价。** 一次查看是一次读栈：六次 `systemctl show` 加一些小的读取，本机上约 40 毫秒（10 月 21 日只读测得），重任务另加约 4 毫秒（对所有候选 scope 只做一次 `systemctl show`，日志只在变化时才重新解析）。
+**查看的代价。** 一次查看是一次读栈：六次 `systemctl show` 加一些小的读取，本机上约 40 毫秒（10 月 21 日只读测得），重任务另加约 7 毫秒（对闸门的通配符和日志里的候选 scope 只做一次 `systemctl show`，日志只在变化时才重新解析）。
 每 0.25 秒一次加上变化之后的那几次，大约每秒 3-4 次，约占一个核的十分之一；没有任何规则保证它不落在控制回路的核上（这个内核不是实时的）：它是每次查看几个短进程，不是自己的线程，
 而且只在引导式启动或停止运行时才有；等人确认时每 2 秒看一次。没有对着 1 kHz 回路测过。
 
@@ -633,7 +646,7 @@ C 之前的检查 5 秒，C 启动、3 秒后就绪：**从按键到 C 就绪约
 **没有在真机上验证的：** **单元里 `ros2 node list --no-daemon --spin-time 2.0` 要多久**（约 3.4 秒是估计：包装脚本 source 机器人环境、python 和 rclpy 启动、
 2 秒发现；更慢的话 A 要等它，因为 A 需要 B 已知）、**2 秒内发现了监视器的节点，是否就说明夹爪栈的节点也会被看到**（监视器节点证明发现已经运行，不证明发现完整）、
 **机械臂自己的 FCI 服务器怎么对待复位而不是关闭**、整条链的真实用时，以及更快的查看对 1 kHz 回路的负担。在本机上不启动任何东西就验证了的：多个 scope 以及陈旧 scope 的
-`systemctl --user show` 输出格式（`heavy_jobs_running` 对着真实日志和 systemd 跑过：`clear`，忽略 7 个陈旧 scope，4 毫秒）、复位关闭之后内核的表。同样没有在真机上验证的：日志行的匹配规则（来自 franka_control 源码，每条在 `stack_units.py` 里注明了源码行，并有测试去核对这些源码；
+`systemctl --user show` 输出格式（`heavy_jobs_running` 对着真实日志和 systemd 跑过：`clear`，忽略 18 个陈旧 scope，通配符的一次 `show` 约 7 毫秒）、复位关闭之后内核的表。同样没有在真机上验证的：日志行的匹配规则（来自 franka_control 源码，每条在 `stack_units.py` 里注明了源码行，并有测试去核对这些源码；
 没有读过任何真实单元的日志）、`ros2 control list_controllers` 的输出格式（读自已安装 egg-link 所指的
 `ros2controlcli/verb/list_controllers.py:34-36`，从未运行过）、A/B/C 在单元里的真实运行、单元内的 FIFO 98 与 `mlockall`、双 SIGINT、10-11 秒的停止、
 `SendSIGKILL=no` 遇到真实卡死时的表现（失败单元仍有进程时 `TasksCurrent` 显示什么）、`RuntimeMaxSec` 结束命令之后 `systemd-run --wait` 给出的
@@ -655,7 +668,7 @@ FCI 探针、上述各状态下健康监视器的真实写法（读自它的源�
   `RuntimeMaxSec` 之后 `systemd-run --wait` 的退出码（1，4.2 秒后；被杀之前的输出带回来了）、单元里 `timeout -s INT` 的行为（会取消的程序：124；忽略 SIGINT 的程序：4.0 秒后 255）、
   `KillMode=control-group` 下 launch 式父进程的子进程收到几次 SIGINT（2 次）、停止超时的单元的任务数（`TasksCurrent` 为 1，该程序忽略第二次 SIGINT）；机器上有机器人进程时它拒绝运行（退出码 2）；
   对快速启动，它通过真实的一次性单元（外面套 `timeout`，输出是替身的）运行图检查，并对真实的 scope 运行 `_scopes_tasks`：有进程的、不存在的、以及同一个结束之后的。
-- 快速启动：`test_marvel0_stack_act_heavy.py`（真实的 `heavy_jobs_running`，对着闸门自己格式的日志文件和真实的 `systemctl show` 输出：陈旧 scope、读不了的日志、比尾部读取更长的日志、文档以及其后的门）、
+- 快速启动：`test_marvel0_stack_act_heavy.py`（真实的 `heavy_jobs_running`，对着闸门自己格式的日志文件和真实的 `systemctl show` 输出，其中有 `show 'heavy-gate-*'` 的实测输出（本机的 18 个陈旧 scope，`fixtures/systemctl_show_heavy_gate_glob.txt`）：别的 hub 的或超出日志窗口的任务由第二个来源看到、读不了的日志、比尾部读取更长的日志、文档以及其后的门）、
   `test_marvel0_stack_act_fast.py`（图检查及其回退，用真实的 `ros2 node list` 格式；作为并行操作的 B 检查、顺序、归还标记、C 之前的检查同时进行、定时器、页面缓存、各步用时、控制文件的下限）、
   `test_marvel0_stack_act_timeline.py`（真实定时器和线程跑在测试拨动的时钟上，`sim_time.py`：A 在 5 秒内、整条链、重任务把 A 拦住直到它结束或到上限、读不出来时的固定等待）、
   `test_marvel0_stack_act_fast_processes.py`（真实进程：图检查的替身、同时进行的两项检查、真实定时器上的整条链、FCI 检查之后内核的表）。

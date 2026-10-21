@@ -12,6 +12,7 @@ programs print them (escape codes of the controller spawner included), so the
 tests read the same text the page will."""
 
 import dataclasses
+import fnmatch
 import json
 import os
 import re
@@ -166,10 +167,19 @@ def scope_print(name, load, active, tasks) -> str:
 
 def scopes_print(scopes, shown) -> str:
     """The output of one `systemctl --user show` of ``scopes``, from ``shown``
-    (name -> (load, active, tasks); a scope not in it is not there)."""
+    (name -> (load, active, tasks); a scope not in it is not there). A glob in
+    ``scopes`` is expanded by systemd itself (21 Oct, systemd 255): every loaded
+    unit that matches gets a block, and a glob that matches nothing prints
+    nothing and exits 0."""
+    names = []
+    for name in scopes:
+        if "*" in name:
+            names += [n for n in shown if fnmatch.fnmatchcase(n, name)]
+        else:
+            names.append(name)
     return "\n".join(
         scope_print(name, *shown.get(name, ("not-found", "inactive", "[not set]")))
-        for name in scopes
+        for name in names
     )
 
 

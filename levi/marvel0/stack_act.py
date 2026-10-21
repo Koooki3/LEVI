@@ -134,14 +134,22 @@ PROBE_TIMEOUT_S = 2.0
 # 45 s). The page used to wait a fixed ``marker_wait_s`` (45-60 s) whether any
 # ran or not. It now waits until the marker is old enough (the control file's
 # ``marker_wait_s``: only the time a gate needs to see it) AND the log of the gate
-# shows no job of its that really runs (``heavy_jobs_running``). What cannot be
-# told falls back to the fixed wait of old, never to "no job". Other programs
-# on this computer do not honour the marker and are not looked at.
+# shows no job of its that really runs (``heavy_jobs_running``). Two sources
+# decide, as in the gate's own ``wait-clear``: its log (the default one, in the
+# hub) and the heavy-gate scopes systemd lists (a gate run with another
+# ``HEAVY_GATE_LOG`` or ``LEVI_HUB_DIR``, a job older than the log window, one
+# logged outside the part of the log that is read: still honours the fixed
+# marker, and is seen there). What cannot be told falls back to the fixed wait
+# of old, never to "no job". Other programs on this computer do not honour the
+# marker and are not looked at.
 HEAVY_LOG_NAME = "heavy-gate.jsonl"
 HEAVY_LOG_MAX_AGE_S = 6 * 3600.0  # a job last heard of longer ago is not looked at
 HEAVY_LOG_TAIL_BYTES = 4 * 1024 * 1024  # of a long log, only its end is read
 HEAVY_MAX_UNITS = 64  # more candidates than this are not asked about: unknown
 HEAVY_SHOW = "--property=Id,LoadState,ActiveState,TasksCurrent"
+# The second source: every heavy-gate scope systemd has loaded, whatever log (or
+# no log) its gate wrote. systemd 255 expands the glob in ``show`` itself.
+HEAVY_GLOB = "heavy-gate-*"
 HEAVY_TERMINAL = ("finish", "interrupted", "cancelled", "aborted", "exhausted")
 HEAVY_UNIT = re.compile(
     r"heavy-gate-(pytest-file|pytest-dir|bun-test|bun-validate)-\d+-\d+-[0-9a-f]{6}"
@@ -856,56 +864,53 @@ def _scope_verdict(shown) -> str:
     return "unknown"
 
 
-def _scopes_tasks(run, scopes) -> dict:
-    """``{scope: verdict}`` (``_scope_verdict``) for ``scopes``, from ONE
-    ``systemctl --user show`` of all of them (a left-over scope costs a look
-    every time, and there are several on this machine). The answer is a block of
-    ``key=value`` lines per unit, a blank line between them, each with its
-    ``Id``; a unit with no block of its own is unknown, and so is every unit when
-    systemd does not answer."""
-    argv = ["systemctl", "--user", "show", HEAVY_SHOW, *scopes]
+def _show_blocks(run, names):
+    """``{Id: properties}`` from ONE ``systemctl --user show`` of ``names`` (a
+    left-over scope costs a look every time, and there are several on this
+    machine). The answer is a block of ``key=value`` lines per unit, a blank
+    line between them, each with its ``Id`` (a glob that matches nothing prints
+    nothing and exits 0). None when systemd does not answer."""
+    argv = ["systemctl", "--user", "show", HEAVY_SHOW, *names]
     try:
         code, text = run(argv, stack.SHOW_TIMEOUT_S)
     except (OSError, ValueError):
-        return dict.fromkeys(scopes, "unknown")
+        return None
     if code != 0:
-        return dict.fromkeys(scopes, "unknown")
+        return None
     blocks = {}
     for block in re.split(r"\n\s*\n", text.strip("\n")):
         shown = stack.parse_show(block)
         if shown.get("Id"):
             blocks[shown["Id"]] = shown
+    return blocks
+
+
+def _scopes_tasks(run, scopes) -> dict:
+    """``{scope: verdict}`` (``_scope_verdict``) for ``scopes``, from ONE
+    ``systemctl --user show`` of all of them. A unit with no block of its own is
+    unknown, and so is every unit when systemd does not answer."""
+    blocks = _show_blocks(run, scopes)
+    if blocks is None:
+        return dict.fromkeys(scopes, "unknown")
     return {
         scope: _scope_verdict(blocks[scope]) if scope in blocks else "unknown"
         for scope in scopes
     }
 
 
-def heavy_jobs_running(log_path, run, now=time.time) -> dict:
-    """Does a heavy job of ``heavy_gate.py`` really run? ``{"state":
-    "clear"|"running"|"unknown", "count", "kinds", "empty", "why"}``.
-
-    A job is one whose scope was launched (``launching`` or ``start`` in the
-    gate's log, within ``HEAVY_LOG_MAX_AGE_S``) and has no terminal record with
-    its scope confirmed empty (``heavy_gate.running_jobs`` and ``_ends``: a
-    ``queued`` after an ``interrupted``, or a ``not_empty``, do not change
-    that), **and** whose systemd scope still holds a process
-    (``TasksCurrent`` > 0). A scope that is listed and holds none is a left-over
-    (the open problem of stale ``heavy-gate-*.scope`` units): it does not count
-    (``empty``). Whatever cannot be told is ``unknown`` (never "clear"): no log,
-    an unreadable log, a systemd that does not answer, a scope without a task
-    count, more candidates than ``HEAVY_MAX_UNITS``, a job that did not run in a
-    scope. ``running`` wins over ``unknown``: a job that is seen decides.
-
-    ``run`` is the host's ``(argv, timeout_s) -> (code, text)``; nothing but
-    ``systemctl --user show`` is asked of it."""
-    unknown = {"state": "unknown", "count": 0, "kinds": [], "empty": 0}
+def _heavy_log_candidates(log_path, now):
+    """``(units, doubt)``: the jobs the gate's log says run, as the names of their
+    scopes' units, and why the log cannot be relied on (None when it can). A job
+    is one whose scope was launched (``launching`` or ``start`` in the log,
+    within ``HEAVY_LOG_MAX_AGE_S``) and has no terminal record with its scope
+    confirmed empty (``heavy_gate.running_jobs`` and ``_ends``: a ``queued``
+    after an ``interrupted``, or a ``not_empty``, do not change that)."""
     try:
         records = _heavy_records(log_path)
     except FileNotFoundError:
-        return {**unknown, "why": "log_missing"}
+        return [], "log_missing"
     except OSError:
-        return {**unknown, "why": "log_unreadable"}
+        return [], "log_unreadable"
     ended, latest = set(), {}
     for rec in records:
         unit, event = rec.get("unit"), rec.get("event")
@@ -927,35 +932,101 @@ def heavy_jobs_running(log_path, run, now=time.time) -> dict:
             continue
         candidates.append((at if at is not None else t_now, unit, rec))
     if len(candidates) > HEAVY_MAX_UNITS:
-        return {**unknown, "why": "too_many_candidates"}
-    running, empty, doubtful = [], 0, None
-    scoped = []
+        return [], "too_many_candidates"
+    units, doubt = [], None
     for _, unit, rec in sorted(candidates, reverse=True):
         if rec.get("mode", "scope") != "scope":
-            doubtful = doubtful or "not_a_scope"  # (no systemd evidence for it)
+            doubt = doubt or "not_a_scope"  # (no systemd evidence for it)
         else:
-            scoped.append(unit)
-    verdicts = _scopes_tasks(run, [u + ".scope" for u in scoped]) if scoped else {}
-    for unit in scoped:
-        verdict = verdicts[unit + ".scope"]
-        if verdict == "running":
-            running.append(unit)
-        elif verdict == "empty":
-            empty += 1
-        elif verdict == "unknown":
-            doubtful = doubtful or "systemd_unreadable"
+            units.append(unit)
+    return units, doubt
+
+
+def heavy_jobs_running(log_path, run, now=time.time) -> dict:
+    """Does a heavy job of ``heavy_gate.py`` really run? ``{"state":
+    "clear"|"running"|"unknown", "count", "kinds", "empty", "why"}``.
+
+    **Two sources, and their union decides** (the gate's own ``wait-clear`` also
+    uses its log and the scopes systemd lists):
+
+    * the gate's log (``_heavy_log_candidates``): a job it launched and did not
+      close, within the last ``HEAVY_LOG_MAX_AGE_S`` and the part of the log that
+      is read;
+    * the heavy-gate scopes systemd has loaded, whoever launched them and
+      wherever they logged: a gate run with another ``HEAVY_GATE_LOG`` or
+      ``LEVI_HUB_DIR`` still honours the fixed marker, and a job started long ago
+      or logged outside the part read is still a job. The gate's own naming
+      (``HEAVY_UNIT``) decides which units are jobs (a ``heavy-gate-probe-*``
+      scope is not).
+
+    Both are answered by ONE ``systemctl --user show`` (the glob and the log's
+    candidates). A job counts only while its scope still holds a process
+    (``TasksCurrent`` > 0). A scope that is listed and holds none is a left-over
+    (the open problem of stale ``heavy-gate-*.scope`` units; about 18 on this
+    machine): it does not count (``empty``); one that is inactive or failed and
+    still holds a process does count (the gate treats it as not cleared). Whatever
+    cannot be told is ``unknown`` (never "clear"): no log, an unreadable log, a
+    systemd that does not answer (or a glob it did not expand), a scope without a
+    task count, more candidates than ``HEAVY_MAX_UNITS``, a job that did not run
+    in a scope. ``running`` wins over ``unknown``: a job that is seen decides.
+
+    ``run`` is the host's ``(argv, timeout_s) -> (code, text)``; nothing but
+    ``systemctl --user show`` is asked of it."""
+    listed, doubtful = _heavy_log_candidates(log_path, now)
+    blocks = _show_blocks(run, [HEAVY_GLOB, *(u + ".scope" for u in listed)])
+    running, empty = set(), set()
+    if blocks is None or any("*" in name for name in blocks):
+        # (an old systemd prints a not-found block named like the glob: that
+        # proves nothing)
+        doubtful = doubtful or "systemd_unreadable"
+    else:
+        # the log's candidates one by one: a unit systemd gave no block for is
+        # unknown, a scope that is not loaded is gone
+        for unit in listed:
+            shown = blocks.get(unit + ".scope")
+            verdict = "unknown" if shown is None else _scope_verdict(shown)
+            if verdict == "running":
+                running.add(unit)
+            elif verdict == "empty":
+                empty.add(unit)
+            elif verdict == "unknown":
+                doubtful = doubtful or "systemd_unreadable"
+        # every heavy-gate scope that is loaded, whoever launched it
+        for name, shown in blocks.items():
+            unit = name.removesuffix(".scope")
+            if name == unit or not HEAVY_UNIT.fullmatch(unit):
+                continue  # (a probe scope, a service, anything that is not a job)
+            verdict = _scope_verdict(shown)
+            if verdict == "running":
+                running.add(unit)
+            elif verdict == "empty":
+                empty.add(unit)
+            elif verdict == "unknown":
+                doubtful = doubtful or "systemd_unreadable"
     kinds = sorted({HEAVY_UNIT.fullmatch(u).group(1) for u in running})
     if running:
         return {
             "state": "running",
             "count": len(running),
             "kinds": kinds,
-            "empty": empty,
+            "empty": len(empty),
             "why": None,
         }
     if doubtful:
-        return {**unknown, "empty": empty, "why": doubtful}
-    return {"state": "clear", "count": 0, "kinds": [], "empty": empty, "why": None}
+        return {
+            "state": "unknown",
+            "count": 0,
+            "kinds": [],
+            "empty": len(empty),
+            "why": doubtful,
+        }
+    return {
+        "state": "clear",
+        "count": 0,
+        "kinds": [],
+        "empty": len(empty),
+        "why": None,
+    }
 
 
 @dataclass
