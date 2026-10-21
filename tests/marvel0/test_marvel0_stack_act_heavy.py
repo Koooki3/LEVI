@@ -771,6 +771,53 @@ def test_a_tail_that_begins_in_a_line_drops_the_cut_line_and_keeps_the_next(
     assert heavy(log, systemd)["state"] == "running"
 
 
+# --- the log alone: the jobs it names, whatever systemd lists ---------------------------------
+# (the scopes systemd lists are a second source, so a job that the log names and
+# that has processes is "running" either way: these ask the log's own reading)
+
+
+def named_by_the_log(log, now=NOW):
+    return stack_act._heavy_log_candidates(log, lambda: now)
+
+
+def test_the_log_names_a_job_until_a_close_that_confirmed_its_scope_empty(log):
+    u = unit_name(1)
+    launch = launched(300, u)
+    write_log(log, [*launch, record(100, "finish", u, exit_code=0, emptied=True)])
+    assert named_by_the_log(log) == ([], None)
+    write_log(log, [*launch, record(100, "not_empty", u, emptied=False)])
+    assert named_by_the_log(log) == ([u], None)
+    write_log(log, [*launch, record(100, "interrupted", u, emptied="unknown")])
+    assert named_by_the_log(log) == ([u], None)
+    write_log(log, [*launch, record(100, "interrupted", u, emptied=True)])
+    assert named_by_the_log(log) == ([], None)
+    write_log(log, [*launch])
+    assert named_by_the_log(log) == ([u], None)
+
+
+def test_a_tail_that_begins_on_a_line_keeps_that_line_in_the_logs_own_reading(
+    log, monkeypatch
+):
+    tail_log(log, monkeypatch)
+    assert named_by_the_log(log) == ([unit_name(1)], None)
+
+
+def test_a_tail_that_begins_in_a_line_keeps_the_next_one_in_the_logs_own_reading(
+    log, monkeypatch
+):
+    tail_log(log, monkeypatch, extra=7)
+    assert named_by_the_log(log) == ([unit_name(1)], None)
+
+
+def test_the_logs_own_reading_says_why_it_cannot_be_relied_on(log, tmp_path):
+    assert named_by_the_log(log) == ([], "log_missing")
+    folder = tmp_path / "a-folder.jsonl"
+    folder.mkdir()
+    assert named_by_the_log(folder) == ([], "log_unreadable")
+    write_log(log, [record(30, "launching", unit_name(1), mode="pgroup")])
+    assert named_by_the_log(log) == ([], "not_a_scope")
+
+
 def test_all_the_candidates_are_asked_about_in_one_call_and_each_gets_its_own_answer(
     log,
 ):

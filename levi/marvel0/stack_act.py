@@ -906,17 +906,22 @@ def _show_blocks(run, names):
     return blocks
 
 
-def _scopes_tasks(run, scopes) -> dict:
-    """``{scope: verdict}`` (``_scope_verdict``) for ``scopes``, from ONE
-    ``systemctl --user show`` of all of them. A unit with no block of its own is
-    unknown, and so is every unit when systemd does not answer."""
-    blocks = _show_blocks(run, scopes)
+def _verdicts(blocks, scopes) -> dict:
+    """``{scope: verdict}`` (``_scope_verdict``) for ``scopes`` from the blocks
+    ``_show_blocks`` read. A unit with no block of its own is unknown, and so is
+    every unit when systemd did not answer (``blocks`` None)."""
     if blocks is None:
         return dict.fromkeys(scopes, "unknown")
     return {
         scope: _scope_verdict(blocks[scope]) if scope in blocks else "unknown"
         for scope in scopes
     }
+
+
+def _scopes_tasks(run, scopes) -> dict:
+    """``_verdicts`` for ``scopes`` from ONE ``systemctl --user show`` of all of
+    them."""
+    return _verdicts(_show_blocks(run, scopes), scopes)
 
 
 def _heavy_log_candidates(log_path, now):
@@ -1003,9 +1008,9 @@ def heavy_jobs_running(log_path, run, now=time.time) -> dict:
     else:
         # the log's candidates one by one: a unit systemd gave no block for is
         # unknown, a scope that is not loaded is gone
+        verdicts = _verdicts(blocks, [u + ".scope" for u in listed])
         for unit in listed:
-            shown = blocks.get(unit + ".scope")
-            verdict = "unknown" if shown is None else _scope_verdict(shown)
+            verdict = verdicts[unit + ".scope"]
             if verdict == "running":
                 running.add(unit)
             elif verdict == "empty":
