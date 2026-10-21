@@ -41,7 +41,11 @@ safe shutdown); a write error (a full disk) drops the bytes and goes on. And a
 hang-up (SIGHUP) sends **SIGINT** to the client's groups and to ours and only
 ``hangup_grace_s`` later (SIGALRM) SIGKILL: terminal D wraps up on SIGINT
 (stops the motion, holds the arm) and the grace is the user's decision of
-2026-10-21 (3 s). ``spec["events_file"]`` (optional) gets one
+2026-10-21 (3 s). Those signals go to the client's group, **to terminal D's own
+group** (``spec["runner_json"]``, D's heartbeat file: the pid in it counts only
+while it is still the process the file describes and a descendant of the client)
+and to ours: ``uv`` may one day put D in a group of its own, which the client's
+group would miss. ``spec["events_file"]`` (optional) gets one
 ``[HH:MM:SS] terminal D exited rc=<n>`` line when the client ends, the line
 ``wait_request.sh`` and ``res_monitor.py`` of the AERI tools wait for. A spec
 without ``mode`` behaves exactly as before.
@@ -67,6 +71,9 @@ AERI_DRAIN_JOIN_S = 5.0  # how long to wait for the last output after the client
 
 _child: subprocess.Popen | None = None
 _grace_s = AERI_GRACE_S
+_runner_json: str | None = None  # AERI mode: D's heartbeat file (its pid and identity)
+_known_runner: tuple | None = None  # D as last seen: (pid, (start_ticks, boot))
+_hung: list = []  # the groups the hang-up signalled (the grace's kill goes to them too)
 
 
 def _say(text: str) -> None:
@@ -116,9 +123,94 @@ def _hangup(signum, frame) -> None:
     os.killpg(own, signal.SIGKILL)
 
 
+def _own_identity(pid: int):
+    """``(start_ticks, boot)`` of a live process of ours, or None."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as handle:
+            fields = handle.read().rsplit(")", 1)[1].split()
+        if fields[0] in ("Z", "X", "x"):
+            return None
+        with open("/proc/sys/kernel/random/boot_id", encoding="utf-8") as handle:
+            return fields[19], handle.read().strip()
+    except (OSError, IndexError):
+        return None
+
+
+def _parent_of(pid: int):
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as handle:
+            return int(handle.read().rsplit(")", 1)[1].split()[1])
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _descends_from(pid: int, root: int) -> bool:
+    """Whether ``pid`` is ``root`` or one of its descendants (parent links, at
+    most 32 deep): a heartbeat file names a process of the client or it names
+    nothing this launcher may signal."""
+    for _ in range(32):
+        if pid == root:
+            return True
+        parent = _parent_of(pid)
+        if parent is None or parent <= 1:
+            return False
+        pid = parent
+    return False
+
+
+def _read_runner():
+    """``(pid, (start_ticks, boot))`` of terminal D from its heartbeat file: the
+    pid counts only while it is the process the file describes (start time and
+    boot) **and** a descendant of the client this launcher started. None
+    otherwise. May raise (the callers catch)."""
+    if _runner_json is None or _child is None:
+        return None
+    with open(_runner_json, "rb") as handle:
+        body = json.loads(handle.read(1 << 16))
+    pid, ident = body.get("pid"), body.get("identity")
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1:
+        return None
+    if not isinstance(ident, dict):
+        return None
+    found = _own_identity(pid)
+    if found is None:
+        return None
+    if (str(ident.get("start_ticks")), str(ident.get("boot"))) != found:
+        return None
+    if not _descends_from(pid, _child.pid):
+        return None
+    return pid, found
+
+
+def _runner_group():
+    """The process group of terminal D itself. D is the ``python`` under ``env``
+    and ``uv``; if ``uv`` ever puts it in a group of its own, the client's group
+    (``getpgid`` of the pid started here) is not D's. From the heartbeat file
+    while that proves D is ours; D as last seen otherwise (``uv`` may be gone
+    after a SIGINT while D wraps up, and D is then nobody's child here), as long
+    as that process is still the same one. Never raises: this runs inside signal
+    handlers."""
+    global _known_runner
+    try:
+        found = _read_runner()
+        if found is not None:
+            _known_runner = found
+        elif (
+            _known_runner is not None
+            and _own_identity(_known_runner[0]) == (_known_runner[1])
+        ):
+            found = _known_runner
+        if found is None:
+            return None
+        return os.getpgid(found[0])
+    except Exception:  # noqa: BLE001 - a handler never raises
+        return None
+
+
 def _groups() -> list:
     """The process groups to signal on a hang-up: the client's (it may differ
-    from ours: ``uv`` may put it in a group of its own) first, then our own."""
+    from ours: ``uv`` may put it in a group of its own), then **D's own** (from
+    its heartbeat, see ``_runner_group``), then our own."""
     own = os.getpgrp()
     groups = []
     if _child is not None:
@@ -128,6 +220,9 @@ def _groups() -> list:
             other = own
         if other != own:
             groups.append(other)
+    runner = _runner_group()
+    if runner is not None and runner != own and runner not in groups:
+        groups.append(runner)
     groups.append(own)
     return groups
 
@@ -137,7 +232,9 @@ def _hangup_aeri(signum, frame) -> None:
     motion, holds the arm and shuts its services down on it), SIGKILL after the
     grace (``_alarm``). SIGINT reaches this process too (its group); it
     ignores it."""
-    for group in _groups():
+    groups = _groups()
+    _hung[:] = groups
+    for group in groups:
         try:
             os.killpg(group, signal.SIGINT)
         except OSError:
@@ -151,8 +248,9 @@ def _hangup_aeri(signum, frame) -> None:
 
 
 def _alarm(signum, frame) -> None:
-    """The grace is over: nothing may run on without a keyboard."""
-    for group in _groups():
+    """The grace is over: nothing may run on without a keyboard. The groups the
+    hang-up signalled, and those that are the client's and D's now."""
+    for group in dict.fromkeys([*_hung, *_groups()]):
         try:
             os.killpg(group, signal.SIGKILL)
         except OSError:
@@ -200,6 +298,9 @@ def _load(path: str) -> dict:
         events = spec.get("events_file")
         if events is not None and not isinstance(events, str):
             raise ValueError("events_file must be a string")
+        runner = spec.get("runner_json")
+        if runner is not None and (not isinstance(runner, str) or not runner):
+            raise ValueError("runner_json must be a string")
         grace = spec.get("hangup_grace_s", AERI_GRACE_S)
         if (
             isinstance(grace, bool)
@@ -295,7 +396,7 @@ def _event(path, text: str) -> None:
 
 
 def main(argv) -> int:
-    global _child, _grace_s
+    global _child, _grace_s, _runner_json
     if len(argv) != 2:
         _say("usage: hostchild.py <spec.json>")
         return EXIT_SPAWN
@@ -311,6 +412,7 @@ def main(argv) -> int:
         # The grace timer's handler first: a hang-up that arrives at once must
         # find it installed.
         _grace_s = float(spec.get("hangup_grace_s", AERI_GRACE_S))
+        _runner_json = spec.get("runner_json")
         signal.signal(signal.SIGALRM, _alarm)
         signal.signal(signal.SIGHUP, _hangup_aeri)
     else:
@@ -356,6 +458,7 @@ def main(argv) -> int:
         code = _child.wait()
     else:
         code = _wait_aeri(_child, output)
+        _await_groups()
     sig = -code if code < 0 else None
     if aeri:
         with _timer_off():
@@ -368,6 +471,40 @@ def main(argv) -> int:
         _write_exit(spec["exit_file"], _child.pid, None if sig else code, sig)
     _say(f"client ended ({'signal ' + str(sig) if sig else 'code ' + str(code)})")
     return 128 + sig if sig else code
+
+
+def _group_alive(group: int) -> bool:
+    """Whether any process is left in the group (signal 0 reaches it)."""
+    try:
+        os.killpg(group, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # (not ours to signal, but there)
+    return True
+
+
+def _await_groups() -> None:
+    """After a hang-up the client may have ended on the SIGINT (``uv`` does not
+    always wait) while terminal D, or another process of its groups, is still
+    wrapping up: nobody's child here now, but nothing may keep stepping without a
+    keyboard, so this launcher stays, the grace timer armed (its SIGKILL goes to
+    the groups the hang-up signalled), until those groups are empty. Bounded: a
+    little after the grace the groups are killed here."""
+    if not _hung:
+        return
+    own = os.getpgrp()
+    left = [g for g in _hung if g != own]
+    deadline = time.monotonic() + _grace_s + 5.0
+    while left and time.monotonic() < deadline:
+        left = [g for g in left if _group_alive(g)]
+        if left:
+            time.sleep(0.1)
+    for group in left:
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except OSError:
+            pass
 
 
 class _timer_off:
@@ -393,6 +530,7 @@ def _wait_aeri(child, output) -> int:
         except subprocess.TimeoutExpired:
             if not output.alive():
                 output.start()
+            _runner_group()  # (remembers D while its heartbeat proves it is ours)
 
 
 if __name__ == "__main__":

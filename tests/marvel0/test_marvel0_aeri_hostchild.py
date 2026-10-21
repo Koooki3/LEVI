@@ -627,3 +627,259 @@ def test_the_hangup_handlers_are_installed_grace_timer_first(monkeypatch, tmp_pa
         for n in (signal.SIGTERM, signal.SIGTSTP, signal.SIGQUIT, signal.SIGHUP):
             real(n, signal.SIG_DFL)
     assert order.index(signal.SIGALRM) < order.index(signal.SIGHUP)
+
+
+# --- terminal D in a group of its own (the hang-up must reach it) ----------------------------
+
+# What ``uv run`` might one day do: start the real client in a process group of
+# its own and wait for it. The client (D) writes its heartbeat (pid and identity,
+# as ``runner.json`` has them) and ignores SIGINT, so only the SIGKILL of the
+# grace can end it.
+UV_STAND_IN = textwrap.dedent(
+    """
+    import signal, subprocess, sys
+    if sys.argv[2] == "waits":  # like uv: the Ctrl+C is D's, uv waits for D
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    d = subprocess.Popen([sys.executable, "-c", sys.argv[1]], process_group=0)
+    sys.exit(d.wait())
+    """
+)
+D_IN_ITS_OWN_GROUP = textwrap.dedent(
+    """
+    import json, os, signal, sys, time
+    log = open("signals.log", "a", buffering=1)
+    signal.signal(signal.SIGINT, lambda *a: log.write("INT %.3f\\n" % time.monotonic()))
+    signal.signal(signal.SIGHUP, lambda *a: log.write("HUP\\n"))
+    stat = open("/proc/%d/stat" % os.getpid()).read().rsplit(")", 1)[1].split()
+    boot = open("/proc/sys/kernel/random/boot_id").read().strip()
+    json.dump({"pid": os.getpid(), "state": "running",
+               "identity": {"start_ticks": stat[19], "boot": boot}},
+              open("runner.json", "w"))
+    open("up", "w").write(str(os.getpid()))
+    while True:
+        time.sleep(0.05)
+    """
+)
+
+
+def launch_client(tmp_path, argv, grace=0.6, **spec_extra):
+    """The launcher in AERI mode under a pty held by a separate core process; the
+    client signals that it is up by writing ``up`` (its pid)."""
+    spec = tmp_path / "uv-spec.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "mode": "aeri",
+                "argv": argv,
+                "cwd": str(tmp_path),
+                "exit_file": str(tmp_path / "exit.json"),
+                "out_log": str(tmp_path / "screen.log"),
+                "hangup_grace_s": grace,
+                **spec_extra,
+            }
+        )
+    )
+    core = subprocess.Popen(
+        [sys.executable, "-c", CORE, HOSTCHILD, str(spec), str(tmp_path / "core.log")],
+        stdout=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    launcher = int(core.stdout.readline())
+    assert wait_for(lambda: (tmp_path / "up").exists(), 15)
+    return core, launcher, int((tmp_path / "up").read_text())
+
+
+def launch_uv_with_d(tmp_path, runner_json="runner.json", grace=0.6, uv="waits"):
+    return launch_client(
+        tmp_path,
+        [sys.executable, "-c", UV_STAND_IN, D_IN_ITS_OWN_GROUP, uv],
+        grace=grace,
+        runner_json=str(tmp_path / runner_json),
+    )
+
+
+@pytest.mark.parametrize("uv", ["waits", "dies"])
+def test_a_client_in_a_group_of_its_own_still_gets_the_hangup(tmp_path, uv):
+    """The groups the hang-up signalled used to be the client's (``getpgid`` of the
+    process started here, which is ``uv``) and ours: a D that ``uv`` put in a group
+    of its own was missed, and kept stepping without a keyboard. ``uv`` that waits
+    for D and ``uv`` that ends on the SIGINT (D is nobody's child here then) both."""
+    core, launcher, d = launch_uv_with_d(tmp_path, uv=uv)
+    try:
+        assert os.getpgid(d) != os.getpgid(launcher) and os.getpgid(d) == d
+        core.kill()
+        core.wait()
+        assert gone(launcher, 10)
+        assert gone(d, 10), "D was in a group of its own and was killed all the same"
+        assert [n for n, _ in signals(tmp_path)][:1] == ["INT"], "SIGINT came first"
+    finally:
+        kill_all(core, launcher, tmp_path)
+        try:
+            os.killpg(d, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def test_the_heartbeat_names_a_process_that_is_not_the_clients_and_it_is_left_alone(
+    tmp_path,
+):
+    """The pid in ``runner.json`` is signalled only if it is a descendant of the
+    client this launcher started (and the process the file describes): a file that
+    names a bystander must not make the launcher kill it."""
+    bystander = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True
+    )
+    try:
+        stat = Path(f"/proc/{bystander.pid}/stat").read_text().rsplit(")", 1)[1].split()
+        boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        (tmp_path / "other.json").write_text(
+            json.dumps(
+                {
+                    "pid": bystander.pid,
+                    "identity": {"start_ticks": stat[19], "boot": boot},
+                }
+            )
+        )
+        core, launcher, d = launch_uv_with_d(tmp_path, runner_json="other.json")
+        try:
+            core.kill()
+            core.wait()
+            assert gone(launcher, 10)
+            assert bystander.poll() is None, "a process that is not D was signalled"
+            # (D, in a group of its own the launcher was not told of, is left too)
+        finally:
+            kill_all(core, launcher, tmp_path)
+            try:
+                os.killpg(d, signal.SIGKILL)
+            except OSError:
+                pass
+    finally:
+        bystander.kill()
+        bystander.wait(5)
+
+
+def test_a_heartbeat_whose_identity_is_not_the_processs_is_not_used(tmp_path):
+    core, launcher, d = launch_uv_with_d(tmp_path)
+    try:
+        body = json.loads((tmp_path / "runner.json").read_text())
+        body["identity"]["start_ticks"] = "1"
+        (tmp_path / "runner.json").write_text(json.dumps(body))
+        core.kill()
+        core.wait()
+        assert gone(launcher, 10)
+        assert run.proc_state(d) not in (None, "Z"), "a stale heartbeat was trusted"
+    finally:
+        kill_all(core, launcher, tmp_path)
+        try:
+            os.killpg(d, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+@pytest.mark.parametrize(
+    "content",
+    [b"", b"not json", b"[]", b'{"pid": true}', b'{"pid": 1}', b'{"pid": 99999999}'],
+)
+def test_a_heartbeat_that_cannot_be_used_gives_no_group_and_never_raises(
+    tmp_path, monkeypatch, content
+):
+    path = tmp_path / "runner.json"
+    path.write_bytes(content)
+
+    class Child:
+        pid = os.getpid()
+
+    monkeypatch.setattr(hostchild, "_runner_json", str(path))
+    monkeypatch.setattr(hostchild, "_child", Child())
+    assert hostchild._runner_group() is None
+    assert os.getpgrp() in hostchild._groups()
+    monkeypatch.setattr(hostchild, "_runner_json", str(tmp_path / "missing.json"))
+    assert hostchild._runner_group() is None
+    monkeypatch.setattr(hostchild, "_runner_json", None)
+    assert hostchild._runner_group() is None
+
+
+def test_the_runner_file_is_optional_in_the_spec_and_must_be_a_string(tmp_path):
+    spec = write_spec(tmp_path, "pass", runner_json="x.json")
+    assert hostchild._load(str(spec))["runner_json"] == "x.json"
+    for bad in (5, "", ["x"], True):
+        spec = write_spec(tmp_path, "pass", runner_json=bad)
+        with pytest.raises(ValueError):
+            hostchild._load(str(spec))
+    spec = write_spec(tmp_path, "pass")
+    assert "runner_json" not in hostchild._load(str(spec))
+
+
+# A client that leaves its own group behind: it puts itself in a group of its own,
+# starts a straggler in it and ends on the SIGINT (D, or anything else of that
+# group, is then nobody's child here).
+STRAGGLER = (
+    "import signal, time; signal.signal(signal.SIGINT, signal.SIG_IGN); time.sleep(120)"
+)
+CLIENT_THAT_LEAVES = textwrap.dedent(
+    """
+    import os, subprocess, sys, time
+    os.setpgid(0, 0)
+    straggler = subprocess.Popen([sys.executable, "-c", STRAGGLER])
+    open("straggler", "w").write(str(straggler.pid))
+    open("up", "w").write(str(os.getpid()))
+    time.sleep(120)
+    """
+)
+
+
+def test_what_the_client_leaves_in_its_own_group_is_killed_at_the_end_of_the_grace(
+    tmp_path,
+):
+    """The client ended on the SIGINT, so the launcher's wait for it is over, but
+    its group is not empty: the launcher stays until it is (the grace timer stays
+    armed) and the group is signalled by the number the hang-up recorded, though
+    ``getpgid`` of the reaped client no longer answers."""
+    core, launcher, client = launch_client(
+        tmp_path,
+        [
+            sys.executable,
+            "-c",
+            CLIENT_THAT_LEAVES.replace("STRAGGLER", repr(STRAGGLER)),
+        ],
+    )
+    straggler = int((tmp_path / "straggler").read_text())
+    try:
+        assert os.getpgid(straggler) == client != os.getpgid(launcher)
+        began = time.monotonic()
+        core.kill()
+        core.wait()
+        assert gone(straggler, 12), "a process of the client's group outlived the grace"
+        took = time.monotonic() - began
+        # at the end of the grace (0.6 s), not by the launcher's own backstop
+        # (the grace and 5 s more)
+        assert took < 3.5, took
+        assert gone(launcher, 10)
+    finally:
+        kill_all(core, launcher, tmp_path)
+        for pid in (straggler, client):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+
+def test_the_wait_for_the_groups_is_over_at_once_without_a_hangup(monkeypatch):
+    monkeypatch.setattr(hostchild, "_hung", [])
+    began = time.monotonic()
+    hostchild._await_groups()
+    assert time.monotonic() - began < 0.5
+
+
+def test_a_group_is_alive_while_a_process_is_in_it():
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True
+    )
+    try:
+        assert hostchild._group_alive(proc.pid) is True
+        proc.kill()
+        proc.wait(5)
+        assert hostchild._group_alive(proc.pid) is False
+    finally:
+        proc.kill()
