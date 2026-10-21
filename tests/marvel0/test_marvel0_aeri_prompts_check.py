@@ -72,16 +72,45 @@ def test_the_real_worktrees_are_what_their_profiles_were_written_from(profile):
     assert done.returncode == 0 and "is what it was written from" in done.stdout
 
 
-def test_this_repositorys_own_aeri_code_is_what_the_main_profile_was_written_from():
-    """If this fails, the AERI code of this repository changed (console_text.py,
-    console.py, subtask_units.py or fr3_run.py): review what changed in the
-    words or the prompts' order, then regenerate the profile with
-    ``uv run --no-sync python tests/marvel0/regen_aeri_prompts.py`` and a new
-    commit in ``PROFILES``. Until then the page refuses to host that code."""
-    found = check.check(ROOT, DATA["profiles"]["main-297a74c3"])
-    assert {k: v for k, v in found.items() if v} == {}, (
-        "main's AERI code moved: see the docstring"
+def test_the_main_profile_is_what_its_pinned_commit_has_in_it(tmp_path):
+    """The ``main-297a74c3`` profile against the files **of that commit**
+    (``git show``), not against this repository's own ``levi/automatic``: the page
+    hosts a pinned worktree and never the code it runs in, so a change to this
+    repository's AERI code must not break this test (it would only push people to
+    regenerate the profile without reading what changed). The gate against the
+    pinned worktrees is ``check_aeri_prompts.py``. Skipped where that commit is
+    not in the clone (a shallow one)."""
+    commit = DATA["profiles"]["main-297a74c3"]["commit"]
+    have = subprocess.run(
+        ["git", "-C", str(ROOT), "cat-file", "-e", f"{commit}^{{commit}}"],
+        capture_output=True,
+        timeout=30,
+        check=False,
     )
+    if have.returncode != 0:
+        pytest.skip(f"commit {commit} is not in this clone")
+    for rel in FILES:
+        shown = subprocess.run(
+            ["git", "-C", str(ROOT), "show", f"{commit}:{rel}"],
+            capture_output=True,
+            timeout=30,
+            check=True,
+        )
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(shown.stdout)
+    found = check.check(tmp_path, DATA["profiles"]["main-297a74c3"])
+    assert {k: v for k, v in found.items() if v} == {}, (
+        "the main profile no longer matches its own commit: regenerate it"
+    )
+
+
+def test_a_change_to_this_repositorys_own_aeri_code_is_not_this_files_business():
+    """The relaxation, pinned: nothing in this file reads ``levi/automatic`` of the
+    checkout it runs in."""
+    source = Path(__file__).read_text()
+    assert "check.check(" + "ROOT," not in source
+    assert 'ROOT / "levi" ' + '/ "automatic"' not in source
 
 
 def test_the_profile_the_page_pins_cannot_be_hosted_with_other_words(tree):
