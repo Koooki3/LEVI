@@ -85,6 +85,28 @@ LIST_TIMEOUT_S = 20
 LIST_KILL_AFTER_S = 3
 # systemd's RuntimeMaxSec is only the backstop behind `timeout`.
 PROBE_RUNTIME_MAX_S = LIST_TIMEOUT_S + LIST_KILL_AFTER_S + 12
+# The fast check whether a gripper stack runs asks the ROS graph instead of the
+# service: `ros2 node list --no-daemon --spin-time T` starts its own node (no
+# daemon: a daemon the one-shot spawned would die with the unit and cost a
+# start-up each time), waits T s for discovery and prints one node name per
+# line (ros2node/verb/list.py main(): `print(*sorted_names, sep='\n')`;
+# ros2cli/node/direct.py: the spin time). It ends by itself after about T + 2 s,
+# so the `timeout` here is only a backstop. A gripper stack is the nodes of
+# `robotiq_collect.launch.py`, all in the namespace `robotiq` (the control node
+# is `/robotiq/controller_manager`: ros2_control_node.cpp:43, launch :107).
+# "No such node" proves nothing by itself (a graph that has not been discovered
+# yet is empty too), so the answer only counts when the health monitor's own
+# node is in the list (``MONITOR_NODE``: fr3_health_monitor.py:285, the node of
+# the unit the page starts first): the graph is then known to have been
+# discovered. Without it the answer is inconclusive and the slow question
+# (``list_controllers``) is asked.
+NODES_SPIN_S = 2.0
+NODES_TIMEOUT_S = 8
+NODES_KILL_AFTER_S = 2
+NODES_RUNTIME_MAX_S = NODES_TIMEOUT_S + NODES_KILL_AFTER_S + 6
+GRIPPER_NAMESPACE = "/robotiq"
+GRIPPER_NODE = "/robotiq/controller_manager"
+MONITOR_NODE = "/fr3_health_monitor"
 GRIPPER_CONTROLLER_MANAGER = "/robotiq/controller_manager"
 GRIPPER_CONTROLLERS = (
     "joint_state_broadcaster_robotiq",
@@ -318,6 +340,7 @@ class Specs:
     gripper_cmd: object = None  # (position) -> argv
     controllers_cmd: tuple = ()
     ee_cmd: tuple = ()
+    nodes_cmd: tuple = ()  # the fast check of the ROS graph (``parse_nodes``)
     extra: dict = field(default_factory=dict)
 
 
@@ -465,6 +488,12 @@ def real_specs(control, wrapper=WRAPPER) -> Specs:
         ),
     )
 
+    nodes = _bounded(
+        NODES_TIMEOUT_S,
+        NODES_KILL_AFTER_S,
+        ("ros2", "node", "list", "--no-daemon", "--spin-time", str(NODES_SPIN_S)),
+    )
+
     def gripper(position):
         goal = f"{{command: {{position: {float(position)!r}, max_effort: 0.0}}}}"
         return check_argv(
@@ -503,6 +532,7 @@ def real_specs(control, wrapper=WRAPPER) -> Specs:
             _behind(wrapper, env_file, controllers), long_lived=False
         ),
         ee_cmd=check_argv(_behind(wrapper, env_file, ee), long_lived=False),
+        nodes_cmd=check_argv(_behind(wrapper, env_file, nodes), long_lived=False),
     )
 
 
@@ -777,6 +807,41 @@ def parse_controllers(text) -> dict:
     if _NO_SERVICE.search(plain):
         return {"state": "absent", "controllers": {}}
     return {"state": "unknown", "controllers": {}}
+
+
+# One line of `ros2 node list`: a fully qualified node name. Everything else
+# the command or the library prints (a log line, the duplicate-name warning on
+# standard error) is not a node.
+_NODE_NAME = re.compile(r"^/[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*$")
+
+
+def parse_nodes(text, code=0) -> dict:
+    """``{"state": present|absent|unknown, "nodes", "gripper", "canary"}`` of
+    ``ros2 node list`` (``code``: how the command ended).
+
+    ``present``: a node of the gripper stack's namespace is listed (the control
+    node, or any other: a half-started stack is somebody's gripper stack too).
+    ``absent``: nothing of it is listed, the command ended well (0), **and** the
+    health monitor's node is listed, which shows that discovery had run. Anything
+    else is ``unknown``, never absent: an empty list (nothing discovered), a
+    list without the monitor, a command that ended by ``timeout`` or failed."""
+    plain = strip_ansi(text)
+    nodes = sorted(
+        {line.strip() for line in plain.splitlines() if _NODE_NAME.match(line.strip())}
+    )
+    gripper = [
+        n
+        for n in nodes
+        if n == GRIPPER_NAMESPACE or n.startswith(GRIPPER_NAMESPACE + "/")
+    ]
+    canary = MONITOR_NODE in nodes
+    if gripper:
+        state = "present"
+    elif code == 0 and canary:
+        state = "absent"
+    else:
+        state = "unknown"
+    return {"state": state, "nodes": nodes, "gripper": gripper, "canary": canary}
 
 
 def gripper_controllers_ok(parsed) -> bool:

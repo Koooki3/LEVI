@@ -272,7 +272,7 @@ A_BREAKS = {
     ),
     "no marker": (lambda m: m.marker_path.unlink(), "gate.marker_set"),
     "young marker": (
-        lambda m: setattr(m, "t", os.lstat(m.marker_path).st_ctime + 10),
+        lambda m: setattr(m, "t", os.lstat(m.marker_path).st_ctime + 1),
         "marker_young",
     ),
     "arm sockets": (
@@ -1244,6 +1244,8 @@ def test_a_sequence_that_cannot_see_the_fci_port_stops_there(m):
     start_sequence(m)
     seq = run_sequence(m)
     assert seq["state"] == "failed" and seq["reason"] == "fci_closed"
+    # (the marker is set first now, so that its age runs during the check; a
+    # start that ends before A gives it back)
     assert m.systemd_runs("a") == [] and not m.marker_path.exists()
 
 

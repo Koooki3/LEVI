@@ -54,8 +54,13 @@ def grip(m, action="open", rid="grip-0000001"):
 
 
 def probes(m):
-    """The one-shot checks that asked B's controller manager."""
-    return [c for c in m.oneshots if "list_controllers" in " ".join(c)]
+    """The one-shot checks that asked whether a gripper stack runs: the ROS graph
+    (the fast question) and, when that proved nothing, B's controller manager."""
+    return [
+        c
+        for c in m.oneshots
+        if "list_controllers" in " ".join(c) or " node list " in " ".join(c)
+    ]
 
 
 def probe_request(n=1):
@@ -128,10 +133,11 @@ def test_the_b_check_alone_refreshes_it_with_a_up_and_makes_no_fci_connection(m)
 
 def test_the_b_check_is_bounded_as_the_one_before_a_is(m):
     m.m_ready()
+    m.nodes_out = ""  # (the graph proves nothing: the controller manager is asked)
     m.act.probe_b(probe_request())
-    [cmd] = probes(m)
+    [_, cmd] = probes(m)
     assert cmd[cmd.index("--") + 1 :][:6] == ["timeout", "-s", "INT", "-k", "3", "20"]
-    [run] = [c for c in m.calls if c[0] == "systemd-run" and "probe-b" in " ".join(c)]
+    [run] = [c for c in m.calls if c[0] == "systemd-run" and "probe-b-1" in " ".join(c)]
     limit = next(a for a in run if a.startswith("--property=RuntimeMaxSec="))
     assert int(limit.split("=")[2]) == stack_units.PROBE_RUNTIME_MAX_S
 

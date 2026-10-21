@@ -24,7 +24,14 @@ opens a socket."""
 import random
 
 import pytest
-from stack_act_machine import CONTROLLERS_OUT, NO_MANAGER, ActMachine
+from stack_act_machine import (
+    CONTROLLERS_OUT,
+    GRIPPER_NODES,
+    MONITOR_NODE,
+    NO_MANAGER,
+    ActMachine,
+    node_list_print,
+)
 from test_marvel0_deploy import forbid_real_machine  # noqa: F401 - the guard
 
 from levi.marvel0 import stack, stack_act
@@ -39,7 +46,13 @@ OTHER_STEPS = [
     *("time", "time", "hang", "table", "systemd", "sockets"),
     *("monitor_off", "monitor_on", "restart", "up", "up", "pre_c", "cancel"),
     *("release", "m_ready", "stop_all", "chain", "chain"),
+    # (the fast start: heavy jobs that run or cannot be told, a graph that says
+    # little or a gripper stack nobody started, an FCI port that does not answer)
+    *("heavy", "heavy", "nodes", "nodes", "fci"),
 ]
+CLEAR = {"state": "clear", "count": 0, "kinds": [], "empty": 0, "why": None}
+RUNNING = {**CLEAR, "state": "running", "count": 2, "kinds": ["pytest-dir"]}
+UNKNOWN = {**CLEAR, "state": "unknown", "why": "log_missing"}
 
 
 class Walk:
@@ -234,6 +247,23 @@ class Walk:
             m.act, m.sup = again, again.stack
             self.log.append(name)
             again.resume()
+        elif name == "heavy":
+            self.log.append(name)
+            m.heavy = rng.choice([CLEAR, CLEAR, RUNNING, UNKNOWN])
+        elif name == "nodes":
+            self.log.append(name)
+            m.nodes_out, m.nodes_code = rng.choice(
+                [(None, 0)] * 3
+                + [
+                    ("", 0),
+                    (node_list_print([MONITOR_NODE]), 0),
+                    (node_list_print([MONITOR_NODE, *GRIPPER_NODES]), 0),
+                    (node_list_print([MONITOR_NODE]), 124),
+                ]
+            )
+        elif name == "fci":
+            self.log.append(name)
+            m.fci = {"state": rng.choice(["open"] * 4 + ["closed", "unreachable"])}
         elif name == "up":
             for key, up in (("a", m.a_up), ("b", m.b_up), ("c", m.c_up)):
                 if key in m.units and m.units[key]["active"] == "active":
@@ -259,6 +289,7 @@ class Walk:
         SIGINT from the page's stop (the fake's ``ends_on_kill``)."""
         m = self.m
         m.systemd_down, m.table_ok, self.monitor_alive = False, True, True
+        m.heavy, m.nodes_out, m.fci = dict(CLEAR), None, {"state": "open"}
         m.show_failing.clear()
         for unit in m.units.values():
             unit["hangs"] = False
@@ -425,3 +456,18 @@ def test_the_walks_reach_the_chain_and_its_endings(tmp_path):
     assert {"waiting_confirm", "done"} <= {state for state, _ in endings}, sorted(
         endings, key=str
     )
+
+
+def test_the_walks_reach_a_heavy_job_that_does_not_end_and_the_wait_for_one(tmp_path):
+    reasons, waits = set(), set()
+    for seed in range(60):
+        walk = Walk(seed, tmp_path)
+        for _ in range(STEPS):
+            walk.step()
+            seq = walk.m.doc()["sequence"]
+            if seq["state"] == "failed":
+                reasons.add(seq["reason"])
+            wait = seq.get("wait") or {}
+            waits |= {h for h in wait.get("holds", ())}
+    assert "heavy_job_still_running" in reasons, sorted(reasons, key=str)
+    assert {"heavy_jobs_running", "heavy_jobs_unknown"} <= waits, sorted(waits)

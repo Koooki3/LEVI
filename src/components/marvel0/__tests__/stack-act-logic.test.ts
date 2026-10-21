@@ -476,9 +476,9 @@ describe("the stop of the whole stack", () => {
       step: "stop_a",
     });
     expect(view.steps).toEqual([
-      { step: "stop_c", terminal: "C", state: "done" },
-      { step: "stop_a", terminal: "A", state: "running" },
-      { step: "stop_b", terminal: "B", state: "pending" },
+      { step: "stop_c", terminal: "C", state: "done", tookS: 0 },
+      { step: "stop_a", terminal: "A", state: "running", tookS: null },
+      { step: "stop_b", terminal: "B", state: "pending", tookS: null },
     ]);
     // Done, failed (at A, with the single stop's own code) and cancelled.
     expect(act("stop_all_done").sequence.steps.map((x) => x.state)).toEqual([
@@ -510,8 +510,72 @@ describe("the stop of the whole stack", () => {
       ];
     }).sequence;
     expect(view.steps).toEqual([
-      { step: "stop_b", terminal: "B", state: "pending" },
+      { step: "stop_b", terminal: "B", state: "pending", tookS: null },
     ]);
+  });
+
+  test("the wait before A: what it waits for, the heavy jobs, and a reason with its count", () => {
+    const waiting = act("chain_waiting_heavy").sequence;
+    expect(waiting.remainingS).toBeNull(); // (a heavy job runs: its end is not known)
+    expect(waiting.wait).toEqual({
+      ageS: 14,
+      minS: 3,
+      remainingS: null,
+      heavy: { state: "running", count: 2 },
+      holds: ["heavy_jobs_running"],
+      capS: 90,
+      waitedS: 12.5,
+    });
+    const unknown = act("chain_waiting_heavy_unknown").sequence;
+    expect(unknown.wait!.heavy).toEqual({ state: "unknown", count: 0 });
+    expect(unknown.wait!.minS).toBe(45); // (the fixed wait of old)
+    expect(unknown.wait!.holds).toEqual(["heavy_jobs_unknown", "marker_young"]);
+    expect(unknown.remainingS).toBe(38);
+    const failed = act("chain_failed_heavy").sequence;
+    expect(failed.reason!.say).toEqual({
+      key: "marvel0.ctl.seq.reason.heavy_job_still_running",
+      params: { count: 2 },
+    });
+    expect(failed.wait).toBeNull(); // (over: the wait is no more)
+    expect(failed.tookS).toBe(104.5);
+  });
+
+  test("how long the steps took is read as numbers; anything else is null", () => {
+    const done = act("chain_done").sequence;
+    expect(done.steps.map((x) => x.tookS)).toEqual([
+      0, 1, 1, 4.5, 0.5, 0.5, 0.5, 1, 1, 1,
+    ]);
+    expect(done.tookS).toBe(
+      done.steps.reduce((sum, x) => sum + (x.tookS ?? 0), 0),
+    );
+    const odd = act("chain_done", (doc) => {
+      doc.act.sequence.steps[0].took_s = "slow";
+      delete doc.act.sequence.steps[1].took_s;
+      doc.act.sequence.took_s = null;
+    }).sequence;
+    expect(odd.steps[0].tookS).toBeNull();
+    expect(odd.steps[1].tookS).toBeNull();
+    expect(odd.tookS).toBeNull();
+  });
+
+  test("a wait of the wrong type reads as nothing known; an older backend sends none", () => {
+    const odd = act("chain_waiting_heavy", (doc) => {
+      doc.act.sequence.wait.heavy = { state: 7, count: "many" };
+      doc.act.sequence.wait.holds = "heavy_jobs_running";
+      doc.act.sequence.wait.cap_s = "ninety";
+    }).sequence.wait!;
+    expect(odd.heavy).toEqual({ state: "clear", count: 0 });
+    expect(odd.holds).toEqual([]);
+    expect(odd.capS).toBeNull();
+    const old = act("chain_waiting_heavy", (doc) => {
+      delete doc.act.sequence.wait;
+      delete doc.act.sequence.took_s;
+      delete doc.act.sequence.elapsed_s;
+      delete doc.act.sequence.reason_params;
+    }).sequence;
+    expect(old.wait).toBeNull();
+    expect(old.tookS).toBeNull();
+    expect(old.elapsedS).toBeNull();
   });
 
   test("an idle sequence (no kind) and an older backend read as a start with no steps", () => {

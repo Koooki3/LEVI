@@ -538,7 +538,7 @@
               {
                 "code": "b_probe_stale",
                 "level": "warn",
-                "text": "No usable check says whether a gripper stack is already running (none made, too old, or without an answer): pressing start makes the check first (about 20 s); press start again when it has finished.",
+                "text": "No usable check says whether a gripper stack is already running (none made, too old, or without an answer): pressing start makes the check first (a few seconds); press start again when it has finished.",
                 "params": {
                   "age_s": null
                 }
@@ -658,8 +658,10 @@
           "age_s": null,
           "ctime_age_s": null,
           "ours": false,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": null,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -1258,7 +1260,7 @@
               {
                 "code": "b_probe_stale",
                 "level": "warn",
-                "text": "No usable check says whether a gripper stack is already running (none made, too old, or without an answer): pressing start makes the check first (about 20 s); press start again when it has finished.",
+                "text": "No usable check says whether a gripper stack is already running (none made, too old, or without an answer): pressing start makes the check first (a few seconds); press start again when it has finished.",
                 "params": {
                   "age_s": null
                 }
@@ -1372,8 +1374,10 @@
           "age_s": null,
           "ctime_age_s": null,
           "ours": false,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": null,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -2040,8 +2044,16 @@
           "age_s": 90.0,
           "ctime_age_s": 90.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": {
+            "state": "clear",
+            "count": 0,
+            "kinds": [],
+            "empty": 0,
+            "why": null
+          },
           "touch_blockers": []
         },
         "sequence": {
@@ -2080,7 +2092,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 0.0,
             "fresh": true
           },
@@ -2765,8 +2778,10 @@
           "age_s": 102.0,
           "ctime_age_s": 102.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -2805,7 +2820,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 12.0,
             "fresh": true
           },
@@ -3460,8 +3476,10 @@
           "age_s": 102.0,
           "ctime_age_s": 102.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -3500,7 +3518,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 12.0,
             "fresh": true
           },
@@ -4202,8 +4221,10 @@
           "age_s": 106.0,
           "ctime_age_s": 106.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -4242,7 +4263,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 16.0,
             "fresh": true
           },
@@ -4937,8 +4959,10 @@
           "age_s": 106.0,
           "ctime_age_s": 106.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -4970,7 +4994,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 16.0,
             "fresh": true
           },
@@ -5665,8 +5690,10 @@
           "age_s": 106.0,
           "ctime_age_s": 106.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -5705,7 +5732,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 16.0,
             "fresh": true
           },
@@ -6400,8 +6428,10 @@
           "age_s": 106.0,
           "ctime_age_s": 106.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -6440,7 +6470,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 16.0,
             "fresh": true
           },
@@ -7180,8 +7211,10 @@
           "age_s": 109.0,
           "ctime_age_s": 109.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -7220,7 +7253,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 19.0,
             "fresh": true
           },
@@ -7987,8 +8021,10 @@
           "age_s": 109.0,
           "ctime_age_s": 109.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -8027,7 +8063,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 19.0,
             "fresh": true
           },
@@ -8803,8 +8840,10 @@
           "age_s": 109.0,
           "ctime_age_s": 109.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -8852,7 +8891,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 19.0,
             "fresh": true
           },
@@ -9560,8 +9600,10 @@
           "age_s": 109.0,
           "ctime_age_s": 109.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -9600,7 +9642,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 19.0,
             "fresh": true
           },
@@ -10299,8 +10342,10 @@
           "age_s": 96.0,
           "ctime_age_s": 96.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -10339,7 +10384,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 6.0,
             "fresh": true
           },
@@ -10929,7 +10975,7 @@
               {
                 "code": "b_probe_stale",
                 "level": "warn",
-                "text": "No usable check says whether a gripper stack is already running (none made, too old, or without an answer): pressing start makes the check first (about 20 s); press start again when it has finished.",
+                "text": "No usable check says whether a gripper stack is already running (none made, too old, or without an answer): pressing start makes the check first (a few seconds); press start again when it has finished.",
                 "params": {
                   "age_s": null
                 }
@@ -11049,8 +11095,10 @@
           "age_s": null,
           "ctime_age_s": null,
           "ours": false,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": null,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -11061,6 +11109,8 @@
           "reason": null,
           "since": 1800000000.0,
           "step_at": 1800000000.0,
+          "reason_params": null,
+          "took_s": null,
           "through": "a",
           "pauses": {
             "b": true,
@@ -11070,34 +11120,47 @@
             {
               "step": "monitor",
               "terminal": "m",
-              "state": "running"
-            },
-            {
-              "step": "probe",
-              "terminal": "a",
-              "state": "pending"
+              "state": "running",
+              "at": 1800000000.0,
+              "took_s": null
             },
             {
               "step": "marker",
               "terminal": "a",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "probe",
+              "terminal": "a",
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "wait",
               "terminal": "a",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "arm",
               "terminal": "a",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "await_a",
               "terminal": "a",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             }
-          ]
+          ],
+          "elapsed_s": 0.0
         },
         "gripper_test": {
           "state": "idle",
@@ -11174,7 +11237,7 @@
     },
     "sequence_waiting_b": {
       "schema": "levi.marvel0.stack.v1",
-      "sampled_at": 1800000080.0,
+      "sampled_at": 1800000040.0,
       "profile": "real",
       "profile_code": "profile.product",
       "lock": {
@@ -11205,8 +11268,8 @@
       },
       "marker": {
         "state": "present",
-        "age_s": 80.0,
-        "ctime_age_s": 80.0,
+        "age_s": 40.0,
+        "ctime_age_s": 40.0,
         "code": null,
         "can_clear": false,
         "clear_blockers": ["marker_a_unit", "marker_arm_active"]
@@ -11347,7 +11410,7 @@
               "ok": true,
               "level": "required",
               "params": {
-                "age_s": 80.0
+                "age_s": 40.0
               }
             },
             {
@@ -11772,11 +11835,13 @@
         },
         "marker": {
           "state": "present",
-          "age_s": 80.0,
-          "ctime_age_s": 80.0,
+          "age_s": 40.0,
+          "ctime_age_s": 40.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -11785,8 +11850,10 @@
           "step": null,
           "next": "b",
           "reason": null,
-          "since": 1800000080.0,
-          "step_at": 1800000080.0,
+          "since": 1800000040.0,
+          "step_at": 1800000040.0,
+          "reason_params": null,
+          "took_s": null,
           "through": "a",
           "pauses": {
             "b": true,
@@ -11796,34 +11863,47 @@
             {
               "step": "monitor",
               "terminal": "m",
-              "state": "done"
-            },
-            {
-              "step": "probe",
-              "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
             },
             {
               "step": "marker",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
+            },
+            {
+              "step": "probe",
+              "terminal": "a",
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
             },
             {
               "step": "wait",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 40.0
             },
             {
               "step": "arm",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000040.0,
+              "took_s": 0.0
             },
             {
               "step": "await_a",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000040.0,
+              "took_s": 0.0
             }
-          ]
+          ],
+          "elapsed_s": 40.0
         },
         "gripper_test": {
           "state": "idle",
@@ -11851,14 +11931,15 @@
           "fci": {
             "at": 1800000000.0,
             "state": "open",
-            "age_s": 80.0,
+            "age_s": 40.0,
             "fresh": true
           },
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
-            "age_s": 80.0,
+            "by": "nodes",
+            "graph": "absent",
+            "age_s": 40.0,
             "fresh": true
           },
           "c_preflight": null,
@@ -12431,7 +12512,7 @@
               {
                 "code": "b_probe_stale",
                 "level": "warn",
-                "text": "No usable check says whether a gripper stack is already running (none made, too old, or without an answer): pressing start makes the check first (about 20 s); press start again when it has finished.",
+                "text": "No usable check says whether a gripper stack is already running (none made, too old, or without an answer): pressing start makes the check first (a few seconds); press start again when it has finished.",
                 "params": {
                   "age_s": null
                 }
@@ -12545,8 +12626,10 @@
           "age_s": null,
           "ctime_age_s": null,
           "ours": false,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": null,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -12557,6 +12640,8 @@
           "reason": null,
           "since": 1800000000.0,
           "step_at": 1800000000.0,
+          "reason_params": null,
+          "took_s": null,
           "through": "c",
           "pauses": {
             "b": false,
@@ -12566,54 +12651,75 @@
             {
               "step": "monitor",
               "terminal": "m",
-              "state": "running"
-            },
-            {
-              "step": "probe",
-              "terminal": "a",
-              "state": "pending"
+              "state": "running",
+              "at": 1800000000.0,
+              "took_s": null
             },
             {
               "step": "marker",
               "terminal": "a",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "probe",
+              "terminal": "a",
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "wait",
               "terminal": "a",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "arm",
               "terminal": "a",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "await_a",
               "terminal": "a",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "b_probe",
               "terminal": "b",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "b",
               "terminal": "b",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "c_preflight",
               "terminal": "c",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "c",
               "terminal": "c",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             }
-          ]
+          ],
+          "elapsed_s": 0.0
         },
         "gripper_test": {
           "state": "idle",
@@ -12690,7 +12796,7 @@
     },
     "chain_running_b": {
       "schema": "levi.marvel0.stack.v1",
-      "sampled_at": 1800000080.0,
+      "sampled_at": 1800000008.5,
       "profile": "real",
       "profile_code": "profile.product",
       "lock": {
@@ -12712,7 +12818,7 @@
       },
       "health": {
         "state": "ok",
-        "age_s": 0.1,
+        "age_s": 1.1,
         "monitor_pid": 4242,
         "hardware_active": true,
         "controller_active": false,
@@ -12721,8 +12827,8 @@
       },
       "marker": {
         "state": "present",
-        "age_s": 80.0,
-        "ctime_age_s": 80.0,
+        "age_s": 8.0,
+        "ctime_age_s": 8.0,
         "code": null,
         "can_clear": false,
         "clear_blockers": ["marker_a_unit", "marker_arm_active"]
@@ -12737,7 +12843,7 @@
             },
             {
               "code": "health.age_s",
-              "value": 0.1
+              "value": 1.1
             },
             {
               "code": "m.pid_matches",
@@ -12863,7 +12969,7 @@
               "ok": true,
               "level": "required",
               "params": {
-                "age_s": 80.0
+                "age_s": 8.0
               }
             },
             {
@@ -13155,7 +13261,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 0.0,
+              "waited_s": 1.5,
               "timeout_s": 90.0
             },
             "owned": true,
@@ -13288,11 +13394,13 @@
         },
         "marker": {
           "state": "present",
-          "age_s": 80.0,
-          "ctime_age_s": 80.0,
+          "age_s": 8.0,
+          "ctime_age_s": 8.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -13302,7 +13410,9 @@
           "next": null,
           "reason": null,
           "since": 1800000000.0,
-          "step_at": 1800000080.0,
+          "step_at": 1800000008.0,
+          "reason_params": null,
+          "took_s": null,
           "through": "c",
           "pauses": {
             "b": false,
@@ -13312,54 +13422,75 @@
             {
               "step": "monitor",
               "terminal": "m",
-              "state": "done"
-            },
-            {
-              "step": "probe",
-              "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
             },
             {
               "step": "marker",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 1.0
+            },
+            {
+              "step": "probe",
+              "terminal": "a",
+              "state": "done",
+              "at": 1800000001.0,
+              "took_s": 1.0
             },
             {
               "step": "wait",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000002.0,
+              "took_s": 4.5
             },
             {
               "step": "arm",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000006.5,
+              "took_s": 0.5
             },
             {
               "step": "await_a",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000007.0,
+              "took_s": 0.5
             },
             {
               "step": "b_probe",
               "terminal": "b",
-              "state": "done"
+              "state": "done",
+              "at": 1800000007.5,
+              "took_s": 0.5
             },
             {
               "step": "b",
               "terminal": "b",
-              "state": "running"
+              "state": "running",
+              "at": 1800000008.0,
+              "took_s": null
             },
             {
               "step": "c_preflight",
               "terminal": "c",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "c",
               "terminal": "c",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             }
-          ]
+          ],
+          "elapsed_s": 8.5
         },
         "gripper_test": {
           "state": "idle",
@@ -13379,22 +13510,23 @@
           "kind": "preflight_a",
           "terminal": null,
           "state": "done",
-          "started_at": 1800000000.0,
-          "finished_at": 1800000000.0,
+          "started_at": 1800000001.5,
+          "finished_at": 1800000001.5,
           "code": null
         },
         "checks": {
           "fci": {
-            "at": 1800000000.0,
+            "at": 1800000001.5,
             "state": "open",
-            "age_s": 80.0,
+            "age_s": 7.0,
             "fresh": true
           },
           "b_probe": {
-            "at": 1800000000.0,
+            "at": 1800000000.5,
             "state": "absent",
-            "by": "probe",
-            "age_s": 80.0,
+            "by": "nodes",
+            "graph": "absent",
+            "age_s": 8.0,
             "fresh": true
           },
           "c_preflight": null,
@@ -13450,7 +13582,7 @@
     },
     "chain_running_c_check": {
       "schema": "levi.marvel0.stack.v1",
-      "sampled_at": 1800000080.0,
+      "sampled_at": 1800000009.5,
       "profile": "real",
       "profile_code": "profile.product",
       "lock": {
@@ -13472,7 +13604,7 @@
       },
       "health": {
         "state": "ok",
-        "age_s": 0.1,
+        "age_s": 0.6,
         "monitor_pid": 4242,
         "hardware_active": true,
         "controller_active": false,
@@ -13481,8 +13613,8 @@
       },
       "marker": {
         "state": "present",
-        "age_s": 80.0,
-        "ctime_age_s": 80.0,
+        "age_s": 9.0,
+        "ctime_age_s": 9.0,
         "code": null,
         "can_clear": false,
         "clear_blockers": ["marker_a_unit", "marker_arm_active"]
@@ -13497,7 +13629,7 @@
             },
             {
               "code": "health.age_s",
-              "value": 0.1
+              "value": 0.6
             },
             {
               "code": "m.pid_matches",
@@ -13623,7 +13755,7 @@
               "ok": true,
               "level": "required",
               "params": {
-                "age_s": 80.0
+                "age_s": 9.0
               }
             },
             {
@@ -13925,7 +14057,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 0.0,
+              "waited_s": 2.5,
               "timeout_s": 90.0
             },
             "owned": true,
@@ -14005,7 +14137,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 0.0,
+              "waited_s": 1.0,
               "timeout_s": 60.0
             },
             "owned": true,
@@ -14085,11 +14217,13 @@
         },
         "marker": {
           "state": "present",
-          "age_s": 80.0,
-          "ctime_age_s": 80.0,
+          "age_s": 9.0,
+          "ctime_age_s": 9.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -14099,7 +14233,9 @@
           "next": null,
           "reason": null,
           "since": 1800000000.0,
-          "step_at": 1800000080.0,
+          "step_at": 1800000009.0,
+          "reason_params": null,
+          "took_s": null,
           "through": "c",
           "pauses": {
             "b": false,
@@ -14109,54 +14245,75 @@
             {
               "step": "monitor",
               "terminal": "m",
-              "state": "done"
-            },
-            {
-              "step": "probe",
-              "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
             },
             {
               "step": "marker",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 1.0
+            },
+            {
+              "step": "probe",
+              "terminal": "a",
+              "state": "done",
+              "at": 1800000001.0,
+              "took_s": 1.0
             },
             {
               "step": "wait",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000002.0,
+              "took_s": 4.5
             },
             {
               "step": "arm",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000006.5,
+              "took_s": 0.5
             },
             {
               "step": "await_a",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000007.0,
+              "took_s": 0.5
             },
             {
               "step": "b_probe",
               "terminal": "b",
-              "state": "done"
+              "state": "done",
+              "at": 1800000007.5,
+              "took_s": 0.5
             },
             {
               "step": "b",
               "terminal": "b",
-              "state": "done"
+              "state": "done",
+              "at": 1800000008.0,
+              "took_s": 1.0
             },
             {
               "step": "c_preflight",
               "terminal": "c",
-              "state": "running"
+              "state": "running",
+              "at": 1800000009.0,
+              "took_s": null
             },
             {
               "step": "c",
               "terminal": "c",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             }
-          ]
+          ],
+          "elapsed_s": 9.5
         },
         "gripper_test": {
           "state": "idle",
@@ -14169,22 +14326,23 @@
           "kind": "preflight_a",
           "terminal": null,
           "state": "done",
-          "started_at": 1800000000.0,
-          "finished_at": 1800000000.0,
+          "started_at": 1800000001.5,
+          "finished_at": 1800000001.5,
           "code": null
         },
         "checks": {
           "fci": {
-            "at": 1800000000.0,
+            "at": 1800000001.5,
             "state": "open",
-            "age_s": 80.0,
+            "age_s": 8.0,
             "fresh": true
           },
           "b_probe": {
-            "at": 1800000000.0,
+            "at": 1800000000.5,
             "state": "absent",
-            "by": "probe",
-            "age_s": 80.0,
+            "by": "nodes",
+            "graph": "absent",
+            "age_s": 9.0,
             "fresh": true
           },
           "c_preflight": null,
@@ -14240,7 +14398,7 @@
     },
     "chain_running_c": {
       "schema": "levi.marvel0.stack.v1",
-      "sampled_at": 1800000080.0,
+      "sampled_at": 1800000010.5,
       "profile": "real",
       "profile_code": "profile.product",
       "lock": {
@@ -14262,7 +14420,7 @@
       },
       "health": {
         "state": "ok",
-        "age_s": 0.1,
+        "age_s": 0.6,
         "monitor_pid": 4242,
         "hardware_active": true,
         "controller_active": false,
@@ -14271,8 +14429,8 @@
       },
       "marker": {
         "state": "present",
-        "age_s": 80.0,
-        "ctime_age_s": 80.0,
+        "age_s": 10.0,
+        "ctime_age_s": 10.0,
         "code": null,
         "can_clear": false,
         "clear_blockers": ["marker_a_unit", "marker_arm_active"]
@@ -14287,7 +14445,7 @@
             },
             {
               "code": "health.age_s",
-              "value": 0.1
+              "value": 0.6
             },
             {
               "code": "m.pid_matches",
@@ -14413,7 +14571,7 @@
               "ok": true,
               "level": "required",
               "params": {
-                "age_s": 80.0
+                "age_s": 10.0
               }
             },
             {
@@ -14715,7 +14873,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 0.0,
+              "waited_s": 3.5,
               "timeout_s": 90.0
             },
             "owned": true,
@@ -14795,7 +14953,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 0.0,
+              "waited_s": 2.0,
               "timeout_s": 60.0
             },
             "owned": true,
@@ -14866,11 +15024,13 @@
         },
         "marker": {
           "state": "present",
-          "age_s": 80.0,
-          "ctime_age_s": 80.0,
+          "age_s": 10.0,
+          "ctime_age_s": 10.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -14880,7 +15040,9 @@
           "next": null,
           "reason": null,
           "since": 1800000000.0,
-          "step_at": 1800000080.0,
+          "step_at": 1800000010.0,
+          "reason_params": null,
+          "took_s": null,
           "through": "c",
           "pauses": {
             "b": false,
@@ -14890,54 +15052,75 @@
             {
               "step": "monitor",
               "terminal": "m",
-              "state": "done"
-            },
-            {
-              "step": "probe",
-              "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
             },
             {
               "step": "marker",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 1.0
+            },
+            {
+              "step": "probe",
+              "terminal": "a",
+              "state": "done",
+              "at": 1800000001.0,
+              "took_s": 1.0
             },
             {
               "step": "wait",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000002.0,
+              "took_s": 4.5
             },
             {
               "step": "arm",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000006.5,
+              "took_s": 0.5
             },
             {
               "step": "await_a",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000007.0,
+              "took_s": 0.5
             },
             {
               "step": "b_probe",
               "terminal": "b",
-              "state": "done"
+              "state": "done",
+              "at": 1800000007.5,
+              "took_s": 0.5
             },
             {
               "step": "b",
               "terminal": "b",
-              "state": "done"
+              "state": "done",
+              "at": 1800000008.0,
+              "took_s": 1.0
             },
             {
               "step": "c_preflight",
               "terminal": "c",
-              "state": "done"
+              "state": "done",
+              "at": 1800000009.0,
+              "took_s": 1.0
             },
             {
               "step": "c",
               "terminal": "c",
-              "state": "running"
+              "state": "running",
+              "at": 1800000010.0,
+              "took_s": null
             }
-          ]
+          ],
+          "elapsed_s": 10.5
         },
         "gripper_test": {
           "state": "idle",
@@ -14950,32 +15133,33 @@
           "kind": "preflight_c",
           "terminal": null,
           "state": "done",
-          "started_at": 1800000080.0,
-          "finished_at": 1800000080.0,
+          "started_at": 1800000009.5,
+          "finished_at": 1800000009.5,
           "code": null
         },
         "checks": {
           "fci": {
-            "at": 1800000000.0,
+            "at": 1800000001.5,
             "state": "open",
-            "age_s": 80.0,
+            "age_s": 9.0,
             "fresh": true
           },
           "b_probe": {
-            "at": 1800000000.0,
+            "at": 1800000000.5,
             "state": "absent",
-            "by": "probe",
-            "age_s": 80.0,
+            "by": "nodes",
+            "graph": "absent",
+            "age_s": 10.0,
             "fresh": true
           },
           "c_preflight": {
-            "at": 1800000080.0,
+            "at": 1800000009.5,
             "ok": true,
             "qos": true,
             "controllers": true,
             "controllers_state": "listed",
             "ee_frame": true,
-            "age_s": 0.0,
+            "age_s": 1.0,
             "fresh": true
           },
           "can_probe_b": false,
@@ -15030,7 +15214,7 @@
     },
     "chain_done": {
       "schema": "levi.marvel0.stack.v1",
-      "sampled_at": 1800000080.0,
+      "sampled_at": 1800000011.5,
       "profile": "real",
       "profile_code": "profile.product",
       "lock": {
@@ -15061,8 +15245,8 @@
       },
       "marker": {
         "state": "present",
-        "age_s": 80.0,
-        "ctime_age_s": 80.0,
+        "age_s": 11.0,
+        "ctime_age_s": 11.0,
         "code": null,
         "can_clear": false,
         "clear_blockers": ["marker_a_unit", "marker_arm_active"]
@@ -15203,7 +15387,7 @@
               "ok": true,
               "level": "required",
               "params": {
-                "age_s": 80.0
+                "age_s": 11.0
               }
             },
             {
@@ -15507,7 +15691,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 0.0,
+              "waited_s": 4.5,
               "timeout_s": 90.0
             },
             "owned": true,
@@ -15594,7 +15778,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 0.0,
+              "waited_s": 3.0,
               "timeout_s": 60.0
             },
             "owned": true,
@@ -15674,7 +15858,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 0.0,
+              "waited_s": 1.0,
               "timeout_s": 60.0
             },
             "owned": true,
@@ -15724,11 +15908,13 @@
         },
         "marker": {
           "state": "present",
-          "age_s": 80.0,
-          "ctime_age_s": 80.0,
+          "age_s": 11.0,
+          "ctime_age_s": 11.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -15738,7 +15924,9 @@
           "next": null,
           "reason": null,
           "since": 1800000000.0,
-          "step_at": 1800000080.0,
+          "step_at": 1800000010.0,
+          "reason_params": null,
+          "took_s": 11.0,
           "through": "c",
           "pauses": {
             "b": false,
@@ -15748,52 +15936,72 @@
             {
               "step": "monitor",
               "terminal": "m",
-              "state": "done"
-            },
-            {
-              "step": "probe",
-              "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
             },
             {
               "step": "marker",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 1.0
+            },
+            {
+              "step": "probe",
+              "terminal": "a",
+              "state": "done",
+              "at": 1800000001.0,
+              "took_s": 1.0
             },
             {
               "step": "wait",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000002.0,
+              "took_s": 4.5
             },
             {
               "step": "arm",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000006.5,
+              "took_s": 0.5
             },
             {
               "step": "await_a",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000007.0,
+              "took_s": 0.5
             },
             {
               "step": "b_probe",
               "terminal": "b",
-              "state": "done"
+              "state": "done",
+              "at": 1800000007.5,
+              "took_s": 0.5
             },
             {
               "step": "b",
               "terminal": "b",
-              "state": "done"
+              "state": "done",
+              "at": 1800000008.0,
+              "took_s": 1.0
             },
             {
               "step": "c_preflight",
               "terminal": "c",
-              "state": "done"
+              "state": "done",
+              "at": 1800000009.0,
+              "took_s": 1.0
             },
             {
               "step": "c",
               "terminal": "c",
-              "state": "done"
+              "state": "done",
+              "at": 1800000010.0,
+              "took_s": 1.0
             }
           ]
         },
@@ -15808,32 +16016,33 @@
           "kind": "preflight_c",
           "terminal": null,
           "state": "done",
-          "started_at": 1800000080.0,
-          "finished_at": 1800000080.0,
+          "started_at": 1800000009.5,
+          "finished_at": 1800000009.5,
           "code": null
         },
         "checks": {
           "fci": {
-            "at": 1800000000.0,
+            "at": 1800000001.5,
             "state": "open",
-            "age_s": 80.0,
+            "age_s": 10.0,
             "fresh": true
           },
           "b_probe": {
-            "at": 1800000000.0,
+            "at": 1800000000.5,
             "state": "absent",
-            "by": "probe",
-            "age_s": 80.0,
+            "by": "nodes",
+            "graph": "absent",
+            "age_s": 11.0,
             "fresh": true
           },
           "c_preflight": {
-            "at": 1800000080.0,
+            "at": 1800000009.5,
             "ok": true,
             "qos": true,
             "controllers": true,
             "controllers_state": "listed",
             "ee_frame": true,
-            "age_s": 0.0,
+            "age_s": 2.0,
             "fresh": true
           },
           "can_probe_b": false,
@@ -15892,7 +16101,7 @@
     },
     "stop_all_started_blocks_starts": {
       "schema": "levi.marvel0.stack.v1",
-      "sampled_at": 1800000080.0,
+      "sampled_at": 1800000011.5,
       "profile": "real",
       "profile_code": "profile.product",
       "lock": {
@@ -15923,8 +16132,8 @@
       },
       "marker": {
         "state": "present",
-        "age_s": 80.0,
-        "ctime_age_s": 80.0,
+        "age_s": 11.0,
+        "ctime_age_s": 11.0,
         "code": null,
         "can_clear": false,
         "clear_blockers": ["marker_a_unit", "marker_arm_active"]
@@ -16065,7 +16274,7 @@
               "ok": true,
               "level": "required",
               "params": {
-                "age_s": 80.0
+                "age_s": 11.0
               }
             },
             {
@@ -16369,7 +16578,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 0.0,
+              "waited_s": 4.5,
               "timeout_s": 90.0
             },
             "owned": true,
@@ -16462,7 +16671,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 0.0,
+              "waited_s": 3.0,
               "timeout_s": 60.0
             },
             "owned": true,
@@ -16548,7 +16757,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 0.0,
+              "waited_s": 1.0,
               "timeout_s": 60.0
             },
             "owned": true,
@@ -16604,11 +16813,13 @@
         },
         "marker": {
           "state": "present",
-          "age_s": 80.0,
-          "ctime_age_s": 80.0,
+          "age_s": 11.0,
+          "ctime_age_s": 11.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": [
             {
               "code": "sequence_stopping",
@@ -16624,25 +16835,34 @@
           "step": "stop_c",
           "next": null,
           "reason": null,
-          "since": 1800000080.0,
-          "step_at": 1800000080.0,
+          "since": 1800000011.5,
+          "step_at": 1800000011.5,
+          "reason_params": null,
+          "took_s": null,
           "steps": [
             {
               "step": "stop_c",
               "terminal": "c",
-              "state": "running"
+              "state": "running",
+              "at": 1800000011.5,
+              "took_s": null
             },
             {
               "step": "stop_a",
               "terminal": "a",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "stop_b",
               "terminal": "b",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             }
-          ]
+          ],
+          "elapsed_s": 0.0
         },
         "gripper_test": {
           "state": "idle",
@@ -16662,32 +16882,33 @@
           "kind": "preflight_c",
           "terminal": null,
           "state": "done",
-          "started_at": 1800000080.0,
-          "finished_at": 1800000080.0,
+          "started_at": 1800000009.5,
+          "finished_at": 1800000009.5,
           "code": null
         },
         "checks": {
           "fci": {
-            "at": 1800000000.0,
+            "at": 1800000001.5,
             "state": "open",
-            "age_s": 80.0,
+            "age_s": 10.0,
             "fresh": true
           },
           "b_probe": {
-            "at": 1800000000.0,
+            "at": 1800000000.5,
             "state": "absent",
-            "by": "probe",
-            "age_s": 80.0,
+            "by": "nodes",
+            "graph": "absent",
+            "age_s": 11.0,
             "fresh": true
           },
           "c_preflight": {
-            "at": 1800000080.0,
+            "at": 1800000009.5,
             "ok": true,
             "qos": true,
             "controllers": true,
             "controllers_state": "listed",
             "ee_frame": true,
-            "age_s": 0.0,
+            "age_s": 2.0,
             "fresh": true
           },
           "can_probe_b": false,
@@ -16751,9 +16972,2407 @@
         }
       ]
     },
+    "chain_waiting_heavy": {
+      "schema": "levi.marvel0.stack.v1",
+      "sampled_at": 1800000014.5,
+      "profile": "real",
+      "profile_code": "profile.product",
+      "lock": {
+        "state": "free",
+        "holder": null,
+        "file": ".marvel0-stack.lock"
+      },
+      "linger": {
+        "state": "no"
+      },
+      "rt_limits": {
+        "state": "ok",
+        "rtprio": 99,
+        "memlock": "infinity"
+      },
+      "arm_sockets": {
+        "state": "inactive",
+        "detail": "no socket to the arm"
+      },
+      "health": {
+        "state": "ok",
+        "age_s": 0.1,
+        "monitor_pid": 4242,
+        "hardware_active": null,
+        "controller_active": null,
+        "robot_mode_name": null,
+        "code": "health.fresh"
+      },
+      "marker": {
+        "state": "present",
+        "age_s": 14.0,
+        "ctime_age_s": 14.0,
+        "code": null,
+        "can_clear": true,
+        "clear_blockers": []
+      },
+      "terminals": {
+        "M": {
+          "state": "running",
+          "evidence": [
+            {
+              "code": "health.state",
+              "value": "ok"
+            },
+            {
+              "code": "health.age_s",
+              "value": 0.1
+            },
+            {
+              "code": "m.pid_matches",
+              "value": true
+            }
+          ],
+          "code": "m.running"
+        },
+        "A": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "a.arm_sockets",
+              "value": "inactive"
+            },
+            {
+              "code": "a.hardware_active",
+              "value": null
+            }
+          ],
+          "code": "a.stopped"
+        },
+        "B": {
+          "state": "unknown",
+          "evidence": [],
+          "code": "b.not_observable"
+        },
+        "C": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "c.listening",
+              "value": false
+            },
+            {
+              "code": "c.impedance_active",
+              "value": null
+            }
+          ],
+          "code": "c.stopped"
+        },
+        "policy": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "policy.listening",
+              "value": false
+            }
+          ],
+          "code": "policy.stopped"
+        },
+        "client": {
+          "state": "unknown",
+          "evidence": [
+            {
+              "code": "client.connected",
+              "value": false
+            },
+            {
+              "code": "client.open_session",
+              "value": false
+            }
+          ],
+          "code": "client.not_connected"
+        }
+      },
+      "verdict": {
+        "verdict": "busy",
+        "active": ["M"],
+        "unknown": ["B"]
+      },
+      "gates": {
+        "A": {
+          "verdict": "would_refuse",
+          "reasons": ["gate.layers_known", "gate.fci_probe"],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.a_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.marker_set",
+              "ok": true,
+              "level": "required",
+              "params": {
+                "age_s": 14.0
+              }
+            },
+            {
+              "code": "gate.arm_sockets_clear",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.rt_limits",
+              "ok": true,
+              "level": "required",
+              "params": {
+                "rtprio": 99,
+                "memlock": "infinity"
+              }
+            },
+            {
+              "code": "gate.fci_probe",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.linger",
+              "ok": false,
+              "level": "warn",
+              "params": {}
+            },
+            {
+              "code": "gate.person_desk",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        },
+        "B": {
+          "verdict": "would_refuse",
+          "reasons": ["gate.layers_known", "gate.a_running", "gate.b_absent"],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_running",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_absent",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.person_jaws_clear",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        },
+        "C": {
+          "verdict": "would_refuse",
+          "reasons": [
+            "gate.layers_known",
+            "gate.a_running",
+            "gate.b_known",
+            "gate.b_running",
+            "gate.no_client"
+          ],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_running",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_known",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_running",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.c_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.c_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.no_client",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.person_estop",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            },
+            {
+              "code": "gate.person_no_client",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        }
+      },
+      "monitor": {
+        "unit": "levi-fr3-health-monitor.service",
+        "unit_state": "running",
+        "owned": true,
+        "restarts": 0,
+        "can_start": false,
+        "start_blockers": ["monitor_running"],
+        "can_stop": true,
+        "stop_blockers": [],
+        "auto": true,
+        "auto_setting": "on",
+        "plan": {
+          "action": "none",
+          "code": "auto.wait_stack_down"
+        },
+        "last_auto": null
+      },
+      "phrases": {
+        "monitor_start": "start health monitor",
+        "monitor_stop": "stop health monitor",
+        "marker_clear": "clear marker",
+        "arm_start": "start arm stack",
+        "sequence_start": "start arm stack",
+        "sequence_stop": "stop whole stack",
+        "arm_stop": "stop arm stack",
+        "gripper_start": "start gripper stack",
+        "gripper_stop": "stop gripper stack",
+        "robot_server_start": "start robot server",
+        "robot_server_stop": "stop robot server",
+        "marker_touch": "set marker",
+        "marker_adopt": "adopt marker",
+        "gripper_open": "gripper open",
+        "gripper_close": "gripper close"
+      },
+      "act": {
+        "schema": "levi.marvel0.stack_act.v1",
+        "enabled": true,
+        "control": {
+          "state": "ok",
+          "code": "control.enabled",
+          "stack_enabled": true,
+          "client_enabled": false,
+          "errors": [],
+          "env": "LEVI_MARVEL0_CONTROL"
+        },
+        "spec_profile": "real",
+        "order": ["m", "a", "b", "c"],
+        "terminals": {
+          "m": {
+            "key": "m",
+            "unit": "levi-fr3-health-monitor.service",
+            "state": "ready",
+            "reason": "m.running",
+            "failure": null,
+            "unit_state": "running",
+            "readiness": null,
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "monitor_running",
+                "level": "required",
+                "text": "The health monitor is already running",
+                "params": {}
+              }
+            ],
+            "can_stop": true,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start health monitor",
+              "stop": "stop health monitor"
+            },
+            "attest": {
+              "start": [],
+              "stop": []
+            },
+            "hazard": null,
+            "stop_note": null
+          },
+          "a": {
+            "key": "a",
+            "unit": "levi-aeri-stack-marvel0-a.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "idle",
+            "reason": "a.stopped",
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "gate.linger",
+                "level": "warn",
+                "text": "Logging out stops every unit of the stack within about 5 s (Linger is off).",
+                "params": {}
+              },
+              {
+                "code": "heavy_jobs_running",
+                "level": "required",
+                "text": "2 heavy job(s) of this computer (pytest-dir) still run. They stop within about 30 s of the marker; A starts when they have.",
+                "params": {
+                  "count": 2,
+                  "kinds": "pytest-dir"
+                }
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start arm stack",
+              "stop": "stop arm stack"
+            },
+            "attest": {
+              "start": ["desk_done", "estop_hand"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.a",
+              "text": "Starting A connects the 1 kHz control loop to the arm. The arm does not move, but nothing else may touch it. LEVI's own heavy jobs (the ones that honour the marker) are paused first; other programs on this computer are not."
+            },
+            "stop_note": null,
+            "override": null,
+            "can_stop_with_override": false
+          },
+          "b": {
+            "key": "b",
+            "unit": "levi-aeri-stack-marvel0-b.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "idle",
+            "reason": "b.not_running",
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "gate.a_running",
+                "level": "required",
+                "text": "The arm controller A is not running.",
+                "params": {}
+              },
+              {
+                "code": "a_not_ready",
+                "level": "required",
+                "text": "The arm controller A is not ready (it is idle).",
+                "params": {
+                  "state": "idle"
+                }
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start gripper stack",
+              "stop": "stop gripper stack"
+            },
+            "attest": {
+              "start": ["hands_clear"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.b",
+              "text": "Starting B opens and closes the gripper fully (about 2 s). Keep hands and objects out of the jaws."
+            },
+            "stop_note": null,
+            "override": null,
+            "can_stop_with_override": false
+          },
+          "c": {
+            "key": "c",
+            "unit": "levi-aeri-stack-marvel0-c.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "idle",
+            "reason": "c.stopped",
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "gate.a_running",
+                "level": "required",
+                "text": "The arm controller A is not running.",
+                "params": {}
+              },
+              {
+                "code": "gate.b_running",
+                "level": "required",
+                "text": "The gripper stack B is not running.",
+                "params": {}
+              },
+              {
+                "code": "a_not_ready",
+                "level": "required",
+                "text": "The arm controller A is not ready (it is idle).",
+                "params": {
+                  "state": "idle"
+                }
+              },
+              {
+                "code": "gripper_b_not_ready",
+                "level": "required",
+                "text": "The gripper stack B is not ready.",
+                "params": {}
+              },
+              {
+                "code": "c_preflight",
+                "level": "required",
+                "text": "The checks before C (QoS, gripper controllers, end-effector frame) have not all passed in the last 300 s.",
+                "params": {
+                  "ttl_s": 300
+                }
+              },
+              {
+                "code": "health_not_ok",
+                "level": "required",
+                "text": "The health file does not show a ready arm: fresh, hardware active, idle or moving, no red light.",
+                "params": {}
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start robot server",
+              "stop": "stop robot server"
+            },
+            "attest": {
+              "start": ["estop_hand", "hands_clear", "no_client"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.c",
+              "text": "About 3 s after the server starts, the impedance controller turns on and the arm may sink 1-2 mm. The server's port has no authentication. Keep a hand on the physical emergency stop."
+            },
+            "stop_note": null,
+            "override": "stop robot server with client connected",
+            "can_stop_with_override": false
+          }
+        },
+        "marker": {
+          "state": "present",
+          "age_s": 14.0,
+          "ctime_age_s": 14.0,
+          "ours": true,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
+          "remaining_s": null,
+          "heavy": {
+            "state": "running",
+            "count": 2,
+            "kinds": ["pytest-dir"],
+            "empty": 1,
+            "why": null
+          },
+          "touch_blockers": []
+        },
+        "sequence": {
+          "state": "running",
+          "kind": "start",
+          "step": "wait",
+          "next": null,
+          "reason": null,
+          "since": 1800000000.0,
+          "step_at": 1800000002.0,
+          "reason_params": null,
+          "took_s": null,
+          "through": "c",
+          "pauses": {
+            "b": false,
+            "c": false
+          },
+          "steps": [
+            {
+              "step": "monitor",
+              "terminal": "m",
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
+            },
+            {
+              "step": "marker",
+              "terminal": "a",
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 1.0
+            },
+            {
+              "step": "probe",
+              "terminal": "a",
+              "state": "done",
+              "at": 1800000001.0,
+              "took_s": 1.0
+            },
+            {
+              "step": "wait",
+              "terminal": "a",
+              "state": "running",
+              "at": 1800000002.0,
+              "took_s": null
+            },
+            {
+              "step": "arm",
+              "terminal": "a",
+              "state": "pending",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "await_a",
+              "terminal": "a",
+              "state": "pending",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "b_probe",
+              "terminal": "b",
+              "state": "pending",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "b",
+              "terminal": "b",
+              "state": "pending",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "c_preflight",
+              "terminal": "c",
+              "state": "pending",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "c",
+              "terminal": "c",
+              "state": "pending",
+              "at": null,
+              "took_s": null
+            }
+          ],
+          "remaining_s": null,
+          "wait": {
+            "age_s": 14.0,
+            "min_s": 3.0,
+            "configured_s": 3.0,
+            "remaining_s": null,
+            "heavy": {
+              "state": "running",
+              "count": 2,
+              "kinds": ["pytest-dir"],
+              "empty": 1,
+              "why": null
+            },
+            "sockets": "inactive",
+            "holds": ["heavy_jobs_running"],
+            "cap_s": 90.0,
+            "waited_s": 12.5
+          },
+          "elapsed_s": 14.5
+        },
+        "gripper_test": {
+          "state": "idle",
+          "last": null,
+          "can_run": false,
+          "blockers": [
+            {
+              "code": "gripper_b_not_ready",
+              "level": "required",
+              "text": "The gripper stack B is not ready.",
+              "params": {}
+            }
+          ],
+          "attest": ["hands_clear"]
+        },
+        "operation": {
+          "kind": "preflight_a",
+          "terminal": null,
+          "state": "done",
+          "started_at": 1800000001.5,
+          "finished_at": 1800000001.5,
+          "code": null
+        },
+        "checks": {
+          "fci": {
+            "at": 1800000001.5,
+            "state": "open",
+            "age_s": 13.0,
+            "fresh": true
+          },
+          "b_probe": {
+            "at": 1800000000.5,
+            "state": "absent",
+            "by": "nodes",
+            "graph": "absent",
+            "age_s": 14.0,
+            "fresh": true
+          },
+          "c_preflight": null,
+          "can_probe_b": true,
+          "can_stop_all": false
+        },
+        "stop_all_blockers": [
+          {
+            "code": "nothing_to_stop",
+            "level": "required",
+            "text": "Nothing that this page started is running, so there is nothing to stop.",
+            "params": {}
+          }
+        ],
+        "linger": {
+          "state": "no"
+        },
+        "rt_limits": {
+          "state": "ok",
+          "rtprio": 99,
+          "memlock": "infinity"
+        },
+        "estop": {
+          "text": "Keep a hand on the physical emergency stop for every session. Nothing on this page is an emergency stop: the stop buttons end a program, they do not stop the arm."
+        },
+        "scope": {
+          "text": "These checks stop mistakes. They do not stop another program of this account, which can send the same requests; Franka Desk and the physical emergency stop are the real barriers."
+        },
+        "phrases": {
+          "arm_start": "start arm stack",
+          "arm_stop": "stop arm stack",
+          "gripper_start": "start gripper stack",
+          "gripper_stop": "stop gripper stack",
+          "robot_server_start": "start robot server",
+          "robot_server_stop": "stop robot server",
+          "marker_touch": "set marker",
+          "marker_adopt": "adopt marker",
+          "marker_clear": "clear marker",
+          "gripper_open": "gripper open",
+          "gripper_close": "gripper close",
+          "sequence_stop": "stop whole stack",
+          "client_override": "stop robot server with client connected"
+        },
+        "attest": {
+          "a": ["desk_done", "estop_hand"],
+          "b": ["hands_clear"],
+          "c": ["estop_hand", "hands_clear", "no_client"],
+          "gripper": ["hands_clear"]
+        },
+        "notices": []
+      },
+      "notices": [
+        {
+          "code": "notice.gates_scope"
+        }
+      ]
+    },
+    "chain_failed_heavy": {
+      "schema": "levi.marvel0.stack.v1",
+      "sampled_at": 1800000104.5,
+      "profile": "real",
+      "profile_code": "profile.product",
+      "lock": {
+        "state": "free",
+        "holder": null,
+        "file": ".marvel0-stack.lock"
+      },
+      "linger": {
+        "state": "no"
+      },
+      "rt_limits": {
+        "state": "ok",
+        "rtprio": 99,
+        "memlock": "infinity"
+      },
+      "arm_sockets": {
+        "state": "inactive",
+        "detail": "no socket to the arm"
+      },
+      "health": {
+        "state": "ok",
+        "age_s": 0.1,
+        "monitor_pid": 4242,
+        "hardware_active": null,
+        "controller_active": null,
+        "robot_mode_name": null,
+        "code": "health.fresh"
+      },
+      "marker": {
+        "state": "absent",
+        "age_s": null,
+        "ctime_age_s": null,
+        "code": null,
+        "can_clear": false,
+        "clear_blockers": ["marker_absent"]
+      },
+      "terminals": {
+        "M": {
+          "state": "running",
+          "evidence": [
+            {
+              "code": "health.state",
+              "value": "ok"
+            },
+            {
+              "code": "health.age_s",
+              "value": 0.1
+            },
+            {
+              "code": "m.pid_matches",
+              "value": true
+            }
+          ],
+          "code": "m.running"
+        },
+        "A": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "a.arm_sockets",
+              "value": "inactive"
+            },
+            {
+              "code": "a.hardware_active",
+              "value": null
+            }
+          ],
+          "code": "a.stopped"
+        },
+        "B": {
+          "state": "unknown",
+          "evidence": [],
+          "code": "b.not_observable"
+        },
+        "C": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "c.listening",
+              "value": false
+            },
+            {
+              "code": "c.impedance_active",
+              "value": null
+            }
+          ],
+          "code": "c.stopped"
+        },
+        "policy": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "policy.listening",
+              "value": false
+            }
+          ],
+          "code": "policy.stopped"
+        },
+        "client": {
+          "state": "unknown",
+          "evidence": [
+            {
+              "code": "client.connected",
+              "value": false
+            },
+            {
+              "code": "client.open_session",
+              "value": false
+            }
+          ],
+          "code": "client.not_connected"
+        }
+      },
+      "verdict": {
+        "verdict": "busy",
+        "active": ["M"],
+        "unknown": ["B"]
+      },
+      "gates": {
+        "A": {
+          "verdict": "would_refuse",
+          "reasons": ["gate.layers_known", "gate.marker_set", "gate.fci_probe"],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.a_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.marker_set",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "age_s": null
+              }
+            },
+            {
+              "code": "gate.arm_sockets_clear",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.rt_limits",
+              "ok": true,
+              "level": "required",
+              "params": {
+                "rtprio": 99,
+                "memlock": "infinity"
+              }
+            },
+            {
+              "code": "gate.fci_probe",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.linger",
+              "ok": false,
+              "level": "warn",
+              "params": {}
+            },
+            {
+              "code": "gate.person_desk",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        },
+        "B": {
+          "verdict": "would_refuse",
+          "reasons": ["gate.layers_known", "gate.a_running", "gate.b_absent"],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_running",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_absent",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.person_jaws_clear",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        },
+        "C": {
+          "verdict": "would_refuse",
+          "reasons": [
+            "gate.layers_known",
+            "gate.a_running",
+            "gate.b_known",
+            "gate.b_running",
+            "gate.no_client"
+          ],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_running",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_known",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_running",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.c_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.c_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.no_client",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.person_estop",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            },
+            {
+              "code": "gate.person_no_client",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        }
+      },
+      "monitor": {
+        "unit": "levi-fr3-health-monitor.service",
+        "unit_state": "running",
+        "owned": true,
+        "restarts": 0,
+        "can_start": false,
+        "start_blockers": ["monitor_running"],
+        "can_stop": true,
+        "stop_blockers": [],
+        "auto": true,
+        "auto_setting": "on",
+        "plan": {
+          "action": "none",
+          "code": "auto.wait_stack_down"
+        },
+        "last_auto": null
+      },
+      "phrases": {
+        "monitor_start": "start health monitor",
+        "monitor_stop": "stop health monitor",
+        "marker_clear": "clear marker",
+        "arm_start": "start arm stack",
+        "sequence_start": "start arm stack",
+        "sequence_stop": "stop whole stack",
+        "arm_stop": "stop arm stack",
+        "gripper_start": "start gripper stack",
+        "gripper_stop": "stop gripper stack",
+        "robot_server_start": "start robot server",
+        "robot_server_stop": "stop robot server",
+        "marker_touch": "set marker",
+        "marker_adopt": "adopt marker",
+        "gripper_open": "gripper open",
+        "gripper_close": "gripper close"
+      },
+      "act": {
+        "schema": "levi.marvel0.stack_act.v1",
+        "enabled": true,
+        "control": {
+          "state": "ok",
+          "code": "control.enabled",
+          "stack_enabled": true,
+          "client_enabled": false,
+          "errors": [],
+          "env": "LEVI_MARVEL0_CONTROL"
+        },
+        "spec_profile": "real",
+        "order": ["m", "a", "b", "c"],
+        "terminals": {
+          "m": {
+            "key": "m",
+            "unit": "levi-fr3-health-monitor.service",
+            "state": "ready",
+            "reason": "m.running",
+            "failure": null,
+            "unit_state": "running",
+            "readiness": null,
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "monitor_running",
+                "level": "required",
+                "text": "The health monitor is already running",
+                "params": {}
+              }
+            ],
+            "can_stop": true,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start health monitor",
+              "stop": "stop health monitor"
+            },
+            "attest": {
+              "start": [],
+              "stop": []
+            },
+            "hazard": null,
+            "stop_note": null
+          },
+          "a": {
+            "key": "a",
+            "unit": "levi-aeri-stack-marvel0-a.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "idle",
+            "reason": "a.stopped",
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "gate.marker_set",
+                "level": "required",
+                "text": "The arm-controller marker is not set; it pauses heavy jobs on this computer before A starts.",
+                "params": {
+                  "age_s": null
+                }
+              },
+              {
+                "code": "gate.linger",
+                "level": "warn",
+                "text": "Logging out stops every unit of the stack within about 5 s (Linger is off).",
+                "params": {}
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start arm stack",
+              "stop": "stop arm stack"
+            },
+            "attest": {
+              "start": ["desk_done", "estop_hand"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.a",
+              "text": "Starting A connects the 1 kHz control loop to the arm. The arm does not move, but nothing else may touch it. LEVI's own heavy jobs (the ones that honour the marker) are paused first; other programs on this computer are not."
+            },
+            "stop_note": null,
+            "override": null,
+            "can_stop_with_override": false
+          },
+          "b": {
+            "key": "b",
+            "unit": "levi-aeri-stack-marvel0-b.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "idle",
+            "reason": "b.not_running",
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "gate.a_running",
+                "level": "required",
+                "text": "The arm controller A is not running.",
+                "params": {}
+              },
+              {
+                "code": "a_not_ready",
+                "level": "required",
+                "text": "The arm controller A is not ready (it is idle).",
+                "params": {
+                  "state": "idle"
+                }
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start gripper stack",
+              "stop": "stop gripper stack"
+            },
+            "attest": {
+              "start": ["hands_clear"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.b",
+              "text": "Starting B opens and closes the gripper fully (about 2 s). Keep hands and objects out of the jaws."
+            },
+            "stop_note": null,
+            "override": null,
+            "can_stop_with_override": false
+          },
+          "c": {
+            "key": "c",
+            "unit": "levi-aeri-stack-marvel0-c.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "idle",
+            "reason": "c.stopped",
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "gate.a_running",
+                "level": "required",
+                "text": "The arm controller A is not running.",
+                "params": {}
+              },
+              {
+                "code": "gate.b_running",
+                "level": "required",
+                "text": "The gripper stack B is not running.",
+                "params": {}
+              },
+              {
+                "code": "a_not_ready",
+                "level": "required",
+                "text": "The arm controller A is not ready (it is idle).",
+                "params": {
+                  "state": "idle"
+                }
+              },
+              {
+                "code": "gripper_b_not_ready",
+                "level": "required",
+                "text": "The gripper stack B is not ready.",
+                "params": {}
+              },
+              {
+                "code": "c_preflight",
+                "level": "required",
+                "text": "The checks before C (QoS, gripper controllers, end-effector frame) have not all passed in the last 300 s.",
+                "params": {
+                  "ttl_s": 300
+                }
+              },
+              {
+                "code": "health_not_ok",
+                "level": "required",
+                "text": "The health file does not show a ready arm: fresh, hardware active, idle or moving, no red light.",
+                "params": {}
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start robot server",
+              "stop": "stop robot server"
+            },
+            "attest": {
+              "start": ["estop_hand", "hands_clear", "no_client"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.c",
+              "text": "About 3 s after the server starts, the impedance controller turns on and the arm may sink 1-2 mm. The server's port has no authentication. Keep a hand on the physical emergency stop."
+            },
+            "stop_note": null,
+            "override": "stop robot server with client connected",
+            "can_stop_with_override": false
+          }
+        },
+        "marker": {
+          "state": "absent",
+          "age_s": null,
+          "ctime_age_s": null,
+          "ours": false,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
+          "remaining_s": null,
+          "heavy": null,
+          "touch_blockers": []
+        },
+        "sequence": {
+          "state": "failed",
+          "kind": "start",
+          "step": null,
+          "next": null,
+          "reason": "heavy_job_still_running",
+          "since": 1800000000.0,
+          "step_at": 1800000002.0,
+          "reason_params": {
+            "count": 2
+          },
+          "took_s": 104.5,
+          "through": "c",
+          "pauses": {
+            "b": false,
+            "c": false
+          },
+          "steps": [
+            {
+              "step": "monitor",
+              "terminal": "m",
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
+            },
+            {
+              "step": "marker",
+              "terminal": "a",
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 1.0
+            },
+            {
+              "step": "probe",
+              "terminal": "a",
+              "state": "done",
+              "at": 1800000001.0,
+              "took_s": 1.0
+            },
+            {
+              "step": "wait",
+              "terminal": "a",
+              "state": "failed",
+              "at": 1800000002.0,
+              "took_s": 102.5
+            },
+            {
+              "step": "arm",
+              "terminal": "a",
+              "state": "not_reached",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "await_a",
+              "terminal": "a",
+              "state": "not_reached",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "b_probe",
+              "terminal": "b",
+              "state": "not_reached",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "b",
+              "terminal": "b",
+              "state": "not_reached",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "c_preflight",
+              "terminal": "c",
+              "state": "not_reached",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "c",
+              "terminal": "c",
+              "state": "not_reached",
+              "at": null,
+              "took_s": null
+            }
+          ]
+        },
+        "gripper_test": {
+          "state": "idle",
+          "last": null,
+          "can_run": false,
+          "blockers": [
+            {
+              "code": "gripper_b_not_ready",
+              "level": "required",
+              "text": "The gripper stack B is not ready.",
+              "params": {}
+            }
+          ],
+          "attest": ["hands_clear"]
+        },
+        "operation": {
+          "kind": "preflight_a",
+          "terminal": null,
+          "state": "done",
+          "started_at": 1800000001.5,
+          "finished_at": 1800000001.5,
+          "code": null
+        },
+        "checks": {
+          "fci": {
+            "at": 1800000001.5,
+            "state": "open",
+            "age_s": 103.0,
+            "fresh": true
+          },
+          "b_probe": {
+            "at": 1800000000.5,
+            "state": "absent",
+            "by": "nodes",
+            "graph": "absent",
+            "age_s": 104.0,
+            "fresh": true
+          },
+          "c_preflight": null,
+          "can_probe_b": true,
+          "can_stop_all": false
+        },
+        "stop_all_blockers": [
+          {
+            "code": "nothing_to_stop",
+            "level": "required",
+            "text": "Nothing that this page started is running, so there is nothing to stop.",
+            "params": {}
+          }
+        ],
+        "linger": {
+          "state": "no"
+        },
+        "rt_limits": {
+          "state": "ok",
+          "rtprio": 99,
+          "memlock": "infinity"
+        },
+        "estop": {
+          "text": "Keep a hand on the physical emergency stop for every session. Nothing on this page is an emergency stop: the stop buttons end a program, they do not stop the arm."
+        },
+        "scope": {
+          "text": "These checks stop mistakes. They do not stop another program of this account, which can send the same requests; Franka Desk and the physical emergency stop are the real barriers."
+        },
+        "phrases": {
+          "arm_start": "start arm stack",
+          "arm_stop": "stop arm stack",
+          "gripper_start": "start gripper stack",
+          "gripper_stop": "stop gripper stack",
+          "robot_server_start": "start robot server",
+          "robot_server_stop": "stop robot server",
+          "marker_touch": "set marker",
+          "marker_adopt": "adopt marker",
+          "marker_clear": "clear marker",
+          "gripper_open": "gripper open",
+          "gripper_close": "gripper close",
+          "sequence_stop": "stop whole stack",
+          "client_override": "stop robot server with client connected"
+        },
+        "attest": {
+          "a": ["desk_done", "estop_hand"],
+          "b": ["hands_clear"],
+          "c": ["estop_hand", "hands_clear", "no_client"],
+          "gripper": ["hands_clear"]
+        },
+        "notices": []
+      },
+      "notices": [
+        {
+          "code": "notice.gates_scope"
+        }
+      ]
+    },
+    "chain_waiting_heavy_unknown": {
+      "schema": "levi.marvel0.stack.v1",
+      "sampled_at": 1800000007.5,
+      "profile": "real",
+      "profile_code": "profile.product",
+      "lock": {
+        "state": "free",
+        "holder": null,
+        "file": ".marvel0-stack.lock"
+      },
+      "linger": {
+        "state": "no"
+      },
+      "rt_limits": {
+        "state": "ok",
+        "rtprio": 99,
+        "memlock": "infinity"
+      },
+      "arm_sockets": {
+        "state": "inactive",
+        "detail": "no socket to the arm"
+      },
+      "health": {
+        "state": "ok",
+        "age_s": 0.1,
+        "monitor_pid": 4242,
+        "hardware_active": null,
+        "controller_active": null,
+        "robot_mode_name": null,
+        "code": "health.fresh"
+      },
+      "marker": {
+        "state": "present",
+        "age_s": 7.0,
+        "ctime_age_s": 7.0,
+        "code": null,
+        "can_clear": true,
+        "clear_blockers": []
+      },
+      "terminals": {
+        "M": {
+          "state": "running",
+          "evidence": [
+            {
+              "code": "health.state",
+              "value": "ok"
+            },
+            {
+              "code": "health.age_s",
+              "value": 0.1
+            },
+            {
+              "code": "m.pid_matches",
+              "value": true
+            }
+          ],
+          "code": "m.running"
+        },
+        "A": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "a.arm_sockets",
+              "value": "inactive"
+            },
+            {
+              "code": "a.hardware_active",
+              "value": null
+            }
+          ],
+          "code": "a.stopped"
+        },
+        "B": {
+          "state": "unknown",
+          "evidence": [],
+          "code": "b.not_observable"
+        },
+        "C": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "c.listening",
+              "value": false
+            },
+            {
+              "code": "c.impedance_active",
+              "value": null
+            }
+          ],
+          "code": "c.stopped"
+        },
+        "policy": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "policy.listening",
+              "value": false
+            }
+          ],
+          "code": "policy.stopped"
+        },
+        "client": {
+          "state": "unknown",
+          "evidence": [
+            {
+              "code": "client.connected",
+              "value": false
+            },
+            {
+              "code": "client.open_session",
+              "value": false
+            }
+          ],
+          "code": "client.not_connected"
+        }
+      },
+      "verdict": {
+        "verdict": "busy",
+        "active": ["M"],
+        "unknown": ["B"]
+      },
+      "gates": {
+        "A": {
+          "verdict": "would_refuse",
+          "reasons": ["gate.layers_known", "gate.fci_probe"],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.a_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.marker_set",
+              "ok": true,
+              "level": "required",
+              "params": {
+                "age_s": 7.0
+              }
+            },
+            {
+              "code": "gate.arm_sockets_clear",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.rt_limits",
+              "ok": true,
+              "level": "required",
+              "params": {
+                "rtprio": 99,
+                "memlock": "infinity"
+              }
+            },
+            {
+              "code": "gate.fci_probe",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.linger",
+              "ok": false,
+              "level": "warn",
+              "params": {}
+            },
+            {
+              "code": "gate.person_desk",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        },
+        "B": {
+          "verdict": "would_refuse",
+          "reasons": ["gate.layers_known", "gate.a_running", "gate.b_absent"],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_running",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_absent",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.person_jaws_clear",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        },
+        "C": {
+          "verdict": "would_refuse",
+          "reasons": [
+            "gate.layers_known",
+            "gate.a_running",
+            "gate.b_known",
+            "gate.b_running",
+            "gate.no_client"
+          ],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_running",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_known",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_running",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.c_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.c_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.no_client",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.person_estop",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            },
+            {
+              "code": "gate.person_no_client",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        }
+      },
+      "monitor": {
+        "unit": "levi-fr3-health-monitor.service",
+        "unit_state": "running",
+        "owned": true,
+        "restarts": 0,
+        "can_start": false,
+        "start_blockers": ["monitor_running"],
+        "can_stop": true,
+        "stop_blockers": [],
+        "auto": true,
+        "auto_setting": "on",
+        "plan": {
+          "action": "none",
+          "code": "auto.wait_stack_down"
+        },
+        "last_auto": null
+      },
+      "phrases": {
+        "monitor_start": "start health monitor",
+        "monitor_stop": "stop health monitor",
+        "marker_clear": "clear marker",
+        "arm_start": "start arm stack",
+        "sequence_start": "start arm stack",
+        "sequence_stop": "stop whole stack",
+        "arm_stop": "stop arm stack",
+        "gripper_start": "start gripper stack",
+        "gripper_stop": "stop gripper stack",
+        "robot_server_start": "start robot server",
+        "robot_server_stop": "stop robot server",
+        "marker_touch": "set marker",
+        "marker_adopt": "adopt marker",
+        "gripper_open": "gripper open",
+        "gripper_close": "gripper close"
+      },
+      "act": {
+        "schema": "levi.marvel0.stack_act.v1",
+        "enabled": true,
+        "control": {
+          "state": "ok",
+          "code": "control.enabled",
+          "stack_enabled": true,
+          "client_enabled": false,
+          "errors": [],
+          "env": "LEVI_MARVEL0_CONTROL"
+        },
+        "spec_profile": "real",
+        "order": ["m", "a", "b", "c"],
+        "terminals": {
+          "m": {
+            "key": "m",
+            "unit": "levi-fr3-health-monitor.service",
+            "state": "ready",
+            "reason": "m.running",
+            "failure": null,
+            "unit_state": "running",
+            "readiness": null,
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "monitor_running",
+                "level": "required",
+                "text": "The health monitor is already running",
+                "params": {}
+              }
+            ],
+            "can_stop": true,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start health monitor",
+              "stop": "stop health monitor"
+            },
+            "attest": {
+              "start": [],
+              "stop": []
+            },
+            "hazard": null,
+            "stop_note": null
+          },
+          "a": {
+            "key": "a",
+            "unit": "levi-aeri-stack-marvel0-a.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "idle",
+            "reason": "a.stopped",
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "gate.linger",
+                "level": "warn",
+                "text": "Logging out stops every unit of the stack within about 5 s (Linger is off).",
+                "params": {}
+              },
+              {
+                "code": "marker_young",
+                "level": "required",
+                "text": "The marker is 7.0 s old; A starts when it is 45.0 s old and no heavy job of this computer still runs.",
+                "params": {
+                  "age_s": 7.0,
+                  "wait_s": 45.0,
+                  "remaining_s": 38.0
+                }
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start arm stack",
+              "stop": "stop arm stack"
+            },
+            "attest": {
+              "start": ["desk_done", "estop_hand"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.a",
+              "text": "Starting A connects the 1 kHz control loop to the arm. The arm does not move, but nothing else may touch it. LEVI's own heavy jobs (the ones that honour the marker) are paused first; other programs on this computer are not."
+            },
+            "stop_note": null,
+            "override": null,
+            "can_stop_with_override": false
+          },
+          "b": {
+            "key": "b",
+            "unit": "levi-aeri-stack-marvel0-b.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "idle",
+            "reason": "b.not_running",
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "gate.a_running",
+                "level": "required",
+                "text": "The arm controller A is not running.",
+                "params": {}
+              },
+              {
+                "code": "a_not_ready",
+                "level": "required",
+                "text": "The arm controller A is not ready (it is idle).",
+                "params": {
+                  "state": "idle"
+                }
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start gripper stack",
+              "stop": "stop gripper stack"
+            },
+            "attest": {
+              "start": ["hands_clear"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.b",
+              "text": "Starting B opens and closes the gripper fully (about 2 s). Keep hands and objects out of the jaws."
+            },
+            "stop_note": null,
+            "override": null,
+            "can_stop_with_override": false
+          },
+          "c": {
+            "key": "c",
+            "unit": "levi-aeri-stack-marvel0-c.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "idle",
+            "reason": "c.stopped",
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "gate.a_running",
+                "level": "required",
+                "text": "The arm controller A is not running.",
+                "params": {}
+              },
+              {
+                "code": "gate.b_running",
+                "level": "required",
+                "text": "The gripper stack B is not running.",
+                "params": {}
+              },
+              {
+                "code": "a_not_ready",
+                "level": "required",
+                "text": "The arm controller A is not ready (it is idle).",
+                "params": {
+                  "state": "idle"
+                }
+              },
+              {
+                "code": "gripper_b_not_ready",
+                "level": "required",
+                "text": "The gripper stack B is not ready.",
+                "params": {}
+              },
+              {
+                "code": "c_preflight",
+                "level": "required",
+                "text": "The checks before C (QoS, gripper controllers, end-effector frame) have not all passed in the last 300 s.",
+                "params": {
+                  "ttl_s": 300
+                }
+              },
+              {
+                "code": "health_not_ok",
+                "level": "required",
+                "text": "The health file does not show a ready arm: fresh, hardware active, idle or moving, no red light.",
+                "params": {}
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start robot server",
+              "stop": "stop robot server"
+            },
+            "attest": {
+              "start": ["estop_hand", "hands_clear", "no_client"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.c",
+              "text": "About 3 s after the server starts, the impedance controller turns on and the arm may sink 1-2 mm. The server's port has no authentication. Keep a hand on the physical emergency stop."
+            },
+            "stop_note": null,
+            "override": "stop robot server with client connected",
+            "can_stop_with_override": false
+          }
+        },
+        "marker": {
+          "state": "present",
+          "age_s": 7.0,
+          "ctime_age_s": 7.0,
+          "ours": true,
+          "wait_s": 45.0,
+          "configured_wait_s": 3.0,
+          "remaining_s": 38.0,
+          "heavy": {
+            "state": "unknown",
+            "count": 0,
+            "kinds": [],
+            "empty": 0,
+            "why": "log_missing"
+          },
+          "touch_blockers": []
+        },
+        "sequence": {
+          "state": "running",
+          "kind": "start",
+          "step": "wait",
+          "next": null,
+          "reason": null,
+          "since": 1800000000.0,
+          "step_at": 1800000002.0,
+          "reason_params": null,
+          "took_s": null,
+          "through": "c",
+          "pauses": {
+            "b": false,
+            "c": false
+          },
+          "steps": [
+            {
+              "step": "monitor",
+              "terminal": "m",
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
+            },
+            {
+              "step": "marker",
+              "terminal": "a",
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 1.0
+            },
+            {
+              "step": "probe",
+              "terminal": "a",
+              "state": "done",
+              "at": 1800000001.0,
+              "took_s": 1.0
+            },
+            {
+              "step": "wait",
+              "terminal": "a",
+              "state": "running",
+              "at": 1800000002.0,
+              "took_s": null
+            },
+            {
+              "step": "arm",
+              "terminal": "a",
+              "state": "pending",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "await_a",
+              "terminal": "a",
+              "state": "pending",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "b_probe",
+              "terminal": "b",
+              "state": "pending",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "b",
+              "terminal": "b",
+              "state": "pending",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "c_preflight",
+              "terminal": "c",
+              "state": "pending",
+              "at": null,
+              "took_s": null
+            },
+            {
+              "step": "c",
+              "terminal": "c",
+              "state": "pending",
+              "at": null,
+              "took_s": null
+            }
+          ],
+          "remaining_s": 38.0,
+          "wait": {
+            "age_s": 7.0,
+            "min_s": 45.0,
+            "configured_s": 3.0,
+            "remaining_s": 38.0,
+            "heavy": {
+              "state": "unknown",
+              "count": 0,
+              "kinds": [],
+              "empty": 0,
+              "why": "log_missing"
+            },
+            "sockets": "inactive",
+            "holds": ["heavy_jobs_unknown", "marker_young"],
+            "cap_s": 90.0,
+            "waited_s": 5.5
+          },
+          "elapsed_s": 7.5
+        },
+        "gripper_test": {
+          "state": "idle",
+          "last": null,
+          "can_run": false,
+          "blockers": [
+            {
+              "code": "gripper_b_not_ready",
+              "level": "required",
+              "text": "The gripper stack B is not ready.",
+              "params": {}
+            }
+          ],
+          "attest": ["hands_clear"]
+        },
+        "operation": {
+          "kind": "preflight_a",
+          "terminal": null,
+          "state": "done",
+          "started_at": 1800000001.5,
+          "finished_at": 1800000001.5,
+          "code": null
+        },
+        "checks": {
+          "fci": {
+            "at": 1800000001.5,
+            "state": "open",
+            "age_s": 6.0,
+            "fresh": true
+          },
+          "b_probe": {
+            "at": 1800000000.5,
+            "state": "absent",
+            "by": "nodes",
+            "graph": "absent",
+            "age_s": 7.0,
+            "fresh": true
+          },
+          "c_preflight": null,
+          "can_probe_b": true,
+          "can_stop_all": false
+        },
+        "stop_all_blockers": [
+          {
+            "code": "nothing_to_stop",
+            "level": "required",
+            "text": "Nothing that this page started is running, so there is nothing to stop.",
+            "params": {}
+          }
+        ],
+        "linger": {
+          "state": "no"
+        },
+        "rt_limits": {
+          "state": "ok",
+          "rtprio": 99,
+          "memlock": "infinity"
+        },
+        "estop": {
+          "text": "Keep a hand on the physical emergency stop for every session. Nothing on this page is an emergency stop: the stop buttons end a program, they do not stop the arm."
+        },
+        "scope": {
+          "text": "These checks stop mistakes. They do not stop another program of this account, which can send the same requests; Franka Desk and the physical emergency stop are the real barriers."
+        },
+        "phrases": {
+          "arm_start": "start arm stack",
+          "arm_stop": "stop arm stack",
+          "gripper_start": "start gripper stack",
+          "gripper_stop": "stop gripper stack",
+          "robot_server_start": "start robot server",
+          "robot_server_stop": "stop robot server",
+          "marker_touch": "set marker",
+          "marker_adopt": "adopt marker",
+          "marker_clear": "clear marker",
+          "gripper_open": "gripper open",
+          "gripper_close": "gripper close",
+          "sequence_stop": "stop whole stack",
+          "client_override": "stop robot server with client connected"
+        },
+        "attest": {
+          "a": ["desk_done", "estop_hand"],
+          "b": ["hands_clear"],
+          "c": ["estop_hand", "hands_clear", "no_client"],
+          "gripper": ["hands_clear"]
+        },
+        "notices": []
+      },
+      "notices": [
+        {
+          "code": "notice.gates_scope"
+        }
+      ]
+    },
     "chain_paused_b": {
       "schema": "levi.marvel0.stack.v1",
-      "sampled_at": 1800000080.0,
+      "sampled_at": 1800000008.0,
       "profile": "real",
       "profile_code": "profile.product",
       "lock": {
@@ -16775,7 +19394,7 @@
       },
       "health": {
         "state": "ok",
-        "age_s": 0.1,
+        "age_s": 0.6,
         "monitor_pid": 4242,
         "hardware_active": true,
         "controller_active": false,
@@ -16784,8 +19403,8 @@
       },
       "marker": {
         "state": "present",
-        "age_s": 80.0,
-        "ctime_age_s": 80.0,
+        "age_s": 7.5,
+        "ctime_age_s": 7.5,
         "code": null,
         "can_clear": false,
         "clear_blockers": ["marker_a_unit", "marker_arm_active"]
@@ -16800,7 +19419,7 @@
             },
             {
               "code": "health.age_s",
-              "value": 0.1
+              "value": 0.6
             },
             {
               "code": "m.pid_matches",
@@ -16926,7 +19545,7 @@
               "ok": true,
               "level": "required",
               "params": {
-                "age_s": 80.0
+                "age_s": 7.5
               }
             },
             {
@@ -17218,7 +19837,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 0.0,
+              "waited_s": 1.0,
               "timeout_s": 90.0
             },
             "owned": true,
@@ -17351,11 +19970,13 @@
         },
         "marker": {
           "state": "present",
-          "age_s": 80.0,
-          "ctime_age_s": 80.0,
+          "age_s": 7.5,
+          "ctime_age_s": 7.5,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -17364,8 +19985,10 @@
           "step": null,
           "next": "b",
           "reason": null,
-          "since": 1800000080.0,
-          "step_at": 1800000080.0,
+          "since": 1800000007.5,
+          "step_at": 1800000007.0,
+          "reason_params": null,
+          "took_s": null,
           "through": "c",
           "pauses": {
             "b": true,
@@ -17375,54 +19998,75 @@
             {
               "step": "monitor",
               "terminal": "m",
-              "state": "done"
-            },
-            {
-              "step": "probe",
-              "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
             },
             {
               "step": "marker",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 1.0
+            },
+            {
+              "step": "probe",
+              "terminal": "a",
+              "state": "done",
+              "at": 1800000001.0,
+              "took_s": 1.0
             },
             {
               "step": "wait",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000002.0,
+              "took_s": 4.5
             },
             {
               "step": "arm",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000006.5,
+              "took_s": 0.5
             },
             {
               "step": "await_a",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000007.0,
+              "took_s": 0.5
             },
             {
               "step": "b_probe",
               "terminal": "b",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "b",
               "terminal": "b",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "c_preflight",
               "terminal": "c",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "c",
               "terminal": "c",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             }
-          ]
+          ],
+          "elapsed_s": 8.0
         },
         "gripper_test": {
           "state": "idle",
@@ -17442,22 +20086,23 @@
           "kind": "preflight_a",
           "terminal": null,
           "state": "done",
-          "started_at": 1800000000.0,
-          "finished_at": 1800000000.0,
+          "started_at": 1800000001.5,
+          "finished_at": 1800000001.5,
           "code": null
         },
         "checks": {
           "fci": {
-            "at": 1800000000.0,
+            "at": 1800000001.5,
             "state": "open",
-            "age_s": 80.0,
+            "age_s": 6.5,
             "fresh": true
           },
           "b_probe": {
-            "at": 1800000000.0,
+            "at": 1800000000.5,
             "state": "absent",
-            "by": "probe",
-            "age_s": 80.0,
+            "by": "nodes",
+            "graph": "absent",
+            "age_s": 7.5,
             "fresh": true
           },
           "c_preflight": null,
@@ -17513,7 +20158,7 @@
     },
     "chain_paused_c": {
       "schema": "levi.marvel0.stack.v1",
-      "sampled_at": 1800000080.0,
+      "sampled_at": 1800000009.5,
       "profile": "real",
       "profile_code": "profile.product",
       "lock": {
@@ -17544,8 +20189,8 @@
       },
       "marker": {
         "state": "present",
-        "age_s": 80.0,
-        "ctime_age_s": 80.0,
+        "age_s": 9.0,
+        "ctime_age_s": 9.0,
         "code": null,
         "can_clear": false,
         "clear_blockers": ["marker_a_unit", "marker_arm_active"]
@@ -17686,7 +20331,7 @@
               "ok": true,
               "level": "required",
               "params": {
-                "age_s": 80.0
+                "age_s": 9.0
               }
             },
             {
@@ -17988,7 +20633,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 0.0,
+              "waited_s": 2.5,
               "timeout_s": 90.0
             },
             "owned": true,
@@ -18068,7 +20713,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 0.0,
+              "waited_s": 1.0,
               "timeout_s": 60.0
             },
             "owned": true,
@@ -18148,11 +20793,13 @@
         },
         "marker": {
           "state": "present",
-          "age_s": 80.0,
-          "ctime_age_s": 80.0,
+          "age_s": 9.0,
+          "ctime_age_s": 9.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -18161,8 +20808,10 @@
           "step": null,
           "next": "c",
           "reason": null,
-          "since": 1800000080.0,
-          "step_at": 1800000080.0,
+          "since": 1800000009.0,
+          "step_at": 1800000008.0,
+          "reason_params": null,
+          "took_s": null,
           "through": "c",
           "pauses": {
             "b": false,
@@ -18172,54 +20821,75 @@
             {
               "step": "monitor",
               "terminal": "m",
-              "state": "done"
-            },
-            {
-              "step": "probe",
-              "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
             },
             {
               "step": "marker",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 1.0
+            },
+            {
+              "step": "probe",
+              "terminal": "a",
+              "state": "done",
+              "at": 1800000001.0,
+              "took_s": 1.0
             },
             {
               "step": "wait",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000002.0,
+              "took_s": 4.5
             },
             {
               "step": "arm",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000006.5,
+              "took_s": 0.5
             },
             {
               "step": "await_a",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000007.0,
+              "took_s": 0.5
             },
             {
               "step": "b_probe",
               "terminal": "b",
-              "state": "done"
+              "state": "done",
+              "at": 1800000007.5,
+              "took_s": 0.5
             },
             {
               "step": "b",
               "terminal": "b",
-              "state": "done"
+              "state": "done",
+              "at": 1800000008.0,
+              "took_s": 1.0
             },
             {
               "step": "c_preflight",
               "terminal": "c",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "c",
               "terminal": "c",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             }
-          ]
+          ],
+          "elapsed_s": 9.5
         },
         "gripper_test": {
           "state": "idle",
@@ -18232,22 +20902,23 @@
           "kind": "preflight_a",
           "terminal": null,
           "state": "done",
-          "started_at": 1800000000.0,
-          "finished_at": 1800000000.0,
+          "started_at": 1800000001.5,
+          "finished_at": 1800000001.5,
           "code": null
         },
         "checks": {
           "fci": {
-            "at": 1800000000.0,
+            "at": 1800000001.5,
             "state": "open",
-            "age_s": 80.0,
+            "age_s": 8.0,
             "fresh": true
           },
           "b_probe": {
-            "at": 1800000000.0,
+            "at": 1800000000.5,
             "state": "absent",
-            "by": "probe",
-            "age_s": 80.0,
+            "by": "nodes",
+            "graph": "absent",
+            "age_s": 9.0,
             "fresh": true
           },
           "c_preflight": null,
@@ -18303,7 +20974,7 @@
     },
     "chain_failed_b": {
       "schema": "levi.marvel0.stack.v1",
-      "sampled_at": 1800000141.0,
+      "sampled_at": 1800000070.0,
       "profile": "real",
       "profile_code": "profile.product",
       "lock": {
@@ -18334,8 +21005,8 @@
       },
       "marker": {
         "state": "present",
-        "age_s": 141.0,
-        "ctime_age_s": 141.0,
+        "age_s": 69.5,
+        "ctime_age_s": 69.5,
         "code": null,
         "can_clear": false,
         "clear_blockers": ["marker_a_unit", "marker_arm_active"]
@@ -18476,7 +21147,7 @@
               "ok": true,
               "level": "required",
               "params": {
-                "age_s": 141.0
+                "age_s": 69.5
               }
             },
             {
@@ -18778,7 +21449,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 61.0,
+              "waited_s": 63.0,
               "timeout_s": 90.0
             },
             "owned": true,
@@ -18858,7 +21529,7 @@
                   "text": "Controller robotiq_activation_controller is configured and active"
                 }
               ],
-              "waited_s": 61.0,
+              "waited_s": 61.5,
               "timeout_s": 60.0
             },
             "owned": true,
@@ -18950,11 +21621,13 @@
         },
         "marker": {
           "state": "present",
-          "age_s": 141.0,
-          "ctime_age_s": 141.0,
+          "age_s": 69.5,
+          "ctime_age_s": 69.5,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -18964,7 +21637,9 @@
           "next": null,
           "reason": "b_failed",
           "since": 1800000000.0,
-          "step_at": 1800000080.0,
+          "step_at": 1800000008.0,
+          "reason_params": null,
+          "took_s": 70.0,
           "through": "c",
           "pauses": {
             "b": false,
@@ -18974,52 +21649,72 @@
             {
               "step": "monitor",
               "terminal": "m",
-              "state": "done"
-            },
-            {
-              "step": "probe",
-              "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
             },
             {
               "step": "marker",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 1.0
+            },
+            {
+              "step": "probe",
+              "terminal": "a",
+              "state": "done",
+              "at": 1800000001.0,
+              "took_s": 1.0
             },
             {
               "step": "wait",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000002.0,
+              "took_s": 4.5
             },
             {
               "step": "arm",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000006.5,
+              "took_s": 0.5
             },
             {
               "step": "await_a",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000007.0,
+              "took_s": 0.5
             },
             {
               "step": "b_probe",
               "terminal": "b",
-              "state": "done"
+              "state": "done",
+              "at": 1800000007.5,
+              "took_s": 0.5
             },
             {
               "step": "b",
               "terminal": "b",
-              "state": "failed"
+              "state": "failed",
+              "at": 1800000008.0,
+              "took_s": 62.0
             },
             {
               "step": "c_preflight",
               "terminal": "c",
-              "state": "not_reached"
+              "state": "not_reached",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "c",
               "terminal": "c",
-              "state": "not_reached"
+              "state": "not_reached",
+              "at": null,
+              "took_s": null
             }
           ]
         },
@@ -19041,22 +21736,23 @@
           "kind": "preflight_a",
           "terminal": null,
           "state": "done",
-          "started_at": 1800000000.0,
-          "finished_at": 1800000000.0,
+          "started_at": 1800000001.5,
+          "finished_at": 1800000001.5,
           "code": null
         },
         "checks": {
           "fci": {
-            "at": 1800000000.0,
+            "at": 1800000001.5,
             "state": "open",
-            "age_s": 141.0,
+            "age_s": 68.5,
             "fresh": true
           },
           "b_probe": {
-            "at": 1800000000.0,
+            "at": 1800000000.5,
             "state": "absent",
-            "by": "probe",
-            "age_s": 141.0,
+            "by": "nodes",
+            "graph": "absent",
+            "age_s": 69.5,
             "fresh": true
           },
           "c_preflight": null,
@@ -19768,8 +22464,10 @@
           "age_s": 90.0,
           "ctime_age_s": 90.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -19780,21 +22478,29 @@
           "reason": "stop_c_unknown",
           "since": 1800000000.0,
           "step_at": 1800000000.0,
+          "reason_params": null,
+          "took_s": 0,
           "steps": [
             {
               "step": "stop_c",
               "terminal": "c",
-              "state": "failed"
+              "state": "failed",
+              "at": 1800000000.0,
+              "took_s": 0.0
             },
             {
               "step": "stop_a",
               "terminal": "a",
-              "state": "not_reached"
+              "state": "not_reached",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "stop_b",
               "terminal": "b",
-              "state": "not_reached"
+              "state": "not_reached",
+              "at": null,
+              "took_s": null
             }
           ]
         },
@@ -19838,7 +22544,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 0.0,
             "fresh": true
           },
@@ -20592,8 +23299,10 @@
           "age_s": 90.0,
           "ctime_age_s": 90.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -20625,7 +23334,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 0.0,
             "fresh": true
           },
@@ -21398,8 +24108,10 @@
           "age_s": 90.0,
           "ctime_age_s": 90.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -21431,7 +24143,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 0.0,
             "fresh": true
           },
@@ -22216,8 +24929,10 @@
           "age_s": 90.0,
           "ctime_age_s": 90.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": [
             {
               "code": "sequence_stopping",
@@ -22235,23 +24950,32 @@
           "reason": null,
           "since": 1800000000.0,
           "step_at": 1800000000.0,
+          "reason_params": null,
+          "took_s": null,
           "steps": [
             {
               "step": "stop_c",
               "terminal": "c",
-              "state": "running"
+              "state": "running",
+              "at": 1800000000.0,
+              "took_s": null
             },
             {
               "step": "stop_a",
               "terminal": "a",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "stop_b",
               "terminal": "b",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             }
-          ]
+          ],
+          "elapsed_s": 0.0
         },
         "gripper_test": {
           "state": "idle",
@@ -22285,7 +25009,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 0.0,
             "fresh": true
           },
@@ -23010,8 +25735,10 @@
           "age_s": 90.0,
           "ctime_age_s": 90.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": [
             {
               "code": "sequence_stopping",
@@ -23029,23 +25756,32 @@
           "reason": null,
           "since": 1800000000.0,
           "step_at": 1800000000.0,
+          "reason_params": null,
+          "took_s": null,
           "steps": [
             {
               "step": "stop_c",
               "terminal": "c",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
             },
             {
               "step": "stop_a",
               "terminal": "a",
-              "state": "running"
+              "state": "running",
+              "at": 1800000000.0,
+              "took_s": null
             },
             {
               "step": "stop_b",
               "terminal": "b",
-              "state": "pending"
+              "state": "pending",
+              "at": null,
+              "took_s": null
             }
-          ]
+          ],
+          "elapsed_s": 0.0
         },
         "gripper_test": {
           "state": "idle",
@@ -23079,7 +25815,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 0.0,
             "fresh": true
           },
@@ -23741,8 +26478,10 @@
           "age_s": null,
           "ctime_age_s": null,
           "ours": false,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": null,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -23753,21 +26492,29 @@
           "reason": null,
           "since": 1800000000.0,
           "step_at": 1800000000.0,
+          "reason_params": null,
+          "took_s": 0,
           "steps": [
             {
               "step": "stop_c",
               "terminal": "c",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
             },
             {
               "step": "stop_a",
               "terminal": "a",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
             },
             {
               "step": "stop_b",
               "terminal": "b",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
             }
           ]
         },
@@ -24502,8 +27249,10 @@
           "age_s": 90.0,
           "ctime_age_s": 90.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -24514,21 +27263,29 @@
           "reason": "stop_failed",
           "since": 1800000000.0,
           "step_at": 1800000000.0,
+          "reason_params": null,
+          "took_s": 0,
           "steps": [
             {
               "step": "stop_c",
               "terminal": "c",
-              "state": "done"
+              "state": "done",
+              "at": 1800000000.0,
+              "took_s": 0.0
             },
             {
               "step": "stop_a",
               "terminal": "a",
-              "state": "failed"
+              "state": "failed",
+              "at": 1800000000.0,
+              "took_s": 0.0
             },
             {
               "step": "stop_b",
               "terminal": "b",
-              "state": "not_reached"
+              "state": "not_reached",
+              "at": null,
+              "took_s": null
             }
           ]
         },
@@ -24557,7 +27314,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 0.0,
             "fresh": true
           },
@@ -25339,8 +28097,10 @@
           "age_s": 90.0,
           "ctime_age_s": 90.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -25381,7 +28141,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 0.0,
             "fresh": true
           },
@@ -26157,8 +28918,10 @@
           "age_s": 90.0,
           "ctime_age_s": 90.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -26169,21 +28932,29 @@
           "reason": "cancelled",
           "since": 1800000000.0,
           "step_at": 1800000000.0,
+          "reason_params": null,
+          "took_s": 0,
           "steps": [
             {
               "step": "stop_c",
               "terminal": "c",
-              "state": "cancelled"
+              "state": "cancelled",
+              "at": 1800000000.0,
+              "took_s": 0.0
             },
             {
               "step": "stop_a",
               "terminal": "a",
-              "state": "not_reached"
+              "state": "not_reached",
+              "at": null,
+              "took_s": null
             },
             {
               "step": "stop_b",
               "terminal": "b",
-              "state": "not_reached"
+              "state": "not_reached",
+              "at": null,
+              "took_s": null
             }
           ]
         },
@@ -26212,7 +28983,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 0.0,
             "fresh": true
           },
@@ -26799,7 +29571,7 @@
               {
                 "code": "b_probe_stale",
                 "level": "warn",
-                "text": "No usable check says whether a gripper stack is already running (none made, too old, or without an answer): pressing start makes the check first (about 20 s); press start again when it has finished.",
+                "text": "No usable check says whether a gripper stack is already running (none made, too old, or without an answer): pressing start makes the check first (a few seconds); press start again when it has finished.",
                 "params": {
                   "age_s": null
                 }
@@ -26913,8 +29685,10 @@
           "age_s": null,
           "ctime_age_s": null,
           "ours": false,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": null,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -27542,7 +30316,7 @@
               {
                 "code": "b_probe_stale",
                 "level": "warn",
-                "text": "No usable check says whether a gripper stack is already running (none made, too old, or without an answer): pressing start makes the check first (about 20 s); press start again when it has finished.",
+                "text": "No usable check says whether a gripper stack is already running (none made, too old, or without an answer): pressing start makes the check first (a few seconds); press start again when it has finished.",
                 "params": {
                   "age_s": 601.0
                 }
@@ -27636,8 +30410,10 @@
           "age_s": 691.0,
           "ctime_age_s": 691.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -27676,7 +30452,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 601.0,
             "fresh": false
           },
@@ -28342,8 +31119,10 @@
           "age_s": 691.0,
           "ctime_age_s": 691.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -28382,7 +31161,8 @@
           "b_probe": {
             "at": 1800000601.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 0.0,
             "fresh": true
           },
@@ -29048,8 +31828,10 @@
           "age_s": 691.0,
           "ctime_age_s": 691.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -29088,7 +31870,8 @@
           "b_probe": {
             "at": 1800000601.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 0.0,
             "fresh": true
           },
@@ -29740,8 +32523,16 @@
           "age_s": 90.0,
           "ctime_age_s": 90.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": {
+            "state": "clear",
+            "count": 0,
+            "kinds": [],
+            "empty": 0,
+            "why": null
+          },
           "touch_blockers": []
         },
         "sequence": {
@@ -29780,7 +32571,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 0.0,
             "fresh": true
           },
@@ -30602,8 +33394,10 @@
           "age_s": 3690.0,
           "ctime_age_s": 3690.0,
           "ours": true,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": 0.0,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -30635,7 +33429,8 @@
           "b_probe": {
             "at": 1800000000.0,
             "state": "absent",
-            "by": "probe",
+            "by": "nodes",
+            "graph": "absent",
             "age_s": 3600.0,
             "fresh": false
           },
@@ -31258,8 +34053,10 @@
           "age_s": null,
           "ctime_age_s": null,
           "ours": false,
-          "wait_s": 60.0,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
           "remaining_s": null,
+          "heavy": null,
           "touch_blockers": []
         },
         "sequence": {
@@ -31383,6 +34180,9 @@
     "sequence_start_already": {
       "done": "already_started"
     },
+    "sequence_start_chain_heavy": {
+      "done": "sequence_started"
+    },
     "sequence_stop": {
       "done": "sequence_stop_started"
     },
@@ -31478,7 +34278,7 @@
       "status": 409,
       "detail": {
         "code": "b_probe_started",
-        "message": "There was no usable check whether a gripper stack is already running (none made, too old, or without an answer), so it has been started (about 20 s). Nothing was started: press start again when it has finished."
+        "message": "There was no usable check whether a gripper stack is already running (none made, too old, or without an answer), so it has been started (a few seconds). Nothing was started: press start again when it has finished."
       }
     },
     "probe_b_with_unit": {

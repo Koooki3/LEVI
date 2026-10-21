@@ -733,6 +733,9 @@ def test_the_document_says_what_the_sequence_is_and_hides_the_bookkeeping(up):
         "since",
         "step_at",
         "steps",
+        "reason_params",
+        "took_s",
+        "elapsed_s",
     }
     assert [i["step"] for i in seq["steps"]] == list(stack_act.SEQUENCE_STOP_STEPS)
     assert all(i["state"] in stack_act.SEQUENCE_STEP_STATES for i in seq["steps"])

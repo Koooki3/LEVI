@@ -183,11 +183,26 @@ class Rehearsal:
             uid=os.getuid(),
         )
         self.sup = stack.Stack(base)
+        stack_act.register_run_probe(lambda: False)  # (no hosted run here)
         host = stack_act.ActHost(
             base=base,
             state_root=lambda: self.work / "state" / "marvel0" / "stack",
             fci_probe=self.fci_probe,
             arm_lock=str(self.work / "arm.lock"),
+            # (the rehearsal's workspace is a temporary folder, not the main
+            # checkout's: the product-only rule of the design record 2.12 is about
+            # the real stack, which nothing here touches)
+            workspace_ok=lambda: True,
+            # (no gate log in the rehearsal's hub: the decision itself is the real
+            # function's, shown on real scopes below and on the real log in the
+            # tests; here the wait does not depend on it)
+            heavy_jobs=lambda log, run, now: {
+                "state": "clear",
+                "count": 0,
+                "kinds": [],
+                "empty": 0,
+                "why": None,
+            },
             background=False,
             sleep=lambda s: time.sleep(min(s, 0.2)),
         )
@@ -254,6 +269,57 @@ class Rehearsal:
         write_health(str(self.health), **flags)
 
 
+def scope_check(r: Rehearsal):
+    """``stack_act._scopes_tasks`` on real scopes (named for the rehearsal, never
+    a name of the heavy-job gate): one that holds a process, one that is not
+    there, and the same one after it ended."""
+    say("2b. The heavy-job decision's systemd questions, on a real scope")
+    live, absent = f"{TAG}heavyscope.scope", f"{TAG}nosuchscope.scope"
+    scope = subprocess.Popen(
+        [
+            "systemd-run",
+            "--user",
+            "--scope",
+            "--quiet",
+            f"--unit={live.removesuffix('.scope')}",
+            "--collect",
+            "--",
+            "sleep",
+            "30",
+        ],
+        stdin=subprocess.DEVNULL,
+    )
+    try:
+        run = stack.guarded(r.run)
+        end = time.monotonic() + 5
+        got = {}
+        while time.monotonic() < end:
+            got = stack_act._scopes_tasks(run, [live, absent])
+            if got.get(live) == "running":
+                break
+            time.sleep(0.1)
+        check(
+            "a scope that holds a process reads running, one that is not there gone (one `systemctl show` for both)",
+            got == {live: "running", absent: "gone"},
+            str(got),
+        )
+        systemctl("stop", live)
+        time.sleep(0.5)
+        after = stack_act._scopes_tasks(run, [live])
+        check(
+            "the scope after it ended is gone, not running",
+            after == {live: "gone"},
+            str(after),
+        )
+    finally:
+        systemctl("stop", live)
+        scope.terminate()
+        try:
+            scope.wait(5)
+        except subprocess.TimeoutExpired:
+            scope.kill()
+
+
 def scenario(r: Rehearsal):
     act = r.act
     say("1. The stack is seen, nothing exists yet")
@@ -297,6 +363,14 @@ def scenario(r: Rehearsal):
         doc["terminals"]["a"]["can_start"],
         str([b["code"] for b in doc["terminals"]["a"]["start_blockers"]]),
     )
+
+    probe = act._b_probe
+    check(
+        "the graph was asked first, through the real `timeout`-bounded one-shot (the stand-in lists the monitor's node)",
+        (probe["by"], probe["graph"], probe["state"]) == ("nodes", "absent", "absent"),
+        str(probe),
+    )
+    scope_check(r)
 
     say("3. Start A as a real transient unit behind the wrapper")
     started = time.monotonic()

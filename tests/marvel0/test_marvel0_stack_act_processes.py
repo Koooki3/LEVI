@@ -418,10 +418,9 @@ def probe_limit(monkeypatch, seconds=3):
 
 
 def test_the_probe_of_the_gripper_stack_reads_a_real_command(make, monkeypatch):
-    """No gripper stack: the command logs that it cannot contact its controller
-    manager and never ends by itself, so it is ended by RuntimeMaxSec (R1 M4),
-    and what it printed is the answer. One started by hand (here: the stand-in's
-    marker file): it is listed."""
+    """No gripper stack: the graph lists the monitor's node and none of the
+    gripper's. One started by hand (here: the stand-in's marker file): its nodes
+    are listed. (The slow question, the controller manager, is the next tests'.)"""
     m = make()
     m.no_manager()
     m.preflight_a()
@@ -438,7 +437,9 @@ def test_a_probe_that_hangs_is_ended_by_the_backstop_and_its_warning_is_the_answ
     make, monkeypatch
 ):
     probe_limit(monkeypatch)
-    m = make(controllers="hang")  # nothing but RuntimeMaxSec ends it
+    # (the graph proves nothing, so the controller manager is asked: nothing but
+    # RuntimeMaxSec ends that command)
+    m = make(controllers="hang", nodes="blind")
     m.no_manager()
     started = time.monotonic()
     m.preflight_a()
@@ -452,7 +453,7 @@ def test_a_probe_that_is_ended_before_it_can_say_is_no_answer_not_absent(
     make, monkeypatch
 ):
     probe_limit(monkeypatch)
-    m = make(controllers="silent")  # ended before the 10 s warning
+    m = make(controllers="silent", nodes="blind")  # ended before the 10 s warning
     m.no_manager()
     m.preflight_a()
     t = m.terminal("b")

@@ -344,7 +344,9 @@ def test_a_check_of_the_gripper_stack_that_gets_no_answer_ends_the_chain(m):
     m.controllers_out, m.controllers_code = "garbage\n", 1
     probes = len(m.oneshots)
     m.act.advance()  # the check is made, in this tick
-    assert len(m.oneshots) == probes + 1
+    # (the graph says nothing, so the controller manager is asked as well)
+    assert len(m.oneshots) == probes + 2
+    assert len(m.oneshots_of("node list")) == 2  # the early check, and this one
     failed_at(m, "b_probe", "b_not_seen", ("b", "c_preflight", "c"))
     assert m.systemd_runs("b") == []
 
@@ -360,8 +362,10 @@ def test_a_check_of_the_gripper_stack_is_made_when_the_old_one_is_due(m):
     assert m.act.advance()["step"] == "b"
     assert states(m.doc()["sequence"])["b_probe"] == "done"
     assert m.run_chain()["state"] == "done"
-    # a fresh one is not asked again
-    assert len([c for c in m.oneshots if "list_controllers" in " ".join(c)]) >= 2
+    # a fresh one is not asked again: the graph twice (the early check and this
+    # one), the controller manager only for the checks before C
+    assert len(m.oneshots_of("node list")) == 2
+    assert len(m.oneshots_of("list_controllers")) == 1
 
 
 def test_a_fresh_check_of_the_gripper_stack_is_not_made_again(m):

@@ -241,7 +241,13 @@ describe("states, reasons, failures and ready lines", () => {
       ...steps,
       ...order.map((key) => `stop_${key}`),
     ]);
-    for (const reason of ["cancelled", "expired", "superseded", "step_timeout"])
+    for (const reason of [
+      "cancelled",
+      "expired",
+      "superseded",
+      "step_timeout",
+      "heavy_job_still_running",
+    ])
       expect(`marvel0.ctl.seq.reason.${reason}` in E).toBe(true);
     // Every reason a guided start or stop can end with has its sentence, in
     // both languages (its own family, or the refusals'): the page never shows a
@@ -276,8 +282,8 @@ describe("states, reasons, failures and ready lines", () => {
     ].map((m) => m[1]);
     expect(chain).toEqual([
       "monitor",
-      "probe",
       "marker",
+      "probe",
       "wait",
       "arm",
       "await_a",
@@ -287,6 +293,13 @@ describe("states, reasons, failures and ready lines", () => {
       "c",
     ]);
     sameSet(family("marvel0.ctl.seq.chain."), chain);
+    // What the wait before A can be waiting for, and its words in both languages.
+    const holds = [
+      ...act.match(/\nWAIT_HOLDS = \(([^)]*)\)/s)![1].matchAll(/"([a-z_]+)"/g),
+    ].map((m) => m[1]);
+    expect(holds.length).toBe(5);
+    sameSet(family("marvel0.ctl.seq.hold."), holds);
+    expect(missing("marvel0.ctl.seq.hold.", holds)).toEqual([]);
     // A stop ends with the single stop's own refusal code, worded by the
     // refusals' family, or by the sequence's own where the code has facts.
     for (const code of [

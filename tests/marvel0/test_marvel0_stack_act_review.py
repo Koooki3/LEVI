@@ -264,15 +264,35 @@ def test_r1_m4_a_runner_that_gave_up_is_unknown_not_absent(m):
 
 def test_r1_m4_the_probe_is_bounded_from_inside_and_from_outside(m):
     m.m_ready()
+    m.nodes_out = ""  # (the graph proves nothing: the controller manager is asked)
     m.act.preflight_a({"request_id": "pre-a-00000054"})
     [cmd] = [c for c in m.oneshots if "list_controllers" in " ".join(c)]
     assert cmd[cmd.index("--") + 1 :][:6] == ["timeout", "-s", "INT", "-k", "3", "20"]
-    [run] = [c for c in m.calls if c[0] == "systemd-run" and "probe-b" in " ".join(c)]
+    [run] = [c for c in m.calls if c[0] == "systemd-run" and "probe-b-1" in " ".join(c)]
     limit = int(
         next(a for a in run if a.startswith("--property=RuntimeMaxSec=")).split("=")[2]
     )
     assert limit == stack_units.PROBE_RUNTIME_MAX_S
     assert limit > stack_units.LIST_TIMEOUT_S + stack_units.LIST_KILL_AFTER_S
+
+
+def test_the_fast_probe_is_bounded_from_inside_and_from_outside(m):
+    m.m_ready()
+    m.act.preflight_a({"request_id": "pre-a-00000056"})
+    [cmd] = [c for c in m.oneshots if " node list " in " ".join(c)]
+    assert cmd[cmd.index("--") + 1 :] == [
+        "timeout", "-s", "INT", "-k", "2", "8",
+        "ros2", "node", "list", "--no-daemon", "--spin-time", "2.0",
+    ]  # fmt: skip
+    [run] = [
+        c for c in m.calls if c[0] == "systemd-run" and "probe-b-nodes" in " ".join(c)
+    ]
+    limit = int(
+        next(a for a in run if a.startswith("--property=RuntimeMaxSec=")).split("=")[2]
+    )
+    assert limit == stack_units.NODES_RUNTIME_MAX_S
+    assert limit > stack_units.NODES_TIMEOUT_S + stack_units.NODES_KILL_AFTER_S
+    assert not m.oneshots_of("list_controllers"), "the slow question was not needed"
 
 
 def test_r1_m4_a_present_gripper_stack_is_foreign_running_not_unknown(m):
@@ -778,6 +798,10 @@ def test_r1_s2_2_the_window_is_not_part_of_what_the_page_shows(m):
         "through",
         "pauses",
         "steps",
+        "reason_params",
+        "took_s",
+        "elapsed_s",
+        "wait",
     }
 
 

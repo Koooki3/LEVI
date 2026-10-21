@@ -136,6 +136,56 @@ NO_MANAGER = (
     "/robotiq/controller_manager/list_controllers\n" + WAITING_LINE
 )
 NO_MANAGER_CODE = 124  # (``timeout`` ended the command)
+# What ``ros2 node list`` prints: the fully qualified names, sorted, one per
+# line (ros2node/verb/list.py main(): `print(*sorted_names, sep='\n')`). The
+# gripper stack of robotiq_collect.launch.py is these nodes, all in the
+# namespace `robotiq` (the control node is `/robotiq/controller_manager`, the
+# controllers it loads are lifecycle nodes named after them); the health
+# monitor's own node is `/fr3_health_monitor` (fr3_health_monitor.py:285). The
+# duplicate-name warning goes to standard error (list.py), which a
+# `systemd-run --pipe` unit returns with the rest.
+MONITOR_NODE = "/fr3_health_monitor"
+GRIPPER_NODES = (
+    "/robotiq/controller_manager",
+    "/robotiq/joint_state_broadcaster_robotiq",
+    "/robotiq/robot_state_publisher",
+    "/robotiq/robotiq_activation_controller",
+    "/robotiq/robotiq_gripper_controller",
+)
+
+
+def scope_print(name, load, active, tasks) -> str:
+    """What `systemctl --user show --property=Id,LoadState,ActiveState,TasksCurrent
+    <scope>` prints for one scope, in the order systemd prints it (captured on the
+    machine, 21 Oct: a loaded scope that holds no process says `TasksCurrent=0`, a
+    scope that is not there says `TasksCurrent=[not set]` and
+    `LoadState=not-found`; with several units there is one block each, a blank
+    line between them)."""
+    return f"TasksCurrent={tasks}\nId={name}\nLoadState={load}\nActiveState={active}\n"
+
+
+def scopes_print(scopes, shown) -> str:
+    """The output of one `systemctl --user show` of ``scopes``, from ``shown``
+    (name -> (load, active, tasks); a scope not in it is not there)."""
+    return "\n".join(
+        scope_print(name, *shown.get(name, ("not-found", "inactive", "[not set]")))
+        for name in scopes
+    )
+
+
+DUPLICATE_WARNING = (
+    "WARNING: Be aware that there are nodes in the graph that share an exact "
+    "name, which can have unintended side effects.\n"
+)
+
+
+def node_list_print(names) -> str:
+    """The output of `ros2 node list` for ``names`` (built the way list.py
+    prints them; nothing printed for an empty graph)."""
+    names = sorted(names)
+    return "\n".join(names) + "\n" if names else ""
+
+
 # The kernel keeps the side that closed a TCP connection in TIME_WAIT for this
 # long (net.ipv4.tcp_fin_timeout does not apply to it): the FCI check's own
 # socket to the arm, which ``arm_guard`` counts as a control connection.
@@ -165,7 +215,27 @@ class ActMachine(Machine):
         self.gripper_reached, self.gripper_stalled, self.gripper_code = True, False, 0
         self.gripper_out = None  # a fixed output instead of the scripted one
         self.controllers_out, self.controllers_code = NO_MANAGER, NO_MANAGER_CODE
+        # The ROS graph as `ros2 node list` sees it. None: derived from
+        # ``controllers_out`` (a manager that answers is the gripper stack's
+        # nodes, one that does not is a graph with only the monitor's node, a
+        # command that says nothing is a graph that was not discovered), so a
+        # test that says what the controller manager answers says it for both.
+        self.nodes_out, self.nodes_code = None, 0
         self.ee_out, self.ee_code = EE_OUT, 0
+        # What heavy_jobs_running says (the decision itself is tested with the
+        # real function on fixture logs; here the sequence's use of it is).
+        self.heavy = {
+            "state": "clear",
+            "count": 0,
+            "kinds": [],
+            "empty": 0,
+            "why": None,
+        }
+        self.heavy_asked = 0
+        # The heavy-gate scopes systemd shows: name -> (LoadState, ActiveState,
+        # TasksCurrent as printed). A scope that is not listed is not there.
+        self.scopes = {}
+        self.scope_failing = False
         self.stop_codes = {}
         # Units whose `systemctl stop` fails and leaves them as they were (a
         # stop that failed): "a"/"b"/"c". The guided stop's tests use it.
@@ -234,8 +304,14 @@ class ActMachine(Machine):
             workspace_ok=lambda: self.workspace_main,
             cgroup_procs=lambda group: self.cgroup_pids.get(group),
             background=False,
+            parallel=False,
+            heavy_jobs=self._heavy_jobs,
             sleep=self.slept.append,
         )
+
+    def _heavy_jobs(self, log, run, now):
+        self.heavy_asked += 1
+        return dict(self.heavy)
 
     def _probe(self, ip, port):
         self.fci_probes.append((ip, port))
@@ -298,6 +374,15 @@ class ActMachine(Machine):
         if argv[:3] == ["systemctl", "--user", "show-environment"]:
             self.calls.append(list(argv))
             return 0, "PATH=/usr/bin\nHOME=/home/x\nROS_DISTRO=jazzy\nCONDA_SHLVL=1\n"
+        if (
+            argv[:3] == ["systemctl", "--user", "show"]
+            and len(argv) >= 5
+            and argv[3].startswith("--property=Id,LoadState,ActiveState,TasksCurrent")
+        ):
+            self.calls.append(list(argv))
+            if self.scope_failing:
+                return 1, "Failed to connect to bus"
+            return 0, scopes_print(argv[4:], self.scopes)
         if (
             argv[:3] == ["systemctl", "--user", "show"]
             and len(argv) == 5
@@ -446,11 +531,23 @@ class ActMachine(Machine):
                 stalled=str(self.gripper_stalled).lower(),
             )
             return self.gripper_code, out
+        if " node list " in f" {text} ":
+            return self._nodes()
         if "list_controllers" in text:
             return self.controllers_code, self.controllers_out
         if "check_fr3_ee_frame" in text:
             return self.ee_code, self.ee_out
         raise AssertionError(f"unexpected one-shot {cmd}")
+
+    def _nodes(self):
+        if self.nodes_out is not None:
+            return self.nodes_code, self.nodes_out
+        listing = stack_units.parse_controllers(self.controllers_out)["state"]
+        if listing == "listed":
+            return 0, node_list_print([MONITOR_NODE, *GRIPPER_NODES])
+        if listing == "absent":
+            return 0, node_list_print([MONITOR_NODE])
+        return 0, ""  # (nothing discovered: the graph proves nothing)
 
     # -- what a unit prints, and what the rest of the machine shows then
     def emit(self, key, *lines):
@@ -574,7 +671,7 @@ class ActMachine(Machine):
             if seq["state"] != "running" or (stop_at and stop_at(seq)):
                 return seq
             if seq.get("step") == "wait":
-                self.t += 40
+                self.t += 4  # (the marker's minimum age is 3 s)
                 self.no_manager()
             self.chain_world(up, ready)
         raise AssertionError(f"the guided start did not settle: {seq}")
