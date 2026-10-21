@@ -906,3 +906,15 @@ def test_a_link_or_a_missing_log_is_never_cut(tmp_path):
     assert stack_units.trim_log(link, cap=1, keep=10) is False
     assert target.read_text() == "x" * 100
     assert stack_units.trim_log(tmp_path / "gone.log", cap=1, keep=10) is False
+
+
+def test_a_one_shot_unit_does_not_wait_for_what_its_command_leaves_behind():
+    """The ros2 CLI starts the ROS 2 daemon as a detached child; the unit then
+    stays in "deactivating" for the default 90 s stop timeout and `systemd-run
+    --wait --pipe` does not return: a check that succeeded lost its output (the first
+    real run of Start whole stack, 21 Oct). The leftovers get one second."""
+    argv = stack_units.oneshot_argv(
+        "levi-aeri-stack-marvel0-oneshot-x", ["true"], 35, "x"
+    )
+    assert f"--property=TimeoutStopSec={stack_units.ONESHOT_STOP_S}" in argv
+    assert stack_units.ONESHOT_STOP_S <= 2

@@ -83,6 +83,9 @@ GRIPPER_KILL_AFTER_S = 5
 # the wait starts, and python takes a few seconds to start: 20 s leaves room.
 LIST_TIMEOUT_S = 20
 LIST_KILL_AFTER_S = 3
+ONESHOT_STOP_S = (
+    1  # seconds a one-shot's leftover processes get after its main one exits
+)
 # systemd's RuntimeMaxSec is only the backstop behind `timeout`.
 PROBE_RUNTIME_MAX_S = LIST_TIMEOUT_S + LIST_KILL_AFTER_S + 12
 GRIPPER_CONTROLLER_MANAGER = "/robotiq/controller_manager"
@@ -576,6 +579,14 @@ def oneshot_argv(unit, argv, runtime_max_s, description) -> list:
         f"--description={description}, managed by the marvel0 page",
         f"--property=RuntimeMaxSec={int(runtime_max_s)}",
         "--property=KillSignal=SIGINT",
+        # What the command leaves behind in the unit's control group is ended
+        # ONE second after its main process exits. The ros2 CLI starts the ROS 2
+        # daemon (a detached child) when none runs; the unit then waited for it
+        # (state "deactivating / stop-sigterm", the default stop timeout is 90 s),
+        # `systemd-run --wait --pipe` did not return, the page's 45 s timeout hit
+        # and the output of a check that had succeeded was lost (first real run
+        # of Start whole stack, 21 Oct 22:26: C's controller check "refused" twice).
+        f"--property=TimeoutStopSec={ONESHOT_STOP_S}",
         "--setenv=PYTHONUNBUFFERED=1",
         "--setenv=RCUTILS_COLORIZED_OUTPUT=0",
         "--",
