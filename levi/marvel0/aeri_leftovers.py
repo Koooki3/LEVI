@@ -9,7 +9,14 @@ offers for it (``aeri_api.py``):
   serving a robot, and the page's own deploy has its own stop with the client
   checks) and never the evaluation client's or the page-hosted terminal's scopes;
 * **the live annotation service** (``levi live``), which holds port 8100 and the
-  GPU lock: ``levi live stop``, the command of AERI.md, with no ``--force``.
+  GPU lock: ``systemctl --user stop <[live].unit>`` (decided 22 Oct, O-6). It is
+  how the product's own live-service stop (``levi/live/service_control.py``)
+  stops a service its unit runs. The unit's ``ExecStop`` is ``levi live stop``
+  with the live workspace spelt out, ``TimeoutStopSec=180`` bounds the wait and
+  ends what is left of its cgroup, and the unit's state is what the card reads
+  before and after. ``levi live stop`` without ``--workspace`` finds its service
+  by the workspace of the last one started with the same home: for another it
+  says "not running" and exits 0, with the service still up.
 
 Both writes are a person's, need their typed phrase, and refuse while an AERI
 run is alive, a hosted evaluation client or session is on, or the arm lock is
@@ -22,7 +29,6 @@ These stop mistakes, not another program of the same account.
 
 import re
 import subprocess
-from pathlib import Path
 
 from . import aeri_prep
 from .aeri_prep import Refuse
@@ -33,9 +39,16 @@ VLM_UNIT = re.compile(r"levi-aeri-vlm-[a-z0-9][a-z0-9-]{0,46}")
 POLICY_UNIT = re.compile(r"levi-aeri-policy-[a-z0-9][a-z0-9-]{0,46}")
 MANUAL_PREFIX = "levi-aeri-policy-manual-"
 STOP_TIMEOUT_S = 90.0
-LIVE_STOP_TIMEOUT_S = 120.0
+# The unit's TimeoutStopSec is 180 s and ``systemctl stop`` waits for the stop job
+# (``service_control.STOP_TIMEOUT_S``, the same figure).
+LIVE_STOP_TIMEOUT_S = 210.0
+# ``levi.live.service_control.UNIT_NAME`` (a test compares the patterns): only
+# ``levi-live.service`` or a variant of it is ever stopped from here, whatever the
+# site file says.
+LIVE_UNIT = re.compile(r"levi-live(?:[-@_.:][A-Za-z0-9@._:-]{0,100})?\.service")
+LIVE_UNIT_FORBIDDEN = "levi-product"
 TAIL_CHARS = 400
-# The only variables ``levi live stop`` and ``systemctl --user`` get: no
+# The only variables ``systemctl --user`` gets: no
 # ``LEVI_*`` (the UI token among them), no token of any kind.
 LIVE_ENV_KEYS = (
     "HOME",
@@ -146,35 +159,27 @@ def stop_units(names, run=aeri_prep.run_capture) -> list:
 
 
 def live_env(environ) -> dict:
-    """The environment of ``levi live stop``: the allowlist, nothing else."""
+    """The environment of the stop: the allowlist, nothing else."""
     env = {"PATH": LIVE_ENV_PATH}
     env.update({k: environ[k] for k in LIVE_ENV_KEYS if environ.get(k)})
     return env
 
 
-def levi_root(levi_bin) -> str | None:
-    """The checkout a ``<checkout>/.venv/bin/levi`` belongs to (where AERI.md
-    runs the command from), or None when that is not a folder."""
-    path = Path(levi_bin)
+def stop_live(unit, environ, run=aeri_prep.run_capture) -> dict:
+    """``systemctl --user stop <unit>`` for the live annotation service's unit
+    (``[live].unit`` of the site file; no ``--force``, nothing else is stopped).
+    Returns ``{"returncode", "tail"}``; raises ``Refuse("live_stop_failed")`` when
+    the unit name is not a live unit's, or the command cannot run or times out.
+    The caller reads the unit's state again afterwards, and that decides."""
+    if (
+        not isinstance(unit, str)
+        or LIVE_UNIT.fullmatch(unit) is None
+        or LIVE_UNIT_FORBIDDEN in unit
+    ):
+        raise Refuse("live_stop_failed", reason="unit_invalid")
+    argv = ["systemctl", "--user", "stop", unit]
     try:
-        root = path.parents[2]
-    except IndexError:
-        return None
-    return str(root) if root.is_dir() else None
-
-
-def stop_live(aeri, environ, run=aeri_prep.run_capture) -> dict:
-    """``levi live stop`` (no ``--force``). Returns ``{"returncode", "tail"}``;
-    raises ``Refuse("live_stop_failed")`` when it cannot run or times out. The
-    caller reads the service's state again afterwards."""
-    argv = [aeri.levi_bin, "live", "stop"]
-    try:
-        done = run(
-            argv,
-            cwd=levi_root(aeri.levi_bin),
-            env=live_env(environ),
-            timeout=LIVE_STOP_TIMEOUT_S,
-        )
+        done = run(argv, env=live_env(environ), timeout=LIVE_STOP_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         raise Refuse("live_stop_failed", reason="timeout") from None
     except (OSError, ValueError, subprocess.SubprocessError):

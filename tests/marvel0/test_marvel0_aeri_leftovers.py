@@ -1,12 +1,13 @@
 """What an AERI run leaves behind and how the card stops it
 (``levi/marvel0/aeri_leftovers.py``): which units are leftovers (and which are
 never touched), the order of the reasons a stop is withheld, ``systemctl stop``
-as it really behaves, and ``levi live stop`` as a real child process with an
-allowlisted environment."""
+as it really behaves, and the stop of the live annotation service
+(``systemctl --user stop`` of its unit, with an allowlisted environment)."""
 
 import json
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 from aeri_world import DEFAULT_PROFILES, World, installed_profiles
@@ -262,13 +263,16 @@ def test_the_environment_is_an_allowlist():
     assert left.live_env({"HOME": ""}) == {"PATH": left.LIVE_ENV_PATH}
 
 
-def test_levi_live_stop_runs_the_command_of_aeri_md_from_its_checkout(world):
-    world.set_levi(say="stopped the live service")
-    got = left.stop_live(world.aeri, SECRETS, aeri_prep.run_capture)
-    assert got == {"returncode": 0, "tail": "stopped the live service"}
-    seen = world.seen_levi()
-    assert seen["argv"][1:] == ["live", "stop"], "and no --force"
-    assert seen["cwd"] == str(world.levi_root)
+def test_the_live_service_is_stopped_through_its_unit_with_an_allowlisted_environment(
+    world,
+):
+    world.set_live_stop(say="")
+    got = left.stop_live(world.site.live.unit, SECRETS, world.systemctl)
+    assert got == {"returncode": 0, "tail": ""}
+    seen = world.seen_live_stop()
+    assert seen["argv"] == ["systemctl", "--user", "stop", "levi-live.service"]
+    assert "--force" not in seen["argv"]
+    assert seen["env"] == left.live_env(SECRETS)
     assert "LEVI_UI_TOKEN" not in seen["env"] and "HF_TOKEN" not in seen["env"]
     assert (
         "ANTHROPIC_API_KEY" not in seen["env"] and "LEVI_WORKSPACE" not in seen["env"]
@@ -277,18 +281,20 @@ def test_levi_live_stop_runs_the_command_of_aeri_md_from_its_checkout(world):
     assert seen["env"]["HOME"] == "/home/x"
 
 
-def test_a_refusal_of_the_command_is_returned_not_worked_around(world):
-    world.set_levi(stops=False, rc=1, say="refused: a job is running")
-    got = left.stop_live(world.aeri, {}, aeri_prep.run_capture)
-    assert got == {"returncode": 1, "tail": "refused: a job is running"}
+def test_the_decision_is_the_unit_state_read_after_not_the_exit_code(world):
+    """``stop_live`` only reports what the command said; the card's re-read of
+    the unit decides (``aeri_api``): a refusing command leaves it running."""
+    world.set_live_stop(stops=False, rc=1, say="Job for levi-live.service canceled.")
+    got = left.stop_live(world.site.live.unit, {}, world.systemctl)
+    assert got == {"returncode": 1, "tail": "Job for levi-live.service canceled."}
     assert json.loads(world.live_file.read_text())["active"] == "active", (
         "nothing else was tried"
     )
 
 
 def test_the_tail_is_bounded_and_scrubbed(world):
-    world.set_levi(say="x" * 2000 + " see /home/marvel/secret/file")
-    got = left.stop_live(world.aeri, {}, aeri_prep.run_capture)
+    world.set_live_stop(say="x" * 2000 + " see /home/marvel/secret/file")
+    got = left.stop_live(world.site.live.unit, {}, world.systemctl)
     assert len(got["tail"]) <= left.TAIL_CHARS and "/home/marvel" not in got["tail"]
 
 
@@ -297,7 +303,7 @@ def test_a_command_that_hangs_or_is_missing_is_a_stop_failure(world):
         raise subprocess.TimeoutExpired(argv, kw["timeout"])
 
     with pytest.raises(Refuse) as caught:
-        left.stop_live(world.aeri, {}, slow)
+        left.stop_live("levi-live.service", {}, slow)
     assert (caught.value.code, caught.value.extra["reason"]) == (
         "live_stop_failed",
         "timeout",
@@ -307,25 +313,79 @@ def test_a_command_that_hangs_or_is_missing_is_a_stop_failure(world):
         raise FileNotFoundError(argv[0])
 
     with pytest.raises(Refuse) as caught:
-        left.stop_live(world.aeri, {}, gone)
+        left.stop_live("levi-live.service", {}, gone)
     assert caught.value.extra["reason"] == "not_run"
 
 
-def test_the_timeout_is_the_one_in_the_design(world):
+def test_the_timeout_covers_the_units_own_stop_job(world):
+    """The unit says ``TimeoutStopSec=180``; ``systemctl stop`` waits for the stop
+    job, so the call waits longer (the product's own stop waits 210 s)."""
+    from levi.live import service_control
+
     seen = {}
 
     def spy(argv, **kw):
         seen.update(kw)
         return ran(0)
 
-    left.stop_live(world.aeri, {"HOME": "/h"}, spy)
-    assert seen["timeout"] == 120.0 and seen["cwd"] == str(world.levi_root)
+    left.stop_live("levi-live.service", {"HOME": "/h"}, spy)
+    assert seen["timeout"] == left.LIVE_STOP_TIMEOUT_S == 210.0
+    assert left.LIVE_STOP_TIMEOUT_S == service_control.STOP_TIMEOUT_S
+    # the documented unit (docs/SUPERVISION.md), not a file of this machine
+    text = (Path(__file__).resolve().parents[2] / "docs" / "SUPERVISION.md").read_text()
+    assert "TimeoutStopSec=180" in text and left.LIVE_STOP_TIMEOUT_S > 180
 
 
-def test_the_checkout_is_two_folders_above_the_venv_bin(tmp_path):
-    (tmp_path / "LEVI" / ".venv" / "bin").mkdir(parents=True)
-    assert left.levi_root(str(tmp_path / "LEVI" / ".venv" / "bin" / "levi")) == str(
-        tmp_path / "LEVI"
+@pytest.mark.parametrize(
+    "unit",
+    [
+        "levi-live.service",
+        "levi-live-cold.service",
+        "levi-live@x.service",
+    ],
+)
+def test_a_live_unit_name_is_stopped(unit):
+    seen = []
+
+    def spy(argv, **kw):
+        seen.append(argv)
+        return ran(0)
+
+    left.stop_live(unit, {}, spy)
+    assert seen == [["systemctl", "--user", "stop", unit]]
+
+
+@pytest.mark.parametrize(
+    "unit",
+    [
+        "levi-product.service",
+        "levi-live-levi-product.service",
+        "levi-aeri-vlm-8100.service",
+        "levi-aeri-policy-forward.service",
+        "ssh.service",
+        "levi-live",
+        "levi-live.scope",
+        "-all",
+        "levi-live.service --now",
+        "",
+        None,
+        7,
+    ],
+)
+def test_any_other_unit_is_never_stopped_whatever_the_site_file_says(unit):
+    def never(argv, **kw):
+        raise AssertionError("a command ran")
+
+    with pytest.raises(Refuse) as caught:
+        left.stop_live(unit, {}, never)
+    assert (caught.value.code, caught.value.extra["reason"]) == (
+        "live_stop_failed",
+        "unit_invalid",
     )
-    assert left.levi_root(str(tmp_path / "nowhere" / ".venv" / "bin" / "levi")) is None
-    assert left.levi_root("levi") is None
+
+
+def test_the_unit_pattern_is_the_one_the_products_own_stop_accepts():
+    from levi.live import service_control
+
+    assert service_control.UNIT_NAME.pattern == "^" + left.LIVE_UNIT.pattern + "$"
+    assert service_control.FORBIDDEN_IN_UNIT == left.LIVE_UNIT_FORBIDDEN

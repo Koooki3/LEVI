@@ -7,7 +7,7 @@
 - ``POST /api/levi/marvel0/aeri/prepare``: prepare one run (``aeri_prep.py``:
   the versioned port of ``new_run.py``): writes only the new run's folder;
 - ``POST /api/levi/marvel0/aeri/live/stop``: stop the live annotation service
-  that holds port 8100 (``levi live stop``);
+  that holds port 8100 (``systemctl --user stop`` of its unit);
 - ``POST /api/levi/marvel0/aeri/leftovers/stop``: stop the units an earlier run
   left behind (``aeri_leftovers.py``).
 
@@ -271,7 +271,7 @@ class Preparer:
                 )
             self._obstacles(facts, with_gpu=False)
             ran = aeri_leftovers.stop_live(
-                aeri, self.host.prep.environ, self.host.prep.run
+                facts["main_site"].live.unit, self.host.prep.environ, self.host.prep.run
             )
             after = self.readiness.facts(fresh=True)
             if after["live"] == "running" or after["live"] is None:
@@ -390,8 +390,8 @@ def aeri_prepare(body: PrepareBody):
 
 @router.post("/aeri/live/stop", dependencies=[Depends(person_only)])
 def aeri_live_stop(body: ConfirmBody):
-    """Stop the live annotation service (``levi live stop``), which holds port
-    8100 and the GPU lock; refused while an AERI run, a hosted evaluation client
+    """Stop the live annotation service (``systemctl --user stop`` of its unit),
+    which holds port 8100 and the GPU lock; refused while an AERI run, a hosted evaluation client
     or the arm is in use."""
     return _answer(preparer().live_stop, body.model_dump())
 

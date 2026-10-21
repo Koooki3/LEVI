@@ -3,9 +3,8 @@
 ``tmp_path`` the caller hands in, nothing touches the real machine.
 
 What is real here: the git repository of the "worktree" (``git init`` and a
-commit), the stand-in ``scripts/aeri.py`` and ``levi`` programs (real child
-processes: their argv, working folder, environment and niceness are recorded
-and asserted), the templates (copies of the real ones, with the real
+commit), the stand-in ``scripts/aeri.py`` program (a real child process: its argv,
+working folder, environment and niceness are recorded and asserted), the templates (copies of the real ones, with the real
 ``SOURCES.sha256``), the site and control parsers, the policy-switch log reader
 (``fr3_policy_swap.pending``) and every parser of a command's output. What is
 scripted: the clock, ``nvidia-smi``, ``/proc/meminfo``, the socket tables, the
@@ -76,38 +75,36 @@ out.update(b.get("override", {{}}))
 print(json.dumps(out, indent=2))
 """
 
-LEVI_STANDIN = """\
-#!/usr/bin/env python3
-import json, os, sys
-CONTROL = {control!r}
-SEEN = {seen!r}
-LIVE = {live!r}
-b = json.load(open(CONTROL)) if os.path.exists(CONTROL) else {{}}
-json.dump({{"argv": sys.argv, "cwd": os.getcwd(), "env": dict(os.environ)}},
-          open(SEEN, "w"))
-if b.get("stops", True):
-    json.dump({{"load": "loaded", "active": "inactive", "sub": "dead"}}, open(LIVE, "w"))
-print(b.get("say", "live service stopped"))
-sys.exit(b.get("rc", 0))
-"""
-
 
 class Systemctl:
     """``systemctl`` is never run for real by these tests: a ``stop`` is kept and
-    answered (``fail`` names the units that refuse); every other command (git, the
-    stand-in programs) runs for real."""
+    answered (``fail`` names the units that refuse); the live unit's stop acts on
+    the world's scripted unit state the way systemd would (``world.live_stop``:
+    ``stops`` False leaves it running, ``rc`` and ``say`` are the command's exit
+    code and text). Every other command (git, the stand-in programs) runs for
+    real."""
 
-    def __init__(self):
+    def __init__(self, world=None):
         self.calls = []
+        self.kws = []
         self.fail = set()
+        self.world = world
 
     def __call__(self, argv, **kw):
         if argv[0] != "systemctl":
             return aeri_prep.run_capture(argv, **kw)
         self.calls.append(list(argv))
+        self.kws.append(dict(kw))
         name = argv[-1]
         if name in self.fail:
             return aeri_prep.Ran(1, "", f"Failed to stop {name}: Unit is masked.")
+        world = self.world
+        if world is not None and name == world.site.live.unit:
+            how = world.live_stop
+            if how.get("stops", True):
+                world.set_live("stopped")
+            say = how.get("say", "")
+            return aeri_prep.Ran(how.get("rc", 0), "", say)
         return aeri_prep.Ran(0, "", "")
 
 
@@ -141,12 +138,13 @@ class World:
         self.state = r / "state"
         self.hub = r / "hub"
         self.levi_root = r / "LEVI"
-        self.levi_bin = self.levi_root / ".venv" / "bin" / "levi"
+        self.levi_bin = (
+            self.levi_root / ".venv" / "bin" / "levi"
+        )  # (named by the site; not run)
         self.local_model = r / "models" / "qwen3-vl-4b"
         self.behaviour = r / "behaviour.json"
         self.seen = r / "seen.json"
-        self.levi_behaviour = r / "levi_behaviour.json"
-        self.levi_seen = r / "levi_seen.json"
+        self.live_stop: dict = {}
         self.live_file = r / "live.json"
         self.profile = profile
         for folder in (
@@ -165,7 +163,6 @@ class World:
         for name in (*aeri_prep.TEMPLATE_FILES, aeri_prep.SOURCES_FILE):
             shutil.copyfile(FIXTURES / name, self.templates / name)
         self._worktree()
-        self._levi()
         self.set_live("running")
         self.local = local
         self.facts = {
@@ -186,7 +183,7 @@ class World:
         }
         self.site = self._site()
         self.reads: dict = {}
-        self.systemctl = Systemctl()
+        self.systemctl = Systemctl(self)
 
     # ---- the pieces
 
@@ -202,16 +199,6 @@ class World:
         git("init", "-q", "-b", "main", cwd=self.wt)
         git("add", "-A", cwd=self.wt)
         git("commit", "-q", "-m", "stand-in AERI code", cwd=self.wt)
-
-    def _levi(self):
-        self.levi_bin.write_text(
-            LEVI_STANDIN.format(
-                control=str(self.levi_behaviour),
-                seen=str(self.levi_seen),
-                live=str(self.live_file),
-            )
-        )
-        self.levi_bin.chmod(0o755)
 
     def head(self) -> str:
         return git("rev-parse", "HEAD", cwd=self.wt)
@@ -266,8 +253,9 @@ class World:
     def set_check(self, **behaviour):
         self.behaviour.write_text(json.dumps(behaviour))
 
-    def set_levi(self, **behaviour):
-        self.levi_behaviour.write_text(json.dumps(behaviour))
+    def set_live_stop(self, **behaviour):
+        """How the stop of the live unit answers: ``stops``, ``rc``, ``say``."""
+        self.live_stop = dict(behaviour)
 
     def set_live(self, state):
         shown = {
@@ -280,8 +268,17 @@ class World:
     def seen_check(self) -> dict:
         return json.loads(self.seen.read_text())
 
-    def seen_levi(self) -> dict:
-        return json.loads(self.levi_seen.read_text())
+    def live_stops(self) -> list:
+        """``{"argv", "env", "timeout"}`` of every stop of the live unit, in order."""
+        unit = self.site.live.unit
+        return [
+            {"argv": argv, **kw}
+            for argv, kw in zip(self.systemctl.calls, self.systemctl.kws, strict=True)
+            if argv[-1] == unit
+        ]
+
+    def seen_live_stop(self) -> dict:
+        return self.live_stops()[-1]
 
     @staticmethod
     def stack_doc(a="running", b="unknown", c="running", m="running", health="ok"):

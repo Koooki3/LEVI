@@ -5,6 +5,7 @@ acted on twice, that two writes do not run at once, and that the stops touch
 only what they should (the one place a test must not reach the real
 ``systemctl``: its calls are recorded and answered here)."""
 
+import dataclasses
 import fcntl
 import json
 import os
@@ -91,7 +92,7 @@ def test_a_bearer_credential_cannot_change_anything(machine, path, body):
     )
     assert r.status_code == 403 and r.json()["detail"]["code"] == "person_only"
     assert runs(machine) == [] and machine.systemctl.calls == []
-    assert not machine.levi_seen.exists()
+    assert machine.live_stops() == []
 
 
 @pytest.mark.parametrize("path, body", WRITES)
@@ -175,7 +176,7 @@ def test_the_phrase_must_be_typed_exactly(machine, path, body):
     for wrong in ("", "Prepare aeri run", "prepare aeri run ", "go"):
         r = post(machine, path, {**body(machine), "confirm": wrong})
         assert r.status_code == 400 and r.json()["detail"]["code"] == "confirm_required"
-    assert runs(machine) == [] and not machine.levi_seen.exists()
+    assert runs(machine) == [] and machine.live_stops() == []
 
 
 @pytest.mark.parametrize("path, body", WRITES)
@@ -197,7 +198,7 @@ def test_a_switched_off_card_refuses_every_write(machine, path, body):
     assert (
         post(machine, path, body(machine)).json()["detail"]["code"] == "aeri_disabled"
     )
-    assert runs(machine) == [] and not machine.levi_seen.exists()
+    assert runs(machine) == [] and machine.live_stops() == []
 
 
 @pytest.mark.parametrize("path, body", WRITES)
@@ -207,7 +208,7 @@ def test_only_the_product_may_write(machine, path, body, product):
     machine.facts["product"] = product
     r = post(machine, path, body(machine))
     assert r.status_code == 409 and r.json()["detail"]["code"] == "not_product"
-    assert runs(machine) == [] and not machine.levi_seen.exists()
+    assert runs(machine) == [] and machine.live_stops() == []
 
 
 @pytest.mark.parametrize("path, body", WRITES)
@@ -416,23 +417,43 @@ def test_the_live_service_is_stopped_with_the_command_and_the_state_read_again(m
     assert body["already"] is False and body["leftovers"] is None
     assert body["results"] == [{"name": "levi-live", "ok": True, "detail": None}]
     assert body["live_service"]["state"] == "stopped"
-    assert machine.seen_levi()["argv"][1:] == ["live", "stop"]
+    assert machine.seen_live_stop()["argv"] == [
+        "systemctl",
+        "--user",
+        "stop",
+        "levi-live.service",
+    ]
+
+
+def test_a_site_file_that_names_another_unit_cannot_make_the_card_stop_it(machine):
+    """The unit name comes from the site file; only ``levi-live*.service`` is ever
+    stopped from here (the product's own stop holds the same rule)."""
+    machine.site = dataclasses.replace(
+        machine.site, live=marvel0_site.Live(unit="levi-product.service")
+    )
+    machine.set_live("running")
+    r = post(machine, "/live/stop", STOP_LIVE)
+    assert r.status_code == 502, r.text
+    detail = r.json()["detail"]
+    assert detail["code"] == "live_stop_failed" and detail["reason"] == "unit_invalid"
+    assert machine.live_stops() == []
+    assert machine.systemctl.calls == [], "no systemctl command of any kind"
 
 
 def test_a_service_that_is_not_running_is_left_alone(machine):
     machine.set_live("stopped")
     body = post(machine, "/live/stop", STOP_LIVE).json()
     assert body["already"] is True and body["results"] == []
-    assert not machine.levi_seen.exists(), "the command was not even run"
+    assert machine.live_stops() == [], "the command was not even run"
 
 
 def test_the_stop_is_answered_again_not_run_twice(machine):
     machine.set_live("running")
     first = post(machine, "/live/stop", STOP_LIVE).json()
-    machine.levi_seen.unlink()
+    assert len(machine.live_stops()) == 1
     again = post(machine, "/live/stop", STOP_LIVE).json()
     assert again == {**first, "replayed": True}
-    assert not machine.levi_seen.exists()
+    assert len(machine.live_stops()) == 1, "and not stopped again"
 
 
 @pytest.mark.parametrize(
@@ -456,7 +477,7 @@ def test_the_live_stop_is_refused_while_the_robot_side_is_in_use(
     machine.facts[fact] = value
     r = post(machine, "/live/stop", STOP_LIVE)
     assert r.status_code == 409 and r.json()["detail"]["code"] == code
-    assert not machine.levi_seen.exists()
+    assert machine.live_stops() == []
 
 
 @pytest.mark.parametrize(
@@ -473,7 +494,7 @@ def test_the_live_stop_is_refused_when_an_obstacle_cannot_be_read(machine, fact,
     machine.facts[fact] = value
     r = post(machine, "/live/stop", STOP_LIVE)
     assert r.status_code == 409 and r.json()["detail"]["code"] == "state_unreadable"
-    assert not machine.levi_seen.exists()
+    assert machine.live_stops() == []
 
 
 def test_a_live_service_whose_state_cannot_be_read_is_not_stopped(machine):
@@ -483,25 +504,27 @@ def test_a_live_service_whose_state_cannot_be_read_is_not_stopped(machine):
     machine.api.readiness.host.unit_show = broken
     r = post(machine, "/live/stop", STOP_LIVE)
     assert r.status_code == 409 and r.json()["detail"]["code"] == "state_unreadable"
-    assert not machine.levi_seen.exists()
+    assert machine.live_stops() == []
 
 
 def test_a_command_that_leaves_the_service_running_is_a_failure_with_its_words(machine):
     machine.set_live("running")
-    machine.set_levi(stops=False, rc=1, say="refused: a job is running")
+    machine.set_live_stop(stops=False, rc=1, say="refused: a job is running")
     r = post(machine, "/live/stop", STOP_LIVE)
     assert r.status_code == 502
     detail = r.json()["detail"]
     assert detail["code"] == "live_stop_failed" and detail["reason"] == "still_running"
     assert detail["returncode"] == 1 and "a job is running" in detail["tail"]
     # a failure is not remembered as an answer: the same request may be sent again
-    machine.set_levi(stops=True, rc=0)
+    machine.set_live_stop(stops=True, rc=0)
     assert post(machine, "/live/stop", STOP_LIVE).status_code == 200
 
 
 def test_the_truth_is_the_service_state_not_the_exit_code(machine):
     machine.set_live("running")
-    machine.set_levi(stops=True, rc=3, say="warning: could not remove the pid file")
+    machine.set_live_stop(
+        stops=True, rc=3, say="warning: could not remove the pid file"
+    )
     body = post(machine, "/live/stop", STOP_LIVE).json()
     assert body["live_service"]["state"] == "stopped"
     assert body["results"][0]["detail"] == "warning: could not remove the pid file"
@@ -516,7 +539,7 @@ def test_the_live_stop_holds_the_run_lock_and_waits_for_nobody(machine):
     finally:
         os.close(fd)
     assert r.status_code == 423 and r.json()["detail"]["code"] == "busy"
-    assert not machine.levi_seen.exists()
+    assert machine.live_stops() == []
 
 
 def test_the_leftover_stop_holds_the_run_lock_and_waits_for_nobody(machine):

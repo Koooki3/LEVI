@@ -264,13 +264,13 @@ def build_data(tmp):
         )
     )
     world.facts["flock"] = {}
-    world.set_levi(stops=False, rc=1, say="refused: a job is running")
+    world.set_live_stop(stops=False, rc=1, say="refused: a job is running")
     errors_live["live_stop_failed"] = failure(
         lambda: preparer.live_stop(
             {"request_id": "req-err-live-005", "confirm": "stop live service"}
         )
     )
-    world.set_levi()
+    world.set_live_stop()
     world.set_live("stopped")
     errors_left["gpu_in_use"] = constructed("gpu_in_use")
     errors_left["stop_failed"] = constructed(
