@@ -109,6 +109,56 @@ def _row_passes(row) -> bool:
     return level == "ok" or (level == "warn" and row.get("code") in aeri_ready.WARN_OK)
 
 
+@dataclass(frozen=True)
+class RunSite:
+    """What a live run needs of the site file, **copied when it starts** (and
+    kept in its record). While the run is live nothing is read from the site
+    file again: a file edited into something invalid in the middle of a run must
+    neither hide a live D (``ended``), nor take Stop away. The keys are the
+    names ``Aeri`` and the site have, so this goes where they went."""
+
+    rollout_root: str
+    runs_root: str
+    console_lang: str
+    gpu_lock_file: str
+    avoid: tuple  # source-data roots the state folder must not be inside
+
+    @classmethod
+    def of(cls, main_site, aeri) -> "RunSite":
+        return cls(
+            rollout_root=str(aeri.rollout_root),
+            runs_root=str(aeri.runs_root),
+            console_lang=str(aeri.console_lang),
+            gpu_lock_file=str(main_site.gpu_lock_file),
+            avoid=tuple(
+                str(root)
+                for root in (
+                    main_site.rollout_root,
+                    main_site.checkpoints_root,
+                    main_site.openpi_checkout,
+                )
+            ),
+        )
+
+    def to_json(self) -> dict:
+        return {**self.__dict__, "avoid": list(self.avoid)}
+
+    @classmethod
+    def from_json(cls, data):
+        """The snapshot a record carries, or None when there is none or it is
+        not what ``to_json`` writes."""
+        if not isinstance(data, dict):
+            return None
+        names = ("rollout_root", "runs_root", "console_lang", "gpu_lock_file")
+        avoid = data.get("avoid")
+        if (
+            not all(isinstance(data.get(n), str) and data[n] for n in names)
+            or not isinstance(avoid, list)
+            or not all(isinstance(a, str) for a in avoid)
+        ):
+            return None
+        return cls(**{n: data[n] for n in names}, avoid=tuple(avoid))
+
 
 # --- what the site file says ---------------------------------------------------------------
 
@@ -473,8 +523,9 @@ class Supervisor:
         self._dir: Path | None = None
         self._child = None
         self._master: int | None = None
-        self._adopted = False  # adopt() ran
+        self._adopted = False  # adopt() read the record (and acted on it) once
         self._found = False  # this run was found again after a restart
+        self._snap: RunSite | None = None  # the site values of the run (see RunSite)
         self._mem = st.Memory()
         self._seq = 0
         self._seq_sig = None
@@ -529,6 +580,14 @@ class Supervisor:
         self._dir = directory
         return directory
 
+    def _run_dir(self) -> Path:
+        """The folder of the run's record: the one the run has (it needs no
+        site file), else the site's."""
+        with self._mutex:
+            if self._snap is not None and self._dir is not None:
+                return self._dir
+        return self._existing_folder(self.site_loader())
+
     def _request_id(self, body) -> str:
         request_id = body.get("request_id")
         if not isinstance(request_id, str) or not record.REQUEST_ID.fullmatch(
@@ -567,14 +626,74 @@ class Supervisor:
 
     def _update(self, **fields) -> dict:
         """``fields`` into the run record: in memory first (a safety action never
-        waits for the disk), then on disk."""
+        waits for the disk), then on disk **merged into what is there**
+        (``record.update_record``, under the record's lock): the out-of-page
+        stop script writes ``stop_sent_epoch`` into the same file, and writing
+        the whole in-memory record back would erase it."""
         with self._mutex:
             self._rec = {**(self._rec or {}), **fields}
             self._cache = None
             if self._dir is not None:
-                with contextlib.suppress(OSError, record.RecordCorrupt):
-                    record.write_record(self._dir, self._rec)
+                try:
+                    on_disk = record.update_record(self._dir, **fields)
+                except record.RecordCorrupt:
+                    on_disk = None
+                    self._write_whole()  # (a record that cannot be read is replaced)
+                except OSError:
+                    on_disk = None
+                self._absorb_stop(on_disk)
             return self._rec
+
+    def _write_whole(self) -> None:
+        """A new run replaces the record (the only place the whole of it is
+        written)."""
+        with self._mutex:
+            self._cache = None
+            if self._dir is not None:
+                with contextlib.suppress(OSError), record.locked(self._dir):
+                    record.write_record(self._dir, self._rec)
+
+    def _absorb_stop(self, disk) -> None:
+        """What another process wrote about Ctrl+C into the record on disk (the
+        out-of-page script ``aeri_page_stop.py``): its ``stop_sent_epoch`` is
+        taken over, so this page knows a Stop was sent and does not offer it
+        again; a **later** one there (``--again``) means the retry was used too.
+        Only these two fields, only for this run's own record."""
+        rec = self._rec
+        if rec is None or not isinstance(disk, dict):
+            return
+        if disk.get("run_id") != rec.get("run_id"):
+            return
+        theirs, mine = disk.get("stop_sent_epoch"), rec.get("stop_sent_epoch")
+        if isinstance(theirs, bool) or not isinstance(theirs, (int, float)):
+            theirs = None
+        changes: dict = {}
+        if theirs is not None:
+            if mine is None:
+                changes["stop_sent_epoch"] = theirs
+            elif theirs > mine + 0.5:
+                changes["stop_sent_epoch"] = theirs
+                changes["stop_retried"] = True
+        if disk.get("stop_retried") is True and not rec.get("stop_retried"):
+            changes["stop_retried"] = True
+        if changes:
+            self._rec = {**rec, **changes}
+            self._cache = None
+            if changes.get("stop_retried") and not disk.get("stop_retried"):
+                # (kept for a restart: a later page must not offer a third)
+                with contextlib.suppress(OSError, record.RecordCorrupt):
+                    if self._dir is not None:
+                        record.update_record(self._dir, stop_retried=True)
+
+    def _merge_disk(self) -> None:
+        """Every look takes in what the record on disk says about Ctrl+C."""
+        if self._dir is None or self._rec is None:
+            return
+        try:
+            on_disk = record.read_record(self._dir)
+        except (OSError, record.RecordCorrupt):
+            return
+        self._absorb_stop(on_disk)
 
     # ---- what is read
 
@@ -667,9 +786,12 @@ class Supervisor:
         return h.proc_state(pid) is not None, None
 
     def _facts(self, aeri, now) -> st.Facts:
+        """The facts of the run; ``aeri`` is its ``RunSite`` (the paths)."""
         rec = self._rec
         if rec is None:
             return st.Facts(now=now)
+        self._merge_disk()
+        rec = self._rec
         name = rec["name"]
         alive, ex = self._proc(rec)
         if ex is None and not alive:
@@ -739,23 +861,27 @@ class Supervisor:
 
     # ---- the state, as the document and the watcher both see it
 
-    def _aeri_or_none(self):
-        try:
-            return self._aeri(self.site_loader())
-        except Exception:  # noqa: BLE001 - no site: nothing can be read
-            return None
+    def _run_site(self) -> RunSite:
+        """What the run reads of the site: the snapshot taken when it started
+        (or was found again), never the file. Only a run whose record has no
+        snapshot (one written by an older build) falls back to the file."""
+        with self._mutex:
+            snap = self._snap
+        if snap is not None:
+            return snap
+        main_site = self.site_loader()
+        return RunSite.of(main_site, self._aeri(main_site))
 
     def _current(self) -> tuple:
         """``(facts, derived, context)`` read afresh."""
-        main_site = self.site_loader()
-        aeri = self._aeri(main_site)
+        site = self._run_site()
         now = self.host.now()
-        f = self._facts(aeri, now)
+        f = self._facts(site, now)
         d = st.derive(f, self._mem)
         self._mem = d.mem
         if f.record and f.record.get("phase") == "started" and not d.alive:
-            self._finish(f, aeri)
-            f = self._facts(aeri, now)
+            self._finish(f, site)
+            f = self._facts(site, now)
             d = st.derive(f, self._mem)
             self._mem = d.mem
         return f, d, self._observe(f, d)
@@ -904,18 +1030,25 @@ class Supervisor:
             return body
 
     def _document(self) -> dict:
-        main_site = None
-        aeri = None
-        try:
-            main_site = self.site_loader()
-            aeri = settings_of(main_site)
-        except Refuse:
-            pass
+        with self._mutex:
+            rec, snap = self._rec, self._snap
+        live = rec is not None and rec.get("phase") in ("intent", "started")
+        main_site = aeri = None
+        if not live or snap is None:
+            # (a live run reads nothing of the file: see ``RunSite``; one found
+            # again after a restart has no snapshot yet)
+            try:
+                main_site = self.site_loader()
+                aeri = settings_of(main_site)
+            except Exception:  # noqa: BLE001 - no site: the card is off, not broken
+                main_site = aeri = None
         now = self.host.now()
-        if aeri is None or self._rec is None:
+        if rec is not None and snap is None and aeri is not None:
+            snap = RunSite.of(main_site, aeri)  # a record without a snapshot
+        if rec is None or snap is None:
             f = st.Facts(now=now)
-            if self._rec is not None:
-                f.record = self._rec
+            if rec is not None:
+                f.record = rec
             d = st.derive(f, st.Memory())
             c = st.Context(
                 now=now,
@@ -936,11 +1069,13 @@ class Supervisor:
             (f.record or {}).get("leader") or {}
         ).get("pid")
         c.exit = d.state == "ended" and (f.exit or f.record.get("exit")) or None
-        c.locks = self._locks(main_site, f, d)
+        c.locks = self._locks(snap, f, d)
         c.after_exit = (
             (f.record or {}).get("after_exit") if d.state == "ended" else None
         )
-        c.start_why = self._start_why(True) if d.state in ("ended", "idle") else None
+        c.start_why = (
+            self._start_why(aeri is not None) if d.state in ("ended", "idle") else None
+        )
         return st.document(f, d, c)
 
     def _start_why(self, configured: bool) -> dict | None:
@@ -998,7 +1133,7 @@ class Supervisor:
             "ports": {"8000": "free", "8100": "free", "8110": "free"},
         }
 
-    def _locks(self, main_site, f: st.Facts, d: st.Derived) -> dict:
+    def _locks(self, site: RunSite, f: st.Facts, d: st.Derived) -> dict:
         h = self.host
         answered = self._answered or bool(f.j.lines)
 
@@ -1026,7 +1161,7 @@ class Supervisor:
             else:
                 ports[str(port)] = "d_unit" if d.alive and f.steps.steps else "other"
         arm = lock(h.arm_lock_path())
-        gpu = lock(main_site.gpu_lock_file)
+        gpu = lock(site.gpu_lock_file)
         return {"arm": arm, "gpu": gpu, "ports": ports}
 
     def active(self) -> dict | None:
@@ -1359,7 +1494,8 @@ class Supervisor:
             f"{stem}.spec.json",
         )
         unit = f"{UNIT_PREFIX}{run_id}"
-        p = self._paths(aeri, name)
+        site = RunSite.of(main_site, aeri)
+        p = self._paths(site, name)
         rec = {
             "schema": st.RECORD_SCHEMA,
             "run_id": run_id,
@@ -1383,13 +1519,15 @@ class Supervisor:
             "exit_file": exit_name,
             "stop_sent_epoch": None,
             "stop_retried": False,
+            # what the run reads of the site file, kept for as long as it lives
+            "site": site.to_json(),
         }
         master = slave = log_fd = None
         try:
             with self._mutex:
-                self._reset_run(aeri, name, rec)
+                self._reset_run(site, name, rec)
                 self._dir = directory
-                self._update()
+                self._write_whole()
             master, slave = h.openpty()
             self._quiet_pty(master, slave)
             log_fd = os.open(
@@ -1408,6 +1546,7 @@ class Supervisor:
                         "exit_file": str(directory / "logs" / exit_name),
                         "out_log": str(p["typescript"]),
                         "events_file": str(p["events"]),
+                        "runner_json": str(p["runner"]),
                         "hangup_grace_s": 3.0,
                     }
                 ),
@@ -1460,9 +1599,10 @@ class Supervisor:
             "state_seq": self._seq,
         }
 
-    def _reset_run(self, aeri, name, rec) -> None:
+    def _reset_run(self, site: RunSite, name, rec) -> None:
         self._rec = rec
-        self._begin_readers(aeri, name, aeri.console_lang)
+        self._snap = site
+        self._begin_readers(site, name, site.console_lang)
         self.challenges.void()
         self._found = False
 
@@ -1510,9 +1650,8 @@ class Supervisor:
         action = body.get("action")
         if action not in st.KEYS:
             raise Refuse("state_not_allowed", state="unknown")
-        main_site = self.site_loader()
         self._require_real()
-        directory = self._existing_folder(main_site)
+        directory = self._run_dir()
         return self._transaction(
             "key",
             directory,
@@ -1605,41 +1744,69 @@ class Supervisor:
 
     def stop(self, body) -> dict:
         """Ctrl+C: at any time D lives and has not been told; not in the single
-        flight and not waiting for the run lock."""
+        flight and not waiting for the run lock. **It does not depend on the site
+        file nor on being able to derive the state**: the run's own snapshot is
+        read, and when anything about the derivation fails the signal still goes
+        to D's checked pid (``_stop_blind``)."""
         self.adopt()
         request_id = self._request_id(body)
         with self._run_lock_if_free("stop"), self._mutex:
-            f, d, _c = self._current()
+            try:
+                f, d, _c = self._current()
+            except Exception:  # noqa: BLE001 - nothing may take Ctrl+C away
+                return self._stop_blind(request_id)
             if not d.alive:
                 raise Refuse("d_gone")
             if not d.stop_open:
                 if d.stop_phase != "idle":
                     raise Refuse("stop_spent")
                 raise Refuse("state_not_allowed", state=d.state)
-            via = self._send_stop(f)
-            first = (f.record or {}).get("stop_sent_epoch") is None
-            if first:
-                self._update(stop_sent_epoch=f.now)
-            else:
-                self._update(stop_retried=True)
-            self._audit(
-                "stop",
-                request_id=request_id,
-                run_id=(f.record or {}).get("run_id"),
-                state=d.state,
-                route=via,
-                byte="Ctrl+C",
-                key="stop",
-            )
-            return {
-                "schema": st.RESULT_SCHEMA,
-                "accepted": True,
-                "phase": "sent" if first else "retried",
-                "via": via,
-            }
+            return self._stop_now(f, d.state, request_id)
 
-    def _runner_pid(self, f: st.Facts) -> int | None:
-        runner = f.runner
+    def _stop_now(self, f: st.Facts, state: str, request_id) -> dict:
+        """Send the signal and record it. A second one (``retry``) never goes by
+        the pty: if the first Ctrl+C byte did not become a SIGINT for D, the
+        second would not either, so it goes straight to D's checked pid."""
+        retry = (f.record or {}).get("stop_sent_epoch") is not None
+        via = self._send_stop(f, retry=retry)
+        if retry:
+            self._update(stop_retried=True)
+        else:
+            self._update(stop_sent_epoch=f.now)
+        self._audit(
+            "stop",
+            request_id=request_id,
+            run_id=(f.record or {}).get("run_id"),
+            state=state,
+            route=via,
+            byte="Ctrl+C",
+            key="stop",
+        )
+        return {
+            "schema": st.RESULT_SCHEMA,
+            "accepted": True,
+            "phase": "retried" if retry else "sent",
+            "via": via,
+        }
+
+    def _stop_blind(self, request_id) -> dict:
+        """Ctrl+C when the state could not be derived at all (a broken reader, an
+        unreadable file): from the record in memory alone. Once per run, since
+        whether D answered cannot be told."""
+        rec = self._rec
+        if rec is None or rec.get("phase") not in ("intent", "started"):
+            raise Refuse("d_gone")
+        if rec.get("stop_sent_epoch") is not None:
+            raise Refuse("stop_spent")
+        path = rec.get("runner_json")
+        runner = jr.read_runner(path) if isinstance(path, str) else jr.RView()
+        isig = self._termios()[1]
+        f = st.Facts(now=self.host.now(), record=rec, runner=runner, isig=isig)
+        return self._stop_now(f, "unknown", request_id)
+
+    def _checked_pid(self, runner) -> int | None:
+        """The pid in D's heartbeat when it is still the process the heartbeat
+        describes (start time and boot), else None."""
         if not runner.present or runner.pid is None or runner.identity is None:
             return None
         who = self.host.identity(runner.pid)
@@ -1653,13 +1820,17 @@ class Supervisor:
             else None
         )
 
-    def _send_stop(self, f: st.Facts) -> str:
+    def _runner_pid(self, f: st.Facts) -> int | None:
+        return self._checked_pid(f.runner)
+
+    def _send_stop(self, f: st.Facts, retry: bool = False) -> str:
         """Ctrl+C by the pty (ISIG on: the terminal turns it into SIGINT for D's
         foreground group); else SIGINT to the pid in D's heartbeat when its
-        identity matches; else to the terminal's foreground group. Never more."""
+        identity matches; else to the terminal's foreground group. Never more.
+        A ``retry`` skips the pty (see ``_stop_now``)."""
         h = self.host
         master = self._master
-        if master is not None and f.isig is not False and not self._found:
+        if not retry and master is not None and f.isig is not False and not self._found:
             try:
                 if os.write(master, st.STOP_BYTE) == 1:
                     return "pty"
@@ -1687,8 +1858,7 @@ class Supervisor:
         request_id = self._request_id(body)
         if body.get("confirm") != st.END_PHRASE:
             raise Refuse("confirm_required", phrase=st.END_PHRASE)
-        main_site = self.site_loader()
-        directory = self._existing_folder(main_site)
+        directory = self._run_dir()
         return self._transaction(
             "end", directory, request_id, body, lambda mark_sent: self._end(request_id)
         )
@@ -1953,10 +2123,12 @@ class Supervisor:
         """The tail of D's screen file, paths cut to their last segment."""
         self.adopt()
         with self._mutex:
-            rec = self._rec
+            rec, aeri = self._rec, self._snap
+        if rec is not None and aeri is None:
             try:
-                aeri = settings_of(self.site_loader())
-            except Refuse:
+                main_site = self.site_loader()
+                aeri = RunSite.of(main_site, settings_of(main_site))
+            except Exception:  # noqa: BLE001
                 aeri = None
         if rec is None or aeri is None:
             return {"schema": st.LOG_SCHEMA, "lines": [], "bytes": 0}

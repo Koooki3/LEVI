@@ -119,6 +119,8 @@ def test_a_start_hosts_the_very_command_a_terminal_would_run(m):
     assert spec["cwd"] == m.aeri.openpi_root
     assert spec["out_log"] == str(m.typescript)
     assert spec["events_file"].endswith("terminal_d.events")
+    # D's heartbeat file: the launcher signals D's own group from it on a hang-up
+    assert spec["runner_json"] == str(m.run_dir / "runner.json")
     events = (m.runs / NAME / "terminal_d.events").read_text()
     assert "start: env -u VIRTUAL_ENV" in events
 
@@ -1092,7 +1094,10 @@ def test_an_unacknowledged_stop_may_be_repeated_once(m, monkeypatch):
     assert {"code": "stop_unconfirmed", "level": "warn"} in doc["notices"]
     answer = m.stop()
     assert answer["phase"] == "retried"
-    assert m.typed() == b"\x03"
+    # (not by the pty again: if the first byte did not become a SIGINT for D, the
+    # second would not either; the retry goes straight to D's checked pid)
+    assert answer["via"] == "pid" and m.typed() == b""
+    assert ("kill", m.child.pid, signal.SIGINT) in m.signals
     assert refusal(m.sup.stop, {"request_id": m.rid()})[1] == "stop_spent"
     assert m.typed() == b""
 
