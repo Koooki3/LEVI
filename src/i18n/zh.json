@@ -4512,7 +4512,7 @@
   "marvel0.autonomy.fallback": "如果本页卡住，用下面的脚本向终端 D 发一次 Ctrl+C：",
   "marvel0.autonomy.load_failed": "第 5 步没能加载，所以本页上没有它的“停止”按钮。刷新页面可以重试。",
   "marvel0.autonomy.load_failed_stop": "如果有终端 D 在运行，请在 LEVI 所在的机器上开一个终端，进入本页所属的 LEVI 检出目录，运行：",
-  "marvel0.autonomy.load_failed_needs": "这个脚本向终端 D 发一次 Ctrl+C，和“停止”按钮一样：手臂停在原处、不回位，D 大约两分钟内收尾。它需要本页的运行记录（LEVI 工作区里的 outputs/LEVI/workbench/marvel0/aeri/record.json；用 --workspace DIR 指定别的工作区）和仍在运行的 D。只有在 D 对第一次停止 5 秒内没有回应时才加 --again：第二次 Ctrl+C 会打断它的收尾。如果脚本说读不到这份记录，就只剩物理急停了。",
+  "marvel0.autonomy.load_failed_needs": "这个脚本向终端 D 发一次 Ctrl+C，和“停止”按钮一样：手臂停在原处、不回位，D 大约两分钟内收尾。它需要本页的运行记录（LEVI 工作区里的 outputs/LEVI/workbench/marvel0/aeri/record.json；用 --workspace DIR 指定别的工作区）和仍在运行的 D。只有在 D 对第一次停止 5 秒内没有回应时才加 --again：第二次 Ctrl+C 会打断它的收尾。如果脚本说读不到这份记录，就加上 --scope 再运行：它不靠记录，按 systemd 的 scope 找到 D（页面不会知道这次停止，也没有任何东西防止再发第二次）。物理急停始终可用。",
   "marvel0.autonomy.load_failed_estop": "这不是急停。物理急停才是：手要放在它上面。",
   "marvel0.autonomy.loading": "正在加载第 5 步…",
   "marvel0.autonomy.chain.live": "终端 D（自主系统，第 5 步）正在运行并占用手臂。它结束之前，评测客户端和手臂栈的停止、启动窗口都保持关闭。",

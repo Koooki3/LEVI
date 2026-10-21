@@ -159,7 +159,7 @@ differs from it** (a test compares the table with the backend's).
   D one Ctrl+C, like the Stop button; it needs the run record the page wrote (`outputs/LEVI/workbench/marvel0/aeri/
   record.json` in the LEVI workspace, `--workspace DIR` names another) and a D that is still running; `--again` only
   when D did not answer a first Stop within 5 s (a second Ctrl+C cuts its wrap-up short); if the script says it cannot
-  read the record, only the physical e-stop is left. It is not an emergency stop.
+  read the record, run it again with `--scope`: it finds D by its systemd scope without the record (the page will not know of that Stop and nothing guards a second one). The physical e-stop is always there; this script is not an emergency stop.
 
 ## Default off, and the files
 
@@ -322,7 +322,7 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 - **按需加载。** 第 5 步是页面在首屏之后才取的一段独立代码，外面套着一个边界：加载失败或渲染时抛错，就用一条说明替换它，页面其余部分不受影响。这条说明由始终加载的外层画出（它不从第 5 步的代码里导入任何东西），
   并写明不靠页面也能用的办法：在 LEVI 所在的机器上、在本页所属的 LEVI 检出目录里运行 `python3 -I scripts/aeri_page_stop.py`；它和“停止”按钮一样向 D 发一次 Ctrl+C；
   它需要页面写下的运行记录（LEVI 工作区里的 `outputs/LEVI/workbench/marvel0/aeri/record.json`，用 `--workspace DIR` 指定别的工作区）和仍在运行的 D；
-  只有在 D 对第一次停止 5 秒内没有回应时才加 `--again`（第二次 Ctrl+C 会打断它的收尾）；如果脚本说读不到这份记录，就只剩物理急停了。它不是急停。
+  只有在 D 对第一次停止 5 秒内没有回应时才加 `--again`（第二次 Ctrl+C 会打断它的收尾）；如果脚本说读不到这份记录，就加上 `--scope` 再运行：它不靠记录，按 systemd 的 scope 找到 D（页面不会知道这次停止，也没有任何东西防止再发第二次）。物理急停始终可用；这个脚本不是急停。
 
 ## 默认关闭，以及相关文件
 
