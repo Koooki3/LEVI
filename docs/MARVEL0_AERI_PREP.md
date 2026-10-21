@@ -41,7 +41,7 @@ are Franka Desk and the physical emergency stop.
 the page. A source that fails makes its row `unknown`; it never fails the request.
 
 **What a read costs.** A full read is one batch (`git` three times, `nvidia-smi`, `systemctl` twice, the stack and deploy views; every
-source asked once) and the page asks every three seconds from every open tab while the arm controller may be running, so the read is
+source asked once; the product unit's stop timeout is one more `systemctl --user show`, kept for a minute) and the page asks every three seconds from every open tab while the arm controller may be running, so the read is
 **light** (no process started, no folder scanned) whenever the rest cannot matter: with `[aeri] enabled = false` the document is the
 switch and the site's facts (`readiness: []`, `ready: false`, no `prepared`, `live_service` and `leftovers` null, the profile without
 `head` and `clean`); and while this page's own terminal D or evaluation client is on, one row says why (`no_other_aeri` or `no_e_run`,
@@ -49,7 +49,7 @@ switch and the site's facts (`readiness: []`, `ready: false`, no `prepared`, `li
 answer is not a light read (a full one; its rows are `unknown`). The two stops use the same light read to refuse (`d_active`,
 `e_active`). The cache time (`aeri_ready.CACHE_S`) is one second, well under the page's three-second poll, so two tabs share one batch and
 every poll sees what is now. **`warn` is for `aeri_ready.WARN_OK` only** (`stack_ready`, which can only be `warn` when the stack is up:
-the gripper stack and the controller cannot be observed): the start gate of the hosted run needs `snapshot()["ready"] is True` and refuses
+the gripper stack and the controller cannot be observed; and `unit_timeout`, which is `ok` or `warn` and nothing else): the start gate of the hosted run needs `snapshot()["ready"] is True` and refuses
 a `warn` of any other row; `tests/marvel0/fixtures/aeri_stack_up_rows.json` is `snapshot()` on the made-up machine with the stack up,
 not read and down, built from the real rows, to test that gate on.
 
@@ -67,6 +67,7 @@ not read and down, built from the real rows, to test that gate on.
 | `no_e_run`, `no_policy_deploy`, `no_other_aeri` | no hosted evaluation client or session; this page has no policy server unit; no AERI run is alive |
 | `no_aeri_unit_left`, `swap_logs_clean` | no `levi-aeri-vlm-*` or `levi-aeri-policy-*` unit exists; no policy-switch log is unfinished |
 | `monitor_green`, `stack_ready` | the health file is fresh and not red; the arm and the robot server look up (the gripper stack and the controller cannot be observed, so this row shows `warn` at best) |
+| `unit_timeout` | advice, never a condition (`ok` or `warn`): the user unit `levi-product.service` waits at least 150 s at a stop (`systemctl --user show levi-product.service --property=LoadState --property=TimeoutStopUSec`, read only, kept for a minute; `ok` too when the unit is not loaded or the wait is `infinity`); `warn` with the seconds when it waits less, because a direct `systemctl stop` or `restart` while a hosted D lives would cut its 7/7 wrap-up (`levi stop` is the sanctioned first step), or when the unit cannot be asked |
 
 The arm's pose is **not** read (it needs the robot server's port): "the arm is at home" stays a tick of the person's and the check
 of AERI's own start gate. `readiness_sha256` covers each row's code and level, the profile, the AERI HEAD and the prepared run's
@@ -116,13 +117,17 @@ GPU lock is held), or any of that cannot be read. A stop that fails is not remem
   and the identity (start time and boot) of the launcher's pid, and in the same way the hosted evaluation client (`marvel0-client`, `<workspace state>/marvel0/run/record.json`),
   **read only and never through the pages' supervisors**: their take-over sends a SIGINT to a D (and freezes a client) that lost its keyboard, which is right in a
   restarted service and wrong in a `levi stop` process that merely asks. A record that cannot be read
-  is listed (`record-unreadable`), not taken for "no run". `levi stop` therefore refuses while a D runs (`--wait` waits for the person to end it), as it does
-  for a pool export. The setup guard shows it among "product jobs" while the arm controller is on (information only, nothing gates on it).
+  is listed (`record-unreadable`), not taken for "no run" (and the page's own gates, `aeri_run_api.active()` and so E's start, the deploy and the arm stack, count it as a D too).
+  `levi stop` therefore refuses while a D runs (`--wait` waits for the person to end it), as it does
+  for a pool export. The setup guard does **not** list it among "product jobs" while the arm controller is on: a `hosted` row is the robot session itself, not a worker job
+  (it used to warn "product jobs run while the arm controller is active: marvel0-aeri" for every session).
 - **The service's start** adopts a D that outlived the previous service (`aeri_run_api.adopt_on_start`: one Ctrl+C, then watched). **Its shutdown** (`levi stop
   --force`, `systemctl stop levi-product`, a restart) first sends a hosted D the Stop a person presses (`Supervisor.stop`, once; a D that was stopped already
   is only waited for) and waits up to 130 s for its 7/7 wrap-up; never a bare kill. What is left after the wait is the launcher's hang-up chain (SIGINT, 3 s,
-  SIGKILL) when the pty closes with the process. **`levi-product.service` has `TimeoutStopSec=15`**: systemd ends the service after that, so the unit needs
-  at least 150 s for the orderly end to be able to finish (a change of the unit file in the lab ledger, not made here).
+  SIGKILL) when the pty closes with the process. **The unit `levi-product.service` must have `TimeoutStopSec` of at least 150 s**, or systemd ends the service
+  in the middle of that wait (with the old 15 s: the core killed 15 s in, a second SIGINT into D's wrap-up, SIGKILL 3 s later). **`levi stop` is the sanctioned first step and refuses while D lives**;
+  a direct `systemctl --user stop` or `restart` with D alive **cuts D's 7/7 wrap-up** and leaves its units behind unless the unit has the 150 s. The readiness card's `unit_timeout` row (`warn`, never refuses)
+  says when the installed unit has less. A core that does not own the run (another live core's) returns from the shutdown at once; it holds no pty of it, so no hang-up chain follows from it.
 - **The evaluation client's start check** (`no_aeri`) refuses from the click that starts a hosted D (D takes the arm lock only after its phrase); a probe that
   fails is `unknown`, which refuses. **The policy-server deploy** is refused with `aeri_run_live` (the hosted run's id) while a hosted D is on.
 - **The start gate's mechanical check** (`aeri_activity.hosted_visible_to_activity`): before a launch, the real `running_jobs` must list a canary record of this
@@ -180,12 +185,12 @@ and `git` outputs on other machines; `stack_ready` against a running stack. The 
 每一行都来自文件、`/proc`、`nvidia-smi`（只用查询选项）、`systemctl --user show/list-units`、`git`（不取可选锁）或页面其他部分的只读视图；某个来源失败只会让对应行变成 `unknown`，
 不会让请求失败。各行的通过条件见上面的表。
 
-**一次读取的代价。** 完整读取是一批进程（`git` 三次、`nvidia-smi`、`systemctl` 两次，加栈与部署两个视图；每个来源只问一次），而页面在每个打开的标签页里每三秒问一次，
+**一次读取的代价。** 完整读取是一批进程（`git` 三次、`nvidia-smi`、`systemctl` 两次，加栈与部署两个视图；每个来源只问一次；产品单元的停止超时是多出的一次 `systemctl --user show`，缓存一分钟），而页面在每个打开的标签页里每三秒问一次，
 机械臂控制器可能正在运行。所以凡是其余信息无关紧要时，读取都是**轻量**的（不起进程、不扫文件夹）：`[aeri] enabled = false` 时文档只有开关和站点的事实
 （`readiness: []`、`ready: false`、没有 `prepared`、`live_service` 与 `leftovers` 为 null、档案里没有 `head` 和 `clean`）；本页自己的终端 D 或评测客户端在用时，只给出一行说明原因
 （`no_other_aeri` 或 `no_e_run`，`refuse`），不再问别的，因为那时控制器已经在运行、也不可能开始。托管运行的探针答不出来时不算轻量读取（走完整读取，各行为 `unknown`）。
 两个停止动作用同一个轻量读取来拒绝（`d_active`、`e_active`）。缓存时间（`aeri_ready.CACHE_S`）是一秒，远小于页面三秒的轮询，两个标签页共用一批，
-每次轮询都看到当下的状态。**`warn` 只属于 `aeri_ready.WARN_OK`**（`stack_ready`，栈起来时它只能是 `warn`：夹爪栈和控制器无法观察）：托管运行的开始门要求
+每次轮询都看到当下的状态。**`warn` 只属于 `aeri_ready.WARN_OK`**（`stack_ready`，栈起来时它只能是 `warn`：夹爪栈和控制器无法观察；以及 `unit_timeout`，它只会是 `ok` 或 `warn`）：托管运行的开始门要求
 `snapshot()["ready"] is True`，并拒绝其他任何行上的 `warn`；`tests/marvel0/fixtures/aeri_stack_up_rows.json` 是在虚构机器上栈已起、未读到、已停三种情况下的 `snapshot()`，
 由真实的行生成，用来测试这道门。
 
@@ -222,11 +227,13 @@ and `git` outputs on other machines; `stack_ready` against a running stack. The 
   列出 `marvel0-aeri`（id 是运行号，pid 是启动器的，`hosted: true`），同样列出托管的评测客户端（`marvel0-client`，`<工作区状态>/marvel0/run/record.json`），
   **只读，绝不经过页面的 supervisor**：它们的接管会给失去键盘的 D 发 SIGINT（并冻结客户端），这在重启后的服务里是对的，
   在只是来问一句的 `levi stop` 进程里是错的。读不出来的记录也会被列出（`record-unreadable`），而不是当作“没有运行”。所以 D 在运行时 `levi stop` 会拒绝（`--wait` 等人结束它），
-  和对池导出一样。启动自检的“产品作业”里，在机械臂控制器开着时也会显示它（只是信息，没有任何东西依赖它）。
+  和对池导出一样（页面自己的门，`aeri_run_api.active()`，以及由它而来的 E 的启动、部署、臂栈，也把它算作一个 D）。启动自检的“产品作业”里，在机械臂控制器开着时**不再**列出它：
+  `hosted` 行就是机器人会话本身，不是工作进程（以前每个会话都会警告“product jobs run while the arm controller is active: marvel0-aeri”）。
 - **服务启动**时接管上一个服务留下的 D（`aeri_run_api.adopt_on_start`：一次 Ctrl+C，然后只观察）。**服务关停**（`levi stop --force`、`systemctl stop levi-product`、重启）时，
   先给托管的 D 发人按下的那个停止（`Supervisor.stop`，只发一次；已经停止过的 D 只是等待），最多等 130 秒让它跑完 7/7 收尾；绝不直接杀。等待结束后剩下的由启动器的挂断链处理
-  （进程退出、pty 关闭时：SIGINT，3 秒后 SIGKILL）。**`levi-product.service` 的 `TimeoutStopSec=15`**：systemd 过了这个时间就结束服务，所以这个单元至少要改到 150 秒，
-  有序关停才有机会跑完（单元文件在实验台账里，这里没有改）。
+  （进程退出、pty 关闭时：SIGINT，3 秒后 SIGKILL）。**单元 `levi-product.service` 的 `TimeoutStopSec` 必须至少 150 秒**，否则 systemd 会在这段等待中途结束服务
+  （原来的 15 秒：核心在第 15 秒被杀，往收尾中的 D 再发一次 SIGINT，3 秒后 SIGKILL）。**`levi stop` 是被认可的第一步，D 活着时它拒绝**；D 活着时直接 `systemctl --user stop` 或 `restart`，
+  除非单元有那 150 秒，否则会**截断 D 的 7/7 收尾**并留下它的单元。就绪卡的 `unit_timeout` 行（`warn`，从不拒绝）会在已安装的单元不足时说出来。不拥有该运行的核心（另一个活核心的）在关停时立刻返回；它没有这个运行的 pty，也就没有挂断链。
 - **评测客户端的开始检查**（`no_aeri`）从托管 D 的开始点击起就拒绝（D 要等键入短语后才持臂锁）；探针答不出来是 `unknown`，同样拒绝。**策略服务部署**在托管 D 运行时以 `aeri_run_live`（运行号是托管运行的）拒绝。
 - **开始门的机械检查**（`aeri_activity.hosted_visible_to_activity`）：启动之前，真正的 `running_jobs` 必须能在一个临时工作区里列出一份指向本进程的试验记录，且记录文件夹必须是它会去读的那种；
   启动登记之后，`running_jobs` 必须列出这个运行号。D 若是 `levi stop` 看不见的，就不开始（启动之后发现，则停止它）。
