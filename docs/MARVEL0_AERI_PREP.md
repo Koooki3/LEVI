@@ -5,7 +5,7 @@ pin, the templates, run names, the check), `aeri_ready.py` (the passive readines
 an earlier run leaves behind, the two stops), `aeri_api.py` (routes), `site.py` and `control_site.py` (the `[aeri]` sections),
 `aeri_activity.py` (how the rest of the product sees a hosted terminal D, below).
 Tests: `tests/marvel0/test_marvel0_aeri_{site,prep,ready,leftovers,route,ready_sample,activity}.py` on the made-up machine
-`tests/marvel0/aeri_world.py` (the last on real `hostchild.py` and fake terminal D under real ptys); samples
+`tests/marvel0/marvel0_aeri_world.py` (the last on real `hostchild.py` and fake terminal D under real ptys); samples
 `tests/marvel0/regen_aeri_ready_sample.py` (also `fixtures/aeri_stack_up_rows.json`); mutation sweeps
 `tests/marvel0/mutate_aeri_prep.py` and `tests/marvel0/mutate_aeri_wiring.py`. Design record:
 `LEVI/lab/levi-hub/programs/rig-console/reviews/aeri-page-design-20261021.md` (section 7, 8, 11). The hosted terminal D (keys, state,

@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from aeri_world import DEFAULT_PROFILES, World, installed_profiles
+from marvel0_aeri_world import DEFAULT_PROFILES, World, installed_profiles
 
 from levi.marvel0 import aeri_leftovers as left
 from levi.marvel0 import aeri_prep

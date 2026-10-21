@@ -1,6 +1,6 @@
 """The start gate of the hosted terminal D (``aeri_run.Supervisor._start_gate``),
 tested against the **real readiness rows** of the preparation card
-(``aeri_ready.rows`` on a made-up machine, ``aeri_world.World``): the first build
+(``aeri_ready.rows`` on a made-up machine, ``marvel0_aeri_world.World``): the first build
 refused every row that was not ``ok`` while the card makes ``stack_ready`` ``warn``
 whenever the arm stack is up (the gripper stack and the controller cannot be seen
 from here), so no start could ever go through; the test of the gate had replaced
@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 from aeri_machine import HEAD, NAME
 from aeri_run_kit import machine_of, refusal
-from aeri_world import DEFAULT_PROFILES, World, installed_profiles
+from marvel0_aeri_world import DEFAULT_PROFILES, World, installed_profiles
 
 from levi.marvel0 import aeri_ready, aeri_run
 from levi.marvel0 import aeri_state as st

@@ -251,7 +251,7 @@ a heartbeat that stops, a reworded prompt, lines of other programs, a restart th
 then SIGKILL after the grace), the mutation checks (each gate removed in turn must fail a test), the drift check on the three
 code versions; the **whole recording of 18 Oct replayed** (the journal cut after each of its 97 lines, with the screen D had
 printed by then, looked at again up to 560 s later, through the state rules and through the supervisor: never `unknown` while D
-waits), the start gate against the real readiness rows of the card (`aeri_world.World`), a Stop from the script, a site file
+waits), the start gate against the real readiness rows of the card (`marvel0_aeri_world.World`), a Stop from the script, a site file
 that breaks in the middle of a run, adoption with a failing read, a dead D and a second core. **Not run: the real terminal D, the real arm, `uv run` of the real AERI under this environment** (does
 `UV_OFFLINE=1` find the pyrealsense2 overlay? does the allowlist environment start D?), `systemd-run --scope` for the
 launcher on this machine (the rehearsal `tests/marvel0/rehearse_aeri.py` does, with stand-ins), and the zh screen of the pin

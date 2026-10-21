@@ -1,5 +1,5 @@
 """The routes of the AERI preparation card (``levi/marvel0/aeri_api.py``) on an
-app of their own, over the made-up machine of ``aeri_world.py``: who may call
+app of their own, over the made-up machine of ``marvel0_aeri_world.py``: who may call
 them, what each refuses and why, that a request is answered again and never
 acted on twice, that two writes do not run at once, and that the stops touch
 only what they should (the one place a test must not reach the real
@@ -13,9 +13,9 @@ import threading
 import time
 
 import pytest
-from aeri_world import DEFAULT_PROFILES, World, installed_profiles
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from marvel0_aeri_world import DEFAULT_PROFILES, World, installed_profiles
 
 from levi.marvel0 import aeri_api, status
 from levi.marvel0 import site as marvel0_site

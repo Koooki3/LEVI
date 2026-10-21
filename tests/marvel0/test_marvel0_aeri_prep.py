@@ -1,6 +1,6 @@
 """The preparation of an AERI run (``levi/marvel0/aeri_prep.py``): the versioned
 port of ``new_run.py``, the code pin, the templates, the run names and the
-read-only check, on a made-up machine (``aeri_world.py``) with a real git
+read-only check, on a made-up machine (``marvel0_aeri_world.py``) with a real git
 repository and real child processes. Nothing here reaches the real machine
 except, when it is present, a read of the real ``new_run.py`` to run it next to
 the port on the same inputs."""
@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from aeri_world import DEFAULT_PROFILES, NOW, World, installed_profiles
+from marvel0_aeri_world import DEFAULT_PROFILES, NOW, World, installed_profiles
 
 from levi.marvel0 import aeri_prep, record
 from levi.marvel0 import site as marvel0_site

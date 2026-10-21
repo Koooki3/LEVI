@@ -18,7 +18,7 @@ parse with the page's own readers, so the page and the server agree on one shape
     uv run --no-sync python tests/marvel0/regen_aeri_ready_sample.py
 
 The documents are what ``aeri_ready.document`` builds on the made-up machine of
-``aeri_world.py`` (a temporary folder, a real git repository, stand-in programs,
+``marvel0_aeri_world.py`` (a temporary folder, a real git repository, stand-in programs,
 a fixed clock; no unit, port or process of the real machine is looked at). Paths
 of the temporary folder become ``/path/to``, digests that depend on it become
 fixed values and the commit becomes ``5bc750ca``, so the file does not depend on
@@ -33,7 +33,7 @@ import json
 import re
 import tempfile
 
-from aeri_world import World
+from marvel0_aeri_world import World
 from regen_deploy_sample import _lines
 from regen_sample import FOLDER, ROOT, fixed_zone
 
