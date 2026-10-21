@@ -70,21 +70,19 @@ describe("what the backend names by code is worded", () => {
     expect(missing(STATE_IDS.map(stateKey))).toEqual([]);
     // A sentence for each state, and for each state after each stop phase
     // (the states that follow a Stop say what the Stop has reached).
-    expect(
-      missing(
-        STATE_IDS.flatMap((id) =>
-          STOP_PHASES.map((phase) => stateHintKey(id, phase)),
-        ),
+    const hints = [
+      ...STATE_IDS.flatMap((id) =>
+        STOP_PHASES.map((phase) => stateHintKey(id, phase)),
       ),
-    ).toEqual([]);
+      // ... and the one reason that changes what an unreadable D means: another
+      // core of LEVI owns the run.
+      stateHintKey("unknown", "idle", "no_keyboard"),
+    ];
+    expect(missing(hints)).toEqual([]);
     sameSet(family("state."), STATE_IDS);
     sameSet(
       family("hint."),
-      STATE_IDS.flatMap((id) =>
-        STOP_PHASES.map((phase) =>
-          stateHintKey(id, phase).slice(`${P}hint.`.length),
-        ),
-      ),
+      hints.map((key) => key.slice(`${P}hint.`.length)),
     );
     sameSet(tupleOf("STATES"), STATE_IDS);
   });

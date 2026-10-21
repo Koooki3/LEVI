@@ -44,6 +44,7 @@ import {
   stateHintKey,
   stateKey,
   stopControl,
+  stopUnacknowledged,
   visibleKeys,
   type KeyCtx,
   type Limits,
@@ -248,6 +249,10 @@ function WaitBlock({ run }: { run: RunView }) {
   const { t } = useLocale();
   const wait = run.wait;
   if (!wait) return null;
+  // D's own words for the wait, unless the quote of the prompt above already
+  // says exactly that.
+  const words = [wait.text, wait.todo].filter(Boolean).join(" ");
+  const quoted = words !== "" && words.trim() === promptLine(run)?.trim();
   return (
     <div className="rg-await" data-testid="marvel0-autonomy-wait">
       {wait.reason && (
@@ -256,14 +261,14 @@ function WaitBlock({ run }: { run: RunView }) {
           {wordOf(t, "marvel0.autonomy.waitreason.", wait.reason)}
         </p>
       )}
-      {(wait.text || wait.todo) && (
+      {words !== "" && !quoted && (
         // D's own words for what it waits for, in its console language.
         <blockquote
           className="rg-aprompt"
           data-testid="marvel0-autonomy-wait-text"
           lang={run.profile?.consoleLang ?? undefined}
         >
-          {[wait.text, wait.todo].filter(Boolean).join(" ")}
+          {words}
         </blockquote>
       )}
       {wait.confirm && (
@@ -635,12 +640,16 @@ function Queue({ run }: { run: RunView }) {
   );
 }
 
+/** The edge colour of the card. Red for a D that cannot be trusted (stuck,
+ * locked, unreadable) and for a Stop that D has not acknowledged: the arm may
+ * still be moving then, and a green edge would say the opposite. */
 const CARD_TONE = (run: RunView | null): string =>
   run === null || !hasRun(run)
     ? "not_started"
     : run.state.id === "stalled" ||
         run.state.id === "fault_locked" ||
-        run.state.id === "unknown"
+        run.state.id === "unknown" ||
+        (run.d.alive && stopUnacknowledged(run.stop.phase))
       ? "red"
       : mayMove(run)
         ? "ok"
@@ -786,7 +795,13 @@ export function AutonomyRunCard({
             data-testid="marvel0-autonomy-status"
           >
             <p className="rg-arun__hint" data-testid="marvel0-autonomy-hint">
-              {t(stateHintKey(run.state.id, run.stop.phase))}
+              {t(
+                stateHintKey(
+                  run.state.id,
+                  run.stop.phase,
+                  run.state.reasonCode,
+                ),
+              )}
             </p>
             {run.state.reason && (
               <p className="rg-muted" data-testid="marvel0-autonomy-reason">

@@ -1033,6 +1033,22 @@ describe("what the page says after a Stop, by what D has said back", () => {
     }
   });
 
+  test("an unreadable D that another core of LEVI owns is not said to offer Stop", () => {
+    expect(hint("unknown", "idle")).toBe("marvel0.autonomy.hint.unknown");
+    expect(stateHintKey("unknown", "idle", "screen_drift")).toBe(
+      "marvel0.autonomy.hint.unknown",
+    );
+    const other = stateHintKey("unknown", "idle", "no_keyboard");
+    expect(other).toBe("marvel0.autonomy.hint.unknown_other_core");
+    expect(E["marvel0.autonomy.hint.unknown"]).toMatch(/Only Stop is offered/);
+    expect(E[other]).toMatch(/only watches it/);
+    expect(E[other]).not.toMatch(/Only Stop is offered/);
+    // Only the state `unknown` is read by its reason.
+    expect(stateHintKey("stopping", "acked", "no_keyboard")).toBe(
+      "marvel0.autonomy.hint.stopping",
+    );
+  });
+
   test("the other states have one sentence whatever the phase", () => {
     for (const state of ["forward_running", "services", "ended"] as const)
       for (const phase of phases)

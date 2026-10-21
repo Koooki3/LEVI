@@ -161,14 +161,27 @@ export const homingKey = (step: 1 | 2 | 3): string =>
   `marvel0.autonomy.homing.${step}`;
 export const exitKey = (kind: string): string =>
   `marvel0.autonomy.exit.${kind}`;
+/** A Stop was sent and D has not said it received it (`sent`, `unconfirmed`,
+ * `retried`): the arm may still be moving. `acked` is D's own acknowledgement,
+ * whoever sent the signal. */
+export const stopUnacknowledged = (phase: StopPhase): boolean =>
+  phase === "sent" || phase === "unconfirmed" || phase === "retried";
+
 /** The sentence under the state badge. The three states that follow a Stop
  * say what the Stop has reached, not what it is meant to do: until D has
  * acknowledged it (stop phase `acked`) the arm may still be moving and D is not
  * known to be winding down, so the sentence says "sent, not confirmed" and
  * leaves the physical e-stop as the thing to rely on (review R10 #10). */
-export function stateHintKey(id: StateId, phase: StopPhase = "idle"): string {
-  const unconfirmed =
-    phase === "sent" || phase === "unconfirmed" || phase === "retried";
+export function stateHintKey(
+  id: StateId,
+  phase: StopPhase = "idle",
+  reason: string | null = null,
+): string {
+  // Another live core of LEVI owns this run (`no_keyboard`): this page only
+  // watches it, so "only Stop is offered" would be false.
+  if (id === "unknown" && reason === "no_keyboard")
+    return "marvel0.autonomy.hint.unknown_other_core";
+  const unconfirmed = stopUnacknowledged(phase);
   if (id === "stopping")
     return phase === "acked"
       ? "marvel0.autonomy.hint.stopping"

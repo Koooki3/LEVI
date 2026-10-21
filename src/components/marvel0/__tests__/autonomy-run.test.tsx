@@ -86,7 +86,13 @@ describe("every state of the backend's samples", () => {
       );
       // The sentence of a state that follows a Stop is by what D has said back.
       expect(text($(host, "marvel0-autonomy-hint"))).toBe(
-        E[stateHintKey(id as never, doc.stop.phase as StopPhase)],
+        E[
+          stateHintKey(
+            id as never,
+            doc.stop.phase as StopPhase,
+            doc.state.reason as string,
+          )
+        ],
       );
       // A refused key of the state is shown as well, with its reason.
       const expected = KEYS_OF[id].filter((key) =>
@@ -527,5 +533,70 @@ describe("a level B key stands behind a window", () => {
     expect(text(progress)).toContain("Round 1 of 5");
     expect(text(progress)).toContain("step 66 of 200");
     expect(text(progress)).toContain("Rounds released: 1. Discarded: 0.");
+  });
+});
+
+describe("what the card says when it can only watch, and when words repeat", () => {
+  test("a run another core owns: its own sentence, Stop off with the backend's reason, no key", async () => {
+    const { host } = await openStep({ run: runDoc("unknown_other_core") });
+    expect(text($(host, "marvel0-autonomy-hint"))).toBe(
+      E["marvel0.autonomy.hint.unknown_other_core"],
+    );
+    expect(
+      ($(host, "marvel0-autonomy-stop") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(text($(host, "marvel0-autonomy-stop-caption"))).toBe(
+      E["marvel0.autonomy.err.driven_elsewhere"],
+    );
+    expect(host.querySelectorAll("div.rg-akey")).toHaveLength(0);
+  });
+
+  test("a wait whose words are the line already quoted above is not quoted twice", async () => {
+    const same = await openStep({
+      run: runDoc("await_resume", (doc) => {
+        doc.wait.text = doc.state.prompt.line;
+        doc.wait.todo = null;
+      }),
+    });
+    expect($(same.host, "marvel0-autonomy-prompt")).not.toBeNull();
+    expect($(same.host, "marvel0-autonomy-wait-text")).toBeNull();
+    const other = await openStep({
+      run: runDoc("await_resume", (doc) => {
+        doc.wait.text = "Another sentence of D";
+        doc.wait.todo = null;
+      }),
+    });
+    expect(text($(other.host, "marvel0-autonomy-wait-text"))).toBe(
+      "Another sentence of D",
+    );
+  });
+});
+
+describe("the edge of the card follows what can be trusted", () => {
+  const edge = async (
+    name: string,
+    change?: (doc: ReturnType<typeof runDoc>) => void,
+  ) => {
+    const { host } = await openStep({ run: runDoc(name, change) });
+    return $(host, "marvel0-autonomy-run")!.className;
+  };
+
+  test("a Stop D has not acknowledged is red: the arm may still be moving, and a green edge would say the opposite", async () => {
+    for (const phase of ["sent", "unconfirmed", "retried"])
+      expect([
+        phase,
+        await edge("stopping", (doc) => (doc.stop.phase = phase)),
+      ]).toEqual([phase, expect.stringContaining("rg-card--red")]);
+    expect(await edge("stopping_unconfirmed")).toContain("rg-card--red");
+    expect(await edge("orphaned")).toContain("rg-card--red");
+  });
+
+  test("an acknowledged Stop is not green either (it is wrapping up), and a run that goes well is", async () => {
+    const acked = await edge("stopping");
+    expect(acked).not.toContain("rg-card--red");
+    expect(acked).not.toContain("rg-card--ok");
+    expect(await edge("stopping_acked_elsewhere")).not.toContain("rg-card--ok");
+    expect(await edge("forward_running")).toContain("rg-card--ok");
+    expect(await edge("stalled")).toContain("rg-card--red");
   });
 });

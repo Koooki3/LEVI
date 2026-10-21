@@ -293,6 +293,8 @@ export interface RunView {
     /** The backend said an id this page does not know: shown as `unknown`. */
     foreign: boolean;
     reason: Worded<Say> | null;
+    /** The backend's code of the reason (`no_keyboard`, `screen_drift`...). */
+    reasonCode: string | null;
     seq: number;
     since: number | null;
     mayMove: boolean;
@@ -559,6 +561,7 @@ export function runView(raw: unknown, known: Known): RunView | null {
       id: stateId ?? "unknown",
       foreign: stateId === null,
       reason: reasonOf(state?.reason, state?.params, REASON_PREFIXES, known),
+      reasonCode: str(state?.reason, 80),
       seq: num(state?.seq) ?? -1,
       since: timeOf(state?.since),
       mayMove: bool(state?.may_move) === true,

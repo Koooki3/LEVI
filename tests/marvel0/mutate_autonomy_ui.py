@@ -564,8 +564,8 @@ MUTATIONS = [
     (
         "stop wording: the card's hint ignores the stop phase",
         M + "autonomy-run-card.tsx",
-        "stateHintKey(run.state.id, run.stop.phase)",
-        "stateHintKey(run.state.id)",
+        "                  run.stop.phase,\n                  run.state.reasonCode,",
+        '                  "idle",\n                  run.state.reasonCode,',
         (RUN,),
     ),
     (
@@ -574,6 +574,27 @@ MUTATIONS = [
         '  if (id === "orphaned" && unconfirmed)',
         '  if (id === "orphaned" && false)',
         (LOGIC, RUN),
+    ),
+    (
+        "stop wording: the card's edge is green while a Stop is unacknowledged",
+        M + "autonomy-run-card.tsx",
+        "        (run.d.alive && stopUnacknowledged(run.stop.phase))\n",
+        "        false\n",
+        (RUN,),
+    ),
+    (
+        "stop wording: a run another core owns is said to offer Stop",
+        M + "autonomy-logic.ts",
+        '  if (id === "unknown" && reason === "no_keyboard")',
+        '  if (id === "unknown" && reason === "no_keyboard" && false)',
+        (LOGIC, RUN),
+    ),
+    (
+        "card: the wait's words are quoted twice",
+        M + "autonomy-run-card.tsx",
+        '  const quoted = words !== "" && words.trim() === promptLine(run)?.trim();',
+        "  const quoted = false;",
+        (RUN,),
     ),
     # --- review R11 M4, L2: how often the page reads, what it loads -------------------
     (
