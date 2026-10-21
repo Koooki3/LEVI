@@ -48,7 +48,17 @@ page), and while a member starts, which ready lines were seen and which are miss
   gripper stack, rows of `name type state` mean one runs, and a command ended before it could say is *no answer* (reason
   `b.probe_no_answer`, which keeps everything refused until it is asked again), never "absent". That takes about 20 s, and is
   only needed when the monitor is not in the graph. `checks.b_probe` says which way the answer came (`by`: `nodes` or
-  `probe`; `graph`: what the graph said). `c/preflight` runs three read-only checks (QoS, the three gripper controllers, the
+  `probe`; `graph`: what the graph said) and whether it is **`confirmed`**. **"None" from the graph alone is one answer, and one
+  answer is not enough to start B**: a graph that listed the monitor but has not discovered the gripper stack's participants
+  yet says the same, and a second gripper stack on the same RS-485 port is a motion risk. It is confirmed by a second answer: the
+  answer before it, still good (10 minutes), was "absent" too, or the check makes a second graph check itself (so every check a
+  person asks for is two graph checks, about 7 s when nothing fresh goes before it). A second answer that is "present" is final;
+  one that proves nothing goes on to the slow question, and the controller manager's own word ("Could not contact service") and B's own stop need no second answer. **A's start still uses the
+  first answer** (it needs B known, not confirmed), so the 5 s target before A holds: the guided start asks the check that A
+  waits for with `confirm` off (one graph check), and, when the chain goes straight on to B, makes the second graph check
+  **during A's start-up** (about 5 s, off the critical path); a start that stops at A or pauses before B makes it while it waits for
+  the person. B's start is refused as a press that checks first (the warning `b_probe_unconfirmed`, 409 `b_probe_started`, nothing
+  started) while the only answer is the unconfirmed one. `c/preflight` runs three read-only checks (QoS, the three gripper controllers, the
   end-effector frame); the listing of the controllers and the frame check do not depend on each other and **run at the same
   time**.
 - **The check of B alone.** `b/probe` (the button "check the gripper stack") asks the same question and nothing else: it
@@ -142,8 +152,8 @@ page), and while a member starts, which ready lines were seen and which are miss
     `failed`, `cancelled`, `not_reached`): `monitor`, `marker`, `probe`, `wait`, `arm`, `await_a` (A's: the marker is set first and
     the check whether a gripper stack runs begins with it, as an operation of its own; `probe` is the FCI check and the wait for that
     answer; `wait` is what is left of the marker's age, the heavy jobs and the arm's sockets), then for
-    `"c"`: `b_probe` (the check whether a gripper stack runs; made here only when the answer is stale and was not
-    refreshed during A's start-up, which a start that goes on to B does), `b` (B's
+    `"c"`: `b_probe` (the check whether a gripper stack runs; made here only when the answer is stale or unconfirmed and was not
+    refreshed during A's start-up, which a start that goes on to B does: the second graph check B needs), `b` (B's
     start **and** the wait for ready: the gripper calibrates), `c_preflight` (the three checks before C; **one automatic retry**
     when the controller listing got no answer, `controllers_state` `absent` or `unknown`; a check that answered no is not
     asked again), `c` (C's start and the wait for ready), then `done`. `skipped`: nothing was asked of the machine (the part was
@@ -263,7 +273,7 @@ the chain to be compressed. What the chain adds to what the machine takes, old a
 | Delay | Old | New |
 | --- | --- | --- |
 | Marker wait before A | fixed `marker_wait_s`: 45-60 s (file floor 45, default 60) | marker age >= `marker_wait_s` (floor 2, default **3 s**) and no heavy job really running; 90 s cap; unknown: 45 s |
-| Check whether a gripper stack runs (A's start needs the answer: rule R) | `list_controllers`, about 21 s when no stack runs, **before** the marker | ROS graph, about 3.4 s (estimated, see below), **beside** the marker's age and the FCI check; the 20 s question only when the graph proves nothing |
+| Check whether a gripper stack runs (A's start needs the answer: rule R) | `list_controllers`, about 21 s when no stack runs, **before** the marker | ROS graph, about 3.4 s (estimated, see below), **beside** the marker's age and the FCI check; the 20 s question only when the graph proves nothing; the second graph check B needs is made **during A's start-up** |
 | FCI check | 1 s, before the marker; its socket (TIME_WAIT, 60 s) kept A from starting for a minute | 1 s, beside the marker's age; reset close, no socket left |
 | Ticker | one look every 2.0 s, one step per look (ten steps: 20 s and more of waiting) | a look 0.25 s after the last one **until A has a unit, then 1.0 s** (the 1 kHz loop is live), at once after any change (step moved, operation ended), woken by operations |
 | Page's cached read | 2 s after any change | dropped at each change (`on_change` -> `stack_api.invalidate`); 2 s kept for idle reads of several pages |
@@ -278,18 +288,19 @@ the retry of the listing before C (a hiccup costs the listing's 20 s bound); the
 marker release after a stop (not the start chain). **The expected timeline** with the timings above (the timing test
 `test_marvel0_stack_act_timeline.py` runs the real ticker on a clock it moves): A starts about 3.4 s after the press (the
 check of the graph), is ready about 5 s later, B starts within one look and is ready 2 s later, the checks before C take
-5 s, C starts and is ready 3 s later: about **20.5 s from the press to C ready** (about 100 s before; 19 s with 0.25 s looks
-throughout, which cost 28 fork/execs a second while the control loop ran). Before A the ticker adds at most 0.25 s (it sees a stage
-ready at its next look); once A has a unit the pause is 1 s, so A, B and C are each seen up to 1 s late (1.5 s on the chain in the
-timing test, 21.4 s to the end of the sequence). **The control file of the machine must say
+5 s, C starts and is ready 3 s later: about **20 s from the press to C ready** (about 100 s before; 18.9 s with 0.25 s looks
+throughout, which cost some 29 fork/execs a second while the control loop ran). Before A the ticker adds at most 0.25 s (it sees a stage
+ready at its next look); once A has a unit the pause is 1 s, so A, B and C are each seen up to 1 s late (C ready at 19.9 s and the
+sequence done at 20.8 s in the timing test: A starts at 3.4 s, is ready at 8.5 s, B starts at 8.8 s, C at 16.8 s). **The control file of the machine must say
 `marker_wait_s = 3` (or nothing)**: a file that says 45 keeps A back 45 s all the same.
 
 **Cost of the looks.** One look is one read of the stack: six `systemctl show` and some small reads, about 40 ms on the machine
 (measured 21 Oct, read-only), plus about 7 ms for the heavy jobs (one `systemctl show` of the gate's glob and the log's
 candidate scopes, the log parsed only when it changes). **Before A has a unit** one look per 0.25 s plus the looks that follow a change
 is about 3-4 per second, a tenth of one core (nothing is running yet that the looks could disturb). **Once A has a unit the control loop
-is live and the pause is 1 s** (`SEQUENCE_TICK_ARM_S`): in the timing test 1.4 looks per second from A's start to the end, about 8
-fork/execs a second instead of some 28 (the alternative, one `systemctl show` for all four units, would have kept 12). The looks
+is live and the pause is 1 s** (`SEQUENCE_TICK_ARM_S`): in the timing test 1.5 looks per second from A's start to the end (48 looks in
+all, 93 with 0.25 s throughout), about 9 fork/execs a second instead of some 29 (the alternative, one `systemctl show` for all four
+units, would have kept 12). The looks
 that follow a change and the wake-up when an operation ends stay, so a finished check is acted on at once; what the slow pause
 costs is at most one pause per stage that came up between two looks. The cores the control loop runs on are not reserved by any rule (this kernel is not real-time: it is a
 few short processes per look, not a thread of its own, and only while a guided start or stop runs; waiting for the person looks
@@ -358,7 +369,8 @@ Not verified on the real machine: **the time of `ros2 node list --no-daemon --sp
 the wrapper sourcing the rig's environment, python and rclpy starting, 2 s of discovery; if it is slower A waits for it, because A
 needs B known), **that discovery of the monitor's node within 2 s means a gripper stack's nodes would have been seen too** (the
 canary is a proof of discovery, not of completeness), **what the arm's FCI server makes of a reset instead of a close**, the real
-timings of the chain, and the load of the faster looks on the 1 kHz loop. Verified on this machine without starting anything:
+timings of the chain, that **the second graph check (a python/rclpy process of a few seconds of CPU) while A starts up
+does not disturb A's start-up or the control loop** (the early check of old ran before A existed), and the load of the looks on the 1 kHz loop. Verified on this machine without starting anything:
 the format of `systemctl --user show` for several scopes and for the stale scopes (`heavy_jobs_running` ran against the real log and
 systemd: `clear`, 18 stale scopes ignored, 7 ms per `show` of the glob), the kernel's table after a reset close. Not verified on the real machine either: the line patterns (they come from the franka_control sources, each with its source line
 in `stack_units.py`, and a test greps those sources; no real unit log has been read), the format of `ros2 control
@@ -401,8 +413,10 @@ after it is ready (no health source): a gripper driver that dies without a `proc
   unreadable logs, a log longer than the tail read, the document and the gates behind it), `test_marvel0_stack_act_fast.py` (the graph check and its fallback from the real `ros2 node list` format, the check of B
   as an operation beside others, the order, the marker given back, the checks before C side by side, the ticker, the page's
   cache, the step times, the control file's floor), `test_marvel0_stack_act_timeline.py` (the real ticker and threads on a
-  clock the test moves, `sim_time.py`: A under 5 s, the whole chain, a heavy job that holds A back until it ends or the cap, the
-  fixed wait when it cannot be told) and `test_marvel0_stack_act_fast_processes.py` (real processes: the stand-in of the graph
+  clock the test moves, `sim_time.py`: A under 5 s, the whole chain, the pause once A has a unit, a heavy job that holds A back until it ends or the cap, the
+  fixed wait when it cannot be told), `test_marvel0_stack_act_fast_review.py` (the unit name of a one-shot, a person's operation that holds the
+  start back without the lock, the FCI answer a stop drops, and B started only on a confirmed absence: the first answer, the second answer during A's
+  start-up, present as the final word, the manager's word, a stale first answer) and `test_marvel0_stack_act_fast_processes.py` (real processes: the stand-in of the graph
   check, two checks side by side, the whole chain on the real ticker, and the kernel's table after the FCI check).
 - The mutation check (`tests/marvel0/mutate_stack_act.py`, 282 mutations, 75 of them for the fast start; `--check` says whether every mutation still applies)
   removes each gate in turn, including every gate added by the reviews of 2026-10-21 and their fixes; the 59 of the guided
@@ -460,7 +474,12 @@ after it is ready (no health source): a gripper driver that dies without a `proc
   “Could not contact service”），所以在 `timeout -s INT -k 3 20` 之下运行，外面还有 systemd 的 `RuntimeMaxSec`，结论读的是它打印了什么，
   不是它怎么结束的：看到警告就是没有夹爪栈，看到 `名字 类型 状态` 的行就是有，还没来得及说话就被结束的是“没有回答”（原因
   `b.probe_no_answer`，在再次询问之前一切仍被拒绝），绝不当作“没有”。这要约 20 秒，只在监视器不在图里时才需要。`checks.b_probe` 说明答案
-  怎么来的（`by`：`nodes` 或 `probe`；`graph`：图说了什么）。`c/preflight` 运行三项只读检查（QoS、三个夹爪控制器、末端坐标系）；控制器列表和
+  怎么来的（`by`：`nodes` 或 `probe`；`graph`：图说了什么），以及是否 **`confirmed`**。**只由图给出的“没有”只是一次回答，一次回答不足以启动 B**：图里有监视器、
+但还没发现夹爪栈的参与者时，说的也是“没有”，而同一个 RS-485 串口上的第二个夹爪栈会带来运动风险。要第二次回答来确认：它之前仍有效（10 分钟）的回答也是“没有”，
+或者这次检查自己再做一次图检查（所以人要求的每次检查都是两次图检查，前面没有新鲜回答时约 7 秒）。第二次回答是“有”就是最终结果；什么也证明不了就去问慢的那一个；控制器管理器自己的话
+（“Could not contact service”）和 B 自己的停止不需要第二次回答。**A 的启动仍用第一次回答**（它要 B 已知，不要求已确认），所以 A 之前的 5 秒目标不变：引导式启动让 A 等的那次检查
+关掉 `confirm`（只做一次图检查），启动要直接接着去 B 时，**在 A 启动期间**（约 5 秒，不在关键路径上）做第二次图检查；停在 A 或在 B 之前暂停的启动，在等人的时候做。
+只要唯一的回答是未确认的，B 的启动就只按“先检查”处理（警告 `b_probe_unconfirmed`，409 `b_probe_started`，什么也不启动）。`c/preflight` 运行三项只读检查（QoS、三个夹爪控制器、末端坐标系）；控制器列表和
   坐标系检查互不依赖，**同时运行**。
 - **只查 B 的检查。** `b/probe`（按键“检查夹爪栈”）问同一个问题，别的什么都不做：不碰 FCI 端口，所以 A 在运行和 A 空闲时都可以做
   （已有 B 的单元时不做：那时 B 已知），`act.checks.can_probe_b` 说明按键何时出现。需要它，是因为“没有夹爪栈在运行”只有 10 分钟有效
@@ -519,8 +538,8 @@ after it is ready (no health source): a gripper driver that dies without a `proc
     勾选是被记录下来的点击。
   - **步骤**（`act.sequence.steps`，`{step, terminal, state, at, took_s}`；状态 `pending`、`running`、`done`、`skipped`、`failed`、`cancelled`、
     `not_reached`）：`monitor`、`marker`、`probe`、`wait`、`arm`、`await_a`（A 的：先设标记，查夹爪栈的检查随标记一起作为独立的操作开始；`probe` 是 FCI 检查和等那个答案；
-    `wait` 是标记年龄、重任务和机械臂套接字还剩的部分），`"c"` 再加：`b_probe`（检查有没有夹爪栈在运行；这里只在答案过期、且没有在 A 启动期间刷新时才做，
-    接着去 B 的启动会在 A 启动期间刷新）、`b`（B 的启动**以及**等它就绪：夹爪校准）、`c_preflight`（C 之前的三项检查；控制器列表没有回答时
+    `wait` 是标记年龄、重任务和机械臂套接字还剩的部分），`"c"` 再加：`b_probe`（检查有没有夹爪栈在运行；这里只在答案过期或未确认、且没有在 A 启动期间刷新时才做，
+    接着去 B 的启动会在 A 启动期间刷新：B 需要的第二次图检查）、`b`（B 的启动**以及**等它就绪：夹爪校准）、`c_preflight`（C 之前的三项检查；控制器列表没有回答时
     （`controllers_state` 为 `absent` 或 `unknown`）**自动重试一次**；回答了“不行”的检查不再重问）、`c`（C 的启动和等它就绪），最后 `done`。
     `skipped`：没有向机器要求任何东西（该部分本来就已就绪，或者序列等待时人已经手工做了）。`not_reached`：序列在它之前已经结束。
     `act.sequence` 还带 `through` 和 `pauses`（`{b, c}`，是生效的值：`"a"` 的启动两个都报 `true`，因为它等人去启动 B 和 C）。**时间花在哪里：**
@@ -600,7 +619,7 @@ after it is ready (no health source): a gripper driver that dies without a `proc
 | 延迟 | 旧 | 新 |
 | --- | --- | --- |
 | A 之前的标记等待 | 固定 `marker_wait_s`：45-60 秒（文件下限 45，默认 60） | 标记年龄 >= `marker_wait_s`（下限 2，默认 **3 秒**）且没有重任务真的在运行；上限 90 秒；读不出来：45 秒 |
-| 查有没有夹爪栈（A 的启动需要这个答案：规则 R） | `list_controllers`，没有夹爪栈时约 21 秒，在标记**之前** | ROS 图，约 3.4 秒（估计值，见下），与标记年龄、FCI 检查**同时**；只有图什么也证明不了时才问那个 20 秒的问题 |
+| 查有没有夹爪栈（A 的启动需要这个答案：规则 R） | `list_controllers`，没有夹爪栈时约 21 秒，在标记**之前** | ROS 图，约 3.4 秒（估计值，见下），与标记年龄、FCI 检查**同时**；只有图什么也证明不了时才问那个 20 秒的问题；B 需要的第二次图检查**在 A 启动期间**做 |
 | FCI 检查 | 1 秒，在标记之前；它的套接字（TIME_WAIT，60 秒）让 A 在一分钟内启动不了 | 1 秒，与标记年龄同时；复位关闭，不留套接字 |
 | 定时器 | 每 2.0 秒看一次，每次只走一步（十步就是 20 秒以上的空等） | 上一次之后 0.25 秒再看，**A 有了单元之后改为 1.0 秒**（1 kHz 回路在运行），任何变化（步骤前进、操作结束）后立刻再看，操作结束时被唤醒 |
 | 页面缓存的读 | 变化之后还要 2 秒 | 每次变化就丢弃（`on_change` -> `stack_api.invalidate`）；空闲读仍缓存 2 秒，给多个打开的页面共用 |
@@ -611,12 +630,12 @@ after it is ready (no health source): a gripper driver that dies without a `proc
 健康监视器每秒写两次健康文件（`--hz 2`，由 `stack.py` 启动它），所以每个等这个文件的“就绪”最多晚 0.5 秒才被看到；C 之前列表的重试（一次异常要付列表的 20 秒上限）；
 各种有效期（`FCI_TTL_S`、`B_PROBE_TTL_S`、`C_PREFLIGHT_TTL_S`：它们说一个答案管多久，没有任何东西在等它们）；停止之后每 2 秒一次的标记释放（不属于启动链）。**预期的时间线**，
 用上面的时间（时间测试 `test_marvel0_stack_act_timeline.py` 在一个由测试拨动的时钟上跑真实的定时器）：按键后约 3.4 秒启动 A（图检查的时间），约 5 秒后就绪，B 在一次查看之内启动、2 秒后就绪，
-C 之前的检查 5 秒，C 启动、3 秒后就绪：**从按键到 C 就绪约 20.5 秒**（以前约 100 秒；每次都 0.25 秒一看是 19 秒，但那在控制回路运行时每秒要 fork 约 28 次）。A 之前定时器最多多加 0.25 秒（它在下一次查看时才看到阶段就绪）；A 有了单元之后间隔是 1 秒，所以 A、B、C 各最多晚 1 秒被看到（时间测试里整条链共 1.5 秒，序列结束在 21.4 秒）。**本机的控制文件必须写
+C 之前的检查 5 秒，C 启动、3 秒后就绪：**从按键到 C 就绪约 20 秒**（以前约 100 秒；每次都 0.25 秒一看是 18.9 秒，但那在控制回路运行时每秒要 fork 约 29 次）。A 之前定时器最多多加 0.25 秒（它在下一次查看时才看到阶段就绪）；A 有了单元之后间隔是 1 秒，所以 A、B、C 各最多晚 1 秒被看到（时间测试里 C 就绪在 19.9 秒、序列结束在 20.8 秒：A 在 3.4 秒启动、8.5 秒就绪，B 在 8.8 秒启动，C 在 16.8 秒启动）。**本机的控制文件必须写
 `marker_wait_s = 3`（或者不写）**：写着 45 的文件照样让 A 等 45 秒。
 
 **查看的代价。** 一次查看是一次读栈：六次 `systemctl show` 加一些小的读取，本机上约 40 毫秒（10 月 21 日只读测得），重任务另加约 7 毫秒（对闸门的通配符和日志里的候选 scope 只做一次 `systemctl show`，日志只在变化时才重新解析）。
 **A 有单元之前**每 0.25 秒一次加上变化之后的那几次，大约每秒 3-4 次，约占一个核的十分之一（那时还没有东西会被这些查看干扰）。**A 有了单元之后控制回路在运行，间隔改为 1 秒**
-（`SEQUENCE_TICK_ARM_S`）：时间测试里从 A 启动到结束每秒 1.4 次，约每秒 8 次 fork/exec，而不是约 28 次（另一个办法是四个单元合成一次 `systemctl show`，那样仍有 12 次）。变化之后的那几次查看
+（`SEQUENCE_TICK_ARM_S`）：时间测试里从 A 启动到结束每秒 1.5 次（共 48 次查看，每次都 0.25 秒一看是 93 次），约每秒 9 次 fork/exec，而不是约 29 次（另一个办法是四个单元合成一次 `systemctl show`，那样仍有 12 次）。变化之后的那几次查看
 和操作结束时的唤醒保留，所以做完的检查会立刻被处理；慢间隔的代价是每个恰好在两次查看之间就绪的阶段最多晚一个间隔。没有任何规则保证它不落在控制回路的核上（这个内核不是实时的）：它是每次查看几个短进程，不是自己的线程，
 而且只在引导式启动或停止运行时才有；等人确认时每 2 秒看一次。没有对着 1 kHz 回路测过。
 
@@ -654,7 +673,7 @@ C 之前的检查 5 秒，C 启动、3 秒后就绪：**从按键到 C 就绪约
 
 **没有在真机上验证的：** **单元里 `ros2 node list --no-daemon --spin-time 2.0` 要多久**（约 3.4 秒是估计：包装脚本 source 机器人环境、python 和 rclpy 启动、
 2 秒发现；更慢的话 A 要等它，因为 A 需要 B 已知）、**2 秒内发现了监视器的节点，是否就说明夹爪栈的节点也会被看到**（监视器节点证明发现已经运行，不证明发现完整）、
-**机械臂自己的 FCI 服务器怎么对待复位而不是关闭**、整条链的真实用时，以及更快的查看对 1 kHz 回路的负担。在本机上不启动任何东西就验证了的：多个 scope 以及陈旧 scope 的
+**机械臂自己的 FCI 服务器怎么对待复位而不是关闭**、整条链的真实用时，**A 启动期间做第二次图检查（一个要用几秒 CPU 的 python/rclpy 进程）是否干扰 A 的启动和控制回路**（以前的提前检查在 A 出现之前就做完了），以及查看对 1 kHz 回路的负担。在本机上不启动任何东西就验证了的：多个 scope 以及陈旧 scope 的
 `systemctl --user show` 输出格式（`heavy_jobs_running` 对着真实日志和 systemd 跑过：`clear`，忽略 18 个陈旧 scope，通配符的一次 `show` 约 7 毫秒）、复位关闭之后内核的表。同样没有在真机上验证的：日志行的匹配规则（来自 franka_control 源码，每条在 `stack_units.py` 里注明了源码行，并有测试去核对这些源码；
 没有读过任何真实单元的日志）、`ros2 control list_controllers` 的输出格式（读自已安装 egg-link 所指的
 `ros2controlcli/verb/list_controllers.py:34-36`，从未运行过）、A/B/C 在单元里的真实运行、单元内的 FIFO 98 与 `mlockall`、双 SIGINT、10-11 秒的停止、
@@ -679,7 +698,8 @@ FCI 探针、上述各状态下健康监视器的真实写法（读自它的源�
   对快速启动，它通过真实的一次性单元（外面套 `timeout`，输出是替身的）运行图检查，并对真实的 scope 运行 `_scopes_tasks`：有进程的、不存在的、以及同一个结束之后的。
 - 快速启动：`test_marvel0_stack_act_heavy.py`（真实的 `heavy_jobs_running`，对着闸门自己格式的日志文件和真实的 `systemctl show` 输出，其中有 `show 'heavy-gate-*'` 的实测输出（本机的 18 个陈旧 scope，`fixtures/systemctl_show_heavy_gate_glob.txt`）：别的 hub 的或超出日志窗口的任务由第二个来源看到、读不了的日志、比尾部读取更长的日志、文档以及其后的门）、
   `test_marvel0_stack_act_fast.py`（图检查及其回退，用真实的 `ros2 node list` 格式；作为并行操作的 B 检查、顺序、归还标记、C 之前的检查同时进行、定时器、页面缓存、各步用时、控制文件的下限）、
-  `test_marvel0_stack_act_timeline.py`（真实定时器和线程跑在测试拨动的时钟上，`sim_time.py`：A 在 5 秒内、整条链、重任务把 A 拦住直到它结束或到上限、读不出来时的固定等待）、
+  `test_marvel0_stack_act_timeline.py`（真实定时器和线程跑在测试拨动的时钟上，`sim_time.py`：A 在 5 秒内、整条链、A 有单元之后的间隔、重任务把 A 拦住直到它结束或到上限、读不出来时的固定等待）、
+  `test_marvel0_stack_act_fast_review.py`（一次性检查的单元名、人自己的操作让启动等待而不碰锁、停止丢弃的 FCI 答案，以及 B 只在已确认的“没有”之上启动：第一次回答、A 启动期间的第二次回答、“有”为最终结果、管理器的话、过期的第一次回答）、
   `test_marvel0_stack_act_fast_processes.py`（真实进程：图检查的替身、同时进行的两项检查、真实定时器上的整条链、FCI 检查之后内核的表）。
 - 变异检查（`tests/marvel0/mutate_stack_act.py`，282 个变异，其中快速启动的 75 个；`--check` 只检查每个变异是否仍能应用）逐个去掉每道门，包括 2026-10-21 审查新增的
   每一道及其修复；其中经 B 和 C 的引导式启动、竞争、引导式停止新词的 59 个，各自只跑守着它的那一个测试文件。整张表要跑几分钟的 pytest：机械臂控制器运行时不要跑

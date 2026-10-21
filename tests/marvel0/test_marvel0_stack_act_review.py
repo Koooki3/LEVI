@@ -279,17 +279,26 @@ def test_r1_m4_the_probe_is_bounded_from_inside_and_from_outside(m):
 def test_the_fast_probe_is_bounded_from_inside_and_from_outside(m):
     m.m_ready()
     m.act.preflight_a({"request_id": "pre-a-00000056"})
-    [cmd] = [c for c in m.oneshots if " node list " in " ".join(c)]
+    # (the button's check is two answers of the graph, the same command twice)
+    cmds = [c for c in m.oneshots if " node list " in " ".join(c)]
+    assert len(cmds) == 2 and cmds[0] == cmds[1]
+    cmd = cmds[0]
     assert cmd[cmd.index("--") + 1 :] == [
         "timeout", "-s", "INT", "-k", "2", "8",
         "ros2", "node", "list", "--no-daemon", "--spin-time", "2.0",
     ]  # fmt: skip
-    [run] = [
+    runs = [
         c for c in m.calls if c[0] == "systemd-run" and "probe-b-nodes" in " ".join(c)
     ]
-    limit = int(
-        next(a for a in run if a.startswith("--property=RuntimeMaxSec=")).split("=")[2]
-    )
+    assert len(runs) == 2
+    [limit] = {
+        int(
+            next(a for a in run if a.startswith("--property=RuntimeMaxSec=")).split(
+                "="
+            )[2]
+        )
+        for run in runs
+    }
     assert limit == stack_units.NODES_RUNTIME_MAX_S
     assert limit > stack_units.NODES_TIMEOUT_S + stack_units.NODES_KILL_AFTER_S
     assert not m.oneshots_of("list_controllers"), "the slow question was not needed"

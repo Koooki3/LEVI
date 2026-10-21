@@ -2094,6 +2094,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 0.0,
             "fresh": true
           },
@@ -2822,6 +2823,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 12.0,
             "fresh": true
           },
@@ -3520,6 +3522,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 12.0,
             "fresh": true
           },
@@ -4265,6 +4268,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 16.0,
             "fresh": true
           },
@@ -4996,6 +5000,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 16.0,
             "fresh": true
           },
@@ -5734,6 +5739,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 16.0,
             "fresh": true
           },
@@ -6472,6 +6478,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 16.0,
             "fresh": true
           },
@@ -7255,6 +7262,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 19.0,
             "fresh": true
           },
@@ -8065,6 +8073,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 19.0,
             "fresh": true
           },
@@ -8893,6 +8902,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 19.0,
             "fresh": true
           },
@@ -9644,6 +9654,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 19.0,
             "fresh": true
           },
@@ -10386,6 +10397,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 6.0,
             "fresh": true
           },
@@ -11763,7 +11775,16 @@
             "state": "idle",
             "reason": "b.not_running",
             "can_start": true,
-            "start_blockers": [],
+            "start_blockers": [
+              {
+                "code": "b_probe_unconfirmed",
+                "level": "warn",
+                "text": "The last check found no gripper stack, but only once: the ROS graph can miss a stack it has not discovered yet, and a second gripper stack would fight the first for the serial port. Pressing start repeats the check first (a few seconds); press start again when it has finished.",
+                "params": {
+                  "age_s": 40.0
+                }
+              }
+            ],
             "can_stop": false,
             "stop_blockers": [],
             "confirm": {
@@ -11939,6 +11960,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": false,
             "age_s": 40.0,
             "fresh": true
           },
@@ -12796,7 +12818,7 @@
     },
     "chain_running_b": {
       "schema": "levi.marvel0.stack.v1",
-      "sampled_at": 1800000008.5,
+      "sampled_at": 1800000009.0,
       "profile": "real",
       "profile_code": "profile.product",
       "lock": {
@@ -12818,7 +12840,7 @@
       },
       "health": {
         "state": "ok",
-        "age_s": 1.1,
+        "age_s": 1.6,
         "monitor_pid": 4242,
         "hardware_active": true,
         "controller_active": false,
@@ -12827,8 +12849,8 @@
       },
       "marker": {
         "state": "present",
-        "age_s": 8.0,
-        "ctime_age_s": 8.0,
+        "age_s": 8.5,
+        "ctime_age_s": 8.5,
         "code": null,
         "can_clear": false,
         "clear_blockers": ["marker_a_unit", "marker_arm_active"]
@@ -12843,7 +12865,7 @@
             },
             {
               "code": "health.age_s",
-              "value": 1.1
+              "value": 1.6
             },
             {
               "code": "m.pid_matches",
@@ -12969,7 +12991,7 @@
               "ok": true,
               "level": "required",
               "params": {
-                "age_s": 8.0
+                "age_s": 8.5
               }
             },
             {
@@ -13261,7 +13283,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 1.5,
+              "waited_s": 2.0,
               "timeout_s": 90.0
             },
             "owned": true,
@@ -13394,8 +13416,8 @@
         },
         "marker": {
           "state": "present",
-          "age_s": 8.0,
-          "ctime_age_s": 8.0,
+          "age_s": 8.5,
+          "ctime_age_s": 8.5,
           "ours": true,
           "wait_s": 3.0,
           "configured_wait_s": 3.0,
@@ -13410,7 +13432,7 @@
           "next": null,
           "reason": null,
           "since": 1800000000.0,
-          "step_at": 1800000008.0,
+          "step_at": 1800000008.5,
           "reason_params": null,
           "took_s": null,
           "through": "c",
@@ -13466,13 +13488,13 @@
               "terminal": "b",
               "state": "done",
               "at": 1800000007.5,
-              "took_s": 0.5
+              "took_s": 1.0
             },
             {
               "step": "b",
               "terminal": "b",
               "state": "running",
-              "at": 1800000008.0,
+              "at": 1800000008.5,
               "took_s": null
             },
             {
@@ -13490,7 +13512,7 @@
               "took_s": null
             }
           ],
-          "elapsed_s": 8.5
+          "elapsed_s": 9.0
         },
         "gripper_test": {
           "state": "idle",
@@ -13507,26 +13529,27 @@
           "attest": ["hands_clear"]
         },
         "operation": {
-          "kind": "preflight_a",
-          "terminal": null,
+          "kind": "probe_b",
+          "terminal": "b",
           "state": "done",
-          "started_at": 1800000001.5,
-          "finished_at": 1800000001.5,
+          "started_at": 1800000008.0,
+          "finished_at": 1800000008.0,
           "code": null
         },
         "checks": {
           "fci": {
             "at": 1800000001.5,
             "state": "open",
-            "age_s": 7.0,
+            "age_s": 7.5,
             "fresh": true
           },
           "b_probe": {
-            "at": 1800000000.5,
+            "at": 1800000008.0,
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
-            "age_s": 8.0,
+            "confirmed": true,
+            "age_s": 1.0,
             "fresh": true
           },
           "c_preflight": null,
@@ -13582,7 +13605,7 @@
     },
     "chain_running_c_check": {
       "schema": "levi.marvel0.stack.v1",
-      "sampled_at": 1800000009.5,
+      "sampled_at": 1800000010.0,
       "profile": "real",
       "profile_code": "profile.product",
       "lock": {
@@ -13613,8 +13636,8 @@
       },
       "marker": {
         "state": "present",
-        "age_s": 9.0,
-        "ctime_age_s": 9.0,
+        "age_s": 9.5,
+        "ctime_age_s": 9.5,
         "code": null,
         "can_clear": false,
         "clear_blockers": ["marker_a_unit", "marker_arm_active"]
@@ -13755,7 +13778,7 @@
               "ok": true,
               "level": "required",
               "params": {
-                "age_s": 9.0
+                "age_s": 9.5
               }
             },
             {
@@ -14057,7 +14080,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 2.5,
+              "waited_s": 3.0,
               "timeout_s": 90.0
             },
             "owned": true,
@@ -14217,8 +14240,8 @@
         },
         "marker": {
           "state": "present",
-          "age_s": 9.0,
-          "ctime_age_s": 9.0,
+          "age_s": 9.5,
+          "ctime_age_s": 9.5,
           "ours": true,
           "wait_s": 3.0,
           "configured_wait_s": 3.0,
@@ -14233,7 +14256,7 @@
           "next": null,
           "reason": null,
           "since": 1800000000.0,
-          "step_at": 1800000009.0,
+          "step_at": 1800000009.5,
           "reason_params": null,
           "took_s": null,
           "through": "c",
@@ -14289,20 +14312,20 @@
               "terminal": "b",
               "state": "done",
               "at": 1800000007.5,
-              "took_s": 0.5
+              "took_s": 1.0
             },
             {
               "step": "b",
               "terminal": "b",
               "state": "done",
-              "at": 1800000008.0,
+              "at": 1800000008.5,
               "took_s": 1.0
             },
             {
               "step": "c_preflight",
               "terminal": "c",
               "state": "running",
-              "at": 1800000009.0,
+              "at": 1800000009.5,
               "took_s": null
             },
             {
@@ -14313,7 +14336,7 @@
               "took_s": null
             }
           ],
-          "elapsed_s": 9.5
+          "elapsed_s": 10.0
         },
         "gripper_test": {
           "state": "idle",
@@ -14323,26 +14346,27 @@
           "attest": ["hands_clear"]
         },
         "operation": {
-          "kind": "preflight_a",
-          "terminal": null,
+          "kind": "probe_b",
+          "terminal": "b",
           "state": "done",
-          "started_at": 1800000001.5,
-          "finished_at": 1800000001.5,
+          "started_at": 1800000008.0,
+          "finished_at": 1800000008.0,
           "code": null
         },
         "checks": {
           "fci": {
             "at": 1800000001.5,
             "state": "open",
-            "age_s": 8.0,
+            "age_s": 8.5,
             "fresh": true
           },
           "b_probe": {
-            "at": 1800000000.5,
+            "at": 1800000008.0,
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
-            "age_s": 9.0,
+            "confirmed": true,
+            "age_s": 2.0,
             "fresh": true
           },
           "c_preflight": null,
@@ -14398,7 +14422,7 @@
     },
     "chain_running_c": {
       "schema": "levi.marvel0.stack.v1",
-      "sampled_at": 1800000010.5,
+      "sampled_at": 1800000011.0,
       "profile": "real",
       "profile_code": "profile.product",
       "lock": {
@@ -14429,8 +14453,8 @@
       },
       "marker": {
         "state": "present",
-        "age_s": 10.0,
-        "ctime_age_s": 10.0,
+        "age_s": 10.5,
+        "ctime_age_s": 10.5,
         "code": null,
         "can_clear": false,
         "clear_blockers": ["marker_a_unit", "marker_arm_active"]
@@ -14571,7 +14595,7 @@
               "ok": true,
               "level": "required",
               "params": {
-                "age_s": 10.0
+                "age_s": 10.5
               }
             },
             {
@@ -14873,7 +14897,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 3.5,
+              "waited_s": 4.0,
               "timeout_s": 90.0
             },
             "owned": true,
@@ -15024,8 +15048,8 @@
         },
         "marker": {
           "state": "present",
-          "age_s": 10.0,
-          "ctime_age_s": 10.0,
+          "age_s": 10.5,
+          "ctime_age_s": 10.5,
           "ours": true,
           "wait_s": 3.0,
           "configured_wait_s": 3.0,
@@ -15040,7 +15064,7 @@
           "next": null,
           "reason": null,
           "since": 1800000000.0,
-          "step_at": 1800000010.0,
+          "step_at": 1800000010.5,
           "reason_params": null,
           "took_s": null,
           "through": "c",
@@ -15096,31 +15120,31 @@
               "terminal": "b",
               "state": "done",
               "at": 1800000007.5,
-              "took_s": 0.5
+              "took_s": 1.0
             },
             {
               "step": "b",
               "terminal": "b",
               "state": "done",
-              "at": 1800000008.0,
+              "at": 1800000008.5,
               "took_s": 1.0
             },
             {
               "step": "c_preflight",
               "terminal": "c",
               "state": "done",
-              "at": 1800000009.0,
+              "at": 1800000009.5,
               "took_s": 1.0
             },
             {
               "step": "c",
               "terminal": "c",
               "state": "running",
-              "at": 1800000010.0,
+              "at": 1800000010.5,
               "took_s": null
             }
           ],
-          "elapsed_s": 10.5
+          "elapsed_s": 11.0
         },
         "gripper_test": {
           "state": "idle",
@@ -15133,27 +15157,28 @@
           "kind": "preflight_c",
           "terminal": null,
           "state": "done",
-          "started_at": 1800000009.5,
-          "finished_at": 1800000009.5,
+          "started_at": 1800000010.0,
+          "finished_at": 1800000010.0,
           "code": null
         },
         "checks": {
           "fci": {
             "at": 1800000001.5,
             "state": "open",
-            "age_s": 9.0,
+            "age_s": 9.5,
             "fresh": true
           },
           "b_probe": {
-            "at": 1800000000.5,
+            "at": 1800000008.0,
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
-            "age_s": 10.0,
+            "confirmed": true,
+            "age_s": 3.0,
             "fresh": true
           },
           "c_preflight": {
-            "at": 1800000009.5,
+            "at": 1800000010.0,
             "ok": true,
             "qos": true,
             "controllers": true,
@@ -15214,7 +15239,7 @@
     },
     "chain_done": {
       "schema": "levi.marvel0.stack.v1",
-      "sampled_at": 1800000011.5,
+      "sampled_at": 1800000012.0,
       "profile": "real",
       "profile_code": "profile.product",
       "lock": {
@@ -15245,8 +15270,8 @@
       },
       "marker": {
         "state": "present",
-        "age_s": 11.0,
-        "ctime_age_s": 11.0,
+        "age_s": 11.5,
+        "ctime_age_s": 11.5,
         "code": null,
         "can_clear": false,
         "clear_blockers": ["marker_a_unit", "marker_arm_active"]
@@ -15387,7 +15412,7 @@
               "ok": true,
               "level": "required",
               "params": {
-                "age_s": 11.0
+                "age_s": 11.5
               }
             },
             {
@@ -15691,7 +15716,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 4.5,
+              "waited_s": 5.0,
               "timeout_s": 90.0
             },
             "owned": true,
@@ -15908,8 +15933,8 @@
         },
         "marker": {
           "state": "present",
-          "age_s": 11.0,
-          "ctime_age_s": 11.0,
+          "age_s": 11.5,
+          "ctime_age_s": 11.5,
           "ours": true,
           "wait_s": 3.0,
           "configured_wait_s": 3.0,
@@ -15924,9 +15949,9 @@
           "next": null,
           "reason": null,
           "since": 1800000000.0,
-          "step_at": 1800000010.0,
+          "step_at": 1800000010.5,
           "reason_params": null,
-          "took_s": 11.0,
+          "took_s": 11.5,
           "through": "c",
           "pauses": {
             "b": false,
@@ -15980,27 +16005,27 @@
               "terminal": "b",
               "state": "done",
               "at": 1800000007.5,
-              "took_s": 0.5
+              "took_s": 1.0
             },
             {
               "step": "b",
               "terminal": "b",
               "state": "done",
-              "at": 1800000008.0,
+              "at": 1800000008.5,
               "took_s": 1.0
             },
             {
               "step": "c_preflight",
               "terminal": "c",
               "state": "done",
-              "at": 1800000009.0,
+              "at": 1800000009.5,
               "took_s": 1.0
             },
             {
               "step": "c",
               "terminal": "c",
               "state": "done",
-              "at": 1800000010.0,
+              "at": 1800000010.5,
               "took_s": 1.0
             }
           ]
@@ -16016,27 +16041,28 @@
           "kind": "preflight_c",
           "terminal": null,
           "state": "done",
-          "started_at": 1800000009.5,
-          "finished_at": 1800000009.5,
+          "started_at": 1800000010.0,
+          "finished_at": 1800000010.0,
           "code": null
         },
         "checks": {
           "fci": {
             "at": 1800000001.5,
             "state": "open",
-            "age_s": 10.0,
+            "age_s": 10.5,
             "fresh": true
           },
           "b_probe": {
-            "at": 1800000000.5,
+            "at": 1800000008.0,
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
-            "age_s": 11.0,
+            "confirmed": true,
+            "age_s": 4.0,
             "fresh": true
           },
           "c_preflight": {
-            "at": 1800000009.5,
+            "at": 1800000010.0,
             "ok": true,
             "qos": true,
             "controllers": true,
@@ -16101,7 +16127,7 @@
     },
     "stop_all_started_blocks_starts": {
       "schema": "levi.marvel0.stack.v1",
-      "sampled_at": 1800000011.5,
+      "sampled_at": 1800000012.0,
       "profile": "real",
       "profile_code": "profile.product",
       "lock": {
@@ -16132,8 +16158,8 @@
       },
       "marker": {
         "state": "present",
-        "age_s": 11.0,
-        "ctime_age_s": 11.0,
+        "age_s": 11.5,
+        "ctime_age_s": 11.5,
         "code": null,
         "can_clear": false,
         "clear_blockers": ["marker_a_unit", "marker_arm_active"]
@@ -16274,7 +16300,7 @@
               "ok": true,
               "level": "required",
               "params": {
-                "age_s": 11.0
+                "age_s": 11.5
               }
             },
             {
@@ -16578,7 +16604,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 4.5,
+              "waited_s": 5.0,
               "timeout_s": 90.0
             },
             "owned": true,
@@ -16813,8 +16839,8 @@
         },
         "marker": {
           "state": "present",
-          "age_s": 11.0,
-          "ctime_age_s": 11.0,
+          "age_s": 11.5,
+          "ctime_age_s": 11.5,
           "ours": true,
           "wait_s": 3.0,
           "configured_wait_s": 3.0,
@@ -16835,8 +16861,8 @@
           "step": "stop_c",
           "next": null,
           "reason": null,
-          "since": 1800000011.5,
-          "step_at": 1800000011.5,
+          "since": 1800000012.0,
+          "step_at": 1800000012.0,
           "reason_params": null,
           "took_s": null,
           "steps": [
@@ -16844,7 +16870,7 @@
               "step": "stop_c",
               "terminal": "c",
               "state": "running",
-              "at": 1800000011.5,
+              "at": 1800000012.0,
               "took_s": null
             },
             {
@@ -16882,27 +16908,28 @@
           "kind": "preflight_c",
           "terminal": null,
           "state": "done",
-          "started_at": 1800000009.5,
-          "finished_at": 1800000009.5,
+          "started_at": 1800000010.0,
+          "finished_at": 1800000010.0,
           "code": null
         },
         "checks": {
           "fci": {
             "at": 1800000001.5,
             "state": "open",
-            "age_s": 10.0,
+            "age_s": 10.5,
             "fresh": true
           },
           "b_probe": {
-            "at": 1800000000.5,
+            "at": 1800000008.0,
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
-            "age_s": 11.0,
+            "confirmed": true,
+            "age_s": 4.0,
             "fresh": true
           },
           "c_preflight": {
-            "at": 1800000009.5,
+            "at": 1800000010.0,
             "ok": true,
             "qos": true,
             "controllers": true,
@@ -17472,6 +17499,14 @@
                 "params": {
                   "state": "idle"
                 }
+              },
+              {
+                "code": "b_probe_unconfirmed",
+                "level": "warn",
+                "text": "The last check found no gripper stack, but only once: the ROS graph can miss a stack it has not discovered yet, and a second gripper stack would fight the first for the serial port. Pressing start repeats the check first (a few seconds); press start again when it has finished.",
+                "params": {
+                  "age_s": 14.0
+                }
               }
             ],
             "can_stop": false,
@@ -17721,6 +17756,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": false,
             "age_s": 14.0,
             "fresh": true
           },
@@ -18278,6 +18314,14 @@
                 "params": {
                   "state": "idle"
                 }
+              },
+              {
+                "code": "b_probe_unconfirmed",
+                "level": "warn",
+                "text": "The last check found no gripper stack, but only once: the ROS graph can miss a stack it has not discovered yet, and a second gripper stack would fight the first for the serial port. Pressing start repeats the check first (a few seconds); press start again when it has finished.",
+                "params": {
+                  "age_s": 104.0
+                }
               }
             ],
             "can_stop": false,
@@ -18504,6 +18548,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": false,
             "age_s": 104.0,
             "fresh": true
           },
@@ -19063,6 +19108,14 @@
                 "params": {
                   "state": "idle"
                 }
+              },
+              {
+                "code": "b_probe_unconfirmed",
+                "level": "warn",
+                "text": "The last check found no gripper stack, but only once: the ROS graph can miss a stack it has not discovered yet, and a second gripper stack would fight the first for the serial port. Pressing start repeats the check first (a few seconds); press start again when it has finished.",
+                "params": {
+                  "age_s": 7.0
+                }
               }
             ],
             "can_stop": false,
@@ -19312,6 +19365,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": false,
             "age_s": 7.0,
             "fresh": true
           },
@@ -19898,7 +19952,16 @@
             "state": "idle",
             "reason": "b.not_running",
             "can_start": true,
-            "start_blockers": [],
+            "start_blockers": [
+              {
+                "code": "b_probe_unconfirmed",
+                "level": "warn",
+                "text": "The last check found no gripper stack, but only once: the ROS graph can miss a stack it has not discovered yet, and a second gripper stack would fight the first for the serial port. Pressing start repeats the check first (a few seconds); press start again when it has finished.",
+                "params": {
+                  "age_s": 7.5
+                }
+              }
+            ],
             "can_stop": false,
             "stop_blockers": [],
             "confirm": {
@@ -20102,6 +20165,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": false,
             "age_s": 7.5,
             "fresh": true
           },
@@ -20158,7 +20222,7 @@
     },
     "chain_paused_c": {
       "schema": "levi.marvel0.stack.v1",
-      "sampled_at": 1800000009.5,
+      "sampled_at": 1800000010.0,
       "profile": "real",
       "profile_code": "profile.product",
       "lock": {
@@ -20189,8 +20253,8 @@
       },
       "marker": {
         "state": "present",
-        "age_s": 9.0,
-        "ctime_age_s": 9.0,
+        "age_s": 9.5,
+        "ctime_age_s": 9.5,
         "code": null,
         "can_clear": false,
         "clear_blockers": ["marker_a_unit", "marker_arm_active"]
@@ -20331,7 +20395,7 @@
               "ok": true,
               "level": "required",
               "params": {
-                "age_s": 9.0
+                "age_s": 9.5
               }
             },
             {
@@ -20633,7 +20697,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 2.5,
+              "waited_s": 3.0,
               "timeout_s": 90.0
             },
             "owned": true,
@@ -20793,8 +20857,8 @@
         },
         "marker": {
           "state": "present",
-          "age_s": 9.0,
-          "ctime_age_s": 9.0,
+          "age_s": 9.5,
+          "ctime_age_s": 9.5,
           "ours": true,
           "wait_s": 3.0,
           "configured_wait_s": 3.0,
@@ -20808,8 +20872,8 @@
           "step": null,
           "next": "c",
           "reason": null,
-          "since": 1800000009.0,
-          "step_at": 1800000008.0,
+          "since": 1800000009.5,
+          "step_at": 1800000008.5,
           "reason_params": null,
           "took_s": null,
           "through": "c",
@@ -20865,13 +20929,13 @@
               "terminal": "b",
               "state": "done",
               "at": 1800000007.5,
-              "took_s": 0.5
+              "took_s": 1.0
             },
             {
               "step": "b",
               "terminal": "b",
               "state": "done",
-              "at": 1800000008.0,
+              "at": 1800000008.5,
               "took_s": 1.0
             },
             {
@@ -20889,7 +20953,7 @@
               "took_s": null
             }
           ],
-          "elapsed_s": 9.5
+          "elapsed_s": 10.0
         },
         "gripper_test": {
           "state": "idle",
@@ -20899,26 +20963,27 @@
           "attest": ["hands_clear"]
         },
         "operation": {
-          "kind": "preflight_a",
-          "terminal": null,
+          "kind": "probe_b",
+          "terminal": "b",
           "state": "done",
-          "started_at": 1800000001.5,
-          "finished_at": 1800000001.5,
+          "started_at": 1800000008.0,
+          "finished_at": 1800000008.0,
           "code": null
         },
         "checks": {
           "fci": {
             "at": 1800000001.5,
             "state": "open",
-            "age_s": 8.0,
+            "age_s": 8.5,
             "fresh": true
           },
           "b_probe": {
-            "at": 1800000000.5,
+            "at": 1800000008.0,
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
-            "age_s": 9.0,
+            "confirmed": true,
+            "age_s": 2.0,
             "fresh": true
           },
           "c_preflight": null,
@@ -20974,7 +21039,7 @@
     },
     "chain_failed_b": {
       "schema": "levi.marvel0.stack.v1",
-      "sampled_at": 1800000070.0,
+      "sampled_at": 1800000070.5,
       "profile": "real",
       "profile_code": "profile.product",
       "lock": {
@@ -21005,8 +21070,8 @@
       },
       "marker": {
         "state": "present",
-        "age_s": 69.5,
-        "ctime_age_s": 69.5,
+        "age_s": 70.0,
+        "ctime_age_s": 70.0,
         "code": null,
         "can_clear": false,
         "clear_blockers": ["marker_a_unit", "marker_arm_active"]
@@ -21147,7 +21212,7 @@
               "ok": true,
               "level": "required",
               "params": {
-                "age_s": 69.5
+                "age_s": 70.0
               }
             },
             {
@@ -21449,7 +21514,7 @@
                 }
               ],
               "missing": [],
-              "waited_s": 63.0,
+              "waited_s": 63.5,
               "timeout_s": 90.0
             },
             "owned": true,
@@ -21621,8 +21686,8 @@
         },
         "marker": {
           "state": "present",
-          "age_s": 69.5,
-          "ctime_age_s": 69.5,
+          "age_s": 70.0,
+          "ctime_age_s": 70.0,
           "ours": true,
           "wait_s": 3.0,
           "configured_wait_s": 3.0,
@@ -21637,9 +21702,9 @@
           "next": null,
           "reason": "b_failed",
           "since": 1800000000.0,
-          "step_at": 1800000008.0,
+          "step_at": 1800000008.5,
           "reason_params": null,
-          "took_s": 70.0,
+          "took_s": 70.5,
           "through": "c",
           "pauses": {
             "b": false,
@@ -21693,13 +21758,13 @@
               "terminal": "b",
               "state": "done",
               "at": 1800000007.5,
-              "took_s": 0.5
+              "took_s": 1.0
             },
             {
               "step": "b",
               "terminal": "b",
               "state": "failed",
-              "at": 1800000008.0,
+              "at": 1800000008.5,
               "took_s": 62.0
             },
             {
@@ -21733,26 +21798,27 @@
           "attest": ["hands_clear"]
         },
         "operation": {
-          "kind": "preflight_a",
-          "terminal": null,
+          "kind": "probe_b",
+          "terminal": "b",
           "state": "done",
-          "started_at": 1800000001.5,
-          "finished_at": 1800000001.5,
+          "started_at": 1800000008.0,
+          "finished_at": 1800000008.0,
           "code": null
         },
         "checks": {
           "fci": {
             "at": 1800000001.5,
             "state": "open",
-            "age_s": 68.5,
+            "age_s": 69.0,
             "fresh": true
           },
           "b_probe": {
-            "at": 1800000000.5,
+            "at": 1800000008.0,
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
-            "age_s": 69.5,
+            "confirmed": true,
+            "age_s": 62.5,
             "fresh": true
           },
           "c_preflight": null,
@@ -22546,6 +22612,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 0.0,
             "fresh": true
           },
@@ -23336,6 +23403,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 0.0,
             "fresh": true
           },
@@ -24145,6 +24213,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 0.0,
             "fresh": true
           },
@@ -25011,6 +25080,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 0.0,
             "fresh": true
           },
@@ -25817,6 +25887,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 0.0,
             "fresh": true
           },
@@ -26551,6 +26622,7 @@
             "at": 1800000000.0,
             "state": "absent",
             "by": "stop",
+            "confirmed": true,
             "age_s": 0.0,
             "fresh": true
           },
@@ -27316,6 +27388,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 0.0,
             "fresh": true
           },
@@ -28143,6 +28216,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 0.0,
             "fresh": true
           },
@@ -28985,6 +29059,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 0.0,
             "fresh": true
           },
@@ -30454,6 +30529,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 601.0,
             "fresh": false
           },
@@ -31163,6 +31239,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 0.0,
             "fresh": true
           },
@@ -31872,6 +31949,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 0.0,
             "fresh": true
           },
@@ -32573,6 +32651,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 0.0,
             "fresh": true
           },
@@ -33431,6 +33510,7 @@
             "state": "absent",
             "by": "nodes",
             "graph": "absent",
+            "confirmed": true,
             "age_s": 3600.0,
             "fresh": false
           },
@@ -34278,7 +34358,7 @@
       "status": 409,
       "detail": {
         "code": "b_probe_started",
-        "message": "There was no usable check whether a gripper stack is already running (none made, too old, or without an answer), so it has been started (a few seconds). Nothing was started: press start again when it has finished."
+        "message": "There was no usable check whether a gripper stack is already running (none made, too old, without an answer, or only one answer of the graph), so it has been started (a few seconds). Nothing was started: press start again when it has finished."
       }
     },
     "probe_b_with_unit": {

@@ -208,7 +208,9 @@ def test_a_press_on_start_b_with_an_old_check_makes_the_check_and_starts_nothing
     m.oneshots.clear()
     assert refused(m.act.start, "b", m.start_body("b")) == "b_probe_started"
     assert m.systemd_runs("b") == [], "nothing is started on a B that cannot be seen"
-    assert len(probes(m)) == 1 and len(m.fci_probes) == 1  # (the one before A)
+    # (two answers of the graph, as every check a person asks for: nothing fresh
+    # went before it, and the FCI check is the one before A)
+    assert len(probes(m)) == 2 and len(m.fci_probes) == 1
     assert m.terminal("b")["state"] == "idle"  # the check answered: absent
     # the person presses again: now it starts
     assert m.act.start("b", m.start_body("b", "start-b-0002"))["done"] == "started"
@@ -259,10 +261,15 @@ def test_a_guided_start_that_waits_for_b_keeps_the_check_fresh(m):
     start_sequence(m)
     seq = run_sequence(m)
     assert seq["state"] == "waiting_confirm" and seq["next"] == "b"
-    before = len(probes(m))  # (the one made before A)
-    # not yet due: the check is left alone
+    before = len(probes(m))  # (the one made before A: a single answer of the graph)
+    # B needs a second answer: the sequence makes it while it waits (one check)
     m.act.advance()
-    assert len(probes(m)) == before
+    assert len(probes(m)) == before + 1
+    assert m.act._b_probe["confirmed"] is True
+    # now it is not due: the check is left alone
+    m.act.advance()
+    assert len(probes(m)) == before + 1
+    before += 1
     # half of the validity later it is made again, by the sequence itself
     m.t += stack_act.B_PROBE_REFRESH_S + 1
     m.a_up(lines=False)
@@ -309,7 +316,8 @@ def test_a_guided_start_does_not_end_while_another_operation_holds_the_check_bac
     assert len(probes(m)) == n
     m.act._finish(op, True)
     assert m.act.advance()["state"] == "waiting_confirm"
-    assert len(probes(m)) == n + 1
+    # (nothing fresh goes before it: two answers of the graph)
+    assert len(probes(m)) == n + 2
 
 
 def test_a_guided_start_does_not_end_when_the_optional_check_is_refused(m):

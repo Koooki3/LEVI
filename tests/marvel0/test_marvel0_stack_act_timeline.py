@@ -257,13 +257,14 @@ def test_the_looks_slow_down_once_a_has_a_unit_because_the_control_loop_is_live(
     world.press()
     world.run()
     a_start, a_up = world.starts["a"], world.readied["a"]
-    # while A starts up nothing changes: the looks are one pause apart
+    # while A starts up the looks are one pause apart, or fewer: the second check
+    # of B, made beside it, ends in this window and wakes the ticker once
     during = [t for t in world.look_times if a_start < t < a_up]
     gaps = [b - a for a, b in pairwise(during)]
     assert len(during) >= 3 and gaps
-    assert all(
-        stack_act.SEQUENCE_TICK_ARM_S - 0.01 <= g <= ARM_TICK_SLACK_S for g in gaps
-    ), gaps
+    assert all(g <= ARM_TICK_SLACK_S for g in gaps), gaps
+    assert sum(1 for g in gaps if g >= stack_act.SEQUENCE_TICK_ARM_S - 0.01) >= 2
+    assert len(during) <= (a_up - a_start) / stack_act.SEQUENCE_TICK_ARM_S + 3
     # ... and before A it stayed fast (the 3.4 s of the graph check in 0.25 s steps)
     before = [t for t in world.look_times if t <= a_start and t > world.t0]
     quick = [b - a for a, b in pairwise(before) if b - a > 0.01]

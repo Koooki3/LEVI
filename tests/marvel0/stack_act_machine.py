@@ -650,7 +650,16 @@ class ActMachine(Machine):
         return out
 
     def start_b(self):
-        out = self.act.start("b", self.start_body("b"))
+        """A person's start of B. When the only answer about a gripper stack is
+        the first, unconfirmed "absent" of the graph (the guided start's early
+        check), the first press makes the second check and starts nothing
+        (``b_probe_started``): the person presses again, as the page says."""
+        try:
+            out = self.act.start("b", self.start_body("b"))
+        except stack_act.ActRefuse as refusal:
+            if refusal.code != "b_probe_started":
+                raise
+            out = self.act.start("b", self.start_body("b", "start-b-0002"))
         self.b_up()
         return out
 

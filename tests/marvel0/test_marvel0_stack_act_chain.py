@@ -368,11 +368,27 @@ def test_a_check_of_the_gripper_stack_is_made_when_the_old_one_is_due(m):
     assert len(m.oneshots_of("list_controllers")) == 1
 
 
-def test_a_fresh_check_of_the_gripper_stack_is_not_made_again(m):
+def test_a_fresh_confirmed_check_of_the_gripper_stack_is_not_made_again(m):
     to_step(m, "b_probe")
+    # (a confirmed absence: two answers of the graph, or the manager's own word)
+    m.act._b_probe = {**m.act._b_probe, "confirmed": True}
     before = len(m.oneshots)
     assert m.act.advance()["step"] == "b"
     assert len(m.oneshots) == before
+
+
+def test_the_first_answer_of_the_early_check_is_confirmed_once_before_b(m):
+    """The early check gave one answer of the graph (A's start could not wait
+    for two); B needs the second, made here when the chain was not given the
+    time during A's start-up (A is ready at the first look in this world)."""
+    to_step(m, "b_probe")
+    assert m.act._b_probe["confirmed"] is False
+    before = len(m.oneshots_of("node list"))
+    assert m.act.advance()["step"] == "b_probe"
+    assert len(m.oneshots_of("node list")) == before + 1  # one: the first is fresh
+    assert m.act._b_probe["confirmed"] is True and m.systemd_runs("b") == []
+    assert m.act.advance()["step"] == "b"
+    assert m.run_chain()["state"] == "done" and len(m.systemd_runs("b")) == 1
 
 
 # --- the checks before C: one retry when the listing gets no answer -----------------------------
@@ -790,7 +806,8 @@ def test_a_check_that_went_old_between_two_steps_is_made_and_b_goes_on(m):
         m.act.advance()
     )  # B's start finds no usable check: it makes one, starts nothing
     assert seq["step"] == "b_probe" and m.systemd_runs("b") == []
-    assert len(m.oneshots) == before + 1 and not m.act._busy()
+    # (nothing fresh goes before it: two answers of the graph)
+    assert len(m.oneshots) == before + 2 and not m.act._busy()
     assert states(seq)["b"] == "pending"
     seq = m.run_chain()
     assert seq["state"] == "done" and len(m.systemd_runs("b")) == 1

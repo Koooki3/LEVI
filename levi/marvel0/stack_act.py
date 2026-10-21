@@ -621,13 +621,22 @@ TEXT = {
             "check first (a few seconds); press start again when it has finished."
         ),
     ),
+    "b_probe_unconfirmed": (
+        409,
+        (
+            "The last check found no gripper stack, but only once: the ROS graph "
+            "can miss a stack it has not discovered yet, and a second gripper stack "
+            "would fight the first for the serial port. Pressing start repeats the "
+            "check first (a few seconds); press start again when it has finished."
+        ),
+    ),
     "b_probe_started": (
         409,
         (
             "There was no usable check whether a gripper stack is already running "
-            "(none made, too old, or without an answer), so it has been started "
-            "(a few seconds). Nothing was started: press start again when it has "
-            "finished."
+            "(none made, too old, without an answer, or only one answer of the "
+            "graph), so it has been started (a few seconds). Nothing was started: "
+            "press start again when it has finished."
         ),
     ),
 }
@@ -1860,20 +1869,44 @@ class Act:
         if settled:
             probe = ctx.b_probe
             age = None if not probe else round(max(0.0, ctx.r["now"] - probe["at"]), 1)
-            out.append(row("b_probe_stale", "warn", age_s=age))
+            if self._b_absence_unconfirmed(ctx):
+                out.append(row("b_probe_unconfirmed", "warn", age_s=age))
+            else:
+                out.append(row("b_probe_stale", "warn", age_s=age))
         return out
 
     @staticmethod
-    def _settled_by_a_press(key, ctx: Ctx) -> bool:
-        """Is B unknown for one reason only: no fresh check whether a gripper
-        stack runs (never made, or too old), with every other layer known? A
-        press on B's start then makes that check (``_do_start``) instead of
-        being refused for a thing it can settle: with A up the check of A
-        cannot be made, and the old check was the only way to know."""
+    def _b_absence_unconfirmed(ctx: Ctx) -> bool:
+        """Does the page know that no gripper stack runs only from ONE answer of
+        the ROS graph? That answer is enough for A's start (the guided start must
+        not wait for a second), but not for B's: a graph that has not discovered
+        the gripper stack's participants yet reads "absent" too, and a second
+        gripper stack on the same RS-485 port is a motion risk. B starts only on
+        a confirmed absence (two answers of the graph in a row, or the controller
+        manager's own word, or B's own stop: ``_probe_b``)."""
+        probe = ctx.b_probe
         return (
-            key == "b"
-            and ctx.states["b"]["reason"] in B_ASK_AGAIN
-            and stack.unknown_layers(ctx.terms) == ["B"]
+            ctx.states["b"]["reason"] == "b.not_running"
+            and bool(probe)
+            and not probe.get("confirmed")
+        )
+
+    @staticmethod
+    def _settled_by_a_press(key, ctx: Ctx) -> bool:
+        """Is B's start held back for one reason only, a check that a press can
+        settle? Either B is unknown because there is no fresh check whether a
+        gripper stack runs (never made, or too old) with every other layer
+        known, or the only answer is a first, unconfirmed "absent" of the graph
+        (``_b_absence_unconfirmed``). A press on B's start then makes the check
+        (``_do_start``) instead of being refused for a thing it can settle: with
+        A up the check of A cannot be made, and the old check was the only way
+        to know. Nothing is started by that press, whichever it is."""
+        return key == "b" and (
+            (
+                ctx.states["b"]["reason"] in B_ASK_AGAIN
+                and stack.unknown_layers(ctx.terms) == ["B"]
+            )
+            or Act._b_absence_unconfirmed(ctx)
         )
 
     def stop_blockers(self, key, ctx: Ctx, override=False) -> list:
@@ -2849,7 +2882,12 @@ class Act:
         self._write_record(key, phase="stopped", stopped_at=round(now, 3))
         if key == "b":
             # Nothing of ours is left and nothing else was seen: B is known.
-            self._b_probe = {"at": now, "state": "absent", "by": "stop"}
+            self._b_probe = {
+                "at": now,
+                "state": "absent",
+                "by": "stop",
+                "confirmed": True,
+            }
         self._finish(op, True, f"{key}.stopped")
         if key == "a":
             self._release_safely()
@@ -3073,13 +3111,15 @@ class Act:
         self.require_enabled()
         return self._write(body, "probe_b", self._do_probe_b, phrase=False)
 
-    def _do_probe_b(self, r) -> dict:
+    def _do_probe_b(self, r, confirm=True) -> dict:
+        """Begin the check of B. ``confirm`` False is for the one case that
+        cannot afford a second answer, the check that A's start waits for."""
         ctx = self._context(r, holding=True)
         refusal = self._probe_b_refusal(r, ctx)
         if refusal:
             raise ActRefuse(refusal)
         op = self._begin("probe_b", "b")
-        self._spawn(op, lambda: self._probe_b_worker(op, ctx))
+        self._spawn(op, lambda: self._probe_b_worker(op, ctx, confirm))
         return {"done": "probe_started", "kind": "probe_b"}
 
     def _probe_b_refusal(self, r, ctx: Ctx):
@@ -3093,8 +3133,8 @@ class Act:
             return "gate.b_unit_absent"
         return None
 
-    def _probe_b_worker(self, op, ctx: Ctx) -> None:
-        probe = self._probe_b(ctx.specs, op)
+    def _probe_b_worker(self, op, ctx: Ctx, confirm=True) -> None:
+        probe = self._probe_b(ctx.specs, op, confirm)
         if probe is not None and probe["state"] == "unknown":
             self._finish(op, False, "b_probe_no_answer")
 
@@ -3111,10 +3151,25 @@ class Act:
         probe, now = ctx.b_probe, ctx.r["now"]
         if not _fresh(probe, B_PROBE_TTL_S, now):
             return True
+        if probe.get("state") == "absent" and not probe.get("confirmed"):
+            return True  # (one answer of the graph: B needs a second)
         wait = B_PROBE_REFRESH_S if probe.get("state") == "absent" else B_PROBE_RETRY_S
         return now - probe["at"] > wait
 
-    def _probe_b(self, specs, op) -> dict | None:
+    def _graph_check(self, specs, op):
+        """One ``ros2 node list`` (about 3.4 s), parsed; None when a stop came
+        meanwhile and dropped it."""
+        code, text = self._oneshot(
+            specs.nodes_cmd,
+            "probe-b-nodes",
+            "FR3 gripper stack probe (ROS graph)",
+            stack_units.NODES_RUNTIME_MAX_S,
+        )
+        if op["_superseded"]:
+            return None
+        return stack_units.parse_nodes(text, code)
+
+    def _probe_b(self, specs, op, confirm=True) -> dict | None:
         """Does a gripper stack run that this page did not start?
 
         **First the ROS graph** (``ros2 node list``, about 3 s): a node of the
@@ -3126,21 +3181,44 @@ class Act:
         every 10 s, about 20 s in all), so it is ended by ``timeout`` and the
         verdict is read from what it printed, not from how it ended: the warning
         means absent, a listing means present, and a command ended before it
-        could say is *no answer* (unknown), never absent."""
-        fast = None
-        state, by = None, "nodes"
+        could say is *no answer* (unknown), never absent.
+
+        **"Absent" from the graph alone is one answer** (``confirmed`` False in
+        the record): a graph that listed the monitor but has not discovered the
+        gripper stack's participants yet says the same, and a second gripper
+        stack on the same serial port is a motion risk. It is confirmed by a
+        second answer: the answer before it, still fresh, was absent too, or (with
+        ``confirm``) a second graph check is made now. ``confirm`` is False only
+        for the check that A's start waits for (which must not wait for two): the
+        guided start makes the second one while A starts up, and B starts only on a
+        confirmed absence (``_b_absence_unconfirmed``). A second answer that is
+        *present* is final; one that proves nothing goes on to the controller
+        manager. The manager's own "absent" (its warning that the service did not
+        appear for 10 s) and B's own stop need no second answer."""
+        prior, began = self._b_probe, self.now()
+        graph, state, by, confirmed = None, None, "nodes", False
         if specs.nodes_cmd:
-            code, text = self._oneshot(
-                specs.nodes_cmd,
-                "probe-b-nodes",
-                "FR3 gripper stack probe (ROS graph)",
-                stack_units.NODES_RUNTIME_MAX_S,
-            )
-            if op["_superseded"]:
+            fast = self._graph_check(specs, op)
+            if fast is None:
                 return None
-            fast = stack_units.parse_nodes(text, code)
-            if fast["state"] in ("present", "absent"):
-                state = fast["state"]
+            graph = fast["state"]
+            if graph in ("present", "absent"):
+                state = graph
+            if state == "absent":
+                confirmed = (
+                    bool(prior)
+                    and prior.get("state") == "absent"
+                    and _fresh(prior, B_PROBE_TTL_S, began)
+                )
+                if confirm and not confirmed:
+                    again = self._graph_check(specs, op)
+                    if again is None:
+                        return None
+                    graph = again["state"]
+                    if graph == "absent":
+                        confirmed = True
+                    else:  # (present is final; nothing proved goes to the manager)
+                        state = graph if graph == "present" else None
         if state is None:
             by = "probe"
             _, text = self._oneshot(
@@ -3155,12 +3233,15 @@ class Act:
             state = {"listed": "present", "absent": "absent"}.get(
                 parsed["state"], "unknown"
             )
+        if by == "probe" and state == "absent":
+            confirmed = True  # (the manager's own word: no second answer to add)
         self._b_probe = {
             "at": self.now(),
             "state": state,
             "by": by,
             # (why the slow question was needed, for whoever looks)
-            "graph": None if fast is None else fast["state"],
+            "graph": graph,
+            "confirmed": confirmed,
         }
         return self._b_probe
 
@@ -3694,7 +3775,10 @@ class Act:
             return
         with contextlib.suppress(stack.Refuse):
             self._seq_locked(
-                seq, "sequence_early_probe_b", self._do_probe_b, keep="_early_op"
+                seq,
+                "sequence_early_probe_b",
+                lambda r: self._do_probe_b(r, confirm=False),
+                keep="_early_op",
             )
 
     def _seq_probe(self, seq, ctx: Ctx) -> None:
@@ -3729,7 +3813,10 @@ class Act:
                 # there): begun now, and a refusal that will not go away ends the
                 # start with its own code (a busy lock is tried again).
                 return self._seq_locked(
-                    seq, "sequence_early_probe_b", self._do_probe_b, keep="_early_op"
+                    seq,
+                    "sequence_early_probe_b",
+                    lambda r: self._do_probe_b(r, confirm=False),
+                    keep="_early_op",
                 )
             with self._op_lock:
                 state = op["state"]
@@ -3824,6 +3911,30 @@ class Act:
             with self._seq_lock:
                 if seq["state"] == "running":
                     self._after_a(seq)
+        else:
+            self._confirm_b_while_a_starts(seq, ctx)
+
+    def _confirm_b_while_a_starts(self, seq, ctx: Ctx) -> None:
+        """A's start takes about 5 s and nothing in it needs B: when the chain
+        goes straight on to B and the only answer about it is one unconfirmed
+        "absent" (``_b_absence_unconfirmed``), the second answer of the graph is
+        asked for now, beside A's start, so that the step after A finds it made
+        (``_seq_b_probe`` waits for this operation, and goes on to B at once when
+        it is done). A start that stops at A or pauses before B gets its second
+        answer while it waits for the person (``_refresh_b_probe``). Optional: a
+        refusal (the first check not ended yet, another check, a busy lock) is
+        tried again at the next look, and the step after A makes the check itself
+        when this one never got made."""
+        if (
+            seq["pauses"]["b"]  # (a start that stops at A pauses before B)
+            or seq.get("_probe_op") is not None
+            or not self._b_absence_unconfirmed(ctx)
+        ):
+            return
+        with contextlib.suppress(stack.Refuse):
+            self._seq_locked(
+                seq, "sequence_probe_b", self._do_probe_b, keep="_probe_op"
+            )
 
     # What follows a stage that is up. All three run under the sequence's lock,
     # from a running step or from the wait for the person's own start.

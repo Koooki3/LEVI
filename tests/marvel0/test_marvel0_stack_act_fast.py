@@ -149,7 +149,11 @@ def test_a_gripper_stack_that_is_not_there_is_seen_absent_by_the_graph_alone(m):
     m.act.probe_b(probe_request())
     assert m.act._b_probe["state"] == "absent" and m.act._b_probe["by"] == "nodes"
     assert m.act._b_probe["graph"] == "absent"
-    assert len(m.oneshots_of("node list")) == 1
+    # (the check a person asks for gives an answer B can be started on: two
+    # answers of the graph; the one A's start waits for is a single one, see
+    # test_marvel0_stack_act_fast_review.py)
+    assert m.act._b_probe["confirmed"] is True
+    assert len(m.oneshots_of("node list")) == 2
     assert m.oneshots_of("list_controllers") == [], "the slow question was not asked"
     assert (m.terminal("b")["state"], m.terminal("b")["reason"]) == (
         "idle",
@@ -218,8 +222,9 @@ def test_the_button_for_a_runs_the_fci_check_and_the_check_of_b_together(m):
     m.m_ready()
     m.act.host.parallel = True
     m.act.preflight_a({"request_id": "fast-pre-a-0001"})
-    assert len(m.fci_probes) == 1 and len(m.oneshots_of("node list")) == 1
+    assert len(m.fci_probes) == 1 and len(m.oneshots_of("node list")) == 2
     assert m.act._fci["state"] == "open" and m.act._b_probe["state"] == "absent"
+    assert m.act._b_probe["confirmed"] is True
     assert m.terminal("b")["reason"] == "b.not_running"
 
 
@@ -227,13 +232,19 @@ def test_the_two_checks_of_the_button_really_overlap(m):
     m.m_ready()
     m.act.host.parallel = True
     both = threading.Barrier(2, timeout=5)
+    met = []
 
     def fci(ip, port):
         both.wait()  # (cannot pass unless the node listing is asked meanwhile)
         return {"state": "open"}
 
+    def listing(cmd):
+        if " node list " in " ".join(cmd) and not met:  # (the first listing only)
+            met.append(True)
+            both.wait()
+
     m.act.host.fci_probe = fci
-    m.on_oneshot = lambda cmd: both.wait() if " node list " in " ".join(cmd) else None
+    m.on_oneshot = listing
     m.act.preflight_a({"request_id": "fast-pre-a-0002"})
     assert m.act._fci["state"] == "open" and m.act._b_probe["state"] == "absent"
 
@@ -845,7 +856,7 @@ def test_a_refusal_of_the_check_of_b_that_will_not_go_away_ends_the_start_with_i
 ):
     m.m_ready()
 
-    def refuse(r):
+    def refuse(r, **_):
         raise stack_act.ActRefuse("systemd_unreadable")
 
     m.act._do_probe_b = refuse
@@ -860,11 +871,11 @@ def test_a_busy_lock_for_the_check_of_b_is_tried_again_not_the_end(m):
     real = m.act._do_probe_b
     calls = []
 
-    def busy_then_fine(r):
+    def busy_then_fine(r, **kw):
         calls.append(1)
         if len(calls) < 3:
             raise stack_act.ActRefuse("operation_running")
-        return real(r)
+        return real(r, **kw)
 
     m.act._do_probe_b = busy_then_fine
     start_sequence(m)
