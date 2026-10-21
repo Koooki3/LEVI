@@ -631,3 +631,45 @@ describe("in Chinese", () => {
     );
   });
 });
+
+describe("the stages of a first use are on the form, and the defaults stay the cautious ones", () => {
+  test("three stages in order: inventory only without motion, one round, several rounds; with the defaults of the backend named", async () => {
+    const { host } = await openStep({ ready: allMet() });
+    const stages = $(host, "marvel0-autonomy-stages")!;
+    expect(
+      Array.from(stages.querySelectorAll("li")).map((li) =>
+        li.getAttribute("data-stage"),
+      ),
+    ).toEqual(["s1", "s2", "s3"]);
+    const s1 = text(stages.querySelector("[data-stage=s1]"));
+    expect(s1).toBe(E["marvel0.autonomy.stage.s1"]);
+    expect(s1).toMatch(/inventory only, no motion/);
+    expect(s1).toMatch(/The arm does not move/);
+    expect(text(stages.querySelector("[data-stage=s2]"))).toMatch(/one round/);
+    expect(text(stages.querySelector("[data-stage=s3]"))).toMatch(
+      /several rounds/,
+    );
+    // The note names the defaults the backend sent (5 rounds, 200 steps), which
+    // the form below starts with: the steps default is not the evaluation
+    // client's 3000.
+    const limits = readyDoc("prepared_ready").limits;
+    expect(limits.steps.default).toBe(200);
+    expect(limits.rounds.default).toBe(5);
+    expect(text($(host, "marvel0-autonomy-stage-note"))).toContain(
+      "5 rounds and 200 steps",
+    );
+    const fields = Array.from(
+      $(host, "marvel0-autonomy-form")!.querySelectorAll<HTMLInputElement>(
+        "input[inputmode=numeric]",
+      ),
+    ).map((input) => input.value);
+    expect(fields).toEqual(["5", "200"]);
+  });
+
+  test("in Chinese too", async () => {
+    const { host } = await openStep({ ready: allMet(), zh: true });
+    const stages = $(host, "marvel0-autonomy-stages")!;
+    expect(text(stages)).toContain(Z["marvel0.autonomy.stage.s1"]);
+    expect(text(stages)).toContain(Z["marvel0.autonomy.stage.title"]);
+  });
+});
