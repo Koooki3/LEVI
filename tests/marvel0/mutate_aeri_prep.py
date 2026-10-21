@@ -11,7 +11,7 @@ on the unbroken copy. The mutations are made in a **copy** of ``levi/`` and
 ``tests/`` in a temporary folder (the checkout itself is never edited, so nobody
 else's test run can meet a broken gate), and the tests run there with that
 folder first on ``PYTHONPATH``. It starts no process but pytest, one test file at
-a time, under ``nice -n 19 taskset -c 20-23``. It refuses to run while a robot
+a time, under ``nice -n 19 taskset -c 16-19``. It refuses to run while a robot
 process is alive (the passive ``ps`` check of setup.md): a sweep is many test
 runs, and the arm's control loop is not to be disturbed by it;
 ``--even-if-robot-runs`` lifts that (one file at a time stays)."""
@@ -31,6 +31,8 @@ COPIED = (
     "levi",
     "tests",
     "src/components/marvel0/__tests__/marvel0-aeri.samples.json",
+    "src/components/marvel0/autonomy-logic.ts",
+    "docs/SUPERVISION.md",
     "pyproject.toml",
 )
 ROBOT = re.compile(
@@ -674,7 +676,7 @@ def run_tests(test_file: str) -> tuple:
             "19",
             "taskset",
             "-c",
-            "20-23",
+            "16-19",
             sys.executable,
             "-m",
             "pytest",

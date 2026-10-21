@@ -244,6 +244,19 @@ def test_the_gate_check_fails_when_the_folder_is_not_one_it_would_read(live):
     assert aeri_activity.hosted_visible_to_activity(live.workspace) is False
 
 
+def test_a_check_that_cannot_run_does_not_pass(live, monkeypatch):
+    m = live
+    m.start()
+    run_id = m.record()["run_id"]
+
+    def broken(*args, **kwargs):
+        raise OSError("no")
+
+    monkeypatch.setattr(activity, "running_jobs", broken)
+    assert aeri_activity.hosted_visible_to_activity(m.workspace, run_id=run_id) is False
+    assert aeri_activity.hosted_visible_to_activity(m.workspace) is False
+
+
 def test_the_check_after_the_launch_asks_the_real_jobs_for_this_run(live, monkeypatch):
     m = live
     m.start()
@@ -357,9 +370,13 @@ def test_the_start_takes_over_a_d_that_outlived_the_service_with_one_ctrl_c(
 
 
 def test_a_take_over_that_fails_never_stops_the_service_from_starting(monkeypatch):
-    def broken():
+    def broken(*args, **kwargs):
         raise OSError("no")
 
+    # (the page's own adopt_on_start already swallows a failing supervisor)
+    monkeypatch.setattr(aeri_run_api, "adopt_on_start", broken)
+    assert aeri_activity.adopt_on_start() is None
+    monkeypatch.undo()
     monkeypatch.setattr(aeri_run_api, "supervisor", broken)
     assert aeri_activity.adopt_on_start() is None
 
