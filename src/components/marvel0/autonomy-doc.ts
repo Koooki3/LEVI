@@ -23,6 +23,11 @@ import {
 } from "./marvel0-json";
 import type { Say } from "./marvel0-logic";
 
+/** The closed sets' own "unknown" (a state the backend did not name, a level or
+ * a unit state it did not say): a member of the set, worded by the catalogue
+ * like every other member, never a display word of its own. */
+const UNKNOWN = "unknown" as const;
+
 export const RUN_SCHEMA = "levi.marvel0.aeri_run.v1";
 export const READY_SCHEMA = "levi.marvel0.aeri.v1";
 
@@ -558,7 +563,7 @@ export function runView(raw: unknown, known: Known): RunView | null {
         }
       : null,
     state: {
-      id: stateId ?? "unknown",
+      id: stateId ?? UNKNOWN,
       foreign: stateId === null,
       reason: reasonOf(state?.reason, state?.params, REASON_PREFIXES, known),
       reasonCode: str(state?.reason, 80),
@@ -635,7 +640,7 @@ export function runView(raw: unknown, known: Known): RunView | null {
     },
     monitor: monitor
       ? {
-          state: str(monitor.state, 20) ?? "unknown",
+          state: str(monitor.state, 20) ?? UNKNOWN,
           ageS: num(monitor.age_s),
         }
       : null,
@@ -836,13 +841,13 @@ export function readyView(raw: unknown, known: Known): ReadyView | null {
   const confirm = rec(doc.confirm);
   return {
     enabled: bool(doc.enabled) === true,
-    controlState: str(control?.state, 20) ?? "unknown",
+    controlState: str(control?.state, 20) ?? UNKNOWN,
     controlErrors: list(control?.errors).flatMap((entry) => {
       const text = str(rec(entry)?.code ?? entry, 80);
       return text ? [text] : [];
     }),
     site: {
-      state: str(site?.state, 20) ?? "unknown",
+      state: str(site?.state, 20) ?? UNKNOWN,
       errors: list(site?.errors).flatMap((entry) => {
         const code = str(rec(entry)?.code ?? entry, 80);
         return code ? [{ field: str(rec(entry)?.field, 80), code }] : [];
@@ -866,7 +871,7 @@ export function readyView(raw: unknown, known: Known): ReadyView | null {
       return [
         {
           code,
-          level: oneOf(READY_LEVELS, item.level) ?? "unknown",
+          level: oneOf(READY_LEVELS, item.level) ?? UNKNOWN,
           worded: codedSay(
             "marvel0.autonomy.ready.",
             code,
@@ -882,7 +887,7 @@ export function readyView(raw: unknown, known: Known): ReadyView | null {
     prepared: preparedView(doc.prepared),
     liveService: live
       ? {
-          state: str(live.state, 40) ?? "unknown",
+          state: str(live.state, 40) ?? UNKNOWN,
           port: num(live.port),
           canStop: bool(live.can_stop) === true,
           whyNot: whyWithText(live.why_not, known),
@@ -890,7 +895,7 @@ export function readyView(raw: unknown, known: Known): ReadyView | null {
       : null,
     leftovers: left
       ? {
-          state: str(left.state, 40) ?? "unknown",
+          state: str(left.state, 40) ?? UNKNOWN,
           units: list(left.units).flatMap((entry) => {
             const name = str(rec(entry)?.name, 120);
             return name ? [{ name, kind: str(rec(entry)?.kind, 20) }] : [];
