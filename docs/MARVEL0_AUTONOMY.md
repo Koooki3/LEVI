@@ -97,6 +97,9 @@ differs from it** (a test compares the table with the backend's).
   no tick or the other way round; the window also quotes the line D is showing, so the person confirms that prompt. A
   level C key whose document gives no phrase is never sent (the page does not make one up; it says so as its own
   mistake).
+- **The Enter that asks to resume** is level B for both kinds of wait (the backend cannot be sure which kind a wait is, so
+  the asking Enter has the delay, the gap and the presence check too). Its window says "step 1 of 2: D should ask again; if
+  it resumes at once instead, the arm may move" for the wait that asks twice, and "D resumes at once" for the other.
 - A window whose prompt moved on while it was open (another run, another state counter, another prompt id, or a prompt
   of another kind than the key's) closes by itself and sends nothing; `pressKey` itself also refuses a key for a prompt
   other than the one D shows.
@@ -112,7 +115,9 @@ differs from it** (a test compares the table with the backend's).
   the page says after a Stop depends on what D has said back:** until D acknowledges it (stop phase `sent`,
   `unconfirmed`, `retried`) it says "sent, not confirmed; the arm may still be moving" and that the physical e-stop is
   the emergency stop; only an acknowledged stop (`acked`, whoever sent it) is "D is winding down, the arm stays where it
-  is". The same for the restart orphan and a stuck wrap-up. A
+  is". The same for the restart orphan and a stuck wrap-up, and the card's edge is red while a Stop is unacknowledged (the
+  arm may still be moving; a green edge would say the opposite). A run another core of LEVI owns (`no_keyboard`, Stop refused
+  with `driven_elsewhere`) is said to be only watched: no key, no Stop from this page. A
   dock repeats it at the foot of the window when the card is scrolled out of view. Nothing here is an emergency stop and
   the caption beside it says so. If the page itself hangs, `scripts/aeri_page_stop.py` (named on the card) sends D one
   Ctrl+C.
@@ -245,6 +250,8 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
   这些清单照档案自己的文本（`levi/marvel0/aeri_prompts.json`）写成，有测试在文本点名了某一项却没有对应勾选、或反过来时失败；
   窗口里还引用 D 此刻显示的那一行，让人确认的就是这个提示。文档没有给出确认语的 C 级键绝不发送（页面不自己编，并把它当作
   页面自己的错误说出来）。
+- **请求续跑的那个 Enter** 对两种等待都是 B 级（后端无法确定一次等待属于哪一种，所以这个询问的 Enter 同样有延迟、间隔和在场检查）。
+  对要求确认两次的等待，窗口里写“两步中的第一步：D 应当再问一次；如果它直接续跑，手臂可能会动”；对 D 直接续跑的等待，写“D 立即续跑”。
 - 窗口打开期间提示已经变了（运行号、状态计数、提示号变了，或者提示种类不再是这个键对应的），窗口会自己关闭，什么都不发；
   `pressKey` 本身也拒绝发送与 D 当前显示的提示不符的键。
 - 一次点击带着页面当时看到的内容（`seen`：运行号、状态计数、提示号）、这个键的一次性令牌和本标签页的编号；后端把 `seen`
@@ -254,7 +261,8 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 - **停止**（Ctrl+C）是整行的块，高 64 px，位置固定，终端 D 活着就在，**不等新的读取**（读不到 D 的时候恰恰最需要它）。
   它走独立的路径：没有 seen、没有令牌，从不等正在发送的键。每次运行一次；D 没有确认时后端再开放一次重试。**停止之后页面怎么说，取决于
   D 回了什么：** 在 D 确认之前（停止阶段 `sent`、`unconfirmed`、`retried`）说的是“已发送，尚未确认，手臂可能仍在运动”，并说急停
-  仍由物理急停负责；只有已确认的停止（`acked`，不管是谁发的）才说“D 正在收尾，手臂停在原处”。重启后找回的孤儿和卡住的收尾同理。
+  仍由物理急停负责；只有已确认的停止（`acked`，不管是谁发的）才说“D 正在收尾，手臂停在原处”。重启后找回的孤儿和卡住的收尾同理；停止未被确认期间卡片的边缘是红色（手臂可能仍在运动，绿色会说反）。
+  由另一个 LEVI 核心持有的运行（`no_keyboard`，停止被 `driven_elsewhere` 拒绝）显示为只观察：本页不发键、不发停止。
   卡片滚出视野时，
   窗口底部的停靠条重复它。页面上的任何东西都不是急停，旁边的说明也这么写。如果页面本身卡住，用卡片上写明的
   `scripts/aeri_page_stop.py` 给 D 发一次 Ctrl+C。
