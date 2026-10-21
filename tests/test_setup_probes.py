@@ -529,6 +529,32 @@ def test_guard_banner_while_the_controller_is_active(proc, tmp_path):
     assert guard["product_jobs"] == [{"kind": "pool", "id": "export-1"}]
 
 
+def test_a_hosted_session_is_not_a_product_job_in_the_guard_banner(proc, tmp_path):
+    """Safety review 2 N9 / mechanics review 2 N2: ``running_jobs`` now also lists
+    the robot session the marvel0 page hosts (``hosted``), so every D or E session
+    showed "product jobs run while the arm controller is active: marvel0-aeri"."""
+    health = tmp_path / "h.json"
+    health.write_text(
+        json.dumps({"updated_at_epoch": 2_000_000_000.0, "controller_active": True})
+    )
+    proc.host()
+    hosted = [
+        {"kind": "marvel0-aeri", "id": "20261022T101500-a1b2c3", "hosted": True},
+        {"kind": "marvel0-client", "id": "record-unreadable", "hosted": True},
+    ]
+    context = P.Context(proc=str(proc.root), health_file=str(health))
+    guard = probe(jobs=lambda: hosted).status(context)["guard"]
+    assert guard["controller_active"] is True
+    assert guard["product_jobs"] == []
+    assert guard["banner"] is None
+    # a real product job beside them is still named, and only it
+    mixed = [*hosted, {"kind": "pool", "id": "export-1", "pid": 9}]
+    guard = probe(jobs=lambda: mixed).status(context)["guard"]
+    assert guard["product_jobs"] == [{"kind": "pool", "id": "export-1"}]
+    reasons = " | ".join(guard["banner"]["reasons"])
+    assert "pool" in reasons and "marvel0" not in reasons
+
+
 def test_guard_quiet_and_unknown(proc):
     proc.process(7, "bash", ["bash"])
     assert probe().status(P.Context(proc=str(proc.root)))["guard"]["quiet"] is True
