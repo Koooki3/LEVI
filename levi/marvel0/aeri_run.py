@@ -80,6 +80,34 @@ ENV_ALLOW = ("LEVI_AERI_CONSOLE_LANG",)
 EXIT_NO_TTY = run.EXIT_NO_TTY
 EXIT_SPAWN = run.EXIT_SPAWN
 PHASES = ("intent", "started", "ended")
+# The lines of ``terminal_d.events`` the AERI tools wait on (written by the
+# terminal wrapper, by this page and by the launcher).
+EVENT_LINE = re.compile(r"^\[[0-9:]{8}\] (start:|terminal D exited)", re.MULTILINE)
+
+
+def events_open(text: str) -> bool:
+    """Whether ``terminal_d.events`` says a terminal D is running: **the last**
+    ``start:`` / ``terminal D exited`` line decides. (Finding either anywhere
+    in the file is not the same: a terminal that was started again after an
+    earlier exit is running, and a start whose exit line nobody wrote, a
+    launcher killed by the hang-up chain, is over.)"""
+    found = EVENT_LINE.findall(text)
+    return bool(found) and found[-1] == "start:"
+
+
+def _row_passes(row) -> bool:
+    """A readiness row that lets a start go on: ``ok``, or ``warn`` for a row of
+    ``aeri_ready.WARN_OK`` (``stack_ready``: the arm stack looks up, but the
+    gripper stack and the controller cannot be seen from here, so it is *always*
+    ``warn`` when the stack is up). ``refuse``, ``unknown`` and a ``warn`` of any
+    other row do not pass."""
+    from . import aeri_ready
+
+    if not isinstance(row, dict):
+        return False
+    level = row.get("level")
+    return level == "ok" or (level == "warn" and row.get("code") in aeri_ready.WARN_OK)
+
 
 
 # --- what the site file says ---------------------------------------------------------------
@@ -1177,6 +1205,16 @@ class Supervisor:
             raise Refuse("code_pin_mismatch")
         if not st.profile_known(aeri.profile):
             raise Refuse("profile_unknown", profile=str(aeri.profile))
+        # The profile hashes four files; the journal the page reads is written by
+        # others too (orchestrator.py, journal.py, domain/aeri.py). A clean tree
+        # at the very commit the profile was written from pins all of them (and
+        # every other file) at once, which a longer list of hashes would not.
+        if not st.profile_head_ok(aeri.profile, head.strip()):
+            raise Refuse(
+                "profile_unknown",
+                profile=aeri.profile,
+                detail="head_not_profile_commit",
+            )
         ok, detail = st.profile_matches(aeri.worktree, aeri.profile)
         if not ok:
             raise Refuse("profile_unknown", profile=aeri.profile, detail=detail)
@@ -1198,7 +1236,7 @@ class Supervisor:
             text = events.read_text(errors="replace")
         except OSError:
             text = ""
-        if "start:" in text and "terminal D exited" not in text:
+        if events_open(text):  # the LAST start / exit line decides
             raise Refuse("driven_elsewhere", name=name)
 
     def _start_gate(self, main_site, aeri, name) -> tuple:
@@ -1222,10 +1260,21 @@ class Supervisor:
         self._code_gate(aeri)
         self._not_driven_elsewhere(aeri, name)
         snap = self.host.snapshot()
-        bad = [r for r in snap.get("rows", []) if r.get("level") != "ok"]
-        if bad or not snap.get("ready"):
-            first = bad[0]["code"] if bad else "readiness"
-            raise Refuse("readiness_failed", first=first, rows=bad[:6])
+        rows = snap.get("rows")
+        rows = rows if isinstance(rows, list) else [None]
+        bad = [r for r in rows if not _row_passes(r)]
+        # (``ready`` must be true itself, not merely truthy: it is the card's own
+        # verdict, and a start needs both that and every row to pass.)
+        if bad or snap.get("ready") is not True:
+            first = next(
+                (r.get("code") for r in bad if isinstance(r, dict) and r.get("code")),
+                "readiness",
+            )
+            raise Refuse(
+                "readiness_failed",
+                first=first,
+                rows=[r for r in bad[:6] if isinstance(r, dict)],
+            )
         return data, snap
 
     def challenge(self, body) -> dict:

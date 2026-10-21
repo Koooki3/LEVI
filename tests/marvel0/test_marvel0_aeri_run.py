@@ -187,6 +187,11 @@ def test_a_start_that_must_be_refused(m, change, code):
 
 
 def test_unknown_readiness_refuses_as_firmly_as_a_failed_row(m):
+    """``refuse`` and ``unknown`` refuse; so does a ``warn`` of a row that is not
+    on the card's list of warning rows. (The first build refused *every* row that
+    was not ``ok``, which turned the always-``warn`` ``stack_ready`` row of a
+    machine that is ready into a refusal at every start: the real rows are in
+    ``test_marvel0_aeri_run_gate.py``.)"""
     for level in ("refuse", "unknown", "warn"):
         m.snap = {
             "rows": [{"code": "gpu_free", "level": level, "params": {}}],
@@ -197,6 +202,16 @@ def test_unknown_readiness_refuses_as_firmly_as_a_failed_row(m):
             m.sup.challenge, {"purpose": "start", "name": NAME}
         )
         assert code == "readiness_failed" and extra["first"] == "gpu_free"
+    m.snap = {
+        "rows": [
+            {"code": "gpu_free", "level": "ok", "params": {}},
+            {"code": "stack_ready", "level": "warn", "params": {}},
+        ],
+        "ready": True,
+        "sha256": "x",
+    }
+    m.present()
+    assert m.sup.challenge({"purpose": "start", "name": NAME})["name"] == NAME
 
 
 def test_a_snapshot_that_says_ready_but_has_a_row_that_is_not_ok_is_refused(m):
