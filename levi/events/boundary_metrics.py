@@ -10,15 +10,17 @@ Points (boundaries, candidate times) and segments, per episode, in seconds:
   how far each reference boundary is from its nearest candidate: mean (MAE)
   and 90th percentile (P90), on every boundary, matched or not, so a missed
   boundary counts as the distance to whatever candidate is closest.
-- ``segment_f1``: Segment F1 at several IoU thresholds, with the matching
-  rule of ``levi.harness.grading.episode`` (same subtask, the reference's
-  best-IoU candidate at or above the threshold, each candidate used once);
-  at IoU 0.3 it is that function's ``segment_f1``.
+- ``segment_f1``: Segment F1 at several IoU thresholds. The matching rule
+  (same subtask, the reference's best-IoU candidate at or above the
+  threshold, each candidate used once) is ``match_segments`` and the F1
+  with its empty-set rules is ``segment_f1_counts``; ``levi.harness.grading``
+  grades with these two, so at IoU 0.3 this is its ``segment_f1`` by
+  construction (one implementation, lite review 2026-10-20).
 
 Pure functions, no I/O. ``levi.agent.evaluation.temporal`` (one tolerance,
-identity-matched annotation rows) and ``levi.harness.grading`` (one IoU)
-stay as they are; this module adds the multi-threshold views an event
-reader is judged by.
+identity-matched annotation rows, a different empty-reference rule) stays
+as it is; this module adds the multi-threshold views an event reader is
+judged by.
 """
 
 import numpy as np
@@ -128,31 +130,43 @@ def boundary_scores(reference, candidates, durations, tolerances=TOLERANCES):
     return out
 
 
-def _iou(a, b):
+def iou(a, b):
+    """Intersection over union of two segments (``start``, ``end``)."""
     inter = max(0.0, min(a["end"], b["end"]) - max(a["start"], b["start"]))
     union = max(a["end"], b["end"]) - min(a["start"], b["start"])
     return inter / union if union > 0 else 0.0
 
 
-def _episode_pairs(ref, cand, threshold):
+def match_segments(ref, cand, threshold):
+    """``(pairs, closed_ref, closed_cand)``: segments without an ``end`` are
+    left out; for each reference segment in order, the unused candidate of the
+    same subtask with the best IoU at or above ``threshold`` (ties: the later
+    one) is paired with it."""
     ref = [s for s in ref if s.get("end") is not None]
     cand = [s for s in cand if s.get("end") is not None]
-    pairs, used = 0, set()
+    pairs, used = [], set()
     for r in ref:
         best, score = None, threshold
         for j, c in enumerate(cand):
             if j in used or c.get("subtask") != r.get("subtask"):
                 continue
-            value = _iou(r, c)
+            value = iou(r, c)
             if value >= score:
                 best, score = j, value
         if best is not None:
             used.add(best)
-            pairs += 1
-    return pairs, len(ref), len(cand)
+            pairs.append((r, cand[best]))
+    return pairs, ref, cand
 
 
-def _f1(pairs, n_ref, n_cand):
+def _episode_pairs(ref, cand, threshold):
+    pairs, ref, cand = match_segments(ref, cand, threshold)
+    return len(pairs), len(ref), len(cand)
+
+
+def segment_f1_counts(pairs, n_ref, n_cand):
+    """F1 of ``pairs`` matches; no candidate scores 1 only when there is no
+    reference either, and no reference scores recall 1."""
     precision = pairs / n_cand if n_cand else (1.0 if not n_ref else 0.0)
     recall = pairs / n_ref if n_ref else 1.0
     return 2 * precision * recall / (precision + recall) if precision + recall else 0.0
@@ -170,7 +184,7 @@ def segment_f1(reference, candidates, ious=IOUS):
             pairs, n_ref, n_cand = _episode_pairs(
                 reference[e], candidates.get(e, []), threshold
             )
-            per.append(_f1(pairs, n_ref, n_cand))
+            per.append(segment_f1_counts(pairs, n_ref, n_cand))
             pairs_all, ref_all, cand_all = (
                 pairs_all + pairs,
                 ref_all + n_ref,
@@ -179,7 +193,7 @@ def segment_f1(reference, candidates, ious=IOUS):
         out[f"{threshold:g}"] = {
             "iou": threshold,
             "mean": round(sum(per) / len(per), 4) if per else None,
-            "pooled": round(_f1(pairs_all, ref_all, cand_all), 4)
+            "pooled": round(segment_f1_counts(pairs_all, ref_all, cand_all), 4)
             if ref_all or cand_all
             else None,
             "matched": pairs_all,

@@ -133,3 +133,40 @@ def test_segment_f1_falls_with_a_stricter_iou():
     out = segment_f1(ref, cand, ious=(0.3, 0.7, 0.8))
     assert [out[k]["pooled"] for k in ("0.3", "0.7", "0.8")] == [1.0, 1.0, 0.0]
     assert segment_f1({0: []}, {0: []})["0.5"]["pooled"] is None
+
+
+def test_grading_uses_the_one_matching_rule():
+    """refactor/eval-segment-core: grading.episode matches with match_segments and scores with
+    segment_f1_counts; it keeps no IoU or F1 of its own."""
+    from levi.events.boundary_metrics import match_segments, segment_f1_counts
+
+    assert not hasattr(grading, "_iou")
+    rng = random.Random(7)
+    for _ in range(50):
+        ref = _random_segments(rng)
+        cand = [
+            {**s, "end": s["end"] + rng.uniform(-0.4, 0.4)}
+            for s in _random_segments(rng) + ref
+        ]
+        out = grading.episode(ref, cand)
+        pairs, r, c = match_segments(ref, cand, grading.IOU)
+        assert out["matched"] == len(pairs)
+        assert out["segment_f1"] == round(
+            segment_f1_counts(len(pairs), len(r), len(c)), 3
+        )
+
+
+def test_match_segments_ties_go_to_the_later_candidate_and_open_segments_are_left_out():
+    from levi.events.boundary_metrics import match_segments
+
+    ref = [
+        {"start": 0, "end": 2, "subtask": "a"},
+        {"start": 5, "end": None, "subtask": "a"},
+    ]
+    cand = [
+        {"start": 0, "end": 2, "subtask": "a", "id": 1},
+        {"start": 0, "end": 2, "subtask": "a", "id": 2},
+        {"start": 0, "end": 2, "subtask": "b", "id": 3},
+    ]
+    pairs, r, c = match_segments(ref, cand, 0.3)
+    assert [p[1]["id"] for p in pairs] == [2] and len(r) == 1 and len(c) == 3

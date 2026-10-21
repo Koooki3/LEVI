@@ -21,6 +21,7 @@ is then producing the teacher's annotation, not merely something plausible.
 
 import time
 
+from ..events.boundary_metrics import match_segments, segment_f1_counts
 from .layout import dataset_dir, read_json, write_json
 
 IOU = 0.3
@@ -70,31 +71,10 @@ def save_reference(store, key, task, change_id, *, description=""):
     return value
 
 
-def _iou(a, b):
-    start, end = max(a["start"], b["start"]), min(a["end"], b["end"])
-    inter = max(0.0, end - start)
-    union = max(a["end"], b["end"]) - min(a["start"], b["start"])
-    return inter / union if union > 0 else 0.0
-
-
 def episode(reference, candidate):
-    ref = [s for s in reference if s.get("end") is not None]
-    cand = [s for s in candidate if s.get("end") is not None]
-    pairs, used = [], set()
-    for r in ref:
-        best, score = None, IOU
-        for j, c in enumerate(cand):
-            if j in used or c.get("subtask") != r.get("subtask"):
-                continue
-            value = _iou(r, c)
-            if value >= score:
-                best, score = j, value
-        if best is not None:
-            used.add(best)
-            pairs.append((r, cand[best]))
-    precision = len(pairs) / len(cand) if cand else (1.0 if not ref else 0.0)
-    recall = len(pairs) / len(ref) if ref else 1.0
-    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    # one matching rule and one F1 for grading and the event readers (levi.events.boundary_metrics)
+    pairs, ref, cand = match_segments(reference, candidate, IOU)
+    f1 = segment_f1_counts(len(pairs), len(ref), len(cand))
     outcomes = [r.get("outcome") == c.get("outcome") for r, c in pairs]
     errors = [
         (abs(r["start"] - c["start"]) + abs(r["end"] - c["end"])) / 2 for r, c in pairs
