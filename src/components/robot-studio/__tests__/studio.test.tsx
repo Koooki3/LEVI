@@ -52,6 +52,12 @@ describe("Robot Studio interaction", () => {
       true,
     );
   });
+  test("the link back goes to the marvel_workstation page (the old /marvel0 only redirects)", async () => {
+    const { host } = await render(<RobotStudio />);
+    const link = host.querySelector<HTMLAnchorElement>("a.rs-link")!;
+    expect(link.getAttribute("href")).toBe("/marvel_workstation");
+    expect(link.textContent).toBe("Open marvel_workstation");
+  });
   test("an unreachable drag keeps the accepted pose and blocks saving", async () => {
     const { host } = await render(<RobotStudio />);
     const accepted = [...scene.joints];

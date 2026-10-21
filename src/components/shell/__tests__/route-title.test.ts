@@ -6,6 +6,7 @@ import zh from "@/i18n/zh.json";
 import { navPages } from "../commands";
 import { routePageName, routeTitle } from "../route-title";
 
+const enText = (text: string) => (en as Record<string, string>)[text] ?? text;
 const zhText = (text: string) =>
   (zh as Record<string, string>)[text] ??
   text.replace(/^Episode (\d+)$/, "片段 $1");
@@ -19,7 +20,11 @@ describe("tab titles", () => {
     expect(routeTitle("/workbench")).toBe("Conversion & review · LEVI");
     expect(routeTitle("/pool")).toBe("Training pool · LEVI");
     expect(routeTitle("/live")).toBe("Live evaluation · LEVI");
-    expect(routeTitle("/marvel0")).toBe("marvel0 · LEVI");
+    // The name is the catalogue key "marvel0" (its value is marvel_workstation).
+    expect(routeTitle("/marvel_workstation")).toBe("marvel0 · LEVI");
+    // The old address is no page (next.config.ts redirects it).
+    expect(routeTitle("/marvel0")).toBe("LEVI");
+    expect(routeTitle("/rig")).toBe("LEVI");
     expect(routeTitle("/lerobot/aloha_static_coffee/episode_3")).toBe(
       "Episode viewer · lerobot/aloha_static_coffee · Episode 3 · LEVI",
     );
@@ -45,7 +50,12 @@ describe("tab titles", () => {
     expect(routeTitle("/explore", zhText)).toBe("探索数据 · LEVI");
     expect(routeTitle("/pool", zhText)).toBe("训练池 · LEVI");
     expect(routeTitle("/live", zhText)).toBe("实时评测 · LEVI");
-    expect(routeTitle("/marvel0", zhText)).toBe("MARVEL0 · LEVI");
+    expect(routeTitle("/marvel_workstation", zhText)).toBe(
+      "marvel_workstation · LEVI",
+    );
+    expect(routeTitle("/marvel_workstation", enText)).toBe(
+      "marvel_workstation · LEVI",
+    );
     expect(routeTitle("/robot-studio", zhText)).toBe("FR3 交互预览 · LEVI");
     expect(routeTitle("/", zhText)).toBe("首页 · LEVI");
     expect(routeTitle("/org/ds/episode_0", zhText)).toBe(

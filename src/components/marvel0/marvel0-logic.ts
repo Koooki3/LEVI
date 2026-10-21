@@ -1,4 +1,4 @@
-// Pure mapping for the marvel0 (/marvel0): the two status answers
+// Pure mapping for the marvel_workstation page (/marvel_workstation): the two status answers
 // (`GET /api/levi/setup/status` and `GET /api/levi/marvel0/status`) in, one view
 // model per component out. No React and no fetching, so every rule can be
 // tested on its own.

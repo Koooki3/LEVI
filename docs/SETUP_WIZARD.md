@@ -7,7 +7,7 @@ command comes next, what it touches, and whether the step it starts is
 already healthy. This page covers the two parts that exist so far: the
 **recipe registry**, which ties each step to the machine's own operator
 guide, and the **read-only status probes** behind `GET /api/levi/setup/status`.
-Neither starts, stops or connects to anything. The **marvel0** page builds
+Neither starts, stops or connects to anything. The **marvel_workstation** page (the page was called marvel0 until 2026-10-21; its backend, API routes and files keep that name) builds
 on the probes; it is described at the end of "Status probes": the status route
 is read-only, and the page's policy server panel starts and stops one policy
 server unit and nothing else.
@@ -160,7 +160,7 @@ own text, passed on (at most 200 characters).
 ### marvel0 (read-only)
 
 `GET /api/levi/marvel0/status` (the same local authentication as the route above)
-answers one question for the **marvel0** page (`/marvel0`; it is a header link; the command palette, `Ctrl+K`, and the go-to chord `G C` open it too):
+answers one question for the **marvel_workstation** page (`/marvel_workstation`; `/marvel0` and `/rig` redirect to it; it is a header link; the command palette, `Ctrl+K`, and the go-to chord `G C` open it too):
 is any robot activity to be seen? The document has the schema
 `levi.marvel0.status.v1` and four parts. As above, a part that cannot be read says
 `unknown` with a `detail` and never fails the rest.
@@ -285,7 +285,7 @@ seconds; a request arriving while a part is being read waits for that read
 (`unknown`, answered at once) only after its deadline has passed.
 
 **Terminals A, B and C are not controlled.** The status route is read-only (the
-policy server panel at the end of this page is the one place the marvel0 page starts
+policy server panel at the end of this page is the one place the marvel_workstation page starts
 anything, and only its own policy server unit). The arm stack (A), the gripper
 stack (B) and the robot server (C) are started and stopped by hand as setup.md
 describes. The terminal A and C cards show what the
@@ -402,7 +402,7 @@ card does not mean it is safe to approach the robot.
 
 ### marvel0: policy server panel and client command panel
 
-Besides `GET /api/levi/marvel0/status`, the marvel0 page has two panels that prepare a
+Besides `GET /api/levi/marvel0/status`, the marvel_workstation page has two panels that prepare a
 real-robot session, and routes behind them. The **policy server panel** starts,
 shows and stops **one** policy server: what a person otherwise types by hand in
 the policy server terminal (the openpi serving script with a checkpoint, a share
@@ -411,7 +411,7 @@ command for the demo client terminal (task instruction, steps, episodes,
 `--min-z`, RTC horizon, rollout group, note), checked against the site's limits
 and shown as **text to copy**.
 
-On the page (`/marvel0`) they are steps 2 and 3, each beside the read-only
+On the page (`/marvel_workstation`) they are steps 2 and 3, each beside the read-only
 status card of what it is about: the **Policy server** card and the **Demo
 client command** card. Nothing else on the page does anything.
 

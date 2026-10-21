@@ -2,7 +2,7 @@
 
 [简体中文](ROBOT_STUDIO.zh-CN.md)
 
-Open **FR3 interactive preview** from the **More** menu of the top bar, from the card under the title of the MARVEL0 page, or in the command palette (`Ctrl+K` / `⌘K`), or visit `/robot-studio`; the page links back to MARVEL0. This is a browser-only design workspace. It loads a pinned, local FR3 model, lets you move and rotate the flange target, and exports preview points. It does not connect to a robot or record a physical demonstration.
+Open **FR3 interactive preview** from the **FR3 3D** link of the top bar, from the card under the title of the marvel_workstation page, or in the command palette (`Ctrl+K` / `⌘K`), or visit `/robot-studio`; the page links back to marvel_workstation. This is a browser-only design workspace. It loads a pinned, local FR3 model, lets you move and rotate the flange target, and exports preview points. It does not connect to a robot or record a physical demonstration.
 
 ## Using the preview
 

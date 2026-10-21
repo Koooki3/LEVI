@@ -1,5 +1,5 @@
 "use client";
-// MARVEL0. The page reads top to bottom as the stack is brought up: the chain
+// marvel_workstation. The page reads top to bottom as the stack is brought up: the chain
 // at the top (M → Desk → A → B → C → policy server → evaluation run, each with
 // its state and, for the first one that is not ready, the reason), then step 1
 // the arm stack (a card per terminal with its own Start and Stop, the gripper

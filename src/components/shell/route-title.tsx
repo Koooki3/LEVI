@@ -37,7 +37,7 @@ export function routePageName(pathname: string | null): string | null {
       return "Live evaluation";
     case "automatic":
       return "liveService.navAutomatic";
-    case "marvel0":
+    case "marvel_workstation":
       return "marvel0";
     case "robot-studio":
       return "robotStudio.title";

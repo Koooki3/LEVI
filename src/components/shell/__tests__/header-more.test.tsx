@@ -5,7 +5,7 @@ import { join } from "path";
 
 // The header with its neighbours stubbed: what is under test is which links
 // the bar keeps at a width and what the "More" menu holds.
-const route = { path: "/marvel0" };
+const route = { path: "/marvel_workstation" };
 const went: string[] = [];
 mock.module("next/navigation", () => ({
   useRouter: () => ({ push: () => undefined }),
@@ -43,6 +43,8 @@ mock.module("@/components/shell/shell-events", () => ({
   openAgentConnections: () => undefined,
 }));
 
+const { NAV_COLLAPSE_WIDTHS, NAV_COMPACT_BELOW, NAV_ROW_BELOW } =
+  await import("../commands");
 const { ShellProvider } = await import("../shell-context");
 const { default: LeviHeader } = await import("../../levi-header");
 
@@ -57,7 +59,7 @@ function atWidth(width: number) {
 }
 afterEach(() => {
   atWidth(original);
-  route.path = "/marvel0";
+  route.path = "/marvel_workstation";
   went.length = 0;
 });
 
@@ -74,95 +76,101 @@ const menuItems = async (host: HTMLElement) => {
   await click(moreTrigger(host));
   return Array.from(host.querySelectorAll("[role^=menuitem]"));
 };
-const PREVIEW = "FR3 interactive preview";
+const REPORT = "Report";
+const MAIN = [
+  "/live",
+  "/automatic",
+  "/marvel_workstation",
+  "/robot-studio",
+  "/explore",
+];
+const texts = (host: HTMLElement) =>
+  Array.from(host.querySelectorAll("[role^=menuitem]")).map(
+    (item) => item.textContent,
+  );
 
 describe("the header navigation", () => {
-  test("wide: every page is a link, marvel0 among them", async () => {
-    atWidth(1700);
+  test("wide: every page but Report is a link, marvel_workstation and FR3 3D among them", async () => {
+    atWidth(1920);
     const { host } = await render(header());
-    expect(hrefs(host)).toEqual([
-      "/live",
-      "/automatic",
-      "/marvel0",
-      "/explore",
-      "/workbench",
-      "/pool",
-      "/guide",
-      "/report",
-    ]);
-    // marvel0 is the current page and says so.
+    expect(hrefs(host)).toEqual([...MAIN, "/workbench", "/pool", "/guide"]);
+    // marvel_workstation is the current page and says so.
     expect(
       host
-        .querySelector("nav a[href='/marvel0']")!
+        .querySelector("nav a[href='/marvel_workstation']")!
         .getAttribute("aria-current"),
     ).toBe("page");
-  });
-
-  test("a little narrower: Guide and Report move into More, which lists them", async () => {
-    atWidth(1530);
-    const { host } = await render(header());
-    expect(hrefs(host)).toEqual([
-      "/live",
-      "/automatic",
-      "/marvel0",
-      "/explore",
-      "/workbench",
-      "/pool",
-    ]);
+    // Report is in More.
     await click(moreTrigger(host));
-    const items = Array.from(host.querySelectorAll("[role^=menuitem]")).map(
-      (item) => item.textContent,
-    );
-    expect(items).toEqual(["Guide", "Report", PREVIEW]);
+    expect(texts(host)).toEqual([REPORT]);
   });
 
-  test("a laptop width (1440 px): the four main links, marvel0 among them, and everything else in More", async () => {
+  test("a little narrower: Guide moves into More, which lists it before Report", async () => {
+    atWidth(1700);
+    const { host } = await render(header());
+    expect(hrefs(host)).toEqual([...MAIN, "/workbench", "/pool"]);
+    await click(moreTrigger(host));
+    expect(texts(host)).toEqual(["Guide", REPORT]);
+  });
+
+  test("then the training pool, then Conversion & review", async () => {
+    atWidth(1600);
+    const { host } = await render(header());
+    expect(hrefs(host)).toEqual([...MAIN, "/workbench"]);
+    await click(moreTrigger(host));
+    expect(texts(host)).toEqual(["Training pool", "Guide", REPORT]);
+  });
+
+  test("a laptop width (1440 px): the five main links, marvel_workstation and FR3 3D among them, and everything else in More", async () => {
     atWidth(1440);
     const { host } = await render(header());
-    expect(hrefs(host)).toEqual([
-      "/live",
-      "/automatic",
-      "/marvel0",
-      "/explore",
-    ]);
+    expect(hrefs(host)).toEqual(MAIN);
     await click(moreTrigger(host));
-    expect(
-      Array.from(host.querySelectorAll("[role^=menuitem]")).map(
-        (item) => item.textContent,
-      ),
-    ).toEqual([
+    expect(texts(host)).toEqual([
       "Conversion & review",
       "Training pool",
       "Guide",
-      "Report",
-      PREVIEW,
+      REPORT,
     ]);
   });
 
-  test("narrow: only the four main links stay; More holds the other five and chooses by the router", async () => {
-    atWidth(1000);
+  test("narrowest one-row bar: the five main links stay; More holds the other four and chooses by the router", async () => {
+    atWidth(NAV_ROW_BELOW);
     const { host } = await render(header());
-    expect(hrefs(host)).toEqual([
-      "/live",
-      "/automatic",
-      "/marvel0",
-      "/explore",
-    ]);
+    expect(hrefs(host)).toEqual(MAIN);
     await click(moreTrigger(host));
     const items = Array.from(host.querySelectorAll("[role^=menuitem]"));
     expect(items.map((item) => item.textContent)).toEqual([
       "Conversion & review",
       "Training pool",
       "Guide",
-      "Report",
-      PREVIEW,
+      REPORT,
     ]);
     await click(items[2]);
     expect(went).toEqual(["/guide"]);
   });
 
+  test("the folding widths of the module are the ones the styles use, and each step shows its link from its own width", async () => {
+    const { first, second, third } = NAV_COLLAPSE_WIDTHS;
+    for (const [width, expected] of [
+      [first, ["/workbench", "/pool", "/guide"]],
+      [first - 1, ["/workbench", "/pool"]],
+      [second, ["/workbench", "/pool"]],
+      [second - 1, ["/workbench"]],
+      [third, ["/workbench"]],
+      [third - 1, []],
+    ] as const) {
+      atWidth(width);
+      const { host } = await render(header());
+      expect([width, hrefs(host).filter((h) => !MAIN.includes(h!))]).toEqual([
+        width,
+        [...expected],
+      ]);
+    }
+  });
+
   test("the menu marks the current page when it is folded", async () => {
-    atWidth(1000);
+    atWidth(NAV_ROW_BELOW);
     route.path = "/guide";
     const { host } = await render(header());
     expect(host.querySelector(".levi-shell-more.is-current")).toBeTruthy();
@@ -173,20 +181,26 @@ describe("the header navigation", () => {
     expect(checked).toEqual(["Guide"]);
   });
 
-  test("two rows below 1000 px: every link is in the bar", async () => {
-    atWidth(600);
-    const { host } = await render(header());
-    expect(hrefs(host)).toHaveLength(8);
+  test("two rows below NAV_ROW_BELOW: every link but Report is in the bar", async () => {
+    for (const width of [600, NAV_ROW_BELOW - 1]) {
+      atWidth(width);
+      const { host } = await render(header());
+      expect([width, hrefs(host)]).toEqual([
+        width,
+        [...MAIN, "/workbench", "/pool", "/guide"],
+      ]);
+    }
   });
 
-  test("More is an icon-only button on the two-row bar (so the first links keep their room) and a labelled one from 1000 px", async () => {
+  test("More is an icon-only button on the two-row bar (so the first links keep their room) and a labelled one from NAV_ROW_BELOW", async () => {
     for (const [width, iconOnly] of [
       [360, true],
       [420, true],
       [999, true],
-      [1000, false],
+      [NAV_ROW_BELOW - 1, true],
+      [NAV_ROW_BELOW, false],
       [1440, false],
-      [1700, false],
+      [1920, false],
     ] as const) {
       atWidth(width);
       const { host } = await render(header());
@@ -203,46 +217,72 @@ describe("the header navigation", () => {
     }
   });
 
-  test("the FR3 preview is a menu item at every width, never a link of the bar, and the menu goes to it", async () => {
-    for (const width of [420, 999, 1000, 1240, 1440, 1530, 1700]) {
+  test("the FR3 3D link is in the bar at every width, reads FR3 3D (the palette keeps the full name), never folds, and is not in More", async () => {
+    for (const width of [420, 999, 1170, 1359, 1360, 1440, 1530, 1700, 1920]) {
       atWidth(width);
       const { host } = await render(header());
-      expect([width, hrefs(host).includes("/robot-studio")]).toEqual([
+      const link = host.querySelector("nav a[href='/robot-studio']");
+      expect([width, link?.textContent]).toEqual([width, "FR3 3D"]);
+      expect([width, link?.hasAttribute("data-collapse")]).toEqual([
         width,
         false,
       ]);
-      const items = await menuItems(host);
-      const preview = items.find((item) => item.textContent === PREVIEW);
-      expect([width, Boolean(preview)]).toEqual([width, true]);
-      await click(preview!);
-      expect([width, went.pop()]).toEqual([width, "/robot-studio"]);
+      await menuItems(host);
+      for (const name of ["FR3 3D", "FR3 interactive preview"])
+        expect([width, texts(host).includes(name)]).toEqual([width, false]);
     }
   });
 
-  test("on the preview page the menu marks it, and marvel0 is not marked", async () => {
-    atWidth(1700);
-    route.path = "/robot-studio";
+  test("Report is a menu item at every width, never a link of the bar, and the menu goes to it", async () => {
+    for (const width of [420, 999, 1170, 1440, 1530, 1700, 1920]) {
+      atWidth(width);
+      const { host } = await render(header());
+      expect([width, hrefs(host).includes("/report")]).toEqual([width, false]);
+      const items = await menuItems(host);
+      const report = items.find((item) => item.textContent === REPORT);
+      expect([width, Boolean(report)]).toEqual([width, true]);
+      await click(report!);
+      expect([width, went.pop()]).toEqual([width, "/report"]);
+    }
+  });
+
+  test("on the Report page the menu marks it, and marvel_workstation is not marked", async () => {
+    atWidth(1920);
+    route.path = "/report";
     const { host } = await render(header());
     expect(host.querySelector(".levi-shell-more.is-current")).toBeTruthy();
     expect(
       host
-        .querySelector("nav a[href='/marvel0']")!
+        .querySelector("nav a[href='/marvel_workstation']")!
         .getAttribute("aria-current"),
     ).toBeNull();
     await click(moreTrigger(host));
     const checked = Array.from(
       host.querySelectorAll("[role=menuitemradio][aria-checked=true]"),
     ).map((item) => item.textContent);
-    expect(checked).toEqual([PREVIEW]);
+    expect(checked).toEqual([REPORT]);
   });
 
-  test("marvel0 is a link of the bar at every width, never only in More, and is marked as the current page there", async () => {
+  test("on the preview page its bar link is marked and More is not", async () => {
+    atWidth(1440);
+    route.path = "/robot-studio";
+    const { host } = await render(header());
+    expect(
+      host
+        .querySelector("nav a[href='/robot-studio']")!
+        .getAttribute("aria-current"),
+    ).toBe("page");
+    expect(host.querySelector(".levi-shell-more.is-current")).toBeNull();
+  });
+
+  test("marvel_workstation is a link of the bar at every width, never only in More, and is marked as the current page there", async () => {
     for (const width of [
-      360, 420, 820, 999, 1000, 1024, 1240, 1440, 1560, 1640, 1700,
+      360, 420, 820, 999, 1000, 1169, 1170, 1240, 1359, 1360, 1440, 1530, 1640,
+      1710, 1920,
     ]) {
       atWidth(width);
       const { host } = await render(header());
-      const link = host.querySelector("nav a[href='/marvel0']");
+      const link = host.querySelector("nav a[href='/marvel_workstation']");
       expect([width, link?.getAttribute("aria-current")]).toEqual([
         width,
         "page",
@@ -250,33 +290,23 @@ describe("the header navigation", () => {
       // The menu never holds it (it would be the second place to look).
       if (moreTrigger(host)) {
         await click(moreTrigger(host));
-        const items = Array.from(host.querySelectorAll("[role^=menuitem]")).map(
-          (item) => item.textContent,
-        );
-        expect([width, items.includes("MARVEL0")]).toEqual([width, false]);
+        expect([width, texts(host).includes("marvel_workstation")]).toEqual([
+          width,
+          false,
+        ]);
       }
     }
   });
 
-  test("the link reads MARVEL0 with 'robot' after it, a word the stylesheet drops where the bar is short of room", async () => {
+  test("the link reads marvel_workstation and nothing after it; no link has a hint word", async () => {
     atWidth(1440);
     const { host } = await render(header());
-    const link = host.querySelector("nav a[href='/marvel0']")!;
-    expect(link.textContent).toBe("MARVEL0robot");
-    const hint = link.querySelector(".levi-shell-link__hint")!;
-    expect(hint.textContent).toBe("robot");
-    // The accessible name keeps the hint (it is text, not decoration); the
-    // other links have none.
-    expect(
-      host.querySelector("nav a[href='/explore'] .levi-shell-link__hint"),
-    ).toBeNull();
-    const css = readFileSync(
-      join(import.meta.dir, "../../../styles/shell.css"),
-      "utf8",
-    );
-    expect(css).toMatch(
-      /@media \(max-width: 1239px\) \{\s*\.levi-shell-link__hint \{\s*display: none/,
-    );
+    const link = host.querySelector("nav a[href='/marvel_workstation']")!;
+    expect(link.textContent).toBe("marvel_workstation");
+    expect(host.querySelector(".levi-shell-link__hint")).toBeNull();
+    // The old addresses are not links any more (next.config.ts redirects them).
+    expect(host.querySelector("nav a[href='/marvel0']")).toBeNull();
+    expect(host.querySelector("nav a[href='/rig']")).toBeNull();
   });
 
   test("on the two-row bar the menu opens leftwards from the end of the row, so its panel stays on the screen", () => {
@@ -285,15 +315,21 @@ describe("the header navigation", () => {
       "utf8",
     );
     expect(css).toMatch(
-      /@media \(max-width: 999px\) \{[\s\S]*?\.levi-shell-more \.ds-menu--start \{\s*left: auto;\s*right: 0;/,
+      new RegExp(
+        `@media \\(max-width: ${NAV_ROW_BELOW - 1}px\\) \\{[\\s\\S]*?\\.levi-shell-more \\.ds-menu--start \\{\\s*left: auto;\\s*right: 0;`,
+      ),
     );
   });
 
-  test("the folded pages are still reached from More at a laptop width; marvel0 stays in the bar", async () => {
-    atWidth(1024);
+  test("the compact bar (tight links, search icon only) ends where the full one starts", () => {
+    expect(NAV_COMPACT_BELOW).toBeGreaterThan(NAV_ROW_BELOW);
+  });
+
+  test("the folded pages are still reached from More at a laptop width; marvel_workstation stays in the bar", async () => {
+    atWidth(1200);
     route.path = "/guide";
     const { host } = await render(header());
-    expect(hrefs(host)).toContain("/marvel0");
+    expect(hrefs(host)).toContain("/marvel_workstation");
     expect(host.querySelector(".levi-shell-more.is-current")).toBeTruthy();
   });
 });

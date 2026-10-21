@@ -1,4 +1,4 @@
-# The arm stack buttons of the marvel0 page
+# The arm stack buttons of the marvel_workstation page
 
 English first, Chinese after the line below. Backend: `levi/marvel0/stack_act.py` and `stack_act_api.py`
 (on top of the read-only arm stack of `levi/marvel0/stack.py`), `stack_units.py`, `gripper.py`,

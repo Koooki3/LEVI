@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { navScrollTarget } from "../nav-scroll";
 
 // Links of a 420 px bar, as (start, end) from the start of the row: "Live
-// evaluation 1", "Automatic evaluation", "MARVEL0", "Explore", "Conversion &
+// evaluation 1", "Automatic evaluation", "marvel_workstation", "Explore", "Conversion &
 // review".
 const edges = [
   [0, 150],
@@ -24,7 +24,7 @@ describe("rolling the link row to the current page", () => {
   });
 
   test("a link that is cut at the end rolls the row to the start of a link, so the first visible link is whole", () => {
-    // MARVEL0 ends at 380: 360 px of bar does not show it.
+    // marvel_workstation ends at 380: 360 px of bar does not show it.
     const target = navScrollTarget({
       edges,
       current: 2,

@@ -17,10 +17,18 @@ const nextConfig: NextConfig = {
     optimizePackageImports: ["react-icons", "recharts", "@huggingface/hub"],
   },
   generateBuildId: () => packageJson.version,
-  // The robot-station page was /rig until 2026-10-20; old bookmarks and the
-  // operator tutorial still point there. Temporary, so no browser keeps it.
+  // The robot-station page was /rig until 2026-10-20 and /marvel0 until
+  // 2026-10-21 (now /marvel_workstation); old bookmarks and the operator
+  // tutorial still point there. Temporary (307), so no browser keeps it.
   async redirects() {
-    return [{ source: "/rig", destination: "/marvel0", permanent: false }];
+    return [
+      { source: "/rig", destination: "/marvel_workstation", permanent: false },
+      {
+        source: "/marvel0",
+        destination: "/marvel_workstation",
+        permanent: false,
+      },
+    ];
   },
 };
 

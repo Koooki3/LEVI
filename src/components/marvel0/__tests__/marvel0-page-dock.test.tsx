@@ -6,7 +6,7 @@ import { RUN, runDoc } from "./ctl-fixtures";
 // the HOLD dock must not wait for the status poll. A reload while the hosted
 // client runs has to show HOLD at once, even when /setup/status and
 // /marvel0/status have not answered (or never do).
-const { default: Marvel0Page } = await import("@/app/marvel0/page");
+const { default: Marvel0Page } = await import("@/app/marvel_workstation/page");
 setupDom();
 
 const SETUP = "/api/levi/setup/status";
