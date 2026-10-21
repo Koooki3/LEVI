@@ -107,7 +107,12 @@ def test_the_whole_real_run_never_turns_unknown_while_d_waits(m):
                 "runner_stale",
             ), (n, k, doc["state"])
             checked += 1
-        assert looks[-1]["state"]["id"] == state or not long, (n, k, state, looks[-1]["state"])
+        assert looks[-1]["state"]["id"] == state or not long, (
+            n,
+            k,
+            state,
+            looks[-1]["state"],
+        )
         assert looks[-1]["d"]["alive"] is True
     assert checked > 100
 
