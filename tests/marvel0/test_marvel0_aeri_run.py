@@ -1621,13 +1621,18 @@ def test_anything_d_writes_to_the_keyboard_pty_is_read_and_dropped(m):
     (it never does), the master must not fill up and stall it."""
     import select
 
+    def readable(fd, seconds):
+        # poll(), not select(): in the whole-tree run this process holds more than 1023 files and
+        # select() refuses a descriptor that high ("filedescriptor out of range").
+        waiter = select.poll()
+        waiter.register(fd, select.POLLIN)
+        return bool(waiter.poll(seconds * 1000))
+
     started(m)
     os.write(m.child.keyboard, b"something on the keyboard pty\r\n")
-    ready, _, _ = select.select([m.sup._master], [], [], 0.5)
-    assert ready, "it is there to be read"
+    assert readable(m.sup._master, 0.5), "it is there to be read"
     m.sup.tick()
-    ready, _, _ = select.select([m.sup._master], [], [], 0.1)
-    assert not ready
+    assert not readable(m.sup._master, 0.1)
 
 
 def test_the_document_names_the_pid_of_d_not_only_the_launchers(m):
