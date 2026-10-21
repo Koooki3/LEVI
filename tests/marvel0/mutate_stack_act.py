@@ -1874,7 +1874,7 @@ MUTATIONS = [
         "graph: the graph first, the manager only when it proves nothing",
         "stack_act.py",
         '            if graph in ("present", "absent"):\n                state = graph',
-        '            if True:\n                state = graph',
+        "            if True:\n                state = graph",
         FAST,
     ),
     (
