@@ -18,9 +18,9 @@ reverse loop resets the scene, round after round. Until now a person prepared a 
 2. it starts terminal D **inside the page** (a pty the page owns) up to D's confirmation prompt;
 3. it shows what D is doing and waits for, and **a click on a button stands for pressing the same key in terminal D**.
 
-The honest wording is on the page, always shown, not folded: *this is not an emergency stop; keep a hand on the physical
+The honest wording is on the page, always shown, not folded: _this is not an emergency stop; keep a hand on the physical
 e-stop; a click here stands for the same key in terminal D and is your decision; Stop is Ctrl+C: the arm stays where it
-is and does not go home; the checks only prevent mistakes and cannot stop another program of the same account.* Franka
+is and does not go home; the checks only prevent mistakes and cannot stop another program of the same account._ Franka
 Desk and the physical emergency stop are the barrier. Terminal D stays a valid way to run AERI (`AERI.md`); a run started
 in a terminal is not hosted by the page, and a hosted run cannot be taken over by a terminal.
 
@@ -35,12 +35,22 @@ and a hand on the e-stop (design section 12).
 Top to bottom, in the order of a run. While a hosted D lives the prepare part is hidden; once it has ended the run's
 summary stays and the next run can be prepared.
 
-- **Readiness** (`GET /aeri`, every 3 s): one row per check, what refuses first (`Not met:`), warnings, and what is met
-  folded. An `unknown` row refuses like a refusal. The backend checks every row again at the start.
-- **Prepare**: the task (the new_run.py pattern, sent to the policy word for word), the mode (external: an agent
+- **Readiness** (`GET /aeri`): one row per check, what refuses first (`Not met:`), warnings, and what is met folded. An
+  `unknown` row refuses like a refusal. The backend checks every row again at the start. A full read costs the backend
+  about six processes (git, nvidia-smi, systemctl), so the page reads it every 3 s **only while there is something to
+  prepare**: when hosting is off in the control file or the site file has no usable `[aeri]` section it reads once and then
+  every 30 s (the backend answers with the switch and the site's facts only), and while an evaluation client is live it
+  reads once and then not at all until the client ends (the card says so; the arm controller is up then, and the
+  backend's read is a light one). D's own document is read every second while D lives, otherwise every 3 s (every 30 s
+  when hosting is off or a client is live).
+- **Prepare**: first the three stages of a first use (1: inventory only, no motion; 2: one round; 3: several rounds), then
+  the task (the new_run.py pattern, sent to the policy word for word; the example in the field is "pick the watermelon
+  into the blue plate", no longer the worn-out pepper), the mode (external: an agent
   answers, about 9 GB of GPU; local: a small vision model, about 19 GB, not yet run on the real robot), rounds, steps per
   subtask, the gripper wait, and a switch "home the arm first" that exists only for code versions that have the three
-  homing confirmations. The limits are the backend's (`limits` in the document), checked again there.
+  homing confirmations. The limits are the backend's (`limits` in the document), checked again there. The defaults here
+  (5 rounds, 200 steps per subtask) are the cautious ones for the first runs; the page's 3000 steps and 50 episodes belong
+  to the evaluation client of Step 4, not to this step.
 - **The prepared run**: its facts, the plan and binding digests, and **the command of the terminal fallback**, which is the
   very command the hosted D runs. **Start terminal D** is off while a row refuses (or is unknown), the prepared files
   changed, a D or the evaluation client of Step 4 is live, or the run document says a start is not offered; the reasons
@@ -66,11 +76,11 @@ backend decides which keys exist in a state and why one is off (`keys[]` of `GET
 that are about this browser. The page labels each key from its own closed table and **refuses a document whose byte
 differs from it** (a test compares the table with the backend's).
 
-| Level | Keys | What the page asks |
-| --- | --- | --- |
-| A | `n`, `q`, cancel of a resume | one click |
-| B | `y` (list), Enter (release, resume), `o`, `p`, `h`, `s`, `f`, `d`, `y` (resume) | the key is off for **1.5 s** after it appears (a countdown on the button) and for **3 s** after the previous key; then one click opens a **confirm window** (Cancel has the initial focus; Escape and the backdrop cancel) and its Confirm sends the key |
-| C | `execute <name>` (and the long variant after an unfinished policy switch) | the same, with ticks (hand on the e-stop, the area clear / the leftovers checked); **the page sends the phrase itself, nothing is typed** |
+| Level | Keys                                                                                     | What the page asks                                                                                                                                                                                                                                                                                                                                                                |
+| ----- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A     | `n`, `q`, cancel of a resume                                                             | one click                                                                                                                                                                                                                                                                                                                                                                         |
+| B     | `y` (list), Enter (release, resume), `o`, `p`, `h`, `s`, `f`, `d`, `y` (resume)          | the key is off for **1.5 s** after it appears (a countdown on the button) and for **3 s** after the previous key; then one click opens a **confirm window** (Cancel has the initial focus; Escape and the backdrop cancel) and its Confirm sends the key                                                                                                                          |
+| C     | `execute <name>`, the long variant after an unfinished policy switch, and the forced end | the same, with **one tick for every check terminal D itself asks a person to make before it takes the phrase**, then the three checks of the arm stack's windows (a hand on the e-stop, hands and objects clear, no evaluation client); Confirm stays off until every box is ticked. **The page sends the phrase itself, the document's own word for word, and nothing is typed** |
 
 - `o`, `p` and `h` are three separate clicks in their own states, each with its own warning; the later keys of a pair
   (`p`, `h`, `s`/`f`/`d`, the resume `y`) sit in **another column** (on a phone, under a line "next step"), so one hand
@@ -79,7 +89,17 @@ differs from it** (a test compares the table with the backend's).
   prompt is off. If the page does not see the key taken after 5 s it says so; it does not resend. A request that got no
   answer is treated as possibly sent. There is **no optimistic state**: what the card shows next is what the next
   document says.
-- A window whose prompt moved on while it was open closes by itself and sends nothing.
+- **What the level C windows tick.** `execute`: D's five (the reviewed scene, limits, checkpoints, active providers and
+  hardware readiness: what its `run_confirm_warning` names) + the three. `execute_variant`: the four of D's policy
+  switch check (each leftover unit with `systemctl --user status`, the policy ports with `ss -ltnp`, `nvidia-smi`, the
+  arm at its home pose) + D's five + the three. The forced end: the three (D asks nothing there). The lists are written
+  from the profile's own texts (`levi/marvel0/aeri_prompts.json`) and a test fails when a text names an item that has
+  no tick or the other way round; the window also quotes the line D is showing, so the person confirms that prompt. A
+  level C key whose document gives no phrase is never sent (the page does not make one up; it says so as its own
+  mistake).
+- A window whose prompt moved on while it was open (another run, another state counter, another prompt id, or a prompt
+  of another kind than the key's) closes by itself and sends nothing; `pressKey` itself also refuses a key for a prompt
+  other than the one D shows.
 - A click carries what the page was looking at (`seen`: run id, state counter, prompt id), the key's one-time token and
   this tab's id; the backend compares `seen` with its own state and sends nothing when they differ. A read older than 2 s
   switches every key off. The delay the page takes from the backend's `not_before` is bounded by 3 s, so a browser clock
@@ -88,22 +108,33 @@ differs from it** (a test compares the table with the backend's).
 - **There is no keyboard shortcut and no `accesskey`**: a stray key in the browser cannot release a round.
 - **Stop** (Ctrl+C) is a full-width block, 64 px high, in a place that does not move, there while D lives and **not
   waiting for a fresh read** (a D that is not read is the case in which it matters most). It is its own path: no seen, no
-  token, it never waits for a key on its way. Once per run; the backend opens one retry if D did not acknowledge it. A
+  token, it never waits for a key on its way. Once per run; the backend opens one retry if D did not acknowledge it. **What
+  the page says after a Stop depends on what D has said back:** until D acknowledges it (stop phase `sent`,
+  `unconfirmed`, `retried`) it says "sent, not confirmed; the arm may still be moving" and that the physical e-stop is
+  the emergency stop; only an acknowledged stop (`acked`, whoever sent it) is "D is winding down, the arm stays where it
+  is". The same for the restart orphan and a stuck wrap-up. A
   dock repeats it at the foot of the window when the card is scrolled out of view. Nothing here is an emergency stop and
   the caption beside it says so. If the page itself hangs, `scripts/aeri_page_stop.py` (named on the card) sends D one
   Ctrl+C.
-- **Force-end** is folded and offered only when D's wrap-up shows no progress; a window with a danger button; the units
-  may stay behind.
+- **Force-end** is folded and offered only when D's wrap-up shows no progress; a window with a danger button and the three
+  ticks; the units may stay behind.
+- **The chain at the top of the page** follows D: a D that lives is a run (its node is ready, working, a problem, or needs a
+  look, by D's state, and stale when it was not read lately). The backend counts D as an active run (`run_active`), which
+  is why the arm stack's stop and start (blocker `run_active`), a policy-server deploy (`aeri_run_live`) and the evaluation
+  client's start (`no_aeri`) are refused while D lives; the page shows the backend's blocker.
+- **Loaded on demand.** Step 5 is a separate piece of code the page fetches after its first paint, behind a boundary: if
+  it cannot load, or throws while it renders, one note replaces it (naming `scripts/aeri_page_stop.py` and the physical
+  e-stop for a D that runs anyway) and the rest of the page stays.
 
 ## Default off, and the files
 
-| What | Where |
-| --- | --- |
-| switch (default off) | `control.toml` `[aeri] enabled = false` |
-| which AERI code, which prompt profile, paths | `site.toml` `[aeri]` (profile `harvest-5bc750ca`, validated on the real robot on 18 Oct, is the default; `bfdee2cf` has no startup homing; an unknown version is refused, never guessed) |
-| readiness, preparing | `levi/marvel0/aeri_ready.py`, `aeri_prep.py`, `aeri_leftovers.py`, `aeri_api.py` |
-| hosting, state, keys | `levi/marvel0/aeri_run.py`, `aeri_state.py`, `aeri_screen.py`, `aeri_journal.py`, `aeri_run_api.py`, `hostchild.py` (`mode: "aeri"`) |
-| front end | `autonomy-doc.ts` (documents, closed sets), `autonomy-logic.ts` (what a key may do), `autonomy-api.ts`, `use-autonomy.ts`, `autonomy-keys.tsx`, `autonomy-run-card.tsx`, `autonomy-prepare.tsx`, `autonomy-step.tsx`, `autonomy-styles.css`, the words `marvel0.autonomy.*` |
+| What                                         | Where                                                                                                                                                                                                                                                                       |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| switch (default off)                         | `control.toml` `[aeri] enabled = false`                                                                                                                                                                                                                                     |
+| which AERI code, which prompt profile, paths | `site.toml` `[aeri]` (profile `harvest-5bc750ca`, validated on the real robot on 18 Oct, is the default; `bfdee2cf` has no startup homing; an unknown version is refused, never guessed)                                                                                    |
+| readiness, preparing                         | `levi/marvel0/aeri_ready.py`, `aeri_prep.py`, `aeri_leftovers.py`, `aeri_api.py`                                                                                                                                                                                            |
+| hosting, state, keys                         | `levi/marvel0/aeri_run.py`, `aeri_state.py`, `aeri_screen.py`, `aeri_journal.py`, `aeri_run_api.py`, `hostchild.py` (`mode: "aeri"`)                                                                                                                                        |
+| front end                                    | `autonomy-doc.ts` (documents, closed sets), `autonomy-logic.ts` (what a key may do), `autonomy-api.ts`, `use-autonomy.ts`, `autonomy-keys.tsx`, `autonomy-run-card.tsx`, `autonomy-prepare.tsx`, `autonomy-step.tsx`, `autonomy-styles.css`, the words `marvel0.autonomy.*` |
 
 ## Tests
 
@@ -117,12 +148,15 @@ the arm controller is on, and under `nice -n 19 taskset`):
   and no injected fake), `autonomy-contract.test.ts` (routes, bodies, constants, key table), `autonomy-catalog.test.ts`
   (every code the backend names has words in both languages; the Chinese rules; nothing calls itself an emergency
   stop), `autonomy-styles.test.ts`;
-- DOM: `autonomy-run.test.tsx` (every state of the samples, level A and B keys, one request per click), 
+- DOM: `autonomy-run.test.tsx` (every state of the samples, level A and B keys, one request per click),
+  `autonomy-confirm.test.tsx` (the ticks of the level C windows, each one needed; the phrase; the window closing with the
+  prompt; `pressKey` on its own), `autonomy-poll.test.tsx` (how often it reads, the dock's watch, the lazy load, the
+  boundary), `autonomy-chain.test.ts` (the chain's run node follows D),
   `autonomy-actions.test.tsx` (Stop, the windows of the other keys, the dead and stuck states, presence, switched off,
   Chinese), `autonomy-prepare.test.tsx` (readiness, preparing, starting, the live service and leftovers),
   `autonomy-page.test.tsx` (the mount on the page);
 - `tests/marvel0/mutate_autonomy_ui.py` breaks one gate at a time in a temporary state of the front end and requires a
-  test to fail for each.
+  test to fail for each (86 mutations; `MUTATE_CORES=16-19` picks the cores).
 
 Screenshots of every state (1440 and 420 px, light and dark, English and Chinese) are made with the rig-console harness
 (`programs/rig-console/tools/shots/marvel0_shots.py`) on a temporary instance, every request answered from the samples;
@@ -131,8 +165,10 @@ nothing reaches a backend route or a robot port.
 ## Not verified
 
 The first run on the real robot has not happened. Unverified until then: how the page's pty and `uv` carry Ctrl+C and the
-hang-up to D, the numbers in the table above (1.5 s, 3 s, 5 s, 2 s, 15 s are guesses to be measured), the zh prompt
-wording of the pinned code on the real robot, `levi live stop`'s behaviour, local mode on the real robot, and that the
+hang-up to D, the numbers in the table above (1.5 s, 3 s, 5 s, 2 s, 15 s are guesses to be measured), that the tick
+lists match D's texts on a version of the AERI code other than the profiles on record (a test compares them with the
+pinned texts of every profile, in both languages), the zh prompt wording of the pinned code on the real robot, the live
+service's stop through its unit on the real machine, local mode on the real robot, and that the
 AERI log cannot tell a click on this page from a key in the terminal (only the page's own click list can).
 
 ---
@@ -153,8 +189,8 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 2. 在**页面内**启动终端 D（页面自己持有的 pty），运行到 D 的确认提示为止；
 3. 显示 D 在做什么、在等什么，**点按钮等同于在终端 D 里按同一个键**。
 
-诚实的措辞一直显示在页面上，不折叠：*这不是急停；手要放在物理急停上；这里的点击等同于在终端 D 里按同一个键，每一次都是你的
-决定；停止等于 Ctrl+C：手臂停在原处、不会回位；这些检查只防误操作，防不了同一账号下的其他程序。* 屏障是 Franka Desk 和
+诚实的措辞一直显示在页面上，不折叠：_这不是急停；手要放在物理急停上；这里的点击等同于在终端 D 里按同一个键，每一次都是你的
+决定；停止等于 Ctrl+C：手臂停在原处、不会回位；这些检查只防误操作，防不了同一账号下的其他程序。_ 屏障是 Franka Desk 和
 物理急停。终端 D 仍然是运行 AERI 的有效方式（`AERI.md`）；在终端里启动的运行不由页面托管，页面托管的运行也不能被终端接管。
 
 **只有人点击。** 按钮背后的写入路由拒绝任何 Bearer 凭据，agent 从不调用。外部模式里 agent 只负责回答视觉模型的队列文件；
@@ -165,11 +201,16 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 
 自上而下，按一次运行的顺序。托管的 D 活着时，准备部分隐藏；它结束后，这次运行的摘要保留，可以准备下一次。
 
-- **就绪检查**（`GET /aeri`，每 3 秒）：每项检查一行，未满足的在前（“未满足：”），然后是提醒，已满足的折叠。“未知”按未满足处理。
-  启动时后端会把每一行再查一遍。
-- **准备**：任务（new_run.py 的格式，原样发给策略）、模式（外部：由智能体作答，显存约 9 GB；本地：本地小视觉模型，约
+- **就绪检查**（`GET /aeri`）：每项检查一行，未满足的在前（“未满足：”），然后是提醒，已满足的折叠。“未知”按未满足处理。
+  启动时后端会把每一行再查一遍。后端完整读一次要起约六个进程（git、nvidia-smi、systemctl），所以页面**只在有东西可准备时**
+  每 3 秒读一次：控制文件里托管关闭、或站点文件没有可用的 `[aeri]` 段时，只读一次，之后每 30 秒读一次（后端此时只回答开关和
+  站点的情况）；评测客户端运行期间读一次后就不再读，直到客户端结束（卡片会说明；此时手臂控制器是开着的，后端的读取也是轻量的）。
+  终端 D 的文档在 D 活着时每秒读一次，否则每 3 秒一次（托管关闭或客户端运行时每 30 秒一次）。
+- **准备**：先是三行首次使用的阶段说明（1：只看清单，手臂不动；2：只跑一轮；3：多轮），然后是任务（new_run.py 的格式，原样发给
+  策略；输入框里的示例是“pick the watermelon into the blue plate”，不再是用腻了的辣椒）、模式（外部：由智能体作答，显存约 9 GB；本地：本地小视觉模型，约
   19 GB，还没有在真机上跑过）、轮数、每个子任务的步数、夹爪等待，以及“先让手臂回位”开关（只有带三次回位确认的代码版本才有）。
-  上下限来自后端（文档里的 `limits`），后端会再检查一遍。
+  上下限来自后端（文档里的 `limits`），后端会再检查一遍。这里的默认值（5 轮、每个子任务 200 步）是首次运行用的保守值；页面上
+  的 3000 步和 50 个片段属于第 4 步的评测客户端，不属于这一步。
 - **已准备的运行**：它的各项信息、计划和绑定摘要，以及**终端备用的命令**——就是托管的 D 运行的那一条命令。**启动终端 D**
   在这些情况下关闭：有检查未满足（或未知）、准备好的文件被改动、已有 D 或第 4 步的评测客户端在运行、运行文档说现在不提供
   启动；原因列在按钮下面。
@@ -188,36 +229,51 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 为什么关着，由后端决定（`GET /aeri/run` 的 `keys[]`）；页面只加与这个浏览器有关的检查。页面用自己的封闭表给每个键写标签，
 **文档里的字节与这张表不符就不提供这个键**（有测试把这张表和后端的表对照）。
 
-| 级别 | 键 | 页面要求 |
-| --- | --- | --- |
-| A | `n`、`q`、续跑的取消 | 点一下 |
-| B | `y`（清单）、Enter（放行、续跑）、`o`、`p`、`h`、`s`、`f`、`d`、`y`（续跑） | 键出现后 **1.5 秒**内、以及上一个键之后 **3 秒**内保持关闭（按钮上倒计时）；然后点一下打开**确认窗口**（“取消”有初始焦点；Esc 和点背景都是取消），窗口里的“确认”才发送这个键 |
-| C | `execute <名>`（以及上次策略切换未收尾后的长确认语） | 同上，另有勾选项（手在急停上、周围无人 / 已检查残留）；**确认语由页面自己发送，不用输入任何东西** |
+| 级别 | 键                                                                          | 页面要求                                                                                                                                                                                                                                                              |
+| ---- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A    | `n`、`q`、续跑的取消                                                        | 点一下                                                                                                                                                                                                                                                                |
+| B    | `y`（清单）、Enter（放行、续跑）、`o`、`p`、`h`、`s`、`f`、`d`、`y`（续跑） | 键出现后 **1.5 秒**内、以及上一个键之后 **3 秒**内保持关闭（按钮上倒计时）；然后点一下打开**确认窗口**（“取消”有初始焦点；Esc 和点背景都是取消），窗口里的“确认”才发送这个键                                                                                          |
+| C    | `execute <名>`、上次策略切换未收尾后的长确认语、强制结束                    | 同上，另有**终端 D 自己在接受确认语之前要人检查的每一项，各是一个勾选框**，再加手臂栈各个窗口都要的三项（手在物理急停上、手和物体离开夹爪与手臂的活动范围、没有评测客户端）；全部勾选之前“确认”保持关闭。**确认语由页面自己发送，逐字取自后端文档，不用输入任何东西** |
 
 - `o`、`p`、`h` 是三次独立的点击，各在自己的状态里，各带自己的警告；成对的后一个键（`p`、`h`、`s`/`f`/`d`、续跑的 `y`）放在
   **另一栏**（手机上放在“下一步”一行文字下面），一只手不会在同一个位置连按两下。
 - **每个提示只发一个键。** 点击之后按钮显示已发送，**不会重发**；该提示的其他键全部关闭。5 秒内没有看到键被取走，页面
   会说出来，但不重发。没有收到回答的请求按“可能已发出”处理。**没有乐观状态**：接下来卡片显示什么，只看下一份文档。
-- 窗口打开期间提示已经变了，窗口会自己关闭，什么都不发。
+- **C 级窗口勾选什么。** `execute`：D 的五项（已核对的场景、限位、检查点、生效的提供方、硬件就绪情况，即它的
+  `run_confirm_warning` 点名的东西）+ 那三项。`execute_variant`：D 的策略切换检查的四项（逐个服务单元用 `systemctl --user status`、
+  策略端口用 `ss -ltnp`、`nvidia-smi`、机械臂在回位姿态）+ D 的五项 + 那三项。强制结束：那三项（D 在这里不要求任何检查）。
+  这些清单照档案自己的文本（`levi/marvel0/aeri_prompts.json`）写成，有测试在文本点名了某一项却没有对应勾选、或反过来时失败；
+  窗口里还引用 D 此刻显示的那一行，让人确认的就是这个提示。文档没有给出确认语的 C 级键绝不发送（页面不自己编，并把它当作
+  页面自己的错误说出来）。
+- 窗口打开期间提示已经变了（运行号、状态计数、提示号变了，或者提示种类不再是这个键对应的），窗口会自己关闭，什么都不发；
+  `pressKey` 本身也拒绝发送与 D 当前显示的提示不符的键。
 - 一次点击带着页面当时看到的内容（`seen`：运行号、状态计数、提示号）、这个键的一次性令牌和本标签页的编号；后端把 `seen`
   和自己此刻的状态比较，不一致就什么都不发。读取结果超过 2 秒，所有键都关闭。页面从后端的 `not_before` 取的等待最多 3 秒，所以浏览器时钟差几分钟也不会把键锁住（后端仍按自己的时间强制执行）。可见且有焦点的标签页每 5 秒向后端报一次在场
   （会让手臂动的键要求点击的标签页 15 秒内报过在场）。
 - **没有任何键盘快捷键，也没有 `accesskey`**：浏览器里误敲一个键不能放行一轮。
 - **停止**（Ctrl+C）是整行的块，高 64 px，位置固定，终端 D 活着就在，**不等新的读取**（读不到 D 的时候恰恰最需要它）。
-  它走独立的路径：没有 seen、没有令牌，从不等正在发送的键。每次运行一次；D 没有确认时后端再开放一次重试。卡片滚出视野时，
+  它走独立的路径：没有 seen、没有令牌，从不等正在发送的键。每次运行一次；D 没有确认时后端再开放一次重试。**停止之后页面怎么说，取决于
+  D 回了什么：** 在 D 确认之前（停止阶段 `sent`、`unconfirmed`、`retried`）说的是“已发送，尚未确认，手臂可能仍在运动”，并说急停
+  仍由物理急停负责；只有已确认的停止（`acked`，不管是谁发的）才说“D 正在收尾，手臂停在原处”。重启后找回的孤儿和卡住的收尾同理。
+  卡片滚出视野时，
   窗口底部的停靠条重复它。页面上的任何东西都不是急停，旁边的说明也这么写。如果页面本身卡住，用卡片上写明的
   `scripts/aeri_page_stop.py` 给 D 发一次 Ctrl+C。
-- **强制结束**默认折叠，只在 D 的收尾没有进展时才开放；窗口里是危险色按钮；单元可能会残留。
+- **强制结束**默认折叠，只在 D 的收尾没有进展时才开放；窗口里是危险色按钮和那三项勾选；单元可能会残留。
+- **页面顶部的链条**跟随 D：活着的 D 就是一次运行（它的节点按 D 的状态显示为就绪、进行中、有问题或需要看一眼，很久没读到则显示
+  过期）。后端把 D 算作活动运行（`run_active`），所以 D 活着期间手臂栈的停止和启动（阻挡原因 `run_active`）、策略服务器的部署（`aeri_run_live`）、评测客户端的启动（`no_aeri`）
+  都被拒绝；页面显示后端给出的阻挡原因。
+- **按需加载。** 第 5 步是页面在首屏之后才取的一段独立代码，外面套着一个边界：加载失败或渲染时抛错，就用一条说明替换它（指出
+  `scripts/aeri_page_stop.py` 和物理急停，用于仍在运行的 D），页面其余部分不受影响。
 
 ## 默认关闭，以及相关文件
 
-| 内容 | 位置 |
-| --- | --- |
-| 开关（默认关） | `control.toml` 的 `[aeri] enabled = false` |
-| 用哪份 AERI 代码、哪套提示词档案、路径 | `site.toml` 的 `[aeri]`（档案 `harvest-5bc750ca` 已于 10 月 18 日在真机上验证，是默认；`bfdee2cf` 没有开跑前回位；未知版本拒绝托管，绝不猜） |
-| 就绪、准备 | `levi/marvel0/aeri_ready.py`、`aeri_prep.py`、`aeri_leftovers.py`、`aeri_api.py` |
-| 托管、状态、按键 | `levi/marvel0/aeri_run.py`、`aeri_state.py`、`aeri_screen.py`、`aeri_journal.py`、`aeri_run_api.py`、`hostchild.py`（`mode: "aeri"`） |
-| 前端 | `autonomy-doc.ts`（文档与封闭集合）、`autonomy-logic.ts`（键何时可点）、`autonomy-api.ts`、`use-autonomy.ts`、`autonomy-keys.tsx`、`autonomy-run-card.tsx`、`autonomy-prepare.tsx`、`autonomy-step.tsx`、`autonomy-styles.css`，文案 `marvel0.autonomy.*` |
+| 内容                                   | 位置                                                                                                                                                                                                                                                      |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 开关（默认关）                         | `control.toml` 的 `[aeri] enabled = false`                                                                                                                                                                                                                |
+| 用哪份 AERI 代码、哪套提示词档案、路径 | `site.toml` 的 `[aeri]`（档案 `harvest-5bc750ca` 已于 10 月 18 日在真机上验证，是默认；`bfdee2cf` 没有开跑前回位；未知版本拒绝托管，绝不猜）                                                                                                              |
+| 就绪、准备                             | `levi/marvel0/aeri_ready.py`、`aeri_prep.py`、`aeri_leftovers.py`、`aeri_api.py`                                                                                                                                                                          |
+| 托管、状态、按键                       | `levi/marvel0/aeri_run.py`、`aeri_state.py`、`aeri_screen.py`、`aeri_journal.py`、`aeri_run_api.py`、`hostchild.py`（`mode: "aeri"`）                                                                                                                     |
+| 前端                                   | `autonomy-doc.ts`（文档与封闭集合）、`autonomy-logic.ts`（键何时可点）、`autonomy-api.ts`、`use-autonomy.ts`、`autonomy-keys.tsx`、`autonomy-run-card.tsx`、`autonomy-prepare.tsx`、`autonomy-step.tsx`、`autonomy-styles.css`，文案 `marvel0.autonomy.*` |
 
 ## 测试
 
@@ -228,10 +284,12 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 - `autonomy-doc.test.ts`（文档对照封闭集合）、`autonomy-logic.test.ts`（键何时可点，用真函数、不注入替身）、
   `autonomy-contract.test.ts`（路由、请求体、常量、键表）、`autonomy-catalog.test.ts`（后端命名的每个代码在两种语言里都有文案；
   中文规则；没有任何文字自称急停）、`autonomy-styles.test.ts`；
-- DOM：`autonomy-run.test.tsx`（样本里的每个状态、A 级和 B 级键、一次点击一个请求）、`autonomy-actions.test.tsx`（停止、其他键的窗口、
+- DOM：`autonomy-run.test.tsx`（样本里的每个状态、A 级和 B 级键、一次点击一个请求）、`autonomy-confirm.test.tsx`（C 级窗口的勾选，每
+  一项都必需；确认语；窗口随提示一起关闭；`pressKey` 本身）、`autonomy-poll.test.tsx`（读取频率、停靠条的监视、按需加载、边界）、
+  `autonomy-chain.test.ts`（链条的运行节点跟随 D）、`autonomy-actions.test.tsx`（停止、其他键的窗口、
   终止和卡住的状态、在场信号、关闭时、中文）、`autonomy-prepare.test.tsx`（就绪、准备、启动、实时服务和残留单元）、
   `autonomy-page.test.tsx`（页面上的挂载）；
-- `tests/marvel0/mutate_autonomy_ui.py` 在前端的临时副本里每次破坏一道门，并要求至少有一个测试失败。
+- `tests/marvel0/mutate_autonomy_ui.py` 在前端的临时副本里每次破坏一道门，并要求至少有一个测试失败（86 条；`MUTATE_CORES=16-19` 指定可用的核）。
 
 每个状态的截图（1440 和 420 px，浅色和深色，英文和中文）用 rig-console 的截图工具
 （`programs/rig-console/tools/shots/marvel0_shots.py`）在临时实例上拍摄，所有请求都由样本回答，不会碰到任何后端路由或机器人端口。
@@ -239,5 +297,5 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 ## 未验证
 
 还没有在真机上跑过。在那之前没有验证的有：页面的 pty 和 `uv` 怎样把 Ctrl+C 与挂断传给 D；上表里的数字（1.5 秒、3 秒、5 秒、
-2 秒、15 秒都是待测的猜测值）；固定代码在真机上的中文提示词措辞；`levi live stop` 的行为；本地模式在真机上；以及 AERI 的日志分不出
+2 秒、15 秒都是待测的猜测值）；勾选清单在档案已记录的版本之外的 AERI 代码上是否仍与 D 的文本一致（有测试把它们和每个档案的固定文本逐一对照，中英文都查）；固定代码在真机上的中文提示词措辞；实时服务经它自己的单元停止在真机上的表现；本地模式在真机上；以及 AERI 的日志分不出
 这是本页上的点击还是终端里的按键（只有本页自己的点击记录能分出来）。
