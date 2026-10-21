@@ -54,6 +54,7 @@ PAGE = T + "autonomy-page.test.tsx"
 CONFIRM = T + "autonomy-confirm.test.tsx"
 POLL = T + "autonomy-poll.test.tsx"
 CHAIN = T + "autonomy-chain.test.ts"
+REVIEW2 = T + "autonomy-review2.test.tsx"
 
 # (name, file, old text that occurs exactly once, new text, test files)
 MUTATIONS = [
@@ -315,8 +316,8 @@ MUTATIONS = [
     (
         "document: a readiness row with an unknown level is met",
         M + "autonomy-doc.ts",
-        "level: oneOf(READY_LEVELS, item.level) ?? UNKNOWN,",
-        'level: oneOf(READY_LEVELS, item.level) ?? "ok",',
+        "const level = oneOf(READY_LEVELS, item.level) ?? UNKNOWN;",
+        'const level = oneOf(READY_LEVELS, item.level) ?? "ok";',
         (DOC,),
     ),
     (
@@ -507,8 +508,8 @@ MUTATIONS = [
     (
         "ticks: the forced end's window is sent whatever the document's phrase",
         M + "autonomy-run-card.tsx",
-        "actions.end(run.end.phrase)",
-        'actions.end("end")',
+        ".end(run.end.phrase, attestOf(",
+        '.end("end", attestOf(',
         (CONFIRM, ACTIONS),
     ),
     (
@@ -549,8 +550,8 @@ MUTATIONS = [
     (
         "prompt: the window does not quote D's screen line",
         M + "autonomy-keys.tsx",
-        '        line && key?.level === "C" ? (',
-        "        false ? (",
+        '{line && key?.level === "C" && (',
+        "{false && (",
         (CONFIRM,),
     ),
     # --- review R10 #10: what is said after a Stop ----------------------------------
@@ -681,6 +682,210 @@ MUTATIONS = [
         "    onRun?.(fact);",
         "",
         (POLL, PAGE),
+    ),
+    # --- the second round of reviews (SAFETY N2, N3, N5, N6, N11) --------------------
+    (
+        "r2 stop: a retry that is not offered is shown as offered",
+        M + "autonomy-logic.ts",
+        """        ? seen.allowed
+          ? "retry"
+          : "unoffered"
+""",
+        """        ? "retry"
+""",
+        (LOGIC, REVIEW2),
+    ),
+    (
+        "r2 stop: a Stop the backend does not offer is called ready",
+        M + "autonomy-logic.ts",
+        """      ? seen.allowed || lockedHere
+        ? "ready"
+        : "off"
+""",
+        """      ? "ready"
+""",
+        (LOGIC, REVIEW2),
+    ),
+    (
+        "r2 stop: the caption of a Stop that is off leaves out the reason",
+        M + "autonomy-run-card.tsx",
+        """        {t("marvel0.autonomy.stop.off")} <StopReason poll={poll} />""",
+        """        {t("marvel0.autonomy.stop.off")}""",
+        (REVIEW2, RUN),
+    ),
+    (
+        "r2 stop: a run another core owns is worded with the start refusal's sentence",
+        M + "autonomy-logic.ts",
+        'const STOP_WHY = new Set(["stop_spent", "driven_elsewhere", "d_gone"]);',
+        'const STOP_WHY = new Set(["stop_spent", "d_gone"]);',
+        (LOGIC, REVIEW2, RUN),
+    ),
+    (
+        "r2 stop: the sentence under the badge promises a retry that is not offered",
+        M + "autonomy-logic.ts",
+        '        : phase === "unconfirmed" && !stopAllowed\n',
+        "        : false\n",
+        (LOGIC, REVIEW2),
+    ),
+    (
+        "r2 stop: the card does not tell the sentence whether a Stop is offered",
+        M + "autonomy-run-card.tsx",
+        "                  run.stop.allowed,\n",
+        "",
+        (REVIEW2,),
+    ),
+    (
+        "r2 stop: the dock does not say why its Stop is off",
+        M + "autonomy-step.tsx",
+        '{mode === "off" || mode === "unoffered" ? (',
+        "{false ? (",
+        (REVIEW2,),
+    ),
+    (
+        "r2 stop: the document's reason code is not read",
+        M + "autonomy-doc.ts",
+        "      whyCode: whyCodeOf(stop?.why_not),",
+        "      whyCode: null,",
+        (LOGIC, REVIEW2),
+    ),
+    (
+        "r2 release: the round is released without D's own check (the scene is ready)",
+        M + "autonomy-logic.ts",
+        '  if (id === "release_round") return TERMINAL_CHECKS.release.map(terminalCheck);\n',
+        "",
+        (LOGIC, REVIEW2, RUN),
+    ),
+    (
+        "r2 release: the window explains D's five and the stack's three, not the one check",
+        M + "autonomy-keys.tsx",
+        """                key?.id === "release_round"
+                  ? "marvel0.autonomy.confirm.checks_release"
+                  : "marvel0.autonomy.confirm.checks",""",
+        """                "marvel0.autonomy.confirm.checks",""",
+        (REVIEW2,),
+    ),
+    (
+        "r2 phrase: the window does not quote what D printed above the prompt",
+        M + "autonomy-keys.tsx",
+        "      ? promptContext(run)\n",
+        "      ? []\n",
+        (REVIEW2,),
+    ),
+    (
+        "r2 phrase: the quote is cut to five lines",
+        M + "autonomy-logic.ts",
+        "export const CONTEXT_LINES = 30;",
+        "export const CONTEXT_LINES = 5;",
+        (LOGIC, REVIEW2),
+    ),
+    (
+        "r2 attest: a key with ticks is sent without them",
+        M + "use-autonomy.ts",
+        '              key.level === "C" ? phrase : undefined,\n              attest,\n',
+        '              key.level === "C" ? phrase : undefined,\n',
+        (CONFIRM, RUN, REVIEW2),
+    ),
+    (
+        "r2 attest: the forced end is sent without them",
+        M + "use-autonomy.ts",
+        "api.end(endBody(id, phrase, attest))",
+        "api.end(endBody(id, phrase))",
+        (CONFIRM, ACTIONS),
+    ),
+    (
+        "r2 attest: a partial list of ticks is sent",
+        M + "autonomy-logic.ts",
+        "  return required.every((code) => ticked[code] === true) ? required : null;",
+        "  return required.filter((code) => ticked[code] === true);",
+        (LOGIC, CONFIRM),
+    ),
+    (
+        "r2 attest: pressKey sends a key with fewer ticks than it needs",
+        M + "use-autonomy.ts",
+        '      if (!attestComplete(key.id, attest)) return refuse("attest_incomplete");\n',
+        "",
+        (CONFIRM,),
+    ),
+    (
+        "r2 attest: the window forgets what was ticked",
+        M + "autonomy-keys.tsx",
+        "        const attest = attestOf(key.id, ticked) ?? undefined;",
+        "        const attest = undefined;",
+        (CONFIRM, RUN, REVIEW2),
+    ),
+    (
+        "r2 off: the step says 'nothing acts' while a D runs",
+        M + "autonomy-step.tsx",
+        """                  runLive
+                    ? "marvel0.autonomy.disabled.live"
+                    : disabledKey(ready.value?.controlState),""",
+        """                  disabledKey(ready.value?.controlState),""",
+        (REVIEW2,),
+    ),
+    (
+        "r2 off: a key that moves the arm stays on when hosting is switched off mid-run",
+        M + "autonomy-logic.ts",
+        '  if (!run.enabled && key.motion !== "none") return off(local("switched_off"));\n',
+        "",
+        (REVIEW2, LOGIC),
+    ),
+    (
+        "r2 off: the run document's own switch is not read by the step",
+        M + "autonomy-step.tsx",
+        "    runView?.enabled === false ||\n",
+        "",
+        (REVIEW2,),
+    ),
+    (
+        "r2 load: the note that replaces Step 5 does not name the command",
+        M + "autonomy-lazy.tsx",
+        "{STOP_SCRIPT_COMMAND}",
+        "",
+        (POLL,),
+    ),
+    (
+        "r2 load: the note does not say what the script needs",
+        M + "autonomy-lazy.tsx",
+        '        <p>{t("marvel0.autonomy.load_failed_needs")}</p>\n',
+        "",
+        (POLL,),
+    ),
+    (
+        "r2 unit: every unit_timeout row is worded as the warning",
+        M + "autonomy-doc.ts",
+        '  if (level === "ok") return "unit_timeout.ok";\n',
+        "",
+        (REVIEW2, CATALOG),
+    ),
+    (
+        "r2 unit: the unit_timeout row is not a known code",
+        M + "autonomy-doc.ts",
+        '  "stack_ready",\n  "unit_timeout",\n] as const;',
+        '  "stack_ready",\n] as const;',
+        (CATALOG,),
+    ),
+    (
+        "r2 attest: the page's tick for the release of a round is renamed",
+        M + "autonomy-logic.ts",
+        '  release: ["scene_ready"],',
+        '  release: ["scene_set"],',
+        (CONTRACT, LOGIC),
+    ),
+    (
+        "r2 attest: the backend holds the forced end to the start's checks",
+        "levi/marvel0/aeri_state.py",
+        '    "end": WINDOW_ATTEST,',
+        '    "end": START_ATTEST,',
+        (CONTRACT,),
+    ),
+    (
+        "r2 stop: a D the page cannot follow is said to be another core's, with no Stop",
+        M + "autonomy-logic.ts",
+        """    return stopAllowed
+      ? "marvel0.autonomy.hint.unknown_unfollowed"
+      : "marvel0.autonomy.hint.unknown_other_core";""",
+        """    return "marvel0.autonomy.hint.unknown_other_core";""",
+        (LOGIC, REVIEW2),
     ),
     # --- the form --------------------------------------------------------------------
     (
