@@ -3,7 +3,7 @@
 
     fake_oneshot.py gripper POSITION MODE   (MODE: ok | stalled | silent | hang)
     fake_oneshot.py controllers MODE ALIVE  (MODE: ok | inactive | none | silent |
-                                             hang; the controllers are listed only
+                                             hang | flaky-once; the controllers are listed only
                                              while the file ALIVE exists: the
                                              gripper stack is up. Without it the
                                              command does what the real one does
@@ -14,7 +14,10 @@
                                              its warning; ``hang`` is not ended by
                                              anything but the caller's backstop;
                                              ``none`` is a manager with nothing
-                                             loaded)
+                                             loaded; ``flaky-once`` gets no answer
+                                             the first time it is asked while the
+                                             gripper stack is up, as the first real
+                                             run did, and answers after that)
     fake_oneshot.py ee MODE                 (MODE: ok | fail)
 
 The output is the real programs': the rows of ``list_controllers`` are the
@@ -65,7 +68,11 @@ if kind == "gripper":
     )
 elif kind == "controllers":
     mode, alive = rest
-    if not os.path.exists(alive):
+    listed = os.path.exists(alive)
+    if mode == "flaky-once" and listed and not os.path.exists(alive + ".asked"):
+        open(alive + ".asked", "w").close()
+        listed = False  # (no answer this once)
+    if not listed:
         # (the real command is ended by SIGINT from `timeout` or from systemd)
         signal.signal(signal.SIGINT, lambda *args: sys.exit(2))
         waiting = (

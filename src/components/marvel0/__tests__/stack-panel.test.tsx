@@ -1,6 +1,7 @@
 import { act } from "react";
 import {
   click,
+  press,
   render,
   setupDom,
   waitFor,
@@ -14,7 +15,14 @@ import { marvel0View } from "../marvel0-logic";
 import { StackPanel } from "../stack-panel";
 import type { StackApi } from "../stack-api";
 import { useStackPoll } from "../use-stack-poll";
-import { button, tick, type } from "./actions-helpers";
+import {
+  button,
+  doubleClick,
+  textFields,
+  tick,
+  tickAll,
+  type,
+} from "./actions-helpers";
 import { STACK_ANSWERS, STACK_REFUSALS, stackDoc } from "./ctl-fixtures";
 import { quietMarvel0, quietSetup } from "./fixtures";
 
@@ -74,6 +82,7 @@ function fake(initial: Doc) {
     preflight: write("preflight") as StackApi["preflight"],
     gripper: write("gripper") as StackApi["gripper"],
     sequence: write("sequence") as StackApi["sequence"],
+    sequenceStop: write("sequenceStop") as StackApi["sequenceStop"],
     sequenceCancel: write("sequenceCancel") as StackApi["sequenceCancel"],
     log: async () => errorOf(404, {}),
   };
@@ -358,7 +367,7 @@ describe("outside the product, or with the controls off or unread, nothing can b
 });
 
 describe("starting a terminal", () => {
-  test("the dialog says what the action does, asks the checks of the person and the phrase, and sends one request", async () => {
+  test("the confirm window says what the action does, asks the ticks, has Cancel in focus and sends one request on a double click", async () => {
     const { host, state } = await open(stackDoc("ready_to_start_a"));
     await click(button(comp(host, "A"), "Start")!);
     const d = dialog(host)!;
@@ -368,25 +377,27 @@ describe("starting a terminal", () => {
     expect(text(d)).toContain(en["marvel0.ctl.hazard.start_A"]);
     expect(text(d)).toContain(en["marvel0.stack.gates_scope"]);
     expect(text(d)).toContain(en["marvel0.ctl.unverified"]);
-    // No control in the dialog is called an emergency stop.
+    // No control in the window is called an emergency stop.
     for (const b of d.querySelectorAll("button"))
       expect(b.textContent).not.toMatch(/e-?stop|emergency/i);
+    // Nothing is typed and nothing asks for a phrase; Cancel has the focus, so
+    // a stray Enter cancels.
+    expect(textFields(d)).toHaveLength(0);
+    expect(text(d)).not.toMatch(/type exactly|confirmation phrase/i);
+    expect(document.activeElement).toBe(button(d, "Cancel"));
     const go = () => button(d, "Start")!;
     expect(go().disabled).toBe(true);
-    await type(
-      d.querySelector("input[type=text], input:not([type])"),
-      "start arm stack",
-    );
-    expect(go().disabled).toBe(true); // the checks are not ticked
     await tickBox(d, /Desk is done/);
-    expect(go().disabled).toBe(true);
+    expect(go().disabled).toBe(true); // one check is still not ticked
     await tickBox(d, /hand is on the physical e-stop/);
     expect(go().disabled).toBe(false);
-    await click(go());
+    await doubleClick(go());
     await tick(3, 10);
     expect(state.calls).toHaveLength(1);
     expect(state.calls[0]).toMatchObject({ op: "start", comp: "A" });
-    expect(state.calls[0].body).toMatchObject({
+    // The page sent the fixed phrase of the catalogue itself.
+    expect(state.calls[0].body).toEqual({
+      request_id: expect.any(String),
       confirm: "start arm stack",
       attest: { desk_done: true, estop_hand: true },
     });
@@ -396,21 +407,31 @@ describe("starting a terminal", () => {
     expect(dialog(host)).toBeNull();
   });
 
-  test("the phrase must be typed exactly", async () => {
+  test("Cancel, Escape and the backdrop close the window and send nothing; a tick does not outlive its window", async () => {
     const { host, state } = await open(stackDoc("ready_to_start_a"));
-    await click(button(comp(host, "A"), "Start")!);
-    const d = dialog(host)!;
-    await tickBox(d, /Desk is done/);
-    await tickBox(d, /hand is on the physical e-stop/);
-    for (const wrong of [
-      "start arm",
-      "Start arm stack",
-      "start arm stacks",
-      "stop arm stack",
-    ]) {
-      await type(d.querySelector("input:not([type=checkbox])"), wrong);
-      expect(button(d, "Start")!.disabled).toBe(true);
-    }
+    const a = comp(host, "A");
+    await click(button(a, "Start")!);
+    await tickAll(dialog(host)!);
+    expect(button(dialog(host)!, "Start")!.disabled).toBe(false);
+    await click(button(dialog(host)!, "Cancel")!);
+    expect(dialog(host)).toBeNull();
+    // Opened again, nothing is ticked.
+    await click(button(a, "Start")!);
+    expect(
+      Array.from(
+        dialog(host)!.querySelectorAll<HTMLInputElement>(
+          "input[type=checkbox]",
+        ),
+      ).map((box) => box.checked),
+    ).toEqual([false, false]);
+    expect(button(dialog(host)!, "Start")!.disabled).toBe(true);
+    await press(document.activeElement, "Escape");
+    expect(dialog(host)).toBeNull();
+    await click(button(a, "Start")!);
+    await click(host.ownerDocument.querySelector(".ds-scrim"));
+    expect(dialog(host)).toBeNull();
+    // A stray Enter on the focused Cancel cancels: Cancel is a button, and
+    // the click an Enter makes on it is the one that closed the window above.
     expect(state.calls).toHaveLength(0);
   });
 
@@ -423,17 +444,16 @@ describe("starting a terminal", () => {
       });
     await click(button(comp(host, "A"), "Start")!);
     const d = dialog(host)!;
-    await type(
-      d.querySelector("input:not([type=checkbox])"),
-      "start arm stack",
-    );
-    await tickBox(d, /Desk is done/);
-    await tickBox(d, /hand is on the physical e-stop/);
+    await tickAll(d);
     await click(button(d, "Start")!);
     expect(state.calls).toHaveLength(1);
     // The write is open: the card says it is working, and no other control acts.
     expect(host.querySelector("[data-testid=marvel0-working]")).not.toBeNull();
     expect(button(comp(host, "M"), "Start")!.disabled).toBe(true);
+    // The window cannot be left, nor the request sent twice, while it is on its way.
+    expect(button(d, "Cancel")!.disabled).toBe(true);
+    await click(button(d, "Start")!);
+    expect(state.calls).toHaveLength(1);
     await act(async () =>
       release({ ok: true, status: 202, data: { done: "started" } }),
     );
@@ -452,13 +472,7 @@ describe("starting a terminal", () => {
         button(comp(host, "A"), lang ? zh["marvel0.ctl.btn.start"] : "Start")!,
       );
       const d = dialog(host)!;
-      await type(
-        d.querySelector("input:not([type=checkbox])"),
-        "start arm stack",
-      );
-      for (const label of d.querySelectorAll("label"))
-        if (label.querySelector("input[type=checkbox]"))
-          await click(label.querySelector("input")!);
+      await tickAll(d);
       await click(button(d, lang ? zh["marvel0.ctl.btn.start"] : "Start")!);
       await tick(3, 10);
       const refusedEl = host.querySelector("[data-testid=marvel0-refused]")!;
@@ -486,13 +500,7 @@ describe("starting a terminal", () => {
       });
     await click(button(comp(host, "A"), "Start")!);
     const d = dialog(host)!;
-    await type(
-      d.querySelector("input:not([type=checkbox])"),
-      "start arm stack",
-    );
-    for (const label of d.querySelectorAll("label"))
-      if (label.querySelector("input[type=checkbox]"))
-        await click(label.querySelector("input")!);
+    await tickAll(d);
     await click(button(d, "Start")!);
     await tick(3, 10);
     expect(text(host.querySelector("[data-testid=marvel0-refused]"))).toContain(
@@ -500,19 +508,43 @@ describe("starting a terminal", () => {
     );
   });
 
+  test("the backend refusing the phrase is an internal error with the mismatch, not a prompt to type", async () => {
+    const { host, state } = await open(stackDoc("ready_to_start_a"));
+    state.answer = () =>
+      errorOf(400, {
+        detail: {
+          code: "confirm_required",
+          message: "Type the confirmation phrase exactly: start arm stack",
+          phrase: "start arm stack v2",
+        },
+      });
+    await click(button(comp(host, "A"), "Start")!);
+    await tickAll(dialog(host)!);
+    await click(button(dialog(host)!, "Start")!);
+    await tick(3, 10);
+    // The window stays so that the error is read; it has no field to type in.
+    const d = dialog(host)!;
+    expect(textFields(d)).toHaveLength(0);
+    const refused = d.querySelector(
+      "[data-testid=marvel0-ctl-dialog-refused]",
+    )!;
+    expect(refused.getAttribute("data-code")).toBe("confirm_required");
+    expect(refused.getAttribute("data-internal")).toBe("true");
+    expect(text(refused)).toContain(en["marvel0.ctl.confirm.internal"]);
+    expect(text(refused)).toContain("The server expects: start arm stack v2");
+    expect(text(refused)).not.toMatch(/type|typed/i);
+    expect(text(refused)).not.toContain("Type the confirmation phrase");
+    expect(state.calls).toHaveLength(1);
+  });
+
   test("with no answer at all the next press repeats the same request id", async () => {
     const { host, state } = await open(stackDoc("ready_to_start_a"));
     state.answer = () => errorOf(0, {}) as ApiResult;
     const send = async () => {
-      await click(button(comp(host, "A"), "Start")!);
+      // (the window stays open after a send without an answer, or is opened)
+      if (!dialog(host)) await click(button(comp(host, "A"), "Start")!);
       const d = dialog(host)!;
-      await type(
-        d.querySelector("input:not([type=checkbox])"),
-        "start arm stack",
-      );
-      for (const label of d.querySelectorAll("label"))
-        if (label.querySelector("input[type=checkbox]"))
-          await click(label.querySelector("input")!);
+      await tickAll(d);
       await click(button(d, "Start")!);
       await tick(3, 10);
     };
@@ -528,7 +560,7 @@ describe("starting a terminal", () => {
 });
 
 describe("the other writes", () => {
-  test("stopping C with a client on it asks for the override phrase as well", async () => {
+  test("stopping C with a client on it keeps the one typed override; the base phrase is the page's", async () => {
     const { host, state } = await open(stackDoc("c_ready_with_client"));
     const stop = button(comp(host, "C"), en["marvel0.ctl.btn.stop_C"])!;
     expect(stop.disabled).toBe(false);
@@ -537,21 +569,63 @@ describe("the other writes", () => {
     expect(text(d)).toContain(en["marvel0.ctl.hazard.stop_C"]);
     expect(text(d)).toContain(en["marvel0.ctl.dialog.client_on_server"]);
     const confirm = () => button(d, "Stop")!;
-    const inputs = () =>
-      Array.from(
-        d.querySelectorAll<HTMLInputElement>("input:not([type=checkbox])"),
-      );
-    await type(inputs()[0], "stop robot server");
+    // The override is the only field, and Cancel has the focus.
+    expect(textFields(d)).toHaveLength(1);
+    expect(document.activeElement).toBe(button(d, "Cancel"));
     expect(confirm().disabled).toBe(true);
-    await type(inputs()[1], "stop robot server with client connected");
+    await type(textFields(d)[0], "stop robot server");
+    expect(confirm().disabled).toBe(true); // the base phrase is not the override
+    await type(textFields(d)[0], "stop robot server with client connected");
     expect(confirm().disabled).toBe(false);
-    await click(confirm());
+    await doubleClick(confirm());
     await tick(3, 10);
+    expect(state.calls).toHaveLength(1);
     expect(state.calls[0]).toMatchObject({ op: "stop", comp: "C" });
-    expect(state.calls[0].body).toMatchObject({
+    expect(state.calls[0].body).toEqual({
+      request_id: expect.any(String),
       confirm: "stop robot server",
       client_override: "stop robot server with client connected",
     });
+  });
+
+  test("stopping C without a client has nothing to type: the override stays out of the window", async () => {
+    const { host, state } = await open(stackDoc("c_ready"));
+    await click(button(comp(host, "C"), en["marvel0.ctl.btn.stop_C"])!);
+    const d = dialog(host)!;
+    expect(text(d)).toContain(en["marvel0.ctl.hazard.stop_C"]);
+    expect(textFields(d)).toHaveLength(0);
+    await click(button(d, "Stop")!);
+    await tick(3, 10);
+    expect(state.calls[0].body).toEqual({
+      request_id: expect.any(String),
+      confirm: "stop robot server",
+      client_override: "",
+    });
+  });
+
+  test("a client that appears after the window opened: the refusal asks for the override, which is then typed", async () => {
+    const { host, state } = await open(stackDoc("c_ready"));
+    state.answer = (call) =>
+      (call.body as { client_override: string }).client_override
+        ? { ok: true, status: 202, data: { done: "stopping" } }
+        : errorOf(409, {
+            detail: {
+              code: "client_connected",
+              message: "A client",
+              port: 5056,
+            },
+          });
+    await click(button(comp(host, "C"), en["marvel0.ctl.btn.stop_C"])!);
+    await click(button(dialog(host)!, "Stop")!);
+    await tick(3, 10);
+    const d = dialog(host)!;
+    expect(textFields(d)).toHaveLength(1);
+    expect(button(d, "Stop")!.disabled).toBe(true);
+    await type(textFields(d)[0], "stop robot server with client connected");
+    await click(button(d, "Stop")!);
+    await tick(3, 10);
+    expect(state.calls).toHaveLength(2);
+    expect(dialog(host)).toBeNull();
   });
 
   test("the gripper test is a tick and a click and sends the page's phrase", async () => {
@@ -561,12 +635,14 @@ describe("the other writes", () => {
     ) as HTMLElement;
     await click(button(test_, "Open gripper")!);
     const d = dialog(host)!;
-    expect(d.querySelectorAll("input:not([type=checkbox])")).toHaveLength(0);
+    expect(textFields(d)).toHaveLength(0);
+    expect(document.activeElement).toBe(button(d, "Cancel"));
     expect(text(d)).toContain(en["marvel0.ctl.hazard.gripper"]);
     expect(button(d, "Open gripper")!.disabled).toBe(true);
     await tickBox(d, /Hands and objects are clear/);
-    await click(button(d, "Open gripper")!);
+    await doubleClick(button(d, "Open gripper")!);
     await tick(3, 10);
+    expect(state.calls).toHaveLength(1);
     expect(state.calls[0]).toMatchObject({ op: "gripper" });
     expect(state.calls[0].body).toMatchObject({
       action: "open",
@@ -588,7 +664,7 @@ describe("the other writes", () => {
     expect(text(last)).toContain("stalled");
   });
 
-  test("A's FCI check and the checks before C are one click, no dialog", async () => {
+  test("A's FCI check and the checks before C are one click, no window", async () => {
     const { host, state } = await open(stackDoc("idle"));
     await click(button(comp(host, "A"), "Check FCI")!);
     await tick(3, 10);
@@ -602,7 +678,7 @@ describe("the other writes", () => {
     expect(c.state.calls[0]).toMatchObject({ op: "preflight", comp: "C" });
   });
 
-  test("the marker: the countdown, adopt, set", async () => {
+  test("the marker: the countdown, adopt, set, release; each one click and a window, nothing typed", async () => {
     const young = stackDoc("idle", (doc) => {
       doc.act.marker = {
         state: "present",
@@ -637,7 +713,8 @@ describe("the other writes", () => {
     );
     await click(button(foreign.host, "Adopt marker")!);
     const d = dialog(foreign.host)!;
-    expect(d.querySelectorAll("input:not([type=checkbox])")).toHaveLength(0);
+    expect(textFields(d)).toHaveLength(0);
+    expect(document.activeElement).toBe(button(d, "Cancel"));
     await click(button(d, "Adopt marker")!);
     await tick(3, 10);
     expect(foreign.state.calls[0]).toMatchObject({ op: "marker" });
@@ -655,36 +732,995 @@ describe("the other writes", () => {
     });
   });
 
-  test("the guided start asks A's checks and A's phrase; while it waits for B the Start of B is marked", async () => {
+  test("releasing the marker is a window with a danger Confirm, and no phrase to type", async () => {
+    // (offered when A is gone and the arm shows no control connection)
+    const { host, state } = await open(stackDoc("ready_to_start_a"));
+    await click(button(host, "Release marker")!);
+    const d = dialog(host)!;
+    expect(textFields(d)).toHaveLength(0);
+    expect(document.activeElement).toBe(button(d, "Cancel"));
+    const go = button(d, "Release marker")!;
+    expect(go.className).toContain("ds-btn--danger");
+    await doubleClick(go);
+    await tick(3, 10);
+    expect(state.calls).toHaveLength(1);
+    expect(state.calls[0].body).toMatchObject({
+      op: "release",
+      confirm: "clear marker",
+    });
+  });
+
+  test("the whole stack's start is one window: every hazard line and every check of A, B and C, the pause switch off, the page's phrase, nothing to type", async () => {
     const { host, state } = await open(stackDoc("idle"));
     await click(button(host, "Start whole stack")!);
     const d = dialog(host)!;
-    expect(text(d)).toContain(en["marvel0.ctl.hazard.sequence"]);
-    await type(
-      d.querySelector("input:not([type=checkbox])"),
-      "start arm stack",
+    // The sentences of the three single starts, all of them, and the e-stop.
+    for (const key of [
+      "marvel0.ctl.hazard.sequence_through",
+      "marvel0.ctl.hazard.start_A",
+      "marvel0.ctl.hazard.start_B",
+      "marvel0.ctl.hazard.start_C_sag",
+      "marvel0.ctl.hazard.start_C_port",
+    ])
+      expect(text(d)).toContain(en[key as keyof typeof en]);
+    expect(text(d)).toContain(en["marvel0.ctl.estop"]);
+    expect(text(d)).toContain(en["marvel0.stack.gates_scope"]);
+    expect(text(d)).toContain(en["marvel0.ctl.unverified"]);
+    // Four checks, the pause is a switch and not one of them.
+    const boxes = Array.from(
+      d.querySelectorAll<HTMLInputElement>(
+        "input[type=checkbox]:not([role=switch])",
+      ),
     );
-    for (const label of d.querySelectorAll("label"))
-      if (label.querySelector("input[type=checkbox]"))
-        await click(label.querySelector("input")!);
+    expect(boxes).toHaveLength(4);
+    for (const label of ["desk_done", "estop_hand", "hands_clear", "no_client"])
+      expect(text(d)).toContain(
+        en[`marvel0.ctl.attest.${label}` as keyof typeof en],
+      );
+    const pause = d.querySelector<HTMLInputElement>("input[role=switch]")!;
+    expect(pause.checked).toBe(false);
+    expect(text(d)).toContain(en["marvel0.ctl.dialog.sequence_pause"]);
+    expect(textFields(d)).toHaveLength(0);
+    expect(document.activeElement).toBe(button(d, "Cancel"));
+    // No Confirm until every check is ticked; the switch does not count.
+    expect(button(d, "Start whole stack")!.disabled).toBe(true);
+    await click(pause);
+    expect(button(d, "Start whole stack")!.disabled).toBe(true);
+    await click(pause);
+    await tickAll(d);
+    expect(pause.checked).toBe(false);
+    expect(button(d, "Start whole stack")!.disabled).toBe(false);
+    await doubleClick(button(d, "Start whole stack")!);
+    await tick(3, 10);
+    expect(state.calls).toHaveLength(1);
+    expect(state.calls[0]).toMatchObject({ op: "sequence" });
+    expect(state.calls[0].body).toEqual({
+      request_id: expect.any(String),
+      confirm: "start arm stack",
+      attest: {
+        desk_done: true,
+        estop_hand: true,
+        hands_clear: true,
+        no_client: true,
+      },
+      through: "c",
+      pause_before_b: false,
+      pause_before_c: false,
+    });
+  });
+
+  test("with the pause switched on it is sent, and the switch is off again at the next opening", async () => {
+    const { host, state } = await open(stackDoc("idle"));
+    await click(button(host, "Start whole stack")!);
+    let d = dialog(host)!;
+    await tickAll(d);
+    await click(d.querySelector("input[role=switch]")!);
     await click(button(d, "Start whole stack")!);
     await tick(3, 10);
-    expect(state.calls[0]).toMatchObject({ op: "sequence" });
+    expect(state.calls).toHaveLength(1);
     expect(state.calls[0].body).toMatchObject({
-      confirm: "start arm stack",
-      attest: { desk_done: true, estop_hand: true },
+      through: "c",
+      pause_before_b: true,
+      pause_before_c: true,
     });
+    // A cancelled window keeps nothing: ticks and the switch are fresh.
+    state.calls.length = 0;
+    await click(button(host, "Start whole stack")!);
+    d = dialog(host)!;
+    await click(d.querySelector("input[role=switch]")!);
+    await click(button(d, "Cancel")!);
+    await click(button(host, "Start whole stack")!);
+    d = dialog(host)!;
+    expect(
+      d.querySelector<HTMLInputElement>("input[role=switch]")!.checked,
+    ).toBe(false);
+    expect(
+      Array.from(
+        d.querySelectorAll<HTMLInputElement>(
+          "input[type=checkbox]:not([role=switch])",
+        ),
+      ).every((box) => !box.checked),
+    ).toBe(true);
+    expect(state.calls).toHaveLength(0);
+  });
+
+  test("a start that waits for B and C (the pause was on) leaves their Start to the person, with its own window; Cancel ends it", async () => {
     const waiting = await open(stackDoc("sequence_waiting_b"));
     expect(
       text(waiting.host.querySelector("[data-testid=marvel0-sequence-wait]")),
     ).toContain("Gripper stack (B)");
     expect(comp(waiting.host, "B").getAttribute("data-next")).toBe("true");
     expect(comp(waiting.host, "C").getAttribute("data-next")).toBeNull();
-    // The guided start never starts B or C by itself: its Start is the person's.
+    // The guided start never starts B or C by itself: its Start is the person's,
+    // and it has its own window.
     expect(button(comp(waiting.host, "B"), "Start")!.disabled).toBe(false);
+    await click(button(comp(waiting.host, "B"), "Start")!);
+    expect(dialog(waiting.host)).not.toBeNull();
+    expect(textFields(dialog(waiting.host)!)).toHaveLength(0);
+    await click(button(dialog(waiting.host)!, "Cancel")!);
     await click(button(waiting.host, "Cancel guided start")!);
     await tick(3, 10);
     expect(waiting.state.calls[0]).toMatchObject({ op: "sequenceCancel" });
+  });
+});
+
+describe("no window of the arm stack asks for a typed phrase", () => {
+  // Every start, stop, marker and gripper window, with the stack in the state
+  // in which its button is on: ticks and a click, nothing to type. The one
+  // field that exists is the override of a stop of C with a client on it.
+  const cases: Array<{
+    name: string;
+    view: string;
+    open: (host: HTMLElement) => Promise<void> | void;
+    fields: number;
+    change?: (doc: Record<string, any>) => void; // eslint-disable-line @typescript-eslint/no-explicit-any
+  }> = [
+    {
+      name: "start M",
+      view: "idle",
+      fields: 0,
+      open: (h) => click(button(comp(h, "M"), "Start")!),
+    },
+    {
+      name: "start A",
+      view: "ready_to_start_a",
+      fields: 0,
+      open: (h) => click(button(comp(h, "A"), "Start")!),
+    },
+    {
+      name: "start B",
+      view: "a_ready",
+      fields: 0,
+      open: (h) => click(button(comp(h, "B"), "Start")!),
+    },
+    {
+      name: "start C",
+      view: "c_stopped_arm_held",
+      fields: 0,
+      open: (h) => click(button(comp(h, "C"), "Start")!),
+    },
+    {
+      name: "stop M",
+      view: "monitor_ready",
+      fields: 0,
+      open: (h) => click(button(comp(h, "M"), "Stop")!),
+    },
+    {
+      name: "stop A",
+      view: "a_ready",
+      fields: 0,
+      open: (h) => click(button(comp(h, "A"), en["marvel0.ctl.btn.stop_A"])!),
+    },
+    {
+      name: "stop B",
+      view: "b_ready",
+      fields: 0,
+      open: (h) => click(button(comp(h, "B"), "Stop")!),
+    },
+    {
+      name: "stop C",
+      view: "c_ready",
+      fields: 0,
+      open: (h) => click(button(comp(h, "C"), en["marvel0.ctl.btn.stop_C"])!),
+    },
+    {
+      name: "stop C with a client (the override)",
+      view: "c_ready_with_client",
+      fields: 1,
+      open: (h) => click(button(comp(h, "C"), en["marvel0.ctl.btn.stop_C"])!),
+    },
+    {
+      name: "gripper close",
+      view: "b_ready",
+      fields: 0,
+      open: (h) => click(button(h, "Close gripper")!),
+    },
+    {
+      name: "set marker",
+      view: "idle",
+      fields: 0,
+      open: (h) => click(button(h, "Set marker")!),
+    },
+    {
+      name: "whole stack",
+      view: "idle",
+      fields: 0,
+      open: (h) => click(button(h, "Start whole stack")!),
+    },
+    {
+      name: "stop whole stack",
+      view: "stop_all_ready",
+      fields: 0,
+      open: (h) => click(button(h, "Stop whole stack")!),
+    },
+  ];
+  for (const c of cases)
+    test(c.name, async () => {
+      const { host, state } = await open(stackDoc(c.view, c.change));
+      await c.open(host);
+      const d = dialog(host)!;
+      expect(d).not.toBeNull();
+      expect(textFields(d)).toHaveLength(c.fields);
+      expect(document.activeElement).toBe(button(d, "Cancel"));
+      expect(state.calls).toHaveLength(0);
+      // Nothing in the window reads as a prompt to type.
+      expect(text(d)).not.toMatch(/Confirmation phrase|Type the phrase/);
+    });
+});
+
+describe("Stop whole stack", () => {
+  const stopAll = (host: HTMLElement) =>
+    host.querySelector<HTMLButtonElement>("[data-testid=marvel0-stop-all]")!;
+  const progress = (host: HTMLElement) =>
+    host.querySelector("[data-testid=marvel0-sequence-progress]");
+
+  test("it sits beside Start whole stack in step 1 and is on exactly when the backend says so", async () => {
+    const on = await open(stackDoc("stop_all_ready"));
+    const block = on.host.querySelector("[data-testid=marvel0-sequence]")!;
+    // Same row of buttons as Start whole stack.
+    expect(stopAll(on.host).closest(".rg-comp__buttons")).toBe(
+      button(on.host, "Start whole stack")!.closest(".rg-comp__buttons"),
+    );
+    expect(block.contains(stopAll(on.host))).toBe(true);
+    expect(stopAll(on.host).textContent).toBe("Stop whole stack");
+    expect(stopAll(on.host).disabled).toBe(false);
+    expect(
+      on.host.querySelector("[data-testid=marvel0-block-stop-all]"),
+    ).toBeNull();
+    // Stopping ends programs: the outlined danger button, never a solid one.
+    expect(stopAll(on.host).className).toContain("rg-btn--danger-outline");
+    expect(stopAll(on.host).className).not.toContain("ds-btn--danger ");
+    // Nothing of ours runs: off, and the backend's reason is beside it.
+    const off = await open(stackDoc("stop_all_nothing"));
+    expect(stopAll(off.host).disabled).toBe(true);
+    const why = off.host.querySelector("[data-testid=marvel0-block-stop-all]")!;
+    expect(text(why)).toContain("Stop whole stack is off:");
+    expect(text(why)).toContain(en["marvel0.ctl.block.nothing_to_stop"]);
+    // A client on C: the reason names the port and says there is no override.
+    const blocked = await open(stackDoc("stop_all_blocked"));
+    expect(stopAll(blocked.host).disabled).toBe(true);
+    const client = text(
+      blocked.host.querySelector("[data-testid=marvel0-block-stop-all]"),
+    );
+    expect(client).toContain("on port 5000");
+    expect(client).toContain("no override phrase");
+  });
+
+  test("the window lists what it stops in order, says plainly what the arm does, and asks nothing to type or tick", async () => {
+    const { host, state } = await open(stackDoc("stop_all_ready"));
+    await click(stopAll(host));
+    const d = dialog(host)!;
+    expect(text(d)).toContain("Stop the whole stack");
+    expect(text(d)).toContain(en["marvel0.ctl.dialog.stop_all_intro"]);
+    // C, then A, then B; M stays.
+    const order = text(
+      d.querySelector("[data-testid=marvel0-ctl-dialog-hazards]"),
+    );
+    expect(order).toContain(en["marvel0.ctl.hazard.stop_all_order"]);
+    expect(en["marvel0.ctl.hazard.stop_all_order"]).toMatch(
+      /C .*then A .*then B/,
+    );
+    expect(text(d)).toContain(
+      en["marvel0.ctl.dialog.stop_all_intro"].split(".")[2],
+    );
+    // The arm: held until A stops, then held by nothing.
+    expect(text(d)).toContain(en["marvel0.ctl.hazard.stop_all_arm"]);
+    expect(en["marvel0.ctl.hazard.stop_all_arm"]).toContain(
+      "impedance control",
+    );
+    expect(en["marvel0.ctl.hazard.stop_all_arm"]).toContain(
+      "nothing holds the arm any more",
+    );
+    expect(text(d)).toContain(en["marvel0.ctl.hazard.stop_all_client"]);
+    // Honest: the e-stop sentence, what the gates are worth, not verified.
+    expect(text(d)).toContain(en["marvel0.ctl.estop"]);
+    expect(text(d)).toContain(en["marvel0.stack.gates_scope"]);
+    expect(text(d)).toContain(en["marvel0.ctl.unverified"]);
+    for (const b of d.querySelectorAll("button"))
+      expect(b.textContent).not.toMatch(/e-?stop|emergency/i);
+    expect(textFields(d)).toHaveLength(0);
+    expect(d.querySelectorAll("input[type=checkbox]")).toHaveLength(0);
+    expect(document.activeElement).toBe(button(d, "Cancel"));
+    // The Confirm button is the danger one.
+    const go = button(d, "Stop whole stack")!;
+    expect(go.className).toContain("ds-btn--danger");
+    expect(go.disabled).toBe(false);
+    expect(state.calls).toHaveLength(0);
+  });
+
+  test("Confirm sends one request with the page's phrase, whatever the clicks; Cancel and Escape send nothing", async () => {
+    const { host, state } = await open(stackDoc("stop_all_ready"));
+    await click(stopAll(host));
+    await click(button(dialog(host)!, "Cancel")!);
+    expect(dialog(host)).toBeNull();
+    await click(stopAll(host));
+    await press(document.activeElement, "Escape");
+    expect(dialog(host)).toBeNull();
+    expect(state.calls).toHaveLength(0);
+    state.answer = () => ({
+      ok: true,
+      status: 202,
+      data: STACK_ANSWERS.sequence_stop,
+    });
+    await click(stopAll(host));
+    await doubleClick(button(dialog(host)!, "Stop whole stack")!);
+    await tick(3, 10);
+    expect(state.calls).toHaveLength(1);
+    expect(state.calls[0]).toMatchObject({ op: "sequenceStop" });
+    expect(state.calls[0].body).toEqual({
+      request_id: expect.any(String),
+      confirm: "stop whole stack",
+      attest: {},
+    });
+    expect(dialog(host)).toBeNull();
+  });
+
+  test("the window stays shut for a stack that cannot be read, and closes when the backend stops offering the stop", async () => {
+    const { host, state } = await open(stackDoc("stop_all_ready"));
+    await click(stopAll(host));
+    expect(dialog(host)).not.toBeNull();
+    // Someone else's stop began meanwhile: the window is gone, and so is the offer.
+    state.doc = stackDoc("stop_all_started");
+    await waitFor(() => dialog(host) === null, {
+      label: "the window to close",
+    });
+    expect(stopAll(host).disabled).toBe(true);
+    expect(state.calls).toHaveLength(0);
+  });
+
+  test("while another write is on its way the button waits, and it shows working on its own click", async () => {
+    let release: (value: ApiResult) => void = () => {};
+    const { host, state } = await open(stackDoc("stop_all_ready"));
+    state.answer = () =>
+      new Promise<ApiResult>((resolve) => {
+        release = resolve;
+      });
+    await click(stopAll(host));
+    await click(button(dialog(host)!, "Stop whole stack")!);
+    expect(state.calls).toHaveLength(1);
+    expect(stopAll(host).getAttribute("aria-busy")).toBe("true");
+    expect(stopAll(host).disabled).toBe(true);
+    expect(button(host, "Start whole stack")!.disabled).toBe(true);
+    expect(
+      button(comp(host, "C"), en["marvel0.ctl.btn.stop_C"])!.disabled,
+    ).toBe(true);
+    await act(async () =>
+      release({ ok: true, status: 202, data: STACK_ANSWERS.sequence_stop }),
+    );
+    await waitFor(() => stopAll(host).getAttribute("aria-busy") !== "true", {
+      label: "working to end",
+    });
+  });
+
+  test("the progress: C, then A, then B, each with how far its stop is, and the step it is on", async () => {
+    const running = await open(stackDoc("stop_all_running"));
+    const steps = Array.from(progress(running.host)!.querySelectorAll("li"));
+    expect(steps.map((li) => li.getAttribute("data-comp"))).toEqual([
+      "C",
+      "A",
+      "B",
+    ]);
+    expect(steps.map((li) => li.getAttribute("data-step-state"))).toEqual([
+      "done",
+      "running",
+      "pending",
+    ]);
+    expect(steps.map((li) => li.getAttribute("aria-current"))).toEqual([
+      null,
+      "step",
+      null,
+    ]);
+    expect(text(steps[0])).toContain("Robot server (C)");
+    expect(text(steps[0])).toContain("Stopped");
+    expect(text(steps[1])).toContain("Stopping");
+    expect(text(steps[2])).toContain("Waiting");
+    expect(
+      text(running.host.querySelector("[data-testid=marvel0-sequence-step]")),
+    ).toBe("Now: stopping A");
+    // While it runs: its state is "Stopping", the stop and start buttons are
+    // off and the one live control is the cancel of the guided stop.
+    const seq = running.host.querySelector("[data-testid=marvel0-sequence]")!;
+    expect(seq.getAttribute("data-kind")).toBe("stop");
+    expect(text(seq.querySelector(".ds-badge"))).toBe("Stopping");
+    expect(stopAll(running.host).disabled).toBe(true);
+    expect(button(running.host, "Start whole stack")!.disabled).toBe(true);
+    // The state and the steps say it runs: no "off" block that repeats it.
+    expect(
+      running.host.querySelector("[data-testid=marvel0-block-stop-all]"),
+    ).toBeNull();
+    await click(button(running.host, "Cancel guided stop")!);
+    await tick(3, 10);
+    expect(running.state.calls).toEqual([
+      { op: "sequenceCancel", body: { request_id: expect.any(String) } },
+    ]);
+  });
+
+  test("done, failed and cancelled are told; a stop that failed or was cancelled can be pressed again", async () => {
+    const done = await open(stackDoc("stop_all_done"));
+    expect(
+      Array.from(progress(done.host)!.querySelectorAll("li")).map((li) =>
+        li.getAttribute("data-step-state"),
+      ),
+    ).toEqual(["done", "done", "done"]);
+    // The words come from the steps that were done, not from the plan.
+    const finished = text(
+      done.host.querySelector("[data-testid=marvel0-sequence-done]"),
+    );
+    expect(finished).toBe(
+      `Stopped: C, A, B. ${en["marvel0.ctl.seq.stop_done"]}`,
+    );
+    expect(finished).toContain("M keeps running");
+    expect(
+      text(done.host.querySelector("[data-testid=marvel0-sequence] .ds-badge")),
+    ).toBe("Stopped");
+    expect(stopAll(done.host).disabled).toBe(true);
+
+    const failed = await open(stackDoc("stop_all_failed"));
+    expect(
+      Array.from(progress(failed.host)!.querySelectorAll("li")).map((li) =>
+        li.getAttribute("data-step-state"),
+      ),
+    ).toEqual(["done", "failed", "not_reached"]);
+    // The step after the failure was never reached: it does not read "Waiting".
+    expect(text(progress(failed.host)!.querySelectorAll("li")[2])).toContain(
+      en["marvel0.ctl.seq.step_state.not_reached"],
+    );
+    expect(text(progress(failed.host))).not.toContain("Waiting");
+    const why = failed.host.querySelector(
+      "[data-testid=marvel0-sequence-reason]",
+    )!;
+    expect(why.className).toContain("rg-bad");
+    // Where it failed, why, and what pressing again does.
+    expect(text(why)).toBe(
+      `Failed at Arm controller (A): ${en["marvel0.ctl.block.stop_failed"]}`,
+    );
+    expect(
+      text(failed.host.querySelector("[data-testid=marvel0-sequence-retry]")),
+    ).toBe(en["marvel0.ctl.seq.retry_stop"]);
+    expect(
+      text(
+        failed.host.querySelector("[data-testid=marvel0-sequence] .ds-badge"),
+      ),
+    ).toBe("Stop failed");
+    // Pressing again skips what is stopped: the button is on, no cancel is left.
+    expect(stopAll(failed.host).disabled).toBe(false);
+    expect(button(failed.host, "Cancel guided stop")).toBeUndefined();
+
+    const cancelled = await open(stackDoc("stop_all_cancelled"));
+    expect(
+      text(
+        cancelled.host.querySelector("[data-testid=marvel0-sequence-reason]"),
+      ),
+    ).toBe(en["marvel0.ctl.seq.reason.cancelled"]);
+    expect(stopAll(cancelled.host).disabled).toBe(false);
+  });
+
+  test("a refusal of the request is told in words from its code, under the buttons once the window is gone", async () => {
+    for (const [name, expected] of [
+      [
+        "sequence_stop_with_client",
+        en["marvel0.ctl.block.stop_all_client_connected"].replace(
+          "{port}",
+          "5000",
+        ),
+      ],
+      ["sequence_stop_run_active", en["marvel0.ctl.block.run_active"]],
+    ] as const) {
+      const { host, state } = await open(stackDoc("stop_all_ready"));
+      const refusal = STACK_REFUSALS[name];
+      state.answer = () => errorOf(refusal.status, { detail: refusal.detail });
+      await click(stopAll(host));
+      await click(button(dialog(host)!, "Stop whole stack")!);
+      await tick(3, 10);
+      expect(dialog(host)).toBeNull();
+      const shown = host.querySelector(
+        "[data-testid=marvel0-toolbar-refused]",
+      )!;
+      expect(shown.getAttribute("role")).toBe("alert");
+      expect(text(shown)).toContain(expected);
+      expect(shown.querySelector("[lang=en]")).toBeNull();
+    }
+  });
+
+  test("the backend refusing the phrase is an internal error with the mismatch, never a prompt to type", async () => {
+    const { host, state } = await open(stackDoc("stop_all_ready"));
+    const refusal = STACK_REFUSALS.sequence_stop_wrong_phrase;
+    state.answer = () => errorOf(refusal.status, { detail: refusal.detail });
+    await click(stopAll(host));
+    await click(button(dialog(host)!, "Stop whole stack")!);
+    await tick(3, 10);
+    const d = dialog(host)!;
+    const shown = d.querySelector("[data-testid=marvel0-ctl-dialog-refused]")!;
+    expect(shown.getAttribute("data-internal")).toBe("true");
+    expect(text(shown)).toContain(en["marvel0.ctl.confirm.internal"]);
+    expect(text(shown)).toContain("The server expects: stop whole stack");
+    expect(text(shown)).not.toContain("Type the confirmation phrase");
+    expect(textFields(d)).toHaveLength(0);
+  });
+
+  test("a stop needs no control file, but a worktree or temporary instance only shows", async () => {
+    const disabled = await open(
+      stackDoc("stop_all_ready", (doc) => {
+        doc.act.enabled = false;
+      }),
+    );
+    expect(stopAll(disabled.host).disabled).toBe(false);
+    const fake = await open(
+      stackDoc("stop_all_ready", (doc) => {
+        doc.profile = "fake";
+      }),
+    );
+    expect(stopAll(fake.host).disabled).toBe(true);
+    // No reason block on an instance that only shows: the page says so once.
+    expect(
+      fake.host.querySelector("[data-testid=marvel0-block-stop-all]"),
+    ).toBeNull();
+  });
+
+  test("an older backend without it shows a disabled button and does not break the page", async () => {
+    const { host } = await open(
+      stackDoc("stop_all_ready", (doc) => {
+        delete doc.act.checks.can_stop_all;
+        delete doc.act.stop_all_blockers;
+        delete doc.act.sequence.kind;
+      }),
+    );
+    expect(stopAll(host).disabled).toBe(true);
+    expect(button(host, "Start whole stack")).toBeDefined();
+  });
+
+  test("in Chinese the button, the window and the progress are worded", async () => {
+    const { host } = await open(stackDoc("stop_all_running"), true);
+    expect(stopAll(host).textContent).toBe(zh["marvel0.ctl.seq.stop_button"]);
+    expect(
+      text(host.querySelector("[data-testid=marvel0-sequence-step]")),
+    ).toBe("现在：停止 A");
+    expect(text(progress(host))).toContain(zh["marvel0.ctl.name.C"]);
+    expect(text(progress(host))).toContain(
+      zh["marvel0.ctl.seq.step_state.done"],
+    );
+    const ready = await open(stackDoc("stop_all_ready"), true);
+    await click(stopAll(ready.host));
+    const d = dialog(ready.host)!;
+    expect(text(d)).toContain(zh["marvel0.ctl.dialog.stop_all_title"]);
+    expect(text(d)).toContain(zh["marvel0.ctl.hazard.stop_all_arm"]);
+    expect(text(d)).not.toContain("Stop the whole stack");
+    expect(button(d, zh["marvel0.ctl.btn.cancel"])).toBeDefined();
+  });
+});
+
+describe("Start whole stack, all the way through C", () => {
+  const progress = (host: HTMLElement) =>
+    host.querySelector("[data-testid=marvel0-sequence-progress]")!;
+  const states = (host: HTMLElement) =>
+    Array.from(progress(host).querySelectorAll("li")).map((li) =>
+      li.getAttribute("data-step-state"),
+    );
+  const steps = (host: HTMLElement) =>
+    Array.from(progress(host).querySelectorAll("li")).map((li) =>
+      li.getAttribute("data-step"),
+    );
+  const ORDER = [
+    "monitor",
+    "probe",
+    "marker",
+    "wait",
+    "arm",
+    "await_a",
+    "b_probe",
+    "b",
+    "c_preflight",
+    "c",
+  ];
+
+  test("while it runs: every step of the chain in order with its state, the step it is on, and Cancel; the buttons that start are off", async () => {
+    const { host, state } = await open(stackDoc("chain_running_b"));
+    expect(steps(host)).toEqual(ORDER);
+    expect(states(host)).toEqual([
+      "done",
+      "done",
+      "done",
+      "done",
+      "done",
+      "done",
+      "done",
+      "running",
+      "pending",
+      "pending",
+    ]);
+    const lis = progress(host).querySelectorAll("li");
+    expect(lis[7].getAttribute("aria-current")).toBe("step");
+    expect(text(lis[7])).toContain(en["marvel0.ctl.seq.chain.b"]);
+    expect(text(lis[7])).toContain(
+      en["marvel0.ctl.seq.start_step_state.running"],
+    );
+    expect(text(lis[9])).toContain(
+      en["marvel0.ctl.seq.start_step_state.pending"],
+    );
+    expect(
+      text(host.querySelector("[data-testid=marvel0-sequence-step]")),
+    ).toBe("Now: starting B and waiting for it");
+    const seq = host.querySelector("[data-testid=marvel0-sequence]")!;
+    expect(seq.getAttribute("data-kind")).toBe("start");
+    expect(text(seq.querySelector(".ds-badge"))).toBe("Running");
+    expect(
+      host.querySelector<HTMLButtonElement>("[data-testid=marvel0-start-all]")!
+        .disabled,
+    ).toBe(true);
+    // The cancel says what it does not do.
+    expect(
+      text(host.querySelector("[data-testid=marvel0-sequence-cancel-note]")),
+    ).toBe(en["marvel0.ctl.seq.cancel_note"]);
+    await click(button(host, "Cancel guided start")!);
+    await tick(3, 10);
+    expect(state.calls).toEqual([
+      { op: "sequenceCancel", body: { request_id: expect.any(String) } },
+    ]);
+    // It runs through: no pause line, no waiting line.
+    expect(
+      host.querySelector("[data-testid=marvel0-sequence-paused-note]"),
+    ).toBeNull();
+    expect(
+      host.querySelector("[data-testid=marvel0-sequence-wait]"),
+    ).toBeNull();
+  });
+
+  test("the first step, the checks before C and C itself are told in words", async () => {
+    for (const [view, now] of [
+      ["chain_running_m", "Now: starting M"],
+      ["chain_running_c_check", "Now: checking before C"],
+      ["chain_running_c", "Now: starting C and waiting for it"],
+    ] as const) {
+      const { host } = await open(stackDoc(view));
+      expect([
+        view,
+        text(host.querySelector("[data-testid=marvel0-sequence-step]")),
+      ]).toEqual([view, now]);
+      expect(steps(host)).toEqual(ORDER);
+    }
+  });
+
+  test("done: all ten steps done and the stack is up", async () => {
+    const { host } = await open(stackDoc("chain_done"));
+    expect(states(host)).toEqual(Array(10).fill("done"));
+    expect(
+      text(host.querySelector("[data-testid=marvel0-sequence-done]")),
+    ).toBe(en["marvel0.ctl.seq.start_done"]);
+    expect(
+      text(host.querySelector("[data-testid=marvel0-sequence] .ds-badge")),
+    ).toBe("Done");
+    // Everything is ready: nothing to start, and the page says so.
+    expect(
+      host.querySelector<HTMLButtonElement>("[data-testid=marvel0-start-all]")!
+        .disabled,
+    ).toBe(true);
+    expect(
+      text(host.querySelector("[data-testid=marvel0-sequence-needs]")),
+    ).toBe(en["marvel0.ctl.seq.needs_all_ready"]);
+  });
+
+  test("failed at B: where, why, the steps after it not reached, and the same button again", async () => {
+    const { host, state } = await open(stackDoc("chain_failed_b"));
+    expect(states(host)).toEqual([
+      "done",
+      "done",
+      "done",
+      "done",
+      "done",
+      "done",
+      "done",
+      "failed",
+      "not_reached",
+      "not_reached",
+    ]);
+    const lis = progress(host).querySelectorAll("li");
+    expect(text(lis[8])).toContain(
+      en["marvel0.ctl.seq.start_step_state.not_reached"],
+    );
+    expect(text(progress(host))).not.toContain("Waiting");
+    const why = host.querySelector("[data-testid=marvel0-sequence-reason]")!;
+    expect(why.className).toContain("rg-bad");
+    expect(text(why)).toBe(
+      `Failed at ${en["marvel0.ctl.seq.chain.b"]}: ${en["marvel0.ctl.seq.reason.b_failed"]}`,
+    );
+    expect(
+      text(host.querySelector("[data-testid=marvel0-sequence-retry]")),
+    ).toBe("Press Start whole stack again: it skips what is already ready.");
+    expect(
+      text(host.querySelector("[data-testid=marvel0-sequence] .ds-badge")),
+    ).toBe("Failed");
+    // Pressing again is possible (A is up; B failed, C idle): the window is the
+    // same whole-stack window, and it sends the same request.
+    const start = host.querySelector<HTMLButtonElement>(
+      "[data-testid=marvel0-start-all]",
+    )!;
+    expect(start.disabled).toBe(false);
+    await click(start);
+    const d = dialog(host)!;
+    await tickAll(d);
+    await click(button(d, "Start whole stack")!);
+    await tick(3, 10);
+    expect(state.calls).toHaveLength(1);
+    expect(state.calls[0]).toMatchObject({
+      op: "sequence",
+      body: { through: "c", pause_before_b: false, pause_before_c: false },
+    });
+  });
+
+  test("a pause waits for the person's own Start of B, then of C, each with its own window; the chain list does not call the rest 'not reached'", async () => {
+    const b = await open(stackDoc("chain_paused_b"));
+    expect(states(b.host)).toEqual([
+      "done",
+      "done",
+      "done",
+      "done",
+      "done",
+      "done",
+      "pending",
+      "pending",
+      "pending",
+      "pending",
+    ]);
+    expect(
+      text(b.host.querySelector("[data-testid=marvel0-sequence-wait]")),
+    ).toContain("Gripper stack (B)");
+    expect(
+      text(b.host.querySelector("[data-testid=marvel0-sequence] .ds-badge")),
+    ).toBe("Waiting for you");
+    expect(comp(b.host, "B").getAttribute("data-next")).toBe("true");
+    expect(button(comp(b.host, "B"), "Start")!.disabled).toBe(false);
+    await click(button(comp(b.host, "B"), "Start")!);
+    expect(textFields(dialog(b.host)!)).toHaveLength(0);
+    expect(
+      dialog(b.host)!.querySelectorAll("input[type=checkbox]"),
+    ).toHaveLength(1);
+    await click(button(dialog(b.host)!, "Cancel")!);
+    const c = await open(stackDoc("chain_paused_c"));
+    expect(
+      text(c.host.querySelector("[data-testid=marvel0-sequence-wait]")),
+    ).toContain("Robot server (C)");
+    expect(comp(c.host, "C").getAttribute("data-next")).toBe("true");
+    expect(comp(c.host, "B").getAttribute("data-next")).toBeNull();
+  });
+
+  test("a start that was asked to pause says where it will stop while it runs", async () => {
+    const { host } = await open(
+      stackDoc("chain_running_m", (doc) => {
+        doc.act.sequence.pauses = { b: true, c: true };
+      }),
+    );
+    expect(
+      text(host.querySelector("[data-testid=marvel0-sequence-paused-note]")),
+    ).toBe(
+      "The pause is on: the start stops before B / C and waits for you there.",
+    );
+  });
+
+  test("A and B up, C not: the same button is offered again and skips what is ready", async () => {
+    const { host } = await open(stackDoc("b_ready"));
+    const start = host.querySelector<HTMLButtonElement>(
+      "[data-testid=marvel0-start-all]",
+    )!;
+    expect(start.disabled).toBe(false);
+    expect(
+      host.querySelector("[data-testid=marvel0-sequence-needs]"),
+    ).toBeNull();
+  });
+
+  test("a failed A is for the person to look at first, with the reason beside the button", async () => {
+    const { host } = await open(stackDoc("a_failed"));
+    expect(
+      host.querySelector<HTMLButtonElement>("[data-testid=marvel0-start-all]")!
+        .disabled,
+    ).toBe(true);
+    expect(
+      text(host.querySelector("[data-testid=marvel0-sequence-needs]")),
+    ).toBe(en["marvel0.ctl.seq.needs_a_unfit"]);
+  });
+
+  test("an answer 'already started' (a second tab was first) is told and starts nothing", async () => {
+    const { host, state } = await open(stackDoc("b_ready"));
+    state.answer = () => ({
+      ok: true,
+      status: 200,
+      data: STACK_ANSWERS.sequence_start_already,
+    });
+    await click(
+      host.querySelector("[data-testid=marvel0-start-all]") as HTMLElement,
+    );
+    await tickAll(dialog(host)!);
+    await click(button(dialog(host)!, "Start whole stack")!);
+    await tick(3, 10);
+    expect(dialog(host)).toBeNull();
+    expect(
+      text(host.querySelector("[data-testid=marvel0-sequence-already]")),
+    ).toBe(en["marvel0.ctl.seq.already_started"]);
+  });
+
+  test("a refusal for a missing tick is told in words (the window sends every tick, so this is the page's own mistake only if it ever shows)", async () => {
+    const { host, state } = await open(stackDoc("idle"));
+    const refusal = STACK_REFUSALS.sequence_start_chain_without_attest;
+    state.answer = () => errorOf(refusal.status, { detail: refusal.detail });
+    await click(
+      host.querySelector("[data-testid=marvel0-start-all]") as HTMLElement,
+    );
+    await tickAll(dialog(host)!);
+    await click(button(dialog(host)!, "Start whole stack")!);
+    await tick(3, 10);
+    const d = dialog(host)!;
+    expect(d).not.toBeNull();
+    expect(
+      text(d.querySelector("[data-testid=marvel0-ctl-dialog-refused]")),
+    ).toContain("hands_clear, no_client");
+  });
+
+  test("in Chinese the chain, its states and the failure are worded", async () => {
+    const { host } = await open(stackDoc("chain_failed_b"), true);
+    expect(text(progress(host))).toContain(zh["marvel0.ctl.seq.chain.b"]);
+    expect(text(progress(host))).toContain(
+      zh["marvel0.ctl.seq.start_step_state.not_reached"],
+    );
+    const why = text(
+      host.querySelector("[data-testid=marvel0-sequence-reason]"),
+    );
+    expect(why).toContain(zh["marvel0.ctl.seq.reason.b_failed"]);
+    expect(why).toContain(zh["marvel0.ctl.seq.chain.b"]);
+    expect(
+      text(host.querySelector("[data-testid=marvel0-sequence-retry]")),
+    ).toBe(zh["marvel0.ctl.seq.retry_start"]);
+    expect(why).not.toContain("Failed at");
+  });
+});
+
+describe("a guided stop that ended at C because it cannot tell, and one cut short by a restart", () => {
+  test("Stop whole stack ended at C: the step is failed, A and B were not reached, the reason says why", async () => {
+    const { host } = await open(stackDoc("stop_all_c_unknown"));
+    const lis = host.querySelectorAll(
+      "[data-testid=marvel0-sequence-progress] li",
+    );
+    expect(
+      Array.from(lis).map((li) => li.getAttribute("data-step-state")),
+    ).toEqual(["failed", "not_reached", "not_reached"]);
+    const why = text(
+      host.querySelector("[data-testid=marvel0-sequence-reason]"),
+    );
+    expect(why).toContain("Failed at Robot server (C):");
+    expect(why).toContain(en["marvel0.ctl.seq.reason.stop_c_unknown"]);
+    expect(why).not.toContain("Nothing to stop");
+    expect(text(lis[0])).not.toContain("Nothing to stop");
+  });
+
+  test("a stop that was asked for and is carried by nothing is a notice that names the unit", async () => {
+    const { host } = await open(stackDoc("stop_unfinished"));
+    const notice = text(
+      host.querySelector(
+        "[data-testid=marvel0-notice][data-code='notice.stop_unfinished']",
+      ),
+    );
+    expect(notice).toBe(
+      en["marvel0.ctl.notice.stop_unfinished"].replaceAll("{unit}", "C"),
+    );
+    const zhHost = await open(stackDoc("stop_unfinished"), true);
+    expect(
+      text(
+        zhHost.host.querySelector(
+          "[data-testid=marvel0-notice][data-code='notice.stop_unfinished']",
+        ),
+      ),
+    ).toBe(zh["marvel0.ctl.notice.stop_unfinished"].replaceAll("{unit}", "C"));
+  });
+
+  test("while a stop runs the starts are off with the backend's reason (the backend's own sample)", async () => {
+    const { host } = await open(stackDoc("stop_all_started_blocks_starts"));
+    expect(
+      text(host.querySelector("[data-testid=marvel0-block-gripper]")),
+    ).toContain(en["marvel0.ctl.block.sequence_stopping"]);
+    expect(button(host, "Open gripper")!.disabled).toBe(true);
+    expect(button(host, "Close gripper")!.disabled).toBe(true);
+  });
+});
+
+describe("while a guided stop runs, nothing is started, set or tested", () => {
+  // The backend adds a required blocker (`sequence_stopping`) to every start,
+  // to the gripper test and to "set marker"; the page shows each button off
+  // with that reason beside it, in words, in both languages.
+  type AnyDoc = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const blocked = (doc: AnyDoc) => {
+    const row = [
+      {
+        code: "sequence_stopping",
+        level: "required",
+        text: "A guided stop is running.",
+        params: {},
+      },
+    ];
+    for (const key of ["m", "a", "b", "c"]) {
+      doc.act.terminals[key].can_start = false;
+      doc.act.terminals[key].start_blockers = row;
+    }
+    doc.act.gripper_test.can_run = false;
+    doc.act.gripper_test.blockers = row;
+    doc.act.marker.state = "absent";
+    doc.act.marker.ours = false;
+    doc.act.marker.touch_blockers = row;
+  };
+
+  test("the three starts, the gripper test and Set marker are off, each with the reason beside it", async () => {
+    const { host } = await open(stackDoc("stop_all_running", blocked));
+    for (const id of ["C", "B"]) {
+      expect(button(comp(host, id), "Start")!.disabled).toBe(true);
+    }
+    const why = (testId: string) =>
+      host.querySelector(`[data-testid=${testId}]`)!;
+    // A and M are ready or running in this sample: their cards say so by their
+    // state; the ones that are idle say the reason.
+    for (const testId of [
+      "marvel0-block-start-C",
+      "marvel0-block-gripper",
+      "marvel0-block-marker",
+    ]) {
+      expect(text(why(testId))).toContain(
+        en["marvel0.ctl.block.sequence_stopping"],
+      );
+      expect(why(testId).querySelector("li")!.getAttribute("data-code")).toBe(
+        "sequence_stopping",
+      );
+    }
+    expect(button(host, "Open gripper")!.disabled).toBe(true);
+    expect(button(host, "Close gripper")!.disabled).toBe(true);
+    expect(button(host, "Set marker")!.disabled).toBe(true);
+  });
+
+  test("a click on a button that is off opens nothing and sends nothing", async () => {
+    const { host, state } = await open(stackDoc("stop_all_running", blocked));
+    for (const node of [
+      button(comp(host, "C"), "Start")!,
+      button(host, "Set marker")!,
+      button(host, "Open gripper")!,
+    ])
+      await click(node);
+    expect(dialog(host)).toBeNull();
+    expect(state.calls).toHaveLength(0);
+  });
+
+  test("in Chinese the reason is worded", async () => {
+    const { host } = await open(stackDoc("stop_all_running", blocked), true);
+    expect(
+      text(host.querySelector("[data-testid=marvel0-block-marker]")),
+    ).toContain(zh["marvel0.ctl.block.sequence_stopping"]);
+    expect(
+      text(host.querySelector("[data-testid=marvel0-block-marker]")),
+    ).toContain(zh["marvel0.ctl.off.marker"]);
+  });
+
+  test("a marker that is not blocked is set by the same button", async () => {
+    const { host } = await open(
+      stackDoc("idle", (doc) => {
+        doc.act.marker.state = "absent";
+      }),
+    );
+    expect(button(host, "Set marker")!.disabled).toBe(false);
+    expect(host.querySelector("[data-testid=marvel0-block-marker]")).toBeNull();
   });
 });
 
@@ -766,13 +1802,10 @@ describe("what the page says about itself", () => {
 });
 
 describe("a dialog confirms the state it was opened on", () => {
-  test("when the stack can no longer be read, the dialog closes and what was typed is gone", async () => {
+  test("when the stack can no longer be read, the window closes and what was ticked is gone", async () => {
     const { host, state } = await open(stackDoc("ready_to_start_a"));
     await click(button(comp(host, "A"), "Start")!);
-    await type(
-      dialog(host)!.querySelector("input:not([type=checkbox])"),
-      "start arm stack",
-    );
+    await tickAll(dialog(host)!);
     state.doc = null;
     await waitFor(() => dialog(host) === null, {
       label: "the dialog to close",

@@ -572,7 +572,7 @@ Only the `cfg_configs` take `--cfg-guidance-scale`. The family `pi05_fr3_sp` (an
 any `restricted_prefixes`) takes only the client's two task instructions. An option not
 in `verified` carries the label `unverified`: no real-GPU serving check is
 recorded for it, and a deploy of it needs `accept_unverified` as well as the
-typed phrase. The folder is read once in 30 seconds.
+phrase (which the confirm window sends). The folder is read once in 30 seconds.
 
 #### The policy server panel
 
@@ -589,15 +589,17 @@ free now, and a guidance scale field for a CFG model (empty uses the default).
 Checkpoints that are not offered are folded under "n checkpoint(s) not offered"
 with the reason. **Deploy** opens a dialog with the model, config, RTC, fraction
 and memory, the reminder that nothing on the page is an emergency stop, for an
-unverified model a box to accept it, and the confirmation phrase to type; the
-dialog's Deploy button stays off until the phrase is exact. The dialog's intro
+unverified model a box to accept it, and nothing to type: it is a confirm window
+whose Confirm button is on once the boxes are ticked, and the page sends the
+phrase `deploy <model>` itself (the backend still checks it). The dialog's intro
 also says: "Do not press Deploy while a server is being started by hand in a
 terminal; the page can only see it once it listens." The Deploy button of the
 card is off, with the reason beside it, while the state is not `idle`,
 `failed` or `dead`, while a check blocks, while the chosen fraction needs more
 memory than is free, and while the state cannot be read. **Stop policy server** appears only
-when the server says the unit can be stopped; its dialog asks for the stop
-phrase, and for the extra phrase too when a client is connected, and says how
+when the server says the unit can be stopped; its confirm window sends the stop
+phrase itself and, when a client is connected, asks for the extra phrase to be
+typed (one of the two typed overrides that stay), and says how
 long the stop may take (`stop_timeout_s` + 30 seconds). For a server started by
 hand there is no Stop, only the instruction to press Ctrl+C in its terminal. The
 page reads the state every 3 seconds while the tab is visible (not while it is
@@ -742,7 +744,7 @@ and fraction are checked again by the deploy itself. A stop is offered
 runs, or `stopping` with the unit still up and no stop of this process going on. The answer also holds the readiness flags, the `failure`, the
 `gpu` numbers, the `vram` need of each preset, `stop_blockers` (`client_connected`,
 `foreign_listener`, `net_unreadable`), `live_annotation`, `estop`, `notes`,
-`confirm` (the typed phrases) and `operation` (the deploy or stop in progress).
+`confirm` (the phrases the confirm window sends) and `operation` (the deploy or stop in progress).
 A failed or dead record stays visible until the next deploy replaces it.
 
 Who owns a listening socket is decided from the processes of the panel's **own**
@@ -803,8 +805,10 @@ refused). It stops only the unit recorded at deploy time:
 A short-lived connection to the port (a health probe from another tool) also
 blocks a stop until it ends.
 
-**Confirmations.** A write is refused (`confirm_required`, 400) unless the typed
-phrase matches exactly, naming the action and the model:
+**Confirmations.** A write is refused (`confirm_required`, 400) unless the phrase
+in `confirm` matches exactly, naming the action and the model. The page's confirm
+window sends it for the person; a script sends it itself. Only the extra phrase
+for a stop under a connected client is still typed:
 
 | Action | Phrase |
 | --- | --- |
@@ -1013,8 +1017,8 @@ made until its owner decides it, so A's dry run always refuses on
 `gate.fci_probe`.
 
 The writes are a person's (the policy deploy's check: a Bearer credential is
-refused), carry a `request_id` (answered again, never done twice) and a typed
-phrase:
+refused), carry a `request_id` (answered again, never done twice) and the
+phrase in `confirm` (the page's confirm window sends it):
 
 | Route | Phrase | What it does |
 | --- | --- | --- |

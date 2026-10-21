@@ -12,7 +12,7 @@ import { modelsAnswer, siteAnswer } from "./catalog-fixtures";
 import { preview } from "./command-fixtures";
 import { deployed, idle, logAnswer, ready } from "./deploy-fixtures";
 import { quietMarvel0, quietSetup } from "./fixtures";
-import { button, field, tick, type } from "./actions-helpers";
+import { button, tick } from "./actions-helpers";
 import { RUN, STACK, runDoc, stackDoc } from "./ctl-fixtures";
 
 const { default: Marvel0Page } = await import("@/app/marvel0/page");
@@ -186,9 +186,9 @@ describe("the marvel0 with its action cards", () => {
     ) as HTMLElement;
     await click(button(card, "Deploy")!);
     const dialog = host.querySelector("[role=dialog]") as HTMLElement;
-    await type(
-      field(dialog, "Confirmation phrase"),
-      "deploy pi05_fr3_all_step49999",
+    // The window has nothing to type: the page sends the phrase itself.
+    expect(dialog.querySelectorAll("input:not([type=checkbox])")).toHaveLength(
+      0,
     );
     await click(button(dialog, "Deploy")!);
     await tick(3, 5);

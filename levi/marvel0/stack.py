@@ -112,6 +112,7 @@ PHRASES = {
     # a constant there.
     "arm_start": "start arm stack",
     "sequence_start": "start arm stack",
+    "sequence_stop": "stop whole stack",
     "arm_stop": "stop arm stack",
     "gripper_start": "start gripper stack",
     "gripper_stop": "stop gripper stack",

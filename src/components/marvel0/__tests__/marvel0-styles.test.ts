@@ -77,21 +77,25 @@ describe("the stylesheet of the marvel0", () => {
       "run-panel.tsx",
       "run-dock.tsx",
       "stack-panel.tsx",
+      "stack-dialog.tsx",
+      "run-start.tsx",
     ].map((file) => ({
       file,
       code: readFileSync(join(import.meta.dir, "..", file), "utf8"),
     }));
-    // `variant="danger"` is on HOLD (the card's and the dock's) and on the
-    // confirm buttons of the dialogs, never on a button of the page itself.
+    // `variant="danger"` is on HOLD (the card's and the dock's), never on a
+    // button of the page itself: the confirm buttons of the windows get it
+    // from the one confirm window (a stop, End, Exit and go home).
     const solid = sources.flatMap(({ file, code }) =>
       [...code.matchAll(/variant="danger"/g)].map(() => file),
     );
-    expect(solid.sort()).toEqual([
-      "deploy-panel.tsx",
-      "run-dock.tsx",
-      "run-panel.tsx",
-      "run-panel.tsx",
-    ]);
+    expect(solid.sort()).toEqual(["run-dock.tsx", "run-panel.tsx"]);
+    const window = readFileSync(
+      join(import.meta.dir, "../confirm-window.tsx"),
+      "utf8",
+    );
+    expect(window.match(/"danger"/g)).toHaveLength(1);
+    expect(window).toContain('variant={danger ? "danger" : "primary"}');
   });
 
   test("figures do not jitter: the page uses tabular numbers, and the ages are monospace", () => {

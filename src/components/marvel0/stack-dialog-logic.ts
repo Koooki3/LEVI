@@ -1,8 +1,10 @@
-// What each confirmation dialog of the arm stack says and asks: the fixed
+// What each confirm window of the arm stack says and asks: the fixed
 // sentences (a hand on the physical e-stop; what the gates are worth), the
 // hazard line of the action, the checks only a person can make (tick boxes,
-// recorded with the request) and the phrase to type. Pure: the dialog
-// component prints this and sends nothing the spec does not name.
+// recorded with the request) and the confirmation phrase the page sends
+// itself. Nothing is typed, except the override of a stop of C with a client
+// connected. Pure: the window component prints this and sends nothing the
+// spec does not name.
 //
 // The hazard lines are the page's own words about what the action does to the
 // machine; none of them has been checked on the real machine yet (starting
@@ -22,7 +24,8 @@ export type DialogKind =
   | { kind: "stop"; comp: CompId }
   | { kind: "marker"; op: MarkerOp }
   | { kind: "gripper"; action: GripperAction }
-  | { kind: "sequence" };
+  | { kind: "sequence" }
+  | { kind: "sequence_stop" };
 
 export interface Attest {
   /** The key sent in `attest`. */
@@ -38,16 +41,19 @@ export interface DialogSpec {
   /** A hand on the physical e-stop, and the gates' honest limits. */
   estop: boolean;
   attest: Attest[];
+  /** The confirmation phrase of the backend's catalogue. The page sends it
+   * when the confirm button is clicked; nobody types it. */
   phrase: string;
-  /** The person types the phrase. When not, the confirm click is the
-   * confirmation and the page sends the phrase itself (the gripper test and
-   * adopting or setting a marker: a tick or a click, not a sentence). */
-  typed: boolean;
   confirmKey: string;
   danger: boolean;
   /** The phrase that overrides the client rule of a stop of C, and whether
-   * the stop is blocked by that rule now (then it is asked for at once). */
+   * the stop is blocked by that rule now (then it is asked for at once). This
+   * is the one phrase a person types: it cuts a client off. */
   override: { phrase: string; now: boolean } | null;
+  /** The window offers the choice to pause before B and before C (the whole
+   * stack's start; off by default). It is a choice, not a check: Confirm does
+   * not wait for it. */
+  pauseOption: boolean;
 }
 
 const k = (key: string, params?: Record<string, string | number | Say>): Say =>
@@ -72,6 +78,20 @@ const STOP_HAZARD: Record<CompId, string[]> = {
 const attestOf = (keys: string[]): Attest[] =>
   keys.map((code) => ({ code, label: k(`marvel0.ctl.attest.${code}`) }));
 
+/** The hazard lines of the terminals the whole stack's start brings up, A
+ * then B then C: each as its own single start's window says it. */
+const SEQUENCE_HAZARD: string[] = ["A", "B", "C"].flatMap(
+  (id) => START_HAZARD[id as CompId],
+);
+/** The checks of the whole stack's start: those of A, B and C, each once, in
+ * the order the terminals come up (the backend names them per terminal). */
+export function sequenceAttest(act: ActView | null): string[] {
+  const keys = (["A", "B", "C"] as const).flatMap(
+    (id) => act?.comps[id].attest ?? [],
+  );
+  return [...new Set(keys)];
+}
+
 export function dialogSpec(want: DialogKind, act: ActView | null): DialogSpec {
   switch (want.kind) {
     case "start":
@@ -82,10 +102,10 @@ export function dialogSpec(want: DialogKind, act: ActView | null): DialogSpec {
         estop: want.comp !== "M",
         attest: attestOf(act?.comps[want.comp].attest ?? []),
         phrase: compPhrase(act, "start", want.comp),
-        typed: true,
         confirmKey: "marvel0.ctl.btn.start",
         danger: false,
         override: null,
+        pauseOption: false,
       };
     case "stop": {
       const comp = act?.comps[want.comp];
@@ -97,7 +117,6 @@ export function dialogSpec(want: DialogKind, act: ActView | null): DialogSpec {
         estop: want.comp !== "M",
         attest: [],
         phrase: compPhrase(act, "stop", want.comp),
-        typed: true,
         confirmKey: "marvel0.ctl.btn.stop",
         danger: true,
         override: overridden
@@ -106,6 +125,7 @@ export function dialogSpec(want: DialogKind, act: ActView | null): DialogSpec {
               now: comp ? stopControl(comp).needsOverride : false,
             }
           : null,
+        pauseOption: false,
       };
     }
     case "gripper":
@@ -120,13 +140,13 @@ export function dialogSpec(want: DialogKind, act: ActView | null): DialogSpec {
         estop: true,
         attest: attestOf(act?.gripper.attest ?? []),
         phrase: phraseFor(act, `gripper_${want.action}`),
-        typed: false,
         confirmKey:
           want.action === "open"
             ? "marvel0.ctl.btn.gripper_open"
             : "marvel0.ctl.btn.gripper_close",
         danger: false,
         override: null,
+        pauseOption: false,
       };
     case "marker": {
       const name = {
@@ -141,46 +161,72 @@ export function dialogSpec(want: DialogKind, act: ActView | null): DialogSpec {
         estop: false,
         attest: [],
         phrase: phraseFor(act, name),
-        typed: want.op === "release",
         confirmKey: `marvel0.ctl.btn.marker_${want.op}`,
         danger: want.op === "release",
         override: null,
+        pauseOption: false,
       };
     }
     case "sequence":
+      // One window for the whole chain: the hazard sentences and the checks
+      // of A, B and C, all of them, because nothing asks again between the
+      // steps (unless the person asks for the pause).
       return {
         title: k("marvel0.ctl.dialog.sequence_title"),
         intro: k("marvel0.ctl.dialog.sequence_intro"),
-        hazards: [k("marvel0.ctl.hazard.sequence")],
+        hazards: [
+          k("marvel0.ctl.hazard.sequence_through"),
+          ...SEQUENCE_HAZARD.map((key) => k(key)),
+        ],
         estop: true,
-        attest: attestOf(act?.comps.A.attest ?? []),
+        attest: attestOf(sequenceAttest(act)),
         phrase: phraseFor(act, "sequence_start"),
-        typed: true,
         confirmKey: "marvel0.ctl.btn.sequence",
         danger: false,
         override: null,
+        pauseOption: true,
+      };
+    case "sequence_stop":
+      return {
+        title: k("marvel0.ctl.dialog.stop_all_title"),
+        intro: k("marvel0.ctl.dialog.stop_all_intro"),
+        hazards: [
+          k("marvel0.ctl.hazard.stop_all_order"),
+          k("marvel0.ctl.hazard.stop_all_arm"),
+          k("marvel0.ctl.hazard.stop_all_client"),
+        ],
+        estop: true,
+        attest: [],
+        phrase: phraseFor(act, "sequence_stop"),
+        confirmKey: "marvel0.ctl.btn.stop_all",
+        danger: true,
+        override: null,
+        pauseOption: false,
       };
   }
 }
 
-/** Whether a dialog's confirm button is on: the phrase typed exactly (spaces
- * at the ends do not count), every check ticked, and the override phrase when
- * the stop is blocked by the client rule. */
+/** Whether the override phrase is in order: typed exactly (spaces at the ends
+ * do not count) when the stop is blocked by the client rule, else not asked. */
+export function overrideReady(
+  spec: DialogSpec,
+  typedOverride: string,
+  overrideAsked: boolean,
+): boolean {
+  if (!spec.override?.now && !overrideAsked) return true;
+  return typedOverride.trim() === spec.override?.phrase;
+}
+
+/** Whether a window's confirm button is on: every check ticked and the
+ * override in order. There is no other phrase to type. */
 export function dialogReady(
   spec: DialogSpec,
-  typed: string,
   ticked: Record<string, boolean>,
   typedOverride: string,
   overrideAsked: boolean,
 ): boolean {
-  if (spec.typed && typed.trim() !== spec.phrase) return false;
   if (!spec.attest.every((a) => ticked[a.code] === true)) return false;
-  if (
-    (spec.override?.now || overrideAsked) &&
-    typedOverride.trim() !== spec.override?.phrase
-  )
-    return false;
-  return true;
+  return overrideReady(spec, typedOverride, overrideAsked);
 }
 
 /** The `attest` object of a request: every check of the spec, true. */

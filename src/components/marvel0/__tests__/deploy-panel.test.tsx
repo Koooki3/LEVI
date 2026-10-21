@@ -1,5 +1,6 @@
 import {
   click,
+  press,
   render,
   setupDom,
   waitFor,
@@ -25,11 +26,13 @@ import {
 import {
   button,
   choose,
+  doubleClick,
   fakeApi,
   field,
   nothing,
   ok,
   refused,
+  textFields,
   tick,
   type,
   type Canned,
@@ -169,7 +172,7 @@ describe("the Policy server card", () => {
 });
 
 describe("deploying", () => {
-  test("Deploy asks for the typed phrase, then sends one request with exactly the choices", async () => {
+  test("Deploy opens a confirm window (nothing to type), Cancel in focus; Confirm sends one request with exactly the choices and the page's phrase", async () => {
     const { host, calls } = await open({
       startDeploy: ok(deployed(), 202),
     });
@@ -181,15 +184,13 @@ describe("deploying", () => {
     expect(text(d)).toContain("It starts nothing else");
     expect(text(d)).toContain("started from their own cards");
     expect(text(d)).toContain("Nothing on this page is an emergency stop");
-    expect(text(d)).toContain(`deploy ${SFT}`);
-    const confirm = button(d, "Deploy")!;
-    expect(confirm.disabled).toBe(true);
-    await type(field(d, "Confirmation phrase"), `deploy ${SFT} `);
-    expect(button(d, "Deploy")!.disabled).toBe(true);
-    await type(field(d, "Confirmation phrase"), `deploy ${SFT}`);
+    // Nothing is typed: the page sends the phrase of the action itself.
+    expect(textFields(d)).toHaveLength(0);
+    expect(text(d)).not.toMatch(/Confirmation phrase|Type exactly/);
+    expect(document.activeElement).toBe(button(d, "Cancel"));
     expect(button(d, "Deploy")!.disabled).toBe(false);
     expect(calls.startDeploy).toHaveLength(0);
-    await click(button(d, "Deploy")!);
+    await doubleClick(button(d, "Deploy")!);
     await tick();
     expect(calls.startDeploy).toHaveLength(1);
     const body = calls.startDeploy[0];
@@ -242,7 +243,6 @@ describe("deploying", () => {
     const { host, calls } = await open({ startDeploy: ok(deployed(), 202) });
     const before = calls.deploy;
     await click(button(card(host), "Deploy")!);
-    await type(field(dialog(host)!, "Confirmation phrase"), `deploy ${SFT}`);
     await click(button(dialog(host)!, "Deploy")!);
     await tick();
     expect(calls.deploy).toBeGreaterThan(before);
@@ -256,7 +256,6 @@ describe("deploying", () => {
     await click(button(c, "Deploy")!);
     expect(text(dialog(host))).toContain("RTC off");
     expect(text(dialog(host))).toContain("0.30");
-    await type(field(dialog(host)!, "Confirmation phrase"), `deploy ${SFT}`);
     await click(button(dialog(host)!, "Deploy")!);
     await tick();
     expect(calls.startDeploy[0]).toMatchObject({ rtc: false, fraction: 0.3 });
@@ -269,7 +268,6 @@ describe("deploying", () => {
     await type(field(c, "Guidance scale"), "1.2");
     await click(button(c, "Deploy")!);
     const d = dialog(host)!;
-    await type(field(d, "Confirmation phrase"), `deploy ${CFG}`);
     expect(button(d, "Deploy")!.disabled).toBe(true);
     await click(
       field(d, "I accept deploying a model without a recorded real-GPU check")!,
@@ -285,18 +283,19 @@ describe("deploying", () => {
     });
   });
 
-  test("Cancel closes the dialog and sends nothing", async () => {
+  test("Cancel, Escape and the backdrop close the window and send nothing", async () => {
     const { host, calls } = await open();
     await click(button(card(host), "Deploy")!);
-    await type(field(dialog(host)!, "Confirmation phrase"), `deploy ${SFT}`);
     await click(button(dialog(host)!, "Cancel")!);
     expect(dialog(host)).toBeNull();
-    expect(calls.startDeploy).toHaveLength(0);
-    // The phrase is not kept for the next time.
     await click(button(card(host), "Deploy")!);
-    expect(
-      (field(dialog(host)!, "Confirmation phrase") as HTMLInputElement).value,
-    ).toBe("");
+    expect(document.activeElement).toBe(button(dialog(host)!, "Cancel"));
+    await press(document.activeElement, "Escape");
+    expect(dialog(host)).toBeNull();
+    await click(button(card(host), "Deploy")!);
+    await click(document.querySelector(".ds-scrim"));
+    expect(dialog(host)).toBeNull();
+    expect(calls.startDeploy).toHaveLength(0);
   });
 
   test("a fraction the card cannot hold keeps Deploy off and says by how much", async () => {
@@ -337,7 +336,6 @@ describe("deploying", () => {
       }),
     });
     await click(button(card(host), "Deploy")!);
-    await type(field(dialog(host)!, "Confirmation phrase"), `deploy ${SFT}`);
     await click(button(dialog(host)!, "Deploy")!);
     await tick();
     const problem = host.querySelector("[data-testid=marvel0-deploy-problem]")!;
@@ -347,7 +345,6 @@ describe("deploying", () => {
     expect(button(card(host), "Deploy")!.disabled).toBe(false);
     // A refusal is final for its request id: the next press is a new request.
     await click(button(card(host), "Deploy")!);
-    await type(field(dialog(host)!, "Confirmation phrase"), `deploy ${SFT}`);
     await click(button(dialog(host)!, "Deploy")!);
     await tick();
     expect(calls.startDeploy).toHaveLength(2);
@@ -363,7 +360,6 @@ describe("deploying", () => {
     const { host, calls } = await open({ startDeploy: () => answer });
     const press = async () => {
       await click(button(card(host), "Deploy")!);
-      await type(field(dialog(host)!, "Confirmation phrase"), `deploy ${SFT}`);
       await click(button(dialog(host)!, "Deploy")!);
       await tick();
     };
@@ -388,7 +384,6 @@ describe("deploying", () => {
     });
     const { host, calls } = await open({ startDeploy: () => pending });
     await click(button(card(host), "Deploy")!);
-    await type(field(dialog(host)!, "Confirmation phrase"), `deploy ${SFT}`);
     await click(button(dialog(host)!, "Deploy")!);
     await click(button(dialog(host)!, "Deploy")!);
     expect(calls.startDeploy).toHaveLength(1);
@@ -401,7 +396,6 @@ describe("deploying", () => {
   test("two presses in the same instant send one request", async () => {
     const { host, calls } = await open({ startDeploy: ok(deployed(), 202) });
     await click(button(card(host), "Deploy")!);
-    await type(field(dialog(host)!, "Confirmation phrase"), `deploy ${SFT}`);
     const confirm = button(dialog(host)!, "Deploy")!;
     await act(async () => {
       confirm.click();
@@ -415,7 +409,6 @@ describe("deploying", () => {
     const { host } = await open({ startDeploy: ok(deployed(), 202) });
     const press = async () => {
       await click(button(card(host), "Deploy")!);
-      await type(field(dialog(host)!, "Confirmation phrase"), `deploy ${SFT}`);
       await click(button(dialog(host)!, "Deploy")!);
       await tick();
     };
@@ -434,7 +427,6 @@ describe("deploying", () => {
       startDeploy: ok(deployed({ replayed: true }), 202),
     });
     await click(button(card(host), "Deploy")!);
-    await type(field(dialog(host)!, "Confirmation phrase"), `deploy ${SFT}`);
     await click(button(dialog(host)!, "Deploy")!);
     await tick();
     expect(
@@ -506,7 +498,7 @@ describe("a server that runs", () => {
     });
   });
 
-  test("Stop asks for its phrase and sends one request", async () => {
+  test("Stop opens a confirm window with nothing to type, Cancel in focus, and sends the page's phrase once", async () => {
     const { host, calls } = await open({
       deploy: ok(ready()),
       stopDeploy: ok(stopped()),
@@ -516,9 +508,11 @@ describe("a server that runs", () => {
     expect(text(d)).toContain("Stop the policy server");
     expect(text(d)).toContain(UNIT);
     expect(text(d)).toContain("never kills a process by number or name");
-    expect(button(d, STOP)!.disabled).toBe(true);
-    await type(field(d, "Confirmation phrase"), "stop policy server");
-    await click(button(d, STOP)!);
+    expect(textFields(d)).toHaveLength(0);
+    expect(document.activeElement).toBe(button(d, "Cancel"));
+    expect(button(d, STOP)!.disabled).toBe(false);
+    expect(button(d, STOP)!.className).toContain("ds-btn--danger");
+    await doubleClick(button(d, STOP)!);
     await tick();
     expect(calls.stopDeploy).toHaveLength(1);
     expect(calls.stopDeploy[0]).toEqual({
@@ -531,7 +525,7 @@ describe("a server that runs", () => {
     ).toContain("The policy server is stopped");
   });
 
-  test("with a client connected the stop needs a second phrase, and says what happens to the client", async () => {
+  test("with a client connected the stop keeps the one typed phrase, the override, and says what happens to the client", async () => {
     const connected = ready({
       listener: { port: 8000, present: true, ours: true, established: 1 },
       stop_blockers: ["client_connected"],
@@ -544,8 +538,15 @@ describe("a server that runs", () => {
     const d = dialog(host)!;
     expect(text(d)).toContain("A client is connected");
     expect(text(d)).toContain("Keep a hand on the physical e-stop");
-    await type(field(d, "Confirmation phrase"), "stop policy server");
+    // The override is the only field; the base phrase is not typed.
+    expect(textFields(d)).toHaveLength(1);
+    expect(document.activeElement).toBe(button(d, "Cancel"));
     expect(button(d, STOP)!.disabled).toBe(true);
+    await type(
+      field(d, "Extra phrase for a connected client"),
+      "stop with client",
+    );
+    expect(button(d, STOP)!.disabled).toBe(true); // not exactly the phrase
     await type(
       field(d, "Extra phrase for a connected client"),
       "stop with client connected",
@@ -568,16 +569,32 @@ describe("a server that runs", () => {
       stopDeploy: refused(409, "client_connected", { established: 1 }),
     });
     await click(button(card(host), STOP)!);
-    await type(
-      field(dialog(host)!, "Confirmation phrase"),
-      "stop policy server",
-    );
     await click(button(dialog(host)!, STOP)!);
     await tick();
     const d = dialog(host)!;
     expect(d).not.toBeNull();
     expect(text(d)).toContain("type the extra phrase to stop anyway");
     expect(field(d, "Extra phrase for a connected client")).not.toBeNull();
+    expect(textFields(d)).toHaveLength(1);
+    expect(button(d, STOP)!.disabled).toBe(true);
+  });
+
+  test("the server refusing the phrase is an internal error with the mismatch, not a prompt to type", async () => {
+    const { host } = await open({
+      deploy: ok(ready()),
+      stopDeploy: refused(400, "confirm_required", {
+        phrase: "stop policy server now",
+      }),
+    });
+    await click(button(card(host), STOP)!);
+    await click(button(dialog(host)!, STOP)!);
+    await tick();
+    const shown = text(
+      host.querySelector("[data-testid=marvel0-deploy-problem]"),
+    );
+    expect(shown).toContain("Internal error");
+    expect(shown).toContain("stop policy server now");
+    expect(shown).not.toMatch(/type|typed/i);
   });
 
   test("a stop the server could not finish says what the person runs", async () => {
@@ -586,10 +603,6 @@ describe("a server that runs", () => {
       stopDeploy: refused(502, "stop_incomplete", { unit: UNIT }),
     });
     await click(button(card(host), STOP)!);
-    await type(
-      field(dialog(host)!, "Confirmation phrase"),
-      "stop policy server",
-    );
     await click(button(dialog(host)!, STOP)!);
     await tick();
     expect(
@@ -612,7 +625,6 @@ describe("a dialog that is open when the state changes", () => {
     let now: Record<string, unknown> = idle();
     const { host } = await open({ deploy: () => ok(now) }, 20);
     await click(button(card(host), "Deploy")!);
-    await type(field(dialog(host)!, "Confirmation phrase"), `deploy ${SFT}`);
     expect(button(dialog(host)!, "Deploy")!.disabled).toBe(false);
     now = starting();
     await waitFor(() => card(host).getAttribute("data-state") === "starting", {
@@ -625,16 +637,29 @@ describe("a dialog that is open when the state changes", () => {
     let now: Record<string, unknown> = ready();
     const { host } = await open({ deploy: () => ok(now) }, 20);
     await click(button(card(host), STOP)!);
-    await type(
-      field(dialog(host)!, "Confirmation phrase"),
-      "stop policy server",
-    );
     expect(button(dialog(host)!, STOP)!.disabled).toBe(false);
     now = idle();
     await waitFor(() => card(host).getAttribute("data-state") === "idle", {
       label: "the new state",
     });
     expect(button(dialog(host)!, STOP)!.disabled).toBe(true);
+  });
+
+  test("the deploy window is for the model it was opened for: another model closes it and nothing is sent for either", async () => {
+    const { host, calls } = await open();
+    const c = card(host);
+    await click(button(c, "Deploy")!);
+    expect(text(dialog(host)!)).toContain(SFT);
+    // The selection moves under the open window (the card's list, or the
+    // command card's choice, which is the same shared selection).
+    await choose(field<HTMLSelectElement>(c, "Model"), CFG);
+    await tick(3, 10);
+    expect(dialog(host)).toBeNull();
+    expect(calls.startDeploy).toEqual([]);
+    // Opened again, it names the new model and sends that one.
+    await click(button(card(host), "Deploy")!);
+    expect(text(dialog(host)!)).toContain(CFG);
+    expect(text(dialog(host)!)).not.toContain(SFT);
   });
 
   test("a state that could not be read again closes the dialog, so its button cannot be pressed", async () => {
@@ -644,10 +669,6 @@ describe("a dialog that is open when the state changes", () => {
       20,
     );
     await click(button(card(host), STOP)!);
-    await type(
-      field(dialog(host)!, "Confirmation phrase"),
-      "stop policy server",
-    );
     fail = true;
     await waitFor(() => dialog(host) === null, {
       label: "the dialog to close",
@@ -1195,10 +1216,6 @@ describe("in Chinese", () => {
       expect(body).not.toContain(english);
     // Only the log, the identifiers and the units are English.
     await click(button(c, zh["marvel0.deploy.btn.deploy"])!);
-    await type(
-      field(dialog(host)!, zh["marvel0.deploy.dialog.phrase"]),
-      `deploy ${SFT}`,
-    );
     await click(button(dialog(host)!, zh["marvel0.deploy.btn.deploy"])!);
     await tick();
     const problem = text(
@@ -1221,10 +1238,6 @@ describe("in Chinese", () => {
       label: "Chinese",
     });
     await click(button(card(host), zh["marvel0.deploy.btn.deploy"])!);
-    await type(
-      field(dialog(host)!, zh["marvel0.deploy.dialog.phrase"]),
-      `deploy ${SFT}`,
-    );
     await click(button(dialog(host)!, zh["marvel0.deploy.btn.deploy"])!);
     await tick();
     const problem = host.querySelector("[data-testid=marvel0-deploy-problem]")!;
@@ -1259,14 +1272,18 @@ describe("the labels and what a lost state takes with it", () => {
     expect(button(card(other.host), STOP)).toBeUndefined();
   });
 
-  test("a dialog does not come back with its typed phrase after the state was lost", async () => {
+  test("a window does not come back after the state was lost, and what was ticked in it is gone", async () => {
     let lost = false;
     const { host } = await open(
       { deploy: () => (lost ? nothing() : ok(idle())) },
       20,
     );
-    await click(button(card(host), "Deploy")!);
-    await type(field(dialog(host)!, "Confirmation phrase"), `deploy ${SFT}`);
+    const c = card(host);
+    await choose(field<HTMLSelectElement>(c, "Model"), CFG);
+    const label =
+      "I accept deploying a model without a recorded real-GPU check";
+    await click(button(c, "Deploy")!);
+    await click(field(dialog(host)!, label)!);
     expect(button(dialog(host)!, "Deploy")!.disabled).toBe(false);
     lost = true;
     await waitFor(() => dialog(host) === null, {
@@ -1280,8 +1297,9 @@ describe("the labels and what a lost state takes with it", () => {
     await tick(3, 40);
     expect(dialog(host)).toBeNull();
     await click(button(card(host), "Deploy")!);
-    expect(field(dialog(host)!, "Confirmation phrase")!.value).toBe("");
+    expect(field(dialog(host)!, label)!.checked).toBe(false);
     expect(button(dialog(host)!, "Deploy")!.disabled).toBe(true);
+    expect(document.activeElement).toBe(button(dialog(host)!, "Cancel"));
   });
 
   test("the acceptance of an unverified model is not kept for the next deploy", async () => {
@@ -1320,7 +1338,6 @@ describe("the labels and what a lost state takes with it", () => {
       startDeploy: ok({ schema: "levi.marvel0.deploy_result.v9" }, 202),
     });
     await click(button(card(host), "Deploy")!);
-    await type(field(dialog(host)!, "Confirmation phrase"), `deploy ${SFT}`);
     await click(button(dialog(host)!, "Deploy")!);
     await tick();
     const shown = text(

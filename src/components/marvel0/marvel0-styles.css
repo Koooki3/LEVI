@@ -876,6 +876,49 @@
   background: var(--ds-info-bg);
   font-size: var(--ds-text-callout-size);
 }
+/* The steps of a guided start (ten) or stop (three) in the order they run: a
+ * grid, so ten steps do not push the rest of the block off the screen. */
+.rg-seq__steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr));
+  gap: var(--ds-space-1) var(--ds-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rg-seq__steps li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-1) var(--ds-space-2);
+  padding: var(--ds-space-1) var(--ds-space-2);
+  border-radius: var(--ds-radius-sm);
+  font-size: var(--ds-text-callout-size);
+}
+/* The order the steps run in, as a number (the grid reads left to right). */
+.rg-seq__steps {
+  counter-reset: rg-step;
+}
+.rg-seq__steps li::before {
+  counter-increment: rg-step;
+  content: counter(rg-step) ".";
+  min-width: 1.5em;
+  text-align: right;
+  color: var(--ds-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.rg-seq__steps li[aria-current="step"] {
+  background: var(--ds-info-bg);
+  font-weight: var(--ds-weight-semibold);
+}
+/* What has not come yet, and what the sequence never reached, recedes. */
+.rg-seq__steps li[data-step-state="pending"],
+.rg-seq__steps li[data-step-state="not_reached"] {
+  color: var(--ds-text-secondary);
+}
+.rg-toolbar__refused {
+  grid-column: 1 / -1;
+}
 .rg-grid--stack {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -1046,6 +1089,41 @@
   display: flex;
   flex-direction: column;
   gap: var(--ds-space-3);
+}
+/* A confirm window has many lines (the whole stack's start has five hazard
+ * lines and four checks): its title and its buttons stay in place and only the
+ * text between them scrolls. Otherwise the focus on Cancel scrolls the panel to
+ * the foot and the window opens with its title and first lines out of sight. */
+.ds-dialog.rg-confirm {
+  overflow: hidden;
+}
+.rg-confirm .ds-dialog__body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.rg-confirm .rg-dialog {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* The lines keep their height; the group scrolls instead of squeezing them. */
+.rg-confirm .rg-dialog > * {
+  flex-shrink: 0;
+}
+.rg-confirm .ds-dialog__body > :not(.rg-dialog) {
+  flex-shrink: 0;
+}
+/* The footer's note on the checks still to tick sits at the start of the row. */
+.rg-confirm__need {
+  margin-right: auto;
+  align-self: center;
+  font-size: var(--ds-text-callout-size);
+}
+/* Wrapped check labels (a phone) keep a gap between boxes. */
+.rg-dialog .ds-choice {
+  padding-block: var(--ds-space-1);
 }
 .rg-evidence__h {
   margin: var(--ds-space-3) 0 var(--ds-space-1);

@@ -11,6 +11,7 @@ import {
   blockersOf,
   codedSay,
   paramsOf,
+  stopping,
   type Blocker,
   type Known,
 } from "./ctl-text";
@@ -111,7 +112,13 @@ export interface MarkerAct {
   waitS: number | null;
   /** Seconds of the wait that were left when the sample was taken. */
   remainingS: number | null;
+  /** The marker is absent on a machine the page acts on: "Set marker" is
+   * shown (on, or off with `touchBlockers` beside it). */
+  showTouch: boolean;
   canTouch: boolean;
+  /** What keeps "set marker" from being on besides the marker's own state (a
+   * guided stop that runs), in the backend's words. */
+  touchBlockers: Blocker[];
   canAdopt: boolean;
   /** Releasing is the S4-0 card's: only a marker of the page, and only when A
    * is gone and the arm shows no control connection. */
@@ -161,16 +168,63 @@ export const SEQUENCE_STATES = [
   "cancelled",
 ] as const;
 export type SequenceState = (typeof SEQUENCE_STATES)[number];
+/** Which guided sequence the state is about: the start (M, marker, A, then B
+ * and C by the person) or the stop of the whole stack (C, A, B in that order). */
+export type SequenceKind = "start" | "stop";
+export const SEQUENCE_STEP_STATES = [
+  "pending",
+  "running",
+  "done",
+  "skipped",
+  "failed",
+  "cancelled",
+  "not_reached",
+] as const;
+export type SequenceStepState = (typeof SEQUENCE_STEP_STATES)[number];
+/** One step of a guided start or stop and how far it is. A stop's steps are
+ * terminals (`stop_c`, `stop_a`, `stop_b`); a start's are the chain `monitor`,
+ * `probe`, `marker`, `wait`, `arm`, `await_a`, `b_probe`, `b`, `c_preflight`,
+ * `c`. `terminal` is the terminal the step belongs to (the FCI check, the
+ * marker and the wait belong to A). */
+export interface SequenceStep {
+  step: string;
+  terminal: CompId;
+  state: SequenceStepState;
+}
+
 export interface SequenceAct {
+  /** An idle sequence, or an older backend, names no kind: that is the start. */
+  kind: SequenceKind;
   state: SequenceState;
   /** The step it is on while it runs (`monitor`, `probe`, `marker`, `wait`,
-   * `arm`, `await_a`). */
+   * `arm`, `await_a` for the start; `stop_c`, `stop_a`, `stop_b` for the
+   * stop). */
   step: string | null;
   /** The terminal the person has to start next while it waits. */
   next: CompId | null;
   reason: Worded<Say> | null;
   /** Seconds of the marker's wait left, while it waits for it. */
   remainingS: number | null;
+  /** The steps in the order they run; empty while idle (and for an older
+   * backend, which sent none for a start). */
+  steps: SequenceStep[];
+  /** How far the start goes by itself: to A only, or through B and C. */
+  through: "a" | "c" | null;
+  /** The start waits for the person's own Start of B / of C (`waiting_confirm`)
+   * instead of starting it. Always true for a start that goes through A only. */
+  pauseB: boolean;
+  pauseC: boolean;
+}
+
+/** The stop of the whole stack: C, then A, then B (M stays), as one click.
+ * The backend decides whether it is offered and says why not. */
+export interface StopAllAct {
+  /** The page acts on the real machine: the button and its reasons are shown.
+   * (A stop needs no control file, so this is the profile alone.) */
+  offered: boolean;
+  canStop: boolean;
+  /** Why it is not offered, in the backend's codes. */
+  blockers: Blocker[];
 }
 
 export interface FciCheck {
@@ -206,6 +260,7 @@ export interface ActView {
   marker: MarkerAct;
   gripper: GripperAct;
   sequence: SequenceAct;
+  stopAll: StopAllAct;
   fci: FciCheck | null;
   server: ServerCheck | null;
   /** An operation of the page that runs now, or ended last. */
@@ -219,6 +274,9 @@ export interface ActView {
 }
 
 const REASON = ["marvel0.ctl.reason.", "marvel0.stack.code."];
+/** Why a guided start or stop ended: its own reasons, then the codes of a
+ * refusal (a stop that met a client ends there with that code). */
+const SEQUENCE_REASON = ["marvel0.ctl.seq.reason.", "marvel0.ctl.block."];
 const FAILURE = ["marvel0.ctl.failure."];
 
 function compState(value: unknown): CompState {
@@ -309,17 +367,25 @@ function markerAct(
   real: boolean,
   enabled: boolean,
   passive: StackView | null,
+  known: Known,
 ): MarkerAct {
   const state =
     raw?.state === "present" || raw?.state === "absent" ? raw.state : "unknown";
   const ours = bool(raw?.ours);
+  const touchBlockers = blockersOf(raw?.touch_blockers, known);
   return {
     state,
     ageS: num(raw?.age_s),
     ours,
     waitS: num(raw?.wait_s),
     remainingS: num(raw?.remaining_s),
-    canTouch: real && enabled && state === "absent",
+    showTouch: real && enabled && state === "absent",
+    canTouch:
+      real &&
+      enabled &&
+      state === "absent" &&
+      stopping(touchBlockers).length === 0,
+    touchBlockers,
     canAdopt: real && enabled && state === "present" && ours === false,
     canRelease:
       real &&
@@ -355,14 +421,52 @@ function gripperAct(raw: Rec | null, known: Known, real: boolean): GripperAct {
 function sequenceAct(raw: Rec | null, known: Known): SequenceAct {
   const next = str(raw?.next, 4)?.toUpperCase();
   return {
+    kind: raw?.kind === "stop" ? "stop" : "start",
     state: SEQUENCE_STATES.includes(raw?.state as SequenceState)
       ? (raw!.state as SequenceState)
       : "idle",
     step: str(raw?.step, 40),
     next: COMPS.includes(next as CompId) ? (next as CompId) : null,
-    reason: coded(["marvel0.ctl.seq.reason."], raw?.reason, known),
+    reason: coded(SEQUENCE_REASON, raw?.reason, known),
     remainingS: num(raw?.remaining_s),
+    steps: sequenceSteps(raw?.steps),
+    through: raw?.through === "a" || raw?.through === "c" ? raw.through : null,
+    pauseB: bool(rec(raw?.pauses)?.b) === true,
+    pauseC: bool(rec(raw?.pauses)?.c) === true,
   };
+}
+
+function stopAllAct(
+  act: Rec,
+  checks: Rec | null,
+  known: Known,
+  offered: boolean,
+): StopAllAct {
+  return {
+    offered,
+    // The backend decides; nothing is offered when this page does not act.
+    canStop: offered && bool(checks?.can_stop_all) === true,
+    blockers: blockersOf(act.stop_all_blockers, known),
+  };
+}
+
+function sequenceSteps(raw: unknown): SequenceStep[] {
+  return list(raw).flatMap((entry): SequenceStep[] => {
+    const item = rec(entry);
+    const step = str(item?.step, 40);
+    const terminal = str(item?.terminal, 4)?.toUpperCase();
+    const state = item?.state;
+    if (!item || !step || !COMPS.includes(terminal as CompId)) return [];
+    return [
+      {
+        step,
+        terminal: terminal as CompId,
+        state: SEQUENCE_STEP_STATES.includes(state as SequenceStepState)
+          ? (state as SequenceStepState)
+          : "pending",
+      },
+    ];
+  });
 }
 
 function fciCheck(raw: unknown): FciCheck | null {
@@ -440,9 +544,11 @@ export function actView(
       doc.profile === "real",
       enabled,
       passive,
+      known,
     ),
     gripper: gripperAct(rec(act.gripper_test), known, real),
     sequence: sequenceAct(rec(act.sequence), known),
+    stopAll: stopAllAct(act, checks, known, doc.profile === "real"),
     fci: fciCheck(checks?.fci),
     server: serverCheck(checks?.c_preflight),
     operation: operationAct(act.operation),
@@ -468,6 +574,7 @@ const DEFAULT_PHRASES: Record<string, string> = {
   robot_server_start: "start robot server",
   robot_server_stop: "stop robot server",
   sequence_start: "start arm stack",
+  sequence_stop: "stop whole stack",
   gripper_open: "gripper open",
   gripper_close: "gripper close",
   marker_touch: "set marker",
@@ -573,12 +680,44 @@ export function canCheckServer(act: ActView): boolean {
     !operationRunning(act)
   );
 }
-/** The guided start is offered while A is idle and no guided start is on. */
+/** The stop of the whole stack is offered when the backend says so. A guided
+ * START that is running does not hold it back (the way out does not depend on
+ * the way in: the backend ends the start and any read-only check first); only a
+ * guided STOP already running does (it would be the same request). */
+export function canStopSequence(act: ActView): boolean {
+  return (
+    act.stopAll.canStop &&
+    !(act.sequence.kind === "stop" && act.sequence.state === "running")
+  );
+}
+/** Why the start of the whole stack is not offered, when the page can say
+ * (the key under `marvel0.ctl.seq.needs_`): another operation runs, A, B and C
+ * are all ready already, or A is in a state the chain cannot start from. Null:
+ * it is offered, or a sequence that runs says it itself, or the page only
+ * shows. */
+export type StartNeed = "free" | "all_ready" | "a_unfit";
+export function startNeed(act: ActView): StartNeed | null {
+  if (!act.real) return null;
+  if (operationRunning(act)) return "free";
+  if (act.sequence.state === "running") return null;
+  if (act.sequence.state === "waiting_confirm") return null;
+  if (["A", "B", "C"].every((id) => act.comps[id as CompId].state === "ready"))
+    return "all_ready";
+  // The chain starts A when it is idle and goes on from one that is ready or
+  // starting; a failed, vanished, foreign, stopping or unreadable A is for the
+  // person to look at first.
+  return ["idle", "ready", "starting"].includes(act.comps.A.state)
+    ? null
+    : "a_unfit";
+}
+/** The start of the whole stack is offered while nothing else runs and
+ * something of A, B, C is not ready yet: it starts what is not up and skips
+ * what is (press it again after a failure). The backend decides the rest and
+ * refuses in words. */
 export function canStartSequence(act: ActView): boolean {
   return (
     act.real &&
-    act.comps.A.state === "idle" &&
-    !operationRunning(act) &&
+    startNeed(act) === null &&
     act.sequence.state !== "running" &&
     act.sequence.state !== "waiting_confirm"
   );

@@ -283,6 +283,255 @@ def views() -> tuple:
                 a_is_up = True
         out["sequence_waiting_b"] = view(m)
 
+    chain_ticks = {"desk_done": True, "estop_hand": True, "hands_clear": True}
+    chain_ticks["no_client"] = True
+
+    def chain_press(m, rid, **options):
+        return post(
+            m,
+            "sequence/start",
+            {
+                "request_id": rid,
+                "confirm": "start arm stack",
+                "attest": chain_ticks,
+                "through": "c",
+                **options,
+            },
+        )
+
+    def until(m, ready, stop):
+        """The chain's ticks, with the machine answering, until ``stop(seq)``."""
+        return m.run_chain(ready=ready, stop_at=stop)
+
+    with machine() as m:
+        # "Start whole stack": one request carries every confirmation (A: Desk
+        # done, e-stop hand; B: hands clear; C: e-stop hand, hands clear, no
+        # client) and the guided start goes on by itself through B and C.
+        m.m_ready()
+        m.no_manager()
+        status, answers["sequence_start_chain"] = chain_press(m, "chain-000001")
+        assert status == 202, answers["sequence_start_chain"]
+        out["chain_running_m"] = view(m)
+        until(m, ("a", "b", "c"), lambda seq: seq["step"] == "b")
+        out["chain_running_b"] = view(m)
+        until(m, ("a", "b", "c"), lambda seq: seq["step"] == "c_preflight")
+        out["chain_running_c_check"] = view(m)
+        until(m, ("a", "b", "c"), lambda seq: seq["step"] == "c")
+        out["chain_running_c"] = view(m)
+        until(m, ("a", "b", "c"), None)
+        keep_fresh(m)
+        out["chain_done"] = view(m)
+        # pressed again with everything up: nothing to do, 200
+        status, answers["sequence_start_already"] = chain_press(m, "chain-000002")
+        assert status == 200, answers["sequence_start_already"]
+        # a single start while a guided stop is live is refused
+        post(
+            m,
+            "sequence/stop",
+            {
+                "request_id": "sequence-stop-0010",
+                "confirm": "stop whole stack",
+                "attest": {},
+            },
+        )
+        refusals["start_c_while_stopping"] = refusal(
+            m,
+            "c/start",
+            {
+                "request_id": "start-c-stopping",
+                "confirm": "start robot server",
+                "attest": {"estop_hand": True, "hands_clear": True, "no_client": True},
+            },
+        )
+        refusals["marker_touch_while_stopping"] = refusal(
+            m,
+            "marker",
+            {"request_id": "marker-stopping", "op": "touch", "confirm": "set marker"},
+        )
+        out["stop_all_started_blocks_starts"] = view(m)
+
+    with machine() as m:
+        # The careful path: the chain waits before B and before C for the
+        # person's own start (a fresh window with its own confirmations).
+        m.m_ready()
+        m.no_manager()
+        chain_press(m, "chain-000003", pause_before_b=True)
+        until(m, ("a",), None)  # (waiting_confirm is not "running": it returns)
+        out["chain_paused_b"] = view(m)
+
+    with machine() as m:
+        # Pausing before C only: B runs by itself, then the chain waits.
+        m.m_ready()
+        m.no_manager()
+        chain_press(m, "chain-000006", pause_before_c=True)
+        until(m, ("a", "b"), None)
+        keep_fresh(m)
+        out["chain_paused_c"] = view(m)
+
+    with machine() as m:
+        # B never becomes ready: the chain ends at B with the reason; C was
+        # not reached; what is up (M, A) stays up.
+        m.m_ready()
+        m.no_manager()
+        chain_press(m, "chain-000004")
+        until(m, ("a",), lambda seq: seq["step"] == "b" and "b" in m.units)
+        m.t += m.specs.units["b"].ready_timeout_s + 1
+        keep_fresh(m)
+        m.act.advance()
+        out["chain_failed_b"] = view(m)
+
+    with machine() as m:
+        # The request without a confirmation a stage it will reach needs.
+        m.m_ready()
+        m.no_manager()
+        refusals["sequence_start_chain_without_attest"] = refusal(
+            m,
+            "sequence/start",
+            {
+                "request_id": "chain-000005",
+                "confirm": "start arm stack",
+                "attest": {"desk_done": True, "estop_hand": True},
+                "through": "c",
+            },
+        )
+
+    with machine() as m:
+        # "Stop whole stack" cannot tell whether C runs: it stops there.
+        m.start_a(aged_s=MARKER_AGE_S)
+        keep_fresh(m)
+        m.table_ok = False
+        post(
+            m,
+            "sequence/stop",
+            {
+                "request_id": "sequence-stop-0011",
+                "confirm": "stop whole stack",
+                "attest": {},
+            },
+        )
+        m.act.advance()
+        out["stop_all_c_unknown"] = view(m)
+
+    with machine() as m:
+        # A stop that was asked for and is carried by nobody (the page was
+        # restarted in the middle of it): the unit is still there.
+        m.all_up(aged_s=MARKER_AGE_S)
+        keep_fresh(m)
+        m.act._write_record("c", phase="stopping", stop_requested_at=m.t)
+        out["stop_unfinished"] = view(m)
+
+    with machine() as m:
+        # "Stop whole stack": C, then A, then B, one request. The guided stop
+        # starts nothing, leaves M running, and each step waits for its unit.
+        m.all_up(aged_s=MARKER_AGE_S)
+        keep_fresh(m)
+        out["stop_all_ready"] = view(m)
+        status, answers["sequence_stop"] = post(
+            m,
+            "sequence/stop",
+            {
+                "request_id": "sequence-stop-0001",
+                "confirm": "stop whole stack",
+                "attest": {},
+            },
+        )
+        assert status == 202, answers["sequence_stop"]
+        out["stop_all_started"] = view(m)
+        m.act.advance()  # C is told to stop
+        keep_fresh(m)
+        m.act.advance()  # C is gone: A is next
+        keep_fresh(m)
+        out["stop_all_running"] = view(m)
+        for _ in range(8):
+            if m.act.advance()["state"] != "running":
+                break
+            keep_fresh(m)
+        out["stop_all_done"] = view(m)
+
+    with machine() as m:
+        # A stop that fails ends the sequence at its step, with the reason;
+        # pressing the button again skips what is already stopped.
+        m.all_up(aged_s=MARKER_AGE_S)
+        m.stop_fails = {"a"}
+        post(
+            m,
+            "sequence/stop",
+            {
+                "request_id": "sequence-stop-0002",
+                "confirm": "stop whole stack",
+                "attest": {},
+            },
+        )
+        for _ in range(8):
+            if m.act.advance()["state"] != "running":
+                break
+            keep_fresh(m)
+        out["stop_all_failed"] = view(m)
+
+    with machine() as m:
+        # Refused up front: a client is connected to C (the override phrase of
+        # C's own stop is not part of the sequence), a hosted run is active.
+        m.all_up(aged_s=MARKER_AGE_S)
+        m.socks.append(_sock(40000, net.ESTABLISHED, remote_port=SERVER_PORT))
+        out["stop_all_blocked"] = view(m)
+        refusals["sequence_stop_with_client"] = refusal(
+            m,
+            "sequence/stop",
+            {
+                "request_id": "sequence-stop-0003",
+                "confirm": "stop whole stack",
+                "attest": {},
+            },
+        )
+        m.socks.pop()
+        m.run_active = True
+        refusals["sequence_stop_run_active"] = refusal(
+            m,
+            "sequence/stop",
+            {
+                "request_id": "sequence-stop-0004",
+                "confirm": "stop whole stack",
+                "attest": {},
+            },
+        )
+        m.run_active = False
+        refusals["sequence_stop_wrong_phrase"] = refusal(
+            m,
+            "sequence/stop",
+            {"request_id": "sequence-stop-0005", "confirm": "stop", "attest": {}},
+        )
+        # a stop that was asked for can be cancelled; nothing further is stopped
+        post(
+            m,
+            "sequence/stop",
+            {
+                "request_id": "sequence-stop-0006",
+                "confirm": "stop whole stack",
+                "attest": {},
+            },
+        )
+        status, answers["sequence_cancel"] = post(
+            m, "sequence/cancel", {"request_id": "sequence-cancel-01"}
+        )
+        assert status == 200, answers["sequence_cancel"]
+        out["stop_all_cancelled"] = view(m)
+
+    with machine() as m:
+        # Nothing of the stack is running: the button is off, and a press that
+        # still arrives is answered "already stopped".
+        m.m_ready()
+        out["stop_all_nothing"] = view(m)
+        status, answers["sequence_stop_nothing"] = post(
+            m,
+            "sequence/stop",
+            {
+                "request_id": "sequence-stop-0007",
+                "confirm": "stop whole stack",
+                "attest": {},
+            },
+        )
+        assert status == 200, answers["sequence_stop_nothing"]
+
     with machine() as m:
         # A is up and the check whether a gripper stack runs (made before A) is
         # older than its validity: B reads unknown, the start button is there

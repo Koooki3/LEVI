@@ -311,7 +311,7 @@ def test_a_guided_start_does_not_end_when_the_optional_check_is_refused(m):
     run_sequence(m)
     m.start_b()  # the person started B between the tick's read and its check
     n = len(probes(m))
-    m.act._refresh_b_probe()  # (refused: a unit of B exists)
+    m.act._refresh_b_probe(m.act._seq)  # (refused: a unit of B exists)
     assert len(probes(m)) == n
     assert m.act.advance()["state"] == "waiting_confirm"
 

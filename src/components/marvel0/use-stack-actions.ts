@@ -3,7 +3,9 @@
 // the request id kept across a retry, "working" from the click until the page
 // has read the stack again, and a refusal shown in words from the backend's
 // code. The writes are the person's: nothing here starts by itself, and the
-// guided sequence is only started by a click on its own button.
+// guided sequences are only started by a click on their own buttons. A confirm
+// window sends the action's fixed confirmation phrase (the spec's), never
+// text a person typed; only the override of a stop of C is typed.
 import { useCallback, useRef, useState } from "react";
 import { RequestIds } from "@/components/live/live-service-logic";
 import en from "@/i18n/en.json";
@@ -17,6 +19,7 @@ import {
   markerBody,
   preflightBody,
   sequenceBody,
+  sequenceStopBody,
   startBody,
   stopBody,
   type MarkerOp,
@@ -48,6 +51,8 @@ export const workKey = (
       return `preflight:${kind.comp}`;
     case "sequence":
       return "sequence";
+    case "sequence_stop":
+      return "sequence_stop";
   }
 };
 
@@ -56,6 +61,12 @@ export const workKey = (
 export interface Outcome {
   ok: boolean;
   code: string | null;
+}
+
+/** What a window adds to the checks it was ticked with. */
+export interface ConfirmInput {
+  override: string;
+  pause: boolean;
 }
 
 export interface Refused {
@@ -74,16 +85,20 @@ export interface StackActions {
   refused: Refused | null;
   /** The last write that went through, by `workKey`. */
   done: string | null;
-  /** Sends a confirmed dialog. */
+  /** What the backend said it did for that write (`done` of its answer), when
+   * it said: `already_started` and `already_stopped` start or stop nothing. */
+  answered: { key: string; done: string } | null;
+  /** Sends a confirmed window. `input.override` is the typed override phrase
+   * of a stop of C with a client connected, else empty; `input.pause` is the
+   * whole stack's start paused before B and before C. */
   confirm: (
     want: DialogKind,
     spec: DialogSpec,
-    typed: string,
-    override: string,
+    input: ConfirmInput,
   ) => Promise<Outcome>;
   /** Runs a check that needs no dialog (A's FCI check, the checks before C). */
   check: (comp: "A" | "C") => Promise<Outcome>;
-  /** Ends the guided start; nothing that already runs is stopped. */
+  /** Ends the guided start or stop; nothing that already runs is stopped. */
   cancelSequence: () => Promise<Outcome>;
   clear: () => void;
 }
@@ -97,6 +112,10 @@ export function useStackActions(
   const [working, setWorking] = useState<string | null>(null);
   const [refused, setRefused] = useState<Refused | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [answered, setAnswered] = useState<{
+    key: string;
+    done: string;
+  } | null>(null);
 
   const run = useCallback(
     async (key: string, send: (id: string) => Promise<ApiResult>) => {
@@ -105,6 +124,7 @@ export function useStackActions(
       setWorking(key);
       setRefused(null);
       setDone(null);
+      setAnswered(null);
       let answer: ApiResult;
       try {
         answer = await send(ids.next(key));
@@ -114,6 +134,8 @@ export function useStackActions(
       if (answer.ok) {
         ids.release();
         setDone(key);
+        const said = (answer.data as { done?: unknown } | null)?.done;
+        if (typeof said === "string") setAnswered({ key, done: said });
       } else {
         // A refusal is final for its request id. With no answer at all it is
         // not known whether the request arrived: the id is kept, so a press
@@ -134,10 +156,10 @@ export function useStackActions(
   );
 
   const confirm = useCallback(
-    (want: DialogKind, spec: DialogSpec, typed: string, override: string) => {
-      // A dialog without a typed phrase sends the phrase itself: its confirm
-      // click is the confirmation.
-      const confirmText = spec.typed ? typed.trim() : spec.phrase;
+    (want: DialogKind, spec: DialogSpec, { override, pause }: ConfirmInput) => {
+      // The confirm click is the confirmation: the page sends the action's
+      // fixed phrase itself (the backend still checks it).
+      const confirmText = spec.phrase;
       const key = workKey(want);
       switch (want.kind) {
         case "start":
@@ -160,7 +182,15 @@ export function useStackActions(
           );
         case "sequence":
           return run(key, (id) =>
-            api.sequence(sequenceBody(id, confirmText, attestBody(spec))),
+            api.sequence(
+              sequenceBody(id, confirmText, attestBody(spec), pause),
+            ),
+          );
+        case "sequence_stop":
+          return run(key, (id) =>
+            api.sequenceStop(
+              sequenceStopBody(id, confirmText, attestBody(spec)),
+            ),
           );
       }
     },
@@ -183,6 +213,7 @@ export function useStackActions(
   const clear = useCallback(() => {
     setRefused(null);
     setDone(null);
+    setAnswered(null);
   }, []);
 
   return {
@@ -190,6 +221,7 @@ export function useStackActions(
     locked: !poll.current,
     refused,
     done,
+    answered,
     confirm,
     check,
     cancelSequence,

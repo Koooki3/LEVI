@@ -31,7 +31,15 @@ TESTS = os.environ.get("MUTATE_TESTS", "").split() or [
     "tests/marvel0/test_marvel0_stack_act_review.py",
     "tests/marvel0/test_marvel0_stack_act_residual.py",
     "tests/marvel0/test_marvel0_stack_act_walk.py",
+    "tests/marvel0/test_marvel0_stack_act_stopall.py",
+    "tests/marvel0/test_marvel0_stack_act_chain.py",
+    "tests/marvel0/test_marvel0_stack_act_race.py",
+    "tests/marvel0/test_marvel0_stack_act_stopping.py",
 ]
+CHAIN = "tests/marvel0/test_marvel0_stack_act_chain.py"
+RACE = "tests/marvel0/test_marvel0_stack_act_race.py"
+STOPPING = "tests/marvel0/test_marvel0_stack_act_stopping.py"
+ROUTES = "tests/marvel0/test_marvel0_stack_act_routes.py"
 COPIED = (
     "levi",
     "tests",
@@ -40,7 +48,9 @@ COPIED = (
     "pyproject.toml",
 )
 
-# (name, file, old text that occurs exactly once, new text)
+# (name, file, old text that occurs exactly once, new text[, test file]): a
+# mutation with a test file is run against that one file only (the new gates of
+# the guided start through B and C each have the one file that guards them).
 MUTATIONS = [
     (
         "control file: require_enabled",
@@ -63,14 +73,14 @@ MUTATIONS = [
     (
         "attestations all ticked",
         "stack_act.py",
-        '        if missing:\n            raise ActRefuse("attest_missing", keys=", ".join(missing))',
-        "        if False:\n            pass",
+        '        missing = [k for k in ATTEST_NEEDED[key] if given.get(k) is not True]\n        if missing:\n            raise ActRefuse("attest_missing", keys=", ".join(missing))',
+        "        missing = []",
     ),
     (
         "attestations known",
         "stack_act.py",
-        '        if unknown:\n            raise ActRefuse("attest_invalid", keys=", ".join(unknown))',
-        "        if False:\n            pass",
+        '        if unknown:\n            raise ActRefuse("attest_invalid", keys=", ".join(unknown))\n        missing = [k for k in ATTEST_NEEDED[key]',
+        "        missing = [k for k in ATTEST_NEEDED[key]",
     ),
     ("fci answered", "stack_act.py", 'item["ok"] = fci_ok', 'item["ok"] = True'),
     (
@@ -507,7 +517,7 @@ MUTATIONS = [
     (
         "sequence: the ticks expire",
         "stack_act.py",
-        '        if step != "await_a" and now - seq["begun_at"] > window:',
+        '        if window is not None and now - seq["begun_at"] > window:',
         "        if False:",
     ),
     (
@@ -616,8 +626,8 @@ MUTATIONS = [
     (
         "b check: a refused optional check does not end the sequence",
         "stack_act.py",
-        '            self._locked("sequence_probe_b", self._do_probe_b)\n        except stack.Refuse:\n            pass',
-        '            self._locked("sequence_probe_b", self._do_probe_b)\n        except stack.Refuse:\n            raise',
+        "        except stack.Refuse:\n            pass\n\n    # -- the chain: B and C by the guided start",
+        "        except stack.Refuse:\n            raise\n\n    # -- the chain: B and C by the guided start",
     ),
     (
         "drain: the arm's sockets must be known",
@@ -763,6 +773,588 @@ MUTATIONS = [
         '        hardware = health.get("hardware_active")\n        if hardware is True:\n            return False\n',
         '        hardware = health.get("hardware_active")\n        if hardware is not False:\n            return False\n',
     ),
+    # --- "stop whole stack" (``Act.sequence_stop``): each gate of the guided stop
+    (
+        "stop all: a hosted run known to be active refuses it",
+        "stack_act.py",
+        '    "record_corrupt",\n    "run_active",\n    "client_connected",\n)',
+        '    "record_corrupt",\n    "client_connected",\n)',
+    ),
+    (
+        "stop all: a client connected to C refuses it",
+        "stack_act.py",
+        '    "run_active",\n    "client_connected",\n)\n',
+        '    "run_active",\n)\n',
+    ),
+    (
+        "stop all: systemd that cannot be read refuses it",
+        "stack_act.py",
+        '    "gate.product",\n    "systemd_unreadable",\n    "record_corrupt",',
+        '    "gate.product",\n    "record_corrupt",',
+    ),
+    (
+        "stop all: a record that cannot be read refuses it",
+        "stack_act.py",
+        '    "systemd_unreadable",\n    "record_corrupt",\n    "run_active",',
+        '    "systemd_unreadable",\n    "run_active",',
+    ),
+    (
+        "stop all: only the product acts",
+        "stack_act.py",
+        'STOP_ALL_CODES = (\n    "gate.product",\n',
+        "STOP_ALL_CODES = (\n",
+    ),
+    (
+        "stop all: the sequence offers no override of a client",
+        "stack_act.py",
+        'STOP_ALL_RENAMED = {"client_connected": "stop_all_client_connected"}',
+        "STOP_ALL_RENAMED = {}",
+    ),
+    (
+        "stop all: the order is C, A, B",
+        "stack_act.py",
+        'STOP_ORDER = ("c", "a", "b")',
+        'STOP_ORDER = ("a", "c", "b")',
+    ),
+    (
+        "stop all: it ends a guided start that would start what it stops",
+        "stack_act.py",
+        '            if self._seq.get("kind") == "start":\n                self._seq_end("cancelled", "superseded")',
+        "            pass",
+    ),
+    (
+        "stop all: nothing to stop is answered, not started",
+        "stack_act.py",
+        '            if "nothing_to_stop" in codes:\n                return {"done": "already_stopped"}',
+        "            pass",
+    ),
+    (
+        "stop all: the ticks of a start are not a stop's (unknown keys refused)",
+        "stack_act.py",
+        '            raise ActRefuse("attest_invalid", keys=", ".join(unknown))\n        ctx = self._context(r, holding=True)\n        rows = self.stop_all_blockers(ctx)',
+        "            pass\n        ctx = self._context(r, holding=True)\n        rows = self.stop_all_blockers(ctx)",
+    ),
+    (
+        "stop all: the phrase is typed",
+        "stack_act.py",
+        '            body, "sequence_stop", lambda r: self._seq_begin_stop(body, r)\n        )',
+        '            body,\n            "sequence_stop",\n            lambda r: self._seq_begin_stop(body, r),\n            phrase=False,\n        )',
+    ),
+    (
+        "stop all: a stop that failed ends the sequence",
+        "stack_act.py",
+        '                if op_state == "failed":\n                    return self._seq_end("failed", "stop_failed", seq)',
+        '                if False:\n                    return self._seq_end("failed", "stop_failed", seq)',
+    ),
+    (
+        "stop all: the next step waits for the unit to be gone",
+        "stack_act.py",
+        '                if self._unit_gone(key, ctx):\n                    return self._stop_step_done(seq, "done")\n                return\n',
+        '                return self._stop_step_done(seq, "done")\n',
+    ),
+    (
+        "stop all: after a stop only the unit is asked, not the evidence that lingers",
+        "stack_act.py",
+        '            if seq["_issued"]:\n                # Something was sent',
+        "            if False:\n                # Something was sent",
+    ),
+    (
+        "stop all: a part that cannot be read is not skipped",
+        "stack_act.py",
+        '            if refusing:\n                code = refusing[0]["code"]\n                return self._seq_end("failed", STOP_ALL_RENAMED.get(code, code), seq)',
+        '            if False:\n                code = refusing[0]["code"]\n                return self._seq_end("failed", STOP_ALL_RENAMED.get(code, code), seq)',
+    ),
+    (
+        "stop all: a part with nothing of ours is skipped",
+        "stack_act.py",
+        '                if self._stop_step_done(seq, "skipped"):',
+        '                if self._stop_step_done(seq, "done"):',
+    ),
+    (
+        "stop all: a stop that is on its way is waited for, not repeated",
+        "stack_act.py",
+        '            if st["state"] == "stopping":\n                return  # (a stop is on its way: this one, or a person\'s)',
+        "            if False:\n                return  # (a stop is on its way: this one, or a person's)",
+    ),
+    (
+        "stop all: a step that never ends fails",
+        "stack_act.py",
+        '            if self.now() - seq["step_at"] > limit:\n                return self._seq_end("failed", "step_timeout", seq)',
+        '            if False:\n                return self._seq_end("failed", "step_timeout", seq)',
+    ),
+    (
+        "stop all: a busy machine-wide lock is tried again, not a failure",
+        "stack_act.py",
+        '            if exc.code not in TRANSIENT:\n                self._seq_end("failed", STOP_ALL_RENAMED.get(exc.code, exc.code), seq)',
+        '            if True:\n                self._seq_end("failed", STOP_ALL_RENAMED.get(exc.code, exc.code), seq)',
+    ),
+    (
+        "stop all: a step ends its own sequence, not the one that replaced it",
+        "stack_act.py",
+        "            target = self._seq if seq is None else seq",
+        "            target = self._seq",
+    ),
+    (
+        "stop all: a unit that failed or vanished is something to stop",
+        "stack_act.py",
+        '        return bool(st["owned"]) or st["state"] in ("failed", "dead")',
+        '        return bool(st["owned"])',
+    ),
+    (
+        "stop all: the button is off when a blocker refuses",
+        "stack_act.py",
+        '            "can_stop_all": not any(b["level"] == "required" for b in stop_all),',
+        '            "can_stop_all": True,',
+    ),
+    (
+        "stop all: the document says what is nothing to stop",
+        "stack_act.py",
+        '            out.append(row("nothing_to_stop"))',
+        "            pass",
+    ),
+    (
+        "stop all: a request while a guided stop runs shows sequence_active",
+        "stack_act.py",
+        '                out.append(row("sequence_active"))\n        for key in STOP_ORDER:',
+        "                pass\n        for key in STOP_ORDER:",
+    ),
+    (
+        "stop all: the sequence view says its kind",
+        "stack_act.py",
+        '        seq.setdefault("kind", None)  # (idle: neither a start nor a stop)',
+        "        pass",
+    ),
+    (
+        "stop all: a start sequence says it is one",
+        "stack_act.py",
+        '                "state": "running",\n                "kind": "start",\n',
+        '                "state": "running",\n',
+    ),
+    (
+        "stop all: the bookkeeping of a stop is not shown",
+        "stack_act.py",
+        '            if k not in hidden and not k.startswith("_")',
+        "            if k not in hidden",
+    ),
+    (
+        "stop all: the page's phrase for it",
+        "stack.py",
+        '    "sequence_stop": "stop whole stack",\n',
+        '    "sequence_stop": "stop",\n',
+    ),
+    (
+        "race: a step looks at the sequence again inside the lock",
+        "stack_act.py",
+        '                if self._seq is not seq or seq["state"] not in live:\n                    return None',
+        "                if False:\n                    return None",
+        RACE,
+    ),
+    (
+        "race: sequence_monitor looks again inside the lock",
+        "stack_act.py",
+        'if self._seq is not seq or seq["state"] not in live:',
+        'if action != "sequence_monitor" and (self._seq is not seq or seq["state"] not in live):',
+        RACE,
+    ),
+    (
+        "race: sequence_probe looks again inside the lock",
+        "stack_act.py",
+        'if self._seq is not seq or seq["state"] not in live:',
+        'if action != "sequence_probe" and (self._seq is not seq or seq["state"] not in live):',
+        RACE,
+    ),
+    (
+        "race: sequence_marker looks again inside the lock",
+        "stack_act.py",
+        'if self._seq is not seq or seq["state"] not in live:',
+        'if action != "sequence_marker" and (self._seq is not seq or seq["state"] not in live):',
+        RACE,
+    ),
+    (
+        "race: sequence_arm looks again inside the lock",
+        "stack_act.py",
+        'if self._seq is not seq or seq["state"] not in live:',
+        'if action != "sequence_arm" and (self._seq is not seq or seq["state"] not in live):',
+        RACE,
+    ),
+    (
+        "race: sequence_probe_b looks again inside the lock",
+        "stack_act.py",
+        'if self._seq is not seq or seq["state"] not in live:',
+        'if action != "sequence_probe_b" and (self._seq is not seq or seq["state"] not in live):',
+        RACE,
+    ),
+    (
+        "race: sequence_b looks again inside the lock",
+        "stack_act.py",
+        'if self._seq is not seq or seq["state"] not in live:',
+        'if action != "sequence_b" and (self._seq is not seq or seq["state"] not in live):',
+        RACE,
+    ),
+    (
+        "race: sequence_preflight_c looks again inside the lock",
+        "stack_act.py",
+        'if self._seq is not seq or seq["state"] not in live:',
+        'if action != "sequence_preflight_c" and (self._seq is not seq or seq["state"] not in live):',
+        RACE,
+    ),
+    (
+        "race: sequence_c looks again inside the lock",
+        "stack_act.py",
+        'if self._seq is not seq or seq["state"] not in live:',
+        'if action != "sequence_c" and (self._seq is not seq or seq["state"] not in live):',
+        RACE,
+    ),
+    (
+        "race: a refusal that says its work was started still runs it",
+        "stack_act.py",
+        "        except ActRefuse as refusal:\n            if refusal.keep_work:\n                self._flush()\n            raise\n        self._flush()",
+        "        except ActRefuse as refusal:\n            if False:\n                self._flush()\n            raise\n        self._flush()",
+        CHAIN,
+    ),
+    (
+        "chain: b_probe_started takes the chain back to the check",
+        "stack_act.py",
+        '            if refusal.code == "b_probe_started":',
+        "            if False:",
+        CHAIN,
+    ),
+    (
+        "chain: the step that goes back to the check is pending again",
+        "stack_act.py",
+        '                return self._goto(seq, back, how="pending")',
+        "                return self._goto(seq, back)",
+        CHAIN,
+    ),
+    (
+        "stopping: no start while a guided stop is live",
+        "stack_act.py",
+        '        if self._stopping():\n            out.append(row("sequence_stopping"))\n        settled =',
+        "        settled =",
+        STOPPING,
+    ),
+    (
+        "stopping: no gripper test while a guided stop is live",
+        "stack_act.py",
+        '        if self._stopping():\n            out.append(row("sequence_stopping"))\n        if not self._is_real(ctx.r):\n            out.append(row("gate.product"))\n        if ctx.states["b"]',
+        '        if not self._is_real(ctx.r):\n            out.append(row("gate.product"))\n        if ctx.states["b"]',
+        STOPPING,
+    ),
+    (
+        "stopping: no marker while a guided stop is live",
+        "stack_act.py",
+        '        if self._stopping():\n            raise ActRefuse("sequence_stopping")',
+        '        if False:\n            raise ActRefuse("sequence_stopping")',
+        STOPPING,
+    ),
+    (
+        "stopping: the document says the marker is held back",
+        "stack_act.py",
+        '                "touch_blockers": [row("sequence_stopping")]\n                if self._stopping()\n                else [],',
+        '                "touch_blockers": [],',
+        STOPPING,
+    ),
+    (
+        "stopping: only a stop holds the starts back, not a start",
+        "stack_act.py",
+        '            return self._seq.get("kind") == "stop" and self._seq_live(self._seq)',
+        "            return self._seq_live(self._seq)",
+        STOPPING,
+    ),
+    (
+        "stopping: a c that cannot be told ends the stop at c",
+        "stack_act.py",
+        '                if key == "c" and st["state"] == "unknown":',
+        "                if False:",
+        STOPPING,
+    ),
+    (
+        "stopping: the steps after the end were not reached",
+        "stack_act.py",
+        '                    elif item["state"] == "pending" and state != "done":\n                        item["state"] = "not_reached"',
+        '                    elif item["state"] == "pending" and state != "done":\n                        pass',
+        STOPPING,
+    ),
+    (
+        "stopping: a stop asked for and not carried leaves a notice",
+        "stack_act.py",
+        '                rec.get("phase") == "stopping"\n                and st[key]["owned"]',
+        '                st[key]["owned"]',
+        STOPPING,
+    ),
+    (
+        "stopping: the notice is for a unit that is still there",
+        "stack_act.py",
+        '                and st[key]["owned"]\n                and st[key]["state"] != "stopping"',
+        '                and st[key]["state"] != "stopping"',
+        STOPPING,
+    ),
+    (
+        "stopping: no notice while systemd is stopping the unit",
+        "stack_act.py",
+        '                and st[key]["state"] != "stopping"\n                and not self._stop_running(key)',
+        "                and not self._stop_running(key)",
+        STOPPING,
+    ),
+    (
+        "stopping: no notice while this process carries the stop",
+        "stack_act.py",
+        '                and st[key]["state"] != "stopping"\n                and not self._stop_running(key)',
+        '                and st[key]["state"] != "stopping"',
+        STOPPING,
+    ),
+    (
+        "chain: every stage's confirmations are asked at the request",
+        "stack_act.py",
+        '        if missing:\n            raise ActRefuse("attest_missing", keys=", ".join(missing))\n        return {stage:',
+        "        if False:\n            pass\n        return {stage:",
+        CHAIN,
+    ),
+    (
+        "chain: an unknown confirmation is refused at the request",
+        "stack_act.py",
+        '        if unknown:\n            raise ActRefuse("attest_invalid", keys=", ".join(unknown))\n        missing = []',
+        "        if False:\n            pass\n        missing = []",
+        CHAIN,
+    ),
+    (
+        "chain: the through option is checked",
+        "stack_act.py",
+        "        if through not in SEQUENCE_THROUGH:",
+        "        if False:",
+        CHAIN,
+    ),
+    (
+        "chain: a pause option must be a bool",
+        "stack_act.py",
+        "            if not isinstance(value, bool):",
+        "            if False:",
+        CHAIN,
+    ),
+    (
+        "chain: a pause asks for no confirmation of the stage it waits before",
+        "stack_act.py",
+        '                    and not paused\n                    and st[key]["state"] not in ("ready", "starting")',
+        '                    and st[key]["state"] not in ("ready", "starting")',
+        CHAIN,
+    ),
+    (
+        "chain: a part that is up asks for no confirmation",
+        "stack_act.py",
+        '                    and not paused\n                    and st[key]["state"] not in ("ready", "starting")',
+        "                    and not paused",
+        CHAIN,
+    ),
+    (
+        "chain: a guided start through A reports the pauses it has",
+        "stack_act.py",
+        '                "pauses": {"b": pause_b or not chain, "c": pause_c or not chain},',
+        '                "pauses": {"b": pause_b, "c": pause_c},',
+        CHAIN,
+    ),
+    (
+        "chain: an A that is up is not started again",
+        "stack_act.py",
+        '            a_up = chain and st["a"]["state"] in ("ready", "starting")',
+        "            a_up = False",
+        CHAIN,
+    ),
+    (
+        "chain: A's gates are not asked again when A is up",
+        "stack_act.py",
+        "            if not a_up:\n                hard = [",
+        "            if True:\n                hard = [",
+        CHAIN,
+    ),
+    (
+        "chain: everything up is already started",
+        "stack_act.py",
+        '            if chain and all(st[k]["state"] == "ready" for k in "abc"):\n                return {"done": "already_started"}',
+        "            if False:\n                return {}",
+        CHAIN,
+    ),
+    (
+        "chain: A's checks are skipped when A is up",
+        "stack_act.py",
+        '            if seq.get("_a_up"):',
+        "            if False:",
+        CHAIN,
+    ),
+    (
+        "chain: the pause before B is kept",
+        "stack_act.py",
+        '        if seq["through"] == "c" and not seq["pauses"]["b"]:',
+        '        if seq["through"] == "c":',
+        CHAIN,
+    ),
+    (
+        "chain: the pause before C is kept",
+        "stack_act.py",
+        '        if seq["through"] == "c" and not seq["pauses"]["c"]:',
+        '        if seq["through"] == "c":',
+        CHAIN,
+    ),
+    (
+        "chain: a part that is not ready any more ends the chain",
+        "stack_act.py",
+        '            if state != "ready":\n                self._seq_end("failed", f"{key}_lost", seq)\n                return False',
+        "            if False:\n                return False",
+        CHAIN,
+    ),
+    (
+        "chain: a part that cannot be told is waited for",
+        "stack_act.py",
+        '            if state == "unknown":\n                return False\n            if state != "ready":',
+        '            if False:\n                return False\n            if state != "ready":',
+        CHAIN,
+    ),
+    (
+        "chain: the check of B is skipped when B is up",
+        "stack_act.py",
+        '        if ctx.states["b"]["state"] in ("ready", "starting", "failed", "dead"):\n            # B is up',
+        "        if False:\n            # B is up",
+        CHAIN,
+    ),
+    (
+        "chain: the check of B is not made when it is fresh",
+        "stack_act.py",
+        '        if not self._b_probe_due(ctx):\n            return self._goto(seq, "b")',
+        '        if False:\n            return self._goto(seq, "b")',
+        CHAIN,
+    ),
+    (
+        "chain: a check of B that got no answer ends the chain",
+        "stack_act.py",
+        '            if state == "failed":\n                return self._seq_end("failed", "b_not_seen", seq)\n            return self._goto(seq, "b")',
+        '            if False:\n                return self._seq_end("failed", "b_not_seen", seq)\n            return self._goto(seq, "b")',
+        CHAIN,
+    ),
+    (
+        "chain: B that is starting is waited for",
+        "stack_act.py",
+        '        if b == "starting":\n            return\n        if seq.get("_started_b"):',
+        '        if False:\n            return\n        if seq.get("_started_b"):',
+        CHAIN,
+    ),
+    (
+        "chain: B that failed or vanished ends the chain",
+        "stack_act.py",
+        '        if b in ("failed", "dead"):\n            return self._seq_end("failed", f"b_{b}", seq)',
+        '        if False:\n            return self._seq_end("failed", f"b_{b}", seq)',
+        CHAIN,
+    ),
+    (
+        "chain: a B that was started and is gone ends the chain",
+        "stack_act.py",
+        '            return self._seq_end("failed", "b_lost", seq)\n        self._chain_start(seq, "b", back="b_probe")',
+        '            return\n        self._chain_start(seq, "b", back="b_probe")',
+        CHAIN,
+    ),
+    (
+        "chain: the checks before C are skipped when C is up",
+        "stack_act.py",
+        '        if ctx.states["c"]["state"] in ("ready", "starting", "failed", "dead"):\n            return self._goto(seq, "c", how="skipped")',
+        '        if False:\n            return self._goto(seq, "c", how="skipped")',
+        CHAIN,
+    ),
+    (
+        "chain: the checks before C are asked again once",
+        "stack_act.py",
+        '                and listing in ("absent", "unknown")',
+        "                and False",
+        CHAIN,
+    ),
+    (
+        "chain: only a listing with no answer is asked again",
+        "stack_act.py",
+        '                and listing in ("absent", "unknown")',
+        "                and True",
+        CHAIN,
+    ),
+    (
+        "chain: the checks before C are asked again only once",
+        "stack_act.py",
+        '                and not seq.get("_pre_retried")',
+        "                and True",
+        CHAIN,
+    ),
+    (
+        "chain: the second ask is a new check",
+        "stack_act.py",
+        '                seq["_pre_op"] = None\n                return',
+        "                return",
+        CHAIN,
+    ),
+    (
+        "chain: C that is starting is waited for",
+        "stack_act.py",
+        '        if c == "starting":\n            return\n        if seq.get("_started_c"):',
+        '        if False:\n            return\n        if seq.get("_started_c"):',
+        CHAIN,
+    ),
+    (
+        "chain: C that failed or vanished ends the chain",
+        "stack_act.py",
+        '        if c in ("failed", "dead"):\n            return self._seq_end("failed", f"c_{c}", seq)',
+        '        if False:\n            return self._seq_end("failed", f"c_{c}", seq)',
+        CHAIN,
+    ),
+    (
+        "chain: the chain is done when C is ready",
+        "stack_act.py",
+        '                if seq["state"] == "running":\n                    self._after_c(seq)',
+        "                if False:\n                    self._after_c(seq)",
+        CHAIN,
+    ),
+    (
+        "chain: what the person started while the sequence waited is passed",
+        "stack_act.py",
+        '                self._skip_pending(seq, ("b_probe", "b"))',
+        "                pass",
+        CHAIN,
+    ),
+    (
+        "chain: B's window",
+        "stack_act.py",
+        "            return window + SEQUENCE_A_READY_S + SEQUENCE_B_READY_S\n        if step in CHAIN_STEPS[2:]:",
+        "            return None\n        if step in CHAIN_STEPS[2:]:",
+        CHAIN,
+    ),
+    (
+        "chain: C's window",
+        "stack_act.py",
+        "                + SEQUENCE_C_CHECK_S\n                + SEQUENCE_C_READY_S\n            )",
+        "                + 100000\n            )",
+        CHAIN,
+    ),
+    (
+        "chain: B's window is later than A's",
+        "stack_act.py",
+        "            return window + SEQUENCE_A_READY_S + SEQUENCE_B_READY_S\n        if step in CHAIN_STEPS[2:]:",
+        "            return window\n        if step in CHAIN_STEPS[2:]:",
+        CHAIN,
+    ),
+    (
+        "chain: the step that was pending is not pending after a skip",
+        "stack_act.py",
+        '        for name in names:\n            self._mark(seq, name, "skipped", only=("pending",))',
+        "        for name in names:\n            pass",
+        CHAIN,
+    ),
+    (
+        "chain: the body is typed",
+        "stack_act_api.py",
+        '    through: Literal["a", "c"] = "a"',
+        '    through: str = "a"',
+        ROUTES,
+    ),
+    (
+        "chain: nothing to do is a 200",
+        "stack_act_api.py",
+        "        else accepted",
+        "        else 202",
+        ROUTES,
+    ),
 ]
 
 
@@ -777,7 +1369,7 @@ def copy_sources():
             shutil.copy2(source, target)
 
 
-def run_tests() -> int:
+def run_tests(tests=None) -> int:
     env = dict(os.environ)
     env["LEVI_WORKSPACE"] = str(ROOT / ".state")
     env["TMPDIR"] = str(ROOT / "tmp")
@@ -790,11 +1382,11 @@ def run_tests() -> int:
             "19",
             "taskset",
             "-c",
-            "20-23",
+            os.environ.get("MUTATE_CPUS", "16-19"),
             sys.executable,
             "-m",
             "pytest",
-            *TESTS,
+            *(tests or TESTS),
             "-q",
             "-x",
             "-p",
@@ -814,7 +1406,7 @@ def run_tests() -> int:
 def check_applicable() -> int:
     """Does every mutation apply, to exactly one place? (No test runs.)"""
     bad = 0
-    for name, file, old, _ in MUTATIONS:
+    for name, file, old, _new, *_tests in MUTATIONS:
         count = (SOURCE / "levi" / "marvel0" / file).read_text().count(old)
         if count != 1:
             bad += 1
@@ -832,7 +1424,7 @@ def main(argv) -> int:
     survived = []
     try:
         print(f"baseline: pytest exit {run_tests()} (must be 0)", flush=True)
-        for name, file, old, new in chosen:
+        for name, file, old, new, *own in chosen:
             path = PKG / file
             text = path.read_text()
             if text.count(old) != 1:
@@ -844,7 +1436,7 @@ def main(argv) -> int:
                 continue
             path.write_text(text.replace(old, new))
             try:
-                code = run_tests()
+                code = run_tests(own)
             finally:
                 path.write_text(text)
             print(f"{'killed  ' if code else 'SURVIVED'} {name}", flush=True)

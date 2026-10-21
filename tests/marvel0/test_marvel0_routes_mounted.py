@@ -63,6 +63,7 @@ ROUTES = [
     ("POST", f"{BASE}/stack/c/preflight"),
     ("POST", f"{BASE}/stack/b/gripper"),
     ("POST", f"{BASE}/stack/sequence/start"),
+    ("POST", f"{BASE}/stack/sequence/stop"),
     ("POST", f"{BASE}/stack/sequence/cancel"),
     ("GET", f"{BASE}/stack/a/log"),
     ("GET", f"{BASE}/stack/b/log"),

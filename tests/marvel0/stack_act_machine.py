@@ -167,6 +167,12 @@ class ActMachine(Machine):
         self.controllers_out, self.controllers_code = NO_MANAGER, NO_MANAGER_CODE
         self.ee_out, self.ee_code = EE_OUT, 0
         self.stop_codes = {}
+        # Units whose `systemctl stop` fails and leaves them as they were (a
+        # stop that failed): "a"/"b"/"c". The guided stop's tests use it.
+        self.stop_fails = set()
+        # Units whose `systemctl stop` answers yes and leaves them there (a
+        # unit another program starts again, or systemd that is slow to let go).
+        self.stop_keeps = set()
         self.m_health_on_start = True
         self.qos_text = f"x\n{stack_units.QOS_OK}\ny\n"
         self.slept = []
@@ -366,6 +372,10 @@ class ActMachine(Machine):
         key = KEY_OF[argv[3].removesuffix(".service")]
         code = self.stop_codes.get(argv[2], 0)
         if code == 0:
+            if argv[2] == "stop" and key in self.stop_fails:
+                return 1, "Failed to stop unit: Connection timed out"
+            if argv[2] == "stop" and key in self.stop_keeps:
+                return 0, ""
             if argv[2] == "stop" and self.units.get(key, {}).get("hangs"):
                 self.units[key]["active"] = "failed"
                 self.units[key]["tasks"] = 3  # (SendSIGKILL=no: they are still there)
@@ -508,6 +518,10 @@ class ActMachine(Machine):
             attest={k: True for k in need} if attest else {},
         )
 
+    def stop_all_body(self, rid="stop-all-00001", **extra):
+        """What "stop whole stack" sends: the phrase and no ticks."""
+        return self.body("sequence_stop", rid, attest={}, **extra)
+
     def stop_body(self, key, rid=None, **extra):
         return self.body(
             stack_act.ACTIONS[("stop", key)], rid or f"stop-{key}-00001", **extra
@@ -535,6 +549,55 @@ class ActMachine(Machine):
         self.start_a(aged_s)
         self.start_b()
         self.start_c()
+
+    def chain_world(self, up, ready=("a", "b", "c")):
+        """What the machine does around a running guided start: each unit of
+        ``ready`` prints its ready lines once it exists (``up``, a set, holds
+        what has been done), the clock moves past the marker's wait, and the
+        controller manager answers once B exists (before that it does not: no
+        gripper stack runs)."""
+        for key, call in (("a", self.a_up), ("b", self.b_up), ("c", self.c_up)):
+            if key in ready and key in self.units and key not in up:
+                call()
+                up.add(key)
+        if "b" in self.units:
+            self.controllers_out, self.controllers_code = CONTROLLERS_OUT, 0
+
+    def run_chain(self, limit=120, ready=("a", "b", "c"), stop_at=None):
+        """Advance the guided start until it stops running (or ``stop_at(seq)``
+        says so), with the machine answering as a healthy one would
+        (``chain_world``). The returned dict is the last ``advance``."""
+        up = set()
+        seq = {}
+        for _ in range(limit):
+            seq = self.act.advance()
+            if seq["state"] != "running" or (stop_at and stop_at(seq)):
+                return seq
+            if seq.get("step") == "wait":
+                self.t += 40
+                self.no_manager()
+            self.chain_world(up, ready)
+        raise AssertionError(f"the guided start did not settle: {seq}")
+
+    def refresh_health(self):
+        """The monitor keeps writing: the health file is as old as the clock
+        says, with the values the machine showed (a jump of the clock does not
+        leave it stale)."""
+        health = self.act._context(self.sup._read()).r["health"]
+        self.health(
+            hardware=health.get("hardware_active"),
+            controller=health.get("controller_active"),
+            red=health["state"] == "red",
+            mode=health.get("robot_mode_name"),
+        )
+
+    def chain_body(self, rid="chain-0000001", **extra):
+        """What "start whole stack" sends: the window's one request, with every
+        confirmation ticked (each stage takes the keys it needs)."""
+        every = {k: True for k in stack_act.ATTEST_KEYS}
+        return self.body(
+            "sequence_start", rid, attest=every, **{"through": "c", **extra}
+        )
 
     def hold_arm_lock(self):
         """The AERI arm lock is held by someone (a line in the fake lock table)."""
@@ -564,6 +627,10 @@ class ActMachine(Machine):
         if key is None:
             return runs
         return [c for c in runs if f"--unit={OURS[key].removesuffix('.service')}" in c]
+
+    def oneshots_of(self, word):
+        """The one-shot commands run so far whose command line holds ``word``."""
+        return [c for c in self.oneshots if word in " ".join(c)]
 
     def stop_calls(self):
         return [c for c in self.calls if c[:3] == ["systemctl", "--user", "stop"]]

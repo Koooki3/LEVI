@@ -9,7 +9,10 @@
 // What the card shows is decided in deploy-logic.ts; what the server refuses is
 // worded in marvel0-failure.ts. Both writes go through the same-origin proxy that
 // adds the person's token (nothing here reads one), carry a request id kept
-// across a retry, and need a typed phrase naming the action (and the model).
+// across a retry, and are confirmed in a window (title, what the action does,
+// Cancel with the initial focus, Confirm). The page sends the action's fixed
+// confirmation phrase itself; the one phrase a person types is the extra one
+// that stops the server under a connected client.
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CircleCheck,
@@ -25,7 +28,6 @@ import {
   Button,
   Card,
   Checkbox,
-  Dialog,
   Field,
   Input,
   Select,
@@ -35,6 +37,7 @@ import { useLocale } from "@/components/levi-locale";
 import { Note } from "@/components/pages-ui/feedback";
 import { RequestIds } from "@/components/live/live-service-logic";
 import { ReadNote, Refusal, WordedText } from "./action-parts";
+import { ConfirmRefusal, ConfirmWindow } from "./confirm-window";
 import { ChecksBlock, LogBlock, ModelFacts, StatusBlock } from "./deploy-parts";
 import {
   modelOptionText,
@@ -134,7 +137,9 @@ export function DeployPanel({
   );
   const [edits, setEdits] = useState<Partial<DeployForm>>({});
   const [dialog, setDialog] = useState<"deploy" | "stop" | null>(null);
-  const [phrase, setPhrase] = useState("");
+  // The model the deploy window was opened for. The window confirms that
+  // model and no other: when the selection moves under it, it closes.
+  const [pinned, setPinned] = useState<string | null>(null);
   const [override, setOverride] = useState("");
   const [pending, setPending] = useState<Pending>(null);
   const [result, setResult] = useState<ActionResult | null>(null);
@@ -200,7 +205,7 @@ export function DeployPanel({
 
   const close = () => {
     setDialog(null);
-    setPhrase("");
+    setPinned(null);
     setOverride("");
     // The acceptance of an unverified model is for this deploy only.
     setEdits((now) =>
@@ -213,16 +218,31 @@ export function DeployPanel({
   useEffect(() => {
     if (!current) {
       setDialog(null);
-      setPhrase("");
+      setPinned(null);
       setOverride("");
       setEdits((now) =>
         now.acceptUnverified ? { ...now, acceptUnverified: false } : now,
       );
     }
   }, [current]);
+  // The deploy window is for the model it was opened for: another model
+  // (picked by the card, the command card or a server that now holds the
+  // selection) closes it, and what was ticked in it goes with it.
+  const movedOff = dialog === "deploy" && pinned !== modelId;
+  useEffect(() => {
+    if (movedOff) {
+      setDialog(null);
+      setPinned(null);
+      setEdits((now) =>
+        now.acceptUnverified ? { ...now, acceptUnverified: false } : now,
+      );
+    }
+  }, [movedOff]);
 
   async function send(action: "deploy" | "stop") {
     if (busy.current || !form || !status) return;
+    // Never another model than the one the window was opened for.
+    if (action === "deploy" && pinned !== modelId) return;
     busy.current = true;
     setPending(action);
     setProblem(null);
@@ -232,9 +252,16 @@ export function DeployPanel({
     try {
       answer =
         action === "deploy"
-          ? await api.startDeploy(deployBody(id, form, model!, phrase, site))
+          ? await api.startDeploy(
+              deployBody(id, form, model!, deployPhrase(status, modelId), site),
+            )
           : await api.stopDeploy(
-              stopBody(id, phrase, override, overridePhrase(status)),
+              stopBody(
+                id,
+                stopPhrase(status),
+                override,
+                overridePhrase(status),
+              ),
             );
     } finally {
       busy.current = false;
@@ -273,16 +300,15 @@ export function DeployPanel({
   // went stale, or changed under an open dialog, switches the button off.
   const deployReady =
     !deployOff &&
+    pinned === modelId &&
     !!model &&
     !!status &&
-    phrase === deployPhrase(status, modelId) &&
     (model.verified || !!form?.acceptUnverified);
   const stopReady =
     current &&
     control.show &&
     !control.operation &&
     !!status &&
-    phrase === stopPhrase(status) &&
     (!clientsNow || override === overridePhrase(status));
 
   const edge = EDGE[state];
@@ -499,7 +525,10 @@ export function DeployPanel({
                 variant="primary"
                 loading={pending === "deploy"}
                 disabled={deployOff}
-                onClick={() => setDialog("deploy")}
+                onClick={() => {
+                  setPinned(modelId);
+                  setDialog("deploy");
+                }}
               >
                 {t("marvel0.deploy.btn.deploy")}
               </Button>
@@ -583,11 +612,9 @@ export function DeployPanel({
       </Card>
 
       {form && model && status && (
-        <Dialog
-          open={dialog === "deploy"}
-          onClose={() => {
-            if (pending === null) close();
-          }}
+        <ConfirmWindow
+          open={dialog === "deploy" && !movedOff}
+          testId="marvel0-deploy-dialog"
           title={sayText(
             {
               key: "marvel0.deploy.dialog.deploy_title",
@@ -595,193 +622,139 @@ export function DeployPanel({
             },
             t,
           )}
-          description={t("marvel0.deploy.dialog.deploy_intro")}
-          footer={
-            <>
-              <Button
-                variant="secondary"
-                disabled={pending !== null}
-                onClick={close}
-              >
-                {t("marvel0.deploy.btn.cancel")}
-              </Button>
-              <Button
-                variant="primary"
-                loading={pending === "deploy"}
-                disabled={!deployReady}
-                onClick={() => void send("deploy")}
-              >
-                {t("marvel0.deploy.btn.deploy")}
-              </Button>
-            </>
+          intro={t("marvel0.deploy.dialog.deploy_intro")}
+          estop={t("marvel0.deploy.dialog.hand")}
+          facts={
+            <dl className="rg-facts">
+              {[
+                [
+                  t("marvel0.deploy.fact.model"),
+                  <code key="m">{model.id}</code>,
+                ],
+                [
+                  t("marvel0.deploy.fact.config"),
+                  <code key="c">{model.config}</code>,
+                ],
+                [
+                  t("marvel0.deploy.fact.rtc"),
+                  t(
+                    form.rtc
+                      ? "marvel0.deploy.dialog.rtc_on"
+                      : "marvel0.deploy.dialog.rtc_off",
+                  ),
+                ],
+                [
+                  t("marvel0.deploy.fact.fraction"),
+                  form.fraction === null ? "?" : form.fraction.toFixed(2),
+                ],
+                [
+                  t("marvel0.deploy.fact.gpu"),
+                  (rows.find((row) => row.fraction === form.fraction)?.say &&
+                    sayText(
+                      rows.find((row) => row.fraction === form.fraction)!.say,
+                      t,
+                    )) ??
+                    "?",
+                ],
+              ].map(([label, value], index) => (
+                <div key={index} className="rg-fact">
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
           }
-        >
-          <dl className="rg-facts">
-            {[
-              [t("marvel0.deploy.fact.model"), <code key="m">{model.id}</code>],
-              [
-                t("marvel0.deploy.fact.config"),
-                <code key="c">{model.config}</code>,
-              ],
-              [
-                t("marvel0.deploy.fact.rtc"),
-                t(
-                  form.rtc
-                    ? "marvel0.deploy.dialog.rtc_on"
-                    : "marvel0.deploy.dialog.rtc_off",
-                ),
-              ],
-              [
-                t("marvel0.deploy.fact.fraction"),
-                form.fraction === null ? "?" : form.fraction.toFixed(2),
-              ],
-              [
-                t("marvel0.deploy.fact.gpu"),
-                (rows.find((row) => row.fraction === form.fraction)?.say &&
-                  sayText(
-                    rows.find((row) => row.fraction === form.fraction)!.say,
-                    t,
-                  )) ??
-                  "?",
-              ],
-            ].map(([label, value], index) => (
-              <div key={index} className="rg-fact">
-                <dt>{label}</dt>
-                <dd>{value}</dd>
-              </div>
-            ))}
-          </dl>
-          <Note tone="warning">{t("marvel0.deploy.dialog.hand")}</Note>
-          {!model.verified && (
-            <Checkbox
-              checked={form.acceptUnverified}
-              onChange={(event) =>
-                edit({ acceptUnverified: event.target.checked })
-              }
-              label={t("marvel0.deploy.model.accept")}
-              description={t("marvel0.deploy.model.unverified_hint")}
-            />
-          )}
-          <Field
-            label={t("marvel0.deploy.dialog.phrase")}
-            hint={sayText(
-              {
-                key: "marvel0.deploy.dialog.phrase_hint",
-                params: { phrase: deployPhrase(status, model.id) },
-              },
-              t,
-            )}
-          >
-            <Input
-              value={phrase}
-              onChange={(event) => setPhrase(event.target.value)}
-              autoComplete="off"
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-            />
-          </Field>
-        </Dialog>
+          after={
+            !model.verified ? (
+              <Checkbox
+                checked={form.acceptUnverified}
+                onChange={(event) =>
+                  edit({ acceptUnverified: event.target.checked })
+                }
+                label={t("marvel0.deploy.model.accept")}
+                description={t("marvel0.deploy.model.unverified_hint")}
+              />
+            ) : null
+          }
+          ready={deployReady}
+          confirmLabel={t("marvel0.deploy.btn.deploy")}
+          working={pending !== null}
+          onCancel={close}
+          onConfirm={() => send("deploy")}
+        />
       )}
 
       {status && (
-        <Dialog
+        <ConfirmWindow
           open={dialog === "stop"}
-          onClose={() => {
-            if (pending === null) close();
-          }}
+          testId="marvel0-deploy-stop-dialog"
           title={t("marvel0.deploy.dialog.stop_title")}
-          description={sayText(
+          intro={sayText(
             {
               key: "marvel0.deploy.dialog.stop_intro",
               params: { unit: status.deploy?.unit ?? "?" },
             },
             t,
           )}
-          footer={
-            <>
-              <Button
-                variant="secondary"
-                disabled={pending !== null}
-                onClick={close}
-              >
-                {t("marvel0.deploy.btn.cancel")}
-              </Button>
-              <Button
-                variant="danger"
-                loading={pending === "stop"}
-                disabled={!stopReady}
-                onClick={() => void send("stop")}
-              >
-                {t("marvel0.deploy.btn.stop")}
-              </Button>
-            </>
+          estop={clientsNow ? t("marvel0.deploy.dialog.stop_client") : null}
+          notes={
+            site
+              ? [
+                  sayText(
+                    {
+                      key: "marvel0.deploy.dialog.stop_wait",
+                      params: { s: (site.unit.stopTimeoutS ?? 0) + 30 },
+                    },
+                    t,
+                  ),
+                ]
+              : []
           }
-        >
-          {clientsNow && (
-            <Note tone="warning" role="alert">
-              {t("marvel0.deploy.dialog.stop_client")}
-            </Note>
-          )}
-          {problem?.action === "stop" && dialog === "stop" && (
-            <p className="rg-bad" role="status">
-              <WordedText
-                worded={sayStopRefusal(problem.failure, { write: true, site })}
-              />
-            </p>
-          )}
-          <Field
-            label={t("marvel0.deploy.dialog.phrase")}
-            hint={sayText(
-              {
-                key: "marvel0.deploy.dialog.phrase_hint",
-                params: { phrase: stopPhrase(status) },
-              },
-              t,
-            )}
-          >
-            <Input
-              value={phrase}
-              onChange={(event) => setPhrase(event.target.value)}
-              autoComplete="off"
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-            />
-          </Field>
-          {clientsNow && (
-            <Field
-              label={t("marvel0.deploy.dialog.override")}
-              hint={sayText(
-                {
-                  key: "marvel0.deploy.dialog.phrase_hint",
-                  params: { phrase: overridePhrase(status) },
-                },
-                t,
-              )}
-            >
-              <Input
-                value={override}
-                onChange={(event) => setOverride(event.target.value)}
-                autoComplete="off"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-            </Field>
-          )}
-          {site && (
-            <p className="rg-muted">
-              {sayText(
-                {
-                  key: "marvel0.deploy.dialog.stop_wait",
-                  params: { s: (site.unit.stopTimeoutS ?? 0) + 30 },
-                },
-                t,
-              )}
-            </p>
-          )}
-        </Dialog>
+          after={
+            clientsNow ? (
+              <Field
+                label={t("marvel0.deploy.dialog.override")}
+                hint={sayText(
+                  {
+                    key: "marvel0.deploy.dialog.phrase_hint",
+                    params: { phrase: overridePhrase(status) },
+                  },
+                  t,
+                )}
+              >
+                <Input
+                  value={override}
+                  onChange={(event) => setOverride(event.target.value)}
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+              </Field>
+            ) : null
+          }
+          ready={stopReady}
+          confirmLabel={t("marvel0.deploy.btn.stop")}
+          danger
+          working={pending !== null}
+          refused={
+            problem?.action === "stop" && dialog === "stop" ? (
+              <ConfirmRefusal
+                failure={problem.failure}
+                testId="marvel0-deploy-stop-refused"
+              >
+                <WordedText
+                  worded={sayStopRefusal(problem.failure, {
+                    write: true,
+                    site,
+                  })}
+                />
+              </ConfirmRefusal>
+            ) : null
+          }
+          onCancel={close}
+          onConfirm={() => send("stop")}
+        />
       )}
     </>
   );

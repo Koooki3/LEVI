@@ -15,7 +15,7 @@ from test_marvel0_deploy import forbid_real_machine  # noqa: F401 - the guard
 
 # Imported here, not in a test: the service reads the machine at import time.
 from levi.agent import legacy, security  # noqa: F401
-from levi.marvel0 import api, stack_act_api, stack_api
+from levi.marvel0 import api, stack_act, stack_act_api, stack_api
 from levi.service import app as service_app
 
 BASE = "/api/levi/marvel0/stack"
@@ -32,6 +32,7 @@ ROUTES = [
     ("POST", f"{BASE}/c/preflight"),
     ("POST", f"{BASE}/b/gripper"),
     ("POST", f"{BASE}/sequence/start"),
+    ("POST", f"{BASE}/sequence/stop"),
     ("POST", f"{BASE}/sequence/cancel"),
     *(("GET", f"{BASE}/{k}/log") for k in "abc"),
 ]
@@ -83,7 +84,10 @@ def body_of(m, path):
             "a": "stop arm stack",
             "b": "stop gripper stack",
             "c": "stop robot server",
+            "sequence": "stop whole stack",
         }[key]
+        if key == "sequence":  # (the shape of a start; nothing is ticked)
+            return {"request_id": rid, "confirm": phrase, "attest": {}}
         return {"request_id": rid, "confirm": phrase}
     if path.endswith("/marker"):
         return {"request_id": rid, "op": "touch", "confirm": "set marker"}
@@ -346,6 +350,144 @@ def test_the_sequence_routes(client, m):
     assert cancelled.status_code == 200 and cancelled.json() == {
         "done": "sequence_cancelled"
     }
+
+
+def chain_post(client, m, rid, **extra):
+    body = {
+        "request_id": rid,
+        "confirm": "start arm stack",
+        "attest": dict.fromkeys(
+            ("desk_done", "estop_hand", "hands_clear", "no_client"), True
+        ),
+        "through": "c",
+        **extra,
+    }
+    return client.post(f"{BASE}/sequence/start", json=body)
+
+
+def test_the_start_whole_stack_route_takes_the_options_and_runs_the_chain(client, m):
+    started = chain_post(client, m, "req-chain-0001")
+    assert started.status_code == 202 and started.json() == {"done": "sequence_started"}
+    seq = client.get(BASE).json()["act"]["sequence"]
+    assert (seq["through"], seq["pauses"]) == ("c", {"b": False, "c": False})
+    assert [i["step"] for i in seq["steps"]] == list(stack_act.SEQUENCE_STEPS)
+    assert m.run_chain()["state"] == "done"
+    stack_api.invalidate()  # (the ticker is not a request: the cached view is old)
+    assert client.get(BASE).json()["act"]["sequence"]["state"] == "done"
+    again = chain_post(client, m, "req-chain-0002")
+    assert again.status_code == 200 and again.json() == {"done": "already_started"}
+
+
+def test_the_start_whole_stack_route_refuses_a_missing_confirmation_by_name(client, m):
+    m.m_ready()
+    body = {
+        "request_id": "req-chain-0003",
+        "confirm": "start arm stack",
+        "attest": {"desk_done": True, "estop_hand": True},
+        "through": "c",
+    }
+    answer = client.post(f"{BASE}/sequence/start", json=body)
+    assert answer.status_code == 400
+    detail = answer.json()["detail"]
+    assert detail["code"] == "attest_missing"
+    assert detail["keys"] == "hands_clear, no_client"
+    assert client.get(BASE).json()["act"]["sequence"] == {"state": "idle", "kind": None}
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"through": "b"},
+        {"through": 3},
+        {"pause_before_b": "yes"},
+        {"pause_before_c": 1},
+        {"pause_before_d": True},
+        {"pause_everywhere": True},
+    ],
+)
+def test_the_start_body_is_closed_and_typed(client, m, extra):
+    answer = chain_post(client, m, "req-chain-0004", **extra)
+    assert answer.status_code == 422
+    assert client.get(BASE).json()["act"]["sequence"] == {"state": "idle", "kind": None}
+
+
+def test_the_old_start_body_still_works_and_waits_for_b_and_c(client, m):
+    started = client.post(
+        f"{BASE}/sequence/start", json=body_of(m, f"{BASE}/sequence/start")
+    )
+    assert started.status_code == 202
+    seq = client.get(BASE).json()["act"]["sequence"]
+    assert (seq["through"], seq["pauses"]) == ("a", {"b": True, "c": True})
+
+
+def test_the_stop_whole_stack_body_does_not_take_the_start_options(client, m):
+    m.all_up()
+    path = f"{BASE}/sequence/stop"
+    for extra in ({"through": "c"}, {"pause_before_b": True}):
+        assert client.post(path, json={**body_of(m, path), **extra}).status_code == 422
+
+
+def test_the_stop_whole_stack_route(client, m):
+    m.all_up()
+    path = f"{BASE}/sequence/stop"
+    # the override phrase of C's own stop is not part of the sequence: the
+    # body is closed, so it cannot even be sent
+    extra = {
+        **body_of(m, path),
+        "client_override": "stop robot server with client connected",
+    }
+    assert client.post(path, json=extra).status_code == 422
+    wrong = client.post(path, json={**body_of(m, path), "confirm": "stop"})
+    assert wrong.status_code == 400
+    assert wrong.json()["detail"]["code"] == "confirm_required"
+    assert "stop whole stack" in wrong.json()["detail"]["message"]
+    before = client.get(BASE).json()["act"]
+    assert (
+        before["checks"]["can_stop_all"] is True and before["sequence"]["kind"] is None
+    )
+    assert not m.stop_calls()
+    started = client.post(path, json=body_of(m, path))
+    assert started.status_code == 202
+    assert started.json() == {"done": "sequence_stop_started"}
+    seq = client.get(BASE).json()["act"]["sequence"]
+    assert (seq["state"], seq["kind"], seq["step"]) == ("running", "stop", "stop_c")
+    again = client.post(path, json={**body_of(m, path), "request_id": "req-stop-two-1"})
+    assert (
+        again.status_code == 409 and again.json()["detail"]["code"] == "sequence_active"
+    )
+    cancelled = client.post(
+        f"{BASE}/sequence/cancel", json={"request_id": "req-seq-cancel2"}
+    )
+    assert cancelled.status_code == 200
+    assert client.get(BASE).json()["act"]["sequence"]["state"] == "cancelled"
+    assert not m.stop_calls()  # (no tick has run: nothing was stopped)
+
+
+def test_stop_whole_stack_with_nothing_running_is_200_already_stopped(client, m):
+    m.m_ready()
+    answer = client.post(
+        f"{BASE}/sequence/stop", json=body_of(m, f"{BASE}/sequence/stop")
+    )
+    assert answer.status_code == 200 and answer.json() == {"done": "already_stopped"}
+    assert not m.stop_calls()
+
+
+def test_stop_whole_stack_needs_no_control_file(tmp_path, monkeypatch):
+    m = ActMachine(tmp_path)
+    m.all_up()
+    m.set_control(False)
+    monkeypatch.setattr(stack_api, "supervisor", lambda: m.sup)
+    monkeypatch.setattr(stack_api, "_VIEW", [])
+    monkeypatch.delenv("LEVI_UI_TOKEN", raising=False)
+    web = FastAPI()
+    web.include_router(stack_api.router)
+    web.include_router(stack_act_api.router)
+    answer = TestClient(web).post(
+        f"{BASE}/sequence/stop", json=body_of(m, f"{BASE}/sequence/stop")
+    )
+    assert (
+        answer.status_code == 202 and answer.json()["done"] == "sequence_stop_started"
+    )
 
 
 def test_the_log_route(client, m):

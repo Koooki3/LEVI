@@ -3,8 +3,10 @@
 // order they come up (M, Desk, A, B, C): the status card the passive probes
 // feed, with the terminal's controls under its summary (stack-controls.tsx),
 // Desk read-only because a person does it in Franka Desk. Above the cards: the
-// guided "Start whole stack" button and the arm-controller marker with its
-// wait; under them the passive evidence folded away.
+// guided "Start whole stack" and "Stop whole stack" buttons (with their
+// progress) and the arm-controller marker with its wait; under them the
+// passive evidence folded away. Every start and stop is one click and a
+// confirm window (stack-dialog.tsx); nothing is typed.
 //
 // The page reads the stack every 2 s and a click is "working" from the moment
 // it is made until the next read has come back. Every button that is off says
@@ -13,11 +15,11 @@
 // not another program of the same account; Desk and the physical emergency
 // stop are the barrier.
 import { useEffect, useState } from "react";
-import { CircleAlert, CircleX, RefreshCw, Rocket, X } from "lucide-react";
+import { CircleAlert, CircleX, RefreshCw } from "lucide-react";
 import { Badge, Button, Card } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Notice } from "./notice";
-import { WordedText } from "./action-parts";
+import { RefusedBlock, WordedText } from "./action-parts";
 import { nodeAnchor, type ChainId } from "./chain-logic";
 import { wordOf } from "./ctl-text";
 import { LiveAge, useNow } from "./live-age";
@@ -27,6 +29,7 @@ import { sayText } from "./marvel0-say";
 import {
   STATE_TONE,
   canStartSequence,
+  canStopSequence,
   gripperTestFailed,
   markerRemaining,
   operationRunning,
@@ -36,12 +39,17 @@ import {
   type CompId,
 } from "./stack-act-logic";
 import type { StackApi } from "./stack-api";
-import { CompControls, GripperTest } from "./stack-controls";
+import { CompControls, GripperTest, Reasons } from "./stack-controls";
+import { SequenceBlock } from "./stack-sequence";
 import { StackDialog } from "./stack-dialog";
 import { dialogSpec, type DialogKind } from "./stack-dialog-logic";
 import { StackEvidence } from "./stack-evidence";
 import type { Polled } from "./use-polled";
-import { useStackActions, type StackActions } from "./use-stack-actions";
+import {
+  useStackActions,
+  type ConfirmInput,
+  type StackActions,
+} from "./use-stack-actions";
 import { STACK_FRESH_MS, type StackDoc } from "./use-stack-poll";
 
 const COMP_OF: Partial<Record<Marvel0CardId, CompId>> = {
@@ -68,7 +76,9 @@ const EDGE: Record<CompState, Marvel0State | "working"> = {
   foreign_running: "stale",
   stopping: "working",
 };
-/** A dialog that stays open on these refusals: the person fixes the input. */
+/** A window that stays open on these refusals: the person fixes the input
+ * (the override of a stop of C, a tick). `confirm_required` stays so that it
+ * is read as the internal error it is, not lost behind a closing window. */
 const STAYS_OPEN = new Set([
   "client_connected",
   "confirm_required",
@@ -96,129 +106,9 @@ function stillOffered(want: DialogKind, act: ActView): boolean {
           : act.marker.canTouch;
     case "sequence":
       return canStartSequence(act);
+    case "sequence_stop":
+      return canStopSequence(act);
   }
-}
-
-function SequenceBlock({
-  act,
-  actions,
-  ask,
-}: {
-  act: ActView;
-  actions: StackActions;
-  ask: (want: DialogKind) => void;
-}) {
-  const { t } = useLocale();
-  const seq = act.sequence;
-  const live = seq.state === "running" || seq.state === "waiting_confirm";
-  const tone =
-    seq.state === "failed"
-      ? "danger"
-      : seq.state === "done"
-        ? "success"
-        : live
-          ? "info"
-          : "neutral";
-  return (
-    <div
-      className="rg-seq"
-      data-testid="marvel0-sequence"
-      data-state={seq.state}
-    >
-      <div className="rg-seq__head">
-        <h4 className="rg-marker__title">{t("marvel0.ctl.seq.title")}</h4>
-        <Badge tone={tone}>
-          {wordOf(t, "marvel0.ctl.seq.state.", seq.state)}
-        </Badge>
-      </div>
-      <p className="rg-muted">{t("marvel0.ctl.seq.lead")}</p>
-      <div className="rg-comp__buttons">
-        <Button
-          variant="primary"
-          icon={Rocket}
-          disabled={
-            !canStartSequence(act) || actions.working !== null || actions.locked
-          }
-          onClick={() => ask({ kind: "sequence" })}
-        >
-          {t("marvel0.ctl.seq.button")}
-        </Button>
-        {live && (
-          <Button
-            variant="secondary"
-            icon={X}
-            disabled={actions.working !== null}
-            loading={actions.working === "sequence:cancel"}
-            onClick={() => void actions.cancelSequence()}
-          >
-            {t("marvel0.ctl.seq.cancel")}
-          </Button>
-        )}
-      </div>
-      {seq.state === "running" && seq.step && (
-        <p
-          className="rg-working"
-          role="status"
-          data-testid="marvel0-sequence-step"
-        >
-          {sayText(
-            {
-              key: "marvel0.ctl.seq.step",
-              params: {
-                step: { raw: wordOf(t, "marvel0.ctl.seq.step.", seq.step) },
-              },
-            },
-            t,
-          )}
-          {seq.step === "wait" && seq.remainingS !== null && (
-            <>
-              {" "}
-              {sayText(
-                {
-                  key: "marvel0.ctl.marker.countdown",
-                  params: { s: Math.ceil(seq.remainingS) },
-                },
-                t,
-              )}
-            </>
-          )}
-        </p>
-      )}
-      {seq.state === "waiting_confirm" && seq.next && (
-        <p
-          className="rg-seq__wait"
-          role="status"
-          data-testid="marvel0-sequence-wait"
-        >
-          {sayText(
-            {
-              key: "marvel0.ctl.seq.waiting_for",
-              params: { name: { key: `marvel0.stack.name.${seq.next}` } },
-            },
-            t,
-          )}
-        </p>
-      )}
-      {(seq.state === "failed" || seq.state === "cancelled") && seq.reason && (
-        <p
-          className={seq.state === "failed" ? "rg-bad" : "rg-muted"}
-          role="status"
-          data-testid="marvel0-sequence-reason"
-        >
-          <WordedText worded={seq.reason} />
-        </p>
-      )}
-      {!canStartSequence(act) && seq.state === "idle" && !live && (
-        <p className="rg-muted" data-testid="marvel0-sequence-needs">
-          {t(
-            operationRunning(act)
-              ? "marvel0.ctl.seq.needs_free"
-              : "marvel0.ctl.seq.needs_idle",
-          )}
-        </p>
-      )}
-    </div>
-  );
 }
 
 function MarkerBlock({
@@ -299,9 +189,9 @@ function MarkerBlock({
         </p>
       )}
       <div className="rg-comp__buttons">
-        {marker.canTouch && (
+        {marker.showTouch && (
           <Button
-            disabled={busy}
+            disabled={busy || !marker.canTouch}
             onClick={() => ask({ kind: "marker", op: "touch" })}
           >
             {t("marvel0.ctl.btn.marker_touch")}
@@ -325,8 +215,30 @@ function MarkerBlock({
           </Button>
         )}
       </div>
+      {marker.showTouch && (
+        <Reasons
+          label="marvel0.ctl.off.marker"
+          control={{
+            enabled: marker.canTouch,
+            blockers: marker.touchBlockers,
+            needsOverride: false,
+          }}
+          testId="marvel0-block-marker"
+        />
+      )}
     </div>
   );
+}
+
+/** A notice names its unit by the backend's key (`a`, `b`, `c`); the page
+ * calls the terminals by their letters. */
+function unitName(
+  params: Record<string, string | number>,
+): Record<string, string | number> {
+  const unit = params.unit;
+  return typeof unit === "string" && /^[abc]$/.test(unit)
+    ? { ...params, unit: unit.toUpperCase() }
+    : params;
 }
 
 /** The backend's own operation (a start waiting for its units, a check, the
@@ -385,7 +297,7 @@ function Operation({ act }: { act: ActView }) {
           {sayText(
             {
               key: `marvel0.ctl.notice.${notice.code.replace(/^notice\./, "")}`,
-              params: notice.params,
+              params: unitName(notice.params),
             },
             t,
           )}
@@ -424,12 +336,18 @@ export function StackPanel({
     if (lost && actions.working === null) setWant(null);
   }, [lost, actions.working]);
 
-  const send = async (typed: string, override: string) => {
+  const send = async (input: ConfirmInput) => {
     if (!want || !spec) return;
-    const outcome = await actions.confirm(want, spec, typed, override);
+    const outcome = await actions.confirm(want, spec, input);
     if (outcome.ok || (outcome.code && !STAYS_OPEN.has(outcome.code)))
       setWant(null);
   };
+  // The refusals of the writes that have no card of their own (the marker and
+  // the guided start and stop) are shown under them once their window is gone.
+  const toolbarRefused =
+    actions.refused && /^(marker|sequence)/.test(actions.refused.key)
+      ? actions.refused
+      : null;
 
   return (
     <section
@@ -507,6 +425,16 @@ export function StackPanel({
               actions={actions}
               ask={open}
             />
+            {toolbarRefused && !want && (
+              <div className="rg-toolbar__refused">
+                <RefusedBlock
+                  testId="marvel0-toolbar-refused"
+                  code={toolbarRefused.failure.code}
+                >
+                  <WordedText worded={toolbarRefused.worded} />
+                </RefusedBlock>
+              </div>
+            )}
           </Card>
         </>
       )}
@@ -580,7 +508,7 @@ export function StackPanel({
         working={actions.working !== null}
         refused={want ? actions.refused : null}
         onClose={() => setWant(null)}
-        onConfirm={(typed, override) => void send(typed, override)}
+        onConfirm={(input) => send(input)}
       />
     </section>
   );

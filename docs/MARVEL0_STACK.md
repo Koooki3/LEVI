@@ -83,11 +83,90 @@ page), and while a member starts, which ready lines were seen and which are miss
   stopped only once that unit is gone (at most `GRIPPER_END_WAIT_S`, 10 s, then anyway), because `send_goal`'s SIGINT handler
   needs B's action server to answer the cancel, and a stop that lands before systemd has created the unit waits for it. Gates: B ready, no
   hosted run (or one that cannot be told), no client on C, the AERI arm lock free, hands clear ticked, one operation at a time.
-- **Guided start.** One request runs M, the checks, the marker, the wait and A, then stops and waits for the person to
-  start B and then C with their own phrases and confirmations. It lives in memory only and is never resumed after a restart
-  of the service; `sequence/cancel` ends it without stopping anything. A stop of A while it waits for A to become ready ends it
-  (`a_lost`): that step has no time window of its own and would otherwise hold `sequence_active` for up to 10 minutes.
-- **Stop order:** client, C, A, B (optional), M last. The page names only the unit it recorded, after `systemctl show`
+- **Guided start ("start whole stack").** One request, `POST .../stack/sequence/start`, body (closed; an unknown field or a
+  value of the wrong type is a 422): `request_id`, `confirm` (`start arm stack`, which the page's confirm window sends for
+  the person), `attest`, and the options `through` (`"a"`, the default, or `"c"`), `pause_before_b` and `pause_before_c`
+  (booleans, default `false`; they only matter for `"c"`). **Through `"a"`** (the body of old) runs M, the checks, the marker,
+  the wait and A, then waits for the person to start B and then C with their own confirmations. **Through `"c"`** goes on by
+  itself: B, then C, each by the single start's own code and gates (`_do_start`: every gate is asked again, under the
+  machine-wide lock, at every step), with the confirmations the request carried. It lives in memory only and is never resumed
+  after a restart of the service.
+  - **The confirmations.** `attest` is one flat dictionary; the request is refused as a whole (400 `attest_missing`, naming
+    the keys, nothing begun or set) when a stage the sequence will start itself lacks one: A `desk_done`, `estop_hand`;
+    B `hands_clear`; C `estop_hand`, `hands_clear`, `no_client`. One tick serves every stage that asks for it. A part
+    that is ready or starting when the button is pressed, and a part the request pauses before, asks for nothing; an
+    unknown key is `attest_invalid`. Each unit's record keeps the keys of its own stage. `act.attest` lists the keys per
+    stage; the hazard sentences are `act.terminals.{a,b,c}.hazard`. The gates stop mistakes only: the ticks are clicks that
+    are recorded.
+  - **The steps** (`act.sequence.steps`, `{step, terminal, state}`; the states are `pending`, `running`, `done`, `skipped`,
+    `failed`, `cancelled`, `not_reached`): `monitor`, `probe`, `marker`, `wait`, `arm`, `await_a` (A's, as before), then for
+    `"c"`: `b_probe` (the check whether a gripper stack runs; automatic, made only when the last one is due), `b` (B's
+    start **and** the wait for ready: the gripper calibrates), `c_preflight` (the three checks before C; **one automatic retry**
+    when the controller listing got no answer, `controllers_state` `absent` or `unknown`; a check that answered no is not
+    asked again), `c` (C's start and the wait for ready), then `done`. `skipped`: nothing was asked of the machine (the part was
+    ready already, or the person did it by hand while the sequence waited). `not_reached`: the sequence ended before it.
+    `act.sequence` also carries `through` and `pauses` (`{b, c}`, the effective ones: a start through `"a"` reports both
+    `true`, because it waits for the person's B and C).
+  - **A pause** (`pause_before_b`, `pause_before_c`): the sequence waits (`waiting_confirm`, `next` `b` or `c`) for the person's
+    own start of that part, with a window and confirmations of their own; when it is ready the chain goes on by itself if the
+    next stage is not paused. The ticks of the click are not good for ever: A must be started within `SEQUENCE_ARM_WINDOW_S`
+    (300 s) plus the marker's wait of the click, B within `SEQUENCE_A_READY_S` + `SEQUENCE_B_READY_S` (300 s + 300 s) after
+    that, C within `SEQUENCE_C_CHECK_S` + `SEQUENCE_C_READY_S` (240 s + 240 s) after that. A chain that is late for a stage
+    ends (`cancelled`, `expired`) and starts nothing on the old ticks; the person starts that part themselves. A step that
+    takes longer than `STEP_TIMEOUT_S` (600 s) ends it (`step_timeout`).
+  - **It ends at the first step that fails**, with the reason in `act.sequence.reason`: the code of the gate that refused (the
+    same codes as the single start's `start_blockers`), `b_not_seen` (the check of B got no answer), `b_failed`, `b_dead`
+    (B did not become ready, or vanished), `c_preflight_failed`, `c_failed`, `c_dead`, `a_lost`, `b_lost` (a part before this
+    one is not ready any more; a part that merely cannot be vouched for for a while is waited for), `attest_missing` (a part
+    that was up at the request is gone and nothing was ticked for starting it). **What is already up stays up**: the document
+    says what is up; the person fixes the cause and presses the button again, which **skips what is ready** (A that is up is
+    not started, its checks, the marker and the wait are `skipped`; B and C that are up are passed) and answers 200
+    `already_started` when A, B and C are all ready. The sequence never starts B without A ready or C without A and B ready.
+  - **Cancel and stop win.** `sequence/cancel` and "stop whole stack" end it and it advances no more; nothing that already
+    runs is stopped by either. Because the sequence reads the machine without the machine-wide lock and then starts something
+    under it, every start, touch and check it makes **looks again, inside the lock, whether it is still the running
+    sequence** (`Act._seq_locked`): a stop or a cancel that was answered in between is not undone (found by the review of the
+    stop-all package for A; it holds for the monitor, the FCI check, the marker, the check of B, B, the checks before C and C).
+    A stop of A while it waits for A to become ready ends it (`a_lost`): that step has no time window of its own and would
+    otherwise hold `sequence_active` for up to 10 minutes.
+- **Guided stop ("stop whole stack").** One request, `POST .../stack/sequence/stop` (body `request_id`, `confirm`, `attest`; the
+  phrase is `stop whole stack`, which the page's confirm window sends for the person; `attest` ticks nothing and unknown keys are
+  `attest_invalid`), stops C, then A, then B, and leaves M running (the marker's release already follows A's stop). Each step is
+  the **single stop of that unit, by the same code and the same gates** (`stop_c_first`, `not_ours`, `unit_foreign`,
+  `record_corrupt`, `systemd_unreadable`, `run_active`, the client rule of C): a unit with nothing of ours to stop is skipped, one
+  that has is stopped, and the next step waits until the unit is gone. After a stop the question is only whether the unit is
+  gone, not what the rest of the evidence says: the monitor's last health file and the arm's sockets outlast A by seconds and
+  would read as a part that is not ours. It never bypasses a gate, starts nothing and sends no kill. The override phrase of C's
+  own stop stays a typed single-stop feature and is **not** part of the sequence.
+  It is refused up front (409, nothing is stopped) while a hosted run is known to be active (`run_active`), while a client is
+  connected to C or the socket table cannot be read (`stop_all_client_connected`), when systemd or a record cannot be read
+  (`systemd_unreadable`, `record_corrupt`) and when this instance is not the product; with no unit of ours it answers 200
+  `already_stopped`. `act.checks.can_stop_all` and `act.stop_all_blockers` (rows `{code, level, text, params}`; `nothing_to_stop`
+  and `sequence_active` are rows too) say the same beforehand. **The way out does not depend on the way in (RIG-04):** a run
+  probe that raises or is missing, a stale health file, a check or the gripper test that is running and a missing control file do
+  not block it.
+  A stop that fails ends the sequence at that step, with the single stop's code as `act.sequence.reason` (`stop_failed`: the
+  unit did not stop on SIGINT in its time; `not_ours`, `unit_foreign`: the page did not start it; `stop_left_processes`;
+  `stop_c_first`; `run_active`; `stop_all_client_connected` when the client came after the press; `step_timeout`: the unit's
+  stop time plus 90 s; `stop_c_unknown`: C is not the page's and whether it runs cannot be told, so "nothing to stop" would be
+  a guess and A is not stopped under a C that may be up, while a stop of A or B alone goes ahead with the warning), the steps
+  after it read `not_reached`, and nothing after it is touched. The person presses again: what is
+  stopped is skipped (`skipped`), so a press can be repeated. `sequence/cancel` ends it (a stop already sent stays sent; nothing
+  further is stopped). It ends a guided start that runs or waits (`superseded`), also when nothing was running, so that the start
+  does not go on to start what was just stopped. Like the guided start it lives in memory only: a restart of the service ends it,
+  and the next press skips what is already stopped.
+  `act.sequence` carries `kind` (`start`, `stop`, null when idle) and `steps`; for a stop they are `{step: stop_c|stop_a|stop_b,
+  terminal, state: pending|running|done|skipped|failed|cancelled|not_reached}`. A page words the end of a stop from them
+  (`done`: stopped by this press; `skipped`: there was nothing of the page's), not from a fixed sentence. **While a guided
+  stop is live nothing is started, set or tested** (`sequence_stopping`, a required blocker on the starts of A, B and C, on
+  the gripper test's blockers and on `act.marker.touch_blockers`; the single stops stay open, the way out does not wait).
+  A stop that was asked for and is carried by nobody (the page restarted in the middle of it, or the stop failed) leaves the
+  notice `notice.stop_unfinished` (`params.unit`), built from the unit's record: the unit is still there, the person decides.
+  **A stop of C or A is what the single stops are:** C's leaves
+  the arm under impedance control until A is stopped, and A's closes the connection to the arm; neither locks the arm and neither
+  is an emergency stop (the unit notes `c.stop_arm_still_held` and `a.stop_fci_dropped` say so, per unit, once it is so). Desk's
+  Lock and Deactivate FCI, and the physical emergency stop, stay a person's.
+- **Stop order:** client, C, A, B (optional), M last (the guided stop does the first four in one request). The page names only the unit it recorded, after `systemctl show`
   reports that very `Id` and command, and sends the unit's own stop signal (SIGINT, like Ctrl+C). It never kills.
   Stopping C leaves the impedance controller holding the arm until A stops; once C is stopped the document says so
   (`stop_note`: "the arm is still under impedance control"), and A's note ("the connection to the arm closed") comes only
@@ -109,8 +188,10 @@ page), and while a member starts, which ready lines were seen and which are miss
   pid that is 0 or missing (a failed unit shows 0 with processes still in its group); only a unit with no control group at all
   has nothing left. If the arm must be freed meanwhile, the physical emergency stop is the way.
 
-Each start needs: the control file switching the stack on, the exact typed phrase (`start arm stack`, `start gripper stack`,
-`start robot server`), the confirmations ticked (A: Desk done, hand on the e-stop; B: hands clear; C: hand on the e-stop,
+Each start needs: the control file switching the stack on, the exact phrase in `confirm` (`start arm stack`, `start gripper
+stack`, `start robot server`; the page's confirm window sends it for the person once the boxes are ticked, a script sends it
+itself; the only phrase a person still types is the override of a stop of C with a client connected, and the
+deploy page's), the confirmations ticked (A: Desk done, hand on the e-stop; B: hands clear; C: hand on the e-stop,
 hands clear, no client running), a fresh `request_id` (a repeated request is answered, never done twice), the
 machine-wide stack lock, and every blocker clear. A request id is answered again from memory **and from the folder of
 answered requests (`<workspace>/marvel0/stack/replay/`, the newest 64) after a restart of the page**, so a browser that
@@ -198,7 +279,14 @@ after it is ready (no health source): a gripper driver that dies without a `proc
 ## What was run
 
 - L1, a fake machine (`stack_act_machine.py`): every gate alone, the order of stops, the marker, the checks, the gripper
-  test, the sequence, the document. L2, real child processes of stand-in programs (`fake_stack/`) behind a runner that maps
+  test, the sequence, the guided stop (`test_marvel0_stack_act_stopall.py`; what it holds back and what it says when it
+  cannot finish: `test_marvel0_stack_act_stopping.py`), the guided start through B and C (`test_marvel0_stack_act_chain.py`:
+  the confirmations per stage, the pauses, every gate of B's and C's single start alone at its step, a failure at each step
+  and a press again that skips what is ready, the retry of the listing, the windows, cancel at every step, "stop whole
+  stack" taking its place, a restart; `test_marvel0_stack_act_race.py`: a stop or a cancel answered just before each start,
+  touch or check of the sequence), the document. L2, real child processes of stand-in programs (`fake_stack/`; the guided
+  stop in `test_marvel0_stack_act_stopall_processes.py`, the whole chain to C ready, a B that never becomes ready, a listing
+  that needs the retry and a press again in `test_marvel0_stack_act_chain_processes.py`) behind a runner that maps
   `systemd-run`/`systemctl` to `Popen`: slow, never ready, crash, ignore SIGINT, duplicate and missing lines, the
   wrapper. L3, `tests/marvel0/rehearse_stack.py`, once on the development machine with the arm off: real `systemd --user`
   units named `rehearsal`, stand-in commands: the properties above were accepted, the program inside saw `rtprio 99` and
@@ -208,13 +296,16 @@ after it is ready (no health source): a gripper driver that dies without a `proc
   measures the exit status of `systemd-run --wait` after `RuntimeMaxSec`, `timeout -s INT` inside a unit, the SIGINTs a
   child gets under `KillMode=control-group` and the task count of a unit whose stop timed out, and it refuses to run
   (exit 2) while a robot process is on the machine.
-- The mutation check (`tests/marvel0/mutate_stack_act.py`, 120 mutations; `--check` says whether every mutation still applies)
-  removes each gate in turn, including every gate added by the reviews of 2026-10-21 and their fixes. A run of the whole list
-  takes a few minutes of pytest: not while the arm controller is active (`MUTATE_TESTS` names one test file for a quick run).
+- The mutation check (`tests/marvel0/mutate_stack_act.py`, 207 mutations; `--check` says whether every mutation still applies)
+  removes each gate in turn, including every gate added by the reviews of 2026-10-21 and their fixes; the 59 of the guided
+  start through B and C, of the race and of the guided stop's new words each run against the one test file that guards them.
+  A run of the whole list takes a few minutes of pytest: not while the arm controller is active (`MUTATE_TESTS` names one test
+  file for a quick run; the tests run on cores `MUTATE_CPUS`, default 16-19).
 - `test_marvel0_stack_act_walk.py`: random walks over the fake machine (most steps the next step of the bring-up, the rest
   anything: stops out of order, wrong answers of the checks, clock jumps, a silent monitor, an unreadable socket table or
-  systemd, a unit that hangs on its stop, a restart of the page), after which the page's own buttons must be able to bring
-  everything down, the marker included. It looks for a state the person cannot leave, which no list of cases does.
+  systemd, a unit that hangs on its stop, a restart of the page, a guided start through A or through B and C with or without
+  pauses), after which the page's own buttons, "stop whole stack" among them, must be able to bring everything down, the
+  marker included. It looks for a state the person cannot leave, which no list of cases does.
 - Regenerate the sample the front end reads: `uv run --no-sync python tests/marvel0/regen_stack_act_sample.py`
   (`src/components/marvel0/__tests__/marvel0-stack-act.samples.json`).
 
@@ -284,10 +375,60 @@ after it is ready (no health source): a gripper driver that dies without a `proc
   同样是 `timeout_killed`（255，即 `systemd-run --wait` 对 `timeout` 不得不 SIGKILL 其程序的单元预期给出的状态；或 traceback 的 1，等等）。
   停止 B 会结束正在进行的测试（停止它的一次性单元：SIGINT），结果写 `cancelled`；要等那个单元消失以后才停 B（最多 `GRIPPER_END_WAIT_S`，
   10 秒，之后照停），因为 `send_goal` 的 SIGINT 处理需要 B 的 action server 回答取消；停止若落在 systemd 创建该单元之前，就等它出现。门：B 就绪、没有托管的运行（或读不出来）、C 上没有客户端、AERI 机械臂锁空闲、已勾选爪口清空、同一时刻只做一件事。
-- **引导式启动。** 一次请求依次完成 M、检查、标记、等待和 A，然后停下，等人用各自的确认短语和勾选依次启动 B 和 C。它只存在于
-  内存里，服务重启后不会恢复；`sequence/cancel` 结束它，不会停止任何东西。它等 A 就绪的时候有人停 A，序列随之结束（`a_lost`）：
-  那一步没有自己的时间窗，否则会让 `sequence_active` 最多挂 10 分钟。
-- **停止顺序：** 客户端、C、A、B（可选）、最后 M。页面只认自己记录的单元，且要 `systemctl show` 报出的 `Id` 和命令与记录完全一致，
+- **引导式启动（“启动整个栈”）。** 一次请求 `POST .../stack/sequence/start`，请求体（封闭的：多出的字段、类型不对的值都是 422）：
+  `request_id`、`confirm`（`start arm stack`，由页面的确认弹窗替人发送）、`attest`，以及选项 `through`（`"a"`，默认；或 `"c"`）、
+  `pause_before_b`、`pause_before_c`（布尔，默认 `false`，只对 `"c"` 有意义）。**`through` 为 `"a"`**（旧请求体）依次完成 M、检查、标记、等待和 A，
+  然后停下，等人用各自的确认依次启动 B 和 C。**`through` 为 `"c"`** 自己接着往下走：B，然后 C，每一个都经单独启动自己的代码和门
+  （`_do_start`：每一步都在整机级的锁里把所有门再问一遍），用的是请求带来的确认。它只存在于内存里，服务重启后不会恢复。
+  - **确认项。** `attest` 是一个扁平的字典；序列自己要启动的某一段缺了确认项，整个请求被拒绝（400 `attest_missing`，点名缺哪些键，
+    什么都没开始、没设置）：A 要 `desk_done`、`estop_hand`；B 要 `hands_clear`；C 要 `estop_hand`、`hands_clear`、`no_client`。
+    一个勾选满足所有要它的阶段。按键时已经就绪或正在启动的部分、请求选择在它之前暂停的部分，都不要确认项；未知的键是 `attest_invalid`。
+    每个单元的记录只保存它自己那一段的键。`act.attest` 按阶段列出这些键；危险提示是 `act.terminals.{a,b,c}.hazard`。这些门只防误操作：
+    勾选是被记录下来的点击。
+  - **步骤**（`act.sequence.steps`，`{step, terminal, state}`；状态 `pending`、`running`、`done`、`skipped`、`failed`、`cancelled`、
+    `not_reached`）：`monitor`、`probe`、`marker`、`wait`、`arm`、`await_a`（A 的，和以前一样），`"c"` 再加：`b_probe`（检查有没有夹爪栈在运行；自动，
+    只在上一次的结果到期时才做）、`b`（B 的启动**以及**等它就绪：夹爪校准）、`c_preflight`（C 之前的三项检查；控制器列表没有回答时
+    （`controllers_state` 为 `absent` 或 `unknown`）**自动重试一次**；回答了“不行”的检查不再重问）、`c`（C 的启动和等它就绪），最后 `done`。
+    `skipped`：没有向机器要求任何东西（该部分本来就已就绪，或者序列等待时人已经手工做了）。`not_reached`：序列在它之前已经结束。
+    `act.sequence` 还带 `through` 和 `pauses`（`{b, c}`，是生效的值：`"a"` 的启动两个都报 `true`，因为它等人去启动 B 和 C）。
+  - **暂停**（`pause_before_b`、`pause_before_c`）：序列等待（`waiting_confirm`，`next` 为 `b` 或 `c`）人自己启动该部分，用人自己的窗口和确认；
+    它就绪之后，如果下一段没有暂停，链自己接着走。按键时的勾选不是永远有效的：A 必须在 `SEQUENCE_ARM_WINDOW_S`（300 秒）加标记等待时间之内启动，
+    B 在那之后的 `SEQUENCE_A_READY_S` + `SEQUENCE_B_READY_S`（300 + 300 秒）之内，C 在再之后的 `SEQUENCE_C_CHECK_S` + `SEQUENCE_C_READY_S`
+    （240 + 240 秒）之内。某一段来得太晚，序列结束（`cancelled`，`expired`），不会用旧的勾选去启动；人自己去启动那一部分。
+    某一步超过 `STEP_TIMEOUT_S`（600 秒）也会结束它（`step_timeout`）。
+  - **在第一个失败的步骤结束**，原因在 `act.sequence.reason`：拒绝的那道门的代码（和单独启动的 `start_blockers` 同样的代码）、`b_not_seen`
+    （B 的检查没有回答）、`b_failed`、`b_dead`（B 没有就绪，或不见了）、`c_preflight_failed`、`c_failed`、`c_dead`、`a_lost`、`b_lost`（这一段之前的部分不再就绪；
+    只是暂时说不清的部分会等）、`attest_missing`（按键时已经在运行的部分后来不见了，而没有为启动它勾选过）。**已经起来的保持原样**：文档说明什么在运行；
+    人排除原因后再按一次，**已经就绪的会被跳过**（A 已在运行就不再启动，它的检查、标记、等待记为 `skipped`；已就绪的 B、C 直接通过），
+    A、B、C 都就绪时回答 200 `already_started`。序列从不在 A 没就绪时启动 B，也不在 A、B 没都就绪时启动 C。
+  - **取消和停止优先。** `sequence/cancel` 和“停止整个栈”会结束它，它不再往前走；两者都不会停掉已经在运行的东西。序列读机器时不持整机级的锁，
+    随后才在锁里启动东西，所以它做的每一次启动、设置和检查都会**在锁里再看一遍自己是不是还在运行的那个序列**（`Act._seq_locked`）：
+    中间已经回答了的停止或取消不会被撤销（停止整个栈那一包的审查在 A 上发现了这一点；监视器、FCI 检查、标记、B 的检查、B、C 之前的检查和 C 都一样）。
+    它等 A 就绪的时候有人停 A，序列随之结束（`a_lost`）：那一步没有自己的时间窗，否则会让 `sequence_active` 最多挂 10 分钟。
+- **引导式停止（“停止整个栈”）。** 一次请求 `POST .../stack/sequence/stop`（请求体 `request_id`、`confirm`、`attest`；短语是
+  `stop whole stack`，由页面的确认弹窗替人发送；`attest` 不需要勾选，未知的键返回 `attest_invalid`），依次停 C、A、B，M 继续运行
+  （标记的释放本来就跟在 A 的停止之后）。每一步就是**该单元的单独停止，同样的代码、同样的门**（`stop_c_first`、`not_ours`、`unit_foreign`、
+  `record_corrupt`、`systemd_unreadable`、`run_active`、C 的客户端规则）：没有我们的东西要停的单元直接跳过，有的就停，下一步要等该单元消失以后才开始。
+  停止之后只问单元是否已经消失，不再看其他证据：监视器最后一份健康文件和机械臂的套接字会比 A 多存在几秒，会被读成“不是我们的”。
+  它不绕过任何一道门，不启动任何东西，不发任何强杀。C 单独停止时的覆盖短语仍是需要手输的单独停止功能，**不属于**这个序列。
+  下面这些情况在一开始就被拒绝（409，什么都不停）：已知有托管的运行在进行（`run_active`）、C 上有客户端连接或套接字表读不出来
+  （`stop_all_client_connected`）、systemd 或某条记录读不出来（`systemd_unreadable`、`record_corrupt`）、本实例不是产品；没有我们的单元时回答 200
+  `already_stopped`。`act.checks.can_stop_all` 和 `act.stop_all_blockers`（行为 `{code, level, text, params}`；`nothing_to_stop`、`sequence_active` 也是行）
+  事先说明同样的事。**出路不依赖入口（RIG-04）：** 运行探针抛异常或没注册、健康文件过期、正在进行的检查或夹爪测试、控制文件不见了，
+  都不会阻止它。
+  某一步停止失败，序列就在该步结束，`act.sequence.reason` 是该单独停止的代码（`stop_failed`：单元在时限内没有响应 SIGINT；`not_ours`、`unit_foreign`：
+  不是页面启动的；`stop_left_processes`；`stop_c_first`；`run_active`；按键之后才来的客户端是 `stop_all_client_connected`；`step_timeout`：该单元的停止时限加 90 秒；
+  `stop_c_unknown`：C 不是页面的而且说不清它是否在运行，“没有东西要停”只是猜测，所以不在可能还在运行的 C 之下停 A；单独停 A 或 B 带着警告照做），
+  它之后的步骤记为 `not_reached`，不会碰。再按一次：已经停掉的被跳过（`skipped`），所以这个按键可以重复按。`sequence/cancel` 结束它（已经发出的停止不会撤回，
+  之后不再停任何东西）。它会结束正在运行或等待中的引导式启动（`superseded`），没有东西在运行时也一样，免得那个启动接着去启动刚停掉的东西。和引导式启动一样，它只存在于
+  内存里：服务重启就结束了，下一次按键跳过已经停掉的。
+  `act.sequence` 带 `kind`（`start`、`stop`，空闲时为 null）和 `steps`；停止序列的是 `{step: stop_c|stop_a|stop_b, terminal, state: pending|running|done|skipped|failed|cancelled|not_reached}`。
+  页面按它们来写停止的结果（`done`：本次按键停掉的；`skipped`：本来就没有页面的东西），不用一句固定的话。**引导式停止在进行时，什么都不启动、不设置、不测试**
+  （`sequence_stopping`：A、B、C 启动、夹爪测试的阻塞项和 `act.marker.touch_blockers` 里的必选项；单独的停止仍然开放，出路不等人）。
+  停止被要求过却没有人在执行（页面在中途重启了，或者停止失败）时，留下通知 `notice.stop_unfinished`（`params.unit`），由该单元的记录得出：单元还在，由人决定。
+  **停 C 和停 A 就是单独停止的样子：** 停 C 之后阻抗控制器仍然握住机械臂，直到 A 停止；停 A 则断开与机械臂的连接；两者都不会锁住机械臂，
+  也都不是急停（单元的说明 `c.stop_arm_still_held` 和 `a.stop_fci_dropped` 在事实成立之后逐个单元写明）。Desk 里的 Lock 和 Deactivate FCI，以及物理急停，仍归人。
+- **停止顺序：** 客户端、C、A、B（可选）、最后 M（引导式停止在一次请求里做前四项）。页面只认自己记录的单元，且要 `systemctl show` 报出的 `Id` 和命令与记录完全一致，
   然后发出该单元自己的停止信号（SIGINT，相当于 Ctrl+C）。它从不强杀。停止 C 之后阻抗控制器仍然握住机械臂，直到 A 停止；
   C 真的停了之后文档里才写明“机械臂仍在阻抗控制下”（`stop_note`），A 的说明（“与机械臂的连接已断开”）只在 A 的单元消失且机械臂的
   套接字安静之后才出现，不会出现在按键的回答里。C 的端口上有客户端连接时，停止需要额外短语 `stop robot server with client connected`。
@@ -303,7 +444,8 @@ after it is ready (no health source): a gripper driver that dies without a `proc
   把记录写成 `stop_failed`，回答 `stop_left_processes`；进程没有了以后，同样的按键才会确认它。读不出来的，一律当作“还有进程”：
   没有任务计数、读不了的控制组、值为 0 或缺失的主进程号（失败的单元显示 0，组里却可能还有进程）；只有完全没有控制组的单元才算没有剩余。这期间如果必须放开机械臂，办法是物理急停。
 
-每次启动需要：控制文件打开了栈的开关、一字不差的确认短语（`start arm stack`、`start gripper stack`、`start robot server`）、
+每次启动需要：控制文件打开了栈的开关、`confirm` 里一字不差的确认短语（`start arm stack`、`start gripper stack`、`start robot server`；勾选之后由页面的确认弹窗
+替人发送，脚本自己发；人还需要手输的只有 C 有客户端连接时停止的覆盖短语，以及部署页的那一个）、
 勾选的确认项（A：Desk 已做完、手在急停上；B：爪口已清空；C：手在急停上、区域已清空、没有评测客户端在运行）、新的
 `request_id`（重复的请求只会得到回答，不会做两次）、整机级的栈锁，以及所有阻塞原因都已消除。请求 id 的回答既在内存里，也保存在已回答请求的文件夹里
 （`<工作区>/marvel0/stack/replay/`，保留最新 64 个），所以页面重启之后浏览器重发夹爪请求也不会让夹爪动两次；同一个 id 配不同的内容返回 `request_id_used`。
@@ -357,17 +499,21 @@ FCI 探针、上述各状态下健康监视器的真实写法（读自它的源�
 
 ## 已经运行过的
 
-- L1，假机器（`stack_act_machine.py`）：每道门单独、停止顺序、标记、检查、夹爪测试、引导序列、文档。L2，用真实子进程运行替身程序
-  （`fake_stack/`），把 `systemd-run` 和 `systemctl` 映射到 `Popen`：慢、永不就绪、崩溃、忽略 SIGINT、重复和缺失的行、包装脚本。
+- L1，假机器（`stack_act_machine.py`）：每道门单独、停止顺序、标记、检查、夹爪测试、引导序列、引导式停止（`test_marvel0_stack_act_stopall.py`；它拦住什么、
+  做不完时说什么：`test_marvel0_stack_act_stopping.py`）、经 B 和 C 的引导式启动（`test_marvel0_stack_act_chain.py`：各阶段的确认项、暂停、B 和 C 单独启动的每道门在它的步骤上单独检验、
+  每一步的失败和再按一次跳过已就绪的、列表重试、时间窗、每一步的取消、“停止整个栈”取代它、重启；`test_marvel0_stack_act_race.py`：序列每一次启动、设置、检查之前恰好回答了停止或取消）、文档。
+  L2，用真实子进程运行替身程序
+  （`fake_stack/`；引导式停止在 `test_marvel0_stack_act_stopall_processes.py`；整条链到 C 就绪、一个永不就绪的 B、需要重试的列表和再按一次在 `test_marvel0_stack_act_chain_processes.py`），把 `systemd-run` 和 `systemctl` 映射到 `Popen`：慢、永不就绪、崩溃、忽略 SIGINT、重复和缺失的行、包装脚本。
   L3，`tests/marvel0/rehearse_stack.py`，在开发机上、机械臂关闭时运行一次：名字带 `rehearsal` 的真实 `systemd --user` 单元，命令是替身：
   上述属性都被接受，单元内的程序看到 `rtprio 99` 和无限的内存锁，控制组里只有替身，SIGINT 停止结束了它，子单元在启动它的单元
   停止后仍然存活，`--pipe --wait` 带回了一次性检查的输出，`RuntimeMaxSec` 结束了卡住的一次性单元，最后没有留下任何东西。这次运行
   早于 2026-10-21 的两份审查，**此后没有重跑**：演练脚本现在还会测量 `RuntimeMaxSec` 之后 `systemd-run --wait` 的退出码、单元里 `timeout -s INT` 的行为、
   `KillMode=control-group` 下 launch 式父进程的子进程收到几次 SIGINT、停止超时的单元的任务数；并且机器上有机器人进程时它拒绝运行（退出码 2）。
-- 变异检查（`tests/marvel0/mutate_stack_act.py`，120 个变异；`--check` 只检查每个变异是否仍能应用）逐个去掉每道门，包括 2026-10-21 审查新增的
-  每一道及其修复。整张表要跑几分钟的 pytest：机械臂控制器运行时不要跑（用 `MUTATE_TESTS` 指定一个测试文件做快速运行）。
+- 变异检查（`tests/marvel0/mutate_stack_act.py`，207 个变异；`--check` 只检查每个变异是否仍能应用）逐个去掉每道门，包括 2026-10-21 审查新增的
+  每一道及其修复；其中经 B 和 C 的引导式启动、竞争、引导式停止新词的 59 个，各自只跑守着它的那一个测试文件。整张表要跑几分钟的 pytest：机械臂控制器运行时不要跑
+  （用 `MUTATE_TESTS` 指定一个测试文件做快速运行；测试在 `MUTATE_CPUS` 指定的核上运行，默认 16-19）。
 - `test_marvel0_stack_act_walk.py`：在假机器上随机游走（多数步骤是启动流程的下一步，其余是任何事：顺序错乱的停止、检查的错误回答、时钟跳变、
-  监视器不写、套接字表或 systemd 读不出来、停止时卡住的单元、页面重启），之后页面自己的按键必须能把一切停下来，包括标记。它找的是人
+  监视器不写、套接字表或 systemd 读不出来、停止时卡住的单元、页面重启、经 A 或经 B 和 C 的引导式启动（带或不带暂停）），之后页面自己的按键，包括“停止整个栈”，必须能把一切停下来，包括标记。它找的是人
   无法离开的状态，任何一张用例清单都找不到。
 - 重新生成前端读取的样本：`uv run --no-sync python tests/marvel0/regen_stack_act_sample.py`
   （`src/components/marvel0/__tests__/marvel0-stack-act.samples.json`）。

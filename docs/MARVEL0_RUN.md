@@ -16,7 +16,8 @@ the one the command card renders (`command.render` is the only producer of the c
 
 - **Start** (`POST /run/start`). The page asks for a token first (`POST /run/challenge`, purpose `start`, with the form):
   the answer carries every start check and the command's warnings; a token is only issued when all checks pass. The start
-  then needs the token, the phrase `start client <rollout group>`, the checklist (`attest`: scene reset, area clear, a
+  then needs the token, the phrase `start client <rollout group>` (`confirm`: the page's confirm window sends it for the
+  person, with the checklist ticked there; a script sends it itself), the checklist (`attest`: scene reset, area clear, a
   hand on the physical e-stop) and a fresh `request_id`. The client runs through `hostchild.py` (a launcher that gives it
   a keyboard, a pty) inside its own `systemd-run --user --scope` (`env -i` with the allowlist in front of the launcher; `systemd-run` itself gets
   only the user bus variables), so a restart of the product does not signal it. The core keeps the pty's master. Output goes to a private log (0600) in the workspace.
@@ -28,7 +29,7 @@ the one the command card renders (`command.render` is the only producer of the c
   | `starting` | connecting, warming up the cameras | none (hold, end) |
   | `at_gate` | waits at the start gate | **Enter** (the arm goes home without any limit check, then the policy runs; once per gate), **q** (leave; no motion) |
   | `homing` | the arm goes home | none (hold) |
-  | `running` | the policy runs | **s** success, **f** failure (one label per episode), **q** "exit and go home" (blind; its own phrase `exit and go home`) |
+  | `running` | the policy runs | **s** success, **f** failure (one label per episode), **q** "exit and go home" (blind; its own phrase `exit and go home`, sent by its confirm window, which has tick boxes: hand on the e-stop, area clear) |
   | `awaiting_label` | the step limit is reached, the client waits | **s**, **f**, **d** discard (one label) |
   | `finishing` | saving the episode, closing | none (hold) |
   | `held`, `lost` | frozen, or not supervisable | none (end; hold in `lost`) |
@@ -45,7 +46,7 @@ the one the command card renders (`command.render` is the only producer of the c
   last one. One click, no phrase, no token, always available while a client exists, idempotent, never waits for a lock.
   **Nothing resumes it**: afterwards the only action is end. (A resumed step would send one stale action, and a hold at
   the step-limit prompt would turn into a blind homing.)
-- **End** (`POST /run/end`, phrase `end client run`). `q` at the gate (a key); for a held, lost or still starting client
+- **End** (`POST /run/end`, phrase `end client run`, sent by the page's confirm window). `q` at the gate (a key); for a held, lost or still starting client
   SIGKILL of its group. Never SIGTERM + SIGCONT. A killed episode leaves its folder without `stopped_at` (the client's
   off mode does not tidy it): the page says so after an end; look at it before using the data.
 - **Holds on its own** (it never sends anything else on its own): the health monitor shows red on **two distinct writes**
@@ -70,7 +71,11 @@ the one the command card renders (`command.render` is the only producer of the c
 
 **The gates stop mistakes. They do not stop another program of the same account**: anything that runs as this user can send
 the same requests (ask for a token, then use it), forge the page's headers, write to the client's keyboard or signal its
-process. The tokens, phrases and checklist are clicks that are recorded, not proofs. The real barriers are Franka Desk and
+process. The tokens, phrases and checklist are clicks that are recorded, not proofs. **Nothing is typed any more**: every
+start and stop of the page (the client, the arm stack, the policy server, the deploy) is one confirm window with its hazard
+sentences and tick boxes, and the page sends the phrase itself; the backend still checks it. The two overrides that cut
+something that is in use stay typed fields: stopping the robot server C with a client connected, and stopping the policy
+server with a client connected. The real barriers are Franka Desk and
 the **physical emergency stop; keep a hand on it**. **Nothing on this page is an emergency stop**: hold freezes the client,
 it does not stop the arm, which keeps the last target it was sent; success, failure, discard, exit and Enter send the arm
 home without any limit check. Agent sessions never call the `/run` or `/stack` write routes (a rule, not a mechanism, on a
@@ -138,7 +143,7 @@ with the owner at the arm and a hand on the emergency stop.
 （客户端的 argv 只由 `command.render` 产生）；页面只多加 `--no-display-images`，别的都不加。
 
 - **开始**（`POST /run/start`）。页面先要一个令牌（`POST /run/challenge`，用途 `start`，带上表单）：回答里有全部开始检查和命令的警告；
-  只有全部检查通过才会发令牌。开始还需要：令牌、短语 `start client <rollout group>`、清单（`attest`：场景已复位、区域已清空、手在物理急停上）
+  只有全部检查通过才会发令牌。开始还需要：令牌、短语 `start client <rollout group>`（`confirm`：由页面的确认弹窗替人发送，清单在弹窗里勾选；脚本自己发）、清单（`attest`：场景已复位、区域已清空、手在物理急停上）
   和新的 `request_id`。客户端通过 `hostchild.py`（给它一个键盘，即伪终端的启动器）运行在它自己的 `systemd-run --user --scope` 里（启动器前面是带白名单的 `env -i`；`systemd-run` 自己只拿到用户总线变量），所以产品重启不会
   给它发信号。核心保留伪终端的主端。输出写入工作区里的私有日志（0600）。
 - **按键。** 写给客户端键盘的字节只有这五个：回车、`s`、`f`、`d`、`q`。页面提供哪些，取决于客户端所处的状态，状态由它的会话文件、日志和
@@ -149,7 +154,7 @@ with the owner at the arm and a hand on the emergency stop.
   | `starting` | 正在连接、预热相机 | 无（保持、结束） |
   | `at_gate` | 停在开始闸门 | **回车**（机械臂不经任何限位检查地回位，然后运行策略；每个闸门一次）、**q**（离开；不动） |
   | `homing` | 机械臂回位 | 无（保持） |
-  | `running` | 策略在运行 | **s** 成功、**f** 失败（每个片段一个标签）、**q** “退出并回位”（盲走；有自己的短语 `exit and go home`） |
+  | `running` | 策略在运行 | **s** 成功、**f** 失败（每个片段一个标签）、**q** “退出并回位”（盲走；有自己的短语 `exit and go home`，由它的确认弹窗发送，弹窗里有勾选项：手在急停上、区域已清空） |
   | `awaiting_label` | 到达步数上限，客户端在等标签 | **s**、**f**、**d** 作废（一个标签） |
   | `finishing` | 正在保存片段、正在关闭 | 无（保持） |
   | `held`、`lost` | 已冻结，或无法监管 | 无（结束；`lost` 时还可保持） |
@@ -162,7 +167,7 @@ with the owner at the arm and a hand on the emergency stop.
   一个键，不会重复一个键。
 - **保持**（`POST /run/hold`）。对客户端的整个进程组发 SIGSTOP：不再发出新目标，机械臂停在最后一个目标上。一次点击，不要短语，不要令牌，只要客户端存在就始终可用，
   可重复，从不等锁。**没有任何东西会让它恢复**：之后唯一的动作是结束。（恢复会多发一个过期动作，在步数上限提示处的保持恢复后还会变成盲走回位。）
-- **结束**（`POST /run/end`，短语 `end client run`）。闸门处是 `q`（一个键）；已冻结、失联或仍在启动的客户端则对其进程组发 SIGKILL。绝不用 SIGTERM 加
+- **结束**（`POST /run/end`，短语 `end client run`，由页面的确认弹窗发送）。闸门处是 `q`（一个键）；已冻结、失联或仍在启动的客户端则对其进程组发 SIGKILL。绝不用 SIGTERM 加
   SIGCONT。被杀死的片段留下没有 `stopped_at` 的文件夹（客户端的 off 模式不会整理它）：结束后页面会提示；用这份数据之前先看一眼。
 - **自动保持**（页面自己不会发别的东西）：健康监视器在**两次不同的写入**里都显示红灯，且机械臂可能在动；会话文件 10 秒不更新；会话文件显示换了任务（有键到了
   闸门）；策略服务器接受了第二个连接；服务重启后发现客户端还活着（它已经没有键盘）。监视器不新鲜或不绿时**只警告并拦住下一次回车**；红灯还会拦住所有会让机械臂动的键。
@@ -177,7 +182,8 @@ with the owner at the arm and a hand on the emergency stop.
 ## 这些门的分量，以及这里什么都不是
 
 **这些门只防误操作，防不了同一账号下的其他程序**：任何以这个用户运行的程序都能发出同样的请求（先要令牌再用令牌）、伪造页面的请求头、直接写客户端的键盘或给它的进程发信号。
-令牌、短语和清单是被记录下来的点击，不是证明。真正的屏障是 Franka Desk 和**物理急停；手要放在上面**。**页面上没有任何东西是急停**：保持只冻结客户端，不会让机械臂停下，
+令牌、短语和清单是被记录下来的点击，不是证明。**现在不需要再输入任何东西**：页面上每一次启动和停止（客户端、机械臂栈、策略服务器、部署）都是一个带危险提示和勾选项的确认弹窗，
+短语由页面自己发送，后端仍然核对它。仍然要手输的只有两个会切断正在使用的东西的覆盖：C 上有客户端连接时停止机器人服务器，以及有客户端连接时停止策略服务器。真正的屏障是 Franka Desk 和**物理急停；手要放在上面**。**页面上没有任何东西是急停**：保持只冻结客户端，不会让机械臂停下，
 机械臂保持最后收到的目标；成功、失败、作废、退出和回车都会让机械臂不受任何限位检查地回位。agent 会话从不调用 `/run` 和 `/stack` 的写路由（在共享账号上这是规则，不是机制）。
 写操作只在产品 LEVI（主检出里的 `levi-product.service`）中生效；其他实例只显示运行状态并拒绝写操作（`not_product`）。核心结束时伪终端的主端关闭，内核会让客户端挂断。
 

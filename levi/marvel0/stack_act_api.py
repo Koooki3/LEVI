@@ -12,7 +12,13 @@
   controllers, end-effector frame): read-only checks that a start needs;
 - ``POST .../b/gripper`` with ``action`` ``open`` | ``close``: the gripper test;
 - ``POST .../sequence/start`` and ``.../sequence/cancel``: the guided start of
-  M, the marker and A, which stops before B and before C;
+  M, the marker and A; with ``through = "c"`` it goes on by itself to B and C
+  (one confirm window up front carries every confirmation; ``pause_before_b`` /
+  ``pause_before_c`` make it wait for the person's own start instead), and
+  without it stops before B and before C;
+- ``POST .../sequence/stop``: the guided stop, "stop whole stack": C, then A,
+  then B, each by the single stop's own gates; it starts nothing and leaves M
+  running (``.../sequence/cancel`` ends it too);
 - ``GET .../{a|b|c}/log``: the printable tail of a unit's log (one route each).
 
 The state is the ``act`` part of ``GET /api/levi/marvel0/stack``.
@@ -35,7 +41,7 @@ Errors have the shape of ``errors.fail``. No answer names a path.
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from . import stack, stack_act, stack_api
 from .deploy_api import person_only
@@ -75,6 +81,27 @@ class StartBody(Closed):
     attest: dict[str, bool] = {}
 
 
+class SequenceStartBody(StartBody):
+    """The guided start. ``through``: ``"a"`` (the default: M, the marker, A, then
+    wait for the person's own B and C) or ``"c"`` (go on to B and C). The pauses
+    only matter for ``"c"``. ``attest`` must carry the confirmations of every
+    stage the sequence starts itself (A: ``desk_done``, ``estop_hand``; B:
+    ``hands_clear``; C: ``estop_hand``, ``hands_clear``, ``no_client``)."""
+
+    through: Literal["a", "c"] = "a"
+    pause_before_b: bool = False
+    pause_before_c: bool = False
+
+    @model_validator(mode="after")
+    def _pauses_go_together(self):
+        # A pause before B but none before C would start C on confirmations
+        # ticked long before (found by the review of the chain): the page sets
+        # both from one switch, so the API refuses the mixed form.
+        if self.pause_before_b and not self.pause_before_c:
+            raise ValueError("pause_before_b needs pause_before_c")
+        return self
+
+
 class StopBody(Closed):
     request_id: str
     confirm: str
@@ -102,7 +129,9 @@ def _answer(call, response: Response, accepted=202):
     stack_api.invalidate()
     done = answer.get("done")
     response.status_code = (
-        200 if done in ("already_stopped", "acknowledged") else accepted
+        200
+        if done in ("already_stopped", "already_started", "acknowledged")
+        else accepted
     )
     return answer
 
@@ -178,14 +207,26 @@ def gripper_test(body: GripperBody, response: Response):
 
 
 @router.post("/stack/sequence/start", dependencies=[Depends(person_only)])
-def sequence_start(body: StartBody, response: Response):
-    """Start M, set the marker, wait and start A; stops before B and C."""
+def sequence_start(body: SequenceStartBody, response: Response):
+    """Start M, set the marker, wait and start A; with ``through = "c"`` go on to
+    B and C by itself (each by the single start's own gates, with the
+    confirmations of this request), unless a pause is asked for. 200
+    ``already_started`` when A, B and C are all ready."""
     return _answer(lambda: act().sequence_start(body.model_dump()), response)
+
+
+@router.post("/stack/sequence/stop", dependencies=[Depends(person_only)])
+def sequence_stop(body: StartBody, response: Response):
+    """Stop C, then A, then B ("stop whole stack"); starts nothing, M stays.
+    Needs no control file. ``attest`` is accepted (the shape of a start) and
+    needs nothing ticked."""
+    return _answer(lambda: act().sequence_stop(body.model_dump()), response)
 
 
 @router.post("/stack/sequence/cancel", dependencies=[Depends(person_only)])
 def sequence_cancel(body: CheckBody, response: Response):
-    """End the guided start; nothing that already runs is stopped."""
+    """End the guided start or stop; nothing that already runs (or that a
+    stop already sent) is undone, and nothing further is stopped."""
     return _answer(
         lambda: act().sequence_cancel(body.model_dump()), response, accepted=200
     )

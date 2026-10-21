@@ -169,3 +169,31 @@ export function field<T extends Element = HTMLInputElement>(
   if (id) return host.querySelector<T>(`[id="${id}"]`);
   return found.querySelector<T>("input, select");
 }
+
+/** Two clicks before React has rendered the first one's result: what a double
+ * click does. */
+export async function doubleClick(target: Element | null) {
+  if (!target) throw new Error("no element to double click");
+  await act(async () => {
+    (target as HTMLElement).click();
+    (target as HTMLElement).click();
+  });
+}
+
+/** The fields a person can type into (a check box is a tick, not typing). */
+export const textFields = (host: ParentNode) =>
+  Array.from(
+    host.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+      "input:not([type=checkbox]):not([type=radio]), textarea",
+    ),
+  );
+
+/** Ticks every check box of a window: the checks a person makes. A switch
+ * (`role=switch`, an option such as "pause before B and before C") is a choice,
+ * not a check, and stays as it is. */
+export async function tickAll(host: ParentNode) {
+  for (const box of host.querySelectorAll<HTMLInputElement>(
+    "input[type=checkbox]:not([role=switch])",
+  ))
+    if (!box.checked) await act(async () => box.click());
+}
