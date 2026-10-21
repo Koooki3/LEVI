@@ -11,7 +11,7 @@ The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SV
   <img alt="LEVI in context: raw captures, LeRobot datasets, robot rollouts and the Hugging Face Hub go in; models propose; a person decides; LeRobot v2.1, RECAP value data, training manifests and pool exports come out." src="assets/atlas/01-system-context-light.svg">
 </picture>
 
-*Read it left to right.* Everything inside the frame runs on your machine. Agent work, through the web UI, REST, MCP or the CLI, goes through one capability layer, so its rules are the same whichever door it uses. Models propose; a person approves and commits (the live service's audited auto-approver is the one exception). Source data is never modified.
+*Read it left to right.* Everything inside the frame runs on your machine. Agent work, through the web UI, REST, MCP or the CLI, goes through one capability layer, so its rules are the same whichever door it uses. Models propose; a person approves and commits (the live service's audited auto-approver is the one exception). Source data is never modified. The README shows a larger version with three inputs and three outputs (`11-context-lite`).
 
 ## 2 From raw data to a better policy
 
@@ -20,7 +20,7 @@ The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SV
   <img alt="A five-tier pyramid: read and convert, check, label and judge, curate for training, and a better policy at the top, which is not established." src="assets/atlas/02-pyramid-light.svg">
 </picture>
 
-*Read it bottom to top.* Each tier depends on the one below it. The measured result sits at tier 3 (judging success on one task); the top tier is the goal and has no result yet. [Evidence](#7-evidence-with-its-limits) shows the numbers.
+*Read it bottom to top.* Each tier depends on the one below it. The measured result sits at tier 3 (judging success on one task); the top tier is the goal and has no result yet. [Evidence](#7-evidence-with-its-limits) shows the numbers. The README shows a larger version with each tier's name and status only (`12-pyramid-lite`).
 
 ## 3 Layers of the workbench
 
@@ -65,26 +65,40 @@ The figures are generated from [`docs/atlas/build.py`](atlas/build.py), plain SV
   <img alt="Dot plots of balanced accuracy and failures judged as success on blind 60-episode test sets, with the scale-up quality bar drawn in: on plates release-anchored review meets the bar (0.94, 12.8%) against judging from segments (0.81, 38.5%) and a direct call (0.78, 43.6%); on screws it misses it (0.76, 48.7%). Below: time-segment labelling at parity, and what is not established." src="assets/atlas/07-evidence-light.svg">
 </picture>
 
-*Read the dashed bar line first.* A dot on the right side of the bar meets the scale-up quality gate. Judging success with release-anchored review meets it on the plates task and misses it on the second task; time-segment labelling is at parity with a direct call; whether curated data improves a policy is not established. The numbers are the project's own, on blind test sets; the experiment record is not shipped. [Validation](VALIDATION.md) documents the anchored-review re-run.
+*Read the dashed bar line first.* A dot on the right side of the bar meets the scale-up quality gate. Judging success with release-anchored review meets it on the plates task and misses it on the second task; time-segment labelling is at parity with a direct call; whether curated data improves a policy is not established. The numbers are the project's own, on blind test sets; the experiment record is not shipped. [Validation](VALIDATION.md) documents the anchored-review re-run. The README shows a larger version with the same two plots and numbers (`16-evidence-lite`).
 
 ## 8 An AERI run, start to finish
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/atlas/08-aeri-flow-dark.svg">
-  <img alt="Swim lanes for the operator, the web page, terminal D, the policy service, the vision judge and the robot stack. Prepare, start, an eight-step round loop (R1–R8), the end, and what happens at any time when something goes wrong. Only terminal D sends motion. Badges mark what is in main, what is on the integration branch and what is planned; hardware acceptance pending." src="assets/atlas/08-aeri-flow-light.svg">
+  <img alt="Swim lanes for the operator, the web page, terminal D, the policy service, the vision judge and the robot stack. Prepare, start, an eight-step round loop (R1–R8), the end, and what happens at any time when something goes wrong. Only terminal D sends motion. Badges mark what is in main and what is planned; hardware acceptance pending." src="assets/atlas/08-aeri-flow-light.svg">
 </picture>
 
-*Read it top to bottom, lane by lane; the loop in part 3 (R1–R8) is one round, and the bottom row can happen at any time.* Terminal D (`scripts/aeri.py execute`) runs the whole session and is the only part that sends motion; the page and the vision model watch and take labels; the page shows the scene question, and the answer that releases a round is typed in terminal D once the terminal-only release lands in main (marked planned). The README shows a four-stage version of this figure (`10-aeri-lite`). The keys in D are Enter (the scene is reset), `y`/`n`/`u` (is the scene ready?) and Ctrl+C (`q` on the branch) to stop. An unknown verdict is never a success, a fault locks the run, and a stop is possible at any time. Each card has a badge: **main** is in the main branch; **branch** is on the integration branch and not yet in main (the one-terminal console with one-key answers, the start-pose check and policy warm-up, a policy unit that D starts itself, and resuming a stopped real run only from D); **planned** is designed but not built for real runs (pausing the policy while the model judges, and handling other event-adapter errors). **Software only: tested with fakes and offline runs; hardware acceptance is pending.** [Automatic evaluation pipeline](AUTOMATIC_PIPELINE.md).
+*Read it top to bottom, lane by lane; the loop in part 3 (R1–R8) is one round, and the bottom row can happen at any time.* Terminal D (`scripts/aeri.py execute`) runs the whole session and is the only part that sends motion; the page and the vision model watch and take labels; the page shows the scene question, and only the answer typed in terminal D releases a round; in a real-robot run, a page or model answer is shown but never counted. The README shows a four-stage version of this figure (`10-aeri-lite`). The keys in D are Enter (the scene is reset), `y`/`n`/`u` (is the scene ready?) and Ctrl+C to stop (`q` too, at a D prompt other than the scene question). An unknown verdict is never a success, a fault locks the run, and a stop is possible at any time. Each card has a badge: **main** is in the main branch; **planned** is designed but not built for real runs (pausing the policy while the model judges); other event-adapter errors lock the run. A real-robot run starts only with the go-ahead of the person responsible for the robot, in person. **Software only: tested with fakes and offline runs; hardware acceptance is pending.** [Automatic evaluation pipeline](AUTOMATIC_PIPELINE.md).
 
 
 ## 9 Lighter without losing anything
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/atlas/09-lightweight-dark.svg">
-  <img alt="Measured baseline: the whole Python suite about 21 minutes for 6,118 test cases, the frontend check about 25 s, importing the service core 0.77 s and 176 MB, 147,234 lines of Python source. Guards on the integration branch: the agent workbench component split from 1,699 to 1,343 lines, a test selector that missed none of 619 deletion scenarios, and an inventory that fails when anything disappears." src="assets/atlas/09-lightweight-light.svg">
+  <img alt="Measured baseline: the whole Python suite about 21 minutes for 6,118 test cases, the frontend check about 25 s, importing the service core 0.77 s and 176 MB, 147,234 lines of Python source. Guards now in main: the agent workbench component split from 1,699 to 1,343 lines, a test selector that missed none of 619 deletion scenarios, and an inventory that fails when anything disappears." src="assets/atlas/09-lightweight-light.svg">
 </picture>
 
-*A baseline, not a speed-up.* The left half is what checking one change costs today; the right half is how the slimming work proves it lost nothing: a smaller component with the same behaviour, a test selector checked against deliberate deletions, and an inventory of every route, command, setting, page and test that fails when one disappears. The three guards are on the integration branch, not yet in main. No before-and-after timing is shown, because the suite grew by about 900 test cases between the two timed runs.
+*A baseline, not a speed-up.* The left half is what checking one change costs today; the right half is how the slimming work proves it lost nothing: a smaller component with the same behaviour, a test selector checked against deliberate deletions, and an inventory of every route, command, setting, page and test that fails when one disappears. The three guards are in main. No before-and-after timing is shown, because the suite grew by about 900 test cases between the two timed runs.
+
+## 10 The AERI subtask loop (first real-robot runs in external mode)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/atlas/14-subtask-flow-dark.svg">
+  <img alt="Swim lanes for the operator, terminal D, the policy service, the vision model, the robot stack and the web page. Prepare, start with a confirmed object list, a round of release, planned subtasks, up to 200 steps each, a check and the next subtask or a retry, home, a reverse loop and home again, then the end. Only terminal D moves the robot; the model's done only moves the flow on." src="assets/atlas/14-subtask-flow-light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/atlas/15-aeri-terminals-dark.svg">
+  <img alt="Four robot-stack terminals A, B, C and M that you start, and terminal D, which in seven numbered steps checks the machine, starts the vision model and puts it to sleep, starts the policy service, lists the objects for you to confirm, runs the rounds and stops both models at the end." src="assets/atlas/15-aeri-terminals-light.svg">
+</picture>
+
+*Not a result yet.* A run with `reset_strategy: subtask_loop` needs no reset policy: you set a task name and the number of rounds, the vision model plans pick-and-place subtasks from the objects you confirmed, the policy runs each one, and a reverse loop puts the scene back. The vision model's "done" only moves the flow on; the result of a round is the s or f you press in terminal D. The policy and the vision model never compute at the same time. The code is in main. Earlier branch versions of it ran on the robot only in external mode, where an agent answered the vision model's questions; the version in main has not run on the robot, no round has an operator label, so there is no measured success rate, and the local vision model has not run on the robot. Hardware acceptance pending. The README shows a shorter version (`13-subtask-loop`). The run described in [section 8](#8-an-aeri-run-start-to-finish) stays as it is for runs with a reset policy. [Automatic evaluation pipeline](AUTOMATIC_PIPELINE.md).
 
 ---
 

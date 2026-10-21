@@ -54,6 +54,13 @@ class Fake:
         # a cancelled one did not complete).
         self.started = 0
         self.finished = 0
+        # Set by stop(): a request waiting out ``delay`` goes on at once, so
+        # a test's teardown need not wait for it.
+        self.stopped = threading.Event()
+
+    def stop(self):
+        """End every wait for ``delay``, now and later (teardown)."""
+        self.stopped.set()
 
     def served(self):
         return {
@@ -72,7 +79,7 @@ class Fake:
         if self.sleeping:
             raise RuntimeError("the server is asleep")
         if self.delay:
-            time.sleep(self.delay)
+            self.stopped.wait(self.delay)
         if self.fail and self.fail(n, payload):
             raise RuntimeError("injected failure")
         try:
@@ -230,11 +237,55 @@ def handler(fake):
     return Handler
 
 
+class Server(ThreadingHTTPServer):
+    """``ThreadingHTTPServer`` that keeps the threads it starts for requests
+    (``handler_threads``) so a teardown can wait for them; they stay daemon
+    threads, and ``server_close()`` does not wait for them (as before)."""
+
+    daemon_threads = True
+
+    def __init__(self, *args, **kwargs):
+        self.handler_threads = set()
+        self._handler_lock = threading.Lock()
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, client_address):
+        # Registered before it starts: once shutdown() has returned, no
+        # request thread exists that is not in handler_threads.
+        thread = threading.Thread(
+            target=self._handle, args=(request, client_address), daemon=True
+        )
+        with self._handler_lock:
+            self.handler_threads.add(thread)
+        try:
+            thread.start()
+        except BaseException:
+            with self._handler_lock:
+                self.handler_threads.discard(thread)
+            raise
+
+    def _handle(self, request, client_address):
+        try:
+            self.process_request_thread(request, client_address)
+        finally:
+            with self._handler_lock:
+                self.handler_threads.discard(threading.current_thread())
+
+    def join_handlers(self, timeout):
+        """Wait up to ``timeout`` seconds in all for the request threads;
+        returns those still running. Call after ``shutdown()`` (no new ones)."""
+        deadline = time.monotonic() + timeout
+        with self._handler_lock:
+            threads = list(self.handler_threads)
+        for thread in threads:
+            thread.join(max(0.0, deadline - time.monotonic()))
+        return [t for t in threads if t.is_alive()]
+
+
 def serve(port=0, fake=None, host="127.0.0.1"):
     """Start a fake server in a thread; returns (server, fake, port)."""
     fake = fake or Fake()
-    server = ThreadingHTTPServer((host, port), handler(fake))
-    server.daemon_threads = True
+    server = Server((host, port), handler(fake))
     threading.Thread(target=server.serve_forever, daemon=True, name="fake-vllm").start()
     return server, fake, server.server_address[1]
 
