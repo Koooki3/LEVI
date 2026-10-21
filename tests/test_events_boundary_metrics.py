@@ -135,8 +135,9 @@ def test_segment_f1_falls_with_a_stricter_iou():
     assert segment_f1({0: []}, {0: []})["0.5"]["pooled"] is None
 
 
-# frozen copy of 89bd5b32 levi/harness/grading.py (_iou and episode), do not edit: the oracle the
-# refactor (grading and boundary_metrics sharing match_segments) is checked against.
+# frozen copy of 89bd5b32 grading._iou and grading.episode; only adapted: IOU -> iou_threshold
+# (default 0.3 = IOU), and the return value is (f1, dict) instead of dict; logic unchanged, do not
+# edit. The oracle the refactor (grading and boundary_metrics sharing match_segments) is checked against.
 def _oracle_iou(a, b):
     start, end = max(a["start"], b["start"]), min(a["end"], b["end"])
     inter = max(0.0, end - start)
