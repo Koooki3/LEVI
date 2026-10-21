@@ -1661,6 +1661,20 @@ MUTATIONS = [
         FAST_REVIEW,
     ),
     (
+        "review: a person's operation holds the start back without the lock",
+        "stack_act.py",
+        '            if ctx.busy_main:\n                return\n            self._seq_locked(\n                seq,\n                "sequence_probe",',
+        '            if False:\n                return\n            self._seq_locked(\n                seq,\n                "sequence_probe",',
+        FAST_REVIEW,
+    ),
+    (
+        "review: a superseded FCI answer is not kept",
+        "stack_act.py",
+        '            if not op["_superseded"]:\n                # (kept at once: the sequence waits for this, not for the other)',
+        "            if True:\n                # (kept at once: the sequence waits for this, not for the other)",
+        FAST_REVIEW,
+    ),
+    (
         "tick: the pause is the slow one once A has a unit",
         "stack_act.py",
         "        return SEQUENCE_TICK_S if self._a_unit is False else SEQUENCE_TICK_ARM_S",

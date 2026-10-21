@@ -418,7 +418,7 @@ after it is ready (no health source): a gripper driver that dies without a `proc
   start back without the lock, the FCI answer a stop drops, and B started only on a confirmed absence: the first answer, the second answer during A's
   start-up, present as the final word, the manager's word, a stale first answer) and `test_marvel0_stack_act_fast_processes.py` (real processes: the stand-in of the graph
   check, two checks side by side, the whole chain on the real ticker, and the kernel's table after the FCI check).
-- The mutation check (`tests/marvel0/mutate_stack_act.py`, 282 mutations, 75 of them for the fast start; `--check` says whether every mutation still applies)
+- The mutation check (`tests/marvel0/mutate_stack_act.py`, 304 mutations, 97 of them for the fast start; `--check` says whether every mutation still applies)
   removes each gate in turn, including every gate added by the reviews of 2026-10-21 and their fixes; the 59 of the guided
   start through B and C, of the race and of the guided stop's new words each run against the one test file that guards them.
   A run of the whole list takes a few minutes of pytest: not while the arm controller is active (`MUTATE_TESTS` names one test
@@ -701,7 +701,7 @@ FCI 探针、上述各状态下健康监视器的真实写法（读自它的源�
   `test_marvel0_stack_act_timeline.py`（真实定时器和线程跑在测试拨动的时钟上，`sim_time.py`：A 在 5 秒内、整条链、A 有单元之后的间隔、重任务把 A 拦住直到它结束或到上限、读不出来时的固定等待）、
   `test_marvel0_stack_act_fast_review.py`（一次性检查的单元名、人自己的操作让启动等待而不碰锁、停止丢弃的 FCI 答案，以及 B 只在已确认的“没有”之上启动：第一次回答、A 启动期间的第二次回答、“有”为最终结果、管理器的话、过期的第一次回答）、
   `test_marvel0_stack_act_fast_processes.py`（真实进程：图检查的替身、同时进行的两项检查、真实定时器上的整条链、FCI 检查之后内核的表）。
-- 变异检查（`tests/marvel0/mutate_stack_act.py`，282 个变异，其中快速启动的 75 个；`--check` 只检查每个变异是否仍能应用）逐个去掉每道门，包括 2026-10-21 审查新增的
+- 变异检查（`tests/marvel0/mutate_stack_act.py`，304 个变异，其中快速启动的 97 个；`--check` 只检查每个变异是否仍能应用）逐个去掉每道门，包括 2026-10-21 审查新增的
   每一道及其修复；其中经 B 和 C 的引导式启动、竞争、引导式停止新词的 59 个，各自只跑守着它的那一个测试文件。整张表要跑几分钟的 pytest：机械臂控制器运行时不要跑
   （用 `MUTATE_TESTS` 指定一个测试文件做快速运行；测试在 `MUTATE_CPUS` 指定的核上运行，默认 16-19）。
 - `test_marvel0_stack_act_walk.py`：在假机器上随机游走（多数步骤是启动流程的下一步，其余是任何事：顺序错乱的停止、检查的错误回答、时钟跳变、

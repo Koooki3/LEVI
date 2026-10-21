@@ -1,6 +1,9 @@
 """Review findings of the fast start (L1, the fake machine), one test group each:
 
 * the unit of a one-shot check is unique per call, not per second;
+* a person's own operation that runs makes the guided start wait without
+  touching the machine-wide lock;
+* a stop that comes while the FCI port is being asked drops that answer;
 * the answer "no gripper stack runs" that the graph gave once is not enough to
   start B: a second answer is needed (the groups below it).
 
@@ -81,6 +84,55 @@ def test_a_click_on_the_fci_check_during_the_early_check_of_b_loses_nothing(m):
     assert len(m.oneshots_of("node list")) == 4
     assert m.act._b_probe["by"] == "nodes" and m.act._b_probe["state"] == "absent"
     assert m.act._fci["state"] == "open"
+
+
+# --- a person's own operation holds the start back, without the lock -----------------------------
+
+
+def test_the_start_waits_for_a_persons_operation_and_does_not_touch_the_lock(m):
+    m.m_ready()
+    assert start_sequence(m) == {"done": "sequence_started"}
+    for _ in range(6):
+        if m.act.advance()["step"] == "probe":
+            break
+    assert m.act._seq["step"] == "probe" and not m.fci_probes
+    # a person's stop of B runs (a main operation: not a check beside the others)
+    person = m.act._begin("stop_b", "b")
+    locks = []
+    real = m.sup._locked
+    m.sup._locked = lambda action, act: locks.append(action) or real(action, act)
+    for _ in range(3):
+        shown = m.act.advance()
+    m.sup._locked = real
+    assert (shown["state"], shown["step"], shown["reason"]) == (
+        "running",
+        "probe",
+        None,
+    ), "the start waits, it does not fail with operation_running"
+    assert locks == [], "the start did not take the machine-wide lock meanwhile"
+    assert not m.fci_probes, "and asked the arm's port nothing"
+    # the person's operation ends: the start goes on at the next look
+    m.act._finish(person, True)
+    shown = m.act.advance()
+    assert m.fci_probes and shown["state"] == "running"
+
+
+# --- a stop that comes during the FCI check drops its answer -------------------------------------
+
+
+def test_a_stop_during_the_fci_check_drops_the_answer(m):
+    m.m_ready()
+
+    def fci(ip, port):
+        m.act._begin("stop_a", "a")  # (the stop supersedes the check that runs)
+        return {"state": "open"}
+
+    m.act.host.fci_probe = fci
+    m.act.preflight_a({"request_id": "stop-fci-00000001"})
+    assert m.act._fci is None, "an answer for a stack that is going was kept"
+    check = next(o for o in m.act._ops if o["kind"] == "preflight_a")
+    assert (check["state"], check["code"]) == ("failed", "superseded")
+    assert "gate.fci_probe" in m.blockers("a")
 
 
 # --- B starts only on a confirmed absence: one answer of the graph is not enough ----------------
