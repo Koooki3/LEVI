@@ -620,6 +620,7 @@ def test_the_form_has_exactly_the_documented_fields():
         "rtc_horizon",
         "rollout_group",
         "note",
+        "control_hz",
     ]
 
 
@@ -628,6 +629,7 @@ def test_the_flags_of_the_form_are_a_closed_list():
     assert from_form == {
         "--prompt",
         "--max-timesteps",
+        "--control-hz",
         "--eval-num",
         "--min-z",
         "--rtc",

@@ -951,6 +951,24 @@
       "--eval-note=marvel0 page: pi05_fr3_all_step49999 rtc=on horizon=6"
     ],
     "command": "cd /path/to/openpi && \\\n  env -u VIRTUAL_ENV no_proxy=localhost,127.0.0.1,::1 \\\n  uv run --no-sync --with pyrealsense2==2.55.1.6486 python examples/fr3_local/run_robotiq_client_collect_data.py \\\n  --remote-host=127.0.0.1 --remote-port=8000 --view-camera-id=262622274256 --wrist-camera-id=262622275490 --franka-server-url=http://127.0.0.1:5000/ \\\n  '--prompt=pick the eggplant in the blue plate' \\\n  --max-timesteps=500 --eval-num=5 --min-z=0.025 \\\n  --home-pose 0.481902 -0.011145 0.235951 3.119139 0.008288 -0.883962 --home-duration-s=3.0 \\\n  --max-xy=0.85 --max-step-m=0.1 --max-step-rad=0.35 --rx-range 1.5 4.03 --ry-range -0.74 0.96 --rz-range -2.44 0.77 \\\n  --binarize-gripper --require-matching-server --no-allow-unknown-prompt \\\n  --levi-mode=off --new --no-step-by-step --rtc --rtc-execute-horizon=6 \\\n  --rollout-root=/path/to/rollouts --rollout-group=pi05_fr3_all_step49999_rtc_demo '--eval-note=marvel0 page: pi05_fr3_all_step49999 rtc=on horizon=6'",
+    "control": {
+      "chunk_s": 1.0,
+      "episode_s": 50.0,
+      "horizon_s": 0.6,
+      "hz": 10,
+      "latency_beats": 3,
+      "period_ms": 100.0,
+      "reference_hz": 10,
+      "rtc": {
+        "horizon": 6,
+        "margin": 1,
+        "reached": 9
+      },
+      "speed_cap_m_s": 1.0,
+      "speed_cap_rad_s": 3.5,
+      "step_cap_m": 0.1,
+      "step_cap_rad": 0.35
+    },
     "cwd": "/path/to/openpi",
     "env": ["no_proxy=localhost,127.0.0.1,::1"],
     "hands": "Keep a hand on the physical e-stop. This preview starts nothing: the arm stack and the client have their own start buttons, each with its own confirmation.",
@@ -1053,6 +1071,24 @@
       "--eval-note=marvel0 page: recap_cfg_r2_best_step14300_jax rtc=on horizon=8"
     ],
     "command": "cd /path/to/openpi && \\\n  env -u VIRTUAL_ENV no_proxy=localhost,127.0.0.1,::1 \\\n  uv run --no-sync --with pyrealsense2==2.55.1.6486 python examples/fr3_local/run_robotiq_client_collect_data.py \\\n  --remote-host=127.0.0.1 --remote-port=8000 --view-camera-id=262622274256 --wrist-camera-id=262622275490 --franka-server-url=http://127.0.0.1:5000/ \\\n  '--prompt=pick the eggplant in the blue plate' \\\n  --max-timesteps=500 --eval-num=5 --min-z=0.03 \\\n  --home-pose 0.481902 -0.011145 0.235951 3.119139 0.008288 -0.883962 --home-duration-s=3.0 \\\n  --max-xy=0.85 --max-step-m=0.1 --max-step-rad=0.35 --rx-range 1.5 4.03 --ry-range -0.74 0.96 --rz-range -2.44 0.77 \\\n  --binarize-gripper --require-matching-server --no-allow-unknown-prompt \\\n  --levi-mode=off --new --no-step-by-step --rtc --rtc-execute-horizon=8 \\\n  --rollout-root=/path/to/rollouts --rollout-group=recap_cfg_r2_best_step14300_jax_rtc_demo '--eval-note=marvel0 page: recap_cfg_r2_best_step14300_jax rtc=on horizon=8'",
+    "control": {
+      "chunk_s": 1.0,
+      "episode_s": 50.0,
+      "horizon_s": 0.8,
+      "hz": 10,
+      "latency_beats": 3,
+      "period_ms": 100.0,
+      "reference_hz": 10,
+      "rtc": {
+        "horizon": 8,
+        "margin": -1,
+        "reached": 11
+      },
+      "speed_cap_m_s": 1.0,
+      "speed_cap_rad_s": 3.5,
+      "step_cap_m": 0.1,
+      "step_cap_rad": 0.35
+    },
     "cwd": "/path/to/openpi",
     "env": ["no_proxy=localhost,127.0.0.1,::1"],
     "hands": "Keep a hand on the physical e-stop. This preview starts nothing: the arm stack and the client have their own start buttons, each with its own confirmation.",
@@ -1639,6 +1675,22 @@
       "rtc_horizon": {
         "default": 6,
         "max": 8
+      }
+    },
+    "control": {
+      "action_horizon": 10,
+      "default": 10,
+      "latency_beats": 3,
+      "options": [5, 10, 20, 25, 50],
+      "reference_hz": 10,
+      "short_episode_s": 30,
+      "step_caps": {
+        "m": 0.1,
+        "rad": 0.35
+      },
+      "train_step_p99": {
+        "m": 0.0384,
+        "rad": 0.0883
       }
     },
     "fixed_flags": [

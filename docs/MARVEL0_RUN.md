@@ -99,6 +99,55 @@ for `levi stop` (`levi/activity.py`) and for the policy deploy's stop (`levi/mar
 runs and not honour its override phrase); `run_api.adopt_on_start()` could be called from the service's lifespan
 (`levi/service.py`, next to `stack_api.start_auto()`); nothing calls either today.
 
+## Control rate
+
+The command card has a **Control rate** (`--control-hz`): exactly 5, 10, 20, 25 or 50 Hz, default 10. At 10 Hz no flag is
+written and the command is byte for byte the one the card made before (`tests/marvel0/fixtures/command_golden_10hz.json` was
+taken from main before the option was written). Any other value is refused with `control_hz_unsupported` (a string, a float,
+a boolean is `invalid_type`); the hosted run starts the very command the form renders, so the rate reaches it unchanged.
+Code: `levi/marvel0/command.py`; tests: `tests/marvel0/test_marvel0_command_hz*.py`, `src/components/marvel0/__tests__/control-logic.test.ts`,
+`command-panel-hz.test.tsx`.
+
+**What scales, and why** (client files are in `openpi/examples/fr3_local/`, read only):
+
+| Flag or value | Rule | Evidence |
+| --- | --- | --- |
+| `--max-step-m`, `--max-step-rad` | the site's value up to 10 Hz; above it divided by `rate / 10` (20 Hz: 0.05 m and 0.175 rad, 25 Hz: 0.04 and 0.14, 50 Hz: 0.02 and 0.07). The speed they allow stays 1 m/s and 3.5 rad/s; at 5 Hz it is 0.5 m/s and 1.75 rad/s | `run_robotiq_client.py:704` `raw_step` is the distance of the commanded pose from the **measured** pose, `:728` and `:730` compare it with the caps, on every tick (loop period `:1506`); a rejected chunk is dropped, re-queried and costs one step of the budget (`:1585`). So a per-step cap is a speed cap: at 50 Hz a 0.1 m cap would allow 5 m/s |
+| `--rtc-execute-horizon`, when the field is empty | the site's default up to 10 Hz; above it the largest horizon that leaves `ceil(3 * rate / 10)` beats of the 10 actions free (20 Hz: 4, 25 Hz: 2, 50 Hz: 1); an explicit value is kept | `run_robotiq_client.py:305` "execute_horizon + d must stay <= 10"; the RTC delay `d` is a latency in ticks, `rtc_chunker.py:206` `ceil(latency_s / period_s) + 1` with `period_s = 1 / control_hz` (`run_robotiq_client.py:904`); the 3 beats of this page are the 0.3 s of 10 Hz (server round trip 187 ms, `README_ROBOTIQ_ZH.md:236`) |
+| the RTC margin warning | beats of the chosen rate: 2 (5 Hz), 3, 6, 8, 15 (50 Hz); at 50 Hz not even a horizon of 1 fits (`rtc_never_fits`: a 10-action chunk lasts 200 ms, shorter than the latency) | same |
+| the default note | gets ` hz=<rate>` for another rate | the note is stamped into the eval log; the episodes are filed in the same rollout group unless one is typed (`metadata.json` of each episode holds the nominal rate, `run_robotiq_client_collect_data.py:147`, and the measured one) |
+
+**What stays, and why.** `--max-timesteps` stays in steps, and the site's cap (3000 steps) is not changed: the number of
+actions a task needs does not depend on the rate (the client's own budget, 400 steps at 10 Hz, `run_robotiq_client.py:230-238`).
+The form shows the seconds (`steps / rate`; at least, because each inference of about 187 ms stalls the loop, which does not
+catch up, `:1641`) and warns (`episode_short`) when, above 10 Hz, they are under 30 s, about the 90th percentile of the
+slower task's demos at 10 Hz (28.7 s, `:230-231`). `--home-duration-s` is already seconds (`:941`: `int(home_duration_s * control_hz)`
+steps of `1 / control_hz` each). `--post-step-verify-delay` is not passed: the client sets 0.0 (`:222`; the 0.2 s default
+of `RobotEnv` capped the loop at 4.8 Hz, `README_ROBOTIQ_ZH.md:215-231`), and a step costs about 8 ms of HTTP, which fits the 20 ms
+of 50 Hz. `--min-z`, `--max-xy`, the angle ranges, the gripper settings (`fr3_env.py:383`, a 0.75 s throttle in seconds) are
+lengths, angles or times and do not depend on the rate. `--video-fps` is 0, the measured median rate.
+
+**Warnings** (never refusals), for a rate other than 10 Hz: `control_hz_not_trained` (the policy was trained on 10 Hz data:
+`meta/info.json` of `lerobot_fr3_filtered_robotiq_v3` says `"fps": 10`, `action_horizon=10` in `src/openpi/training/config.py:1145`,
+`run_robotiq_client.py:294`; the client's README says raising the rate "plays the training trajectories faster, leaves the
+action distribution and triggers reflexes more easily", `README_ROBOTIQ_ZH.md:233`); `control_hz_untested` (the first use
+changes the arm's speed profile and is untested on this rig: the owner present with a hand on the physical e-stop; the start dialog
+repeats it); `step_cap_tight` (the scaled caps are below the 99th percentile of the 10 Hz training steps); `episode_short`.
+
+**Measured, read only** (2026-10-21, every 6th episode of `lerobot_fr3_filtered_robotiq_v3`: 250 of 1497, 30336 rows): the
+distance between a training action and its state, the quantity the client's per-step check uses: median 0.0098 m, 90th
+percentile 0.0227, 99th 0.0384; rotation (largest of the three wrapped angle differences) 0.0164, 0.0445, 0.0883 rad. Rows above the
+scaled caps: 20 Hz 0.11 % (m) and 0 % (rad), 25 Hz 0.77 % and 0.06 %, 50 Hz **14.32 %** and 2.59 %. A real rollout adds the
+tracking lag of the arm, so the share is higher than this: at 50 Hz expect many rejected chunks, which is the interlock
+doing its job, not a fault. The constants `TRAIN_STEP_P99_*` in `command.py` are these 99th percentiles.
+
+**Not verified.** No rate other than 10 Hz has been run on the arm, and the client was not run at all: what the arm does at
+20, 25 and 50 Hz (whether the controller follows 50 targets a second, whether the loop keeps 20 ms next to the camera and state
+reads, how often the scaled caps reject), the real inference latency in beats at each rate, and whether the policy behaves
+at all outside 10 Hz are unknown. The flag spelling and the lines this section stands on are checked by
+`scripts/check_client_prompts.py` (12 strings, `control_hz_*`, `step_cap_*`, `loop_period`, `home_steps_by_seconds`, `rtc_period`,
+`rtc_delay_ticks`, `post_step_verify_zero`, `trained_at_10_fps`). The default rollout group is the same at every rate.
+
 ## What was run, and what was not
 
 Run on the development machine, with the arm off, never against a robot port, never the real client: the unit tests of the
@@ -112,7 +161,7 @@ The five test files hold 260 tests (96 + 81 + 25 + 50 + 8, the 25 with real proc
 the code 98 ways, in a scratch copy, one test file per breakage: the first sweep let 7
 through (a pid check after a restart, the launcher's own kill of the group, the exit record's mode, the token list after a
 run, the same monitor write counted twice, the arm lock row, the z floor row), each got a test and is now caught, so all 98 are;
-`scripts/check_client_prompts.py` found all 49 strings in place on 2026-10-21.
+`scripts/check_client_prompts.py` found all 49 strings (and 12 more for the control rate, 61 in all) in place on 2026-10-21.
 Regenerate what the front end reads with `uv run --no-sync python tests/marvel0/regen_run_sample.py`
 (`marvel0-run.samples.json`: `GET /run` in every state; `marvel0-run.answers.json`: the other answers and the refusals).
 
@@ -200,12 +249,47 @@ with the owner at the arm and a hand on the emergency stop.
 （`levi/marvel0/deploy.py` 应在有客户端运行时拒绝停止，且不再接受覆盖短语）；`run_api.adopt_on_start()` 可以在服务的 lifespan 里调用
 （`levi/service.py`，紧挨 `stack_api.start_auto()`）；目前没有任何地方调用这两个函数。
 
+## 控制频率
+
+命令卡片有一个**控制频率**（`--control-hz`）：只能是 5、10、20、25 或 50 Hz，默认 10。10 Hz 时不写这个参数，命令与此前卡片生成的逐字节相同
+（`tests/marvel0/fixtures/command_golden_10hz.json` 在写这个选项之前从 main 取得）。其他值一律以 `control_hz_unsupported` 拒绝（字符串、浮点数、布尔值是 `invalid_type`）；
+托管的运行启动的就是表单渲染出的那条命令，所以频率原样到达客户端。代码：`levi/marvel0/command.py`；测试：`tests/marvel0/test_marvel0_command_hz*.py`、
+`src/components/marvel0/__tests__/control-logic.test.ts`、`command-panel-hz.test.tsx`。
+
+**哪些随频率变，为什么**（客户端文件在 `openpi/examples/fr3_local/`，只读）：
+
+| 参数或数值 | 规则 | 依据 |
+| --- | --- | --- |
+| `--max-step-m`、`--max-step-rad` | 10 Hz 及以下用站点文件的值；高于 10 Hz 除以 `频率 / 10`（20 Hz：0.05 米和 0.175 弧度，25 Hz：0.04 和 0.14，50 Hz：0.02 和 0.07）。上限对应的速度保持 1 米/秒和 3.5 弧度/秒；5 Hz 时是 0.5 米/秒和 1.75 弧度/秒 | `run_robotiq_client.py:704` 的 `raw_step` 是命令位姿与**实测**位姿的距离，`:728`、`:730` 在每一拍拿它与上限比较（循环周期 `:1506`）；被拒绝的动作块会丢掉、重新请求，并用掉预算里的一步（`:1585`）。所以每步上限就是速度上限：50 Hz 时 0.1 米的上限允许 5 米/秒 |
+| `--rtc-execute-horizon`（留空时） | 10 Hz 及以下用站点的默认值；高于 10 Hz 取能给 10 个动作里留出 `ceil(3 * 频率 / 10)` 拍空位的最大值（20 Hz：4，25 Hz：2，50 Hz：1）；显式填的值不改 | `run_robotiq_client.py:305`“execute_horizon + d must stay <= 10”；RTC 延迟 `d` 是以拍计的延迟，`rtc_chunker.py:206` 为 `ceil(latency_s / period_s) + 1`，`period_s = 1 / control_hz`（`run_robotiq_client.py:904`）；本页的 3 拍就是 10 Hz 下的 0.3 秒（服务器往返 187 毫秒，`README_ROBOTIQ_ZH.md:236`） |
+| RTC 余量警告 | 按所选频率的拍数：2（5 Hz）、3、6、8、15（50 Hz）；50 Hz 时连执行步数取 1 也装不下（`rtc_never_fits`：10 个动作的块只持续 200 毫秒，比延迟还短） | 同上 |
+| 默认备注 | 其他频率时加上 ` hz=<频率>` | 备注写进评测日志；不另填数据分组时，各频率的片段会放在同一个分组里（每个片段的 `metadata.json` 记有标称频率，`run_robotiq_client_collect_data.py:147`，也记有实测频率） |
+
+**哪些不变，为什么。** `--max-timesteps` 仍以步为单位，站点的上限（3000 步）也不改：任务需要多少个动作与频率无关（客户端自己的预算是 10 Hz 下 400 步，`run_robotiq_client.py:230-238`）。
+表单会显示秒数（`步数 / 频率`；是“至少”，因为每次约 187 毫秒的推理会让循环停顿，而循环不会补回，`:1641`），并且在高于 10 Hz 且不足 30 秒时警告（`episode_short`），
+30 秒约等于较慢任务示范在 10 Hz 下的第 90 百分位（28.7 秒，`:230-231`）。`--home-duration-s` 本来就是秒（`:941`：`int(home_duration_s * control_hz)` 步，每步 `1 / control_hz` 秒）。
+`--post-step-verify-delay` 不传：客户端自己设为 0.0（`:222`；`RobotEnv` 默认的 0.2 秒会把循环锁在 4.8 Hz，`README_ROBOTIQ_ZH.md:215-231`），一步约 8 毫秒的 HTTP，装得进 50 Hz 的 20 毫秒。
+`--min-z`、`--max-xy`、角度范围、夹爪设置（`fr3_env.py:383`，0.75 秒的节流，单位是秒）是长度、角度或时间，与频率无关。`--video-fps` 是 0，即用实测中位帧率。
+
+**警告**（都不是拒绝），频率不是 10 Hz 时：`control_hz_not_trained`（策略是用 10 Hz 的数据训练的：`lerobot_fr3_filtered_robotiq_v3` 的 `meta/info.json` 写着 `"fps": 10`，
+`src/openpi/training/config.py:1145` 的 `action_horizon=10`，`run_robotiq_client.py:294`；客户端 README 说调高频率“等于加速播放训练轨迹，会走出动作分布，也更容易触发 reflex”，`README_ROBOTIQ_ZH.md:233`）；
+`control_hz_untested`（第一次使用会改变机械臂的速度曲线，在这台设备上没有试过：机主在场，手放在实体急停上；开始对话框里再说一遍）；`step_cap_tight`（缩放后的每步上限低于 10 Hz 训练步长的第 99 百分位）；`episode_short`。
+
+**实测，只读**（2026-10-21，`lerobot_fr3_filtered_robotiq_v3` 每 6 个片段取 1 个：1497 个里的 250 个，30336 行）：训练动作与其对应状态的距离，也就是客户端每步检查用的量：中位数 0.0098 米，
+第 90 百分位 0.0227，第 99 百分位 0.0384；旋转（三个包裹后角度差里最大的一个）0.0164、0.0445、0.0883 弧度。超过缩放后上限的行：20 Hz 为 0.11 %（米）和 0 %（弧度），25 Hz 为 0.77 % 和 0.06 %，
+50 Hz 为 **14.32 %** 和 2.59 %。真实运行还要加上机械臂的跟踪滞后，所以占比会更高：50 Hz 时预计会有很多动作块被拒绝，这是联锁在起作用，不是故障。
+`command.py` 里的常量 `TRAIN_STEP_P99_*` 就是这两个第 99 百分位。
+
+**没有验证的。** 10 Hz 以外的频率从未在机械臂上运行过，客户端本身也没有运行：机械臂在 20、25、50 Hz 下会怎样（控制器能不能跟上每秒 50 个目标，循环能不能在相机和状态读取之外
+守住 20 毫秒，缩放后的上限多久拒绝一次）、每个频率下真实的推理延迟拍数、以及策略在 10 Hz 之外到底表现如何，都不知道。参数拼写和本节依据的那些行由 `scripts/check_client_prompts.py` 检查
+（12 条字符串：`control_hz_*`、`step_cap_*`、`loop_period`、`home_steps_by_seconds`、`rtc_period`、`rtc_delay_ticks`、`post_step_verify_zero`、`trained_at_10_fps`）。默认的数据分组在各个频率下相同。
+
 ## 已经运行过的，和没有运行过的
 
 在开发机上、机械臂关闭时运行，从未连接任何机器人端口，从未运行真正的客户端：状态规则的单元测试（每个状态、客户端换了说法的文字、已经消失的客户端）、提供哪些动作、令牌、环境和命令；
 脚本化客户端上的监管者（开始及每一种拒绝、按键以及到达键盘的字节、保持、结束、监视器的自动保持、重启后的接管、重放）；真实伪终端下的启动器和假客户端（完整的一次运行、误按的 `s`、
 慢速保存期间的两次标签点击、保持与结束、核心已死的客户端）；变异检查（故意改坏代码，指定的测试必须失败）；以及对客户端源码的漂移检查。五个测试文件共 260 个测试（96 + 81 + 25 + 50 + 8，其中 25 个用真实进程，约 25 秒）；变异检查脚本 `tests/marvel0/mutate_run.py`（有机器人进程在运行时拒绝运行；`--check` 只校验清单）在临时副本里用 98 种方式改坏代码，每种只跑一个测试文件：第一轮有 7 种没被抓到（重启后的进程号检查、启动器自己对进程组的 SIGKILL、退出记录的权限、运行结束后的令牌、同一次监视器写入被数两次、手臂锁检查行、z 下限检查行），每种都补了测试，现在 98 种全部被抓到；
-`scripts/check_client_prompts.py` 在 2026-10-21 找到了全部 49 条字符串。重新生成前端读取的文件：`uv run --no-sync python tests/marvel0/regen_run_sample.py`
+`scripts/check_client_prompts.py` 在 2026-10-21 找到了全部 49 条字符串（加上控制频率的 12 条，共 61 条）。重新生成前端读取的文件：`uv run --no-sync python tests/marvel0/regen_run_sample.py`
 （`marvel0-run.samples.json`：各个状态下的 `GET /run`；`marvel0-run.answers.json`：其他路由的回答和各种拒绝）。
 
 **没有在真机上验证的：** `systemd-run --user --scope` 本身（pid 是否就是启动器的、进程组是否在产品重启后存活、scope 的停止行为）；启动器下的真实客户端（环境白名单下 `uv` 的离线运行、

@@ -69,8 +69,8 @@ TASK_KEYS = {"s": SCREWS, "p": PLATES}  # RC:127
 
 VALUE = [
     "--remote-host", "--remote-port", "--view-camera-id", "--wrist-camera-id",
-    "--franka-server-url", "--prompt", "--max-timesteps", "--eval-num", "--min-z",
-    "--home-duration-s", "--max-xy", "--max-step-m", "--max-step-rad", "--levi-mode",
+    "--franka-server-url", "--prompt", "--max-timesteps", "--control-hz", "--eval-num",
+    "--min-z", "--home-duration-s", "--max-xy", "--max-step-m", "--max-step-rad", "--levi-mode",
     "--rtc-execute-horizon", "--open-loop-horizon", "--rollout-root",
     "--rollout-group", "--eval-note",
 ]  # fmt: skip

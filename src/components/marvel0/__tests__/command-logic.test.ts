@@ -39,6 +39,7 @@ describe("the form as it opens", () => {
       horizon: "",
       group: "",
       note: "",
+      hz: "10",
     });
   });
 
@@ -174,11 +175,13 @@ describe("what the form shows as its defaults", () => {
       group: "pi05_fr3_all_step49999_rtc_demo",
       horizon: "6",
       horizonMax: 8,
+      horizonLoweredFrom: null,
     });
     expect(placeholders(base({ rtc: false }), models, site)).toEqual({
       group: "pi05_fr3_all_step49999_demo",
       horizon: "6",
       horizonMax: 10,
+      horizonLoweredFrom: null,
     });
   });
 
