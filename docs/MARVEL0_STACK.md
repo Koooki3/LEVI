@@ -414,7 +414,7 @@ after it is ready (no health source): a gripper driver that dies without a `proc
   as an operation beside others, the order, the marker given back, the checks before C side by side, the ticker, the page's
   cache, the step times, the control file's floor), `test_marvel0_stack_act_timeline.py` (the real ticker and threads on a
   clock the test moves, `sim_time.py`: A under 5 s, the whole chain, the pause once A has a unit, a heavy job that holds A back until it ends or the cap, the
-  fixed wait when it cannot be told), `test_marvel0_stack_act_fast_review.py` (the unit name of a one-shot, a person's operation that holds the
+  fixed wait when it cannot be told), `test_marvel0_sim_time.py` (the clock behind the timing tests: a thread that goes on after waiting for another goes on at the moment the other ended or blocked), `test_marvel0_stack_act_fast_review.py` (the unit name of a one-shot, a person's operation that holds the
   start back without the lock, the FCI answer a stop drops, and B started only on a confirmed absence: the first answer, the second answer during A's
   start-up, present as the final word, the manager's word, a stale first answer) and `test_marvel0_stack_act_fast_processes.py` (real processes: the stand-in of the graph
   check, two checks side by side, the whole chain on the real ticker, and the kernel's table after the FCI check).
@@ -699,7 +699,7 @@ FCI 探针、上述各状态下健康监视器的真实写法（读自它的源�
 - 快速启动：`test_marvel0_stack_act_heavy.py`（真实的 `heavy_jobs_running`，对着闸门自己格式的日志文件和真实的 `systemctl show` 输出，其中有 `show 'heavy-gate-*'` 的实测输出（本机的 18 个陈旧 scope，`fixtures/systemctl_show_heavy_gate_glob.txt`）：别的 hub 的或超出日志窗口的任务由第二个来源看到、读不了的日志、比尾部读取更长的日志、文档以及其后的门）、
   `test_marvel0_stack_act_fast.py`（图检查及其回退，用真实的 `ros2 node list` 格式；作为并行操作的 B 检查、顺序、归还标记、C 之前的检查同时进行、定时器、页面缓存、各步用时、控制文件的下限）、
   `test_marvel0_stack_act_timeline.py`（真实定时器和线程跑在测试拨动的时钟上，`sim_time.py`：A 在 5 秒内、整条链、A 有单元之后的间隔、重任务把 A 拦住直到它结束或到上限、读不出来时的固定等待）、
-  `test_marvel0_stack_act_fast_review.py`（一次性检查的单元名、人自己的操作让启动等待而不碰锁、停止丢弃的 FCI 答案，以及 B 只在已确认的“没有”之上启动：第一次回答、A 启动期间的第二次回答、“有”为最终结果、管理器的话、过期的第一次回答）、
+  `test_marvel0_sim_time.py`（计时测试背后的时钟：等过别的线程之后继续的线程，在被等的线程结束或阻塞的那一刻继续）、`test_marvel0_stack_act_fast_review.py`（一次性检查的单元名、人自己的操作让启动等待而不碰锁、停止丢弃的 FCI 答案，以及 B 只在已确认的“没有”之上启动：第一次回答、A 启动期间的第二次回答、“有”为最终结果、管理器的话、过期的第一次回答）、
   `test_marvel0_stack_act_fast_processes.py`（真实进程：图检查的替身、同时进行的两项检查、真实定时器上的整条链、FCI 检查之后内核的表）。
 - 变异检查（`tests/marvel0/mutate_stack_act.py`，304 个变异，其中快速启动的 97 个；`--check` 只检查每个变异是否仍能应用）逐个去掉每道门，包括 2026-10-21 审查新增的
   每一道及其修复；其中经 B 和 C 的引导式启动、竞争、引导式停止新词的 59 个，各自只跑守着它的那一个测试文件。整张表要跑几分钟的 pytest：机械臂控制器运行时不要跑
