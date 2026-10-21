@@ -11,7 +11,7 @@ unbroken copy (the first thing a sweep does). The mutations are made in a **copy
 of ``src/``, ``levi/marvel0/``, ``tests/marvel0/fixtures/`` and the configuration
 in a temporary folder (``node_modules`` is linked), so the checkout itself is never
 edited and nobody else's test run can meet a broken gate; the tests run there with
-bun, one file per process, under ``nice -n 19 taskset -c 20-23``. It refuses to run
+bun, one file per process, under ``nice -n 19 taskset -c $MUTATE_CORES`` (default 20-23). It refuses to run
 while a robot process is alive (the passive ``ps`` check of setup.md): a sweep is
 many test runs, and the arm's control loop is not to be disturbed by it;
 ``--even-if-robot-runs`` lifts that (one file at a time stays). The bun used is the
@@ -33,6 +33,7 @@ CONFIG = ("package.json", "tsconfig.json", "tsconfig.test.json", "bunfig.toml")
 ROBOT = re.compile(
     r"ros2_control_node|franka_server|enpire_franka|serve_policy|run_robotiq_client"
 )
+CORES = os.environ.get("MUTATE_CORES", "20-23")  # the cores the test runs may use
 BUN = os.environ.get("BUN") or str(
     Path(__file__).resolve().parents[5] / ".runtime" / "bun-linux-x64" / "bun"
 )
@@ -50,6 +51,9 @@ RUN = T + "autonomy-run.test.tsx"
 ACTIONS = T + "autonomy-actions.test.tsx"
 PREPARE = T + "autonomy-prepare.test.tsx"
 PAGE = T + "autonomy-page.test.tsx"
+CONFIRM = T + "autonomy-confirm.test.tsx"
+POLL = T + "autonomy-poll.test.tsx"
+CHAIN = T + "autonomy-chain.test.ts"
 
 # (name, file, old text that occurs exactly once, new text, test files)
 MUTATIONS = [
@@ -158,9 +162,9 @@ MUTATIONS = [
     (
         "seen: a key is sent with no prompt in the document",
         M + "use-autonomy.ts",
-        "if (!runId || !key.token || promptId === null) {",
-        "if (!runId || !key.token) {",
-        (RUN,),
+        'if (!runId || !key.token || promptId === null)\n        return refuse("stale_page");\n      if (!keyFitsPrompt(view, key.id)) return refuse("stale_page");',
+        'if (!runId || !key.token) return refuse("stale_page");',
+        (CONFIRM,),
     ),
     (
         "phrase: a level C key is sent without its phrase",
@@ -187,9 +191,9 @@ MUTATIONS = [
     (
         "window: a window whose prompt moved on stays open and sends the new prompt's key",
         M + "autonomy-keys.tsx",
-        "    asking !== null &&\n    (run.runId !== asking.runId || run.state.seq !== asking.seq);",
+        "    asking !== null &&\n    (run.runId !== asking.runId ||\n      run.state.seq !== asking.seq ||\n      (run.state.prompt?.id ?? null) !== asking.promptId ||\n      !keyFitsPrompt(run, asking.id));",
         "    false;",
-        (RUN,),
+        (RUN, CONFIRM),
     ),
     (
         "window: Confirm is on whatever the key's state",
@@ -318,7 +322,7 @@ MUTATIONS = [
     (
         "document: a todo that is a bare code name is shown as words",
         M + "autonomy-doc.ts",
-        '!/^[a-z0-9_]+$/.test(text) ? text : null',
+        "!/^[a-z0-9_]+$/.test(text) ? text : null",
         "text",
         (ACTIONS,),
     ),
@@ -353,8 +357,8 @@ MUTATIONS = [
     (
         "start: the page does not hand Step 5 whether the client is live",
         "src/app/marvel0/page.tsx",
-        "<AutonomyStep evalLive={ownRunLive} />",
-        "<AutonomyStep evalLive={false} />",
+        "<AutonomyStepLazy evalLive={ownRunLive} onRun={setAeri} />",
+        "<AutonomyStepLazy evalLive={false} onRun={setAeri} />",
         (PAGE,),
     ),
     (
@@ -372,11 +376,11 @@ MUTATIONS = [
         (LOGIC, PREPARE),
     ),
     (
-        "execute: the long variant has no suffix",
+        "execute: the page makes up a phrase when the document names none",
         M + "autonomy-logic.ts",
-        "? `${base} after policy switch check`",
-        "? base",
-        (LOGIC, ACTIONS),
+        'return key.level === "C" && key.phrase ? key.phrase : null;',
+        'return key.level === "C" ? (key.phrase ?? `execute ${key.id}`) : null;',
+        (LOGIC, CONFIRM),
     ),
     (
         "hosting: the page acts although the control file switched it off",
@@ -410,7 +414,7 @@ MUTATIONS = [
     (
         "contract: the prepare body drops the gripper wait",
         M + "autonomy-logic.ts",
-        "    gripper_confirm_s:\n      form.gripperConfirmS.trim() === \"\"\n        ? null\n        : Number(form.gripperConfirmS.trim()),\n",
+        '    gripper_confirm_s:\n      form.gripperConfirmS.trim() === ""\n        ? null\n        : Number(form.gripperConfirmS.trim()),\n',
         "",
         (CONTRACT, LOGIC),
     ),
@@ -457,11 +461,228 @@ MUTATIONS = [
         "  border: 1px solid #ff0000;\n  border-radius: var(--ds-radius-md);\n  background: var(--ds-danger-bg);",
         (STYLES,),
     ),
+    # --- review R10 #1: the checks in front of a level C key, one tick each -----------
+    (
+        "ticks: one of D's five start checks is not asked",
+        M + "autonomy-logic.ts",
+        '  start: ["scene", "limits", "checkpoints", "providers", "hardware"],',
+        '  start: ["scene", "checkpoints", "providers", "hardware"],',
+        (LOGIC, CONFIRM, ACTIONS),
+    ),
+    (
+        "ticks: one of the four items of the policy switch check is not asked",
+        M + "autonomy-logic.ts",
+        '  switch: ["switch_units", "switch_ports", "switch_gpu", "switch_home"],',
+        '  switch: ["switch_units", "switch_ports", "switch_gpu"],',
+        (LOGIC, CONFIRM, ACTIONS),
+    ),
+    (
+        "ticks: the long phrase's window leaves out the policy switch items",
+        M + "autonomy-logic.ts",
+        "? [...TERMINAL_CHECKS.switch, ...TERMINAL_CHECKS.start]",
+        "? [...TERMINAL_CHECKS.start]",
+        (LOGIC, CONFIRM, ACTIONS),
+    ),
+    (
+        "ticks: one of the stack windows' three checks is not asked",
+        M + "autonomy-logic.ts",
+        '  "no_client",\n] as const;',
+        "] as const;",
+        (LOGIC, CONFIRM, ACTIONS),
+    ),
+    (
+        "ticks: the forced end asks nothing",
+        M + "autonomy-logic.ts",
+        '  if (id !== "execute" && id !== "execute_variant" && id !== "end") return [];',
+        '  if (id !== "execute" && id !== "execute_variant") return [];',
+        (LOGIC, CONFIRM, ACTIONS),
+    ),
+    (
+        "ticks: the key window shows none of them",
+        M + "autonomy-keys.tsx",
+        "      attest={attest}",
+        "      attest={[]}",
+        (CONFIRM, ACTIONS),
+    ),
+    (
+        "ticks: the forced end's window is sent whatever the document's phrase",
+        M + "autonomy-run-card.tsx",
+        "actions.end(run.end.phrase)",
+        'actions.end("end")',
+        (CONFIRM, ACTIONS),
+    ),
+    (
+        "phrase: pressKey sends a phrase that is not the document's",
+        M + "use-autonomy.ts",
+        'if (key.level === "C" && (!key.phrase || phrase !== key.phrase))',
+        "if (false as boolean)",
+        (CONFIRM,),
+    ),
+    (
+        "prompt: pressKey sends a key for a prompt that is not on D's screen",
+        M + "use-autonomy.ts",
+        'if (!keyFitsPrompt(view, key.id)) return refuse("stale_page");',
+        "",
+        (CONFIRM,),
+    ),
+    (
+        "prompt: a window stays open when the same prompt is printed again",
+        M + "autonomy-keys.tsx",
+        "      (run.state.prompt?.id ?? null) !== asking.promptId ||",
+        "",
+        (CONFIRM,),
+    ),
+    (
+        "prompt: a window stays open when the prompt is another kind",
+        M + "autonomy-keys.tsx",
+        "      !keyFitsPrompt(run, asking.id));",
+        "      false);",
+        (CONFIRM,),
+    ),
+    (
+        "prompt: a key is on although D shows another prompt",
+        M + "autonomy-logic.ts",
+        '  if (!keyFitsPrompt(run, key.id)) return off(local("prompt_mismatch"));',
+        "",
+        (LOGIC, RUN),
+    ),
+    (
+        "prompt: the window does not quote D's screen line",
+        M + "autonomy-keys.tsx",
+        '        line && key?.level === "C" ? (',
+        "        false ? (",
+        (CONFIRM,),
+    ),
+    # --- review R10 #10: what is said after a Stop ----------------------------------
+    (
+        "stop wording: a stop D has not acknowledged is said to be winding down",
+        M + "autonomy-logic.ts",
+        "        : `marvel0.autonomy.hint.stopping_${phase}`;",
+        '        : "marvel0.autonomy.hint.stopping";',
+        (LOGIC,),
+    ),
+    (
+        "stop wording: the card's hint ignores the stop phase",
+        M + "autonomy-run-card.tsx",
+        "stateHintKey(run.state.id, run.stop.phase)",
+        "stateHintKey(run.state.id)",
+        (RUN,),
+    ),
+    (
+        "stop wording: an orphan whose Ctrl+C was not acknowledged is said to be wrapping up",
+        M + "autonomy-logic.ts",
+        '  if (id === "orphaned" && unconfirmed)',
+        '  if (id === "orphaned" && false)',
+        (LOGIC, RUN),
+    ),
+    # --- review R11 M4, L2: how often the page reads, what it loads -------------------
+    (
+        "poll: the readiness document is read every 3 s while hosting is off",
+        M + "autonomy-logic.ts",
+        "  return hostingOff(ready, routeOff) ? limits.slowPollMs : limits.readyPollMs;",
+        "  return limits.readyPollMs;",
+        (LOGIC, POLL),
+    ),
+    (
+        "poll: the readiness document is read on while an evaluation client is live",
+        M + "use-autonomy.ts",
+        "    enabled: !paused,",
+        "    enabled: true,",
+        (POLL,),
+    ),
+    (
+        "poll: the step does not tell the readiness poll that a client is live",
+        M + "autonomy-step.tsx",
+        "useAutonomyReady(api, { limits, evalLive })",
+        "useAutonomyReady(api, { limits })",
+        (POLL,),
+    ),
+    (
+        "poll: D's document is read every 3 s while nothing can be seen",
+        M + "autonomy-step.tsx",
+        "{ quiet: evalLive || ready.off }",
+        "{ quiet: false }",
+        (POLL,),
+    ),
+    (
+        "poll: the dock watches the scroll and runs its timer with no D alive",
+        M + "autonomy-step.tsx",
+        "    if (!active) {\n      setOnScreen(false);\n      return;\n    }\n",
+        "",
+        (POLL,),
+    ),
+    (
+        "load: the page imports Step 5 directly, not on demand",
+        "src/app/marvel0/page.tsx",
+        'import { AutonomyStepLazy } from "@/components/marvel0/autonomy-lazy";',
+        'import { AutonomyStep as AutonomyStepLazy } from "@/components/marvel0/autonomy-step";',
+        (POLL,),
+    ),
+    (
+        "load: a step that throws takes the whole page down",
+        M + "autonomy-lazy.tsx",
+        "    <AutonomyBoundary>\n      <Suspense fallback={<Loading />}>\n        <Step {...props} />\n      </Suspense>\n    </AutonomyBoundary>",
+        "    <Suspense fallback={<Loading />}>\n      <Step {...props} />\n    </Suspense>",
+        (POLL,),
+    ),
+    # --- the chain follows the hosted D ----------------------------------------------
+    (
+        "chain: the run node ignores a D that lives",
+        M + "chain-logic.ts",
+        "  if (input.aeri?.alive) return aeriNode(input.aeri);",
+        "",
+        (CHAIN, PAGE),
+    ),
+    (
+        "chain: a D that cannot be told apart from the ready is stuck and the node says ready",
+        M + "chain-logic.ts",
+        '  stalled: "problem",',
+        '  stalled: "ready",',
+        (CHAIN,),
+    ),
+    (
+        "chain: a D not read lately is called ready",
+        M + "chain-logic.ts",
+        "  if (!fact.current)\n    return {",
+        "  if (false as boolean)\n    return {",
+        (CHAIN,),
+    ),
+    (
+        "chain: the page does not hand the chain the state of D",
+        "src/app/marvel0/page.tsx",
+        "<AutonomyStepLazy evalLive={ownRunLive} onRun={setAeri} />",
+        "<AutonomyStepLazy evalLive={ownRunLive} />",
+        (PAGE,),
+    ),
+    (
+        "chain: the step never tells the page",
+        M + "autonomy-step.tsx",
+        "    onRun?.(fact);",
+        "",
+        (POLL, PAGE),
+    ),
+    # --- the form --------------------------------------------------------------------
+    (
+        "form: the example task is the pepper again",
+        "src/i18n/en.json",
+        '"marvel0.autonomy.form.task_example": "pick the watermelon into the blue plate"',
+        '"marvel0.autonomy.form.task_example": "pick the pepper into the white plate"',
+        (LOGIC,),
+    ),
+    (
+        "form: the stages of a first use are gone",
+        M + "autonomy-prepare.tsx",
+        "      <Stages limits={limits} />",
+        "",
+        (PREPARE,),
+    ),
 ]
 
 
 def robot_running() -> bool:
-    out = subprocess.run(["ps", "-eo", "args"], capture_output=True, text=True).stdout
+    out = subprocess.run(
+        ["ps", "-eo", "args"], capture_output=True, text=True, check=False
+    ).stdout
     return any(ROBOT.search(line) for line in out.splitlines())
 
 
@@ -481,11 +702,12 @@ def prepare_copy() -> None:
 def run_test(test: str) -> tuple[int, str]:
     try:
         result = subprocess.run(
-            ["nice", "-n", "19", "taskset", "-c", "20-23", BUN, "test", test],
+            ["nice", "-n", "19", "taskset", "-c", CORES, BUN, "test", test],
             cwd=ROOT,
             capture_output=True,
             text=True,
             timeout=90,
+            check=False,
         )
     except subprocess.TimeoutExpired:
         # A gate removed so that a test waits for something that never comes
@@ -511,7 +733,9 @@ def main() -> int:
             path = ROOT / rel
             text = path.read_text(encoding="utf-8")
             if text.count(old) != 1:
-                print(f"CANNOT APPLY  {name}: {text.count(old)} matches of the old text in {rel}")
+                print(
+                    f"CANNOT APPLY  {name}: {text.count(old)} matches of the old text in {rel}"
+                )
                 survivors.append(name)
                 continue
             applied += 1
@@ -540,7 +764,10 @@ def main() -> int:
                     if code != 0:
                         caught.append(Path(test).name)
                         break
-                print(f"{'caught  ' if caught else 'SURVIVED'}  {name}" + (f"  ({caught[0]})" if caught else ""))
+                print(
+                    f"{'caught  ' if caught else 'SURVIVED'}  {name}"
+                    + (f"  ({caught[0]})" if caught else "")
+                )
                 if not caught:
                     survivors.append(name)
             finally:
