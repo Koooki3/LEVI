@@ -287,3 +287,75 @@ def test_the_default_place_of_the_record_is_the_product_workspace(tmp_path):
     from levi.workspace import Workspace
 
     assert Workspace.at(base).state / Path(*aeri_run.REL) / "record.json" == base / rel
+
+
+# --- the record is written before the signal goes out ---------------------------------------
+
+
+def patched_kill(script, monkeypatch, kill):
+    """The script's own view of ``os`` with another ``kill`` (the real ``os`` is
+    left alone: the fixture kills its processes with it)."""
+    import types
+
+    own = types.SimpleNamespace(**vars(os))
+    own.kill = kill
+    monkeypatch.setattr(script, "os", own)
+
+
+def load_script():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("aeri_page_stop_order", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_record_says_sent_before_the_signal_is_sent(world, monkeypatch):
+    """A page that looks at the record between the two must find that a Stop was
+    sent (it then offers none of its own): the record is written first."""
+    proc, _log = world.spawn()
+    world.write(runner=runner_of(proc))
+    script = load_script()
+    seen = []
+
+    def spy(pid, sig):
+        seen.append(json.loads(world.record_path.read_text()).get("stop_sent_epoch"))
+
+    patched_kill(script, monkeypatch, spy)
+    assert script.main(["--record", str(world.record_path)]) == 0
+    assert len(seen) == 1 and seen[0] is not None and seen[0] > 0
+
+
+def test_a_signal_that_cannot_be_sent_puts_the_record_back(world, monkeypatch, capsys):
+    proc, _log = world.spawn()
+    world.write(runner=runner_of(proc), stop_sent_epoch=None)
+    script = load_script()
+
+    def refuse(pid, sig):
+        raise PermissionError(1, "Operation not permitted")
+
+    patched_kill(script, monkeypatch, refuse)
+    assert script.main(["--record", str(world.record_path)]) == 2
+    assert "could not be sent" in capsys.readouterr().err
+    assert json.loads(world.record_path.read_text())["stop_sent_epoch"] is None
+    # a Stop that had been sent before keeps its time when the second fails
+    world.write(runner=runner_of(proc), stop_sent_epoch=1234.5)
+    assert script.main(["--record", str(world.record_path), "--again"]) == 2
+    assert json.loads(world.record_path.read_text())["stop_sent_epoch"] == 1234.5
+
+
+def test_a_record_that_cannot_be_written_never_keeps_the_signal_from_going_out(
+    world, monkeypatch, capsys
+):
+    proc, log = world.spawn()
+    world.write(runner=runner_of(proc))
+    script = load_script()
+
+    def broken(path, when):
+        raise OSError(30, "Read-only file system")
+
+    monkeypatch.setattr(script, "mark_sent", broken)
+    assert script.main(["--record", str(world.record_path)]) == 0
+    assert "will not know of this Stop" in capsys.readouterr().err
+    assert world.signals(log) == [str(int(signal.SIGINT))]

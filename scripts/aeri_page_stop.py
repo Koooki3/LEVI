@@ -20,8 +20,9 @@ What it does, and nothing else:
   and boot id, as the page recorded them), and sends it SIGINT; with no usable
   heartbeat it sends SIGINT to the launcher's process group, after the same
   check of the launcher (the launcher ignores SIGINT; D is in its group);
-* writes ``stop_sent_epoch`` into the record, so that a page that is restarted
-  later does not send a second one. **A second Ctrl+C during D's wrap-up kills the
+* writes ``stop_sent_epoch`` into the record (before the signal, see below), so
+  that the page, running or restarted later, knows a Stop was sent and offers none
+  of its own. **A second Ctrl+C during D's wrap-up kills the
   ``systemctl`` calls it stops its units with and leaves them running**, so this
   script refuses to send again unless you say ``--again`` (D did not answer within
   a few seconds).
@@ -207,23 +208,38 @@ def main(argv=None) -> int:
     if args.dry_run:
         print(f"would send SIGINT to {where}")
         return 0
+    # The record first, the signal after: a page that looks at the record between
+    # the two must find "a Stop was sent" and not offer its own, and a signal that
+    # then fails puts the old value back. (A script killed between the two leaves
+    # a record that says "sent": the page shows it unconfirmed after a few seconds
+    # and offers its one retry.) A record that cannot be written never keeps the
+    # signal from going out.
+    previous = record.get("stop_sent_epoch")
+    noted = True
+    try:
+        mark_sent(path, time.time())
+    except (OSError, ValueError) as exc:
+        noted = False
+        print(
+            f"the record could not be updated ({exc.__class__.__name__}): "
+            "the page will not know of this Stop",
+            file=sys.stderr,
+        )
     try:
         if how == "pid":
             os.kill(target, signal.SIGINT)
         else:
             os.killpg(target, signal.SIGINT)
     except OSError as exc:
+        if noted:
+            try:
+                mark_sent(path, previous)
+            except (OSError, ValueError):
+                pass
         print(
             f"the signal could not be sent ({exc.__class__.__name__})", file=sys.stderr
         )
         return 2
-    try:
-        mark_sent(path, time.time())
-    except (OSError, ValueError) as exc:
-        print(
-            f"sent, but the record could not be updated ({exc.__class__.__name__})",
-            file=sys.stderr,
-        )
     print(
         f"SIGINT sent to {where}. It stops the motion and holds the arm; it does not go home."
     )
