@@ -946,3 +946,24 @@ def test_a_client_not_connected_is_never_called_stopped(m):
         ]
         assert words in text
         assert "stopped" not in text.lower() and "已停" not in text
+
+
+def test_the_main_checkout_check_compares_the_checkout_not_the_workspace(
+    tmp_path, monkeypatch
+):
+    """``levi.paths.ROOT`` is the workspace (``<checkout>/.state``). Comparing it
+    with the main checkout made every product instance read ``fake`` and refuse
+    every write, which only the first real deploy showed (21 Oct): every other
+    test here injects ``in_main_checkout``."""
+    from levi import paths
+    from levi.live import locate
+    from levi.marvel0 import site
+
+    checkout = tmp_path / "LEVI"
+    (checkout / ".git").mkdir(parents=True)
+    monkeypatch.setattr(paths, "ROOT", checkout / ".state")
+    monkeypatch.setattr(locate, "checkout_root", lambda: checkout)
+    monkeypatch.setattr(site, "main_checkout", lambda checkouts=None: checkout)
+    assert stack._in_main_checkout() is True
+    monkeypatch.setattr(locate, "checkout_root", lambda: tmp_path / "worktree")
+    assert stack._in_main_checkout() is False

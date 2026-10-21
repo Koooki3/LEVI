@@ -288,12 +288,16 @@ def _read_self_cgroup():
 
 
 def _in_main_checkout() -> bool:
-    from levi.paths import ROOT
+    # ``levi.paths.ROOT`` is the WORKSPACE (``<checkout>/.state``), never the
+    # checkout: comparing it with the main checkout made every product instance
+    # read ``fake`` and refuse every write (found on the first deploy, 21 Oct).
+    # The checkout this code runs from is ``locate.checkout_root()``.
+    from levi.live import locate
 
     from . import site
 
     try:
-        return Path(ROOT).resolve() == site.main_checkout().resolve()
+        return Path(locate.checkout_root()).resolve() == site.main_checkout().resolve()
     except (OSError, IndexError, RuntimeError):
         return False
 
