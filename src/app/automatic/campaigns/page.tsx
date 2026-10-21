@@ -7,7 +7,7 @@ import { CampaignList } from "@/components/automatic/campaign-list";
 
 export default function CampaignsPage() {
   return (
-    <main className="ds-root pg-workbench aw-page">
+    <main className="ds-root ds-page pg-workbench aw-page">
       <CampaignList />
     </main>
   );

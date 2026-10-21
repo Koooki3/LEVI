@@ -2,19 +2,11 @@
  * fails on any colour literal here. */
 
 .levi-home {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: var(--ds-space-10) var(--ds-space-6) var(--ds-space-16);
+  /* frame: .ds-page.ds-page--reading (ds.css) */
   display: flex;
   flex-direction: column;
   gap: var(--ds-space-6);
   color: var(--ds-text-primary);
-}
-@media (min-width: 1280px) {
-  .levi-home {
-    padding-left: var(--ds-space-8);
-    padding-right: var(--ds-space-8);
-  }
 }
 
 /* ── Head: greeting and "open a dataset" ── */
@@ -321,9 +313,6 @@
   }
 }
 @media (max-width: 899px) {
-  .levi-home {
-    padding: var(--ds-space-6) var(--ds-space-4) var(--ds-space-12);
-  }
   .levi-home-head {
     grid-template-columns: minmax(0, 1fr);
   }

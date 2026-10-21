@@ -591,7 +591,7 @@ export function HomeDashboard() {
   const hour = now === null ? null : new Date(now).getHours();
 
   return (
-    <main className="levi-home">
+    <main className="ds-page ds-page--reading levi-home">
       <header className="levi-home-head">
         <div className="levi-home-title">
           <LeviMark size={40} />

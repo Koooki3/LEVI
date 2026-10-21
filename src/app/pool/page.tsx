@@ -107,7 +107,7 @@ export default function TrainingPoolPage() {
   const { enabled, embedded } = useLivePulse();
   if (isLiveWorkspace(enabled, embedded)) {
     return (
-      <main className="ds-root pg-workbench">
+      <main className="ds-root ds-page pg-workbench">
         <div role="status">
           <EmptyState
             icon={Layers}
@@ -382,7 +382,7 @@ function TrainingPool() {
   const summary = status?.last_scan;
 
   return (
-    <main className="ds-root pg-workbench pg-pool">
+    <main className="ds-root ds-page pg-workbench pg-pool">
       <div className="pg-head">
         <h1>{t("Training pool")}</h1>
         <div className="pg-head-actions">

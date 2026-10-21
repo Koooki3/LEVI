@@ -20,7 +20,7 @@ function ReportPageInner() {
     "operator_label",
   );
   return (
-    <main className="ds-root pg-workbench aw-page">
+    <main className="ds-root ds-page pg-workbench aw-page">
       <CampaignReportView
         campaignId={id}
         basis={basis}

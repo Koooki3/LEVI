@@ -154,7 +154,7 @@ export default function Guide() {
   const { t } = useLocale();
   const current = useCurrentSection(IDS);
   return (
-    <main className="levi-reading">
+    <main className="ds-page ds-page--reading levi-reading">
       <div className="levi-reading__head">
         <span className="levi-reading__brand">
           <LeviMark size={18} />

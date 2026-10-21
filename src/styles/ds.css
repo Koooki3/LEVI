@@ -1418,3 +1418,23 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* ── Page frame (layout audit 2026-10-21, P1) ───────────────────────────
+   One frame for every page: the content is at most --ds-page-max wide and
+   centred by its side padding (so a page background still spans the window),
+   with the same top, bottom and side margins everywhere. Work pages are 1360,
+   reading pages (home, guide, report) add .ds-page--reading for 1200. */
+.ds-page {
+  --ds-page-max: var(--ds-page-max-wide);
+  padding: var(--ds-page-top)
+    max(var(--ds-page-inset), calc((100% - var(--ds-page-max)) / 2))
+    var(--ds-page-bottom);
+}
+.ds-page--reading {
+  --ds-page-max: var(--ds-page-max-reading);
+}
+@media (max-width: 899px) {
+  .ds-page {
+    --ds-page-inset: var(--ds-space-4);
+  }
+}

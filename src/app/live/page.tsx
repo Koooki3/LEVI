@@ -169,7 +169,7 @@ export default function LivePage() {
   const now = poll.lastOk ?? Date.now();
 
   return (
-    <main className="ds-root pg-workbench pg-live">
+    <main className="ds-root ds-page pg-workbench pg-live">
       <h1>{t("Live evaluation & annotation")}</h1>
       {status?.enabled && status.workspace_name && (
         <p className="pg-pool-muted">

@@ -8,7 +8,7 @@ import { WizardPage } from "@/components/automatic/wizard-page";
 export default function NewEvaluationPage() {
   const router = useRouter();
   return (
-    <main className="ds-root pg-workbench aw-page">
+    <main className="ds-root ds-page pg-workbench aw-page">
       <WizardPage navigate={(href) => router.push(href)} />
     </main>
   );

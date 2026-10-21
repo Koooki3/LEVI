@@ -14,7 +14,7 @@ import { RunList } from "@/components/automatic/run-list";
 export default function AutomaticPage() {
   const { t } = useLocale();
   return (
-    <main className="ds-root pg-workbench ar-page">
+    <main className="ds-root ds-page pg-workbench ar-page">
       <div className="ar-head">
         <h1>{t("automatic.run.page.title")}</h1>
         <Link

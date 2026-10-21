@@ -107,7 +107,7 @@ export function SessionDetail({
     resultRequest.refresh();
   };
   return (
-    <main className="ds-root pg-workbench pg-live pg-live-detail">
+    <main className="ds-root ds-page pg-workbench pg-live pg-live-detail">
       <Link className="pg-back-link ds-focus" href="/live">
         {t("Back to live evaluation")}
       </Link>

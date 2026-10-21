@@ -4,9 +4,7 @@
  * reading text 16/26. Tokens only; a test fails on any colour literal. */
 
 .levi-reading {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: var(--ds-space-8) var(--ds-space-6) var(--ds-space-16);
+  /* frame: .ds-page.ds-page--reading (ds.css) */
   color: var(--ds-text-primary);
 }
 .levi-reading__head {

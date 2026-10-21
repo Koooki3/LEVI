@@ -10,7 +10,7 @@ export default function CampaignPage() {
   const params = useParams<{ id: string }>();
   const id = decodeURIComponent(String(params?.id ?? ""));
   return (
-    <main className="ds-root pg-workbench aw-page">
+    <main className="ds-root ds-page pg-workbench aw-page">
       <CampaignOverview campaignId={id} />
     </main>
   );

@@ -209,8 +209,9 @@ describe("pages.css keeps the fixes that tests cannot see in a DOM", () => {
     expect(rule(".pg-pool-order .pg-pool-row")).toMatch(/min-width:\s*0/);
   });
   test("Conversion & review, Training pool and Explore share one page width", () => {
-    expect(rule(".pg-workbench")).toMatch(/--pg-max:\s*1360px/);
-    expect(css).not.toMatch(/\.pg-pool\s*\{[^}]*--pg-max/);
+    // the frame is .ds-page (ds.css, 1360 from --ds-page-max-wide); no page
+    // keeps a width of its own
+    expect(css).not.toMatch(/--pg-max/);
     expect(css).not.toMatch(/\.pg-workbench\.pg-pool/);
   });
   test("a home job row shows the figure, not the bar's label a second time", () => {

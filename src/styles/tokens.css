@@ -97,6 +97,14 @@
   --ds-space-12: 48px;
   --ds-space-16: 64px;
 
+  /* Page frame (layout audit 2026-10-21, P1; user: two widths, one set of
+     margins): reading pages 1200, work pages 1360. */
+  --ds-page-max-reading: 1200px;
+  --ds-page-max-wide: 1360px;
+  --ds-page-inset: var(--ds-space-6);
+  --ds-page-top: var(--ds-space-8);
+  --ds-page-bottom: var(--ds-space-16);
+
   /* ── Control heights and icon sizes (§4.8, §6). ── */
   --ds-control-sm: 28px;
   --ds-control-md: 32px;

@@ -206,7 +206,7 @@ export default function Workbench() {
     return m;
   }, {});
   return (
-    <main className="ds-root pg-workbench">
+    <main className="ds-root ds-page pg-workbench">
       <h1>
         <T>From raw capture to reviewed data.</T>
       </h1>

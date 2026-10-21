@@ -111,7 +111,7 @@ export default function Marvel0Page() {
     holdEnabled(run.lastSeen) || run.lastSeen?.state === "held";
   const hostRed = host?.cards.some((card) => card.state === "red") ?? false;
   return (
-    <main className="ds-root pg-workbench rg-page">
+    <main className="ds-root ds-page pg-workbench rg-page">
       <header className="rg-head">
         <h1>{t("marvel0")}</h1>
         <Freshness

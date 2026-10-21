@@ -97,7 +97,7 @@ export function RunWindow({ runId }: { runId: string }) {
   );
 
   return (
-    <main className="ds-root pg-workbench ar-page">
+    <main className="ds-root ds-page pg-workbench ar-page">
       <div className="ar-head">
         <div>
           <Link href="/automatic" className="ds-focus ar-link">

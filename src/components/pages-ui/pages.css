@@ -9,12 +9,9 @@
 
 /* ── Page frame ─────────────────────────────────────────────────────── */
 .pg-workbench {
-  /* One page width for Conversion & review, Training pool and Explore; wide
-     tables scroll inside their own box instead of widening the page. */
-  --pg-max: 1360px;
+  /* The frame (width 1360, margins) is .ds-page (ds.css); wide tables scroll
+     inside their own box instead of widening the page. */
   min-height: calc(100dvh - var(--levi-header-height, 56px));
-  padding: var(--ds-space-10)
-    max(var(--ds-space-6), calc((100% - var(--pg-max)) / 2));
 }
 .pg-workbench h1 {
   font-size: var(--ds-text-title-1-size);
