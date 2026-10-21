@@ -21,6 +21,19 @@ row's code and level, the profile, the AERI HEAD and the prepared run's
 digests, but not the numbers in ``params``, so a number that drifts does not
 void a challenge and any row changing level does.
 
+**Cost.** A full read is one batch (git three times, ``nvidia-smi``, two
+``systemctl``, the stack and deploy views) and the page asks every three seconds,
+from every open tab, also while the arm controller runs at 1 kHz on a kernel
+without real-time scheduling. So a read is **light** (no process started, no
+folder scanned: the control file, the site file, the profile table and two
+in-memory answers) whenever the rest cannot matter: ``disabled`` (the control
+file switches AERI off: the document is the switch and the site's facts) and
+``busy`` (this page's own terminal D, or its evaluation client, is on: a start is
+refused whatever the other rows say, and the arm controller is up, so the one
+row that says why is all there is). A full read is cached for ``CACHE_S``,
+well under the page's poll, so two tabs share one batch and every poll still
+sees what is now.
+
 No answer holds a path, except the ``execute`` of the prepared run, which is the
 command for the terminal fallback and has to show them.
 """
@@ -44,7 +57,9 @@ from . import aeri_leftovers, aeri_prep, control_site, net, record, status
 from . import site as marvel0_site
 
 SCHEMA = "levi.marvel0.aeri.v1"
-CACHE_S = 3.0
+# Well below the page's poll (3 s): a read is shared by callers that arrive together
+# (two tabs, a challenge and a poll), never served to the next poll.
+CACHE_S = 1.0
 LIVE_PORT = 8100
 PORTS = (8000, 8100, 8110)  # the policy server, the VLM, the bridge experiment
 MEM_NEED_MIB = 28 * 1024  # AERI.md section 2: available >= 28 GB
@@ -78,6 +93,12 @@ ROW_CODES = (
 )
 # These never refuse: shown as ``warn`` when they cannot be fully confirmed.
 WARN_ROWS = ("stack_ready",)
+# The contract with the start gate (``aeri_run._start_gate``): a start needs
+# ``snapshot()["ready"] is True`` and no row below ``ok`` except these, which may
+# be ``warn`` (``stack_ready`` can only ever be ``warn`` when the stack is up: the
+# gripper stack and the controller cannot be observed from here). Any other row
+# at ``warn`` is a bug of the row and refuses the start.
+WARN_OK = WARN_ROWS
 
 CHECK_OK = {
     "aeri_enabled": "AERI hosting is switched on in the control file.",
@@ -402,6 +423,34 @@ def production_host() -> Host:
 # --- the facts ------------------------------------------------------------------------------
 
 
+# What a light read leaves unread (``None``: not told, which refuses like an
+# unreadable source would, so no row may be built from it: ``rows`` returns the
+# light rows instead).
+UNREAD = {
+    "mode": "external",
+    "git": {"head": None, "dirty": None},
+    "matches": None,
+    "templates": None,
+    "binding": None,
+    "prepared": None,
+    "name_where": None,
+    "gpu": None,
+    "mem_mib": None,
+    "table": None,
+    "gpu_lock": None,
+    "arm_lock": None,
+    "live": None,
+    "units": None,
+    "aeri_runs": None,
+    "swap": None,
+    "stack": None,
+    "deploy": None,
+    "e_hosted": None,
+    "e_session": None,
+    "d_hosted": None,
+}
+
+
 def _try(call, *args):
     """``call(*args)``, or None when it raises: a source that fails is an
     unknown fact, never a failed request."""
@@ -469,6 +518,16 @@ def collect(host: Host) -> dict:
     }
     if aeri is None:
         return facts
+    # The light reads: nothing below this block is read (no process, no folder).
+    facts.update(light=None, **{**UNREAD, "git": dict(UNREAD["git"])})
+    facts["profile"] = aeri_prep.profile_info(aeri.profile)
+    if control["enabled"] is not True:
+        facts["light"] = "disabled"
+        return facts
+    hosted_d, hosted_e = _try(host.hosted_d), _try(host.hosted_e)
+    if hosted_d is True or hosted_e is True:
+        facts.update(light="busy", d_hosted=hosted_d, e_hosted=hosted_e)
+        return facts
     state = _try(aeri_prep.git_state, aeri.worktree, host.prep.run) or {
         "head": None,
         "dirty": None,
@@ -524,9 +583,9 @@ def collect(host: Host) -> dict:
             "swap": _try(host.swap_pending, aeri.rollout_root),
             "stack": _try(host.stack_view),
             "deploy": _try(host.deploy_view),
-            "e_hosted": _try(host.hosted_e),
+            "e_hosted": hosted_e,
             "e_session": _try(_e_session, host, main_site),
-            "d_hosted": _try(host.hosted_d),
+            "d_hosted": hosted_d,
         }
     )
     return facts
@@ -639,8 +698,13 @@ def rows(facts) -> list:
     """The readiness rows for these facts, in ``ROW_CODES`` order; no rows when
     there is no AERI section (nothing to be ready for)."""
     aeri = facts.get("aeri")
-    if aeri is None:
+    if aeri is None or facts.get("light") == "disabled":
         return []
+    if facts.get("light") == "busy":
+        # Whichever of the two is on says why nothing else is asked.
+        if facts["d_hosted"] is True:
+            return [row("no_other_aeri", False)]
+        return [row("no_e_run", False)]
     out = []
     ctl = facts["control"]
     out.append(row("aeri_enabled", ctl["enabled"] is True, state=ctl["state"]))
@@ -991,6 +1055,7 @@ def document(facts, rows_=None) -> dict:
     )
     enabled = control["enabled"] is True
     configured = facts.get("aeri") is not None
+    full = configured and not facts.get("light")  # (a light read left them unread)
     return {
         "schema": SCHEMA,
         "sampled_at": record.iso(facts["sampled_at"]),
@@ -1004,8 +1069,8 @@ def document(facts, rows_=None) -> dict:
         "ready": is_ready(rows_),
         "readiness_sha256": digest(rows_, facts),
         "prepared": facts.get("prepared") if configured else None,
-        "live_service": live_block(facts, enabled) if configured else None,
-        "leftovers": leftovers_block(facts, enabled) if configured else None,
+        "live_service": live_block(facts, enabled) if full else None,
+        "leftovers": leftovers_block(facts, enabled) if full else None,
         "confirm": dict(CONFIRM),
         "notices": [{"code": code, "text": text} for code, text in NOTICES.items()],
     }

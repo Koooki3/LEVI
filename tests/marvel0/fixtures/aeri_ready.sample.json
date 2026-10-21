@@ -375,7 +375,7 @@
           "text": "The arm stack's state could not be read."
         }
       ],
-      "readiness_sha256": "0303030303030303030303030303030303030303030303030303030303030303",
+      "readiness_sha256": "0404040404040404040404040404040404040404040404040404040404040404",
       "ready": false,
       "sampled_at": "2026-10-21T20:00:00+08:00",
       "schema": "levi.marvel0.aeri.v1",
@@ -386,31 +386,19 @@
         "template": null
       }
     },
-    "disabled": {
+    "busy": {
       "confirm": {
         "leftovers": "stop leftover aeri units",
         "live_stop": "stop live service",
         "prepare": "prepare aeri run"
       },
       "control": {
-        "code": "aeri.disabled",
+        "code": "aeri.enabled",
         "errors": [],
         "state": "ok"
       },
-      "enabled": false,
-      "leftovers": {
-        "can_stop": false,
-        "state": "none",
-        "swap": {
-          "count": 0,
-          "state": "clean"
-        },
-        "units": [],
-        "why_not": {
-          "code": "aeri_disabled",
-          "text": "AERI hosting is off in the control file."
-        }
-      },
+      "enabled": true,
+      "leftovers": null,
       "limits": {
         "gripper_confirm_s": {
           "default": 4.0,
@@ -433,16 +421,7 @@
           "pattern": "[a-z0-9 ,.'-]{3,120}"
         }
       },
-      "live_service": {
-        "can_stop": false,
-        "listener": false,
-        "port": 8100,
-        "state": "stopped",
-        "why_not": {
-          "code": "aeri_disabled",
-          "text": "AERI hosting is off in the control file."
-        }
-      },
+      "live_service": null,
       "notices": [
         {
           "code": "gates_scope",
@@ -451,9 +430,9 @@
       ],
       "prepared": null,
       "profile": {
-        "clean": true,
+        "clean": null,
         "console_lang": "zh",
-        "head": "5bc750ca",
+        "head": null,
         "id": "harvest-5bc750ca",
         "known": true,
         "pin_sha": "5bc750ca",
@@ -478,191 +457,93 @@
       ],
       "readiness": [
         {
-          "code": "aeri_enabled",
-          "level": "refuse",
-          "params": {
-            "state": "ok"
-          },
-          "text": "AERI hosting is off in the control file."
-        },
-        {
-          "code": "product",
-          "level": "ok",
-          "params": {},
-          "text": "This is the product LEVI."
-        },
-        {
-          "code": "aeri_site",
-          "level": "ok",
-          "params": {},
-          "text": "The site file has a valid AERI section."
-        },
-        {
-          "code": "code_pin",
-          "level": "ok",
-          "params": {
-            "dirty": false,
-            "head": "5bc750ca",
-            "pin": "5bc750ca"
-          },
-          "text": "The AERI code is at the pinned commit and clean."
-        },
-        {
-          "code": "profile_known",
-          "level": "ok",
-          "params": {
-            "profile": "harvest-5bc750ca"
-          },
-          "text": "The pinned code has a known prompt profile."
-        },
-        {
-          "code": "prompts_checked",
-          "level": "ok",
-          "params": {},
-          "text": "The AERI code's source files are the ones the prompt profile was written from."
-        },
-        {
-          "code": "templates_sha",
-          "level": "ok",
-          "params": {
-            "which": []
-          },
-          "text": "The job and binding templates match SOURCES.sha256."
-        },
-        {
-          "code": "prepared",
-          "level": "refuse",
-          "params": {
-            "name": null,
-            "reason": "none"
-          },
-          "text": "No run is prepared, or it changed since (none)."
-        },
-        {
-          "code": "run_name_free",
-          "level": "ok",
-          "params": {
-            "name": null,
-            "where": []
-          },
-          "text": "The name is not used by a rollout folder or an AERI registry."
-        },
-        {
-          "code": "cameras_config",
-          "level": "ok",
-          "params": {
-            "fields": []
-          },
-          "text": "The binding's camera serials equal the site file's."
-        },
-        {
-          "code": "gpu_free",
-          "level": "ok",
-          "params": {
-            "free_mib": 31607,
-            "mode": "external",
-            "need_mib": 9216
-          },
-          "text": "Enough GPU memory is free."
-        },
-        {
-          "code": "gpu_lock_free",
-          "level": "ok",
-          "params": {
-            "holders": 0
-          },
-          "text": "The GPU lock is free."
-        },
-        {
-          "code": "mem_available",
-          "level": "ok",
-          "params": {
-            "available_mib": 96932,
-            "need_mib": 28672
-          },
-          "text": "Enough memory is available."
-        },
-        {
-          "code": "ports_free",
-          "level": "ok",
-          "params": {
-            "ports": []
-          },
-          "text": "Ports 8000, 8100 and 8110 are free."
-        },
-        {
-          "code": "live_service",
-          "level": "ok",
-          "params": {
-            "state": "stopped"
-          },
-          "text": "The live annotation service is not running."
-        },
-        {
-          "code": "arm_lock_free",
-          "level": "ok",
-          "params": {},
-          "text": "The arm lock is free."
-        },
-        {
           "code": "no_e_run",
-          "level": "ok",
+          "level": "refuse",
           "params": {},
-          "text": "No hosted evaluation client or session is on."
-        },
-        {
-          "code": "no_policy_deploy",
-          "level": "ok",
-          "params": {
-            "state": "idle"
-          },
-          "text": "This page has no policy server unit."
-        },
-        {
-          "code": "no_aeri_unit_left",
-          "level": "ok",
-          "params": {
-            "units": [],
-            "vram_mib": 1000
-          },
-          "text": "No AERI model or policy unit is left behind."
-        },
-        {
-          "code": "swap_logs_clean",
-          "level": "ok",
-          "params": {
-            "count": 0
-          },
-          "text": "No unfinished policy-switch log."
-        },
-        {
-          "code": "no_other_aeri",
-          "level": "ok",
-          "params": {},
-          "text": "No other AERI run is alive."
-        },
-        {
-          "code": "monitor_green",
-          "level": "ok",
-          "params": {
-            "state": "ok"
-          },
-          "text": "The health monitor is fresh and green."
-        },
-        {
-          "code": "stack_ready",
-          "level": "warn",
-          "params": {
-            "cards": {
-              "a": "running",
-              "b": "unknown",
-              "c": "running",
-              "m": "running"
-            }
-          },
-          "text": "The arm stack looks up (the gripper stack and the controller are not observable from here)."
+          "text": "A hosted evaluation client or session is on."
         }
       ],
+      "readiness_sha256": "0303030303030303030303030303030303030303030303030303030303030303",
+      "ready": false,
+      "sampled_at": "2026-10-21T20:00:00+08:00",
+      "schema": "levi.marvel0.aeri.v1",
+      "site": {
+        "code": "aeri_site.ok",
+        "errors": [],
+        "state": "ok",
+        "template": null
+      }
+    },
+    "disabled": {
+      "confirm": {
+        "leftovers": "stop leftover aeri units",
+        "live_stop": "stop live service",
+        "prepare": "prepare aeri run"
+      },
+      "control": {
+        "code": "aeri.disabled",
+        "errors": [],
+        "state": "ok"
+      },
+      "enabled": false,
+      "leftovers": null,
+      "limits": {
+        "gripper_confirm_s": {
+          "default": 4.0,
+          "max": 10.0,
+          "min": 1.0
+        },
+        "modes": ["external", "local"],
+        "rounds": {
+          "default": 5,
+          "max": 50,
+          "min": 1
+        },
+        "steps": {
+          "default": 200,
+          "max": 3000,
+          "min": 1
+        },
+        "task": {
+          "max_chars": 120,
+          "pattern": "[a-z0-9 ,.'-]{3,120}"
+        }
+      },
+      "live_service": null,
+      "notices": [
+        {
+          "code": "gates_scope",
+          "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+        }
+      ],
+      "prepared": null,
+      "profile": {
+        "clean": null,
+        "console_lang": "zh",
+        "head": null,
+        "id": "harvest-5bc750ca",
+        "known": true,
+        "pin_sha": "5bc750ca",
+        "start_home": true
+      },
+      "profiles": [
+        {
+          "default": false,
+          "id": "bfdee2cf",
+          "start_home": false
+        },
+        {
+          "default": true,
+          "id": "harvest-5bc750ca",
+          "start_home": true
+        },
+        {
+          "default": false,
+          "id": "main-297a74c3",
+          "start_home": true
+        }
+      ],
+      "readiness": [],
       "readiness_sha256": "0202020202020202020202020202020202020202020202020202020202020202",
       "ready": false,
       "sampled_at": "2026-10-21T20:00:00+08:00",
@@ -801,8 +682,8 @@
         "confirm": "execute aeri-20261021-ext-r01",
         "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
         "files_sha256": {
-          "binding": "0707070707070707070707070707070707070707070707070707070707070707",
-          "job": "0606060606060606060606060606060606060606060606060606060606060606"
+          "binding": "0808080808080808080808080808080808080808080808080808080808080808",
+          "job": "0707070707070707070707070707070707070707070707070707070707070707"
         },
         "gripper_confirm_s": 4.0,
         "intact": true,
@@ -1034,7 +915,7 @@
           "text": "The arm stack looks up (the gripper stack and the controller are not observable from here)."
         }
       ],
-      "readiness_sha256": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+      "readiness_sha256": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
       "ready": false,
       "sampled_at": "2026-10-21T20:00:00+08:00",
       "schema": "levi.marvel0.aeri.v1",
@@ -1124,8 +1005,8 @@
         "confirm": "execute aeri-20261021-ext-r01",
         "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
         "files_sha256": {
-          "binding": "0707070707070707070707070707070707070707070707070707070707070707",
-          "job": "0606060606060606060606060606060606060606060606060606060606060606"
+          "binding": "0808080808080808080808080808080808080808080808080808080808080808",
+          "job": "0707070707070707070707070707070707070707070707070707070707070707"
         },
         "gripper_confirm_s": 4.0,
         "intact": true,
@@ -1357,7 +1238,7 @@
           "text": "The arm stack looks up (the gripper stack and the controller are not observable from here)."
         }
       ],
-      "readiness_sha256": "0909090909090909090909090909090909090909090909090909090909090909",
+      "readiness_sha256": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
       "ready": false,
       "sampled_at": "2026-10-21T20:00:00+08:00",
       "schema": "levi.marvel0.aeri.v1",
@@ -1645,7 +1526,7 @@
           "text": "The arm stack looks up (the gripper stack and the controller are not observable from here)."
         }
       ],
-      "readiness_sha256": "0404040404040404040404040404040404040404040404040404040404040404",
+      "readiness_sha256": "0505050505050505050505050505050505050505050505050505050505050505",
       "ready": false,
       "sampled_at": "2026-10-21T20:00:00+08:00",
       "schema": "levi.marvel0.aeri.v1",
@@ -1725,8 +1606,8 @@
         "confirm": "execute aeri-20261021-ext-r01",
         "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
         "files_sha256": {
-          "binding": "0707070707070707070707070707070707070707070707070707070707070707",
-          "job": "0606060606060606060606060606060606060606060606060606060606060606"
+          "binding": "0808080808080808080808080808080808080808080808080808080808080808",
+          "job": "0707070707070707070707070707070707070707070707070707070707070707"
         },
         "gripper_confirm_s": 4.0,
         "intact": false,
@@ -1954,7 +1835,7 @@
           "text": "The arm stack looks up (the gripper stack and the controller are not observable from here)."
         }
       ],
-      "readiness_sha256": "0808080808080808080808080808080808080808080808080808080808080808",
+      "readiness_sha256": "0909090909090909090909090909090909090909090909090909090909090909",
       "ready": false,
       "sampled_at": "2026-10-21T20:00:00+08:00",
       "schema": "levi.marvel0.aeri.v1",
@@ -2034,8 +1915,8 @@
         "confirm": "execute aeri-20261021-ext-r01",
         "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
         "files_sha256": {
-          "binding": "0707070707070707070707070707070707070707070707070707070707070707",
-          "job": "0606060606060606060606060606060606060606060606060606060606060606"
+          "binding": "0808080808080808080808080808080808080808080808080808080808080808",
+          "job": "0707070707070707070707070707070707070707070707070707070707070707"
         },
         "gripper_confirm_s": 4.0,
         "intact": true,
@@ -2263,7 +2144,7 @@
           "text": "The arm stack looks up (the gripper stack and the controller are not observable from here)."
         }
       ],
-      "readiness_sha256": "0505050505050505050505050505050505050505050505050505050505050505",
+      "readiness_sha256": "0606060606060606060606060606060606060606060606060606060606060606",
       "ready": true,
       "sampled_at": "2026-10-21T20:00:00+08:00",
       "schema": "levi.marvel0.aeri.v1",
@@ -2414,7 +2295,7 @@
       "live_stop_failed": {
         "detail": {
           "code": "live_stop_failed",
-          "message": "levi live stop did not stop the service",
+          "message": "The live annotation service did not stop",
           "reason": "still_running",
           "returncode": 1,
           "tail": "refused: a job is running"
@@ -2605,8 +2486,8 @@
           "confirm": "execute aeri-20261021-ext-r01",
           "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
           "files_sha256": {
-            "binding": "0707070707070707070707070707070707070707070707070707070707070707",
-            "job": "0606060606060606060606060606060606060606060606060606060606060606"
+            "binding": "0808080808080808080808080808080808080808080808080808080808080808",
+            "job": "0707070707070707070707070707070707070707070707070707070707070707"
           },
           "gripper_confirm_s": 4.0,
           "intact": true,

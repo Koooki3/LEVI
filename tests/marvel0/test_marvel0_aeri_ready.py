@@ -188,8 +188,10 @@ def test_a_card_without_rows_is_not_ready():
 
 
 def test_the_switch_row_follows_the_control_file(world):
+    # Off: a light read, no rows at all (the document is the switch; see the
+    # cost tests below). On: the row is there and passes.
     world.facts["control"]["enabled"] = False
-    assert levels(world)["aeri_enabled"] == "refuse"
+    assert levels(world) == {}
     world.facts["control"]["enabled"] = True
     assert levels(world)["aeri_enabled"] == "ok"
 
@@ -780,8 +782,10 @@ def test_the_control_file_states(world):
     world.facts["control"]["enabled"] = False
     doc = document(world)
     assert doc["enabled"] is False and doc["control"]["code"] == "aeri.disabled"
-    assert doc["live_service"]["why_not"]["code"] == "aeri_disabled"
-    assert doc["leftovers"]["why_not"]["code"] == "aeri_disabled"
+    assert doc["ready"] is False and doc["readiness"] == []
+    assert doc["live_service"] is None and doc["leftovers"] is None
+    assert doc["prepared"] is None
+    assert doc["site"]["state"] == "ok" and doc["profile"]["id"] == world.profile
     world.facts["control"]["enabled"] = None
     doc = document(world)
     assert doc["control"]["code"] == "aeri.missing" and doc["enabled"] is False
@@ -802,14 +806,22 @@ def test_the_live_block_offers_the_stop_only_when_it_is_safe(world):
     )
     assert doc["live_service"]["state"] == "running"
     cases = [
-        ("hosted_e", True, "e_active"),
-        ("hosted_d", True, "d_active"),
+        ("aeri_runs", [{"runner_alive": True}], "d_active"),
+        (
+            "sessions",
+            {
+                "state": "ok",
+                "sessions": [{"status": "running", "age_s": 1}],
+            },
+            "e_active",
+        ),
     ]
     for fact, value, code in cases:
+        before = world.facts[fact]
         world.facts[fact] = value
         block = document(world)["live_service"]
         assert block["can_stop"] is False and block["why_not"]["code"] == code
-        world.facts[fact] = False
+        world.facts[fact] = before
     world.facts["flock"] = {"levi-aeri-fr3-arm.lock": [9]}
     assert document(world)["live_service"]["why_not"]["code"] == "arm_in_use"
     world.facts["flock"] = {}
@@ -922,12 +934,12 @@ def test_the_module_function_reads_once_and_keeps_nothing(world):
 # --- the reader --------------------------------------------------------------------------
 
 
-def test_a_second_view_within_three_seconds_does_not_read_again(world):
+def test_a_second_view_within_the_cache_time_does_not_read_again(world):
     reader = aeri_ready.Readiness(world.host())
     reader.view()
     reader.view()
     assert world.reads["gpu"] == 1
-    world.advance(2.9)
+    world.advance(aeri_ready.CACHE_S - 0.1)
     reader.view()
     assert world.reads["gpu"] == 1
     world.advance(0.2)
@@ -944,22 +956,22 @@ def test_a_fresh_snapshot_never_answers_from_the_cache(world):
 
 
 def test_a_slow_read_is_not_kept_longer_than_a_quick_one(world):
-    """The age of a cached read counts from when it began: a read that took 2.9 s
-    is 2.9 s old the moment it is stored."""
+    """The age of a cached read counts from when it began: a read that took
+    almost the whole cache time is that old the moment it is stored."""
     slow = world.host()
     real_gpu = slow.gpu
 
     def gpu():
-        world.advance(2.9)  # the read takes 2.9 seconds
+        world.advance(aeri_ready.CACHE_S - 0.1)  # the read takes that long
         return real_gpu()
 
     slow.gpu = gpu
     reader = aeri_ready.Readiness(slow)
     reader.view()
     assert world.reads["gpu"] == 1
-    world.advance(0.2)  # 3.1 s after it began, 0.2 s after it ended
+    world.advance(0.2)  # CACHE_S + 0.1 after it began, 0.2 after it ended
     reader.view()
-    assert world.reads["gpu"] == 2, "the read had already used its three seconds"
+    assert world.reads["gpu"] == 2, "the read had already used its cache time"
 
 
 def test_a_clock_that_goes_backwards_never_serves_a_cache(world):
@@ -1066,3 +1078,182 @@ def test_the_control_view_inside_the_document_is_the_control_files(world):
     assert document(world)["control"] == {
         k: ctl[k] for k in ("state", "code", "errors")
     }
+
+
+# --- what a read costs ---------------------------------------------------------------------
+#
+# A full read starts processes (git three times, nvidia-smi, systemctl twice, the
+# stack and deploy views) and the page asks every three seconds, from every tab,
+# while the arm controller runs. The light reads start none.
+
+
+SOURCES = (
+    "gpu",
+    "meminfo",
+    "net_table",
+    "flock",
+    "unit_show",
+    "units",
+    "aeri_runs",
+    "swap_pending",
+    "stack_view",
+    "deploy_view",
+    "sessions",
+    "profile_matches",
+    "state_root",
+)
+
+
+def counting(world, **replace):
+    """A host whose every source (and the process runner of git and the stand-in
+    program) counts its calls and answers as the world does; ``calls`` is
+    ``{name: count}``."""
+    calls: dict = {}
+    base = world.host(**replace)
+
+    def watch(name, real):
+        def look(*args, **kwargs):
+            calls[name] = calls.get(name, 0) + 1
+            return real(*args, **kwargs)
+
+        return look
+
+    for name in SOURCES:
+        setattr(base, name, watch(name, getattr(base, name)))
+    base.prep.run = watch("run", base.prep.run)
+    base.prep.registry = watch("registry", base.prep.registry)
+    return base, calls
+
+
+def test_the_cache_time_is_well_under_the_pages_poll():
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "components"
+        / "marvel0"
+        / "autonomy-logic.ts"
+    ).read_text()
+    poll_ms = int(re.search(r"readyPollMs: ([\d_]+)", source).group(1).replace("_", ""))
+    assert aeri_ready.CACHE_S * 1000 * 2 <= poll_ms, (
+        "a poll must see what is now, not what the last poll saw"
+    )
+
+
+def test_a_switched_off_card_reads_nothing_but_the_switch_and_the_site(world):
+    world.facts["control"]["enabled"] = False
+    host, calls = counting(world)
+    doc = aeri_ready.Readiness(host).view()
+    assert calls == {}, "no process, no folder, no source"
+    assert doc["enabled"] is False and doc["ready"] is False
+    assert doc["readiness"] == [] and doc["site"]["state"] == "ok"
+    assert doc["profile"]["id"] == world.profile and doc["profile"]["known"] is True
+    assert doc["profile"]["head"] is None and doc["profile"]["clean"] is None
+    assert doc["profiles"] and doc["limits"] and doc["confirm"]
+    assert doc["prepared"] is None
+    assert doc["live_service"] is None and doc["leftovers"] is None
+    assert doc["control"]["code"] == "aeri.disabled"
+
+
+def test_a_missing_or_broken_control_section_is_a_switched_off_card(world):
+    for value in (None, False):
+        world.facts["control"]["enabled"] = value
+        host, calls = counting(world)
+        doc = aeri_ready.Readiness(host).view()
+        assert calls == {} and doc["enabled"] is False and doc["readiness"] == []
+
+    def boom():
+        raise RuntimeError("boom")
+
+    host, calls = counting(world, control=boom)
+    doc = aeri_ready.Readiness(host).view()
+    assert calls == {} and doc["enabled"] is False and doc["readiness"] == []
+
+
+def test_switching_it_on_reads_everything_the_next_time(world):
+    world.facts["control"]["enabled"] = False
+    reader = aeri_ready.Readiness(world.host())
+    assert reader.view()["readiness"] == []
+    world.facts["control"]["enabled"] = True
+    world.advance(aeri_ready.CACHE_S + 0.1)
+    assert len(reader.view()["readiness"]) == len(aeri_ready.ROW_CODES)
+
+
+@pytest.mark.parametrize(
+    "fact, row",
+    [("hosted_e", "no_e_run"), ("hosted_d", "no_other_aeri")],
+)
+def test_while_the_page_runs_its_own_client_or_d_only_the_reason_is_read(
+    world, fact, row
+):
+    """The arm controller is up then and no start is possible: one row says why,
+    nothing else is asked of the machine."""
+    world.facts[fact] = True
+    if fact == "hosted_d":
+        world.facts["hosted_e"] = True  # (the page's answer for E counts D too)
+    host, calls = counting(world)
+    reader = aeri_ready.Readiness(host)
+    doc = reader.view()
+    assert calls == {}, "nothing was started or scanned"
+    assert [r["code"] for r in doc["readiness"]] == [row]
+    assert doc["readiness"][0]["level"] == "refuse" and doc["ready"] is False
+    assert doc["live_service"] is None and doc["leftovers"] is None
+    assert doc["enabled"] is True and doc["site"]["state"] == "ok"
+    snap = reader.snapshot()
+    assert snap["ready"] is False and [r["code"] for r in snap["rows"]] == [row]
+    assert calls == {}
+
+
+def test_a_hosted_probe_that_cannot_answer_does_not_make_a_light_read(world):
+    def boom():
+        raise RuntimeError("boom")
+
+    host, calls = counting(world, hosted_e=boom, hosted_d=boom)
+    doc = aeri_ready.Readiness(host).view()
+    assert len(doc["readiness"]) == len(aeri_ready.ROW_CODES), "a full read"
+    assert calls["gpu"] == 1
+    codes = {r["code"]: r["level"] for r in doc["readiness"]}
+    assert codes["no_e_run"] == "unknown" and codes["no_other_aeri"] == "unknown"
+
+
+def test_a_full_read_is_one_batch_each_source_asked_once(world):
+    host, calls = counting(world)
+    doc = aeri_ready.Readiness(host).view()
+    assert len(doc["readiness"]) == len(aeri_ready.ROW_CODES)
+    # git: top level, HEAD, status; the two lock files are two questions; every
+    # other source once (the stand-in program is not run: no prepared run)
+    allowed = {"run": 3, "flock": 2}
+    assert calls
+    for name, n in calls.items():
+        assert n <= allowed.get(name, 1), (name, calls)
+
+
+def test_the_write_gates_of_a_light_read_do_not_start_a_batch(world):
+    """A stop asked while the page runs its own client is refused for that, from
+    the light read."""
+    from levi.marvel0.aeri_prep import Refuse
+
+    world.facts["hosted_e"] = True
+    world.set_live("running")
+    prep = world.preparer()
+    body = {"request_id": "req-live-stop-1", "confirm": "stop live service"}
+    with pytest.raises(Refuse) as caught:
+        prep.live_stop(body)
+    assert caught.value.code == "e_active"
+    body = {"request_id": "req-left-stop-1", "confirm": "stop leftover aeri units"}
+    with pytest.raises(Refuse) as caught:
+        prep.leftovers_stop(body)
+    assert caught.value.code == "e_active"
+    assert world.systemctl.calls == []
+
+
+def test_the_rows_that_may_be_warn_are_named_and_no_other_is(world):
+    """The contract with the start gate: ``warn`` only for ``WARN_OK``."""
+    assert aeri_ready.WARN_OK == aeri_ready.WARN_ROWS == ("stack_ready",)
+    assert set(aeri_ready.WARN_OK) <= set(aeri_ready.ROW_CODES)
+    seen = set()
+    for stack in (World.stack_doc(), World.stack_doc(a="unknown", c="unknown")):
+        world.facts["stack"] = stack
+        for r in aeri_ready.rows(facts_of(world)):
+            if r["level"] == "warn":
+                seen.add(r["code"])
+    assert seen == {"stack_ready"}

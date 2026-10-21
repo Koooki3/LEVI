@@ -11,7 +11,15 @@ import re
 import time
 
 import pytest
-from regen_aeri_ready_sample import FIXTURE, REGENERATE, ROOT, SAMPLE, WHY_NOT, build
+from regen_aeri_ready_sample import (
+    FIXTURE,
+    REGENERATE,
+    ROOT,
+    SAMPLE,
+    STACK_UP,
+    WHY_NOT,
+    build_all,
+)
 
 from levi.marvel0 import aeri_prep, aeri_ready
 
@@ -20,8 +28,17 @@ PATH_IN_TEXT = re.compile(r"(?<![\w.:-])/(?:[A-Za-z0-9_.~+@%=,-]+/)+")
 
 
 @pytest.fixture(scope="module")
-def built():
-    return build()
+def built_both():
+    return build_all()
+
+
+@pytest.fixture(scope="module")
+def built(built_both):
+    return built_both[0]
+
+
+def build():
+    return build_all()[0]
 
 
 @pytest.fixture(scope="module")
@@ -36,6 +53,30 @@ def test_the_committed_file_is_what_the_backend_builds(path, built):
     assert path.read_text() == built, (
         f"{name} differs from what the backend builds; regenerate it with: {REGENERATE}"
     )
+
+
+def test_the_stack_up_rows_are_what_the_backend_builds(built_both):
+    name = STACK_UP.relative_to(ROOT)
+    assert STACK_UP.is_file(), f"{name} is missing; create it with: {REGENERATE}"
+    assert STACK_UP.read_text() == built_both[1], (
+        f"{name} differs from what the backend builds; regenerate it with: {REGENERATE}"
+    )
+
+
+def test_the_stack_up_rows_hold_the_rule_of_the_start_gate(built_both):
+    """What the gate may rely on: ``ready`` and ``warn`` only for ``warn_ok``."""
+    data = json.loads(built_both[1])
+    assert data["warn_ok"] == list(aeri_ready.WARN_OK)
+    up = data["snapshots"]["stack_up"]
+    assert up["ready"] is True
+    assert [r["code"] for r in up["rows"]] == list(aeri_ready.ROW_CODES)
+    below = {r["code"]: r["level"] for r in up["rows"] if r["level"] != "ok"}
+    assert below == {"stack_ready": "warn"}, "the one row that can only be warn"
+    for name in ("stack_not_read", "stack_down"):
+        assert data["snapshots"][name]["ready"] is False, name
+    for snap in data["snapshots"].values():
+        warned = {r["code"] for r in snap["rows"] if r["level"] == "warn"}
+        assert warned <= set(data["warn_ok"])
 
 
 def test_the_build_does_not_depend_on_the_time_zone(built, monkeypatch):
@@ -67,6 +108,7 @@ def test_every_state_has_the_same_closed_document(sample):
         assert doc["schema"] == "levi.marvel0.aeri.v1", name
         assert [r["code"] for r in doc["readiness"]] in (
             [],
+            ["no_e_run"],  # (a light read while the page's own client is on)
             list(aeri_ready.ROW_CODES),
         ), name
         for row in doc["readiness"]:
@@ -80,6 +122,7 @@ def test_the_states_cover_what_the_card_shows(sample):
         "unconfigured",
         "invalid_section",
         "disabled",
+        "busy",
         "blocked",
         "not_prepared",
         "prepared_ready",
@@ -93,7 +136,11 @@ def test_the_states_cover_what_the_card_shows(sample):
     assert docs["unconfigured"]["site"]["template"]
     assert docs["invalid_section"]["site"]["state"] == "invalid"
     assert docs["invalid_section"]["site"]["errors"]
-    assert docs["disabled"]["enabled"] is False and docs["disabled"]["readiness"]
+    assert docs["disabled"]["enabled"] is False and docs["disabled"]["readiness"] == []
+    assert docs["disabled"]["live_service"] is None
+    assert docs["busy"]["enabled"] is True and docs["busy"]["ready"] is False
+    assert [r["code"] for r in docs["busy"]["readiness"]] == ["no_e_run"]
+    assert docs["busy"]["live_service"] is None
     assert docs["prepared_ready"]["ready"] is True
     assert docs["prepared_changed"]["prepared"]["problems"] == ["files_changed"]
     assert docs["blocked"]["live_service"]["state"] == "running"

@@ -251,6 +251,14 @@ class Preparer:
 
     # ---- the two stops
 
+    def _refuse_if_busy(self, facts):
+        """A read taken while this page's own terminal D or client is on is a light
+        one (``aeri_ready``: the rest is not read): the stop is refused for that."""
+        if facts.get("light") == "busy":
+            aeri_leftovers.refuse_for(
+                aeri_leftovers.why_not(**aeri_ready._obstacles(facts))
+            )
+
     def _obstacles(self, facts, with_gpu):
         got = aeri_ready._obstacles(facts)
         if not with_gpu:
@@ -263,6 +271,7 @@ class Preparer:
 
         def work():
             facts = self.readiness.facts(fresh=True)
+            self._refuse_if_busy(facts)
             if facts["live"] is None:
                 raise Refuse("state_unreadable")
             if facts["live"] != "running":
@@ -309,6 +318,7 @@ class Preparer:
 
         def work():
             facts = self.readiness.facts(fresh=True)
+            self._refuse_if_busy(facts)
             if facts["units"] is None:
                 raise Refuse("state_unreadable")
             units = aeri_leftovers.leftover_units(facts["units"])

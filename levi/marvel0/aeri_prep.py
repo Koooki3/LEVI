@@ -141,7 +141,7 @@ REFUSALS = {
         409,
         "A source could not be read, so nothing is done (an unknown state refuses)",
     ),
-    "live_stop_failed": (502, "levi live stop did not stop the service"),
+    "live_stop_failed": (502, "The live annotation service did not stop"),
     "stop_failed": (502, "A unit did not stop"),
 }
 

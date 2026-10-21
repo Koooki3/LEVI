@@ -6,7 +6,14 @@ parse with the page's own readers, so the page and the server agree on one shape
   shows, the answers of the three writes and every refusal (``{status, detail}``)
   the page words, and the closed lists of codes it must have text for;
 * ``tests/marvel0/fixtures/aeri_ready.sample.json``: the same text (the
-  design's name for it).
+  design's name for it);
+* ``tests/marvel0/fixtures/aeri_stack_up_rows.json``: what ``snapshot()`` (the
+  hosted run's ``challenge`` and ``start`` read) really gives on the machine
+  where everything is ready and the arm stack is up (every row ``ok`` but
+  ``stack_ready``, which can only be ``warn``), and where the stack is not read
+  (``stack_ready`` unknown): the fixture the start gate of the hosted run is tested
+  with, so its rule about ``warn`` is checked on the real rows, not on a made-up
+  snapshot.
 
     uv run --no-sync python tests/marvel0/regen_aeri_ready_sample.py
 
@@ -37,6 +44,7 @@ from levi.marvel0.aeri_prep import Refuse
 
 SAMPLE = FOLDER / "marvel0-aeri.samples.json"
 FIXTURE = ROOT / "tests" / "marvel0" / "fixtures" / "aeri_ready.sample.json"
+STACK_UP = ROOT / "tests" / "marvel0" / "fixtures" / "aeri_stack_up_rows.json"
 PROFILES = {"harvest-5bc750ca": True, "bfdee2cf": False, "main-297a74c3": True}
 HEAD = "5bc750cacc12e375d77f5036b4976d560ac682a3"
 LATER = "9d3e54ea0000000000000000000000000000beef"
@@ -93,6 +101,14 @@ def restore_profiles(saved):
     module.PROFILES = before
 
 
+def gate_view(preparer) -> dict:
+    """What the hosted run's start gate gets: ``snapshot()`` (fresh), without the
+    prepared run's own details."""
+    preparer.readiness.forget()
+    got = preparer.readiness.snapshot()
+    return {k: got[k] for k in ("rows", "ready", "sha256", "sampled_at")}
+
+
 def build_data(tmp):
     """``(data, root, heads)``: the documents and answers, the made-up machine's
     folder and the two commits its worktree had (before and after a change)."""
@@ -124,6 +140,11 @@ def build_data(tmp):
     world.facts["control"]["enabled"] = False
     docs["disabled"] = doc()
     world.facts["control"]["enabled"] = True
+    # 3b. switched on, but this page's own client (or terminal D) is on: one row
+    # says why, nothing else is read
+    world.facts["hosted_e"] = True
+    docs["busy"] = doc()
+    world.facts["hosted_e"] = False
     # 4. a busy machine: the live service holds 8100 and the GPU lock, the GPU
     # is half full, the drift check was never run, the stack is not read
     world.set_live("running")
@@ -149,6 +170,12 @@ def build_data(tmp):
     body = world.prepare_body(request_id="req-20261021-0001")
     ok_prepare = preparer.prepare(body)
     docs["prepared_ready"] = doc()
+    snapshots = {"stack_up": gate_view(preparer)}
+    world.facts["stack"] = World.stack_doc(a="unknown", c="unknown", health="unknown")
+    snapshots["stack_not_read"] = gate_view(preparer)
+    world.facts["stack"] = World.stack_doc(a="dead", c="running")
+    snapshots["stack_down"] = gate_view(preparer)
+    world.facts["stack"] = World.stack_doc()
     # 6. the prepared file changed afterwards
     job = world.runs / ok_prepare["name"] / "job.yaml"
     original = job.read_text()
@@ -293,7 +320,7 @@ def build_data(tmp):
         "live_stop": {"ok": {"status": 200, "body": live}, "errors": errors_live},
         "leftovers_stop": {"ok": {"status": 200, "body": left}, "errors": errors_left},
     }
-    return {"docs": docs, "answers": answers}, world.root, heads
+    return {"docs": docs, "answers": answers, "snapshots": snapshots}, world.root, heads
 
 
 def normalise(value, root, heads):
@@ -318,6 +345,15 @@ def normalise(value, root, heads):
 
 
 def build() -> str:
+    return build_all()[0]
+
+
+def build_stack_up() -> str:
+    return build_all()[1]
+
+
+def build_all() -> tuple:
+    """``(the sample text, the stack-up rows text)`` from one build."""
     saved = install_profiles()
     try:
         with tempfile.TemporaryDirectory(dir=_tmp_parent()) as tmp, fixed_zone():
@@ -326,6 +362,17 @@ def build() -> str:
     finally:
         restore_profiles(saved)
     docs, answers = data["docs"], data["answers"]
+    stack_up = {
+        "schema": "levi.marvel0.aeri_stack_up_rows.v1",
+        "note": (
+            "Built by tests/marvel0/regen_aeri_ready_sample.py: aeri_ready.snapshot() "
+            "on the made-up machine where everything is ready, with the arm stack up "
+            "(stack_up), not read (stack_not_read) and with A not running "
+            "(stack_down). warn_ok is the list of rows that may be warn."
+        ),
+        "warn_ok": list(aeri_ready.WARN_OK),
+        "snapshots": data["snapshots"],
+    }
     out = {
         "schema": "levi.marvel0.aeri_sample.v1",
         "note": (
@@ -379,7 +426,10 @@ def build() -> str:
         "live_stop": answers["live_stop"],
         "leftovers_stop": answers["leftovers_stop"],
     }
-    return "\n".join(_lines(out, 0, "", "")) + "\n"
+    return (
+        "\n".join(_lines(out, 0, "", "")) + "\n",
+        "\n".join(_lines(stack_up, 0, "", "")) + "\n",
+    )
 
 
 def _tmp_parent():
@@ -389,10 +439,14 @@ def _tmp_parent():
 
 
 def main():
-    text = build()
+    text, stack_up = build_all()
     SAMPLE.write_text(text)
     FIXTURE.write_text(text)
-    print(f"wrote {SAMPLE.relative_to(ROOT)} and {FIXTURE.relative_to(ROOT)}")
+    STACK_UP.write_text(stack_up)
+    print(
+        f"wrote {SAMPLE.relative_to(ROOT)}, {FIXTURE.relative_to(ROOT)} and "
+        f"{STACK_UP.relative_to(ROOT)}"
+    )
 
 
 if __name__ == "__main__":
