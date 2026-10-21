@@ -18,6 +18,7 @@ import {
   ok,
   refused,
   tick,
+  tickAll,
   type,
   type Canned,
 } from "./actions-helpers";
@@ -387,17 +388,12 @@ describe("starting the client at a chosen rate", () => {
       text(dialog.querySelector("[data-testid=marvel0-run-start-hz]")),
     ).toContain("20 Hz");
     expect(text(dialog)).toContain(en["marvel0.hz.start.note"]);
-    for (const box of dialog.querySelectorAll("input[type=checkbox]"))
-      await click(box);
-    await type(
-      dialog.querySelector("input:not([type=checkbox])"),
-      "start client pi05_fr3_all_step49999_rtc_demo",
-    );
-    const go = Array.from(
-      dialog.ownerDocument.querySelectorAll("[role=dialog] button"),
-    ).find((b) => b.textContent?.trim() === "Start the client") as
-      | HTMLButtonElement
-      | undefined;
+    // The window asks three checks and nothing to type: tick them, then start.
+    const win = dialog.ownerDocument.querySelector(
+      "[role=dialog]",
+    ) as HTMLElement;
+    await tickAll(win);
+    const go = button(win, "Start the client");
     await click(go!);
     await tick(3, 10);
     expect(started).toHaveLength(1);

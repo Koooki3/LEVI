@@ -283,8 +283,16 @@ def test_hold_stops_the_steps_and_end_leaves_no_further_motion(live):
     assert (view["reason"]["code"], view["exit"]["signal"]) == ("ended_by_page", 9)
     assert gone(pid) and gone(start["pid"])
     assert steady(m, 0.8), "an end leaves no further motion"
-    with pytest.raises(ProcessLookupError):
-        os.killpg(pid, 0)
+    # The group is gone once its leader is reaped: a zombie that the parent has not yet
+    # collected still keeps the group id (loaded machine), so wait for it instead of asking once.
+    deadline = time.monotonic() + scaled(5.0)
+    while True:
+        try:
+            os.killpg(pid, 0)
+        except ProcessLookupError:
+            break
+        assert time.monotonic() < deadline, "the process group is still there"
+        time.sleep(0.05)
 
 
 def test_hold_in_the_middle_of_the_blind_homing_freezes_it(live):
