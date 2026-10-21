@@ -146,15 +146,24 @@ def test_the_check_of_the_graph_is_a_real_process_that_takes_its_time(make):
     m = make(nodes_delay_s=0.4)
     m.m_ready()
     _, took = timed(lambda: m.act.probe_b(probe_request()))
-    assert took >= 0.4
+    # (a check a person asks for is two answers of the graph, one after the
+    # other: B starts only on a confirmed absence)
+    assert took >= 0.8
     probe = m.act._b_probe
     assert (probe["state"], probe["by"], probe["graph"]) == (
         "absent",
         "nodes",
         "absent",
     )
+    assert probe["confirmed"] is True
     # the stand-in printed the monitor's node and nothing of the gripper's
-    [cmd] = [c for c in m.processes.commands if "fake_oneshot.py" in " ".join(c)]
+    cmds = [c for c in m.processes.commands if "fake_oneshot.py" in " ".join(c)]
+    # (the same command; the unit names differ: unique per call)
+    assert (
+        len(cmds) == 2
+        and cmds[0][cmds[0].index("--") :] == cmds[1][cmds[1].index("--") :]
+    )
+    cmd = cmds[0]
     assert "nodes" in cmd[cmd.index("--") + 1 :] or any("nodes" in a for a in cmd)
     assert m.terminal("b")["reason"] == "b.not_running"
 
