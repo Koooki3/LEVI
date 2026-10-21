@@ -6,9 +6,10 @@
 // in a place that never moves, with the one e-stop line beside it; the one key
 // the state is waiting for (Start next episode, Success, Failure, Discard),
 // all of equal weight and headed "moves the arm home"; a folded "Exit and go
-// home (blind)" with its own phrase; and, apart from HOLD at the foot of the
-// card, how the run ends: End at the gate, or End run (a danger outline) for a
-// client that is starting, frozen or lost.
+// home (blind)" that opens its own confirm window; and, apart from HOLD at the
+// foot of the card, how the run ends: End at the gate, or End run (a danger
+// outline, confirm window) for a client that is starting, frozen or lost. No
+// phrase is typed anywhere on the card: the page sends the fixed one.
 //
 // There is no `s` and no `p` anywhere here: at the client's start gate they
 // run another task. A key is an action of run-logic.ts; the card never sends
@@ -28,18 +29,11 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import {
-  Badge,
-  Button,
-  Card,
-  Dialog,
-  Field,
-  Input,
-  Progress,
-} from "@/components/ds";
+import { Badge, Button, Card, Progress } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Notice } from "./notice";
 import { RefusedBlock, WordedText } from "./action-parts";
+import { ConfirmRefusal, ConfirmWindow } from "./confirm-window";
 import { wordOf } from "./ctl-text";
 import { COMMAND_ANCHOR, nodeAnchor } from "./chain-logic";
 import { goTo } from "./chain-strip";
@@ -160,52 +154,81 @@ function ArmedActions({
   );
 }
 
+/** The two checks of the blind exit: it moves the arm with no limit check, so
+ * the person ticks that a hand is on the physical e-stop and the area is clear.
+ * Ticks are not typing; they only switch Confirm on (the run's key request
+ * carries the fixed phrase and no tick). */
+const EXIT_ACKS = ["estop", "area_clear"] as const;
+
 function ExitHome({ view, actions }: { view: RunView; actions: RunActions }) {
   const { t } = useLocale();
-  const [typed, setTyped] = useState("");
+  const [asking, setAsking] = useState(false);
   const phrase = runPhrase(view, "exit_home");
   const action = view.actions.exit_home;
+  const refused = actions.refused?.key === "exit_home" ? actions.refused : null;
   if (view.state !== "running") return null;
   return (
-    <details className="rg-details rg-run__exit" data-testid="marvel0-run-exit">
-      <summary>{t("marvel0.run.exit_home.summary")}</summary>
-      <p className="rg-muted">{t("marvel0.run.exit_home.hint")}</p>
-      <Field
-        label={t("marvel0.run.phrase")}
-        hint={sayText(
-          { key: "marvel0.run.phrase_hint", params: { phrase } },
-          t,
+    <>
+      <details
+        className="rg-details rg-run__exit"
+        data-testid="marvel0-run-exit"
+      >
+        <summary>{t("marvel0.run.exit_home.summary")}</summary>
+        <p className="rg-muted">{t("marvel0.run.exit_home.hint")}</p>
+        <Button
+          variant="secondary"
+          className="rg-btn--danger-outline"
+          icon={Home}
+          loading={actions.working === "exit_home"}
+          disabled={!action.allowed || actions.working !== null}
+          onClick={() => {
+            actions.clear();
+            setAsking(true);
+          }}
+        >
+          {t(ACTION_KEY.exit_home)}
+        </Button>
+        {!action.allowed && action.whyNot && (
+          <p className="rg-block">
+            <WordedText worded={action.whyNot} />
+          </p>
         )}
-      >
-        <Input
-          value={typed}
-          onChange={(event) => setTyped(event.target.value)}
-          autoComplete="off"
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-        />
-      </Field>
-      <Button
-        variant="secondary"
-        className="rg-btn--danger-outline"
-        icon={Home}
-        loading={actions.working === "exit_home"}
-        disabled={
-          !action.allowed || typed.trim() !== phrase || actions.working !== null
+      </details>
+      <ConfirmWindow
+        open={asking}
+        testId="marvel0-run-exit-dialog"
+        title={t("marvel0.run.exit_home.summary")}
+        intro={t("marvel0.run.exit_home.hint")}
+        estop={t("marvel0.run.start.estop")}
+        hazards={[t("marvel0.run.blind_home")]}
+        notes={[t("marvel0.stack.gates_scope")]}
+        attest={EXIT_ACKS.map((name) => ({
+          code: name,
+          label: wordOf(t, "marvel0.run.ack.", name),
+        }))}
+        confirmLabel={t(ACTION_KEY.exit_home)}
+        confirmIcon={Home}
+        danger
+        ready={action.allowed && actions.working === null}
+        working={actions.working === "exit_home"}
+        refused={
+          refused ? (
+            <ConfirmRefusal
+              failure={refused.failure}
+              testId="marvel0-run-exit-refused"
+            >
+              <WordedText worded={refused.worded} />
+            </ConfirmRefusal>
+          ) : null
         }
-        onClick={() =>
-          void actions.press("exit_home", phrase).then(() => setTyped(""))
+        onCancel={() => setAsking(false)}
+        onConfirm={() =>
+          actions.press("exit_home", phrase).then((ok) => {
+            if (ok) setAsking(false);
+          })
         }
-      >
-        {t(ACTION_KEY.exit_home)}
-      </Button>
-      {!action.allowed && action.whyNot && (
-        <p className="rg-block">
-          <WordedText worded={action.whyNot} />
-        </p>
-      )}
-    </details>
+      />
+    </>
   );
 }
 
@@ -221,74 +244,38 @@ function EndDialog({
   onClose: () => void;
 }) {
   const { t } = useLocale();
-  const [typed, setTyped] = useState("");
   const phrase = runPhrase(view, "end");
   const refused = actions.refused?.key === "end" ? actions.refused : null;
-  // A phrase typed before Cancel must not stay: End asks for it again each time.
-  const close = () => {
-    setTyped("");
-    onClose();
-  };
   return (
-    <Dialog
+    <ConfirmWindow
       open={open}
-      onClose={() => {
-        if (actions.working === null) close();
-      }}
+      testId="marvel0-run-end-dialog"
       title={t("marvel0.run.end.title")}
-      description={t("marvel0.run.end.intro")}
-      footer={
-        <>
-          <Button
-            variant="secondary"
-            onClick={close}
-            disabled={actions.working !== null}
+      intro={t("marvel0.run.end.intro")}
+      hazards={[t("marvel0.run.end.kills")]}
+      notes={[t("marvel0.stack.gates_scope")]}
+      confirmLabel={t(ACTION_KEY.end)}
+      confirmIcon={CircleStop}
+      danger
+      ready={actions.working === null}
+      working={actions.working === "end"}
+      refused={
+        refused ? (
+          <ConfirmRefusal
+            failure={refused.failure}
+            testId="marvel0-run-end-refused"
           >
-            {t("marvel0.ctl.btn.cancel")}
-          </Button>
-          <Button
-            variant="danger"
-            icon={CircleStop}
-            loading={actions.working === "end"}
-            disabled={typed.trim() !== phrase || actions.working !== null}
-            onClick={() =>
-              void actions.end(phrase).then((ok) => {
-                if (ok) close();
-              })
-            }
-          >
-            {t(ACTION_KEY.end)}
-          </Button>
-        </>
-      }
-    >
-      <div className="rg-dialog" data-testid="marvel0-run-end-dialog">
-        <Notice tone="warning" role="alert">
-          {t("marvel0.run.end.kills")}
-        </Notice>
-        <Field
-          label={t("marvel0.run.phrase")}
-          hint={sayText(
-            { key: "marvel0.run.phrase_hint", params: { phrase } },
-            t,
-          )}
-        >
-          <Input
-            value={typed}
-            onChange={(event) => setTyped(event.target.value)}
-            autoComplete="off"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-        </Field>
-        {refused && (
-          <p className="rg-bad" role="alert" data-code={refused.failure.code}>
             <WordedText worded={refused.worded} />
-          </p>
-        )}
-      </div>
-    </Dialog>
+          </ConfirmRefusal>
+        ) : null
+      }
+      onCancel={onClose}
+      onConfirm={() =>
+        actions.end(phrase).then((ok) => {
+          if (ok) onClose();
+        })
+      }
+    />
   );
 }
 

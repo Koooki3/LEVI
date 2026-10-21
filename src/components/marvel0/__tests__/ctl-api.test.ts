@@ -32,6 +32,7 @@ describe("the arm stack's routes", () => {
     await api.preflight("C", {});
     await api.gripper({});
     await api.sequence({});
+    await api.sequenceStop({});
     await api.sequenceCancel({});
     await api.log("B", 40);
     expect(seen.map((s) => `${s.init?.method ?? "GET"} ${s.url}`)).toEqual([
@@ -43,6 +44,7 @@ describe("the arm stack's routes", () => {
       "POST /api/levi/marvel0/stack/c/preflight",
       "POST /api/levi/marvel0/stack/b/gripper",
       "POST /api/levi/marvel0/stack/sequence/start",
+      "POST /api/levi/marvel0/stack/sequence/stop",
       "POST /api/levi/marvel0/stack/sequence/cancel",
       "GET /api/levi/marvel0/stack/b/log?lines=40",
     ]);
@@ -83,9 +85,34 @@ describe("the arm stack's routes", () => {
       confirm: "gripper open",
       attest: { hands_clear: true },
     });
+    // The whole stack's start goes through to C, with the pauses off unless asked.
     expect(stackApi.sequenceBody("id", "start arm stack", {})).toEqual({
       request_id: "id",
       confirm: "start arm stack",
+      attest: {},
+      through: "c",
+      pause_before_b: false,
+      pause_before_c: false,
+    });
+    expect(
+      stackApi.sequenceBody(
+        "id",
+        "start arm stack",
+        { hands_clear: true },
+        true,
+      ),
+    ).toEqual({
+      request_id: "id",
+      confirm: "start arm stack",
+      attest: { hands_clear: true },
+      through: "c",
+      pause_before_b: true,
+      pause_before_c: true,
+    });
+    // The stop of the whole stack has the guided start's closed shape.
+    expect(stackApi.sequenceStopBody("id", "stop whole stack", {})).toEqual({
+      request_id: "id",
+      confirm: "stop whole stack",
       attest: {},
     });
   });
@@ -165,11 +192,18 @@ function bodyModels(file: string) {
   const models: Record<string, { all: string[]; required: string[] }> = {};
   for (const block of text.split(/^class /m).slice(1)) {
     const name = block.slice(0, block.indexOf("("));
-    if (!/^[A-Za-z]+\(Closed\):/.test(block)) continue;
+    // A model of the closed family: `(Closed)` itself or a model already seen
+    // (its fields are inherited).
+    const parent = block.match(/^[A-Za-z]+\(([A-Za-z]+)\):/)?.[1];
+    if (!parent || (parent !== "Closed" && !models[parent])) continue;
     const fields = [...block.matchAll(/^ {4}([a-z_]+): ([^\n]+)$/gm)];
+    const inherited = parent === "Closed" ? null : models[parent];
     models[name] = {
-      all: fields.map((f) => f[1]),
-      required: fields.filter((f) => !f[2].includes("=")).map((f) => f[1]),
+      all: [...(inherited?.all ?? []), ...fields.map((f) => f[1])],
+      required: [
+        ...(inherited?.required ?? []),
+        ...fields.filter((f) => !f[2].includes("=")).map((f) => f[1]),
+      ],
     };
   }
   return models;
@@ -251,10 +285,29 @@ describe("the bodies the page sends are the ones the backend's closed models tak
         stackApi.gripperBody("r", "open", "c", { hands_clear: true }),
       ),
     ).toEqual(OK);
-    // The guided start takes the start model; its cancel takes the check model.
-    expect(accepts(m.StartBody, stackApi.sequenceBody("r", "c", {}))).toEqual(
-      OK,
+    // The guided start has its own model (the start model and `through` with
+    // the two pauses); its cancel takes the check model.
+    expect(Object.keys(m)).toContain("SequenceStartBody");
+    expect(
+      accepts(m.SequenceStartBody, stackApi.sequenceBody("r", "c", {}, true)),
+    ).toEqual(OK);
+    expect(m.SequenceStartBody.all).toEqual(
+      expect.arrayContaining(["through", "pause_before_b", "pause_before_c"]),
     );
+    expect(accepts(m.CheckBody, stackApi.preflightBody("r"))).toEqual(OK);
+    // So does the stop of the whole stack (`/stack/sequence/stop`).
+    expect(
+      accepts(
+        m.StartBody,
+        stackApi.sequenceStopBody("r", "stop whole stack", {}),
+      ),
+    ).toEqual(OK);
+    expect(
+      readFileSync(
+        join(import.meta.dir, "../../../../levi/marvel0/stack_act_api.py"),
+        "utf8",
+      ),
+    ).toContain('"/stack/sequence/stop"');
   });
 
   test("the check itself notices a field that was renamed", () => {
@@ -278,7 +331,7 @@ describe("nothing of the control page reaches a robot-side port", () => {
   test("no source of the arm stack's or the client's controls names a robot or policy port or a loopback address", () => {
     const dir = join(import.meta.dir, "..");
     const files = readdirSync(dir).filter((f) =>
-      /^(stack-(api|act-logic|controls|dialog|dialog-logic|panel|evidence)|run-(api|logic|panel|start)|use-(stack|run|polled)|ctl-|chain-|selection|live-age|notice)/.test(
+      /^(stack-(api|act-logic|controls|dialog|dialog-logic|panel|evidence)|run-(api|logic|panel|start)|use-(stack|run|polled)|confirm-window|ctl-|chain-|selection|live-age|notice)/.test(
         f,
       ),
     );

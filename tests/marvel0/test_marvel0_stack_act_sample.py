@@ -14,6 +14,8 @@ from regen_sample import ROOT
 from regen_stack_act_sample import SAMPLE, build
 from test_marvel0_deploy import forbid_real_machine  # noqa: F401 - the guard
 
+from levi.marvel0 import stack_act
+
 REGENERATE = "uv run --no-sync python tests/marvel0/regen_stack_act_sample.py"
 PATH_IN_TEXT = re.compile(r"(?<![\w.:-])/(?:[A-Za-z0-9_.~+@%=,-]+/)+")
 
@@ -107,6 +109,143 @@ def test_the_samples_name_the_states_of_the_second_round():
     assert refusal["detail"]["code"] == "b_probe_started"
 
 
+def test_the_samples_name_every_state_of_stop_whole_stack():
+    views, answers = samples()["views"], samples()["answers"]
+
+    def seq(name):
+        return views[name]["act"]["sequence"]
+
+    def steps(name):
+        return [(i["terminal"], i["state"]) for i in seq(name)["steps"]]
+
+    assert seq("idle") == {"state": "idle", "kind": None}
+    assert seq("sequence_waiting_b")["kind"] == "start"
+    assert views["stop_all_ready"]["act"]["checks"]["can_stop_all"] is True
+    assert views["stop_all_ready"]["act"]["stop_all_blockers"] == []
+    assert (seq("stop_all_started")["kind"], seq("stop_all_started")["step"]) == (
+        "stop",
+        "stop_c",
+    )
+    assert views["stop_all_started"]["act"]["checks"]["can_stop_all"] is False
+    assert [
+        b["code"] for b in views["stop_all_started"]["act"]["stop_all_blockers"]
+    ] == ["sequence_active"]
+    assert steps("stop_all_running") == [
+        ("c", "done"),
+        ("a", "running"),
+        ("b", "pending"),
+    ]
+    assert steps("stop_all_done") == [("c", "done"), ("a", "done"), ("b", "done")]
+    assert (
+        seq("stop_all_done")["state"] == "done" and seq("stop_all_done")["step"] is None
+    )
+    failed = seq("stop_all_failed")
+    assert (failed["state"], failed["reason"]) == ("failed", "stop_failed")
+    assert steps("stop_all_failed") == [
+        ("c", "done"),
+        ("a", "failed"),
+        ("b", "not_reached"),
+    ]
+    # a failed stop is pressed again: the button is on
+    assert views["stop_all_failed"]["act"]["checks"]["can_stop_all"] is True
+    blocked = views["stop_all_blocked"]["act"]
+    assert blocked["checks"]["can_stop_all"] is False
+    assert [(b["code"], b["level"]) for b in blocked["stop_all_blockers"]] == [
+        ("stop_all_client_connected", "required")
+    ]
+    assert seq("stop_all_cancelled")["state"] == "cancelled"
+    nothing = views["stop_all_nothing"]["act"]
+    assert nothing["checks"]["can_stop_all"] is False
+    assert [b["code"] for b in nothing["stop_all_blockers"]] == ["nothing_to_stop"]
+    assert answers["sequence_stop"] == {"done": "sequence_stop_started"}
+    assert answers["sequence_stop_nothing"] == {"done": "already_stopped"}
+    assert answers["sequence_cancel"] == {"done": "sequence_cancelled"}
+    for name in ("idle", "stop_all_ready"):
+        assert views[name]["act"]["phrases"]["sequence_stop"] == "stop whole stack"
+    refusals = samples()["refusals"]
+    assert refusals["sequence_stop_with_client"]["detail"]["code"] == (
+        "stop_all_client_connected"
+    )
+    assert refusals["sequence_stop_run_active"]["detail"]["code"] == "run_active"
+
+
+def test_the_samples_name_every_state_of_start_whole_stack():
+    views, answers, refusals = (
+        samples()["views"],
+        samples()["answers"],
+        samples()["refusals"],
+    )
+
+    def seq(name):
+        return views[name]["act"]["sequence"]
+
+    def steps(name):
+        return {i["step"]: i["state"] for i in seq(name)["steps"]}
+
+    # the options the request carried, and the steps of the plan
+    running = seq("chain_running_b")
+    assert (running["kind"], running["state"], running["step"]) == (
+        "start",
+        "running",
+        "b",
+    )
+    assert (running["through"], running["pauses"]) == ("c", {"b": False, "c": False})
+    assert list(steps("chain_running_m")) == list(stack_act.SEQUENCE_STEPS)
+    assert steps("chain_running_b")["b_probe"] == "done"
+    assert steps("chain_running_b")["c"] == "pending"
+    assert seq("chain_running_c_check")["step"] == "c_preflight"
+    assert seq("chain_running_c")["step"] == "c"
+    done = seq("chain_done")
+    assert (done["state"], done["step"], done["reason"]) == ("done", None, None)
+    assert set(steps("chain_done").values()) == {"done"}
+    # a pause: waiting for the person's own start; the steps stay pending
+    paused = seq("chain_paused_b")
+    assert (paused["state"], paused["next"], paused["pauses"]) == (
+        "waiting_confirm",
+        "b",
+        {"b": True, "c": False},
+    )
+    assert steps("chain_paused_b")["b"] == "pending"
+    assert seq("chain_paused_c")["next"] == "c"
+    assert steps("chain_paused_c")["b"] == "done"
+    # a failure: the reason, the step, and what was not reached
+    failed = seq("chain_failed_b")
+    assert (failed["state"], failed["reason"]) == ("failed", "b_failed")
+    assert steps("chain_failed_b")["b"] == "failed"
+    assert steps("chain_failed_b")["c_preflight"] == "not_reached"
+    assert views["chain_failed_b"]["act"]["terminals"]["a"]["state"] == "ready"
+    # nothing is started or set while a guided stop is live
+    blocked = views["stop_all_started_blocks_starts"]["act"]
+    assert "sequence_stopping" in [
+        b["code"] for b in blocked["terminals"]["c"]["start_blockers"]
+    ]
+    assert blocked["terminals"]["c"]["can_start"] is False
+    assert [b["code"] for b in blocked["marker"]["touch_blockers"]] == [
+        "sequence_stopping"
+    ]
+    assert blocked["gripper_test"]["can_run"] is False
+    assert refusals["start_c_while_stopping"]["detail"]["code"] == "sequence_stopping"
+    # the answers
+    assert answers["sequence_start_chain"] == {"done": "sequence_started"}
+    assert answers["sequence_start_already"] == {"done": "already_started"}
+    detail = refusals["sequence_start_chain_without_attest"]["detail"]
+    assert (detail["code"], detail["keys"]) == (
+        "attest_missing",
+        "hands_clear, no_client",
+    )
+    # the guided stop cannot tell whether C runs: it stops there, with the word
+    unknown = seq("stop_all_c_unknown")
+    assert (unknown["state"], unknown["reason"]) == ("failed", "stop_c_unknown")
+    assert [i["state"] for i in unknown["steps"]] == [
+        "failed",
+        "not_reached",
+        "not_reached",
+    ]
+    assert {"code": "notice.stop_unfinished", "params": {"unit": "c"}} in (
+        views["stop_unfinished"]["act"]["notices"]
+    )
+
+
 def test_a_starting_unit_lists_what_it_has_shown_and_what_is_missing():
     a = samples()["views"]["a_starting"]["act"]["terminals"]["a"]
     assert [x["key"] for x in a["readiness"]["seen"]] == ["fifo"]
@@ -144,6 +283,12 @@ def test_the_samples_hold_the_refusals_a_page_has_to_word():
         "start_b_check_old": 409,
         "probe_b_with_unit": 409,
         "stop_c_with_client": 409,
+        "sequence_stop_with_client": 409,
+        "sequence_stop_run_active": 409,
+        "sequence_stop_wrong_phrase": 400,
+        "start_c_while_stopping": 409,
+        "marker_touch_while_stopping": 409,
+        "sequence_start_chain_without_attest": 400,
         "control_disabled": 403,
     }
     for item in refusals.values():

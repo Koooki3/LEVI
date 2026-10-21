@@ -4,6 +4,8 @@ import {
   canCheckFci,
   canCheckServer,
   canStartSequence,
+  startNeed,
+  canStopSequence,
   actView,
   compPhrase,
   markerRemaining,
@@ -309,7 +311,239 @@ describe("the marker, the checks, the gripper test and the guided start", () => 
     });
     expect(canStartSequence(act("idle"))).toBe(true);
     expect(canStartSequence(act("sequence_running"))).toBe(false);
-    expect(canStartSequence(act("a_ready"))).toBe(false);
+  });
+
+  test("the whole stack's start is offered again after a failure further on, and skips what is ready", () => {
+    // A is up, B and C are not: pressing again starts B and C.
+    expect(canStartSequence(act("a_ready"))).toBe(true);
+    expect(startNeed(act("a_ready"))).toBeNull();
+    expect(canStartSequence(act("b_ready"))).toBe(true);
+    // Everything is up: nothing to start, and the page says so.
+    expect(canStartSequence(act("c_ready"))).toBe(false);
+    expect(startNeed(act("c_ready"))).toBe("all_ready");
+    // A failed or vanished A is for the person to look at first.
+    expect(canStartSequence(act("a_failed"))).toBe(false);
+    expect(startNeed(act("a_failed"))).toBe("a_unfit");
+    // A start or stop that runs says so itself; an operation is the other reason.
+    expect(startNeed(act("sequence_running"))).toBeNull();
+    expect(startNeed(act("stop_all_running"))).toBeNull();
+    expect(canStartSequence(act("stop_all_running"))).toBe(false);
+    expect(
+      startNeed(
+        act("idle", (doc) => {
+          doc.act.operation = {
+            kind: "preflight_a",
+            terminal: "a",
+            state: "running",
+            started_at: 1,
+            finished_at: null,
+            code: null,
+          };
+        }),
+      ),
+    ).toBe("free");
+    // An instance that only shows says nothing: its own notice does.
+    expect(
+      startNeed(
+        act("idle", (doc) => {
+          doc.profile = "fake";
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  test("how far a start goes and whether it pauses are read from the sequence", () => {
+    const seq = act("sequence_waiting_b", (doc) => {
+      doc.act.sequence.through = "c";
+      doc.act.sequence.pauses = { b: true, c: false };
+    }).sequence;
+    expect(seq).toMatchObject({ through: "c", pauseB: true, pauseC: false });
+    expect(act("idle").sequence).toMatchObject({
+      through: null,
+      pauseB: false,
+      pauseC: false,
+    });
+  });
+});
+
+describe("the stop of the whole stack", () => {
+  test("offered exactly when the backend says so; the backend's rows say why not", () => {
+    for (const name of [
+      "c_ready",
+      "stop_all_ready",
+      "stop_all_failed",
+      "stop_all_cancelled",
+    ]) {
+      const on = act(name);
+      expect([name, on.stopAll.canStop, on.stopAll.blockers]).toEqual([
+        name,
+        true,
+        [],
+      ]);
+      expect(canStopSequence(on)).toBe(true);
+    }
+    const nothing = act("idle");
+    expect(nothing.stopAll.canStop).toBe(false);
+    expect(nothing.stopAll.blockers.map((b) => b.code)).toEqual([
+      "nothing_to_stop",
+    ]);
+    expect(nothing.stopAll.blockers[0].worded.say).toEqual({
+      key: "marvel0.ctl.block.nothing_to_stop",
+    });
+    expect(canStopSequence(nothing)).toBe(false);
+    // A client on C: no override exists for the whole stack, and the sentence
+    // names the port.
+    const blocked = act("stop_all_blocked");
+    expect(blocked.stopAll.blockers.map((b) => b.code)).toEqual([
+      "stop_all_client_connected",
+    ]);
+    expect(blocked.stopAll.blockers[0].worded.say).toEqual({
+      key: "marvel0.ctl.block.stop_all_client_connected",
+      params: { port: 5000 },
+    });
+    expect(canStopSequence(blocked)).toBe(false);
+  });
+
+  test("a backend without it (no answer in the checks) offers nothing, and a wrong type reads as no", () => {
+    const old = act("c_ready", (doc) => {
+      delete doc.act.checks.can_stop_all;
+      delete doc.act.stop_all_blockers;
+    });
+    expect(old.stopAll).toMatchObject({ canStop: false, blockers: [] });
+    expect(
+      act("c_ready", (doc) => {
+        doc.act.checks.can_stop_all = "yes";
+      }).stopAll.canStop,
+    ).toBe(false);
+  });
+
+  test("a stop needs no control file, but a worktree or temporary instance only shows", () => {
+    // The control file is switched off: starting is off, stopping is not.
+    const disabled = act("c_ready", (doc) => {
+      doc.act.enabled = false;
+    });
+    expect(disabled.enabled).toBe(false);
+    expect(disabled.comps.A.canStart).toBe(false);
+    expect(disabled.stopAll.canStop).toBe(true);
+    const fake = act("c_ready", (doc) => {
+      doc.profile = "fake";
+    });
+    expect(fake.stopAll).toMatchObject({ offered: false, canStop: false });
+  });
+
+  test("a running guided start or a read-only check never holds the stop back; a running guided stop does", () => {
+    const operation = act("c_ready", (doc) => {
+      doc.act.operation = {
+        kind: "preflight_c",
+        terminal: "c",
+        state: "running",
+        started_at: doc.sampled_at,
+        code: null,
+        finished_at: null,
+      };
+    });
+    expect(operation.stopAll.canStop).toBe(true);
+    // RIG-04: a read-only check that runs does not hold the way out back (the
+    // backend ends it first).
+    expect(canStopSequence(operation)).toBe(true);
+    // A guided stop already running is the same request: not offered twice.
+    expect(canStopSequence(act("stop_all_started"))).toBe(false);
+    // A guided START that runs (at any step of the chain) does not hold it back:
+    // the backend ends the start first (the review found the button grey for the
+    // whole chain).
+    expect(
+      canStopSequence(
+        act("sequence_running", (doc) => {
+          doc.act.checks.can_stop_all = true;
+        }),
+      ),
+    ).toBe(true);
+    // A guided start that waits for the person does not hold the stop back.
+    expect(
+      canStopSequence(
+        act("sequence_waiting_b", (doc) => {
+          doc.act.checks.can_stop_all = true;
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  test("the guided stop: its kind, its steps in order and each step's state", () => {
+    const view = act("stop_all_running").sequence;
+    expect(view).toMatchObject({
+      kind: "stop",
+      state: "running",
+      step: "stop_a",
+    });
+    expect(view.steps).toEqual([
+      { step: "stop_c", terminal: "C", state: "done" },
+      { step: "stop_a", terminal: "A", state: "running" },
+      { step: "stop_b", terminal: "B", state: "pending" },
+    ]);
+    // Done, failed (at A, with the single stop's own code) and cancelled.
+    expect(act("stop_all_done").sequence.steps.map((x) => x.state)).toEqual([
+      "done",
+      "done",
+      "done",
+    ]);
+    const failed = act("stop_all_failed").sequence;
+    // The step after the failure was not reached (it is not "pending").
+    expect(failed.steps.map((x) => x.state)).toEqual([
+      "done",
+      "failed",
+      "not_reached",
+    ]);
+    expect(failed.reason!.say).toEqual({
+      key: "marvel0.ctl.block.stop_failed",
+    });
+    expect(act("stop_all_cancelled").sequence.reason!.say).toEqual({
+      key: "marvel0.ctl.seq.reason.cancelled",
+    });
+  });
+
+  test("a terminal the page does not know is left out of the steps; an unknown step state reads as not yet reached", () => {
+    const view = act("stop_all_running", (doc) => {
+      doc.act.sequence.steps = [
+        { step: "stop_b", terminal: "b", state: "mystery" },
+        { step: "stop_x", terminal: "x", state: "pending" },
+        { nope: true },
+      ];
+    }).sequence;
+    expect(view.steps).toEqual([
+      { step: "stop_b", terminal: "B", state: "pending" },
+    ]);
+  });
+
+  test("an idle sequence (no kind) and an older backend read as a start with no steps", () => {
+    expect(act("idle").sequence).toMatchObject({ kind: "start", steps: [] });
+    expect(
+      act("idle", (doc) => {
+        delete doc.act.sequence.kind;
+      }).sequence.kind,
+    ).toBe("start");
+    expect(act("sequence_waiting_b").sequence.kind).toBe("start");
+  });
+
+  test("why a guided stop ended is worded from the sequence's reasons, then from the refusals", () => {
+    const ended = (reason: string) =>
+      act("stop_all_failed", (doc) => {
+        doc.act.sequence.reason = reason;
+      }).sequence.reason!;
+    expect(ended("stop_all_client_connected").say).toEqual({
+      key: "marvel0.ctl.seq.reason.stop_all_client_connected",
+    });
+    expect(ended("step_timeout").say).toEqual({
+      key: "marvel0.ctl.seq.reason.step_timeout",
+    });
+    expect(ended("stop_left_processes").say).toEqual({
+      key: "marvel0.ctl.seq.reason.stop_left_processes",
+    });
+    expect(ended("not_ours").say).toEqual({
+      key: "marvel0.ctl.block.not_ours",
+    });
+    expect(ended("superseded").say).toEqual({
+      key: "marvel0.ctl.seq.reason.superseded",
+    });
   });
 });
 
@@ -326,5 +560,14 @@ describe("the phrases", () => {
       doc.act.terminals.a.confirm = { start: "begin A", stop: "end A" };
     });
     expect(compPhrase(changed, "start", "A")).toBe("begin A");
+  });
+
+  test("the stop of the whole stack has its own phrase: the backend's, else the constant", () => {
+    expect(phraseFor(act("c_ready"), "sequence_stop")).toBe("stop whole stack");
+    expect(phraseFor(null, "sequence_stop")).toBe("stop whole stack");
+    const named = act("idle", (doc) => {
+      doc.act.phrases = { ...doc.act.phrases, sequence_stop: "stop it all" };
+    });
+    expect(phraseFor(named, "sequence_stop")).toBe("stop it all");
   });
 });

@@ -7,7 +7,8 @@ offers (M, marker, the checks, A, B, the gripper test, C), the rest anything a
 person or the machine can do (a stop out of order, a check with the wrong
 answer, the clock jumping, the monitor going quiet, the socket table or systemd
 not answering, a unit that hangs on its stop, a restart of the page, a
-guided start and its cancel). Then the machine is let to answer again, and the
+guided start (through A, or through B and C with pauses) and its cancel). Then
+the machine is let to answer again, and the
 page's **own** buttons must be able to bring everything of the page's down:
 every unit of ours stopped or acknowledged (a unit that hung ends on a second
 SIGINT, which is what the button sends), the marker released and the monitor
@@ -37,7 +38,7 @@ OTHER_STEPS = [
     *("stop_a", "stop_b", "stop_c", "stop_m", "grip", "seq", "adv", "adv"),
     *("time", "time", "hang", "table", "systemd", "sockets"),
     *("monitor_off", "monitor_on", "restart", "up", "up", "pre_c", "cancel"),
-    *("release", "m_ready"),
+    *("release", "m_ready", "stop_all", "chain", "chain"),
 ]
 
 
@@ -92,6 +93,16 @@ class Walk:
         a, b, c = t["a"], t["b"], t["c"]
         if t["m"]["state"] != "ready":
             return "m_ready"
+        seq = doc["sequence"]
+        if seq["state"] == "running" and seq["kind"] == "start":
+            # a guided start that is running: let it run (the world goes on)
+            return self.rng.choice(["adv", "up", "adv", "up", "adv", "time"])
+        idle = a["state"] == "idle" and seq["state"] not in (
+            "running",
+            "waiting_confirm",
+        )
+        if idle and self.rng.random() < 0.3:
+            return "chain"
         if a["state"] == "idle":
             if doc["marker"]["state"] == "absent":
                 return "marker"
@@ -171,6 +182,18 @@ class Walk:
                 attest={"desk_done": True, "estop_hand": True},
             )
             self.attempt(name, lambda: m.act.sequence_start(body))
+        elif name == "chain":
+            options = {
+                "pause_before_b": rng.random() < 0.3,
+                "pause_before_c": rng.random() < 0.3,
+            }
+            body = m.chain_body(self.rid("ch"), **options)
+            self.attempt(name, lambda: m.act.sequence_start(body))
+        elif name == "stop_all":
+            self.attempt(
+                name,
+                lambda: m.act.sequence_stop(m.stop_all_body(self.rid("sa"))),
+            )
         elif name == "adv":
             self.attempt(name, m.act.advance)
         elif name == "cancel":
@@ -215,6 +238,10 @@ class Walk:
             for key, up in (("a", m.a_up), ("b", m.b_up), ("c", m.c_up)):
                 if key in m.units and m.units[key]["active"] == "active":
                     up()
+                    if key == "b":  # (the manager answers, mostly)
+                        m.controllers_out, m.controllers_code = rng.choice(
+                            [(CONTROLLERS_OUT, 0)] * 4 + [(NO_MANAGER, 124)]
+                        )
             self.monitor_writes()
         elif name == "pre_c":
             m.controllers_out, m.controllers_code = CONTROLLERS_OUT, 0
@@ -282,6 +309,38 @@ class Walk:
                 return left
         return left
 
+    def stop_whole_stack(self):
+        """The same end by one button: "stop whole stack" pressed again for as
+        long as it ends at a step (a unit that hung ends on the second SIGINT
+        the press after its failure sends), each press followed by its ticks."""
+        m = self.m
+        left = {}
+        started = len(m.systemd_runs())
+        for _ in range(12):
+            m.t += 5
+            self.monitor_writes(True)
+            try:
+                m.act.sequence_stop(m.stop_all_body(self.rid("all")))
+            except stack.Refuse as refusal:
+                self.log.append(f"stop whole stack refused: {refusal.code}")
+            for _ in range(40):
+                m.t += 2
+                self.monitor_writes(True)
+                if m.act.advance()["state"] != "running":
+                    break
+            left = {
+                key: (m.terminal(key)["state"], m.terminal(key)["reason"])
+                for key in "abc"
+                if m.terminal(key)["owned"]
+                or m.terminal(key)["state"] in ("failed", "dead", "stopping")
+            }
+            assert len(m.systemd_runs()) == started, "the stop started something: " + (
+                " -> ".join(self.log[-30:])
+            )
+            if not left:
+                return left
+        return left
+
     def stop_the_rest(self):
         """Everything of the page's is down: the marker and M must be
         releasable too (after the arm's sockets have run out)."""
@@ -323,13 +382,46 @@ def test_the_pages_own_buttons_can_always_bring_everything_down(group, tmp_path)
         )
 
 
+@pytest.mark.parametrize("group", range(GROUPS))
+def test_stop_whole_stack_can_always_bring_everything_down(group, tmp_path):
+    for seed in range(group * WALKS_PER_TEST, (group + 1) * WALKS_PER_TEST):
+        walk = Walk(seed, tmp_path)
+        for _ in range(STEPS):
+            walk.step()
+        walk.machine_answers_again()
+        stuck = walk.stop_whole_stack()
+        assert not stuck, f"seed {seed}: {stuck}; the last steps: " + " -> ".join(
+            walk.log[-30:]
+        )
+
+
 def test_the_walks_reach_the_states_they_are_meant_to_cover(tmp_path):
     # A walk that never got A, B and C up would prove nothing.
     seen = set()
-    for seed in range(8):
+    for seed in range(24):
         walk = Walk(seed, tmp_path)
         for _ in range(STEPS):
             walk.step()
             doc = walk.m.doc()["terminals"]
             seen |= {(key, doc[key]["state"]) for key in "abc"}
     assert {("a", "ready"), ("b", "ready"), ("c", "ready")} <= seen, sorted(seen)
+
+
+def test_the_walks_reach_the_chain_and_its_endings(tmp_path):
+    # The walks that press "start whole stack" must get past A, and some must
+    # end in each way (a pause, a failure, done), or they prove nothing about it.
+    steps, endings = set(), set()
+    for seed in range(40):
+        walk = Walk(seed, tmp_path)
+        for _ in range(STEPS):
+            walk.step()
+            seq = walk.m.doc()["sequence"]
+            if seq["kind"] == "start" and seq.get("through") == "c":
+                steps.add(seq["step"])
+                endings.add(
+                    (seq["state"], seq["reason"] if seq["state"] == "failed" else None)
+                )
+    assert {"b_probe", "b", "c_preflight", "c"} <= steps, sorted(s for s in steps if s)
+    assert {"waiting_confirm", "done"} <= {state for state, _ in endings}, sorted(
+        endings, key=str
+    )

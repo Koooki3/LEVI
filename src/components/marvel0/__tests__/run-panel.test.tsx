@@ -1,6 +1,7 @@
 import { act } from "react";
 import {
   click,
+  press,
   render,
   setupDom,
   waitFor,
@@ -18,7 +19,13 @@ import { RunStart } from "../run-start";
 import { runView } from "../run-logic";
 import { useRunActions } from "../use-run-actions";
 import { useRunPoll } from "../use-run-poll";
-import { button, tick, type } from "./actions-helpers";
+import {
+  button,
+  doubleClick,
+  textFields,
+  tick,
+  tickAll,
+} from "./actions-helpers";
 import { RUN_VIEWS, runDoc } from "./ctl-fixtures";
 
 setupDom();
@@ -396,7 +403,7 @@ describe("the key each state waits for", () => {
 });
 
 describe("leaving the run", () => {
-  test("Exit and go home is folded away, has its own phrase and sends it with the key", async () => {
+  test("Exit and go home is folded away; its window says the arm goes home blind, asks nothing to type and sends the page's phrase with the key", async () => {
     const { host, state } = await open("running");
     const exit = host.querySelector(
       "[data-testid=marvel0-run-exit]",
@@ -405,17 +412,58 @@ describe("leaving the run", () => {
     expect(text(exit.querySelector("summary"))).toBe(
       en["marvel0.run.exit_home.summary"],
     );
+    // No field inside the fold: one button opens the window.
+    expect(textFields(exit)).toHaveLength(0);
     const go = button(exit, "Exit and go home")!;
-    expect(go.disabled).toBe(true);
-    await type(exit.querySelector("input"), "exit and go home");
     expect(go.disabled).toBe(false);
     await click(go);
+    const d = dialog(host)!;
+    expect(text(d)).toContain(en["marvel0.run.blind_home"]);
+    expect(text(d)).toContain(en["marvel0.run.exit_home.hint"]);
+    expect(text(d)).toContain(en["marvel0.run.start.estop"]);
+    expect(textFields(d)).toHaveLength(0);
+    expect(document.activeElement).toBe(button(d, "Cancel"));
+    expect(state.calls).toEqual([]);
+    const confirm = button(d, "Exit and go home")!;
+    expect(confirm.className).toContain("ds-btn--danger");
+    // It moves the arm with no limit check: two ticks (hand on the e-stop, the
+    // area clear) stand between the click and the key. Ticks are not typing.
+    const boxes = Array.from(
+      d.querySelectorAll<HTMLInputElement>("input[type=checkbox]"),
+    );
+    expect(boxes).toHaveLength(2);
+    expect(text(d)).toContain(en["marvel0.run.ack.estop"]);
+    expect(text(d)).toContain(en["marvel0.run.ack.area_clear"]);
+    expect(confirm.disabled).toBe(true);
+    await doubleClick(confirm);
+    expect(state.calls).toEqual([]);
+    await act(async () => boxes[0].click());
+    expect(confirm.disabled).toBe(true);
+    await tickAll(d);
+    expect(confirm.disabled).toBe(false);
+    await doubleClick(confirm);
     await tick(3, 10);
+    // One challenge and one key, however many clicks.
+    expect(state.order).toEqual(["challenge", "key"]);
     expect(state.calls[0].body).toMatchObject({ purpose: "exit_home" });
     expect(state.calls[1].body).toMatchObject({
       action: "exit_home",
       confirm: "exit and go home",
     });
+    expect(dialog(host)).toBeNull();
+  });
+
+  test("Cancel and Escape send nothing, and the window opens fresh each time", async () => {
+    const { host, state } = await open("running");
+    const exit = host.querySelector("[data-testid=marvel0-run-exit]")!;
+    await click(button(exit as HTMLElement, "Exit and go home")!);
+    await click(button(dialog(host)!, "Cancel")!);
+    expect(dialog(host)).toBeNull();
+    await click(button(exit as HTMLElement, "Exit and go home")!);
+    expect(document.activeElement).toBe(button(dialog(host)!, "Cancel"));
+    await press(document.activeElement, "Escape");
+    expect(dialog(host)).toBeNull();
+    expect(state.calls).toEqual([]);
   });
 
   test("it is not there at the gate, where the key is End at the gate", async () => {
@@ -426,40 +474,63 @@ describe("leaving the run", () => {
     ).toBeNull();
   });
 
-  test("End asks for its phrase in a dialog and sends it", async () => {
+  test("End is a window: it says that it kills the client, asks nothing to type and sends the page's phrase once", async () => {
     const { host, state } = await open("held");
     await click(host.querySelector("[data-testid=marvel0-run-end] button")!);
     const d = dialog(host)!;
     expect(text(d)).toContain(en["marvel0.run.end.kills"]);
+    expect(text(d)).toContain(en["marvel0.stack.gates_scope"]);
+    expect(textFields(d)).toHaveLength(0);
+    expect(document.activeElement).toBe(button(d, "Cancel"));
     const end = button(d, "End run")!;
-    expect(end.disabled).toBe(true);
-    await type(d.querySelector("input"), "end client run");
-    await click(end);
+    expect(end.disabled).toBe(false);
+    expect(end.className).toContain("ds-btn--danger");
+    await doubleClick(end);
     await tick(3, 10);
+    expect(state.calls).toHaveLength(1);
     expect(state.calls[0]).toMatchObject({
       op: "end",
       body: { confirm: "end client run" },
     });
+    expect(dialog(host)).toBeNull();
   });
 
-  test("a phrase typed before Cancel is gone when the dialog opens again: End asks for it each time", async () => {
+  test("Cancel and Escape on End send nothing, and the window can be opened again", async () => {
     const { host, state } = await open("held");
     const endOpener = () =>
       host.querySelector("[data-testid=marvel0-run-end] button")!;
     await click(endOpener());
-    let d = dialog(host)!;
-    await type(d.querySelector("input"), "end client run");
-    expect(button(d, "End run")!.disabled).toBe(false);
-    await click(button(d, en["marvel0.ctl.btn.cancel"])!);
+    await click(button(dialog(host)!, en["marvel0.ctl.btn.cancel"])!);
     await tick(3, 10);
     expect(dialog(host)).toBeNull();
-
     await click(endOpener());
-    d = dialog(host)!;
-    expect(d.querySelector("input")!.value).toBe("");
-    expect(button(d, "End run")!.disabled).toBe(true);
-    // Nothing was sent by the Cancel or by the reopening.
+    expect(document.activeElement).toBe(button(dialog(host)!, "Cancel"));
+    await press(document.activeElement, "Escape");
+    expect(dialog(host)).toBeNull();
+    // Nothing was sent by the Cancel, the Escape or the reopening.
     expect(state.calls).toEqual([]);
+  });
+
+  test("a refused End is shown inside its window; a refused phrase is an internal error, not a prompt", async () => {
+    const { host, state } = await open("held");
+    state.answer = () =>
+      errorOf(400, {
+        detail: {
+          code: "confirm_required",
+          message: "Type the confirmation phrase exactly: end client run",
+          phrase: "end client run now",
+        },
+      });
+    await click(host.querySelector("[data-testid=marvel0-run-end] button")!);
+    await click(button(dialog(host)!, "End run")!);
+    await tick(3, 10);
+    const d = dialog(host)!;
+    const shown = d.querySelector("[data-testid=marvel0-run-end-refused]")!;
+    expect(shown.getAttribute("data-internal")).toBe("true");
+    expect(text(shown)).toContain(en["marvel0.ctl.confirm.internal"]);
+    expect(text(shown)).toContain("The server expects: end client run now");
+    expect(text(shown)).not.toContain("Type the confirmation phrase");
+    expect(textFields(d)).toHaveLength(0);
   });
 });
 
@@ -580,7 +651,11 @@ describe("there is no s or p anywhere", () => {
 });
 
 describe("starting from the page", () => {
-  async function openStart(name = "idle_ready", stale = false) {
+  async function openStart(
+    name = "idle_ready",
+    stale = false,
+    group = "my_group",
+  ) {
     const f = fake(runDoc(name));
     const form = { model_id: "m", prompt: "p", rtc: true };
     function Start() {
@@ -591,7 +666,7 @@ describe("starting from the page", () => {
           view={poll.value}
           actions={actions}
           form={form}
-          group="my_group"
+          group={group}
           modelId="m"
           rtc
           stale={stale}
@@ -602,27 +677,24 @@ describe("starting from the page", () => {
     await tick(6, 30);
     return { ...view, ...f, form };
   }
-  const tickAll = async (d: HTMLElement) => {
-    for (const box of d.querySelectorAll("input[type=checkbox]"))
-      await click(box);
-  };
-
-  test("a dialog asks the three checks and the phrase with the group; then a challenge for this form and the start", async () => {
+  test("a window asks the three checks, with Cancel in focus; the page sends the phrase with the group; then a challenge for this form and the start, once", async () => {
     const { host, state, form } = await openStart();
     await click(button(host, "Start the client")!);
     const d = dialog(host)!;
     expect(text(d)).toContain(en["marvel0.run.start.estop"]);
     expect(text(d)).toContain(en["marvel0.stack.gates_scope"]);
+    // The model, RTC and the group of the run, and nothing to type.
+    expect(text(d)).toContain("my_group");
+    expect(textFields(d)).toHaveLength(0);
+    expect(text(d)).not.toMatch(/Confirmation phrase|Type exactly/);
+    expect(document.activeElement).toBe(button(d, "Cancel"));
     const go = () => button(d, "Start the client")!;
     expect(go().disabled).toBe(true);
-    await type(
-      d.querySelector("input:not([type=checkbox])"),
-      "start client my_group",
-    );
-    expect(go().disabled).toBe(true);
+    await click(d.querySelectorAll("input[type=checkbox]")[0]);
+    expect(go().disabled).toBe(true); // two checks are still not ticked
     await tickAll(d);
     expect(go().disabled).toBe(false);
-    await click(go());
+    await doubleClick(go());
     await tick(3, 10);
     expect(state.order).toEqual(["challenge", "start"]);
     expect(state.calls[0].body).toMatchObject({ purpose: "start", form });
@@ -632,18 +704,38 @@ describe("starting from the page", () => {
       confirm: "start client my_group",
       attest: { estop: true, scene_reset: true, area_clear: true },
     });
+    expect(dialog(host)).toBeNull();
   });
 
-  test("the phrase names the group: another group's phrase does not count", async () => {
-    const { host } = await openStart();
+  test("Cancel, Escape and a tick that does not outlive its window: nothing is sent", async () => {
+    const { host, state } = await openStart();
+    await click(button(host, "Start the client")!);
+    await tickAll(dialog(host)!);
+    await click(button(dialog(host)!, "Cancel")!);
+    expect(dialog(host)).toBeNull();
+    await click(button(host, "Start the client")!);
+    expect(
+      Array.from(
+        dialog(host)!.querySelectorAll<HTMLInputElement>(
+          "input[type=checkbox]",
+        ),
+      ).map((box) => box.checked),
+    ).toEqual([false, false, false]);
+    await press(document.activeElement, "Escape");
+    expect(dialog(host)).toBeNull();
+    expect(state.calls).toEqual([]);
+  });
+
+  test("the phrase the page sends names the group of the run", async () => {
+    const { host, state } = await openStart("idle_ready", false, "other");
     await click(button(host, "Start the client")!);
     const d = dialog(host)!;
     await tickAll(d);
-    await type(
-      d.querySelector("input:not([type=checkbox])"),
-      "start client other",
-    );
-    expect(button(d, "Start the client")!.disabled).toBe(true);
+    await click(button(d, "Start the client")!);
+    await tick(3, 10);
+    expect(state.calls[1].body).toMatchObject({
+      confirm: "start client other",
+    });
   });
 
   test("off while a client runs or a check fails, with the backend's reason; off when the form changed", async () => {
@@ -657,7 +749,7 @@ describe("starting from the page", () => {
     expect(text(stale.host)).toContain(en["marvel0.run.start.stale"]);
   });
 
-  test("a refused start is shown inside the dialog in words", async () => {
+  test("a refused start is shown inside the window in words", async () => {
     const { host, state } = await openStart();
     state.answer = (call) =>
       call.op === "challenge"
@@ -671,10 +763,6 @@ describe("starting from the page", () => {
         : { ok: true, status: 202, data: {} };
     await click(button(host, "Start the client")!);
     const d = dialog(host)!;
-    await type(
-      d.querySelector("input:not([type=checkbox])"),
-      "start client my_group",
-    );
     await tickAll(d);
     await click(button(d, "Start the client")!);
     await tick(3, 10);
@@ -682,6 +770,38 @@ describe("starting from the page", () => {
       text(host.querySelector("[data-testid=marvel0-run-start-refused]")),
     ).toContain("policy_ready");
     expect(state.order).toEqual(["challenge"]);
+    // The window stays so that it is read; the three ticks are still set.
+    expect(dialog(host)).not.toBeNull();
+  });
+
+  test("the backend refusing the phrase is an internal error with the mismatch, never a prompt to type", async () => {
+    const { host, state } = await openStart();
+    state.answer = (call) =>
+      call.op === "challenge"
+        ? {
+            ok: true,
+            status: 200,
+            data: { challenge: "tok", expires_at: 1, ttl_s: 30 },
+          }
+        : errorOf(400, {
+            detail: {
+              code: "confirm_required",
+              message: "Type the confirmation phrase exactly: start client x",
+              phrase: "start client x",
+            },
+          });
+    await click(button(host, "Start the client")!);
+    const d = dialog(host)!;
+    await tickAll(d);
+    await click(button(d, "Start the client")!);
+    await tick(3, 10);
+    const shown = host.querySelector(
+      "[data-testid=marvel0-run-start-refused]",
+    )!;
+    expect(shown.getAttribute("data-internal")).toBe("true");
+    expect(text(shown)).toContain("The server expects: start client x");
+    expect(text(shown)).not.toContain("Type the confirmation phrase");
+    expect(textFields(dialog(host)!)).toHaveLength(0);
   });
 });
 

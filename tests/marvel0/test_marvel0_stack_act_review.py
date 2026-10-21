@@ -768,12 +768,16 @@ def test_r1_s2_2_the_window_is_not_part_of_what_the_page_shows(m):
     start_sequence(m)
     assert set(m.doc()["sequence"]) <= {
         "state",
+        "kind",
         "step",
         "next",
         "reason",
         "since",
         "step_at",
         "remaining_s",
+        "through",
+        "pauses",
+        "steps",
     }
 
 

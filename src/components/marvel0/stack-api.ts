@@ -36,7 +36,9 @@ export interface StackApi {
   preflight(id: "A" | "C", body: unknown): Promise<ApiResult>;
   gripper(body: unknown): Promise<ApiResult>;
   sequence(body: unknown): Promise<ApiResult>;
-  /** Ends the guided start; nothing that already runs is stopped. */
+  /** Stops the whole stack: C, then A, then B (M stays). */
+  sequenceStop(body: unknown): Promise<ApiResult>;
+  /** Ends the guided start or stop; nothing that already runs is stopped. */
   sequenceCancel(body: unknown): Promise<ApiResult>;
   log(id: CompId, lines: number, signal?: AbortSignal): Promise<ApiResult>;
 }
@@ -59,6 +61,9 @@ export function createStackApi({
       call(`stack/${lower(id)}/preflight`, limit.check, body),
     gripper: (body) => call("stack/b/gripper", limit.check, body),
     sequence: (body) => call("stack/sequence/start", limit.start, body),
+    // Only begins the sequence and answers; the three stops run on in the
+    // backend and the page follows them in the state.
+    sequenceStop: (body) => call("stack/sequence/stop", limit.start, body),
     sequenceCancel: (body) => call("stack/sequence/cancel", limit.check, body),
     log: (id, lines, signal) =>
       call(
@@ -117,12 +122,28 @@ export const gripperBody = (
   attest,
 });
 
+/** The body of the start of the whole stack (`SequenceStartBody` of the
+ * backend): the checks of A, B and C, `through: "c"` (all the way to C on this
+ * one confirmation) and the two pauses, both off unless the person switched
+ * the pause on. */
 export const sequenceBody = (
   requestId: string,
   confirm: string,
   attest: Record<string, boolean>,
+  pause = false,
 ): Record<string, unknown> => ({
   request_id: requestId,
   confirm,
   attest,
+  through: "c",
+  pause_before_b: pause,
+  pause_before_c: pause,
 });
+
+/** The body of the stop of the whole stack: the same closed shape as a
+ * single start's (a stop ticks nothing). */
+export const sequenceStopBody = (
+  requestId: string,
+  confirm: string,
+  attest: Record<string, boolean>,
+): Record<string, unknown> => ({ request_id: requestId, confirm, attest });

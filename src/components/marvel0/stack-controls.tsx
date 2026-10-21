@@ -73,7 +73,7 @@ const STOPPABLE: readonly CompState[] = [
   "foreign_running",
 ];
 
-function Reasons({
+export function Reasons({
   label,
   control,
   testId,

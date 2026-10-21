@@ -36,9 +36,15 @@ same account, which can send the same requests and edit the files read here.
 The real barriers are Franka Desk and the physical emergency stop; nothing on
 the page is an emergency stop.
 
-**A sequence never outlives the process.** The guided sequence (monitor,
-marker, wait, A) lives in memory only and is never resumed after a restart.
-It stops before B and before C and waits there for the person's own start.
+**A sequence never outlives the process.** The guided sequence lives in memory
+only and is never resumed after a restart. The guided start runs M, the
+marker, the wait and A; with ``through = "c"`` it goes on by itself to B and C,
+each by the same ``_do_start`` as the single start (every gate again, with the
+confirmations recorded at the request), and ``pause_before_b`` /
+``pause_before_c`` make it wait for the person's own start instead. Before every
+start, touch or check it makes, it looks again, inside the machine-wide lock,
+whether it is still the running sequence (a stop or a cancel answered in
+between wins). It never stops anything; the guided stop never starts anything.
 
 Everything of the machine is reached through ``ActHost`` (and the base
 ``stack.Host``), which tests replace.
@@ -115,6 +121,15 @@ SEQUENCE_WAIT_S = 1800.0  # a sequence left waiting for B or C expires
 # marker's wait: a sequence that has not started A by then is over (it was
 # armed by a click that is no longer fresh).
 SEQUENCE_ARM_WINDOW_S = 300.0
+# The chain (``through = "c"``) goes on by itself on the ticks of the same click,
+# so the click must still be fresh when B and C are started: each stage has its
+# own deadline, counted from the click, on top of the one before. A pause the
+# person takes before B or C makes the next automatic start late, and the
+# sequence ends (``expired``) instead of starting on an old tick.
+SEQUENCE_A_READY_S = 300.0  # A's start until A is ready
+SEQUENCE_B_READY_S = 300.0  # the check of B, B's start and the gripper's calibration
+SEQUENCE_C_CHECK_S = 240.0  # the checks before C, one retry included
+SEQUENCE_C_READY_S = 240.0  # C's start until it is ready
 LOG_TRIM_EVERY_S = 60.0  # how often a ready unit's log is checked for its size
 # What the page may see of an operation (the rest is bookkeeping).
 OP_PUBLIC = ("kind", "terminal", "state", "started_at", "finished_at", "code")
@@ -152,14 +167,21 @@ PHRASE_NAMES = (
     "marker_clear",
     "gripper_open",
     "gripper_close",
+    "sequence_stop",
 )
-# Why a guided start ended, besides the codes of a refusal (``TEXT``).
+# Why a guided start (or stop) ended, besides the codes of a refusal (``TEXT``).
 SEQUENCE_REASONS = (
     "cancelled",
     "expired",
     "a_lost",
     "a_failed",
     "a_dead",
+    "b_lost",
+    "b_failed",
+    "b_dead",
+    "c_failed",
+    "c_dead",
+    "c_preflight_failed",
     "b_not_seen",
     "marker_not_ours",
     "marker_unusable",
@@ -172,12 +194,63 @@ SEQUENCE_REASONS = (
     "monitor_foreign_running",
     "monitor_stopping",
     "monitor_unknown",
+    "superseded",
 )
-SEQUENCE_STEPS = ("monitor", "probe", "marker", "wait", "arm", "await_a")
+# The steps of the guided start: the first six are A's (they end with the
+# sequence waiting for B when it goes through A only); the others are the chain
+# (``through = "c"``): the check whether a gripper stack runs, B's start and its
+# calibration, the checks before C, C's start and its readiness.
+A_STEPS = ("monitor", "probe", "marker", "wait", "arm", "await_a")
+CHAIN_STEPS = ("b_probe", "b", "c_preflight", "c")
+SEQUENCE_STEPS = (*A_STEPS, *CHAIN_STEPS)
+SEQUENCE_THROUGH = ("a", "c")
+STEP_TERMINAL = {
+    "monitor": "m",
+    **dict.fromkeys(A_STEPS[1:], "a"),
+    "b_probe": "b",
+    "b": "b",
+    "c_preflight": "c",
+    "c": "c",
+}
+SEQUENCE_KINDS = ("start", "stop")
+# The guided stop ("stop whole stack"): C, then A, then B. M stays (the marker
+# release already follows A's stop); the order is the single stops' own
+# ("stop C first"), here made one request.
+STOP_ORDER = ("c", "a", "b")
+SEQUENCE_STOP_STEPS = tuple(f"stop_{k}" for k in STOP_ORDER)
+# ``skipped``: nothing was asked of the machine (a part that was not there, or
+# one that was ready already). ``not_reached``: the sequence ended before it.
+SEQUENCE_STEP_STATES = (
+    "pending",
+    "running",
+    "done",
+    "skipped",
+    "failed",
+    "cancelled",
+    "not_reached",
+)
+# One step of the guided stop may take the unit's own stop time (SIGINT, then
+# ``TimeoutStopSec``) and this long on top (a busy lock, the worker's start).
+STOP_STEP_SLACK_S = 90.0
+# What "stop whole stack" refuses at once: the gates of the single stops that
+# say what is running cannot be told, or that a person must settle first. The
+# rest (a part the page did not start, a record it cannot read for one unit)
+# stops the sequence at its own step, with its own code.
+STOP_ALL_CODES = (
+    "gate.product",
+    "systemd_unreadable",
+    "record_corrupt",
+    "run_active",
+    "client_connected",
+)
+# The one code the guided stop words by itself: C's single stop offers an
+# override phrase for a connected client, the sequence never does.
+STOP_ALL_RENAMED = {"client_connected": "stop_all_client_connected"}
 NOTICES = (
     "notice.c_open_port",
     "notice.arm_still_held",
     "notice.stopping_too_long",
+    "notice.stop_unfinished",
 )
 STATES = (
     "idle",
@@ -342,8 +415,28 @@ TEXT = {
         ),
     ),
     "gripper_b_not_ready": (409, "The gripper stack B is not ready."),
-    "sequence_active": (409, "A guided start is already in progress."),
-    "sequence_idle": (409, "No guided start is in progress."),
+    "sequence_active": (409, "A guided start or stop is already in progress."),
+    "sequence_idle": (409, "No guided start or stop is in progress."),
+    "sequence_stopping": (
+        409,
+        "A guided stop is in progress; nothing is started or set meanwhile.",
+    ),
+    "sequence_option_invalid": (
+        400,
+        "Unknown or invalid option of the guided start: {name}.",
+    ),
+    "nothing_to_stop": (
+        409,
+        "Nothing that this page started is running, so there is nothing to stop.",
+    ),
+    "stop_all_client_connected": (
+        409,
+        (
+            "A client is connected to the robot server on port {port} (or the "
+            "socket table cannot be read); end it first. Stopping the whole stack "
+            "has no override: that phrase belongs to stopping the robot server alone."
+        ),
+    ),
     "no_log": (404, "That unit has no log on this page."),
     "record_unusable": (503, "The page's own record folder cannot be used."),
     "gate.product": (
@@ -435,8 +528,9 @@ TEXT = {
     "stop_c_unknown": (
         409,
         (
-            "Whether the robot server C runs cannot be told ({reason}); this stop "
-            "does not wait for it."
+            "Whether the robot server C runs cannot be told ({reason}). A stop of "
+            "A or B alone goes ahead with this warning; stopping the whole stack "
+            "stops here, before A, because it cannot tell that C is gone."
         ),
     ),
     "b_probe_stale": (
@@ -536,7 +630,11 @@ def catalog() -> dict:
         "attest": list(ATTEST_KEYS),
         "phrases": list(PHRASE_NAMES),
         "sequence_steps": list(SEQUENCE_STEPS),
+        "sequence_throughs": list(SEQUENCE_THROUGH),
         "sequence_reasons": list(SEQUENCE_REASONS),
+        "sequence_kinds": list(SEQUENCE_KINDS),
+        "sequence_stop_steps": list(SEQUENCE_STOP_STEPS),
+        "sequence_step_states": list(SEQUENCE_STEP_STATES),
     }
 
 
@@ -717,6 +815,10 @@ class Act:
         self._seq_lock = threading.RLock()
         self._adv_lock = threading.Lock()
         self._ticker: threading.Thread | None = None
+        # Held to start the ticker and to let it go: a sequence begun while the
+        # ticker is finishing (a stop pressed again the moment one ended) must
+        # not be left without one.
+        self._ticker_lock = threading.Lock()
         self._ready_at: dict = {}  # (key, log name) -> when it first was ready
         self._trimmed_at: dict = {}  # key -> when its log was last looked at
         self._resumed = False
@@ -1309,10 +1411,19 @@ class Act:
             and health.get("robot_mode_name") in ("IDLE", "MOVE")
         )
 
+    def _stopping(self) -> bool:
+        """Is a guided stop live? Nothing is started, set or tested meanwhile:
+        the stop would meet what it is stopping (C started while A is told to
+        stop, a gripper test while B is)."""
+        with self._seq_lock:
+            return self._seq.get("kind") == "stop" and self._seq_live(self._seq)
+
     def start_blockers(self, key, ctx: Ctx) -> list:
         if not ctx.enabled:
             return [row("control_disabled")]
         out = []
+        if self._stopping():
+            out.append(row("sequence_stopping"))
         settled = self._settled_by_a_press(key, ctx)
         for item in self._checks(key, ctx):
             if item["level"] == "person" or item["ok"] is True:
@@ -1390,6 +1501,44 @@ class Act:
         return out
 
     @staticmethod
+    def _has_something(key, ctx: Ctx) -> bool:
+        """Is there a unit of ours of ``key`` (or the record of one that failed
+        or vanished) for a stop to act on?"""
+        st = ctx.states[key]
+        return bool(st["owned"]) or st["state"] in ("failed", "dead")
+
+    def stop_all_blockers(self, ctx: Ctx) -> list:
+        """Why "stop whole stack" cannot begin now (rows of level ``required``
+        refuse it). Needs no control file, and nothing that only a *start*
+        needs: a run probe that cannot answer, a stale health file, a check or
+        the gripper test running do not count (RIG-04, the way out must not
+        depend on the way in). It refuses for what a single stop would refuse
+        for, and the sequence could not settle on its own: a hosted run known
+        to be active, a client connected to C (or a socket table that cannot be
+        read; the override phrase of C's own stop is not part of the sequence),
+        systemd or a record that cannot be read, an instance that is not the
+        product. A part the page did not start (``not_ours``) is not here: it
+        stops the sequence at its own step. ``nothing_to_stop`` says that no
+        unit of ours is there."""
+        out = []
+        with self._seq_lock:
+            seq = self._seq
+            if seq["state"] in ("running", "waiting_confirm") and (
+                seq.get("kind") == "stop"
+            ):
+                out.append(row("sequence_active"))
+        for key in STOP_ORDER:
+            for item in self.stop_blockers(key, ctx):
+                if item["level"] != "required" or item["code"] not in STOP_ALL_CODES:
+                    continue
+                code = STOP_ALL_RENAMED.get(item["code"], item["code"])
+                if code not in _codes(out):
+                    out.append(row(code, **item["params"]))
+        if not out and not any(self._has_something(k, ctx) for k in STOP_ORDER):
+            out.append(row("nothing_to_stop"))
+        return out
+
+    @staticmethod
     def _c_port(ctx: Ctx):
         if ctx.specs:
             return ctx.specs.server_port
@@ -1415,6 +1564,13 @@ class Act:
         with self._op_lock:
             return any(o["state"] == "running" for o in self._ops)
 
+    def _stop_running(self, key) -> bool:
+        with self._op_lock:
+            return any(
+                o["state"] == "running" and o["kind"] == f"stop_{key}"
+                for o in self._ops
+            )
+
     def document(self, r) -> dict:
         """The ``act`` part of the stack document. Never raises: a failure to
         read is reported in the document, not as a failed page."""
@@ -1427,6 +1583,7 @@ class Act:
     def _document(self, r) -> dict:
         ctx = self._context(r)
         now = r["now"]
+        stop_all = self.stop_all_blockers(ctx)
         terminals = {"m": self._doc_m(r, ctx)}
         for key in stack_units.KEYS:
             terminals[key] = self._doc_terminal(key, ctx)
@@ -1437,11 +1594,18 @@ class Act:
             "spec_profile": ctx.specs.profile if ctx.specs else None,
             "order": list(stack_units.ORDER),
             "terminals": terminals,
-            "marker": ctx.marker,
+            "marker": {
+                **ctx.marker,
+                # what keeps "set marker" from being offered (a guided stop)
+                "touch_blockers": [row("sequence_stopping")]
+                if self._stopping()
+                else [],
+            },
             "sequence": self._seq_view(ctx),
             "gripper_test": self._gripper_view(ctx),
             "operation": ctx.op,
-            "checks": self._checks_view(now, ctx),
+            "checks": self._checks_view(now, ctx, stop_all),
+            "stop_all_blockers": stop_all,
             "linger": r["linger"],
             "rt_limits": r["rt"],
             "estop": {"text": ESTOP_TEXT},
@@ -1545,7 +1709,10 @@ class Act:
             return STOP_NOTES["a"]
         return None
 
-    def _checks_view(self, now, ctx: Ctx) -> dict:
+    def _checks_view(self, now, ctx: Ctx, stop_all=None) -> dict:
+        if stop_all is None:
+            stop_all = self.stop_all_blockers(ctx)
+
         def aged(item, ttl):
             if not item:
                 return None
@@ -1565,6 +1732,9 @@ class Act:
             "can_probe_b": ctx.enabled
             and not ctx.busy
             and self._probe_b_refusal(ctx.r, ctx) is None,
+            # "Stop whole stack" (``sequence_stop``): needs no control file,
+            # like every stop; ``stop_all_blockers`` says what refuses it.
+            "can_stop_all": not any(b["level"] == "required" for b in stop_all),
         }
 
     def _gripper_view(self, ctx: Ctx) -> dict:
@@ -1589,6 +1759,17 @@ class Act:
         if st["c"]["state"] != "ready" and ctx.r["health"].get("controller_active"):
             out.append({"code": "notice.arm_still_held"})
         for key in stack_units.KEYS:
+            rec = ctx.records.get(key) or {}
+            if (
+                rec.get("phase") == "stopping"
+                and st[key]["owned"]
+                and st[key]["state"] != "stopping"
+                and not self._stop_running(key)
+            ):
+                # A stop was asked for (the record says so) and nothing carries
+                # it: the page restarted in the middle of it, or it failed. The
+                # unit is still there; the person decides.
+                out.append({"code": "notice.stop_unfinished", "params": {"unit": key}})
             if st[key]["state"] == "stopping" and (
                 ctx.states[key].get("unit_state") == "deactivating"
             ):
@@ -1605,6 +1786,8 @@ class Act:
         if not ctx.enabled:
             return [row("control_disabled")]
         out = []
+        if self._stopping():
+            out.append(row("sequence_stopping"))
         if not self._is_real(ctx.r):
             out.append(row("gate.product"))
         if ctx.states["b"]["state"] != "ready":
@@ -1627,6 +1810,7 @@ class Act:
     def _seq_view(self, ctx: Ctx) -> dict:
         with self._seq_lock:
             seq = self._seq_public(self._seq)
+        seq.setdefault("kind", None)  # (idle: neither a start nor a stop)
         if seq.get("state") == "running" and seq.get("step") == "wait":
             seq["remaining_s"] = ctx.marker["remaining_s"]
         return seq
@@ -1716,10 +1900,38 @@ class Act:
             raise
 
     def _locked(self, action, act):
-        """``_under_lock`` for the sequence, then the spawned work."""
-        answer = self._under_lock(action, act)
+        """``_under_lock`` for the sequence, then the spawned work (also for a
+        refusal that says the work it queued was started: ``keep_work``)."""
+        try:
+            answer = self._under_lock(action, act)
+        except ActRefuse as refusal:
+            if refusal.keep_work:
+                self._flush()
+            raise
         self._flush()
         return answer
+
+    def _seq_locked(self, seq, action, call, *, live=("running",), keep=None):
+        """``_locked`` for a step of the sequence ``seq``: inside the machine-wide
+        lock it looks once more whether ``seq`` is still the sequence and is
+        still in one of the states ``live``, and does nothing (returns None)
+        when it is not. A stop-all or a cancel is answered under the same lock,
+        so what it answered cannot be undone by a step that looked before it
+        (the step reads the machine without the lock; ``call`` starts
+        something). ``keep``: the key of ``seq`` that gets the operation
+        ``call`` began."""
+
+        def guarded(r):
+            with self._seq_lock:
+                if self._seq is not seq or seq["state"] not in live:
+                    return None
+            out = call(r)
+            if keep is not None:
+                with self._op_lock:
+                    seq[keep] = self._op
+            return out
+
+        return self._locked(action, guarded)
 
     @staticmethod
     def _attested(key, body) -> dict:
@@ -2009,6 +2221,7 @@ class Act:
             return self._clear_failed(key, unit, now)
         self._write_record(key, phase="stopping", stop_requested_at=round(now, 3))
         op = self._begin(f"stop_{key}", key)
+        self._tls.stop_op = op  # (the guided stop follows this one)
         self._spawn(op, lambda: self._stop_worker(key, unit, op, ctx))
         # (what the page says about the stop it says once it is done: the
         # document's ``stop_note``)
@@ -2239,6 +2452,8 @@ class Act:
         )
 
     def _do_touch(self, r) -> dict:
+        if self._stopping():
+            raise ActRefuse("sequence_stopping")
         view = r["marker"]
         if view["state"] == "present":
             raise ActRefuse("marker_exists")
@@ -2419,9 +2634,8 @@ class Act:
         code, text = self._oneshot(
             specs.controllers_cmd, "check-controllers", "FR3 gripper controllers check"
         )
-        controllers = stack_units.gripper_controllers_ok(
-            stack_units.parse_controllers(text)
-        )
+        listing = stack_units.parse_controllers(text)
+        controllers = stack_units.gripper_controllers_ok(listing)
         code, text = self._oneshot(
             specs.ee_cmd, "check-ee", "FR3 end-effector frame check"
         )
@@ -2434,6 +2648,9 @@ class Act:
             "ok": ok,
             "qos": qos,
             "controllers": controllers,
+            # listed | absent | unknown: only "listed" is an answer (the guided
+            # start asks once more when the manager did not answer)
+            "controllers_state": listing["state"],
             "ee_frame": ee,
         }
         if not ok:
@@ -2483,22 +2700,77 @@ class Act:
         self.require_enabled()
         return self._write(body, "sequence_start", lambda r: self._seq_begin(body, r))
 
+    @staticmethod
+    def _seq_options(body) -> tuple:
+        """``(through, pause_before_b, pause_before_c)`` of a guided start. The
+        defaults are the guided start of old: through A, then wait for the
+        person's own start of B and of C."""
+        through = body.get("through", "a")
+        if through not in SEQUENCE_THROUGH:
+            raise ActRefuse("sequence_option_invalid", name="through")
+        pauses = []
+        for name in ("pause_before_b", "pause_before_c"):
+            value = body.get(name, False)
+            if not isinstance(value, bool):
+                raise ActRefuse("sequence_option_invalid", name=name)
+            pauses.append(value)
+        return through, pauses[0], pauses[1]
+
+    @staticmethod
+    def _attested_stages(stages, body) -> dict:
+        """The confirmations of every stage the sequence will start itself, all
+        ticked; one tick serves every stage that asks for it. A missing one
+        refuses the whole request, naming the keys. ``{stage: {key: True}}``:
+        each stage's record keeps what that stage needs."""
+        given = body.get("attest") or {}
+        unknown = sorted(k for k in given if k not in ATTEST_KEYS)
+        if unknown:
+            raise ActRefuse("attest_invalid", keys=", ".join(unknown))
+        missing = []
+        for stage in stages:
+            for k in ATTEST_NEEDED[stage]:
+                if given.get(k) is not True and k not in missing:
+                    missing.append(k)
+        if missing:
+            raise ActRefuse("attest_missing", keys=", ".join(missing))
+        return {stage: {k: True for k in ATTEST_NEEDED[stage]} for stage in stages}
+
     def _seq_begin(self, body, r) -> dict:
         ctx = self._context(r, holding=True)
+        through, pause_b, pause_c = self._seq_options(body)
+        chain = through == "c"
+        st = ctx.states
         with self._seq_lock:
             if self._seq["state"] in ("running", "waiting_confirm"):
                 raise ActRefuse("sequence_active")
-            attested = self._attested("a", body)
-            hard = [
-                b
-                for b in self.start_blockers("a", ctx)
-                if b["level"] == "required" and b["code"] not in SEQUENCE_SOFT
-            ]
-            if hard:
-                raise ActRefuse(hard[0]["code"], **hard[0]["params"])
+            # A press again, after a failure further on, skips what is up: the
+            # chain does not start A (or B, or C) that is ready or starting.
+            # The guided start through A keeps refusing an A that is not idle.
+            a_up = chain and st["a"]["state"] in ("ready", "starting")
+            stages = [] if a_up else ["a"]
+            for key, paused in (("b", pause_b), ("c", pause_c)):
+                if (
+                    chain
+                    and not paused
+                    and st[key]["state"] not in ("ready", "starting")
+                ):
+                    stages.append(key)
+            attests = self._attested_stages(stages, body)
+            if chain and all(st[k]["state"] == "ready" for k in "abc"):
+                return {"done": "already_started"}
+            if not a_up:
+                hard = [
+                    b
+                    for b in self.start_blockers("a", ctx)
+                    if b["level"] == "required" and b["code"] not in SEQUENCE_SOFT
+                ]
+                if hard:
+                    raise ActRefuse(hard[0]["code"], **hard[0]["params"])
             now = self.now()
+            plan = (*A_STEPS, *CHAIN_STEPS) if chain else A_STEPS
             self._seq = {
                 "state": "running",
+                "kind": "start",
                 "step": "monitor",
                 "next": None,
                 "reason": None,
@@ -2506,15 +2778,43 @@ class Act:
                 "step_at": round(now, 3),
                 "begun_at": round(now, 3),
                 "request_id": body.get("request_id"),
-                "attest": attested,
+                "attest": attests.get("a", {}),
+                "through": through,
+                # (a guided start through A waits for the person's B and C)
+                "pauses": {"b": pause_b or not chain, "c": pause_c or not chain},
+                "steps": [
+                    {
+                        "step": name,
+                        "terminal": STEP_TERMINAL[name],
+                        "state": "running" if n == 0 else "pending",
+                    }
+                    for n, name in enumerate(plan)
+                ],
+                "_attests": attests,
+                "_a_up": a_up,
             }
         self._defer(self._ensure_ticker)
         return {"done": "sequence_started"}
 
     def sequence_cancel(self, body) -> dict:
-        return self._write(body, "sequence_cancel", self._do_cancel, phrase=False)
+        # Cancel ends the sequence before the machine lock is asked for: a chain
+        # step holding the lock (systemd-run, up to START_TIMEOUT_S) must not turn
+        # the way out into stack_busy. The cancel itself only stops advancing.
+        ended = False
+        with self._seq_lock:
+            if self._seq["state"] in ("running", "waiting_confirm"):
+                self._seq_end("cancelled", "cancelled")
+                ended = True
+        return self._write(
+            body,
+            "sequence_cancel",
+            lambda r: self._do_cancel(r, ended),
+            phrase=False,
+        )
 
-    def _do_cancel(self, r) -> dict:
+    def _do_cancel(self, r, ended=False) -> dict:
+        if ended:
+            return {"done": "sequence_cancelled"}
         with self._seq_lock:
             if self._seq["state"] not in ("running", "waiting_confirm"):
                 raise ActRefuse("sequence_idle")
@@ -2525,39 +2825,91 @@ class Act:
     def _seq_public(seq) -> dict:
         """What the page may see of the sequence (not the confirmations the
         person ticked, nor the request id, nor when the confirmations were
-        given)."""
+        given, nor the bookkeeping: keys that start with ``_``). The steps and
+        the pauses are copied: the sequence goes on changing the steps."""
         hidden = ("attest", "request_id", "begun_at")
-        return {k: v for k, v in seq.items() if k not in hidden}
+        return {
+            k: copy.deepcopy(v) if k in ("steps", "pauses") else v
+            for k, v in seq.items()
+            if k not in hidden and not k.startswith("_")
+        }
 
-    def _goto(self, seq, step) -> None:
+    def _mark(self, seq, name, state, only=None) -> None:
+        """The state of the step ``name`` (a step the sequence has no entry for
+        is ignored); ``only``: change it only from one of these states."""
+        with self._seq_lock:
+            for item in seq.get("steps", ()):
+                if item["step"] == name and (only is None or item["state"] in only):
+                    item["state"] = state
+
+    def _skip_pending(self, seq, names) -> None:
+        """The steps the person did by hand while the sequence waited."""
+        for name in names:
+            self._mark(seq, name, "skipped", only=("pending",))
+
+    def _set_step(self, seq, step) -> None:
+        with self._seq_lock:
+            seq["step"] = step
+            seq["step_at"] = round(self.now(), 3)
+            self._mark(seq, step, "running")
+
+    def _goto(self, seq, step, how="done") -> None:
+        """Leave the running step (as ``how``: done, skipped when nothing was
+        asked of the machine, or pending when it has to be done again) and
+        enter ``step``."""
         with self._seq_lock:
             if seq["state"] != "running":
                 return  # (cancelled, or ended, while the step was running)
-            seq["step"] = step
-            seq["step_at"] = round(self.now(), 3)
+            self._mark(seq, seq["step"], how, only=("running",))
+            self._set_step(seq, step)
 
-    def _seq_end(self, state, reason) -> None:
+    def _seq_end(self, state, reason, seq=None) -> None:
+        """End ``seq`` (the current sequence when none is named). A step names
+        the sequence it works for: a sequence that a guided stop has taken the
+        place of cannot end the new one. The step that was running ends with
+        it (failed, or cancelled); the steps after it were not reached."""
         with self._seq_lock:
-            if self._seq["state"] in ("running", "waiting_confirm"):
-                self._seq.update(state=state, reason=reason, step=None, next=None)
+            target = self._seq if seq is None else seq
+            if target["state"] in ("running", "waiting_confirm"):
+                target.update(state=state, reason=reason, step=None, next=None)
+                for item in target.get("steps", ()):
+                    if item["state"] == "running":
+                        item["state"] = "failed" if state == "failed" else "cancelled"
+                    elif item["state"] == "pending" and state != "done":
+                        item["state"] = "not_reached"
 
     def _ensure_ticker(self) -> None:
         if not self.host.background:
             return
-        if self._ticker is not None and self._ticker.is_alive():
-            return
-        self._ticker = threading.Thread(
-            target=self._tick_loop, daemon=True, name="levi-marvel0-sequence"
-        )
-        self._ticker.start()
+        with self._ticker_lock:
+            if self._ticker is not None and self._ticker.is_alive():
+                return
+            self._ticker = threading.Thread(
+                target=self._tick_loop, daemon=True, name="levi-marvel0-sequence"
+            )
+            self._ticker.start()
+
+    @staticmethod
+    def _seq_live(seq) -> bool:
+        return seq["state"] in ("running", "waiting_confirm")
 
     def _tick_loop(self) -> None:
-        while self.advance()["state"] in ("running", "waiting_confirm"):
-            self.host.sleep(SEQUENCE_TICK_S)
+        while True:
+            if self._seq_live(self.advance()):
+                self.host.sleep(SEQUENCE_TICK_S)
+                continue
+            with self._ticker_lock:
+                with self._seq_lock:
+                    live = self._seq_live(self._seq)
+                if not live:
+                    self._ticker = None
+                    return
 
     def advance(self) -> dict:
         """One step of the guided sequence (the thread calls this every
-        ``SEQUENCE_TICK_S``; tests call it by hand). It never starts B or C.
+        ``SEQUENCE_TICK_S``; tests call it by hand). The guided start starts B
+        and C only when the request said ``through = "c"`` and did not pause
+        before them; the guided stop never starts anything.
 
         A step reads the machine and may start a command (up to 15 s for
         ``systemd-run``). The sequence's own lock is not held meanwhile: the
@@ -2572,49 +2924,81 @@ class Act:
                 ctx = self._context(self.stack._read())
                 with self._seq_lock:
                     state = seq["state"]
-                if state == "running":
+                if state == "running" and seq.get("kind") == "stop":
+                    self._step_stop(seq, ctx)
+                elif state == "running":
                     self._step_running(seq, ctx)
                 elif state == "waiting_confirm":
                     self._step_waiting(seq, ctx)
             except stack.Refuse as exc:
                 if exc.code not in TRANSIENT:
-                    self._seq_end("failed", exc.code)
+                    self._seq_end("failed", exc.code, seq)
             except Exception as exc:  # noqa: BLE001 - a sequence must end, not hang
-                self._seq_end("failed", type(exc).__name__)
+                self._seq_end("failed", type(exc).__name__, seq)
             with self._seq_lock:
                 return self._seq_public(seq)
+
+    @staticmethod
+    def _window_s(step, ctx: Ctx):
+        """How long after the click the step may still go on (None: the step has
+        no window of its own). The ticks of the click are good for the arm window
+        and the marker's wait; each stage of the chain adds the time its
+        predecessor and itself may take."""
+        if step == "await_a":
+            return None
+        window = SEQUENCE_ARM_WINDOW_S + (ctx.marker.get("wait_s") or 0)
+        if step in CHAIN_STEPS[:2]:
+            return window + SEQUENCE_A_READY_S + SEQUENCE_B_READY_S
+        if step in CHAIN_STEPS[2:]:
+            return (
+                window
+                + SEQUENCE_A_READY_S
+                + SEQUENCE_B_READY_S
+                + SEQUENCE_C_CHECK_S
+                + SEQUENCE_C_READY_S
+            )
+        return window
 
     def _step_running(self, seq, ctx: Ctx) -> None:
         a = ctx.states["a"]["state"]
         step = seq["step"]
         if step in ("arm", "await_a") and a in ("failed", "dead"):
-            return self._seq_end("failed", f"a_{a}")
+            return self._seq_end("failed", f"a_{a}", seq)
         if step == "await_a" and self._a_was_stopped(ctx):
             # A stopped by a person while the sequence waits for it to become
             # ready: nothing is left to wait for (the step has no arm window and
             # would otherwise hold ``sequence_active`` for ``STEP_TIMEOUT_S``).
-            return self._seq_end("failed", "a_lost")
+            return self._seq_end("failed", "a_lost", seq)
         now = self.now()
         if now - seq.get("step_at", seq["since"]) > STEP_TIMEOUT_S:
-            return self._seq_end("failed", "step_timeout")
-        # The desk and e-stop ticks were given at the start; A is not started on
-        # a click that old (the marker's own wait is on top of the window).
-        window = SEQUENCE_ARM_WINDOW_S + (
-            ctx.marker["wait_s"] if ctx.marker.get("wait_s") else 0
-        )
-        if step != "await_a" and now - seq["begun_at"] > window:
-            return self._seq_end("cancelled", "expired")
+            return self._seq_end("failed", "step_timeout", seq)
+        # The ticks were given at the click; nothing is started on a click that
+        # old (A: the marker's own wait is on top of the window; B and C: the
+        # time the stages before them may take).
+        window = self._window_s(step, ctx)
+        if window is not None and now - seq["begun_at"] > window:
+            return self._seq_end("cancelled", "expired", seq)
         handler = getattr(self, f"_seq_{step}")
         handler(seq, ctx)
 
     def _seq_monitor(self, seq, ctx: Ctx) -> None:
         m = ctx.states["m"]["state"]
         if m == "ready":
-            self._goto(seq, "probe")
+            if seq.get("_a_up"):
+                # A is up already (a press again): its checks, the marker, the
+                # wait and its start are not made, only its readiness is looked at.
+                with self._seq_lock:
+                    if seq["state"] != "running":
+                        return
+                    for name in ("probe", "marker", "wait", "arm"):
+                        self._mark(seq, name, "skipped", only=("pending",))
+                    self._goto(seq, "await_a")
+            else:
+                self._goto(seq, "probe")
         elif m == "idle":
-            self._locked("sequence_monitor", self.stack._start)
+            self._seq_locked(seq, "sequence_monitor", self.stack._start)
         elif m != "starting":
-            self._seq_end("failed", f"monitor_{m}")
+            self._seq_end("failed", f"monitor_{m}", seq)
 
     def _seq_probe(self, seq, ctx: Ctx) -> None:
         now = ctx.r["now"]
@@ -2627,24 +3011,26 @@ class Act:
         op = ctx.op
         if op and op["kind"] == "preflight_a" and op["started_at"] >= seq["since"]:
             if op["state"] == "failed":
-                return self._seq_end("failed", op["code"] or "preflight_failed")
-            return self._seq_end("failed", "b_not_seen")
-        self._locked("sequence_probe", self._do_preflight_a)
+                return self._seq_end("failed", op["code"] or "preflight_failed", seq)
+            return self._seq_end("failed", "b_not_seen", seq)
+        self._seq_locked(seq, "sequence_probe", self._do_preflight_a)
 
     def _seq_marker(self, seq, ctx: Ctx) -> None:
         state = ctx.marker["state"]
         if state == "absent":
-            self._locked("sequence_marker", self._do_touch)
+            self._seq_locked(seq, "sequence_marker", self._do_touch)
         elif state == "present" and ctx.marker["ours"]:
             self._goto(seq, "wait")
         else:
             self._seq_end(
-                "failed", "marker_not_ours" if state == "present" else "marker_unusable"
+                "failed",
+                "marker_not_ours" if state == "present" else "marker_unusable",
+                seq,
             )
 
     def _seq_wait(self, seq, ctx: Ctx) -> None:
         if ctx.marker["state"] != "present":
-            return self._seq_end("failed", "marker_gone")
+            return self._seq_end("failed", "marker_gone", seq)
         if ctx.marker["remaining_s"] == 0 and ctx.r["sockets"]["state"] == "inactive":
             self._goto(seq, "arm")
 
@@ -2654,10 +3040,13 @@ class Act:
                 return  # (cancelled meanwhile: A is not started)
             attested = seq["attest"]
             body = {"request_id": seq.get("request_id")}
-        self._locked(
-            "sequence_arm", lambda r: self._do_start("a", body, r, attested=attested)
+        started = self._seq_locked(
+            seq,
+            "sequence_arm",
+            lambda r: self._do_start("a", body, r, attested=attested),
         )
-        self._goto(seq, "await_a")
+        if started is not None:  # (None: a stop or a cancel was answered first)
+            self._goto(seq, "await_a")
 
     @staticmethod
     def _a_was_stopped(ctx: Ctx) -> bool:
@@ -2675,43 +3064,364 @@ class Act:
         if ctx.states["a"]["state"] == "ready":
             with self._seq_lock:
                 if seq["state"] == "running":
-                    seq.update(
-                        state="waiting_confirm",
-                        step=None,
-                        next="b",
-                        since=round(self.now(), 3),
-                    )
+                    self._after_a(seq)
+
+    # What follows a stage that is up. All three run under the sequence's lock,
+    # from a running step or from the wait for the person's own start.
+    def _after_a(self, seq) -> None:
+        self._mark(seq, "await_a", "done", only=("running",))
+        if seq["through"] == "c" and not seq["pauses"]["b"]:
+            seq.update(state="running", next=None)
+            self._set_step(seq, "b_probe")
+        else:
+            seq.update(
+                state="waiting_confirm", step=None, next="b", since=round(self.now(), 3)
+            )
+
+    def _after_b(self, seq) -> None:
+        self._mark(seq, "b", "done", only=("running",))
+        if seq["through"] == "c" and not seq["pauses"]["c"]:
+            seq.update(state="running", next=None)
+            self._set_step(seq, "c_preflight")
+        else:
+            seq.update(
+                state="waiting_confirm", step=None, next="c", since=round(self.now(), 3)
+            )
+
+    def _after_c(self, seq) -> None:
+        self._mark(seq, "c", "done", only=("running",))
+        self._seq_end("done", None, seq)
 
     def _step_waiting(self, seq, ctx: Ctx) -> None:
         st = ctx.states
         if self.now() - seq["since"] > SEQUENCE_WAIT_S:
-            return self._seq_end("cancelled", "expired")
+            return self._seq_end("cancelled", "expired", seq)
         # A that cannot be vouched for for a while (the health file went stale,
         # the user manager did not answer) is not a lost A: only a unit that is
         # no longer there, or no longer well, ends the wait.
         if st["a"]["state"] == "unknown":
             return
         if st["a"]["state"] != "ready":
-            return self._seq_end("failed", "a_lost")
+            return self._seq_end("failed", "a_lost", seq)
         if seq["next"] == "b" and not ctx.busy and self._b_probe_due(ctx):
-            self._refresh_b_probe()
+            self._refresh_b_probe(seq)
         with self._seq_lock:
             if seq["state"] != "waiting_confirm":
                 return
             if seq["next"] == "b" and st["b"]["state"] == "ready":
-                seq.update(next="c", since=round(self.now(), 3))
+                self._skip_pending(seq, ("b_probe", "b"))
+                self._after_b(seq)
             elif seq["next"] == "c" and st["c"]["state"] == "ready":
-                self._seq_end("done", None)
+                self._skip_pending(seq, ("c_preflight", "c"))
+                self._after_c(seq)
 
-    def _refresh_b_probe(self) -> None:
+    def _refresh_b_probe(self, seq) -> None:
         """Make the check whether a gripper stack runs again while the guided
         start waits for B, so that B's start is there when the person comes to
         it. Optional: a busy lock, another operation, or a B that was started
         meanwhile are tried again at the next tick, never the sequence's end."""
         try:
-            self._locked("sequence_probe_b", self._do_probe_b)
+            self._seq_locked(
+                seq, "sequence_probe_b", self._do_probe_b, live=("waiting_confirm",)
+            )
         except stack.Refuse:
             pass
+
+    # -- the chain: B and C by the guided start ----------------------------------
+    def _chain_up(self, seq, ctx: Ctx, *keys) -> bool:
+        """Are the stages before this one still ready? A stage that cannot be
+        vouched for for a while (``unknown``) is waited for; one that is no
+        longer there ends the sequence (``a_lost``, ``b_lost``). The sequence
+        never goes on to B without A ready, nor to C without both."""
+        for key in keys:
+            state = ctx.states[key]["state"]
+            if state == "unknown":
+                return False
+            if state != "ready":
+                self._seq_end("failed", f"{key}_lost", seq)
+                return False
+        return True
+
+    def _chain_start(self, seq, key, back) -> None:
+        """Start B or C by the single start's own ``_do_start`` (every gate
+        again, under the machine-wide lock) with the confirmations recorded at
+        the request."""
+        with self._seq_lock:
+            if seq["state"] != "running":
+                return
+            # (a part that was ready or starting when the request was made has no
+            # entry; if it is not now, ``_do_start`` finds nothing ticked for it
+            # and refuses with ``attest_missing``)
+            attested = seq["_attests"].get(key)
+            body = {"request_id": seq.get("request_id")}
+        try:
+            started = self._seq_locked(
+                seq,
+                f"sequence_{key}",
+                lambda r: self._do_start(key, body, r, attested=attested),
+            )
+        except ActRefuse as refusal:
+            if refusal.code == "b_probe_started":
+                # (the check was too old after all: it is made, then B is tried
+                # again; nothing was started)
+                return self._goto(seq, back, how="pending")
+            raise
+        if started is not None:
+            with self._seq_lock:
+                seq[f"_started_{key}"] = True
+
+    def _seq_b_probe(self, seq, ctx: Ctx) -> None:
+        if not self._chain_up(seq, ctx, "a"):
+            return
+        if ctx.states["b"]["state"] in ("ready", "starting", "failed", "dead"):
+            # B is up (the person's own start) or its start has to say what
+            # became of it: no check to make
+            return self._goto(seq, "b", how="skipped")
+        op = seq.get("_probe_op")
+        if op is not None:
+            with self._op_lock:
+                state = op["state"]
+            if state == "running":
+                return
+            if state == "failed":
+                return self._seq_end("failed", "b_not_seen", seq)
+            return self._goto(seq, "b")
+        if not self._b_probe_due(ctx):
+            return self._goto(seq, "b")
+        if ctx.busy:
+            return
+        self._seq_locked(seq, "sequence_probe_b", self._do_probe_b, keep="_probe_op")
+
+    def _seq_b(self, seq, ctx: Ctx) -> None:
+        if not self._chain_up(seq, ctx, "a"):
+            return
+        b = ctx.states["b"]["state"]
+        if b == "ready":
+            with self._seq_lock:
+                if seq["state"] == "running":
+                    self._after_b(seq)
+            return
+        if b in ("failed", "dead"):
+            return self._seq_end("failed", f"b_{b}", seq)
+        if b == "starting":
+            return
+        if seq.get("_started_b"):
+            if b == "unknown":
+                return  # (cannot be vouched for for a while)
+            return self._seq_end("failed", "b_lost", seq)
+        self._chain_start(seq, "b", back="b_probe")
+
+    def _seq_c_preflight(self, seq, ctx: Ctx) -> None:
+        if not self._chain_up(seq, ctx, "a", "b"):
+            return
+        if ctx.states["c"]["state"] in ("ready", "starting", "failed", "dead"):
+            return self._goto(seq, "c", how="skipped")
+        op = seq.get("_pre_op")
+        if op is not None:
+            with self._op_lock:
+                state, code = op["state"], op["code"]
+            if state == "running":
+                return
+            if state == "done":
+                return self._goto(seq, "c")
+            listing = (ctx.c_pre or {}).get("controllers_state")
+            if (
+                code == "c_preflight_failed"
+                and listing in ("absent", "unknown")
+                and not seq.get("_pre_retried")
+            ):
+                # The listing of the gripper controllers did not answer (the
+                # first real run needed a second press): ask once more.
+                seq["_pre_retried"] = True
+                seq["_pre_op"] = None
+                return
+            return self._seq_end("failed", code or "c_preflight_failed", seq)
+        if ctx.busy:
+            return
+        self._seq_locked(
+            seq, "sequence_preflight_c", self._do_preflight_c, keep="_pre_op"
+        )
+
+    def _seq_c(self, seq, ctx: Ctx) -> None:
+        if not self._chain_up(seq, ctx, "a", "b"):
+            return
+        c = ctx.states["c"]["state"]
+        if c == "ready":
+            with self._seq_lock:
+                if seq["state"] == "running":
+                    self._after_c(seq)
+            return
+        if c in ("failed", "dead"):
+            return self._seq_end("failed", f"c_{c}", seq)
+        if c == "starting":
+            return
+        if seq.get("_started_c"):
+            if c == "unknown":
+                return
+            # (stopped by a person, or gone: it vanished after it was started)
+            return self._seq_end("failed", "c_dead", seq)
+        self._chain_start(seq, "c", back="c_preflight")
+
+    # -- the guided stop ("stop whole stack") ------------------------------------
+    def sequence_stop(self, body) -> dict:
+        """C, then A, then B, each by the single stop's own code and gates,
+        each gone before the next. It starts nothing, leaves M alone (the
+        marker's release already follows A's stop) and needs no control file."""
+        # The way out does not depend on the way in (RIG-04): a guided start that is
+        # still advancing ends FIRST, before the stop is judged. A stop-all the
+        # backend refuses (a corrupt record, a busy lock) must not leave the chain
+        # going on to start B and C. Every step of the chain re-checks under the
+        # machine lock, so only future steps are prevented.
+        self._end_live_start("superseded")
+        return self._write(
+            body, "sequence_stop", lambda r: self._seq_begin_stop(body, r)
+        )
+
+    def _end_live_start(self, reason) -> bool:
+        with self._seq_lock:
+            if self._seq.get("kind") == "start" and self._seq["state"] in (
+                "running",
+                "waiting_confirm",
+            ):
+                self._seq_end("cancelled", reason)
+                return True
+        return False
+
+    def _seq_begin_stop(self, body, r) -> dict:
+        given = body.get("attest") or {}
+        if unknown := sorted(k for k in given if k not in ATTEST_KEYS):
+            raise ActRefuse("attest_invalid", keys=", ".join(unknown))
+        ctx = self._context(r, holding=True)
+        rows = self.stop_all_blockers(ctx)  # (a stop that runs is one of them)
+        codes = _codes(rows)
+        refusing = [b for b in rows if b["code"] != "nothing_to_stop"]
+        if refusing:
+            raise ActRefuse(refusing[0]["code"], **refusing[0]["params"])
+        with self._seq_lock:
+            # A guided start that is running, or waiting for B or C, ends: it
+            # would start what this stops.
+            if self._seq.get("kind") == "start":
+                self._seq_end("cancelled", "superseded")
+            if "nothing_to_stop" in codes:
+                return {"done": "already_stopped"}
+            now = self.now()
+            self._seq = {
+                "state": "running",
+                "kind": "stop",
+                "step": SEQUENCE_STOP_STEPS[0],
+                "next": None,
+                "reason": None,
+                "since": round(now, 3),
+                "step_at": round(now, 3),
+                "begun_at": round(now, 3),
+                "request_id": body.get("request_id"),
+                "steps": [
+                    {
+                        "step": step,
+                        "terminal": step.removeprefix("stop_"),
+                        "state": "running" if n == 0 else "pending",
+                    }
+                    for n, step in enumerate(SEQUENCE_STOP_STEPS)
+                ],
+                "_issued": False,  # this step has sent its stop
+                "_op": None,  # ... and the operation it began
+            }
+        self._defer(self._ensure_ticker)
+        return {"done": "sequence_stop_started"}
+
+    def _step_stop(self, seq, ctx: Ctx) -> None:
+        """One look at the step of a guided stop that is running (the ticker
+        calls ``advance`` every ``SEQUENCE_TICK_S``). A step with nothing of
+        ours to stop is skipped at once; one that has is stopped by
+        ``_do_stop`` (its gates are the single stop's) and waited for until the
+        unit is gone. A failure ends the sequence there, with the reason; a
+        press on "stop whole stack" again starts over and skips what is gone.
+        Nothing here depends on a start's condition."""
+        while seq["state"] == "running":
+            key = seq["step"].removeprefix("stop_")
+            spec = ctx.specs.units[key] if ctx.specs else None
+            limit = (spec.stop_timeout_s if spec else stack_units.STOP_TIMEOUT_S) + (
+                STOP_STEP_SLACK_S
+            )
+            if self.now() - seq["step_at"] > limit:
+                return self._seq_end("failed", "step_timeout", seq)
+            op = seq["_op"]
+            if op is not None:
+                with self._op_lock:
+                    op_state = op["state"]
+                if op_state == "failed":
+                    return self._seq_end("failed", "stop_failed", seq)
+            if seq["_issued"]:
+                # Something was sent (a stop, or the acknowledge of a unit that
+                # had already failed): all that is asked now is whether the
+                # unit is gone. The unit's other evidence is not read again: a
+                # health file that goes on showing the hardware for a few
+                # seconds after A stopped would read as a part that is not ours.
+                # (A read taken just before the worker ended may still show the
+                # unit: look again at the next tick.)
+                if self._unit_gone(key, ctx):
+                    return self._stop_step_done(seq, "done")
+                return
+            refusing = [
+                b for b in self.stop_blockers(key, ctx) if b["level"] == "required"
+            ]
+            if refusing:
+                code = refusing[0]["code"]
+                return self._seq_end("failed", STOP_ALL_RENAMED.get(code, code), seq)
+            st = ctx.states[key]
+            if not st["owned"] and st["state"] in ("idle", "unknown"):
+                if key == "c" and st["state"] == "unknown":
+                    # Nothing of ours to stop, but whether anything else runs
+                    # there cannot be told: "nothing to stop" would be a guess,
+                    # and A is not stopped under a C that may be up. A stop of A
+                    # alone goes ahead with the warning; this one stops here.
+                    return self._seq_end("failed", "stop_c_unknown", seq)
+                if self._stop_step_done(seq, "skipped"):
+                    continue  # (nothing was asked of the machine: the same read serves)
+                return
+            if st["state"] == "stopping":
+                return  # (a stop is on its way: this one, or a person's)
+            return self._stop_step_issue(seq, key)
+
+    @staticmethod
+    def _unit_gone(key, ctx: Ctx) -> bool:
+        return (not ctx.states[key]["owned"]) and ctx.r["units"][key.upper()] is False
+
+    def _stop_step_issue(self, seq, key) -> None:
+        self._tls.stop_op = None
+        try:
+            answer = self._locked(
+                f"sequence_stop_{key}", lambda r: self._do_stop(key, {}, r)
+            )
+        except stack.Refuse as exc:
+            if exc.code not in TRANSIENT:
+                self._seq_end("failed", STOP_ALL_RENAMED.get(exc.code, exc.code), seq)
+            return
+        with self._seq_lock:
+            if seq["state"] == "running" and answer.get("done") != "already_stopped":
+                seq["_issued"] = True
+                seq["_op"] = self._tls.stop_op
+
+    def _stop_step_done(self, seq, how) -> bool:
+        """Close the step that is running and open the next (or end). False
+        when the sequence is no longer running (cancelled meanwhile)."""
+        with self._seq_lock:
+            if seq["state"] != "running":
+                return False
+            steps = seq["steps"]
+            here = next(n for n, i in enumerate(steps) if i["state"] == "running")
+            steps[here]["state"] = how
+            if here + 1 == len(steps):
+                seq.update(state="done", reason=None, step=None, next=None)
+                return True
+            steps[here + 1]["state"] = "running"
+            seq.update(
+                step=steps[here + 1]["step"],
+                step_at=round(self.now(), 3),
+                _issued=False,
+                _op=None,
+            )
+            return True
 
     # -- logs ---------------------------------------------------------------------
     def log(self, key, lines) -> dict:

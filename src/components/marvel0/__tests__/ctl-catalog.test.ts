@@ -4,7 +4,11 @@ import { join } from "path";
 import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
 import { NODE_LABEL } from "../chain-logic";
-import { COMP_STATES, SEQUENCE_STATES } from "../stack-act-logic";
+import {
+  COMP_STATES,
+  SEQUENCE_STATES,
+  SEQUENCE_STEP_STATES,
+} from "../stack-act-logic";
 import { RUN_STATES, ACTIONS } from "../run-logic";
 
 // The words the control page uses for what the backend sends by code. A code
@@ -76,6 +80,17 @@ describe("states, reasons, failures and ready lines", () => {
       expect(E[`marvel0.ctl.state.${state}`]).toBeTruthy();
     sameSet(family("marvel0.ctl.state."), [...COMP_STATES]);
     sameSet(family("marvel0.ctl.seq.state."), [...SEQUENCE_STATES]);
+    // The guided stop words the same states, and each step's own.
+    sameSet(family("marvel0.ctl.seq.stop_state."), [...SEQUENCE_STATES]);
+    sameSet(family("marvel0.ctl.seq.step_state."), [...SEQUENCE_STEP_STATES]);
+    sameSet(
+      [
+        ...act
+          .match(/\nSEQUENCE_STEP_STATES = \(([^)]*)\)/s)![1]
+          .matchAll(/"([a-z_]+)"/g),
+      ].map((m) => m[1]),
+      [...SEQUENCE_STEP_STATES],
+    );
     sameSet(family("marvel0.ctl.marker.state."), [
       "present",
       "absent",
@@ -96,9 +111,9 @@ describe("states, reasons, failures and ready lines", () => {
       expect(label in E && label in Z).toBe(true);
     // The backend has exactly these states.
     sameSet(
-      [...act.match(/STATES = \(([^)]*)\)/s)![1].matchAll(/"([a-z_]+)"/g)].map(
-        (m) => m[1],
-      ),
+      [
+        ...act.match(/\nSTATES = \(([^)]*)\)/s)![1].matchAll(/"([a-z_]+)"/g),
+      ].map((m) => m[1]),
       [...COMP_STATES],
     );
   });
@@ -217,9 +232,72 @@ describe("states, reasons, failures and ready lines", () => {
     const steps = [...act.matchAll(/def _seq_([a-z_]+)\(self, seq, ctx/g)].map(
       (m) => m[1],
     );
-    sameSet(family("marvel0.ctl.seq.step."), steps);
-    for (const reason of ["cancelled", "expired"])
+    // The guided stop's steps are `stop_<terminal>` in the backend's order.
+    const order = [
+      ...act.match(/\nSTOP_ORDER = \(([^)]*)\)/s)![1].matchAll(/"([a-z])"/g),
+    ].map((m) => m[1]);
+    expect(order).toEqual(["c", "a", "b"]);
+    sameSet(family("marvel0.ctl.seq.step."), [
+      ...steps,
+      ...order.map((key) => `stop_${key}`),
+    ]);
+    for (const reason of ["cancelled", "expired", "superseded", "step_timeout"])
       expect(`marvel0.ctl.seq.reason.${reason}` in E).toBe(true);
+    // Every reason a guided start or stop can end with has its sentence, in
+    // both languages (its own family, or the refusals'): the page never shows a
+    // bare code, and no sentence is left over for a reason the backend lost.
+    const reasons = [
+      ...act
+        .match(/\nSEQUENCE_REASONS = \(([^)]*)\)/s)![1]
+        .matchAll(/"([a-z_]+)"/g),
+    ].map((m) => m[1]);
+    expect(reasons.length).toBeGreaterThan(20);
+    for (const reason of reasons)
+      expect([
+        reason,
+        ["marvel0.ctl.seq.reason.", "marvel0.ctl.block."].some(
+          (prefix) => `${prefix}${reason}` in E && `${prefix}${reason}` in Z,
+        ),
+      ]).toEqual([reason, true]);
+    for (const key of family("marvel0.ctl.seq.reason."))
+      expect([
+        key,
+        [
+          ...reasons,
+          "stop_left_processes",
+          "stop_all_client_connected",
+          "stop_c_unknown",
+        ],
+      ]).toEqual([key, expect.arrayContaining([key])]);
+    // The steps of a start through C, in the order the backend runs them.
+    const chain = [
+      ...act.match(/\nA_STEPS = \(([^)]*)\)/s)![1].matchAll(/"([a-z_]+)"/g),
+      ...act.match(/\nCHAIN_STEPS = \(([^)]*)\)/s)![1].matchAll(/"([a-z_]+)"/g),
+    ].map((m) => m[1]);
+    expect(chain).toEqual([
+      "monitor",
+      "probe",
+      "marker",
+      "wait",
+      "arm",
+      "await_a",
+      "b_probe",
+      "b",
+      "c_preflight",
+      "c",
+    ]);
+    sameSet(family("marvel0.ctl.seq.chain."), chain);
+    // A stop ends with the single stop's own refusal code, worded by the
+    // refusals' family, or by the sequence's own where the code has facts.
+    for (const code of [
+      "stop_failed",
+      "not_ours",
+      "unit_foreign",
+      "stop_c_first",
+    ])
+      expect(`marvel0.ctl.block.${code}` in E).toBe(true);
+    for (const code of ["stop_all_client_connected", "stop_left_processes"])
+      expect(`marvel0.ctl.seq.reason.${code}` in E).toBe(true);
   });
 });
 
