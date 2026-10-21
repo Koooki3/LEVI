@@ -34,6 +34,7 @@ import {
   IdleBannerView,
   Marvel0CardView,
 } from "@/components/marvel0/marvel0-card";
+import { AutonomyStep } from "@/components/marvel0/autonomy-step";
 import { Marvel0Actions } from "@/components/marvel0/marvel0-actions";
 import {
   marvel0View,
@@ -152,6 +153,9 @@ export default function Marvel0Page() {
             runActions={runActions}
             onDeploy={setDeploy}
           />
+          {/* Step 5: prepare, start and drive the AERI loop (off until the
+              control file says so; only one of it and the client at a time). */}
+          <AutonomyStep evalLive={ownRunLive} />
           {host && (
             <details
               className="rg-host"

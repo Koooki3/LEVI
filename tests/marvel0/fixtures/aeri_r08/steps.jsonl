@@ -1,0 +1,13 @@
+{"step": 1, "key": "preflight", "ok": null, "wall_ns": 1792321207099531609}
+{"step": 1, "key": "gpu", "ok": true, "free": 25113, "need": 9021, "policy": 7600, "vlm": 1421, "wall_ns": 1792321207113839326}
+{"step": 1, "key": "mem", "ok": true, "mem": 87.60272216796875, "need": 28.0, "wall_ns": 1792321207116228328}
+{"step": 1, "key": "ports", "ok": true, "ports": "8000, 8100", "wall_ns": 1792321207119657108}
+{"step": 2, "key": "vlm_start", "ok": null, "wall_ns": 1792321207120694212}
+{"step": 2, "key": "vlm_ready", "ok": true, "unit": "levi-aeri-vlm-8100", "pid": 1281473, "mib": 0, "wall_ns": 1792321207691101911}
+{"step": 3, "key": "vlm_sleep", "ok": null, "wall_ns": 1792321207692522637}
+{"step": 3, "key": "vlm_asleep", "ok": true, "level": 1, "mem": 87.58152389526367, "wall_ns": 1792321207700892337}
+{"step": 4, "key": "policy_ready", "ok": true, "used": 15087, "wall_ns": 1792321215458470979}
+{"step": 5, "key": "inventory", "ok": null, "wall_ns": 1792321215459938344}
+{"step": 6, "key": "rounds", "ok": null, "wall_ns": 1792321215460936405}
+{"step": 7, "key": "shutdown", "ok": null, "wall_ns": 1792322849702630569}
+{"step": 7, "key": "released", "ok": true, "stopped": "levi-aeri-vlm-8100", "left": [], "used": 7494, "baseline": 7494, "wall_ns": 1792322849758962690}

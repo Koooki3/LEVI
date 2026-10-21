@@ -1,0 +1,398 @@
+/* Step 5 of the marvel0 page: the autonomy system (autonomy-step.tsx and the
+ * cards under it). Colours are the --ds-* tokens only; nothing is hard-coded.
+ * Colour carries state and never alone: an arm that moves has a warning edge,
+ * a line of words and an icon; Stop is the page's danger colour. The cards
+ * reuse the marvel0's own classes (marvel0-styles.css: rg-card, rg-block,
+ * rg-facts, rg-log, rg-command, rg-run__meta, rg-hold__caption); only what
+ * this step adds is here. At a phone's width (420 px) everything is one column,
+ * every button is at least 48 px high, and Stop stays at the top of the card. */
+.rg-autonomy__cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-4);
+}
+.rg-arun,
+.rg-aprepare {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+.rg-arun .ds-card__header,
+.rg-aprepare .ds-card__header {
+  flex-wrap: wrap;
+}
+.rg-arun .ds-card__header > div:first-child,
+.rg-aprepare .ds-card__header > div:first-child {
+  flex: 1 1 14rem;
+}
+.rg-arun__who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2) var(--ds-space-3);
+  margin: 0;
+}
+.rg-arun__status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+.rg-arun__hint {
+  margin: 0;
+  font-size: var(--ds-text-callout-size);
+  font-weight: var(--ds-weight-medium);
+  overflow-wrap: anywhere;
+}
+.rg-arun__cli code {
+  overflow-wrap: anywhere;
+}
+
+/* The line D is waiting on, quoted from its screen. */
+.rg-page .rg-aprompt {
+  margin: 0;
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border-left: 3px solid var(--ds-separator-strong);
+  border-radius: var(--ds-radius-xs);
+  background: var(--ds-surface-sunken);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* Stop: the whole row, 64 px high, in a place that does not move; the only
+ * solid danger button of the card. Sticky at the top of the card on a phone. */
+.rg-astop {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-3);
+  border: 1px solid var(--ds-danger);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-danger-bg);
+}
+.rg-astop[data-mode="sent"],
+.rg-astop[data-mode="acked"],
+.rg-astop[data-mode="spent"] {
+  border-color: var(--ds-warning);
+  background: var(--ds-warning-bg);
+}
+.rg-arun .rg-astop__btn {
+  width: 100%;
+  min-height: 64px;
+  font-size: var(--ds-text-title-3-size);
+}
+
+/* Progress of the rounds, from D's journal. */
+.rg-aprogress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+.rg-page .rg-aprogress__facts {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The objects the vision model listed. */
+.rg-ainv {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+.rg-atable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--ds-text-callout-size);
+}
+.rg-atable th,
+.rg-atable td {
+  padding: var(--ds-space-1) var(--ds-space-3) var(--ds-space-1) 0;
+  border-bottom: 1px solid var(--ds-separator);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.rg-atable th {
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-medium);
+}
+
+/* What a WAIT needs from a person, above the key that asks to resume. */
+.rg-await {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+
+/* The keys. */
+.rg-akeys {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+.rg-akeys__cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ds-space-3);
+}
+.rg-akeys__col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  min-width: 0;
+  /* A key is read as a sentence: not a line of the full width of a wide screen. */
+  max-width: 46rem;
+}
+/* The step after the first one sits apart: another column where there is
+ * room, a block of its own under a line of words where there is not. */
+.rg-akeys__col--second {
+  padding: var(--ds-space-3);
+  border: 1px dashed var(--ds-separator-strong);
+  border-radius: var(--ds-radius-md);
+}
+.rg-page .rg-akeys__second {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+@media (min-width: 720px) {
+  .rg-akeys__cols--two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.rg-akey {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+.rg-akey .rg-akey__btn {
+  width: 100%;
+  min-height: 48px;
+  justify-content: flex-start;
+  text-align: left;
+}
+/* An arm that moves: a warning edge, with the line of words under the button
+ * and its icon. */
+.rg-akey .rg-akey__btn--moves {
+  border-left: 4px solid var(--ds-warning);
+}
+.rg-akey .rg-akey__btn .ds-kbd {
+  flex: none;
+  min-width: 3.5rem;
+  justify-content: center;
+  text-align: center;
+}
+.rg-akey .rg-akey__btn .ds-btn__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  text-align: left;
+}
+.rg-akey__label {
+  overflow-wrap: anywhere;
+}
+.rg-page .rg-akey__note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--ds-space-3);
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-akey__moves {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+  color: var(--ds-warning);
+  font-weight: var(--ds-weight-medium);
+}
+.rg-akey[data-mode="locked"] .rg-akey__state {
+  color: var(--ds-text-primary);
+  font-weight: var(--ds-weight-medium);
+}
+.rg-akey[data-lock="unseen"] .rg-akey__state {
+  color: var(--ds-danger);
+}
+.rg-akey__state {
+  overflow-wrap: anywhere;
+}
+/* The three homing confirmations, so that the place in the three is seen. */
+.rg-ahome {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rg-ahome li {
+  padding: var(--ds-space-1) var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-ahome li[aria-current="step"] {
+  border-color: var(--ds-warning);
+  background: var(--ds-warning-bg);
+  color: var(--ds-text-primary);
+  font-weight: var(--ds-weight-medium);
+}
+.rg-ahome li[data-done] {
+  color: var(--ds-text-secondary);
+  text-decoration: line-through;
+}
+.rg-akeys__lock {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+
+/* The agent's queue, D's screen, the clicks, the end. */
+.rg-page .rg-aqueue {
+  margin: 0;
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-sunken);
+  font-size: var(--ds-text-callout-size);
+}
+.rg-ascreen .rg-log {
+  max-height: 18rem;
+}
+.rg-ahist__list {
+  margin: 0;
+  padding-left: var(--ds-space-5);
+  font-size: var(--ds-text-caption-size);
+  font-variant-numeric: tabular-nums;
+}
+.rg-aended {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  padding-top: var(--ds-space-3);
+  border-top: 1px solid var(--ds-separator);
+}
+.rg-aend__link {
+  align-self: flex-start;
+  min-height: 48px;
+  text-decoration: none;
+}
+.rg-aend {
+  margin-top: 0;
+}
+
+/* Readiness rows: the refusals first. */
+.rg-aready {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+.rg-aready__list {
+  list-style: none;
+  margin: 0;
+  padding: var(--ds-space-2) var(--ds-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-sunken);
+  font-size: var(--ds-text-callout-size);
+  overflow-wrap: anywhere;
+}
+.rg-aready__list li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ds-space-2);
+}
+.rg-aready__list svg {
+  flex: none;
+  margin-top: 0.2em;
+}
+.rg-aready__list li[data-level="ok"] svg {
+  color: var(--ds-success);
+}
+.rg-aready__list li[data-level="warn"] svg {
+  color: var(--ds-warning);
+}
+.rg-aready__list li[data-level="refuse"] svg {
+  color: var(--ds-danger);
+}
+.rg-aready__list li[data-level="unknown"] svg {
+  color: var(--ds-text-tertiary);
+}
+.rg-aready__level {
+  font-weight: var(--ds-weight-medium);
+}
+
+/* The form and the prepared run. */
+.rg-aform,
+.rg-aprep,
+.rg-astopunits {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  padding-top: var(--ds-space-3);
+  border-top: 1px solid var(--ds-separator);
+}
+/* The three numbers of the form side by side where there is room. */
+.rg-aform__nums {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--ds-space-3) var(--ds-space-4);
+  align-items: start;
+}
+.rg-astopunits .ds-btn {
+  align-self: flex-start;
+}
+.rg-afactsfold .rg-afacts {
+  margin-top: var(--ds-space-2);
+}
+.rg-aprep__cmd {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+
+/* A phone: one column, the objects as stacked rows, buttons at least 48 px. */
+@media (max-width: 639px) {
+  .rg-atable thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .rg-atable tr {
+    display: block;
+    padding: var(--ds-space-2) 0;
+    border-bottom: 1px solid var(--ds-separator);
+  }
+  .rg-atable td {
+    display: flex;
+    gap: var(--ds-space-3);
+    border-bottom: 0;
+    padding: 0;
+  }
+  .rg-atable td::before {
+    content: attr(data-label);
+    flex: 0 0 5.5rem;
+    color: var(--ds-text-tertiary);
+  }
+  /* Under the sticky bar of the shell (its height is --levi-sticky-top). */
+  .rg-arun .rg-astop {
+    position: sticky;
+    top: calc(var(--levi-sticky-top, 56px) + var(--ds-space-2));
+    z-index: var(--ds-z-dock);
+  }
+  .rg-arun .ds-btn,
+  .rg-aprepare .ds-btn {
+    min-height: 48px;
+  }
+}

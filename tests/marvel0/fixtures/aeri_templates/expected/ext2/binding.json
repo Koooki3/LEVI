@@ -1,0 +1,111 @@
+{
+  "schema": "levi.aeri.fr3.binding.v1",
+  "openpi_root": "/home/marvel/work/wenkai/openpi",
+  "robot_url": "http://127.0.0.1:5000/",
+  "health_file": "/home/marvel/work/franka_control/run/fr3_health.json",
+  "cameras": {
+    "side": "262622274256",
+    "wrist": "262622275490"
+  },
+  "safety": {
+    "min_z": 0.05325,
+    "max_xy": 0.85,
+    "max_step_m": 0.1,
+    "max_step_rad": 0.35,
+    "home_pose": [
+      0.481902,
+      -0.011145,
+      0.235951,
+      3.119139,
+      0.008288,
+      -0.883962
+    ],
+    "home_duration_s": 3.0,
+    "home_tolerance_mm": 10.0,
+    "rx_range": [
+      1.5,
+      4.03
+    ],
+    "ry_range": [
+      -0.74,
+      0.96
+    ],
+    "rz_range": [
+      -2.44,
+      0.77
+    ],
+    "binarize_gripper": true,
+    "gripper_confirm_timeout_s": 4.0
+  },
+  "policies": {
+    "forward": {
+      "host": "127.0.0.1",
+      "port": 8000
+    }
+  },
+  "policy_swap": {
+    "schema": "levi.aeri.fr3.policy_swap.v1",
+    "services": {
+      "forward": {
+        "unit": "levi-aeri-policy-forward",
+        "argv": [
+          "/home/marvel/work/wenkai/openpi/.venv/bin/python",
+          "scripts/serve_policy.py",
+          "--port",
+          "8000",
+          "policy:checkpoint",
+          "--policy.config",
+          "pi05_fr3_all_state",
+          "--policy.dir",
+          "/home/marvel/work/wenkai/openpi/checkpoints/pi05_fr3_all_step49999"
+        ],
+        "working_directory": "/home/marvel/work/wenkai/openpi",
+        "mem_fraction": 0.22
+      }
+    },
+    "vision_mem_fraction": 0.7,
+    "max_total_fraction": 0.98,
+    "gpu_margin_mib": 1024,
+    "stop_timeout_s": 60,
+    "start_timeout_s": 300,
+    "handshake_timeout_s": 30,
+    "warmup_timeout_s": 120,
+    "start_retries": 1,
+    "still_window_ms": 500,
+    "still_tolerance_mm": 1.0,
+    "still_tolerance_rad": 0.01
+  },
+  "subtask_vlm": {
+    "base_url": "http://127.0.0.1:8100",
+    "model": "agent",
+    "service": {
+      "unit": "levi-aeri-vlm-8100",
+      "argv": [
+        "/usr/bin/python3",
+        "{X}/tools/agent_vlm_bridge.py",
+        "serve",
+        "agent-bridge",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8100",
+        "--served-model-name",
+        "agent",
+        "--max-model-len",
+        "16384",
+        "--gpu-memory-utilization",
+        "0.01",
+        "--queue",
+        "{X}/runs/aeri-20261021-ext-r02/queue",
+        "--answer-timeout-s",
+        "540"
+      ],
+      "env": {
+        "PATH": "/usr/local/bin:/usr/bin:/bin"
+      },
+      "gpu_lock": "/home/marvel/work/wenkai/LEVI/lab/levi-hub/.gpu.lock",
+      "need_policy_mib": 7600,
+      "ready_timeout_s": 1800
+    }
+  }
+}

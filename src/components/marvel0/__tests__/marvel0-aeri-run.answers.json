@@ -1,0 +1,339 @@
+{
+  "answers": {
+    "challenge": {
+      "challenge": "challenge-xxxxxxxxxxxxxxxx",
+      "expires_at": 1792549895.0,
+      "name": "aeri-20261021-ext-r01",
+      "purpose": "start",
+      "readiness_sha256": "snap-0001",
+      "schema": "levi.marvel0.aeri_run_result.v1",
+      "ttl_s": 30.0
+    },
+    "key": {
+      "accepted": true,
+      "action": "release_round",
+      "byte": "Enter",
+      "evidence": "pending",
+      "prompt_id": "release:3447",
+      "schema": "levi.marvel0.aeri_run_result.v1",
+      "sent_at": "2026-10-21T10:31:05+08:00",
+      "state_seq": 2
+    },
+    "log": {
+      "bytes": 3544,
+      "lines": [
+        "  red_pepper_1：red pepper，在 blue_plate_1，可抓取",
+        "  purple_eggplant_1：purple eggplant，在 blue_plate_1，可抓取",
+        "[准备] 清单对就按 y 确认，不对按 n（运行转人工等待）；q 结束运行",
+        "[准备] 清单已确认，冻结为白名单",
+        "第 1/5 轮：确认场景就绪后按 Enter 放行本轮正向子任务循环；q 结束运行"
+      ],
+      "schema": "levi.marvel0.aeri_run_log.v1"
+    },
+    "start": {
+      "accepted": true,
+      "name": "aeri-20261021-ext-r01",
+      "request_id": "req-000001-test",
+      "run_id": "20261021T101500-a1b2c3",
+      "schema": "levi.marvel0.aeri_run_result.v1",
+      "state": "launching",
+      "state_seq": 0
+    },
+    "stop": {
+      "accepted": true,
+      "phase": "sent",
+      "schema": "levi.marvel0.aeri_run_result.v1",
+      "via": "pty"
+    }
+  },
+  "refusals": {
+    "aeri_disabled": {
+      "detail": {
+        "code": "aeri_disabled",
+        "message": "AERI hosting is off in the control file"
+      },
+      "status": 403
+    },
+    "attest_required": {
+      "detail": {
+        "code": "attest_required",
+        "message": "Tick every item of the checklist"
+      },
+      "status": 400
+    },
+    "busy": {
+      "detail": {
+        "code": "busy",
+        "message": "Another action on the run is going on"
+      },
+      "status": 423
+    },
+    "challenge_expired": {
+      "detail": {
+        "code": "challenge_expired",
+        "message": "The confirmation token expired"
+      },
+      "status": 410
+    },
+    "challenge_invalid": {
+      "detail": {
+        "code": "challenge_invalid",
+        "message": "Ask for a new confirmation token"
+      },
+      "status": 400
+    },
+    "challenge_stale": {
+      "detail": {
+        "code": "challenge_stale",
+        "message": "The run or the readiness changed since the token was issued"
+      },
+      "status": 409
+    },
+    "challenge_used": {
+      "detail": {
+        "code": "challenge_used",
+        "message": "The confirmation token was already used"
+      },
+      "status": 409
+    },
+    "check_failed": {
+      "detail": {
+        "code": "check_failed",
+        "message": "aeri.py check refused"
+      },
+      "status": 422
+    },
+    "code_pin_mismatch": {
+      "detail": {
+        "code": "code_pin_mismatch",
+        "message": "The AERI worktree is not at the pinned commit or is dirty"
+      },
+      "status": 412
+    },
+    "confirm_mismatch": {
+      "detail": {
+        "code": "confirm_mismatch",
+        "message": "The phrase does not match"
+      },
+      "status": 400
+    },
+    "confirm_required": {
+      "detail": {
+        "code": "confirm_required",
+        "message": "Type the phrase shown",
+        "phrase": "start aeri aeri-20261021-ext-r01"
+      },
+      "status": 400
+    },
+    "d_active": {
+      "detail": {
+        "code": "d_active",
+        "message": "A hosted run is live"
+      },
+      "status": 409
+    },
+    "d_gone": {
+      "detail": {
+        "code": "d_gone",
+        "message": "Terminal D is not running"
+      },
+      "status": 409
+    },
+    "driven_elsewhere": {
+      "detail": {
+        "code": "driven_elsewhere",
+        "message": "Another terminal drives this run name"
+      },
+      "status": 409
+    },
+    "end_not_allowed": {
+      "detail": {
+        "code": "end_not_allowed",
+        "message": "D can still wrap up"
+      },
+      "status": 409
+    },
+    "key_failed": {
+      "detail": {
+        "code": "key_failed",
+        "message": "The key could not be written"
+      },
+      "status": 500
+    },
+    "key_sent": {
+      "detail": {
+        "code": "key_sent",
+        "message": "A key was already sent for this prompt"
+      },
+      "status": 409
+    },
+    "key_too_soon": {
+      "detail": {
+        "code": "key_too_soon",
+        "message": "Too soon after the button appeared or the last key",
+        "wait_s": 1.2
+      },
+      "status": 429
+    },
+    "key_unconfirmed": {
+      "detail": {
+        "code": "key_unconfirmed",
+        "message": "The last key was not seen taken; nothing is resent"
+      },
+      "status": 409
+    },
+    "live_service_running": {
+      "detail": {
+        "code": "live_service_running",
+        "message": "The live service holds :8100"
+      },
+      "status": 409
+    },
+    "monitor_not_green": {
+      "detail": {
+        "code": "monitor_not_green",
+        "message": "The health monitor is not fresh and green"
+      },
+      "status": 409
+    },
+    "not_prepared": {
+      "detail": {
+        "code": "not_prepared",
+        "message": "No prepared run of that name",
+        "name": "aeri-20261021-ext-r09"
+      },
+      "status": 412
+    },
+    "not_product": {
+      "detail": {
+        "code": "not_product",
+        "message": "Only the product LEVI may do this"
+      },
+      "status": 403
+    },
+    "not_settled": {
+      "detail": {
+        "code": "not_settled",
+        "message": "The sources have not agreed for a second yet"
+      },
+      "status": 409
+    },
+    "prepared_changed": {
+      "detail": {
+        "code": "prepared_changed",
+        "message": "The job, binding or RUN.json changed since it was prepared",
+        "what": "job.yaml"
+      },
+      "status": 409
+    },
+    "presence_stale": {
+      "detail": {
+        "code": "presence_stale",
+        "message": "This tab has not reported for 15 s"
+      },
+      "status": 409
+    },
+    "profile_unknown": {
+      "detail": {
+        "code": "profile_unknown",
+        "message": "The pinned AERI code has no known prompt profile",
+        "profile": "somebody-elses"
+      },
+      "status": 412
+    },
+    "readiness_failed": {
+      "detail": {
+        "code": "readiness_failed",
+        "first": "ports_free",
+        "message": "A readiness row refuses (unknown refuses too)"
+      },
+      "status": 409
+    },
+    "request_id_invalid": {
+      "detail": {
+        "code": "request_id_invalid",
+        "message": "request_id is 8-80 characters of A-Z a-z 0-9 . _ : -"
+      },
+      "status": 400
+    },
+    "request_id_used": {
+      "detail": {
+        "code": "request_id_used",
+        "message": "This request_id was used for a different request"
+      },
+      "status": 409
+    },
+    "run_name_taken": {
+      "detail": {
+        "code": "run_name_taken",
+        "message": "The run name exists in a registry",
+        "name": "aeri-20261021-ext-r01"
+      },
+      "status": 409
+    },
+    "screen_drift": {
+      "detail": {
+        "code": "screen_drift",
+        "message": "The terminal's wording is not the one this page knows"
+      },
+      "status": 409
+    },
+    "signal_failed": {
+      "detail": {
+        "code": "signal_failed",
+        "message": "The signal could not be sent"
+      },
+      "status": 500
+    },
+    "stale_page": {
+      "detail": {
+        "code": "stale_page",
+        "message": "The page's view is not the current prompt"
+      },
+      "status": 409
+    },
+    "start_failed": {
+      "detail": {
+        "code": "start_failed",
+        "message": "The launch failed"
+      },
+      "status": 500
+    },
+    "state_not_allowed": {
+      "detail": {
+        "code": "state_not_allowed",
+        "message": "This key is not offered now",
+        "state": "forward_running"
+      },
+      "status": 409
+    },
+    "stop_spent": {
+      "detail": {
+        "code": "stop_spent",
+        "message": "Stop was already sent for this run"
+      },
+      "status": 409
+    },
+    "swap_unclean": {
+      "detail": {
+        "code": "swap_unclean",
+        "message": "D asks for the policy-switch phrase: use the variant key"
+      },
+      "status": 409
+    },
+    "templates_changed": {
+      "detail": {
+        "code": "templates_changed",
+        "message": "A template does not match SOURCES.sha256"
+      },
+      "status": 412
+    },
+    "verdict_once": {
+      "detail": {
+        "code": "verdict_once",
+        "message": "One verdict per round"
+      },
+      "status": 409
+    }
+  }
+}

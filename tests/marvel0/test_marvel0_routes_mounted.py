@@ -11,6 +11,7 @@ scripted one of ``test_marvel0_run.py``."""
 import warnings
 
 import pytest
+from aeri_machine import AeriMachine
 from fastapi.openapi.utils import get_openapi
 from fastapi.testclient import TestClient
 from site_sample import write_site
@@ -28,7 +29,7 @@ from test_marvel0_stack import Machine as StackMachine
 # the first request read the machine at import time (huggingface_hub reads the
 # boot id), which the guard of test_marvel0_deploy.py forbids during a test.
 from levi.agent import legacy, security  # noqa: F401
-from levi.marvel0 import api, deploy_api, run_api, stack_api
+from levi.marvel0 import aeri_run_api, api, deploy_api, run_api, stack_api
 from levi.service import app
 
 TOKEN = "test-ui-token"
@@ -76,6 +77,20 @@ ROUTES = [
     ("POST", f"{BASE}/run/hold"),
     ("POST", f"{BASE}/run/end"),
     ("GET", f"{BASE}/run/log"),
+    # The AERI preparation card (``aeri_api.py``).
+    ("GET", f"{BASE}/aeri"),
+    ("POST", f"{BASE}/aeri/prepare"),
+    ("POST", f"{BASE}/aeri/live/stop"),
+    ("POST", f"{BASE}/aeri/leftovers/stop"),
+    # The hosted AERI terminal D (``aeri_run_api.py``).
+    ("GET", f"{BASE}/aeri/run"),
+    ("POST", f"{BASE}/aeri/run/challenge"),
+    ("POST", f"{BASE}/aeri/run/start"),
+    ("POST", f"{BASE}/aeri/run/key"),
+    ("POST", f"{BASE}/aeri/run/stop"),
+    ("POST", f"{BASE}/aeri/run/end"),
+    ("POST", f"{BASE}/aeri/run/presence"),
+    ("GET", f"{BASE}/aeri/run/log"),
 ]
 # Every route that changes something: a person's, never a Bearer credential's.
 WRITES = [
@@ -102,7 +117,43 @@ def service(tmp_path, monkeypatch):
     (tmp_path / "locks").write_text("")
     runner.host.locks_path = str(tmp_path / "locks")
     monkeypatch.setattr(run_api, "supervisor", lambda: runner.sup)
+    # The hosted AERI terminal D's supervisor, likewise on a scripted machine.
+    (tmp_path / "aeri").mkdir()
+    aeri_machine = AeriMachine(tmp_path / "aeri", monkeypatch)
+    aeri_machine.host.locks_path = str(tmp_path / "locks")
+    monkeypatch.setattr(aeri_run_api, "supervisor", lambda: aeri_machine.sup)
     return TestClient(app), marvel0
+
+
+def aeri_payload(path):
+    """The closed bodies of the hosted AERI terminal D's routes."""
+    name = "aeri-20261021-ext-r01"
+    request = {"request_id": "req-mounted-1"}
+    if path.endswith("/challenge"):
+        return {"purpose": "start", "name": name}
+    if path.endswith("/start"):
+        attest = {k: True for k in ("estop", "scene_ok", "area_clear", "arm_home")}
+        return {
+            **request,
+            "name": name,
+            "challenge": "x",
+            "confirm": "y",
+            "attest": attest,
+        }
+    if path.endswith("/key"):
+        seen = {"run_id": "r", "state_seq": 1, "prompt_id": "release:1"}
+        return {
+            **request,
+            "action": "release_round",
+            "seen": seen,
+            "token": "t",
+            "tab_id": "tab-00000001",
+        }
+    if path.endswith("/end"):
+        return {**request, "confirm": "not the phrase"}
+    if path.endswith("/presence"):
+        return {"tab_id": "tab-00000001", "visible": True}
+    return request
 
 
 def payload(path):
@@ -122,7 +173,21 @@ def payload(path):
         return {"request_id": "req-mounted-1"}
     if path.endswith("/run/end"):
         return {"request_id": "req-mounted-1", "confirm": "not the phrase"}
+    if "/aeri/run/" in path:
+        return aeri_payload(path)
     if "/stack/" in path:
+        return {"request_id": "req-mounted-1", "confirm": "not the phrase"}
+    if path.endswith("/aeri/prepare"):
+        return {
+            "request_id": "req-mounted-1",
+            "mode": "external",
+            "task": "pick the pepper into the white plate",
+            "rounds": 5,
+            "steps": 200,
+            "start_home": False,
+            "confirm": "not the phrase",
+        }
+    if "/aeri/" in path:
         return {"request_id": "req-mounted-1", "confirm": "not the phrase"}
     if path.endswith("/stop"):
         return STOP
@@ -177,7 +242,10 @@ def test_a_route_answers_with_the_token(service, method, path):
     if response.status_code == 403:
         # No control file here, so starting is switched off: an answer of its
         # own. Any other 403 would be the person check, which a token passes.
-        assert response.json()["detail"]["code"] == "control_disabled", response.text
+        assert response.json()["detail"]["code"] in (
+            "control_disabled",
+            "aeri_disabled",
+        ), response.text
 
 
 @pytest.mark.parametrize("method, path", WRITES)

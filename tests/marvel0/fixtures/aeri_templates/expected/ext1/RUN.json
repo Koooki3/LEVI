@@ -1,0 +1,11 @@
+{
+ "name": "aeri-20261021-ext-r01",
+ "mode": "external",
+ "task": "pick the pepper into the white plate",
+ "rounds": 5,
+ "steps": 200,
+ "plan_sha256": "631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537",
+ "binding_sha256": "b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
+ "execute": "cd {OPENPI} && env -u VIRTUAL_ENV PYTHONPATH={WT} uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B {WT}/scripts/aeri.py execute --config {X}/runs/aeri-20261021-ext-r01/job.yaml --binding {X}/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
+ "confirm": "execute aeri-20261021-ext-r01"
+}

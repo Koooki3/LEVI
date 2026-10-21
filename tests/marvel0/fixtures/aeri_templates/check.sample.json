@@ -1,0 +1,30 @@
+{
+  "plan_sha256": "631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537",
+  "binding_sha256": "b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
+  "reset_strategy": "subtask_loop",
+  "hardware_verified": false,
+  "event_source": "files",
+  "signal_events": null,
+  "policy_swap": {
+    "units": {
+      "forward": "levi-aeri-policy-forward"
+    },
+    "ports": {
+      "forward": 8000
+    },
+    "mem_fraction": {
+      "forward": 0.22
+    },
+    "vision_mem_fraction": 0.7,
+    "max_total_fraction": 0.98,
+    "timeouts_s": {
+      "stop": 60.0,
+      "start": 300.0,
+      "handshake": 30.0,
+      "warmup": 120.0
+    },
+    "start_retries": 1,
+    "at_most_one_policy_service": true,
+    "services_started_by_check": false
+  }
+}

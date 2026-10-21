@@ -76,6 +76,9 @@ marker_wait_s      = 60                          # 45 to 600: heavy jobs are cle
 
 [client]
 enabled            = false                      # true: the page may host the evaluation client
+
+[aeri]
+enabled            = false                      # true: the page may prepare and host an AERI run (the site file's [aeri] names the code)
 """
 
 
@@ -114,10 +117,20 @@ class ClientControl:
 
 
 @dataclass(frozen=True)
+class AeriControl:
+    enabled: bool = False
+
+
+@dataclass(frozen=True)
 class ControlSite:
     stack: StackControl
     client: ClientControl
     origin: str = "main_checkout"
+    # The AERI switch. A malformed ``[aeri]`` section leaves it off and lists
+    # ``(field, code)`` in ``aeri_errors``; it never switches the stack or the
+    # client off, and nothing here can switch it on.
+    aeri: AeriControl = AeriControl()
+    aeri_errors: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -211,6 +224,31 @@ STACK_CHECKS = {
 # The machine values a switched-on stack cannot do without.
 STACK_NEEDED = ("franka_control", "robot_ip", "com_port", "reset_joint_target")
 CLIENT_CHECKS = {"enabled": _flag}
+AERI_CHECKS = {"enabled": _flag}
+
+
+def _aeri_section(data):
+    """``(AeriControl, errors)`` of ``[aeri]``. Absent means off; anything
+    that is not exactly ``enabled = <bool>`` means off with the errors listed."""
+    if "aeri" not in data:
+        return AeriControl(), ()
+    table = data["aeri"]
+    if not isinstance(table, dict):
+        return AeriControl(), (("aeri", "type"),)
+    errors = []
+    out = {}
+    for key, value in table.items():
+        check = AERI_CHECKS.get(key)
+        if check is None:
+            errors.append((f"aeri.{key}", "unknown_key"))
+            continue
+        try:
+            out[key] = check(value)
+        except _Bad as exc:
+            errors.append((f"aeri.{key}", exc.code))
+    if errors:
+        return AeriControl(), tuple(errors)
+    return AeriControl(**out), ()
 
 
 def _section(data, name, checks, errors):
@@ -245,7 +283,7 @@ def parse(data, origin="main_checkout") -> ControlSite:
     elif data["schema"] != SCHEMA:
         errors.append({"field": "schema", "code": "range"})
     for key in data:
-        if key not in ("schema", "stack", "client"):
+        if key not in ("schema", "stack", "client", "aeri"):
             errors.append({"field": key, "code": "unknown_key"})
     stack = _section(data, "stack", STACK_CHECKS, errors)
     client = _section(data, "client", CLIENT_CHECKS, errors)
@@ -257,7 +295,14 @@ def parse(data, origin="main_checkout") -> ControlSite:
         )
     if errors:
         raise ControlSiteError(errors)
-    return ControlSite(StackControl(**stack), ClientControl(**client), origin)
+    aeri, aeri_errors = _aeri_section(data)
+    return ControlSite(
+        StackControl(**stack),
+        ClientControl(**client),
+        origin,
+        aeri=aeri,
+        aeri_errors=aeri_errors,
+    )
 
 
 # --- where it is and how it is read ------------------------------------------------
@@ -375,4 +420,40 @@ def view(loaded: ControlLoad) -> dict:
         "client_enabled": client_on,
         "errors": [dict(e) for e in loaded.errors],
         "env": ENV,
+    }
+
+
+def aeri_view(loaded: ControlLoad) -> dict:
+    """What the AERI card may see of the file: ``{"state", "code", "enabled",
+    "errors"}``. ``enabled`` is true only for a valid file whose ``[aeri]``
+    section is valid and says ``enabled = true``; a missing or invalid file, or a
+    malformed section, is off. No path, no value."""
+    if loaded.state == "missing":
+        return {
+            "state": "missing",
+            "code": "aeri.missing",
+            "enabled": False,
+            "errors": [],
+        }
+    if loaded.state != "ok" or loaded.site is None:
+        return {
+            "state": "invalid",
+            "code": "aeri.invalid",
+            "enabled": False,
+            "errors": [dict(e) for e in loaded.errors],
+        }
+    errors = [{"field": f, "code": c} for f, c in loaded.site.aeri_errors]
+    if errors:
+        return {
+            "state": "invalid",
+            "code": "aeri.invalid",
+            "enabled": False,
+            "errors": errors,
+        }
+    on = loaded.site.aeri.enabled is True
+    return {
+        "state": "ok",
+        "code": "aeri.enabled" if on else "aeri.disabled",
+        "enabled": on,
+        "errors": [],
     }

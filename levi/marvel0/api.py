@@ -250,3 +250,13 @@ router.routes.extend(stack_act_api.router.routes)
 from . import run_api
 
 router.routes.extend(run_api.router.routes)
+
+# The AERI preparation card (``aeri_api.py``), same prefix as the routers above.
+from . import aeri_api
+
+router.routes.extend(aeri_api.router.routes)
+
+# The hosted AERI terminal D (``aeri_run_api.py``), same prefix as the routers above.
+from . import aeri_run_api
+
+router.routes.extend(aeri_run_api.router.routes)

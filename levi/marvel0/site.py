@@ -298,6 +298,12 @@ class Site:
     catalog: Catalog
     prompts: Prompts
     source: Source
+    # The optional ``[aeri]`` section (the AERI subtask loop the page prepares
+    # and hosts, ``aeri_prep.py``); None when it is absent or not valid, and
+    # ``aeri_errors`` then lists ``(field, code)``. A bad section never makes
+    # the rest of the site file invalid.
+    aeri: "Aeri | None" = None
+    aeri_errors: tuple = ()
 
     @property
     def port(self) -> int:
@@ -312,6 +318,30 @@ class Site:
     def arm_lock_file(self) -> str:
         """The AERI runner's arm lock (the same for every site)."""
         return ARM_LOCK_FILE
+
+
+@dataclass(frozen=True)
+class Aeri:
+    """The ``[aeri]`` section: which AERI code the page may use and where its
+    inputs and outputs are. ``pin_sha`` is a prefix (8 to 40 hex digits) the
+    worktree's HEAD must start with."""
+
+    profile: str
+    pin_sha: str
+    worktree: str
+    runs_root: str
+    templates_root: str
+    rollout_root: str
+    openpi_root: str
+    levi_python: str
+    levi_bin: str
+    console_lang: str = "zh"
+    uv_offline: bool = True
+    # The folder of the AERI tools (the VLM bridge and the harness proxy):
+    # ``<runs_root>/../tools`` unless the file says otherwise.
+    tools_root: str = ""
+    # The small VLM of local mode; None: local mode is not offered.
+    local_model: str | None = None
 
 
 class SiteInvalid(ValueError):
@@ -587,6 +617,98 @@ SECTIONS = {
 }
 
 
+# --- the optional [aeri] section ----------------------------------------------------------
+
+AERI_SECTION = "aeri"
+AERI_DEFAULT_PROFILE = "harvest-5bc750ca"  # validated on the real robot, 18 Oct 2026
+_AERI_PIN = re.compile(r"[0-9a-f]{8,40}")
+_AERI_PROFILE = re.compile(r"[a-z0-9][a-z0-9.-]{1,47}")
+AERI_TEMPLATE = """\
+# Add this section to the marvel0 site file to let the page prepare and host an AERI run.
+# The page can read it and never write it. Without it the AERI card says "not configured".
+[aeri]
+profile        = "harvest-5bc750ca"     # the prompt profile of the pinned code (the one validated on the real robot)
+pin_sha        = "5bc750ca"              # 8 to 40 hex digits: the worktree's HEAD must start with them
+worktree       = "/path/to/worktrees/harvest-validation-fix"
+runs_root      = "/path/to/aeri-external/runs"
+templates_root = "/path/to/aeri-external/templates"
+rollout_root   = "/path/to/online_rollout_data/models"
+openpi_root    = "/path/to/openpi"
+levi_python    = "/path/to/LEVI/.venv/bin/python"
+levi_bin       = "/path/to/LEVI/.venv/bin/levi"
+console_lang   = "zh"                    # zh or en
+uv_offline     = true
+# tools_root   = "/path/to/aeri-external/tools"   # default: <runs_root>/../tools (the VLM bridge, the harness proxy)
+# local_model  = "/path/to/models/Qwen--Qwen3-VL-4B-Instruct-FP8"   # without it the page offers no local mode
+"""
+_AERI_SAFE_PATH = re.compile(r"[A-Za-z0-9._/+=@:,-]+")
+
+
+def _aeri_path(value):
+    """An absolute path of only the characters ``shlex.quote`` leaves alone: the
+    command the page prints for a terminal is then the very text it hosts."""
+    value = _path(value)
+    if not _AERI_SAFE_PATH.fullmatch(value):
+        raise _Bad("unsafe_chars")
+    return value
+
+
+AERI_CHECKS = {
+    "profile": _text(_AERI_PROFILE),
+    "pin_sha": _text(_AERI_PIN),
+    "worktree": _aeri_path,
+    "runs_root": _aeri_path,
+    "templates_root": _aeri_path,
+    "rollout_root": _aeri_path,
+    "openpi_root": _aeri_path,
+    "levi_python": _aeri_path,
+    "levi_bin": _aeri_path,
+    "console_lang": _text(re.compile(r"zh|en")),
+    "uv_offline": _boolean,
+    "tools_root": _aeri_path,
+    "local_model": _aeri_path,
+}
+AERI_OPTIONAL = {
+    "profile": AERI_DEFAULT_PROFILE,
+    "console_lang": "zh",
+    "uv_offline": True,
+    "tools_root": None,  # derived from runs_root below
+    "local_model": None,
+}
+
+
+def parse_aeri(table, present):
+    """``(Aeri | None, errors)`` of the ``[aeri]`` table. An absent section is
+    ``(None, ())``; a malformed one is ``(None, ((field, code), ...))`` and
+    never raises, so a typo here cannot take the deploy or the client with it."""
+    if not present:
+        return None, ()
+    if not isinstance(table, dict):
+        return None, ((AERI_SECTION, "type"),)
+    errors, kept = [], {}
+    for key in table:
+        if key not in AERI_CHECKS:
+            errors.append((f"{AERI_SECTION}.{key}", "unknown_key"))
+    for key, check in AERI_CHECKS.items():
+        if key not in table:
+            if key in AERI_OPTIONAL:
+                kept[key] = AERI_OPTIONAL[key]
+            else:
+                errors.append((f"{AERI_SECTION}.{key}", "missing"))
+            continue
+        try:
+            kept[key] = check(table[key])
+        except _Bad as exc:
+            errors.append((f"{AERI_SECTION}.{key}", exc.code))
+    if errors:
+        return None, tuple(errors)
+    if kept["tools_root"] is None:
+        kept["tools_root"] = posixpath.join(
+            posixpath.dirname(kept["runs_root"]), "tools"
+        )
+    return Aeri(**kept), ()
+
+
 def _cross_checks(values, bad):
     """Relations between keys that are valid on their own. A pair with a key
     that already failed is left to that failure."""
@@ -640,7 +762,7 @@ def parse(data, origin: str) -> Site:
     elif data["schema"] != SCHEMA:
         bad("schema", "range")
     for key in data:
-        if key != "schema" and key not in SCHEMA_CHECKS:
+        if key != "schema" and key not in SCHEMA_CHECKS and key != AERI_SECTION:
             bad(key, "unknown_key")
     values = {}
     for section, checks in SCHEMA_CHECKS.items():
@@ -669,10 +791,13 @@ def parse(data, origin: str) -> Site:
     _cross_checks(values, bad)
     if errors:
         raise SiteInvalid(errors)
+    aeri, aeri_errors = parse_aeri(data.get(AERI_SECTION), AERI_SECTION in data)
     return Site(
         origin=origin,
         **values["paths"],
         **{name: cls(**values[name]) for name, cls in SECTIONS.items()},
+        aeri=aeri,
+        aeri_errors=aeri_errors,
     )
 
 
