@@ -355,7 +355,7 @@ def views() -> tuple:
         # person's own start (a fresh window with its own confirmations).
         m.m_ready()
         m.no_manager()
-        chain_press(m, "chain-000003", pause_before_b=True)
+        chain_press(m, "chain-000003", pause_before_b=True, pause_before_c=True)
         until(m, ("a",), None)  # (waiting_confirm is not "running": it returns)
         out["chain_paused_b"] = view(m)
 

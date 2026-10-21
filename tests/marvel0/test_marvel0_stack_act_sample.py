@@ -203,7 +203,7 @@ def test_the_samples_name_every_state_of_start_whole_stack():
     assert (paused["state"], paused["next"], paused["pauses"]) == (
         "waiting_confirm",
         "b",
-        {"b": True, "c": False},
+        {"b": True, "c": True},  # the API refuses a pause before B without one before C
     )
     assert steps("chain_paused_b")["b"] == "pending"
     assert seq("chain_paused_c")["next"] == "c"

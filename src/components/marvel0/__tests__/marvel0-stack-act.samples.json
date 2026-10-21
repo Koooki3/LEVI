@@ -17369,7 +17369,7 @@
           "through": "c",
           "pauses": {
             "b": true,
-            "c": false
+            "c": true
           },
           "steps": [
             {
