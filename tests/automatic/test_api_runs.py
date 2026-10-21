@@ -10,6 +10,7 @@ import stat
 import sys
 import threading
 import time
+import warnings
 from pathlib import Path
 
 import pytest
@@ -195,8 +196,13 @@ def test_a_missing_systemd_is_503(client, roots, tmp_path, monkeypatch, home):
 
 
 class Served:
+    """The runner of a launched run in a thread of this process, with its
+    command pump (the ``aeri-control-<run>`` thread ``runner.serve`` starts)."""
+
     def __init__(self, run_dir, digest):
         self.result = None
+        self.run_dir = Path(os.path.abspath(run_dir))
+        self.forced = False
         self.thread = threading.Thread(
             target=self._go, args=(run_dir, digest), daemon=True
         )
@@ -209,6 +215,70 @@ class Served:
         self.thread.join(timeout)
         assert not self.thread.is_alive()
         return self.result
+
+    def pumps(self):
+        """The live command pumps of this run's runner: found by their type
+        and run folder (the runner object is local to ``runner.serve``)."""
+        return [
+            t
+            for t in threading.enumerate()
+            if isinstance(t, control.CommandPump) and t.run_dir == self.run_dir
+        ]
+
+    def close(self, stop=None, timeout=None, grace=None, strict=False):
+        """End the runner and wait for its threads; returns those still
+        running (each wait at most ``timeout``, default scaled(30)).
+
+        ``stop()`` asks for the stop as a person would (the HTTP stop) and
+        returns what to say if it did not work. A runner still serving
+        ``grace`` (default ``timeout``) after it is ended as by SIGTERM, with
+        a warning (``forced``): a run that waits for a person then exits
+        without a stop (``exited_without_stop``). ``strict``: once the
+        threads are ended, a forced end fails the test (``pytest.fail``) with
+        the stop's answer and the time waited: the stop is the path that
+        stops the arm on the real robot, and must not just warn.
+        """
+        began = time.monotonic()
+        timeout = scaled(30) if timeout is None else timeout
+        said = stop() if stop is not None else "no stop was sent"
+        self.thread.join(timeout if grace is None else grace)
+        if self.thread.is_alive():
+            self.forced = True
+            warnings.warn(
+                f"the served run {self.run_dir.name} did not end after the stop "
+                f"({said}); ending its runner as a SIGTERM would"
+            )
+            for pump in self.pumps():
+                pump.runner.sigterm.set()
+                pump.runner.wake.set()
+            self.thread.join(timeout)
+        for pump in self.pumps():
+            pump.join(timeout)
+        left = [t for t in (self.thread, *self.pumps()) if t.is_alive()]
+        if left:
+            warnings.warn(f"the served run's threads outlived teardown: {left}")
+        if strict and self.forced:
+            pytest.fail(
+                f"the served run {self.run_dir.name} did not end after the stop "
+                f"({said}); ended as by SIGTERM after waiting "
+                f"{time.monotonic() - began:.1f} s in all; threads left: {left}",
+                pytrace=False,
+            )
+        return left
+
+
+def stop_by_page(client, run_id, command_id):
+    """``Served.close``'s ``stop``: the page's stop of ``run_id``."""
+
+    def stop():
+        client.headers.update(REQ)
+        response = client.post(
+            f"{BASE}/runs/{run_id}/stop",
+            json={"command_id": command_id, "confirm": "stop"},
+        )
+        return f"HTTP {response.status_code}: {response.text[:300]}"
+
+    return stop
 
 
 @pytest.fixture
@@ -229,13 +299,75 @@ def waiting(client, roots, tmp_path, fake_systemd):
     )
     yield client, "r-wait", snap, served, Path(entry["run_dir"])
     # Whatever a test did, end the run so the thread finishes.
-    client.headers.update(REQ)
-    client.post(
-        f"{BASE}/runs/r-wait/stop",
-        json={"command_id": "stop-cleanup", "confirm": "stop"},
+    left = served.close(
+        stop_by_page(client, "r-wait", "stop-cleanup"), timeout=scaled(60)
     )
-    served.thread.join(scaled(60))
-    assert not served.thread.is_alive(), "the served run did not end after the stop"
+    assert not served.forced, "the served run did not end after the stop"
+    assert not left
+
+
+def _served_waiting(client, roots, tmp_path, name):
+    """A human-assisted dry run served in a thread, waiting at WAIT_HUMAN."""
+    write_job(roots, tmp_path, name=name, strategy="human_assisted")
+    job_id = job_id_of(client, name)
+    plan = plan_of(client, job_id, overrides={"scenes": ["reset_required"]})
+    assert post_run(client, plan, job_id).status_code == 202
+    entry = launch.read_record(launch.index_path(name))
+    served = Served(Path(entry["run_dir"]), plan["plan_sha256"])
+    wait_for(lambda: client.get(f"{BASE}/runs/{name}").json()["state"] == "WAIT_HUMAN")
+    return served
+
+
+def test_teardown_ends_a_served_runner_no_stop_reached(
+    client, roots, tmp_path, fake_systemd
+):
+    """CI: a fixture's stop did not end the run, and the runner thread and
+    its command pump (``aeri-control-<run>``) outlived the test. ``close``
+    ends both and waits for them, well within the runner's 60 s deadline."""
+    served = _served_waiting(client, roots, tmp_path, "r-close")
+    try:
+        pumps = served.pumps()
+        assert len(pumps) == 1 and pumps[0].name == "aeri-control-r-close"
+        began = time.monotonic()
+        with pytest.warns(UserWarning, match="did not end after the stop"):
+            left = served.close(timeout=scaled(10), grace=0.2)
+        took = time.monotonic() - began
+        assert served.forced and left == []
+        assert not served.thread.is_alive() and not pumps[0].is_alive()
+        assert took < scaled(12)  # without the SIGTERM: the 60 s deadline
+        # It held: the runner exited and left the run waiting for a person.
+        assert served.result is not None and served.result.state == "WAIT_HUMAN"
+    finally:
+        served.close(stop_by_page(client, "r-close", "stop-end"))
+
+
+def test_a_strict_teardown_fails_when_the_stop_did_not_end_the_run(
+    client, roots, tmp_path, fake_systemd
+):
+    """The scene fixture's path (``strict``): a stop that did not take effect
+    is a test failure naming the stop's answer and the time waited, raised
+    only after the runner thread and its pump have ended."""
+    served = _served_waiting(client, roots, tmp_path, "r-strict")
+    try:
+        pumps = served.pumps()
+        assert len(pumps) == 1
+
+        def ignored_stop():  # a stop that reaches no runner
+            return "HTTP 409: the stop was not carried out"
+
+        with (
+            pytest.raises(pytest.fail.Exception) as failed,
+            warnings.catch_warnings(),
+        ):
+            warnings.simplefilter("ignore")
+            served.close(ignored_stop, timeout=scaled(10), grace=0.2, strict=True)
+        message = str(failed.value)
+        assert "HTTP 409: the stop was not carried out" in message
+        assert " s in all" in message and "threads left: []" in message
+        assert served.forced
+        assert not served.thread.is_alive() and not pumps[0].is_alive()
+    finally:
+        served.close(stop_by_page(client, "r-strict", "stop-end"))
 
 
 def test_the_waiting_snapshot_carries_the_card_and_a_challenge(waiting):
