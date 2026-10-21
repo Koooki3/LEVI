@@ -14,7 +14,8 @@ import { BREAKPOINT } from "../../../lib/design/motion";
 
 const SRC = join(import.meta.dir, "../../..");
 
-// measured on feat/layout-p4-spacing-check (2026-10-21); only lower these
+// measured on feat/layout-p4-spacing-check (2026-10-21, after P1's 999 px);
+// only lower these
 const SPACING_ALLOWED: Record<string, number> = {
   "app/report/report.css": 1,
   "components/pages-ui/pages.css": 221,
@@ -31,15 +32,18 @@ const BREAKPOINTS_ALLOWED: Record<string, number> = {
   "components/pages-ui/pages.css": 5,
   "components/viewer/annotations.css": 4,
   "components/viewer/viewer.css": 1,
-  "styles/shell.css": 6,
+  "styles/shell.css": 2,
 };
 
 const SPACING =
   /(?:^|[;{\s])((?:row-|column-)?gap|margin(?:-[a-z]+)?|padding(?:-[a-z]+)?|inset(?:-[a-z]+)?)\s*:\s*([^;{}]+)/g;
 const PX = /(?<![\w.-])(\d+(?:\.\d+)?)px\b/g;
 const MEDIA = /@media[^{]*?\((?:max|min)-width:\s*(\d+)px\)/g;
+// BREAKPOINT, plus the header's two-row width (shell.css, 999/1000), where
+// .ds-page also narrows its sides (layout P1: one left edge for both)
+const HEADER_TWO_ROW = 1000;
 const ALLOWED_WIDTHS = new Set(
-  Object.values(BREAKPOINT).flatMap((w) => [w, w - 1]),
+  [...Object.values(BREAKPOINT), HEADER_TWO_ROW].flatMap((w) => [w, w - 1]),
 );
 
 function cssFiles(): string[] {
