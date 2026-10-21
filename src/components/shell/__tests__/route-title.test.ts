@@ -45,7 +45,7 @@ describe("tab titles", () => {
     expect(routeTitle("/explore", zhText)).toBe("探索数据 · LEVI");
     expect(routeTitle("/pool", zhText)).toBe("训练池 · LEVI");
     expect(routeTitle("/live", zhText)).toBe("实时评测 · LEVI");
-    expect(routeTitle("/marvel0", zhText)).toBe("marvel0 · LEVI");
+    expect(routeTitle("/marvel0", zhText)).toBe("MARVEL0 · LEVI");
     expect(routeTitle("/", zhText)).toBe("首页 · LEVI");
     expect(routeTitle("/org/ds/episode_0", zhText)).toBe(
       "片段查看器 · org/ds · 片段 0 · LEVI",

@@ -262,8 +262,15 @@ export function ChecksBlock({
     bad === 0
       ? { key: "marvel0.deploy.checks.all_ok", params: { n: rows.length } }
       : { key: "marvel0.deploy.checks.blocked", params: { n: bad } };
+  // Open when something blocks a deploy that the person may want. A server of
+  // this page that already runs blocks a second one by itself (its port, its
+  // unit): that is not news, so the list stays folded then.
+  const running =
+    status.state === "ready" ||
+    status.state === "starting" ||
+    status.state === "stopping";
   return (
-    <details className="rg-details" open={bad > 0 || undefined}>
+    <details className="rg-details" open={(bad > 0 && !running) || undefined}>
       <summary>
         {t("marvel0.deploy.checks.title")} · {sayText(summary, t)}
       </summary>

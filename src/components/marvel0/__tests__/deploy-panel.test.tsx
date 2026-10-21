@@ -87,14 +87,14 @@ const dialog = (host: HTMLElement) =>
 const text = (node: Element | null) => node?.textContent ?? "";
 
 describe("the Policy server card", () => {
-  test("says what it is: it starts and stops one unit, and is not an emergency stop", async () => {
+  test("says what it is: it starts and stops one unit (the page's one e-stop line is at the top, not on every card)", async () => {
     const { host } = await open();
     const body = text(card(host));
     expect(body).toContain(en["marvel0.deploy.scope"]);
     expect(en["marvel0.deploy.scope"]).toContain(
-      "only starts and stops the policy server unit it created",
+      "only the policy server unit this page created",
     );
-    expect(en["marvel0.deploy.scope"]).toContain("not an emergency stop");
+    expect(en["marvel0.deploy.scope"]).not.toMatch(/e-?stop|emergency/i);
     // No control is called an e-stop.
     for (const node of host.querySelectorAll("button, summary, [role=button]"))
       expect(node.textContent).not.toMatch(/e-?stop|emergency/i);
@@ -177,9 +177,9 @@ describe("deploying", () => {
     const d = dialog(host)!;
     expect(d).not.toBeNull();
     expect(text(d)).toContain(`Deploy ${SFT}`);
-    expect(text(d)).toContain(
-      "does not start the arm, the gripper, the robot server or the demo client",
-    );
+    // It says what it starts, and where the rest is started from.
+    expect(text(d)).toContain("It starts nothing else");
+    expect(text(d)).toContain("started from their own cards");
     expect(text(d)).toContain("Nothing on this page is an emergency stop");
     expect(text(d)).toContain(`deploy ${SFT}`);
     const confirm = button(d, "Deploy")!;
@@ -823,6 +823,25 @@ describe("the checks and the log", () => {
     expect(text(items[6])).toContain("Cannot tell");
     expect(button(c, "Deploy")!.disabled).toBe(true);
     expect(text(c)).toContain("Deploy is off:");
+  });
+
+  test("the list of checks is open when something blocks a deploy that may be wanted, and folded when the server of this page runs (it blocks a second one by itself)", async () => {
+    const blocks = {
+      port_free: { level: "refuse", text: "E", params: {} },
+      policy_units: { level: "refuse", text: "E", params: {} },
+    };
+    const idleBlocked = await open({
+      deploy: ok(idle({ can_deploy: false, checks: checks(blocks) })),
+    });
+    const fold = (host: HTMLElement) =>
+      host.querySelector("[data-testid=marvel0-deploy-checks]")!
+        .parentElement as HTMLDetailsElement;
+    expect(fold(idleBlocked.host).open).toBe(true);
+    const running = await open({
+      deploy: ok(ready({ can_deploy: false, checks: checks(blocks) })),
+    });
+    expect(fold(running.host).open).toBe(false);
+    expect(text(card(running.host))).toContain("2 check(s) block a deploy.");
   });
 
   test("all checks passing is said once", async () => {

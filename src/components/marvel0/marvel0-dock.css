@@ -1,0 +1,78 @@
+/* The HOLD dock (run-dock.tsx): pinned to the bottom of the window while the
+ * hosted client may move the arm and the Run card's HOLD is out of view. It is
+ * sticky at the end of the page, not fixed: it never covers the last cards.
+ * Colours are the --ds-* tokens only; the red of HOLD is the danger button's
+ * own, the bar itself stays a raised surface with a danger edge on top. */
+.rg-dock {
+  position: sticky;
+  /* A gap under it, so that its edge and shadow are seen. */
+  bottom: var(--ds-space-3);
+  z-index: var(--ds-z-dock);
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-4);
+  padding: var(--ds-space-3) var(--ds-space-4);
+  border: 1px solid var(--ds-separator-strong);
+  border-top: 3px solid var(--ds-danger);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-surface-1);
+  box-shadow: var(--ds-shadow-3);
+}
+.rg-dock--frozen {
+  border-top-color: var(--ds-warning);
+}
+.rg-dock__info {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+.rg-dock__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-1) var(--ds-space-3);
+}
+.rg-dock__where {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--ds-weight-semibold);
+}
+.rg-dock__stale {
+  color: var(--ds-warning);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-page .rg-dock__note {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-dock .rg-dock__hold {
+  flex: 0 0 auto;
+  min-width: 18rem;
+  min-height: 64px;
+  font-size: var(--ds-text-title-3-size);
+}
+/* The client is lost: HOLD may not reach it, and the line says so in the
+ * danger colour. */
+.rg-page .rg-dock__note--lost {
+  color: var(--ds-danger);
+  font-weight: var(--ds-weight-medium);
+}
+@media (max-width: 720px) {
+  .rg-dock {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--ds-space-2);
+    /* Edge to edge of the page's gutters, below nothing: the card above it is
+       the whole width already. */
+    padding: var(--ds-space-2) var(--ds-space-3);
+  }
+  .rg-dock .rg-dock__hold {
+    min-width: 0;
+    width: 100%;
+  }
+  .rg-page .rg-dock__note:not(.rg-dock__note--lost) {
+    display: none;
+  }
+}

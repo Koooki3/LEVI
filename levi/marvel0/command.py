@@ -53,7 +53,8 @@ PREFIX = [
 ]
 HANDS = (
     "Keep a hand on the physical e-stop. "
-    "This page never starts the arm stack or this client."
+    "This preview starts nothing: the arm stack and the client have their own "
+    "start buttons, each with its own confirmation."
 )
 # The client's measured floor of each task (TASK_MIN_Z of run_robotiq_client.py):
 # an explicit --min-z beats it there, so a lower one is allowed (down to the site

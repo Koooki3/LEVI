@@ -1,26 +1,22 @@
 "use client";
 // The Client command card of the marvel0: a form for the demo client's
 // run (task instruction, steps, eval number, lowest height, RTC horizon, group,
-// note) and the exact command for it, to copy. LEVI's backend validates the
-// form and renders the command (levi/marvel0/command.py); every flag that guards
-// the arm comes from the site file and is listed here, never editable. Nothing
-// is executed or started by this card: a person pastes the command into a
-// terminal, with a hand on the physical e-stop.
-import { useMemo, useRef, useState, useEffect } from "react";
+// note) and the exact command for it. LEVI's backend validates the form and
+// renders the command (levi/marvel0/command.py); every flag that guards the arm
+// comes from the site file and is listed here, never editable. The model, RTC
+// and the guidance strength are not set here: they are the page's one selection
+// (selection.ts), chosen in the policy server card, so the command cannot ask
+// for another model than the server serves. A person copies the command into a
+// terminal, or starts the client from the Run card of this step, with a hand
+// on the physical e-stop; this card itself starts nothing.
+import { useMemo, useRef, useState, useEffect, type ReactNode } from "react";
 import { Check, ClipboardCopy, TriangleAlert } from "lucide-react";
-import {
-  Badge,
-  Button,
-  Card,
-  Field,
-  Input,
-  Select,
-  Switch,
-} from "@/components/ds";
+import { Badge, Button, Card, Field, Input } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Note } from "@/components/pages-ui/feedback";
 import { Refusal, WordedText } from "./action-parts";
-import { modelOptionText } from "./catalog-logic";
+import { COMMAND_ANCHOR } from "./chain-logic";
+import { wordOf } from "./ctl-text";
 import {
   bodyKey,
   commandBody,
@@ -38,6 +34,10 @@ import type { DeployStatus } from "./deploy-logic";
 import { fieldMessages } from "./marvel0-failure";
 import type { Say } from "./marvel0-logic";
 import { sayText } from "./marvel0-say";
+import type { RunView } from "./run-logic";
+import { RunStart } from "./run-start";
+import type { Effective } from "./selection";
+import type { RunActions } from "./use-run-actions";
 import type { Marvel0Catalog } from "./use-marvel0-actions";
 
 interface Made {
@@ -50,24 +50,33 @@ export function CommandPanel({
   api,
   catalog,
   status,
-  deployedModel,
+  selection,
+  onUseAnother,
+  run = null,
+  runActions,
 }: {
   api: Marvel0Api;
   catalog: Marvel0Catalog;
   /** The policy server's state, to say whether it fits the command. */
   status: DeployStatus | null;
-  /** The model of the server this page deployed, to start the form on it. */
-  deployedModel: string | null;
+  /** The page's one selected model, RTC and guidance strength; the form
+   * follows it. Null before the model list is read. */
+  selection: Effective | null;
+  /** Takes the person to the policy server card's model control. */
+  onUseAnother: () => void;
+  /** The hosted client's state and what its buttons do: with them the result
+   * offers "Start the client" next to Copy. */
+  run?: RunView | null;
+  runActions?: RunActions;
 }) {
   const { t } = useLocale();
   const models = catalog.models;
   const site = catalog.site;
+  const selectedId = selection?.modelId ?? "";
   const initial = useMemo(
     () =>
-      models && site
-        ? initialCommandForm(models, site, deployedModel ?? "")
-        : null,
-    [models, site, deployedModel],
+      models && site ? initialCommandForm(models, site, selectedId) : null,
+    [models, site, selectedId],
   );
   const [edits, setEdits] = useState<Partial<CommandForm>>({});
   const [made, setMade] = useState<Made | null>(null);
@@ -75,11 +84,15 @@ export function CommandPanel({
   const [local, setLocal] = useState<Partial<Record<FieldName, Say>>>({});
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
-  if (!models || !site || !initial) return null;
+  if (!models || !site || !initial || !selection) return null;
 
-  const form: CommandForm = { ...initial, ...edits };
-  if (!models.models.some((m) => m.id === form.modelId))
-    form.modelId = initial.modelId;
+  // Model and RTC are the selection's, whatever else was typed.
+  const form: CommandForm = {
+    ...initial,
+    ...edits,
+    modelId: selection.modelId,
+    rtc: selection.rtc,
+  };
   const edit = (change: Partial<CommandForm>) =>
     setEdits((cur) => ({ ...cur, ...change }));
   const model = models.models.find((m) => m.id === form.modelId) ?? null;
@@ -139,12 +152,14 @@ export function CommandPanel({
     <Card
       padding="compact"
       className="rg-card rg-action rg-card--unknown"
+      id={COMMAND_ANCHOR}
+      tabIndex={-1}
       data-testid="marvel0-command"
       title={t("marvel0.cmd.title")}
       description={t("marvel0.cmd.scope")}
     >
       <form
-        className="rg-form"
+        className="rg-form rg-form--grid"
         onSubmit={(event) => {
           event.preventDefault();
           void make();
@@ -154,22 +169,13 @@ export function CommandPanel({
           <p className="rg-bad">{t("marvel0.deploy.form.no_models")}</p>
         ) : (
           <>
-            <Field
-              label={t("marvel0.cmd.field.model")}
+            <Follow
+              selection={selection}
               error={fieldError("model_id")}
-            >
-              <Select
-                value={form.modelId}
-                onChange={(event) => edit({ modelId: event.target.value })}
-              >
-                {models.models.map((entry) => (
-                  <option key={entry.id} value={entry.id}>
-                    {modelOptionText(entry, t)}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+              onUseAnother={onUseAnother}
+            />
             <Field
+              className="rg-span"
               label={t("marvel0.cmd.field.prompt")}
               hint={
                 <>
@@ -260,12 +266,6 @@ export function CommandPanel({
                 onChange={(event) => edit({ minZ: event.target.value })}
               />
             </Field>
-            <Switch
-              label={t("marvel0.cmd.field.rtc")}
-              description={t("marvel0.cmd.field.rtc_hint")}
-              checked={form.rtc}
-              onChange={(event) => edit({ rtc: event.target.checked })}
-            />
             <Field
               label={t(
                 form.rtc
@@ -290,6 +290,7 @@ export function CommandPanel({
               />
             </Field>
             <Field
+              className="rg-span"
               label={t("marvel0.cmd.field.group")}
               hint={t("marvel0.cmd.field.group_hint")}
               error={fieldError("rollout_group")}
@@ -306,6 +307,7 @@ export function CommandPanel({
               />
             </Field>
             <Field
+              className="rg-span"
               label={t("marvel0.cmd.field.note")}
               hint={sayText(
                 {
@@ -327,7 +329,7 @@ export function CommandPanel({
             </Field>
           </>
         )}
-        <details className="rg-details">
+        <details className="rg-details rg-span">
           <summary>{t("marvel0.cmd.fixed.title")}</summary>
           <p className="rg-muted">{t("marvel0.cmd.fixed.hint")}</p>
           <ul
@@ -342,7 +344,7 @@ export function CommandPanel({
             ))}
           </ul>
         </details>
-        <div className="rg-actions-row">
+        <div className="rg-actions-row rg-span">
           <Button
             type="submit"
             variant="primary"
@@ -381,9 +383,94 @@ export function CommandPanel({
           preview={made.preview}
           stale={stale}
           modelLabel={made.preview.needs.modelId}
+          start={
+            runActions ? (
+              <RunStart
+                view={run}
+                actions={runActions}
+                form={body}
+                group={form.group.trim() || hints.group}
+                modelId={form.modelId}
+                rtc={form.rtc}
+                stale={stale}
+              />
+            ) : null
+          }
         />
       )}
     </Card>
+  );
+}
+
+/** The model, RTC and guidance strength the command follows, read-only, with
+ * the way back to where they are chosen. */
+function Follow({
+  selection,
+  error,
+  onUseAnother,
+}: {
+  selection: Effective;
+  error?: string;
+  onUseAnother: () => void;
+}) {
+  const { t } = useLocale();
+  return (
+    <div
+      className="rg-follow rg-span"
+      data-testid="marvel0-command-follow"
+      data-source={selection.source}
+    >
+      <span className="rg-follow__label">{t("marvel0.cmd.field.model")}</span>
+      <div className="rg-follow__row">
+        <Badge tone="info">
+          {sayText(
+            {
+              key: "marvel0.cmd.follow",
+              params: { model: selection.modelId },
+            },
+            t,
+          )}
+        </Badge>
+        <Button size="sm" variant="ghost" onClick={onUseAnother}>
+          {t("marvel0.cmd.use_another")}
+        </Button>
+      </div>
+      <p className="rg-muted">
+        {wordOf(t, "marvel0.cmd.follow_", selection.source)}
+      </p>
+      <div
+        className="rg-follow__row"
+        data-testid="marvel0-command-follow-values"
+      >
+        <Badge tone="neutral">
+          {sayText(
+            {
+              key: "marvel0.cmd.follow_rtc",
+              params: {
+                rtc: t(
+                  selection.rtc
+                    ? "marvel0.deploy.value.on"
+                    : "marvel0.deploy.value.off",
+                ),
+              },
+            },
+            t,
+          )}
+        </Badge>
+        {selection.cfgScale !== null && (
+          <Badge tone="neutral">
+            {sayText(
+              {
+                key: "marvel0.cmd.follow_cfg",
+                params: { scale: selection.cfgScale },
+              },
+              t,
+            )}
+          </Badge>
+        )}
+      </div>
+      {error && <p className="rg-bad">{error}</p>}
+    </div>
   );
 }
 
@@ -391,10 +478,13 @@ function CommandResult({
   preview,
   stale,
   modelLabel,
+  start,
 }: {
   preview: Preview;
   stale: boolean;
   modelLabel: string;
+  /** The "Start the client" control, when the page hosts the client. */
+  start?: ReactNode;
 }) {
   const { t } = useLocale();
   const [copied, setCopied] = useState(false);
@@ -447,6 +537,7 @@ function CommandResult({
         )}
       </div>
       <p className="rg-muted">{t("marvel0.cmd.result.hint")}</p>
+      {start}
       <pre
         ref={text}
         lang="en"

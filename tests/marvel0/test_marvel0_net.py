@@ -203,11 +203,20 @@ def test_the_addresses_are_read_in_the_kernels_byte_order(tmp_path):
     assert (six.local_addr, six.remote_addr) == ("2001:db8::1", "::1")
 
 
-def test_an_unreadable_address_is_never_taken_for_a_foreign_service(tmp_path):
-    # The kernel never writes one; if it did, the safe answer is to count it.
-    bad_remote = row4(at4(OWN, 50006), "0100007:1F40", "01", 860, 0)
-    bad_local = row4("XYZ:1F40", at4(PEER, 51000), "01", 861, 1)
-    assert counted(tmp_path, tcp=[bad_remote, bad_local]) == [860, 861]
+@pytest.mark.parametrize(
+    "line",
+    [
+        row4(at4(OWN, 50006), "0100007:1F40", "01", 860, 0),  # remote: odd hex
+        row4("XYZ:1F40", at4(PEER, 51000), "01", 861, 1),  # local: not hex
+    ],
+)
+def test_an_unreadable_address_makes_the_whole_table_not_ok(tmp_path, line):
+    # The kernel never writes one; if it did, the table is not trusted at all.
+    good = row4(at4(OWN, 8000), at4(PEER, 51000), "01", 862, 2)
+    table = net.read(tables(tmp_path, tcp=[good, line], tcp6=[]))
+    assert not table.ok and table.socks == ()
+    assert table.problem == "1 unparsable lines in tcp"
+    assert net.established(table, 8000) == []
 
 
 def test_ipv6_ports_are_read_from_the_last_colon(tmp_path):
@@ -217,16 +226,46 @@ def test_ipv6_ports_are_read_from_the_last_colon(tmp_path):
     assert (sock.proto, sock.local_port, sock.remote_port) == ("tcp6", 8000, 50000)
 
 
-def test_garbage_lines_are_skipped_and_the_rest_is_kept(tmp_path):
+@pytest.mark.parametrize(
+    "garbage",
+    [
+        "this is not a row\n",  # too few fields
+        "   9: ZZZZZZZZ:GGGG 00000000:0000 0A 0 0 0 0 0 0 77\n",  # bad port
+        "   8: 0100007F:1F40 00000000:0000 0A 0 0 0 0 0 notanumber\n",  # bad inode
+        "   7: 0100007F:1F40 00000000:0000 XQ 0 0 0 0 0 0 78\n",  # bad state
+    ],
+)
+def test_one_unparsable_line_makes_the_whole_table_not_ok(tmp_path, garbage):
     folder = tables(tmp_path, tcp=[row4(f"{ZERO4[:8]}:1F40", ZERO4, "0A", 601)])
     with (folder / "tcp").open("a") as handle:
-        handle.write("this is not a row\n")
-        handle.write("   9: ZZZZZZZZ:GGGG 00000000:0000 0A 0 0 0 0 0 0 77\n")
-        handle.write("   8: 0100007F:1F40 00000000:0000 0A 0 0 0 0 0 notanumber\n")
+        handle.write(garbage)
     (folder / "tcp6").write_text(HEADER)
     table = net.read(folder)
+    assert not table.ok and table.socks == ()
+    assert table.problem == "1 unparsable lines in tcp"
+
+
+def test_garbage_next_to_a_listener_on_5000_is_still_not_ok(tmp_path):
+    """The readable LISTEN row on 5000 is not reported as a partial answer."""
+    folder = tables(
+        tmp_path,
+        tcp=[row4(f"{ZERO4[:8]}:1388", ZERO4, "0A", 602), "garbage line\n"],
+        tcp6=["   0: also garbage\n"],
+    )
+    table = net.read(folder)
+    assert not table.ok
+    assert net.listeners(table, 5000) == []
+    assert table.problem == "1 unparsable lines in tcp"
+
+
+def test_the_header_and_blank_lines_are_not_counted(tmp_path):
+    folder = tables(tmp_path, tcp=[row4(f"{ZERO4[:8]}:1F40", ZERO4, "0A", 603)])
+    with (folder / "tcp").open("a") as handle:
+        handle.write("\n   \n")
+    (folder / "tcp6").write_text(HEADER + "\n")
+    table = net.read(folder)
     assert table.ok
-    assert [s.inode for s in net.listeners(table, 8000)] == [601]
+    assert [s.inode for s in net.listeners(table, 8000)] == [603]
 
 
 def test_an_unreadable_or_missing_tcp_table_is_not_ok(tmp_path):
@@ -276,3 +315,48 @@ def test_read_opens_only_the_two_tables_and_lists_nothing(tmp_path, monkeypatch)
 def test_the_default_location_is_proc_net_and_never_a_process_folder():
     assert net.PROC_NET == Path("/proc/net")
     assert net.TABLES == ("tcp", "tcp6")
+
+
+@pytest.mark.parametrize(
+    "has_tcp6, has_if_inet6, ok",
+    [
+        (True, True, True),  # an IPv6 host with its table
+        (True, False, True),  # the table is there: it is read
+        (False, False, True),  # a host without IPv6
+        (False, True, False),  # IPv6 is up but its table is missing
+    ],
+)
+def test_tcp6_and_if_inet6_in_all_four_combinations(
+    tmp_path, has_tcp6, has_if_inet6, ok
+):
+    folder = tables(tmp_path, tcp=[], tcp6=[] if has_tcp6 else None)
+    if has_if_inet6:
+        (folder / "if_inet6").write_text("")
+    table = net.read(folder)
+    assert table.ok is ok
+    if not ok:
+        assert table.socks == () and "tcp6" in table.problem
+
+
+def test_if_inet6_that_cannot_be_examined_makes_a_missing_tcp6_unknown(
+    tmp_path, monkeypatch
+):
+    folder = tables(tmp_path, tcp=[], tcp6=None)
+    real = net.Path.lstat
+
+    def lstat(self, *args, **kwargs):
+        if self.name == "if_inet6":
+            raise PermissionError("denied")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(net.Path, "lstat", lstat)
+    assert net.read(folder).ok is False
+
+
+def test_a_tcp6_table_that_cannot_be_read_or_decoded_is_unknown(tmp_path):
+    folder = tables(tmp_path, tcp=[], tcp6=None)
+    (folder / "tcp6").mkdir()  # IsADirectoryError, an OSError that is not ENOENT
+    assert net.read(folder).ok is False
+    (folder / "tcp6").rmdir()
+    (folder / "tcp6").write_bytes(b"\xff\xfe not text\n")
+    assert net.read(folder).ok is False

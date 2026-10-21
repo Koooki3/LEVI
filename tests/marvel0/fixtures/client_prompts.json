@@ -1,0 +1,285 @@
+{
+  "schema": "levi.marvel0.client_prompts.v1",
+  "about": "Strings of the evaluation client that levi/marvel0/run.py reads or that the keys depend on. 'source' is a substring of the client file named; scripts/check_client_prompts.py checks it (read only). 'render' is what tests/marvel0/fake_client.py prints.",
+  "prompts": {
+    "gate_banner": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1376,
+      "source": "=== ready | ep {ep + 1} | {progress}{extra} | \"{prompt}\" ===",
+      "render": "\n=== ready | ep {ep} | {progress} | \"{prompt}\" ===\n"
+    },
+    "gate_min_z": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1377,
+      "source": "min_z {args.min_z:.5f}",
+      "render": "  min_z {min_z:.5f}\n"
+    },
+    "gate_recording": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1379,
+      "source": "recording -> {sanitize_task_name(prompt)}/",
+      "render": "  recording -> {task}/demo_{index:04d}\n"
+    },
+    "gate_keys_a": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1383,
+      "source": "[Enter] start with this one   [s] RUN screws   [p] RUN plates",
+      "render": "  [Enter] start with this one   [s] RUN screws   [p] RUN plates\n"
+    },
+    "gate_keys_b": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1384,
+      "source": "[i] type an instruction   [q] quit",
+      "render": "  [i] type an instruction   [q] quit"
+    },
+    "gate_reason": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1372,
+      "source": "waiting at the start gate",
+      "render": "waiting at the start gate"
+    },
+    "gate_allowed": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1375,
+      "source": "keys_outer, \"\\riqsp\",",
+      "note": "the keys the start gate reads: Enter, i, q, s, p"
+    },
+    "gate_headless": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1385,
+      "source": "headless=\"q\",",
+      "note": "no tty at the gate: q, nothing moves"
+    },
+    "task_keys": {
+      "file": "run_robotiq_client.py",
+      "line": 127,
+      "source": "TASK_KEYS: dict[str, str] = {\"s\": TASKS[0], \"p\": TASKS[1]}",
+      "note": "at the gate s and p choose a task and fall through to the start"
+    },
+    "task_selected": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1392,
+      "source": "print(f'  -> \"{prompt}\"')",
+      "render": "  -> \"{prompt}\""
+    },
+    "no_tty": {
+      "file": "run_robotiq_client.py",
+      "line": 1232,
+      "source": "(no tty: choosing {headless!r})",
+      "render": "  (no tty: choosing {key!r})"
+    },
+    "connected": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1204,
+      "source": "Connected. Server metadata: {meta}",
+      "render": "Connected. Server metadata: {meta}"
+    },
+    "env_ready": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1271,
+      "source": "print(\"Env ready.\")",
+      "render": "Env ready."
+    },
+    "refusing": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1328,
+      "source": "REFUSING TO START: {exc}",
+      "render": "REFUSING TO START: {exc}"
+    },
+    "homing_over": {
+      "file": "run_robotiq_client.py",
+      "line": 947,
+      "source": "Homing over {n} steps ->",
+      "render": "Homing over {n} steps -> [0.482 -0.011 0.236 3.119 0.008 -0.884]  (rotating 0.0 deg)"
+    },
+    "home_reached": {
+      "file": "run_robotiq_client.py",
+      "line": 960,
+      "source": "print(\"Home reached.\")",
+      "render": "Home reached."
+    },
+    "running_banner": {
+      "file": "run_robotiq_client.py",
+      "line": 1526,
+      "source": "Running. Press 's' = success, 'f' = fail, 'q' = quit",
+      "render": "\nRunning. Press 's' = success, 'f' = fail, 'q' = quit  (continuous mode)"
+    },
+    "marked_success": {
+      "file": "run_robotiq_client.py",
+      "line": 1550,
+      "source": "[s] marked SUCCESS",
+      "render": "\n  [s] marked SUCCESS"
+    },
+    "marked_fail": {
+      "file": "run_robotiq_client.py",
+      "line": 1553,
+      "source": "[f] marked FAIL",
+      "render": "\n  [f] marked FAIL"
+    },
+    "marked_quit": {
+      "file": "run_robotiq_client.py",
+      "line": 1556,
+      "source": "\"\\n  [q] quit\"",
+      "render": "\n  [q] quit"
+    },
+    "episode_ended": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1446,
+      "source": "Episode {ep} ended: {outcome}  ({stats['steps']} steps, {dur:.1f} s)",
+      "render": "\nEpisode {ep} ended: {outcome}  ({steps} steps, {dur:.1f} s)"
+    },
+    "judge_prompt": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1458,
+      "source": "hit the {args.max_timesteps}-step limit. Judge it:",
+      "render": "  hit the {max_steps}-step limit. Judge it:\n  [s] success   [f] fail   [d] discard (does not count)"
+    },
+    "judge_keys": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1459,
+      "source": "[s] success   [f] fail   [d] discard (does not count)"
+    },
+    "judge_allowed": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1457,
+      "source": "keys_outer, \"dsf\",",
+      "note": "the keys the step-limit prompt reads"
+    },
+    "judge_headless": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1460,
+      "source": "headless=\"d\",",
+      "note": "no tty at the step-limit prompt: discard"
+    },
+    "outcome_names": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1462,
+      "source": "outcome = {\"s\": \"success\", \"f\": \"failure\", \"d\": \"discarded\"}[k]"
+    },
+    "closing_env": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 849,
+      "source": "print(\"Closing env.\")",
+      "render": "Closing env."
+    },
+    "interrupt_first": {
+      "file": "run_robotiq_client.py",
+      "line": 445,
+      "source": "Interrupt received, stopping after this step.",
+      "render": "\nInterrupt received, stopping after this step."
+    },
+    "interrupt_second": {
+      "file": "run_robotiq_client.py",
+      "line": 442,
+      "source": "Second interrupt, exiting hard.",
+      "render": "\nSecond interrupt, exiting hard."
+    },
+    "sigterm_first": {
+      "file": "run_robotiq_client.py",
+      "line": 460,
+      "source": "SIGTERM received, stopping after this step.",
+      "render": "\nSIGTERM received, stopping after this step."
+    },
+    "sigterm_second": {
+      "file": "run_robotiq_client.py",
+      "line": 457,
+      "source": "Second termination request, exiting hard.",
+      "render": "\nSecond termination request, exiting hard."
+    },
+    "end_user_quit": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1518,
+      "source": "\"user_quit\" if not rc._STOP else \"interrupted\""
+    },
+    "end_target": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1516,
+      "source": "end_state, end_reason = \"finished\", \"target reached\""
+    },
+    "end_default": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1351,
+      "source": "end_state, end_reason = \"stopped\", \"user_quit\""
+    },
+    "session_states": {
+      "file": "eval_session.py",
+      "line": 32,
+      "source": "STATES = (\"standby\", \"homing\", \"running\", \"waiting_reset\", \"fault\", \"stopped\", \"finished\")"
+    },
+    "session_ended": {
+      "file": "eval_session.py",
+      "line": 33,
+      "source": "ENDED = (\"fault\", \"stopped\", \"finished\")"
+    },
+    "session_stale": {
+      "file": "eval_session.py",
+      "line": 34,
+      "source": "STALE_AFTER_S = 10.0"
+    },
+    "session_dir": {
+      "file": "eval_session.py",
+      "line": 35,
+      "source": "SESSION_DIR = \".eval_sessions\""
+    },
+    "session_retarget": {
+      "file": "eval_session.py",
+      "line": 246,
+      "source": "\"stopped\", \"task_changed\"",
+      "note": "a task switch closes the old file as stopped/task_changed"
+    },
+    "session_name": {
+      "file": "eval_session.py",
+      "line": 109,
+      "source": "return Path(root) / SESSION_DIR / f\"{group}__{task_folder}.json\""
+    },
+    "sanitize_a": {
+      "file": "rollout_writer.py",
+      "line": 93,
+      "source": "normalized = task_description.strip().replace(\" \", \"_\")"
+    },
+    "sanitize_b": {
+      "file": "rollout_writer.py",
+      "line": 94,
+      "source": "normalized = re.sub(r\"[\\\\/]+\", \"_\", normalized)"
+    },
+    "sanitize_c": {
+      "file": "rollout_writer.py",
+      "line": 95,
+      "source": "normalized = re.sub(r\"[^\\w\\-]+\", \"_\", normalized, flags=re.UNICODE)"
+    },
+    "sanitize_d": {
+      "file": "rollout_writer.py",
+      "line": 96,
+      "source": "normalized = re.sub(r\"_+\", \"_\", normalized).strip(\"_\")"
+    },
+    "display_images": {
+      "file": "run_robotiq_client.py",
+      "line": 214,
+      "source": "display_images: bool = True",
+      "note": "a hosted run adds --no-display-images"
+    },
+    "explicit_min_z_wins": {
+      "file": "run_robotiq_client.py",
+      "line": 353,
+      "source": "is EXPLICIT and WINS over the table",
+      "note": "RIG-08: an explicit --min-z beats TASK_MIN_Z"
+    },
+    "cbreak": {
+      "file": "run_robotiq_client.py",
+      "line": 552,
+      "source": "tty.setcbreak(self._fd)",
+      "note": "keys are read in cbreak mode, ISIG stays on"
+    },
+    "one_byte": {
+      "file": "run_robotiq_client.py",
+      "line": 574,
+      "source": "raw = os.read(self._fd, 1)",
+      "note": "one byte per read; nothing is drained"
+    },
+    "rollout_data": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 1295,
+      "source": "Rollout data: {Path(args.rollout_root) / group}/<task>/demo_XXXX"
+    }
+  }
+}

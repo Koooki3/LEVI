@@ -1,0 +1,4378 @@
+{
+  "at_gate": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "at_gate"
+          },
+          "text": "Not offered while the run is at_gate."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "at_gate"
+          },
+          "text": "Not offered while the run is at_gate."
+        }
+      },
+      "end_at_gate": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "enter": {
+        "allowed": true,
+        "blind": true,
+        "why_not": null
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "at_gate"
+          },
+          "text": "Not offered while the run is at_gate."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "at_gate"
+          },
+          "text": "Not offered while the run is at_gate."
+        }
+      },
+      "hold": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "at_gate"
+          },
+          "text": "Not offered while the run is at_gate."
+        }
+      }
+    },
+    "armed": {
+      "expires_at": 1792395021.5,
+      "purpose": "enter"
+    },
+    "can_start": false,
+    "clients": null,
+    "enabled": true,
+    "episode": {
+      "counted": 0,
+      "max_steps": 400,
+      "no": 1,
+      "step": 0,
+      "target": 5
+    },
+    "exit": null,
+    "fr3": {
+      "hardware_active": true,
+      "ok": true,
+      "robot_mode_name": "Move",
+      "state_age_s": 0.1
+    },
+    "heartbeat": {
+      "age_s": 0.6
+    },
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": false,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      },
+      {
+        "code": "blind_home",
+        "text": "Enter, success, failure, discard and exit send the arm home without any limit check; hold freezes the client, nothing resumes."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "waiting_at_gate",
+      "text": "The client waits at the start gate for episode 1. Enter makes the arm go home without any limit check, then the policy runs."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "at_gate",
+    "state_seq": 7
+  },
+  "at_gate_enter_sent": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "at_gate"
+          },
+          "text": "Not offered while the run is at_gate."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "at_gate"
+          },
+          "text": "Not offered while the run is at_gate."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "enter_locked",
+          "params": {},
+          "text": "Enter was already sent at this gate and is never sent twice; read the log, or hold and end."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "enter_locked",
+          "params": {},
+          "text": "Enter was already sent at this gate and is never sent twice; read the log, or hold and end."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "at_gate"
+          },
+          "text": "Not offered while the run is at_gate."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "at_gate"
+          },
+          "text": "Not offered while the run is at_gate."
+        }
+      },
+      "hold": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "at_gate"
+          },
+          "text": "Not offered while the run is at_gate."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": null,
+    "enabled": true,
+    "episode": {
+      "counted": 0,
+      "max_steps": 400,
+      "no": 1,
+      "step": 0,
+      "target": 5
+    },
+    "exit": null,
+    "fr3": {
+      "hardware_active": true,
+      "ok": true,
+      "robot_mode_name": "Move",
+      "state_age_s": 0.1
+    },
+    "heartbeat": {
+      "age_s": 0.6
+    },
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": false,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      },
+      {
+        "code": "blind_home",
+        "text": "Enter, success, failure, discard and exit send the arm home without any limit check; hold freezes the client, nothing resumes."
+      },
+      {
+        "code": "key_not_taken",
+        "text": "The last key was sent and the client has not reacted. It is never sent twice; read the log."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "waiting_at_gate",
+      "text": "The client waits at the start gate for episode 1. Enter makes the arm go home without any limit check, then the policy runs."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "at_gate",
+    "state_seq": 7
+  },
+  "at_gate_monitor_stale": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "at_gate"
+          },
+          "text": "Not offered while the run is at_gate."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "at_gate"
+          },
+          "text": "Not offered while the run is at_gate."
+        }
+      },
+      "end_at_gate": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "monitor_not_green",
+          "params": {
+            "state": "offline"
+          },
+          "text": "The health monitor is not fresh and green (offline)."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "at_gate"
+          },
+          "text": "Not offered while the run is at_gate."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "at_gate"
+          },
+          "text": "Not offered while the run is at_gate."
+        }
+      },
+      "hold": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "at_gate"
+          },
+          "text": "Not offered while the run is at_gate."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": null,
+    "enabled": true,
+    "episode": {
+      "counted": 0,
+      "max_steps": 400,
+      "no": 1,
+      "step": 0,
+      "target": 5
+    },
+    "exit": null,
+    "fr3": {
+      "hardware_active": true,
+      "ok": true,
+      "robot_mode_name": "Move",
+      "state_age_s": 0.1
+    },
+    "heartbeat": {
+      "age_s": 0.6
+    },
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": false,
+    "monitor": {
+      "age_s": 7.2,
+      "state": "offline"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      },
+      {
+        "code": "blind_home",
+        "text": "Enter, success, failure, discard and exit send the arm home without any limit check; hold freezes the client, nothing resumes."
+      },
+      {
+        "code": "monitor_stale",
+        "text": "The health monitor is not fresh: the next Enter is blocked."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "waiting_at_gate",
+      "text": "The client waits at the start gate for episode 1. Enter makes the arm go home without any limit check, then the policy runs."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "at_gate",
+    "state_seq": 7
+  },
+  "awaiting_label": {
+    "actions": {
+      "discard": {
+        "allowed": true,
+        "blind": true,
+        "why_not": null
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "awaiting_label"
+          },
+          "text": "Not offered while the run is awaiting_label."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "awaiting_label"
+          },
+          "text": "Not offered while the run is awaiting_label."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "awaiting_label"
+          },
+          "text": "Not offered while the run is awaiting_label."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "awaiting_label"
+          },
+          "text": "Not offered while the run is awaiting_label."
+        }
+      },
+      "failure": {
+        "allowed": true,
+        "blind": true,
+        "why_not": null
+      },
+      "hold": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": true,
+        "blind": true,
+        "why_not": null
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": 1,
+    "enabled": true,
+    "episode": {
+      "counted": 1,
+      "max_steps": 400,
+      "no": 2,
+      "step": 400,
+      "target": 5
+    },
+    "exit": null,
+    "fr3": {
+      "hardware_active": true,
+      "ok": true,
+      "robot_mode_name": "Move",
+      "state_age_s": 0.1
+    },
+    "heartbeat": {
+      "age_s": 0.6
+    },
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": {
+      "duration_s": 24.6,
+      "outcome": "success",
+      "steps": 212
+    },
+    "may_move": false,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      },
+      {
+        "code": "blind_home",
+        "text": "Enter, success, failure, discard and exit send the arm home without any limit check; hold freezes the client, nothing resumes."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "judge_prompt",
+      "text": "The step limit was reached; the client waits for the label. Success, failure or discard sends the arm home without any limit check."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "awaiting_label",
+    "state_seq": 7
+  },
+  "disabled": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "no_client",
+          "params": {},
+          "text": "There is no client process."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      },
+      "hold": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "no_client",
+          "params": {},
+          "text": "There is no client process."
+        }
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "not_enabled",
+          "params": {},
+          "text": "Hosted runs are switched off in the control site file."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": null,
+    "enabled": false,
+    "episode": null,
+    "exit": null,
+    "fr3": null,
+    "heartbeat": null,
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": false,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [
+      {
+        "code": "client_enabled",
+        "level": "refuse",
+        "params": {},
+        "text": "Hosted runs are switched off in the control site file."
+      },
+      {
+        "code": "product",
+        "level": "ok",
+        "params": {},
+        "text": "This is the product LEVI."
+      },
+      {
+        "code": "run_idle",
+        "level": "ok",
+        "params": {},
+        "text": "No client is running."
+      },
+      {
+        "code": "policy_ready",
+        "level": "ok",
+        "params": {},
+        "text": "The policy server of this page is ready."
+      },
+      {
+        "code": "no_connection",
+        "level": "ok",
+        "params": {},
+        "text": "Nobody is connected to the policy server."
+      },
+      {
+        "code": "no_session",
+        "level": "ok",
+        "params": {},
+        "text": "No evaluation session is active."
+      },
+      {
+        "code": "arm_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The arm lock is free."
+      },
+      {
+        "code": "monitor_green",
+        "level": "ok",
+        "params": {},
+        "text": "The health monitor is fresh and green."
+      },
+      {
+        "code": "rollout_writable",
+        "level": "ok",
+        "params": {},
+        "text": "The rollout folder can be written."
+      },
+      {
+        "code": "robot_server",
+        "level": "ok",
+        "params": {},
+        "text": "Something listens on the robot server's port."
+      }
+    ],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "no_run",
+      "text": "No client is running."
+    },
+    "run": null,
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "idle",
+    "state_seq": 7
+  },
+  "done": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "done"
+          },
+          "text": "Not offered while the run is done."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "no_client",
+          "params": {},
+          "text": "There is no client process."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "done"
+          },
+          "text": "Not offered while the run is done."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "done"
+          },
+          "text": "Not offered while the run is done."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "done"
+          },
+          "text": "Not offered while the run is done."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "done"
+          },
+          "text": "Not offered while the run is done."
+        }
+      },
+      "hold": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "no_client",
+          "params": {},
+          "text": "There is no client process."
+        }
+      },
+      "start": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "done"
+          },
+          "text": "Not offered while the run is done."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": true,
+    "clients": null,
+    "enabled": true,
+    "episode": {
+      "counted": 2,
+      "max_steps": 400,
+      "no": 3,
+      "step": 0,
+      "target": 5
+    },
+    "exit": {
+      "code": 0,
+      "signal": null
+    },
+    "fr3": null,
+    "heartbeat": null,
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": {
+      "duration_s": 24.6,
+      "outcome": "success",
+      "steps": 212
+    },
+    "may_move": false,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [
+      {
+        "code": "client_enabled",
+        "level": "ok",
+        "params": {},
+        "text": "Hosted runs are enabled in the control site file."
+      },
+      {
+        "code": "product",
+        "level": "ok",
+        "params": {},
+        "text": "This is the product LEVI."
+      },
+      {
+        "code": "run_idle",
+        "level": "ok",
+        "params": {},
+        "text": "No client is running."
+      },
+      {
+        "code": "policy_ready",
+        "level": "ok",
+        "params": {},
+        "text": "The policy server of this page is ready."
+      },
+      {
+        "code": "no_connection",
+        "level": "ok",
+        "params": {},
+        "text": "Nobody is connected to the policy server."
+      },
+      {
+        "code": "no_session",
+        "level": "ok",
+        "params": {},
+        "text": "No evaluation session is active."
+      },
+      {
+        "code": "arm_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The arm lock is free."
+      },
+      {
+        "code": "monitor_green",
+        "level": "ok",
+        "params": {},
+        "text": "The health monitor is fresh and green."
+      },
+      {
+        "code": "rollout_writable",
+        "level": "ok",
+        "params": {},
+        "text": "The rollout folder can be written."
+      },
+      {
+        "code": "robot_server",
+        "level": "ok",
+        "params": {},
+        "text": "Something listens on the robot server's port."
+      }
+    ],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "user_quit",
+      "text": "The client ended at the start gate (q); no motion."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "done",
+    "state_seq": 7
+  },
+  "failed": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "failed"
+          },
+          "text": "Not offered while the run is failed."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "no_client",
+          "params": {},
+          "text": "There is no client process."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "failed"
+          },
+          "text": "Not offered while the run is failed."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "failed"
+          },
+          "text": "Not offered while the run is failed."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "failed"
+          },
+          "text": "Not offered while the run is failed."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "failed"
+          },
+          "text": "Not offered while the run is failed."
+        }
+      },
+      "hold": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "no_client",
+          "params": {},
+          "text": "There is no client process."
+        }
+      },
+      "start": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "failed"
+          },
+          "text": "Not offered while the run is failed."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": true,
+    "clients": null,
+    "enabled": true,
+    "episode": {
+      "counted": 0,
+      "max_steps": 400,
+      "no": 1,
+      "step": 0,
+      "target": 5
+    },
+    "exit": {
+      "code": 1,
+      "signal": null
+    },
+    "fr3": null,
+    "heartbeat": null,
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": false,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [
+      {
+        "code": "client_enabled",
+        "level": "ok",
+        "params": {},
+        "text": "Hosted runs are enabled in the control site file."
+      },
+      {
+        "code": "product",
+        "level": "ok",
+        "params": {},
+        "text": "This is the product LEVI."
+      },
+      {
+        "code": "run_idle",
+        "level": "ok",
+        "params": {},
+        "text": "No client is running."
+      },
+      {
+        "code": "policy_ready",
+        "level": "ok",
+        "params": {},
+        "text": "The policy server of this page is ready."
+      },
+      {
+        "code": "no_connection",
+        "level": "ok",
+        "params": {},
+        "text": "Nobody is connected to the policy server."
+      },
+      {
+        "code": "no_session",
+        "level": "ok",
+        "params": {},
+        "text": "No evaluation session is active."
+      },
+      {
+        "code": "arm_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The arm lock is free."
+      },
+      {
+        "code": "monitor_green",
+        "level": "ok",
+        "params": {},
+        "text": "The health monitor is fresh and green."
+      },
+      {
+        "code": "rollout_writable",
+        "level": "ok",
+        "params": {},
+        "text": "The rollout folder can be written."
+      },
+      {
+        "code": "robot_server",
+        "level": "ok",
+        "params": {},
+        "text": "Something listens on the robot server's port."
+      }
+    ],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "exit_code",
+      "text": "The client exited with code 1; the log shows why."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "failed",
+    "state_seq": 7
+  },
+  "failed_no_gate": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "failed"
+          },
+          "text": "Not offered while the run is failed."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "no_client",
+          "params": {},
+          "text": "There is no client process."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "failed"
+          },
+          "text": "Not offered while the run is failed."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "failed"
+          },
+          "text": "Not offered while the run is failed."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "failed"
+          },
+          "text": "Not offered while the run is failed."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "failed"
+          },
+          "text": "Not offered while the run is failed."
+        }
+      },
+      "hold": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "no_client",
+          "params": {},
+          "text": "There is no client process."
+        }
+      },
+      "start": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "failed"
+          },
+          "text": "Not offered while the run is failed."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": true,
+    "clients": null,
+    "enabled": true,
+    "episode": null,
+    "exit": {
+      "code": null,
+      "signal": 9
+    },
+    "fr3": null,
+    "heartbeat": null,
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": false,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [
+      {
+        "code": "client_enabled",
+        "level": "ok",
+        "params": {},
+        "text": "Hosted runs are enabled in the control site file."
+      },
+      {
+        "code": "product",
+        "level": "ok",
+        "params": {},
+        "text": "This is the product LEVI."
+      },
+      {
+        "code": "run_idle",
+        "level": "ok",
+        "params": {},
+        "text": "No client is running."
+      },
+      {
+        "code": "policy_ready",
+        "level": "ok",
+        "params": {},
+        "text": "The policy server of this page is ready."
+      },
+      {
+        "code": "no_connection",
+        "level": "ok",
+        "params": {},
+        "text": "Nobody is connected to the policy server."
+      },
+      {
+        "code": "no_session",
+        "level": "ok",
+        "params": {},
+        "text": "No evaluation session is active."
+      },
+      {
+        "code": "arm_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The arm lock is free."
+      },
+      {
+        "code": "monitor_green",
+        "level": "ok",
+        "params": {},
+        "text": "The health monitor is fresh and green."
+      },
+      {
+        "code": "rollout_writable",
+        "level": "ok",
+        "params": {},
+        "text": "The rollout folder can be written."
+      },
+      {
+        "code": "robot_server",
+        "level": "ok",
+        "params": {},
+        "text": "Something listens on the robot server's port."
+      }
+    ],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "no_gate_in_time",
+      "text": "The client did not reach the start gate in time and was ended; the log shows why."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "failed",
+    "state_seq": 7
+  },
+  "finishing_episode": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "finishing"
+          },
+          "text": "Not offered while the run is finishing."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "finishing"
+          },
+          "text": "Not offered while the run is finishing."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "finishing"
+          },
+          "text": "Not offered while the run is finishing."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "finishing"
+          },
+          "text": "Not offered while the run is finishing."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "finishing"
+          },
+          "text": "Not offered while the run is finishing."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "finishing"
+          },
+          "text": "Not offered while the run is finishing."
+        }
+      },
+      "hold": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "finishing"
+          },
+          "text": "Not offered while the run is finishing."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": 1,
+    "enabled": true,
+    "episode": {
+      "counted": 0,
+      "max_steps": 400,
+      "no": 1,
+      "step": 212,
+      "target": 5
+    },
+    "exit": null,
+    "fr3": {
+      "hardware_active": true,
+      "ok": true,
+      "robot_mode_name": "Move",
+      "state_age_s": 0.1
+    },
+    "heartbeat": {
+      "age_s": 0.6
+    },
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": true,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "episode_closing",
+      "text": "Episode 1 ended; the client saves it. The next motion is the arm going home."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "finishing",
+    "state_seq": 7
+  },
+  "finishing_run": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "finishing"
+          },
+          "text": "Not offered while the run is finishing."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "finishing"
+          },
+          "text": "Not offered while the run is finishing."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "finishing"
+          },
+          "text": "Not offered while the run is finishing."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "finishing"
+          },
+          "text": "Not offered while the run is finishing."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "finishing"
+          },
+          "text": "Not offered while the run is finishing."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "finishing"
+          },
+          "text": "Not offered while the run is finishing."
+        }
+      },
+      "hold": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "finishing"
+          },
+          "text": "Not offered while the run is finishing."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": null,
+    "enabled": true,
+    "episode": {
+      "counted": 1,
+      "max_steps": 400,
+      "no": 2,
+      "step": 0,
+      "target": 5
+    },
+    "exit": null,
+    "fr3": {
+      "hardware_active": true,
+      "ok": true,
+      "robot_mode_name": "Move",
+      "state_age_s": 0.1
+    },
+    "heartbeat": {
+      "age_s": 0.6
+    },
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": {
+      "duration_s": 24.6,
+      "outcome": "success",
+      "steps": 212
+    },
+    "may_move": false,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "session_ended",
+      "text": "The client's session ended; it is closing."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "finishing",
+    "state_seq": 7
+  },
+  "held": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "held"
+          },
+          "text": "Not offered while the run is held."
+        }
+      },
+      "end": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "held"
+          },
+          "text": "Not offered while the run is held."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "held"
+          },
+          "text": "Not offered while the run is held."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "held"
+          },
+          "text": "Not offered while the run is held."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "held"
+          },
+          "text": "Not offered while the run is held."
+        }
+      },
+      "hold": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "already_held",
+          "params": {},
+          "text": "The client is already frozen."
+        }
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "held"
+          },
+          "text": "Not offered while the run is held."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": 1,
+    "enabled": true,
+    "episode": {
+      "counted": 0,
+      "max_steps": 400,
+      "no": 1,
+      "step": 140,
+      "target": 5
+    },
+    "exit": null,
+    "fr3": {
+      "hardware_active": true,
+      "ok": true,
+      "robot_mode_name": "Move",
+      "state_age_s": 0.1
+    },
+    "heartbeat": {
+      "age_s": 0.6
+    },
+    "held": {
+      "at": "2026-10-19T15:29:48+08:00",
+      "by": "person"
+    },
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": false,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "held_person",
+      "text": "Frozen on your request. The arm keeps the last target it was sent. Nothing resumes: the only action is end."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "held",
+    "state_seq": 7
+  },
+  "held_monitor_red": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "held"
+          },
+          "text": "Not offered while the run is held."
+        }
+      },
+      "end": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "held"
+          },
+          "text": "Not offered while the run is held."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "held"
+          },
+          "text": "Not offered while the run is held."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "held"
+          },
+          "text": "Not offered while the run is held."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "held"
+          },
+          "text": "Not offered while the run is held."
+        }
+      },
+      "hold": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "already_held",
+          "params": {},
+          "text": "The client is already frozen."
+        }
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "held"
+          },
+          "text": "Not offered while the run is held."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": null,
+    "enabled": true,
+    "episode": {
+      "counted": 0,
+      "max_steps": 400,
+      "no": 1,
+      "step": 140,
+      "target": 5
+    },
+    "exit": null,
+    "fr3": {
+      "hardware_active": true,
+      "ok": true,
+      "robot_mode_name": "Move",
+      "state_age_s": 0.1
+    },
+    "heartbeat": {
+      "age_s": 0.6
+    },
+    "held": {
+      "at": "2026-10-19T15:29:57+08:00",
+      "by": "monitor_red"
+    },
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": false,
+    "monitor": {
+      "age_s": 0.3,
+      "state": "red"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "held_monitor_red",
+      "text": "Frozen by the page: the health monitor showed red on two writes while the arm could move. Nothing resumes."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "held",
+    "state_seq": 7
+  },
+  "homing": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "homing"
+          },
+          "text": "Not offered while the run is homing."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "homing"
+          },
+          "text": "Not offered while the run is homing."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "homing"
+          },
+          "text": "Not offered while the run is homing."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "homing"
+          },
+          "text": "Not offered while the run is homing."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "homing"
+          },
+          "text": "Not offered while the run is homing."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "homing"
+          },
+          "text": "Not offered while the run is homing."
+        }
+      },
+      "hold": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "homing"
+          },
+          "text": "Not offered while the run is homing."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": null,
+    "enabled": true,
+    "episode": {
+      "counted": 0,
+      "max_steps": 400,
+      "no": 1,
+      "step": 0,
+      "target": 5
+    },
+    "exit": null,
+    "fr3": {
+      "hardware_active": true,
+      "ok": true,
+      "robot_mode_name": "Move",
+      "state_age_s": 0.1
+    },
+    "heartbeat": {
+      "age_s": 0.6
+    },
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": true,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "homing",
+      "text": "The arm goes home (30 steps, no limit check). Only hold works."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "homing",
+    "state_seq": 7
+  },
+  "idle_ready": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "no_client",
+          "params": {},
+          "text": "There is no client process."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      },
+      "hold": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "no_client",
+          "params": {},
+          "text": "There is no client process."
+        }
+      },
+      "start": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": true,
+    "clients": null,
+    "enabled": true,
+    "episode": null,
+    "exit": null,
+    "fr3": null,
+    "heartbeat": null,
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": false,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [
+      {
+        "code": "client_enabled",
+        "level": "ok",
+        "params": {},
+        "text": "Hosted runs are enabled in the control site file."
+      },
+      {
+        "code": "product",
+        "level": "ok",
+        "params": {},
+        "text": "This is the product LEVI."
+      },
+      {
+        "code": "run_idle",
+        "level": "ok",
+        "params": {},
+        "text": "No client is running."
+      },
+      {
+        "code": "policy_ready",
+        "level": "ok",
+        "params": {},
+        "text": "The policy server of this page is ready."
+      },
+      {
+        "code": "no_connection",
+        "level": "ok",
+        "params": {},
+        "text": "Nobody is connected to the policy server."
+      },
+      {
+        "code": "no_session",
+        "level": "ok",
+        "params": {},
+        "text": "No evaluation session is active."
+      },
+      {
+        "code": "arm_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The arm lock is free."
+      },
+      {
+        "code": "monitor_green",
+        "level": "ok",
+        "params": {},
+        "text": "The health monitor is fresh and green."
+      },
+      {
+        "code": "rollout_writable",
+        "level": "ok",
+        "params": {},
+        "text": "The rollout folder can be written."
+      },
+      {
+        "code": "robot_server",
+        "level": "ok",
+        "params": {},
+        "text": "Something listens on the robot server's port."
+      }
+    ],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "no_run",
+      "text": "No client is running."
+    },
+    "run": null,
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "idle",
+    "state_seq": 7
+  },
+  "lost": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "lost"
+          },
+          "text": "Not offered while the run is lost."
+        }
+      },
+      "end": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "lost"
+          },
+          "text": "Not offered while the run is lost."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "lost"
+          },
+          "text": "Not offered while the run is lost."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "lost"
+          },
+          "text": "Not offered while the run is lost."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "lost"
+          },
+          "text": "Not offered while the run is lost."
+        }
+      },
+      "hold": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "lost"
+          },
+          "text": "Not offered while the run is lost."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": null,
+    "enabled": true,
+    "episode": {
+      "counted": 0,
+      "max_steps": 400,
+      "no": 1,
+      "step": 90,
+      "target": 5
+    },
+    "exit": null,
+    "fr3": {
+      "hardware_active": true,
+      "ok": true,
+      "robot_mode_name": "Move",
+      "state_age_s": 0.1
+    },
+    "heartbeat": {
+      "age_s": 0.6
+    },
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": true,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "host_restarted",
+      "text": "The service restarted while a client was recorded; nothing was resumed."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "lost",
+    "state_seq": 7
+  },
+  "lost_heartbeat": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "lost"
+          },
+          "text": "Not offered while the run is lost."
+        }
+      },
+      "end": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "lost"
+          },
+          "text": "Not offered while the run is lost."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "lost"
+          },
+          "text": "Not offered while the run is lost."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "lost"
+          },
+          "text": "Not offered while the run is lost."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "lost"
+          },
+          "text": "Not offered while the run is lost."
+        }
+      },
+      "hold": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "lost"
+          },
+          "text": "Not offered while the run is lost."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": null,
+    "enabled": true,
+    "episode": {
+      "counted": 0,
+      "max_steps": 400,
+      "no": 1,
+      "step": 90,
+      "target": 5
+    },
+    "exit": null,
+    "fr3": {
+      "hardware_active": true,
+      "ok": true,
+      "robot_mode_name": "Move",
+      "state_age_s": 0.1
+    },
+    "heartbeat": {
+      "age_s": 14.0
+    },
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": true,
+    "monitor": {
+      "age_s": 0.3,
+      "state": "red"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "heartbeat_stale",
+      "text": "The client's session file stopped updating; it is being frozen."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "lost",
+    "state_seq": 7
+  },
+  "not_product": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "not_product",
+          "params": {},
+          "text": "Only the product LEVI may act on the real arm; this one only shows the run."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "no_client",
+          "params": {},
+          "text": "There is no client process."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "not_product",
+          "params": {},
+          "text": "Only the product LEVI may act on the real arm; this one only shows the run."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "not_product",
+          "params": {},
+          "text": "Only the product LEVI may act on the real arm; this one only shows the run."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "not_product",
+          "params": {},
+          "text": "Only the product LEVI may act on the real arm; this one only shows the run."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "not_product",
+          "params": {},
+          "text": "Only the product LEVI may act on the real arm; this one only shows the run."
+        }
+      },
+      "hold": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "no_client",
+          "params": {},
+          "text": "There is no client process."
+        }
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "not_product",
+          "params": {},
+          "text": "Only the product LEVI may act on the real arm; this one only shows the run."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "not_product",
+          "params": {},
+          "text": "Only the product LEVI may act on the real arm; this one only shows the run."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": null,
+    "enabled": true,
+    "episode": null,
+    "exit": null,
+    "fr3": null,
+    "heartbeat": null,
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": false,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [
+      {
+        "code": "client_enabled",
+        "level": "ok",
+        "params": {},
+        "text": "Hosted runs are enabled in the control site file."
+      },
+      {
+        "code": "product",
+        "level": "refuse",
+        "params": {},
+        "text": "Only the product LEVI may act on the real arm; this one only shows the run."
+      },
+      {
+        "code": "run_idle",
+        "level": "ok",
+        "params": {},
+        "text": "No client is running."
+      },
+      {
+        "code": "policy_ready",
+        "level": "ok",
+        "params": {},
+        "text": "The policy server of this page is ready."
+      },
+      {
+        "code": "no_connection",
+        "level": "ok",
+        "params": {},
+        "text": "Nobody is connected to the policy server."
+      },
+      {
+        "code": "no_session",
+        "level": "ok",
+        "params": {},
+        "text": "No evaluation session is active."
+      },
+      {
+        "code": "arm_lock",
+        "level": "ok",
+        "params": {},
+        "text": "The arm lock is free."
+      },
+      {
+        "code": "monitor_green",
+        "level": "ok",
+        "params": {},
+        "text": "The health monitor is fresh and green."
+      },
+      {
+        "code": "rollout_writable",
+        "level": "ok",
+        "params": {},
+        "text": "The rollout folder can be written."
+      },
+      {
+        "code": "robot_server",
+        "level": "ok",
+        "params": {},
+        "text": "Something listens on the robot server's port."
+      }
+    ],
+    "profile": "fake",
+    "profile_code": "profile.not_product_unit",
+    "reason": {
+      "code": "no_run",
+      "text": "No client is running."
+    },
+    "run": null,
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "idle",
+    "state_seq": 7
+  },
+  "preflight": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "preflight"
+          },
+          "text": "Not offered while the run is preflight."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "no_client",
+          "params": {},
+          "text": "There is no client process."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "preflight"
+          },
+          "text": "Not offered while the run is preflight."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "preflight"
+          },
+          "text": "Not offered while the run is preflight."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "preflight"
+          },
+          "text": "Not offered while the run is preflight."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "preflight"
+          },
+          "text": "Not offered while the run is preflight."
+        }
+      },
+      "hold": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "no_client",
+          "params": {},
+          "text": "There is no client process."
+        }
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "preflight"
+          },
+          "text": "Not offered while the run is preflight."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": null,
+    "enabled": true,
+    "episode": null,
+    "exit": null,
+    "fr3": null,
+    "heartbeat": null,
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": false,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "checking",
+      "text": "The start checks are being read."
+    },
+    "run": null,
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "preflight",
+    "state_seq": 7
+  },
+  "preflight_failing": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "no_client",
+          "params": {},
+          "text": "There is no client process."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      },
+      "hold": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "no_client",
+          "params": {},
+          "text": "There is no client process."
+        }
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "preflight_failed",
+          "params": {
+            "first": "policy_ready"
+          },
+          "text": "A start check fails: policy_ready."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "idle"
+          },
+          "text": "Not offered while the run is idle."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": null,
+    "enabled": true,
+    "episode": null,
+    "exit": null,
+    "fr3": null,
+    "heartbeat": null,
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": false,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [
+      {
+        "code": "client_enabled",
+        "level": "ok",
+        "params": {},
+        "text": "Hosted runs are enabled in the control site file."
+      },
+      {
+        "code": "product",
+        "level": "ok",
+        "params": {},
+        "text": "This is the product LEVI."
+      },
+      {
+        "code": "run_idle",
+        "level": "ok",
+        "params": {},
+        "text": "No client is running."
+      },
+      {
+        "code": "policy_ready",
+        "level": "refuse",
+        "params": {
+          "state": "idle"
+        },
+        "text": "The policy server of this page is not ready (idle)."
+      },
+      {
+        "code": "no_connection",
+        "level": "refuse",
+        "params": {
+          "count": 2
+        },
+        "text": "2 connection(s) to the policy server; another client may be running."
+      },
+      {
+        "code": "no_session",
+        "level": "unknown",
+        "params": {},
+        "text": "The evaluation sessions could not be read, so none is ruled out."
+      },
+      {
+        "code": "arm_lock",
+        "level": "refuse",
+        "params": {},
+        "text": "The arm lock is held: something else uses the arm."
+      },
+      {
+        "code": "monitor_green",
+        "level": "refuse",
+        "params": {
+          "state": "offline"
+        },
+        "text": "The health monitor is not fresh and green (offline)."
+      },
+      {
+        "code": "rollout_writable",
+        "level": "ok",
+        "params": {},
+        "text": "The rollout folder can be written."
+      },
+      {
+        "code": "robot_server",
+        "level": "warn",
+        "params": {},
+        "text": "Nothing listens on the robot server's port; the client will stop at its first step."
+      }
+    ],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "no_run",
+      "text": "No client is running."
+    },
+    "run": null,
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "idle",
+    "state_seq": 7
+  },
+  "running": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "running"
+          },
+          "text": "Not offered while the run is running."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "running"
+          },
+          "text": "Not offered while the run is running."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "running"
+          },
+          "text": "Not offered while the run is running."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "running"
+          },
+          "text": "Not offered while the run is running."
+        }
+      },
+      "exit_home": {
+        "allowed": true,
+        "blind": true,
+        "why_not": null
+      },
+      "failure": {
+        "allowed": true,
+        "blind": true,
+        "why_not": null
+      },
+      "hold": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": true,
+        "blind": true,
+        "why_not": null
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": 1,
+    "enabled": true,
+    "episode": {
+      "counted": 0,
+      "max_steps": 400,
+      "no": 1,
+      "step": 137,
+      "target": 5
+    },
+    "exit": null,
+    "fr3": {
+      "hardware_active": true,
+      "ok": true,
+      "robot_mode_name": "Move",
+      "state_age_s": 0.1
+    },
+    "heartbeat": {
+      "age_s": 0.6
+    },
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": true,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      },
+      {
+        "code": "blind_home",
+        "text": "Enter, success, failure, discard and exit send the arm home without any limit check; hold freezes the client, nothing resumes."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "running",
+      "text": "Episode 1 is running."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "running",
+    "state_seq": 7
+  },
+  "running_label_sent": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "running"
+          },
+          "text": "Not offered while the run is running."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "running"
+          },
+          "text": "Not offered while the run is running."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "running"
+          },
+          "text": "Not offered while the run is running."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "running"
+          },
+          "text": "Not offered while the run is running."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "key_locked",
+          "params": {},
+          "text": "A key was already sent for this episode; wait for the client's next prompt."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "key_locked",
+          "params": {},
+          "text": "A key was already sent for this episode; wait for the client's next prompt."
+        }
+      },
+      "hold": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "key_locked",
+          "params": {},
+          "text": "A key was already sent for this episode; wait for the client's next prompt."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": 1,
+    "enabled": true,
+    "episode": {
+      "counted": 0,
+      "max_steps": 400,
+      "no": 1,
+      "step": 219,
+      "target": 5
+    },
+    "exit": null,
+    "fr3": {
+      "hardware_active": true,
+      "ok": true,
+      "robot_mode_name": "Move",
+      "state_age_s": 0.1
+    },
+    "heartbeat": {
+      "age_s": 0.6
+    },
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": true,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      },
+      {
+        "code": "blind_home",
+        "text": "Enter, success, failure, discard and exit send the arm home without any limit check; hold freezes the client, nothing resumes."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "running",
+      "text": "Episode 1 is running."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "running",
+    "state_seq": 7
+  },
+  "running_monitor_red": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "running"
+          },
+          "text": "Not offered while the run is running."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "running"
+          },
+          "text": "Not offered while the run is running."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "running"
+          },
+          "text": "Not offered while the run is running."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "running"
+          },
+          "text": "Not offered while the run is running."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "monitor_red",
+          "params": {},
+          "text": "The health monitor shows a red light."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "monitor_red",
+          "params": {},
+          "text": "The health monitor shows a red light."
+        }
+      },
+      "hold": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "monitor_red",
+          "params": {},
+          "text": "The health monitor shows a red light."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": 1,
+    "enabled": true,
+    "episode": {
+      "counted": 0,
+      "max_steps": 400,
+      "no": 1,
+      "step": 88,
+      "target": 5
+    },
+    "exit": null,
+    "fr3": {
+      "hardware_active": true,
+      "ok": true,
+      "robot_mode_name": "Move",
+      "state_age_s": 0.1
+    },
+    "heartbeat": {
+      "age_s": 0.6
+    },
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": true,
+    "monitor": {
+      "age_s": 0.3,
+      "state": "red"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      },
+      {
+        "code": "blind_home",
+        "text": "Enter, success, failure, discard and exit send the arm home without any limit check; hold freezes the client, nothing resumes."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "running",
+      "text": "Episode 1 is running."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "running",
+    "state_seq": 7
+  },
+  "running_second_client": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "running"
+          },
+          "text": "Not offered while the run is running."
+        }
+      },
+      "end": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "running"
+          },
+          "text": "Not offered while the run is running."
+        }
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "running"
+          },
+          "text": "Not offered while the run is running."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "running"
+          },
+          "text": "Not offered while the run is running."
+        }
+      },
+      "exit_home": {
+        "allowed": true,
+        "blind": true,
+        "why_not": null
+      },
+      "failure": {
+        "allowed": true,
+        "blind": true,
+        "why_not": null
+      },
+      "hold": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": true,
+        "blind": true,
+        "why_not": null
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": 2,
+    "enabled": true,
+    "episode": {
+      "counted": 0,
+      "max_steps": 400,
+      "no": 1,
+      "step": 88,
+      "target": 5
+    },
+    "exit": null,
+    "fr3": {
+      "hardware_active": true,
+      "ok": true,
+      "robot_mode_name": "Move",
+      "state_age_s": 0.1
+    },
+    "heartbeat": {
+      "age_s": 0.6
+    },
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": true,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      },
+      {
+        "code": "blind_home",
+        "text": "Enter, success, failure, discard and exit send the arm home without any limit check; hold freezes the client, nothing resumes."
+      },
+      {
+        "code": "extra_connection",
+        "text": "More than one connection to the policy server: another client may be running."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "running",
+      "text": "Episode 1 is running."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "running",
+    "state_seq": 7
+  },
+  "starting": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "starting"
+          },
+          "text": "Not offered while the run is starting."
+        }
+      },
+      "end": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "starting"
+          },
+          "text": "Not offered while the run is starting."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "starting"
+          },
+          "text": "Not offered while the run is starting."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "starting"
+          },
+          "text": "Not offered while the run is starting."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "starting"
+          },
+          "text": "Not offered while the run is starting."
+        }
+      },
+      "hold": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "starting"
+          },
+          "text": "Not offered while the run is starting."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": null,
+    "enabled": true,
+    "episode": null,
+    "exit": null,
+    "fr3": null,
+    "heartbeat": {
+      "age_s": null
+    },
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": false,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "waiting_for_session",
+      "text": "The client is starting: it connects to the policy server and warms up the cameras. Nothing moves yet."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "starting",
+    "state_seq": 7
+  },
+  "starting_gate_unconfirmed": {
+    "actions": {
+      "discard": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "starting"
+          },
+          "text": "Not offered while the run is starting."
+        }
+      },
+      "end": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "end_at_gate": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "starting"
+          },
+          "text": "Not offered while the run is starting."
+        }
+      },
+      "enter": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "starting"
+          },
+          "text": "Not offered while the run is starting."
+        }
+      },
+      "exit_home": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "starting"
+          },
+          "text": "Not offered while the run is starting."
+        }
+      },
+      "failure": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "starting"
+          },
+          "text": "Not offered while the run is starting."
+        }
+      },
+      "hold": {
+        "allowed": true,
+        "blind": false,
+        "why_not": null
+      },
+      "start": {
+        "allowed": false,
+        "blind": false,
+        "why_not": {
+          "code": "run_live",
+          "params": {},
+          "text": "A client is already running; end it first."
+        }
+      },
+      "success": {
+        "allowed": false,
+        "blind": true,
+        "why_not": {
+          "code": "state_not_allowed",
+          "params": {
+            "state": "starting"
+          },
+          "text": "Not offered while the run is starting."
+        }
+      }
+    },
+    "armed": null,
+    "can_start": false,
+    "clients": null,
+    "enabled": true,
+    "episode": {
+      "counted": 0,
+      "max_steps": 400,
+      "no": 1,
+      "step": 0,
+      "target": 5
+    },
+    "exit": null,
+    "fr3": {
+      "hardware_active": true,
+      "ok": true,
+      "robot_mode_name": "Move",
+      "state_age_s": 0.1
+    },
+    "heartbeat": {
+      "age_s": 0.6
+    },
+    "held": null,
+    "keys": {
+      "discard": "d",
+      "end_at_gate": "q",
+      "enter": "Enter",
+      "exit_home": "q",
+      "failure": "f",
+      "success": "s"
+    },
+    "last_episode": null,
+    "may_move": false,
+    "monitor": {
+      "age_s": 0.4,
+      "state": "ok"
+    },
+    "notices": [
+      {
+        "code": "gates_scope",
+        "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+      },
+      {
+        "code": "hold_not_estop",
+        "text": "Hold is not an emergency stop. It freezes the client only: the arm keeps the last target it was sent."
+      }
+    ],
+    "phrases": {
+      "end": "end client run",
+      "exit_home": "exit and go home",
+      "start": "start client {group}"
+    },
+    "preflight": [],
+    "profile": "real",
+    "profile_code": "profile.product",
+    "reason": {
+      "code": "gate_not_confirmed",
+      "text": "The client reports the start gate, but its banner or its keyboard mode is not seen yet; no key is offered."
+    },
+    "run": {
+      "age_s": 300.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "model_id": "pi05_fr3_all_step49999",
+      "prompt": "pick the eggplant in the blue plate",
+      "rtc": true,
+      "run_id": "20261019T073000-4f2a91",
+      "started_at": "2026-10-19T15:25:00+08:00",
+      "task_folder": "pick_the_eggplant_in_the_blue_plate"
+    },
+    "sampled_at": 1792395000.0,
+    "schema": "levi.marvel0.run.v1",
+    "state": "starting",
+    "state_seq": 7
+  }
+}

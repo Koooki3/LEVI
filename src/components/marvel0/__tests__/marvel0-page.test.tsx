@@ -4,24 +4,71 @@ import {
   setupDom,
   waitFor,
 } from "@/components/ds/__tests__/dom";
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
 import { LocaleProvider } from "@/components/levi-locale";
-import { MARVEL0_POLL_MS, MARVEL0_REQUEST_MS } from "../marvel0-logic";
+import { Marvel0CardView } from "../marvel0-card";
 import {
+  MARVEL0_POLL_MS,
+  MARVEL0_REQUEST_MS,
+  type Marvel0Card,
+} from "../marvel0-logic";
+import {
+  healthPart,
   quietMarvel0,
   quietSetup,
   marvel0Status,
   setupStatus,
 } from "./fixtures";
 
-// This file is about the status cards. The action section at the end of the
-// page has its own tests (deploy-panel, command-panel, marvel0-actions-page); it is
-// left out here so that its requests and timers are not mixed into these.
+// This file is about the status cards. The action cards of steps 2 and 3 have
+// their own tests (deploy-panel, command-panel, marvel0-actions-page), and
+// the arm stack's controls and the hosted client's reads have theirs
+// (stack-panel, run-panel); they are left out here so that their requests and
+// timers are not mixed into these. The stand-ins still show the status cards
+// the page hands to them, and the polls of the stack and the run read nothing,
+// so the chain at the top follows the status cards.
+const idlePoll = {
+  loaded: false,
+  value: null,
+  current: false,
+  problem: null,
+  lastOk: null,
+  refresh: async () => {},
+};
+mock.module("@/components/marvel0/use-stack-poll", () => ({
+  STACK_FRESH_MS: 8000,
+  useStackPoll: () => idlePoll,
+}));
+mock.module("@/components/marvel0/use-run-poll", () => ({
+  RUN_POLL_MS: 1000,
+  RUN_FRESH_MS: 5000,
+  useRunPoll: () => ({ ...idlePoll, lastSeen: null }),
+}));
+mock.module("@/components/marvel0/stack-panel", () => ({
+  StackPanel: ({ cards }: { cards: Marvel0Card[] }) => (
+    <>
+      {cards.map((card) => (
+        <Marvel0CardView key={card.id} card={card} />
+      ))}
+    </>
+  ),
+}));
 mock.module("@/components/marvel0/marvel0-actions", () => ({
-  Marvel0Actions: () => null,
+  Marvel0Actions: ({
+    policyStatus,
+    clientStatus,
+  }: {
+    policyStatus?: ReactNode;
+    clientStatus?: ReactNode;
+  }) => (
+    <>
+      {policyStatus}
+      {clientStatus}
+    </>
+  ),
 }));
 const { default: Marvel0Page } = await import("@/app/marvel0/page");
 setupDom();
@@ -201,12 +248,21 @@ describe("the marvel0 page", () => {
     // The badge says the state in words.
     const gripper = host.querySelector("[data-testid=marvel0-card-gripper]")!;
     expect(gripper.textContent).toContain("Unknown");
-    expect(gripper.textContent).toContain("No passive source");
+    expect(gripper.textContent).toContain(
+      "no status file, port or unit this page can read",
+    );
     expect(gripper.textContent).toContain("terminal B");
     // Facts: the GPU line and the lock holder.
     const gpu = host.querySelector("[data-testid=marvel0-card-gpu]")!;
     expect(gpu.textContent).toContain("12.0 / 32.0 GiB");
     expect(gpu.textContent).toContain("levi: held by python (pid 4008)");
+    // The line saying where a card's readings come from is the last row of
+    // its Readings fold, said once, not a paragraph of its own under the card.
+    const arm = host.querySelector("[data-testid=marvel0-card-arm]")!;
+    const fold = arm.querySelector("details.rg-card__probe")!;
+    expect(fold.querySelector(".rg-hint")).not.toBeNull();
+    expect(arm.querySelectorAll(".rg-hint")).toHaveLength(1);
+    expect(fold.lastElementChild!.classList.contains("rg-hint")).toBe(true);
     // Only the two LEVI routes were asked, as plain uncached GETs.
     expect(new Set(calls.map((call) => call.path))).toEqual(
       new Set([SETUP, MARVEL0]),
@@ -218,7 +274,120 @@ describe("the marvel0 page", () => {
     }
   });
 
-  test("says it is read-only, never connects to robot ports and is no e-stop; the only button refreshes", async () => {
+  test("the stack strip comes first, M to client, and says once why Desk, A and M are stale", async () => {
+    serve(() => ({
+      [SETUP]: setupStatus({
+        fr3_health: healthPart({ state: "offline", age_s: 420 }),
+      }),
+      [MARVEL0]: marvel0Status(),
+    }));
+    const { host } = await render(<Marvel0Page />);
+    await loaded(host);
+    const strip = host.querySelector("[data-testid=marvel0-strip]")!;
+    const stops = Array.from(strip.querySelectorAll("li")).map((li) =>
+      li.getAttribute("data-testid"),
+    );
+    expect(stops).toEqual([
+      "marvel0-strip-M",
+      "marvel0-strip-desk",
+      "marvel0-strip-A",
+      "marvel0-strip-B",
+      "marvel0-strip-C",
+      "marvel0-strip-policy",
+      "marvel0-strip-run",
+    ]);
+    for (const id of ["M", "desk", "A"])
+      expect(
+        strip.querySelector(`[data-testid=marvel0-strip-${id}]`)!.textContent,
+      ).toContain("Stale");
+    const cause = host.querySelector("[data-testid=marvel0-strip-cause]")!;
+    // The cause comes first, in the strip, above the tiles it explains.
+    expect(cause.textContent).toMatch(/^Terminal M \(the health monitor\)/);
+    expect(cause.textContent).toContain("Desk, A and M cannot update");
+    expect(cause.textContent).toContain("7 min");
+    expect(
+      cause.compareDocumentPosition(strip.querySelector("ol")!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // Above every card.
+    expect(
+      cause.compareDocumentPosition(
+        host.querySelector("[data-testid=marvel0-card-monitor]")!,
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  test("cards A, B and C show no process evidence, even when the guard lists robot processes (RIG-01: passive sources only)", async () => {
+    serve(() => ({
+      [SETUP]: setupStatus({
+        guard: {
+          state: "ok",
+          quiet: false,
+          robot: [
+            { pid: 11, name: "ros2_control_node" },
+            { pid: 12, name: "ros2_control_node" },
+            { pid: 13, name: "franka_server_ros2" },
+          ],
+          banner: null,
+        },
+      }),
+      [MARVEL0]: marvel0Status(),
+    }));
+    const { host } = await render(<Marvel0Page />);
+    await loaded(host);
+    for (const id of ["arm", "gripper", "robot_server"]) {
+      const node = host.querySelector(`[data-testid=marvel0-card-${id}]`)!;
+      const text = node.textContent!;
+      expect(text).not.toContain("Processes seen");
+      expect(text).not.toContain("ros2_control_node");
+      expect(text).not.toContain("franka_server");
+    }
+    // B stays unknown: nothing on the page guesses it from processes.
+    expect(
+      host
+        .querySelector("[data-testid=marvel0-card-gripper]")!
+        .getAttribute("data-state"),
+    ).toBe("unknown");
+  });
+
+  test("the notes of a card are folded under a count, open only on a red card", async () => {
+    serve(() => ({
+      [SETUP]: setupStatus({
+        ports: { state: "unknown", detail: "no socket table here" },
+      }),
+      [MARVEL0]: marvel0Status(),
+    }));
+    const { host } = await render(<Marvel0Page />);
+    await loaded(host);
+    const folded = Array.from(host.querySelectorAll("details.rg-card__more"));
+    expect(folded.length).toBeGreaterThan(0);
+    for (const details of folded) {
+      const card = details.closest("[data-state]")!;
+      expect(details.hasAttribute("open")).toBe(
+        card.getAttribute("data-state") === "red",
+      );
+      expect(details.querySelector("summary")!.textContent).toMatch(
+        /^Details \(\d+\)$/,
+      );
+      expect(details.querySelector("ul.rg-notes li")).toBeTruthy();
+    }
+  });
+
+  test("the scope says its point in one line; the long text is folded but on the page", async () => {
+    serve(() => ({ [SETUP]: setupStatus(), [MARVEL0]: marvel0Status() }));
+    const { host } = await render(<Marvel0Page />);
+    await loaded(host);
+    const details = host.querySelector(".rg-scope-note details")!;
+    expect(details.hasAttribute("open")).toBe(false);
+    expect(details.querySelector("summary")!.textContent).toBe(
+      en["marvel0.scope.more"],
+    );
+    expect(host.querySelector(".rg-scope-note strong")!.textContent).toBe(
+      en["marvel0.scope.lead"],
+    );
+  });
+
+  test("says what is read-only, that the status cards never connect to robot ports, what the gates are worth and that nothing is an e-stop; the only button outside the chain refreshes", async () => {
     serve(() => ({ [SETUP]: setupStatus(), [MARVEL0]: marvel0Status() }));
     const { host } = await render(<Marvel0Page />);
     await loaded(host);
@@ -226,15 +395,26 @@ describe("the marvel0 page", () => {
     expect(text).toContain(en["marvel0.scope.read_only"]);
     expect(text).toContain(en["marvel0.scope.no_connect"]);
     expect(text).toContain(en["marvel0.scope.actions"]);
+    expect(text).toContain(en["marvel0.scope.gates"]);
     expect(text).toContain(en["marvel0.scope.no_estop"]);
     expect(en["marvel0.scope.read_only"]).toMatch(
       /^The status cards are read-only/,
     );
-    expect(en["marvel0.scope.no_connect"]).toContain("never connects");
+    expect(en["marvel0.scope.no_connect"]).toContain("never connect");
+    // The one connection the page makes itself is named, not hidden.
+    expect(en["marvel0.scope.no_connect"]).toContain("FCI");
+    // The gates are not sold as a barrier against another program.
+    expect(en["marvel0.scope.gates"]).toContain("do not stop another program");
     expect(en["marvel0.scope.no_estop"]).toContain("emergency stop");
-    const buttons = Array.from(host.querySelectorAll("button")).map((b) =>
-      b.textContent?.trim(),
-    );
+    // Nothing the page says is that it never starts anything.
+    expect(en["marvel0.scope.lead"]).not.toMatch(/never start|only watch/i);
+    // The chain's seven nodes are buttons that move to a card; apart from
+    // them the only button is Refresh.
+    const strip = host.querySelector("[data-testid=marvel0-strip]")!;
+    expect(strip.querySelectorAll("button")).toHaveLength(7);
+    const buttons = Array.from(host.querySelectorAll("button"))
+      .filter((b) => !strip.contains(b))
+      .map((b) => b.textContent?.trim());
     expect(buttons).toEqual(["Refresh"]);
     expect(host.querySelector("a, form, input, select")).toBeNull();
   });

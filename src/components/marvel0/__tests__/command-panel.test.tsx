@@ -13,13 +13,13 @@ import { LocaleProvider } from "@/components/levi-locale";
 import { readModels, readSite } from "../catalog-logic";
 import { CommandPanel } from "../command-panel";
 import { readDeploy } from "../deploy-logic";
+import { NO_CHOICE, effectiveSelection, type Effective } from "../selection";
 import type { Marvel0Catalog } from "../use-marvel0-actions";
 import { modelsAnswer, siteAnswer, model, cfgModel } from "./catalog-fixtures";
 import { COMMAND, preview } from "./command-fixtures";
 import { deployInfo, idle, ready, starting } from "./deploy-fixtures";
 import {
   button,
-  choose,
   fakeApi,
   field,
   nothing,
@@ -69,26 +69,48 @@ function withClipboard() {
   });
 }
 
+/** The page's one selection as the page computes it, from the models, what
+ * was picked in the policy server card (nothing) and the server's state; a
+ * test may override parts to put the card in a state the page would not. */
+function selectionFor(
+  status: ReturnType<typeof readDeploy>,
+  over: Partial<Effective> = {},
+  models = readModels(modelsAnswer()),
+): Effective {
+  return { ...effectiveSelection(models, NO_CHOICE, status)!, ...over };
+}
+
 async function open(
   canned: Canned = { preview: ok(preview()) },
   status: ReturnType<typeof readDeploy> = readDeploy(idle()),
   zhLanguage = false,
-  deployedModel: string | null = null,
+  over: Partial<Effective> = {},
 ) {
   if (zhLanguage) localStorage.setItem("levi-language", "zh");
   const { api, calls } = fakeApi(canned);
-  const panel = (
-    <CommandPanel
-      api={api}
-      catalog={catalog()}
-      status={status}
-      deployedModel={deployedModel}
-    />
-  );
-  const view = await render(
-    zhLanguage ? <LocaleProvider>{panel}</LocaleProvider> : panel,
-  );
-  return { ...view, api, calls };
+  const used: string[] = [];
+  const panel = (selection: Effective) => {
+    const card = (
+      <CommandPanel
+        api={api}
+        catalog={catalog()}
+        status={status}
+        selection={selection}
+        onUseAnother={() => used.push("another")}
+      />
+    );
+    return zhLanguage ? <LocaleProvider>{card}</LocaleProvider> : card;
+  };
+  const view = await render(panel(selectionFor(status, over)));
+  return {
+    ...view,
+    api,
+    calls,
+    used,
+    /** The policy server card chose something else. */
+    choose: (change: Partial<Effective>) =>
+      view.rerender(panel(selectionFor(status, change))),
+  };
 }
 const card = (host: HTMLElement) =>
   host.querySelector("[data-testid=marvel0-command]") as HTMLElement;
@@ -99,14 +121,16 @@ const make = async (host: HTMLElement) => {
 };
 
 describe("the Client command card", () => {
-  test("says nothing is executed, and that the arm's settings come from the site file", async () => {
+  test("says what it writes, how to run it, and that the arm's settings come from the site file", async () => {
     const { host } = await open();
     expect(text(card(host))).toContain(en["marvel0.cmd.scope"]);
-    expect(en["marvel0.cmd.scope"]).toContain(
-      "Nothing is executed or started here",
-    );
-    expect(en["marvel0.cmd.scope"]).toContain("never starts the demo client");
-    expect(en["marvel0.cmd.scope"]).toContain("cannot be changed in this form");
+    // The card says where the client is started (here, after Make the
+    // command), not that the Run card does it: that card hosts it afterwards.
+    expect(en["marvel0.cmd.scope"]).toContain("start the client from here");
+    expect(en["marvel0.cmd.scope"]).not.toContain("Run card");
+    // The card no longer says the page never starts the client.
+    expect(en["marvel0.cmd.scope"]).not.toContain("never");
+    expect(en["marvel0.cmd.scope"]).toContain("site file");
   });
 
   test("opens on the site's defaults and the fields the server fills in are empty", async () => {
@@ -127,7 +151,6 @@ describe("the Client command card", () => {
     expect(group.value).toBe("");
     expect(group.placeholder).toBe(`${SFT}_rtc_demo`);
     expect((field(c, "Note") as HTMLInputElement).value).toBe("");
-    expect((field(c, "Model") as HTMLSelectElement).value).toBe(SFT);
   });
 
   test("suggests the known task instructions", async () => {
@@ -145,30 +168,29 @@ describe("the Client command card", () => {
       config: "pi05_fr3_sp",
       restricted_prompts: true,
     });
+    const models = readModels(modelsAnswer({ models: [restricted, model()] }));
     const { api } = fakeApi({ preview: ok(preview()) });
-    const view = await render(
+    const status = readDeploy(idle());
+    const panel = (modelId: string) => (
       <CommandPanel
         api={api}
-        catalog={catalog({
-          models: readModels(modelsAnswer({ models: [restricted, model()] })),
-        })}
-        status={readDeploy(idle())}
-        deployedModel={null}
-      />,
+        catalog={catalog({ models })}
+        status={status}
+        selection={selectionFor(status, { modelId }, models)}
+        onUseAnother={() => {}}
+      />
     );
+    const view = await render(panel("pi05_fr3_sp_v1"));
     const options = () =>
       Array.from(
         view.host.querySelectorAll("datalist#marvel0-known-prompts option"),
       ).map((option) => option.getAttribute("value"));
-    await choose(
-      field<HTMLSelectElement>(card(view.host), "Model"),
-      "pi05_fr3_sp_v1",
-    );
     expect(options()).toEqual([
       "pick screws of same size into the empty slot of screw box",
       "stack the plates of same color together",
     ]);
-    await choose(field<HTMLSelectElement>(card(view.host), "Model"), SFT);
+    // The policy server card chose another model: the list follows.
+    await view.rerender(panel(SFT));
     expect(options()).toHaveLength(3);
   });
 
@@ -193,21 +215,75 @@ describe("the Client command card", () => {
       "allow-unknown",
     ])
       expect(labels.join(" ")).not.toContain(fixedFlag);
-    // Only these controls: the form, nothing for the fixed flags.
+    // Only these controls: the form, nothing for the fixed flags, and no
+    // model or RTC control of its own (they follow the policy server card).
     const inputs = Array.from(
       card(host).querySelectorAll("input, select"),
     ).length;
-    expect(inputs).toBe(9); // model, prompt, steps, eval, min z, rtc, horizon, group, note
+    expect(inputs).toBe(7); // prompt, steps, eval, min z, horizon, group, note
+    expect(card(host).querySelectorAll("select").length).toBe(0);
+    expect(card(host).querySelector("[role=switch]")).toBeNull();
+  });
+});
+
+describe("the model, RTC and guidance strength follow the policy server card", () => {
+  const follow = (host: HTMLElement) =>
+    host.querySelector("[data-testid=marvel0-command-follow]") as HTMLElement;
+
+  test("a read-only badge says which model the command follows, and the way back to choose another", async () => {
+    const { host, used } = await open();
+    expect(text(follow(host))).toContain(`follows the policy server: ${SFT}`);
+    expect(follow(host).getAttribute("data-source")).toBe("default");
+    expect(text(follow(host))).toContain("RTC on");
+    await click(button(follow(host), "use another model")!);
+    expect(used).toEqual(["another"]);
   });
 
-  test("starts on the model of the server this page deployed", async () => {
-    const { host } = await open(
+  test("while a server of this page runs a model, that model is the command's, with its RTC and strength", async () => {
+    const { host, calls } = await open(
       { preview: ok(preview()) },
-      readDeploy(ready()),
-      false,
-      CFG,
+      readDeploy(
+        ready({
+          deploy: deployInfo({
+            model_id: CFG,
+            rtc: false,
+            cfg_guidance_scale: 1.5,
+          }),
+        }),
+      ),
     );
-    expect((field(card(host), "Model") as HTMLSelectElement).value).toBe(CFG);
+    expect(follow(host).getAttribute("data-source")).toBe("server");
+    expect(text(follow(host))).toContain(`follows the policy server: ${CFG}`);
+    expect(text(follow(host))).toContain("RTC off");
+    expect(text(follow(host))).toContain("Guidance strength 1.5");
+    await make(host);
+    expect(calls.preview[0]).toMatchObject({ model_id: CFG, rtc: false });
+    // No mismatch to warn about: the command asks for what the server serves.
+    expect(
+      host
+        .querySelector("[data-testid=marvel0-command-server]")!
+        .getAttribute("data-kind"),
+    ).toBe("match");
+  });
+
+  test("a model chosen in the policy server card is followed at once", async () => {
+    const { host, calls, choose } = await open();
+    await choose({ modelId: CFG, rtc: false, source: "choice" });
+    expect(follow(host).getAttribute("data-source")).toBe("choice");
+    expect(text(follow(host))).toContain(`follows the policy server: ${CFG}`);
+    await make(host);
+    expect(calls.preview[0]).toMatchObject({ model_id: CFG, rtc: false });
+  });
+
+  test("the default rollout group carries the full checkpoint name", async () => {
+    const { host, choose } = await open();
+    const group = () =>
+      (field(card(host), "Rollout group") as HTMLInputElement).placeholder;
+    expect(group()).toBe(`${SFT}_rtc_demo`);
+    await choose({ modelId: CFG });
+    expect(group()).toBe(`${CFG}_rtc_demo`);
+    await choose({ modelId: CFG, rtc: false });
+    expect(group()).toBe(`${CFG}_demo`);
   });
 });
 
@@ -268,11 +344,12 @@ describe("making the command", () => {
     expect(calls.stopDeploy).toHaveLength(0);
   });
 
-  test("what is typed is what is asked for: horizon, group, note, RTC off, another model", async () => {
-    const { host, calls } = await open();
+  test("what is typed is what is asked for: horizon, group, note, and the selected model with RTC off", async () => {
+    const { host, calls } = await open(undefined, undefined, false, {
+      modelId: CFG,
+      rtc: false,
+    });
     const c = card(host);
-    await choose(field<HTMLSelectElement>(c, "Model"), CFG);
-    await click(field(c, "RTC (real-time chunking)")!);
     await type(field(c, "Open-loop horizon"), "4");
     await type(field(c, "Rollout group"), "my_group");
     await type(field(c, "Note"), "first try");
@@ -292,10 +369,10 @@ describe("making the command", () => {
   });
 
   test("RTC changes the horizon's name and the group the server would use", async () => {
-    const { host } = await open();
+    const { host, choose } = await open();
     const c = card(host);
     expect(field(c, "RTC execute horizon")).not.toBeNull();
-    await click(field(c, "RTC (real-time chunking)")!);
+    await choose({ rtc: false });
     expect(field(c, "Open-loop horizon")).not.toBeNull();
     expect(field(c, "RTC execute horizon")).toBeNull();
     expect((field(c, "Rollout group") as HTMLInputElement).placeholder).toBe(
@@ -521,14 +598,21 @@ describe("the policy server against the command", () => {
     expect(line(none.host).getAttribute("data-kind")).toBe("no_server");
     const starting_ = await open(undefined, readDeploy(starting()));
     expect(line(starting_.host).getAttribute("data-kind")).toBe("starting");
+    // The page's selection follows the server, so these two cannot arise from
+    // the page itself; the card still words them if it is handed a selection
+    // that differs from what the server serves.
     const other = await open(
       undefined,
       readDeploy(ready({ deploy: deployInfo({ model_id: CFG }) })),
+      false,
+      { modelId: SFT },
     );
     expect(text(line(other.host))).toContain(CFG);
     const plain = await open(
       undefined,
       readDeploy(ready({ deploy: deployInfo({ rtc: false }) })),
+      false,
+      { rtc: true },
     );
     expect(line(plain.host).getAttribute("data-kind")).toBe("needs_rtc");
   });

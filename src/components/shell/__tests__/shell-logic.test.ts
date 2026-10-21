@@ -10,7 +10,11 @@ import {
   filterCommands,
   isCurrentPage,
   headerPages,
+  NAV_COLLAPSE_WIDTHS,
+  NAV_ROW_BELOW,
+  navCollapseLevel,
   navPages,
+  splitHeaderPages,
 } from "../commands";
 import {
   globalShortcut,
@@ -120,15 +124,73 @@ describe("global shortcuts", () => {
 });
 
 describe("navigation and commands", () => {
-  test("the header leaves out pages that are in the palette only", () => {
+  test("marvel0 is a header link like the others, and every page is a header link", () => {
     const pages = navPages({ live: true, pool: true });
     const all = pages.map((p) => p.href);
-    // The marvel0 is reached by Ctrl+K and G C: an eighth header link
-    // pushed Guide and Report out of view below 1500 px.
     expect(all).toContain("/marvel0");
-    expect(headerPages(pages).map((p) => p.href)).toEqual(
-      all.filter((href) => href !== "/marvel0"),
+    expect(headerPages(pages).map((p) => p.href)).toEqual(all);
+  });
+
+  test("folding: nothing at full width, the reference pages first, then the heavier two; Live, Automatic, marvel0 and Explore never fold", () => {
+    const pages = navPages({ live: true, pool: true });
+    const names = (list: Array<{ href: string }>) => list.map((p) => p.href);
+    const wide = splitHeaderPages(pages, 0);
+    expect(wide.more).toEqual([]);
+    expect(names(wide.links)).toEqual(names(pages));
+    const first = splitHeaderPages(pages, 1);
+    expect(names(first.more)).toEqual(["/guide", "/report"]);
+    const second = splitHeaderPages(pages, 2);
+    expect(names(second.more)).toEqual([
+      "/workbench",
+      "/pool",
+      "/guide",
+      "/report",
+    ]);
+    expect(names(second.links)).toEqual([
+      "/live",
+      "/automatic",
+      "/marvel0",
+      "/explore",
+    ]);
+    // Every page is in the bar or in the menu, once, in navigation order.
+    for (const level of [0, 1, 2] as const) {
+      const { links, more } = splitHeaderPages(pages, level);
+      expect([...names(links), ...names(more)].sort()).toEqual(
+        names(pages).sort(),
+      );
+    }
+    // Without a pool the pool is not offered and nothing else changes.
+    const noPool = splitHeaderPages(navPages({ live: true, pool: false }), 2);
+    expect(names(noPool.more)).toEqual(["/workbench", "/guide", "/report"]);
+  });
+
+  test("the window width picks the folding level; two rows below 900 px fold nothing", () => {
+    expect(navCollapseLevel(1920)).toBe(0);
+    expect(navCollapseLevel(NAV_COLLAPSE_WIDTHS.first)).toBe(0);
+    expect(navCollapseLevel(NAV_COLLAPSE_WIDTHS.first - 1)).toBe(1);
+    expect(navCollapseLevel(NAV_COLLAPSE_WIDTHS.second)).toBe(1);
+    expect(navCollapseLevel(NAV_COLLAPSE_WIDTHS.second - 1)).toBe(2);
+    expect(navCollapseLevel(NAV_ROW_BELOW)).toBe(2);
+    expect(navCollapseLevel(NAV_ROW_BELOW - 1)).toBe(0);
+    expect(navCollapseLevel(420)).toBe(0);
+  });
+
+  test("the styles hide the folded links at the same widths", () => {
+    const css = readFileSync(
+      join(import.meta.dir, "../../../styles/shell.css"),
+      "utf8",
     );
+    // Level 1 starts below `first`, level 2 below `second`; the bar has two
+    // rows (and folds nothing) below NAV_ROW_BELOW.
+    expect(css).toContain(
+      `@media (min-width: ${NAV_ROW_BELOW}px) and (max-width: ${NAV_COLLAPSE_WIDTHS.first - 1}px)`,
+    );
+    expect(css).toContain(
+      `@media (min-width: ${NAV_ROW_BELOW}px) and (max-width: ${NAV_COLLAPSE_WIDTHS.second - 1}px)`,
+    );
+    expect(css).toContain(`@media (max-width: ${NAV_ROW_BELOW - 1}px)`);
+    expect(css).toContain('.levi-shell-link[data-collapse="1"]');
+    expect(css).toContain('.levi-shell-link[data-collapse="2"]');
   });
 
   test("pages follow the live and pool offers, in navigation order", () => {

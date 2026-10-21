@@ -77,15 +77,67 @@
   letter-spacing: 0.08em;
 }
 
-.levi-shell-nav {
+/* The links and, beside them, the "More" menu the links fold into when the
+   bar runs short of room. The menu sits outside the scrolling links so its
+   panel is not clipped. */
+.levi-shell-navwrap {
   grid-area: nav;
   display: flex;
   align-items: stretch;
   gap: var(--ds-space-1);
   height: 100%;
   min-width: 0;
+}
+.levi-shell-nav {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: stretch;
+  gap: var(--ds-space-1);
+  height: 100%;
+  min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
+}
+.levi-shell-more {
+  display: none;
+  flex: none;
+  position: relative;
+  align-items: center;
+}
+.levi-shell-more.is-current::after {
+  content: "";
+  position: absolute;
+  left: var(--ds-space-3);
+  right: var(--ds-space-3);
+  bottom: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ds-selected-indicator);
+}
+.levi-shell-more__trigger {
+  color: var(--ds-text-secondary);
+  font-weight: var(--ds-weight-medium);
+}
+/* Folding steps (src/components/shell/commands.ts, NAV_COLLAPSE_WIDTHS and
+   NAV_ROW_BELOW: a test keeps the numbers equal). Step 1: Guide and Report.
+   Step 2: also Conversion & review and the training pool. The numbers come
+   from measured link widths (English, the widest): all eight links need about
+   1505 px beside the full search box, six links and More about 1445 px, and
+   four links and More about 990 px with the search box reduced to its icon
+   and tighter links (below 1240 px). A link must never be cut off by the
+   scrolling of the bar: marvel0 is one of the four that never fold. */
+@media (min-width: 1000px) and (max-width: 1559px) {
+  .levi-shell-link[data-collapse="1"] {
+    display: none;
+  }
+  .levi-shell-more {
+    display: flex;
+  }
+}
+@media (min-width: 1000px) and (max-width: 1499px) {
+  .levi-shell-link[data-collapse="2"] {
+    display: none;
+  }
 }
 .levi-shell-nav::-webkit-scrollbar {
   display: none;
@@ -103,6 +155,22 @@
   white-space: nowrap;
   text-decoration: none;
   transition: color var(--ds-dur-fast) var(--ds-ease-standard);
+}
+/* The word after a page's label ("MARVEL0 robot"): muted, and dropped where the
+   bar is short of room (below 1240 px wide and on a phone). */
+.levi-shell-link__hint {
+  color: var(--ds-text-tertiary);
+  font-weight: var(--ds-weight-regular);
+}
+@media (max-width: 1239px) {
+  .levi-shell-link__hint {
+    display: none;
+  }
+}
+@media (min-width: 640px) and (max-width: 999px) {
+  .levi-shell-link__hint {
+    display: inline;
+  }
 }
 .levi-shell-link:hover,
 .levi-shell-nav .levi-live-nav:hover {
@@ -207,6 +275,23 @@
   display: inline-flex;
   gap: 2px;
 }
+/* Short of room (below 1240 px): the links are tighter and the search box
+   keeps only its icon. After the base rules above, so that these win. */
+@media (min-width: 1000px) and (max-width: 1239px) {
+  .levi-shell-link,
+  .levi-shell-nav .levi-live-nav {
+    padding: 0 var(--ds-space-2);
+  }
+  .levi-shell-search {
+    min-width: 0;
+    margin-right: 0;
+    padding: 0 var(--ds-space-2);
+  }
+  .levi-shell-search__label,
+  .levi-shell-search__keys {
+    display: none;
+  }
+}
 .levi-shell-language .ds-btn__label,
 .levi-shell-language span[lang] {
   min-width: 2.5em;
@@ -214,8 +299,10 @@
 }
 
 /* Narrow screens: actions beside the wordmark, the navigation on its own
-   scrolling row below. */
-@media (max-width: 899px) {
+   row below (it scrolls; the current page is brought into view by
+   levi-header.tsx, and the links are tight so that the first three show whole
+   at 420 px). */
+@media (max-width: 999px) {
   :root {
     --levi-header-height: 100px;
     /* Two rows tall: too much of a phone screen to keep, so it scrolls
@@ -235,10 +322,14 @@
     justify-content: flex-end;
     min-width: 0;
   }
-  .levi-shell-nav {
+  .levi-shell-navwrap {
     margin: 0 calc(-1 * var(--ds-space-4));
     padding: 0 var(--ds-space-1);
     border-top: 1px solid var(--ds-separator);
+  }
+  .levi-shell-link,
+  .levi-shell-nav .levi-live-nav {
+    padding: 0 var(--ds-space-2);
   }
   .levi-shell-search {
     min-width: 0;

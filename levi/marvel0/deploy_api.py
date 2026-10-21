@@ -11,9 +11,9 @@ The two writes are **a person's**: the same local authentication as the other
 ``/api/levi`` routes, and any Bearer credential is refused (the only ones LEVI
 knows are agents'), as ``levi.automatic.api`` does. Every write carries a
 ``request_id`` (answered again, never acted on twice) and a typed confirmation
-phrase naming the action and the model. Nothing here starts the arm stack or
-the demo client, and no control of the page is an emergency stop: a hand stays
-on the physical one.
+phrase naming the action and the model. Nothing here starts the arm stack
+(``stack_act_api.py`` does) or the demo client (``run_api.py`` does), and no
+control of the page is an emergency stop: a hand stays on the physical one.
 
 Errors have the shape of ``errors.fail``; FastAPI's own 422 answers a malformed
 body. The site file is needed first (412 without it); no answer names a path.

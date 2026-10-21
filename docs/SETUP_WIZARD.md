@@ -160,7 +160,7 @@ own text, passed on (at most 200 characters).
 ### marvel0 (read-only)
 
 `GET /api/levi/marvel0/status` (the same local authentication as the route above)
-answers one question for the **marvel0** page (`/marvel0`; it is not a header link: open it from the command palette, `Ctrl+K`, or with the go-to chord `G C`):
+answers one question for the **marvel0** page (`/marvel0`; it is a header link; the command palette, `Ctrl+K`, and the go-to chord `G C` open it too):
 is any robot activity to be seen? The document has the schema
 `levi.marvel0.status.v1` and four parts. As above, a part that cannot be read says
 `unknown` with a `detail` and never fails the rest.
@@ -293,12 +293,23 @@ FR3 health file and the kernel's socket table say; the terminal B card shows
 `unknown` for the controller state, because the gripper stack has no status
 file or port that the page may read.
 
-**The page.** A banner shows the verdict, then one card per component: the
-robot stack (Desk mode and FCI, terminal A arm stack, terminal B gripper stack,
-terminal C robot server, terminal M health monitor, policy server, demo client)
-and the services on this machine (live service, vision-language model, GPU). A
-card shows a badge (OK, Fault, Stale, Not started or Unknown), a sentence, the
-facts behind it and how that component is started (setup.md, AERI.md). Fault is
+**The page.** It reads top to bottom as the stack is brought up. A one-line
+scope (read-only, advisory, no emergency stop; the details folded under it), a
+stack status strip (terminal M health monitor, Desk, terminal A arm stack,
+terminal B gripper stack, terminal C robot server, policy server, demo client,
+each a tile with its badge; above the tiles, when the health monitor's file
+stopped updating or is missing, one line that names the cause first: "Terminal M
+is not updating, so Desk, A and M cannot update"), the banner with the verdict, then three numbered steps: 1 the arm
+stack (cards M, Desk, A, B, C), 2 the policy server (its status card beside the
+Policy server card), 3 the task and its command (the demo client card beside
+the Demo client command card), and last the services on this machine (live
+service, vision-language model, GPU). A card shows a badge (OK, Fault, Stale,
+Not started or Unknown), a sentence, the facts behind it and a short hint; the
+cards of a row have the same height, and the notes under a card (the reasons
+and what the servers wrote) are folded under "Details (n)" unless the card is a
+fault. The strip is filled from the same cards (`StackStripData`); it reads no
+process list. The A, B and C cards do not read the process list either (marvel0
+uses passive sources only), so terminal B stays Unknown. Fault is
 the health monitor's red light (the sentences of the cards that mirror the
 monitor still say "red light"), a failed policy unit while no listening policy server is
 seen (also when the port table cannot be read), or a fault reported by an evaluation session.
@@ -400,9 +411,9 @@ command for the demo client terminal (task instruction, steps, episodes,
 `--min-z`, RTC horizon, rollout group, note), checked against the site's limits
 and shown as **text to copy**.
 
-On the page (`/marvel0`) they are the two cards of the last section, **Policy server
-and demo client**, under the read-only status cards: the **Policy server** card
-and the **Demo client command** card. Nothing else on the page does anything.
+On the page (`/marvel0`) they are steps 2 and 3, each beside the read-only
+status card of what it is about: the **Policy server** card and the **Demo
+client command** card. Nothing else on the page does anything.
 
 They use the same local authentication as the other `/api/levi` routes (the web
 UI token; an agent's Bearer credential is refused), and both need the **marvel0 site
@@ -422,8 +433,8 @@ file** first. The two writes (deploy and stop) are a person's only.
 
 The panel starts and stops **only the policy server unit it created**
 (`levi-aeri-policy-manual-marvel0-<model>`). It never starts the arm controller
-(terminal A), the gripper stack (terminal B), the robot server (terminal C), the
-health monitor or the demo client; those stay in real terminals as setup.md
+(terminal A), the gripper stack (terminal B), the robot server (terminal C) or
+the demo client (the health monitor is the arm stack card's, below); those stay in real terminals as setup.md
 describes, and the client command is only text. **Nothing on the page is an
 emergency stop**, no control is labelled one, and a hand must stay on the
 physical e-stop for every session. The Policy server card says: "This card only
@@ -952,3 +963,94 @@ form allow is never shown (`500 command_self_check`). The answer also holds:
   `tests/marvel0/test_marvel0_deploy_sample.py` fails when it differs, naming the
   command that rewrites it, `uv run --no-sync python
   tests/marvel0/regen_deploy_sample.py`.
+
+### marvel0: arm stack card and the health monitor
+
+`GET /api/levi/marvel0/stack` (`levi.marvel0.stack.v1`, the same local
+authentication; cached for 2 s) says what state each member of the arm stack is
+in, from passive sources only: the health monitor M, the arm controller A, the
+gripper stack B, the robot server C, the policy server and the demo client. It
+reads `systemctl --user show` of a few named units and the user manager's
+default limits (`DefaultLimitRTPRIO`, `DefaultLimitMEMLOCK`), `loginctl
+show-user` (Linger), the kernel's socket tables (the ledger's `arm_guard.py`
+judges the sockets to the arm, with the marker left out), the health file the
+monitor writes (`fr3.health_file` of the live configuration), the arm
+controller's marker (`lstat` only; its `ctime` age too, which `touch -d` cannot
+set back), the evaluation session files and this process's own `/proc/self/cgroup`. It
+reads no other process's `/proc/<pid>`, not even through the setup probes'
+process scan (`guard.robot` is not used), and connects to no port, the arm's
+included. A is seen from the sockets to the arm and a fresh health file; C and
+the policy server from LISTEN rows of their ports (5000/5001 and the policy
+port; who owns a socket is not looked up); the client from an ESTABLISHED
+connection to the policy port or an open evaluation session (one that has not
+connected yet cannot be seen: `client.not_connected`, unknown). B has no known
+passive evidence (the monitor does not ask the gripper's controller manager),
+so it is always `unknown`. **Rule R**: `verdict` is `busy` when any layer runs,
+else `unknown` when any layer is unknown, and `idle` only when every layer is
+seen stopped (a client that is not connected counts as stopped only while C
+and the policy server are both stopped); while M, A, B or C is unknown every
+start gate refuses (`gate.layers_known`, and `gate.b_known` for C). The client
+is not part of `gate.layers_known`: it can only connect after C and the policy
+server, so C's gate judges it with `gate.no_client` and, because a client that
+has not connected is invisible, with a question to the person
+(`gate.person_no_client`: "Confirm that no evaluation client (terminal E) is
+running or waiting to connect; the page cannot see a client before it
+connects"). The client's row then says it cannot be seen until it connects; it
+is never called stopped. The socket tables count as read only when `tcp` is
+read and `tcp6` is read, or is missing (ENOENT) on a host without IPv6
+(`/proc/net/if_inet6` missing too); a permission error, any other error, text
+that cannot be decoded, IPv6 up without its table, or a single unparsable line
+(too few fields, or a port, state, inode or address that does not parse; the header and
+blank lines do not count) makes them unknown: `N unparsable lines in <table>`. A stopped C with the impedance controller still active is
+`c.stopped_impedance`: the arm stays under control until A stops.
+
+For A, B and C the answer carries a **dry run of every planned start gate**
+(`gates.A|B|C`: `verdict` `would_start` or `would_refuse`, the refusing
+`reasons`, every check with `ok` true, false or null, and its `level`:
+`required`, `warn` or `person`). `route` is always `false`: **no route starts or
+stops A, B or C.** The FCI check before A (one TCP connection to the arm) is not
+made until its owner decides it, so A's dry run always refuses on
+`gate.fci_probe`.
+
+The writes are a person's (the policy deploy's check: a Bearer credential is
+refused), carry a `request_id` (answered again, never done twice) and a typed
+phrase:
+
+| Route | Phrase | What it does |
+| --- | --- | --- |
+| `POST /api/levi/marvel0/stack/monitor/start` | `start health monitor` | starts M as the transient unit `levi-fr3-health-monitor` (`systemd-run --user`, `KillSignal=SIGINT`, `TimeoutStopSec=10`, `Nice=10`, `--collect`, `Restart=no`), running the monitor script next to the health file's `run/` folder (`<franka_control>/scripts/fr3_health_monitor.sh`) |
+| `POST /api/levi/marvel0/stack/monitor/stop` | `stop health monitor` | `systemctl --user stop levi-fr3-health-monitor.service`; refused while A or C runs or cannot be ruled out (M stops last) |
+| `POST /api/levi/marvel0/stack/marker/clear` | `clear marker` | removes `lab/levi-hub/.arm-controller-active` and nothing else; only when A's unit does not exist, the arm's sockets show no control connection and A is seen stopped (no fresh health file saying the hardware is active) |
+
+A unit named `levi-fr3-health-monitor.service` is the page's only when `systemctl
+show` reports exactly that `Id` and exactly the monitor script as `ExecStart`;
+it is then adopted, never replaced. A unit of that name with another command is
+`foreign` and never touched; a fresh health file without that unit is a monitor
+started elsewhere (`elsewhere`: a terminal) and no second one is started.
+
+**Automatic management of M** (`LEVI_MARVEL0_MONITOR_AUTO`, default `off`; `on`
+turns it on; it stays off until it has been checked on the real robot with the
+user present). When on, every 5 s the product LEVI starts M when A or C is seen running
+and M is not running, starts it again when it died (at most 3 automatic starts in
+10 minutes), and stops it only after A and C have both looked stopped for 120 s.
+Unknown evidence, a foreign unit or a monitor elsewhere: nothing is done. The
+monitor is read-only on the robot side (it subscribes to one topic, reads two
+list services and writes the health file).
+
+**Product only, and one machine-wide lock.** Real-machine actions happen only in
+a process of `levi-product.service` running from the main checkout (profile
+`real`); every other instance, a worktree or a temporary page-check instance
+included, has profile `fake`: it shows the stack and every write answers
+`not_product`, and the automatic management does not run. Every write and every
+automatic action holds a `flock` on `lab/levi-hub/.marvel0-stack.lock` of the
+main checkout (never waited for: a second action is refused `stack_busy`, 423);
+the file says who holds it, and `lock.state` in the answer comes from
+`/proc/locks`.
+
+**What these gates are worth.** They stop mistakes, not another program of the
+same account: anything that runs as this user can send the same request, forge
+the page's headers or edit the files read here. The real barriers are Franka
+Desk and the physical emergency stop. With `Linger=no` (`linger.state`), the
+last logout of the account stops every user unit within seconds, a stack started
+in a terminal too; the answer then carries `notice.logout_stops_stack` while A
+may run.

@@ -1,0 +1,338 @@
+{
+  "answers": {
+    "challenge_enter": {
+      "challenge": "challenge-0002-xxxxxxxxxx",
+      "expires_at": 1792000030.0,
+      "purpose": "enter",
+      "schema": "levi.marvel0.run_result.v1",
+      "state": "at_gate",
+      "state_seq": 1,
+      "ttl_s": 30.0
+    },
+    "challenge_label": {
+      "challenge": "challenge-0003-xxxxxxxxxx",
+      "expires_at": 1792000030.0,
+      "purpose": "label",
+      "schema": "levi.marvel0.run_result.v1",
+      "state": "running",
+      "state_seq": 2,
+      "ttl_s": 30.0
+    },
+    "challenge_start": {
+      "challenge": "challenge-0001-xxxxxxxxxx",
+      "confirm": "start client pi05_fr3_all_step49999_rtc_demo",
+      "expires_at": 1792000030.0,
+      "group": "pi05_fr3_all_step49999_rtc_demo",
+      "preflight": [
+        {
+          "code": "client_enabled",
+          "level": "ok",
+          "params": {},
+          "text": "Hosted runs are enabled in the control site file."
+        },
+        {
+          "code": "product",
+          "level": "ok",
+          "params": {},
+          "text": "This is the product LEVI."
+        },
+        {
+          "code": "run_idle",
+          "level": "ok",
+          "params": {},
+          "text": "No client is running."
+        },
+        {
+          "code": "policy_ready",
+          "level": "ok",
+          "params": {
+            "state": "ready"
+          },
+          "text": "The policy server of this page is ready."
+        },
+        {
+          "code": "policy_matches",
+          "level": "ok",
+          "params": {
+            "served": "pi05_fr3_all_step49999",
+            "served_rtc": "on",
+            "wanted": "pi05_fr3_all_step49999",
+            "wanted_rtc": "on"
+          },
+          "text": "The policy server serves the model and RTC setting of the form."
+        },
+        {
+          "code": "no_connection",
+          "level": "ok",
+          "params": {
+            "count": 0
+          },
+          "text": "Nobody is connected to the policy server."
+        },
+        {
+          "code": "no_session",
+          "level": "ok",
+          "params": {
+            "count": 0
+          },
+          "text": "No evaluation session is active."
+        },
+        {
+          "code": "arm_lock",
+          "level": "ok",
+          "params": {},
+          "text": "The arm lock is free."
+        },
+        {
+          "code": "monitor_green",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          },
+          "text": "The health monitor is fresh and green."
+        },
+        {
+          "code": "no_aeri",
+          "level": "ok",
+          "params": {},
+          "text": "No automatic evaluation run is alive."
+        },
+        {
+          "code": "rollout_writable",
+          "level": "ok",
+          "params": {},
+          "text": "The rollout folder can be written."
+        },
+        {
+          "code": "robot_server",
+          "level": "warn",
+          "params": {},
+          "text": "Nothing listens on the robot server's port; the client will stop at its first step."
+        },
+        {
+          "code": "min_z",
+          "level": "ok",
+          "params": {},
+          "text": "The z floor is not below the floor of this task."
+        }
+      ],
+      "purpose": "start",
+      "schema": "levi.marvel0.run_result.v1",
+      "ttl_s": 30.0,
+      "warnings": [
+        {
+          "code": "min_z_below_task_table",
+          "text": "min-z 0.05 is below 0.05325, the floor the client measured for this task; the fingertips can reach the table."
+        }
+      ]
+    },
+    "ended": {
+      "ended": true,
+      "schema": "levi.marvel0.run_result.v1",
+      "state": "done"
+    },
+    "hold": {
+      "already": false,
+      "held": true,
+      "schema": "levi.marvel0.run_result.v1",
+      "state": "held"
+    },
+    "hold_again": {
+      "already": true,
+      "held": true,
+      "schema": "levi.marvel0.run_result.v1",
+      "state": "held"
+    },
+    "key_sent": {
+      "episode_no": 1,
+      "request_id": "req-sample-0002",
+      "schema": "levi.marvel0.run_result.v1",
+      "sent": "enter",
+      "state": "at_gate"
+    },
+    "log": {
+      "lines": [
+        "=== ready | ep 1 | 0/3 | \"pick the eggplant in the blue plate\" ===",
+        "  [Enter] start",
+        "Homing over 30 steps -> [0.4]",
+        "Home reached.",
+        "[ 40] [0.1 0.2]"
+      ],
+      "log_id": "client-20261014T174640Z.log",
+      "schema": "levi.marvel0.run_log.v1",
+      "size_bytes": 144
+    },
+    "started": {
+      "created": true,
+      "next": "Watch the run state; the start gate opens when it shows at_gate.",
+      "request_id": "req-sample-0001",
+      "run_id": "20261015T014640-4f2a91",
+      "schema": "levi.marvel0.run_result.v1",
+      "state": "starting"
+    },
+    "started_again": {
+      "created": true,
+      "next": "Watch the run state; the start gate opens when it shows at_gate.",
+      "replayed": true,
+      "request_id": "req-sample-0001",
+      "run_id": "20261015T014640-4f2a91",
+      "schema": "levi.marvel0.run_result.v1",
+      "state": "starting"
+    }
+  },
+  "refusals": {
+    "attest_required": {
+      "detail": {
+        "code": "attest_required",
+        "message": "Tick every item: the scene is reset, the area is clear, a hand is on the physical e-stop"
+      },
+      "status": 400
+    },
+    "busy": {
+      "detail": {
+        "code": "busy",
+        "message": "Another action on the run is going on"
+      },
+      "status": 423
+    },
+    "challenge_expired": {
+      "detail": {
+        "code": "challenge_expired",
+        "message": "That confirmation token expired (30 s); ask for a new one"
+      },
+      "status": 409
+    },
+    "challenge_invalid": {
+      "detail": {
+        "code": "challenge_invalid",
+        "message": "That confirmation token is not one this page issued; ask for a new one"
+      },
+      "status": 409
+    },
+    "confirm_required": {
+      "detail": {
+        "code": "confirm_required",
+        "message": "Type the confirmation phrase exactly: start client pi05_fr3_all_step49999_rtc_demo",
+        "phrase": "start client pi05_fr3_all_step49999_rtc_demo"
+      },
+      "status": 400
+    },
+    "confirm_required_end": {
+      "detail": {
+        "code": "confirm_required",
+        "message": "Type the confirmation phrase exactly: end client run",
+        "phrase": "end client run"
+      },
+      "status": 400
+    },
+    "enter_locked": {
+      "detail": {
+        "code": "enter_locked",
+        "message": "Enter was already sent at this gate and is never sent twice; read the log, or hold and end."
+      },
+      "status": 409
+    },
+    "key_locked": {
+      "detail": {
+        "code": "key_locked",
+        "message": "A key was already sent for this episode; wait for the client's next prompt."
+      },
+      "status": 409
+    },
+    "max_steps_out_of_range": {
+      "detail": {
+        "code": "max_steps_out_of_range",
+        "field": "max_steps",
+        "max": 3000,
+        "message": "max_steps must be from 1 to 3000",
+        "min": 1
+      },
+      "status": 422
+    },
+    "min_z_below_task_floor": {
+      "detail": {
+        "code": "min_z_below_task_floor",
+        "floor": 0.075,
+        "message": "--min-z 0.03 is below 0.075, the floor the client measured for this task; the fingertips would reach the table",
+        "min_z": "0.03"
+      },
+      "status": 422
+    },
+    "monitor_not_green": {
+      "detail": {
+        "code": "monitor_not_green",
+        "message": "The health monitor is not fresh and green (offline).",
+        "state": "offline"
+      },
+      "status": 409
+    },
+    "monitor_red": {
+      "detail": {
+        "code": "monitor_red",
+        "message": "The health monitor shows a red light."
+      },
+      "status": 409
+    },
+    "not_product": {
+      "detail": {
+        "code": "not_product",
+        "message": "Only the product LEVI (levi-product.service in the main checkout) may act on the real arm; this instance only shows the run"
+      },
+      "status": 409
+    },
+    "preflight_failed": {
+      "detail": {
+        "checks": [
+          {
+            "code": "no_connection",
+            "level": "refuse",
+            "params": {
+              "count": 2
+            },
+            "text": "2 connection(s) to the policy server; another client may be running."
+          },
+          {
+            "code": "monitor_green",
+            "level": "refuse",
+            "params": {
+              "state": "red"
+            },
+            "text": "The health monitor is not fresh and green (red)."
+          },
+          {
+            "code": "robot_server",
+            "level": "warn",
+            "params": {},
+            "text": "Nothing listens on the robot server's port; the client will stop at its first step."
+          }
+        ],
+        "code": "preflight_failed",
+        "first": "no_connection",
+        "message": "A start check fails: no_connection"
+      },
+      "status": 409
+    },
+    "request_id_invalid": {
+      "detail": {
+        "code": "request_id_invalid",
+        "message": "request_id is 8-80 characters of A-Z, a-z, 0-9 and . _ : -"
+      },
+      "status": 400
+    },
+    "run_disabled": {
+      "detail": {
+        "code": "run_disabled",
+        "message": "Hosted runs are switched off: the control site file does not enable them"
+      },
+      "status": 403
+    },
+    "state_not_allowed": {
+      "detail": {
+        "code": "state_not_allowed",
+        "message": "Not offered while the run is running.",
+        "state": "running"
+      },
+      "status": 409
+    }
+  }
+}

@@ -10,11 +10,24 @@
 .rg-page h1 {
   margin: 0;
 }
-.rg-page h2 {
+.rg-page h2,
+.rg-page h3,
+.rg-page h4 {
   margin: 0;
 }
 .rg-page p {
   margin: 0;
+}
+/* The state colours are set as `.rg-page .rg-x`: pages.css colours every
+ * paragraph of a page (`.pg-workbench p`), which a lone class would lose to. */
+/* Counters, ages and timers do not jitter as they change. */
+.rg-page {
+  font-variant-numeric: tabular-nums;
+}
+.rg-page h1 {
+  font-size: var(--ds-text-title-1-size);
+  line-height: var(--ds-text-title-1-line);
+  letter-spacing: var(--ds-tracking-display);
 }
 .rg-scope {
   margin: 0;
@@ -31,22 +44,63 @@
   align-items: center;
   gap: var(--ds-space-2);
 }
-.rg-bad {
+/* The sentence takes the row beside the dot and wraps inside it; the button
+ * goes under it on a narrow screen instead of leaving the dot on a line alone. */
+.rg-fresh > span:not(.rg-fresh__dot) {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+.rg-fresh__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ds-success);
+}
+.rg-fresh__dot--late {
+  background: var(--ds-warning);
+}
+.rg-page .rg-bad {
   color: var(--ds-danger);
 }
 .rg-banner {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ds-space-2);
-  padding: var(--ds-space-4);
+  padding: var(--ds-space-2) var(--ds-space-4);
   border: 1px solid var(--ds-separator);
-  border-left-width: 4px;
+  border-left-width: 3px;
   border-radius: var(--ds-radius-md);
   background: var(--ds-surface-1);
 }
+.rg-banner > :not(summary) {
+  margin-top: var(--ds-space-2);
+}
+.rg-banner > summary,
+.rg-host > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.rg-banner > summary::-webkit-details-marker,
+.rg-host > summary::-webkit-details-marker {
+  display: none;
+}
+/* A folded block says it opens: a chevron at its end that turns when open. */
+.rg-banner > summary::after,
+.rg-host > summary::after {
+  content: "";
+  flex: none;
+  margin-left: auto;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--ds-text-tertiary);
+  border-bottom: 2px solid var(--ds-text-tertiary);
+  transform: rotate(45deg);
+  transition: transform var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.rg-banner[open] > summary::after,
+.rg-host[open] > summary::after {
+  transform: rotate(-135deg);
+}
 .rg-banner--busy {
   border-left-color: var(--ds-warning);
-  background: var(--ds-warning-bg);
 }
 .rg-banner--idle,
 .rg-banner--unknown {
@@ -58,13 +112,25 @@
   align-items: center;
   gap: var(--ds-space-2) var(--ds-space-3);
 }
+.rg-banner__head h2 {
+  font-size: var(--ds-text-callout-size);
+  line-height: var(--ds-text-callout-line);
+  font-weight: var(--ds-weight-semibold);
+}
 .rg-banner__reasons {
   margin: 0;
-  padding-left: var(--ds-space-5);
-  display: flex;
-  flex-direction: column;
-  gap: var(--ds-space-1);
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: var(--ds-space-2) var(--ds-space-3);
   font-size: var(--ds-text-callout-size);
+}
+.rg-banner__reasons li {
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-1);
 }
 .rg-source {
   font-weight: var(--ds-weight-semibold);
@@ -102,11 +168,15 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   gap: var(--ds-space-4);
-  align-items: start;
+  /* Cards of a row are as tall as the tallest; the hint sits at the bottom. */
+  align-items: stretch;
 }
 .rg-card {
-  border-left-width: 4px;
+  border-left-width: 3px;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  transition: border-color var(--ds-dur-base) var(--ds-ease-standard);
 }
 .rg-card--ok {
   border-left-color: var(--ds-success);
@@ -117,14 +187,28 @@
 .rg-card--stale {
   border-left-color: var(--ds-warning);
 }
+.rg-card--working {
+  border-left-color: var(--ds-info);
+}
 .rg-card--not_started,
 .rg-card--unknown {
   border-left-color: var(--ds-separator-strong);
 }
 .rg-card .ds-card__header {
   margin-bottom: var(--ds-space-3);
+  /* The state badge stays beside the title, not above it. */
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: var(--ds-space-3);
+}
+.rg-card .ds-card__header > div:first-child {
+  flex: 1 1 0;
+}
+.rg-card .ds-card__actions {
+  flex: none;
 }
 .rg-facts {
+  font-variant-numeric: tabular-nums;
   display: grid;
   grid-template-columns: minmax(96px, 12rem) minmax(0, 1fr);
   gap: var(--ds-space-1) var(--ds-space-3);
@@ -149,9 +233,15 @@
   overflow-wrap: anywhere;
 }
 .rg-hint {
-  margin: var(--ds-space-3) 0 0;
+  margin: auto 0 0;
+  padding-top: var(--ds-space-3);
   font-size: var(--ds-text-caption-size);
   color: var(--ds-text-tertiary);
+}
+/* The line saying where the readings come from is the last row of the fold. */
+.rg-card__probe .rg-hint {
+  margin: var(--ds-space-2) 0 0;
+  padding-top: 0;
 }
 .rg-fact {
   display: contents;
@@ -209,9 +299,7 @@
   gap: var(--ds-space-2);
 }
 .rg-presets {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ds-space-1);
+  display: block;
   font-size: var(--ds-text-caption-size);
 }
 .rg-presets ul {
@@ -238,7 +326,7 @@
   gap: var(--ds-space-2);
   overflow-wrap: anywhere;
 }
-.rg-warn {
+.rg-page .rg-warn {
   color: var(--ds-warning);
   font-size: var(--ds-text-caption-size);
 }
@@ -282,4 +370,912 @@
   display: flex;
   flex-direction: column;
   gap: var(--ds-space-2);
+}
+
+/* The page head: the title with the freshness line beside it. */
+.rg-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ds-space-2) var(--ds-space-4);
+}
+.rg-scope-note.pg-note {
+  margin: 0;
+  border: 1px solid var(--ds-separator);
+  border-left: 3px solid var(--ds-warning);
+  background: var(--ds-surface-1);
+}
+.rg-scope-note strong {
+  font-weight: var(--ds-weight-medium);
+}
+.rg-scope-note .rg-details {
+  margin-top: var(--ds-space-2);
+}
+.rg-scope-note .rg-scope {
+  margin-top: var(--ds-space-2);
+}
+
+/* What several stops share, first thing in the strip. */
+.rg-strip__cause {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-3);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-warning-bg);
+  font-size: var(--ds-text-callout-size);
+  font-weight: var(--ds-weight-medium);
+  overflow-wrap: anywhere;
+}
+.rg-strip__cause svg {
+  flex: none;
+  margin-top: 0.2em;
+  color: var(--ds-warning);
+}
+
+/* The numbered steps: 1 arm stack, 2 policy server, 3 task and command. */
+.rg-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-5);
+}
+.rg-step__title {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+}
+/* "Step 2": a tag in monospace, so that the steps (1-4) are not read as the
+ * chain's node numbers (01-07). */
+.rg-step__tag {
+  flex: none;
+  padding: 2px var(--ds-space-2);
+  border: 1px solid var(--ds-separator-strong);
+  border-radius: var(--ds-radius-xs);
+  background: var(--ds-surface-sunken);
+  color: var(--ds-text-secondary);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-medium);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.rg-step {
+  padding-top: var(--ds-space-5);
+  border-top: 1px solid var(--ds-separator);
+}
+.rg-step__lead {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+}
+/* A step's action card first (wide) and the status card of what it is about
+ * beside it (narrow); one column on a narrow screen, the action first. */
+.rg-step__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ds-space-4);
+  align-items: start;
+}
+@media (min-width: 960px) {
+  .rg-step__grid:not(.rg-step__grid--one) {
+    grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  }
+}
+
+/* The chain at the top, as an instrument panel: M -> Desk -> A -> B -> C ->
+ * policy server -> run. Each node shows a glyph of its state in a ring in the
+ * state's colour, its step number in monospace, its name and the state in
+ * words; a wire joins it to the next one in the colour of what flows out of
+ * it (solid when it is ready, dashed and moving while it starts, red when it
+ * failed, dotted when it has not started). The first node that is not ready is
+ * the focus: the only one that glows, with its reason said under the chain. A
+ * node is a button (it moves to its card). Colour carries the state and the
+ * words say it too. */
+.rg-chain {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-4);
+  padding: var(--ds-space-4) var(--ds-space-5) var(--ds-space-5);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-surface-1);
+  box-shadow: var(--ds-shadow-1);
+}
+.rg-chain__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ds-space-1) var(--ds-space-4);
+}
+.rg-page .rg-chain__title {
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ds-text-secondary);
+}
+.rg-chain__count {
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-callout-size);
+  color: var(--ds-text-secondary);
+}
+.rg-chain__nodes {
+  /* The nodes per row: seven on a wide screen, four (4 + 3) on a tablet, two
+   * on a phone. A wire joins a node to the next one in its row; the last node
+   * of a row has none (see the media rules below). */
+  --rg-cols: 7;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--rg-cols), minmax(0, 1fr));
+  column-gap: var(--ds-space-4);
+  row-gap: var(--ds-space-4);
+}
+.rg-chain__item {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+.rg-node {
+  --rg-tone: var(--ds-separator-strong);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ds-space-2);
+  width: 100%;
+  min-width: 0;
+  padding: var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-sunken);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--ds-dur-fast) var(--ds-ease-standard),
+    border-color var(--ds-dur-base) var(--ds-ease-standard),
+    box-shadow var(--ds-dur-base) var(--ds-ease-standard);
+}
+.rg-node:hover {
+  background: var(--ds-surface-hover);
+}
+.rg-node:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+.rg-node--ready {
+  --rg-tone: var(--ds-success);
+}
+.rg-node--working {
+  --rg-tone: var(--ds-info);
+}
+.rg-node--problem {
+  --rg-tone: var(--ds-danger);
+}
+.rg-node--attention,
+.rg-node--stale,
+.rg-node--unknown {
+  --rg-tone: var(--ds-warning);
+}
+.rg-node__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+.rg-node__glyph {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1.5px solid var(--rg-tone);
+  background: color-mix(in srgb, var(--rg-tone) 14%, var(--ds-surface-1));
+  color: var(--rg-tone);
+}
+.rg-node--idle .rg-node__glyph {
+  border-style: dashed;
+  background: transparent;
+  color: var(--ds-text-tertiary);
+}
+.rg-node__idx {
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  letter-spacing: 0.06em;
+  color: var(--ds-text-tertiary);
+}
+.rg-node__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-height: 24px;
+  gap: var(--ds-space-1) var(--ds-space-2);
+  font-size: var(--ds-text-callout-size);
+  font-weight: var(--ds-weight-semibold);
+  overflow-wrap: anywhere;
+}
+.rg-node__code {
+  padding: 0 var(--ds-space-1);
+  border: 1px solid var(--ds-separator-strong);
+  border-radius: var(--ds-radius-xs);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  line-height: 1.4;
+  font-weight: var(--ds-weight-medium);
+  color: var(--ds-text-secondary);
+}
+/* The one node to look at is the only one with a glow. */
+.rg-node--focus {
+  border-color: var(--rg-tone);
+  background: var(--ds-surface-1);
+  box-shadow:
+    0 0 0 1px var(--rg-tone),
+    0 0 22px -6px color-mix(in srgb, var(--rg-tone) 65%, transparent);
+}
+/* The node to act on next glows green (nothing is wrong), a blocked one amber. */
+.rg-chain__item[data-focus="next"] .rg-node--focus {
+  --rg-tone: var(--ds-success);
+}
+.rg-chain__item[data-focus="blocked"] .rg-node--focus {
+  --rg-tone: var(--ds-warning);
+}
+.rg-node--focus:hover {
+  background: var(--ds-surface-hover);
+}
+/* The wire to the next node, across the gap of the grid. */
+.rg-chain__link {
+  display: block;
+  position: absolute;
+  top: calc(var(--ds-space-3) + 13px);
+  left: 100%;
+  width: var(--ds-space-4);
+  height: 2px;
+  background: var(--ds-separator-strong);
+  pointer-events: none;
+}
+.rg-chain__link--ready {
+  background: var(--ds-success);
+}
+.rg-chain__link--problem {
+  background: var(--ds-danger);
+}
+.rg-chain__link--attention,
+.rg-chain__link--stale,
+.rg-chain__link--unknown {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--ds-warning) 0 3px,
+    transparent 3px 6px
+  );
+}
+.rg-chain__link--idle {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--ds-separator-strong) 0 2px,
+    transparent 2px 5px
+  );
+}
+.rg-chain__link--working {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--ds-info) 0 4px,
+    transparent 4px 8px
+  );
+  background-size: 8px 2px;
+  animation: rg-flow 0.9s linear infinite;
+}
+.rg-node--working .rg-node__glyph {
+  animation: ds-breathe 2s ease-in-out infinite;
+}
+@keyframes rg-flow {
+  to {
+    background-position-x: 8px;
+  }
+}
+/* Calm: no moving wire or breathing glyph for a person who asked for less. */
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .rg-chain__link--working,
+  :root:not([data-motion="full"]) .rg-node--working .rg-node__glyph {
+    animation: none;
+  }
+}
+[data-motion="reduce"] .rg-chain__link--working,
+[data-motion="reduce"] .rg-node--working .rg-node__glyph {
+  animation: none;
+}
+/* The line under the chain: what the person should look at, and why. */
+.rg-chain__focus {
+  --rg-tone: var(--ds-separator-strong);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-3) var(--ds-space-4);
+  border-left: 3px solid var(--rg-tone);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-sunken);
+  font-size: var(--ds-text-callout-size);
+  overflow-wrap: anywhere;
+}
+.rg-page .rg-chain__focus {
+  color: var(--ds-text-primary);
+}
+.rg-op-failed {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border-left: 3px solid var(--ds-danger);
+  border-radius: var(--ds-radius-xs);
+  background: var(--ds-danger-bg);
+}
+.rg-chain__focus-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--rg-tone);
+}
+.rg-chain__focus--problem {
+  --rg-tone: var(--ds-danger);
+  background: var(--ds-danger-bg);
+}
+.rg-chain__focus--blocked,
+.rg-chain__focus--check {
+  --rg-tone: var(--ds-warning);
+  background: var(--ds-warning-bg);
+}
+.rg-chain__focus--working {
+  --rg-tone: var(--ds-info);
+  background: var(--ds-info-bg);
+}
+.rg-chain__focus--next,
+.rg-chain__focus--done {
+  --rg-tone: var(--ds-success);
+  background: var(--ds-success-bg);
+}
+/* Tablet: four to a row (4 + 3); the fourth node's wire would cross to the
+ * next row, so it is left out. */
+@media (max-width: 1099px) {
+  .rg-chain__nodes {
+    --rg-cols: 4;
+  }
+  .rg-chain__item:nth-child(4n) .rg-chain__link {
+    display: none;
+  }
+}
+/* Phone width: two tiles to a row, a wire inside each pair only. */
+@media (max-width: 639px) {
+  .rg-chain {
+    padding: var(--ds-space-3) var(--ds-space-3) var(--ds-space-4);
+  }
+  .rg-chain__nodes {
+    --rg-cols: 2;
+    column-gap: var(--ds-space-3);
+    row-gap: var(--ds-space-3);
+  }
+  .rg-chain__item:nth-child(4n) .rg-chain__link {
+    display: block;
+  }
+  .rg-chain__item:nth-child(2n) .rg-chain__link {
+    display: none;
+  }
+  .rg-node {
+    padding: var(--ds-space-2) var(--ds-space-3);
+    gap: var(--ds-space-1);
+  }
+  .rg-chain__link {
+    top: calc(var(--ds-space-2) + 13px);
+    width: var(--ds-space-3);
+  }
+}
+
+/* "Updated 3 s ago": calm while current, a warning when the polls are late. */
+.rg-age {
+  color: var(--ds-text-tertiary);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  font-variant-numeric: tabular-nums;
+}
+.rg-age--late {
+  color: var(--ds-warning);
+}
+
+/* Step heads: the numbered title with the freshness and Refresh beside it. */
+.rg-step__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2) var(--ds-space-4);
+}
+.rg-step__tools {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.rg-notice .pg-note {
+  margin: 0;
+}
+
+/* Step 1: the guided start and the marker above the terminals' cards. */
+.rg-toolbar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--ds-space-5);
+  align-items: start;
+}
+.rg-seq,
+.rg-marker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  min-width: 0;
+}
+.rg-seq__head,
+.rg-marker__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2) var(--ds-space-3);
+}
+.rg-page .rg-marker__title,
+.rg-page .rg-gripper__title {
+  font-size: var(--ds-text-callout-size);
+  font-weight: var(--ds-weight-semibold);
+}
+.rg-seq__wait {
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-info-bg);
+  font-size: var(--ds-text-callout-size);
+}
+.rg-grid--stack {
+  grid-template-columns: minmax(0, 1fr);
+}
+/* M and Desk are short: they keep their own height instead of being stretched
+ * to the tallest card of their row. */
+.rg-grid--stack > [data-testid="marvel0-card-monitor"],
+.rg-grid--stack > [data-testid="marvel0-card-desk"] {
+  align-self: start;
+}
+@media (min-width: 700px) {
+  .rg-grid--stack {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .rg-grid--stack > :nth-child(5) {
+    grid-column: 1 / -1;
+  }
+}
+@media (min-width: 1100px) {
+  .rg-grid--stack {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .rg-grid--stack > :nth-child(-n + 2) {
+    grid-column: span 3;
+  }
+  .rg-grid--stack > :nth-child(n + 3) {
+    grid-column: span 2;
+  }
+}
+
+/* A terminal's controls inside its card. */
+.rg-comp {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  margin-bottom: var(--ds-space-3);
+  min-width: 0;
+}
+.rg-comp[data-next="true"] {
+  padding: var(--ds-space-2);
+  border-radius: var(--ds-radius-sm);
+  outline: 2px solid var(--ds-info);
+}
+.rg-comp__state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.rg-comp__reason {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  overflow-wrap: anywhere;
+}
+.rg-comp__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+}
+.rg-comp__hazard {
+  margin-top: var(--ds-space-1);
+}
+.rg-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ds-space-1);
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border-left: 3px solid var(--ds-separator-strong);
+  border-radius: var(--ds-radius-xs);
+  background: var(--ds-surface-sunken);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+  overflow-wrap: anywhere;
+}
+.rg-block__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+  font-weight: var(--ds-weight-semibold);
+  color: var(--ds-text-primary);
+}
+.rg-block__list {
+  margin: 0;
+  padding-left: var(--ds-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+.rg-block__more {
+  width: 100%;
+}
+.rg-block__more > summary {
+  cursor: pointer;
+  color: var(--ds-text-tertiary);
+}
+.rg-block__more[open] > summary {
+  margin-bottom: var(--ds-space-1);
+}
+/* A refused write: the same box as "Start is off:", with a danger edge. */
+.rg-block--refused {
+  border-left-color: var(--ds-danger);
+  background: var(--ds-danger-bg);
+  color: var(--ds-text-primary);
+}
+.rg-block--refused .rg-block__label {
+  color: var(--ds-danger);
+}
+/* One danger rule: only HOLD is a solid danger button. An action that ends a
+ * process the arm depends on (Stop A, Stop C, Stop policy server, End run, the
+ * blind exit) is a secondary button outlined in the danger colour. */
+.rg-page .ds-btn--secondary.rg-btn--danger-outline:not(:disabled) {
+  border-color: var(--ds-danger);
+  color: var(--ds-danger);
+}
+.rg-page .ds-btn--secondary.rg-btn--danger-outline:hover:not(:disabled) {
+  background: var(--ds-danger-bg);
+}
+.rg-page .ds-btn--secondary.rg-btn--danger-outline:disabled {
+  border-color: var(--ds-separator);
+}
+.rg-page .rg-working {
+  color: var(--ds-info);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-page .rg-ok {
+  color: var(--ds-success);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-ready {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+.rg-ready__lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-ready__lines li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ds-space-2);
+  overflow-wrap: anywhere;
+}
+.rg-ready__lines svg {
+  flex: none;
+  margin-top: 0.15em;
+}
+.rg-ready__seen svg {
+  color: var(--ds-success);
+}
+.rg-ready__missing {
+  color: var(--ds-text-tertiary);
+}
+.rg-gripper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  margin-bottom: var(--ds-space-3);
+  padding-top: var(--ds-space-3);
+  border-top: 1px solid var(--ds-separator);
+}
+.rg-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+.rg-evidence__h {
+  margin: var(--ds-space-3) 0 var(--ds-space-1);
+  font-size: var(--ds-text-callout-size);
+}
+.rg-evidence {
+  margin-top: 0;
+}
+
+/* Step 3: the command follows the policy server's model, and the run card. */
+.rg-follow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-1) var(--ds-space-3);
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-sunken);
+}
+.rg-follow__label {
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-semibold);
+  color: var(--ds-text-secondary);
+}
+.rg-follow__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+/* The model line is one row: the label, what the command follows, the way
+ * back to the choice, RTC and the guidance strength; the sentence that says
+ * where the choice comes from and an error take a row of their own. */
+.rg-follow > p {
+  flex: 1 1 100%;
+  order: 2;
+}
+.rg-runstart {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2) var(--ds-space-3);
+}
+.rg-step__run {
+  margin-top: var(--ds-space-4);
+}
+.rg-run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+/* The age of the read, Refresh and the state, in the card's header. */
+.rg-run__meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ds-space-2);
+}
+.rg-run .ds-card__header {
+  flex-wrap: wrap;
+}
+/* The title and its sentence keep a readable width; the age, Refresh and the
+ * state drop under them when the card is narrow. */
+.rg-run .ds-card__header > div:first-child {
+  flex: 1 1 14rem;
+}
+/* What the client is doing sits above HOLD; it keeps a minimum height so that
+ * HOLD is in the same place in every state. */
+.rg-run__status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+.rg-run__status--hold {
+  min-height: 6.5rem;
+}
+/* No client yet: where a run is started, in the card's neutral colours. */
+.rg-run__how {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2) var(--ds-space-3);
+  padding: var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-left: 3px solid var(--ds-separator-strong);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-sunken);
+  font-size: var(--ds-text-callout-size);
+}
+.rg-run__how svg {
+  flex: none;
+  color: var(--ds-text-secondary);
+}
+.rg-run__how span {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.rg-run__off {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+/* The client is frozen: HOLD has done its work, only End is left. */
+.rg-run__frozen {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-3) var(--ds-space-4);
+  border: 1px solid var(--ds-warning);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-warning-bg);
+  font-weight: var(--ds-weight-medium);
+}
+.rg-run__frozen {
+  flex-wrap: wrap;
+}
+.rg-run__frozen svg {
+  flex: none;
+  color: var(--ds-warning);
+}
+/* The End of a frozen client sits in the frame, not under it. */
+.rg-run__frozen .rg-run__end {
+  flex: 1 1 18rem;
+  margin: 0;
+  padding: 0;
+  border-top: 0;
+  justify-content: flex-end;
+}
+.rg-run__reason,
+.rg-run__episode {
+  overflow-wrap: anywhere;
+}
+.rg-ready > summary {
+  cursor: pointer;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-run__episode {
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-title-3-size);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--ds-weight-semibold);
+}
+/* HOLD: full width, 64 px high and always in the same place. */
+.rg-run__hold {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-3);
+  border: 1px solid var(--ds-danger);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-danger-bg);
+}
+.rg-run .rg-hold {
+  width: 100%;
+  min-height: 64px;
+  font-size: var(--ds-text-title-3-size);
+}
+.rg-hold__caption {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+/* The reasons a run cannot start yet: one row each, a lock for what blocks and
+ * a triangle for what only warns. */
+.rg-preflight {
+  list-style: none;
+  margin: 0;
+  padding: var(--ds-space-2) var(--ds-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-sunken);
+  font-size: var(--ds-text-callout-size);
+  overflow-wrap: anywhere;
+}
+.rg-preflight li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ds-space-2);
+}
+.rg-preflight svg {
+  flex: none;
+  margin-top: 0.2em;
+  color: var(--ds-danger);
+}
+.rg-preflight li[data-level="warn"] svg {
+  color: var(--ds-warning);
+}
+.rg-preflight li[data-level="unknown"] svg {
+  color: var(--ds-text-tertiary);
+}
+.rg-run__notices {
+  margin-top: 0;
+}
+.rg-run__armed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+.rg-run__keys-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2) var(--ds-space-3);
+}
+/* How the run ends, at the foot of the card: apart from HOLD and the keys,
+ * one button of its own width with its hint. */
+.rg-run__end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2) var(--ds-space-4);
+  margin-top: var(--ds-space-2);
+  padding-top: var(--ds-space-4);
+  border-top: 1px solid var(--ds-separator);
+}
+.rg-run__keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-3);
+}
+.rg-run__keys .ds-btn {
+  flex: 1 1 10rem;
+  min-height: 48px;
+}
+.rg-run__exit {
+  margin-top: 0;
+}
+
+/* In a dialog the hazard of the action is the point: normal text, not a note. */
+.rg-dialog .rg-notes {
+  list-style: none;
+  margin: 0;
+  padding: var(--ds-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  border-left: 3px solid var(--ds-text-secondary);
+  border-radius: var(--ds-radius-xs);
+  background: var(--ds-surface-sunken);
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-callout-size);
+}
+
+/* The services of this machine: one fold, open only when one of them is red. */
+.rg-host > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-2) 0;
+}
+.rg-host[open] > summary {
+  margin-bottom: var(--ds-space-3);
+}
+
+/* The command form: two columns for the short number fields where the card is
+ * wide enough, one column otherwise. */
+.rg-action {
+  container-type: inline-size;
+}
+.rg-form--grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ds-space-3) var(--ds-space-4);
+}
+.rg-form--grid > .rg-span {
+  grid-column: 1 / -1;
+}
+@container (min-width: 640px) {
+  .rg-form--grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }

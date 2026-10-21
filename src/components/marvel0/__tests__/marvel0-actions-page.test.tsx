@@ -13,6 +13,7 @@ import { preview } from "./command-fixtures";
 import { deployed, idle, logAnswer, ready } from "./deploy-fixtures";
 import { quietMarvel0, quietSetup } from "./fixtures";
 import { button, field, tick, type } from "./actions-helpers";
+import { RUN, STACK, runDoc, stackDoc } from "./ctl-fixtures";
 
 const { default: Marvel0Page } = await import("@/app/marvel0/page");
 setupDom();
@@ -26,6 +27,8 @@ const READS = [
   "/api/levi/marvel0/site",
   "/api/levi/marvel0/deploy",
   "/api/levi/marvel0/deploy/log?lines=80",
+  STACK,
+  RUN,
 ];
 
 type Call = { path: string; init?: RequestInit };
@@ -71,6 +74,8 @@ const healthy = (deploy: unknown = idle()) => ({
   "/api/levi/marvel0/site": siteAnswer(),
   "/api/levi/marvel0/deploy": deploy,
   "/api/levi/marvel0/deploy/log?lines=80": logAnswer(),
+  [STACK]: stackDoc("idle"),
+  [RUN]: runDoc("idle_ready"),
 });
 const loaded = (host: HTMLElement) =>
   waitFor(
@@ -86,8 +91,10 @@ describe("the marvel0 with its action cards", () => {
     const { host } = await render(<Marvel0Page />);
     await loaded(host);
     await tick(3, 5);
+    // The status routes, the policy server's, the stack's and the client's;
+    // the log is read only while it is wanted.
     expect(new Set(calls.map((call) => call.path))).toEqual(
-      new Set(READS.slice(0, 5)),
+      new Set([...READS.slice(0, 5), STACK, RUN]),
     );
     for (const call of calls) {
       expect(call.init?.method ?? "GET").toBe("GET");
@@ -96,7 +103,7 @@ describe("the marvel0 with its action cards", () => {
     }
   });
 
-  test("the status cards are still there, and the action section follows them", async () => {
+  test("the action cards sit in steps 2 and 3 next to their status cards, above the services of this machine", async () => {
     core(healthy());
     const { host } = await render(<Marvel0Page />);
     await loaded(host);
@@ -105,11 +112,36 @@ describe("the marvel0 with its action cards", () => {
       host.querySelector("[data-testid=marvel0-card-policy]"),
     ).not.toBeNull();
     const actions = host.querySelector("[data-testid=marvel0-actions]")!;
+    // Below the arm stack (step 1), above the GPU and the other services.
     expect(
       actions.compareDocumentPosition(
         host.querySelector("[data-testid=marvel0-card-gpu]")!,
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      actions.compareDocumentPosition(
+        host.querySelector("[data-testid=marvel0-card-arm]")!,
       ) & Node.DOCUMENT_POSITION_PRECEDING,
     ).toBeTruthy();
+    expect(
+      actions.querySelector("[data-testid=marvel0-card-policy]"),
+    ).not.toBeNull();
+    expect(
+      actions.querySelector("[data-testid=marvel0-card-demo]"),
+    ).not.toBeNull();
+    const steps = Array.from(host.querySelectorAll(".rg-step__title")).map(
+      (h) => h.textContent,
+    );
+    // "Step n" and the name: the steps (1-4) are told apart from the chain's
+    // node numbers (01-07), and the run is the fourth step of its own.
+    const step = (n: number, name: string) =>
+      `${en["marvel0.step.n"].replace("{n}", String(n))}${name}`;
+    expect(steps).toEqual([
+      step(1, en["marvel0.step.arm"]),
+      step(2, en["marvel0.step.policy"]),
+      step(3, en["marvel0.step.client"]),
+      step(4, en["marvel0.step.run"]),
+    ]);
     expect(
       actions.querySelector("[data-testid=marvel0-deploy]"),
     ).not.toBeNull();
@@ -127,8 +159,8 @@ describe("the marvel0 with its action cards", () => {
       "marvel0.scope.read_only",
       "marvel0.scope.no_connect",
       "marvel0.scope.actions",
+      "marvel0.scope.gates",
       "marvel0.scope.no_estop",
-      "marvel0.act.scope",
       "marvel0.deploy.scope",
       "marvel0.cmd.scope",
     ] as const)
@@ -136,7 +168,11 @@ describe("the marvel0 with its action cards", () => {
     expect(en["marvel0.scope.read_only"]).toContain(
       "status cards are read-only",
     );
-    expect(en["marvel0.scope.actions"]).toContain("never start the arm stack");
+    // It says what the buttons do (the stack, the policy server, the client),
+    // not that the page never starts them, and what the gates are worth.
+    expect(en["marvel0.scope.actions"]).toContain("starts and stops");
+    expect(en["marvel0.scope.actions"]).not.toMatch(/never start/i);
+    expect(en["marvel0.scope.gates"]).toContain("do not stop another program");
   });
 
   test("a deploy goes through the page's own proxy route as one JSON POST with nothing but a content type", async () => {
@@ -204,7 +240,7 @@ describe("the marvel0 with its action cards", () => {
       () =>
         host
           .querySelector("[data-testid=marvel0-actions]")
-          ?.textContent?.includes(zh["marvel0.act.title"]),
+          ?.textContent?.includes(zh["marvel0.step.policy"]),
       { label: "the Chinese action section" },
     );
     const actions = host.querySelector("[data-testid=marvel0-actions]")!;

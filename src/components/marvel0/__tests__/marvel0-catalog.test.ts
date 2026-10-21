@@ -24,13 +24,48 @@ const SOURCES = [
   "components/marvel0/deploy-panel.tsx",
   "components/marvel0/marvel0-actions.tsx",
   "components/marvel0/marvel0-failure.ts",
+  // The arm stack: the passive card of the S4-0 module, and the controls.
+  "components/marvel0/stack-status-logic.ts",
+  "components/marvel0/stack-evidence.tsx",
+  "components/marvel0/stack-act-logic.ts",
+  "components/marvel0/stack-dialog-logic.ts",
+  "components/marvel0/stack-dialog.tsx",
+  "components/marvel0/stack-controls.tsx",
+  "components/marvel0/stack-panel.tsx",
+  "components/marvel0/use-stack-actions.ts",
+  "components/marvel0/use-stack-poll.ts",
+  "components/marvel0/ctl-failure.ts",
+  "components/marvel0/ctl-text.ts",
+  "components/marvel0/live-age.tsx",
+  // The chain at the top.
+  "components/marvel0/chain-logic.ts",
+  "components/marvel0/chain-strip.tsx",
+  // The hosted client.
+  "components/marvel0/run-logic.ts",
+  "components/marvel0/run-panel.tsx",
+  "components/marvel0/run-start.tsx",
+  "components/marvel0/use-run-actions.ts",
+  "components/marvel0/use-run-poll.ts",
+  "components/marvel0/selection.ts",
+  // The navigation entry's word after its label.
+  "components/shell/commands.ts",
 ];
+// A key is named as a whole ("marvel0.ctl.estop") or as the start of a family
+// the code finishes with a backend code or a state ("marvel0.ctl.block.",
+// "marvel0.cmd.follow_", or a template `marvel0.ctl.state.${state}`): the
+// members of a family are checked against what produces them in
+// ctl-catalog.test.ts.
 const named = new Set<string>();
+const families: string[] = [];
 for (const file of SOURCES)
   for (const match of readFileSync(join(src, file), "utf8").matchAll(
-    /"(marvel0\.[a-z0-9_.]+)"/g,
-  ))
-    named.add(match[1]);
+    /[`"](marvel0\.[a-z0-9_.A-Z]+)(?:[`"]|\$\{)/g,
+  )) {
+    const name = match[1];
+    (/[._]$/.test(name) ? families : []).push(name);
+    if (!/[._]$/.test(name)) named.add(name);
+  }
+const inFamily = (key: string) => families.some((p) => key.startsWith(p));
 
 const both = (key: string) => key in en && key in zh;
 
@@ -42,7 +77,9 @@ describe("the marvel0's catalogue entries", () => {
 
   test("no marvel0.* entry is left over", () => {
     const entries = Object.keys(en).filter((key) => key.startsWith("marvel0."));
-    expect(entries.filter((key) => !named.has(key))).toEqual([]);
+    expect(entries.filter((key) => !named.has(key) && !inFamily(key))).toEqual(
+      [],
+    );
     expect(Object.keys(zh).filter((key) => key.startsWith("marvel0."))).toEqual(
       entries,
     );
@@ -51,7 +88,10 @@ describe("the marvel0's catalogue entries", () => {
   test("the page, its navigation entry and its chord have both languages", () => {
     for (const key of ["marvel0", "Go to: marvel0"])
       expect(both(key)).toBe(true);
-    expect((zh as Record<string, string>)["marvel0"]).toBe("marvel0");
+    // The bar says "MARVEL0" and, where there is room, "robot" after it.
+    expect((zh as Record<string, string>)["marvel0"]).toBe("MARVEL0");
+    expect(en["marvel0.nav.hint"]).toBe("robot");
+    expect(zh["marvel0.nav.hint"]).toBe("机器人");
   });
 
   test("the scope texts say the backend runs read-only queries, in both languages", () => {
@@ -70,7 +110,7 @@ describe("the marvel0's catalogue entries", () => {
   });
 
   test("Chinese text keeps the placeholders of the English text", () => {
-    for (const key of named) {
+    for (const key of Object.keys(en).filter((k) => k.startsWith("marvel0."))) {
       const placeholders = (text: string) =>
         [...text.matchAll(/\{(\w+)\}/g)].map((match) => match[1]).sort();
       expect(placeholders((zh as Record<string, string>)[key])).toEqual(

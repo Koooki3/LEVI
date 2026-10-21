@@ -3,9 +3,10 @@
 What the page may do is deliberately small: start **one** policy server as a
 transient ``systemd --user`` unit it names itself
 (``levi-aeri-policy-manual-marvel0-<model>``), say what state that server is in,
-and stop that unit. The arm controller, the robot server, the gripper stack and
-the demo client are never started here, and nothing here is an emergency stop:
-a hand stays on the physical one.
+and stop that unit. The arm controller, the robot server and the gripper stack
+are started and stopped by ``stack_act.py`` and the demo client by ``run.py``,
+never from here, and nothing here is an emergency stop: a hand stays on the
+physical one.
 
 The rules that hold everywhere below:
 

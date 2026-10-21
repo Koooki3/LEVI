@@ -4,6 +4,7 @@
 // notice that the site file is missing or invalid. Nothing here sends a
 // request or starts anything.
 import type { ReactNode } from "react";
+import { CircleX } from "lucide-react";
 import { useLocale } from "@/components/levi-locale";
 import { Problem } from "@/components/pages-ui/feedback";
 import type { ApiFailure } from "./deploy-api";
@@ -25,6 +26,36 @@ export function WordedText({ worded }: { worded: Worded<Say> }): ReactNode {
     sayText(worded.say, t)
   ) : (
     <span lang="en">{worded.text}</span>
+  );
+}
+
+/** A write the backend refused, in the same boxed block as the reasons a
+ * button is off ("Start is off:"), with a danger edge and an icon so that it
+ * is not read as one more line of the card's prose. */
+export function RefusedBlock({
+  testId,
+  code,
+  children,
+}: {
+  testId?: string;
+  /** The backend's code of the refusal, for the tests and for styling. */
+  code?: string;
+  children: ReactNode;
+}) {
+  const { t } = useLocale();
+  return (
+    <div
+      className="rg-block rg-block--refused"
+      role="alert"
+      data-testid={testId}
+      data-code={code}
+    >
+      <span className="rg-block__label">
+        <CircleX size={14} aria-hidden="true" />
+        {t("marvel0.ctl.refused")}
+      </span>
+      <span>{children}</span>
+    </div>
   );
 }
 

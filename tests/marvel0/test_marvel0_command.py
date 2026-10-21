@@ -793,9 +793,10 @@ def test_every_warning_has_a_code_and_a_text_without_a_path(tmp_path):
         assert "/" not in warning["text"]
 
 
-def test_the_hands_sentence_says_what_this_page_does_not_do():
+def test_the_hands_sentence_says_this_preview_starts_nothing():
     assert C.HANDS == (
-        "Keep a hand on the physical e-stop. This page never starts the arm stack or this client."
+        "Keep a hand on the physical e-stop. This preview starts nothing: the arm "
+        "stack and the client have their own start buttons, each with its own confirmation."
     )
 
 

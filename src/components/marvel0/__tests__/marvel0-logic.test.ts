@@ -8,6 +8,7 @@ import {
   MARVEL0_POLL_MAX_MS,
   MARVEL0_POLL_MS,
   MARVEL0_REQUEST_MS,
+  STACK_ORDER,
   STATE_KEY,
   STATE_TONE,
   isFresh,
@@ -90,22 +91,19 @@ describe("a running marvel0", () => {
     });
   });
 
-  test("the cards come in two groups, robot side first, each with a hint", () => {
+  test("the cards come in the page's steps, arm stack first in the strip's order, each with a hint", () => {
     const result = view(setupStatus());
-    expect(result.groups.map((g) => g.id)).toEqual(["robot", "host"]);
-    expect(result.groups[0].cards.map((c) => c.id)).toEqual([
-      "desk",
+    expect(result.groups.map((g) => g.id)).toEqual([
       "arm",
-      "gripper",
-      "robot_server",
-      "monitor",
       "policy",
-      "demo",
+      "client",
+      "host",
     ]);
-    expect(result.groups[1].cards.map((c) => c.id)).toEqual([
-      "live",
-      "vlm",
-      "gpu",
+    expect(result.groups.map((g) => g.cards.map((c) => c.id))).toEqual([
+      ["monitor", "desk", "arm", "gripper", "robot_server"],
+      ["policy"],
+      ["demo"],
+      ["live", "vlm", "gpu"],
     ]);
     for (const c of Object.values(cards(result))) {
       expect(c.hint).toBeTruthy();
@@ -2666,5 +2664,93 @@ describe("words", () => {
             problems.push(`${name}: ${key} needs {${match[1]}}`);
       }
     expect([...new Set(problems)]).toEqual([]);
+  });
+});
+
+describe("the stack status strip", () => {
+  test("lists M, Desk, A, B, C, the policy server and the client, each with its card's state", () => {
+    const result = view(setupStatus());
+    expect(result.stack.steps.map((step) => step.id)).toEqual([
+      "monitor",
+      "desk",
+      "arm",
+      "gripper",
+      "robot_server",
+      "policy",
+      "demo",
+    ]);
+    const found = cards(result);
+    for (const step of result.stack.steps)
+      expect(step.state).toBe(found[step.id].state);
+    expect(result.stack.cause).toBeNull();
+  });
+
+  test("every short name is in both catalogues", () => {
+    for (const { label } of STACK_ORDER) {
+      expect(en).toHaveProperty([label]);
+      expect(zh).toHaveProperty([label]);
+    }
+  });
+
+  test("a health file that stopped updating is named once as the reason Desk, A and M are stale", () => {
+    const result = view(
+      setupStatus({ fr3_health: healthPart({ state: "offline", age_s: 420 }) }),
+    );
+    const found = cards(result);
+    expect([found.desk.state, found.arm.state, found.monitor.state]).toEqual([
+      "stale",
+      "stale",
+      "stale",
+    ]);
+    expect(result.stack.cause).toEqual({
+      key: "marvel0.cause.monitor_offline",
+      params: { age: { ago: 420 } },
+    });
+  });
+
+  test("no health file at all is named as the reason Desk and A are unknown", () => {
+    const result = view(setupStatus({ fr3_health: { state: "missing" } }));
+    expect(result.stack.cause).toEqual({
+      key: "marvel0.cause.monitor_missing",
+    });
+  });
+
+  test("an old sample of the whole machine status gives no monitor reason: the page note says why", () => {
+    const result = view(
+      setupStatus({
+        stale: true,
+        age_s: 30,
+        fr3_health: healthPart({ state: "offline", age_s: 420 }),
+      }),
+    );
+    expect(result.notes.length).toBeGreaterThan(0);
+    expect(result.stack.cause).toBeNull();
+  });
+
+  test("terminal B stays unknown with its reason first: the cards read no process list", () => {
+    const busy = setupStatus({
+      guard: {
+        state: "ok",
+        quiet: false,
+        robot: [
+          { pid: 1, name: "ros2_control_node" },
+          { pid: 2, name: "ros2_control_node" },
+          { pid: 3, name: "franka_server_ros2" },
+        ],
+        banner: null,
+      },
+    });
+    const c = card("gripper", busy);
+    expect(c.state).toBe("unknown");
+    expect(summary(c)).toBe("marvel0.gripper.reason");
+    expect(en["marvel0.gripper.reason"]).toMatch(/^Unknown: /);
+    expect(zh["marvel0.gripper.reason"]).toMatch(/^未知：/);
+    // RIG-01: marvel0 uses passive sources only, so no card of the arm stack
+    // carries anything from the guard's process list.
+    for (const id of ["arm", "gripper", "robot_server"] as const) {
+      const text = JSON.stringify(card(id, busy));
+      expect(text).not.toContain("ros2_control_node");
+      expect(text).not.toContain("franka_server");
+    }
   });
 });

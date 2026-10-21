@@ -8,7 +8,13 @@
  */
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   Activity,
   Bot,
@@ -28,13 +34,20 @@ import { offersTrainingPool } from "./live/embedding";
 import { LiveNavLink } from "./live/live-nav";
 import { useLivePulse } from "./live/use-live-pulse";
 import { CommandPalette } from "./shell/command-palette";
-import { headerPages, isCurrentPage, navPages } from "./shell/commands";
+import {
+  isCurrentPage,
+  navCollapseLevel,
+  navPages,
+  splitHeaderPages,
+} from "./shell/commands";
 import { isApplePlatform, paletteKeys } from "./shell/global-keys";
+import { navScrollTarget } from "./shell/nav-scroll";
 import { JobsMenu } from "./shell/jobs-menu";
 import { useShell } from "./shell/shell-context";
 import {
   SHELL_EVENTS,
   openAgentConnections,
+  requestGo,
   toggleAgentWorkbench,
 } from "./shell/shell-events";
 import { LeviWordmark } from "./shell/brand";
@@ -54,6 +67,23 @@ function useAgentOpen(): boolean {
     return () => window.removeEventListener(SHELL_EVENTS.agentState, onState);
   }, []);
   return open;
+}
+
+/**
+ * How many folding steps of the navigation apply at the window's width (see
+ * `navCollapseLevel`). The server and the first client render say 0 (every
+ * link); styles/shell.css hides the folded links by width until this catches
+ * up, so the bar does not jump.
+ */
+function useNavCollapseLevel(): 0 | 1 | 2 {
+  return useSyncExternalStore(
+    (notify) => {
+      window.addEventListener("resize", notify);
+      return () => window.removeEventListener("resize", notify);
+    },
+    () => navCollapseLevel(window.innerWidth),
+    () => 0,
+  );
 }
 
 export default function LeviHeader() {
@@ -77,6 +107,58 @@ export default function LeviHeader() {
     () => navPages({ live: true, pool }),
     [pool],
   );
+  const level = useNavCollapseLevel();
+  const { links, more } = useMemo(
+    () => splitHeaderPages(pages, level),
+    [pages, level],
+  );
+  // Before the width is known (level 0) the menu holds every page that can
+  // fold, so it is complete whichever width the styles hid the links at.
+  const moreItems = level === 0 ? splitHeaderPages(pages, 2).more : more;
+  const moreCurrent = moreItems.some((page) =>
+    isCurrentPage(page.href, pathname),
+  );
+  // The bar scrolls when the links do not fit (the two-row bar of a narrow
+  // window). The current page (marvel0 among them) is brought into view only
+  // when it is not whole there already, and then to the start of a link: a bar
+  // rolled for no reason cut the first link ("ion 1" for "Live evaluation 1").
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const roll = () => {
+      if (nav.scrollWidth <= nav.clientWidth) return;
+      const links = Array.from(nav.children) as HTMLElement[];
+      const current = links.findIndex(
+        (el) =>
+          el.matches('[aria-current="page"]') ||
+          el.querySelector('[aria-current="page"]'),
+      );
+      if (current < 0) return;
+      const box = nav.getBoundingClientRect();
+      const target = navScrollTarget({
+        edges: links.map((el) => {
+          const r = el.getBoundingClientRect();
+          return [
+            r.left - box.left + nav.scrollLeft,
+            r.right - box.left + nav.scrollLeft,
+          ] as const;
+        }),
+        current,
+        scrollLeft: nav.scrollLeft,
+        width: nav.clientWidth,
+      });
+      if (target !== null) nav.scrollLeft = target;
+    };
+    roll();
+    // The links change width after the first paint (the live count arrives,
+    // the font loads, the language changes): look again when they do.
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(roll);
+    watch.observe(nav);
+    for (const child of Array.from(nav.children)) watch.observe(child);
+    return () => watch.disconnect();
+  }, [pathname, level, language]);
   const agentOpen = useAgentOpen();
   // Rendered after mount so the server and the first client render agree.
   const [apple, setApple] = useState(false);
@@ -100,27 +182,57 @@ export default function LeviHeader() {
         <Link href="/" className="levi-shell-brand ds-focus">
           <LeviWordmark size={20} />
         </Link>
-        <nav className="levi-shell-nav" aria-label={t("Main navigation")}>
-          {headerPages(pages).map((page) =>
-            page.href === "/live" ? (
-              <LiveNavLink
-                key={page.href}
-                current={isCurrentPage(page.href, pathname)}
+        <div className="levi-shell-navwrap">
+          <nav
+            ref={navRef}
+            className="levi-shell-nav"
+            aria-label={t("Main navigation")}
+          >
+            {links.map((page) =>
+              page.href === "/live" ? (
+                <LiveNavLink
+                  key={page.href}
+                  current={isCurrentPage(page.href, pathname)}
+                />
+              ) : (
+                <Link
+                  key={page.href}
+                  href={page.href}
+                  className="levi-shell-link ds-focus"
+                  data-collapse={page.collapse}
+                  aria-current={
+                    isCurrentPage(page.href, pathname) ? "page" : undefined
+                  }
+                >
+                  {t(page.label)}
+                  {page.hint && (
+                    <span className="levi-shell-link__hint">
+                      {t(page.hint)}
+                    </span>
+                  )}
+                </Link>
+              ),
+            )}
+          </nav>
+          {moreItems.length > 0 && (
+            <div
+              className={"levi-shell-more" + (moreCurrent ? " is-current" : "")}
+            >
+              <Menu
+                label={t("More")}
+                variant="ghost"
+                align="start"
+                triggerClassName="levi-shell-more__trigger"
+                items={moreItems.map((page) => ({
+                  id: page.href,
+                  label: t(page.label),
+                  checked: isCurrentPage(page.href, pathname),
+                  onSelect: () => requestGo(page.href),
+                }))}
               />
-            ) : (
-              <Link
-                key={page.href}
-                href={page.href}
-                className="levi-shell-link ds-focus"
-                aria-current={
-                  isCurrentPage(page.href, pathname) ? "page" : undefined
-                }
-              >
-                {t(page.label)}
-              </Link>
-            ),
+            </div>
           )}
-        </nav>
+        </div>
         <div className="levi-shell-actions">
           <button
             type="button"

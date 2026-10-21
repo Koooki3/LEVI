@@ -113,20 +113,28 @@ export interface Marvel0Api {
 
 type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
 
-export function createMarvel0Api({
+/** One request of the marvel0's routes: `call(path, deadline, body?, signal?)`
+ * with a path under `/api/levi/marvel0/`. A body makes it a POST. */
+export type Caller = (
+  path: string,
+  deadline: number,
+  body?: unknown,
+  signal?: AbortSignal,
+) => Promise<ApiResult>;
+
+/** The request machinery every client of the marvel0's routes shares (this
+ * file's, the arm stack's and the run's): same origin, a hard deadline, and
+ * one `ApiResult` for every outcome. */
+export function createCaller({
   // Late-bound, so a test that replaces globalThis.fetch is seen.
   fetchFn = (input, init) => globalThis.fetch(input, init),
-  deadlines = {},
 }: {
   fetchFn?: FetchFn;
-  deadlines?: Partial<Deadlines>;
-} = {}): Marvel0Api {
-  const limit = { ...DEADLINES, ...deadlines };
-
+} = {}): Caller {
   /** One request with a deadline. A race, not only an abort of the request, so
    * one that ignores its signal (or a body that never ends) cannot hold the
    * caller either. `signal` is the caller's: when it aborts, this throws. */
-  async function call(
+  return async function call(
     path: string,
     deadline: number,
     body?: unknown,
@@ -176,7 +184,18 @@ export function createMarvel0Api({
       clearTimeout(timer);
       signal?.removeEventListener("abort", dropped);
     }
-  }
+  };
+}
+
+export function createMarvel0Api({
+  fetchFn,
+  deadlines = {},
+}: {
+  fetchFn?: FetchFn;
+  deadlines?: Partial<Deadlines>;
+} = {}): Marvel0Api {
+  const limit = { ...DEADLINES, ...deadlines };
+  const call = createCaller({ fetchFn });
 
   return {
     models: (signal) => call("models", limit.read, undefined, signal),

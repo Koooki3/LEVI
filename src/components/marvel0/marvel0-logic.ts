@@ -114,16 +114,55 @@ export interface Marvel0Banner {
   hint: Say | null;
 }
 
+/** The page's steps, in order: 1 the arm stack (M, Desk, A, B, C), 2 the
+ * policy server, 3 the task and its command; then the services on this
+ * machine. */
+export type Marvel0GroupId = "arm" | "policy" | "client" | "host";
+
 export interface Marvel0Group {
-  id: "robot" | "host";
+  id: Marvel0GroupId;
   /** Catalogue key. */
   title: string;
   cards: Marvel0Card[];
 }
 
+/** One stop of the stack status strip at the top of the page. */
+export interface StackStep {
+  id: Marvel0CardId;
+  /** Catalogue key of the short name in the strip. */
+  label: string;
+  state: Marvel0State;
+}
+
+/** What the stack status strip shows: the stack in order (M → Desk → A → B
+ * → C → policy server → client) and, when several stops are stale or unknown
+ * for one reason, that reason in one line. This is the strip's whole input:
+ * a later source (a dedicated, passive stack status route) only has to fill
+ * it. Built here from the passive parts of the two status routes (health
+ * file, marker, units, the kernel's socket table); never from a process
+ * list. */
+export interface StackStripData {
+  steps: StackStep[];
+  cause: Say | null;
+}
+
+/** The order and short names of the strip. */
+export const STACK_ORDER: ReadonlyArray<{ id: Marvel0CardId; label: string }> =
+  [
+    { id: "monitor", label: "marvel0.strip.monitor" },
+    { id: "desk", label: "marvel0.strip.desk" },
+    { id: "arm", label: "marvel0.strip.arm" },
+    { id: "gripper", label: "marvel0.strip.gripper" },
+    { id: "robot_server", label: "marvel0.strip.server" },
+    { id: "policy", label: "marvel0.strip.policy" },
+    { id: "demo", label: "marvel0.strip.demo" },
+  ];
+
 export interface Marvel0View {
   banner: Marvel0Banner;
   groups: Marvel0Group[];
+  /** The stack status strip, from the same cards. */
+  stack: StackStripData;
   /** Page-level remarks: a request failed, a sample is old. */
   notes: Say[];
 }
@@ -776,7 +815,7 @@ function policyCard(setup: Rec | null, marvel0: Rec | null): Marvel0Card {
   }
   return {
     id: "policy",
-    title: "Policy server",
+    title: "marvel0.policy.title",
     state,
     summary,
     facts,
@@ -1408,6 +1447,41 @@ function asOld(card: Marvel0Card, age: number | null): Marvel0Card {
   };
 }
 
+// -- the stack status strip
+
+/** One line for the top of the page when the health monitor is the reason
+ * Desk, terminal A and terminal M cannot say anything from now: its file
+ * stopped updating, or there is none. Null otherwise (an old sample of the
+ * whole machine status has its own page note). */
+function stackCause(health: Health, old: boolean): Say | null {
+  if (old) return null;
+  if (health.state === "offline") {
+    const age = num(health.part?.age_s);
+    return k("marvel0.cause.monitor_offline", {
+      age: age === null ? k("marvel0.value.unknown") : { ago: age },
+    });
+  }
+  if (health.state === "missing") return k("marvel0.cause.monitor_missing");
+  return null;
+}
+
+/** The strip from the cards, in `STACK_ORDER`. */
+export function stackFromCards(
+  cards: Marvel0Card[],
+  cause: Say | null,
+): StackStripData {
+  const byId = new Map(cards.map((card) => [card.id, card]));
+  return {
+    steps: STACK_ORDER.map(({ id, label }) => {
+      // A stop without its card (a source that does not send it) is a
+      // state the page cannot tell, not a missing value.
+      const card = byId.get(id);
+      return { id, label, state: card ? card.state : "unknown" };
+    }),
+    cause,
+  };
+}
+
 // -- the whole page
 
 /** Everything the page shows, from the two answers. A missing answer makes
@@ -1437,15 +1511,16 @@ export function marvel0View(input: Marvel0Input): Marvel0View {
   // The cards read from the machine status; the gripper stack has no source
   // and the demo client is read from the marvel0 status.
   const aged = (card: Marvel0Card) => (old ? asOld(card, old.age) : card);
-  const robot: Marvel0Card[] = [
+  // Step 1 in the order of the strip: M, Desk, A, B, C.
+  const arm: Marvel0Card[] = [
+    aged(monitorCard(health)),
     aged(deskCard(health)),
     aged(armCard(health, marvel0)),
     gripperCard(),
     aged(robotServerCard(setup)),
-    aged(monitorCard(health)),
-    aged(policyCard(setup, marvel0)),
-    demoCard(marvel0),
   ];
+  const policy: Marvel0Card[] = [aged(policyCard(setup, marvel0))];
+  const client: Marvel0Card[] = [demoCard(marvel0)];
   const host: Marvel0Card[] = [
     aged(liveCard(setup)),
     aged(vlmCard(setup)),
@@ -1454,9 +1529,15 @@ export function marvel0View(input: Marvel0Input): Marvel0View {
   return {
     banner: bannerOf(marvel0, input.marvel0Error, health, old !== null),
     groups: [
-      { id: "robot", title: "marvel0.group.robot", cards: robot },
+      { id: "arm", title: "marvel0.step.arm", cards: arm },
+      { id: "policy", title: "marvel0.step.policy", cards: policy },
+      { id: "client", title: "marvel0.step.client", cards: client },
       { id: "host", title: "marvel0.group.host", cards: host },
     ],
+    stack: stackFromCards(
+      [...arm, ...policy, ...client],
+      stackCause(health, old !== null),
+    ),
     notes,
   };
 }

@@ -72,6 +72,11 @@ import {
   type DeployPoll,
   type Marvel0Catalog,
 } from "./use-marvel0-actions";
+import {
+  effectiveSelection,
+  serverHolding,
+  type ChoiceState,
+} from "./selection";
 
 const STATE_ICON: Record<DeployState, LucideIcon> = {
   idle: CircleDashed,
@@ -99,16 +104,25 @@ interface Problem {
   failure: ApiFailure;
 }
 
+/** Marks the model control: the command card's "use another model" link moves
+ * the keyboard to the element that carries it. (Not an id: the label of the
+ * field points at the control by the id the field gives it.) */
+export const MODEL_CONTROL = "data-model-control";
+
 export function DeployPanel({
   api,
   catalog,
   poll,
   onLogOpen,
+  choice: shared,
 }: {
   api: Marvel0Api;
   catalog: Marvel0Catalog;
   poll: DeployPoll;
   onLogOpen: (open: boolean) => void;
+  /** The page's one selected model (selection.ts): what is chosen here is
+   * what the command and the run follow. */
+  choice: ChoiceState;
 }) {
   const { t } = useLocale();
   const status = poll.status;
@@ -128,14 +142,49 @@ export function DeployPanel({
   const busy = useRef(false);
   const ids = useRef(new RequestIds(newRequestId)).current;
 
+  // The model, RTC and guidance strength are the page's one selection: this
+  // card chooses them, the command and the run follow. While the policy
+  // server of this page runs, what it runs is the selection and the controls
+  // are read-only.
+  const effective = effectiveSelection(catalog.models, shared.choice, status);
+  const held = serverHolding(status) !== null && effective?.source === "server";
   const form: DeployForm | null =
     initial && catalog.models && site
-      ? resolveForm(initial, edits, catalog.models, site)
+      ? resolveForm(
+          initial,
+          {
+            ...edits,
+            ...(effective
+              ? { modelId: effective.modelId, rtc: effective.rtc }
+              : {}),
+            scale: held
+              ? effective?.cfgScale === null ||
+                effective?.cfgScale === undefined
+                ? ""
+                : String(effective.cfgScale)
+              : shared.choice.scale,
+          },
+          catalog.models,
+          site,
+        )
       : null;
   const modelId = form?.modelId ?? "";
   const model: ModelRow | null = models.find((m) => m.id === modelId) ?? null;
-  const edit = (change: Partial<DeployForm>) =>
-    setEdits((current) => ({ ...current, ...change }));
+  const edit = (change: Partial<DeployForm>) => {
+    const { modelId: pickedModel, rtc, scale: typedScale, ...own } = change;
+    if (
+      pickedModel !== undefined ||
+      rtc !== undefined ||
+      typedScale !== undefined
+    )
+      shared.pick({
+        ...(pickedModel !== undefined ? { modelId: pickedModel } : {}),
+        ...(rtc !== undefined ? { rtc } : {}),
+        ...(typedScale !== undefined ? { scale: typedScale } : {}),
+      });
+    if (Object.keys(own).length > 0)
+      setEdits((current) => ({ ...current, ...own }));
+  };
 
   const control = stopControl(status);
   const current = poll.current && status !== null;
@@ -326,7 +375,9 @@ export function DeployPanel({
               <>
                 <Field label={t("marvel0.deploy.form.model")}>
                   <Select
+                    {...{ [MODEL_CONTROL]: "true" }}
                     value={modelId}
+                    disabled={held}
                     onChange={(event) =>
                       edit({
                         modelId: event.target.value,
@@ -343,10 +394,16 @@ export function DeployPanel({
                   </Select>
                 </Field>
                 {model && <ModelFacts model={model} />}
+                {held && (
+                  <p className="rg-muted" data-testid="marvel0-deploy-held">
+                    {t("marvel0.deploy.form.held")}
+                  </p>
+                )}
                 <Switch
                   label={t("marvel0.deploy.form.rtc")}
                   description={t("marvel0.deploy.form.rtc_hint")}
                   checked={form.rtc}
+                  disabled={held}
                   onChange={(event) => edit({ rtc: event.target.checked })}
                 />
                 <Field label={t("marvel0.deploy.form.fraction")}>
@@ -364,8 +421,19 @@ export function DeployPanel({
                   </Select>
                 </Field>
                 {rows.length > 0 && (
-                  <div className="rg-presets">
-                    <strong>{t("marvel0.deploy.presets.title")}</strong>
+                  // What each VRAM fraction needs: folded (the Deploy button
+                  // says when memory is short), open when the chosen fraction
+                  // does not fit.
+                  <details
+                    className="rg-details rg-presets"
+                    open={
+                      rows.find((row) => row.fraction === form.fraction)
+                        ?.enough === false
+                        ? true
+                        : undefined
+                    }
+                  >
+                    <summary>{t("marvel0.deploy.presets.title")}</summary>
                     <ul
                       className="rg-notes"
                       data-testid="marvel0-deploy-presets"
@@ -386,7 +454,7 @@ export function DeployPanel({
                         </li>
                       ))}
                     </ul>
-                  </div>
+                  </details>
                 )}
                 {model?.cfgCapable && (
                   <Field
@@ -419,6 +487,7 @@ export function DeployPanel({
                       autoComplete="off"
                       spellCheck={false}
                       placeholder={String(site.caps.cfgScale.default)}
+                      disabled={held}
                       onChange={(event) => edit({ scale: event.target.value })}
                     />
                   </Field>
@@ -435,8 +504,11 @@ export function DeployPanel({
                 {t("marvel0.deploy.btn.deploy")}
               </Button>
               {control.show && (
+                // Ends a process the client depends on: outlined in the
+                // danger colour; only HOLD is a solid danger button.
                 <Button
-                  variant="danger"
+                  variant="secondary"
+                  className="rg-btn--danger-outline"
                   loading={pending === "stop"}
                   disabled={stopOff}
                   onClick={() => setDialog("stop")}

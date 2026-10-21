@@ -88,9 +88,16 @@ async def lifespan(app):
     # A live workspace only: the person's runs the live gate stopped go on by
     # themselves once it has stayed open (None, and no thread, anywhere else).
     gate_resumer = resumer.start(ROOT, lambda: (Store(STATE), Workbench(STATE)))
+    from .marvel0 import stack_api
+
+    # The product LEVI only: the health monitor M runs while the arm stack
+    # runs (None, and no thread, in any other instance).
+    monitor_auto = stack_api.start_auto()
     try:
         yield
     finally:
+        if monitor_auto:
+            monitor_auto.close()
         if gate_resumer:
             gate_resumer.close()
         gpu_watch.close()
