@@ -246,8 +246,11 @@ describe("hosting switched off in the control file while D runs (SAFETY N3)", ()
     );
   });
 
-  test("switched off with no D, the start-time sentence stays (nothing acts then)", async () => {
-    const { host } = await openStep({ run: runDoc("idle_disabled") });
+  test("switched off with no D, the start-time sentence stays (nothing acts then), when the run document alone says so", async () => {
+    const { host } = await openStep({
+      run: runDoc("idle_disabled"),
+      ready: readyDoc("prepared_ready"),
+    });
     expect(text($(host, "marvel0-autonomy-disabled"))).toBe(
       E[`${P}disabled.off`],
     );

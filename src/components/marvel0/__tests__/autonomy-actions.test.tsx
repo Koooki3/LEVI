@@ -804,8 +804,10 @@ describe("hosting off, no site section, a run that cannot be read", () => {
   });
 
   test("switched off with the key `enabled = false`", async () => {
+    // The readiness document alone says it (the run document, read at another
+    // moment, still says it is on): the page is off.
     const { host } = await openStep({
-      run: runDoc("idle_disabled"),
+      run: runDoc("idle"),
       ready: readyDoc("prepared_ready", (doc) => (doc.enabled = false)),
     });
     expect(text($(host, "marvel0-autonomy-disabled"))).toBe(

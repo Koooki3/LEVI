@@ -195,7 +195,7 @@ the arm controller is on, and under `nice -n 19 taskset`):
   Chinese), `autonomy-prepare.test.tsx` (readiness, preparing, starting, the live service and leftovers),
   `autonomy-page.test.tsx` (the mount on the page);
 - `tests/marvel0/mutate_autonomy_ui.py` breaks one gate at a time in a temporary state of the front end and requires a
-  test to fail for each (86 mutations; `MUTATE_CORES=16-19` picks the cores).
+  test to fail for each (116 mutations; `MUTATE_CORES=16-19` picks the cores).
 
 Screenshots of every state (1440 and 420 px, light and dark, English and Chinese) are made with the rig-console harness
 (`programs/rig-console/tools/shots/marvel0_shots.py`) on a temporary instance, every request answered from the samples;
@@ -350,7 +350,7 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
   `autonomy-chain.test.ts`（链条的运行节点跟随 D）、`autonomy-actions.test.tsx`（停止、其他键的窗口、
   终止和卡住的状态、在场信号、关闭时、中文）、`autonomy-prepare.test.tsx`（就绪、准备、启动、实时服务和残留单元）、
   `autonomy-page.test.tsx`（页面上的挂载）；
-- `tests/marvel0/mutate_autonomy_ui.py` 在前端的临时副本里每次破坏一道门，并要求至少有一个测试失败（86 条；`MUTATE_CORES=16-19` 指定可用的核）。
+- `tests/marvel0/mutate_autonomy_ui.py` 在前端的临时副本里每次破坏一道门，并要求至少有一个测试失败（116 条；`MUTATE_CORES=16-19` 指定可用的核）。
 
 每个状态的截图（1440 和 420 px，浅色和深色，英文和中文）用 rig-console 的截图工具
 （`programs/rig-console/tools/shots/marvel0_shots.py`）在临时实例上拍摄，所有请求都由样本回答，不会碰到任何后端路由或机器人端口。
