@@ -203,6 +203,7 @@ class AeriMachine:
         self.signals: list = []
         self.enabled = True
         self.e_running = False
+        self.visible = True  # whether levi stop would list the hosted D (scripted)
         self.git_head = HEAD
         self.git_dirty = ""
         self.snap = {"rows": [], "ready": True, "sha256": "snap-0001"}
@@ -251,6 +252,9 @@ class AeriMachine:
             net_table=lambda: net.read(self.proc / "net"),
             snapshot=lambda: dict(self.snap),
             e_active=lambda: self.e_running,
+            # live: the real check against the real list of jobs (the launcher is a
+            # real process); scripted: the launcher is not, so the answer is told
+            hosted_visible=(aeri_run._hosted_visible if live else self.visible_check),
             control_enabled=lambda: self.enabled,
             cgroup=lambda: self.profile_cgroup,
             in_main_checkout=lambda: True,
@@ -288,6 +292,12 @@ class AeriMachine:
             child = FakeChild(argv, stdin, stdout, env, cwd)
         self.children.append(child)
         return child
+
+    def visible_check(self, workspace=None, run_id=None):
+        """Scripted ``Host.hosted_visible``: ``visible`` is a bool, or a function
+        of ``(workspace, run_id)``."""
+        see = self.visible
+        return bool(see(workspace, run_id) if callable(see) else see)
 
     def client_argv(self, argv):
         """The fake profile: terminal D's fake with the flags the page built

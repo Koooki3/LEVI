@@ -12,7 +12,7 @@ in a **copy** of ``levi/``, ``tests/`` and ``scripts/`` in a temporary folder (t
 checkout itself is never edited, so nobody else's test run can meet a broken
 gate), and the tests run there with that folder first on ``PYTHONPATH``. It starts
 no process but pytest, one test file at a time, under ``nice -n 19 taskset -c
-20-23``. It refuses to run while a robot process is alive (the passive ``ps``
+20-23`` (``MUTATE_CPUS`` names other cores, e.g. ``16-19``). It refuses to run while a robot process is alive (the passive ``ps``
 check of setup.md): a sweep is many test runs, and the arm's control loop is not
 to be disturbed by it; ``--even-if-robot-runs`` lifts that (one file at a time
 stays)."""
@@ -237,7 +237,7 @@ MUTATIONS = [
     (
         "stop: a second Stop is allowed",
         "aeri_state.py",
-        '    stop_open = alive and (\n        (\n            phase == "idle"\n            and not v.winding\n            and v.state not in ("idle", "ended", "fault_locked", "orphaned")\n        )\n        or (phase == "unconfirmed" and v.state == "stopping")\n    )',
+        '    stop_open = (\n        alive\n        and not f.foreign\n        and (\n            (\n                phase == "idle"\n                and not v.winding\n                and v.state not in ("idle", "ended", "fault_locked", "orphaned")\n            )\n            or (phase == "unconfirmed" and v.state == "stopping")\n        )\n    )',
         "    stop_open = alive",
         STATE,
     ),
@@ -251,8 +251,8 @@ MUTATIONS = [
     (
         "stop: offered while winding down",
         "aeri_state.py",
-        '            and not v.winding\n            and v.state not in ("idle", "ended", "fault_locked", "orphaned")\n',
-        '            and v.state not in ("idle", "ended", "orphaned")\n',
+        '                and not v.winding\n                and v.state not in ("idle", "ended", "fault_locked", "orphaned")\n',
+        '                and v.state not in ("idle", "ended", "orphaned")\n',
         STATE,
     ),
     (
@@ -352,8 +352,8 @@ MUTATIONS = [
     (
         "adopt: the second look sends another SIGINT",
         "aeri_run.py",
-        '            if rec.get("stop_sent_epoch") is None:\n                self._adopt_stop(f, rec, pid)',
-        "            self._adopt_stop(f, rec, pid)",
+        '        if rec.get("stop_sent_epoch") is None and not st.interrupted(f):\n            # (a D that already answered a Ctrl+C from elsewhere is not told twice)\n            self._adopt_stop(f, rec, pid)',
+        "        self._adopt_stop(f, rec, pid)",
         RUN,
     ),
     (
@@ -452,7 +452,7 @@ def run_tests(test_file: str) -> tuple:
             "19",
             "taskset",
             "-c",
-            "20-23",
+            os.environ.get("MUTATE_CPUS", "20-23"),
             sys.executable,
             "-m",
             "pytest",

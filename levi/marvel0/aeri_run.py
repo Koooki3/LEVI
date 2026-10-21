@@ -203,6 +203,15 @@ def _e_active() -> bool:
     return sup.active() is not None
 
 
+def _hosted_visible(workspace=None, run_id=None) -> bool:
+    """Whether ``levi stop`` and the R6 restart would list this hosted D
+    (``aeri_activity.hosted_visible_to_activity``): without ``run_id`` the wiring
+    is checked before a launch, with it the real ``running_jobs`` after."""
+    from . import aeri_activity
+
+    return aeri_activity.hosted_visible_to_activity(workspace, run_id=run_id)
+
+
 def _git(worktree: str, *args: str, home: str = "") -> str | None:
     """Output of a read-only git command in the AERI worktree, or None."""
     env = {
@@ -299,6 +308,7 @@ class Host:
     net_table: Callable = net.read
     snapshot: Callable = _snapshot
     e_active: Callable = _e_active
+    hosted_visible: Callable = _hosted_visible
     control_enabled: Callable = _control_enabled
     cgroup: Callable = stack._read_self_cgroup
     in_main_checkout: Callable = stack._in_main_checkout
@@ -1422,6 +1432,10 @@ class Supervisor:
                 first=first,
                 rows=[r for r in bad[:6] if isinstance(r, dict)],
             )
+        # A D that ``levi stop`` and the R6 restart could not list would be taken
+        # for no job at all and cut short by the hang-up chain: no start for it.
+        if not self.host.hosted_visible(self.workspace):
+            raise Refuse("start_failed", why="not_listed_by_levi_stop")
         return data, snap
 
     def challenge(self, body) -> dict:
@@ -1604,6 +1618,14 @@ class Supervisor:
             self._update(phase="started", leader={"pid": child.pid, "identity": who})
         self._audit("start", request_id=request_id, run_id=run_id, name=name)
         self._start_watcher()
+        if not h.hosted_visible(self.workspace, run_id=run_id):
+            # started, and not in the list of jobs ``levi stop`` reads: what it
+            # cannot see it would cut short. Ctrl+C now (D is at its phrase; the
+            # arm is not touched before it), and no start.
+            self._audit("start_unlisted", request_id=request_id, run_id=run_id)
+            with contextlib.suppress(Exception):
+                self._stop_blind(request_id)
+            raise Refuse("start_failed", why="not_listed_by_levi_stop")
         return {
             "schema": st.RESULT_SCHEMA,
             "accepted": True,
