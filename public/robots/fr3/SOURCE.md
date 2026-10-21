@@ -19,7 +19,7 @@ The base frame is `fr3_link0`; the preview endpoint is the flange `fr3_link8`,
 0.107 m along link7's Z axis. The initial pose is illustrative, not robot feedback.
 
 Detailed source URLs, original SHA-256 hashes and generated asset hashes are in
-[SOURCE.json](SOURCE.json). Reproduction tool: `src/lib/robot-studio/vendor-fr3.py`
+[SOURCE.json](SOURCE.json). Reproduction tool: `scripts/robot-studio/vendor-fr3.py` (run by a person; it downloads from GitHub, it is not part of the app)
 (Python standard library only; run from repository root). Asset generation is an
 explicit development step; the browser fetches only these local assets.
 
