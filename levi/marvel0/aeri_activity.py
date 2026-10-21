@@ -21,7 +21,10 @@ restart, the service's start and its shutdown.
   Stop press does (``Supervisor.stop``: Ctrl+C by the pty, once), then waits for
   its 7/7 wrap-up up to ``SHUTDOWN_WAIT_S``. Never a bare kill: what is left when
   the wait ends is the hang-up chain's job (the pty closes with the process). The
-  evaluation client has no wrap-up to wait for and is left to its chain.
+  evaluation client has no wrap-up to wait for and is left to its chain. **The wait
+  only fits if the service unit gives it the time:** ``levi-product.service`` needs
+  ``TimeoutStopSec`` of at least 150 s (the 130 s wait and the chain's 3 s); with a
+  shorter one systemd kills the core in the middle of the wait (see the doc).
 * **The start gate** (``hosted_visible_to_activity``) is the mechanical check
   that the first of these can see a D at all: a start whose D ``levi stop`` could
   not list is refused (before, as a self-test of the wiring and the record
@@ -57,9 +60,12 @@ HOSTED = ((KIND, REL), (CLIENT_KIND, CLIENT_REL))
 # after that.
 INTENT_GRACE_S = 120.0
 # A hosted D wraps up with a 7/7 shutdown of at most about 2 x 60 s
-# (subtask_units); the wait is a little longer. ``levi-product.service`` stops
-# the service after its ``TimeoutStopSec``, which is 15 s there: see the doc.
+# (subtask_units); the wait is a little longer. ``levi-product.service`` must
+# allow it: ``TimeoutStopSec`` >= ``UNIT_STOP_TIMEOUT_S`` (see the doc).
 SHUTDOWN_WAIT_S = 130.0
+# What the unit's ``TimeoutStopSec`` must be at least: the wait, the chain's grace
+# (3 s) and the rest of the service's own shutdown.
+UNIT_STOP_TIMEOUT_S = 150.0
 SHUTDOWN_POLL_S = 0.5
 UNREADABLE = "record-unreadable"
 CANARY = "wiring-check"
@@ -257,9 +263,14 @@ def shutdown_hosted(
     """The orderly end of a hosted D when the service shuts down: the same Stop
     a person presses (Ctrl+C by the pty, sent once; a D that was told already, or
     is past stopping, is just waited for), then the wait for its wrap-up. Returns
-    ``{"state": none|ended|timeout|error, "stop": <what Stop answered>}`` and
-    never raises. After a timeout nothing more is done: the pty closes with this
-    process and the launcher's hang-up chain (SIGINT, 3 s, SIGKILL) takes over."""
+    ``{"state": none|ended|elsewhere|timeout|error, "stop": <what Stop answered>}``
+    and never raises. After a timeout nothing more is done: the pty closes with this
+    process and the launcher's hang-up chain (SIGINT, 3 s, SIGKILL) takes over.
+
+    A run that **another live core owns** (Stop answers ``driven_elsewhere``) is
+    that core's to stop and to wait for: this one holds no pty of it, so closing
+    nothing here hangs the launcher up. It returns ``elsewhere`` at once, without
+    the wait and without saying the chain takes over (mechanics review 2, N3)."""
     try:
         if supervisor is None:
             from . import aeri_run_api
@@ -272,6 +283,12 @@ def shutdown_hosted(
     if job is None:
         return {"state": "none", "stop": None}
     sent = _stop(supervisor, job)
+    if sent == "driven_elsewhere":
+        log.info(
+            "the hosted AERI terminal D belongs to another core: it is that "
+            "core's to stop; nothing to wait for here"
+        )
+        return {"state": "elsewhere", "stop": sent}
     deadline = monotonic() + wait_s
     while monotonic() < deadline:
         try:

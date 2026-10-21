@@ -4,13 +4,17 @@ changing in the middle of a run, the start gate, adopting a run): the scripted
 machine of ``aeri_machine.py`` at the moments of the real run of 18 Oct, and the
 out-of-page stop script loaded as the module it is."""
 
+import dataclasses
 import importlib.util
+import os
+import signal
 import time
 from pathlib import Path
 
 import pytest
 from aeri_machine import AeriMachine
 
+from levi.marvel0 import aeri_run, run
 from levi.marvel0 import aeri_screen as sc
 from levi.marvel0 import aeri_state as st
 from levi.marvel0.aeri_state import Refuse
@@ -81,3 +85,35 @@ def stop_script():
 def stop_from_elsewhere(m: AeriMachine, when=None):
     """What ``aeri_page_stop.py`` leaves in the record after its SIGINT."""
     stop_script().mark_sent(m.folder / "record.json", when or time.time())
+
+
+def restarted(m, host=None, site_loader=None):
+    """A new process finds the record of the run: a new supervisor."""
+    return aeri_run.Supervisor(
+        host or m.host,
+        site_loader=site_loader or (lambda: m.site),
+        workspace=m.workspace,
+    )
+
+
+def sigints(m):
+    return [s for s in m.signals if s[2] == signal.SIGINT]
+
+
+OTHER = {"pid": 424242, "identity": {"start_ticks": "777", "boot": "other-boot"}}
+
+
+def second_core(m, alive=None):
+    """A second core: its own identity, and a view of the machine in which the
+    first core (the test process) is alive for as long as ``alive['first']``."""
+    alive = alive if alive is not None else {"first": True}
+    first_pid = os.getpid()
+    first_identity = run._identity(first_pid)
+
+    def identity(pid):
+        if pid == first_pid:
+            return first_identity if alive["first"] else None
+        return m.identity(pid)
+
+    host = dataclasses.replace(m.host, self_owner=lambda: OTHER, identity=identity)
+    return restarted(m, host=host), alive

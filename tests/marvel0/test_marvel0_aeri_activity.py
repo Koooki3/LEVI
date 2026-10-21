@@ -382,6 +382,42 @@ def test_a_d_that_does_not_wrap_up_is_left_alone_after_the_wait(live):
     assert m.look()["d"]["alive"] is True
 
 
+def test_a_core_that_does_not_own_the_run_does_not_wait_for_it_at_shutdown(live):
+    """Mechanics review 2 N3: Stop answers ``driven_elsewhere``, the old code
+    then waited the whole 130 s and logged "the hang-up chain takes over", which
+    is false for a core that holds no pty of this run."""
+    from aeri_run_kit import second_core
+
+    m = live
+    to_forward(m)
+    other, _alive = second_core(m)
+    other.view()
+    assert other._foreign is True
+    slept = []
+    started = time.monotonic()
+    answer = aeri_activity.shutdown_hosted(
+        supervisor=other, wait_s=60.0, sleep=lambda s: slept.append(s)
+    )
+    assert answer == {"state": "elsewhere", "stop": "driven_elsewhere"}
+    assert time.monotonic() - started < 5.0 and slept == [], "it returned at once"
+    assert not [s for s in m.signals if s[0] in ("kill", "killpg")]
+    assert m.look()["d"]["alive"] is True
+
+
+def test_that_core_does_not_claim_the_hang_up_chain_takes_over(live, caplog):
+    from aeri_run_kit import second_core
+
+    m = live
+    to_forward(m)
+    other, _alive = second_core(m)
+    other.view()
+    with caplog.at_level("INFO", logger="levi"):
+        aeri_activity.shutdown_hosted(supervisor=other, wait_s=60.0)
+    text = " ".join(r.getMessage() for r in caplog.records)
+    assert "hang-up chain" not in text
+    assert "another core" in text
+
+
 def test_with_no_hosted_d_the_shutdown_does_nothing(live):
     m = live
     fresh = aeri_run.Supervisor(
