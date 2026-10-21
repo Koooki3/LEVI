@@ -301,7 +301,7 @@ MUTATIONS = [
     (
         "document: a state the page does not know is shown as idle",
         M + "autonomy-doc.ts",
-        'id: stateId ?? "unknown",',
+        "id: stateId ?? UNKNOWN,",
         'id: stateId ?? "idle",',
         (DOC,),
     ),
@@ -315,7 +315,7 @@ MUTATIONS = [
     (
         "document: a readiness row with an unknown level is met",
         M + "autonomy-doc.ts",
-        'level: oneOf(READY_LEVELS, item.level) ?? "unknown",',
+        "level: oneOf(READY_LEVELS, item.level) ?? UNKNOWN,",
         'level: oneOf(READY_LEVELS, item.level) ?? "ok",',
         (DOC,),
     ),
