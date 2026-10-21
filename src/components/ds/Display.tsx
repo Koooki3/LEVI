@@ -121,6 +121,7 @@ export function Card({
   title,
   description,
   actions,
+  footer,
   children,
   className,
   ...rest
@@ -130,6 +131,8 @@ export function Card({
   title?: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;
+  /** Bottom row (links, buttons); pinned to the card's bottom edge. */
+  footer?: ReactNode;
   children?: ReactNode;
 } & Omit<HTMLAttributes<HTMLElement>, "title">) {
   return (
@@ -156,6 +159,7 @@ export function Card({
         </header>
       )}
       {children}
+      {footer && <footer className="ds-card__footer">{footer}</footer>}
     </section>
   );
 }

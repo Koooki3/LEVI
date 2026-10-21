@@ -706,6 +706,20 @@
   line-height: var(--ds-text-callout-line);
   color: var(--ds-text-secondary);
 }
+/* Footer slot (layout P3): a card with a footer is a column, the footer sits
+   at the bottom, so cards stretched to one row height end on one line. */
+.ds-card:has(> .ds-card__footer) {
+  display: flex;
+  flex-direction: column;
+}
+.ds-card__footer {
+  margin-top: auto;
+  padding-top: var(--ds-space-4);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
 .ds-card__actions {
   display: flex;
   flex-wrap: wrap;
@@ -1439,4 +1453,39 @@
   .ds-page {
     --ds-page-inset: var(--ds-space-4);
   }
+}
+
+/* ── Card grid and panel (layout audit 2026-10-21, P3) ──────────────────
+   .ds-card-grid: as many columns as fit at --ds-card-min (a page may set its
+   own on the grid), every card in a row stretched to the same height, no
+   lone half-width card. .ds-panel: a full-width information block, 12/16
+   inside, md radius; a state shows as an inset left edge that takes no
+   layout width, so text in a coloured and a plain panel starts at one x. */
+.ds-card-grid {
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(min(var(--ds-card-min), 100%), 1fr)
+  );
+  gap: var(--ds-space-4);
+  align-items: stretch;
+}
+.ds-panel {
+  padding: var(--ds-space-3) var(--ds-space-4);
+  border-radius: var(--ds-radius-md);
+  border: 1px solid var(--ds-separator);
+  background: var(--ds-surface-1);
+  color: var(--ds-text-primary);
+}
+.ds-panel--info {
+  box-shadow: inset 3px 0 0 var(--ds-info);
+}
+.ds-panel--success {
+  box-shadow: inset 3px 0 0 var(--ds-success);
+}
+.ds-panel--warning {
+  box-shadow: inset 3px 0 0 var(--ds-warning);
+}
+.ds-panel--danger {
+  box-shadow: inset 3px 0 0 var(--ds-danger);
 }

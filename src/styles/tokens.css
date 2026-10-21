@@ -104,6 +104,8 @@
   --ds-page-inset: var(--ds-space-6);
   --ds-page-top: var(--ds-space-8);
   --ds-page-bottom: var(--ds-space-16);
+  /* Card grids (layout P3): the narrowest column before the grid wraps. */
+  --ds-card-min: 280px;
 
   /* ── Control heights and icon sizes (§4.8, §6). ── */
   --ds-control-sm: 28px;
