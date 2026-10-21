@@ -29,7 +29,11 @@
   font-weight: var(--ds-weight-semibold);
   margin-bottom: var(--ds-space-3);
 }
-.pg-workbench p {
+/* The page default for paragraphs, at the lowest specificity (0,0,1): any class
+   that sets its own size or colour (ds-field__error, ds-empty__title, rg-muted…)
+   wins; a paragraph whose class sets neither keeps this default (layout audit
+   2026-10-21, P0). */
+:where(.pg-workbench) p {
   font-size: var(--ds-text-callout-size);
   line-height: var(--ds-text-callout-line);
   color: var(--ds-text-secondary);
