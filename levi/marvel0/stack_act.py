@@ -61,6 +61,7 @@ import stat
 import struct
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -3154,7 +3155,14 @@ class Act:
         (``systemd-run --pipe --wait``). ``runtime_max_s`` is systemd's backstop
         behind the command's own bound."""
         limit = int(runtime_max_s or CHECK_TIMEOUT_S + 10)
-        unit = f"{stack_units.ONESHOT_PREFIX}{name}-{int(self.now())}"
+        # The name is unique per call, not per second: two checks of one kind in
+        # the same second (the early check of B and a person's click on the FCI
+        # check) would otherwise meet in ``systemd-run`` ("already loaded"), one
+        # of them would read as no answer, and the slow path would be taken.
+        unit = (
+            f"{stack_units.ONESHOT_PREFIX}{name}-{int(self.now())}-"
+            f"{uuid.uuid4().hex[:6]}"
+        )
         full = stack_units.oneshot_argv(unit, argv, limit, description)
         return self.host.base.run(full, limit + 10)
 

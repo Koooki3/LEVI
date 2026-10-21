@@ -329,7 +329,8 @@ argv comes from this file and nowhere else.
 ## The units
 
 All four are `systemd-run --user` transient units (the one-shot checks are `--pipe --wait --collect`, with `RuntimeMaxSec` as
-the backstop behind the `timeout` inside their command; the check of the graph is `levi-aeri-stack-marvel0-oneshot-probe-b-nodes-*`). A, B and C: `Type=exec`, `KillMode=control-group`, `KillSignal=SIGINT`,
+the backstop behind the `timeout` inside their command; the check of the graph is `levi-aeri-stack-marvel0-oneshot-probe-b-nodes-<second>-<6 hex>`: the name is unique per call, not per second, so
+two checks of one kind in the same second, such as the early check of B and a click on the FCI check, do not meet in `systemd-run`). A, B and C: `Type=exec`, `KillMode=control-group`, `KillSignal=SIGINT`,
 `SendSIGKILL=no`, `TimeoutStopSec=30`, `Restart=no`, `StandardInput=null`, `ManagedOOMPreference=avoid`; A also
 `LimitRTPRIO=99` and `LimitMEMLOCK=infinity`, B `LimitRTPRIO=99`; no `Nice`, CPU affinity or quota; no `--collect` (a
 failed unit stays listed until the page resets it); the manager's ROS, conda and venv variables are unset and
@@ -631,7 +632,7 @@ C 之前的检查 5 秒，C 启动、3 秒后就绪：**从按键到 C 就绪约
 `TimeoutStopSec=30`、`Restart=no`、`StandardInput=null`、`ManagedOOMPreference=avoid`；A 另有 `LimitRTPRIO=99` 和
 `LimitMEMLOCK=infinity`，B 有 `LimitRTPRIO=99`；不设 `Nice`、CPU 亲和性和配额；不加 `--collect`（失败的单元保留在列表里，直到页面重置它）；
 管理器环境里的 ROS、conda 和虚拟环境变量被清除，并设置 `PYTHONUNBUFFERED=1`、`RCUTILS_COLORIZED_OUTPUT=0`。一次性检查是 `--pipe --wait --collect`，
-命令里的 `timeout` 之外还有 `RuntimeMaxSec` 兜底（查 ROS 图的是 `levi-aeri-stack-marvel0-oneshot-probe-b-nodes-*`）。命令运行在
+命令里的 `timeout` 之外还有 `RuntimeMaxSec` 兜底（查 ROS 图的是 `levi-aeri-stack-marvel0-oneshot-probe-b-nodes-<秒>-<6 位十六进制>`：名字每次调用都不同、不是每秒一个，所以同一秒里同种的两个检查，比如 B 的提前检查和一次 FCI 检查的点击，不会在 `systemd-run` 里撞名）。命令运行在
 `levi/marvel0/stack_exec.sh <fr3_env.sh> --` 之后：它先 source 这台机器人自己的环境文件，再用命令替换自己（它的 sha256 固定在
 `stack_units.py` 里）。日志在 `<工作区>/marvel0/stack/<a|b|c>/logs/`（目录 0700、文件 0600），每次启动在单元存在之前先写下记录（更新时持记录锁）；
 曾经就绪的单元，日志超过 8 MiB 时原地截成最后 512 KiB（systemd 以 `O_APPEND` 追加；C 的 werkzeug 每个请求写一行）。

@@ -36,6 +36,7 @@ TESTS = os.environ.get("MUTATE_TESTS", "").split() or [
     "tests/marvel0/test_marvel0_stack_act_race.py",
     "tests/marvel0/test_marvel0_stack_act_stopping.py",
     "tests/marvel0/test_marvel0_stack_act_fast.py",
+    "tests/marvel0/test_marvel0_stack_act_fast_review.py",
     "tests/marvel0/test_marvel0_stack_act_heavy.py",
     "tests/marvel0/test_marvel0_stack_act_timeline.py",
 ]
@@ -44,6 +45,7 @@ RACE = "tests/marvel0/test_marvel0_stack_act_race.py"
 STOPPING = "tests/marvel0/test_marvel0_stack_act_stopping.py"
 ROUTES = "tests/marvel0/test_marvel0_stack_act_routes.py"
 FAST = "tests/marvel0/test_marvel0_stack_act_fast.py"
+FAST_REVIEW = "tests/marvel0/test_marvel0_stack_act_fast_review.py"
 HEAVY = "tests/marvel0/test_marvel0_stack_act_heavy.py"
 TIMELINE = "tests/marvel0/test_marvel0_stack_act_timeline.py"
 FAST_PROCESSES = "tests/marvel0/test_marvel0_stack_act_fast_processes.py"
@@ -1650,6 +1652,13 @@ MUTATIONS = [
         '            if ctx.busy_main:\n                return\n            self._seq_locked(\n                seq,\n                "sequence_probe",',
         '            if ctx.busy:\n                return\n            self._seq_locked(\n                seq,\n                "sequence_probe",',
         FAST,
+    ),
+    (
+        "review: a one-shot check's unit is unique per call, not per second",
+        "stack_act.py",
+        '        unit = (\n            f"{stack_units.ONESHOT_PREFIX}{name}-{int(self.now())}-"\n            f"{uuid.uuid4().hex[:6]}"\n        )',
+        '        unit = f"{stack_units.ONESHOT_PREFIX}{name}-{int(self.now())}"',
+        FAST_REVIEW,
     ),
     (
         "marker: a start that ended before A gives the marker back",

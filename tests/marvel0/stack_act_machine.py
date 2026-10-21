@@ -495,6 +495,13 @@ class ActMachine(Machine):
         opts, cmd = argv[:cut], argv[cut + 1 :]
         unit = next(o.split("=", 1)[1] for o in opts if o.startswith("--unit="))
         if "--pipe" in opts:
+            if unit in self.oneshot_units:
+                # (what systemd-run prints for a name that is in use)
+                return (
+                    1,
+                    f"Failed to start transient service unit: Unit {unit}.service "
+                    "was already loaded or has a fragment file.",
+                )
             self.oneshot_units[unit] = {"stopped": False, "shows_left": 0}
             try:
                 return self._oneshot(cmd)
