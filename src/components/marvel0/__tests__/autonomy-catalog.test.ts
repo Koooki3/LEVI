@@ -68,9 +68,24 @@ const errWorded = (code: string) =>
 describe("what the backend names by code is worded", () => {
   test("the states, each with its word and its sentence; nothing is left over", () => {
     expect(missing(STATE_IDS.map(stateKey))).toEqual([]);
-    expect(missing(STATE_IDS.map(stateHintKey))).toEqual([]);
+    // A sentence for each state, and for each state after each stop phase
+    // (the states that follow a Stop say what the Stop has reached).
+    expect(
+      missing(
+        STATE_IDS.flatMap((id) =>
+          STOP_PHASES.map((phase) => stateHintKey(id, phase)),
+        ),
+      ),
+    ).toEqual([]);
     sameSet(family("state."), STATE_IDS);
-    sameSet(family("hint."), STATE_IDS);
+    sameSet(
+      family("hint."),
+      STATE_IDS.flatMap((id) =>
+        STOP_PHASES.map((phase) =>
+          stateHintKey(id, phase).slice(`${P}hint.`.length),
+        ),
+      ),
+    );
     sameSet(tupleOf("STATES"), STATE_IDS);
   });
 
@@ -160,9 +175,15 @@ describe("what the backend names by code is worded", () => {
       family("ready.").filter(
         (c) =>
           /^[a-z_]+$/.test(c) &&
-          !["title", "count", "met", "empty", "unreadable", "stale"].includes(
-            c,
-          ),
+          ![
+            "title",
+            "count",
+            "met",
+            "empty",
+            "unreadable",
+            "stale",
+            "paused",
+          ].includes(c),
       ),
       READY_CODES,
     );

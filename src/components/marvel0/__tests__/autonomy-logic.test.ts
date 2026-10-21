@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
+import { join } from "path";
 import en from "@/i18n/en.json";
+import zh from "@/i18n/zh.json";
 import { readyView, runView, type RunView } from "../autonomy-doc";
 import {
   DEFAULT_LIMITS,
@@ -10,20 +13,30 @@ import {
   armKey,
   blockingRows,
   exitKind,
-  executePhrase,
   groupBySlot,
   hasRun,
   historySig,
   homingStep,
+  hostingOff,
   initialForm,
+  KEY_PROMPTS,
+  TERMINAL_CHECKS,
+  WINDOW_CHECKS,
+  keyChecks,
+  keyFitsPrompt,
+  keyPhrase,
   keyVM,
   lockPhase,
   prepareBody,
   prepareErrors,
   promptLine,
+  readyPaused,
+  readyPollMs,
   runPageHref,
+  runPollMs,
   startOff,
   startPhrase,
+  stateHintKey,
   stopControl,
   stopSeen,
   visibleKeys,
@@ -31,7 +44,8 @@ import {
   type PrepareForm,
   type SentKey,
 } from "../autonomy-logic";
-import { readyDoc, runDoc } from "./autonomy-fixtures";
+import { CODES, RUN_VIEWS, keyOf, readyDoc, runDoc } from "./autonomy-fixtures";
+import { KEY_IDS } from "../autonomy-doc";
 
 const KNOWN = new Set(Object.keys(en));
 const view = (
@@ -531,24 +545,25 @@ describe("the phrases the page sends itself", () => {
     );
   });
 
-  test("execute: the backend's phrase, else the one the terminal asks for", () => {
+  test("a level C key goes with the backend's phrase, word for word, and with nothing else: the page never builds one", () => {
     const run = view("await_phrase_variant");
     const [execute, variant] = [
       run.keys.find((k) => k.id === "execute")!,
       run.keys.find((k) => k.id === "execute_variant")!,
     ];
-    expect(executePhrase(variant, run.name)).toBe(
+    expect(keyPhrase(variant)).toBe(variant.phrase);
+    expect(keyPhrase(variant)).toBe(
       "execute aeri-20261021-ext-r01 after policy switch check",
     );
-    expect(executePhrase(execute, run.name)).toBe(
-      "execute aeri-20261021-ext-r01",
-    );
-    expect(executePhrase({ ...execute, phrase: null }, "n1")).toBe(
-      "execute n1",
-    );
-    expect(executePhrase({ ...variant, phrase: null }, "n1")).toBe(
-      "execute n1 after policy switch check",
-    );
+    expect(keyPhrase(execute)).toBe(execute.phrase);
+    // No phrase in the document: none is made up from the run's name.
+    expect(keyPhrase({ ...execute, phrase: null })).toBeNull();
+    expect(keyPhrase({ ...variant, phrase: "" })).toBeNull();
+    // A key below level C has none, even if the document carried one.
+    const release = view("await_release").keys.find(
+      (k) => k.id === "release_round",
+    )!;
+    expect(keyPhrase({ ...release, phrase: "execute x" })).toBeNull();
   });
 
   test("the prepare, live-stop and leftovers phrases", () => {
@@ -750,5 +765,356 @@ describe("the prepare form", () => {
     expect(
       prepareBody("req-1234567", form({ task: "  pick it up  " })).task,
     ).toBe("pick it up");
+  });
+});
+
+// -- the checks in front of a level C key (review R10 #1)
+
+const root = join(import.meta.dir, "../../../..");
+/** D's own words, as the backend carries them (copied from the AERI sources by
+ * tests/marvel0/regen_aeri_prompts.py): a real file, never a paraphrase. */
+const PROMPTS = JSON.parse(
+  readFileSync(join(root, "levi/marvel0/aeri_prompts.json"), "utf8"),
+) as {
+  profiles: Record<string, { texts: Record<string, Record<string, string>> }>;
+};
+const E = en as Record<string, string>;
+const Z = zh as Record<string, string>;
+
+/** What D asks a person to check before it takes the start phrase, one item
+ * per thing it names, split out of its sentence. */
+function itemsOfStart(lang: string, text: string): string[] {
+  const body =
+    lang === "en"
+      ? text.match(/Confirm the reviewed (.+)\.$/)?.[1]
+      : text.match(/请确认已核对的(.+)。$/)?.[1];
+  return (body ?? "").split(lang === "en" ? /, | and /u : /、|和/u);
+}
+/** The same for the long phrase after an unfinished policy switch. */
+function itemsOfSwitch(lang: string, text: string): string[] {
+  const body =
+    lang === "en"
+      ? text.match(/check (each unit .+)$/)?.[1]
+      : text.match(/请(逐个检查.+)$/)?.[1];
+  return (body ?? "")
+    .replace(/[:：]$/u, "")
+    .split(lang === "en" ? /, | and /u : /、|，并/u);
+}
+
+describe("the checks in front of a level C key", () => {
+  test("execute: everything D asks before the phrase, one tick each, then the three checks of the stack windows", () => {
+    const checks = keyChecks("execute");
+    expect(checks.map((c) => `${c.from}:${c.code}`)).toEqual([
+      "terminal:scene",
+      "terminal:limits",
+      "terminal:checkpoints",
+      "terminal:providers",
+      "terminal:hardware",
+      "window:estop_hand",
+      "window:hands_clear",
+      "window:no_client",
+    ]);
+  });
+
+  test("execute_variant: the items of the policy switch check, then the start ones, then the three", () => {
+    const checks = keyChecks("execute_variant");
+    expect(checks.map((c) => c.code)).toEqual([
+      "switch_units",
+      "switch_ports",
+      "switch_gpu",
+      "switch_home",
+      "scene",
+      "limits",
+      "checkpoints",
+      "providers",
+      "hardware",
+      "estop_hand",
+      "hands_clear",
+      "no_client",
+    ]);
+  });
+
+  test("end has the three alone (D asks nothing there); every other key has no tick", () => {
+    expect(keyChecks("end").map((c) => c.code)).toEqual([...WINDOW_CHECKS]);
+    for (const id of KEY_IDS)
+      if (id !== "execute" && id !== "execute_variant")
+        expect([id, keyChecks(id)]).toEqual([id, []]);
+  });
+
+  test("a tick has a sentence in both languages and no code is ticked twice", () => {
+    for (const id of ["execute", "execute_variant", "end"] as const) {
+      const checks = keyChecks(id);
+      expect(new Set(checks.map((c) => c.code)).size).toBe(checks.length);
+      for (const check of checks) {
+        expect([check.label, typeof E[check.label]]).toEqual([
+          check.label,
+          "string",
+        ]);
+        expect([check.label, typeof Z[check.label]]).toEqual([
+          check.label,
+          "string",
+        ]);
+      }
+    }
+  });
+
+  test("the list is D's own: one tick for each thing its text names, in every profile, in both languages", () => {
+    const profiles = Object.entries(PROMPTS.profiles);
+    expect(profiles.length).toBeGreaterThanOrEqual(3);
+    const needle: Record<string, Record<string, string>> = {
+      en: {
+        scene: "scene",
+        limits: "limits",
+        checkpoints: "checkpoints",
+        providers: "providers",
+        hardware: "hardware",
+        switch_units: "systemctl --user status",
+        switch_ports: "ss -ltnp",
+        switch_gpu: "nvidia-smi",
+        switch_home: "home pose",
+      },
+      zh: {
+        scene: "场景",
+        limits: "限位",
+        checkpoints: "检查点",
+        providers: "提供方",
+        hardware: "硬件",
+        switch_units: "systemctl --user status",
+        switch_ports: "ss -ltnp",
+        switch_gpu: "nvidia-smi",
+        switch_home: "回位姿态",
+      },
+    };
+    for (const [id, profile] of profiles)
+      for (const lang of ["en", "zh"]) {
+        const texts = profile.texts[lang];
+        const start = itemsOfStart(lang, texts.run_confirm_warning);
+        const swap = itemsOfSwitch(lang, texts.swap_unclean_head);
+        const where = `${id}/${lang}`;
+        expect([where, start.length]).toEqual([
+          where,
+          TERMINAL_CHECKS.start.length,
+        ]);
+        expect([where, swap.length]).toEqual([
+          where,
+          TERMINAL_CHECKS.switch.length,
+        ]);
+        TERMINAL_CHECKS.start.forEach((code, index) =>
+          expect([
+            where,
+            code,
+            start[index].includes(needle[lang][code]),
+          ]).toEqual([where, code, true]),
+        );
+        TERMINAL_CHECKS.switch.forEach((code, index) =>
+          expect([
+            where,
+            code,
+            swap[index].includes(needle[lang][code]),
+          ]).toEqual([where, code, true]),
+        );
+      }
+  });
+
+  test("the three window checks are the ones the stack's start of C asks (stack_act.ATTEST_NEEDED), in the stack's words", () => {
+    const source = readFileSync(
+      join(root, "levi/marvel0/stack_act.py"),
+      "utf8",
+    );
+    const needed = source.match(/"c": \(([^)]*)\)/)?.[1] ?? "";
+    expect(needed.match(/"(\w+)"/g)?.map((x) => x.slice(1, -1))).toEqual([
+      ...WINDOW_CHECKS,
+    ]);
+    for (const code of WINDOW_CHECKS)
+      expect(typeof E[`marvel0.ctl.attest.${code}`]).toBe("string");
+  });
+});
+
+describe("a key answers its own prompt only", () => {
+  test("the table covers every key, and only the prompt kinds the backend lists", () => {
+    expect(Object.keys(KEY_PROMPTS).sort()).toEqual([...KEY_IDS].sort());
+    const kinds = new Set<string>(CODES.prompt_kinds);
+    for (const [id, list] of Object.entries(KEY_PROMPTS))
+      for (const kind of list)
+        expect([id, kind, kinds.has(kind)]).toEqual([id, kind, true]);
+  });
+
+  test("every key the backend's samples allow fits the prompt of its own document", () => {
+    for (const name of RUN_VIEWS) {
+      const run = view(name);
+      for (const key of run.keys.filter((k) => k.allowed))
+        expect([name, key.id, keyFitsPrompt(run, key.id)]).toEqual([
+          name,
+          key.id,
+          true,
+        ]);
+    }
+  });
+
+  test("a key offered while D shows another prompt stays off, with the page's own reason", () => {
+    // `release_round` offered, but the prompt of the document is an inventory.
+    const run = view("await_release", (doc) => {
+      doc.state.prompt.kind = "inventory";
+    });
+    const key = run.keys.find((k) => k.id === "release_round")!;
+    expect(key.allowed).toBe(true);
+    expect(keyFitsPrompt(run, "release_round")).toBe(false);
+    const vm = keyVM(run, key, ctx(run));
+    expect(vm.mode).toBe("off");
+    expect(vm.why?.say).toEqual({
+      key: "marvel0.autonomy.local.prompt_mismatch",
+    });
+    // And with no prompt at all.
+    const bare = view("await_release", (doc) => {
+      doc.state.prompt = null;
+    });
+    expect(keyFitsPrompt(bare, "release_round")).toBe(false);
+    expect(keyVM(bare, key, ctx(bare)).mode).toBe("off");
+  });
+
+  test("quit and the two resume keys follow the prompt kinds of their states", () => {
+    for (const [name, key, kind] of [
+      ["await_inventory", "inventory_yes", "inventory"],
+      ["await_resume", "resume_ask", "resume"],
+      ["await_resume_confirm", "resume_confirm", "confirm_resume"],
+      ["await_resume_confirm", "resume_cancel", "confirm_resume"],
+      ["await_phrase", "execute", "phrase"],
+      ["await_phrase_variant", "execute_variant", "phrase_variant"],
+      ["forward_running", "verdict_success", "round"],
+    ] as const) {
+      const run = view(name);
+      expect([name, key, run.state.prompt?.kind]).toEqual([name, key, kind]);
+      expect(keyFitsPrompt(run, key)).toBe(true);
+    }
+    expect(keyOf(runDoc("await_inventory"), "quit")).toBeDefined();
+  });
+});
+
+describe("what the page says after a Stop, by what D has said back", () => {
+  const phases = ["idle", "sent", "acked", "unconfirmed", "retried"] as const;
+  const hint = (state: Parameters<typeof stateHintKey>[0], phase: string) =>
+    stateHintKey(state, phase as (typeof phases)[number]);
+
+  test("only after D acknowledged is D said to wind down and the arm to stay where it is", () => {
+    expect(E[hint("stopping", "acked")]).toMatch(/confirmed the Stop/);
+    expect(E[hint("stopping", "acked")]).toMatch(/winding down/);
+    expect(E[hint("stopping", "acked")]).toMatch(/arm stays where it is/);
+    for (const phase of ["sent", "unconfirmed", "retried"]) {
+      const sentence = E[hint("stopping", phase)];
+      expect([phase, sentence]).toEqual([phase, expect.any(String)]);
+      expect([phase, /may still be moving/.test(sentence)]).toEqual([
+        phase,
+        true,
+      ]);
+      expect([phase, /winding down|stays where it is/.test(sentence)]).toEqual([
+        phase,
+        false,
+      ]);
+      const chinese = Z[hint("stopping", phase)];
+      expect([phase, /手臂可能仍在运动/.test(chinese)]).toEqual([phase, true]);
+      expect([phase, /急停|物理急停/.test(chinese)]).toEqual([phase, true]);
+      expect([phase, /手臂停在原处/.test(chinese)]).toEqual([phase, false]);
+    }
+  });
+
+  test("a run that ends by itself (no Stop sent) is not said to have been stopped", () => {
+    const sentence = E[hint("stopping", "idle")];
+    expect(sentence).toMatch(/ending/);
+    expect(sentence).not.toMatch(/Stop|arm stays/);
+  });
+
+  test("a restart's orphan and a stuck wrap-up say the same, by the same phase", () => {
+    for (const state of ["orphaned", "stalled"] as const) {
+      expect(hint(state, "acked")).toBe(`marvel0.autonomy.hint.${state}`);
+      expect(hint(state, "idle")).toBe(`marvel0.autonomy.hint.${state}`);
+      for (const phase of ["sent", "unconfirmed", "retried"])
+        expect(E[hint(state, phase)]).toMatch(/may still be moving/);
+      expect(E[hint(state, "acked")]).not.toMatch(/may still be moving/);
+    }
+  });
+
+  test("the other states have one sentence whatever the phase", () => {
+    for (const state of ["forward_running", "services", "ended"] as const)
+      for (const phase of phases)
+        expect(hint(state, phase)).toBe(`marvel0.autonomy.hint.${state}`);
+  });
+
+  test("the captions under the Stop button: sent and unconfirmed never promise the arm stays", () => {
+    for (const mode of ["sent", "retry", "spent"]) {
+      const sentence = E[`marvel0.autonomy.stop.${mode}`];
+      expect([
+        mode,
+        /not confirmed|did not confirm|still not confirmed/.test(sentence),
+      ]).toEqual([mode, true]);
+      expect([mode, /may still be moving/.test(sentence)]).toEqual([
+        mode,
+        true,
+      ]);
+      expect([mode, /stays where it is/.test(sentence)]).toEqual([mode, false]);
+    }
+    expect(E["marvel0.autonomy.stop.acked"]).toMatch(/confirmed the stop/);
+    expect(E["marvel0.autonomy.stop.acked"]).toMatch(/stays where it is/);
+  });
+});
+
+describe("how often the page reads (review R11 M4)", () => {
+  test("the readiness document is read at the normal pace only where there is something to prepare", () => {
+    expect(LIMITS.slowPollMs).toBe(30_000);
+    expect(readyPollMs(ready("prepared_ready"), false)).toBe(
+      LIMITS.readyPollMs,
+    );
+    expect(readyPollMs(null, false)).toBe(LIMITS.readyPollMs);
+    // Switched off in the control file: the backend's own sample, then slowly.
+    expect(ready("disabled").enabled).toBe(false);
+    expect(readyPollMs(ready("disabled"), false)).toBe(LIMITS.slowPollMs);
+    // No usable section in the site file (missing, malformed).
+    expect(readyPollMs(ready("unconfigured"), false)).toBe(LIMITS.slowPollMs);
+    expect(readyPollMs(ready("invalid_section"), false)).toBe(
+      LIMITS.slowPollMs,
+    );
+    // The route itself said "off" (aeri_disabled), before any document.
+    expect(readyPollMs(null, true)).toBe(LIMITS.slowPollMs);
+    expect(hostingOff(null, false)).toBe(false);
+    expect(hostingOff(ready("prepared_ready"), false)).toBe(false);
+  });
+
+  test("it is not read at all while an evaluation client is live, once it has been read", () => {
+    expect(readyPaused(true, true)).toBe(true);
+    expect(readyPaused(true, false)).toBe(false); // the first read is made
+    expect(readyPaused(false, true)).toBe(false);
+  });
+
+  test("D's document: every second while D lives, 3 s otherwise, slowly when there is nothing to see", () => {
+    const alive = view("forward_running");
+    const idle = view("idle");
+    expect(runPollMs(alive, false)).toBe(LIMITS.runPollMs);
+    expect(runPollMs(alive, true)).toBe(LIMITS.runPollMs);
+    expect(runPollMs(idle, false)).toBe(LIMITS.idlePollMs);
+    expect(runPollMs(null, false)).toBe(LIMITS.idlePollMs);
+    expect(runPollMs(idle, true)).toBe(LIMITS.slowPollMs);
+    expect(runPollMs(view("ended_done"), true)).toBe(LIMITS.slowPollMs);
+  });
+});
+
+describe("the example task of the form", () => {
+  test("it is no longer the pepper, it is a valid task under the backend's own pattern, and it keeps the wording the policy was run with", () => {
+    for (const lang of [E, Z]) {
+      const example = lang["marvel0.autonomy.form.task_example"];
+      expect(example).not.toMatch(/pepper/);
+      expect(example).toMatch(/^pick the [a-z]+ into the (white|blue) plate$/);
+      expect(
+        prepareErrors({
+          ...initialForm(null),
+          task: example,
+        }),
+      ).toEqual({});
+    }
+    // The pattern the backend sends, from its own sample.
+    const limits = ready("prepared_ready").limits!;
+    expect(
+      new RegExp(`^${limits.taskPattern}$`).test(
+        E["marvel0.autonomy.form.task_example"],
+      ),
+    ).toBe(true);
   });
 });

@@ -16,7 +16,7 @@
 // The step owns the polls and the actions; the cards are views of them. Stop
 // has a dock (like the evaluation client's HOLD) for the person who has
 // scrolled away from the card while D lives.
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "./autonomy-styles.css";
 import { ArrowDown, Square } from "lucide-react";
 import { Badge, Button } from "@/components/ds";
@@ -33,6 +33,7 @@ import {
   isLive,
   stateKey,
   stopControl,
+  type AeriFact,
   type Limits,
 } from "./autonomy-logic";
 import { StepHeading } from "./marvel0-card";
@@ -59,9 +60,15 @@ const CARD_STOP = '[data-testid="marvel0-autonomy-stop-frame"]';
  * it is clear of the dock's place. */
 const DOCK_PX = 96;
 
-function useCardStopOnScreen(): boolean {
+/** Whether the card's own Stop is in view. Nothing is watched, and no timer
+ * runs, unless `active` (a D is alive: the dock exists only then). */
+export function useCardStopOnScreen(active: boolean): boolean {
   const [onScreen, setOnScreen] = useState(false);
   useEffect(() => {
+    if (!active) {
+      setOnScreen(false);
+      return;
+    }
     let frame = 0;
     const look = () => {
       frame = 0;
@@ -83,8 +90,8 @@ function useCardStopOnScreen(): boolean {
       window.removeEventListener("scroll", queue);
       window.removeEventListener("resize", queue);
     };
-  }, []);
-  return onScreen;
+  }, [active]);
+  return active && onScreen;
 }
 
 /** Stop in a bar pinned to the bottom of the window while D lives and the
@@ -98,8 +105,8 @@ function StopDock({
   actions: ReturnType<typeof useAutonomyActions>;
 }) {
   const { t } = useLocale();
-  const cardOnScreen = useCardStopOnScreen();
   const { mode, enabled } = stopControl(poll.lastSeen, actions.stopSent);
+  const cardOnScreen = useCardStopOnScreen(mode !== "hidden");
   const run = poll.value;
   if (mode === "hidden" || cardOnScreen) return null;
   return (
@@ -158,20 +165,41 @@ export function AutonomyStep({
   api = autonomyApi,
   evalLive = false,
   limits = LIMITS,
+  onRun,
 }: {
   api?: AutonomyApi;
   /** The hosted evaluation client is live (Step 4): only one of the two
-   * sessions can be alive, so Start here is off meanwhile. */
+   * sessions can be alive, so Start here is off meanwhile, and the readiness
+   * document (a costly read) is not read again until the client ends. */
   evalLive?: boolean;
   limits?: Limits;
+  /** Tells the page what the chain at its top needs to know of D: whether it
+   * lives and in which state. Called when that changes, not on every read. */
+  onRun?: (fact: AeriFact | null) => void;
 }) {
   const { t } = useLocale();
   const [tabId] = useState(newTabId);
-  const ready = useAutonomyReady(api, { pollMs: limits.readyPollMs });
-  const run = useAutonomyRun(api, limits);
+  const ready = useAutonomyReady(api, { limits, evalLive });
+  // Hosting off, or a client live: nothing to see in D's document but a change.
+  const run = useAutonomyRun(api, limits, { quiet: evalLive || ready.off });
   const actions = useAutonomyActions(api, run, ready, { tabId });
   const runView = run.value;
   const runLive = isLive(runView);
+  // The primitives the chain reads: a new document with the same facts is not
+  // a change, so the page is not rendered once a second for nothing.
+  const alive = runView?.d.alive ?? null;
+  const stateId = runView?.state.id ?? null;
+  const current = run.current;
+  const fact = useMemo<AeriFact | null>(
+    () =>
+      alive === null || stateId === null
+        ? null
+        : { alive, state: stateId, current },
+    [alive, stateId, current],
+  );
+  useEffect(() => {
+    onRun?.(fact);
+  }, [fact, onRun]);
   usePresence(api, runLive, tabId, limits);
   // Off in the control file: the routes answer `aeri_disabled`, or the
   // document says `enabled: false`. A D that is still alive keeps its card.
@@ -249,6 +277,13 @@ export function AutonomyStep({
               <span data-testid="marvel0-autonomy-read-problem">
                 {t("marvel0.autonomy.ready.unreadable")}{" "}
                 <WordedText worded={sayFailure(readProblem)} />
+              </span>
+            </Note>
+          )}
+          {ready.paused && ready.value && (
+            <Note tone="info" role="status">
+              <span data-testid="marvel0-autonomy-paused">
+                {t("marvel0.autonomy.ready.paused")}
               </span>
             </Note>
           )}

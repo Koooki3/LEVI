@@ -41,6 +41,7 @@ import type { Worded } from "./marvel0-json";
 import type { Say } from "./marvel0-logic";
 import {
   MODES,
+  type FormLimits,
   type PreparedView,
   type ReadyRow,
   type ReadyView,
@@ -376,6 +377,49 @@ function PreparedCard({
   );
 }
 
+/** What the first real uses are, stage by stage (design section 12): the
+ * defaults of the form below are the cautious ones for them. Static text; the
+ * owner is at the arm and says "go" before each stage. */
+const STAGES = [
+  ["s1", "marvel0.autonomy.stage.s1"],
+  ["s2", "marvel0.autonomy.stage.s2"],
+  ["s3", "marvel0.autonomy.stage.s3"],
+] as const;
+
+function Stages({ limits }: { limits: FormLimits }) {
+  const { t } = useLocale();
+  return (
+    <section
+      className="rg-astage"
+      data-testid="marvel0-autonomy-stages"
+      aria-labelledby="marvel0-autonomy-stages-title"
+    >
+      <h5 id="marvel0-autonomy-stages-title" className="rg-marker__title">
+        {t("marvel0.autonomy.stage.title")}
+      </h5>
+      <ol>
+        {STAGES.map(([stage, key]) => (
+          <li key={stage} data-stage={stage}>
+            {t(key)}
+          </li>
+        ))}
+      </ol>
+      <p className="rg-muted" data-testid="marvel0-autonomy-stage-note">
+        {sayText(
+          {
+            key: "marvel0.autonomy.stage.note",
+            params: {
+              rounds: limits.rounds.default,
+              steps: limits.steps.default,
+            },
+          },
+          t,
+        )}
+      </p>
+    </section>
+  );
+}
+
 function PrepareFormCard({
   ready,
   actions,
@@ -436,6 +480,7 @@ function PrepareFormCard({
       }}
     >
       <h4 className="rg-marker__title">{t("marvel0.autonomy.form.title")}</h4>
+      <Stages limits={limits} />
       <div className="rg-form--grid">
         <Field
           className="rg-span"

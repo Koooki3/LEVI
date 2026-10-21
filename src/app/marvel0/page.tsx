@@ -34,7 +34,8 @@ import {
   IdleBannerView,
   Marvel0CardView,
 } from "@/components/marvel0/marvel0-card";
-import { AutonomyStep } from "@/components/marvel0/autonomy-step";
+import { AutonomyStepLazy } from "@/components/marvel0/autonomy-lazy";
+import type { AeriFact } from "@/components/marvel0/autonomy-logic";
 import { Marvel0Actions } from "@/components/marvel0/marvel0-actions";
 import {
   marvel0View,
@@ -72,6 +73,9 @@ export default function Marvel0Page() {
   // The policy server's state is read by its own card (step 2); the chain
   // follows what that card last read.
   const [deploy, setDeploy] = useState<DeployStatus | null>(null);
+  // The hosted terminal D (step 5) as the chain needs it: alive or not, and in
+  // which state. Step 5 is loaded on demand; until it has been, there is none.
+  const [aeri, setAeri] = useState<AeriFact | null>(null);
   const view = useMemo(
     () =>
       marvel0View({
@@ -88,8 +92,14 @@ export default function Marvel0Page() {
   const runNow = run.current ? run.value : null;
   const chain = useMemo(
     () =>
-      chainView({ strip: view.stack, stack: stackNow, deploy, run: runNow }),
-    [view.stack, stackNow, deploy, runNow],
+      chainView({
+        strip: view.stack,
+        stack: stackNow,
+        deploy,
+        run: runNow,
+        aeri,
+      }),
+    [view.stack, stackNow, deploy, runNow, aeri],
   );
   const group = (id: Marvel0GroupId) =>
     view.groups.find((entry) => entry.id === id);
@@ -155,7 +165,7 @@ export default function Marvel0Page() {
           />
           {/* Step 5: prepare, start and drive the AERI loop (off until the
               control file says so; only one of it and the client at a time). */}
-          <AutonomyStep evalLive={ownRunLive} />
+          <AutonomyStepLazy evalLive={ownRunLive} onRun={setAeri} />
           {host && (
             <details
               className="rg-host"

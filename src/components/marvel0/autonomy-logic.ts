@@ -43,6 +43,11 @@ export interface Limits {
   idlePollMs: number;
   /** Polling of the readiness document. */
   readyPollMs: number;
+  /** The pace of a poll that has little to say: hosting switched off in the
+   * control file, no `[aeri]` section, an evaluation client live (design
+   * review R11 M4: a read of the readiness document starts about six
+   * processes, so it is not made every 3 s for nothing). */
+  slowPollMs: number;
 }
 export const LIMITS: Limits = {
   armDelayMs: 1_500,
@@ -53,7 +58,47 @@ export const LIMITS: Limits = {
   runPollMs: 1_000,
   idlePollMs: 3_000,
   readyPollMs: 3_000,
+  slowPollMs: 30_000,
 };
+/** How often the readiness document is read. It is the costly one (each read
+ * the backend makes starts a handful of processes: git, nvidia-smi, systemctl),
+ * so it is read quickly only while there is something to prepare:
+ *  - hosting is off in the control file, or the site file has no usable
+ *    `[aeri]` section: it is read once and then every `slowPollMs` (a person
+ *    who edits the file sees the change within that time, or on Refresh);
+ *  - a hosted evaluation client is live (only one session at a time, and the
+ *    arm controller is up then): after the first read it is not read at all
+ *    until the client ends (`readyPaused`). */
+export function readyPollMs(
+  ready: ReadyView | null,
+  routeOff: boolean,
+  limits: Limits = LIMITS,
+): number {
+  return hostingOff(ready, routeOff) ? limits.slowPollMs : limits.readyPollMs;
+}
+/** Nothing can be prepared or started: hosting is off in the control file (the
+ * routes answer `aeri_disabled` or the document says `enabled: false`) or the
+ * site file has no usable `[aeri]` section. */
+export const hostingOff = (
+  ready: ReadyView | null,
+  routeOff: boolean,
+): boolean =>
+  routeOff || (ready !== null && (!ready.enabled || ready.site.state !== "ok"));
+export const readyPaused = (evalLive: boolean, loaded: boolean): boolean =>
+  evalLive && loaded;
+
+/** How often the hosted D's document is read: every second while D lives, else
+ * every 3 s, or every `slowPollMs` when hosting is off or an evaluation client
+ * is live (D cannot start then, and the page reads on only to notice). */
+export function runPollMs(
+  run: RunView | null,
+  quiet: boolean,
+  limits: Limits = LIMITS,
+): number {
+  if (run?.d.alive === true) return limits.runPollMs;
+  return quiet ? limits.slowPollMs : limits.idlePollMs;
+}
+
 /** The run document older than this is not shown as current. */
 export const RUN_FRESH_MS = 5_000;
 /** The readiness document older than this is not shown as current. */
@@ -72,14 +117,12 @@ export const startPhrase = (
   name: string,
   template = "start aeri {name}",
 ): string => template.replace("{name}", name);
-/** The phrase of `execute` / `execute_variant`: the backend's when the
- * document names it, else the one the terminal asks for. */
-export function executePhrase(key: KeyView, name: string | null): string {
-  if (key.phrase) return key.phrase;
-  const base = `execute ${name ?? ""}`.trim();
-  return key.id === "execute_variant"
-    ? `${base} after policy switch check`
-    : base;
+/** The phrase a level C key is confirmed with: the one the backend's document
+ * names for that key, and nothing else. The page never builds it from the run's
+ * name (a phrase it made up could differ from the one the terminal asks for and
+ * would hide that); a C key whose document carries none cannot be sent. */
+export function keyPhrase(key: KeyView): string | null {
+  return key.level === "C" && key.phrase ? key.phrase : null;
 }
 
 // -- states
@@ -118,8 +161,26 @@ export const homingKey = (step: 1 | 2 | 3): string =>
   `marvel0.autonomy.homing.${step}`;
 export const exitKey = (kind: string): string =>
   `marvel0.autonomy.exit.${kind}`;
-export const stateHintKey = (id: StateId): string =>
-  `marvel0.autonomy.hint.${id}`;
+/** The sentence under the state badge. The three states that follow a Stop
+ * say what the Stop has reached, not what it is meant to do: until D has
+ * acknowledged it (stop phase `acked`) the arm may still be moving and D is not
+ * known to be winding down, so the sentence says "sent, not confirmed" and
+ * leaves the physical e-stop as the thing to rely on (review R10 #10). */
+export function stateHintKey(id: StateId, phase: StopPhase = "idle"): string {
+  const unconfirmed =
+    phase === "sent" || phase === "unconfirmed" || phase === "retried";
+  if (id === "stopping")
+    return phase === "acked"
+      ? "marvel0.autonomy.hint.stopping"
+      : phase === "idle"
+        ? "marvel0.autonomy.hint.stopping_ending"
+        : `marvel0.autonomy.hint.stopping_${phase}`;
+  if (id === "orphaned" && unconfirmed)
+    return "marvel0.autonomy.hint.orphaned_unconfirmed";
+  if (id === "stalled" && unconfirmed)
+    return "marvel0.autonomy.hint.stalled_unconfirmed";
+  return `marvel0.autonomy.hint.${id}`;
+}
 
 /** The three separate homing confirmations: 1, 2 or 3; 0 outside them. */
 export function homingStep(id: StateId): 0 | 1 | 2 | 3 {
@@ -130,6 +191,14 @@ export function homingStep(id: StateId): 0 | 1 | 2 | 3 {
       : id === "await_home_h"
         ? 3
         : 0;
+}
+
+/** What the chain at the top of the page needs of D: whether it lives, in which
+ * state, and whether that was read lately. Nothing else crosses to the page. */
+export interface AeriFact {
+  alive: boolean;
+  state: StateId;
+  current: boolean;
 }
 
 /** D is a process this page can still talk to or watch. */
@@ -220,6 +289,104 @@ export function groupBySlot(keys: KeyView[]): {
     first: keys.filter((key) => key.slot === "first"),
     second: keys.filter((key) => key.slot === "second"),
   };
+}
+
+/** The prompt each key answers (the kinds of `state.prompt.kind`; design
+ * section 4.1). The backend offers a key only for its own prompt; the page
+ * checks it again at the moment of the click, so that a window opened for one
+ * prompt can never send its key to another one. */
+export const KEY_PROMPTS: Record<KeyId, readonly string[]> = {
+  execute: ["phrase"],
+  execute_variant: ["phrase_variant"],
+  inventory_yes: ["inventory"],
+  inventory_no: ["inventory"],
+  home_o: ["home_o"],
+  home_p: ["home_p"],
+  home_h: ["home_h"],
+  release_round: ["release"],
+  verdict_success: ["round"],
+  verdict_failure: ["round"],
+  verdict_discard: ["round"],
+  resume_ask: ["resume"],
+  resume_confirm: ["confirm_resume"],
+  resume_cancel: ["confirm_resume"],
+  quit: [
+    "inventory",
+    "home_o",
+    "home_p",
+    "home_h",
+    "release",
+    "resume",
+    "confirm_resume",
+  ],
+};
+
+/** The prompt D shows now is the one this key answers. */
+export function keyFitsPrompt(run: RunView, id: KeyId): boolean {
+  const prompt = run.state.prompt;
+  return prompt !== null && KEY_PROMPTS[id].includes(prompt.kind);
+}
+
+/** The checks that stand in front of a level C key, as separate ticks. */
+export interface KeyCheck {
+  /** The tick's code (only the page's own; none of them is sent). */
+  code: string;
+  /** Where the sentence comes from: the terminal's own prompt text, or one of
+   * the three checks every window of the arm stack asks. */
+  from: "terminal" | "window";
+  /** The catalogue key of the sentence. */
+  label: string;
+}
+
+/** What terminal D itself asks a person to check before it takes the phrase,
+ * one tick per thing it names (the profile's `console_text`; a test reads the
+ * words of the profile and fails when one of these is no longer in them).
+ *
+ * `run_confirm_warning` (printed before every start): "Confirm the reviewed
+ * scene, limits, checkpoints, active providers and hardware readiness."
+ *
+ * `swap_unclean_head` (printed first when an earlier policy switch did not end
+ * cleanly, which is what turns the phrase into the long one): "check each unit
+ * (systemctl --user status <unit>), the policy ports (ss -ltnp), nvidia-smi and
+ * that the arm is at its home pose". */
+export const TERMINAL_CHECKS = {
+  start: ["scene", "limits", "checkpoints", "providers", "hardware"],
+  switch: ["switch_units", "switch_ports", "switch_gpu", "switch_home"],
+} as const;
+
+/** The three checks of the windows of the arm stack (start of C): a hand on
+ * the physical e-stop, hands and objects clear, no evaluation client. */
+export const WINDOW_CHECKS = [
+  "estop_hand",
+  "hands_clear",
+  "no_client",
+] as const;
+
+const terminalCheck = (code: string): KeyCheck => ({
+  code,
+  from: "terminal",
+  label: `marvel0.autonomy.dcheck.${code}`,
+});
+const windowCheck = (code: string): KeyCheck => ({
+  code,
+  from: "window",
+  label: `marvel0.ctl.attest.${code}`,
+});
+
+/** The ticks of the window of a key: none for the keys below level C (they have
+ * their own sentences and the delay), and for each level C key everything the
+ * terminal asks, in the order it asks it, then the three checks of the stack
+ * windows. `end` is the third level C action: the terminal asks nothing there,
+ * so it has the three alone. */
+export function keyChecks(id: KeyId | "end"): KeyCheck[] {
+  const terminal: readonly string[] =
+    id === "execute"
+      ? TERMINAL_CHECKS.start
+      : id === "execute_variant"
+        ? [...TERMINAL_CHECKS.switch, ...TERMINAL_CHECKS.start]
+        : [];
+  if (id !== "execute" && id !== "execute_variant" && id !== "end") return [];
+  return [...terminal.map(terminalCheck), ...WINDOW_CHECKS.map(windowCheck)];
 }
 
 /** The key this page sent and what it has seen of it. One key per prompt: as
@@ -334,6 +501,10 @@ export function keyVM(run: RunView, key: KeyView, ctx: KeyCtx): KeyVM {
         text: "state_not_allowed",
       },
     );
+  // The backend offers a key for its own prompt only; a document that offers
+  // one for another prompt than the one D shows is not trusted (a window open
+  // for one prompt must never send its key to the next).
+  if (!keyFitsPrompt(run, key.id)) return off(local("prompt_mismatch"));
   const age = ctx.docAt === null ? Infinity : ctx.now - ctx.docAt;
   if (!ctx.current || age > limits.docStaleMs) return off(local("doc_stale"));
   if (key.level === "A")

@@ -11,9 +11,13 @@
 // cancels), Confirm is off until the key's 1.5 s delay and the 3 s gap after
 // the last key have passed, and a window whose prompt moved on while it was
 // open closes by itself and sends nothing. There is no keyboard shortcut and no
-// typed phrase: the page sends the phrase of a level C key itself and the
-// backend still checks it. A click is a person's decision; nothing here sends
-// a key by itself.
+// typed phrase: the page sends the phrase of a level C key itself, the
+// document's own word for word, and the backend still checks it. That makes
+// the window the only place where a person confirms what terminal D asks of
+// them, so a level C window lists every check D itself asks for before it takes
+// the phrase as a tick of its own, then the three checks of the stack's
+// windows; Confirm stays off until every box is ticked (review R10 #1). A click
+// is a person's decision; nothing here sends a key by itself.
 import { useCallback, useEffect, useId, useState } from "react";
 import { Footprints, Hand, Lock, TriangleAlert } from "lucide-react";
 import { Button, Kbd } from "@/components/ds";
@@ -24,13 +28,15 @@ import {
   ConfirmWindow,
   type ConfirmAttest,
 } from "./confirm-window";
-import { wordOf } from "./ctl-text";
 import type { KeyId, KeyView, RunView } from "./autonomy-doc";
 import {
-  executePhrase,
   groupBySlot,
   homingKey,
   homingStep,
+  keyChecks,
+  keyFitsPrompt,
+  keyPhrase,
+  promptLine,
   type KeyVM,
 } from "./autonomy-logic";
 import type { AutonomyActions } from "./use-autonomy";
@@ -77,12 +83,6 @@ const KEY_HAZARD: Partial<Record<KeyId, string[]>> = {
   verdict_discard: ["marvel0.autonomy.hazard.discard"],
   resume_ask: ["marvel0.autonomy.hazard.resume_ask"],
   resume_confirm: ["marvel0.autonomy.hazard.resume_confirm"],
-};
-
-/** The ticks of a window: what only a person can check. */
-const KEY_ATTEST: Partial<Record<KeyId, string[]>> = {
-  execute: ["estop", "area_clear"],
-  execute_variant: ["estop", "leftovers_checked"],
 };
 
 const MOTION_KEY: Record<KeyView["motion"], string | null> = {
@@ -165,6 +165,9 @@ export interface Asking {
   id: KeyId;
   runId: string | null;
   seq: number;
+  /** The prompt D showed when the window opened (its id changes whenever the
+   * same prompt is printed again). */
+  promptId: string | null;
 }
 
 export function KeyConfirm({
@@ -183,9 +186,16 @@ export function KeyConfirm({
   onClose: () => void;
 }) {
   const { t } = useLocale();
+  // Moved on: another run, another state counter, another prompt, or a prompt
+  // that is not this key's any more. Any of them closes the window and nothing
+  // is sent; the counter alone would do (the backend counts a prompt too), the
+  // rest is the second layer.
   const moved =
     asking !== null &&
-    (run.runId !== asking.runId || run.state.seq !== asking.seq);
+    (run.runId !== asking.runId ||
+      run.state.seq !== asking.seq ||
+      (run.state.prompt?.id ?? null) !== asking.promptId ||
+      !keyFitsPrompt(run, asking.id));
   // The prompt moved on while the window was open: close it, send nothing.
   const gone = asking !== null && !moved && vm === null;
   useEffect(() => {
@@ -196,9 +206,12 @@ export function KeyConfirm({
   const refused =
     asking && actions.refused?.key === asking.id ? actions.refused : null;
   const label = key ? t(keyLabelKey(key)) : "";
-  const attest: ConfirmAttest[] = (key ? (KEY_ATTEST[key.id] ?? []) : []).map(
-    (code) => ({ code, label: wordOf(t, "marvel0.autonomy.ack.", code) }),
-  );
+  const checks = key ? keyChecks(key.id) : [];
+  const attest: ConfirmAttest[] = checks.map((check) => ({
+    code: check.code,
+    label: t(check.label),
+  }));
+  const line = promptLine(run);
   const ready = vm?.mode === "ready" && actions.working === null;
   const waiting = vm?.mode === "wait";
   return (
@@ -210,11 +223,26 @@ export function KeyConfirm({
       estop={
         key && key.motion !== "none" ? t("marvel0.autonomy.estop_line") : null
       }
+      facts={
+        // What D's screen says now, quoted: the person confirms this prompt.
+        line && key?.level === "C" ? (
+          <blockquote
+            className="rg-aprompt"
+            data-testid="marvel0-autonomy-key-prompt"
+            lang={run.profile?.consoleLang ?? undefined}
+          >
+            {line}
+          </blockquote>
+        ) : undefined
+      }
       hazards={[
         ...(key ? (KEY_HAZARD[key.id] ?? []) : []).map((hazard) => t(hazard)),
         ...(key && MOTION_KEY[key.motion] ? [t(MOTION_KEY[key.motion]!)] : []),
       ]}
-      notes={[t("marvel0.autonomy.gates_scope")]}
+      notes={[
+        t("marvel0.autonomy.gates_scope"),
+        ...(checks.length > 0 ? [t("marvel0.autonomy.confirm.checks")] : []),
+      ]}
       attest={attest}
       confirmLabel={
         waiting && vm
@@ -237,8 +265,10 @@ export function KeyConfirm({
       onCancel={onClose}
       onConfirm={() => {
         if (!key || vm?.mode !== "ready") return;
-        const phrase =
-          key.level === "C" ? executePhrase(key, run.name) : undefined;
+        // The document's phrase for a level C key, word for word; none for the
+        // others. A key the document gives no phrase for is refused by
+        // `pressKey` and shown as the page's own mistake.
+        const phrase = keyPhrase(key) ?? undefined;
         return actions.pressKey(key, run, phrase).then((ok) => {
           if (ok) onClose();
         });
@@ -346,7 +376,12 @@ export function useKeyPress(
       void actions.pressKey(key, run);
       return;
     }
-    setAsking({ id: key.id, runId: run.runId, seq: run.state.seq });
+    setAsking({
+      id: key.id,
+      runId: run.runId,
+      seq: run.state.seq,
+      promptId: run.state.prompt?.id ?? null,
+    });
   };
   return { asking, press, close };
 }

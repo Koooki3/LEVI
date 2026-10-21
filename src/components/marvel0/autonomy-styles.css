@@ -332,6 +332,30 @@
 }
 
 /* The form and the prepared run. */
+/* The three stages of a first use, above the form whose defaults are for them. */
+.rg-astage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-sunken);
+}
+.rg-astage h5 {
+  margin: 0;
+}
+.rg-astage ol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  margin: 0;
+  padding-left: var(--ds-space-5);
+}
+.rg-page .rg-astage p {
+  margin: 0;
+}
+
 .rg-aform,
 .rg-aprep,
 .rg-astopunits {

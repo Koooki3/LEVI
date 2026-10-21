@@ -35,6 +35,7 @@ import {
   exitKind,
   hasRun,
   isLive,
+  keyChecks,
   keyVM,
   mayMove,
   modeKey,
@@ -334,7 +335,14 @@ function EndForced({
         title={t("marvel0.autonomy.end.title")}
         intro={t("marvel0.autonomy.end.intro")}
         hazards={[t("marvel0.autonomy.end.kills")]}
-        notes={[t("marvel0.autonomy.gates_scope")]}
+        notes={[
+          t("marvel0.autonomy.gates_scope"),
+          t("marvel0.autonomy.confirm.checks_window"),
+        ]}
+        attest={keyChecks("end").map((check) => ({
+          code: check.code,
+          label: t(check.label),
+        }))}
         confirmLabel={t("marvel0.autonomy.end.button")}
         confirmIcon={CircleStop}
         danger
@@ -778,7 +786,7 @@ export function AutonomyRunCard({
             data-testid="marvel0-autonomy-status"
           >
             <p className="rg-arun__hint" data-testid="marvel0-autonomy-hint">
-              {t(stateHintKey(run.state.id))}
+              {t(stateHintKey(run.state.id, run.stop.phase))}
             </p>
             {run.state.reason && (
               <p className="rg-muted" data-testid="marvel0-autonomy-reason">

@@ -269,14 +269,14 @@ describe("Stop", () => {
 });
 
 describe("the windows of the other keys", () => {
-  test("execute: two ticks, the phrase of the backend sent by the page, nothing typed, once", async () => {
+  test("execute: one tick for each thing D asks and the three of the stack's windows, the backend's phrase sent by the page, nothing typed, once", async () => {
     const f = await openStep({ run: runDoc("await_phrase") });
     await pressKey(f.host, "execute");
     const d = dialog()!;
     expect(textFields(d)).toHaveLength(0);
     expect(document.activeElement).toBe(button(d, "Cancel"));
     expect(text(d)).toContain(E["marvel0.autonomy.hazard.execute"]);
-    expect(d.querySelectorAll("input[type=checkbox]")).toHaveLength(2);
+    expect(d.querySelectorAll("input[type=checkbox]")).toHaveLength(8);
     expect(confirmOf("execute").disabled).toBe(true);
     await tickAll(d);
     expect(confirmOf("execute").disabled).toBe(false);
@@ -298,7 +298,15 @@ describe("the windows of the other keys", () => {
     );
     await pressKey(f.host, "execute_variant");
     const d = dialog()!;
-    expect(text(d)).toContain(E["marvel0.autonomy.ack.leftovers_checked"]);
+    // The four items of the policy switch check, the five of the start, the three.
+    expect(d.querySelectorAll("input[type=checkbox]")).toHaveLength(12);
+    for (const code of [
+      "switch_units",
+      "switch_ports",
+      "switch_gpu",
+      "switch_home",
+    ])
+      expect(text(d)).toContain(E[`marvel0.autonomy.dcheck.${code}`]);
     await tickAll(d);
     await click(confirmOf("execute_variant"));
     await tick(3, 10);
@@ -666,6 +674,11 @@ describe("the dead and the stuck", () => {
       (b) => text(b) === E["marvel0.autonomy.end.button"],
     )!;
     expect(confirm.className).toContain("ds-btn--danger");
+    // The three checks of the stack's windows; Confirm waits for all of them.
+    expect(d.querySelectorAll("input[type=checkbox]")).toHaveLength(3);
+    expect(confirm.disabled).toBe(true);
+    await tickAll(d);
+    expect(confirm.disabled).toBe(false);
     await doubleClick(confirm);
     await tick(3, 10);
     expect(callsOf(f.state, "end")).toEqual([

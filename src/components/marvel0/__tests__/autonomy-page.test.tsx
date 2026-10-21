@@ -111,4 +111,44 @@ describe("Step 5 on the marvel0 page", () => {
         .textContent,
     ).toContain(E["marvel0.autonomy.local.eval_live"]);
   });
+
+  test("the chain at the top follows a D that lives: the run node is not 'not started' and the strip says what D holds", async () => {
+    // No client run (the run poll is idle), a D in the middle of a round.
+    core({
+      ...answers(),
+      "/api/levi/marvel0/aeri/run": runDoc("forward_running"),
+    });
+    const { host } = await render(<Marvel0Page />);
+    await waitFor(
+      () =>
+        start(host) || host.querySelector("[data-testid=marvel0-autonomy-run]"),
+      {
+        label: "step 5",
+      },
+    );
+    await waitFor(
+      () =>
+        host
+          .querySelector("[data-testid=marvel0-strip-run]")
+          ?.getAttribute("data-state") === "ready",
+      { label: "the run node to follow D" },
+    );
+    // With D launching, the node is working and the line under the chain says why.
+    expect(
+      host
+        .querySelector("[data-testid=marvel0-strip-run]")!
+        .getAttribute("data-state"),
+    ).toBe("ready");
+  });
+
+  test("with no D alive the run node is what the client's document says", async () => {
+    core(answers());
+    const { host } = await render(<Marvel0Page />);
+    await waitFor(() => start(host), { label: "the Start button of step 5" });
+    expect(
+      host
+        .querySelector("[data-testid=marvel0-strip-run]")!
+        .getAttribute("data-state"),
+    ).not.toBe("ready");
+  });
 });

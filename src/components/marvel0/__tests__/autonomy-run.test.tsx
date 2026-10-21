@@ -3,6 +3,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { click, press, setupDom, waitFor } from "@/components/ds/__tests__/dom";
 import en from "@/i18n/en.json";
 import { button, doubleClick, textFields, tick } from "./actions-helpers";
+import { stateHintKey } from "../autonomy-logic";
+import type { StopPhase } from "../autonomy-doc";
 import {
   $,
   dialog,
@@ -82,8 +84,9 @@ describe("every state of the backend's samples", () => {
       expect(text($(host, "marvel0-autonomy-state"))).toBe(
         E[`marvel0.autonomy.state.${id}`],
       );
+      // The sentence of a state that follows a Stop is by what D has said back.
       expect(text($(host, "marvel0-autonomy-hint"))).toBe(
-        E[`marvel0.autonomy.hint.${id}`],
+        E[stateHintKey(id as never, doc.stop.phase as StopPhase)],
       );
       // A refused key of the state is shown as well, with its reason.
       const expected = KEYS_OF[id].filter((key) =>
@@ -246,16 +249,17 @@ describe("a level A key is one click", () => {
     expect(keyButton(f.host, "quit")!.disabled).toBe(false);
   });
 
-  test("a key answers a prompt: with no prompt in the document the page sends nothing, and says the page is stale", async () => {
+  test("a key answers a prompt: with no prompt in the document the key is off, with the page's own reason, and nothing can be sent", async () => {
     const f = await openStep({
       run: runDoc("await_inventory", (doc) => (doc.state.prompt = null)),
     });
+    expect(keyButton(f.host, "quit")!.disabled).toBe(true);
+    expect(text(keyButton(f.host, "quit")!.closest(".rg-akey"))).toContain(
+      E["marvel0.autonomy.local.prompt_mismatch"],
+    );
     await click(keyButton(f.host, "quit"));
     await tick(3, 10);
     expect(callsOf(f.state, "key")).toEqual([]);
-    expect(text($(f.host, "marvel0-autonomy-refused"))).toContain(
-      E["marvel0.autonomy.err.stale_page"],
-    );
   });
 
   test("a request with no answer may have arrived: it says so and is not sent again", async () => {

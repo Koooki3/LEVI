@@ -9,6 +9,8 @@
 // ready is the one the person looks at: a problem, something still starting,
 // something that cannot be started yet (with the backend's reason), or the
 // next step that can be taken now.
+import type { StateId as AeriStateId } from "./autonomy-doc";
+import { stateHintKey, type AeriFact } from "./autonomy-logic";
 import { stopping } from "./ctl-text";
 import type { DeployState, DeployStatus } from "./deploy-logic";
 import type { Worded } from "./marvel0-json";
@@ -158,6 +160,38 @@ const FROM_RUN: Record<RunState, NodeState> = {
   lost: "problem",
 };
 
+/** What each state of the hosted terminal D (step 5) makes of the chain's run
+ * node. A D that lives IS a run: it holds the arm lock, the policy and the
+ * vision model, and the evaluation client, the policy server's stop and the
+ * arm stack's stop and start cannot go on meanwhile (the backend refuses them
+ * with `run_active`, which counts D). Ready is "a run is active and nothing
+ * needs a person's attention"; a D that cannot be read, is stuck or locked
+ * itself is a problem. */
+const FROM_AERI: Record<AeriStateId, NodeState> = {
+  idle: "idle",
+  launching: "working",
+  services: "working",
+  stopping: "working",
+  await_phrase: "ready",
+  await_phrase_variant: "ready",
+  await_home_o: "ready",
+  await_home_p: "ready",
+  await_home_h: "ready",
+  await_inventory: "ready",
+  await_release: "ready",
+  forward_running: "ready",
+  closing: "ready",
+  reverse_running: "ready",
+  await_resume: "ready",
+  await_resume_confirm: "ready",
+  busy: "ready",
+  orphaned: "attention",
+  stalled: "problem",
+  fault_locked: "problem",
+  unknown: "problem",
+  ended: "idle",
+};
+
 const CARD_OF: Record<ChainId, Marvel0CardId> = {
   M: "monitor",
   desk: "desk",
@@ -177,6 +211,9 @@ export interface ChainInput {
   deploy: DeployStatus | null;
   /** The hosted client's state, when its last read is current. */
   run: RunView | null;
+  /** The hosted terminal D of step 5: whether it lives and in which state, and
+   * whether that was read lately. Optional: null until step 5 has loaded. */
+  aeri?: AeriFact | null;
 }
 
 function fromCard(input: ChainInput, id: ChainId): ChainNode {
@@ -253,7 +290,33 @@ function policyNode(input: ChainInput): ChainNode {
   };
 }
 
+/** The run node while the hosted terminal D lives (it takes the place of the
+ * evaluation client, which cannot be live at the same time). */
+function aeriNode(fact: AeriFact): ChainNode {
+  if (!fact.current)
+    return {
+      id: "run",
+      state: "stale",
+      reason: plain(say("marvel0.chain.reason.stale")),
+      startable: false,
+    };
+  const state = FROM_AERI[fact.state];
+  return {
+    id: "run",
+    state,
+    reason: plain(
+      say(
+        state === "problem" || state === "attention"
+          ? stateHintKey(fact.state)
+          : "marvel0.autonomy.chain.live",
+      ),
+    ),
+    startable: false,
+  };
+}
+
 function runNode(input: ChainInput): ChainNode {
+  if (input.aeri?.alive) return aeriNode(input.aeri);
   const run = input.run;
   if (!run) return fromCard(input, "run");
   const first = run.preflight.find((row) => row.level !== "ok");

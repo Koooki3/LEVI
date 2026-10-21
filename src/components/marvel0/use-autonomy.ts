@@ -46,7 +46,11 @@ import {
   RUN_FRESH_MS,
   armKey,
   historySig,
+  hostingOff,
+  keyFitsPrompt,
   prepareBody,
+  readyPaused,
+  runPollMs,
   startPhrase,
   stopSeen,
   type Limits,
@@ -66,18 +70,49 @@ const KNOWN = new Set(Object.keys(en));
 
 // -- polls
 
+/** Why a poll's last answer was a refusal of the control file. */
+const routeOff = (problem: Polled<unknown>["problem"]): boolean =>
+  problem !== null &&
+  !("format" in problem) &&
+  problem.code === "aeri_disabled";
+
+export interface AutonomyReadyPoll extends Polled<ReadyView> {
+  /** The readiness document is not being read: an evaluation client is live
+   * (the first read is made, then none until it ends). */
+  paused: boolean;
+  /** Hosting cannot be used now (switched off or not configured): the
+   * document is read once and then slowly. */
+  off: boolean;
+}
+
 export function useAutonomyReady(
   api: AutonomyApi,
-  { pollMs = LIMITS.readyPollMs }: { pollMs?: number } = {},
-): Polled<ReadyView> {
+  {
+    limits = LIMITS,
+    evalLive = false,
+  }: { limits?: Limits; evalLive?: boolean } = {},
+): AutonomyReadyPoll {
   const read = useCallback((signal: AbortSignal) => api.ready(signal), [api]);
   const parse = useCallback((data: unknown) => readyView(data, KNOWN), []);
-  return usePolled<ReadyView>({
+  const [pace, setPace] = useState(limits.readyPollMs);
+  const [settled, setSettled] = useState(false);
+  const paused = readyPaused(evalLive, settled);
+  const polled = usePolled<ReadyView>({
     read,
     parse,
-    pollMs,
+    pollMs: pace,
     freshMs: READY_FRESH_MS,
+    enabled: !paused,
   });
+  const off = hostingOff(polled.value, routeOff(polled.problem));
+  const next = off ? limits.slowPollMs : limits.readyPollMs;
+  useEffect(() => {
+    setPace(next);
+  }, [next]);
+  useEffect(() => {
+    if (polled.loaded) setSettled(true);
+  }, [polled.loaded]);
+  return { ...polled, paused, off };
 }
 
 export interface AutonomyRunPoll extends Polled<RunView> {
@@ -86,9 +121,13 @@ export interface AutonomyRunPoll extends Polled<RunView> {
   lastSeen: StopSeen | null;
 }
 
+/** The hosted D's document. `quiet`: hosting is off or an evaluation client is
+ * live, so there is nothing to see until that changes and the pace is slow
+ * (a D that is alive is always read every second). */
 export function useAutonomyRun(
   api: AutonomyApi,
   limits: Limits = LIMITS,
+  { quiet = false }: { quiet?: boolean } = {},
 ): AutonomyRunPoll {
   const seen = useRef<StopSeen | null>(null);
   const [pace, setPace] = useState(limits.idlePollMs);
@@ -104,11 +143,16 @@ export function useAutonomyRun(
     pollMs: pace,
     freshMs: RUN_FRESH_MS,
   });
-  // One read a second while D lives (its prompts move), every 3 s otherwise.
-  const alive = polled.value?.d.alive === true;
+  // One read a second while D lives (its prompts move), every 3 s otherwise,
+  // every 30 s when there is nothing to see (switched off, or a client live).
+  const next = runPollMs(
+    polled.value,
+    quiet || routeOff(polled.problem),
+    limits,
+  );
   useEffect(() => {
-    setPace(alive ? limits.runPollMs : limits.idlePollMs);
-  }, [alive, limits.runPollMs, limits.idlePollMs]);
+    setPace(next);
+  }, [next]);
   return { ...polled, lastSeen: seen.current };
 }
 
@@ -301,20 +345,32 @@ export function useAutonomyActions(
     (key: KeyView, view: RunView, phrase?: string) => {
       const runId = view.runId;
       const promptId = view.state.prompt?.id ?? null;
-      // A key answers a prompt: without the prompt the page was looking at,
-      // the backend has nothing to compare with and the page sends nothing.
-      if (!runId || !key.token || promptId === null) {
+      const refuse = (code: string, extra: Record<string, unknown> = {}) => {
         fail(key.id, {
           ok: false,
           status: 0,
-          code: "stale_page",
+          code,
           message: "",
-          extra: {},
+          extra,
           field: null,
           fields: [],
         });
         return Promise.resolve(false);
-      }
+      };
+      // A key answers a prompt: without the prompt the page was looking at,
+      // the backend has nothing to compare with and the page sends nothing.
+      // The same when the prompt D shows is not the one this key is for.
+      if (!runId || !key.token || promptId === null)
+        return refuse("stale_page");
+      if (!keyFitsPrompt(view, key.id)) return refuse("stale_page");
+      // A level C key goes with the backend's own phrase, word for word, and
+      // with nothing else: a phrase the page made up, or one that is not the
+      // document's, is a mistake of the page, never sent.
+      if (key.level === "C" && (!key.phrase || phrase !== key.phrase))
+        return refuse(
+          "confirm_required",
+          key.phrase ? { phrase: key.phrase } : {},
+        );
       const record: SentKey = {
         runId,
         seq: view.state.seq,
