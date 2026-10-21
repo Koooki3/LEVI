@@ -1489,3 +1489,44 @@
 .ds-panel--danger {
   box-shadow: inset 3px 0 0 var(--ds-danger);
 }
+
+/* ── Page head (layout audit 2026-10-21, P2) ─────────────────────────────
+   Title and tools on one row, centred on each other; the lead below. No
+   margin inside: the spacing is the gaps. */
+.ds-page-head {
+  display: grid;
+  gap: var(--ds-space-2);
+  margin-bottom: var(--ds-space-6);
+}
+.ds-page-head__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-3) var(--ds-space-4);
+  min-width: 0;
+}
+/* two classes (0,2,0): .pg-workbench h1 (0,1,1) sets margins on every page h1 */
+.ds-page-head .ds-page-head__title {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--ds-text-title-1-size);
+  line-height: var(--ds-text-title-1-line);
+  font-weight: var(--ds-weight-semibold);
+  letter-spacing: var(--ds-tracking-title);
+  color: var(--ds-text-primary);
+}
+.ds-page-head__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2) var(--ds-space-3);
+  min-width: 0;
+}
+.ds-page-head__lead {
+  margin: 0;
+  max-width: 80ch;
+  font-size: var(--ds-text-callout-size);
+  line-height: var(--ds-text-callout-line);
+  color: var(--ds-text-secondary);
+}

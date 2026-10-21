@@ -26,6 +26,7 @@ export {
   type Tone,
 } from "./Display";
 export { Progress, Spinner } from "./Progress";
+export { PageHead } from "./PageHead";
 export {
   ConfirmDialog,
   Dialog,
