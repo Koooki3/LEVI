@@ -47,6 +47,9 @@ KEY_GAP_S = 3.0  # between one key being taken and the next being allowed
 STOP_ACK_S = 5.0  # D must acknowledge a Ctrl+C within this
 RUNNER_STALE_S = 10.0  # the heartbeat of a live D older than this: unknown
 STALL_S = 150.0  # a winding-down D without progress this long: stalled
+END_AFTER_RETRY_S = (
+    60.0  # End is offered this long after the Stop retry, when D never answered
+)
 STALL_QUEUE_S = 600.0  # the same while an external answer is awaited
 PRESENCE_S = 15.0  # a tab must have reported this recently to press a B-level key
 START_TIMEOUT_S = 300.0  # a launch that shows nothing for this long
@@ -102,6 +105,8 @@ MOTIONS = ("none", "may_move", "arm_moves")
 SLOTS = ("first", "second")
 VARIANTS = ("confirm_reason", "direct")
 STOP_PHASES = ("idle", "sent", "acked", "unconfirmed", "retried")
+# The states in which a Ctrl+C that D did not answer may be repeated once.
+RETRY_STATES = ("stopping", "stalled", "orphaned")
 WHY_NOT = (
     "state_not_allowed",
     "not_settled",
@@ -202,6 +207,10 @@ REFUSALS = {
     "confirm_required": (400, "Type the phrase shown"),
     "confirm_mismatch": (400, "The phrase does not match"),
     "attest_required": (400, "Tick every item of the checklist"),
+    "attest_incomplete": (
+        400,
+        "The ticks sent are not exactly the checks this key needs",
+    ),
     "busy": (423, "Another action on the run is going on"),
     "not_product": (403, "Only the product LEVI may do this"),
     "aeri_disabled": (403, "AERI hosting is off in the control file"),
@@ -431,6 +440,28 @@ EXECUTE_PHRASE = "execute {name}"
 VARIANT_SUFFIX = " after policy switch check"
 ATTEST = ("estop", "scene_ok", "area_clear", "arm_home")
 
+# The checks a window puts in front of a key, **as the server holds them to**: the
+# page ticks them one by one and sends their codes in ``attest``; the key is
+# refused (``attest_incomplete``) unless the codes sent are exactly these, no
+# more, no fewer. The codes are the ones the page's ``keyChecks``
+# (``src/components/marvel0/autonomy-logic.ts``) names for its ticks. A key not
+# in this table needs none (``attest`` must then be empty). Three of them are the
+# checks every window of the arm stack asks, the others come from terminal D's
+# own prompts (``console_text``: ``run_confirm_warning``, ``swap_unclean_head``,
+# ``sub_release``). This stops a mistake, not another program of the account:
+# anything running as this user can send the same list.
+WINDOW_ATTEST = ("estop_hand", "hands_clear", "no_client")
+START_ATTEST = ("scene", "limits", "checkpoints", "providers", "hardware")
+SWITCH_ATTEST = ("switch_units", "switch_ports", "switch_gpu", "switch_home")
+KEY_ATTEST = {
+    "execute": (*START_ATTEST, *WINDOW_ATTEST),
+    "execute_variant": (*SWITCH_ATTEST, *START_ATTEST, *WINDOW_ATTEST),
+    "end": WINDOW_ATTEST,
+    # "when the scene is ready press Enter": the release of a round
+    "release_round": ("scene_ready",),
+}
+ATTEST_CODES = tuple(dict.fromkeys(c for codes in KEY_ATTEST.values() for c in codes))
+
 
 def phrase_for(action: str, name: str) -> str:
     base = EXECUTE_PHRASE.format(name=name)
@@ -470,6 +501,10 @@ class Facts:
     keyboard: bool = False  # this process holds the pty master
     adopted: bool = False  # found again after a restart: no keyboard
     foreign: bool = False  # another live core owns this run: only watched
+    # alive, but the values it is followed with cannot be had (a record of an older
+    # build without its site snapshot, and a site file that does not read): not
+    # followed, and not another core's either: Stop is still this page's
+    blind: bool = False
     j: JView = field(default_factory=JView)
     screen: aeri_screen.ScreenView = field(default_factory=aeri_screen.ScreenView)
     runner: RView = field(default_factory=RView)
@@ -481,7 +516,8 @@ class Facts:
     queue_pending: int = 0
     queue_oldest_s: float | None = None
     stop_written: str = "idle"  # idle | sent | retried
-    stop_age_s: float | None = None
+    stop_age_s: float | None = None  # since the first Ctrl+C
+    stop_last_age_s: float | None = None  # since the last one (the retry, if any)
     started_age_s: float | None = None
     external: bool = False
     verdict_round_id: str | None = None  # the round a verdict key was sent in
@@ -506,6 +542,7 @@ class Derived:
     variant: str | None  # resume_ask: confirm_reason | direct
     stop_phase: str
     stop_open: bool
+    end_open: bool
     winding: bool
     stalled: bool
     alive: bool
@@ -651,6 +688,10 @@ def _decide(f: Facts, expect, expect_age: float, progress_age: float) -> _V:
     if f.foreign:
         # Another live core owns this run: this one only watches (no key, no
         # signal). The owner's page is where the run is driven.
+        return _V("unknown", "no_keyboard", may_move=True)
+    if f.blind:
+        # Alive, and nothing of it can be read (see ``Facts.blind``): no key; the
+        # state is not derived. Stop is what is left, and it is this page's.
         return _V("unknown", "no_keyboard", may_move=True)
     acked = interrupted(f)
     sent = f.stop_written != "idle"
@@ -925,7 +966,30 @@ def _assemble(f: Facts, mem: Memory, nxt: Memory, v: _V, expect) -> Derived:
                 and not v.winding
                 and v.state not in ("idle", "ended", "fault_locked", "orphaned")
             )
-            or (phase == "unconfirmed" and v.state == "stopping")
+            # The one retry, in every wrap-up that D has not answered: an adopted
+            # D is ``orphaned`` and a silent one turns ``stalled``, and the retry
+            # was only offered in ``stopping`` (safety review 2, N1).
+            or (phase == "unconfirmed" and v.state in RETRY_STATES)
+        )
+    )
+    # End: a wrap-up that is stuck (nothing new for STALL_S), or a D that never
+    # answered the Ctrl+C *and* the retry for END_AFTER_RETRY_S. The second is for
+    # a D that goes on printing steps: steps are progress, so it never stalls. D
+    # prints its acknowledgement within a step or two of a SIGINT (the handler
+    # runs in its main thread, also while that waits for the VLM), so 5 s without
+    # one is already late (STOP_ACK_S); a minute after the retry, with the arm
+    # possibly still moving, is long past any D that is merely slow.
+    end_open = (
+        alive
+        and not f.foreign
+        and not f.blind
+        and (
+            bool(v.stalled)
+            or (
+                phase == "retried"
+                and f.stop_last_age_s is not None
+                and f.stop_last_age_s >= END_AFTER_RETRY_S
+            )
         )
     )
     progress = _progress(f, v, rec, round_id)
@@ -946,6 +1010,7 @@ def _assemble(f: Facts, mem: Memory, nxt: Memory, v: _V, expect) -> Derived:
         variant=v.variant,
         stop_phase=phase,
         stop_open=bool(stop_open),
+        end_open=bool(end_open),
         winding=v.winding,
         stalled=v.stalled,
         alive=alive,
@@ -1116,6 +1181,11 @@ def offer(d: Derived, f: Facts, c: Context) -> list:
         reason = None
         if not d.alive:
             reason = why("d_gone")
+        elif not c.enabled:
+            # The switch of the control file is read at every look, not only at the
+            # start: a key must not outlive it. Stop and End are blocks, not keys,
+            # and stay (safety review 2, N3).
+            reason = why("aeri_disabled")
         elif c.unconfirmed is not None and c.unconfirmed == prompt_id:
             reason = why("key_unconfirmed")
         elif prompt_id in c.keyed or c.pending:
@@ -1200,7 +1270,7 @@ def stop_entry(d: Derived, f: Facts) -> dict:
 
 
 def end_entry(d: Derived) -> dict:
-    ok = d.stalled and d.alive
+    ok = d.end_open
     return {
         "allowed": ok,
         "why_not": None if ok else why("end_not_allowed"),

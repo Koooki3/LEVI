@@ -189,10 +189,13 @@ def test_the_keys_of_each_state_are_the_ones_the_design_gives(samples):
 def test_stop_and_end_follow_the_rules(samples):
     for name, doc in samples.items():
         state = doc["state"]["id"]
-        if state in ("idle", "ended", "fault_locked", "orphaned"):
+        if state in ("idle", "ended", "fault_locked"):
             assert doc["stop"]["allowed"] is False, name
+        if state == "orphaned" and doc["stop"]["allowed"]:
+            assert doc["stop"]["phase"] == "unconfirmed", name  # the one retry
         if doc["end"]["allowed"]:
-            assert state == "stalled", name
+            # a stuck wrap-up, or a D that answered neither Ctrl+C
+            assert state == "stalled" or doc["stop"]["phase"] == "retried", name
         if state == "stalled":
             assert doc["end"]["allowed"] is True, name
         if doc["stop"]["allowed"]:
@@ -202,6 +205,47 @@ def test_stop_and_end_follow_the_rules(samples):
             )
     assert samples["stopping_unconfirmed"]["stop"]["allowed"] is True
     assert samples["stopping"]["stop"]["allowed"] is False
+    # the retry is offered to an adopted D that did not answer, once
+    adopted = samples["orphaned_unconfirmed"]
+    assert (
+        adopted["stop"]["allowed"] is True and adopted["stop"]["phase"] == "unconfirmed"
+    )
+    assert adopted["end"]["allowed"] is False, "the retry first"
+    assert samples["orphaned"]["stop"]["allowed"] is False
+    # and End after the retry when D never answered, though it is not stalled
+    retried = samples["stopping_retried_end"]
+    assert (
+        retried["state"]["id"] == "stopping" and retried["stop"]["phase"] == "retried"
+    )
+    assert retried["stop"]["allowed"] is False and retried["end"]["allowed"] is True
+    # a live run the page cannot follow is not another core's: Stop is its own
+    blind = samples["unknown_unfollowed"]
+    assert blind["stop"]["allowed"] is True and blind["keys"] == []
+    assert blind["stop"]["why_not"] is None
+    other = samples["unknown_other_core"]
+    assert other["stop"]["why_not"]["code"] == "driven_elsewhere"
+
+
+def test_the_switch_off_in_the_control_file_takes_every_key_away(samples):
+    doc = samples["await_release_disabled"]
+    # the document's own `enabled` is the control file's switch, now off, while a
+    # run is live
+    assert doc["state"]["id"] == "await_release" and doc["enabled"] is False
+    assert [k["id"] for k in doc["keys"]] == ["release_round", "quit"]
+    assert all(
+        k["allowed"] is False and k["why_not"]["code"] == "aeri_disabled"
+        for k in doc["keys"]
+    )
+    assert doc["stop"]["allowed"] is True
+
+
+def test_a_record_nobody_can_read_blocks_a_start_and_says_so(samples):
+    doc = samples["idle_record_unreadable"]
+    assert doc["start"]["allowed"] is False
+    assert doc["start"]["why_not"] == {
+        "code": "d_active",
+        "params": {"record": "unreadable"},
+    }
 
 
 def test_verdict_keys_only_in_the_forward_loop_and_only_once_per_round(samples):

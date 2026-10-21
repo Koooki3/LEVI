@@ -1344,6 +1344,255 @@
       "task": "pick the pepper into the white plate",
       "wait": null
     },
+    "await_release_disabled": {
+      "after_exit": null,
+      "agree": {
+        "journal": "ok",
+        "screen": "ok",
+        "termios": "cbreak"
+      },
+      "d": {
+        "alive": true,
+        "exit": null,
+        "keyboard": true,
+        "pid": 123456,
+        "runner": {
+          "age_s": 1.4,
+          "state": "running"
+        }
+      },
+      "enabled": false,
+      "end": {
+        "allowed": false,
+        "phrase": "end terminal D",
+        "why_not": {
+          "code": "end_not_allowed",
+          "params": {}
+        }
+      },
+      "fallback": {
+        "stop_cli": "scripts/aeri_page_stop.py"
+      },
+      "history": [
+        {
+          "byte": "execute",
+          "key": "execute",
+          "prompt_id": "phrase:612",
+          "round": 0,
+          "state": "await_phrase",
+          "time": "2026-10-21T10:30:05+08:00"
+        },
+        {
+          "byte": "y",
+          "key": "inventory_yes",
+          "prompt_id": "inventory:3320",
+          "round": 0,
+          "state": "await_inventory",
+          "time": "2026-10-21T10:31:48+08:00"
+        }
+      ],
+      "inventory": {
+        "confirmed": true,
+        "items": [
+          {
+            "colour": "blue",
+            "graspable": false,
+            "id": "blue_plate_1",
+            "kind": "plate",
+            "on": "table"
+          },
+          {
+            "colour": "white",
+            "graspable": false,
+            "id": "white_plate_1",
+            "kind": "plate",
+            "on": "table"
+          },
+          {
+            "colour": "red",
+            "graspable": true,
+            "id": "red_pepper_1",
+            "kind": "pepper",
+            "on": "blue_plate_1"
+          },
+          {
+            "colour": "purple",
+            "graspable": true,
+            "id": "purple_eggplant_1",
+            "kind": "eggplant",
+            "on": "blue_plate_1"
+          }
+        ]
+      },
+      "keys": [
+        {
+          "allowed": false,
+          "byte": "Enter",
+          "id": "release_round",
+          "level": "B",
+          "motion": "arm_moves",
+          "not_before": null,
+          "phrase": null,
+          "slot": "first",
+          "token": null,
+          "variant": null,
+          "why_not": {
+            "code": "aeri_disabled",
+            "params": {}
+          }
+        },
+        {
+          "allowed": false,
+          "byte": "q",
+          "id": "quit",
+          "level": "A",
+          "motion": "none",
+          "not_before": null,
+          "phrase": null,
+          "slot": "first",
+          "token": null,
+          "variant": null,
+          "why_not": {
+            "code": "aeri_disabled",
+            "params": {}
+          }
+        }
+      ],
+      "locks": {
+        "arm": "held_by_d",
+        "gpu": "held_by_d",
+        "ports": {
+          "8000": "d_unit",
+          "8100": "d_unit",
+          "8110": "free"
+        }
+      },
+      "mode": "external",
+      "monitor": {
+        "age_s": 0.4,
+        "state": "ok"
+      },
+      "name": "aeri-20261021-ext-r01",
+      "notices": [
+        {
+          "code": "not_estop",
+          "level": "info"
+        }
+      ],
+      "presence": {
+        "age_s": 2.1,
+        "need_s": 15.0,
+        "ok": true
+      },
+      "profile": {
+        "code_sha": "5bc750ca",
+        "console_lang": "zh",
+        "id": "harvest-5bc750ca",
+        "start_home": true
+      },
+      "progress": {
+        "discarded": 0,
+        "done": 0,
+        "max_steps": null,
+        "released": 0,
+        "round": 1,
+        "rounds": 5,
+        "step": null,
+        "verdict_latched": false
+      },
+      "queue": {
+        "oldest_age_s": null,
+        "pending": 0
+      },
+      "run_id": "20261021T101500-a1b2c3",
+      "sampled_at": 1792549868.0,
+      "schema": "levi.marvel0.aeri_run.v1",
+      "screen": {
+        "bytes": 3544,
+        "drift": false,
+        "tail": [
+          "warning: The `tool.uv.dev-dependencies` field (used in `packages/openpi-client/pyproject.toml`) is deprecated and will be removed in a future release; use `dependency-groups.dev` instead",
+          "",
+          "============================================================",
+          "AERI 真机运行  run_id = aeri-20261018-ext-r08",
+          "------------------------------------------------------------",
+          "模式：子任务循环（无复位策略：VLM 规划子任务，测评策略执行，逆向循环复位）",
+          "轮次：5 轮；每个正向或反向子任务最多 200 步",
+          "任务指令：pick the pepper into the white plate",
+          "检查点[forward]：pi05_fr3_all_step49999  (<path>)",
+          "判定来源：场景核对 = 机器 provider 先判断（仅供参考），每轮由操作员在本终端键入 y/n/u 放行；成败 = 不提前结束（跑满步数），成败由标签/事后判定",
+          "起始位姿检查：确认后由预检执行；未通过时进入等待并说明原因（本屏无结果）",
+          "每轮操作：确认物体清单（只在开始时一次），每轮按 Enter 放行；正向循环中 s/f/d 给本轮下判定",
+          "随时停止：Ctrl+C，或在提示处按 q",
+          "============================================================",
+          "",
+          "这将连接机器人并可能让它运动。请确认已核对的场景、限位、检查点、生效的提供方和硬件就绪情况。",
+          "请输入 execute aeri-20261018-ext-r08：1/7 预检：GPU 锁、显存、内存、端口 / 无需操作 / 停止：Ctrl+C",
+          "1/7 空闲显存 25113 MiB，需要 9021 MiB（策略 7600 + VLM 1421） [通过]",
+          "1/7 MemAvailable 87.60272216796875 GiB，需要 28.0 GiB [通过]",
+          "1/7 端口 8000, 8100 空闲 [通过]",
+          "2/7 启动 VLM 服务（本方单元），等待就绪，首次可能要几分钟 / 等待 / 停止：Ctrl+C",
+          "2/7 VLM 就绪：单元 levi-aeri-vlm-8100，pid 1281473，显存 0 MiB [通过]",
+          "3/7 让 VLM 睡眠（先查 MemAvailable）/ 等待 / 停止：Ctrl+C",
+          "3/7 VLM 已睡眠（level 1，MemAvailable 87.58152389526367 GiB） [通过]",
+          "  server config: pi05_fr3_all_state  (rebase dim=3, offset=+3.141593, horizon=10, discrete_state_input=True)",
+          "  NOTE: this model consumes state (binned into the prompt). state[6] must be the issued command, not the measured aperture.",
+          "4/7 策略服务就绪，显存合计 15087 MiB [通过]",
+          "5/7 物体清单：按 y 确认、n 否决 / 停止：q 或 Ctrl+C",
+          "6/7 各轮：每轮按 Enter 放行 / 停止：Ctrl+C",
+          "首轮回位会打开夹爪。先安全处理夹持物，完成后按 o；q 取消。Enter 不会确认回位。",
+          "检查机械臂返回 Home 的整条路径无障碍，确认后按 p；q 取消。",
+          "确认知道回位会开爪，并授权本次回位：按 h；q 取消。回位后仍须另按 Enter 放行本轮。",
+          "Homing over 30 steps -> [ 0.482 -0.011  0.236  3.119  0.008 -0.884]  (rotating 11.6 deg)",
+          "Home reached.",
+          "Home verified: error_mm=5.5 tolerance_mm=10.0 rotation_rad=0.02783 rotation_tol_rad=0.05 gripper=1 gripper_min=0.9 waited_s=0.0",
+          "",
+          "[准备] VLM 列出的物体（这一份确认后就是本次运行的白名单）：",
+          "  blue_plate_1：blue plate，在 table，只作放置目标",
+          "  white_plate_1：white plate，在 table，只作放置目标",
+          "  red_pepper_1：red pepper，在 blue_plate_1，可抓取",
+          "  purple_eggplant_1：purple eggplant，在 blue_plate_1，可抓取",
+          "[准备] 清单对就按 y 确认，不对按 n（运行转人工等待）；q 结束运行",
+          "[准备] 清单已确认，冻结为白名单",
+          "",
+          "第 1/5 轮：确认场景就绪后按 Enter 放行本轮正向子任务循环；q 结束运行"
+        ]
+      },
+      "start": {
+        "allowed": false,
+        "attest": ["estop", "scene_ok", "area_clear", "arm_home"],
+        "phrase": "start aeri {name}",
+        "why_not": {
+          "code": "aeri_disabled",
+          "params": {}
+        }
+      },
+      "state": {
+        "id": "await_release",
+        "may_move": false,
+        "params": {},
+        "prompt": {
+          "id": "release:3447",
+          "kind": "release",
+          "line": "第 1/5 轮：确认场景就绪后按 Enter 放行本轮正向子任务循环；q 结束运行",
+          "n": 1,
+          "total": 5
+        },
+        "reason": "prompt_open",
+        "seq": 69,
+        "settled": true,
+        "since": "2026-10-21T10:31:05+08:00"
+      },
+      "steps": 200,
+      "stop": {
+        "allowed": true,
+        "phase": "idle",
+        "sent_at": null,
+        "why_not": null
+      },
+      "task": "pick the pepper into the white plate",
+      "wait": null
+    },
     "await_release_key_sent": {
       "after_exit": null,
       "agree": {
@@ -5595,6 +5844,123 @@
       "task": null,
       "wait": null
     },
+    "idle_record_unreadable": {
+      "after_exit": null,
+      "agree": {
+        "journal": "missing",
+        "screen": "missing",
+        "termios": "unknown"
+      },
+      "d": {
+        "alive": false,
+        "exit": null,
+        "keyboard": false,
+        "pid": null,
+        "runner": null
+      },
+      "enabled": true,
+      "end": {
+        "allowed": false,
+        "phrase": "end terminal D",
+        "why_not": {
+          "code": "end_not_allowed",
+          "params": {}
+        }
+      },
+      "fallback": {
+        "stop_cli": "scripts/aeri_page_stop.py"
+      },
+      "history": [],
+      "inventory": null,
+      "keys": [],
+      "locks": {
+        "arm": "free",
+        "gpu": "free",
+        "ports": {
+          "8000": "free",
+          "8100": "free",
+          "8110": "free"
+        }
+      },
+      "mode": null,
+      "monitor": {
+        "age_s": 0.0,
+        "state": "ok"
+      },
+      "name": null,
+      "notices": [
+        {
+          "code": "not_estop",
+          "level": "info"
+        }
+      ],
+      "presence": {
+        "age_s": 2.1,
+        "need_s": 15.0,
+        "ok": true
+      },
+      "profile": {
+        "code_sha": null,
+        "console_lang": "zh",
+        "id": null,
+        "start_home": false
+      },
+      "progress": {
+        "discarded": 0,
+        "done": 0,
+        "max_steps": null,
+        "released": 0,
+        "round": 0,
+        "rounds": 0,
+        "step": null,
+        "verdict_latched": false
+      },
+      "queue": {
+        "oldest_age_s": null,
+        "pending": 0
+      },
+      "run_id": null,
+      "sampled_at": 1792549865.0,
+      "schema": "levi.marvel0.aeri_run.v1",
+      "screen": {
+        "bytes": 0,
+        "drift": false,
+        "tail": []
+      },
+      "start": {
+        "allowed": false,
+        "attest": ["estop", "scene_ok", "area_clear", "arm_home"],
+        "phrase": "start aeri {name}",
+        "why_not": {
+          "code": "d_active",
+          "params": {
+            "record": "unreadable"
+          }
+        }
+      },
+      "state": {
+        "id": "idle",
+        "may_move": false,
+        "params": {},
+        "prompt": null,
+        "reason": "no_run",
+        "seq": 1,
+        "settled": false,
+        "since": "2026-10-21T10:31:05+08:00"
+      },
+      "steps": 0,
+      "stop": {
+        "allowed": false,
+        "phase": "idle",
+        "sent_at": null,
+        "why_not": {
+          "code": "d_gone",
+          "params": {}
+        }
+      },
+      "task": null,
+      "wait": null
+    },
     "launching": {
       "after_exit": null,
       "agree": {
@@ -5916,6 +6282,220 @@
           "code": "stop_spent",
           "params": {}
         }
+      },
+      "task": "pick the pepper into the white plate",
+      "wait": null
+    },
+    "orphaned_unconfirmed": {
+      "after_exit": null,
+      "agree": {
+        "journal": "ok",
+        "screen": "ok",
+        "termios": "cbreak"
+      },
+      "d": {
+        "alive": true,
+        "exit": null,
+        "keyboard": false,
+        "pid": 123456,
+        "runner": {
+          "age_s": 1.4,
+          "state": "running"
+        }
+      },
+      "enabled": true,
+      "end": {
+        "allowed": false,
+        "phrase": "end terminal D",
+        "why_not": {
+          "code": "end_not_allowed",
+          "params": {}
+        }
+      },
+      "fallback": {
+        "stop_cli": "scripts/aeri_page_stop.py"
+      },
+      "history": [
+        {
+          "byte": "execute",
+          "key": "execute",
+          "prompt_id": "phrase:612",
+          "round": 0,
+          "state": "await_phrase",
+          "time": "2026-10-21T10:30:05+08:00"
+        },
+        {
+          "byte": "y",
+          "key": "inventory_yes",
+          "prompt_id": "inventory:3320",
+          "round": 0,
+          "state": "await_inventory",
+          "time": "2026-10-21T10:31:48+08:00"
+        }
+      ],
+      "inventory": {
+        "confirmed": true,
+        "items": [
+          {
+            "colour": "blue",
+            "graspable": false,
+            "id": "blue_plate_1",
+            "kind": "plate",
+            "on": "table"
+          },
+          {
+            "colour": "white",
+            "graspable": false,
+            "id": "white_plate_1",
+            "kind": "plate",
+            "on": "table"
+          },
+          {
+            "colour": "red",
+            "graspable": true,
+            "id": "red_pepper_1",
+            "kind": "pepper",
+            "on": "blue_plate_1"
+          },
+          {
+            "colour": "purple",
+            "graspable": true,
+            "id": "purple_eggplant_1",
+            "kind": "eggplant",
+            "on": "blue_plate_1"
+          }
+        ]
+      },
+      "keys": [],
+      "locks": {
+        "arm": "held_by_d",
+        "gpu": "held_by_d",
+        "ports": {
+          "8000": "d_unit",
+          "8100": "d_unit",
+          "8110": "free"
+        }
+      },
+      "mode": "external",
+      "monitor": {
+        "age_s": 0.4,
+        "state": "ok"
+      },
+      "name": "aeri-20261021-ext-r01",
+      "notices": [
+        {
+          "code": "not_estop",
+          "level": "info"
+        },
+        {
+          "code": "stop_unconfirmed",
+          "level": "warn"
+        }
+      ],
+      "presence": {
+        "age_s": 2.1,
+        "need_s": 15.0,
+        "ok": true
+      },
+      "profile": {
+        "code_sha": "5bc750ca",
+        "console_lang": "zh",
+        "id": "harvest-5bc750ca",
+        "start_home": true
+      },
+      "progress": {
+        "discarded": 0,
+        "done": 0,
+        "max_steps": null,
+        "released": 0,
+        "round": 0,
+        "rounds": 5,
+        "step": null,
+        "verdict_latched": false
+      },
+      "queue": {
+        "oldest_age_s": null,
+        "pending": 0
+      },
+      "run_id": "20261021T101500-a1b2c3",
+      "sampled_at": 1792549868.0,
+      "schema": "levi.marvel0.aeri_run.v1",
+      "screen": {
+        "bytes": 3544,
+        "drift": false,
+        "tail": [
+          "warning: The `tool.uv.dev-dependencies` field (used in `packages/openpi-client/pyproject.toml`) is deprecated and will be removed in a future release; use `dependency-groups.dev` instead",
+          "",
+          "============================================================",
+          "AERI 真机运行  run_id = aeri-20261018-ext-r08",
+          "------------------------------------------------------------",
+          "模式：子任务循环（无复位策略：VLM 规划子任务，测评策略执行，逆向循环复位）",
+          "轮次：5 轮；每个正向或反向子任务最多 200 步",
+          "任务指令：pick the pepper into the white plate",
+          "检查点[forward]：pi05_fr3_all_step49999  (<path>)",
+          "判定来源：场景核对 = 机器 provider 先判断（仅供参考），每轮由操作员在本终端键入 y/n/u 放行；成败 = 不提前结束（跑满步数），成败由标签/事后判定",
+          "起始位姿检查：确认后由预检执行；未通过时进入等待并说明原因（本屏无结果）",
+          "每轮操作：确认物体清单（只在开始时一次），每轮按 Enter 放行；正向循环中 s/f/d 给本轮下判定",
+          "随时停止：Ctrl+C，或在提示处按 q",
+          "============================================================",
+          "",
+          "这将连接机器人并可能让它运动。请确认已核对的场景、限位、检查点、生效的提供方和硬件就绪情况。",
+          "请输入 execute aeri-20261018-ext-r08：1/7 预检：GPU 锁、显存、内存、端口 / 无需操作 / 停止：Ctrl+C",
+          "1/7 空闲显存 25113 MiB，需要 9021 MiB（策略 7600 + VLM 1421） [通过]",
+          "1/7 MemAvailable 87.60272216796875 GiB，需要 28.0 GiB [通过]",
+          "1/7 端口 8000, 8100 空闲 [通过]",
+          "2/7 启动 VLM 服务（本方单元），等待就绪，首次可能要几分钟 / 等待 / 停止：Ctrl+C",
+          "2/7 VLM 就绪：单元 levi-aeri-vlm-8100，pid 1281473，显存 0 MiB [通过]",
+          "3/7 让 VLM 睡眠（先查 MemAvailable）/ 等待 / 停止：Ctrl+C",
+          "3/7 VLM 已睡眠（level 1，MemAvailable 87.58152389526367 GiB） [通过]",
+          "  server config: pi05_fr3_all_state  (rebase dim=3, offset=+3.141593, horizon=10, discrete_state_input=True)",
+          "  NOTE: this model consumes state (binned into the prompt). state[6] must be the issued command, not the measured aperture.",
+          "4/7 策略服务就绪，显存合计 15087 MiB [通过]",
+          "5/7 物体清单：按 y 确认、n 否决 / 停止：q 或 Ctrl+C",
+          "6/7 各轮：每轮按 Enter 放行 / 停止：Ctrl+C",
+          "首轮回位会打开夹爪。先安全处理夹持物，完成后按 o；q 取消。Enter 不会确认回位。",
+          "检查机械臂返回 Home 的整条路径无障碍，确认后按 p；q 取消。",
+          "确认知道回位会开爪，并授权本次回位：按 h；q 取消。回位后仍须另按 Enter 放行本轮。",
+          "Homing over 30 steps -> [ 0.482 -0.011  0.236  3.119  0.008 -0.884]  (rotating 11.6 deg)",
+          "Home reached.",
+          "Home verified: error_mm=5.5 tolerance_mm=10.0 rotation_rad=0.02783 rotation_tol_rad=0.05 gripper=1 gripper_min=0.9 waited_s=0.0",
+          "",
+          "[准备] VLM 列出的物体（这一份确认后就是本次运行的白名单）：",
+          "  blue_plate_1：blue plate，在 table，只作放置目标",
+          "  white_plate_1：white plate，在 table，只作放置目标",
+          "  red_pepper_1：red pepper，在 blue_plate_1，可抓取",
+          "  purple_eggplant_1：purple eggplant，在 blue_plate_1，可抓取",
+          "[准备] 清单对就按 y 确认，不对按 n（运行转人工等待）；q 结束运行",
+          "[准备] 清单已确认，冻结为白名单",
+          "",
+          "第 1/5 轮：确认场景就绪后按 Enter 放行本轮正向子任务循环；q 结束运行"
+        ]
+      },
+      "start": {
+        "allowed": false,
+        "attest": ["estop", "scene_ok", "area_clear", "arm_home"],
+        "phrase": "start aeri {name}",
+        "why_not": {
+          "code": "d_active",
+          "params": {}
+        }
+      },
+      "state": {
+        "id": "orphaned",
+        "may_move": true,
+        "params": {},
+        "prompt": null,
+        "reason": "adopted_after_restart",
+        "seq": 67,
+        "settled": false,
+        "since": "2026-10-21T10:31:05+08:00"
+      },
+      "steps": 200,
+      "stop": {
+        "allowed": true,
+        "phase": "unconfirmed",
+        "sent_at": "2026-10-21T10:30:53+08:00",
+        "why_not": null
       },
       "task": "pick the pepper into the white plate",
       "wait": null
@@ -6972,6 +7552,228 @@
       "task": "pick the pepper into the white plate",
       "wait": null
     },
+    "stopping_retried_end": {
+      "after_exit": null,
+      "agree": {
+        "journal": "ok",
+        "screen": "ok",
+        "termios": "cbreak"
+      },
+      "d": {
+        "alive": true,
+        "exit": null,
+        "keyboard": true,
+        "pid": 123456,
+        "runner": {
+          "age_s": 1.4,
+          "state": "running"
+        }
+      },
+      "enabled": true,
+      "end": {
+        "allowed": true,
+        "phrase": "end terminal D",
+        "why_not": null
+      },
+      "fallback": {
+        "stop_cli": "scripts/aeri_page_stop.py"
+      },
+      "history": [
+        {
+          "byte": "execute",
+          "key": "execute",
+          "prompt_id": "phrase:612",
+          "round": 0,
+          "state": "await_phrase",
+          "time": "2026-10-21T10:30:05+08:00"
+        },
+        {
+          "byte": "y",
+          "key": "inventory_yes",
+          "prompt_id": "inventory:3320",
+          "round": 0,
+          "state": "await_inventory",
+          "time": "2026-10-21T10:31:48+08:00"
+        }
+      ],
+      "inventory": {
+        "confirmed": true,
+        "items": [
+          {
+            "colour": "blue",
+            "graspable": false,
+            "id": "blue_plate_1",
+            "kind": "plate",
+            "on": "table"
+          },
+          {
+            "colour": "white",
+            "graspable": false,
+            "id": "white_plate_1",
+            "kind": "plate",
+            "on": "table"
+          },
+          {
+            "colour": "red",
+            "graspable": true,
+            "id": "red_pepper_1",
+            "kind": "pepper",
+            "on": "blue_plate_1"
+          },
+          {
+            "colour": "purple",
+            "graspable": true,
+            "id": "purple_eggplant_1",
+            "kind": "eggplant",
+            "on": "blue_plate_1"
+          }
+        ]
+      },
+      "keys": [],
+      "locks": {
+        "arm": "held_by_d",
+        "gpu": "held_by_d",
+        "ports": {
+          "8000": "d_unit",
+          "8100": "d_unit",
+          "8110": "free"
+        }
+      },
+      "mode": "external",
+      "monitor": {
+        "age_s": 0.4,
+        "state": "ok"
+      },
+      "name": "aeri-20261021-ext-r01",
+      "notices": [
+        {
+          "code": "not_estop",
+          "level": "info"
+        }
+      ],
+      "presence": {
+        "age_s": 2.1,
+        "need_s": 15.0,
+        "ok": true
+      },
+      "profile": {
+        "code_sha": "5bc750ca",
+        "console_lang": "zh",
+        "id": "harvest-5bc750ca",
+        "start_home": true
+      },
+      "progress": {
+        "discarded": 0,
+        "done": 0,
+        "max_steps": null,
+        "released": 1,
+        "round": 1,
+        "rounds": 5,
+        "step": null,
+        "verdict_latched": false
+      },
+      "queue": {
+        "oldest_age_s": null,
+        "pending": 0
+      },
+      "run_id": "20261021T101500-a1b2c3",
+      "sampled_at": 1792549868.0,
+      "schema": "levi.marvel0.aeri_run.v1",
+      "screen": {
+        "bytes": 4223,
+        "drift": false,
+        "tail": [
+          "warning: The `tool.uv.dev-dependencies` field (used in `packages/openpi-client/pyproject.toml`) is deprecated and will be removed in a future release; use `dependency-groups.dev` instead",
+          "",
+          "============================================================",
+          "AERI 真机运行  run_id = aeri-20261018-ext-r08",
+          "------------------------------------------------------------",
+          "模式：子任务循环（无复位策略：VLM 规划子任务，测评策略执行，逆向循环复位）",
+          "轮次：5 轮；每个正向或反向子任务最多 200 步",
+          "任务指令：pick the pepper into the white plate",
+          "检查点[forward]：pi05_fr3_all_step49999  (<path>)",
+          "判定来源：场景核对 = 机器 provider 先判断（仅供参考），每轮由操作员在本终端键入 y/n/u 放行；成败 = 不提前结束（跑满步数），成败由标签/事后判定",
+          "起始位姿检查：确认后由预检执行；未通过时进入等待并说明原因（本屏无结果）",
+          "每轮操作：确认物体清单（只在开始时一次），每轮按 Enter 放行；正向循环中 s/f/d 给本轮下判定",
+          "随时停止：Ctrl+C，或在提示处按 q",
+          "============================================================",
+          "",
+          "这将连接机器人并可能让它运动。请确认已核对的场景、限位、检查点、生效的提供方和硬件就绪情况。",
+          "请输入 execute aeri-20261018-ext-r08：1/7 预检：GPU 锁、显存、内存、端口 / 无需操作 / 停止：Ctrl+C",
+          "1/7 空闲显存 25113 MiB，需要 9021 MiB（策略 7600 + VLM 1421） [通过]",
+          "1/7 MemAvailable 87.60272216796875 GiB，需要 28.0 GiB [通过]",
+          "1/7 端口 8000, 8100 空闲 [通过]",
+          "2/7 启动 VLM 服务（本方单元），等待就绪，首次可能要几分钟 / 等待 / 停止：Ctrl+C",
+          "2/7 VLM 就绪：单元 levi-aeri-vlm-8100，pid 1281473，显存 0 MiB [通过]",
+          "3/7 让 VLM 睡眠（先查 MemAvailable）/ 等待 / 停止：Ctrl+C",
+          "3/7 VLM 已睡眠（level 1，MemAvailable 87.58152389526367 GiB） [通过]",
+          "  server config: pi05_fr3_all_state  (rebase dim=3, offset=+3.141593, horizon=10, discrete_state_input=True)",
+          "  NOTE: this model consumes state (binned into the prompt). state[6] must be the issued command, not the measured aperture.",
+          "4/7 策略服务就绪，显存合计 15087 MiB [通过]",
+          "5/7 物体清单：按 y 确认、n 否决 / 停止：q 或 Ctrl+C",
+          "6/7 各轮：每轮按 Enter 放行 / 停止：Ctrl+C",
+          "首轮回位会打开夹爪。先安全处理夹持物，完成后按 o；q 取消。Enter 不会确认回位。",
+          "检查机械臂返回 Home 的整条路径无障碍，确认后按 p；q 取消。",
+          "确认知道回位会开爪，并授权本次回位：按 h；q 取消。回位后仍须另按 Enter 放行本轮。",
+          "Homing over 30 steps -> [ 0.482 -0.011  0.236  3.119  0.008 -0.884]  (rotating 11.6 deg)",
+          "Home reached.",
+          "Home verified: error_mm=5.5 tolerance_mm=10.0 rotation_rad=0.02783 rotation_tol_rad=0.05 gripper=1 gripper_min=0.9 waited_s=0.0",
+          "",
+          "[准备] VLM 列出的物体（这一份确认后就是本次运行的白名单）：",
+          "  blue_plate_1：blue plate，在 table，只作放置目标",
+          "  white_plate_1：white plate，在 table，只作放置目标",
+          "  red_pepper_1：red pepper，在 blue_plate_1，可抓取",
+          "  purple_eggplant_1：purple eggplant，在 blue_plate_1，可抓取",
+          "[准备] 清单对就按 y 确认，不对按 n（运行转人工等待）；q 结束运行",
+          "[准备] 清单已确认，冻结为白名单",
+          "",
+          "第 1/5 轮：确认场景就绪后按 Enter 放行本轮正向子任务循环；q 结束运行",
+          "第 1/5 轮已放行",
+          "  server config: pi05_fr3_all_state  (rebase dim=3, offset=+3.141593, horizon=10, discrete_state_input=True)",
+          "  NOTE: this model consumes state (binned into the prompt). state[6] must be the issued command, not the measured aperture.",
+          "── 第 1/5 轮 开始  (aeri-20261018-ext-r08.forward.0001) ──",
+          "[第 1/5 轮] 子任务进行中：s 记本轮成功、f 记失败（都结束正向循环，逆向循环照常复位），d 作废本轮（复位后重做一轮）",
+          "   当前正向子任务 步 2/200",
+          "   当前正向子任务 步 19/200",
+          "   当前正向子任务 步 34/200",
+          "   当前正向子任务 步 50/200",
+          "   当前正向子任务 步 66/200"
+        ]
+      },
+      "start": {
+        "allowed": false,
+        "attest": ["estop", "scene_ok", "area_clear", "arm_home"],
+        "phrase": "start aeri {name}",
+        "why_not": {
+          "code": "d_active",
+          "params": {}
+        }
+      },
+      "state": {
+        "id": "stopping",
+        "may_move": true,
+        "params": {
+          "since_stop_s": 150.0
+        },
+        "prompt": null,
+        "reason": "stop_sent",
+        "seq": 66,
+        "settled": false,
+        "since": "2026-10-21T10:31:05+08:00"
+      },
+      "steps": 200,
+      "stop": {
+        "allowed": false,
+        "phase": "retried",
+        "sent_at": "2026-10-21T10:30:53+08:00",
+        "why_not": {
+          "code": "stop_spent",
+          "params": {}
+        }
+      },
+      "task": "pick the pepper into the white plate",
+      "wait": null
+    },
     "stopping_unconfirmed": {
       "after_exit": null,
       "agree": {
@@ -7848,6 +8650,135 @@
         "prompt": null,
         "reason": "runner_stale",
         "seq": 57,
+        "settled": false,
+        "since": "2026-10-21T10:31:05+08:00"
+      },
+      "steps": 200,
+      "stop": {
+        "allowed": true,
+        "phase": "idle",
+        "sent_at": null,
+        "why_not": null
+      },
+      "task": "pick the pepper into the white plate",
+      "wait": null
+    },
+    "unknown_unfollowed": {
+      "after_exit": null,
+      "agree": {
+        "journal": "missing",
+        "screen": "missing",
+        "termios": "cbreak"
+      },
+      "d": {
+        "alive": true,
+        "exit": null,
+        "keyboard": false,
+        "pid": 123456,
+        "runner": null
+      },
+      "enabled": true,
+      "end": {
+        "allowed": false,
+        "phrase": "end terminal D",
+        "why_not": {
+          "code": "end_not_allowed",
+          "params": {}
+        }
+      },
+      "fallback": {
+        "stop_cli": "scripts/aeri_page_stop.py"
+      },
+      "history": [
+        {
+          "byte": "execute",
+          "key": "execute",
+          "prompt_id": "phrase:612",
+          "round": 0,
+          "state": "await_phrase",
+          "time": "2026-10-21T10:30:05+08:00"
+        },
+        {
+          "byte": "y",
+          "key": "inventory_yes",
+          "prompt_id": "inventory:3320",
+          "round": 0,
+          "state": "await_inventory",
+          "time": "2026-10-21T10:31:48+08:00"
+        }
+      ],
+      "inventory": null,
+      "keys": [],
+      "locks": {
+        "arm": "held_by_d",
+        "gpu": "held_by_d",
+        "ports": {
+          "8000": "d_unit",
+          "8100": "d_unit",
+          "8110": "free"
+        }
+      },
+      "mode": "external",
+      "monitor": {
+        "age_s": 0.4,
+        "state": "ok"
+      },
+      "name": "aeri-20261021-ext-r01",
+      "notices": [
+        {
+          "code": "not_estop",
+          "level": "info"
+        }
+      ],
+      "presence": {
+        "age_s": 2.1,
+        "need_s": 15.0,
+        "ok": true
+      },
+      "profile": {
+        "code_sha": "5bc750ca",
+        "console_lang": "zh",
+        "id": "harvest-5bc750ca",
+        "start_home": true
+      },
+      "progress": {
+        "discarded": 0,
+        "done": 0,
+        "max_steps": null,
+        "released": 0,
+        "round": 0,
+        "rounds": 5,
+        "step": null,
+        "verdict_latched": false
+      },
+      "queue": {
+        "oldest_age_s": null,
+        "pending": 0
+      },
+      "run_id": "20261021T101500-a1b2c3",
+      "sampled_at": 1792549868.0,
+      "schema": "levi.marvel0.aeri_run.v1",
+      "screen": {
+        "bytes": 0,
+        "drift": false,
+        "tail": []
+      },
+      "start": {
+        "allowed": false,
+        "attest": ["estop", "scene_ok", "area_clear", "arm_home"],
+        "phrase": "start aeri {name}",
+        "why_not": {
+          "code": "d_active",
+          "params": {}
+        }
+      },
+      "state": {
+        "id": "unknown",
+        "may_move": true,
+        "params": {},
+        "prompt": null,
+        "reason": "no_keyboard",
+        "seq": 68,
         "settled": false,
         "since": "2026-10-21T10:31:05+08:00"
       },

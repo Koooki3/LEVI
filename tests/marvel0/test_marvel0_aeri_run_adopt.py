@@ -21,20 +21,23 @@ processes and the signals go (``Host`` fakes)."""
 import dataclasses
 import json
 import os
-import signal
 
 import pytest
 from aeri_machine import NAME
 from aeri_run_kit import (
+    OTHER,
     at_forward,
     interrupt_line,
     machine_of,
     refusal,
+    restarted,
+    second_core,
+    sigints,
     stop_from_elsewhere,
 )
 
-from levi.marvel0 import aeri_run, record, run
 from levi.marvel0 import aeri_state as st
+from levi.marvel0 import record, run
 
 
 @pytest.fixture(name="m")
@@ -42,19 +45,6 @@ def machine(tmp_path, monkeypatch):
     mm = machine_of(tmp_path, monkeypatch)
     yield mm
     mm.close()
-
-
-def restarted(m, host=None, site_loader=None):
-    """A new process finds the record of the run: a new supervisor."""
-    return aeri_run.Supervisor(
-        host or m.host,
-        site_loader=site_loader or (lambda: m.site),
-        workspace=m.workspace,
-    )
-
-
-def sigints(m):
-    return [s for s in m.signals if s[2] == signal.SIGINT]
 
 
 def events(m) -> list:
@@ -86,7 +76,10 @@ def test_a_failing_first_read_does_not_hide_a_live_d_for_ever(m, monkeypatch):
         return real(directory)
 
     monkeypatch.setattr(record, "read_record", flaky)
-    assert found(new) is None and new._adopted is False
+    job = found(new)
+    # (not "no run": a record that cannot be read may be a D that is running)
+    assert job is not None and job["id"] == "record-unreadable"
+    assert new._adopted is False
     assert sigints(m) == [], "nothing was signalled on a read that did not work"
     broken["on"] = False
     job = found(new)
@@ -100,7 +93,7 @@ def test_a_corrupt_record_is_read_again_and_a_missing_one_is_final(m):
     path = m.folder / "record.json"
     good = path.read_text()
     path.write_text("{not json")
-    assert found(new) is None and new._adopted is False
+    assert found(new)["id"] == "record-unreadable" and new._adopted is False
     path.write_text(good)
     assert found(new) is not None and new._adopted is True
     # no record at all: that is a result, not a failure
@@ -142,7 +135,8 @@ def test_a_record_without_the_snapshot_needs_the_site_file_and_waits_for_it(m):
     assert new._adopted is False and sigints(m) == []
     doc = new.view()
     assert doc["state"]["id"] == "unknown" and doc["d"]["alive"] is True
-    assert doc["keys"] == [] and doc["stop"]["allowed"] is False
+    # (no key; and Stop is still there: the run is not another core's)
+    assert doc["keys"] == [] and doc["stop"]["allowed"] is True
     state["ok"] = True
     assert found(new) is not None and new._adopted is True
     assert len(sigints(m)) == 1
@@ -212,25 +206,6 @@ def test_a_second_adoption_of_a_run_that_ended_changes_nothing(m):
 
 
 # --- the owner of a run -----------------------------------------------------------------------
-
-
-OTHER = {"pid": 424242, "identity": {"start_ticks": "777", "boot": "other-boot"}}
-
-
-def second_core(m, alive=None):
-    """A second core: its own identity, and a view of the machine in which the
-    first core (the test process) is alive for as long as ``alive['first']``."""
-    alive = alive if alive is not None else {"first": True}
-    first_pid = os.getpid()
-    first_identity = run._identity(first_pid)
-
-    def identity(pid):
-        if pid == first_pid:
-            return first_identity if alive["first"] else None
-        return m.identity(pid)
-
-    host = dataclasses.replace(m.host, self_owner=lambda: OTHER, identity=identity)
-    return restarted(m, host=host), alive
 
 
 def test_the_record_names_the_core_that_owns_the_run(m):
@@ -384,4 +359,228 @@ def test_a_run_this_process_started_is_never_found_again_and_keeps_its_keyboard(
         doc = m.look()
     assert m.sup._found is False and m.sup._adopted is True
     assert doc["d"]["keyboard"] is True and doc["state"]["id"] == "forward_running"
+    assert sigints(m) == []
+
+
+# --- the second review: a record that cannot be read is "a D may be running" (N8) -----------------
+
+
+def corrupt(m, text="{not json"):
+    (m.folder / "record.json").write_text(text)
+
+
+def unreadable_job(sup):
+    sup.adopt()
+    return sup.active()
+
+
+def test_a_corrupt_record_is_a_job_for_the_gates_until_a_person_clears_it(m):
+    """Safety review 2 N8 (probe P10): ``levi stop`` listed a loud
+    ``record-unreadable`` row but ``aeri_run_api.active()`` said None and
+    ``run_active()`` False, so E, the deploy and the arm stack went ahead."""
+    at_forward(m)
+    good = (m.folder / "record.json").read_text()
+    corrupt(m)
+    new = restarted(m)
+    job = unreadable_job(new)
+    assert job is not None and job["kind"] == "marvel0-aeri"
+    assert job["id"] == "record-unreadable" and job["unreadable"] is True
+    assert sigints(m) == [], "a record nobody can read is not acted on"
+    # a person repairs it: the next look finds the run again
+    (m.folder / "record.json").write_text(good)
+    job = unreadable_job(new)
+    assert job["id"] != "record-unreadable" and new._adopted is True
+    assert len(sigints(m)) == 1
+    # or removes it: no run, and then it is a result
+    other = restarted(m)
+    corrupt(m)
+    assert unreadable_job(other)["id"] == "record-unreadable"
+    (m.folder / "record.json").unlink()
+    assert unreadable_job(other) is None and other._adopted is True
+
+
+def test_an_unreadable_record_is_active_for_every_gate_of_the_product(m, monkeypatch):
+    from levi import paths
+    from levi.marvel0 import aeri_ready, aeri_run_api, deploy, run, run_api
+
+    monkeypatch.setattr(paths, "workspace", lambda: m.workspace.root)
+    at_forward(m)
+    corrupt(m)
+    new = restarted(m)
+    monkeypatch.setattr(aeri_run_api, "supervisor", lambda: new)
+    assert aeri_run_api.active()["id"] == "record-unreadable"
+    assert run_api.run_active() is True, "(the arm stack's start and stop, E's start)"
+    assert deploy._hosted_aeri()["id"] == "record-unreadable"
+    assert run._hosted_aeri() is True
+    assert aeri_ready._d_hosted_active() is True
+    rows = __import__("levi.marvel0.aeri_activity", fromlist=["x"]).job_rows(
+        m.workspace
+    )
+    assert [r["id"] for r in rows if r["kind"] == "marvel0-aeri"] == [
+        "record-unreadable"
+    ]
+
+
+def test_the_document_of_an_unreadable_record_blocks_a_start_and_says_why(m):
+    at_forward(m)
+    corrupt(m)
+    new = restarted(m)
+    doc = new.view()
+    assert doc["state"]["id"] == "idle"
+    assert doc["start"]["allowed"] is False
+    assert doc["start"]["why_not"]["code"] == "d_active"
+    assert doc["start"]["why_not"]["params"] == {"record": "unreadable"}
+    code = refusal(new.challenge, {"purpose": "start", "name": NAME})
+    assert code[1] == "d_active" and code[2].get("record") == "unreadable"
+    assert m.spawned and len(m.spawned) == 1, "no second D"
+
+
+def test_a_start_is_not_possible_beside_a_record_nobody_can_read(m):
+    corrupt_first = restarted(m)
+    (m.folder.parent).mkdir(parents=True, exist_ok=True)
+    m.folder.mkdir(parents=True, exist_ok=True)
+    corrupt(m)
+    assert unreadable_job(corrupt_first)["id"] == "record-unreadable"
+    m.present()
+    assert refusal(corrupt_first.challenge, {"purpose": "start", "name": NAME})[1] == (
+        "d_active"
+    )
+    assert m.spawned == []
+
+
+# --- one failed read of /proc does not end an adopted run (N7) -------------------------------------
+
+
+def lost_once(real, kind="proc_state"):
+    calls = {"n": 0}
+
+    def read(pid):
+        calls["n"] += 1
+        return None if calls["n"] == 1 else real(pid)
+
+    read.calls = calls
+    return read
+
+
+@pytest.mark.parametrize("which", ["proc_state", "identity"])
+def test_one_lost_read_does_not_end_an_adopted_run(m, which):
+    at_forward(m)
+    pauses = []
+    host = dataclasses.replace(
+        m.host,
+        **{which: lost_once(getattr(m.host, which))},
+        sleep=lambda s: pauses.append(s),
+    )
+    new = restarted(m, host=host)
+    new.adopt()
+    assert new._found is True and new._rec["phase"] == "started"
+    assert len(sigints(m)) == 1, "found alive, told once"
+    assert pauses and 0 < pauses[0] <= 1.0, "a short pause between the two reads"
+    assert new.tick() is True
+    assert new._rec["phase"] == "started"
+    doc = new.view()
+    assert doc["d"]["alive"] is True and doc["state"]["id"] == "orphaned"
+
+
+def test_a_lost_read_in_a_look_does_not_end_an_adopted_run(m):
+    at_forward(m)
+    new = restarted(m)
+    new.adopt()
+    real = new.host.proc_state
+    new.host = dataclasses.replace(new.host, proc_state=lost_once(real))
+    assert new.tick() is True
+    assert new._rec["phase"] == "started" and new.view()["d"]["alive"] is True
+
+
+def test_two_lost_reads_in_a_row_do_end_an_adopted_run(m):
+    """The launcher is gone for real: both reads miss."""
+    at_forward(m)
+    new = restarted(m)
+    new.adopt()
+    m.child.exits(-9)
+    assert new.tick() is False
+    assert new._rec["phase"] == "ended"
+    assert new.active() is None
+
+
+def test_a_pid_that_is_another_process_now_is_gone_at_once(m):
+    """No second read is needed when the pid answers and is not the process the
+    record names (it was reused)."""
+    at_forward(m)
+    pauses = []
+    host = dataclasses.replace(
+        m.host,
+        identity=lambda pid: {"start_ticks": "999", "boot": "b"},
+        sleep=lambda s: pauses.append(s),
+    )
+    new = restarted(m, host=host)
+    new.adopt()
+    assert new._rec["phase"] == "ended" and pauses == []
+    assert sigints(m) == []
+
+
+# --- two gaps of the adoption (mechanics review 2 N4) ------------------------------------------------
+
+
+def test_a_record_with_no_launcher_identity_and_a_pid_that_is_gone_is_over(m):
+    """(a): ``None == None`` counted as alive, and ``killpg`` went out with no
+    proof of whose process group it was."""
+    at_forward(m)
+    rec = m.record()
+    record.update_record(
+        m.folder, leader={"pid": rec["leader"]["pid"], "identity": None}, owner=None
+    )
+    m.child.exits(0)  # (identity() answers None for every pid now)
+    new = restarted(m)
+    new.adopt()
+    assert [s for s in m.signals if s[0] in ("kill", "killpg")] == []
+    assert new._rec["phase"] == "ended" and new._found is False
+    assert new.active() is None
+
+
+def test_a_record_with_no_launcher_identity_is_never_signalled_even_if_the_pid_lives(m):
+    at_forward(m)
+    rec = m.record()
+    record.update_record(
+        m.folder, leader={"pid": rec["leader"]["pid"], "identity": None}, owner=None
+    )
+    new = restarted(m)
+    new.adopt()
+    assert [s for s in m.signals if s[0] in ("kill", "killpg")] == []
+
+
+def test_a_second_core_does_not_end_a_launch_the_owner_is_still_making(m):
+    """(b): the owner writes ``intent`` before the spawn and ``started`` after. A
+    second core that looked in between marked the run ended and wrote ``terminal D
+    exited rc=unknown`` after ``start:``."""
+    at_forward(m)
+    rec = record.read_record(m.folder)
+    rec.pop("leader", None)
+    rec["phase"] = "intent"
+    record.write_record(m.folder, rec)
+    before = events(m)
+    new, _alive = second_core(m)
+    new.adopt()
+    after = record.read_record(m.folder)
+    assert after["phase"] == "intent" and "exit" not in after
+    assert events(m) == before, "no exit line was added"
+    assert [s for s in m.signals if s[0] in ("kill", "killpg")] == []
+    assert new.active() is not None, "and it still blocks a second D"
+    assert new._foreign is True
+    doc = new.view()
+    assert doc["state"]["id"] != "ended" and doc["stop"]["allowed"] is False
+
+
+def test_the_owner_going_on_to_started_is_not_disturbed_by_a_second_core(m):
+    at_forward(m)
+    rec = record.read_record(m.folder)
+    leader = rec.pop("leader")
+    rec["phase"] = "intent"
+    record.write_record(m.folder, rec)
+    new, _alive = second_core(m)
+    new.adopt()
+    record.update_record(m.folder, phase="started", leader=leader)
+    assert new.tick() is True
+    assert record.read_record(m.folder)["phase"] == "started"
+    assert new.view()["d"]["alive"] is True
     assert sigints(m) == []

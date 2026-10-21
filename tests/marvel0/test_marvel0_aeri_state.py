@@ -776,6 +776,181 @@ def test_a_run_found_again_after_a_restart_is_orphaned_without_a_key(rig):
     assert rig.keys(d) == [] and d.stop_open is False
 
 
+# --- the second review: the retry in every wrap-up, the bounded End, the blind run ---------------
+
+
+def test_an_adopted_run_whose_sigint_was_not_answered_is_offered_one_retry(rig):
+    """Safety review 2, N1: an adopted D is ``orphaned``, and the retry was only
+    offered in ``stopping``: after the one SIGINT of the adoption a D that did
+    not answer had no Stop (``stop_spent``) and no End."""
+    j = rig.jview(26)
+    screen = cut("第 1/5 轮：确认场景就绪")
+    kw = {"adopted": True, "keyboard": False}
+    d = rig.look(j, screen, stop_written="sent", stop_age_s=3.0, **kw)
+    assert (d.state, d.stop_phase, d.stop_open) == ("orphaned", "sent", False)
+    d = rig.look(j, screen, stop_written="sent", stop_age_s=st.STOP_ACK_S + 1, **kw)
+    assert (d.state, d.stop_phase, d.stop_open) == ("orphaned", "unconfirmed", True)
+    assert d.may_move is True
+    d = rig.look(
+        j,
+        screen,
+        stop_written="retried",
+        stop_age_s=st.STOP_ACK_S + 9,
+        stop_last_age_s=3.0,
+        **kw,
+    )
+    assert (d.stop_phase, d.stop_open) == ("retried", False), "once"
+    interrupted = (
+        screen.decode()
+        + "收到 SIGINT（Ctrl+C）：已停止下发运动指令，正在安全收尾，不会再开始新的一轮。\r\n"
+    )
+    d = rig.look(j, interrupted, stop_written="sent", stop_age_s=30.0, **kw)
+    assert (d.stop_phase, d.stop_open) == ("acked", False), "D answered: no retry"
+
+
+def test_a_stalled_wrap_up_that_never_answered_is_offered_the_retry(rig):
+    j = rig.jview(34)
+    screen = cut("当前正向子任务 步 66/200")
+    rig.look(j, screen, stop_written="sent", stop_age_s=1.0, settle=False)
+    rig.now += st.STALL_S + 1
+    d = rig.look(
+        j, screen, stop_written="sent", stop_age_s=st.STALL_S + 1, settle=False
+    )
+    assert (d.state, d.stop_phase, d.stalled) == ("stalled", "unconfirmed", True)
+    assert d.stop_open is True
+    d = rig.look(
+        j,
+        screen,
+        stop_written="retried",
+        stop_age_s=st.STALL_S + 1,
+        stop_last_age_s=2.0,
+        settle=False,
+    )
+    assert d.state == "stalled" and d.stop_open is False
+
+
+def test_end_opens_after_the_retry_when_d_never_answered_though_it_keeps_printing(rig):
+    """N1, the second half: a D that ignores two Ctrl+C and keeps printing steps
+    never stalls (steps are progress), so ``stalled`` alone left the End
+    unreachable for ever. The bounded rule: the retry was used and
+    ``END_AFTER_RETRY_S`` passed with no acknowledgement."""
+    j = rig.jview(34)
+    screen = cut("当前正向子任务 步 66/200")
+    kw = {"stop_written": "retried", "stop_age_s": 200.0}
+    d = rig.look(j, screen, stop_last_age_s=st.END_AFTER_RETRY_S - 1, **kw)
+    assert d.state == "stopping" and st.end_entry(d)["allowed"] is False
+    d = rig.look(j, screen, stop_last_age_s=st.END_AFTER_RETRY_S + 1, **kw)
+    assert d.state == "stopping" and d.stalled is False
+    assert st.end_entry(d)["allowed"] is True
+    assert st.end_entry(d)["phrase"] == "end terminal D"
+
+
+def test_end_after_the_retry_needs_the_retry_the_silence_and_a_run_that_is_ours(rig):
+    j = rig.jview(34)
+    screen = cut("当前正向子任务 步 66/200")
+    late = st.END_AFTER_RETRY_S + 30
+    # the retry was not used: Stop is offered, End is not
+    d = rig.look(j, screen, stop_written="sent", stop_age_s=late, stop_last_age_s=late)
+    assert d.stop_phase == "unconfirmed" and st.end_entry(d)["allowed"] is False
+    # D answered: it winds down, End stays for a stall
+    answered = (
+        screen.decode()
+        + "收到 SIGINT（Ctrl+C）：已停止下发运动指令，正在安全收尾，不会再开始新的一轮。\r\n"
+    )
+    d = rig.look(
+        j, answered, stop_written="retried", stop_age_s=late, stop_last_age_s=late
+    )
+    assert d.stop_phase == "acked" and st.end_entry(d)["allowed"] is False
+    # another live core owns the run: nothing of this core's
+    d = rig.look(
+        j,
+        screen,
+        stop_written="retried",
+        stop_age_s=late,
+        stop_last_age_s=late,
+        foreign=True,
+        adopted=True,
+        keyboard=False,
+    )
+    assert st.end_entry(d)["allowed"] is False
+    # D is gone
+    d = rig.look(
+        j,
+        screen,
+        stop_written="retried",
+        stop_age_s=late,
+        stop_last_age_s=late,
+        alive=False,
+    )
+    assert st.end_entry(d)["allowed"] is False
+
+
+def test_a_live_run_the_page_cannot_follow_still_has_stop(rig):
+    """Safety review 2, N12: a record without the site snapshot (an older build)
+    and a site file that does not read: the run is alive, not followed. It used
+    to be shown with the answer of a run another core owns."""
+    j = rig.jview(34)
+    d = rig.look(
+        j,
+        cut("当前正向子任务 步 66/200"),
+        blind=True,
+        keyboard=False,
+    )
+    assert (d.state, d.reason) == ("unknown", "no_keyboard")
+    assert d.stop_open is True and d.may_move is True
+    assert st.end_entry(d)["allowed"] is False
+    entry = st.stop_entry(d, rig.last)
+    assert entry["allowed"] is True and entry["why_not"] is None
+    d = rig.look(
+        j,
+        cut("当前正向子任务 步 66/200"),
+        blind=True,
+        keyboard=False,
+        stop_written="sent",
+        stop_age_s=3.0,
+    )
+    assert d.stop_open is False
+    assert st.stop_entry(d, rig.last)["why_not"]["code"] == "stop_spent"
+
+
+def test_every_key_is_off_when_the_control_file_switches_the_page_off(rig):
+    """Safety review 2, N3: ``enabled`` was read only at the start; a switch
+    turned off in the control file during a run left every key working."""
+    d = rig.look(rig.jview(26), cut("第 1/5 轮：确认场景就绪"))
+    assert d.prompt is not None
+    on = rig.keys(d)
+    assert allowed(on) == ["release_round", "quit"]
+    off = rig.keys(d, enabled=False)
+    assert [k["id"] for k in off] == [k["id"] for k in on]
+    for key in off:
+        assert key["allowed"] is False and key["token"] is None
+        assert key["why_not"]["code"] == "aeri_disabled", key["id"]
+    # Stop is not a key: the document's block stays what the state says
+    assert d.stop_open is True
+
+
+def test_the_ticks_a_key_needs_are_a_closed_table_of_the_pages_codes():
+    assert set(st.KEY_ATTEST) == {"execute", "execute_variant", "end", "release_round"}
+    assert st.KEY_ATTEST["end"] == ("estop_hand", "hands_clear", "no_client")
+    assert st.KEY_ATTEST["release_round"] == ("scene_ready",)
+    start = ("scene", "limits", "checkpoints", "providers", "hardware")
+    window = ("estop_hand", "hands_clear", "no_client")
+    assert st.KEY_ATTEST["execute"] == (*start, *window)
+    assert st.KEY_ATTEST["execute_variant"] == (
+        "switch_units",
+        "switch_ports",
+        "switch_gpu",
+        "switch_home",
+        *start,
+        *window,
+    )
+    for key, codes in st.KEY_ATTEST.items():
+        assert key == "end" or key in st.ACTIONS
+        assert len(set(codes)) == len(codes)
+    assert set(st.ATTEST_CODES) == {c for v in st.KEY_ATTEST.values() for c in v}
+    assert "attest_incomplete" in st.REFUSALS
+
+
 # --- the keys, as a table -----------------------------------------------------------------------
 
 
@@ -1001,6 +1176,7 @@ def test_the_closed_enums_of_the_codes_file_are_the_modules():
     assert tuple(codes["stop_phases"]) == st.STOP_PHASES
     assert tuple(codes["variants"]) == st.VARIANTS
     assert tuple(codes["slots"]) == st.SLOTS and tuple(codes["levels"]) == st.LEVELS
+    assert {k: tuple(v) for k, v in codes["key_attest"].items()} == st.KEY_ATTEST
 
 
 def test_every_refusal_has_a_status_and_a_message():

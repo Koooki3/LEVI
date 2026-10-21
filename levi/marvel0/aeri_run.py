@@ -35,6 +35,7 @@ All of the machine is reached through ``Host``, which tests replace whole.
 """
 
 import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -73,6 +74,15 @@ HISTORY_MAX_BYTES = 256 * 1024
 SCREEN_REPLAY = 256 * 1024  # bytes of the screen file replayed after a restart
 SCREEN_STEP = 1 << 20  # bytes of the screen file read per look, at most
 KILL_WAIT_S = 3.0
+# A launcher that is not our own child is gone only when two reads of /proc, this
+# long apart, both say so (one failed read of ``/proc/<pid>/stat``, an EMFILE or
+# an ENOMEM, must not end a live run: ``ended`` closes the pty and the hang-up
+# chain cuts D).
+MISS_RECHECK_S = 0.1
+# Stop takes the record's lock to write "sent" before it signals; it never waits
+# for it longer than this (a Ctrl+C never waits).
+RECORD_LOCK_WAIT_S = 1.0
+UNREADABLE_ID = "record-unreadable"
 BUS_ENV = run.BUS_ENV
 # The command a terminal runs, as new_run.py prints it: the pieces.
 UV_WITH = "pyrealsense2==2.55.1.6486"
@@ -93,6 +103,29 @@ def events_open(text: str) -> bool:
     launcher killed by the hang-up chain, is over.)"""
     found = EVENT_LINE.findall(text)
     return bool(found) and found[-1] == "start:"
+
+
+def _epoch(value) -> float | None:
+    """``value`` when it is a time (a number, not a bool), else None."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def stop_facts(rec: dict, now: float) -> dict:
+    """What the record says about Ctrl+C, as the fields of ``Facts``: the state of
+    the writing, the age of the first signal, the age of the last (the retry's, if
+    one was used)."""
+    sent = _epoch(rec.get("stop_sent_epoch"))
+    retry = _epoch(rec.get("stop_retry_epoch"))
+    last = max((t for t in (sent, retry) if t is not None), default=None)
+    return {
+        "stop_written": "idle"
+        if sent is None
+        else ("retried" if rec.get("stop_retried") else "sent"),
+        "stop_age_s": None if sent is None else max(0.0, now - sent),
+        "stop_last_age_s": None if last is None else max(0.0, now - last),
+    }
 
 
 def _row_passes(row) -> bool:
@@ -542,6 +575,9 @@ class Supervisor:
         self._adopted = False  # adopt() read the record (and acted on it) once
         self._found = False  # this run was found again after a restart
         self._foreign = False  # another live core owns the run: only watched
+        # The record exists and cannot be read (corrupt, EIO...): a D may be running
+        # that this process cannot see. Sticky until a read of the record works.
+        self._unreadable = False
         self._snap: RunSite | None = None  # the site values of the run (see RunSite)
         self._mem = st.Memory()
         self._seq = 0
@@ -641,36 +677,56 @@ class Supervisor:
             )
             jsonio.append_line(path, line, max_bytes=HISTORY_MAX_BYTES, keep=1)
 
-    def _update(self, **fields) -> dict:
+    def _update(self, _disk: str = "lock", **fields) -> dict:
         """``fields`` into the run record: in memory first (a safety action never
         waits for the disk), then on disk **merged into what is there**
         (``record.update_record``, under the record's lock): the out-of-page
         stop script writes ``stop_sent_epoch`` into the same file, and writing
-        the whole in-memory record back would erase it."""
+        the whole in-memory record back would erase it. ``_disk`` is ``"lock"``
+        (take the record's lock), ``"held"`` (the caller holds it: ``_stop_now``)
+        or ``"skip"`` (memory only)."""
         with self._mutex:
             self._rec = {**(self._rec or {}), **fields}
             self._cache = None
-            if self._dir is not None:
+            if self._dir is not None and _disk != "skip":
+                held = _disk == "held"
                 try:
-                    on_disk = record.update_record(self._dir, **fields)
+                    on_disk = self._disk_update(held, fields)
                 except record.RecordCorrupt:
                     on_disk = None
-                    self._write_whole()  # (a record that cannot be read is replaced)
+                    # (a record that cannot be read is replaced)
+                    self._write_whole(held)
                 except OSError:
                     on_disk = None
-                self._absorb_stop(on_disk)
+                self._absorb_stop(on_disk, held)
             return self._rec
 
-    def _write_whole(self) -> None:
+    def _disk_update(self, held: bool, fields: dict) -> dict:
+        """``fields`` merged into the record on disk: under the lock taken here, or
+        (``held``) under the one the caller already holds. ``flock`` locks of two
+        open files conflict even in one process, so a caller that holds it must not
+        call ``record.update_record``."""
+        directory = self._dir
+        if not held:
+            return record.update_record(directory, **fields)
+        value = record.read_record(directory) or {}
+        value.update(fields)
+        record.write_record(directory, value)
+        return value
+
+    def _write_whole(self, held: bool = False) -> None:
         """A new run replaces the record (the only place the whole of it is
         written)."""
         with self._mutex:
             self._cache = None
             if self._dir is not None:
-                with contextlib.suppress(OSError), record.locked(self._dir):
+                with (
+                    contextlib.suppress(OSError),
+                    contextlib.nullcontext() if held else record.locked(self._dir),
+                ):
                     record.write_record(self._dir, self._rec)
 
-    def _absorb_stop(self, disk) -> None:
+    def _absorb_stop(self, disk, held: bool = False) -> None:
         """What another process wrote about Ctrl+C into the record on disk (the
         out-of-page script ``aeri_page_stop.py``): its ``stop_sent_epoch`` is
         taken over, so this page knows a Stop was sent and does not offer it
@@ -700,9 +756,9 @@ class Supervisor:
                 # (kept for a restart: a later page must not offer a third)
                 with contextlib.suppress(OSError, record.RecordCorrupt):
                     if self._dir is not None:
-                        record.update_record(self._dir, stop_retried=True)
+                        self._disk_update(held, {"stop_retried": True})
 
-    def _merge_disk(self) -> None:
+    def _merge_disk(self, held: bool = False) -> None:
         """Every look takes in what the record on disk says about Ctrl+C."""
         if self._dir is None or self._rec is None:
             return
@@ -710,7 +766,7 @@ class Supervisor:
             on_disk = record.read_record(self._dir)
         except (OSError, record.RecordCorrupt):
             return
-        self._absorb_stop(on_disk)
+        self._absorb_stop(on_disk, held)
 
     # ---- what is read
 
@@ -784,8 +840,12 @@ class Supervisor:
 
     def _proc(self, rec) -> tuple:
         """``(alive, exit)``: whether the launcher lives and, once it is gone,
-        how it ended. The launcher is our own child unless we were restarted."""
-        h = self.host
+        how it ended. The launcher is our own child unless we were restarted.
+
+        **One failed read of ``/proc`` never ends a run.** Our own child is judged
+        by ``poll()`` alone (a child that ``poll`` has not reaped has not exited);
+        a launcher found again after a restart is gone only when two reads of
+        ``/proc`` a moment apart both say so (``_pid_alive``)."""
         if rec.get("phase") == "ended":
             return False, rec.get("exit")
         child = self._child
@@ -795,12 +855,33 @@ class Supervisor:
                 if code >= 0:
                     return False, {"code": code, "signal": None}
                 return False, {"code": None, "signal": -code}
-            return h.proc_state(child.pid) is not None, None
+            return True, None
+        if self._foreign and rec.get("phase") == "intent":
+            return True, None  # the core that owns it is still making the launch
         leader = rec.get("leader") or {}
         pid = leader.get("pid")
-        if not isinstance(pid, int) or h.identity(pid) != leader.get("identity"):
+        if isinstance(pid, bool) or not isinstance(pid, int):
             return False, None
-        return h.proc_state(pid) is not None, None
+        return self._pid_alive(pid, leader.get("identity")), None
+
+    def _pid_alive(self, pid: int, want) -> bool:
+        """Whether ``pid`` is the process the record names (``want``: its start
+        time and boot). A record that names no identity proves nothing: not alive.
+        A pid that answers as another process is gone at once; one that does not
+        answer is looked at again after ``MISS_RECHECK_S``, and only two misses in
+        a row are "gone"."""
+        h = self.host
+        if not isinstance(want, dict):
+            return False
+        for attempt in range(2):
+            if attempt:
+                h.sleep(MISS_RECHECK_S)
+            who = h.identity(pid)
+            if who is not None and who != want:
+                return False
+            if who is not None and h.proc_state(pid) is not None:
+                return True
+        return False
 
     def _facts(self, aeri, now) -> st.Facts:
         """The facts of the run; ``aeri`` is its ``RunSite`` (the paths)."""
@@ -831,7 +912,6 @@ class Supervisor:
         )
         icanon, isig = self._termios()
         began = rec.get("created_epoch")
-        sent = rec.get("stop_sent_epoch")
         return st.Facts(
             now=now,
             record=rec,
@@ -851,10 +931,7 @@ class Supervisor:
             isig=isig,
             queue_pending=pending,
             queue_oldest_s=oldest,
-            stop_written="idle"
-            if sent is None
-            else ("retried" if rec.get("stop_retried") else "sent"),
-            stop_age_s=None if sent is None else max(0.0, now - sent),
+            **stop_facts(rec, now),
             started_age_s=now - began if isinstance(began, (int, float)) else None,
             external=rec.get("mode") == "external",
             verdict_round_id=self._verdict_round,
@@ -1068,9 +1145,12 @@ class Supervisor:
                 f.record = rec
                 if live:
                     # a run whose site values cannot be had (a record without the
-                    # snapshot, and no site file): seen to be alive, not followed
-                    f.alive, f.foreign = True, True
+                    # snapshot, and no site file): seen to be alive, not followed,
+                    # and not another core's: Stop is this page's (N12)
+                    f.alive, f.blind = True, True
                     f.profile = st.PROFILES.get(rec.get("profile"))
+                    for name, value in stop_facts(rec, now).items():
+                        setattr(f, name, value)
             d = st.derive(f, st.Memory())
             c = st.Context(
                 now=now,
@@ -1101,6 +1181,8 @@ class Supervisor:
         return st.document(f, d, c)
 
     def _start_why(self, configured: bool) -> dict | None:
+        if self._unreadable:
+            return st.why("d_active", record="unreadable")
         if not configured:
             return st.why("aeri_disabled", configured=False)
         try:
@@ -1192,6 +1274,17 @@ class Supervisor:
         with self._mutex:
             rec = self._rec
             if rec is None or rec.get("phase") not in ("intent", "started"):
+                if self._unreadable:
+                    # The record exists and cannot be read: a D may be running that
+                    # this process cannot see. The gates of the product (E's start,
+                    # the deploy, the arm stack, ``levi stop``) treat that as a D
+                    # until a person repairs or removes the record.
+                    return {
+                        "kind": "marvel0-aeri",
+                        "id": UNREADABLE_ID,
+                        "running_seconds": 0,
+                        "unreadable": True,
+                    }
                 return None
             began = rec.get("created_epoch") or self.host.now()
             return {
@@ -1403,6 +1496,8 @@ class Supervisor:
         self._require_real()
         with self._mutex:
             rec = self._rec
+            if self._unreadable:
+                raise Refuse("d_active", record="unreadable")
             if rec is not None and rec.get("phase") in ("intent", "started"):
                 raise Refuse("d_active")
         try:
@@ -1720,6 +1815,9 @@ class Supervisor:
             token = body.get("token")
             if token != entry["token"]:
                 raise Refuse("stale_page")
+            # The page is right about the prompt; now the evidence the server
+            # holds it to: every tick of the key's window, exactly (N6).
+            self._check_attest(action, body.get("attest"))
             spec = st.KEYS[action]
             now = f.now
             if entry["level"] in ("B", "C"):
@@ -1778,6 +1876,26 @@ class Supervisor:
                 "evidence": "pending",
             }
 
+    @staticmethod
+    def _check_attest(action: str, sent) -> None:
+        """The ticks sent are exactly the ones ``aeri_state.KEY_ATTEST`` names for
+        the key (none for a key not in it): no more, no fewer, none twice. The
+        order is the page's own. This stops a mistake; it is not a barrier against
+        a program of the same account, which can send the same list."""
+        need = st.KEY_ATTEST.get(action, ())
+        got = (
+            list(sent)
+            if isinstance(sent, (list, tuple)) and all(isinstance(c, str) for c in sent)
+            else None
+        )
+        if got is None or sorted(got) != sorted(need):
+            have = got or []
+            raise Refuse(
+                "attest_incomplete",
+                missing=[c for c in need if c not in have],
+                unexpected=sorted({c for c in have if c not in need}),
+            )
+
     # ---- stop and end
 
     def stop(self, body) -> dict:
@@ -1803,16 +1921,73 @@ class Supervisor:
                 raise Refuse("state_not_allowed", state=d.state)
             return self._stop_now(f, d.state, request_id)
 
+    @contextlib.contextmanager
+    def _record_lock(self):
+        """The record's ``flock`` (the one the stop script takes), tried for
+        ``RECORD_LOCK_WAIT_S``; yields whether it is held. A Ctrl+C never waits
+        longer than that for it: without it the signal goes out all the same and
+        the disk is left alone (the script's write would then have to look)."""
+        fd = None
+        held = False
+        if self._dir is not None:
+            with contextlib.suppress(OSError):
+                fd = os.open(
+                    Path(self._dir) / (record.RECORD + ".lock"),
+                    os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+                    0o600,
+                )
+        try:
+            if fd is not None:
+                deadline = self.host.monotonic() + RECORD_LOCK_WAIT_S
+                while True:
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        held = True
+                        break
+                    except OSError:
+                        if self.host.monotonic() >= deadline:
+                            break
+                        self.host.sleep(0.02)
+            yield held
+        finally:
+            if fd is not None:
+                os.close(fd)  # closing releases the lock
+
     def _stop_now(self, f: st.Facts, state: str, request_id) -> dict:
         """Send the signal and record it. A second one (``retry``) never goes by
         the pty: if the first Ctrl+C byte did not become a SIGINT for D, the
-        second would not either, so it goes straight to D's checked pid."""
-        retry = (f.record or {}).get("stop_sent_epoch") is not None
-        via = self._send_stop(f, retry=retry)
-        if retry:
-            self._update(stop_retried=True)
-        else:
-            self._update(stop_sent_epoch=f.now)
+        second would not either, so it goes straight to D's checked pid.
+
+        **The record says "sent" before the signal goes out** and puts the old
+        values back when it cannot be sent, as the stop script does, and both are
+        done under the record's lock: a script run that looks at the record
+        between the signal and the write would otherwise send a second Ctrl+C into
+        a wrap-up that has begun (safety review 2, N13). What the script wrote
+        since ``f`` was read is taken in under the same lock; if it changes the
+        decision, nothing is sent."""
+        with self._record_lock() as held:
+            disk = "held" if held else "skip"
+            if held:
+                self._merge_disk(held=True)
+            rec = self._rec or {}
+            seen = f.record or {}
+            if (seen.get("stop_sent_epoch") is None) != (
+                rec.get("stop_sent_epoch") is None
+            ) or bool(seen.get("stop_retried")) != bool(rec.get("stop_retried")):
+                raise Refuse("stop_spent")
+            retry = rec.get("stop_sent_epoch") is not None
+            fields = (
+                {"stop_retried": True, "stop_retry_epoch": f.now}
+                if retry
+                else {"stop_sent_epoch": f.now}
+            )
+            before = {name: rec.get(name) for name in fields}
+            self._update(_disk=disk, **fields)
+            try:
+                via = self._send_stop(f, retry=retry)
+            except BaseException:
+                self._update(_disk=disk, **before)
+                raise
         self._audit(
             "stop",
             request_id=request_id,
@@ -1902,14 +2077,19 @@ class Supervisor:
             raise Refuse("confirm_required", phrase=st.END_PHRASE)
         directory = self._run_dir()
         return self._transaction(
-            "end", directory, request_id, body, lambda mark_sent: self._end(request_id)
+            "end",
+            directory,
+            request_id,
+            body,
+            lambda mark_sent: self._end(request_id, body.get("attest")),
         )
 
-    def _end(self, request_id) -> dict:
+    def _end(self, request_id, attest=None) -> dict:
         with self._mutex:
             f, d, _c = self._current()
             if not st.end_entry(d)["allowed"]:
                 raise Refuse("end_not_allowed")
+            self._check_attest("end", attest)
             groups = self._groups(f)
             self._audit(
                 "end",
@@ -2176,7 +2356,14 @@ class Supervisor:
         except Exception:  # noqa: BLE001 - the record is found without the site too
             avoid = ()
         directory = state_dir(avoid, self.workspace, create=False)
-        rec = record.read_record(directory)  # (raises: not latched)
+        try:
+            rec = record.read_record(directory)  # (raises: not latched)
+        except (OSError, record.RecordCorrupt):
+            # There is a record and it cannot be read: not "no run". The gates see a
+            # D until a read works (``active``), and nothing is acted on.
+            self._unreadable = True
+            raise
+        self._unreadable = False
         self._dir = directory
         self._rec = rec
         self._snap = RunSite.from_json(rec.get("site")) if rec else None
@@ -2189,12 +2376,33 @@ class Supervisor:
         self._snap = site
         leader = rec.get("leader") or {}
         pid = leader.get("pid")
+        name = rec.get("name")
+        # The owner comes first: a run another live core owns is its to end (a
+        # launch under way there writes ``intent`` and no leader yet, and a second
+        # core must not mark that ended nor add an exit line after ``start:``).
+        if self._other_live_owner(rec.get("owner"), h.self_owner()):
+            size = self._screen_size(site, name)
+            self._begin_readers(
+                site,
+                name,
+                rec.get("console_lang") or site.console_lang,
+                base=max(0, size - SCREEN_REPLAY),
+            )
+            self._found = True
+            self._answered = True
+            self._feed_screen(site, name)
+            self._foreign = True
+            self._start_watcher()
+            return False
+        # Alive only on proof: the launcher's pid, with the identity the record
+        # holds. A record that holds none (the launcher died before it was read)
+        # proves nothing, and no signal goes out on it.
         alive = (
             rec.get("phase") == "started"
             and isinstance(pid, int)
-            and h.identity(pid) == leader.get("identity")
+            and not isinstance(pid, bool)
+            and self._pid_alive(pid, leader.get("identity"))
         )
-        name = rec.get("name")
         if not alive:
             ex = self._exit_file(rec) or {"code": None, "signal": None}
             self._finished = True
@@ -2212,10 +2420,6 @@ class Supervisor:
         self._found = True
         self._answered = True
         self._feed_screen(site, name)
-        if self._other_live_owner(rec.get("owner"), h.self_owner()):
-            self._foreign = True
-            self._start_watcher()
-            return False
         self._foreign = False
         self._update(owner=h.self_owner())
         f = self._facts(site, h.now())

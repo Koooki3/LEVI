@@ -166,6 +166,16 @@ def test_the_routes_are_the_ones_of_the_design():
         ("key", {**BODIES["key"], "seen": {**SEEN, "extra": 1}}),
         ("key", {k: v for k, v in BODIES["key"].items() if k != "token"}),
         ("key", {k: v for k, v in BODIES["key"].items() if k != "tab_id"}),
+        # the ticks: a closed set of words, a list, nothing else
+        ("key", {**BODIES["key"], "attest": ["scene_ready", "not_a_tick"]}),
+        ("key", {**BODIES["key"], "attest": "scene_ready"}),
+        ("key", {**BODIES["key"], "attest": {"scene_ready": True}}),
+        ("key", {**BODIES["key"], "attest": [1]}),
+        ("key", {**BODIES["key"], "attest": [True]}),
+        ("key", {**BODIES["key"], "attest": None}),
+        ("end", {**BODIES["end"], "attest": ["estop_hand", "stop now"]}),
+        ("end", {**BODIES["end"], "attest": "estop_hand"}),
+        ("stop", {"request_id": "req-0001-abcd", "attest": []}),
         ("stop", {}),
         ("stop", {"request_id": "req-0001-abcd", "force": True}),
         ("end", {"request_id": "req-0001-abcd"}),
@@ -195,7 +205,15 @@ def test_no_body_can_name_a_byte_or_a_signal():
         "token",
         "tab_id",
         "confirm",
+        "attest",
     }
+    assert set(aeri_run_api.EndBody.model_fields) == {
+        "request_id",
+        "confirm",
+        "attest",
+    }
+    # the words a body may carry as ticks are the ones the server holds keys to
+    assert set(aeri_run_api.Tick.__args__) == set(st.ATTEST_CODES)
 
 
 # --- the answers --------------------------------------------------------------------------------
@@ -245,6 +263,26 @@ def test_a_key_is_202_and_a_refusal_has_the_shape_of_errors_fail(served):
     sent = client.post(f"{BASE}/aeri/run/key", headers=UI, json=body)
     assert sent.status_code == 202 and sent.json()["evidence"] == "pending"
     assert m.typed() == b"\r"
+
+
+def test_a_key_without_its_ticks_is_400_attest_incomplete_and_nothing_is_typed(served):
+    """Safety review 2 N6: the ticks were enforced in the browser only."""
+    client, m = served
+    m.start()
+    m.script(journal=26, screen="第 1/5 轮：确认场景就绪", cbreak=True, steps=9)
+    view = m.wait_key("release_round")
+    body = m.body_for(view, "release_round")
+    for wrong in (
+        {k: v for k, v in body.items() if k != "attest"},
+        {**body, "attest": []},
+    ):
+        refused = client.post(f"{BASE}/aeri/run/key", headers=UI, json=wrong)
+        assert refused.status_code == 400, refused.text
+        assert detail(refused)["code"] == "attest_incomplete"
+        assert detail(refused)["missing"] == ["scene_ready"]
+    assert m.typed() == b""
+    sent = client.post(f"{BASE}/aeri/run/key", headers=UI, json=body)
+    assert sent.status_code == 202 and m.typed() == b"\r"
 
 
 def test_stop_is_202_and_the_second_one_409(served):

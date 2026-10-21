@@ -102,6 +102,25 @@ class StartBody(Closed):
     attest: Attest
 
 
+# One tick of a window: a code of ``aeri_state.KEY_ATTEST`` (a closed set; the
+# route refuses any other word before the supervisor sees it).
+Tick = Literal[
+    "scene",
+    "limits",
+    "checkpoints",
+    "providers",
+    "hardware",
+    "switch_units",
+    "switch_ports",
+    "switch_gpu",
+    "switch_home",
+    "estop_hand",
+    "hands_clear",
+    "no_client",
+    "scene_ready",
+]
+
+
 class Seen(Closed):
     run_id: str
     state_seq: int
@@ -131,6 +150,9 @@ class KeyBody(Closed):
     token: str
     tab_id: str
     confirm: str = ""
+    # The ticks of the key's window, exactly those of ``aeri_state.KEY_ATTEST[action]``
+    # (none for a key not in it): the server holds the key to them.
+    attest: list[Tick] = []
 
 
 class StopBody(Closed):
@@ -140,6 +162,7 @@ class StopBody(Closed):
 class EndBody(Closed):
     request_id: str
     confirm: str
+    attest: list[Tick] = []
 
 
 class PresenceBody(Closed):
@@ -147,10 +170,11 @@ class PresenceBody(Closed):
     visible: bool
 
 
-# A route's body model and the code table must name the same actions.
+# A route's body model and the code table must name the same actions and ticks.
 assert set(KeyBody.model_fields["action"].annotation.__args__) == set(
     aeri_state.ACTIONS
 )
+assert set(Tick.__args__) == set(aeri_state.ATTEST_CODES)
 
 
 def _answer(call, body: dict):

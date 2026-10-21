@@ -518,6 +518,8 @@ class AeriMachine:
             "token": entry["token"],
             "tab_id": self.tab,
             "confirm": entry["phrase"] or "",
+            # (what the page sends: every tick of the key's window)
+            "attest": list(st.KEY_ATTEST.get(action, ())),
         }
         body.update(over)
         return body
@@ -534,7 +536,12 @@ class AeriMachine:
 
     def end(self, **kw):
         return self.sup.end(
-            {"request_id": self.rid(), "confirm": "end terminal D", **kw}
+            {
+                "request_id": self.rid(),
+                "confirm": "end terminal D",
+                "attest": list(st.KEY_ATTEST["end"]),
+                **kw,
+            }
         )
 
     # ---- the scripted D (r08's real recording)

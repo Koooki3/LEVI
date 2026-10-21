@@ -224,6 +224,11 @@ def samples() -> dict:
             ("idle", {}),
             ("idle_disabled", {"enabled": False, "start_why": st.why("aeri_disabled")}),
             ("idle_blocked", {"start_why": st.why("driven_elsewhere")}),
+            # the run record exists and cannot be read: a D may be running
+            (
+                "idle_record_unreadable",
+                {"start_why": st.why("d_active", record="unreadable")},
+            ),
         ):
             f = st.Facts(now=NOW)
             d = st.derive(f, st.Memory())
@@ -300,6 +305,11 @@ def samples() -> dict:
         put(
             "await_release_monitor_red",
             mk.build(j26, release, steps=9, history=H, monitor_state="red"),
+        )
+        # the control file switched AERI off during the run: every key is off
+        put(
+            "await_release_disabled",
+            mk.build(j26, release, steps=9, history=H, enabled=False, seq=69),
         )
         put(
             "await_release_presence_lost",
@@ -437,6 +447,27 @@ def samples() -> dict:
             ),
         )
         put("stalled", _stalled(mk, j34, interrupted.encode(), sent_rec))
+        # --- a Ctrl+C that D never answered, and the retry and the End that follow
+        put(
+            "stopping_retried_end",
+            mk.build(
+                j34,
+                fwd,
+                steps=9,
+                history=H,
+                record={
+                    **sent_rec,
+                    "stop_retried": True,
+                    "stop_retry_epoch": NOW - 75.0,
+                },
+                facts={
+                    "stop_written": "retried",
+                    "stop_age_s": 150.0,
+                    "stop_last_age_s": 75.0,
+                },
+                seq=66,
+            ),
+        )
         # --- a Ctrl+C that came from elsewhere (a terminal, kill, the script): D
         # answered it, this page never sent one and offers none
         put(
@@ -471,6 +502,35 @@ def samples() -> dict:
             "fault_locked",
             mk.build(
                 locked, "运行已锁定 FAULT_LOCKED：policy_error\r\n", steps=9, history=H
+            ),
+        )
+        put(
+            "orphaned_unconfirmed",
+            mk.build(
+                mk.jview(26),
+                release,
+                steps=9,
+                history=H,
+                record=sent_rec,
+                facts={
+                    "adopted": True,
+                    "keyboard": False,
+                    "stop_written": "sent",
+                    "stop_age_s": 12.0,
+                },
+                seq=67,
+            ),
+        )
+        # --- alive and not followed (a record without the site snapshot, and a site
+        # file that does not read): no key, Stop is still the page's
+        put(
+            "unknown_unfollowed",
+            mk.build(
+                None,
+                b"",
+                history=H,
+                facts={"blind": True, "keyboard": False, "runner": jr.RView()},
+                seq=68,
             ),
         )
         put(
@@ -772,6 +832,7 @@ EXTRA = {
     "prepared_changed": {"what": "job.yaml"},
     "not_prepared": {"name": "aeri-20261021-ext-r09"},
     "run_name_taken": {"name": "aeri-20261021-ext-r01"},
+    "attest_incomplete": {"missing": ["scene_ready"], "unexpected": []},
 }
 VOLATILE = {
     "run_id": RUN_ID,
@@ -819,6 +880,8 @@ def build_codes() -> str:
             "reasons": list(st.REASONS),
             "why_not": list(st.WHY_NOT),
             "notices": list(st.NOTICES),
+            # the ticks each key (and End) is held to, in the page's order
+            "key_attest": {key: list(codes) for key, codes in st.KEY_ATTEST.items()},
             "errors": {code: status for code, (status, _) in st.REFUSALS.items()},
         }
     )

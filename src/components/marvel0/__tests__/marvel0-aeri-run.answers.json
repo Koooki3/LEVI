@@ -54,6 +54,15 @@
       },
       "status": 403
     },
+    "attest_incomplete": {
+      "detail": {
+        "code": "attest_incomplete",
+        "message": "The ticks sent are not exactly the checks this key needs",
+        "missing": ["scene_ready"],
+        "unexpected": []
+      },
+      "status": 400
+    },
     "attest_required": {
       "detail": {
         "code": "attest_required",

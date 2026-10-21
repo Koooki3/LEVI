@@ -18,6 +18,7 @@
   ],
   "errors": {
     "aeri_disabled": 403,
+    "attest_incomplete": 400,
     "attest_required": 400,
     "busy": 423,
     "challenge_expired": 410,
@@ -57,6 +58,34 @@
     "swap_unclean": 409,
     "templates_changed": 412,
     "verdict_once": 409
+  },
+  "key_attest": {
+    "end": ["estop_hand", "hands_clear", "no_client"],
+    "execute": [
+      "scene",
+      "limits",
+      "checkpoints",
+      "providers",
+      "hardware",
+      "estop_hand",
+      "hands_clear",
+      "no_client"
+    ],
+    "execute_variant": [
+      "switch_units",
+      "switch_ports",
+      "switch_gpu",
+      "switch_home",
+      "scene",
+      "limits",
+      "checkpoints",
+      "providers",
+      "hardware",
+      "estop_hand",
+      "hands_clear",
+      "no_client"
+    ],
+    "release_round": ["scene_ready"]
   },
   "levels": ["A", "B", "C"],
   "motions": ["none", "may_move", "arm_moves"],

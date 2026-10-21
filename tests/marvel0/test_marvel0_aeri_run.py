@@ -1649,3 +1649,173 @@ def test_an_ended_run_is_still_shown_after_a_restart(m):
         and doc["after_exit"] is not None
     )
     assert doc["name"] == NAME and doc["keys"] == []
+
+
+# --- the second review: one unreadable /proc read, the switch, the ticks -----------------------
+
+
+def flaky_once(real):
+    """``real`` with its first answer lost (a transient EMFILE, ENOMEM or EINTR
+    of the read of ``/proc/<pid>/stat``)."""
+    calls = {"n": 0}
+
+    def read(pid):
+        calls["n"] += 1
+        return None if calls["n"] == 1 else real(pid)
+
+    read.calls = calls
+    return read
+
+
+def test_one_failed_proc_read_does_not_end_a_live_run(m):
+    """Safety review 2 N7 = mechanics review 2 N1: ``_proc`` asked ``/proc`` as
+    well as ``poll()``, so one failed read recorded ``ended``, closed the pty and
+    let the hang-up chain cut a live D. The own child is judged by ``poll()``."""
+    at_forward(m)
+    flaky = flaky_once(m.host.proc_state)
+    m.host.proc_state = flaky
+    m.sup.tick()
+    assert m.record()["phase"] == "started" and m.sup._master is not None
+    assert m.child.poll() is None
+    doc = m.doc()
+    assert doc["d"]["alive"] is True and doc["state"]["id"] == "forward_running"
+    assert doc["stop"]["allowed"] is True
+    assert m.stop()["accepted"] is True and m.typed() == b"\x03"
+
+
+def test_the_own_launcher_is_judged_by_poll_not_by_proc(m):
+    """Not even a /proc that stays unreadable ends it: the launcher is our child."""
+    at_forward(m)
+    m.host.proc_state = lambda pid: None
+    for _ in range(3):
+        assert m.sup.tick() is True
+    assert m.record()["phase"] == "started" and m.sup._master is not None
+    m.child.exits(0)
+    assert m.sup.tick() is False
+    assert m.doc()["state"]["id"] == "ended"
+
+
+def test_the_switch_turned_off_mid_run_takes_every_key_away_server_side(m):
+    """Safety review 2 N3: the page said "off until the control file says so" but
+    ``enabled`` was read only at the start; the press went through."""
+    at_release(m)
+    m.enabled = False
+    doc = m.look()
+    assert doc["enabled"] is False
+    assert [k["id"] for k in doc["keys"]] == ["release_round", "quit"]
+    assert {k["why_not"]["code"] for k in doc["keys"]} == {"aeri_disabled"}
+    assert all(k["token"] is None for k in doc["keys"])
+    # the page's old tab still holds a token it was given before the switch
+    body = m.body_for(doc, "release_round", token="t-0")
+    assert refusal(m.sup.key, body)[1] == "aeri_disabled"
+    assert m.typed() == b""
+    assert doc["stop"]["allowed"] is True
+
+
+def test_stop_and_end_stay_when_the_switch_is_off(m, monkeypatch):
+    monkeypatch.setattr(st, "STALL_S", 0.3)
+    at_forward(m)
+    m.enabled = False
+    assert m.stop()["accepted"] is True and m.typed() == b"\x03"
+    time.sleep(0.5)
+    doc = m.look()
+    assert doc["state"]["id"] == "stalled" and doc["end"]["allowed"] is True
+    assert m.end()["accepted"] is True
+    assert m.doc()["state"]["id"] == "ended"
+
+
+def test_the_keys_come_back_when_the_switch_is_on_again(m):
+    at_release(m)
+    m.enabled = False
+    assert m.look()["keys"][0]["allowed"] is False
+    m.enabled = True
+    m.press("release_round")
+    assert m.typed() == b"\r"
+
+
+@pytest.mark.parametrize(
+    "start_scene, action, need",
+    [
+        (at_release, "release_round", ("scene_ready",)),
+    ],
+)
+def test_a_b_level_key_needs_exactly_its_ticks(m, start_scene, action, need):
+    view = start_scene(m)
+    body = m.body_for(view, action)
+    assert body["attest"] == list(need)
+    for wrong in ([], ["scene"], [*need, "estop_hand"], [*need, *need], ["x"]):
+        got = refusal(m.sup.key, {**body, "request_id": m.rid(), "attest": wrong})
+        assert got[1] == "attest_incomplete" and got[0] == 400, wrong
+    assert m.typed() == b""
+    body.pop("attest")  # (a body that names none at all)
+    assert refusal(m.sup.key, {**body, "request_id": m.rid()})[1] == "attest_incomplete"
+    assert m.typed() == b""
+    assert m.press(action)["accepted"] is True and m.typed() == b"\r"
+
+
+def test_a_key_that_needs_no_tick_takes_none(m):
+    view = at_inventory(m)
+    body = m.body_for(view, "inventory_yes")
+    assert body["attest"] == []
+    got = refusal(m.sup.key, {**body, "attest": ["scene_ready"]})
+    assert got[1] == "attest_incomplete"
+    assert m.typed() == b""
+    assert m.sup.key(body)["accepted"] is True and m.typed() == b"y"
+
+
+def test_the_phrase_keys_need_all_their_ticks(m):
+    view = at_phrase(m)
+    body = m.body_for(view, "execute")
+    need = list(st.KEY_ATTEST["execute"])
+    assert body["attest"] == need and len(need) == 8
+    for n in range(len(need)):
+        short = need[:n] + need[n + 1 :]  # one tick missing, each in turn
+        got = refusal(m.sup.key, {**body, "request_id": m.rid(), "attest": short})
+        assert got[1] == "attest_incomplete", need[n]
+    got = refusal(
+        m.sup.key,
+        {**body, "request_id": m.rid(), "attest": [*need, "switch_units"]},
+    )
+    assert got[1] == "attest_incomplete"
+    # the order is the page's business, not the server's
+    reordered = {**body, "request_id": m.rid(), "attest": list(reversed(need))}
+    assert m.typed() == b""
+    assert m.sup.key(reordered)["accepted"] is True
+    assert m.typed() == f"execute {NAME}\r".encode()
+
+
+def test_the_variant_phrase_needs_the_four_switch_checks_too(m):
+    started(m)
+    m.script(
+        screen=f"请输入 execute {NAME} after policy switch check：".encode(),
+        cbreak=False,
+        runner=False,
+    )
+    view = m.wait_key("execute_variant")
+    body = m.body_for(view, "execute_variant")
+    assert len(body["attest"]) == 12 and body["attest"][0] == "switch_units"
+    plain = list(st.KEY_ATTEST["execute"])  # a plain start's ticks are not enough
+    assert refusal(m.sup.key, {**body, "attest": plain})[1] == "attest_incomplete"
+    assert m.typed() == b""
+    assert m.sup.key(body)["accepted"] is True
+
+
+def test_end_needs_its_three_ticks(m, monkeypatch):
+    monkeypatch.setattr(st, "STALL_S", 0.3)
+    at_forward(m)
+    m.stop()
+    time.sleep(0.5)
+    assert m.look()["end"]["allowed"] is True
+    for wrong in ([], ["estop_hand", "hands_clear"], [*st.KEY_ATTEST["end"], "scene"]):
+        got = refusal(m.end, attest=wrong)
+        assert got[1] == "attest_incomplete", wrong
+    assert not [s for s in m.signals if s[2] == signal.SIGKILL]
+    assert m.doc()["state"]["id"] == "stalled"
+    assert m.end()["accepted"] is True
+    assert [s for s in m.signals if s[2] == signal.SIGKILL]
+
+
+def test_a_refused_end_for_a_d_that_can_still_wrap_up_is_not_an_attest_error(m):
+    """The state refuses first (End is for a stuck wrap-up), then the evidence."""
+    at_forward(m)
+    assert refusal(m.end, attest=[])[1] == "end_not_allowed"
