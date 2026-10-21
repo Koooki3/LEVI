@@ -283,15 +283,26 @@ def test_hold_stops_the_steps_and_end_leaves_no_further_motion(live):
     assert (view["reason"]["code"], view["exit"]["signal"]) == ("ended_by_page", 9)
     assert gone(pid) and gone(start["pid"])
     assert steady(m, 0.8), "an end leaves no further motion"
-    # The group is gone once its leader is reaped: a zombie that the parent has not yet
-    # collected still keeps the group id (loaded machine), so wait for it instead of asking once.
+    # No live process is left in the group. A zombie may remain: under `driver.py run` the
+    # driver is a child subreaper and keeps orphans it never waits for, so killpg(pid, 0) would
+    # still answer (a zombie does not move; `gone` above counts it as gone too).
     deadline = time.monotonic() + scaled(5.0)
     while True:
-        try:
-            os.killpg(pid, 0)
-        except ProcessLookupError:
+        seen = subprocess.run(
+            ["ps", "-eo", "pid,pgid,stat,args"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout
+        alive = [
+            ln
+            for ln in seen.splitlines()[1:]
+            if ln.split()[1:2] == [str(pid)] and not ln.split()[2].startswith("Z")
+        ]
+        if not alive:
             break
-        assert time.monotonic() < deadline, "the process group is still there"
+        if time.monotonic() >= deadline:
+            pytest.fail("the group still has live processes:\n" + "\n".join(alive))
         time.sleep(0.05)
 
 
