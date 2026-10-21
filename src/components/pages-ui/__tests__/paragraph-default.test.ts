@@ -41,10 +41,12 @@ describe("the page default for paragraphs", () => {
       "--ds-text-title-3-line": "22px",
       "--ds-weight-semibold": "600",
     };
+    // in the order pages load them: ds.css first, pages.css after it (a later
+    // rule of equal specificity would win, so the page default goes last)
     let css = [
-      rule(pages, ":where(.pg-workbench) p"),
       rule(ds, ".ds-field__error"),
       rule(ds, ".ds-empty__title"),
+      rule(pages, ":where(.pg-workbench) p"),
     ].join("\n");
     for (const [name, value] of Object.entries(tokens))
       css = css.replaceAll(`var(${name})`, value);
@@ -55,6 +57,8 @@ describe("the page default for paragraphs", () => {
       <p id="title" class="ds-empty__title">empty</p>
       <p id="other" class="no-own-rule">other</p>
     </main>`;
+    // first real run: if "bare" fails, check that happy-dom supports :where()
+    // before suspecting the rule (supervisor 10-21)
     const style = (id: string) =>
       getComputedStyle(document.getElementById(id) as HTMLElement);
     expect(style("err").color).toBe("rgb(200, 0, 0)");
