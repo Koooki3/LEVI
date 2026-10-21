@@ -19,8 +19,9 @@ const SRC = join(import.meta.dir, "../../..");
 const SPACING_ALLOWED: Record<string, number> = {
   "app/report/report.css": 1,
   "components/pages-ui/pages.css": 221,
-  "components/viewer/annotations.css": 233,
-  "components/viewer/viewer.css": 2,
+  "components/pages-ui/agent-content.css": 1,
+  "components/viewer/annotations.css": 234,
+  "components/viewer/viewer.css": 3,
   "styles/ds.css": 1,
 };
 const BREAKPOINTS_ALLOWED: Record<string, number> = {
@@ -32,13 +33,16 @@ const BREAKPOINTS_ALLOWED: Record<string, number> = {
   "components/pages-ui/pages.css": 5,
   "components/viewer/annotations.css": 4,
   "components/viewer/viewer.css": 1,
-  "styles/shell.css": 2,
+  "styles/shell.css": 5,
 };
 
 const SPACING =
   /(?:^|[;{\s])((?:row-|column-)?gap|margin(?:-[a-z]+)?|padding(?:-[a-z]+)?|inset(?:-[a-z]+)?)\s*:\s*([^;{}]+)/g;
-const PX = /(?<![\w.-])(\d+(?:\.\d+)?)px\b/g;
-const MEDIA = /@media[^{]*?\((?:max|min)-width:\s*(\d+)px\)/g;
+// a negative value counts too (-6px): negative margins are a layout tool
+const PX = /(?<![\w.])-?(\d+(?:\.\d+)?)px\b/g;
+// every width in a media condition, also in `(min-width: a) and (max-width: b)`
+const MEDIA = /@media([^{]*)\{/g;
+const WIDTH = /\((?:min|max)-width:\s*(\d+)px\)/g;
 // BREAKPOINT, plus the header's two-row width (shell.css, 999/1000), where
 // .ds-page also narrows its sides (layout P1: one left edge for both)
 const HEADER_TWO_ROW = 1000;
@@ -50,16 +54,26 @@ function cssFiles(): string[] {
   return [...new Bun.Glob("**/*.css").scanSync({ cwd: SRC })].sort();
 }
 
-export function counts(css: string): { spacing: number; breakpoints: number } {
+export function counts(css: string): {
+  spacing: number;
+  breakpoints: number;
+  unreadable: number;
+} {
   const text = css.replace(/\/\*[\s\S]*?\*\//g, "");
   let spacing = 0;
   for (const m of text.matchAll(SPACING))
     for (const px of m[2].matchAll(PX))
       if (!["0", "1", "2"].includes(px[1])) spacing += 1;
   let breakpoints = 0;
-  for (const m of text.matchAll(MEDIA))
-    if (!ALLOWED_WIDTHS.has(Number(m[1]))) breakpoints += 1;
-  return { spacing, breakpoints };
+  let unreadable = 0;
+  for (const m of text.matchAll(MEDIA)) {
+    const widths = [...m[1].matchAll(WIDTH)].map((w) => Number(w[1]));
+    // a width this counter cannot read (`width <= 900px`, em units) fails the
+    // test instead of slipping through uncounted
+    if ((m[1].match(/width/g) ?? []).length !== widths.length) unreadable += 1;
+    for (const w of widths) if (!ALLOWED_WIDTHS.has(w)) breakpoints += 1;
+  }
+  return { spacing, breakpoints, unreadable };
 }
 
 describe("spacing and breakpoints only go down", () => {
@@ -69,8 +83,12 @@ describe("spacing and breakpoints only go down", () => {
       .b { margin-top: 2px; inset-inline: 3px; row-gap: 1px; }
       /* .c { gap: 99px } */
       @media (max-width: 899px) { .d { gap: var(--ds-space-2) } }
-      @media (max-width: 960px) { .e { padding: 0 } }`;
-    expect(counts(sample)).toEqual({ spacing: 3, breakpoints: 1 });
+      @media (max-width: 960px) { .e { padding: 0 } }
+      .f { margin: -6px 0 -1px; }
+      @media (min-width: 1000px) and (max-width: 1239px) { .g { gap: 0 } }`;
+    expect(counts(sample)).toEqual({ spacing: 4, breakpoints: 2, unreadable: 0 });
+    expect(counts("@media (width <= 900px) { .h { gap: 0 } }").unreadable).toBe(1);
+    expect(counts("@media (max-width: 60em) { .h { gap: 0 } }").unreadable).toBe(1);
   });
 
   for (const file of cssFiles()) {
@@ -86,6 +104,7 @@ describe("spacing and breakpoints only go down", () => {
         got.breakpoints,
         `${file}: ${got.breakpoints} media widths outside BREAKPOINT (${[...ALLOWED_WIDTHS].join("/")}), allowance ${allowedBreakpoints}`,
       ).toBe(allowedBreakpoints);
+      expect(got.unreadable, `${file}: a media condition this check cannot read`).toBe(0);
     });
   }
 });
