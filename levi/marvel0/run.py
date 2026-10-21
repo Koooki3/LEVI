@@ -1225,6 +1225,16 @@ def _spawn(argv, *, stdin, stdout, env, cwd):
     )
 
 
+def _hosted_aeri() -> bool:
+    """Whether the AERI terminal D that this page hosts is on, from the click that
+    starts it: D takes the arm lock only after its phrase, so ``arm_lock`` alone
+    leaves the start itself uncovered. Takes over what a restart left first; a
+    supervisor that cannot answer raises, and the asker treats that as unknown."""
+    from . import aeri_run_api
+
+    return aeri_run_api.active() is not None
+
+
 @dataclass
 class Host:
     """Everything the run reaches outside Python. Tests build one with fakes
@@ -1249,6 +1259,8 @@ class Host:
     net_table: Callable = net.read
     sessions: Callable = status.sessions_part  # (roots, now) -> part
     aeri_runs: Callable = deploy._aeri_runs
+    # Whether the page's own AERI terminal D is on (see ``_hosted_aeri``).
+    hosted_aeri: Callable = lambda: _hosted_aeri()
     deploy_view: Callable = _deploy_view
     control_enabled: Callable = _control_enabled
     cgroup: Callable = stack._read_self_cgroup
@@ -1816,6 +1828,15 @@ class Supervisor:
         return check_row("arm_lock", None if holders is None else not holders)
 
     def _aeri_row(self) -> dict:
+        # The page's own terminal D counts, from its start click: a client started
+        # beside it would be two programs on one arm. An unreadable answer does
+        # not rule it out.
+        try:
+            hosted = bool(self.host.hosted_aeri())
+        except Exception:  # noqa: BLE001
+            return check_row("no_aeri", None)
+        if hosted:
+            return check_row("no_aeri", False, hosted=True)
         try:
             runs = self.host.aeri_runs()
         except Exception:  # noqa: BLE001 - an unreadable registry rules nothing out

@@ -93,9 +93,21 @@ async def lifespan(app):
     # The product LEVI only: the health monitor M runs while the arm stack
     # runs (None, and no thread, in any other instance).
     monitor_auto = stack_api.start_auto()
+    from .marvel0 import aeri_activity
+
+    # A hosted AERI terminal D that outlived the previous service has lost its
+    # keyboard: it is sent one Ctrl+C and watched (nothing, in any other
+    # workspace). Never stops the service from starting.
+    aeri_activity.adopt_on_start()
     try:
         yield
     finally:
+        # First, before anything else stops: a hosted terminal D gets the Stop a
+        # person presses and the time for its 7/7 wrap-up (up to about 130 s;
+        # ``levi stop`` refuses while one runs, so this is a forced stop, a
+        # SIGTERM of the unit or a restart). What is left after the wait is the
+        # launcher's hang-up chain. Never a bare kill.
+        aeri_activity.shutdown_hosted()
         if monitor_auto:
             monitor_auto.close()
         if gate_resumer:
