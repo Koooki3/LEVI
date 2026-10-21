@@ -12,7 +12,7 @@ import { deployInfo, idle, logAnswer, ready } from "./deploy-fixtures";
 import { quietMarvel0, quietSetup } from "./fixtures";
 import { button, choose, field, tick } from "./actions-helpers";
 
-const { default: Marvel0Page } = await import("@/app/marvel0/page");
+const { default: Marvel0Page } = await import("@/app/marvel_workstation/page");
 setupDom();
 
 const SFT = "pi05_fr3_all_step49999";

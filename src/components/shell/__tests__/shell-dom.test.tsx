@@ -591,7 +591,7 @@ describe("go-to chords (G, then a letter)", () => {
     expect(chordPage({ key: "w" })).toBe("/workbench");
     expect(chordPage({ key: "p" })).toBe("/pool");
     expect(chordPage({ key: "l" })).toBe("/live");
-    expect(chordPage({ key: "c" })).toBe("/marvel0");
+    expect(chordPage({ key: "c" })).toBe("/marvel_workstation");
     expect(chordPage({ key: "r" })).toBe("/report");
     expect(chordPage({ key: "h" })).toBe("/");
     expect(chordPage({ key: "u" })).toBe("/guide");

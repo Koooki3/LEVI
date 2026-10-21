@@ -1,4 +1,4 @@
-# The evaluation run buttons of the marvel0 page
+# The evaluation run buttons of the marvel_workstation page
 
 English first, Chinese after the line below. Backend: `levi/marvel0/run.py` (state rules, keys, supervisor),
 `run_api.py` (routes), `hostchild.py` (the launcher). Tests: `tests/marvel0/test_marvel0_run*.py`, the fake client

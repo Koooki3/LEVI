@@ -118,25 +118,33 @@
   color: var(--ds-text-secondary);
   font-weight: var(--ds-weight-medium);
 }
-/* Folding steps (src/components/shell/commands.ts, NAV_COLLAPSE_WIDTHS and
-   NAV_ROW_BELOW: a test keeps the numbers equal). Step 1: Guide and Report.
-   Step 2: also Conversion & review and the training pool. The "More" button
-   is in the bar at every width: it holds the pages that are only menu items
-   (the FR3 preview) and, where links fold, the folded ones. Measured in a
-   browser (English, the widest): all eight links and More fit from 1600 px
-   beside the full search box (1580 px clipped the last link by 11 px, 1560 px
-   by 31 px), so the first step starts below 1640 px; six links and More fit at
-   1500 px with 73 px to spare; four links and More fit at 1000 px with 80 px
-   to spare (the search box is reduced to its icon and the links are tighter
-   below 1240 px). A link must never be cut off by the scrolling of the bar:
-   marvel0 is one of the four that never fold. */
-@media (min-width: 1000px) and (max-width: 1639px) {
+/* Folding steps (src/components/shell/commands.ts: NAV_COLLAPSE_WIDTHS,
+   NAV_COMPACT_BELOW and NAV_ROW_BELOW; a test keeps the numbers equal).
+   Step 1: Guide. Step 2: also the training pool. Step 3: also Conversion &
+   review. Report is a "More" item at every width and FR3 3D never folds;
+   marvel_workstation, Live evaluation, Automatic evaluation, FR3 3D and
+   Explore stay in the bar from 1170 px up. Measured in a real browser
+   (English, the widest; the Live link with its count "1", the current page in
+   bold): the five links and More need 713 px of bar and have 742 at 1170 px
+   (29 px to spare, room for a two-digit count); below 1170 px they do not fit
+   (they need about 1141 px), so the bar has two rows there. From 1360 px the
+   links are looser and the search box is whole: five links 753 px, 778 at
+   1360 (25 spare); six 915, 948 at 1530 (33); seven 1030, 1058 at 1640 (29);
+   all eight 1096, 1128 at 1710 (32). Every step keeps at least 25 px, in both
+   languages and with either FR3 3D or marvel_workstation as the current page
+   (Chinese needs less). */
+@media (min-width: 1170px) and (max-width: 1709px) {
   .levi-shell-link[data-collapse="1"] {
     display: none;
   }
 }
-@media (min-width: 1000px) and (max-width: 1499px) {
+@media (min-width: 1170px) and (max-width: 1639px) {
   .levi-shell-link[data-collapse="2"] {
+    display: none;
+  }
+}
+@media (min-width: 1170px) and (max-width: 1529px) {
+  .levi-shell-link[data-collapse="3"] {
     display: none;
   }
 }
@@ -156,22 +164,6 @@
   white-space: nowrap;
   text-decoration: none;
   transition: color var(--ds-dur-fast) var(--ds-ease-standard);
-}
-/* The word after a page's label ("MARVEL0 robot"): muted, and dropped where the
-   bar is short of room (below 1240 px wide and on a phone). */
-.levi-shell-link__hint {
-  color: var(--ds-text-tertiary);
-  font-weight: var(--ds-weight-regular);
-}
-@media (max-width: 1239px) {
-  .levi-shell-link__hint {
-    display: none;
-  }
-}
-@media (min-width: 640px) and (max-width: 999px) {
-  .levi-shell-link__hint {
-    display: inline;
-  }
 }
 .levi-shell-link:hover,
 .levi-shell-nav .levi-live-nav:hover {
@@ -276,9 +268,9 @@
   display: inline-flex;
   gap: 2px;
 }
-/* Short of room (below 1240 px): the links are tighter and the search box
+/* Short of room (below 1360 px): the links are tighter and the search box
    keeps only its icon. After the base rules above, so that these win. */
-@media (min-width: 1000px) and (max-width: 1239px) {
+@media (min-width: 1170px) and (max-width: 1359px) {
   .levi-shell-link,
   .levi-shell-nav .levi-live-nav {
     padding: 0 var(--ds-space-2);
@@ -301,9 +293,10 @@
 
 /* Narrow screens: actions beside the wordmark, the navigation on its own
    row below (it scrolls; the current page is brought into view by
-   levi-header.tsx, and the links are tight so that the first three show whole
-   at 420 px). */
-@media (max-width: 999px) {
+   levi-header.tsx, and the links are tight; at 420 px "Automatic evaluation",
+   marvel_workstation and FR3 3D show whole when marvel_workstation is the
+   current page, and the first two and a part of the third otherwise). */
+@media (max-width: 1169px) {
   :root {
     --levi-header-height: 100px;
     /* Two rows tall: too much of a phone screen to keep, so it scrolls

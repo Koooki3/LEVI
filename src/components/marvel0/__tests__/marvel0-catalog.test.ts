@@ -13,7 +13,7 @@ const SOURCES = [
   "components/marvel0/marvel0-card.tsx",
   "components/marvel0/marvel0-say.ts",
   "components/marvel0/use-marvel0-poll.ts",
-  "app/marvel0/page.tsx",
+  "app/marvel_workstation/page.tsx",
   // The action cards.
   "components/marvel0/action-parts.tsx",
   "components/marvel0/catalog-logic.ts",
@@ -93,10 +93,17 @@ describe("the marvel0's catalogue entries", () => {
   test("the page, its navigation entry and its chord have both languages", () => {
     for (const key of ["marvel0", "Go to: marvel0"])
       expect(both(key)).toBe(true);
-    // The bar says "MARVEL0" and, where there is room, "robot" after it.
-    expect((zh as Record<string, string>)["marvel0"]).toBe("MARVEL0");
-    expect(en["marvel0.nav.hint"]).toBe("robot");
-    expect(zh["marvel0.nav.hint"]).toBe("机器人");
+    // The page is called marvel_workstation (it was MARVEL0 until 2026-10-21);
+    // the keys marvel0.* are identifiers and keep their names.
+    expect((en as Record<string, string>)["marvel0"]).toBe(
+      "marvel_workstation",
+    );
+    expect((zh as Record<string, string>)["marvel0"]).toBe(
+      "marvel_workstation",
+    );
+    expect(en["Go to: marvel0"]).toBe("Go to: marvel_workstation");
+    expect(zh["Go to: marvel0"]).toBe("跳转：marvel_workstation");
+    expect(Object.keys(en)).not.toContain("marvel0.nav.hint");
   });
 
   test("the scope texts say the backend runs read-only queries, in both languages", () => {

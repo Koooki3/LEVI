@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
+import en from "@/i18n/en.json";
+import zh from "@/i18n/zh.json";
 import {
   THEME_DEFAULT_PREFERENCE,
   THEME_STORAGE_KEY,
@@ -11,6 +13,7 @@ import {
   isCurrentPage,
   headerPages,
   NAV_COLLAPSE_WIDTHS,
+  NAV_COMPACT_BELOW,
   NAV_ROW_BELOW,
   navCollapseLevel,
   navPages,
@@ -124,110 +127,138 @@ describe("global shortcuts", () => {
 });
 
 describe("navigation and commands", () => {
-  test("marvel0 is a header link like the others; the FR3 preview is a menu item; every page is offered by the header", () => {
+  test("marvel_workstation and the FR3 3D preview are header links; Report is a menu item; every page is offered by the header", () => {
     const pages = navPages({ live: true, pool: true });
     const all = pages.map((p) => p.href);
-    expect(all).toContain("/marvel0");
+    expect(all).toContain("/marvel_workstation");
     expect(all).toContain("/robot-studio");
+    expect(all).not.toContain("/marvel0");
     expect(headerPages(pages).map((p) => p.href)).toEqual(all);
-    // marvel0 never folds and is never only a menu item; the preview is only
-    // ever a menu item (a tool for now and then must not push a main link out).
-    const marvel0 = pages.find((p) => p.href === "/marvel0")!;
-    expect(marvel0.menuOnly).toBeUndefined();
-    expect(marvel0.collapse).toBeUndefined();
-    expect(pages.find((p) => p.href === "/robot-studio")!.menuOnly).toBe(true);
+    // marvel_workstation and the preview never fold and are never only menu
+    // items; Report is only ever a menu item (a page for now and then must
+    // not push a main link out).
+    for (const href of ["/marvel_workstation", "/robot-studio"]) {
+      const page = pages.find((p) => p.href === href)!;
+      expect([href, page.menuOnly]).toEqual([href, undefined]);
+      expect([href, page.collapse]).toEqual([href, undefined]);
+    }
+    const report = pages.find((p) => p.href === "/report")!;
+    expect(report.menuOnly).toBe(true);
+    expect(report.collapse).toBeUndefined();
+    // The bar says "FR3 3D"; the palette and the page keep the full name.
+    const preview = pages.find((p) => p.href === "/robot-studio")!;
+    expect(preview.label).toBe("robotStudio.title");
+    expect(preview.barLabel).toBe("robotStudio.nav");
+    expect(en["robotStudio.nav"]).toBe("FR3 3D");
+    expect(zh["robotStudio.nav"]).toBe("FR3 三维预览");
   });
 
-  test("folding: nothing at full width, the reference pages first, then the heavier two; Live, Automatic, marvel0 and Explore never fold; the FR3 preview is always in the menu", () => {
+  test("folding: nothing at full width, Guide first, then Training pool, then Conversion & review; Live, Automatic, marvel_workstation, FR3 3D and Explore never fold; Report is always in the menu", () => {
     const pages = navPages({ live: true, pool: true });
     const names = (list: Array<{ href: string }>) => list.map((p) => p.href);
     const wide = splitHeaderPages(pages, 0);
-    expect(names(wide.more)).toEqual(["/robot-studio"]);
+    expect(names(wide.more)).toEqual(["/report"]);
     expect(names(wide.links)).toEqual(
-      names(pages).filter((href) => href !== "/robot-studio"),
+      names(pages).filter((href) => href !== "/report"),
     );
-    const first = splitHeaderPages(pages, 1);
-    expect(names(first.more)).toEqual(["/guide", "/report", "/robot-studio"]);
-    const second = splitHeaderPages(pages, 2);
-    expect(names(second.more)).toEqual([
+    expect(names(splitHeaderPages(pages, 1).more)).toEqual([
+      "/guide",
+      "/report",
+    ]);
+    expect(names(splitHeaderPages(pages, 2).more)).toEqual([
+      "/pool",
+      "/guide",
+      "/report",
+    ]);
+    const third = splitHeaderPages(pages, 3);
+    expect(names(third.more)).toEqual([
       "/workbench",
       "/pool",
       "/guide",
       "/report",
-      "/robot-studio",
     ]);
-    expect(names(second.links)).toEqual([
+    expect(names(third.links)).toEqual([
       "/live",
       "/automatic",
-      "/marvel0",
+      "/marvel_workstation",
+      "/robot-studio",
       "/explore",
     ]);
     // Every page is in the bar or in the menu, once, in navigation order.
-    for (const level of [0, 1, 2] as const) {
+    for (const level of [0, 1, 2, 3] as const) {
       const { links, more } = splitHeaderPages(pages, level);
       expect([...names(links), ...names(more)].sort()).toEqual(
         names(pages).sort(),
       );
     }
     // Without a pool the pool is not offered and nothing else changes.
-    const noPool = splitHeaderPages(navPages({ live: true, pool: false }), 2);
-    expect(names(noPool.more)).toEqual([
-      "/workbench",
-      "/guide",
-      "/report",
-      "/robot-studio",
-    ]);
+    const noPool = splitHeaderPages(navPages({ live: true, pool: false }), 3);
+    expect(names(noPool.more)).toEqual(["/workbench", "/guide", "/report"]);
   });
 
-  test("the window width picks the folding level; two rows below 900 px fold nothing", () => {
+  test("the window width picks the folding level; the two-row bar below NAV_ROW_BELOW folds nothing", () => {
+    const { first, second, third } = NAV_COLLAPSE_WIDTHS;
+    expect(first).toBeGreaterThan(second);
+    expect(second).toBeGreaterThan(third);
+    expect(third).toBeGreaterThan(NAV_COMPACT_BELOW);
+    expect(NAV_COMPACT_BELOW).toBeGreaterThan(NAV_ROW_BELOW);
     expect(navCollapseLevel(1920)).toBe(0);
-    expect(navCollapseLevel(NAV_COLLAPSE_WIDTHS.first)).toBe(0);
-    expect(navCollapseLevel(NAV_COLLAPSE_WIDTHS.first - 1)).toBe(1);
-    expect(navCollapseLevel(NAV_COLLAPSE_WIDTHS.second)).toBe(1);
-    expect(navCollapseLevel(NAV_COLLAPSE_WIDTHS.second - 1)).toBe(2);
-    expect(navCollapseLevel(NAV_ROW_BELOW)).toBe(2);
+    expect(navCollapseLevel(first)).toBe(0);
+    expect(navCollapseLevel(first - 1)).toBe(1);
+    expect(navCollapseLevel(second)).toBe(1);
+    expect(navCollapseLevel(second - 1)).toBe(2);
+    expect(navCollapseLevel(third)).toBe(2);
+    expect(navCollapseLevel(third - 1)).toBe(3);
+    expect(navCollapseLevel(NAV_ROW_BELOW)).toBe(3);
     expect(navCollapseLevel(NAV_ROW_BELOW - 1)).toBe(0);
     expect(navCollapseLevel(420)).toBe(0);
   });
 
-  test("the styles hide the folded links at the same widths", () => {
+  test("the styles hide the folded links and tighten the bar at the same widths", () => {
     const css = readFileSync(
       join(import.meta.dir, "../../../styles/shell.css"),
       "utf8",
     );
-    // Level 1 starts below `first`, level 2 below `second`; the bar has two
-    // rows (and folds nothing) below NAV_ROW_BELOW.
+    // Step 1 below `first`, step 2 below `second`, step 3 below `third`; the
+    // links are tighter below NAV_COMPACT_BELOW; the bar has two rows (and
+    // folds nothing) below NAV_ROW_BELOW.
+    for (const [step, width] of [
+      [1, NAV_COLLAPSE_WIDTHS.first],
+      [2, NAV_COLLAPSE_WIDTHS.second],
+      [3, NAV_COLLAPSE_WIDTHS.third],
+    ] as const) {
+      expect(css).toMatch(
+        new RegExp(
+          `@media \\(min-width: ${NAV_ROW_BELOW}px\\) and \\(max-width: ${width - 1}px\\) \\{\\s*\\.levi-shell-link\\[data-collapse="${step}"\\]`,
+        ),
+      );
+    }
     expect(css).toContain(
-      `@media (min-width: ${NAV_ROW_BELOW}px) and (max-width: ${NAV_COLLAPSE_WIDTHS.first - 1}px)`,
-    );
-    expect(css).toContain(
-      `@media (min-width: ${NAV_ROW_BELOW}px) and (max-width: ${NAV_COLLAPSE_WIDTHS.second - 1}px)`,
+      `@media (min-width: ${NAV_ROW_BELOW}px) and (max-width: ${NAV_COMPACT_BELOW - 1}px)`,
     );
     expect(css).toContain(`@media (max-width: ${NAV_ROW_BELOW - 1}px)`);
-    expect(css).toContain('.levi-shell-link[data-collapse="1"]');
-    expect(css).toContain('.levi-shell-link[data-collapse="2"]');
   });
 
   test("pages follow the live and pool offers, in navigation order", () => {
     expect(navPages({ live: false, pool: true }).map((p) => p.href)).toEqual([
       "/automatic",
-      "/marvel0",
+      "/marvel_workstation",
+      "/robot-studio",
       "/explore",
       "/workbench",
       "/pool",
       "/guide",
       "/report",
-      "/robot-studio",
     ]);
     expect(navPages({ live: true, pool: false }).map((p) => p.href)).toEqual([
       "/live",
       "/automatic",
-      "/marvel0",
+      "/marvel_workstation",
+      "/robot-studio",
       "/explore",
       "/workbench",
       "/guide",
       "/report",
-      "/robot-studio",
     ]);
   });
 
@@ -280,7 +311,7 @@ describe("navigation and commands", () => {
     const zh = (text: string) => (text === "Report" ? "报告" : text);
     expect(filterCommands(commands, "报告", zh)[0].id).toBe("go-report");
   });
-  test("filter: the marvel0 page is found by what its cards do", () => {
+  test("filter: the marvel_workstation page is found by what its cards do, and by its name", () => {
     const commands = make();
     for (const words of [
       "deploy",
@@ -289,11 +320,14 @@ describe("navigation and commands", () => {
       "部署",
       "策略服务器",
       "评测客户端",
+      "marvel_workstation",
+      "workstation",
+      "工作站",
     ])
       expect(
         filterCommands(commands, words).map((c) => c.id),
         words,
-      ).toContain("go-marvel0");
+      ).toContain("go-marvel_workstation");
   });
 });
 

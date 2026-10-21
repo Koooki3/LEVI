@@ -15,7 +15,7 @@ import { quietMarvel0, quietSetup } from "./fixtures";
 import { button, tick } from "./actions-helpers";
 import { RUN, STACK, runDoc, stackDoc } from "./ctl-fixtures";
 
-const { default: Marvel0Page } = await import("@/app/marvel0/page");
+const { default: Marvel0Page } = await import("@/app/marvel_workstation/page");
 setupDom();
 
 const SETUP = "/api/levi/setup/status";

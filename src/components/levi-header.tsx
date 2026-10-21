@@ -90,7 +90,7 @@ function useWidthValue<T>(read: (width: number) => T, server: T): T {
  * link); styles/shell.css hides the folded links by width until this catches
  * up, so the bar does not jump.
  */
-function useNavCollapseLevel(): 0 | 1 | 2 {
+function useNavCollapseLevel(): 0 | 1 | 2 | 3 {
   return useWidthValue(navCollapseLevel, 0);
 }
 
@@ -134,7 +134,7 @@ export default function LeviHeader() {
   // the styles at those widths, and the menu cannot be opened yet.
   const moreCurrent = more.some((page) => isCurrentPage(page.href, pathname));
   // The bar scrolls when the links do not fit (the two-row bar of a narrow
-  // window). The current page (marvel0 among them) is brought into view only
+  // window). The current page (marvel_workstation among them) is brought into view only
   // when it is not whole there already, and then to the start of a link: a bar
   // rolled for no reason cut the first link ("ion 1" for "Live evaluation 1").
   const navRef = useRef<HTMLElement>(null);
@@ -219,12 +219,7 @@ export default function LeviHeader() {
                     isCurrentPage(page.href, pathname) ? "page" : undefined
                   }
                 >
-                  {t(page.label)}
-                  {page.hint && (
-                    <span className="levi-shell-link__hint">
-                      {t(page.hint)}
-                    </span>
-                  )}
+                  {t(page.barLabel ?? page.label)}
                 </Link>
               ),
             )}

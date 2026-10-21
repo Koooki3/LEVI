@@ -29,9 +29,9 @@ export type Command = {
 export type NavPage = {
   href: string;
   label: string;
-  /** A word after the label that says what the page is ("MARVEL0 robot"),
-   * a catalogue key; the header drops it where the bar is short of room. */
-  hint?: string;
+  /** A shorter label for the header's link (a catalogue key); the palette and
+   * the "More" menu keep `label`. */
+  barLabel?: string;
   keywords: string[];
   /** `false`: in the palette and the go-to chords, not a header link. */
   header?: boolean;
@@ -43,11 +43,11 @@ export type NavPage = {
   menuOnly?: boolean;
   /**
    * The header link moves into the "More" menu when the bar runs short of
-   * room: 1 = first (reference pages), 2 = next (see `navCollapseLevel`).
-   * Without it the link stays. The palette and the go-to chords are
-   * unaffected.
+   * room: 1 = first (Guide), 2 = next (Training pool), 3 = last (Conversion &
+   * review; see `navCollapseLevel`). Without it the link stays. The palette
+   * and the go-to chords are unaffected.
    */
-  collapse?: 1 | 2;
+  collapse?: 1 | 2 | 3;
 };
 
 export function navPages(options: { live: boolean; pool: boolean }): NavPage[] {
@@ -65,11 +65,12 @@ export function navPages(options: { live: boolean; pool: boolean }): NavPage[] {
       keywords: ["automatic", "aeri", "evaluation", "自动测评", "自动评测"],
     },
     {
-      href: "/marvel0",
+      href: "/marvel_workstation",
       label: "marvel0",
-      hint: "marvel0.nav.hint",
       keywords: [
         "robot",
+        "marvel_workstation",
+        "workstation",
         "marvel0",
         "status",
         "deploy",
@@ -80,6 +81,24 @@ export function navPages(options: { live: boolean; pool: boolean }): NavPage[] {
         "部署",
         "策略服务器",
         "评测客户端",
+        "工作站",
+      ],
+    },
+    {
+      // Offline: a model and a solver in the browser, no robot connection.
+      href: "/robot-studio",
+      label: "robotStudio.title",
+      barLabel: "robotStudio.nav",
+      keywords: [
+        "fr3",
+        "3d",
+        "urdf",
+        "robot",
+        "preview",
+        "机械臂",
+        "拖拽",
+        "预览",
+        "三维",
       ],
     },
     {
@@ -91,7 +110,7 @@ export function navPages(options: { live: boolean; pool: boolean }): NavPage[] {
       href: "/workbench",
       label: "Conversion & review",
       keywords: ["convert", "review", "转换", "审核"],
-      collapse: 2,
+      collapse: 3,
     },
   );
   if (options.pool)
@@ -112,13 +131,7 @@ export function navPages(options: { live: boolean; pool: boolean }): NavPage[] {
       href: "/report",
       label: "Report",
       keywords: ["results", "报告"],
-      collapse: 1,
-    },
-    {
-      // Offline: a model and a solver in the browser, no robot connection.
-      href: "/robot-studio",
-      label: "robotStudio.title",
-      keywords: ["fr3", "urdf", "robot", "preview", "机械臂", "拖拽", "预览"],
+      // A page looked at now and then, not a link of the bar (since 2026-10-21).
       menuOnly: true,
     },
   );
@@ -132,19 +145,27 @@ export function headerPages(pages: NavPage[]): NavPage[] {
 }
 
 /**
- * Widths (CSS px) below which the header folds links into "More": the
- * reference pages (Guide, Report) first, then Conversion & review and the
- * training pool. Below `NAV_ROW_BELOW` the bar is two rows and the links
- * have a row of their own, so nothing folds. The "More" button itself is in
- * the bar at every width (the menu-only pages are in it). The same numbers
- * are in src/styles/shell.css (a test keeps them equal).
+ * Widths (CSS px) below which the header folds links into "More", one step at
+ * a time: Guide first, then Training pool, then Conversion & review. Report
+ * and the pages that are only menu items are in "More" at every width. Below
+ * `NAV_ROW_BELOW` the bar is two rows and the links have a row of their own
+ * (it scrolls), so nothing folds. Below `NAV_COMPACT_BELOW` the links are
+ * tighter and the search box keeps only its icon. The "More" button itself is
+ * in the bar at every width. The same numbers are in src/styles/shell.css (a
+ * test keeps them equal); how they were measured is written there.
  */
-export const NAV_COLLAPSE_WIDTHS = { first: 1640, second: 1500 } as const;
-export const NAV_ROW_BELOW = 1000;
+export const NAV_COLLAPSE_WIDTHS = {
+  first: 1710,
+  second: 1640,
+  third: 1530,
+} as const;
+export const NAV_COMPACT_BELOW = 1360;
+export const NAV_ROW_BELOW = 1170;
 
 /** How many folding steps apply at a window width: 0 = every link shows. */
-export function navCollapseLevel(width: number): 0 | 1 | 2 {
+export function navCollapseLevel(width: number): 0 | 1 | 2 | 3 {
   if (width < NAV_ROW_BELOW) return 0;
+  if (width < NAV_COLLAPSE_WIDTHS.third) return 3;
   if (width < NAV_COLLAPSE_WIDTHS.second) return 2;
   if (width < NAV_COLLAPSE_WIDTHS.first) return 1;
   return 0;
@@ -155,7 +176,7 @@ export function navCollapseLevel(width: number): 0 | 1 | 2 {
  * pages that are only ever menu items. */
 export function splitHeaderPages(
   pages: NavPage[],
-  level: 0 | 1 | 2,
+  level: 0 | 1 | 2 | 3,
 ): { links: NavPage[]; more: NavPage[] } {
   const links: NavPage[] = [];
   const more: NavPage[] = [];

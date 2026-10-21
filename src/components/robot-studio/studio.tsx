@@ -236,7 +236,7 @@ export default function RobotStudio() {
         </div>
         <div className="rs-header-links">
           <Badge>{t("robotStudio.offline")}</Badge>
-          <Link className="ds-focus rs-link" href="/marvel0">
+          <Link className="ds-focus rs-link" href="/marvel_workstation">
             {t("robotStudio.console")}
           </Link>
         </div>
