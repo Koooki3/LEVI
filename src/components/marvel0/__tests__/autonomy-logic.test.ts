@@ -937,6 +937,10 @@ describe("a key answers its own prompt only", () => {
     for (const [id, list] of Object.entries(KEY_PROMPTS))
       for (const kind of list)
         expect([id, kind, kinds.has(kind)]).toEqual([id, kind, true]);
+    // ... and no kind the backend lists is left without a key: a new kind
+    // would otherwise leave its keys off ("another prompt") without a word.
+    const used = new Set<string>(Object.values(KEY_PROMPTS).flat());
+    expect([...kinds].filter((kind) => !used.has(kind))).toEqual([]);
   });
 
   test("every key the backend's samples allow fits the prompt of its own document", () => {
