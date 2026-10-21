@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 from aeri_machine import AeriMachine
 from conftest import scaled
+from test_marvel0_run import Machine as EvalMachine
 
 from levi import activity, paths
 from levi.agent import core
@@ -148,6 +149,8 @@ def test_a_record_that_cannot_be_read_is_listed_not_taken_for_no_run(live):
     (row,) = hosted(activity.running_jobs())
     assert row["id"] == aeri_activity.UNREADABLE
     assert "marvel0-aeri" in activity.describe([row])  # (no pid to print)
+    # the other session's folder is its own: nothing there, nothing listed
+    assert [r for r in activity.running_jobs() if r["kind"] != "marvel0-aeri"] == []
 
 
 def test_a_failure_of_the_reader_is_listed_not_swallowed(monkeypatch):
@@ -155,12 +158,14 @@ def test_a_failure_of_the_reader_is_listed_not_swallowed(monkeypatch):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(aeri_activity, "hosted_job", broken)
-    (row,) = hosted(activity.running_jobs())
-    assert row["id"] == "error"
+    rows = activity.running_jobs()
+    assert {r["kind"] for r in rows} == {"marvel0-aeri", "marvel0-client"}
+    assert {r["id"] for r in rows} == {"error"}
 
 
 def test_the_reader_reads_the_folder_and_the_identity_the_launch_writes(live):
     assert aeri_activity.REL == aeri_run.REL
+    assert aeri_activity.CLIENT_REL == run.REL
     assert record.RECORD == "record.json"
     me = os.getpid()
     assert aeri_activity._identity(me) == run._identity(me)
@@ -170,6 +175,55 @@ def test_the_reader_reads_the_folder_and_the_identity_the_launch_writes(live):
     assert m.record()["leader"]["identity"] == aeri_activity._identity(
         m.record()["leader"]["pid"]
     )
+
+
+# --- the hosted evaluation client is a job too -------------------------------------------
+
+
+@pytest.fixture(name="client")
+def evaluation_client(tmp_path, monkeypatch):
+    m = EvalMachine(tmp_path / "e", monkeypatch, live=True)
+    monkeypatch.setattr(paths, "workspace", lambda: m.workspace.root)
+    yield m
+    m.close()
+    for spawned in m.children:
+        with contextlib.suppress(OSError):
+            os.killpg(spawned.pid, signal.SIGKILL)
+
+
+def test_the_jobs_list_the_hosted_client_from_its_start_to_its_end(client):
+    m = client
+    assert activity.running_jobs() == []
+    m.fake(connect_s=0.1, mux_s=0.05)
+    m.start(max_steps=400)
+    m.wait_state("at_gate")
+    (row,) = activity.running_jobs()
+    rec = m.record()
+    assert (row["kind"], row["id"], row["pid"]) == (
+        "marvel0-client",
+        rec["run_id"],
+        rec["leader"]["pid"],
+    )
+    answer = core.stop(force=False)
+    assert answer["status"] == "refused" and answer["running"] == [row]
+    m.press("end_at_gate")
+    m.wait_state("done")
+    assert activity.running_jobs() == []
+
+
+def test_asking_for_the_jobs_never_freezes_the_hosted_client(client, monkeypatch):
+    """The page's take-over of a client freezes it (SIGSTOP); a ``levi stop`` that
+    asks must not."""
+    m = client
+    m.fake(connect_s=0.1, mux_s=0.05)
+    m.start(max_steps=400)
+    m.wait_state("at_gate")
+    pid = m.record()["leader"]["pid"]
+    for _ in range(3):
+        assert len(activity.running_jobs()) == 1
+    time.sleep(0.3)
+    assert run.proc_state(pid) not in ("T", None), "not frozen"
+    assert m.sup._keyboard is True
 
 
 # --- the decision on one record -----------------------------------------------------------

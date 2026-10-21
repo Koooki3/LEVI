@@ -72,8 +72,8 @@ MUTATIONS = [
     (
         "activity: a run of an earlier process with the same pid is a D",
         "levi/marvel0/aeri_activity.py",
-        "    return _row(rec, pid, now) if same else None",
-        "    return _row(rec, pid, now)",
+        "    return _row(rec, pid, now, kind) if same else None",
+        "    return _row(rec, pid, now, kind)",
         ACT,
     ),
     (
@@ -123,6 +123,20 @@ MUTATIONS = [
         "levi/marvel0/aeri_activity.py",
         'REL = ("marvel0", "aeri")',
         'REL = ("marvel0", "aeri-run")',
+        ACT,
+    ),
+    (
+        "activity: the hosted evaluation client is not among the jobs",
+        "levi/marvel0/aeri_activity.py",
+        "HOSTED = ((KIND, REL), (CLIENT_KIND, CLIENT_REL))",
+        "HOSTED = ((KIND, REL),)",
+        ACT,
+    ),
+    (
+        "activity: the reader looks in another folder than the client's page writes",
+        "levi/marvel0/aeri_activity.py",
+        'CLIENT_REL = ("marvel0", "run")',
+        'CLIENT_REL = ("marvel0", "client")',
         ACT,
     ),
     # --- the start gate's check -----------------------------------------------------------

@@ -113,8 +113,9 @@ GPU lock is held), or any of that cannot be read. A stop that fails is not remem
 
 - **`levi stop`, the core's stop route and the restart by the workspace manual's R6** read `levi.activity.running_jobs()`. It lists
   `marvel0-aeri` (id = the run id, pid = the launcher's, `hosted: true`) from the run record on disk (`<workspace state>/marvel0/aeri/record.json`)
-  and the identity (start time and boot) of the launcher's pid, **read only and never through the page's supervisor**: its take-over sends a SIGINT to
-  a D that lost its keyboard, which is right in a restarted service and wrong in a `levi stop` process that merely asks. A record that cannot be read
+  and the identity (start time and boot) of the launcher's pid, and in the same way the hosted evaluation client (`marvel0-client`, `<workspace state>/marvel0/run/record.json`),
+  **read only and never through the pages' supervisors**: their take-over sends a SIGINT to a D (and freezes a client) that lost its keyboard, which is right in a
+  restarted service and wrong in a `levi stop` process that merely asks. A record that cannot be read
   is listed (`record-unreadable`), not taken for "no run". `levi stop` therefore refuses while a D runs (`--wait` waits for the person to end it), as it does
   for a pool export. The setup guard shows it among "product jobs" while the arm controller is on (information only, nothing gates on it).
 - **The service's start** adopts a D that outlived the previous service (`aeri_run_api.adopt_on_start`: one Ctrl+C, then watched). **Its shutdown** (`levi stop
@@ -218,7 +219,8 @@ and `git` outputs on other machines; `stack_ready` against a running stack. The 
 ### 产品其余部分如何看见托管的终端 D（`aeri_activity.py`）
 
 - **`levi stop`、核心的停止路由和工作区手册 R6 的重启**都读 `levi.activity.running_jobs()`。它从磁盘上的运行记录（`<工作区状态>/marvel0/aeri/record.json`）和启动器 pid 的身份（启动时刻与开机标识）
-  列出 `marvel0-aeri`（id 是运行号，pid 是启动器的，`hosted: true`），**只读，绝不经过页面的 supervisor**：它的接管会给失去键盘的 D 发 SIGINT，这在重启后的服务里是对的，
+  列出 `marvel0-aeri`（id 是运行号，pid 是启动器的，`hosted: true`），同样列出托管的评测客户端（`marvel0-client`，`<工作区状态>/marvel0/run/record.json`），
+  **只读，绝不经过页面的 supervisor**：它们的接管会给失去键盘的 D 发 SIGINT（并冻结客户端），这在重启后的服务里是对的，
   在只是来问一句的 `levi stop` 进程里是错的。读不出来的记录也会被列出（`record-unreadable`），而不是当作“没有运行”。所以 D 在运行时 `levi stop` 会拒绝（`--wait` 等人结束它），
   和对池导出一样。启动自检的“产品作业”里，在机械臂控制器开着时也会显示它（只是信息，没有任何东西依赖它）。
 - **服务启动**时接管上一个服务留下的 D（`aeri_run_api.adopt_on_start`：一次 Ctrl+C，然后只观察）。**服务关停**（`levi stop --force`、`systemctl stop levi-product`、重启）时，

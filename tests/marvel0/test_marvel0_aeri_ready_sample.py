@@ -57,6 +57,7 @@ def test_the_committed_file_is_what_the_backend_builds(path, built):
 
 def test_the_stack_up_rows_are_what_the_backend_builds(built_both):
     name = STACK_UP.relative_to(ROOT)
+    assert STACK_UP.name == "aeri_stack_up_rows.json"
     assert STACK_UP.is_file(), f"{name} is missing; create it with: {REGENERATE}"
     assert STACK_UP.read_text() == built_both[1], (
         f"{name} differs from what the backend builds; regenerate it with: {REGENERATE}"

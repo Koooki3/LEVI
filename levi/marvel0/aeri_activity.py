@@ -1,25 +1,29 @@
-"""The hosted AERI terminal D as seen by the rest of the product: ``levi stop``,
-the R6 restart, the service's start and its shutdown.
+"""The sessions the marvel0 page hosts, as the rest of the product sees them:
+the AERI terminal D and the evaluation client (terminal E). ``levi stop``, the R6
+restart, the service's start and its shutdown.
 
 * **``levi stop`` and every other process** (the CLI, the setup probes, the core's
   own stop route) ask ``levi.activity.running_jobs()`` which jobs would be killed.
-  A hosted D must be among them, or an agent that restarts the product by R6
-  starts the hang-up chain (SIGINT, 3 s, SIGKILL) under a D that is moving the
-  arm: the 7/7 shutdown is cut short and the policy and VLM units stay behind.
-  ``job_rows`` answers that **from the run record on disk and the identity of
-  the launcher's pid, read only**: it must not use the supervisor of
-  ``aeri_run_api``, whose ``adopt`` sends a SIGINT to a D it finds without a
-  keyboard, which is right in a restarted service and wrong in a ``levi stop``
-  process that merely asks. A record that cannot be read is not "no D": it is
-  listed (as ``record-unreadable``), so a wrong answer is loud, never quiet.
+  A hosted D (or E) must be among them, or an agent that restarts the product by
+  R6 starts the hang-up chain under a session that is moving the arm: for D
+  (SIGINT, 3 s, SIGKILL) the 7/7 shutdown is cut short and the policy and VLM
+  units stay behind; for E the client is killed outright.
+  ``job_rows`` answers that **from the run record on disk and the identity of the
+  launcher's pid, read only**: it must not use the supervisors of ``aeri_run_api``
+  or ``run_api``, whose ``adopt`` signals a session it finds without a keyboard
+  (D gets a SIGINT, E is frozen), which is right in a restarted service and wrong
+  in a ``levi stop`` process that merely asks. A record that cannot be read is not
+  "no session": it is listed (as ``record-unreadable``), so a wrong answer is
+  loud, never quiet.
 * **The service's start** (``adopt_on_start``) takes over a D that outlived the
   service (``aeri_run_api.adopt_on_start``: one SIGINT, then watched).
 * **The service's shutdown** (``shutdown_hosted``) stops a hosted D the way a
   Stop press does (``Supervisor.stop``: Ctrl+C by the pty, once), then waits for
   its 7/7 wrap-up up to ``SHUTDOWN_WAIT_S``. Never a bare kill: what is left when
-  the wait ends is the hang-up chain's job (the pty closes with the process).
+  the wait ends is the hang-up chain's job (the pty closes with the process). The
+  evaluation client has no wrap-up to wait for and is left to its chain.
 * **The start gate** (``hosted_visible_to_activity``) is the mechanical check
-  that the two above can see a run at all: a start whose D ``levi stop`` could
+  that the first of these can see a D at all: a start whose D ``levi stop`` could
   not list is refused (before, as a self-test of the wiring and the record
   folder; after the launch bookkeeping, against the real ``running_jobs``).
 
@@ -41,9 +45,13 @@ from levi.workspace import Workspace
 from . import record
 
 KIND = "marvel0-aeri"
-# <workspace state>/marvel0/aeri/record.json (aeri_run.REL and record.RECORD;
-# a test compares the two so a move cannot blind this reader).
+CLIENT_KIND = "marvel0-client"
+# <workspace state>/marvel0/aeri/record.json and .../marvel0/run/record.json
+# (aeri_run.REL, run.REL and record.RECORD; a test compares them so a move cannot
+# blind this reader).
 REL = ("marvel0", "aeri")
+CLIENT_REL = ("marvel0", "run")
+HOSTED = ((KIND, REL), (CLIENT_KIND, CLIENT_REL))
 # A record in phase "intent" is written just before the launcher is spawned: it is
 # a start in flight for a moment, and a leftover of a service that died in between
 # after that.
@@ -68,11 +76,11 @@ def _identity(pid) -> dict | None:
     return {"start_ticks": who["start_ticks"], "boot": who["boot"]}
 
 
-def record_dir(workspace: Workspace | None = None) -> Path | None:
+def record_dir(workspace: Workspace | None = None, rel=REL) -> Path | None:
     """The run record's folder of ``workspace`` (default: the process-wide one),
     or None when there is none to read (no folder, a link, another user's)."""
     base = (workspace or Workspace.at(paths.workspace())).state
-    target = base / Path(*REL)
+    target = base / Path(*rel)
     try:
         info = os.lstat(target)
     except OSError:
@@ -82,10 +90,10 @@ def record_dir(workspace: Workspace | None = None) -> Path | None:
     return target
 
 
-def _row(rec: dict, pid, now: float) -> dict:
+def _row(rec: dict, pid, now: float, kind=KIND) -> dict:
     began = rec.get("created_epoch")
     return {
-        "kind": KIND,
+        "kind": kind,
         "id": rec.get("run_id"),
         "pid": pid if isinstance(pid, int) and pid > 0 else None,
         "running_seconds": round(now - began) if isinstance(began, (int, float)) else 0,
@@ -96,7 +104,9 @@ def _row(rec: dict, pid, now: float) -> dict:
     }
 
 
-def row_of(rec, *, identity=_identity, now: float | None = None) -> dict | None:
+def row_of(
+    rec, *, identity=_identity, now: float | None = None, kind=KIND
+) -> dict | None:
     """The job row for a run record, or None when no D runs for it. A pure
     decision on the record and on what ``identity`` says of the launcher's pid.
 
@@ -109,7 +119,7 @@ def row_of(rec, *, identity=_identity, now: float | None = None) -> dict | None:
     if phase == "intent":
         began = rec.get("created_epoch")
         young = isinstance(began, (int, float)) and 0 <= now - began < INTENT_GRACE_S
-        return _row(rec, None, now) if young else None
+        return _row(rec, None, now, kind) if young else None
     if phase != "started":
         return None
     leader = rec.get("leader") or {}
@@ -121,43 +131,53 @@ def row_of(rec, *, identity=_identity, now: float | None = None) -> dict | None:
     if got is None:
         return None
     if not isinstance(want, dict):
-        return _row(rec, pid, now)
+        return _row(rec, pid, now, kind)
     same = all(str(want.get(k)) == str(got.get(k)) for k in ("start_ticks", "boot"))
-    return _row(rec, pid, now) if same else None
+    return _row(rec, pid, now, kind) if same else None
 
 
 def hosted_job(
-    workspace: Workspace | None = None, *, identity=_identity, now=None
+    workspace: Workspace | None = None,
+    *,
+    identity=_identity,
+    now=None,
+    kind=KIND,
+    rel=REL,
 ) -> dict | None:
-    """The hosted D as a job row, or None. Raises ``record.RecordCorrupt`` for a
-    record that exists and cannot be read."""
-    directory = record_dir(workspace)
+    """The hosted session of ``kind`` (default: D) as a job row, or None. Raises
+    ``record.RecordCorrupt`` for a record that exists and cannot be read."""
+    directory = record_dir(workspace, rel)
     if directory is None:
         return None
     rec = record.read_record(directory)
     if rec is None:
         return None
-    return row_of(rec, identity=identity, now=now)
+    return row_of(rec, identity=identity, now=now, kind=kind)
 
 
 def job_rows(workspace: Workspace | None = None, *, identity=_identity) -> list:
-    """What ``levi.activity.running_jobs`` adds: the hosted D, or a loud row when
-    the answer cannot be had. Never raises."""
-    try:
-        row = hosted_job(workspace, identity=identity)
-    except Exception as exc:  # noqa: BLE001 - an unreadable answer is not "idle"
-        why = UNREADABLE if isinstance(exc, record.RecordCorrupt) else "error"
-        return [
-            {
-                "kind": KIND,
-                "id": why,
-                "pid": None,
-                "running_seconds": 0,
-                "progress": None,
-                "hosted": True,
-            }
-        ]
-    return [] if row is None else [row]
+    """What ``levi.activity.running_jobs`` adds: the hosted D and the hosted
+    client, or a loud row for one whose answer cannot be had. Never raises."""
+    out = []
+    for kind, rel in HOSTED:
+        try:
+            row = hosted_job(workspace, identity=identity, kind=kind, rel=rel)
+        except Exception as exc:  # noqa: BLE001 - an unreadable answer is not "idle"
+            why = UNREADABLE if isinstance(exc, record.RecordCorrupt) else "error"
+            out.append(
+                {
+                    "kind": kind,
+                    "id": why,
+                    "pid": None,
+                    "running_seconds": 0,
+                    "progress": None,
+                    "hosted": True,
+                }
+            )
+        else:
+            if row is not None:
+                out.append(row)
+    return out
 
 
 def hosted_visible_to_activity(
