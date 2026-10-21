@@ -67,6 +67,12 @@ export function navPages(options: { live: boolean; pool: boolean }): NavPage[] {
       header: false,
     },
     {
+      href: "/robot-studio",
+      label: "robotStudio.title",
+      keywords: ["fr3", "urdf", "robot", "preview", "机械臂", "拖拽", "预览"],
+      header: false,
+    },
+    {
       href: "/explore",
       label: "Explore",
       keywords: ["datasets", "browse", "探索", "数据集"],

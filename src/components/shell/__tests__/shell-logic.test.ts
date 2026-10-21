@@ -126,8 +126,9 @@ describe("navigation and commands", () => {
     // The marvel0 is reached by Ctrl+K and G C: an eighth header link
     // pushed Guide and Report out of view below 1500 px.
     expect(all).toContain("/marvel0");
+    expect(all).toContain("/robot-studio");
     expect(headerPages(pages).map((p) => p.href)).toEqual(
-      all.filter((href) => href !== "/marvel0"),
+      all.filter((href) => !["/marvel0", "/robot-studio"].includes(href)),
     );
   });
 
@@ -135,6 +136,7 @@ describe("navigation and commands", () => {
     expect(navPages({ live: false, pool: true }).map((p) => p.href)).toEqual([
       "/automatic",
       "/marvel0",
+      "/robot-studio",
       "/explore",
       "/workbench",
       "/pool",
@@ -145,6 +147,7 @@ describe("navigation and commands", () => {
       "/live",
       "/automatic",
       "/marvel0",
+      "/robot-studio",
       "/explore",
       "/workbench",
       "/guide",
@@ -190,6 +193,8 @@ describe("navigation and commands", () => {
     const commands = make();
     expect(filterCommands(commands, "")).toEqual(commands);
     expect(filterCommands(commands, "pool")[0].id).toBe("go-pool");
+    expect(filterCommands(commands, "fr3")[0].id).toBe("go-robot-studio");
+    expect(filterCommands(commands, "拖拽")[0].id).toBe("go-robot-studio");
     expect(filterCommands(commands, "训练池")[0].id).toBe("go-pool");
     expect(filterCommands(commands, "theme dark").map((c) => c.id)).toEqual([
       "theme-dark",

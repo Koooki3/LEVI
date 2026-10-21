@@ -90,3 +90,8 @@ levi/agent/skills/levi-overview/SKILL.md
 /lab/
 LEVI_Data_Harness_Research_Plan_20260924.md
 levi.md
+
+# Pinned FR3 preview assets; other generated public content remains ignored.
+!/public/robots/
+/public/robots/*
+!/public/robots/fr3/

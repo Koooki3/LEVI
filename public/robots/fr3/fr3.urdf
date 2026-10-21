@@ -1,0 +1,115 @@
+<?xml version="1.0"?>
+<!-- Derived visual-only FR3 model; see SOURCE.json and NOTICE. No end effector. -->
+<robot name="fr3_preview">
+  <link name="fr3_link0">
+    <visual>
+      <geometry>
+        <mesh filename="link0.glb" />
+      </geometry>
+    </visual>
+  </link>
+  <link name="fr3_link1">
+    <visual>
+      <geometry>
+        <mesh filename="link1.glb" />
+      </geometry>
+    </visual>
+  </link>
+  <joint name="fr3_joint1" type="revolute">
+    <parent link="fr3_link0" />
+    <child link="fr3_link1" />
+    <origin xyz="0.0 0.0 0.333" rpy="0.0 0.0 0.0" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.9007" upper="2.9007" effort="87.0" velocity="2.62" />
+  </joint>
+  <link name="fr3_link2">
+    <visual>
+      <geometry>
+        <mesh filename="link2.glb" />
+      </geometry>
+    </visual>
+  </link>
+  <joint name="fr3_joint2" type="revolute">
+    <parent link="fr3_link1" />
+    <child link="fr3_link2" />
+    <origin xyz="0.0 0.0 0.0" rpy="-1.570796326794897 0.0 0.0" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.8361" upper="1.8361" effort="87.0" velocity="2.62" />
+  </joint>
+  <link name="fr3_link3">
+    <visual>
+      <geometry>
+        <mesh filename="link3.glb" />
+      </geometry>
+    </visual>
+  </link>
+  <joint name="fr3_joint3" type="revolute">
+    <parent link="fr3_link2" />
+    <child link="fr3_link3" />
+    <origin xyz="0.0 -0.316 0.0" rpy="1.570796326794897 0.0 0.0" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.9007" upper="2.9007" effort="87.0" velocity="2.62" />
+  </joint>
+  <link name="fr3_link4">
+    <visual>
+      <geometry>
+        <mesh filename="link4.glb" />
+      </geometry>
+    </visual>
+  </link>
+  <joint name="fr3_joint4" type="revolute">
+    <parent link="fr3_link3" />
+    <child link="fr3_link4" />
+    <origin xyz="0.0825 0.0 0.0" rpy="1.570796326794897 0.0 0.0" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.077" upper="-0.1169" effort="87.0" velocity="2.62" />
+  </joint>
+  <link name="fr3_link5">
+    <visual>
+      <geometry>
+        <mesh filename="link5.glb" />
+      </geometry>
+    </visual>
+  </link>
+  <joint name="fr3_joint5" type="revolute">
+    <parent link="fr3_link4" />
+    <child link="fr3_link5" />
+    <origin xyz="-0.0825 0.384 0.0" rpy="-1.570796326794897 0.0 0.0" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.8763" upper="2.8763" effort="12.0" velocity="5.26" />
+  </joint>
+  <link name="fr3_link6">
+    <visual>
+      <geometry>
+        <mesh filename="link6.glb" />
+      </geometry>
+    </visual>
+  </link>
+  <joint name="fr3_joint6" type="revolute">
+    <parent link="fr3_link5" />
+    <child link="fr3_link6" />
+    <origin xyz="0.0 0.0 0.0" rpy="1.570796326794897 0.0 0.0" />
+    <axis xyz="0 0 1" />
+    <limit lower="0.4398" upper="4.6216" effort="12.0" velocity="4.18" />
+  </joint>
+  <link name="fr3_link7">
+    <visual>
+      <geometry>
+        <mesh filename="link7.glb" />
+      </geometry>
+    </visual>
+  </link>
+  <joint name="fr3_joint7" type="revolute">
+    <parent link="fr3_link6" />
+    <child link="fr3_link7" />
+    <origin xyz="0.088 0.0 0.0" rpy="1.570796326794897 0.0 0.0" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.0508" upper="3.0508" effort="12.0" velocity="5.26" />
+  </joint>
+  <link name="fr3_link8" />
+  <joint name="fr3_joint8" type="fixed">
+    <parent link="fr3_link7" />
+    <child link="fr3_link8" />
+    <origin xyz="0.0 0.0 0.107" rpy="0.0 0.0 0.0" />
+  </joint>
+</robot>

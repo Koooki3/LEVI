@@ -13,3 +13,7 @@ Every guide in one place. English and 中文 editions sit side by side where bot
 | **Reference** | [API](API.md) · [Validation](VALIDATION.md) · [Architecture status](architecture/IMPLEMENTATION_STATUS.md) · [Automatic evaluation pipeline (AERI)](AUTOMATIC_PIPELINE.md) · [中文](AUTOMATIC_PIPELINE.zh-CN.md) · [Event intelligence](EVENTS.md) · [中文](EVENTS.zh-CN.md) · [Performance baseline and cache budget](PERFORMANCE.md) · [中文](PERFORMANCE.zh-CN.md) · [Upstream](UPSTREAM.md) · [Releasing](RELEASING.md) · [Changelog](../CHANGELOG.md) · [Third-party notices](../THIRD_PARTY_NOTICES.md) · [References and citation](REFERENCES.md) |
 
 The **Report** page shows a live technical report from a folder you name with `LEVI_REPORT_DIR` (read-only, may be outside the workspace); see [API](API.md#technical-report--技术报告).
+
+## Robot interaction
+
+[FR3 Robot Studio](ROBOT_STUDIO.md) · [简体中文](ROBOT_STUDIO.zh-CN.md): offline flange dragging, joint preview and non-executable draft export.
