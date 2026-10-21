@@ -135,25 +135,117 @@ def test_segment_f1_falls_with_a_stricter_iou():
     assert segment_f1({0: []}, {0: []})["0.5"]["pooled"] is None
 
 
-def test_grading_uses_the_one_matching_rule():
-    """refactor/eval-segment-core: grading.episode matches with match_segments and scores with
-    segment_f1_counts; it keeps no IoU or F1 of its own."""
-    from levi.events.boundary_metrics import match_segments, segment_f1_counts
+# frozen copy of 89bd5b32 levi/harness/grading.py (_iou and episode), do not edit: the oracle the
+# refactor (grading and boundary_metrics sharing match_segments) is checked against.
+def _oracle_iou(a, b):
+    start, end = max(a["start"], b["start"]), min(a["end"], b["end"])
+    inter = max(0.0, end - start)
+    union = max(a["end"], b["end"]) - min(a["start"], b["start"])
+    return inter / union if union > 0 else 0.0
 
-    assert not hasattr(grading, "_iou")
-    rng = random.Random(7)
-    for _ in range(50):
-        ref = _random_segments(rng)
-        cand = [
-            {**s, "end": s["end"] + rng.uniform(-0.4, 0.4)}
-            for s in _random_segments(rng) + ref
+
+def _oracle_episode(reference, candidate, iou_threshold=0.3):
+    ref = [s for s in reference if s.get("end") is not None]
+    cand = [s for s in candidate if s.get("end") is not None]
+    pairs, used = [], set()
+    for r in ref:
+        best, score = None, iou_threshold
+        for j, c in enumerate(cand):
+            if j in used or c.get("subtask") != r.get("subtask"):
+                continue
+            value = _oracle_iou(r, c)
+            if value >= score:
+                best, score = j, value
+        if best is not None:
+            used.add(best)
+            pairs.append((r, cand[best]))
+    precision = len(pairs) / len(cand) if cand else (1.0 if not ref else 0.0)
+    recall = len(pairs) / len(ref) if ref else 1.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    outcomes = [r.get("outcome") == c.get("outcome") for r, c in pairs]
+    errors = [
+        (abs(r["start"] - c["start"]) + abs(r["end"] - c["end"])) / 2 for r, c in pairs
+    ]
+    total = sum(max(0.0, r["end"] - r["start"]) for r in ref)
+    same_subtask = same_outcome = 0.0
+    for r in ref:
+        for c in cand:
+            if c.get("subtask") != r.get("subtask"):
+                continue
+            overlap = max(0.0, min(r["end"], c["end"]) - max(r["start"], c["start"]))
+            same_subtask += overlap
+            if c.get("outcome") == r.get("outcome"):
+                same_outcome += overlap
+    return f1, {
+        "reference_segments": len(ref),
+        "candidate_segments": len(cand),
+        "matched": len(pairs),
+        "segment_f1": round(f1, 3),
+        "outcome_accuracy": round(sum(outcomes) / len(outcomes), 3)
+        if outcomes
+        else 0.0,
+        "boundary_mae": round(sum(errors) / len(errors), 2) if errors else None,
+        "time_accuracy": round(min(1.0, same_subtask / total), 3) if total else None,
+        "outcome_time_accuracy": round(min(1.0, same_outcome / total), 3)
+        if total
+        else None,
+    }
+
+
+def _oracle_cases():
+    """Random episodes with outcomes, plus the edges a random draw seldom hits: an IoU
+    exactly at the 0.3 threshold, candidates tied on IoU whose outcomes differ (which
+    one is paired changes outcome_accuracy), open segments and empty sides."""
+    rng = random.Random(11)
+    for _ in range(200):
+        ref = [
+            {**s, "outcome": rng.choice(["success", "failure"])}
+            for s in _random_segments(rng)
         ]
-        out = grading.episode(ref, cand)
-        pairs, r, c = match_segments(ref, cand, grading.IOU)
-        assert out["matched"] == len(pairs)
-        assert out["segment_f1"] == round(
-            segment_f1_counts(len(pairs), len(r), len(c)), 3
-        )
+        cand = [
+            {
+                **s,
+                "start": s["start"] + rng.uniform(-0.6, 0.6),
+                "end": s["end"] + rng.uniform(-0.6, 0.6),
+                "outcome": rng.choice(["success", "failure"]),
+            }
+            for s in _random_segments(rng) + ref
+            if rng.random() < 0.8
+        ]
+        yield ref, cand
+    a = {"subtask": "a"}
+    yield (
+        [{"start": 0.0, "end": 10.0, **a}],
+        [{"start": 0.0, "end": 3.0, **a}],
+    )  # IoU 0.3 exactly
+    yield (
+        [{"start": 0.0, "end": 2.0, "outcome": "success", **a}],
+        [
+            {"start": 0.0, "end": 2.0, "outcome": "failure", **a},
+            {"start": 0.0, "end": 2.0, "outcome": "success", **a},
+        ],
+    )
+    yield [{"start": 0.0, "end": 2.0, **a}, {"start": 3.0, "end": None, **a}], []
+    yield [], [{"start": 0.0, "end": 1.0, **a}]
+    yield [], []
+
+
+def test_grading_and_segment_f1_match_the_frozen_pre_refactor_grading():
+    """refactor/eval-segment-core: grading.episode and boundary_metrics.segment_f1 give exactly
+    what grading.episode gave at 89bd5b32 (supervisor review: compare with a frozen copy, not
+    with the shared functions themselves)."""
+    assert not hasattr(grading, "_iou")
+    for ref, cand in _oracle_cases():
+        f1, expected = _oracle_episode(ref, cand)
+        assert grading.episode(ref, cand) == expected, (ref, cand)
+        multi = segment_f1({0: ref}, {0: cand}, ious=(0.3,))["0.3"]["mean"]
+        assert multi == pytest.approx(f1, abs=1e-4), (ref, cand)
+
+
+def test_an_iou_exactly_at_the_threshold_is_a_match():
+    ref = [{"start": 0.0, "end": 10.0, "subtask": "a"}]
+    cand = [{"start": 0.0, "end": 3.0, "subtask": "a"}]
+    assert grading.episode(ref, cand)["matched"] == 1
 
 
 def test_match_segments_ties_go_to_the_later_candidate_and_open_segments_are_left_out():
