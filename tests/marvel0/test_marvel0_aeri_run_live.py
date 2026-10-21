@@ -202,7 +202,7 @@ def test_a_wait_that_asks_twice_is_resumed_with_enter_then_y(live):
     view = m.wait_state("await_resume", timeout=40)
     assert view["wait"]["confirm"] is True
     ask = next(k for k in view["keys"] if k["id"] == "resume_ask")
-    assert (ask["level"], ask["motion"]) == ("A", "none")
+    assert (ask["level"], ask["motion"]) == ("B", "may_move")  # (B for both variants)
     m.press("resume_ask")
     view = m.wait_state("await_resume_confirm")
     assert {k["id"] for k in view["keys"] if k["allowed"]} <= {

@@ -234,7 +234,9 @@ def test_the_second_step_keys_sit_in_the_second_slot(samples):
                 assert key["slot"] == "first", (name, key["id"])
 
 
-def test_the_two_enters_differ_in_what_they_say(samples):
+def test_the_two_enters_differ_in_what_they_say_and_are_both_level_b(samples):
+    """Which variant a wait is rests on an inference; both Enters are level B
+    (the delay, the gap and the presence check), never a single click."""
     confirm = next(
         k for k in samples["await_resume"]["keys"] if k["id"] == "resume_ask"
     )
@@ -243,9 +245,10 @@ def test_the_two_enters_differ_in_what_they_say(samples):
     )
     assert (confirm["variant"], confirm["level"], confirm["motion"]) == (
         "confirm_reason",
-        "A",
-        "none",
+        "B",
+        "may_move",
     )
+    assert confirm["not_before"] is not None
     assert (direct["variant"], direct["level"], direct["motion"]) == (
         "direct",
         "B",
@@ -284,3 +287,27 @@ def test_the_codes_file_lists_every_code_of_the_module():
     assert set(st.WHY_NOT) <= set(st.REFUSALS), (
         "every reason a key is refused is a route error too"
     )
+
+
+def test_a_stop_from_elsewhere_and_a_run_of_another_core_are_in_the_samples(samples):
+    """For the page's texts: the wording follows ``stop.phase`` (until D has
+    answered, ``sent``/``unconfirmed``/``retried``, the arm may still move:
+    ``state.may_move``; after, ``acked``, it stays where it is), whoever sent the
+    Ctrl+C; and a run another live core owns is only watched."""
+    acked = samples["stopping_acked_elsewhere"]
+    assert acked["state"]["id"] == "stopping" and acked["state"]["may_move"] is False
+    assert acked["stop"]["phase"] == "acked" and acked["stop"]["sent_at"] is None
+    assert acked["stop"]["allowed"] is False
+    for name in ("stopping_unconfirmed", "orphaned"):
+        assert samples[name]["state"]["may_move"] is True, name
+        assert samples[name]["stop"]["phase"] in ("sent", "unconfirmed"), name
+    for name in ("stopping", "stalled", "stopping_acked_elsewhere"):
+        assert samples[name]["state"]["may_move"] is False, name
+    other = samples["unknown_other_core"]
+    assert (other["state"]["id"], other["state"]["reason"]) == (
+        "unknown",
+        "no_keyboard",
+    )
+    assert other["keys"] == [] and other["stop"]["allowed"] is False
+    assert other["stop"]["why_not"]["code"] == "driven_elsewhere"
+    assert other["d"]["alive"] is True and other["d"]["keyboard"] is False

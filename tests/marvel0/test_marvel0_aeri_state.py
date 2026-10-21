@@ -378,7 +378,11 @@ def waited(reason, extra=()):
     ]
 
 
-def test_a_wait_that_needs_a_second_step_asks_first_without_moving(rig):
+def test_a_wait_that_needs_a_second_step_asks_first_and_is_still_a_level_b_key(rig):
+    """Which variant a wait is rests on an inference (the reason table of the
+    profile, ``other`` falling to "direct"); the asking step is therefore a
+    level B key too: with the delay, the gap and the presence check, never a
+    single click that could be a direct resume when the inference is wrong."""
     d = rig.look(
         rig.jview(21, extra=waited("operator_stop")),
         wait_text("harvest-5bc750ca", "operator_stop"),
@@ -389,10 +393,11 @@ def test_a_wait_that_needs_a_second_step_asks_first_without_moving(rig):
     assert allowed(keys) == ["resume_ask", "quit"]
     ask = keys[0]
     assert (ask["level"], ask["motion"], ask["variant"]) == (
-        "A",
-        "none",
+        "B",
+        "may_move",
         "confirm_reason",
     )
+    assert ask["not_before"] is not None  # the delay applies to it
 
 
 def test_a_wait_that_resumes_on_enter_alone_is_a_key_that_may_move_the_arm(rig):

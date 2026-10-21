@@ -341,6 +341,19 @@ def profile_matches(worktree, profile_id) -> tuple:
     return True, "ok"
 
 
+def profile_head_ok(profile_id, head) -> bool:
+    """Whether ``head`` (the full commit id git prints for the AERI worktree) is
+    the commit the profile was written from. With a clean tree this pins every
+    file of the worktree, the ones that write the journal included."""
+    profile = PROFILES.get(profile_id)
+    return (
+        profile is not None
+        and isinstance(head, str)
+        and len(profile.commit) >= 7
+        and head.lower().startswith(profile.commit.lower())
+    )
+
+
 # --- the key table -----------------------------------------------------------------------
 
 
@@ -456,6 +469,7 @@ class Facts:
     exit: dict | None = None  # {"code", "signal"} once it is gone
     keyboard: bool = False  # this process holds the pty master
     adopted: bool = False  # found again after a restart: no keyboard
+    foreign: bool = False  # another live core owns this run: only watched
     j: JView = field(default_factory=JView)
     screen: aeri_screen.ScreenView = field(default_factory=aeri_screen.ScreenView)
     runner: RView = field(default_factory=RView)
@@ -533,8 +547,19 @@ def expected_prompt(f: Facts) -> str | None:
     if j.to_state in ("VERIFY_INITIAL", "SCENE_ASSESS"):
         if j.inventory_pending:
             return "inventory"
+        # The release prompt of a round is asked only where D's loop is idle:
+        # at VERIFY_INITIAL (``preflight_passed`` before the first round,
+        # ``subtask_reverse_done`` after each one). SCENE_ASSESS is where the
+        # forward loop ends (``subtask_forward_done``) and where the reverse loop
+        # re-plans (``subtask_continue``): D asks for nothing there and the VLM
+        # may take minutes (up to 540 s with an external answer), so expecting a
+        # prompt there turned every reverse loop into ``unknown`` (r08 seq 49
+        # and 71). Not "released <= reverse rounds done" either: a round that a
+        # resume abandoned never completes its reverse loop, and that count
+        # would hide every later prompt.
         if (
-            j.inventory_confirmed
+            j.to_state == "VERIFY_INITIAL"
+            and j.inventory_confirmed
             and not j.released_after(last)
             and j.pose_refused_seq < last
             and j.open_transaction is None
@@ -571,13 +596,22 @@ def exit_reason(ex) -> str:
     return EXITS.get(code, "exit_other")
 
 
+def interrupted(f: Facts) -> bool:
+    """D says it was interrupted (its ``interrupt`` line on the screen or its
+    ``operator_interrupt`` note), **whoever sent the Ctrl+C**: this page, the
+    out-of-page script, a terminal or ``kill``."""
+    return bool(f.screen.interrupt or f.j.interrupt_seq >= 0)
+
+
 def stop_phase(f: Facts) -> str:
     """idle | sent | acked | unconfirmed | retried, from what was written and
-    what D said back (its ``interrupt`` line or the ``operator_interrupt`` note)."""
+    what D said back. D's acknowledgement counts whoever sent the signal: a Stop
+    sent from elsewhere that D answered is ``acked`` here too, so this page
+    never offers a second Ctrl+C into a wrap-up that has begun."""
+    if interrupted(f):
+        return "acked"
     if f.stop_written == "idle":
         return "idle"
-    if f.screen.interrupt or f.j.interrupt_seq >= 0:
-        return "acked"
     if f.stop_written == "retried":
         return "retried"
     if f.runner_seen and f.stop_age_s is not None and f.stop_age_s > STOP_ACK_S:
@@ -614,13 +648,22 @@ def _decide(f: Facts, expect, expect_age: float, progress_age: float) -> _V:
         return _V("ended", exit_reason(f.exit or rec.get("exit")))
     if f.profile is None:
         return _V("unknown", "profile_missing", may_move=True)
-    winding = f.stop_written != "idle" or j.to_state in ("FAULT_LOCKED", "COMPLETED")
+    if f.foreign:
+        # Another live core owns this run: this one only watches (no key, no
+        # signal). The owner's page is where the run is driven.
+        return _V("unknown", "no_keyboard", may_move=True)
+    acked = interrupted(f)
+    sent = f.stop_written != "idle"
+    winding = sent or acked or j.to_state in ("FAULT_LOCKED", "COMPLETED")
+    # A Ctrl+C that D has not answered yet: the arm may still be moving.
+    unacked = sent and not acked
     limit = STALL_QUEUE_S if _waiting_agent(f) else STALL_S
     if winding and progress_age >= limit:
         return _V(
             "stalled",
             "no_progress",
             {"since_progress_s": round(progress_age, 1)},
+            may_move=unacked,
             winding=True,
             stalled=True,
         )
@@ -628,7 +671,9 @@ def _decide(f: Facts, expect, expect_age: float, progress_age: float) -> _V:
         code = screen.fault or j.reason
         return _V("fault_locked", "fault_locked", {"code": code}, winding=True)
     if f.adopted:
-        return _V("orphaned", "adopted_after_restart", winding=winding)
+        return _V(
+            "orphaned", "adopted_after_restart", may_move=unacked, winding=winding
+        )
     if winding:
         since = round(f.stop_age_s, 1) if f.stop_age_s is not None else None
         reason = "completing" if j.to_state == "COMPLETED" else "stop_sent"
@@ -636,6 +681,7 @@ def _decide(f: Facts, expect, expect_age: float, progress_age: float) -> _V:
             "stopping",
             reason,
             {} if since is None else {"since_stop_s": since},
+            may_move=unacked,
             winding=True,
         )
     if f.runner_seen and f.runner_age_s is not None and f.runner_age_s > RUNNER_STALE_S:
@@ -870,13 +916,17 @@ def _assemble(f: Facts, mem: Memory, nxt: Memory, v: _V, expect) -> Derived:
         agree["journal"] = "conflict"
     phase = stop_phase(f)
     alive = bool(f.alive) and v.state not in ("ended", "idle")
-    stop_open = alive and (
-        (
-            phase == "idle"
-            and not v.winding
-            and v.state not in ("idle", "ended", "fault_locked", "orphaned")
+    stop_open = (
+        alive
+        and not f.foreign
+        and (
+            (
+                phase == "idle"
+                and not v.winding
+                and v.state not in ("idle", "ended", "fault_locked", "orphaned")
+            )
+            or (phase == "unconfirmed" and v.state == "stopping")
         )
-        or (phase == "unconfirmed" and v.state == "stopping")
     )
     progress = _progress(f, v, rec, round_id)
     inventory = _inventory(f, v)
@@ -1055,9 +1105,12 @@ def offer(d: Derived, f: Facts, c: Context) -> list:
         spec = KEYS[action]
         level, motion, variant, phrase = spec.level, spec.motion, None, None
         if action == "resume_ask":
+            # Level B for both variants. Which variant a wait is rests on an
+            # inference (the reason is in the profile's table, ``other`` falls
+            # to the direct one): when it is wrong, a "direct" resume would go
+            # out as one click, without the delay and the presence check, and
+            # the arm moves at once. The price of B for the asking step is 1.5 s.
             variant = d.variant
-            if variant == "confirm_reason":
-                level, motion = "A", "none"
         if spec.wire is None:
             phrase = phrase_for(action, run_name)
         reason = None
@@ -1132,6 +1185,8 @@ def stop_entry(d: Derived, f: Facts) -> dict:
         }
     if not d.alive:
         reason = why("d_gone")
+    elif f.foreign:
+        reason = why("driven_elsewhere")
     elif d.stop_phase != "idle":
         reason = why("stop_spent")
     else:

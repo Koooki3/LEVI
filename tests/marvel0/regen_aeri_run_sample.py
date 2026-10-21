@@ -437,6 +437,24 @@ def samples() -> dict:
             ),
         )
         put("stalled", _stalled(mk, j34, interrupted.encode(), sent_rec))
+        # --- a Ctrl+C that came from elsewhere (a terminal, kill, the script): D
+        # answered it, this page never sent one and offers none
+        put(
+            "stopping_acked_elsewhere",
+            mk.build(j34, interrupted.encode(), steps=9, history=H, seq=64),
+        )
+        # --- a run that another live core owns: watched, not driven
+        put(
+            "unknown_other_core",
+            mk.build(
+                j34,
+                fwd,
+                steps=9,
+                history=H,
+                facts={"foreign": True, "adopted": True, "keyboard": False},
+                seq=65,
+            ),
+        )
         locked = mk.jview(
             34,
             extra=[
