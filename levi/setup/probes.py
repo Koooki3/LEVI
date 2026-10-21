@@ -1114,7 +1114,13 @@ class Probes:
         return {
             "state": "ok",
             "jobs": [
-                {"kind": j.get("kind"), "id": j.get("id")} for j in (self.jobs() or [])
+                {
+                    "kind": j.get("kind"),
+                    "id": j.get("id"),
+                    # a robot session the marvel0 page hosts, not a worker job
+                    **({"hosted": True} if j.get("hosted") else {}),
+                }
+                for j in (self.jobs() or [])
             ][:12],
         }
 
@@ -1147,7 +1153,11 @@ class Probes:
             quiet = False
         else:
             quiet = None if unknown else True
-        running = list((jobs or {}).get("jobs") or [])
+        # "Product jobs" are the workers LEVI starts (pool, conversion, RECAP...). The
+        # sessions the marvel0 page hosts (``hosted``: terminal D, the evaluation
+        # client) are the robot session itself, which is what the controller being
+        # active means; counting them made every session warn about itself.
+        running = [j for j in ((jobs or {}).get("jobs") or []) if not j.get("hosted")]
         gate = (live or {}).get("gate") or {}
         controller = (health or {}).get("controller_active")
         if (health or {}).get("state") not in ("ok", "red"):

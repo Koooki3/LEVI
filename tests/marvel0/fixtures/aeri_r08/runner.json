@@ -1,0 +1,15 @@
+{
+ "backend": "standalone",
+ "final_state": "COMPLETED",
+ "identity": {
+  "boot": "d0a9d3b5-761b-44b2-9b9d-f87f6860183d",
+  "start_ticks": "76650256"
+ },
+ "origin": "operator_terminal",
+ "pid": 1281312,
+ "plan_sha256": "631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537",
+ "run_id": "aeri-20261018-ext-r08",
+ "started_wall_ns": 1792321233474555253,
+ "state": "exited",
+ "updated_wall_ns": 1792322848795474972
+}

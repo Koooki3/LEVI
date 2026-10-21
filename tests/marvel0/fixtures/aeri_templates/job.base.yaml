@@ -1,0 +1,38 @@
+# AERI subtask_loop job for 2026-10-17. The operator edits ONLY
+# experiment.episodes and task.instruction. Each --execute needs a new
+# experiment.name (an existing run folder is refused).
+schema_version: levi.aeri.job.v1
+experiment:
+  name: aeri-20261018-local-r01
+  episodes: 10
+  random_seed: 0
+  execution_mode: assisted
+policies:
+  forward:
+    deployment:
+      checkpoint_id: pi05_fr3_all_step49999
+      config: pi05_fr3_all_state
+      checkpoint_dir: /home/marvel/work/wenkai/openpi/checkpoints/pi05_fr3_all_step49999
+task:
+  instruction: "pick the eggplant into the white plate"
+termination:
+  inference_mode: legacy_async
+  allow_early_stop: false
+reset:
+  strategy: subtask_loop
+subtask:
+  max_steps: 200
+  max_retries: 5
+  vlm:
+    model: RedHatAI/Qwen3.8-27B-INT4
+    served_name: qwen3.8-27b
+    port: 8100
+    gpu_memory_utilization: 0.70
+    max_model_len: 16384
+    min_model_len: 16384
+    sleep_mode: true
+recording:
+  rollout_root: /home/marvel/work/wenkai/online_rollout_data/models
+  group: pi05_fr3_all_step49999
+  # Subtask rollouts go to <forward_folder>__subtask and __reverse.
+  forward_folder: pick_the_eggplant_into_the_white_plate__aeri-20261018-local-r01

@@ -50,6 +50,16 @@ const SOURCES = [
   "components/marvel0/use-run-actions.ts",
   "components/marvel0/use-run-poll.ts",
   "components/marvel0/selection.ts",
+  // Step 5, the autonomy system (its own words are also checked against the
+  // backend's codes in autonomy-catalog.test.ts).
+  "components/marvel0/autonomy-doc.ts",
+  "components/marvel0/autonomy-logic.ts",
+  "components/marvel0/autonomy-keys.tsx",
+  "components/marvel0/autonomy-run-card.tsx",
+  "components/marvel0/autonomy-prepare.tsx",
+  "components/marvel0/autonomy-step.tsx",
+  "components/marvel0/autonomy-lazy.tsx",
+  "components/marvel0/use-autonomy.ts",
   // The card to the offline 3D preview.
   "components/marvel0/studio-link.tsx",
   // The navigation entry's word after its label.

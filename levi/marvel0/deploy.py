@@ -269,6 +269,15 @@ def _aeri_runs() -> list:
     return launch.runs()
 
 
+def _hosted_aeri():
+    """The AERI terminal D that this page hosts as a job row (``id``), or None.
+    It is in no registry before its assembly, and the arm lock is its own only
+    after its phrase: from the click that starts it, only the page knows."""
+    from . import aeri_run_api
+
+    return aeri_run_api.active()
+
+
 def _robot_context() -> dict:
     """What the keep-a-hand-on-the-e-stop notice needs: the arm-controller
     marker, and whether an evaluation session has not ended (None: unknown)."""
@@ -310,6 +319,7 @@ class Host:
     locks_path: str = "/proc/locks"
     gpu_lock: Callable = _gpu_lock
     aeri_runs: Callable = _aeri_runs
+    hosted_aeri: Callable = lambda: _hosted_aeri()
     robot_context: Callable = _robot_context
     hash_file: Callable = _hash_file
     read_file: Callable = _read_file
@@ -1088,6 +1098,14 @@ class Supervisor:
             raise Refuse("arm_lock_held")
 
     def _check_aeri(self):
+        # The page's own terminal D first: a policy server deployed beside it
+        # would take port 8000 (its 1/7 fails) or swap under it.
+        try:
+            hosted = self.host.hosted_aeri()
+        except Exception:  # noqa: BLE001 - any failure reading it fails closed
+            raise Refuse("aeri_registry_unreadable") from None
+        if hosted:
+            raise Refuse("aeri_run_live", run_id=str(hosted.get("id")))
         try:
             runs = self.host.aeri_runs()
         except Exception:  # noqa: BLE001 - any failure reading the registry fails closed

@@ -1,0 +1,2886 @@
+{
+  "codes": {
+    "control": [
+      "aeri.enabled",
+      "aeri.disabled",
+      "aeri.missing",
+      "aeri.invalid"
+    ],
+    "errors": [
+      "aeri_disabled",
+      "aeri_unconfigured",
+      "arm_in_use",
+      "busy",
+      "check_failed",
+      "code_pin_mismatch",
+      "confirm_required",
+      "d_active",
+      "e_active",
+      "form_invalid",
+      "gpu_in_use",
+      "live_stop_failed",
+      "lock_unusable",
+      "not_product",
+      "profile_unknown",
+      "request_id_invalid",
+      "request_id_used",
+      "run_name_taken",
+      "start_home_unsupported",
+      "state_dir_unusable",
+      "state_unreadable",
+      "stop_failed",
+      "templates_changed"
+    ],
+    "leftover_states": ["none", "present", "unknown"],
+    "levels": ["ok", "warn", "refuse", "unknown"],
+    "live_states": ["running", "stopped", "absent", "unknown"],
+    "modes": ["external", "local"],
+    "notices": ["gates_scope"],
+    "problems": [
+      "run_json_missing",
+      "files_changed",
+      "code_changed",
+      "profile_changed",
+      "digest_missing"
+    ],
+    "readiness": [
+      "aeri_enabled",
+      "product",
+      "aeri_site",
+      "code_pin",
+      "profile_known",
+      "prompts_checked",
+      "templates_sha",
+      "prepared",
+      "run_name_free",
+      "cameras_config",
+      "gpu_free",
+      "gpu_lock_free",
+      "mem_available",
+      "ports_free",
+      "live_service",
+      "arm_lock_free",
+      "no_e_run",
+      "no_policy_deploy",
+      "no_aeri_unit_left",
+      "swap_logs_clean",
+      "no_other_aeri",
+      "monitor_green",
+      "stack_ready",
+      "unit_timeout"
+    ],
+    "site": [
+      "aeri_site.ok",
+      "aeri_site.no_section",
+      "aeri_site.missing_file",
+      "aeri_site.invalid"
+    ],
+    "swap_states": ["clean", "unclean", "unknown"],
+    "unit_kinds": ["vlm", "policy"],
+    "why_not": [
+      "aeri_disabled",
+      "arm_in_use",
+      "d_active",
+      "e_active",
+      "gpu_in_use",
+      "not_product",
+      "not_running",
+      "nothing_to_stop",
+      "unreadable"
+    ]
+  },
+  "constructed": [
+    "busy",
+    "gpu_in_use",
+    "lock_unusable",
+    "profile_unknown",
+    "run_name_taken",
+    "state_dir_unusable",
+    "stop_failed"
+  ],
+  "get": {
+    "blocked": {
+      "confirm": {
+        "leftovers": "stop leftover aeri units",
+        "live_stop": "stop live service",
+        "prepare": "prepare aeri run"
+      },
+      "control": {
+        "code": "aeri.enabled",
+        "errors": [],
+        "state": "ok"
+      },
+      "enabled": true,
+      "leftovers": {
+        "can_stop": false,
+        "state": "none",
+        "swap": {
+          "count": 0,
+          "state": "clean"
+        },
+        "units": [],
+        "why_not": {
+          "code": "nothing_to_stop",
+          "text": "No leftover AERI unit exists."
+        }
+      },
+      "limits": {
+        "gripper_confirm_s": {
+          "default": 4.0,
+          "max": 10.0,
+          "min": 1.0
+        },
+        "modes": ["external", "local"],
+        "rounds": {
+          "default": 5,
+          "max": 50,
+          "min": 1
+        },
+        "steps": {
+          "default": 200,
+          "max": 3000,
+          "min": 1
+        },
+        "task": {
+          "max_chars": 120,
+          "pattern": "[a-z0-9 ,.'-]{3,120}"
+        }
+      },
+      "live_service": {
+        "can_stop": true,
+        "listener": true,
+        "port": 8100,
+        "state": "running",
+        "why_not": null
+      },
+      "notices": [
+        {
+          "code": "gates_scope",
+          "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+        }
+      ],
+      "prepared": null,
+      "profile": {
+        "clean": true,
+        "console_lang": "zh",
+        "head": "5bc750ca",
+        "id": "harvest-5bc750ca",
+        "known": true,
+        "pin_sha": "5bc750ca",
+        "start_home": true
+      },
+      "profiles": [
+        {
+          "default": false,
+          "id": "bfdee2cf",
+          "start_home": false
+        },
+        {
+          "default": true,
+          "id": "harvest-5bc750ca",
+          "start_home": true
+        },
+        {
+          "default": false,
+          "id": "main-297a74c3",
+          "start_home": true
+        }
+      ],
+      "readiness": [
+        {
+          "code": "aeri_enabled",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          },
+          "text": "AERI hosting is switched on in the control file."
+        },
+        {
+          "code": "product",
+          "level": "ok",
+          "params": {},
+          "text": "This is the product LEVI."
+        },
+        {
+          "code": "aeri_site",
+          "level": "ok",
+          "params": {},
+          "text": "The site file has a valid AERI section."
+        },
+        {
+          "code": "code_pin",
+          "level": "ok",
+          "params": {
+            "dirty": false,
+            "head": "5bc750ca",
+            "pin": "5bc750ca"
+          },
+          "text": "The AERI code is at the pinned commit and clean."
+        },
+        {
+          "code": "profile_known",
+          "level": "ok",
+          "params": {
+            "profile": "harvest-5bc750ca"
+          },
+          "text": "The pinned code has a known prompt profile."
+        },
+        {
+          "code": "prompts_checked",
+          "level": "refuse",
+          "params": {
+            "file": "levi/automatic/console.py",
+            "reason": "differs"
+          },
+          "text": "The AERI code differs from what the prompt profile was written from (differs: levi/automatic/console.py); the page would misread its terminal."
+        },
+        {
+          "code": "templates_sha",
+          "level": "ok",
+          "params": {
+            "which": []
+          },
+          "text": "The job and binding templates match SOURCES.sha256."
+        },
+        {
+          "code": "prepared",
+          "level": "refuse",
+          "params": {
+            "name": null,
+            "reason": "none"
+          },
+          "text": "No run is prepared, or it changed since (none)."
+        },
+        {
+          "code": "run_name_free",
+          "level": "ok",
+          "params": {
+            "name": null,
+            "where": []
+          },
+          "text": "The name is not used by a rollout folder or an AERI registry."
+        },
+        {
+          "code": "cameras_config",
+          "level": "ok",
+          "params": {
+            "fields": []
+          },
+          "text": "The binding's camera serials equal the site file's."
+        },
+        {
+          "code": "gpu_free",
+          "level": "refuse",
+          "params": {
+            "free_mib": 6107,
+            "mode": "external",
+            "need_mib": 9216
+          },
+          "text": "Only 6107 MiB of GPU memory are free; external mode needs 9216."
+        },
+        {
+          "code": "gpu_lock_free",
+          "level": "refuse",
+          "params": {
+            "holders": 1
+          },
+          "text": "The GPU lock is held (1 holder(s))."
+        },
+        {
+          "code": "mem_available",
+          "level": "ok",
+          "params": {
+            "available_mib": 96932,
+            "need_mib": 28672
+          },
+          "text": "Enough memory is available."
+        },
+        {
+          "code": "ports_free",
+          "level": "refuse",
+          "params": {
+            "ports": [8100]
+          },
+          "text": "A listener holds a port AERI needs: [8100]."
+        },
+        {
+          "code": "live_service",
+          "level": "refuse",
+          "params": {
+            "state": "running"
+          },
+          "text": "The live annotation service is running and holds port 8100."
+        },
+        {
+          "code": "arm_lock_free",
+          "level": "ok",
+          "params": {},
+          "text": "The arm lock is free."
+        },
+        {
+          "code": "no_e_run",
+          "level": "ok",
+          "params": {},
+          "text": "No hosted evaluation client or session is on."
+        },
+        {
+          "code": "no_policy_deploy",
+          "level": "ok",
+          "params": {
+            "state": "idle"
+          },
+          "text": "This page has no policy server unit."
+        },
+        {
+          "code": "no_aeri_unit_left",
+          "level": "ok",
+          "params": {
+            "units": [],
+            "vram_mib": 26500
+          },
+          "text": "No AERI model or policy unit is left behind."
+        },
+        {
+          "code": "swap_logs_clean",
+          "level": "ok",
+          "params": {
+            "count": 0
+          },
+          "text": "No unfinished policy-switch log."
+        },
+        {
+          "code": "no_other_aeri",
+          "level": "ok",
+          "params": {},
+          "text": "No other AERI run is alive."
+        },
+        {
+          "code": "monitor_green",
+          "level": "unknown",
+          "params": {
+            "state": "unknown"
+          },
+          "text": "The health monitor could not be read."
+        },
+        {
+          "code": "stack_ready",
+          "level": "unknown",
+          "params": {
+            "cards": {
+              "a": "unknown",
+              "b": "unknown",
+              "c": "unknown",
+              "m": "running"
+            }
+          },
+          "text": "The arm stack's state could not be read."
+        },
+        {
+          "code": "unit_timeout",
+          "level": "ok",
+          "params": {
+            "need_s": 150,
+            "seconds": 150.0
+          },
+          "text": "The product's service unit allows its shutdown at least 150 s (or the product does not run under that unit)."
+        }
+      ],
+      "readiness_sha256": "0404040404040404040404040404040404040404040404040404040404040404",
+      "ready": false,
+      "sampled_at": "2026-10-21T20:00:00+08:00",
+      "schema": "levi.marvel0.aeri.v1",
+      "site": {
+        "code": "aeri_site.ok",
+        "errors": [],
+        "state": "ok",
+        "template": null
+      }
+    },
+    "busy": {
+      "confirm": {
+        "leftovers": "stop leftover aeri units",
+        "live_stop": "stop live service",
+        "prepare": "prepare aeri run"
+      },
+      "control": {
+        "code": "aeri.enabled",
+        "errors": [],
+        "state": "ok"
+      },
+      "enabled": true,
+      "leftovers": null,
+      "limits": {
+        "gripper_confirm_s": {
+          "default": 4.0,
+          "max": 10.0,
+          "min": 1.0
+        },
+        "modes": ["external", "local"],
+        "rounds": {
+          "default": 5,
+          "max": 50,
+          "min": 1
+        },
+        "steps": {
+          "default": 200,
+          "max": 3000,
+          "min": 1
+        },
+        "task": {
+          "max_chars": 120,
+          "pattern": "[a-z0-9 ,.'-]{3,120}"
+        }
+      },
+      "live_service": null,
+      "notices": [
+        {
+          "code": "gates_scope",
+          "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+        }
+      ],
+      "prepared": null,
+      "profile": {
+        "clean": null,
+        "console_lang": "zh",
+        "head": null,
+        "id": "harvest-5bc750ca",
+        "known": true,
+        "pin_sha": "5bc750ca",
+        "start_home": true
+      },
+      "profiles": [
+        {
+          "default": false,
+          "id": "bfdee2cf",
+          "start_home": false
+        },
+        {
+          "default": true,
+          "id": "harvest-5bc750ca",
+          "start_home": true
+        },
+        {
+          "default": false,
+          "id": "main-297a74c3",
+          "start_home": true
+        }
+      ],
+      "readiness": [
+        {
+          "code": "no_e_run",
+          "level": "refuse",
+          "params": {},
+          "text": "A hosted evaluation client or session is on."
+        }
+      ],
+      "readiness_sha256": "0303030303030303030303030303030303030303030303030303030303030303",
+      "ready": false,
+      "sampled_at": "2026-10-21T20:00:00+08:00",
+      "schema": "levi.marvel0.aeri.v1",
+      "site": {
+        "code": "aeri_site.ok",
+        "errors": [],
+        "state": "ok",
+        "template": null
+      }
+    },
+    "disabled": {
+      "confirm": {
+        "leftovers": "stop leftover aeri units",
+        "live_stop": "stop live service",
+        "prepare": "prepare aeri run"
+      },
+      "control": {
+        "code": "aeri.disabled",
+        "errors": [],
+        "state": "ok"
+      },
+      "enabled": false,
+      "leftovers": null,
+      "limits": {
+        "gripper_confirm_s": {
+          "default": 4.0,
+          "max": 10.0,
+          "min": 1.0
+        },
+        "modes": ["external", "local"],
+        "rounds": {
+          "default": 5,
+          "max": 50,
+          "min": 1
+        },
+        "steps": {
+          "default": 200,
+          "max": 3000,
+          "min": 1
+        },
+        "task": {
+          "max_chars": 120,
+          "pattern": "[a-z0-9 ,.'-]{3,120}"
+        }
+      },
+      "live_service": null,
+      "notices": [
+        {
+          "code": "gates_scope",
+          "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+        }
+      ],
+      "prepared": null,
+      "profile": {
+        "clean": null,
+        "console_lang": "zh",
+        "head": null,
+        "id": "harvest-5bc750ca",
+        "known": true,
+        "pin_sha": "5bc750ca",
+        "start_home": true
+      },
+      "profiles": [
+        {
+          "default": false,
+          "id": "bfdee2cf",
+          "start_home": false
+        },
+        {
+          "default": true,
+          "id": "harvest-5bc750ca",
+          "start_home": true
+        },
+        {
+          "default": false,
+          "id": "main-297a74c3",
+          "start_home": true
+        }
+      ],
+      "readiness": [],
+      "readiness_sha256": "0202020202020202020202020202020202020202020202020202020202020202",
+      "ready": false,
+      "sampled_at": "2026-10-21T20:00:00+08:00",
+      "schema": "levi.marvel0.aeri.v1",
+      "site": {
+        "code": "aeri_site.ok",
+        "errors": [],
+        "state": "ok",
+        "template": null
+      }
+    },
+    "invalid_section": {
+      "confirm": {
+        "leftovers": "stop leftover aeri units",
+        "live_stop": "stop live service",
+        "prepare": "prepare aeri run"
+      },
+      "control": {
+        "code": "aeri.enabled",
+        "errors": [],
+        "state": "ok"
+      },
+      "enabled": true,
+      "leftovers": null,
+      "limits": null,
+      "live_service": null,
+      "notices": [
+        {
+          "code": "gates_scope",
+          "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+        }
+      ],
+      "prepared": null,
+      "profile": null,
+      "profiles": [],
+      "readiness": [],
+      "readiness_sha256": "0101010101010101010101010101010101010101010101010101010101010101",
+      "ready": false,
+      "sampled_at": "2026-10-21T20:00:00+08:00",
+      "schema": "levi.marvel0.aeri.v1",
+      "site": {
+        "code": "aeri_site.invalid",
+        "errors": [
+          {
+            "code": "range",
+            "field": "aeri.pin_sha"
+          },
+          {
+            "code": "not_absolute",
+            "field": "aeri.levi_bin"
+          }
+        ],
+        "state": "invalid",
+        "template": null
+      }
+    },
+    "leftovers_blocked": {
+      "confirm": {
+        "leftovers": "stop leftover aeri units",
+        "live_stop": "stop live service",
+        "prepare": "prepare aeri run"
+      },
+      "control": {
+        "code": "aeri.enabled",
+        "errors": [],
+        "state": "ok"
+      },
+      "enabled": true,
+      "leftovers": {
+        "can_stop": false,
+        "state": "present",
+        "swap": {
+          "count": 1,
+          "state": "unclean"
+        },
+        "units": [
+          {
+            "active": "active",
+            "kind": "policy",
+            "name": "levi-aeri-policy-forward.service",
+            "sub": "running"
+          },
+          {
+            "active": "active",
+            "kind": "vlm",
+            "name": "levi-aeri-vlm-8100.service",
+            "sub": "running"
+          }
+        ],
+        "why_not": {
+          "code": "gpu_in_use",
+          "text": "The GPU lock is held."
+        }
+      },
+      "limits": {
+        "gripper_confirm_s": {
+          "default": 4.0,
+          "max": 10.0,
+          "min": 1.0
+        },
+        "modes": ["external", "local"],
+        "rounds": {
+          "default": 5,
+          "max": 50,
+          "min": 1
+        },
+        "steps": {
+          "default": 200,
+          "max": 3000,
+          "min": 1
+        },
+        "task": {
+          "max_chars": 120,
+          "pattern": "[a-z0-9 ,.'-]{3,120}"
+        }
+      },
+      "live_service": {
+        "can_stop": false,
+        "listener": false,
+        "port": 8100,
+        "state": "stopped",
+        "why_not": {
+          "code": "not_running",
+          "text": "The live annotation service is not running."
+        }
+      },
+      "notices": [
+        {
+          "code": "gates_scope",
+          "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+        }
+      ],
+      "prepared": {
+        "aeri_head": "5bc750ca",
+        "binding_sha256": "b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
+        "confirm": "execute aeri-20261021-ext-r01",
+        "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
+        "files_sha256": {
+          "binding": "0808080808080808080808080808080808080808080808080808080808080808",
+          "job": "0707070707070707070707070707070707070707070707070707070707070707"
+        },
+        "gripper_confirm_s": 4.0,
+        "intact": true,
+        "mode": "external",
+        "name": "aeri-20261021-ext-r01",
+        "plan_sha256": "631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537",
+        "prepared_at": "2026-10-21T20:00:00+08:00",
+        "problems": [],
+        "profile": "harvest-5bc750ca",
+        "rounds": 5,
+        "start_home": true,
+        "steps": 200,
+        "task": "pick the pepper into the white plate"
+      },
+      "profile": {
+        "clean": true,
+        "console_lang": "zh",
+        "head": "5bc750ca",
+        "id": "harvest-5bc750ca",
+        "known": true,
+        "pin_sha": "5bc750ca",
+        "start_home": true
+      },
+      "profiles": [
+        {
+          "default": false,
+          "id": "bfdee2cf",
+          "start_home": false
+        },
+        {
+          "default": true,
+          "id": "harvest-5bc750ca",
+          "start_home": true
+        },
+        {
+          "default": false,
+          "id": "main-297a74c3",
+          "start_home": true
+        }
+      ],
+      "readiness": [
+        {
+          "code": "aeri_enabled",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          },
+          "text": "AERI hosting is switched on in the control file."
+        },
+        {
+          "code": "product",
+          "level": "ok",
+          "params": {},
+          "text": "This is the product LEVI."
+        },
+        {
+          "code": "aeri_site",
+          "level": "ok",
+          "params": {},
+          "text": "The site file has a valid AERI section."
+        },
+        {
+          "code": "code_pin",
+          "level": "ok",
+          "params": {
+            "dirty": false,
+            "head": "5bc750ca",
+            "pin": "5bc750ca"
+          },
+          "text": "The AERI code is at the pinned commit and clean."
+        },
+        {
+          "code": "profile_known",
+          "level": "ok",
+          "params": {
+            "profile": "harvest-5bc750ca"
+          },
+          "text": "The pinned code has a known prompt profile."
+        },
+        {
+          "code": "prompts_checked",
+          "level": "ok",
+          "params": {},
+          "text": "The AERI code's source files are the ones the prompt profile was written from."
+        },
+        {
+          "code": "templates_sha",
+          "level": "ok",
+          "params": {
+            "which": []
+          },
+          "text": "The job and binding templates match SOURCES.sha256."
+        },
+        {
+          "code": "prepared",
+          "level": "ok",
+          "params": {
+            "name": "aeri-20261021-ext-r01",
+            "reason": null
+          },
+          "text": "Run aeri-20261021-ext-r01 is prepared and unchanged."
+        },
+        {
+          "code": "run_name_free",
+          "level": "ok",
+          "params": {
+            "name": "aeri-20261021-ext-r01",
+            "where": []
+          },
+          "text": "The name is not used by a rollout folder or an AERI registry."
+        },
+        {
+          "code": "cameras_config",
+          "level": "ok",
+          "params": {
+            "fields": []
+          },
+          "text": "The binding's camera serials equal the site file's."
+        },
+        {
+          "code": "gpu_free",
+          "level": "ok",
+          "params": {
+            "free_mib": 11207,
+            "mode": "external",
+            "need_mib": 9216
+          },
+          "text": "Enough GPU memory is free."
+        },
+        {
+          "code": "gpu_lock_free",
+          "level": "refuse",
+          "params": {
+            "holders": 1
+          },
+          "text": "The GPU lock is held (1 holder(s))."
+        },
+        {
+          "code": "mem_available",
+          "level": "ok",
+          "params": {
+            "available_mib": 96932,
+            "need_mib": 28672
+          },
+          "text": "Enough memory is available."
+        },
+        {
+          "code": "ports_free",
+          "level": "ok",
+          "params": {
+            "ports": []
+          },
+          "text": "Ports 8000, 8100 and 8110 are free."
+        },
+        {
+          "code": "live_service",
+          "level": "ok",
+          "params": {
+            "state": "stopped"
+          },
+          "text": "The live annotation service is not running."
+        },
+        {
+          "code": "arm_lock_free",
+          "level": "ok",
+          "params": {},
+          "text": "The arm lock is free."
+        },
+        {
+          "code": "no_e_run",
+          "level": "ok",
+          "params": {},
+          "text": "No hosted evaluation client or session is on."
+        },
+        {
+          "code": "no_policy_deploy",
+          "level": "ok",
+          "params": {
+            "state": "idle"
+          },
+          "text": "This page has no policy server unit."
+        },
+        {
+          "code": "no_aeri_unit_left",
+          "level": "refuse",
+          "params": {
+            "units": [
+              "levi-aeri-policy-forward.service",
+              "levi-aeri-policy-manual-eggplant.scope",
+              "levi-aeri-vlm-8100.service"
+            ],
+            "vram_mib": 21400
+          },
+          "text": "AERI units are left behind and may hold GPU memory."
+        },
+        {
+          "code": "swap_logs_clean",
+          "level": "refuse",
+          "params": {
+            "count": 1
+          },
+          "text": "A policy-switch log is unfinished; the run would need the variant phrase."
+        },
+        {
+          "code": "no_other_aeri",
+          "level": "ok",
+          "params": {},
+          "text": "No other AERI run is alive."
+        },
+        {
+          "code": "monitor_green",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          },
+          "text": "The health monitor is fresh and green."
+        },
+        {
+          "code": "stack_ready",
+          "level": "warn",
+          "params": {
+            "cards": {
+              "a": "running",
+              "b": "unknown",
+              "c": "running",
+              "m": "running"
+            }
+          },
+          "text": "The arm stack looks up (the gripper stack and the controller are not observable from here)."
+        },
+        {
+          "code": "unit_timeout",
+          "level": "ok",
+          "params": {
+            "need_s": 150,
+            "seconds": 150.0
+          },
+          "text": "The product's service unit allows its shutdown at least 150 s (or the product does not run under that unit)."
+        }
+      ],
+      "readiness_sha256": "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+      "ready": false,
+      "sampled_at": "2026-10-21T20:00:00+08:00",
+      "schema": "levi.marvel0.aeri.v1",
+      "site": {
+        "code": "aeri_site.ok",
+        "errors": [],
+        "state": "ok",
+        "template": null
+      }
+    },
+    "leftovers_present": {
+      "confirm": {
+        "leftovers": "stop leftover aeri units",
+        "live_stop": "stop live service",
+        "prepare": "prepare aeri run"
+      },
+      "control": {
+        "code": "aeri.enabled",
+        "errors": [],
+        "state": "ok"
+      },
+      "enabled": true,
+      "leftovers": {
+        "can_stop": true,
+        "state": "present",
+        "swap": {
+          "count": 1,
+          "state": "unclean"
+        },
+        "units": [
+          {
+            "active": "active",
+            "kind": "policy",
+            "name": "levi-aeri-policy-forward.service",
+            "sub": "running"
+          },
+          {
+            "active": "active",
+            "kind": "vlm",
+            "name": "levi-aeri-vlm-8100.service",
+            "sub": "running"
+          }
+        ],
+        "why_not": null
+      },
+      "limits": {
+        "gripper_confirm_s": {
+          "default": 4.0,
+          "max": 10.0,
+          "min": 1.0
+        },
+        "modes": ["external", "local"],
+        "rounds": {
+          "default": 5,
+          "max": 50,
+          "min": 1
+        },
+        "steps": {
+          "default": 200,
+          "max": 3000,
+          "min": 1
+        },
+        "task": {
+          "max_chars": 120,
+          "pattern": "[a-z0-9 ,.'-]{3,120}"
+        }
+      },
+      "live_service": {
+        "can_stop": false,
+        "listener": false,
+        "port": 8100,
+        "state": "stopped",
+        "why_not": {
+          "code": "not_running",
+          "text": "The live annotation service is not running."
+        }
+      },
+      "notices": [
+        {
+          "code": "gates_scope",
+          "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+        }
+      ],
+      "prepared": {
+        "aeri_head": "5bc750ca",
+        "binding_sha256": "b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
+        "confirm": "execute aeri-20261021-ext-r01",
+        "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
+        "files_sha256": {
+          "binding": "0808080808080808080808080808080808080808080808080808080808080808",
+          "job": "0707070707070707070707070707070707070707070707070707070707070707"
+        },
+        "gripper_confirm_s": 4.0,
+        "intact": true,
+        "mode": "external",
+        "name": "aeri-20261021-ext-r01",
+        "plan_sha256": "631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537",
+        "prepared_at": "2026-10-21T20:00:00+08:00",
+        "problems": [],
+        "profile": "harvest-5bc750ca",
+        "rounds": 5,
+        "start_home": true,
+        "steps": 200,
+        "task": "pick the pepper into the white plate"
+      },
+      "profile": {
+        "clean": true,
+        "console_lang": "zh",
+        "head": "5bc750ca",
+        "id": "harvest-5bc750ca",
+        "known": true,
+        "pin_sha": "5bc750ca",
+        "start_home": true
+      },
+      "profiles": [
+        {
+          "default": false,
+          "id": "bfdee2cf",
+          "start_home": false
+        },
+        {
+          "default": true,
+          "id": "harvest-5bc750ca",
+          "start_home": true
+        },
+        {
+          "default": false,
+          "id": "main-297a74c3",
+          "start_home": true
+        }
+      ],
+      "readiness": [
+        {
+          "code": "aeri_enabled",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          },
+          "text": "AERI hosting is switched on in the control file."
+        },
+        {
+          "code": "product",
+          "level": "ok",
+          "params": {},
+          "text": "This is the product LEVI."
+        },
+        {
+          "code": "aeri_site",
+          "level": "ok",
+          "params": {},
+          "text": "The site file has a valid AERI section."
+        },
+        {
+          "code": "code_pin",
+          "level": "ok",
+          "params": {
+            "dirty": false,
+            "head": "5bc750ca",
+            "pin": "5bc750ca"
+          },
+          "text": "The AERI code is at the pinned commit and clean."
+        },
+        {
+          "code": "profile_known",
+          "level": "ok",
+          "params": {
+            "profile": "harvest-5bc750ca"
+          },
+          "text": "The pinned code has a known prompt profile."
+        },
+        {
+          "code": "prompts_checked",
+          "level": "ok",
+          "params": {},
+          "text": "The AERI code's source files are the ones the prompt profile was written from."
+        },
+        {
+          "code": "templates_sha",
+          "level": "ok",
+          "params": {
+            "which": []
+          },
+          "text": "The job and binding templates match SOURCES.sha256."
+        },
+        {
+          "code": "prepared",
+          "level": "ok",
+          "params": {
+            "name": "aeri-20261021-ext-r01",
+            "reason": null
+          },
+          "text": "Run aeri-20261021-ext-r01 is prepared and unchanged."
+        },
+        {
+          "code": "run_name_free",
+          "level": "ok",
+          "params": {
+            "name": "aeri-20261021-ext-r01",
+            "where": []
+          },
+          "text": "The name is not used by a rollout folder or an AERI registry."
+        },
+        {
+          "code": "cameras_config",
+          "level": "ok",
+          "params": {
+            "fields": []
+          },
+          "text": "The binding's camera serials equal the site file's."
+        },
+        {
+          "code": "gpu_free",
+          "level": "ok",
+          "params": {
+            "free_mib": 11207,
+            "mode": "external",
+            "need_mib": 9216
+          },
+          "text": "Enough GPU memory is free."
+        },
+        {
+          "code": "gpu_lock_free",
+          "level": "ok",
+          "params": {
+            "holders": 0
+          },
+          "text": "The GPU lock is free."
+        },
+        {
+          "code": "mem_available",
+          "level": "ok",
+          "params": {
+            "available_mib": 96932,
+            "need_mib": 28672
+          },
+          "text": "Enough memory is available."
+        },
+        {
+          "code": "ports_free",
+          "level": "ok",
+          "params": {
+            "ports": []
+          },
+          "text": "Ports 8000, 8100 and 8110 are free."
+        },
+        {
+          "code": "live_service",
+          "level": "ok",
+          "params": {
+            "state": "stopped"
+          },
+          "text": "The live annotation service is not running."
+        },
+        {
+          "code": "arm_lock_free",
+          "level": "ok",
+          "params": {},
+          "text": "The arm lock is free."
+        },
+        {
+          "code": "no_e_run",
+          "level": "ok",
+          "params": {},
+          "text": "No hosted evaluation client or session is on."
+        },
+        {
+          "code": "no_policy_deploy",
+          "level": "ok",
+          "params": {
+            "state": "idle"
+          },
+          "text": "This page has no policy server unit."
+        },
+        {
+          "code": "no_aeri_unit_left",
+          "level": "refuse",
+          "params": {
+            "units": [
+              "levi-aeri-policy-forward.service",
+              "levi-aeri-policy-manual-eggplant.scope",
+              "levi-aeri-vlm-8100.service"
+            ],
+            "vram_mib": 21400
+          },
+          "text": "AERI units are left behind and may hold GPU memory."
+        },
+        {
+          "code": "swap_logs_clean",
+          "level": "refuse",
+          "params": {
+            "count": 1
+          },
+          "text": "A policy-switch log is unfinished; the run would need the variant phrase."
+        },
+        {
+          "code": "no_other_aeri",
+          "level": "ok",
+          "params": {},
+          "text": "No other AERI run is alive."
+        },
+        {
+          "code": "monitor_green",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          },
+          "text": "The health monitor is fresh and green."
+        },
+        {
+          "code": "stack_ready",
+          "level": "warn",
+          "params": {
+            "cards": {
+              "a": "running",
+              "b": "unknown",
+              "c": "running",
+              "m": "running"
+            }
+          },
+          "text": "The arm stack looks up (the gripper stack and the controller are not observable from here)."
+        },
+        {
+          "code": "unit_timeout",
+          "level": "ok",
+          "params": {
+            "need_s": 150,
+            "seconds": 150.0
+          },
+          "text": "The product's service unit allows its shutdown at least 150 s (or the product does not run under that unit)."
+        }
+      ],
+      "readiness_sha256": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "ready": false,
+      "sampled_at": "2026-10-21T20:00:00+08:00",
+      "schema": "levi.marvel0.aeri.v1",
+      "site": {
+        "code": "aeri_site.ok",
+        "errors": [],
+        "state": "ok",
+        "template": null
+      }
+    },
+    "not_prepared": {
+      "confirm": {
+        "leftovers": "stop leftover aeri units",
+        "live_stop": "stop live service",
+        "prepare": "prepare aeri run"
+      },
+      "control": {
+        "code": "aeri.enabled",
+        "errors": [],
+        "state": "ok"
+      },
+      "enabled": true,
+      "leftovers": {
+        "can_stop": false,
+        "state": "none",
+        "swap": {
+          "count": 0,
+          "state": "clean"
+        },
+        "units": [],
+        "why_not": {
+          "code": "nothing_to_stop",
+          "text": "No leftover AERI unit exists."
+        }
+      },
+      "limits": {
+        "gripper_confirm_s": {
+          "default": 4.0,
+          "max": 10.0,
+          "min": 1.0
+        },
+        "modes": ["external", "local"],
+        "rounds": {
+          "default": 5,
+          "max": 50,
+          "min": 1
+        },
+        "steps": {
+          "default": 200,
+          "max": 3000,
+          "min": 1
+        },
+        "task": {
+          "max_chars": 120,
+          "pattern": "[a-z0-9 ,.'-]{3,120}"
+        }
+      },
+      "live_service": {
+        "can_stop": false,
+        "listener": false,
+        "port": 8100,
+        "state": "stopped",
+        "why_not": {
+          "code": "not_running",
+          "text": "The live annotation service is not running."
+        }
+      },
+      "notices": [
+        {
+          "code": "gates_scope",
+          "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+        }
+      ],
+      "prepared": null,
+      "profile": {
+        "clean": true,
+        "console_lang": "zh",
+        "head": "5bc750ca",
+        "id": "harvest-5bc750ca",
+        "known": true,
+        "pin_sha": "5bc750ca",
+        "start_home": true
+      },
+      "profiles": [
+        {
+          "default": false,
+          "id": "bfdee2cf",
+          "start_home": false
+        },
+        {
+          "default": true,
+          "id": "harvest-5bc750ca",
+          "start_home": true
+        },
+        {
+          "default": false,
+          "id": "main-297a74c3",
+          "start_home": true
+        }
+      ],
+      "readiness": [
+        {
+          "code": "aeri_enabled",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          },
+          "text": "AERI hosting is switched on in the control file."
+        },
+        {
+          "code": "product",
+          "level": "ok",
+          "params": {},
+          "text": "This is the product LEVI."
+        },
+        {
+          "code": "aeri_site",
+          "level": "ok",
+          "params": {},
+          "text": "The site file has a valid AERI section."
+        },
+        {
+          "code": "code_pin",
+          "level": "ok",
+          "params": {
+            "dirty": false,
+            "head": "5bc750ca",
+            "pin": "5bc750ca"
+          },
+          "text": "The AERI code is at the pinned commit and clean."
+        },
+        {
+          "code": "profile_known",
+          "level": "ok",
+          "params": {
+            "profile": "harvest-5bc750ca"
+          },
+          "text": "The pinned code has a known prompt profile."
+        },
+        {
+          "code": "prompts_checked",
+          "level": "ok",
+          "params": {},
+          "text": "The AERI code's source files are the ones the prompt profile was written from."
+        },
+        {
+          "code": "templates_sha",
+          "level": "ok",
+          "params": {
+            "which": []
+          },
+          "text": "The job and binding templates match SOURCES.sha256."
+        },
+        {
+          "code": "prepared",
+          "level": "refuse",
+          "params": {
+            "name": null,
+            "reason": "none"
+          },
+          "text": "No run is prepared, or it changed since (none)."
+        },
+        {
+          "code": "run_name_free",
+          "level": "ok",
+          "params": {
+            "name": null,
+            "where": []
+          },
+          "text": "The name is not used by a rollout folder or an AERI registry."
+        },
+        {
+          "code": "cameras_config",
+          "level": "ok",
+          "params": {
+            "fields": []
+          },
+          "text": "The binding's camera serials equal the site file's."
+        },
+        {
+          "code": "gpu_free",
+          "level": "ok",
+          "params": {
+            "free_mib": 24407,
+            "mode": "external",
+            "need_mib": 9216
+          },
+          "text": "Enough GPU memory is free."
+        },
+        {
+          "code": "gpu_lock_free",
+          "level": "ok",
+          "params": {
+            "holders": 0
+          },
+          "text": "The GPU lock is free."
+        },
+        {
+          "code": "mem_available",
+          "level": "ok",
+          "params": {
+            "available_mib": 96932,
+            "need_mib": 28672
+          },
+          "text": "Enough memory is available."
+        },
+        {
+          "code": "ports_free",
+          "level": "ok",
+          "params": {
+            "ports": []
+          },
+          "text": "Ports 8000, 8100 and 8110 are free."
+        },
+        {
+          "code": "live_service",
+          "level": "ok",
+          "params": {
+            "state": "stopped"
+          },
+          "text": "The live annotation service is not running."
+        },
+        {
+          "code": "arm_lock_free",
+          "level": "ok",
+          "params": {},
+          "text": "The arm lock is free."
+        },
+        {
+          "code": "no_e_run",
+          "level": "ok",
+          "params": {},
+          "text": "No hosted evaluation client or session is on."
+        },
+        {
+          "code": "no_policy_deploy",
+          "level": "ok",
+          "params": {
+            "state": "idle"
+          },
+          "text": "This page has no policy server unit."
+        },
+        {
+          "code": "no_aeri_unit_left",
+          "level": "ok",
+          "params": {
+            "units": [],
+            "vram_mib": 8200
+          },
+          "text": "No AERI model or policy unit is left behind."
+        },
+        {
+          "code": "swap_logs_clean",
+          "level": "ok",
+          "params": {
+            "count": 0
+          },
+          "text": "No unfinished policy-switch log."
+        },
+        {
+          "code": "no_other_aeri",
+          "level": "ok",
+          "params": {},
+          "text": "No other AERI run is alive."
+        },
+        {
+          "code": "monitor_green",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          },
+          "text": "The health monitor is fresh and green."
+        },
+        {
+          "code": "stack_ready",
+          "level": "warn",
+          "params": {
+            "cards": {
+              "a": "running",
+              "b": "unknown",
+              "c": "running",
+              "m": "running"
+            }
+          },
+          "text": "The arm stack looks up (the gripper stack and the controller are not observable from here)."
+        },
+        {
+          "code": "unit_timeout",
+          "level": "ok",
+          "params": {
+            "need_s": 150,
+            "seconds": 150.0
+          },
+          "text": "The product's service unit allows its shutdown at least 150 s (or the product does not run under that unit)."
+        }
+      ],
+      "readiness_sha256": "0505050505050505050505050505050505050505050505050505050505050505",
+      "ready": false,
+      "sampled_at": "2026-10-21T20:00:00+08:00",
+      "schema": "levi.marvel0.aeri.v1",
+      "site": {
+        "code": "aeri_site.ok",
+        "errors": [],
+        "state": "ok",
+        "template": null
+      }
+    },
+    "prepared_changed": {
+      "confirm": {
+        "leftovers": "stop leftover aeri units",
+        "live_stop": "stop live service",
+        "prepare": "prepare aeri run"
+      },
+      "control": {
+        "code": "aeri.enabled",
+        "errors": [],
+        "state": "ok"
+      },
+      "enabled": true,
+      "leftovers": {
+        "can_stop": false,
+        "state": "none",
+        "swap": {
+          "count": 0,
+          "state": "clean"
+        },
+        "units": [],
+        "why_not": {
+          "code": "nothing_to_stop",
+          "text": "No leftover AERI unit exists."
+        }
+      },
+      "limits": {
+        "gripper_confirm_s": {
+          "default": 4.0,
+          "max": 10.0,
+          "min": 1.0
+        },
+        "modes": ["external", "local"],
+        "rounds": {
+          "default": 5,
+          "max": 50,
+          "min": 1
+        },
+        "steps": {
+          "default": 200,
+          "max": 3000,
+          "min": 1
+        },
+        "task": {
+          "max_chars": 120,
+          "pattern": "[a-z0-9 ,.'-]{3,120}"
+        }
+      },
+      "live_service": {
+        "can_stop": false,
+        "listener": false,
+        "port": 8100,
+        "state": "stopped",
+        "why_not": {
+          "code": "not_running",
+          "text": "The live annotation service is not running."
+        }
+      },
+      "notices": [
+        {
+          "code": "gates_scope",
+          "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+        }
+      ],
+      "prepared": {
+        "aeri_head": "5bc750ca",
+        "binding_sha256": "b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
+        "confirm": "execute aeri-20261021-ext-r01",
+        "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
+        "files_sha256": {
+          "binding": "0808080808080808080808080808080808080808080808080808080808080808",
+          "job": "0707070707070707070707070707070707070707070707070707070707070707"
+        },
+        "gripper_confirm_s": 4.0,
+        "intact": false,
+        "mode": "external",
+        "name": "aeri-20261021-ext-r01",
+        "plan_sha256": "631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537",
+        "prepared_at": "2026-10-21T20:00:00+08:00",
+        "problems": ["files_changed"],
+        "profile": "harvest-5bc750ca",
+        "rounds": 5,
+        "start_home": true,
+        "steps": 200,
+        "task": "pick the pepper into the white plate"
+      },
+      "profile": {
+        "clean": true,
+        "console_lang": "zh",
+        "head": "5bc750ca",
+        "id": "harvest-5bc750ca",
+        "known": true,
+        "pin_sha": "5bc750ca",
+        "start_home": true
+      },
+      "profiles": [
+        {
+          "default": false,
+          "id": "bfdee2cf",
+          "start_home": false
+        },
+        {
+          "default": true,
+          "id": "harvest-5bc750ca",
+          "start_home": true
+        },
+        {
+          "default": false,
+          "id": "main-297a74c3",
+          "start_home": true
+        }
+      ],
+      "readiness": [
+        {
+          "code": "aeri_enabled",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          },
+          "text": "AERI hosting is switched on in the control file."
+        },
+        {
+          "code": "product",
+          "level": "ok",
+          "params": {},
+          "text": "This is the product LEVI."
+        },
+        {
+          "code": "aeri_site",
+          "level": "ok",
+          "params": {},
+          "text": "The site file has a valid AERI section."
+        },
+        {
+          "code": "code_pin",
+          "level": "ok",
+          "params": {
+            "dirty": false,
+            "head": "5bc750ca",
+            "pin": "5bc750ca"
+          },
+          "text": "The AERI code is at the pinned commit and clean."
+        },
+        {
+          "code": "profile_known",
+          "level": "ok",
+          "params": {
+            "profile": "harvest-5bc750ca"
+          },
+          "text": "The pinned code has a known prompt profile."
+        },
+        {
+          "code": "prompts_checked",
+          "level": "ok",
+          "params": {},
+          "text": "The AERI code's source files are the ones the prompt profile was written from."
+        },
+        {
+          "code": "templates_sha",
+          "level": "ok",
+          "params": {
+            "which": []
+          },
+          "text": "The job and binding templates match SOURCES.sha256."
+        },
+        {
+          "code": "prepared",
+          "level": "refuse",
+          "params": {
+            "name": "aeri-20261021-ext-r01",
+            "reason": "files_changed"
+          },
+          "text": "No run is prepared, or it changed since (files_changed)."
+        },
+        {
+          "code": "run_name_free",
+          "level": "ok",
+          "params": {
+            "name": "aeri-20261021-ext-r01",
+            "where": []
+          },
+          "text": "The name is not used by a rollout folder or an AERI registry."
+        },
+        {
+          "code": "cameras_config",
+          "level": "ok",
+          "params": {
+            "fields": []
+          },
+          "text": "The binding's camera serials equal the site file's."
+        },
+        {
+          "code": "gpu_free",
+          "level": "ok",
+          "params": {
+            "free_mib": 24407,
+            "mode": "external",
+            "need_mib": 9216
+          },
+          "text": "Enough GPU memory is free."
+        },
+        {
+          "code": "gpu_lock_free",
+          "level": "ok",
+          "params": {
+            "holders": 0
+          },
+          "text": "The GPU lock is free."
+        },
+        {
+          "code": "mem_available",
+          "level": "ok",
+          "params": {
+            "available_mib": 96932,
+            "need_mib": 28672
+          },
+          "text": "Enough memory is available."
+        },
+        {
+          "code": "ports_free",
+          "level": "ok",
+          "params": {
+            "ports": []
+          },
+          "text": "Ports 8000, 8100 and 8110 are free."
+        },
+        {
+          "code": "live_service",
+          "level": "ok",
+          "params": {
+            "state": "stopped"
+          },
+          "text": "The live annotation service is not running."
+        },
+        {
+          "code": "arm_lock_free",
+          "level": "ok",
+          "params": {},
+          "text": "The arm lock is free."
+        },
+        {
+          "code": "no_e_run",
+          "level": "ok",
+          "params": {},
+          "text": "No hosted evaluation client or session is on."
+        },
+        {
+          "code": "no_policy_deploy",
+          "level": "ok",
+          "params": {
+            "state": "idle"
+          },
+          "text": "This page has no policy server unit."
+        },
+        {
+          "code": "no_aeri_unit_left",
+          "level": "ok",
+          "params": {
+            "units": [],
+            "vram_mib": 8200
+          },
+          "text": "No AERI model or policy unit is left behind."
+        },
+        {
+          "code": "swap_logs_clean",
+          "level": "ok",
+          "params": {
+            "count": 0
+          },
+          "text": "No unfinished policy-switch log."
+        },
+        {
+          "code": "no_other_aeri",
+          "level": "ok",
+          "params": {},
+          "text": "No other AERI run is alive."
+        },
+        {
+          "code": "monitor_green",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          },
+          "text": "The health monitor is fresh and green."
+        },
+        {
+          "code": "stack_ready",
+          "level": "warn",
+          "params": {
+            "cards": {
+              "a": "running",
+              "b": "unknown",
+              "c": "running",
+              "m": "running"
+            }
+          },
+          "text": "The arm stack looks up (the gripper stack and the controller are not observable from here)."
+        },
+        {
+          "code": "unit_timeout",
+          "level": "ok",
+          "params": {
+            "need_s": 150,
+            "seconds": 150.0
+          },
+          "text": "The product's service unit allows its shutdown at least 150 s (or the product does not run under that unit)."
+        }
+      ],
+      "readiness_sha256": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+      "ready": false,
+      "sampled_at": "2026-10-21T20:00:00+08:00",
+      "schema": "levi.marvel0.aeri.v1",
+      "site": {
+        "code": "aeri_site.ok",
+        "errors": [],
+        "state": "ok",
+        "template": null
+      }
+    },
+    "prepared_ready": {
+      "confirm": {
+        "leftovers": "stop leftover aeri units",
+        "live_stop": "stop live service",
+        "prepare": "prepare aeri run"
+      },
+      "control": {
+        "code": "aeri.enabled",
+        "errors": [],
+        "state": "ok"
+      },
+      "enabled": true,
+      "leftovers": {
+        "can_stop": false,
+        "state": "none",
+        "swap": {
+          "count": 0,
+          "state": "clean"
+        },
+        "units": [],
+        "why_not": {
+          "code": "nothing_to_stop",
+          "text": "No leftover AERI unit exists."
+        }
+      },
+      "limits": {
+        "gripper_confirm_s": {
+          "default": 4.0,
+          "max": 10.0,
+          "min": 1.0
+        },
+        "modes": ["external", "local"],
+        "rounds": {
+          "default": 5,
+          "max": 50,
+          "min": 1
+        },
+        "steps": {
+          "default": 200,
+          "max": 3000,
+          "min": 1
+        },
+        "task": {
+          "max_chars": 120,
+          "pattern": "[a-z0-9 ,.'-]{3,120}"
+        }
+      },
+      "live_service": {
+        "can_stop": false,
+        "listener": false,
+        "port": 8100,
+        "state": "stopped",
+        "why_not": {
+          "code": "not_running",
+          "text": "The live annotation service is not running."
+        }
+      },
+      "notices": [
+        {
+          "code": "gates_scope",
+          "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+        }
+      ],
+      "prepared": {
+        "aeri_head": "5bc750ca",
+        "binding_sha256": "b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
+        "confirm": "execute aeri-20261021-ext-r01",
+        "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
+        "files_sha256": {
+          "binding": "0808080808080808080808080808080808080808080808080808080808080808",
+          "job": "0707070707070707070707070707070707070707070707070707070707070707"
+        },
+        "gripper_confirm_s": 4.0,
+        "intact": true,
+        "mode": "external",
+        "name": "aeri-20261021-ext-r01",
+        "plan_sha256": "631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537",
+        "prepared_at": "2026-10-21T20:00:00+08:00",
+        "problems": [],
+        "profile": "harvest-5bc750ca",
+        "rounds": 5,
+        "start_home": true,
+        "steps": 200,
+        "task": "pick the pepper into the white plate"
+      },
+      "profile": {
+        "clean": true,
+        "console_lang": "zh",
+        "head": "5bc750ca",
+        "id": "harvest-5bc750ca",
+        "known": true,
+        "pin_sha": "5bc750ca",
+        "start_home": true
+      },
+      "profiles": [
+        {
+          "default": false,
+          "id": "bfdee2cf",
+          "start_home": false
+        },
+        {
+          "default": true,
+          "id": "harvest-5bc750ca",
+          "start_home": true
+        },
+        {
+          "default": false,
+          "id": "main-297a74c3",
+          "start_home": true
+        }
+      ],
+      "readiness": [
+        {
+          "code": "aeri_enabled",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          },
+          "text": "AERI hosting is switched on in the control file."
+        },
+        {
+          "code": "product",
+          "level": "ok",
+          "params": {},
+          "text": "This is the product LEVI."
+        },
+        {
+          "code": "aeri_site",
+          "level": "ok",
+          "params": {},
+          "text": "The site file has a valid AERI section."
+        },
+        {
+          "code": "code_pin",
+          "level": "ok",
+          "params": {
+            "dirty": false,
+            "head": "5bc750ca",
+            "pin": "5bc750ca"
+          },
+          "text": "The AERI code is at the pinned commit and clean."
+        },
+        {
+          "code": "profile_known",
+          "level": "ok",
+          "params": {
+            "profile": "harvest-5bc750ca"
+          },
+          "text": "The pinned code has a known prompt profile."
+        },
+        {
+          "code": "prompts_checked",
+          "level": "ok",
+          "params": {},
+          "text": "The AERI code's source files are the ones the prompt profile was written from."
+        },
+        {
+          "code": "templates_sha",
+          "level": "ok",
+          "params": {
+            "which": []
+          },
+          "text": "The job and binding templates match SOURCES.sha256."
+        },
+        {
+          "code": "prepared",
+          "level": "ok",
+          "params": {
+            "name": "aeri-20261021-ext-r01",
+            "reason": null
+          },
+          "text": "Run aeri-20261021-ext-r01 is prepared and unchanged."
+        },
+        {
+          "code": "run_name_free",
+          "level": "ok",
+          "params": {
+            "name": "aeri-20261021-ext-r01",
+            "where": []
+          },
+          "text": "The name is not used by a rollout folder or an AERI registry."
+        },
+        {
+          "code": "cameras_config",
+          "level": "ok",
+          "params": {
+            "fields": []
+          },
+          "text": "The binding's camera serials equal the site file's."
+        },
+        {
+          "code": "gpu_free",
+          "level": "ok",
+          "params": {
+            "free_mib": 24407,
+            "mode": "external",
+            "need_mib": 9216
+          },
+          "text": "Enough GPU memory is free."
+        },
+        {
+          "code": "gpu_lock_free",
+          "level": "ok",
+          "params": {
+            "holders": 0
+          },
+          "text": "The GPU lock is free."
+        },
+        {
+          "code": "mem_available",
+          "level": "ok",
+          "params": {
+            "available_mib": 96932,
+            "need_mib": 28672
+          },
+          "text": "Enough memory is available."
+        },
+        {
+          "code": "ports_free",
+          "level": "ok",
+          "params": {
+            "ports": []
+          },
+          "text": "Ports 8000, 8100 and 8110 are free."
+        },
+        {
+          "code": "live_service",
+          "level": "ok",
+          "params": {
+            "state": "stopped"
+          },
+          "text": "The live annotation service is not running."
+        },
+        {
+          "code": "arm_lock_free",
+          "level": "ok",
+          "params": {},
+          "text": "The arm lock is free."
+        },
+        {
+          "code": "no_e_run",
+          "level": "ok",
+          "params": {},
+          "text": "No hosted evaluation client or session is on."
+        },
+        {
+          "code": "no_policy_deploy",
+          "level": "ok",
+          "params": {
+            "state": "idle"
+          },
+          "text": "This page has no policy server unit."
+        },
+        {
+          "code": "no_aeri_unit_left",
+          "level": "ok",
+          "params": {
+            "units": [],
+            "vram_mib": 8200
+          },
+          "text": "No AERI model or policy unit is left behind."
+        },
+        {
+          "code": "swap_logs_clean",
+          "level": "ok",
+          "params": {
+            "count": 0
+          },
+          "text": "No unfinished policy-switch log."
+        },
+        {
+          "code": "no_other_aeri",
+          "level": "ok",
+          "params": {},
+          "text": "No other AERI run is alive."
+        },
+        {
+          "code": "monitor_green",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          },
+          "text": "The health monitor is fresh and green."
+        },
+        {
+          "code": "stack_ready",
+          "level": "warn",
+          "params": {
+            "cards": {
+              "a": "running",
+              "b": "unknown",
+              "c": "running",
+              "m": "running"
+            }
+          },
+          "text": "The arm stack looks up (the gripper stack and the controller are not observable from here)."
+        },
+        {
+          "code": "unit_timeout",
+          "level": "ok",
+          "params": {
+            "need_s": 150,
+            "seconds": 150.0
+          },
+          "text": "The product's service unit allows its shutdown at least 150 s (or the product does not run under that unit)."
+        }
+      ],
+      "readiness_sha256": "0606060606060606060606060606060606060606060606060606060606060606",
+      "ready": true,
+      "sampled_at": "2026-10-21T20:00:00+08:00",
+      "schema": "levi.marvel0.aeri.v1",
+      "site": {
+        "code": "aeri_site.ok",
+        "errors": [],
+        "state": "ok",
+        "template": null
+      }
+    },
+    "prepared_unit_short": {
+      "confirm": {
+        "leftovers": "stop leftover aeri units",
+        "live_stop": "stop live service",
+        "prepare": "prepare aeri run"
+      },
+      "control": {
+        "code": "aeri.enabled",
+        "errors": [],
+        "state": "ok"
+      },
+      "enabled": true,
+      "leftovers": {
+        "can_stop": false,
+        "state": "none",
+        "swap": {
+          "count": 0,
+          "state": "clean"
+        },
+        "units": [],
+        "why_not": {
+          "code": "nothing_to_stop",
+          "text": "No leftover AERI unit exists."
+        }
+      },
+      "limits": {
+        "gripper_confirm_s": {
+          "default": 4.0,
+          "max": 10.0,
+          "min": 1.0
+        },
+        "modes": ["external", "local"],
+        "rounds": {
+          "default": 5,
+          "max": 50,
+          "min": 1
+        },
+        "steps": {
+          "default": 200,
+          "max": 3000,
+          "min": 1
+        },
+        "task": {
+          "max_chars": 120,
+          "pattern": "[a-z0-9 ,.'-]{3,120}"
+        }
+      },
+      "live_service": {
+        "can_stop": false,
+        "listener": false,
+        "port": 8100,
+        "state": "stopped",
+        "why_not": {
+          "code": "not_running",
+          "text": "The live annotation service is not running."
+        }
+      },
+      "notices": [
+        {
+          "code": "gates_scope",
+          "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+        }
+      ],
+      "prepared": {
+        "aeri_head": "5bc750ca",
+        "binding_sha256": "b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
+        "confirm": "execute aeri-20261021-ext-r01",
+        "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
+        "files_sha256": {
+          "binding": "0808080808080808080808080808080808080808080808080808080808080808",
+          "job": "0707070707070707070707070707070707070707070707070707070707070707"
+        },
+        "gripper_confirm_s": 4.0,
+        "intact": true,
+        "mode": "external",
+        "name": "aeri-20261021-ext-r01",
+        "plan_sha256": "631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537",
+        "prepared_at": "2026-10-21T20:00:00+08:00",
+        "problems": [],
+        "profile": "harvest-5bc750ca",
+        "rounds": 5,
+        "start_home": true,
+        "steps": 200,
+        "task": "pick the pepper into the white plate"
+      },
+      "profile": {
+        "clean": true,
+        "console_lang": "zh",
+        "head": "5bc750ca",
+        "id": "harvest-5bc750ca",
+        "known": true,
+        "pin_sha": "5bc750ca",
+        "start_home": true
+      },
+      "profiles": [
+        {
+          "default": false,
+          "id": "bfdee2cf",
+          "start_home": false
+        },
+        {
+          "default": true,
+          "id": "harvest-5bc750ca",
+          "start_home": true
+        },
+        {
+          "default": false,
+          "id": "main-297a74c3",
+          "start_home": true
+        }
+      ],
+      "readiness": [
+        {
+          "code": "aeri_enabled",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          },
+          "text": "AERI hosting is switched on in the control file."
+        },
+        {
+          "code": "product",
+          "level": "ok",
+          "params": {},
+          "text": "This is the product LEVI."
+        },
+        {
+          "code": "aeri_site",
+          "level": "ok",
+          "params": {},
+          "text": "The site file has a valid AERI section."
+        },
+        {
+          "code": "code_pin",
+          "level": "ok",
+          "params": {
+            "dirty": false,
+            "head": "5bc750ca",
+            "pin": "5bc750ca"
+          },
+          "text": "The AERI code is at the pinned commit and clean."
+        },
+        {
+          "code": "profile_known",
+          "level": "ok",
+          "params": {
+            "profile": "harvest-5bc750ca"
+          },
+          "text": "The pinned code has a known prompt profile."
+        },
+        {
+          "code": "prompts_checked",
+          "level": "ok",
+          "params": {},
+          "text": "The AERI code's source files are the ones the prompt profile was written from."
+        },
+        {
+          "code": "templates_sha",
+          "level": "ok",
+          "params": {
+            "which": []
+          },
+          "text": "The job and binding templates match SOURCES.sha256."
+        },
+        {
+          "code": "prepared",
+          "level": "ok",
+          "params": {
+            "name": "aeri-20261021-ext-r01",
+            "reason": null
+          },
+          "text": "Run aeri-20261021-ext-r01 is prepared and unchanged."
+        },
+        {
+          "code": "run_name_free",
+          "level": "ok",
+          "params": {
+            "name": "aeri-20261021-ext-r01",
+            "where": []
+          },
+          "text": "The name is not used by a rollout folder or an AERI registry."
+        },
+        {
+          "code": "cameras_config",
+          "level": "ok",
+          "params": {
+            "fields": []
+          },
+          "text": "The binding's camera serials equal the site file's."
+        },
+        {
+          "code": "gpu_free",
+          "level": "ok",
+          "params": {
+            "free_mib": 24407,
+            "mode": "external",
+            "need_mib": 9216
+          },
+          "text": "Enough GPU memory is free."
+        },
+        {
+          "code": "gpu_lock_free",
+          "level": "ok",
+          "params": {
+            "holders": 0
+          },
+          "text": "The GPU lock is free."
+        },
+        {
+          "code": "mem_available",
+          "level": "ok",
+          "params": {
+            "available_mib": 96932,
+            "need_mib": 28672
+          },
+          "text": "Enough memory is available."
+        },
+        {
+          "code": "ports_free",
+          "level": "ok",
+          "params": {
+            "ports": []
+          },
+          "text": "Ports 8000, 8100 and 8110 are free."
+        },
+        {
+          "code": "live_service",
+          "level": "ok",
+          "params": {
+            "state": "stopped"
+          },
+          "text": "The live annotation service is not running."
+        },
+        {
+          "code": "arm_lock_free",
+          "level": "ok",
+          "params": {},
+          "text": "The arm lock is free."
+        },
+        {
+          "code": "no_e_run",
+          "level": "ok",
+          "params": {},
+          "text": "No hosted evaluation client or session is on."
+        },
+        {
+          "code": "no_policy_deploy",
+          "level": "ok",
+          "params": {
+            "state": "idle"
+          },
+          "text": "This page has no policy server unit."
+        },
+        {
+          "code": "no_aeri_unit_left",
+          "level": "ok",
+          "params": {
+            "units": [],
+            "vram_mib": 8200
+          },
+          "text": "No AERI model or policy unit is left behind."
+        },
+        {
+          "code": "swap_logs_clean",
+          "level": "ok",
+          "params": {
+            "count": 0
+          },
+          "text": "No unfinished policy-switch log."
+        },
+        {
+          "code": "no_other_aeri",
+          "level": "ok",
+          "params": {},
+          "text": "No other AERI run is alive."
+        },
+        {
+          "code": "monitor_green",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          },
+          "text": "The health monitor is fresh and green."
+        },
+        {
+          "code": "stack_ready",
+          "level": "warn",
+          "params": {
+            "cards": {
+              "a": "running",
+              "b": "unknown",
+              "c": "running",
+              "m": "running"
+            }
+          },
+          "text": "The arm stack looks up (the gripper stack and the controller are not observable from here)."
+        },
+        {
+          "code": "unit_timeout",
+          "level": "warn",
+          "params": {
+            "need_s": 150,
+            "seconds": 15.0
+          },
+          "text": "The product's service unit stops after 15.0 s; a hosted terminal D needs 150 s for its 7/7 wrap-up, so a direct systemctl stop or restart while it runs cuts it. Raise TimeoutStopSec."
+        }
+      ],
+      "readiness_sha256": "0909090909090909090909090909090909090909090909090909090909090909",
+      "ready": true,
+      "sampled_at": "2026-10-21T20:00:00+08:00",
+      "schema": "levi.marvel0.aeri.v1",
+      "site": {
+        "code": "aeri_site.ok",
+        "errors": [],
+        "state": "ok",
+        "template": null
+      }
+    },
+    "unconfigured": {
+      "confirm": {
+        "leftovers": "stop leftover aeri units",
+        "live_stop": "stop live service",
+        "prepare": "prepare aeri run"
+      },
+      "control": {
+        "code": "aeri.missing",
+        "errors": [],
+        "state": "missing"
+      },
+      "enabled": false,
+      "leftovers": null,
+      "limits": null,
+      "live_service": null,
+      "notices": [
+        {
+          "code": "gates_scope",
+          "text": "These checks stop mistakes, not another program of the same account. The real barriers are Franka Desk and the physical emergency stop; keep a hand on it."
+        }
+      ],
+      "prepared": null,
+      "profile": null,
+      "profiles": [],
+      "readiness": [],
+      "readiness_sha256": "0101010101010101010101010101010101010101010101010101010101010101",
+      "ready": false,
+      "sampled_at": "2026-10-21T20:00:00+08:00",
+      "schema": "levi.marvel0.aeri.v1",
+      "site": {
+        "code": "aeri_site.no_section",
+        "errors": [],
+        "state": "unconfigured",
+        "template": "# Add this section to the marvel0 site file to let the page prepare and host an AERI run.\n# The page can read it and never write it. Without it the AERI card says \"not configured\".\n[aeri]\nprofile        = \"harvest-5bc750ca\"     # the prompt profile of the pinned code (the one validated on the real robot)\npin_sha        = \"5bc750ca\"              # 8 to 40 hex digits: the worktree's HEAD must start with them\nworktree       = \"/path/to/worktrees/harvest-validation-fix\"\nruns_root      = \"/path/to/aeri-external/runs\"\ntemplates_root = \"/path/to/aeri-external/templates\"\nrollout_root   = \"/path/to/online_rollout_data/models\"\nopenpi_root    = \"/path/to/openpi\"\nlevi_python    = \"/path/to/LEVI/.venv/bin/python\"\nlevi_bin       = \"/path/to/LEVI/.venv/bin/levi\"\nconsole_lang   = \"zh\"                    # zh or en\nuv_offline     = true\n# tools_root   = \"/path/to/aeri-external/tools\"   # default: <runs_root>/../tools (the VLM bridge, the harness proxy)\n# local_model  = \"/path/to/models/Qwen--Qwen3-VL-4B-Instruct-FP8\"   # without it the page offers no local mode\n"
+      }
+    }
+  },
+  "leftovers_stop": {
+    "errors": {
+      "gpu_in_use": {
+        "detail": {
+          "code": "gpu_in_use",
+          "message": "The GPU lock is held"
+        },
+        "status": 409
+      },
+      "stop_failed": {
+        "detail": {
+          "code": "stop_failed",
+          "message": "A unit did not stop",
+          "results": [
+            {
+              "detail": "Failed to stop levi-aeri-vlm-8100.service: Unit is masked.",
+              "name": "levi-aeri-vlm-8100.service",
+              "ok": false
+            },
+            {
+              "detail": null,
+              "name": "levi-aeri-policy-forward.service",
+              "ok": true
+            }
+          ]
+        },
+        "status": 502
+      }
+    },
+    "ok": {
+      "body": {
+        "action": "leftovers_stop",
+        "already": false,
+        "done": true,
+        "leftovers": {
+          "can_stop": true,
+          "state": "present",
+          "swap": {
+            "count": 1,
+            "state": "unclean"
+          },
+          "units": [
+            {
+              "active": "active",
+              "kind": "policy",
+              "name": "levi-aeri-policy-forward.service",
+              "sub": "running"
+            },
+            {
+              "active": "active",
+              "kind": "vlm",
+              "name": "levi-aeri-vlm-8100.service",
+              "sub": "running"
+            }
+          ],
+          "why_not": null
+        },
+        "live_service": null,
+        "replayed": false,
+        "request_id": "req-20261021-0003",
+        "results": [
+          {
+            "detail": null,
+            "name": "levi-aeri-policy-forward.service",
+            "ok": true
+          },
+          {
+            "detail": null,
+            "name": "levi-aeri-vlm-8100.service",
+            "ok": true
+          }
+        ],
+        "schema": "levi.marvel0.aeri_action.v1"
+      },
+      "status": 200
+    }
+  },
+  "live_stop": {
+    "errors": {
+      "arm_in_use": {
+        "detail": {
+          "code": "arm_in_use",
+          "message": "The arm lock is held"
+        },
+        "status": 409
+      },
+      "d_active": {
+        "detail": {
+          "code": "d_active",
+          "message": "An AERI run is alive"
+        },
+        "status": 409
+      },
+      "e_active": {
+        "detail": {
+          "code": "e_active",
+          "message": "A hosted evaluation client or session is on"
+        },
+        "status": 409
+      },
+      "live_stop_failed": {
+        "detail": {
+          "code": "live_stop_failed",
+          "message": "The live annotation service did not stop",
+          "reason": "still_running",
+          "returncode": 1,
+          "tail": "refused: a job is running"
+        },
+        "status": 502
+      },
+      "state_unreadable": {
+        "detail": {
+          "code": "state_unreadable",
+          "message": "A source could not be read, so nothing is done (an unknown state refuses)"
+        },
+        "status": 409
+      }
+    },
+    "ok": {
+      "body": {
+        "action": "live_stop",
+        "already": false,
+        "done": true,
+        "leftovers": null,
+        "live_service": {
+          "can_stop": false,
+          "listener": false,
+          "port": 8100,
+          "state": "stopped",
+          "why_not": {
+            "code": "not_running",
+            "text": "The live annotation service is not running."
+          }
+        },
+        "replayed": false,
+        "request_id": "req-20261021-0002",
+        "results": [
+          {
+            "detail": null,
+            "name": "levi-live",
+            "ok": true
+          }
+        ],
+        "schema": "levi.marvel0.aeri_action.v1"
+      },
+      "status": 200
+    }
+  },
+  "note": "Built by tests/marvel0/regen_aeri_ready_sample.py from the real code on a made-up machine; paths, the commit and the digests that depend on them are fixed values. Texts are English; the page maps code to its own text and falls back to text.",
+  "prepare": {
+    "errors": {
+      "aeri_disabled": {
+        "detail": {
+          "code": "aeri_disabled",
+          "message": "AERI hosting is off in the control file"
+        },
+        "status": 403
+      },
+      "aeri_unconfigured": {
+        "detail": {
+          "code": "aeri_unconfigured",
+          "errors": [
+            {
+              "code": "range",
+              "field": "aeri.pin_sha"
+            }
+          ],
+          "message": "The site file has no valid [aeri] section"
+        },
+        "status": 412
+      },
+      "busy": {
+        "detail": {
+          "code": "busy",
+          "message": "Another AERI preparation action is going on"
+        },
+        "status": 423
+      },
+      "check_failed": {
+        "detail": {
+          "code": "check_failed",
+          "message": "aeri.py check refused",
+          "reason": "returncode",
+          "returncode": 2,
+          "tail": "job: subtask.max_steps is out of range"
+        },
+        "status": 422
+      },
+      "code_pin_mismatch": {
+        "detail": {
+          "code": "code_pin_mismatch",
+          "dirty": false,
+          "head": "9d3e54ea",
+          "message": "AERI worktree is not at the pinned commit or is dirty",
+          "pin": "5bc750ca"
+        },
+        "status": 412
+      },
+      "confirm_required": {
+        "detail": {
+          "code": "confirm_required",
+          "message": "Type the confirmation phrase exactly: prepare aeri run",
+          "phrase": "prepare aeri run"
+        },
+        "status": 400
+      },
+      "form_invalid": {
+        "detail": {
+          "code": "form_invalid",
+          "field": "task",
+          "message": "The form is not valid",
+          "reason": "pattern"
+        },
+        "status": 422
+      },
+      "lock_unusable": {
+        "detail": {
+          "code": "lock_unusable",
+          "message": "The machine-wide run lock could not be taken"
+        },
+        "status": 503
+      },
+      "not_product": {
+        "detail": {
+          "code": "not_product",
+          "message": "Only the product LEVI may act on the real machine; this instance only shows"
+        },
+        "status": 409
+      },
+      "profile_unknown": {
+        "detail": {
+          "code": "profile_unknown",
+          "message": "The pinned AERI code has no known prompt profile",
+          "profile": "main-297a74c3"
+        },
+        "status": 412
+      },
+      "request_id_invalid": {
+        "detail": {
+          "code": "request_id_invalid",
+          "message": "request_id is 8-80 characters of A-Z, a-z, 0-9 and . _ : -"
+        },
+        "status": 400
+      },
+      "request_id_used": {
+        "detail": {
+          "code": "request_id_used",
+          "message": "That request id was already used for another request"
+        },
+        "status": 409
+      },
+      "run_name_taken": {
+        "detail": {
+          "code": "run_name_taken",
+          "message": "The run name exists in a registry",
+          "name": "aeri-20261021-ext-r01",
+          "where": ["rollout"]
+        },
+        "status": 409
+      },
+      "start_home_unsupported": {
+        "detail": {
+          "code": "start_home_unsupported",
+          "message": "This code version has no startup homing",
+          "profile": "bfdee2cf"
+        },
+        "status": 422
+      },
+      "state_dir_unusable": {
+        "detail": {
+          "code": "state_dir_unusable",
+          "message": "The folder for the AERI records cannot be used"
+        },
+        "status": 412
+      },
+      "templates_changed": {
+        "detail": {
+          "code": "templates_changed",
+          "message": "A template does not match SOURCES.sha256",
+          "which": ["job.base.yaml"]
+        },
+        "status": 412
+      }
+    },
+    "ok": {
+      "body": {
+        "done": true,
+        "name": "aeri-20261021-ext-r01",
+        "prepared": {
+          "aeri_head": "5bc750ca",
+          "binding_sha256": "b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
+          "confirm": "execute aeri-20261021-ext-r01",
+          "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
+          "files_sha256": {
+            "binding": "0808080808080808080808080808080808080808080808080808080808080808",
+            "job": "0707070707070707070707070707070707070707070707070707070707070707"
+          },
+          "gripper_confirm_s": 4.0,
+          "intact": true,
+          "mode": "external",
+          "name": "aeri-20261021-ext-r01",
+          "plan_sha256": "631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537",
+          "prepared_at": "2026-10-21T20:00:00+08:00",
+          "problems": [],
+          "profile": "harvest-5bc750ca",
+          "rounds": 5,
+          "start_home": true,
+          "steps": 200,
+          "task": "pick the pepper into the white plate"
+        },
+        "replayed": false,
+        "request_id": "req-20261021-0001",
+        "schema": "levi.marvel0.aeri_prepare.v1"
+      },
+      "status": 200
+    }
+  },
+  "schema": "levi.marvel0.aeri_sample.v1"
+}

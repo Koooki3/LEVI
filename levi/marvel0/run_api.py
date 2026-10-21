@@ -69,7 +69,11 @@ def run_active() -> bool:
     cannot answer raises, and the asker treats that as active."""
     sup = supervisor()
     sup.adopt()
-    return sup.active() is not None
+    if sup.active() is not None:
+        return True
+    from . import aeri_run_api  # the hosted AERI terminal D shares the arm
+
+    return aeri_run_api.active() is not None
 
 
 def register() -> None:

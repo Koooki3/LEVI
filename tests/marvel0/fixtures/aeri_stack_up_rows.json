@@ -1,0 +1,538 @@
+{
+  "note": "Built by tests/marvel0/regen_aeri_ready_sample.py: aeri_ready.snapshot() on the made-up machine where everything is ready, with the arm stack up (stack_up), not read (stack_not_read) and with A not running (stack_down). warn_ok is the list of rows that may be warn.",
+  "schema": "levi.marvel0.aeri_stack_up_rows.v1",
+  "snapshots": {
+    "stack_down": {
+      "ready": false,
+      "rows": [
+        {
+          "code": "aeri_enabled",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          }
+        },
+        {
+          "code": "product",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "aeri_site",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "code_pin",
+          "level": "ok",
+          "params": {
+            "dirty": false,
+            "head": "5bc750ca",
+            "pin": "5bc750ca"
+          }
+        },
+        {
+          "code": "profile_known",
+          "level": "ok",
+          "params": {
+            "profile": "harvest-5bc750ca"
+          }
+        },
+        {
+          "code": "prompts_checked",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "templates_sha",
+          "level": "ok",
+          "params": {
+            "which": []
+          }
+        },
+        {
+          "code": "prepared",
+          "level": "ok",
+          "params": {
+            "name": "aeri-20261021-ext-r01",
+            "reason": null
+          }
+        },
+        {
+          "code": "run_name_free",
+          "level": "ok",
+          "params": {
+            "name": "aeri-20261021-ext-r01",
+            "where": []
+          }
+        },
+        {
+          "code": "cameras_config",
+          "level": "ok",
+          "params": {
+            "fields": []
+          }
+        },
+        {
+          "code": "gpu_free",
+          "level": "ok",
+          "params": {
+            "free_mib": 24407,
+            "mode": "external",
+            "need_mib": 9216
+          }
+        },
+        {
+          "code": "gpu_lock_free",
+          "level": "ok",
+          "params": {
+            "holders": 0
+          }
+        },
+        {
+          "code": "mem_available",
+          "level": "ok",
+          "params": {
+            "available_mib": 96932,
+            "need_mib": 28672
+          }
+        },
+        {
+          "code": "ports_free",
+          "level": "ok",
+          "params": {
+            "ports": []
+          }
+        },
+        {
+          "code": "live_service",
+          "level": "ok",
+          "params": {
+            "state": "stopped"
+          }
+        },
+        {
+          "code": "arm_lock_free",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "no_e_run",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "no_policy_deploy",
+          "level": "ok",
+          "params": {
+            "state": "idle"
+          }
+        },
+        {
+          "code": "no_aeri_unit_left",
+          "level": "ok",
+          "params": {
+            "units": [],
+            "vram_mib": 8200
+          }
+        },
+        {
+          "code": "swap_logs_clean",
+          "level": "ok",
+          "params": {
+            "count": 0
+          }
+        },
+        {
+          "code": "no_other_aeri",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "monitor_green",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          }
+        },
+        {
+          "code": "stack_ready",
+          "level": "refuse",
+          "params": {
+            "cards": {
+              "a": "dead",
+              "b": "unknown",
+              "c": "running",
+              "m": "running"
+            }
+          }
+        },
+        {
+          "code": "unit_timeout",
+          "level": "ok",
+          "params": {
+            "need_s": 150,
+            "seconds": 150.0
+          }
+        }
+      ],
+      "sampled_at": "2026-10-21T20:00:00+08:00",
+      "sha256": "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e"
+    },
+    "stack_not_read": {
+      "ready": false,
+      "rows": [
+        {
+          "code": "aeri_enabled",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          }
+        },
+        {
+          "code": "product",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "aeri_site",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "code_pin",
+          "level": "ok",
+          "params": {
+            "dirty": false,
+            "head": "5bc750ca",
+            "pin": "5bc750ca"
+          }
+        },
+        {
+          "code": "profile_known",
+          "level": "ok",
+          "params": {
+            "profile": "harvest-5bc750ca"
+          }
+        },
+        {
+          "code": "prompts_checked",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "templates_sha",
+          "level": "ok",
+          "params": {
+            "which": []
+          }
+        },
+        {
+          "code": "prepared",
+          "level": "ok",
+          "params": {
+            "name": "aeri-20261021-ext-r01",
+            "reason": null
+          }
+        },
+        {
+          "code": "run_name_free",
+          "level": "ok",
+          "params": {
+            "name": "aeri-20261021-ext-r01",
+            "where": []
+          }
+        },
+        {
+          "code": "cameras_config",
+          "level": "ok",
+          "params": {
+            "fields": []
+          }
+        },
+        {
+          "code": "gpu_free",
+          "level": "ok",
+          "params": {
+            "free_mib": 24407,
+            "mode": "external",
+            "need_mib": 9216
+          }
+        },
+        {
+          "code": "gpu_lock_free",
+          "level": "ok",
+          "params": {
+            "holders": 0
+          }
+        },
+        {
+          "code": "mem_available",
+          "level": "ok",
+          "params": {
+            "available_mib": 96932,
+            "need_mib": 28672
+          }
+        },
+        {
+          "code": "ports_free",
+          "level": "ok",
+          "params": {
+            "ports": []
+          }
+        },
+        {
+          "code": "live_service",
+          "level": "ok",
+          "params": {
+            "state": "stopped"
+          }
+        },
+        {
+          "code": "arm_lock_free",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "no_e_run",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "no_policy_deploy",
+          "level": "ok",
+          "params": {
+            "state": "idle"
+          }
+        },
+        {
+          "code": "no_aeri_unit_left",
+          "level": "ok",
+          "params": {
+            "units": [],
+            "vram_mib": 8200
+          }
+        },
+        {
+          "code": "swap_logs_clean",
+          "level": "ok",
+          "params": {
+            "count": 0
+          }
+        },
+        {
+          "code": "no_other_aeri",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "monitor_green",
+          "level": "unknown",
+          "params": {
+            "state": "unknown"
+          }
+        },
+        {
+          "code": "stack_ready",
+          "level": "unknown",
+          "params": {
+            "cards": {
+              "a": "unknown",
+              "b": "unknown",
+              "c": "unknown",
+              "m": "running"
+            }
+          }
+        },
+        {
+          "code": "unit_timeout",
+          "level": "ok",
+          "params": {
+            "need_s": 150,
+            "seconds": 150.0
+          }
+        }
+      ],
+      "sampled_at": "2026-10-21T20:00:00+08:00",
+      "sha256": "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d"
+    },
+    "stack_up": {
+      "ready": true,
+      "rows": [
+        {
+          "code": "aeri_enabled",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          }
+        },
+        {
+          "code": "product",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "aeri_site",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "code_pin",
+          "level": "ok",
+          "params": {
+            "dirty": false,
+            "head": "5bc750ca",
+            "pin": "5bc750ca"
+          }
+        },
+        {
+          "code": "profile_known",
+          "level": "ok",
+          "params": {
+            "profile": "harvest-5bc750ca"
+          }
+        },
+        {
+          "code": "prompts_checked",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "templates_sha",
+          "level": "ok",
+          "params": {
+            "which": []
+          }
+        },
+        {
+          "code": "prepared",
+          "level": "ok",
+          "params": {
+            "name": "aeri-20261021-ext-r01",
+            "reason": null
+          }
+        },
+        {
+          "code": "run_name_free",
+          "level": "ok",
+          "params": {
+            "name": "aeri-20261021-ext-r01",
+            "where": []
+          }
+        },
+        {
+          "code": "cameras_config",
+          "level": "ok",
+          "params": {
+            "fields": []
+          }
+        },
+        {
+          "code": "gpu_free",
+          "level": "ok",
+          "params": {
+            "free_mib": 24407,
+            "mode": "external",
+            "need_mib": 9216
+          }
+        },
+        {
+          "code": "gpu_lock_free",
+          "level": "ok",
+          "params": {
+            "holders": 0
+          }
+        },
+        {
+          "code": "mem_available",
+          "level": "ok",
+          "params": {
+            "available_mib": 96932,
+            "need_mib": 28672
+          }
+        },
+        {
+          "code": "ports_free",
+          "level": "ok",
+          "params": {
+            "ports": []
+          }
+        },
+        {
+          "code": "live_service",
+          "level": "ok",
+          "params": {
+            "state": "stopped"
+          }
+        },
+        {
+          "code": "arm_lock_free",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "no_e_run",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "no_policy_deploy",
+          "level": "ok",
+          "params": {
+            "state": "idle"
+          }
+        },
+        {
+          "code": "no_aeri_unit_left",
+          "level": "ok",
+          "params": {
+            "units": [],
+            "vram_mib": 8200
+          }
+        },
+        {
+          "code": "swap_logs_clean",
+          "level": "ok",
+          "params": {
+            "count": 0
+          }
+        },
+        {
+          "code": "no_other_aeri",
+          "level": "ok",
+          "params": {}
+        },
+        {
+          "code": "monitor_green",
+          "level": "ok",
+          "params": {
+            "state": "ok"
+          }
+        },
+        {
+          "code": "stack_ready",
+          "level": "warn",
+          "params": {
+            "cards": {
+              "a": "running",
+              "b": "unknown",
+              "c": "running",
+              "m": "running"
+            }
+          }
+        },
+        {
+          "code": "unit_timeout",
+          "level": "ok",
+          "params": {
+            "need_s": 150,
+            "seconds": 150.0
+          }
+        }
+      ],
+      "sampled_at": "2026-10-21T20:00:00+08:00",
+      "sha256": "0606060606060606060606060606060606060606060606060606060606060606"
+    }
+  },
+  "warn_ok": ["stack_ready", "unit_timeout"]
+}

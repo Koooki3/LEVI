@@ -70,6 +70,11 @@ mock.module("@/components/marvel0/marvel0-actions", () => ({
     </>
   ),
 }));
+// Step 5 (the autonomy system) reads its own two routes and has its own tests
+// (autonomy-*): a stand-in keeps its requests and timers out of these.
+mock.module("@/components/marvel0/autonomy-step", () => ({
+  AutonomyStep: () => null,
+}));
 const { default: Marvel0Page } = await import("@/app/marvel_workstation/page");
 setupDom();
 

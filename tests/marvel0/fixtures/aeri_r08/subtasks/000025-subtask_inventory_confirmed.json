@@ -1,0 +1,43 @@
+{
+ "graspable": [
+  "red_pepper_1",
+  "purple_eggplant_1"
+ ],
+ "objects": [
+  {
+   "colour": "blue",
+   "graspable": false,
+   "id": "blue_plate_1",
+   "kind": "plate",
+   "on": "table"
+  },
+  {
+   "colour": "white",
+   "graspable": false,
+   "id": "white_plate_1",
+   "kind": "plate",
+   "on": "table"
+  },
+  {
+   "colour": "red",
+   "graspable": true,
+   "id": "red_pepper_1",
+   "kind": "pepper",
+   "on": "blue_plate_1"
+  },
+  {
+   "colour": "purple",
+   "graspable": true,
+   "id": "purple_eggplant_1",
+   "kind": "eggplant",
+   "on": "blue_plate_1"
+  }
+ ],
+ "whitelist": [
+  "blue_plate_1",
+  "white_plate_1",
+  "red_pepper_1",
+  "purple_eggplant_1",
+  "table"
+ ]
+}

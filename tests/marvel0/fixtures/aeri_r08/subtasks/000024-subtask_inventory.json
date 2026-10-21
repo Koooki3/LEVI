@@ -1,0 +1,68 @@
+{
+ "completion_tokens": 0,
+ "finish_reason": "stop",
+ "frames": [
+  {
+   "ref": "side:inventory-1",
+   "sha256": "126786a4055c2e9696da89d60b8731551d9509677a61434f6ad9c15a3d73da39"
+  },
+  {
+   "ref": "wrist:inventory-1",
+   "sha256": "7102ae287a35f7a41d04d51a5c88890806d70a2df5e7aae70c686b08a0254f46"
+  }
+ ],
+ "image_refs": [
+  "side:inventory-1",
+  "wrist:inventory-1"
+ ],
+ "kind": "inventory",
+ "latency_ms": 33213,
+ "outcome": "asked",
+ "parsed": [
+  {
+   "colour": "blue",
+   "graspable": false,
+   "id": "blue_plate_1",
+   "kind": "plate",
+   "on": "table"
+  },
+  {
+   "colour": "white",
+   "graspable": false,
+   "id": "white_plate_1",
+   "kind": "plate",
+   "on": "table"
+  },
+  {
+   "colour": "red",
+   "graspable": true,
+   "id": "red_pepper_1",
+   "kind": "pepper",
+   "on": "blue_plate_1"
+  },
+  {
+   "colour": "purple",
+   "graspable": true,
+   "id": "purple_eggplant_1",
+   "kind": "eggplant",
+   "on": "blue_plate_1"
+  }
+ ],
+ "prompt_sha256": "b31668a08925d95dfe6c79c28fee55d452d48ac44d44b89f239fdbc91398c8e7",
+ "prompt_tokens": 0,
+ "raw_content": "{\"objects\":[{\"id\":\"blue_plate_1\",\"colour\":\"blue\",\"kind\":\"plate\",\"on\":\"table\",\"graspable\":false},{\"id\":\"white_plate_1\",\"colour\":\"white\",\"kind\":\"plate\",\"on\":\"table\",\"graspable\":false},{\"id\":\"red_pepper_1\",\"colour\":\"red\",\"kind\":\"pepper\",\"on\":\"blue_plate_1\",\"graspable\":true},{\"id\":\"purple_eggplant_1\",\"colour\":\"purple\",\"kind\":\"eggplant\",\"on\":\"blue_plate_1\",\"graspable\":true}]}\n",
+ "request_evidence": {
+  "file": "subtasks/000024-request-evidence.json",
+  "file_sha256": "1759ffd7f50bb8f43ce44be79c2928629b5d05f2e401e2fe9be06568630433f0"
+ },
+ "request_id": "inventory-1",
+ "request_wall_ns": 1792321261500025663,
+ "response_schema_ok": true,
+ "response_wall_ns": 1792321294713923365,
+ "timeout_s": 600,
+ "usage_source": "provider_reported",
+ "valid": true,
+ "vllm_state": "unknown",
+ "vlm_request_id": "agent-1",
+ "wake_ms": 8
+}

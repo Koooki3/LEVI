@@ -91,10 +91,17 @@ describe("the marvel0 with its action cards", () => {
     const { host } = await render(<Marvel0Page />);
     await loaded(host);
     await tick(3, 5);
-    // The status routes, the policy server's, the stack's and the client's;
-    // the log is read only while it is wanted.
+    // The status routes, the policy server's, the stack's and the client's,
+    // and the two of step 5 (readiness, and the hosted terminal D); the log is
+    // read only while it is wanted.
     expect(new Set(calls.map((call) => call.path))).toEqual(
-      new Set([...READS.slice(0, 5), STACK, RUN]),
+      new Set([
+        ...READS.slice(0, 5),
+        STACK,
+        RUN,
+        "/api/levi/marvel0/aeri",
+        "/api/levi/marvel0/aeri/run",
+      ]),
     );
     for (const call of calls) {
       expect(call.init?.method ?? "GET").toBe("GET");
@@ -132,7 +139,7 @@ describe("the marvel0 with its action cards", () => {
     const steps = Array.from(host.querySelectorAll(".rg-step__title")).map(
       (h) => h.textContent,
     );
-    // "Step n" and the name: the steps (1-4) are told apart from the chain's
+    // "Step n" and the name: the steps (1-5) are told apart from the chain's
     // node numbers (01-07), and the run is the fourth step of its own.
     const step = (n: number, name: string) =>
       `${en["marvel0.step.n"].replace("{n}", String(n))}${name}`;
@@ -141,6 +148,7 @@ describe("the marvel0 with its action cards", () => {
       step(2, en["marvel0.step.policy"]),
       step(3, en["marvel0.step.client"]),
       step(4, en["marvel0.step.run"]),
+      step(5, en["marvel0.autonomy.step"]),
     ]);
     expect(
       actions.querySelector("[data-testid=marvel0-deploy]"),

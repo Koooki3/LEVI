@@ -16,6 +16,23 @@ from .paths import STATE
 JOB_KINDS = ("pool", "conversion", "recap_value", "sam3")
 
 
+def _hosted_jobs(workspace=None) -> list[dict]:
+    """The terminal D that the marvel0 page hosts (a robot session), read from its
+    run record on disk and never through the page's supervisor: this runs in
+    ``levi stop`` and other processes, where taking a D over would signal it."""
+    from .marvel0 import aeri_activity
+
+    return aeri_activity.job_rows(workspace)
+
+
+# Job sources that are not LEVI's own child workers. ``levi stop``, the core's
+# stop route and the R6 restart read ``running_jobs``, so a robot session hosted
+# by the page must be in it. A source that fails is listed as a job (not
+# silently dropped); ``marvel0.aeri_activity.hosted_visible_to_activity`` refuses
+# a start when this tuple has lost the source.
+EXTRA_SOURCES = (_hosted_jobs,)
+
+
 def _is_job(kind: str) -> bool:
     return kind in JOB_KINDS or (
         kind.startswith("segmentation-") and kind != "segmentation-live"
@@ -44,8 +61,10 @@ def _progress(kind: str, job_id: str) -> dict | None:
     }
 
 
-def running_jobs() -> list[dict]:
-    """Running job workers: kind, id, since when, progress when known."""
+def running_jobs(workspace=None) -> list[dict]:
+    """Running job workers: kind, id, since when, progress when known; then what
+    the ``EXTRA_SOURCES`` add (``workspace``: the one they read, default the
+    process-wide one)."""
     now = time.time()
     out = []
     for row in children.listed():
@@ -60,6 +79,8 @@ def running_jobs() -> list[dict]:
                 "progress": _progress(row["kind"], row.get("label") or ""),
             }
         )
+    for source in EXTRA_SOURCES:
+        out.extend(source(workspace))
     return out
 
 
@@ -73,5 +94,6 @@ def describe(jobs: list[dict]) -> str:
             detail = f"  {progress.get('stage')}: {progress.get('done')}/{progress.get('total')}"
             if progress.get("eta_seconds") is not None:
                 detail += f", about {round(progress['eta_seconds'] / 60)} min left"
-        lines.append(f"  - {job['kind']} {job['id']} (pid {job['pid']}){detail}")
+        who = f" (pid {job['pid']})" if job.get("pid") else ""
+        lines.append(f"  - {job['kind']} {job['id']}{who}{detail}")
     return "\n".join(lines)
