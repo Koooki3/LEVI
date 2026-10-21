@@ -1,6 +1,9 @@
 // The answer of POST /api/levi/marvel0/command/preview as the backend writes it
 // (levi/marvel0/catalog_api.py command_preview), for the default form of the SFT
 // model on a site with placeholder paths.
+import { siteAnswer } from "./catalog-fixtures";
+import hzSample from "./marvel0-command-hz.sample.json";
+
 type Rec = Record<string, unknown>;
 
 export const COMMAND = [
@@ -38,3 +41,15 @@ export function preview(over: Rec = {}): Rec {
     ...over,
   };
 }
+
+/** The `control` part of the site answer, as the backend writes it
+ * (levi/marvel0/command.py `control_public`; marvel0-command-hz.sample.json is
+ * written by tests/marvel0/regen_command_hz_sample.py). */
+export const RATE_CONTROL = hzSample.site_control;
+
+/** The site answer of a backend that offers control rates. */
+export const siteWithRate = (over: Rec = {}): Rec =>
+  siteAnswer({ control: RATE_CONTROL, ...over });
+
+/** The cases of the backend's sample: what it works out for each rate. */
+export const RATE_CASES = hzSample.cases;

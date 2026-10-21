@@ -11,17 +11,20 @@
 // on the physical e-stop; this card itself starts nothing.
 import { useMemo, useRef, useState, useEffect, type ReactNode } from "react";
 import { Check, ClipboardCopy, TriangleAlert } from "lucide-react";
-import { Badge, Button, Card, Field, Input } from "@/components/ds";
+import { Badge, Button, Card, Field, Input, Select } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Note } from "@/components/pages-ui/feedback";
 import { Refusal, WordedText } from "./action-parts";
 import { COMMAND_ANCHOR } from "./chain-logic";
 import { wordOf } from "./ctl-text";
 import {
+  DEFAULT_HZ,
   bodyKey,
   commandBody,
   initialCommandForm,
   placeholders,
+  rateFacts,
+  rateOf,
   readPreview,
   serverMatch,
   warningSay,
@@ -29,6 +32,7 @@ import {
   type FieldName,
   type Preview,
 } from "./command-logic";
+import type { ControlFacts, ControlView } from "./control-logic";
 import type { ApiFailure, Marvel0Api } from "./deploy-api";
 import type { DeployStatus } from "./deploy-logic";
 import { fieldMessages } from "./marvel0-failure";
@@ -97,7 +101,9 @@ export function CommandPanel({
     setEdits((cur) => ({ ...cur, ...change }));
   const model = models.models.find((m) => m.id === form.modelId) ?? null;
   const hints = placeholders(form, models, site);
-  const { body, errors } = commandBody(form);
+  const control = site.control;
+  const facts = rateFacts(form, models, site);
+  const { body, errors } = commandBody(form, control?.default ?? DEFAULT_HZ);
   const key = bodyKey(body);
   const stale = made !== null && made.key !== key;
   const server = serverMatch({ modelId: form.modelId, rtc: form.rtc }, status);
@@ -289,6 +295,17 @@ export function CommandPanel({
                 onChange={(event) => edit({ horizon: event.target.value })}
               />
             </Field>
+            {control && facts && (
+              <Rate
+                control={control}
+                facts={facts}
+                value={form.hz}
+                lowered={hints.horizonLoweredFrom}
+                horizon={hints.horizon}
+                error={fieldError("control_hz")}
+                onChange={(hz) => edit({ hz })}
+              />
+            )}
             <Field
               className="rg-span"
               label={t("marvel0.cmd.field.group")}
@@ -392,6 +409,8 @@ export function CommandPanel({
                 group={form.group.trim() || hints.group}
                 modelId={form.modelId}
                 rtc={form.rtc}
+                hz={control ? rateOf(form) : null}
+                referenceHz={control?.referenceHz ?? DEFAULT_HZ}
                 stale={stale}
               />
             ) : null
@@ -399,6 +418,213 @@ export function CommandPanel({
         />
       )}
     </Card>
+  );
+}
+
+/** The control rate: a select of the site's options, the numbers the rate
+ * changes (worked out here the way the backend works them out), and, for a
+ * rate other than the one the policy was trained at, the note that it is
+ * untested. */
+function Rate({
+  control,
+  facts,
+  value,
+  lowered,
+  horizon,
+  error,
+  onChange,
+}: {
+  control: ControlView;
+  facts: ControlFacts;
+  value: string;
+  /** The site's RTC horizon default when this rate lowers it. */
+  lowered: number | null;
+  /** What an empty horizon field means at this rate. */
+  horizon: string;
+  error?: string;
+  onChange: (hz: string) => void;
+}) {
+  const { t } = useLocale();
+  const rows: Array<[string, string, string]> = [
+    [
+      "period",
+      t("marvel0.hz.fact.period"),
+      sayText(
+        { key: "marvel0.hz.value.period", params: { ms: facts.periodMs } },
+        t,
+      ),
+    ],
+    [
+      "episode",
+      t("marvel0.hz.fact.episode"),
+      sayText(
+        {
+          key: "marvel0.hz.value.episode",
+          params: { steps: facts.steps, seconds: facts.episodeS },
+        },
+        t,
+      ),
+    ],
+    [
+      "step_caps",
+      t("marvel0.hz.fact.step_caps"),
+      sayText(
+        {
+          key: "marvel0.hz.value.step_caps",
+          params: { m: facts.stepCapM, rad: facts.stepCapRad },
+        },
+        t,
+      ),
+    ],
+    [
+      "speed_caps",
+      t("marvel0.hz.fact.speed_caps"),
+      sayText(
+        {
+          key: "marvel0.hz.value.speed_caps",
+          params: { ms: facts.speedCapMS, rads: facts.speedCapRadS },
+        },
+        t,
+      ),
+    ],
+    [
+      "chunk",
+      t("marvel0.hz.fact.chunk"),
+      sayText(
+        {
+          key: "marvel0.hz.value.chunk",
+          params: { n: control.actionHorizon, s: facts.chunkS },
+        },
+        t,
+      ),
+    ],
+    [
+      "horizon",
+      t("marvel0.hz.fact.horizon"),
+      sayText(
+        {
+          key: "marvel0.hz.value.horizon",
+          params: {
+            n: facts.horizon,
+            chunk: control.actionHorizon,
+            s: facts.horizonS,
+          },
+        },
+        t,
+      ),
+    ],
+  ];
+  if (facts.rtc) {
+    const { reached, margin } = facts.rtc;
+    const params = {
+      h: facts.rtc.horizon,
+      beats: facts.latencyBeats,
+      reached,
+      chunk: control.actionHorizon,
+    };
+    rows.push(
+      [
+        "beats",
+        t("marvel0.hz.fact.beats"),
+        sayText(
+          {
+            key: "marvel0.hz.value.beats",
+            params: {
+              beats: facts.latencyBeats,
+              ms: facts.periodMs,
+              s: control.latencyBeats / control.referenceHz,
+            },
+          },
+          t,
+        ),
+      ],
+      [
+        "rtc",
+        t("marvel0.hz.fact.rtc"),
+        sayText(
+          margin >= 0
+            ? { key: "marvel0.hz.value.rtc_ok", params }
+            : {
+                key: "marvel0.hz.value.rtc_over",
+                params: { ...params, over: -margin },
+              },
+          t,
+        ),
+      ],
+    );
+  }
+  return (
+    <>
+      <Field
+        className="rg-span"
+        label={t("marvel0.hz.label")}
+        hint={
+          <>
+            {t("marvel0.hz.hint")}
+            {lowered !== null && facts.rtc && (
+              <>
+                {" "}
+                {sayText(
+                  {
+                    key: "marvel0.hz.horizon_lowered",
+                    params: { default: horizon, site: lowered },
+                  },
+                  t,
+                )}
+              </>
+            )}
+          </>
+        }
+        error={error}
+      >
+        <Select
+          data-testid="marvel0-command-hz"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          {control.options.map((hz) => (
+            <option key={hz} value={String(hz)}>
+              {sayText(
+                {
+                  key:
+                    hz === control.default
+                      ? "marvel0.hz.option_default"
+                      : "marvel0.hz.option",
+                  params: { hz },
+                },
+                t,
+              )}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <div
+        className="rg-span"
+        data-testid="marvel0-command-rate-facts"
+        data-hz={facts.hz}
+        data-changed={facts.changed || undefined}
+      >
+        <h4>{t("marvel0.hz.facts.title")}</h4>
+        <dl className="rg-facts">
+          {rows.map(([name, label, text]) => (
+            <div className="rg-fact" key={name} data-fact={name}>
+              <dt>{label}</dt>
+              <dd>{text}</dd>
+            </div>
+          ))}
+        </dl>
+        {facts.changed && (
+          <p className="rg-hint">{t("marvel0.hz.facts.hint")}</p>
+        )}
+      </div>
+      {facts.changed && (
+        <div className="rg-span" data-testid="marvel0-command-rate-note">
+          <Note tone="warning">
+            {sayText({ key: "marvel0.hz.note", params: { hz: facts.hz } }, t)}
+          </Note>
+        </div>
+      )}
+    </>
   );
 }
 

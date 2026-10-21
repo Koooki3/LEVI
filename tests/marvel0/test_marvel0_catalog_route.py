@@ -142,6 +142,7 @@ def test_preview_answers_the_documented_command(machine):
         "argv",
         "command",
         "warnings",
+        "control",
         "hands",
     }
     assert doc["schema"] == "levi.marvel0.command.v1" and doc["ok"] is True
@@ -226,6 +227,10 @@ REFUSED = [
     ({"rollout_group": "../x"}, "rollout_group_invalid", "rollout_group"),
     ({"note": "a$b"}, "note_invalid", "note"),
     ({"note": ""}, "note_invalid", "note"),
+    ({"control_hz": 15}, "control_hz_unsupported", "control_hz"),
+    ({"control_hz": 0}, "control_hz_unsupported", "control_hz"),
+    ({"control_hz": -5}, "control_hz_unsupported", "control_hz"),
+    ({"control_hz": 100}, "control_hz_unsupported", "control_hz"),
 ]
 
 
@@ -237,6 +242,44 @@ def test_preview_refuses_with_the_code_and_the_field(machine, body, code, field)
     detail = reply.json()["detail"]
     assert detail["code"] == code and detail["field"] == field and detail["message"]
     assert str(tmp_path) not in reply.text
+
+
+def test_preview_takes_each_control_rate_and_answers_what_it_changes(machine):
+    client, tmp_path = machine
+    for hz, cap in ((5, "0.1"), (10, "0.1"), (20, "0.05"), (25, "0.04"), (50, "0.02")):
+        doc = preview(client, control_hz=hz).json()
+        flags = [t for t in doc["argv"] if t.startswith("--control-hz")]
+        assert flags == ([] if hz == 10 else [f"--control-hz={hz}"])
+        assert f"--max-step-m={cap}" in doc["argv"]
+        assert doc["control"]["hz"] == hz and doc["control"]["step_cap_m"] == float(cap)
+        assert str(tmp_path) not in json.dumps(doc["control"])
+    assert preview(client, control_hz=10).json()["argv"] == golden_argv(tmp_path)
+
+
+def test_preview_refuses_a_rate_that_is_not_a_whole_number_before_the_command(machine):
+    client, _ = machine
+    for bad in ("20", 20.0, True, [20], {"hz": 20}):
+        reply = preview(client, control_hz=bad)
+        assert reply.status_code == 422, bad
+        assert "argv" not in reply.text
+    unknown = preview(client, control_hz=15).json()["detail"]
+    assert unknown["options"] == [5, 10, 20, 25, 50]
+
+
+def test_preview_does_not_take_the_rate_under_another_name(machine):
+    client, _ = machine
+    for name in ("control-hz", "hz", "controlHz", "max_step_m", "max_step_rad"):
+        assert preview(client, **{name: 20}).status_code == 422, name
+
+
+def test_site_answers_the_control_rate_options_and_the_numbers_behind_them(machine):
+    client, _ = machine
+    control = client.get(SITE).json()["control"]
+    assert control["options"] == [5, 10, 20, 25, 50] and control["default"] == 10
+    assert control["reference_hz"] == 10 and control["action_horizon"] == 10
+    assert control["latency_beats"] == 3 and control["short_episode_s"] == 30
+    assert control["step_caps"] == {"m": 0.1, "rad": 0.35}
+    assert control == command.control_public(marvel0_site.require())
 
 
 def test_a_bad_prompt_names_its_reason(machine):

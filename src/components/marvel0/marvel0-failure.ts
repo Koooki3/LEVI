@@ -74,6 +74,7 @@ const BY_CODE: Record<string, string> = {
   max_steps_out_of_range: "marvel0.err.out_of_range",
   eval_num_out_of_range: "marvel0.err.out_of_range",
   rtc_horizon_out_of_range: "marvel0.err.out_of_range",
+  control_hz_unsupported: "marvel0.hz.err.unsupported",
   rollout_group_invalid: "marvel0.err.rollout_group_invalid",
   unknown_field: "marvel0.err.unknown_field",
   command_self_check: "marvel0.err.command_self_check",
@@ -152,6 +153,14 @@ function paramsOf(f: ApiFailure): Params {
         },
       };
     }
+    case "control_hz_unsupported":
+      return {
+        options:
+          list(x.options)
+            .map((option) => num(option))
+            .filter((option): option is number => option !== null)
+            .join(", ") || "?",
+      };
     case "min_z_below_floor":
       return { floor: show(x.floor) };
     case "min_z_above_home":
@@ -248,6 +257,7 @@ const FORM_CODES = new Set([
   "max_steps_out_of_range",
   "eval_num_out_of_range",
   "rtc_horizon_out_of_range",
+  "control_hz_unsupported",
   "rollout_group_invalid",
   "note_invalid",
   "unknown_field",

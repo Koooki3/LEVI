@@ -2,7 +2,8 @@
 
 - ``GET /api/levi/marvel0/models``: the models the policy deploy panel may deploy
   (``models.py``), with the reasons for the ones it left out;
-- ``GET /api/levi/marvel0/site``: the site file as the page may see it (no path);
+- ``GET /api/levi/marvel0/site``: the site file as the page may see it (no path),
+  and the control-rate options with the numbers behind them;
 - ``POST /api/levi/marvel0/command/preview``: the demo client command for a form,
   as text to copy (``command.py``). **Nothing is executed, started, connected
   to or written**; a person pastes the command into a terminal.
@@ -42,6 +43,7 @@ class PreviewBody(BaseModel):
     rtc_horizon: int | None = None
     rollout_group: str | None = None
     note: str | None = None
+    control_hz: int | None = None
 
 
 @router.get("/models")
@@ -56,8 +58,11 @@ def models_view():
 @router.get("/site")
 def site_view():
     """The site file without its paths: connection, camera serials, home pose,
-    limits, caps, fixed client flags, GPU fractions and unit settings."""
-    return marvel0_site.public_view(marvel0_site.require())
+    limits, caps, fixed client flags, GPU fractions and unit settings; and
+    ``control``, the control-rate options and the numbers the page needs to
+    show what a rate changes before a command is made."""
+    site = marvel0_site.require()
+    return {**marvel0_site.public_view(site), "control": command.control_public(site)}
 
 
 @router.post("/command/preview")
@@ -104,5 +109,6 @@ def command_preview(body: PreviewBody):
         "argv": preview.argv,
         "command": preview.command,
         "warnings": preview.warnings,
+        "control": preview.control,
         "hands": command.HANDS,
     }

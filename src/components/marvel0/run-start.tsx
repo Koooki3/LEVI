@@ -27,6 +27,8 @@ export function RunStart({
   group,
   modelId,
   rtc,
+  hz = null,
+  referenceHz = 10,
   stale,
 }: {
   /** The hosted client's state; null while it is not read. */
@@ -38,6 +40,10 @@ export function RunStart({
   group: string;
   modelId: string;
   rtc: boolean;
+  /** The control rate of the command, null when the site offers none. A rate
+   * other than `referenceHz` is shown in the dialog with its note. */
+  hz?: number | null;
+  referenceHz?: number;
   /** The form changed after the command was made: it is made again first. */
   stale: boolean;
 }) {
@@ -139,10 +145,23 @@ export function RunStart({
                 <code>{group}</code>
               </dd>
             </div>
+            {hz !== null && (
+              <div className="rg-fact" data-testid="marvel0-run-start-hz">
+                <dt>{t("marvel0.hz.start.fact")}</dt>
+                <dd>
+                  {sayText({ key: "marvel0.hz.option", params: { hz } }, t)}
+                </dd>
+              </div>
+            )}
           </dl>
           <Note tone="warning" role="alert">
             {t("marvel0.run.start.estop")}
           </Note>
+          {hz !== null && hz !== referenceHz && (
+            <Note tone="warning" role="alert">
+              {t("marvel0.hz.start.note")}
+            </Note>
+          )}
           <p className="rg-muted">{t("marvel0.run.start.first_enter")}</p>
           <p className="rg-muted">{t("marvel0.stack.gates_scope")}</p>
           {ACKS.map((name) => (

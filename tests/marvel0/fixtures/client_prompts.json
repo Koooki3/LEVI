@@ -280,6 +280,78 @@
       "file": "run_robotiq_client_collect_data.py",
       "line": 1295,
       "source": "Rollout data: {Path(args.rollout_root) / group}/<task>/demo_XXXX"
+    },
+    "control_hz_field": {
+      "file": "run_robotiq_client.py",
+      "line": 296,
+      "source": "control_hz: float = 10.0",
+      "note": "the control rate: --control-hz (tyro spells a field's underscore as a dash), default 10; the page writes the flag only for another rate"
+    },
+    "control_hz_spelling": {
+      "file": "run_robotiq_client.py",
+      "line": 220,
+      "source": "lets --control-hz actually",
+      "note": "the client's own text spells the flag --control-hz"
+    },
+    "control_hz_metadata": {
+      "file": "run_robotiq_client_collect_data.py",
+      "line": 53,
+      "source": "nominal --control-hz land in metadata.json",
+      "note": "the nominal rate is recorded in each episode's metadata.json"
+    },
+    "trained_at_10_fps": {
+      "file": "run_robotiq_client.py",
+      "line": 294,
+      "source": "trained with action_horizon=10 at 10 fps",
+      "note": "the policy's training rate and chunk: the reason a rate other than 10 is warned about"
+    },
+    "step_cap_translation": {
+      "file": "run_robotiq_client.py",
+      "line": 728,
+      "source": "if raw_step > args.max_step_m:",
+      "note": "--max-step-m is a per-tick distance: the commanded pose against the measured one"
+    },
+    "step_cap_rotation": {
+      "file": "run_robotiq_client.py",
+      "line": 730,
+      "source": "if raw_rot.max() > args.max_step_rad:",
+      "note": "--max-step-rad is the same per tick, on the largest of the three angle differences"
+    },
+    "step_cap_measured_from": {
+      "file": "run_robotiq_client.py",
+      "line": 704,
+      "source": "raw_step = float(np.linalg.norm(np.asarray(action[:3], np.float64) - current[:3]))",
+      "note": "what the translation cap is compared with"
+    },
+    "loop_period": {
+      "file": "run_robotiq_client.py",
+      "line": 1506,
+      "source": "period = 1.0 / args.control_hz",
+      "note": "the episode loop sleeps to one period per step"
+    },
+    "home_steps_by_seconds": {
+      "file": "run_robotiq_client.py",
+      "line": 941,
+      "source": "n = max(1, int(args.home_duration_s * args.control_hz))",
+      "note": "homing is --home-duration-s seconds whatever the rate (the steps scale)"
+    },
+    "rtc_period": {
+      "file": "run_robotiq_client.py",
+      "line": 904,
+      "source": "period_s=1.0 / float(args.control_hz)",
+      "note": "the RTC scheduler counts delay in ticks of the control period"
+    },
+    "rtc_delay_ticks": {
+      "file": "rtc_chunker.py",
+      "line": 206,
+      "source": "int(math.ceil(latency_s / self.period_s)) + 1",
+      "note": "the RTC delay is a latency in seconds divided by the period: its beats grow with the rate"
+    },
+    "post_step_verify_zero": {
+      "file": "run_robotiq_client.py",
+      "line": 222,
+      "source": "post_step_verify_delay: float = 0.0",
+      "note": "no sleep inside a step, so --control-hz sets the rate"
     }
   }
 }

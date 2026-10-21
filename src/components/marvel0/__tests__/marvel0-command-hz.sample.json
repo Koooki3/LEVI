@@ -1,0 +1,520 @@
+{
+  "schema": "levi.marvel0.command_hz_sample.v1",
+  "about": "Written by tests/marvel0/regen_command_hz_sample.py from levi/marvel0/command.py.",
+  "site_control": {
+    "options": [5, 10, 20, 25, 50],
+    "default": 10,
+    "reference_hz": 10,
+    "action_horizon": 10,
+    "latency_beats": 3,
+    "short_episode_s": 30,
+    "step_caps": {
+      "m": 0.1,
+      "rad": 0.35
+    },
+    "train_step_p99": {
+      "m": 0.0384,
+      "rad": 0.0883
+    }
+  },
+  "cases": [
+    {
+      "name": "default_5hz",
+      "body": {
+        "control_hz": 5
+      },
+      "effective": {
+        "hz": 5,
+        "max_steps": 500,
+        "rtc": true,
+        "horizon": 6
+      },
+      "control": {
+        "hz": 5,
+        "reference_hz": 10,
+        "period_ms": 200.0,
+        "episode_s": 100.0,
+        "step_cap_m": 0.1,
+        "step_cap_rad": 0.35,
+        "speed_cap_m_s": 0.5,
+        "speed_cap_rad_s": 1.75,
+        "chunk_s": 2.0,
+        "horizon_s": 1.2,
+        "latency_beats": 2,
+        "rtc": {
+          "horizon": 6,
+          "reached": 8,
+          "margin": 2
+        }
+      },
+      "warnings": [
+        "min_z_below_task_table",
+        "control_hz_not_trained",
+        "control_hz_untested"
+      ],
+      "flags": [
+        "--control-hz=5",
+        "--max-step-m=0.1",
+        "--max-step-rad=0.35",
+        "--rtc-execute-horizon=6"
+      ]
+    },
+    {
+      "name": "default_10hz",
+      "body": {
+        "control_hz": 10
+      },
+      "effective": {
+        "hz": 10,
+        "max_steps": 500,
+        "rtc": true,
+        "horizon": 6
+      },
+      "control": {
+        "hz": 10,
+        "reference_hz": 10,
+        "period_ms": 100.0,
+        "episode_s": 50.0,
+        "step_cap_m": 0.1,
+        "step_cap_rad": 0.35,
+        "speed_cap_m_s": 1.0,
+        "speed_cap_rad_s": 3.5,
+        "chunk_s": 1.0,
+        "horizon_s": 0.6,
+        "latency_beats": 3,
+        "rtc": {
+          "horizon": 6,
+          "reached": 9,
+          "margin": 1
+        }
+      },
+      "warnings": ["min_z_below_task_table"],
+      "flags": [
+        "--max-step-m=0.1",
+        "--max-step-rad=0.35",
+        "--rtc-execute-horizon=6"
+      ]
+    },
+    {
+      "name": "default_20hz",
+      "body": {
+        "control_hz": 20
+      },
+      "effective": {
+        "hz": 20,
+        "max_steps": 500,
+        "rtc": true,
+        "horizon": 4
+      },
+      "control": {
+        "hz": 20,
+        "reference_hz": 10,
+        "period_ms": 50.0,
+        "episode_s": 25.0,
+        "step_cap_m": 0.05,
+        "step_cap_rad": 0.175,
+        "speed_cap_m_s": 1.0,
+        "speed_cap_rad_s": 3.5,
+        "chunk_s": 0.5,
+        "horizon_s": 0.2,
+        "latency_beats": 6,
+        "rtc": {
+          "horizon": 4,
+          "reached": 10,
+          "margin": 0
+        }
+      },
+      "warnings": [
+        "min_z_below_task_table",
+        "control_hz_not_trained",
+        "control_hz_untested",
+        "episode_short"
+      ],
+      "flags": [
+        "--control-hz=20",
+        "--max-step-m=0.05",
+        "--max-step-rad=0.175",
+        "--rtc-execute-horizon=4"
+      ]
+    },
+    {
+      "name": "default_25hz",
+      "body": {
+        "control_hz": 25
+      },
+      "effective": {
+        "hz": 25,
+        "max_steps": 500,
+        "rtc": true,
+        "horizon": 2
+      },
+      "control": {
+        "hz": 25,
+        "reference_hz": 10,
+        "period_ms": 40.0,
+        "episode_s": 20.0,
+        "step_cap_m": 0.04,
+        "step_cap_rad": 0.14,
+        "speed_cap_m_s": 1.0,
+        "speed_cap_rad_s": 3.5,
+        "chunk_s": 0.4,
+        "horizon_s": 0.08,
+        "latency_beats": 8,
+        "rtc": {
+          "horizon": 2,
+          "reached": 10,
+          "margin": 0
+        }
+      },
+      "warnings": [
+        "min_z_below_task_table",
+        "control_hz_not_trained",
+        "control_hz_untested",
+        "episode_short"
+      ],
+      "flags": [
+        "--control-hz=25",
+        "--max-step-m=0.04",
+        "--max-step-rad=0.14",
+        "--rtc-execute-horizon=2"
+      ]
+    },
+    {
+      "name": "default_50hz",
+      "body": {
+        "control_hz": 50
+      },
+      "effective": {
+        "hz": 50,
+        "max_steps": 500,
+        "rtc": true,
+        "horizon": 1
+      },
+      "control": {
+        "hz": 50,
+        "reference_hz": 10,
+        "period_ms": 20.0,
+        "episode_s": 10.0,
+        "step_cap_m": 0.02,
+        "step_cap_rad": 0.07,
+        "speed_cap_m_s": 1.0,
+        "speed_cap_rad_s": 3.5,
+        "chunk_s": 0.2,
+        "horizon_s": 0.02,
+        "latency_beats": 15,
+        "rtc": {
+          "horizon": 1,
+          "reached": 16,
+          "margin": -6
+        }
+      },
+      "warnings": [
+        "rtc_never_fits",
+        "min_z_below_task_table",
+        "control_hz_not_trained",
+        "control_hz_untested",
+        "step_cap_tight",
+        "episode_short"
+      ],
+      "flags": [
+        "--control-hz=50",
+        "--max-step-m=0.02",
+        "--max-step-rad=0.07",
+        "--rtc-execute-horizon=1"
+      ]
+    },
+    {
+      "name": "open_loop_5hz",
+      "body": {
+        "control_hz": 5,
+        "rtc": false
+      },
+      "effective": {
+        "hz": 5,
+        "max_steps": 500,
+        "rtc": false,
+        "horizon": 6
+      },
+      "control": {
+        "hz": 5,
+        "reference_hz": 10,
+        "period_ms": 200.0,
+        "episode_s": 100.0,
+        "step_cap_m": 0.1,
+        "step_cap_rad": 0.35,
+        "speed_cap_m_s": 0.5,
+        "speed_cap_rad_s": 1.75,
+        "chunk_s": 2.0,
+        "horizon_s": 1.2,
+        "latency_beats": 2,
+        "rtc": null
+      },
+      "warnings": [
+        "min_z_below_task_table",
+        "control_hz_not_trained",
+        "control_hz_untested"
+      ],
+      "flags": [
+        "--control-hz=5",
+        "--max-step-m=0.1",
+        "--max-step-rad=0.35",
+        "--open-loop-horizon=6"
+      ]
+    },
+    {
+      "name": "open_loop_20hz",
+      "body": {
+        "control_hz": 20,
+        "rtc": false
+      },
+      "effective": {
+        "hz": 20,
+        "max_steps": 500,
+        "rtc": false,
+        "horizon": 6
+      },
+      "control": {
+        "hz": 20,
+        "reference_hz": 10,
+        "period_ms": 50.0,
+        "episode_s": 25.0,
+        "step_cap_m": 0.05,
+        "step_cap_rad": 0.175,
+        "speed_cap_m_s": 1.0,
+        "speed_cap_rad_s": 3.5,
+        "chunk_s": 0.5,
+        "horizon_s": 0.3,
+        "latency_beats": 6,
+        "rtc": null
+      },
+      "warnings": [
+        "min_z_below_task_table",
+        "control_hz_not_trained",
+        "control_hz_untested",
+        "episode_short"
+      ],
+      "flags": [
+        "--control-hz=20",
+        "--max-step-m=0.05",
+        "--max-step-rad=0.175",
+        "--open-loop-horizon=6"
+      ]
+    },
+    {
+      "name": "open_loop_50hz",
+      "body": {
+        "control_hz": 50,
+        "rtc": false
+      },
+      "effective": {
+        "hz": 50,
+        "max_steps": 500,
+        "rtc": false,
+        "horizon": 6
+      },
+      "control": {
+        "hz": 50,
+        "reference_hz": 10,
+        "period_ms": 20.0,
+        "episode_s": 10.0,
+        "step_cap_m": 0.02,
+        "step_cap_rad": 0.07,
+        "speed_cap_m_s": 1.0,
+        "speed_cap_rad_s": 3.5,
+        "chunk_s": 0.2,
+        "horizon_s": 0.12,
+        "latency_beats": 15,
+        "rtc": null
+      },
+      "warnings": [
+        "min_z_below_task_table",
+        "control_hz_not_trained",
+        "control_hz_untested",
+        "step_cap_tight",
+        "episode_short"
+      ],
+      "flags": [
+        "--control-hz=50",
+        "--max-step-m=0.02",
+        "--max-step-rad=0.07",
+        "--open-loop-horizon=6"
+      ]
+    },
+    {
+      "name": "long_episode_25hz",
+      "body": {
+        "control_hz": 25,
+        "max_steps": 1000,
+        "rtc_horizon": 5
+      },
+      "effective": {
+        "hz": 25,
+        "max_steps": 1000,
+        "rtc": true,
+        "horizon": 5
+      },
+      "control": {
+        "hz": 25,
+        "reference_hz": 10,
+        "period_ms": 40.0,
+        "episode_s": 40.0,
+        "step_cap_m": 0.04,
+        "step_cap_rad": 0.14,
+        "speed_cap_m_s": 1.0,
+        "speed_cap_rad_s": 3.5,
+        "chunk_s": 0.4,
+        "horizon_s": 0.2,
+        "latency_beats": 8,
+        "rtc": {
+          "horizon": 5,
+          "reached": 13,
+          "margin": -3
+        }
+      },
+      "warnings": [
+        "rtc_margin_low",
+        "min_z_below_task_table",
+        "control_hz_not_trained",
+        "control_hz_untested"
+      ],
+      "flags": [
+        "--control-hz=25",
+        "--max-step-m=0.04",
+        "--max-step-rad=0.14",
+        "--rtc-execute-horizon=5"
+      ]
+    },
+    {
+      "name": "short_episode_20hz",
+      "body": {
+        "control_hz": 20,
+        "max_steps": 120
+      },
+      "effective": {
+        "hz": 20,
+        "max_steps": 120,
+        "rtc": true,
+        "horizon": 4
+      },
+      "control": {
+        "hz": 20,
+        "reference_hz": 10,
+        "period_ms": 50.0,
+        "episode_s": 6.0,
+        "step_cap_m": 0.05,
+        "step_cap_rad": 0.175,
+        "speed_cap_m_s": 1.0,
+        "speed_cap_rad_s": 3.5,
+        "chunk_s": 0.5,
+        "horizon_s": 0.2,
+        "latency_beats": 6,
+        "rtc": {
+          "horizon": 4,
+          "reached": 10,
+          "margin": 0
+        }
+      },
+      "warnings": [
+        "min_z_below_task_table",
+        "control_hz_not_trained",
+        "control_hz_untested",
+        "episode_short"
+      ],
+      "flags": [
+        "--control-hz=20",
+        "--max-step-m=0.05",
+        "--max-step-rad=0.175",
+        "--rtc-execute-horizon=4"
+      ]
+    },
+    {
+      "name": "wide_horizon_20hz",
+      "body": {
+        "control_hz": 20,
+        "rtc_horizon": 8
+      },
+      "effective": {
+        "hz": 20,
+        "max_steps": 500,
+        "rtc": true,
+        "horizon": 8
+      },
+      "control": {
+        "hz": 20,
+        "reference_hz": 10,
+        "period_ms": 50.0,
+        "episode_s": 25.0,
+        "step_cap_m": 0.05,
+        "step_cap_rad": 0.175,
+        "speed_cap_m_s": 1.0,
+        "speed_cap_rad_s": 3.5,
+        "chunk_s": 0.5,
+        "horizon_s": 0.4,
+        "latency_beats": 6,
+        "rtc": {
+          "horizon": 8,
+          "reached": 14,
+          "margin": -4
+        }
+      },
+      "warnings": [
+        "rtc_margin_low",
+        "min_z_below_task_table",
+        "control_hz_not_trained",
+        "control_hz_untested",
+        "episode_short"
+      ],
+      "flags": [
+        "--control-hz=20",
+        "--max-step-m=0.05",
+        "--max-step-rad=0.175",
+        "--rtc-execute-horizon=8"
+      ]
+    },
+    {
+      "name": "horizon_1_at_50hz",
+      "body": {
+        "control_hz": 50,
+        "rtc_horizon": 1
+      },
+      "effective": {
+        "hz": 50,
+        "max_steps": 500,
+        "rtc": true,
+        "horizon": 1
+      },
+      "control": {
+        "hz": 50,
+        "reference_hz": 10,
+        "period_ms": 20.0,
+        "episode_s": 10.0,
+        "step_cap_m": 0.02,
+        "step_cap_rad": 0.07,
+        "speed_cap_m_s": 1.0,
+        "speed_cap_rad_s": 3.5,
+        "chunk_s": 0.2,
+        "horizon_s": 0.02,
+        "latency_beats": 15,
+        "rtc": {
+          "horizon": 1,
+          "reached": 16,
+          "margin": -6
+        }
+      },
+      "warnings": [
+        "rtc_never_fits",
+        "min_z_below_task_table",
+        "control_hz_not_trained",
+        "control_hz_untested",
+        "step_cap_tight",
+        "episode_short"
+      ],
+      "flags": [
+        "--control-hz=50",
+        "--max-step-m=0.02",
+        "--max-step-rad=0.07",
+        "--rtc-execute-horizon=1"
+      ]
+    }
+  ]
+}

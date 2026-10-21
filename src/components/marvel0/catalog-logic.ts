@@ -5,6 +5,7 @@
 // page made up would be worse than none.
 import type { Say } from "./marvel0-logic";
 import { bool, list, num, rec, str, type Worded } from "./marvel0-json";
+import { readControl, type ControlView } from "./control-logic";
 
 export const MODELS_SCHEMA = "levi.marvel0.models.v1";
 export const SITE_SCHEMA = "levi.marvel0.site_view.v1";
@@ -122,6 +123,9 @@ export interface SiteView {
   };
   /** The client flags the site file fixes, as they appear in the command. */
   fixedFlags: string[];
+  /** The control-rate options and the numbers behind them; null when the
+   * server does not say (the form then has no rate field). */
+  control: ControlView | null;
   gpu: { presets: number[]; marginMib: number | null };
   unit: { stopTimeoutS: number | null; startTimeoutS: number | null };
 }
@@ -196,6 +200,7 @@ export function readSite(data: unknown): SiteView | null {
       restrictedPrefixes: strings(prompts?.restricted_prefixes),
     },
     fixedFlags: strings(body.fixed_flags),
+    control: readControl(body.control),
     gpu: {
       presets: list(rec(body.gpu)?.fraction_presets)
         .map(num)

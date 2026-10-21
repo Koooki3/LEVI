@@ -856,8 +856,9 @@ takes a path.
 On the page, the **Demo client command** card has the form (model, task
 instruction with the site's known instructions as suggestions, or the two of the
 model for a restricted one, maximum steps per episode, eval number, lowest
-height, RTC and its horizon, rollout group, note; steps, eval number, lowest
-height and the task instruction start at the site's defaults; an empty group
+height, RTC and its horizon, control rate, rollout group, note; steps, eval
+number, lowest height, the control rate (10 Hz) and the task instruction start
+at the site's defaults; an empty group
 uses the default shown as its placeholder, and an empty note a default note that
 names the model, RTC and the horizon), the list **Fixed by the
 site file**, and a **Make the command** button. The command appears with a
@@ -870,12 +871,14 @@ warnings under "Check before you run it".
 
 `POST /api/levi/marvel0/command/preview` takes a closed form: `model_id` and `prompt`
 (the task instruction), and optionally `max_steps`, `eval_num` (episodes),
-`min_z`, `rtc`, `rtc_horizon`, `rollout_group` and `note`. A field outside the
-form (`levi_mode`, `max_xy`, `allow_unknown_prompt`, ...) is refused; types are
-strict. Defaults come from the site file: steps and episodes, `min_z_default`,
-RTC on with the site's horizon (with RTC off, `rtc_horizon` is the open-loop
-horizon), the rollout group `<model>_rtc_demo` (`<model>_demo` without RTC) and
-the note `marvel0 page: <model> rtc=on horizon=<n>`.
+`min_z`, `rtc`, `rtc_horizon`, `control_hz`, `rollout_group` and `note`. A field
+outside the form (`levi_mode`, `max_xy`, `max_step_m`, `allow_unknown_prompt`, ...)
+is refused; types are strict. Defaults come from the site file: steps and
+episodes, `min_z_default`, RTC on with the site's horizon (with RTC off,
+`rtc_horizon` is the open-loop horizon; with RTC on above 10 Hz an empty horizon
+is lowered, see **Control rate** below), the control rate 10 Hz, the rollout group
+`<model>_rtc_demo` (`<model>_demo` without RTC) and the note `marvel0 page:
+<model> rtc=on horizon=<n>` (with ` hz=<rate>` appended for another rate).
 
 Bounds (a refusal is `422` with `{code, field, message}`): `max_steps` and
 `eval_num` are 1 to the site's cap (`max_steps_out_of_range`,
@@ -884,7 +887,10 @@ open-loop maximum with RTC off (`rtc_horizon_out_of_range`); `min_z` is a finite
 number above 0 (`min_z_not_positive`), not below the site floor
 (`min_z_below_floor`) and below the home height (`min_z_above_home`); the
 rollout group is a slug of letters, digits, `.`, `_`, `-`, at most 80, starting
-with a letter or digit and without `..` (`rollout_group_invalid`).
+with a letter or digit and without `..` (`rollout_group_invalid`); `control_hz` is
+exactly 5, 10, 20, 25 or 50 as a whole number (`control_hz_unsupported` with the
+list in `options`; a string, a float such as `20.0`, a boolean or anything else is
+`invalid_type`).
 
 The **task instruction** is one argv element and never passes through a shell. It
 is refused when it is empty, longer than 300 characters (or the site's lower cap),
@@ -898,7 +904,9 @@ a restricted model takes only the client's two instructions
 **Fixed flags are never form fields.** Everything that guards the arm comes from
 the site file and no form can change it: the camera serials (both always
 written), the policy server and robot server addresses, the home pose and its
-duration, `--max-xy`, `--max-step-m`, `--max-step-rad`, the three angle ranges,
+duration, `--max-xy`, `--max-step-m` and `--max-step-rad` (the site's values are for
+10 Hz; the command divides them by `rate / 10` above 10 Hz, see **Control rate**),
+the three angle ranges,
 `--binarize-gripper`, `--require-matching-server`, `--allow-unknown-prompt` (shown
 as `--no-allow-unknown-prompt` when the site says false) and the rollout root.
 The unattended mode is never offered: `--levi-mode=off` is a constant, because
@@ -923,14 +931,52 @@ form allow is never shown (`500 command_self_check`). The answer also holds:
 
 - `server_requirements`: the model and config, and whether the policy server
   must have been deployed with RTC (a client with `--rtc` needs the RTC server);
+- `control`: what the control rate changes, in numbers (see **Control rate**);
 - `warnings` (never refusals): `unverified_model`; `rtc_margin_low` when the
   execute horizon plus about 3 beats of latency passes the 10 actions of a chunk
-  (horizon above 7); `min_z_below_task_table` when `min_z` is below the floor the
+  (horizon above 7 at 10 Hz; the beats grow with the rate, and the warning then
+  carries `params`); `rtc_never_fits` when not even a horizon of 1 fits;
+  `control_hz_not_trained`, `control_hz_untested`, `step_cap_tight` and
+  `episode_short` for a rate other than 10 Hz (see **Control rate**);
+  `min_z_below_task_table` when `min_z` is below the floor the
   client measured for the task (0.075 for the screws instruction, 0.05325 for the
   plates instruction and for every other one): an explicit `--min-z` beats the
   client's own table, so a lower value lowers the floor of that task;
 - `hands`: keep a hand on the physical e-stop; this page never starts the arm
   stack or this client.
+
+#### Control rate
+
+The form's **Control rate** is a select of exactly 5, 10, 20, 25 and 50 Hz; 10 Hz
+is the default and the rate the policy was trained at. At 10 Hz the command is
+byte for byte the one this page made before the option existed (no
+`--control-hz`). Another rate writes `--control-hz=<rate>` after
+`--max-timesteps` and changes three things; the rest (`--home-duration-s` is in
+seconds, `--min-z`, `--max-xy`, the angle ranges, the camera and policy
+settings) is a length, an angle or a time and is not touched:
+
+| Flag | At 5 Hz | Above 10 Hz | Why |
+| --- | --- | --- | --- |
+| `--max-step-m`, `--max-step-rad` | the site's value | the site's value times `10 / rate` | the client compares each commanded pose with the measured one, per tick: a per-step cap is a speed cap in disguise, so the speed it allows (cap times rate) is kept at what the site allows at 10 Hz; a lower rate keeps the cap and only lowers that speed |
+| `--rtc-execute-horizon`, left empty | the site's default | the largest horizon that leaves `ceil(0.3 s * rate)` beats of the 10-action chunk free, at most the site's default, at least 1 | the inference latency is a time (3 beats at 10 Hz); an explicit horizon is never changed |
+| the default note | unchanged | gets ` hz=<rate>` | the episodes are filed under the same rollout group unless one is typed |
+
+`--max-timesteps` stays in steps and is never raised: the number of actions a
+task needs does not depend on the rate. The form shows the seconds (`steps / rate`,
+at least: inference stalls add to it). The form shows every derived number under
+the select (one step in milliseconds, the episode in seconds, the per-step caps
+and the speeds they allow, the chunk and the executed horizon in seconds, the
+latency in beats, and the RTC margin), and the preview answers with the same
+numbers as `control`. The evidence for each decision and what is not verified is
+in [the run buttons document](MARVEL0_RUN.md#control-rate).
+
+Warnings for a rate other than 10 Hz (never refusals): `control_hz_not_trained`
+(the policy was trained on 10 Hz data, so any other rate plays its actions at
+another speed), `control_hz_untested` (the first use changes the arm's speed
+profile and is untested on this rig: the owner present, a hand on the physical
+e-stop), `step_cap_tight` (the scaled caps are below the 99th percentile of the
+training steps, which happens at 50 Hz) and `episode_short` (above 10 Hz, under
+30 seconds).
 
 #### Limits
 

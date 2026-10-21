@@ -341,21 +341,41 @@ GPU 锁只从第 15 步持有到服务器常驻显存为止（状态离开 `star
 
 #### 客户端命令面板
 
-在页面上，**评测客户端命令**卡片里有表单（模型、任务指令——以站点已知的任务指令作提示（受限模型则是它的那两条）、每个片段的最大步数、评测数量、最低高度、RTC 及其步数、数据分组、备注；任务指令、步数、评测数量和最低高度从站点的默认值开始；分组留空则用占位符里显示的默认值，备注留空则用一条写着模型、RTC 和执行步数的默认备注）、**由站点文件固定**的参数列表，以及**生成命令**按钮。生成的命令旁有**复制**按钮，以及“本页面没有运行它”的说明；命令生成之后表单又改了，命令会标为过期，必须重新生成。命令下面，卡片会说明策略服务器卡片里的服务器是否适合这条命令（模型和 RTC 模式一致、仍在启动、没有就绪、是别的模型、没有按 RTC 部署，或是手动启动的因而无从得知），并在“运行前请注意”下列出警告。
+在页面上，**评测客户端命令**卡片里有表单（模型、任务指令——以站点已知的任务指令作提示（受限模型则是它的那两条）、每个片段的最大步数、评测数量、最低高度、RTC 及其步数、控制频率、数据分组、备注；任务指令、步数、评测数量、最低高度和控制频率（10 Hz）从站点的默认值开始；分组留空则用占位符里显示的默认值，备注留空则用一条写着模型、RTC 和执行步数的默认备注）、**由站点文件固定**的参数列表，以及**生成命令**按钮。生成的命令旁有**复制**按钮，以及“本页面没有运行它”的说明；命令生成之后表单又改了，命令会标为过期，必须重新生成。命令下面，卡片会说明策略服务器卡片里的服务器是否适合这条命令（模型和 RTC 模式一致、仍在启动、没有就绪、是别的模型、没有按 RTC 部署，或是手动启动的因而无从得知），并在“运行前请注意”下列出警告。
 
-`POST /api/levi/marvel0/command/preview` 接受一份封闭的表单：`model_id` 和 `prompt`（任务指令），以及可选的 `max_steps`、`eval_num`（片段数）、`min_z`、`rtc`、`rtc_horizon`、`rollout_group` 和 `note`。表单以外的字段（`levi_mode`、`max_xy`、`allow_unknown_prompt` 等）一律拒绝；类型是严格的。默认值来自站点文件：步数和片段数、`min_z_default`、RTC 开并取站点的执行步数（关掉 RTC 时，`rtc_horizon` 是开环执行步数）、rollout 组 `<模型>_rtc_demo`（不用 RTC 时是 `<模型>_demo`）和备注 `marvel0 page: <模型> rtc=on horizon=<n>`。
+`POST /api/levi/marvel0/command/preview` 接受一份封闭的表单：`model_id` 和 `prompt`（任务指令），以及可选的 `max_steps`、`eval_num`（片段数）、`min_z`、`rtc`、`rtc_horizon`、`control_hz`、`rollout_group` 和 `note`。表单以外的字段（`levi_mode`、`max_xy`、`max_step_m`、`allow_unknown_prompt` 等）一律拒绝；类型是严格的。默认值来自站点文件：步数和片段数、`min_z_default`、RTC 开并取站点的执行步数（关掉 RTC 时，`rtc_horizon` 是开环执行步数；RTC 开且频率高于 10 Hz 时，留空的执行步数会降低，见下文**控制频率**）、控制频率 10 Hz、rollout 组 `<模型>_rtc_demo`（不用 RTC 时是 `<模型>_demo`）和备注 `marvel0 page: <模型> rtc=on horizon=<n>`。
 
-界限（拒绝时返回 `422`，带 `{code, field, message}`）：`max_steps` 和 `eval_num` 为 1 到站点上限（`max_steps_out_of_range`、`eval_num_out_of_range`）；执行步数为 1 到 RTC 的上限，关掉 RTC 时为 1 到开环上限（`rtc_horizon_out_of_range`）；`min_z` 是有限的数，大于 0（`min_z_not_positive`），不低于站点下限（`min_z_below_floor`），并且低于起始高度（`min_z_above_home`）；rollout 组是由字母、数字、`.`、`_`、`-` 组成的短名，至多 80 个字符，以字母或数字开头，不含 `..`（`rollout_group_invalid`）。
+界限（拒绝时返回 `422`，带 `{code, field, message}`）：`max_steps` 和 `eval_num` 为 1 到站点上限（`max_steps_out_of_range`、`eval_num_out_of_range`）；执行步数为 1 到 RTC 的上限，关掉 RTC 时为 1 到开环上限（`rtc_horizon_out_of_range`）；`min_z` 是有限的数，大于 0（`min_z_not_positive`），不低于站点下限（`min_z_below_floor`），并且低于起始高度（`min_z_above_home`）；`control_hz` 只能是整数 5、10、20、25 或 50（`control_hz_unsupported`，`options` 里列出可选值；字符串、`20.0` 这样的浮点数、布尔值等一律是 `invalid_type`）；rollout 组是由字母、数字、`.`、`_`、`-` 组成的短名，至多 80 个字符，以字母或数字开头，不含 `..`（`rollout_group_invalid`）。
 
 **任务指令**是单独一个 argv 元素，从不经过 shell。为空、超过 300 个字符（或站点设的更低上限）、含引号、反斜杠、`$`、反引号或 `!`、含控制字符（普通空格以外的空白也算），或以短横线开头时会被拒绝（`prompt_invalid`，附 `reason`：`empty`、`too_long`、`forbidden_char`、`control_char`、`leading_dash`）；受限模型只接受客户端那两条任务指令（`prompt_unknown_for_model`）。备注遵守同样的规则，上限是它自己的（`note_invalid`）。
 
-**固定参数从来不是表单字段。** 所有关系到机械臂安全的参数只来自站点文件，任何表单都改不了：相机序列号（两个都总会写出）、策略服务器和机器人服务器的地址、起始位姿及其时长、`--max-xy`、`--max-step-m`、`--max-step-rad`、三个角度范围、`--binarize-gripper`、`--require-matching-server`、`--allow-unknown-prompt`（站点设为 false 时写成 `--no-allow-unknown-prompt`）和 rollout 根目录。无人值守模式永远不会出现：`--levi-mode=off` 是常量，因为 `on` 会在没有人在起始关口把关的情况下启动。`--new` 和 `--no-step-by-step` 也是常量。`--min-z` 总会明确写出。
+**固定参数从来不是表单字段。** 所有关系到机械臂安全的参数只来自站点文件，任何表单都改不了：相机序列号（两个都总会写出）、策略服务器和机器人服务器的地址、起始位姿及其时长、`--max-xy`、`--max-step-m` 和 `--max-step-rad`（站点的值是按 10 Hz 写的；高于 10 Hz 时命令会把它们除以 `频率 / 10`，见**控制频率**）、三个角度范围、`--binarize-gripper`、`--require-matching-server`、`--allow-unknown-prompt`（站点设为 false 时写成 `--no-allow-unknown-prompt`）和 rollout 根目录。无人值守模式永远不会出现：`--levi-mode=off` 是常量，因为 `on` 会在没有人在起始关口把关的情况下启动。`--new` 和 `--no-step-by-step` 也是常量。`--min-z` 总会明确写出。
 
 **命令是要复制的文本，从不执行。** 返回内容（`levi.marvel0.command.v1`）有 `argv`、`env`、`cwd` 和 `command`，其中 `command` 是形如 `cd <openpi 检出> && env -u VIRTUAL_ENV no_proxy=... uv run --no-sync --with pyrealsense2==2.55.1.6486 python examples/fr3_local/run_robotiq_client_collect_data.py ...` 的文本，每行一组参数，每个词都做了 shell 引用，供粘贴到评测客户端终端。这是 AERI 用的写法（openpi 的 `.venv` 里没有 `pyrealsense2`）。每个参数都是单个 `--flag=value`，只有 `--home-pose` 和三个范围的数字例外：它们作为单独的几项跟在参数后面（客户端的解析器就是这样读的），开关写成 `--flag` 或 `--no-flag`。命令里的 openpi 检出和 rollout 根目录是绝对路径，因为 shell 不会展开 `=` 之后的 `~`；除 `looked_at` 之外，返回内容里只有这两处有路径。命令返回之前会再按格式检查一遍（只有已知参数、没有重复、数字个数正确、表单的值再次通过校验）；和站点文件及表单允许的内容不一致的命令不会展示（`500 command_self_check`）。返回里还有：
 
 - `server_requirements`：模型和配置，以及策略服务器是否必须按 RTC 部署（带 `--rtc` 的客户端需要 RTC 服务器）；
-- `warnings`（从不拒绝）：`unverified_model`；`rtc_margin_low`，即执行步数加上约 3 拍推理延迟超过一个动作块的 10 个动作（执行步数大于 7）；`min_z_below_task_table`，即 `min_z` 低于客户端为这条任务测得的下限（螺丝命令 0.075，盘子命令和其他所有命令 0.05325）：显式的 `--min-z` 会盖过客户端自己的表，所以更低的值会降低那项任务的下限；
+- `control`：控制频率带来的变化，用数字表示（见**控制频率**）；
+- `warnings`（从不拒绝）：`unverified_model`；`rtc_margin_low`，即执行步数加上约 3 拍推理延迟超过一个动作块的 10 个动作（10 Hz 时执行步数大于 7；拍数随频率增加，这时警告带着 `params`）；`rtc_never_fits`，即连执行步数取 1 也装不下；`control_hz_not_trained`、`control_hz_untested`、`step_cap_tight` 和 `episode_short`，用于 10 Hz 以外的频率（见**控制频率**）；`min_z_below_task_table`，即 `min_z` 低于客户端为这条任务测得的下限（螺丝命令 0.075，盘子命令和其他所有命令 0.05325）：显式的 `--min-z` 会盖过客户端自己的表，所以更低的值会降低那项任务的下限；
 - `hands`：手放在物理急停上；本页面从不启动机械臂栈或这个客户端。
+
+#### 控制频率
+
+表单里的**控制频率**是一个下拉框，只有 5、10、20、25、50 Hz；10 Hz 是默认值，也是策略训练时的频率。10 Hz 时命令与此前这个选项出现之前页面生成的逐字节相同（没有 `--control-hz`）。
+其他频率会在 `--max-timesteps` 后写 `--control-hz=<频率>`，并改变三件事；其余的（`--home-duration-s` 本来就是秒，`--min-z`、`--max-xy`、角度范围、相机和策略设置）
+是长度、角度或时间，不动：
+
+| 参数 | 5 Hz | 高于 10 Hz | 原因 |
+| --- | --- | --- | --- |
+| `--max-step-m`、`--max-step-rad` | 站点的值 | 站点的值乘以 `10 / 频率` | 客户端每一拍都拿命令位姿与实测位姿比较：每步上限其实是速度上限，所以让它允许的速度（上限乘频率）保持为站点在 10 Hz 时允许的速度；更低的频率保持上限不变，只是它允许的速度降低 |
+| `--rtc-execute-horizon`（留空时） | 站点的默认值 | 能给 10 个动作的块留出 `ceil(0.3 秒 * 频率)` 拍空位的最大值，不超过站点的默认值，不小于 1 | 推理延迟是一段时间（10 Hz 下 3 拍）；显式填的值从不改 |
+| 默认备注 | 不变 | 加上 ` hz=<频率>` | 不另填数据分组时，各频率的片段仍放在同一个 rollout 组里 |
+
+`--max-timesteps` 仍以步为单位，从不替你调高：任务需要多少个动作与频率无关。表单显示秒数（`步数 / 频率`，是“至少”：推理停顿还要加上去）。表单在下拉框下面显示每个派生数字
+（一步多少毫秒、片段多少秒、每步上限及其允许的速度、动作块和执行步数各多少秒、延迟多少拍、RTC 余量），预览也用 `control` 返回同样的数字。每个决定的依据和没有验证的部分在
+[评测运行按键文档](MARVEL0_RUN.md#控制频率)里。
+
+频率不是 10 Hz 时的警告（都不是拒绝）：`control_hz_not_trained`（策略是用 10 Hz 的数据训练的，别的频率会让动作以另一种速度播放）、`control_hz_untested`（第一次使用会改变机械臂的速度曲线，
+在这台设备上没有试过：机主在场，手放在实体急停上）、`step_cap_tight`（缩放后的上限低于训练步长的第 99 百分位，50 Hz 时就是这样）和 `episode_short`（高于 10 Hz 且不足 30 秒）。
 
 #### 限制
 
