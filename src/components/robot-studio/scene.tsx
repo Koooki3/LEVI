@@ -61,13 +61,14 @@ function Robot({ joints, onLoad }: Pick<Props, "joints" | "onLoad">) {
       if (!cancelled) onLoad(false);
     };
     const loader = new URDFLoader(manager);
+    // The typed error callback requires an Object3D; URDFLoader ignores it when err is set.
     loader.loadMeshCb = (path, resourceManager, done) => {
       if (path.endsWith(".glb")) {
         new GLTFLoader(resourceManager).load(
           path,
           (gltf) => done(gltf.scene),
           undefined,
-          (error) => done(null, error as Error),
+          (error) => done(new THREE.Group(), error as Error),
         );
       } else {
         new STLLoader(resourceManager).load(
@@ -86,7 +87,7 @@ function Robot({ joints, onLoad }: Pick<Props, "joints" | "onLoad">) {
             done(group);
           },
           undefined,
-          (error) => done(null, error as Error),
+          (error) => done(new THREE.Group(), error as Error),
         );
       }
     };
@@ -145,7 +146,8 @@ function CameraView({
       top: [0.35, 0, 1.8],
     } as const;
     camera.up.set(0, 0, 1);
-    camera.position.set(...positions[view]);
+    const [x, y, z] = positions[view];
+    camera.position.set(x, y, z);
     if (controls instanceof OrbitControlsImpl) {
       controls.target.set(0.25, 0, 0.4);
       controls.update();
