@@ -65,10 +65,13 @@ const STATE_FEATURE_PRIORITY = [
 const ACTION_FEATURE = "action";
 
 /**
- * FR3 family by substring (fr3, franka, panda); a generic arm, or nothing
- * recorded, may still be detected from column names; anything else (SO-101,
- * OpenArm, Unitree G1, ...) stays on its own viewer. The substring "g1" means
- * nothing here: `isG1Robot` would call `franka_g1x` a G1.
+ * FR3 family by substring (fr3, franka, panda); only this family may drive
+ * an FR3 arm from joint columns. A generic arm, or nothing recorded, gets
+ * pose mode at most (trajectory and axes, which fit any arm): xArm7, Kinova
+ * Gen3 and others also name 7 joints joint_1..7 and would be drawn as a
+ * wrong but plausible FR3. Anything else (SO-101, OpenArm, Unitree G1, ...)
+ * stays on its own viewer. The substring "g1" means nothing here:
+ * `isG1Robot` would call `franka_g1x` a G1.
  */
 export function fr3RobotFamily(
   robotType: string | null | undefined,
@@ -200,6 +203,7 @@ function none(reason: string): Fr3ReplayDetection {
 
 function detectAction(
   columns: Column[] | undefined,
+  allowJoints: boolean,
 ): Pick<Fr3ReplayDetection, "actionMode" | "actionCols" | "actionRotation"> {
   const empty = {
     actionMode: "none" as const,
@@ -207,7 +211,7 @@ function detectAction(
     actionRotation: null,
   };
   if (!columns) return empty;
-  const joints = findJoints(ACTION_FEATURE, columns);
+  const joints = allowJoints ? findJoints(ACTION_FEATURE, columns) : null;
   if (joints?.ok) {
     return {
       actionMode: "joints",
@@ -227,10 +231,10 @@ function detectAction(
 }
 
 /**
- * Joints first (7 named joint columns in an observation feature), then pose
- * (x, y, z + rx, ry, rz or qx, qy, qz, qw), else none. Only the FR3 family
- * and generic arms are considered; a missing gripper column does not change
- * the mode.
+ * Joints first (7 named joint columns in an observation feature; FR3 family
+ * only), then pose (x, y, z + rx, ry, rz or qx, qy, qz, qw; FR3 family and
+ * generic arms), else none. A missing gripper column does not change the
+ * mode.
  */
 export function detectFr3Replay(
   info: Fr3ReplayInfo,
@@ -245,19 +249,27 @@ export function detectFr3Replay(
   }
   const features = groupByFeature(flatKeys);
   const ordered = observationFeatures(features);
-  const action = detectAction(features.get(ACTION_FEATURE));
+  const isFr3 = family === "fr3";
+  const action = detectAction(features.get(ACTION_FEATURE), isFr3);
   const gripperCol = findGripper(features, ordered);
-  const basis =
-    family === "fr3"
-      ? `robot_type "${robotType}" is FR3 family`
-      : `robot_type "${robotType || "(none)"}" is a generic arm`;
+  const basis = isFr3
+    ? `robot_type "${robotType}" is FR3 family`
+    : `robot_type "${robotType || "(none)"}" is a generic arm`;
   const problems: string[] = [];
+  let undeclaredJoints: string | null = null;
 
   for (const feature of ordered) {
     const joints = findJoints(feature, features.get(feature)!);
     if (!joints) continue;
     if (!joints.ok) {
       problems.push(joints.problem);
+      continue;
+    }
+    if (!isFr3) {
+      // Generic arm: the joints may belong to any 7-joint arm.
+      if (undeclaredJoints === null) {
+        undeclaredJoints = `joint columns present in ${feature} but robot_type does not declare an FR3/Franka; set robot_type to show the arm`;
+      }
       continue;
     }
     return {
@@ -272,6 +284,7 @@ export function detectFr3Replay(
     };
   }
 
+  const note = undeclaredJoints ? `; ${undeclaredJoints}` : "";
   for (const feature of ordered) {
     const pose = findPose(features.get(feature)!);
     if (!pose) continue;
@@ -283,10 +296,11 @@ export function detectFr3Replay(
       gripperCol,
       rotation: pose.rotation,
       poseFrameVerified: false,
-      reason: `${basis}; end-effector pose (${pose.rotation}) in ${feature}, pose frame not verified`,
+      reason: `${basis}; end-effector pose (${pose.rotation}) in ${feature}, pose frame not verified${note}`,
     };
   }
 
+  if (undeclaredJoints) return none(`${basis}; ${undeclaredJoints}`);
   const detail = problems.length > 0 ? `: ${problems.join("; ")}` : "";
   return none(
     `${basis} but no 7 joint columns or x, y, z + rotation columns${detail}`,

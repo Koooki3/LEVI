@@ -41,10 +41,10 @@ describe("detectFr3Replay: joints", () => {
     expect(result.stateCols).toEqual(keys("observation.state", names));
   });
 
-  test("fr3_joint1..7 on a generic arm is detected from the names alone", () => {
+  test("fr3_joint1..7 drive the arm when robot_type is fr3", () => {
     const names = range(1, 7).map((i) => `fr3_joint${i}`);
     const result = detectFr3Replay(
-      { robot_type: "generic_arm" },
+      { robot_type: "fr3" },
       keys("observation.state", names),
     );
     expect(result.mode).toBe("joints");
@@ -78,7 +78,7 @@ describe("detectFr3Replay: joints", () => {
 
   test("exported joints (observation.joint_positions) win over a pose state", () => {
     const names = range(1, 7).map((i) => `joint_${i}`);
-    const result = detectFr3Replay({ robot_type: "generic_arm" }, [
+    const result = detectFr3Replay({ robot_type: "fr3" }, [
       ...keys("observation.state", poseEuler),
       ...keys("observation.joint_positions", names),
       ...keys("action", poseEuler),
@@ -88,6 +88,69 @@ describe("detectFr3Replay: joints", () => {
     expect(result.gripperCol).toBe("observation.state | gripper");
     expect(result.actionMode).toBe("pose");
     expect(result.actionRotation).toBe("euler");
+  });
+});
+
+describe("detectFr3Replay: generic arms never get joints", () => {
+  // xArm7, Kinova Gen3 and others also name 7 joints joint_1..7: without an
+  // FR3/Franka robot_type the arm would be drawn as a wrong but plausible FR3.
+  const joints = keys(
+    "observation.state",
+    range(1, 7).map((i) => `joint_${i}`),
+  );
+  const undeclared = "robot_type does not declare an FR3/Franka";
+
+  test("fr3_joint1..7 on generic_arm: no pose columns, so none", () => {
+    const names = range(1, 7).map((i) => `fr3_joint${i}`);
+    const result = detectFr3Replay(
+      { robot_type: "generic_arm" },
+      keys("observation.state", names),
+    );
+    expect(result.mode).toBe("none");
+    expect(result.stateCols).toEqual([]);
+    expect(result.reason).toContain(undeclared);
+  });
+
+  test("empty robot_type with joint_1..7 only: none, with the reason", () => {
+    for (const robotType of ["", null, undefined, "generic"]) {
+      const result = detectFr3Replay({ robot_type: robotType }, joints);
+      expect(result.mode).toBe("none");
+      expect(result.reason).toContain(undeclared);
+      expect(result.reason).toContain("set robot_type to show the arm");
+    }
+  });
+
+  test("empty robot_type with joint_1..7 and a pose: pose", () => {
+    const result = detectFr3Replay({ robot_type: "" }, [
+      ...joints,
+      ...keys("observation.ee_pose", poseEuler),
+    ]);
+    expect(result.mode).toBe("pose");
+    expect(result.stateFeature).toBe("observation.ee_pose");
+    expect(result.reason).toContain(undeclared);
+  });
+
+  test("generic_arm with joints and pose in one feature, joint action: pose, no joint shadow", () => {
+    const names = [...range(1, 7).map((i) => `joint_${i}`), ...poseEuler];
+    const result = detectFr3Replay({ robot_type: "generic_arm" }, [
+      ...keys("observation.state", names),
+      ...keys("action", range(1, 7).map((i) => `joint_${i}`)),
+    ]);
+    expect(result.mode).toBe("pose");
+    expect(result.rotation).toBe("euler");
+    expect(result.stateCols).toEqual(
+      keys("observation.state", poseEuler.slice(0, 6)),
+    );
+    expect(result.actionMode).toBe("none");
+    expect(result.actionCols).toEqual([]);
+  });
+
+  test("the same joint columns with robot_type fr3 or franka_panda do drive the arm", () => {
+    for (const robotType of ["fr3", "franka_panda"]) {
+      const result = detectFr3Replay({ robot_type: robotType }, joints);
+      expect(result.mode).toBe("joints");
+      expect(result.stateCols).toEqual(joints);
+    }
   });
 });
 
