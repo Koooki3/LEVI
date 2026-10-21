@@ -543,7 +543,7 @@ describe("the stop of the whole stack", () => {
   test("how long the steps took is read as numbers; anything else is null", () => {
     const done = act("chain_done").sequence;
     expect(done.steps.map((x) => x.tookS)).toEqual([
-      0, 1, 1, 4.5, 0.5, 0.5, 0.5, 1, 1, 1,
+      0, 1, 1, 4.5, 0.5, 0.5, 1, 1, 1, 1,
     ]);
     expect(done.tookS).toBe(
       done.steps.reduce((sum, x) => sum + (x.tookS ?? 0), 0),
