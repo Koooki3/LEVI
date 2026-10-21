@@ -286,6 +286,12 @@ class Host:
     tcgetpgrp: Callable = os.tcgetpgrp
     proc_state: Callable = run.proc_state
     identity: Callable = lambda pid: run._identity(pid)
+    # This process (the core), as the owner of a run it starts or takes over:
+    # ``{"pid", "identity"}`` (the identity is what ``identity(pid)`` gives).
+    self_owner: Callable = lambda: {
+        "pid": os.getpid(),
+        "identity": run._identity(os.getpid()),
+    }
     run_lock_path: Callable = lambda: run._hub() / run.LOCK_FILE
     arm_lock_path: Callable = lambda: Path(command.marvel0_site.ARM_LOCK_FILE)
     locks_path: str = "/proc/locks"
@@ -525,6 +531,7 @@ class Supervisor:
         self._master: int | None = None
         self._adopted = False  # adopt() read the record (and acted on it) once
         self._found = False  # this run was found again after a restart
+        self._foreign = False  # another live core owns the run: only watched
         self._snap: RunSite | None = None  # the site values of the run (see RunSite)
         self._mem = st.Memory()
         self._seq = 0
@@ -823,6 +830,7 @@ class Supervisor:
             exit=ex,
             keyboard=self._master is not None and not self._found,
             adopted=self._found,
+            foreign=self._foreign,
             j=j,
             screen=view,
             runner=runner,
@@ -1034,9 +1042,8 @@ class Supervisor:
             rec, snap = self._rec, self._snap
         live = rec is not None and rec.get("phase") in ("intent", "started")
         main_site = aeri = None
-        if not live or snap is None:
-            # (a live run reads nothing of the file: see ``RunSite``; one found
-            # again after a restart has no snapshot yet)
+        if not live:
+            # (a live run reads nothing of the file: see ``RunSite``)
             try:
                 main_site = self.site_loader()
                 aeri = settings_of(main_site)
@@ -1049,6 +1056,11 @@ class Supervisor:
             f = st.Facts(now=now)
             if rec is not None:
                 f.record = rec
+                if live:
+                    # a run whose site values cannot be had (a record without the
+                    # snapshot, and no site file): seen to be alive, not followed
+                    f.alive, f.foreign = True, True
+                    f.profile = st.PROFILES.get(rec.get("profile"))
             d = st.derive(f, st.Memory())
             c = st.Context(
                 now=now,
@@ -1521,6 +1533,9 @@ class Supervisor:
             "stop_retried": False,
             # what the run reads of the site file, kept for as long as it lives
             "site": site.to_json(),
+            # which core owns it (a second core sharing the folder must not
+            # signal a D that a live core drives)
+            "owner": h.self_owner(),
         }
         master = slave = log_fd = None
         try:
@@ -1602,6 +1617,7 @@ class Supervisor:
     def _reset_run(self, site: RunSite, name, rec) -> None:
         self._rec = rec
         self._snap = site
+        self._foreign = False
         self._begin_readers(site, name, site.console_lang)
         self.challenges.void()
         self._found = False
@@ -1757,6 +1773,8 @@ class Supervisor:
                 return self._stop_blind(request_id)
             if not d.alive:
                 raise Refuse("d_gone")
+            if f.foreign:
+                raise Refuse("driven_elsewhere")
             if not d.stop_open:
                 if d.stop_phase != "idle":
                     raise Refuse("stop_spent")
@@ -1796,6 +1814,8 @@ class Supervisor:
         rec = self._rec
         if rec is None or rec.get("phase") not in ("intent", "started"):
             raise Refuse("d_gone")
+        if self._foreign:
+            raise Refuse("driven_elsewhere")
         if rec.get("stop_sent_epoch") is not None:
             raise Refuse("stop_spent")
         path = rec.get("runner_json")
@@ -1944,6 +1964,8 @@ class Supervisor:
         times a second; tests call it by hand). False once the run is over. The
         page does nothing on its own here: it reads and records."""
         with self._mutex:
+            if self._foreign:
+                self.adopt()  # (the owner may be gone by now: then it is ours)
             rec = self._rec
             if rec is None or rec.get("phase") not in ("intent", "started"):
                 return False
@@ -1960,24 +1982,35 @@ class Supervisor:
         with contextlib.suppress(OSError):
             os.read(self._master, 4096)
 
-    def _finish(self, f: st.Facts, aeri) -> None:
+    def _finish(self, f: st.Facts, site: RunSite) -> None:
         """The launcher is gone: record how it ended, let go of everything, look
         (without touching anything) at what D left."""
         if (self._rec or {}).get("phase") == "ended" or self._finished:
             return
         self._finished = True
-        ex = f.exit or {"code": None, "signal": None}
-        after = self._after_exit(aeri)
+        self._record_end(f.exit or {"code": None, "signal": None}, site)
+        self._release()
+        with contextlib.suppress(Exception):
+            self._prune()
+
+    def _record_end(self, ex: dict, site: RunSite) -> None:
+        """The end of the run in the record, the history and the event file the
+        AERI tools wait on (``wait_request.sh``, ``res_monitor.py``)."""
+        after = self._after_exit(site)
         name = (self._rec or {}).get("name")
         if name:
-            events = self._paths(aeri, name)["events"]
+            events = self._paths(site, name)["events"]
             try:
                 text = events.read_text(errors="replace")
             except OSError:
                 text = ""
-            if "terminal D exited" not in text:
+            found = EVENT_LINE.findall(text)
+            if not found or found[-1] != "terminal D exited":
                 rc = 128 + ex["signal"] if ex.get("signal") else ex.get("code")
-                self._event(events, f"terminal D exited rc={rc}")
+                self._event(
+                    events,
+                    f"terminal D exited rc={'unknown' if rc is None else rc}",
+                )
         self._update(
             phase="ended", exit=ex, ended_epoch=self.host.now(), after_exit=after
         )
@@ -1987,9 +2020,6 @@ class Supervisor:
             code=ex.get("code"),
             signal=ex.get("signal"),
         )
-        self._release()
-        with contextlib.suppress(Exception):
-            self._prune()
 
     def _after_exit(self, aeri) -> dict:
         """What D left, read only: our units, the ports, the swap logs."""
@@ -2047,49 +2077,131 @@ class Supervisor:
         """Take over the record a restarted service finds. A D that is still
         alive has no keyboard any more: it is sent **one** SIGINT (user decision
         2026-10-21; its pid and identity from its own heartbeat file) and
-        watched. One that is gone is over. The arm lock is never taken and no
-        SIGSTOP is sent: D holds the lock itself and a frozen D freezes its
-        heartbeat thread."""
+        watched. One that is gone is over (and its ``terminal D exited`` line is
+        written to ``terminal_d.events``, which nobody else will do). The arm lock
+        is never taken and no SIGSTOP is sent: D holds the lock itself and a
+        frozen D freezes its heartbeat thread.
+
+        **Latched only after a read that worked**: a site or record that could
+        not be read this time is read again the next time, so one failure never
+        hides a live D from ``active()`` for the life of the process. A D whose
+        record names **another live core** as its owner is not signalled and not
+        driven: it is watched until that core is gone."""
         with self._mutex:
-            if self._adopted:
+            if self._adopted and not self._foreign:
                 return
-            self._adopted = True
+            if self._child is not None or self._master is not None:
+                # a run this process started: there is nothing to find, and
+                # taking it "over" would take its keyboard away
+                self._adopted = True
+                return
+            if self._foreign and not self._owner_gone():
+                return
+            self._foreign = False
             try:
-                main_site = self.site_loader()
-                aeri = settings_of(main_site)
-                self._dir = self._folder(main_site, create=False)
-                self._rec = record.read_record(self._dir)
+                done = self._adopt_read()
             except Exception:  # noqa: BLE001 - nothing readable: no run is assumed
-                self._rec = None
-                return
-            rec = self._rec
-            if rec is None or rec.get("phase") not in ("intent", "started"):
-                return
-            leader = rec.get("leader") or {}
-            pid = leader.get("pid")
-            alive = (
-                rec.get("phase") == "started"
-                and isinstance(pid, int)
-                and self.host.identity(pid) == leader.get("identity")
-            )
-            name = rec.get("name")
-            if not alive:
-                self._update(phase="ended", exit=self._exit_file(rec))
-                return
-            size = self._screen_size(aeri, name)
-            self._begin_readers(
-                aeri,
-                name,
-                rec.get("console_lang") or aeri.console_lang,
-                base=max(0, size - SCREEN_REPLAY),
-            )
-            self._found = True
-            self._answered = True
-            self._feed_screen(aeri, name)
-            f = self._facts(aeri, self.host.now())
-            if rec.get("stop_sent_epoch") is None:
-                self._adopt_stop(f, rec, pid)
+                done = False
+            if done:
+                self._adopted = True
+
+    def _owner_gone(self) -> bool:
+        """Whether the record of a watched run no longer names a live core other
+        than this one as its owner (or the run is over)."""
+        try:
+            rec = record.read_record(self._dir) if self._dir is not None else None
+        except (OSError, record.RecordCorrupt):
+            return False
+        if rec is None or rec.get("phase") not in ("intent", "started"):
+            return True
+        return not self._other_live_owner(rec.get("owner"), self.host.self_owner())
+
+    def _other_live_owner(self, owner, me) -> bool:
+        if not isinstance(owner, dict) or not isinstance(me, dict):
+            return False
+        pid, ident = owner.get("pid"), owner.get("identity")
+        if (
+            isinstance(pid, bool)
+            or not isinstance(pid, int)
+            or not isinstance(ident, dict)
+        ):
+            return False
+        if pid == me.get("pid") and ident == me.get("identity"):
+            return False
+        return self.host.identity(pid) == ident
+
+    def _site_for_adoption(self, rec):
+        """The ``RunSite`` of a record: its snapshot, else (a record of an older
+        build) the site file's values; None when neither can be had."""
+        snap = RunSite.from_json(rec.get("site")) if rec else None
+        if snap is not None:
+            return snap
+        try:
+            main_site = self.site_loader()
+            return RunSite.of(main_site, settings_of(main_site))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _adopt_read(self) -> bool:
+        """One look at the record on disk and what it names. True: the read
+        worked (a run, a finished one or none) and was acted on; False: it did
+        not work, or a live core owns the run (asked again)."""
+        h = self.host
+        avoid: tuple = ()
+        try:
+            main_site = self.site_loader()
+            avoid = RunSite.of(main_site, settings_of(main_site)).avoid
+        except Exception:  # noqa: BLE001 - the record is found without the site too
+            avoid = ()
+        directory = state_dir(avoid, self.workspace, create=False)
+        rec = record.read_record(directory)  # (raises: not latched)
+        self._dir = directory
+        self._rec = rec
+        self._snap = RunSite.from_json(rec.get("site")) if rec else None
+        self._cache = None
+        if rec is None or rec.get("phase") not in ("intent", "started"):
+            return True
+        site = self._site_for_adoption(rec)
+        if site is None:
+            return False
+        self._snap = site
+        leader = rec.get("leader") or {}
+        pid = leader.get("pid")
+        alive = (
+            rec.get("phase") == "started"
+            and isinstance(pid, int)
+            and h.identity(pid) == leader.get("identity")
+        )
+        name = rec.get("name")
+        if not alive:
+            ex = self._exit_file(rec) or {"code": None, "signal": None}
+            self._finished = True
+            self._record_end(ex, site)
+            with contextlib.suppress(Exception):
+                self._prune()
+            return True
+        size = self._screen_size(site, name)
+        self._begin_readers(
+            site,
+            name,
+            rec.get("console_lang") or site.console_lang,
+            base=max(0, size - SCREEN_REPLAY),
+        )
+        self._found = True
+        self._answered = True
+        self._feed_screen(site, name)
+        if self._other_live_owner(rec.get("owner"), h.self_owner()):
+            self._foreign = True
             self._start_watcher()
+            return False
+        self._foreign = False
+        self._update(owner=h.self_owner())
+        f = self._facts(site, h.now())
+        if rec.get("stop_sent_epoch") is None and not st.interrupted(f):
+            # (a D that already answered a Ctrl+C from elsewhere is not told twice)
+            self._adopt_stop(f, rec, pid)
+        self._start_watcher()
+        return True
 
     def _adopt_stop(self, f: st.Facts, rec: dict, leader_pid: int) -> None:
         """The one SIGINT of an adopted D: to the pid in its heartbeat when that
