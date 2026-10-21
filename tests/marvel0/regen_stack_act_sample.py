@@ -300,8 +300,21 @@ def views() -> tuple:
         )
 
     def until(m, ready, stop):
-        """The chain's ticks, with the machine answering, until ``stop(seq)``."""
-        return m.run_chain(ready=ready, stop_at=stop)
+        """The chain's ticks, with the machine answering, until ``stop(seq)``.
+        Every look takes half a second of the machine's time, so the steps of the
+        sample say how long they took."""
+        advance = m.act.advance
+
+        def slow():
+            out = advance()
+            m.t += 0.5
+            return out
+
+        m.act.advance = slow
+        try:
+            return m.run_chain(ready=ready, stop_at=stop)
+        finally:
+            m.act.advance = advance
 
     with machine() as m:
         # "Start whole stack": one request carries every confirmation (A: Desk
@@ -349,6 +362,51 @@ def views() -> tuple:
             {"request_id": "marker-stopping", "op": "touch", "confirm": "set marker"},
         )
         out["stop_all_started_blocks_starts"] = view(m)
+
+    running_job = {
+        "state": "running",
+        "count": 2,
+        "kinds": ["pytest-dir"],
+        "empty": 1,
+        "why": None,
+    }
+    with machine() as m:
+        # Heavy jobs of the gate still run when the marker is old enough: A waits
+        # for them (their end is not known), the document says how many and for
+        # how long it has waited; the start ends when they do not stop.
+        m.m_ready()
+        m.no_manager()
+        m.heavy = running_job
+        status, answers["sequence_start_chain_heavy"] = chain_press(m, "chain-000010")
+        assert status == 202
+        until(m, ("a", "b", "c"), lambda seq: seq["step"] == "wait")
+        m.t += 12
+        keep_fresh(m)
+        m.act.advance()
+        out["chain_waiting_heavy"] = view(m)
+        m.t += stack_act.HEAVY_WAIT_CAP_S
+        keep_fresh(m)
+        m.act.advance()
+        out["chain_failed_heavy"] = view(m)
+
+    with machine() as m:
+        # The heavy jobs cannot be told (no log, no answer from systemd): the fixed
+        # wait of old applies and the document says so.
+        m.m_ready()
+        m.no_manager()
+        m.heavy = {
+            "state": "unknown",
+            "count": 0,
+            "kinds": [],
+            "empty": 0,
+            "why": "log_missing",
+        }
+        chain_press(m, "chain-000011")
+        until(m, ("a", "b", "c"), lambda seq: seq["step"] == "wait")
+        m.t += 5
+        keep_fresh(m)
+        m.act.advance()
+        out["chain_waiting_heavy_unknown"] = view(m)
 
     with machine() as m:
         # The careful path: the chain waits before B and before C for the

@@ -53,7 +53,7 @@ def codes(loaded):
 def test_the_template_is_a_valid_file_and_switches_nothing_on():
     site = cs.parse(tomllib.loads(cs.TEMPLATE))
     assert site.stack.enabled is False and site.client.enabled is False
-    assert site.stack.server_port == 5000 and site.stack.marker_wait_s == 60.0
+    assert site.stack.server_port == 5000 and site.stack.marker_wait_s == 3.0
 
 
 def test_a_missing_file_is_none_and_not_an_error(tmp_path):
@@ -128,7 +128,7 @@ def test_a_bad_value_is_named_by_field_and_code(tmp_path, change, field, code):
         'robot_ip = "10.42.0.157"': 'robot_ip = "127.0.0.1"',
         'com_port = "/dev/serial/by-id/usb-X-if00-port0"': 'com_port = "/tmp/pty"',
         "server_port = 5000": "server_port = 8000",
-        "marker_wait_s = 60": "marker_wait_s = 5",
+        "marker_wait_s = 60": "marker_wait_s = 1",
         "reset_joint_target = [": "reset_joint_target = [9, ",
     }[change]
     loaded = read_file(tmp_path, GOOD.replace(change, bad, 1))

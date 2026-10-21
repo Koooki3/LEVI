@@ -13,6 +13,7 @@ import { Badge, Button } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { WordedText } from "./action-parts";
 import { wordOf } from "./ctl-text";
+import type { Say } from "./marvel0-logic";
 import { sayText } from "./marvel0-say";
 import {
   canStartSequence,
@@ -21,6 +22,7 @@ import {
   type ActView,
   type StartNeed,
   type SequenceStep,
+  type SequenceWait,
 } from "./stack-act-logic";
 import {
   STEP_TONE,
@@ -38,6 +40,37 @@ const NEEDS: Record<StartNeed, string> = {
   all_ready: "marvel0.ctl.seq.needs_all_ready",
   a_unfit: "marvel0.ctl.seq.needs_a_unfit",
 };
+
+/** Seconds as the page shows them: one decimal, no trailing zero. */
+const secs = (value: number): number => Math.round(value * 10) / 10;
+
+/** What the start before A waits for, one line each, with the numbers. */
+function holdSay(code: string, wait: SequenceWait): Say {
+  const min = secs(wait.minS ?? 0);
+  switch (code) {
+    case "marker_young":
+      return {
+        key: "marvel0.ctl.seq.hold.marker_young",
+        params: { min, age: secs(wait.ageS ?? 0) },
+      };
+    case "heavy_jobs_running":
+      return {
+        key: "marvel0.ctl.seq.hold.heavy_jobs_running",
+        params: {
+          count: wait.heavy?.count ?? 0,
+          cap: Math.round(wait.capS ?? 0),
+          waited: Math.round(wait.waitedS ?? 0),
+        },
+      };
+    case "heavy_jobs_unknown":
+      return {
+        key: "marvel0.ctl.seq.hold.heavy_jobs_unknown",
+        params: { min },
+      };
+    default:
+      return { key: `marvel0.ctl.seq.hold.${code}`, params: {} };
+  }
+}
 
 export function SequenceBlock({
   act,
@@ -193,6 +226,24 @@ export function SequenceBlock({
           )}
         </p>
       )}
+      {seq.state === "running" &&
+        !stop &&
+        seq.wait &&
+        seq.wait.holds.length > 0 && (
+          // What the start waits for before A, and for how long: the marker's age,
+          // heavy jobs that still run (their end is not known, the start ends if
+          // they do not stop), the arm's sockets.
+          <div data-testid="marvel0-sequence-waiting">
+            <p className="rg-muted">{t("marvel0.ctl.seq.waiting_on")}</p>
+            <ul className="rg-muted">
+              {seq.wait.holds.map((code) => (
+                <li key={code} data-hold={code}>
+                  {sayText(holdSay(code, seq.wait!), t)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       {seq.state === "running" && !stop && seq.through === "c" && pausedAt && (
         <p className="rg-muted" data-testid="marvel0-sequence-paused-note">
           {sayText(
@@ -241,6 +292,27 @@ export function SequenceBlock({
               >
                 <span>{labelOf(item)}</span>{" "}
                 <Badge tone={STEP_TONE[shown]}>{stateWord(item)}</Badge>
+                {item.tookS !== null &&
+                  shown !== "pending" &&
+                  shown !== "not_reached" && (
+                    // Where the time goes: what this step has taken.
+                    <>
+                      {" "}
+                      <span
+                        className="rg-muted"
+                        data-testid="marvel0-step-took"
+                        data-took={item.tookS}
+                      >
+                        {sayText(
+                          {
+                            key: "marvel0.ctl.seq.took",
+                            params: { s: secs(item.tookS) },
+                          },
+                          t,
+                        )}
+                      </span>
+                    </>
+                  )}
               </li>
             );
           })}
@@ -261,6 +333,20 @@ export function SequenceBlock({
           )}
         </p>
       )}
+      {(seq.state === "done" || seq.state === "failed") &&
+        !stop &&
+        seq.tookS !== null &&
+        seq.tookS > 0 && (
+          <p className="rg-muted" data-testid="marvel0-sequence-took">
+            {sayText(
+              {
+                key: "marvel0.ctl.seq.took_total",
+                params: { s: secs(seq.tookS) },
+              },
+              t,
+            )}
+          </p>
+        )}
       {(seq.state === "failed" || seq.state === "cancelled") && seq.reason && (
         <p
           className={seq.state === "failed" ? "rg-bad" : "rg-muted"}

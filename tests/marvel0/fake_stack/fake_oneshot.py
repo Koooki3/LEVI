@@ -19,6 +19,17 @@
                                              gripper stack is up, as the first real
                                              run did, and answers after that)
     fake_oneshot.py ee MODE                 (MODE: ok | fail)
+    fake_oneshot.py nodes MODE ALIVE        (the stand-in of `ros2 node list --no-daemon
+                                             --spin-time T`: it prints the node names, one per
+                                             line, sorted, after the `delay=` below:
+                                             the monitor's node always (MODE ok), the gripper
+                                             stack's nodes while the file ALIVE exists.
+                                             MODE ``blind``: the graph was not discovered
+                                             (nothing printed); ``hang``: never ends by
+                                             itself, only the caller's backstop ends it)
+
+Any of them takes a last argument ``delay=SECONDS``: it waits that long before it
+does anything (what the real command spends starting up and discovering).
 
 The output is the real programs': the rows of ``list_controllers`` are the
 f-string of franka_ros2_ws/src/ros2_control/ros2controlcli/ros2controlcli/verb/
@@ -36,6 +47,14 @@ TYPES = {
     "robotiq_activation_controller": "robotiq_controllers/RobotiqActivationController",
 }
 SERVICE = "/robotiq/controller_manager/list_controllers"
+MONITOR_NODE = "/fr3_health_monitor"
+GRIPPER_NODES = (
+    "/robotiq/controller_manager",
+    "/robotiq/joint_state_broadcaster_robotiq",
+    "/robotiq/robot_state_publisher",
+    "/robotiq/robotiq_activation_controller",
+    "/robotiq/robotiq_gripper_controller",
+)
 
 
 def rows(states):
@@ -48,6 +67,12 @@ def rows(states):
 
 
 kind, rest = sys.argv[1], sys.argv[2:]
+delay = 0.0
+for item in list(rest):
+    if item.startswith("delay="):
+        delay = float(item.split("=", 1)[1])
+        rest.remove(item)
+time.sleep(delay)
 if kind == "gripper":
     position, mode = rest
     if mode == "hang":
@@ -107,6 +132,16 @@ elif kind == "controllers":
             ),
             end="",
         )
+elif kind == "nodes":
+    mode, alive = rest
+    if mode == "hang":
+        time.sleep(3600)
+    names = [] if mode == "blind" else [MONITOR_NODE]
+    if os.path.exists(alive) and mode != "blind":
+        names += GRIPPER_NODES
+    # (ros2node/verb/list.py: `print(*sorted_names, sep='\n')`; nothing for none)
+    if names:
+        print(*sorted(names), sep="\n")
 else:
     mode = rest[0]
     if mode == "ok":

@@ -48,6 +48,10 @@ def fake_specs(
     names=None,
     qos_file=None,
     alive_file=None,
+    nodes="ok",
+    nodes_delay_s=0.0,
+    controllers_delay_s=0.0,
+    ee_delay_s=0.0,
 ) -> stack_units.Specs:
     """``names``: unit names by key (``{"a": "levi-aeri-stack-marvel0-rehearsal-a"}``)."""
     if port in (5000, 5001, 5100, 7470, 8000):
@@ -115,9 +119,10 @@ def fake_specs(
             units[key].argv, wrapper=stack_units.WRAPPER if via_wrapper else None
         )
 
-    def one_shot(*args):
+    def one_shot(*args, delay=0.0):
+        extra = [f"delay={delay}"] if delay else []
         return stack_units.check_argv(
-            behind([py, str(SCRIPTS["fake_oneshot"]), *args]), long_lived=False
+            behind([py, str(SCRIPTS["fake_oneshot"]), *args, *extra]), long_lived=False
         )
 
     return stack_units.Specs(
@@ -132,6 +137,9 @@ def fake_specs(
         com_port=str(Path(__file__)),  # (only its existence is asked)
         qos_file=str(qos_file) if qos_file else None,
         gripper_cmd=lambda position: one_shot("gripper", str(float(position)), gripper),
-        controllers_cmd=one_shot("controllers", controllers, str(alive_file)),
-        ee_cmd=one_shot("ee", ee),
+        controllers_cmd=one_shot(
+            "controllers", controllers, str(alive_file), delay=controllers_delay_s
+        ),
+        ee_cmd=one_shot("ee", ee, delay=ee_delay_s),
+        nodes_cmd=one_shot("nodes", nodes, str(alive_file), delay=nodes_delay_s),
     )

@@ -54,8 +54,13 @@ def grip(m, action="open", rid="grip-0000001"):
 
 
 def probes(m):
-    """The one-shot checks that asked B's controller manager."""
-    return [c for c in m.oneshots if "list_controllers" in " ".join(c)]
+    """The one-shot checks that asked whether a gripper stack runs: the ROS graph
+    (the fast question) and, when that proved nothing, B's controller manager."""
+    return [
+        c
+        for c in m.oneshots
+        if "list_controllers" in " ".join(c) or " node list " in " ".join(c)
+    ]
 
 
 def probe_request(n=1):
@@ -128,10 +133,11 @@ def test_the_b_check_alone_refreshes_it_with_a_up_and_makes_no_fci_connection(m)
 
 def test_the_b_check_is_bounded_as_the_one_before_a_is(m):
     m.m_ready()
+    m.nodes_out = ""  # (the graph proves nothing: the controller manager is asked)
     m.act.probe_b(probe_request())
-    [cmd] = probes(m)
+    [_, cmd] = probes(m)
     assert cmd[cmd.index("--") + 1 :][:6] == ["timeout", "-s", "INT", "-k", "3", "20"]
-    [run] = [c for c in m.calls if c[0] == "systemd-run" and "probe-b" in " ".join(c)]
+    [run] = [c for c in m.calls if c[0] == "systemd-run" and "probe-b-1" in " ".join(c)]
     limit = next(a for a in run if a.startswith("--property=RuntimeMaxSec="))
     assert int(limit.split("=")[2]) == stack_units.PROBE_RUNTIME_MAX_S
 
@@ -202,7 +208,9 @@ def test_a_press_on_start_b_with_an_old_check_makes_the_check_and_starts_nothing
     m.oneshots.clear()
     assert refused(m.act.start, "b", m.start_body("b")) == "b_probe_started"
     assert m.systemd_runs("b") == [], "nothing is started on a B that cannot be seen"
-    assert len(probes(m)) == 1 and len(m.fci_probes) == 1  # (the one before A)
+    # (two answers of the graph, as every check a person asks for: nothing fresh
+    # went before it, and the FCI check is the one before A)
+    assert len(probes(m)) == 2 and len(m.fci_probes) == 1
     assert m.terminal("b")["state"] == "idle"  # the check answered: absent
     # the person presses again: now it starts
     assert m.act.start("b", m.start_body("b", "start-b-0002"))["done"] == "started"
@@ -253,10 +261,15 @@ def test_a_guided_start_that_waits_for_b_keeps_the_check_fresh(m):
     start_sequence(m)
     seq = run_sequence(m)
     assert seq["state"] == "waiting_confirm" and seq["next"] == "b"
-    before = len(probes(m))  # (the one made before A)
-    # not yet due: the check is left alone
+    before = len(probes(m))  # (the one made before A: a single answer of the graph)
+    # B needs a second answer: the sequence makes it while it waits (one check)
     m.act.advance()
-    assert len(probes(m)) == before
+    assert len(probes(m)) == before + 1
+    assert m.act._b_probe["confirmed"] is True
+    # now it is not due: the check is left alone
+    m.act.advance()
+    assert len(probes(m)) == before + 1
+    before += 1
     # half of the validity later it is made again, by the sequence itself
     m.t += stack_act.B_PROBE_REFRESH_S + 1
     m.a_up(lines=False)
@@ -303,7 +316,8 @@ def test_a_guided_start_does_not_end_while_another_operation_holds_the_check_bac
     assert len(probes(m)) == n
     m.act._finish(op, True)
     assert m.act.advance()["state"] == "waiting_confirm"
-    assert len(probes(m)) == n + 1
+    # (nothing fresh goes before it: two answers of the graph)
+    assert len(probes(m)) == n + 2
 
 
 def test_a_guided_start_does_not_end_when_the_optional_check_is_refused(m):

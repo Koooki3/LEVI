@@ -45,9 +45,17 @@ SCHEMA = "levi.marvel0.control.v1"
 RELATIVE = ("lab", "marvel0", "control.toml")
 MAX_BYTES = 16 * 1024
 DEFAULT_SERVER_PORT = 5000
-DEFAULT_MARKER_WAIT_S = 60.0
-MARKER_WAIT_FLOOR_S = 45.0  # heavy_gate.py clears its jobs within this
+# The least time the marker must have existed before A may start. It used to be
+# a fixed wait of 45-60 s, the time a heavy job of ``heavy_gate.py`` needs to
+# yield (grace 30 s + kill wait 10 s). The page now waits for the jobs
+# themselves (``stack_act.heavy_jobs_running``), so what is left here is only
+# the time a gate needs to *see* the marker (``heavy_gate.MARKER_MIN_AGE`` is
+# 2 s). When the page cannot tell whether a heavy job runs, it falls back to
+# ``LEGACY_MARKER_WAIT_S``, the fixed wait of old.
+DEFAULT_MARKER_WAIT_S = 3.0
+MARKER_WAIT_FLOOR_S = 2.0
 MARKER_WAIT_CEIL_S = 600.0
+LEGACY_MARKER_WAIT_S = 45.0
 JOINTS = 7
 JOINT_LIMIT = 3.2  # radians; no FR3 joint goes further
 # The ports nothing of this page may be configured to bind or serve on: the
@@ -72,7 +80,7 @@ robot_ip           = "10.42.0.157"               # the arm's address (Desk and F
 com_port           = "/dev/serial/by-id/usb-FTDI_USB_TO_RS-485_XXXXXXXX-if00-port0"
 server_port        = 5000                        # the robot server's loopback port
 reset_joint_target = [-0.8063, -0.0623, 0.9130, -2.4036, 0.0580, 2.3011, 1.5844]
-marker_wait_s      = 60                          # 45 to 600: heavy jobs are cleared this long before A starts
+marker_wait_s      = 3                           # 2 to 600: the least age of the marker before A starts (the page also waits for heavy jobs to end)
 
 [client]
 enabled            = false                      # true: the page may host the evaluation client

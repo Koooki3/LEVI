@@ -56,6 +56,10 @@ def attach(stack_obj) -> stack_act.Act:
         stack_obj.act = stack_act.Act(
             stack_obj, stack_act.production_host(stack_obj.host)
         )
+        # The page's read of the stack is cached for two seconds; a step that
+        # moved on or a check that ended must show at once, not two seconds
+        # later (the cache is for several open pages, not for hiding progress).
+        stack_obj.act.on_change = stack_api.invalidate
         # An earlier run of the page may have stopped A and not lived to
         # release the marker (its 90 s loop is in memory).
         stack_obj.act.resume()
@@ -189,7 +193,7 @@ def preflight_a(body: CheckBody, response: Response):
 @router.post("/stack/b/probe", dependencies=[Depends(person_only)])
 def probe_b(body: CheckBody, response: Response):
     """Does a gripper stack run that this page did not start? Asks B's
-    controller manager only (about 20 s): no FCI contact, so it is allowed while
+    gripper stack's ROS graph (a few seconds): no FCI contact, so it is allowed while
     A runs (person only)."""
     return _answer(lambda: act().probe_b(body.model_dump()), response)
 

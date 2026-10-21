@@ -52,14 +52,18 @@ Everything of the machine is reached through ``ActHost`` (and the base
 
 import contextlib
 import copy
+import json
 import logging
 import os
 import re
 import socket
 import stat
+import struct
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from levi.live import gpumgr
@@ -73,7 +77,27 @@ RECORD_SCHEMA = "levi.marvel0.stack_act_record.v1"
 LOG_SCHEMA = "levi.marvel0.stack_log.v1"
 LOG_NAME = re.compile(r"[abc]-\d{8}T\d{6}Z(?:-\d{1,2})?\.log")
 KEEP_LOGS = 10
-SEQUENCE_TICK_S = 2.0
+# The ticker of a guided start or stop looks again this long after the last look
+# (a look is one read of the stack, about 40 ms and six ``systemctl show`` on
+# the real machine) while the sequence runs, and at once after anything that
+# changed: a step that moved on, a check or a start that finished (``_poke``).
+# It used to look every 2 s and move one step per look, so a chain that needed
+# ten steps lost 25 s doing nothing. While the sequence only waits for the
+# person (``waiting_confirm``) a slow look is enough.
+#
+# **Once A has a unit the 1 kHz control loop is live** (await_a, the check of B,
+# B, the checks before C, C, and the steps of a stop), and a look is about six
+# forks of ``systemctl``/``loginctl``: at 0.25 s that is some 28 fork/execs a
+# second on a non-real-time kernel, never measured against the loop. So the
+# short pause holds only until the look that sees A's unit; after that the pause
+# is ``SEQUENCE_TICK_ARM_S``. What it costs is the wait of a stage that came up
+# between two looks (at most one pause per stage, about 1.5 s on the whole
+# chain); the look right after a change and the wake-up when an operation ends
+# stay, so a check that finishes is still acted on at once.
+SEQUENCE_TICK_S = 0.25
+SEQUENCE_TICK_ARM_S = 1.0
+SEQUENCE_TICK_WAITING_S = 2.0
+SEQUENCE_BURST = 40  # looks in a row without a pause after a change, at most
 STEP_TIMEOUT_S = 600.0  # one automatic step of the guided start may take this long
 # What a guided start settles by itself, so it is not a reason to refuse it.
 SEQUENCE_SOFT = (
@@ -81,6 +105,7 @@ SEQUENCE_SOFT = (
     "gate.layers_known",
     "gate.marker_set",
     "marker_young",
+    "heavy_jobs_running",
     "gate.fci_probe",
     "gate.arm_sockets_clear",
     "gate.lock_free",
@@ -115,6 +140,45 @@ C_PREFLIGHT_TTL_S = 300.0
 DRAIN_S = 90.0  # sockets to the arm linger (TIME_WAIT) after a probe or a stop
 DRAIN_SKEW_S = 1.0  # a mark this far ahead of the clock is still "just now"
 PROBE_TIMEOUT_S = 2.0
+# --- the heavy jobs of this computer, and the wait for them ---------------------
+# Heavy jobs that honour the marker (``levi-hub/heavy_gate.py``: pytest and bun
+# runs) stop within about 30 s of it (SIGTERM, 30 s grace, SIGKILL, capped at
+# 45 s). The page used to wait a fixed ``marker_wait_s`` (45-60 s) whether any
+# ran or not. It now waits until the marker is old enough (the control file's
+# ``marker_wait_s``: only the time a gate needs to see it) AND the log of the gate
+# shows no job of its that really runs (``heavy_jobs_running``). Two sources
+# decide, as in the gate's own ``wait-clear``: its log (the default one, in the
+# hub) and the heavy-gate scopes systemd lists (a gate run with another
+# ``HEAVY_GATE_LOG`` or ``LEVI_HUB_DIR``, a job older than the log window, one
+# logged outside the part of the log that is read: still honours the fixed
+# marker, and is seen there). What cannot be told falls back to the fixed wait
+# of old, never to "no job". Other programs on this computer do not honour the
+# marker and are not looked at.
+HEAVY_LOG_NAME = "heavy-gate.jsonl"
+HEAVY_LOG_MAX_AGE_S = 6 * 3600.0  # a job last heard of longer ago is not looked at
+HEAVY_LOG_TAIL_BYTES = 4 * 1024 * 1024  # of a long log, only its end is read
+HEAVY_MAX_UNITS = 64  # more candidates than this are not asked about: unknown
+HEAVY_SHOW = "--property=Id,LoadState,ActiveState,TasksCurrent"
+# The second source: every heavy-gate scope systemd has loaded, whatever log (or
+# no log) its gate wrote. systemd 255 expands the glob in ``show`` itself.
+HEAVY_GLOB = "heavy-gate-*"
+HEAVY_TERMINAL = ("finish", "interrupted", "cancelled", "aborted", "exhausted")
+HEAVY_UNIT = re.compile(
+    r"heavy-gate-(pytest-file|pytest-dir|bun-test|bun-validate)-\d+-\d+-[0-9a-f]{6}"
+)
+HEAVY_STATES = ("clear", "running", "unknown")
+# What the start before A can be waiting for (``act.sequence.wait.holds``).
+WAIT_HOLDS = (
+    "marker_absent",
+    "marker_young",
+    "heavy_jobs_running",
+    "heavy_jobs_unknown",
+    "arm_sockets",
+)
+# How the answer about a gripper stack came (``checks.b_probe.by``).
+B_PROBE_BY = ("nodes", "probe", "stop")
+HEAVY_WAIT_CAP_S = 90.0  # a job that does not yield in this long ends the start
+HEAVY_CLEAN_LOOKS = 2  # looks in a row without a running job (heavy_gate wait-clear)
 CHECK_TIMEOUT_S = 25.0  # one read-only check through a one-shot unit
 SEQUENCE_WAIT_S = 1800.0  # a sequence left waiting for B or C expires
 # The desk and e-stop ticks of a guided start are good for this long plus the
@@ -135,6 +199,10 @@ LOG_TRIM_EVERY_S = 60.0  # how often a ready unit's log is checked for its size
 OP_PUBLIC = ("kind", "terminal", "state", "started_at", "finished_at", "code")
 # A stop does not wait for these: it ends them (the read-only checks).
 PREEMPTED_BY_STOP = ("preflight_a", "preflight_c", "probe_b")
+# The check whether a gripper stack runs only reads the ROS graph: it may run
+# beside the FCI check and beside the start of A (which must not wait for it),
+# but not beside another such check. Every other operation is alone.
+SIDE_OPS = ("probe_b",)
 # A stop of B first ends the gripper test through its one-shot unit and waits for
 # that unit to be gone: send_goal's SIGINT handler spins until B's action server
 # acknowledges the cancel (ros2action/verb/send_goal.py:146-170), and `timeout
@@ -187,6 +255,7 @@ SEQUENCE_REASONS = (
     "marker_unusable",
     "marker_gone",
     "step_timeout",
+    "heavy_job_still_running",
     "fci_closed",
     "fci_unreachable",
     "preflight_failed",
@@ -199,8 +268,12 @@ SEQUENCE_REASONS = (
 # The steps of the guided start: the first six are A's (they end with the
 # sequence waiting for B when it goes through A only); the others are the chain
 # (``through = "c"``): the check whether a gripper stack runs, B's start and its
-# calibration, the checks before C, C's start and its readiness.
-A_STEPS = ("monitor", "probe", "marker", "wait", "arm", "await_a")
+# calibration, the checks before C, C's start and its readiness. The marker is
+# set right after M, so that its age runs while the FCI check (``probe``, about
+# 1 s) and the check whether a gripper stack runs (a background operation begun
+# with the marker) are made; ``wait`` is then only what is left of the marker's
+# minimum age and of the heavy jobs.
+A_STEPS = ("monitor", "marker", "probe", "wait", "arm", "await_a")
 CHAIN_STEPS = ("b_probe", "b", "c_preflight", "c")
 SEQUENCE_STEPS = (*A_STEPS, *CHAIN_STEPS)
 SEQUENCE_THROUGH = ("a", "c")
@@ -349,8 +422,15 @@ TEXT = {
     "marker_young": (
         409,
         (
-            "The marker is {age_s} s old; heavy jobs are cleared {wait_s} s after "
-            "it is set ({remaining_s} s to go)."
+            "The marker is {age_s} s old; A starts when it is {wait_s} s old and "
+            "no heavy job of this computer still runs."
+        ),
+    ),
+    "heavy_jobs_running": (
+        409,
+        (
+            "{count} heavy job(s) of this computer ({kinds}) still run. They "
+            "stop within about 30 s of the marker; A starts when they have."
         ),
     ),
     "marker_not_ours": (
@@ -538,16 +618,25 @@ TEXT = {
         (
             "No usable check says whether a gripper stack is already running "
             "(none made, too old, or without an answer): pressing start makes the "
-            "check first (about 20 s); press start again when it has finished."
+            "check first (a few seconds); press start again when it has finished."
+        ),
+    ),
+    "b_probe_unconfirmed": (
+        409,
+        (
+            "The last check found no gripper stack, but only once: the ROS graph "
+            "can miss a stack it has not discovered yet, and a second gripper stack "
+            "would fight the first for the serial port. Pressing start repeats the "
+            "check first (a few seconds); press start again when it has finished."
         ),
     ),
     "b_probe_started": (
         409,
         (
             "There was no usable check whether a gripper stack is already running "
-            "(none made, too old, or without an answer), so it has been started "
-            "(about 20 s). Nothing was started: press start again when it has "
-            "finished."
+            "(none made, too old, without an answer, or only one answer of the "
+            "graph), so it has been started (a few seconds). Nothing was started: "
+            "press start again when it has finished."
         ),
     ),
 }
@@ -635,6 +724,9 @@ def catalog() -> dict:
         "sequence_kinds": list(SEQUENCE_KINDS),
         "sequence_stop_steps": list(SEQUENCE_STOP_STEPS),
         "sequence_step_states": list(SEQUENCE_STEP_STATES),
+        "sequence_holds": list(WAIT_HOLDS),
+        "heavy_states": list(HEAVY_STATES),
+        "b_probe_by": list(B_PROBE_BY),
     }
 
 
@@ -645,7 +737,16 @@ def tcp_probe(ip, port, timeout_s=PROBE_TIMEOUT_S) -> dict:
     """One TCP connection to ``ip:port`` and straight closed: ``{"state":
     "open"|"closed"|"unreachable"}``. This is the FCI check ``preflight.sh``
     makes. A protected port (the robot server, the policy server, the learner)
-    is never connected to, whatever asks."""
+    is never connected to, whatever asks.
+
+    The connection is closed with a reset (``SO_LINGER`` 0), not with a FIN: the
+    side that closes first keeps the connection in TIME_WAIT for 60 s, and
+    ``arm_guard`` counts such a socket to the arm as a control connection, so
+    a FIN would keep A from starting for a minute after the check (the leftover
+    that ``Act._draining`` has to explain). A reset leaves no socket behind
+    (checked against the kernel's table in ``test_marvel0_stack_act_fast.py``).
+    What the arm's own FCI server makes of a reset instead of a close has not
+    been seen: it is a plain TCP event any crashed client causes."""
     if int(port) in PROTECTED_PORTS:
         raise ValueError("a protected port is never connected to")
     try:
@@ -654,6 +755,8 @@ def tcp_probe(ip, port, timeout_s=PROBE_TIMEOUT_S) -> dict:
         return {"state": "closed"}
     except OSError:
         return {"state": "unreachable"}
+    with contextlib.suppress(OSError):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
     sock.close()
     return {"state": "open"}
 
@@ -705,6 +808,253 @@ def cgroup_procs(group) -> list | None:
     return [int(x) for x in raw.decode("ascii", "replace").split() if x.isdigit()]
 
 
+# --- the heavy jobs of this computer ------------------------------------------------
+
+_HEAVY_CACHE: dict = {}  # log path -> (identity, records): the log is parsed when it changes
+
+
+def _heavy_records(path) -> list:
+    """The records of ``heavy-gate.jsonl`` as ``heavy_gate.read_log`` reads it (a
+    line that is not JSON is skipped). Only the end of a long log is read, and a
+    log that has not changed is not parsed again. Raises ``OSError``
+    (``FileNotFoundError`` when there is none)."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError("not a regular file")
+        identity = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+        cached = _HEAVY_CACHE.get(str(path))
+        if cached is not None and cached[0] == identity:
+            return cached[1]
+        start = max(0, info.st_size - HEAVY_LOG_TAIL_BYTES)
+        begin = max(0, start - 1)  # (one byte more: is the tail on a line start?)
+        raw = os.pread(fd, info.st_size - begin, begin)
+    finally:
+        os.close(fd)
+    if start:
+        # The first line of a tail is cut, unless the tail begins on a line start;
+        # the extra byte read says which: it is then the newline that ends the
+        # line before, and what is dropped is that newline alone.
+        raw = raw.partition(b"\n")[2]
+    lines = raw.decode("utf-8", "replace").splitlines()
+    out = []
+    for line in lines:
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(item, dict):
+            out.append(item)
+    _HEAVY_CACHE.clear()  # (one log is in use)
+    _HEAVY_CACHE[str(path)] = (identity, out)
+    return out
+
+
+def _epoch(text):
+    try:
+        return datetime.fromisoformat(str(text)).timestamp()
+    except ValueError:
+        return None
+
+
+def _count(value):
+    """A task count from ``systemctl show`` (``[not set]`` and uint64 max: the
+    accounting says nothing)."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if 0 <= number < 2**63 else None
+
+
+def _scope_verdict(shown) -> str:
+    """``running`` (the scope has processes), ``empty`` (it is listed and holds
+    none: a scope that is left over), ``gone`` (no such unit) or ``unknown``,
+    from the properties ``systemctl show`` printed for it."""
+    if shown.get("LoadState") == "not-found":
+        return "gone"
+    tasks = _count(shown.get("TasksCurrent"))
+    active = shown.get("ActiveState")
+    if active in ("inactive", "failed"):
+        return "running" if tasks else "gone"
+    if active in ("active", "activating", "deactivating", "reloading"):
+        if tasks is None:
+            return "unknown"
+        return "running" if tasks > 0 else "empty"
+    return "unknown"
+
+
+def _show_blocks(run, names):
+    """``{Id: properties}`` from ONE ``systemctl --user show`` of ``names`` (a
+    left-over scope costs a look every time, and there are several on this
+    machine). The answer is a block of ``key=value`` lines per unit, a blank
+    line between them, each with its ``Id`` (a glob that matches nothing prints
+    nothing and exits 0). None when systemd does not answer."""
+    argv = ["systemctl", "--user", "show", HEAVY_SHOW, *names]
+    try:
+        code, text = run(argv, stack.SHOW_TIMEOUT_S)
+    except (OSError, ValueError):
+        return None
+    if code != 0:
+        return None
+    blocks = {}
+    for block in re.split(r"\n\s*\n", text.strip("\n")):
+        shown = stack.parse_show(block)
+        if shown.get("Id"):
+            blocks[shown["Id"]] = shown
+    return blocks
+
+
+def _verdicts(blocks, scopes) -> dict:
+    """``{scope: verdict}`` (``_scope_verdict``) for ``scopes`` from the blocks
+    ``_show_blocks`` read. A unit with no block of its own is unknown, and so is
+    every unit when systemd did not answer (``blocks`` None)."""
+    if blocks is None:
+        return dict.fromkeys(scopes, "unknown")
+    return {
+        scope: _scope_verdict(blocks[scope]) if scope in blocks else "unknown"
+        for scope in scopes
+    }
+
+
+def _scopes_tasks(run, scopes) -> dict:
+    """``_verdicts`` for ``scopes`` from ONE ``systemctl --user show`` of all of
+    them."""
+    return _verdicts(_show_blocks(run, scopes), scopes)
+
+
+def _heavy_log_candidates(log_path, now):
+    """``(units, doubt)``: the jobs the gate's log says run, as the names of their
+    scopes' units, and why the log cannot be relied on (None when it can). A job
+    is one whose scope was launched (``launching`` or ``start`` in the log,
+    within ``HEAVY_LOG_MAX_AGE_S``) and has no terminal record with its scope
+    confirmed empty (``heavy_gate.running_jobs`` and ``_ends``: a ``queued``
+    after an ``interrupted``, or a ``not_empty``, do not change that)."""
+    try:
+        records = _heavy_records(log_path)
+    except FileNotFoundError:
+        return [], "log_missing"
+    except OSError:
+        return [], "log_unreadable"
+    ended, latest = set(), {}
+    for rec in records:
+        unit, event = rec.get("unit"), rec.get("event")
+        if not isinstance(unit, str) or not HEAVY_UNIT.fullmatch(unit):
+            continue
+        if event in HEAVY_TERMINAL and rec.get("emptied", True) is True:
+            ended.add(unit)
+        elif event in ("launching", "start") and (
+            event == "start" or unit not in latest
+        ):
+            latest[unit] = rec
+    t_now = now()
+    candidates = []
+    for unit, rec in latest.items():
+        if unit in ended:
+            continue
+        at = _epoch(rec.get("ts"))
+        if at is not None and t_now - at > HEAVY_LOG_MAX_AGE_S:
+            continue
+        candidates.append((at if at is not None else t_now, unit, rec))
+    if len(candidates) > HEAVY_MAX_UNITS:
+        return [], "too_many_candidates"
+    units, doubt = [], None
+    for _, unit, rec in sorted(candidates, reverse=True):
+        if rec.get("mode", "scope") != "scope":
+            doubt = doubt or "not_a_scope"  # (no systemd evidence for it)
+        else:
+            units.append(unit)
+    return units, doubt
+
+
+def heavy_jobs_running(log_path, run, now=time.time) -> dict:
+    """Does a heavy job of ``heavy_gate.py`` really run? ``{"state":
+    "clear"|"running"|"unknown", "count", "kinds", "empty", "why"}``.
+
+    **Two sources, and their union decides** (the gate's own ``wait-clear`` also
+    uses its log and the scopes systemd lists):
+
+    * the gate's log (``_heavy_log_candidates``): a job it launched and did not
+      close, within the last ``HEAVY_LOG_MAX_AGE_S`` and the part of the log that
+      is read;
+    * the heavy-gate scopes systemd has loaded, whoever launched them and
+      wherever they logged: a gate run with another ``HEAVY_GATE_LOG`` or
+      ``LEVI_HUB_DIR`` still honours the fixed marker, and a job started long ago
+      or logged outside the part read is still a job. The gate's own naming
+      (``HEAVY_UNIT``) decides which units are jobs (a ``heavy-gate-probe-*``
+      scope is not).
+
+    Both are answered by ONE ``systemctl --user show`` (the glob and the log's
+    candidates). A job counts only while its scope still holds a process
+    (``TasksCurrent`` > 0). A scope that is listed and holds none is a left-over
+    (the open problem of stale ``heavy-gate-*.scope`` units; about 18 on this
+    machine): it does not count (``empty``); one that is inactive or failed and
+    still holds a process does count (the gate treats it as not cleared). Whatever
+    cannot be told is ``unknown`` (never "clear"): no log, an unreadable log, a
+    systemd that does not answer (or a glob it did not expand), a scope without a
+    task count, more candidates than ``HEAVY_MAX_UNITS``, a job that did not run
+    in a scope. ``running`` wins over ``unknown``: a job that is seen decides.
+
+    ``run`` is the host's ``(argv, timeout_s) -> (code, text)``; nothing but
+    ``systemctl --user show`` is asked of it."""
+    listed, doubtful = _heavy_log_candidates(log_path, now)
+    blocks = _show_blocks(run, [HEAVY_GLOB, *(u + ".scope" for u in listed)])
+    running, empty = set(), set()
+    if blocks is None or any("*" in name for name in blocks):
+        # (an old systemd prints a not-found block named like the glob: that
+        # proves nothing)
+        doubtful = doubtful or "systemd_unreadable"
+    else:
+        # the log's candidates one by one: a unit systemd gave no block for is
+        # unknown, a scope that is not loaded is gone
+        verdicts = _verdicts(blocks, [u + ".scope" for u in listed])
+        for unit in listed:
+            verdict = verdicts[unit + ".scope"]
+            if verdict == "running":
+                running.add(unit)
+            elif verdict == "empty":
+                empty.add(unit)
+            elif verdict == "unknown":
+                doubtful = doubtful or "systemd_unreadable"
+        # every heavy-gate scope that is loaded, whoever launched it
+        for name, shown in blocks.items():
+            unit = name.removesuffix(".scope")
+            if name == unit or not HEAVY_UNIT.fullmatch(unit):
+                continue  # (a probe scope, a service, anything that is not a job)
+            verdict = _scope_verdict(shown)
+            if verdict == "running":
+                running.add(unit)
+            elif verdict == "empty":
+                empty.add(unit)
+            elif verdict == "unknown":
+                doubtful = doubtful or "systemd_unreadable"
+    kinds = sorted({HEAVY_UNIT.fullmatch(u).group(1) for u in running})
+    if running:
+        return {
+            "state": "running",
+            "count": len(running),
+            "kinds": kinds,
+            "empty": len(empty),
+            "why": None,
+        }
+    if doubtful:
+        return {
+            "state": "unknown",
+            "count": 0,
+            "kinds": [],
+            "empty": len(empty),
+            "why": doubtful,
+        }
+    return {
+        "state": "clear",
+        "count": 0,
+        "kinds": [],
+        "empty": len(empty),
+        "why": None,
+    }
+
+
 @dataclass
 class ActHost:
     """What ``Act`` reaches beyond ``stack.Host``."""
@@ -717,6 +1067,12 @@ class ActHost:
     workspace_ok: object = workspace_is_main  # () -> the main checkout's workspace?
     cgroup_procs: object = cgroup_procs  # (control group) -> [pids] | None
     background: bool = True  # slow work in a thread (tests run it inline)
+    # Two independent commands of one check run at the same time (the checks
+    # before C, the FCI check beside the check of B). False: one after the other,
+    # for the tests that need one order of the fake machine's calls. A function
+    # ``(calls) -> results`` runs them its own way (the timing tests).
+    parallel: object = True
+    heavy_jobs: object = heavy_jobs_running  # (log path, run, now) -> its answer
     sleep: object = time.sleep
 
 
@@ -784,6 +1140,9 @@ class Ctx:
     health_matches: bool
     enabled: bool = False
     busy: bool = False  # an operation is running (any, not only the latest)
+    # an operation other than the check of B is running (the start of A does not
+    # wait for that one)
+    busy_main: bool = False
     extra: dict = field(default_factory=dict)
 
 
@@ -827,6 +1186,17 @@ class Act:
         # ticker is finishing (a stop pressed again the moment one ended) must
         # not be left without one.
         self._ticker_lock = threading.Lock()
+        # Anything that changes what the next look would find (a step that moved
+        # on, an operation that ended) counts up ``_progress`` and wakes the
+        # ticker, so the sequence looks again at once instead of after its pause.
+        self._wake = threading.Event()
+        self._progress = 0
+        # Did the last look of the sequence find a unit of A (True), none (False)
+        # or could not tell (None)? It sets the pause of the ticker.
+        self._a_unit = False
+        # Called after such a change (the product sets it to forget the page's
+        # cached read of the stack: ``stack_api.invalidate``).
+        self.on_change = None
         self._ready_at: dict = {}  # (key, log name) -> when it first was ready
         self._trimmed_at: dict = {}  # key -> when its log was last looked at
         self._resumed = False
@@ -898,14 +1268,53 @@ class Act:
         return record.update_record(self._folder(key), **fields)
 
     # -- the marker ---------------------------------------------------------------
-    def _marker_info(self, view) -> dict:
+    def _heavy(self) -> dict:
+        """The heavy jobs of this computer now (``heavy_jobs_running``, or what
+        the host replaces it with); a failure to ask is "unknown"."""
+        try:
+            log = Path(self.host.base.marker()).parent / HEAVY_LOG_NAME
+            got = self.host.heavy_jobs(log, self.host.base.run, self.now)
+            state = got.get("state")
+            if state not in HEAVY_STATES:
+                raise ValueError("odd answer")
+            return {
+                "state": state,
+                "count": int(got.get("count") or 0),
+                "kinds": [str(k) for k in got.get("kinds") or []],
+                "empty": int(got.get("empty") or 0),
+                "why": got.get("why"),
+            }
+        except Exception:  # noqa: BLE001 - what cannot be told is not "clear"
+            return {
+                "state": "unknown",
+                "count": 0,
+                "kinds": [],
+                "empty": 0,
+                "why": "heavy_failed",
+            }
+
+    def _marker_info(self, view, heavy=None) -> dict:
         """The marker as the page shows it: the stack's view of it plus who
-        made it (``ours``) and how long is left to wait."""
+        made it (``ours``), the heavy jobs it waits for (``heavy``: asked only
+        while the marker is there) and how long is left to wait.
+
+        A start waits until the marker is ``wait_s`` old **and** no heavy job
+        runs. ``wait_s`` is the control file's ``marker_wait_s`` (a few seconds)
+        when the heavy jobs are known; when they cannot be told it is the fixed
+        wait of old (at least ``LEGACY_MARKER_WAIT_S``). While a job runs the
+        remaining time is not known (``remaining_s`` None): the job yields
+        within about 30 s."""
         _, specs = self._loaded()
-        wait = specs.marker_wait_s if specs else control_site.DEFAULT_MARKER_WAIT_S
+        configured = (
+            specs.marker_wait_s if specs else control_site.DEFAULT_MARKER_WAIT_S
+        )
+        wait = configured
+        if heavy is not None and heavy["state"] == "unknown":
+            wait = max(configured, control_site.LEGACY_MARKER_WAIT_S)
         age = view.get("ctime_age_s")
         remaining = None
-        if view["state"] == "present" and age is not None:
+        running = heavy is not None and heavy["state"] == "running"
+        if view["state"] == "present" and age is not None and not running:
             remaining = max(0.0, wait - age)
         return {
             "state": view["state"],
@@ -913,7 +1322,9 @@ class Act:
             "ctime_age_s": None if age is None else round(age, 1),
             "ours": self._marker_is_ours(),
             "wait_s": wait,
+            "configured_wait_s": configured,
             "remaining_s": None if remaining is None else round(remaining, 1),
+            "heavy": None if heavy is None else dict(heavy),
         }
 
     def _marker_record(self):
@@ -1287,6 +1698,14 @@ class Act:
         expected = loaded.site.stack.health_file if loaded.state == "ok" else None
         lock_path = self.host.arm_lock
         arm_lock = gpumgr.flock_holders(lock_path, locks=self.host.base.locks_path)
+        # (heavy jobs matter only while the marker is there, it is what they
+        # yield to, and only until A has a unit: once A runs nothing waits for
+        # them any more)
+        heavy = (
+            self._heavy()
+            if r["marker"]["state"] == "present" and r["units"]["A"] is not True
+            else None
+        )
         return Ctx(
             r=r,
             loaded=loaded,
@@ -1296,12 +1715,13 @@ class Act:
             states=states,
             terms=terms,
             gates=gates,
-            marker=self._marker_info(r["marker"]),
+            marker=self._marker_info(r["marker"], heavy),
             table=table,
             arm_lock=arm_lock,
             run_active=hosted_run_active(),
             op=self._op_view(),
             busy=self._busy(),
+            busy_main=self._busy(main_only=True),
             fci=self._fci,
             b_probe=self._b_probe,
             c_pre=self._c_pre,
@@ -1357,9 +1777,11 @@ class Act:
         def c(code, ok, **params):
             return stack._check(code, ok, params=params)
 
+        # (the check of B alone is no reason to hold back the start of A: it is
+        # a read, and the sequence waits for its answer where it needs it)
         rows = [
             c("control_health_file", ctx.health_matches),
-            c("operation_running", not ctx.busy),
+            c("operation_running", not (ctx.busy_main if key == "a" else ctx.busy)),
             c("record_open", st[key]["state"] not in ("dead", "failed")),
             c("run_active", ctx.run_active is False),
             c("arm_lock_held", None if ctx.arm_lock is None else not ctx.arm_lock),
@@ -1376,6 +1798,16 @@ class Act:
                     remaining_s=ctx.marker["remaining_s"],
                 )
             )
+            heavy = ctx.marker.get("heavy")
+            if heavy and heavy["state"] == "running":
+                rows.append(
+                    c(
+                        "heavy_jobs_running",
+                        False,
+                        count=heavy["count"],
+                        kinds=", ".join(heavy["kinds"]),
+                    )
+                )
             rows.append(
                 stack._check("marker_not_ours", ctx.marker["ours"], level="warn")
             )
@@ -1442,20 +1874,44 @@ class Act:
         if settled:
             probe = ctx.b_probe
             age = None if not probe else round(max(0.0, ctx.r["now"] - probe["at"]), 1)
-            out.append(row("b_probe_stale", "warn", age_s=age))
+            if self._b_absence_unconfirmed(ctx):
+                out.append(row("b_probe_unconfirmed", "warn", age_s=age))
+            else:
+                out.append(row("b_probe_stale", "warn", age_s=age))
         return out
 
     @staticmethod
-    def _settled_by_a_press(key, ctx: Ctx) -> bool:
-        """Is B unknown for one reason only: no fresh check whether a gripper
-        stack runs (never made, or too old), with every other layer known? A
-        press on B's start then makes that check (``_do_start``) instead of
-        being refused for a thing it can settle: with A up the check of A
-        cannot be made, and the old check was the only way to know."""
+    def _b_absence_unconfirmed(ctx: Ctx) -> bool:
+        """Does the page know that no gripper stack runs only from ONE answer of
+        the ROS graph? That answer is enough for A's start (the guided start must
+        not wait for a second), but not for B's: a graph that has not discovered
+        the gripper stack's participants yet reads "absent" too, and a second
+        gripper stack on the same RS-485 port is a motion risk. B starts only on
+        a confirmed absence (two answers of the graph in a row, or the controller
+        manager's own word, or B's own stop: ``_probe_b``)."""
+        probe = ctx.b_probe
         return (
-            key == "b"
-            and ctx.states["b"]["reason"] in B_ASK_AGAIN
-            and stack.unknown_layers(ctx.terms) == ["B"]
+            ctx.states["b"]["reason"] == "b.not_running"
+            and bool(probe)
+            and not probe.get("confirmed")
+        )
+
+    @staticmethod
+    def _settled_by_a_press(key, ctx: Ctx) -> bool:
+        """Is B's start held back for one reason only, a check that a press can
+        settle? Either B is unknown because there is no fresh check whether a
+        gripper stack runs (never made, or too old) with every other layer
+        known, or the only answer is a first, unconfirmed "absent" of the graph
+        (``_b_absence_unconfirmed``). A press on B's start then makes the check
+        (``_do_start``) instead of being refused for a thing it can settle: with
+        A up the check of A cannot be made, and the old check was the only way
+        to know. Nothing is started by that press, whichever it is."""
+        return key == "b" and (
+            (
+                ctx.states["b"]["reason"] in B_ASK_AGAIN
+                and stack.unknown_layers(ctx.terms) == ["B"]
+            )
+            or Act._b_absence_unconfirmed(ctx)
         )
 
     def stop_blockers(self, key, ctx: Ctx, override=False) -> list:
@@ -1568,9 +2024,60 @@ class Act:
                 return None
             return {k: v for k, v in self._op.items() if k in OP_PUBLIC}
 
-    def _busy(self) -> bool:
+    def _busy(self, main_only=False) -> bool:
+        """Is an operation running? ``main_only``: leave out the checks that run
+        beside the others (``SIDE_OPS``)."""
         with self._op_lock:
-            return any(o["state"] == "running" for o in self._ops)
+            return any(
+                o["state"] == "running" and not (main_only and o["kind"] in SIDE_OPS)
+                for o in self._ops
+            )
+
+    def _poke(self) -> None:
+        """Something changed that the next look would find: wake the ticker (the
+        sequence looks again at once) and tell whoever caches the page's read."""
+        self._progress += 1
+        self._wake.set()
+        notify = self.on_change
+        if notify is not None:
+            try:
+                notify()
+            except Exception:  # a cache that cannot be dropped is no failure
+                LOG.exception("the change of the arm stack could not be announced")
+
+    def _parallel(self, *calls) -> list:
+        """The results of ``calls`` (no arguments each), run at the same time
+        when the host allows it, one after the other when it does not. The first
+        exception is raised once all have ended. ``host.parallel`` may also be
+        a function that runs the calls itself (the timing tests' clock)."""
+        runner = self.host.parallel
+        if callable(runner):
+            return runner(list(calls))
+        if len(calls) == 1 or not runner:
+            return [call() for call in calls]
+        results = [None] * len(calls)
+        errors = [None] * len(calls)
+
+        def work(index, call):
+            try:
+                results[index] = call()
+            except BaseException as exc:  # noqa: BLE001 - raised below, in the caller's thread
+                errors[index] = exc
+
+        threads = [
+            threading.Thread(
+                target=work, args=(i, call), daemon=True, name="levi-marvel0-check"
+            )
+            for i, call in enumerate(calls)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        for exc in errors:
+            if exc is not None:
+                raise exc
+        return results
 
     def _stop_running(self, key) -> bool:
         with self._op_lock:
@@ -1818,10 +2325,56 @@ class Act:
     def _seq_view(self, ctx: Ctx) -> dict:
         with self._seq_lock:
             seq = self._seq_public(self._seq)
+            begun = self._seq.get("begun_at")
         seq.setdefault("kind", None)  # (idle: neither a start nor a stop)
         if seq.get("state") == "running" and seq.get("step") == "wait":
             seq["remaining_s"] = ctx.marker["remaining_s"]
+        if (
+            seq.get("state") == "running"
+            and seq.get("kind") == "start"
+            and seq.get("step") in ("marker", "probe", "wait", "arm")
+        ):
+            seq["wait"] = self._wait_view(ctx, seq)
+        if begun is not None and seq.get("state") in ("running", "waiting_confirm"):
+            seq["elapsed_s"] = round(max(0.0, ctx.r["now"] - begun), 1)
         return seq
+
+    @staticmethod
+    def _wait_view(ctx: Ctx, seq) -> dict:
+        """What the start before A waits for and how long it still takes: the
+        marker's age against its minimum, the heavy jobs (a count, or that the
+        page cannot tell), the arm's sockets. ``holds`` names what still holds A
+        back; ``remaining_s`` is None while a heavy job runs (it yields within
+        about 30 s of the marker) and the sequence ends after
+        ``HEAVY_WAIT_CAP_S`` of that."""
+        marker, heavy = ctx.marker, ctx.marker.get("heavy")
+        sockets = ctx.r["sockets"]["state"]
+        holds = []
+        if marker["state"] != "present":
+            holds.append("marker_absent")
+        else:
+            if heavy and heavy["state"] == "running":
+                holds.append("heavy_jobs_running")
+            elif heavy and heavy["state"] == "unknown":
+                holds.append("heavy_jobs_unknown")  # (the fixed wait applies)
+            if (marker["remaining_s"] or 0) > 0:
+                holds.append("marker_young")
+        if sockets != "inactive":
+            holds.append("arm_sockets")
+        step_at = seq.get("step_at")
+        return {
+            "age_s": marker["ctime_age_s"],
+            "min_s": marker["wait_s"],
+            "configured_s": marker["configured_wait_s"],
+            "remaining_s": marker["remaining_s"],
+            "heavy": heavy,
+            "sockets": sockets,
+            "holds": holds,
+            "cap_s": HEAVY_WAIT_CAP_S,
+            "waited_s": None
+            if step_at is None or seq.get("step") != "wait"
+            else round(max(0.0, ctx.r["now"] - step_at), 1),
+        }
 
     # -- writes: the common frame -------------------------------------------------
     def _write(self, body, action, act, phrase=True):
@@ -1937,6 +2490,7 @@ class Act:
             if keep is not None:
                 with self._op_lock:
                     seq[keep] = self._op
+            self._poke()  # (something was done: look again at once)
             return out
 
         return self._locked(action, guarded)
@@ -1974,7 +2528,7 @@ class Act:
                     ):
                         other["_superseded"] = True
                         ended.append(other)
-            elif running:
+            elif any((o["kind"] in SIDE_OPS) == (kind in SIDE_OPS) for o in running):
                 raise ActRefuse("operation_running")
             op = {
                 "kind": kind,
@@ -2004,6 +2558,7 @@ class Act:
                 finished_at=round(self.now(), 3),
                 code=code,
             )
+        self._poke()
 
     def _spawn(self, op, work) -> None:
         """Queue ``work()`` for ``op``; it runs after the request has let go of
@@ -2081,7 +2636,7 @@ class Act:
         if key == "b" and self._settled_by_a_press(key, ctx):
             # Nothing is started on a B that cannot be seen: the check is made
             # (in a worker, after the locks are let go) and the person presses
-            # again. Never a start that waits ~20 s behind the click.
+            # again. Never a start that waits for the check behind the click.
             op = self._begin("probe_b", "b")
             self._spawn(op, lambda: self._probe_b_worker(op, ctx))
             raise ActRefuse("b_probe_started", keep_work=True)
@@ -2332,7 +2887,12 @@ class Act:
         self._write_record(key, phase="stopped", stopped_at=round(now, 3))
         if key == "b":
             # Nothing of ours is left and nothing else was seen: B is known.
-            self._b_probe = {"at": now, "state": "absent", "by": "stop"}
+            self._b_probe = {
+                "at": now,
+                "state": "absent",
+                "by": "stop",
+                "confirmed": True,
+            }
         self._finish(op, True, f"{key}.stopped")
         if key == "a":
             self._release_safely()
@@ -2500,12 +3060,16 @@ class Act:
         self.require_enabled()
         return self._write(body, "preflight_a", self._do_preflight_a, phrase=False)
 
-    def _do_preflight_a(self, r) -> dict:
+    def _do_preflight_a(self, r, with_b=True) -> dict:
         """The one TCP connection to the arm's FCI port, made only when A is
         positively known to be absent: no unit of ours, A idle, and the arm's
         sockets known and quiet (or lingering after a stop or a probe of ours,
         with a fresh health file saying the hardware is not active). What cannot
-        be told is not "absent"."""
+        be told is not "absent".
+
+        ``with_b``: also ask whether a gripper stack runs, at the same time (the
+        button does; the guided start makes that check as an operation of its
+        own, begun earlier, so that nothing waits for the other)."""
         ctx = self._context(r, holding=True)
         a = ctx.states["a"]
         draining = a["reason"].endswith("sockets_draining")
@@ -2516,22 +3080,30 @@ class Act:
         if not self._is_real(r):
             raise ActRefuse("not_product")
         op = self._begin("preflight_a")
-        self._spawn(op, lambda: self._preflight_a_worker(op, ctx))
+        self._spawn(op, lambda: self._preflight_a_worker(op, ctx, with_b))
         return {"done": "preflight_started", "kind": "preflight_a"}
 
-    def _preflight_a_worker(self, op, ctx: Ctx) -> None:
+    def _preflight_a_worker(self, op, ctx: Ctx, with_b=True) -> None:
         """The FCI port (one TCP connection, never while A exists) and, when
-        no unit of ours is B, whether a gripper stack runs anyway. A stop that
-        came meanwhile supersedes it: nothing of it is kept."""
+        asked and no unit of ours is B, whether a gripper stack runs anyway, the
+        two at the same time. A stop that came meanwhile supersedes it: nothing
+        of it is kept."""
         specs, now = ctx.specs, self.now()
-        probe = self.host.fci_probe(specs.robot_ip, stack_units.FCI_PORT)
+
+        def fci():
+            probe = self.host.fci_probe(specs.robot_ip, stack_units.FCI_PORT)
+            if not op["_superseded"]:
+                # (kept at once: the sequence waits for this, not for the other)
+                self._fci = {"at": now, "state": probe.get("state", "unreachable")}
+
+        calls = [fci]
+        if with_b and ctx.r["shown"]["B"] is not None and ctx.r["units"]["B"] is False:
+            calls.append(lambda: self._probe_b(specs, op))
+        elif with_b and ctx.r["units"]["B"] is True:
+            self._b_probe = None
+        self._parallel(*calls)
         if op["_superseded"]:
             return
-        self._fci = {"at": now, "state": probe.get("state", "unreachable")}
-        if ctx.r["shown"]["B"] is not None and ctx.r["units"]["B"] is False:
-            self._probe_b(specs, op)
-        elif ctx.r["units"]["B"] is True:
-            self._b_probe = None
         if self._fci["state"] != "open":
             self._finish(op, False, f"fci_{self._fci['state']}")
 
@@ -2544,13 +3116,15 @@ class Act:
         self.require_enabled()
         return self._write(body, "probe_b", self._do_probe_b, phrase=False)
 
-    def _do_probe_b(self, r) -> dict:
+    def _do_probe_b(self, r, confirm=True) -> dict:
+        """Begin the check of B. ``confirm`` False is for the one case that
+        cannot afford a second answer, the check that A's start waits for."""
         ctx = self._context(r, holding=True)
         refusal = self._probe_b_refusal(r, ctx)
         if refusal:
             raise ActRefuse(refusal)
         op = self._begin("probe_b", "b")
-        self._spawn(op, lambda: self._probe_b_worker(op, ctx))
+        self._spawn(op, lambda: self._probe_b_worker(op, ctx, confirm))
         return {"done": "probe_started", "kind": "probe_b"}
 
     def _probe_b_refusal(self, r, ctx: Ctx):
@@ -2564,8 +3138,8 @@ class Act:
             return "gate.b_unit_absent"
         return None
 
-    def _probe_b_worker(self, op, ctx: Ctx) -> None:
-        probe = self._probe_b(ctx.specs, op)
+    def _probe_b_worker(self, op, ctx: Ctx, confirm=True) -> None:
+        probe = self._probe_b(ctx.specs, op, confirm)
         if probe is not None and probe["state"] == "unknown":
             self._finish(op, False, "b_probe_no_answer")
 
@@ -2582,30 +3156,98 @@ class Act:
         probe, now = ctx.b_probe, ctx.r["now"]
         if not _fresh(probe, B_PROBE_TTL_S, now):
             return True
+        if probe.get("state") == "absent" and not probe.get("confirmed"):
+            return True  # (one answer of the graph: B needs a second)
         wait = B_PROBE_REFRESH_S if probe.get("state") == "absent" else B_PROBE_RETRY_S
         return now - probe["at"] > wait
 
-    def _probe_b(self, specs, op) -> dict | None:
-        """Does a gripper stack run that this page did not start? Ask its
-        controller manager. The command never ends by itself when there is
-        none (it waits for the service and warns every 10 s), so it is ended by
-        ``timeout`` and the verdict is read from what it printed, not from how
-        it ended: the warning means absent, a listing means present, and a
-        command ended before it could say is *no answer* (unknown), never
-        absent."""
-        _, text = self._oneshot(
-            specs.controllers_cmd,
-            "probe-b",
-            "FR3 gripper stack probe",
-            stack_units.PROBE_RUNTIME_MAX_S,
+    def _graph_check(self, specs, op):
+        """One ``ros2 node list`` (about 3.4 s), parsed; None when a stop came
+        meanwhile and dropped it."""
+        code, text = self._oneshot(
+            specs.nodes_cmd,
+            "probe-b-nodes",
+            "FR3 gripper stack probe (ROS graph)",
+            stack_units.NODES_RUNTIME_MAX_S,
         )
         if op["_superseded"]:
             return None
-        parsed = stack_units.parse_controllers(text)
-        state = {"listed": "present", "absent": "absent"}.get(
-            parsed["state"], "unknown"
-        )
-        self._b_probe = {"at": self.now(), "state": state, "by": "probe"}
+        return stack_units.parse_nodes(text, code)
+
+    def _probe_b(self, specs, op, confirm=True) -> dict | None:
+        """Does a gripper stack run that this page did not start?
+
+        **First the ROS graph** (``ros2 node list``, about 3 s): a node of the
+        gripper stack's namespace means present; none, with the health
+        monitor's own node listed (so that discovery had run), means absent.
+        **Then, only when that proves nothing** (the monitor's node is not seen,
+        the command failed), the controller manager is asked: the command never
+        ends by itself when there is none (it waits for the service and warns
+        every 10 s, about 20 s in all), so it is ended by ``timeout`` and the
+        verdict is read from what it printed, not from how it ended: the warning
+        means absent, a listing means present, and a command ended before it
+        could say is *no answer* (unknown), never absent.
+
+        **"Absent" from the graph alone is one answer** (``confirmed`` False in
+        the record): a graph that listed the monitor but has not discovered the
+        gripper stack's participants yet says the same, and a second gripper
+        stack on the same serial port is a motion risk. It is confirmed by a
+        second answer: the answer before it, still fresh, was absent too, or (with
+        ``confirm``) a second graph check is made now. ``confirm`` is False only
+        for the check that A's start waits for (which must not wait for two): the
+        guided start makes the second one while A starts up, and B starts only on a
+        confirmed absence (``_b_absence_unconfirmed``). A second answer that is
+        *present* is final; one that proves nothing goes on to the controller
+        manager. The manager's own "absent" (its warning that the service did not
+        appear for 10 s) and B's own stop need no second answer."""
+        prior, began = self._b_probe, self.now()
+        graph, state, by, confirmed = None, None, "nodes", False
+        if specs.nodes_cmd:
+            fast = self._graph_check(specs, op)
+            if fast is None:
+                return None
+            graph = fast["state"]
+            if graph in ("present", "absent"):
+                state = graph
+            if state == "absent":
+                confirmed = (
+                    bool(prior)
+                    and prior.get("state") == "absent"
+                    and _fresh(prior, B_PROBE_TTL_S, began)
+                )
+                if confirm and not confirmed:
+                    again = self._graph_check(specs, op)
+                    if again is None:
+                        return None
+                    graph = again["state"]
+                    if graph == "absent":
+                        confirmed = True
+                    else:  # (present is final; nothing proved goes to the manager)
+                        state = graph if graph == "present" else None
+        if state is None:
+            by = "probe"
+            _, text = self._oneshot(
+                specs.controllers_cmd,
+                "probe-b",
+                "FR3 gripper stack probe",
+                stack_units.PROBE_RUNTIME_MAX_S,
+            )
+            if op["_superseded"]:
+                return None
+            parsed = stack_units.parse_controllers(text)
+            state = {"listed": "present", "absent": "absent"}.get(
+                parsed["state"], "unknown"
+            )
+        if by == "probe" and state == "absent":
+            confirmed = True  # (the manager's own word: no second answer to add)
+        self._b_probe = {
+            "at": self.now(),
+            "state": state,
+            "by": by,
+            # (why the slow question was needed, for whoever looks)
+            "graph": graph,
+            "confirmed": confirmed,
+        }
         return self._b_probe
 
     def _oneshot(self, argv, name, description, runtime_max_s=None) -> tuple:
@@ -2613,7 +3255,14 @@ class Act:
         (``systemd-run --pipe --wait``). ``runtime_max_s`` is systemd's backstop
         behind the command's own bound."""
         limit = int(runtime_max_s or CHECK_TIMEOUT_S + 10)
-        unit = f"{stack_units.ONESHOT_PREFIX}{name}-{int(self.now())}"
+        # The name is unique per call, not per second: two checks of one kind in
+        # the same second (the early check of B and a person's click on the FCI
+        # check) would otherwise meet in ``systemd-run`` ("already loaded"), one
+        # of them would read as no answer, and the slow path would be taken.
+        unit = (
+            f"{stack_units.ONESHOT_PREFIX}{name}-{int(self.now())}-"
+            f"{uuid.uuid4().hex[:6]}"
+        )
         full = stack_units.oneshot_argv(unit, argv, limit, description)
         return self.host.base.run(full, limit + 10)
 
@@ -2639,15 +3288,21 @@ class Act:
                 qos = stack_units.qos_ok(data.decode("utf-8", "replace"))
             except OSError:
                 qos = None
-        code, text = self._oneshot(
-            specs.controllers_cmd, "check-controllers", "FR3 gripper controllers check"
+        # (the listing and the frame check do not depend on each other: both at
+        # once, so the checks take as long as the slower one)
+        (_, listed_text), (ee_code, ee_text) = self._parallel(
+            lambda: self._oneshot(
+                specs.controllers_cmd,
+                "check-controllers",
+                "FR3 gripper controllers check",
+            ),
+            lambda: self._oneshot(
+                specs.ee_cmd, "check-ee", "FR3 end-effector frame check"
+            ),
         )
-        listing = stack_units.parse_controllers(text)
+        listing = stack_units.parse_controllers(listed_text)
         controllers = stack_units.gripper_controllers_ok(listing)
-        code, text = self._oneshot(
-            specs.ee_cmd, "check-ee", "FR3 end-effector frame check"
-        )
-        ee = code == 0 and stack_units.ee_frame_ok(text)
+        ee = ee_code == 0 and stack_units.ee_frame_ok(ee_text)
         if op["_superseded"]:
             return  # a stop came meanwhile: this answer is for a stack that is going
         ok = bool(qos) and controllers and ee
@@ -2785,19 +3440,14 @@ class Act:
                 "since": round(now, 3),
                 "step_at": round(now, 3),
                 "begun_at": round(now, 3),
+                "reason_params": None,
+                "took_s": None,
                 "request_id": body.get("request_id"),
                 "attest": attests.get("a", {}),
                 "through": through,
                 # (a guided start through A waits for the person's B and C)
                 "pauses": {"b": pause_b or not chain, "c": pause_c or not chain},
-                "steps": [
-                    {
-                        "step": name,
-                        "terminal": STEP_TERMINAL[name],
-                        "state": "running" if n == 0 else "pending",
-                    }
-                    for n, name in enumerate(plan)
-                ],
+                "steps": self._new_steps(plan, lambda name: STEP_TERMINAL[name]),
                 "_attests": attests,
                 "_a_up": a_up,
             }
@@ -2842,13 +3492,43 @@ class Act:
             if k not in hidden and not k.startswith("_")
         }
 
+    def _new_steps(self, names, terminal) -> list:
+        """The steps of a sequence at its start (the first one running). ``at``
+        is when a step last began, ``took_s`` how long it has taken in all (None
+        until it has run): the page shows where the time goes."""
+        now = round(self.now(), 3)
+        return [
+            {
+                "step": name,
+                "terminal": terminal(name),
+                "state": "running" if n == 0 else "pending",
+                "at": now if n == 0 else None,
+                "took_s": None,
+            }
+            for n, name in enumerate(names)
+        ]
+
+    def _item_state(self, item, state) -> None:
+        """Set the state of a step and keep its clock. A step that goes back to
+        running (the check of B asked again) adds the time it takes to what it
+        took before."""
+        now = round(self.now(), 3)
+        if item["state"] == "running" and state != "running":
+            began = item.get("at")
+            if began is not None:
+                spent = (item.get("took_s") or 0.0) + max(0.0, now - began)
+                item["took_s"] = round(spent, 2)
+        if state == "running":
+            item["at"] = now
+        item["state"] = state
+
     def _mark(self, seq, name, state, only=None) -> None:
         """The state of the step ``name`` (a step the sequence has no entry for
         is ignored); ``only``: change it only from one of these states."""
         with self._seq_lock:
             for item in seq.get("steps", ()):
                 if item["step"] == name and (only is None or item["state"] in only):
-                    item["state"] = state
+                    self._item_state(item, state)
 
     def _skip_pending(self, seq, names) -> None:
         """The steps the person did by hand while the sequence waited."""
@@ -2860,6 +3540,7 @@ class Act:
             seq["step"] = step
             seq["step_at"] = round(self.now(), 3)
             self._mark(seq, step, "running")
+        self._poke()
 
     def _goto(self, seq, step, how="done") -> None:
         """Leave the running step (as ``how``: done, skipped when nothing was
@@ -2871,20 +3552,32 @@ class Act:
             self._mark(seq, seq["step"], how, only=("running",))
             self._set_step(seq, step)
 
-    def _seq_end(self, state, reason, seq=None) -> None:
+    def _seq_end(self, state, reason, seq=None, params=None) -> None:
         """End ``seq`` (the current sequence when none is named). A step names
         the sequence it works for: a sequence that a guided stop has taken the
         place of cannot end the new one. The step that was running ends with
-        it (failed, or cancelled); the steps after it were not reached."""
+        it (failed, or cancelled); the steps after it were not reached.
+        ``params``: facts the reason is worded with (a count)."""
         with self._seq_lock:
             target = self._seq if seq is None else seq
             if target["state"] in ("running", "waiting_confirm"):
-                target.update(state=state, reason=reason, step=None, next=None)
+                target.update(
+                    state=state,
+                    reason=reason,
+                    reason_params=params,
+                    step=None,
+                    next=None,
+                )
                 for item in target.get("steps", ()):
                     if item["state"] == "running":
-                        item["state"] = "failed" if state == "failed" else "cancelled"
+                        self._item_state(
+                            item, "failed" if state == "failed" else "cancelled"
+                        )
                     elif item["state"] == "pending" and state != "done":
-                        item["state"] = "not_reached"
+                        self._item_state(item, "not_reached")
+                spent = [i["took_s"] for i in target.get("steps", ()) if i["took_s"]]
+                target["took_s"] = round(sum(spent), 2)
+        self._poke()
 
     def _ensure_ticker(self) -> None:
         if not self.host.background:
@@ -2901,10 +3594,32 @@ class Act:
     def _seq_live(seq) -> bool:
         return seq["state"] in ("running", "waiting_confirm")
 
+    def _wait_tick(self, seconds) -> None:
+        """Pause until ``seconds`` have passed or something changed
+        (``_poke``)."""
+        self._wake.wait(seconds)
+
+    def _tick_s(self, seq) -> float:
+        """The pause before the next look of a live sequence: long while it
+        waits for the person, short only until A has a unit (nothing but
+        ``systemctl`` is asked then, and the control loop is not running), and
+        ``SEQUENCE_TICK_ARM_S`` once A has one, or cannot be told."""
+        if seq["state"] != "running":
+            return SEQUENCE_TICK_WAITING_S
+        return SEQUENCE_TICK_S if self._a_unit is False else SEQUENCE_TICK_ARM_S
+
     def _tick_loop(self) -> None:
+        burst = 0
         while True:
-            if self._seq_live(self.advance()):
-                self.host.sleep(SEQUENCE_TICK_S)
+            self._wake.clear()
+            before = self._progress
+            seq = self.advance()
+            if self._seq_live(seq):
+                if self._progress != before and burst < SEQUENCE_BURST:
+                    burst += 1  # (it moved: the next look may move it again)
+                    continue
+                burst = 0
+                self._wait_tick(self._tick_s(seq))
                 continue
             with self._ticker_lock:
                 with self._seq_lock:
@@ -2926,10 +3641,14 @@ class Act:
         with self._adv_lock:
             with self._seq_lock:
                 seq = self._seq
-                if seq["state"] not in ("running", "waiting_confirm"):
-                    return self._seq_public(seq)
+                over = seq["state"] not in ("running", "waiting_confirm")
+                shown = self._seq_public(seq) if over else None
+            if over:
+                self._release_unused_marker(seq)  # (ended by a cancel, say)
+                return shown
             try:
                 ctx = self._context(self.stack._read())
+                self._a_unit = ctx.r["units"]["A"]
                 with self._seq_lock:
                     state = seq["state"]
                 if state == "running" and seq.get("kind") == "stop":
@@ -2943,8 +3662,37 @@ class Act:
                     self._seq_end("failed", exc.code, seq)
             except Exception as exc:  # noqa: BLE001 - a sequence must end, not hang
                 self._seq_end("failed", type(exc).__name__, seq)
+            self._release_unused_marker(seq)
             with self._seq_lock:
                 return self._seq_public(seq)
+
+    def _release_unused_marker(self, seq) -> None:
+        """A guided start that ended before it started A (the FCI port closed, a
+        heavy job that did not stop, a cancel) gives back the marker it set:
+        nothing is going to start, and heavy jobs should not stay paused for a
+        start that did not happen. Only a marker this very start made (a marker
+        that was there before is the person's), only while A has no unit and
+        the arm shows no control connection (``_try_release``: the rule of every
+        release), and once."""
+        with self._seq_lock:
+            if (
+                seq.get("kind") != "start"
+                or not seq.get("_marker_made")
+                or seq.get("_arm_started")
+                or seq.get("_marker_given_back")
+                or self._seq_live(seq)
+            ):
+                return
+            seq["_marker_given_back"] = True
+        for _ in range(3):
+            try:
+                self._try_release()
+                return
+            except stack.Refuse:  # (the lock is busy: a moment, then again)
+                self.host.sleep(0.2)
+            except Exception:
+                LOG.exception("the marker of a start that did not happen stayed")
+                return
 
     @staticmethod
     def _window_s(step, ctx: Ctx):
@@ -2986,6 +3734,13 @@ class Act:
         window = self._window_s(step, ctx)
         if window is not None and now - seq["begun_at"] > window:
             return self._seq_end("cancelled", "expired", seq)
+        # (looks of the heavy jobs in a row without one that runs: the wait wants
+        # two, as heavy_gate's wait-clear does; counted at every look, so they
+        # are there when the wait is reached)
+        heavy = ctx.marker.get("heavy")
+        if heavy is not None and seq.get("kind") == "start":
+            clean = heavy["state"] == "clear"
+            seq["_clean_looks"] = seq.get("_clean_looks", 0) + 1 if clean else 0
         handler = getattr(self, f"_seq_{step}")
         handler(seq, ctx)
 
@@ -2998,37 +3753,96 @@ class Act:
                 with self._seq_lock:
                     if seq["state"] != "running":
                         return
-                    for name in ("probe", "marker", "wait", "arm"):
+                    for name in ("marker", "probe", "wait", "arm"):
                         self._mark(seq, name, "skipped", only=("pending",))
                     self._goto(seq, "await_a")
             else:
-                self._goto(seq, "probe")
+                self._goto(seq, "marker")
         elif m == "idle":
             self._seq_locked(seq, "sequence_monitor", self.stack._start)
         elif m != "starting":
             self._seq_end("failed", f"monitor_{m}", seq)
 
+    def _start_b_probe(self, seq, ctx: Ctx) -> None:
+        """Begin the check whether a gripper stack runs, as an operation of its
+        own that runs beside the others, when A's start needs it (B is unknown for
+        want of a usable answer) or, for a start that goes on to B, when the
+        answer is old enough to be made again before B (``_b_probe_due``: it is
+        then made during A's start-up and not between A and B). Optional here: a
+        refusal (another check of B, a B that exists, a busy lock) is tried again
+        where the answer is needed (``_seq_probe``)."""
+        if seq.get("_early_op") is not None:
+            return
+        needed = ctx.states["b"]["state"] == "unknown" or (
+            seq.get("through") == "c" and self._b_probe_due(ctx)
+        )
+        if not needed:
+            return
+        with contextlib.suppress(stack.Refuse):
+            self._seq_locked(
+                seq,
+                "sequence_early_probe_b",
+                lambda r: self._do_probe_b(r, confirm=False),
+                keep="_early_op",
+            )
+
     def _seq_probe(self, seq, ctx: Ctx) -> None:
+        """The checks A's start needs: the arm's FCI port answers (one TCP
+        connection, its own operation) and whether a gripper stack runs is
+        known (begun with the marker, see ``_start_b_probe``). The marker has
+        been ageing since it was set; nothing here waits for it."""
         now = ctx.r["now"]
-        fci_ok = _fresh(ctx.fci, FCI_TTL_S, now) and ctx.fci["state"] == "open"
-        if ctx.busy:
+        if not (_fresh(ctx.fci, FCI_TTL_S, now) and ctx.fci["state"] == "open"):
+            op = seq.get("_fci_op")
+            if op is not None:
+                with self._op_lock:
+                    state, code = op["state"], op["code"]
+                if state == "running":
+                    return
+                if state == "failed":
+                    return self._seq_end("failed", code or "preflight_failed", seq)
+                # (done, and still not a fresh open answer: the clock moved)
+            if ctx.busy_main:
+                return
+            self._seq_locked(
+                seq,
+                "sequence_probe",
+                lambda r: self._do_preflight_a(r, with_b=False),
+                keep="_fci_op",
+            )
             return
-        if fci_ok and ctx.states["b"]["state"] != "unknown":
-            self._goto(seq, "marker")
-            return
-        op = ctx.op
-        if op and op["kind"] == "preflight_a" and op["started_at"] >= seq["since"]:
-            if op["state"] == "failed":
-                return self._seq_end("failed", op["code"] or "preflight_failed", seq)
+        if ctx.states["b"]["state"] == "unknown":
+            op = seq.get("_early_op")
+            if op is None:
+                # Not begun yet (it was refused, or this is a marker that was
+                # there): begun now, and a refusal that will not go away ends the
+                # start with its own code (a busy lock is tried again).
+                return self._seq_locked(
+                    seq,
+                    "sequence_early_probe_b",
+                    lambda r: self._do_probe_b(r, confirm=False),
+                    keep="_early_op",
+                )
+            with self._op_lock:
+                state = op["state"]
+            if state == "running":
+                return
             return self._seq_end("failed", "b_not_seen", seq)
-        self._seq_locked(seq, "sequence_probe", self._do_preflight_a)
+        self._goto(seq, "wait")
 
     def _seq_marker(self, seq, ctx: Ctx) -> None:
         state = ctx.marker["state"]
         if state == "absent":
-            self._seq_locked(seq, "sequence_marker", self._do_touch)
+            # Set first, so that its age runs while the checks are made; then the
+            # check whether a gripper stack runs is begun in the background (A's
+            # start needs its answer and it is the longest of the checks).
+            if self._seq_locked(seq, "sequence_marker", self._do_touch) is not None:
+                with self._seq_lock:
+                    seq["_marker_made"] = True  # (this start made it: it gives it back)
+                self._start_b_probe(seq, ctx)
         elif state == "present" and ctx.marker["ours"]:
-            self._goto(seq, "wait")
+            self._start_b_probe(seq, ctx)
+            self._goto(seq, "probe")
         else:
             self._seq_end(
                 "failed",
@@ -3037,9 +3851,36 @@ class Act:
             )
 
     def _seq_wait(self, seq, ctx: Ctx) -> None:
-        if ctx.marker["state"] != "present":
+        """Until the marker is old enough and no heavy job of this computer
+        runs: heavy jobs yield to the marker within about 30 s, and a job that
+        does not in ``HEAVY_WAIT_CAP_S`` ends the start (the person looks at it).
+        When the heavy jobs cannot be told, the fixed wait of old applies
+        (``marker.wait_s`` is then at least 45 s)."""
+        marker = ctx.marker
+        if marker["state"] != "present":
             return self._seq_end("failed", "marker_gone", seq)
-        if ctx.marker["remaining_s"] == 0 and ctx.r["sockets"]["state"] == "inactive":
+        heavy = marker.get("heavy") or {"state": "unknown", "count": 0}
+        if heavy["state"] == "running":
+            waited = ctx.r["now"] - seq.get("step_at", ctx.r["now"])
+            if waited > HEAVY_WAIT_CAP_S:
+                return self._seq_end(
+                    "failed",
+                    "heavy_job_still_running",
+                    seq,
+                    params={"count": heavy["count"]},
+                )
+            return
+        # (two clean looks in a row, as heavy_gate's wait-clear wants; the
+        # fixed wait of old needs no looks: its age is the evidence)
+        looked = (
+            heavy["state"] == "unknown"
+            or seq.get("_clean_looks", 0) >= HEAVY_CLEAN_LOOKS
+        )
+        if (
+            marker["remaining_s"] == 0
+            and looked
+            and ctx.r["sockets"]["state"] == "inactive"
+        ):
             self._goto(seq, "arm")
 
     def _seq_arm(self, seq, ctx: Ctx) -> None:
@@ -3054,6 +3895,8 @@ class Act:
             lambda r: self._do_start("a", body, r, attested=attested),
         )
         if started is not None:  # (None: a stop or a cancel was answered first)
+            with self._seq_lock:
+                seq["_arm_started"] = True
             self._goto(seq, "await_a")
 
     @staticmethod
@@ -3073,6 +3916,30 @@ class Act:
             with self._seq_lock:
                 if seq["state"] == "running":
                     self._after_a(seq)
+        else:
+            self._confirm_b_while_a_starts(seq, ctx)
+
+    def _confirm_b_while_a_starts(self, seq, ctx: Ctx) -> None:
+        """A's start takes about 5 s and nothing in it needs B: when the chain
+        goes straight on to B and the only answer about it is one unconfirmed
+        "absent" (``_b_absence_unconfirmed``), the second answer of the graph is
+        asked for now, beside A's start, so that the step after A finds it made
+        (``_seq_b_probe`` waits for this operation, and goes on to B at once when
+        it is done). A start that stops at A or pauses before B gets its second
+        answer while it waits for the person (``_refresh_b_probe``). Optional: a
+        refusal (the first check not ended yet, another check, a busy lock) is
+        tried again at the next look, and the step after A makes the check itself
+        when this one never got made."""
+        if (
+            seq["pauses"]["b"]  # (a start that stops at A pauses before B)
+            or seq.get("_probe_op") is not None
+            or not self._b_absence_unconfirmed(ctx)
+        ):
+            return
+        with contextlib.suppress(stack.Refuse):
+            self._seq_locked(
+                seq, "sequence_probe_b", self._do_probe_b, keep="_probe_op"
+            )
 
     # What follows a stage that is up. All three run under the sequence's lock,
     # from a running step or from the wait for the person's own start.
@@ -3323,14 +4190,11 @@ class Act:
                 "step_at": round(now, 3),
                 "begun_at": round(now, 3),
                 "request_id": body.get("request_id"),
-                "steps": [
-                    {
-                        "step": step,
-                        "terminal": step.removeprefix("stop_"),
-                        "state": "running" if n == 0 else "pending",
-                    }
-                    for n, step in enumerate(SEQUENCE_STOP_STEPS)
-                ],
+                "reason_params": None,
+                "took_s": None,
+                "steps": self._new_steps(
+                    SEQUENCE_STOP_STEPS, lambda step: step.removeprefix("stop_")
+                ),
                 "_issued": False,  # this step has sent its stop
                 "_op": None,  # ... and the operation it began
             }
@@ -3418,17 +4282,26 @@ class Act:
                 return False
             steps = seq["steps"]
             here = next(n for n, i in enumerate(steps) if i["state"] == "running")
-            steps[here]["state"] = how
+            self._item_state(steps[here], how)
             if here + 1 == len(steps):
-                seq.update(state="done", reason=None, step=None, next=None)
+                spent = [i["took_s"] for i in steps if i["took_s"]]
+                seq.update(
+                    state="done",
+                    reason=None,
+                    step=None,
+                    next=None,
+                    took_s=round(sum(spent), 2),
+                )
+                self._poke()
                 return True
-            steps[here + 1]["state"] = "running"
+            self._item_state(steps[here + 1], "running")
             seq.update(
                 step=steps[here + 1]["step"],
                 step_at=round(self.now(), 3),
                 _issued=False,
                 _op=None,
             )
+            self._poke()
             return True
 
     # -- logs ---------------------------------------------------------------------

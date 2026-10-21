@@ -1322,8 +1322,8 @@ describe("Start whole stack, all the way through C", () => {
     );
   const ORDER = [
     "monitor",
-    "probe",
     "marker",
+    "probe",
     "wait",
     "arm",
     "await_a",
@@ -1417,6 +1417,108 @@ describe("Start whole stack, all the way through C", () => {
     expect(
       text(host.querySelector("[data-testid=marvel0-sequence-needs]")),
     ).toBe(en["marvel0.ctl.seq.needs_all_ready"]);
+  });
+
+  test("done: every step that ran says how long it took, and the steps add up", async () => {
+    const { host } = await open(stackDoc("chain_done"));
+    const took = Array.from(
+      progress(host).querySelectorAll("[data-testid=marvel0-step-took]"),
+    ).map((x) => Number(x.getAttribute("data-took")));
+    expect(took).toHaveLength(10);
+    expect(Math.max(...took)).toBeGreaterThan(3); // (the wait of the sample)
+    const first = progress(host).querySelector("li")!;
+    expect(text(first)).toContain("0 s");
+    expect(
+      text(host.querySelector("[data-testid=marvel0-sequence-took]")),
+    ).toBe(
+      en["marvel0.ctl.seq.took_total"].replace(
+        "{s}",
+        String(stackDoc("chain_done").act.sequence.took_s),
+      ),
+    );
+  });
+
+  test("a step that did not run shows no time", async () => {
+    const { host } = await open(stackDoc("chain_failed_b"));
+    const lis = progress(host).querySelectorAll("li");
+    expect(lis[8].querySelector("[data-testid=marvel0-step-took]")).toBeNull();
+    expect(
+      lis[0].querySelector("[data-testid=marvel0-step-took]"),
+    ).not.toBeNull();
+  });
+
+  test("waiting for a heavy job: the page says how many, that the end is not known, and has no countdown", async () => {
+    const { host } = await open(stackDoc("chain_waiting_heavy"));
+    const waiting = host.querySelector(
+      "[data-testid=marvel0-sequence-waiting]",
+    )!;
+    expect(
+      Array.from(waiting.querySelectorAll("li")).map((li) =>
+        li.getAttribute("data-hold"),
+      ),
+    ).toEqual(["heavy_jobs_running"]);
+    expect(text(waiting)).toContain(en["marvel0.ctl.seq.waiting_on"]);
+    expect(text(waiting)).toContain("2 heavy job(s)");
+    expect(text(waiting)).toContain("after 90 s the start ends");
+    const now = text(host.querySelector("[data-testid=marvel0-sequence-step]"));
+    expect(now).toContain("waiting for the marker's age and for heavy jobs");
+    expect(now).not.toContain("A may start in"); // (its end is not known)
+  });
+
+  test("heavy jobs that cannot be told: the fixed wait of old, said as it is, with a countdown", async () => {
+    const { host } = await open(stackDoc("chain_waiting_heavy_unknown"));
+    const holds = Array.from(
+      host.querySelectorAll("[data-testid=marvel0-sequence-waiting] li"),
+    ).map((li) => li.getAttribute("data-hold"));
+    expect(holds).toEqual(["heavy_jobs_unknown", "marker_young"]);
+    const waiting = text(
+      host.querySelector("[data-testid=marvel0-sequence-waiting]"),
+    );
+    expect(waiting).toContain("fixed wait of 45 s applies");
+    expect(waiting).toContain("the marker to be 45 s old (it is 7 s)");
+    expect(
+      text(host.querySelector("[data-testid=marvel0-sequence-step]")),
+    ).toContain("A may start in 38 s");
+  });
+
+  test("a heavy job that did not stop ends the start: the reason has its count, nothing was started", async () => {
+    const { host } = await open(stackDoc("chain_failed_heavy"));
+    const why = host.querySelector("[data-testid=marvel0-sequence-reason]")!;
+    expect(text(why)).toBe(
+      `Failed at ${en["marvel0.ctl.seq.chain.wait"]}: ${en["marvel0.ctl.seq.reason.heavy_job_still_running"].replace("{count}", "2")}`,
+    );
+    expect(
+      host.querySelector("[data-testid=marvel0-sequence-waiting]"),
+    ).toBeNull();
+    expect(states(host).slice(0, 4)).toEqual([
+      "done",
+      "done",
+      "done",
+      "failed",
+    ]);
+  });
+
+  test("the new words exist in both languages", () => {
+    for (const code of [
+      "marker_absent",
+      "marker_young",
+      "heavy_jobs_running",
+      "heavy_jobs_unknown",
+      "arm_sockets",
+    ])
+      expect([
+        code,
+        `marvel0.ctl.seq.hold.${code}` in en &&
+          `marvel0.ctl.seq.hold.${code}` in zh,
+      ]).toEqual([code, true]);
+    for (const key of [
+      "marvel0.ctl.seq.waiting_on",
+      "marvel0.ctl.seq.took",
+      "marvel0.ctl.seq.took_total",
+      "marvel0.ctl.block.heavy_jobs_running",
+      "marvel0.ctl.seq.reason.heavy_job_still_running",
+    ])
+      expect([key, key in en && key in zh]).toEqual([key, true]);
   });
 
   test("failed at B: where, why, the steps after it not reached, and the same button again", async () => {

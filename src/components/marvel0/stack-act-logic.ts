@@ -190,6 +190,30 @@ export interface SequenceStep {
   step: string;
   terminal: CompId;
   state: SequenceStepState;
+  /** Seconds the step has taken in all; null until it has run (a step that was
+   * skipped or not reached took none). The page shows where the time goes. */
+  tookS: number | null;
+}
+
+/** What the start before A waits for, while it waits (the marker's age, the
+ * heavy jobs of this computer, the arm's sockets). */
+export interface SequenceWait {
+  /** How old the marker is, and the age it must reach. */
+  ageS: number | null;
+  minS: number | null;
+  /** Seconds to go; null while a heavy job runs (it yields within about
+   * 30 s of the marker) or when nothing can be counted. */
+  remainingS: number | null;
+  /** Heavy jobs of the gate: `running` (a count), `unknown` (the fixed wait of
+   * old applies) or `clear`. */
+  heavy: { state: "clear" | "running" | "unknown"; count: number } | null;
+  /** What still holds A back, by code: `marker_young`, `heavy_jobs_running`,
+   * `heavy_jobs_unknown`, `arm_sockets`, `marker_absent`. */
+  holds: string[];
+  /** A heavy job that has not stopped after this long ends the start. */
+  capS: number | null;
+  /** Seconds the wait has lasted. */
+  waitedS: number | null;
 }
 
 export interface SequenceAct {
@@ -208,6 +232,12 @@ export interface SequenceAct {
   /** The steps in the order they run; empty while idle (and for an older
    * backend, which sent none for a start). */
   steps: SequenceStep[];
+  /** What the start waits for before A (null outside that part of a start). */
+  wait: SequenceWait | null;
+  /** Seconds the steps took in all (set when it ended), and how long it has
+   * been going. */
+  tookS: number | null;
+  elapsedS: number | null;
   /** How far the start goes by itself: to A only, or through B and C. */
   through: "a" | "c" | null;
   /** The start waits for the person's own Start of B / of C (`waiting_confirm`)
@@ -289,9 +319,10 @@ function coded(
   prefixes: string[],
   raw: unknown,
   known: Known,
+  params: Record<string, string | number> = {},
 ): Worded<Say> | null {
   const code = str(raw, 80);
-  return code ? codedSay(prefixes, code, code, {}, known) : null;
+  return code ? codedSay(prefixes, code, code, params, known) : null;
 }
 
 function lines(raw: unknown, known: Known): ReadyLine[] {
@@ -427,9 +458,17 @@ function sequenceAct(raw: Rec | null, known: Known): SequenceAct {
       : "idle",
     step: str(raw?.step, 40),
     next: COMPS.includes(next as CompId) ? (next as CompId) : null,
-    reason: coded(SEQUENCE_REASON, raw?.reason, known),
+    reason: coded(
+      SEQUENCE_REASON,
+      raw?.reason,
+      known,
+      paramsOf(raw?.reason_params),
+    ),
     remainingS: num(raw?.remaining_s),
     steps: sequenceSteps(raw?.steps),
+    wait: sequenceWait(rec(raw?.wait)),
+    tookS: num(raw?.took_s),
+    elapsedS: num(raw?.elapsed_s),
     through: raw?.through === "a" || raw?.through === "c" ? raw.through : null,
     pauseB: bool(rec(raw?.pauses)?.b) === true,
     pauseC: bool(rec(raw?.pauses)?.c) === true,
@@ -450,6 +489,26 @@ function stopAllAct(
   };
 }
 
+function sequenceWait(raw: Rec | null): SequenceWait | null {
+  if (!raw) return null;
+  const heavy = rec(raw.heavy);
+  const state = heavy?.state;
+  return {
+    ageS: num(raw.age_s),
+    minS: num(raw.min_s),
+    remainingS: num(raw.remaining_s),
+    heavy: heavy
+      ? {
+          state: state === "running" || state === "unknown" ? state : "clear",
+          count: num(heavy.count) ?? 0,
+        }
+      : null,
+    holds: strings(raw.holds),
+    capS: num(raw.cap_s),
+    waitedS: num(raw.waited_s),
+  };
+}
+
 function sequenceSteps(raw: unknown): SequenceStep[] {
   return list(raw).flatMap((entry): SequenceStep[] => {
     const item = rec(entry);
@@ -464,6 +523,7 @@ function sequenceSteps(raw: unknown): SequenceStep[] {
         state: SEQUENCE_STEP_STATES.includes(state as SequenceStepState)
           ? (state as SequenceStepState)
           : "pending",
+        tookS: num(item.took_s),
       },
     ];
   });
