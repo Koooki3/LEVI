@@ -363,25 +363,22 @@ def test_a_stop_the_script_sent_before_the_restart_is_not_sent_again(m):
     assert doc["stop"]["allowed"] is False or doc["stop"]["phase"] == "unconfirmed"
 
 
-def test_a_run_this_process_started_is_never_found_again_and_keeps_its_keyboard(
-    m, monkeypatch
-):
-    """A first adoption that failed (not latched) must not, once a run is started
-    here, turn that run into one "found after a restart": it would lose its
-    keyboard (``keyboard=False``) and get a SIGINT."""
-    real = record.read_record
-    broken = {"on": True}
+def test_a_run_this_process_started_is_never_found_again_and_keeps_its_keyboard(m):
+    """A first adoption that failed (not latched) and went on failing while a run
+    was started here must not, once the read works again, turn that run into one
+    "found after a restart": it would lose its keyboard (``keyboard=False``) and
+    get a SIGINT."""
+    real = m.sup._adopt_read
 
-    def flaky(directory):
-        if broken["on"]:
-            raise OSError(5, "Input/output error")
-        return real(directory)
+    def failing():
+        raise OSError(5, "Input/output error")
 
-    monkeypatch.setattr(record, "read_record", flaky)
+    m.sup._adopt_read = failing
     m.sup.adopt()
     assert m.sup._adopted is False
-    broken["on"] = False
-    at_forward(m)
+    at_forward(m)  # (start() asks for the adoption too: it still fails, the run starts)
+    assert m.sup._child is not None
+    m.sup._adopt_read = real
     for _ in range(3):
         m.sup.adopt()
         doc = m.look()
