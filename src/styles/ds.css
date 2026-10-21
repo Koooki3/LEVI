@@ -1433,7 +1433,9 @@
 .ds-page--reading {
   --ds-page-max: var(--ds-page-max-reading);
 }
-@media (max-width: 899px) {
+/* The same width at which the header drops to 16 px sides (shell.css, the
+   two-row bar, max-width: 1169px): page and header keep one left edge. */
+@media (max-width: 1169px) {
   .ds-page {
     --ds-page-inset: var(--ds-space-4);
   }

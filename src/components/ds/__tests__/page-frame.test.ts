@@ -27,16 +27,23 @@ describe("the page frame", () => {
     expect(tokens).toMatch(/--ds-page-bottom:\s*var\(--ds-space-16\)/);
   });
 
-  test(".ds-page is wide by default, .ds-page--reading narrow, the inset drops to 16 below 900 px", () => {
+  test(".ds-page is wide by default, .ds-page--reading narrow, the inset drops to 16 where the header's does", () => {
     expect(block(ds, ".ds-page")).toMatch(
       /--ds-page-max:\s*var\(--ds-page-max-wide\)/,
     );
     expect(block(ds, ".ds-page--reading")).toMatch(
       /--ds-page-max:\s*var\(--ds-page-max-reading\)/,
     );
-    expect(ds).toMatch(
-      /@media \(max-width: 899px\) \{\s*\.ds-page \{\s*--ds-page-inset:\s*var\(--ds-space-4\);/,
+    // one width for both (supervisor 10-21): at 900-999 px the header was at
+    // 16 and the page at 24, an 8 px jump of the left edge
+    const page = ds.match(
+      /@media \(max-width: (\d+)px\) \{\s*\.ds-page \{\s*--ds-page-inset:\s*var\(--ds-space-4\);/,
     );
+    const shell = read("styles/shell.css").match(
+      /@media \(max-width: (\d+)px\) \{\s*:root \{\s*--levi-header-height:[\s\S]*?\.levi-shell-header \{[^}]*padding: 0 var\(--ds-space-4\);/,
+    );
+    expect(page?.[1]).toBeDefined();
+    expect(page?.[1]).toBe(shell?.[1]);
   });
 
   test("the old frames keep no width or frame padding of their own", () => {

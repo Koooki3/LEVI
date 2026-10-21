@@ -296,6 +296,7 @@
    levi-header.tsx, and the links are tight; at 420 px "Automatic evaluation",
    marvel_workstation and FR3 3D show whole when marvel_workstation is the
    current page, and the first two and a part of the third otherwise). */
+/* .ds-page (ds.css) narrows its sides at this same width: keep them equal. */
 @media (max-width: 1169px) {
   :root {
     --levi-header-height: 100px;
