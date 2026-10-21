@@ -396,6 +396,50 @@
   margin-top: var(--ds-space-2);
 }
 
+/* The way to the offline 3D preview: a slim row (icon, title with one line,
+   button) that stacks on a narrow screen. Neutral edge: it is not a state. */
+.rg-studio {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-3) var(--ds-space-4);
+  padding: var(--ds-space-3) var(--ds-space-4);
+  border: 1px solid var(--ds-separator);
+  border-left: 3px solid var(--ds-separator-strong);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+}
+.rg-studio__icon {
+  flex: none;
+  color: var(--ds-text-secondary);
+}
+.rg-studio__text {
+  flex: 1 1 18rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+.rg-page .rg-studio__text h2 {
+  font-size: var(--ds-text-callout-size);
+  line-height: var(--ds-text-callout-line);
+  font-weight: var(--ds-weight-semibold);
+}
+.rg-page .rg-studio__note {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-caption-size);
+}
+.rg-studio__open {
+  flex: none;
+  text-decoration: none;
+}
+@media (max-width: 639px) {
+  .rg-studio__open {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+}
+
 /* What several stops share, first thing in the strip. */
 .rg-strip__cause {
   display: flex;

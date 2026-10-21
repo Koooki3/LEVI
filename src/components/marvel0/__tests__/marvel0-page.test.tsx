@@ -216,6 +216,36 @@ describe("the marvel0 page", () => {
     expect(host.querySelector("[data-testid=marvel0-idle]")).toBeNull();
   });
 
+  test("a card leads to the offline FR3 3D preview, already before the first answer", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (() => new Promise<Response>(() => {})) as typeof fetch;
+    restore = () => {
+      globalThis.fetch = original;
+    };
+    const { host } = await render(<Marvel0Page />);
+    const card = host.querySelector("[data-testid=marvel0-studio-link]")!;
+    // It is there while the page still says "Loading…": it needs no status.
+    expect(host.querySelector("[aria-busy=true]")).toBeTruthy();
+    const link = card.querySelector("a")!;
+    expect(link.getAttribute("href")).toBe("/robot-studio");
+    expect(card.textContent).toContain(en["marvel0.studio.title"]);
+    expect(card.textContent).toContain(en["marvel0.studio.note"]);
+    // It says what the page is not: connected to a robot.
+    expect(en["marvel0.studio.title"]).toMatch(/offline/i);
+    expect(en["marvel0.studio.title"]).toMatch(/no robot connection/i);
+    expect(zh["marvel0.studio.title"]).toContain("不连接机器人");
+    // One link only: the card is a way to the page, not a second control.
+    expect(card.querySelectorAll("a, button")).toHaveLength(1);
+    // Between the head and the first of the steps, not after the steps.
+    const kids = Array.from(host.querySelector("main")!.children);
+    expect(kids.indexOf(card)).toBeGreaterThan(
+      kids.indexOf(host.querySelector("header.rg-head")!),
+    );
+    expect(kids.indexOf(card)).toBeLessThan(
+      kids.indexOf(host.querySelector("[aria-busy=true]")!),
+    );
+  });
+
   test("shows one card per component and the idle banner, from the two routes", async () => {
     const calls = serve(() => ({
       [SETUP]: setupStatus(),
@@ -416,7 +446,11 @@ describe("the marvel0 page", () => {
       .filter((b) => !strip.contains(b))
       .map((b) => b.textContent?.trim());
     expect(buttons).toEqual(["Refresh"]);
-    expect(host.querySelector("a, form, input, select")).toBeNull();
+    // No link, form or field, except the one card to the offline 3D preview.
+    const others = Array.from(
+      host.querySelectorAll("a, form, input, select"),
+    ).filter((el) => !el.closest("[data-testid=marvel0-studio-link]"));
+    expect(others).toHaveLength(0);
   });
 
   test("a marvel0 with nothing running: not started, unknown, and idle", async () => {

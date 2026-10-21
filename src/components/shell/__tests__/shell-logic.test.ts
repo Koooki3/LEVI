@@ -124,27 +124,37 @@ describe("global shortcuts", () => {
 });
 
 describe("navigation and commands", () => {
-  test("marvel0 is a header link like the others, and every page is a header link", () => {
+  test("marvel0 is a header link like the others; the FR3 preview is a menu item; every page is offered by the header", () => {
     const pages = navPages({ live: true, pool: true });
     const all = pages.map((p) => p.href);
     expect(all).toContain("/marvel0");
+    expect(all).toContain("/robot-studio");
     expect(headerPages(pages).map((p) => p.href)).toEqual(all);
+    // marvel0 never folds and is never only a menu item; the preview is only
+    // ever a menu item (a tool for now and then must not push a main link out).
+    const marvel0 = pages.find((p) => p.href === "/marvel0")!;
+    expect(marvel0.menuOnly).toBeUndefined();
+    expect(marvel0.collapse).toBeUndefined();
+    expect(pages.find((p) => p.href === "/robot-studio")!.menuOnly).toBe(true);
   });
 
-  test("folding: nothing at full width, the reference pages first, then the heavier two; Live, Automatic, marvel0 and Explore never fold", () => {
+  test("folding: nothing at full width, the reference pages first, then the heavier two; Live, Automatic, marvel0 and Explore never fold; the FR3 preview is always in the menu", () => {
     const pages = navPages({ live: true, pool: true });
     const names = (list: Array<{ href: string }>) => list.map((p) => p.href);
     const wide = splitHeaderPages(pages, 0);
-    expect(wide.more).toEqual([]);
-    expect(names(wide.links)).toEqual(names(pages));
+    expect(names(wide.more)).toEqual(["/robot-studio"]);
+    expect(names(wide.links)).toEqual(
+      names(pages).filter((href) => href !== "/robot-studio"),
+    );
     const first = splitHeaderPages(pages, 1);
-    expect(names(first.more)).toEqual(["/guide", "/report"]);
+    expect(names(first.more)).toEqual(["/guide", "/report", "/robot-studio"]);
     const second = splitHeaderPages(pages, 2);
     expect(names(second.more)).toEqual([
       "/workbench",
       "/pool",
       "/guide",
       "/report",
+      "/robot-studio",
     ]);
     expect(names(second.links)).toEqual([
       "/live",
@@ -161,7 +171,12 @@ describe("navigation and commands", () => {
     }
     // Without a pool the pool is not offered and nothing else changes.
     const noPool = splitHeaderPages(navPages({ live: true, pool: false }), 2);
-    expect(names(noPool.more)).toEqual(["/workbench", "/guide", "/report"]);
+    expect(names(noPool.more)).toEqual([
+      "/workbench",
+      "/guide",
+      "/report",
+      "/robot-studio",
+    ]);
   });
 
   test("the window width picks the folding level; two rows below 900 px fold nothing", () => {
@@ -202,6 +217,7 @@ describe("navigation and commands", () => {
       "/pool",
       "/guide",
       "/report",
+      "/robot-studio",
     ]);
     expect(navPages({ live: true, pool: false }).map((p) => p.href)).toEqual([
       "/live",
@@ -211,6 +227,7 @@ describe("navigation and commands", () => {
       "/workbench",
       "/guide",
       "/report",
+      "/robot-studio",
     ]);
   });
 
@@ -252,6 +269,8 @@ describe("navigation and commands", () => {
     const commands = make();
     expect(filterCommands(commands, "")).toEqual(commands);
     expect(filterCommands(commands, "pool")[0].id).toBe("go-pool");
+    expect(filterCommands(commands, "fr3")[0].id).toBe("go-robot-studio");
+    expect(filterCommands(commands, "拖拽")[0].id).toBe("go-robot-studio");
     expect(filterCommands(commands, "训练池")[0].id).toBe("go-pool");
     expect(filterCommands(commands, "theme dark").map((c) => c.id)).toEqual([
       "theme-dark",

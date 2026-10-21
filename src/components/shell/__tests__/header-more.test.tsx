@@ -70,6 +70,11 @@ const header = () => (
 );
 const moreTrigger = (host: HTMLElement) =>
   host.querySelector<HTMLButtonElement>(".levi-shell-more__trigger")!;
+const menuItems = async (host: HTMLElement) => {
+  await click(moreTrigger(host));
+  return Array.from(host.querySelectorAll("[role^=menuitem]"));
+};
+const PREVIEW = "FR3 interactive preview";
 
 describe("the header navigation", () => {
   test("wide: every page is a link, marvel0 among them", async () => {
@@ -108,7 +113,7 @@ describe("the header navigation", () => {
     const items = Array.from(host.querySelectorAll("[role^=menuitem]")).map(
       (item) => item.textContent,
     );
-    expect(items).toEqual(["Guide", "Report"]);
+    expect(items).toEqual(["Guide", "Report", PREVIEW]);
   });
 
   test("a laptop width (1440 px): the four main links, marvel0 among them, and everything else in More", async () => {
@@ -125,10 +130,16 @@ describe("the header navigation", () => {
       Array.from(host.querySelectorAll("[role^=menuitem]")).map(
         (item) => item.textContent,
       ),
-    ).toEqual(["Conversion & review", "Training pool", "Guide", "Report"]);
+    ).toEqual([
+      "Conversion & review",
+      "Training pool",
+      "Guide",
+      "Report",
+      PREVIEW,
+    ]);
   });
 
-  test("narrow: only the four main links stay; More holds the other four and chooses by the router", async () => {
+  test("narrow: only the four main links stay; More holds the other five and chooses by the router", async () => {
     atWidth(1000);
     const { host } = await render(header());
     expect(hrefs(host)).toEqual([
@@ -144,6 +155,7 @@ describe("the header navigation", () => {
       "Training pool",
       "Guide",
       "Report",
+      PREVIEW,
     ]);
     await click(items[2]);
     expect(went).toEqual(["/guide"]);
@@ -167,9 +179,66 @@ describe("the header navigation", () => {
     expect(hrefs(host)).toHaveLength(8);
   });
 
+  test("More is an icon-only button on the two-row bar (so the first links keep their room) and a labelled one from 1000 px", async () => {
+    for (const [width, iconOnly] of [
+      [360, true],
+      [420, true],
+      [999, true],
+      [1000, false],
+      [1440, false],
+      [1700, false],
+    ] as const) {
+      atWidth(width);
+      const { host } = await render(header());
+      const trigger = moreTrigger(host);
+      expect([
+        width,
+        trigger.classList.contains("ds-menu-trigger--icon"),
+      ]).toEqual([width, iconOnly]);
+      // The name stays "More" either way (text, hidden from sight when icon-only).
+      expect([width, trigger.textContent]).toEqual([width, "More"]);
+      expect([width, Boolean(trigger.querySelector(".ds-btn__label"))]).toEqual(
+        [width, !iconOnly],
+      );
+    }
+  });
+
+  test("the FR3 preview is a menu item at every width, never a link of the bar, and the menu goes to it", async () => {
+    for (const width of [420, 999, 1000, 1240, 1440, 1530, 1700]) {
+      atWidth(width);
+      const { host } = await render(header());
+      expect([width, hrefs(host).includes("/robot-studio")]).toEqual([
+        width,
+        false,
+      ]);
+      const items = await menuItems(host);
+      const preview = items.find((item) => item.textContent === PREVIEW);
+      expect([width, Boolean(preview)]).toEqual([width, true]);
+      await click(preview!);
+      expect([width, went.pop()]).toEqual([width, "/robot-studio"]);
+    }
+  });
+
+  test("on the preview page the menu marks it, and marvel0 is not marked", async () => {
+    atWidth(1700);
+    route.path = "/robot-studio";
+    const { host } = await render(header());
+    expect(host.querySelector(".levi-shell-more.is-current")).toBeTruthy();
+    expect(
+      host
+        .querySelector("nav a[href='/marvel0']")!
+        .getAttribute("aria-current"),
+    ).toBeNull();
+    await click(moreTrigger(host));
+    const checked = Array.from(
+      host.querySelectorAll("[role=menuitemradio][aria-checked=true]"),
+    ).map((item) => item.textContent);
+    expect(checked).toEqual([PREVIEW]);
+  });
+
   test("marvel0 is a link of the bar at every width, never only in More, and is marked as the current page there", async () => {
     for (const width of [
-      360, 420, 820, 999, 1000, 1024, 1240, 1440, 1560, 1700,
+      360, 420, 820, 999, 1000, 1024, 1240, 1440, 1560, 1640, 1700,
     ]) {
       atWidth(width);
       const { host } = await render(header());
@@ -207,6 +276,16 @@ describe("the header navigation", () => {
     );
     expect(css).toMatch(
       /@media \(max-width: 1239px\) \{\s*\.levi-shell-link__hint \{\s*display: none/,
+    );
+  });
+
+  test("on the two-row bar the menu opens leftwards from the end of the row, so its panel stays on the screen", () => {
+    const css = readFileSync(
+      join(import.meta.dir, "../../../styles/shell.css"),
+      "utf8",
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 999px\) \{[\s\S]*?\.levi-shell-more \.ds-menu--start \{\s*left: auto;\s*right: 0;/,
     );
   });
 

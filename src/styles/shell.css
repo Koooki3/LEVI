@@ -99,7 +99,7 @@
   scrollbar-width: none;
 }
 .levi-shell-more {
-  display: none;
+  display: flex;
   flex: none;
   position: relative;
   align-items: center;
@@ -120,18 +120,19 @@
 }
 /* Folding steps (src/components/shell/commands.ts, NAV_COLLAPSE_WIDTHS and
    NAV_ROW_BELOW: a test keeps the numbers equal). Step 1: Guide and Report.
-   Step 2: also Conversion & review and the training pool. The numbers come
-   from measured link widths (English, the widest): all eight links need about
-   1505 px beside the full search box, six links and More about 1445 px, and
-   four links and More about 990 px with the search box reduced to its icon
-   and tighter links (below 1240 px). A link must never be cut off by the
-   scrolling of the bar: marvel0 is one of the four that never fold. */
-@media (min-width: 1000px) and (max-width: 1559px) {
+   Step 2: also Conversion & review and the training pool. The "More" button
+   is in the bar at every width: it holds the pages that are only menu items
+   (the FR3 preview) and, where links fold, the folded ones. Measured in a
+   browser (English, the widest): all eight links and More fit from 1600 px
+   beside the full search box (1580 px clipped the last link by 11 px, 1560 px
+   by 31 px), so the first step starts below 1640 px; six links and More fit at
+   1500 px with 73 px to spare; four links and More fit at 1000 px with 80 px
+   to spare (the search box is reduced to its icon and the links are tighter
+   below 1240 px). A link must never be cut off by the scrolling of the bar:
+   marvel0 is one of the four that never fold. */
+@media (min-width: 1000px) and (max-width: 1639px) {
   .levi-shell-link[data-collapse="1"] {
     display: none;
-  }
-  .levi-shell-more {
-    display: flex;
   }
 }
 @media (min-width: 1000px) and (max-width: 1499px) {
@@ -326,6 +327,12 @@
     margin: 0 calc(-1 * var(--ds-space-4));
     padding: 0 var(--ds-space-1);
     border-top: 1px solid var(--ds-separator);
+  }
+  /* "More" ends the row, so its panel opens leftwards: opened to the right it
+     ran off the screen ("FR3 inte" at 420 px). */
+  .levi-shell-more .ds-menu--start {
+    left: auto;
+    right: 0;
   }
   .levi-shell-link,
   .levi-shell-nav .levi-live-nav {

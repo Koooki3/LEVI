@@ -18,6 +18,7 @@ import {
 import {
   Activity,
   Bot,
+  Ellipsis,
   Keyboard,
   Languages,
   Monitor,
@@ -36,6 +37,7 @@ import { useLivePulse } from "./live/use-live-pulse";
 import { CommandPalette } from "./shell/command-palette";
 import {
   isCurrentPage,
+  NAV_ROW_BELOW,
   navCollapseLevel,
   navPages,
   splitHeaderPages,
@@ -69,6 +71,19 @@ function useAgentOpen(): boolean {
   return open;
 }
 
+/** A value read from the window's width, updated on resize. `server` is what
+ * the server and the first client render say. */
+function useWidthValue<T>(read: (width: number) => T, server: T): T {
+  return useSyncExternalStore(
+    (notify) => {
+      window.addEventListener("resize", notify);
+      return () => window.removeEventListener("resize", notify);
+    },
+    () => read(window.innerWidth),
+    () => server,
+  );
+}
+
 /**
  * How many folding steps of the navigation apply at the window's width (see
  * `navCollapseLevel`). The server and the first client render say 0 (every
@@ -76,14 +91,14 @@ function useAgentOpen(): boolean {
  * up, so the bar does not jump.
  */
 function useNavCollapseLevel(): 0 | 1 | 2 {
-  return useSyncExternalStore(
-    (notify) => {
-      window.addEventListener("resize", notify);
-      return () => window.removeEventListener("resize", notify);
-    },
-    () => navCollapseLevel(window.innerWidth),
-    () => 0,
-  );
+  return useWidthValue(navCollapseLevel, 0);
+}
+
+/** Whether the links have a row of their own (below `NAV_ROW_BELOW`): there
+ * "More" is a button with an icon only, so the first links keep their room
+ * (the first three show whole at 420 px). */
+function useTwoRowBar(): boolean {
+  return useWidthValue((width) => width < NAV_ROW_BELOW, false);
 }
 
 export default function LeviHeader() {
@@ -108,16 +123,16 @@ export default function LeviHeader() {
     [pool],
   );
   const level = useNavCollapseLevel();
+  const twoRows = useTwoRowBar();
   const { links, more } = useMemo(
     () => splitHeaderPages(pages, level),
     [pages, level],
   );
-  // Before the width is known (level 0) the menu holds every page that can
-  // fold, so it is complete whichever width the styles hid the links at.
-  const moreItems = level === 0 ? splitHeaderPages(pages, 2).more : more;
-  const moreCurrent = moreItems.some((page) =>
-    isCurrentPage(page.href, pathname),
-  );
+  // The menu is always in the bar: it holds the pages that are only menu items
+  // and, at the widths where links fold, the folded ones. Before the width is
+  // known (level 0) it holds only the first; the folded links are hidden by
+  // the styles at those widths, and the menu cannot be opened yet.
+  const moreCurrent = more.some((page) => isCurrentPage(page.href, pathname));
   // The bar scrolls when the links do not fit (the two-row bar of a narrow
   // window). The current page (marvel0 among them) is brought into view only
   // when it is not whole there already, and then to the start of a link: a bar
@@ -158,7 +173,7 @@ export default function LeviHeader() {
     watch.observe(nav);
     for (const child of Array.from(nav.children)) watch.observe(child);
     return () => watch.disconnect();
-  }, [pathname, level, language]);
+  }, [pathname, level, language, twoRows]);
   const agentOpen = useAgentOpen();
   // Rendered after mount so the server and the first client render agree.
   const [apple, setApple] = useState(false);
@@ -214,7 +229,7 @@ export default function LeviHeader() {
               ),
             )}
           </nav>
-          {moreItems.length > 0 && (
+          {more.length > 0 && (
             <div
               className={"levi-shell-more" + (moreCurrent ? " is-current" : "")}
             >
@@ -222,8 +237,10 @@ export default function LeviHeader() {
                 label={t("More")}
                 variant="ghost"
                 align="start"
+                icon={twoRows ? Ellipsis : undefined}
+                iconOnly={twoRows}
                 triggerClassName="levi-shell-more__trigger"
-                items={moreItems.map((page) => ({
+                items={more.map((page) => ({
                   id: page.href,
                   label: t(page.label),
                   checked: isCurrentPage(page.href, pathname),

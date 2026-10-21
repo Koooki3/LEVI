@@ -47,6 +47,8 @@ const SOURCES = [
   "components/marvel0/use-run-actions.ts",
   "components/marvel0/use-run-poll.ts",
   "components/marvel0/selection.ts",
+  // The card to the offline 3D preview.
+  "components/marvel0/studio-link.tsx",
   // The navigation entry's word after its label.
   "components/shell/commands.ts",
 ];

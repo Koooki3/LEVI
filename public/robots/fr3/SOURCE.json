@@ -1,0 +1,150 @@
+{
+  "repository": "https://github.com/frankarobotics/franka_description",
+  "commit": "7aeeddc449edf8d62b594f9e36a81da53e7796f9",
+  "copyright": "Copyright 2023, 2024 Franka Robotics GmbH",
+  "license": "Apache-2.0; upstream DAE headers explicitly apply Apache-2.0 to model files",
+  "derivation": "DAE triangles, normals, diffuse materials and scene matrices converted to indexed GLB without simplification. Original Z-up link coordinates retained. URDF visual-only chain derived from official kinematics/joint_limits and franka_arm.xacro; accelerometers, dynamics, collision and grippers omitted. No calibrated TCP: endpoint fr3_link8 is the flange.",
+  "sources": {
+    "LICENSE": {
+      "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/LICENSE",
+      "bytes": 12926,
+      "sha256": "4b25434e6ec2012e28a484f1d7924a0fd1a8bf232c2be2d50d584d299d04d6d6"
+    },
+    "NOTICE": {
+      "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/NOTICE",
+      "bytes": 581,
+      "sha256": "13991525876741e3dc94c46e0afce111dc0a5c6156c89bbbefd06547b84738fd"
+    },
+    "robots/fr3/kinematics.yaml": {
+      "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/robots/fr3/kinematics.yaml",
+      "bytes": 831,
+      "sha256": "44326830a6773dd6611cdf9947045eeb3276ea4e3ca47a05272816c862c8e386"
+    },
+    "robots/fr3/joint_limits.yaml": {
+      "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/robots/fr3/joint_limits.yaml",
+      "bytes": 1374,
+      "sha256": "42e999184f37689568b58f320d062859053f03c62c8b49bf00a00d69f20d7a65"
+    },
+    "robots/fr3/fr3.urdf.xacro": {
+      "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/robots/fr3/fr3.urdf.xacro",
+      "bytes": 2863,
+      "sha256": "8f068b2f9093e36fe7dfb7dbb811eb77b86c2aa4215bb2624217784458031a89"
+    },
+    "robots/common/franka_arm.xacro": {
+      "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/robots/common/franka_arm.xacro",
+      "bytes": 9002,
+      "sha256": "3c19225fa490120bb0276faa83b5d8dedab56d21fc0b64a677d5c61136fde81e"
+    },
+    "robots/common/utils.xacro": {
+      "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/robots/common/utils.xacro",
+      "bytes": 11741,
+      "sha256": "b6819d3530d760ae8f4a318348d0125f3a2ae67bf03bfc965060d8388fd060f7"
+    },
+    "meshes/robots/fr3/visual/link0.dae": {
+      "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual/link0.dae",
+      "bytes": 7079719,
+      "sha256": "3c52a112d1610d645934945b80ea8d9bb3d1635f345098480a33a537bd43224e"
+    },
+    "meshes/robots/fr3/visual/link1.dae": {
+      "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual/link1.dae",
+      "bytes": 906843,
+      "sha256": "5c5846eabc714aefc82ef051a4d09c4fc1c092bca6258b1290227345dd217fcb"
+    },
+    "meshes/robots/fr3/visual/link2.dae": {
+      "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual/link2.dae",
+      "bytes": 921715,
+      "sha256": "90a1bd38abdc53d0141719cd8e040f788db337b768a845bb6d53c5c52590498f"
+    },
+    "meshes/robots/fr3/visual/link3.dae": {
+      "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual/link3.dae",
+      "bytes": 2475274,
+      "sha256": "1c7a2a8124e39ad07096c0cce8461b0e650f6752900cfd777bf87c181e81749b"
+    },
+    "meshes/robots/fr3/visual/link4.dae": {
+      "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual/link4.dae",
+      "bytes": 2533228,
+      "sha256": "dd134cf13cdaced2b67739e4d9fe2ca011cc533936397d9f6303fc740424e2a2"
+    },
+    "meshes/robots/fr3/visual/link5.dae": {
+      "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual/link5.dae",
+      "bytes": 3259292,
+      "sha256": "cbcabd369e044eba3f1c2cab84b9ed2ebc1b2f424c6104ad9c5d7410e92fabfe"
+    },
+    "meshes/robots/fr3/visual/link6.dae": {
+      "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual/link6.dae",
+      "bytes": 5252660,
+      "sha256": "907b16fea84931f4881174234065bb647700abf105b432c3ff65360e0ad5cf8b"
+    },
+    "meshes/robots/fr3/visual/link7.dae": {
+      "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual/link7.dae",
+      "bytes": 4243523,
+      "sha256": "b9d05ac502ff269b1323705de811d07a8eb9920ce711b32ee0497bf16b74989b"
+    }
+  },
+  "outputs": {
+    "LICENSE": {
+      "bytes": 12926,
+      "sha256": "4b25434e6ec2012e28a484f1d7924a0fd1a8bf232c2be2d50d584d299d04d6d6"
+    },
+    "NOTICE": {
+      "bytes": 581,
+      "sha256": "13991525876741e3dc94c46e0afce111dc0a5c6156c89bbbefd06547b84738fd"
+    },
+    "fr3.urdf": {
+      "bytes": 3411,
+      "sha256": "4009306018e4a764fc60864e989ca17876246a3261478288575e69aed8b107da"
+    },
+    "fr3.urdf.xacro": {
+      "bytes": 2863,
+      "sha256": "8f068b2f9093e36fe7dfb7dbb811eb77b86c2aa4215bb2624217784458031a89"
+    },
+    "franka_arm.xacro": {
+      "bytes": 9002,
+      "sha256": "3c19225fa490120bb0276faa83b5d8dedab56d21fc0b64a677d5c61136fde81e"
+    },
+    "joint_limits.yaml": {
+      "bytes": 1374,
+      "sha256": "42e999184f37689568b58f320d062859053f03c62c8b49bf00a00d69f20d7a65"
+    },
+    "kinematics.yaml": {
+      "bytes": 831,
+      "sha256": "44326830a6773dd6611cdf9947045eeb3276ea4e3ca47a05272816c862c8e386"
+    },
+    "link0.glb": {
+      "bytes": 2876288,
+      "sha256": "7e6721e8cbf652ad31598e15f96f05874ad396424d630395a3a48b4009e346ad"
+    },
+    "link1.glb": {
+      "bytes": 373816,
+      "sha256": "4e7b30f84c080a267ac097781d9f4816d06f66453d96ff80caf19da6c783b6d5"
+    },
+    "link2.glb": {
+      "bytes": 373804,
+      "sha256": "6919672c23c006db55157f02cb56e86acf655ad650177acfe948cbc900471348"
+    },
+    "link3.glb": {
+      "bytes": 999032,
+      "sha256": "a11a3dfba95d1fb1901ff7248bbd28c45fe419072934664c5617af6fc125702f"
+    },
+    "link4.glb": {
+      "bytes": 999072,
+      "sha256": "8891106c85ae2083ca5724b11394281972978fe1a270e43f9129b8a0428ee1e5"
+    },
+    "link5.glb": {
+      "bytes": 1301776,
+      "sha256": "d935dbb29b7a16502c1522418324594ecab9bdf163380a91d7f8684254c45ece"
+    },
+    "link6.glb": {
+      "bytes": 2083796,
+      "sha256": "9e8308791486cb2a6abced645b41de76ea5d4e809a3c0183ff0753fe171002bb"
+    },
+    "link7.glb": {
+      "bytes": 1734196,
+      "sha256": "61dd0d1e78c2aecac84ff26f068fd8c76d7f954ed087642c55e860fc34c60550"
+    },
+    "utils.xacro": {
+      "bytes": 11741,
+      "sha256": "b6819d3530d760ae8f4a318348d0125f3a2ae67bf03bfc965060d8388fd060f7"
+    }
+  }
+}

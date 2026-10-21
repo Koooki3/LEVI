@@ -36,6 +36,12 @@ export type NavPage = {
   /** `false`: in the palette and the go-to chords, not a header link. */
   header?: boolean;
   /**
+   * Never a link of the bar: the page is an item of the "More" menu at every
+   * width (and in the palette), so a tool used now and then does not take room
+   * the main links need.
+   */
+  menuOnly?: boolean;
+  /**
    * The header link moves into the "More" menu when the bar runs short of
    * room: 1 = first (reference pages), 2 = next (see `navCollapseLevel`).
    * Without it the link stays. The palette and the go-to chords are
@@ -108,11 +114,19 @@ export function navPages(options: { live: boolean; pool: boolean }): NavPage[] {
       keywords: ["results", "报告"],
       collapse: 1,
     },
+    {
+      // Offline: a model and a solver in the browser, no robot connection.
+      href: "/robot-studio",
+      label: "robotStudio.title",
+      keywords: ["fr3", "urdf", "robot", "preview", "机械臂", "拖拽", "预览"],
+      menuOnly: true,
+    },
   );
   return pages;
 }
 
-/** The pages the header shows as links (the palette offers all of them). */
+/** The pages the header offers, as a link or as an item of "More" (the
+ * palette offers all of them). */
 export function headerPages(pages: NavPage[]): NavPage[] {
   return pages.filter((page) => page.header !== false);
 }
@@ -121,10 +135,11 @@ export function headerPages(pages: NavPage[]): NavPage[] {
  * Widths (CSS px) below which the header folds links into "More": the
  * reference pages (Guide, Report) first, then Conversion & review and the
  * training pool. Below `NAV_ROW_BELOW` the bar is two rows and the links
- * have a row of their own, so nothing folds. The same numbers are in
- * src/styles/shell.css (a test keeps them equal).
+ * have a row of their own, so nothing folds. The "More" button itself is in
+ * the bar at every width (the menu-only pages are in it). The same numbers
+ * are in src/styles/shell.css (a test keeps them equal).
  */
-export const NAV_COLLAPSE_WIDTHS = { first: 1560, second: 1500 } as const;
+export const NAV_COLLAPSE_WIDTHS = { first: 1640, second: 1500 } as const;
 export const NAV_ROW_BELOW = 1000;
 
 /** How many folding steps apply at a window width: 0 = every link shows. */
@@ -135,8 +150,9 @@ export function navCollapseLevel(width: number): 0 | 1 | 2 {
   return 0;
 }
 
-/** The header links split at a folding level: `links` stay in the bar, `more`
- * go into the "More" menu (in navigation order). */
+/** The header pages split at a folding level: `links` stay in the bar, `more`
+ * go into the "More" menu (in navigation order): the folded links and the
+ * pages that are only ever menu items. */
 export function splitHeaderPages(
   pages: NavPage[],
   level: 0 | 1 | 2,
@@ -144,9 +160,10 @@ export function splitHeaderPages(
   const links: NavPage[] = [];
   const more: NavPage[] = [];
   for (const page of headerPages(pages))
-    (page.collapse !== undefined && page.collapse <= level ? more : links).push(
-      page,
-    );
+    (page.menuOnly || (page.collapse !== undefined && page.collapse <= level)
+      ? more
+      : links
+    ).push(page);
   return { links, more };
 }
 

@@ -13,3 +13,7 @@
 | **参考** | [API](API.md) · [验证](VALIDATION.md) · [架构进度](architecture/IMPLEMENTATION_STATUS.md) · [自动测评流水线（AERI）](AUTOMATIC_PIPELINE.zh-CN.md) · [English](AUTOMATIC_PIPELINE.md) · [事件智能](EVENTS.zh-CN.md) · [English](EVENTS.md) · [性能基线与缓存配额](PERFORMANCE.zh-CN.md) · [English](PERFORMANCE.md) · [上游](UPSTREAM.md) · [发布](RELEASING.md) · [变更记录](../CHANGELOG.md) · [第三方声明](../THIRD_PARTY_NOTICES.md) · [参考文献与引用](REFERENCES.md) |
 
 **报告**页显示一份实时技术报告，目录由 `LEVI_REPORT_DIR` 指定（只读，可以在工作区之外）；见 [API](API.md#technical-report--技术报告)。
+
+## 机械臂交互
+
+[FR3 机械臂工作台](ROBOT_STUDIO.zh-CN.md) · [English](ROBOT_STUDIO.md)：离线法兰拖拽、关节预览与不可执行的草稿导出。

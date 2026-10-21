@@ -16,6 +16,10 @@
 // checks behind the buttons stop mistakes, not another program of the same
 // account; Franka Desk and the physical emergency stop are the barrier, and
 // nothing on the page is an emergency stop (docs/SETUP_WIZARD.md).
+//
+// Under the title, apart from the steps, a card leads to the offline FR3 3D
+// preview (/robot-studio): a model and a solver in the browser, no robot
+// connection.
 import "@/components/pages-ui/pages.css";
 import "@/components/marvel0/marvel0-styles.css";
 import "@/components/marvel0/marvel0-dock.css";
@@ -42,6 +46,7 @@ import { runApi } from "@/components/marvel0/run-api";
 import { holdEnabled } from "@/components/marvel0/run-logic";
 import { StackPanel } from "@/components/marvel0/stack-panel";
 import { stackApi } from "@/components/marvel0/stack-api";
+import { StudioLink } from "@/components/marvel0/studio-link";
 import { useMarvel0Poll } from "@/components/marvel0/use-marvel0-poll";
 import { useRunActions } from "@/components/marvel0/use-run-actions";
 import { useRunPoll } from "@/components/marvel0/use-run-poll";
@@ -120,6 +125,8 @@ export default function Marvel0Page() {
           </ul>
         </details>
       </Note>
+      {/* Offline, no robot connection: there whatever the status polls say. */}
+      <StudioLink />
       {!poll.loaded ? (
         <p role="status" aria-busy="true">
           {t("Loading…")}
