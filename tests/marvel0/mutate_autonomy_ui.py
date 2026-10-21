@@ -357,7 +357,7 @@ MUTATIONS = [
     ),
     (
         "start: the page does not hand Step 5 whether the client is live",
-        "src/app/marvel0/page.tsx",
+        "src/app/marvel_workstation/page.tsx",
         "<AutonomyStepLazy evalLive={ownRunLive} onRun={setAeri} />",
         "<AutonomyStepLazy evalLive={false} onRun={setAeri} />",
         (PAGE,),
@@ -635,7 +635,7 @@ MUTATIONS = [
     ),
     (
         "load: the page imports Step 5 directly, not on demand",
-        "src/app/marvel0/page.tsx",
+        "src/app/marvel_workstation/page.tsx",
         'import { AutonomyStepLazy } from "@/components/marvel0/autonomy-lazy";',
         'import { AutonomyStep as AutonomyStepLazy } from "@/components/marvel0/autonomy-step";',
         (POLL,),
@@ -671,7 +671,7 @@ MUTATIONS = [
     ),
     (
         "chain: the page does not hand the chain the state of D",
-        "src/app/marvel0/page.tsx",
+        "src/app/marvel_workstation/page.tsx",
         "<AutonomyStepLazy evalLive={ownRunLive} onRun={setAeri} />",
         "<AutonomyStepLazy evalLive={ownRunLive} />",
         (PAGE,),

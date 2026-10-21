@@ -43,7 +43,7 @@ mock.module("@/components/marvel0/stack-panel", () => ({
 mock.module("@/components/marvel0/marvel0-actions", () => ({
   Marvel0Actions: () => null,
 }));
-const { default: Marvel0Page } = await import("@/app/marvel0/page");
+const { default: Marvel0Page } = await import("@/app/marvel_workstation/page");
 setupDom();
 
 const E = en as Record<string, string>;

@@ -281,7 +281,7 @@ describe("what the page tells the chain", () => {
 
 describe("Step 5 is loaded on demand, and a failure of it does not take the page down", () => {
   test("the page names the lazy wrapper and never the step itself; the wrapper imports the step on demand", () => {
-    const page = source("app/marvel0/page.tsx");
+    const page = source("app/marvel_workstation/page.tsx");
     expect(page).toContain('from "@/components/marvel0/autonomy-lazy"');
     expect(page).not.toContain('from "@/components/marvel0/autonomy-step"');
     const lazy = source("components/marvel0/autonomy-lazy.tsx");

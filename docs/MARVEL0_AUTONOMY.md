@@ -4,7 +4,7 @@ English first, Chinese after the line below. This page is the whole-feature over
 halves have their own documents: `docs/MARVEL0_AERI_PREP.md` (readiness rows, preparing a run, the site and control
 file sections, the live service and leftovers buttons) and `docs/MARVEL0_AERI_RUN.md` (hosting terminal D, the state
 machine, the keys, Stop, End, adoption after a restart). Front end: `src/components/marvel0/autonomy-*.ts(x)` and
-`use-autonomy.ts`, mounted by one line in `src/app/marvel0/page.tsx`. Design record (binding, with its adversarial
+`use-autonomy.ts`, mounted by one line in `src/app/marvel_workstation/page.tsx`. Design record (binding, with its adversarial
 review): `LEVI/lab/levi-hub/programs/rig-console/reviews/aeri-page-design-20261021.md`.
 
 ## What it is, and what it is not
@@ -216,7 +216,7 @@ AERI log cannot tell a click on this page from a key in the terminal (only the p
 
 先英文，后中文。本文是整项功能的概览和前端说明。后端两半各有文档：`docs/MARVEL0_AERI_PREP.md`（就绪检查、准备运行、
 站点与控制文件段、实时服务与残留单元按钮）和 `docs/MARVEL0_AERI_RUN.md`（托管终端 D、状态机、按键、停止、强制结束、
-重启后接管）。前端：`src/components/marvel0/autonomy-*.ts(x)` 和 `use-autonomy.ts`，由 `src/app/marvel0/page.tsx` 里
+重启后接管）。前端：`src/components/marvel0/autonomy-*.ts(x)` 和 `use-autonomy.ts`，由 `src/app/marvel_workstation/page.tsx` 里
 的一行挂载。设计记录（有约束力，含对抗审查）：`LEVI/lab/levi-hub/programs/rig-console/reviews/aeri-page-design-20261021.md`。
 
 ## 它是什么，不是什么
