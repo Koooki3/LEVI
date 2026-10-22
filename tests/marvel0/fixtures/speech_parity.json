@@ -1,0 +1,20 @@
+[
+  {"prompt": "pick screws of same size into the empty slot of screw box", "en": "pick the screws of the same size into the empty slot of the screw box", "zh": "把同样大小的螺丝放进螺丝盒的空槽", "zh_tier": "B"},
+  {"prompt": "stack the plates of same color together", "en": "stack the plates of the same color together", "zh": "把同颜色的盘子叠在一起"},
+  {"prompt": "pick the eggplant in the blue plate", "en": "please pick up the eggplant and put it in the blue plate", "zh": "拿起茄子放进蓝色的盘子"},
+  {"prompt": "stack red plate on white plate then place eggplant on blue plate", "en": "first stack the red plate on the white plate and then put the eggplant on the blue plate", "zh": "先把红盘子叠在白盘子上面，再把茄子放在蓝盘子里"},
+  {"prompt": "place tomato on red plate then eggplant on blue plate", "en": "place the tomato on the red plate and then the eggplant on the blue plate", "zh": "把西红柿放到红盘子上，然后把茄子放到蓝盘子上"},
+  {"prompt": "pour water into red cup", "en": "pour water into the red cup", "zh": "把水倒进红杯子里"},
+  {"prompt": "put fork into drawer", "en": "put the fork into the drawer", "zh": "把叉子放进抽屉"},
+  {"prompt": "stack red bowl on blue plate", "en": "stack the red bowl on the blue plate", "zh": "把红碗叠到蓝盘子上"},
+  {"prompt": "pick potato on white plate", "en": "pick the potato on the white plate", "zh": "把土豆放到白盘子上"},
+  {"prompt": "tidy up the test tube", "en": "tidy up the test tube", "zh": "整理一下试管"},
+  {"prompt": "pick the pikachu into the blue bowl", "en": "pick the pikachu into the blue bowl", "zh": "把皮卡丘放进蓝碗里"},
+  {"prompt": "pick cucumber on blue plate", "en": "pick the cucumber on the blue plate", "zh": "把黄瓜放到蓝盘子上"},
+  {"prompt": "put pepper into drawer", "en": "put the pepper into the drawer", "zh": "把辣椒放进抽屉"},
+  {"prompt": "pick kiwifruit on red plate", "en": "pick the kiwifruit on the red plate", "zh": "把猕猴桃放到红盘子上"},
+  {"prompt": "pick glue on red plate", "en": "pick the glue on the red plate", "zh": "把胶水放到红盘子上"},
+  {"prompt": "pick mushroom on blue plate", "en": "pick up the mushroom on the blue plate", "zh": "把蘑菇放到蓝盘子上"},
+  {"prompt": "pick apple on green plate", "en": "pick the apple on the green plate", "zh": "把苹果放到绿盘子上"},
+  {"prompt": "put spoon into pink plate", "en": "put the spoon into the pink plate", "zh": "把勺子放到粉色盘子里"}
+]

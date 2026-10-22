@@ -470,3 +470,95 @@ def test_the_prompts_file_is_what_the_regeneration_writes():
             "f": "failure",
             "d": "discard",
         }
+
+
+# --- the cost of a look (review of step 5, M4: 15.7 ms per watcher tick) ---------------------
+
+
+def counting(lexicon, monkeypatch) -> list:
+    """Every call of ``lexicon.classify`` from here on, by line text."""
+    calls: list = []
+    real = lexicon.classify
+
+    def spy(line, index=-1):
+        calls.append(line.text)
+        return real(line, index)
+
+    monkeypatch.setattr(lexicon, "classify", spy)
+    return calls
+
+
+def test_a_look_at_a_screen_that_did_not_change_classifies_nothing(monkeypatch):
+    """The watcher looks four times a second; with 1500 lines on the screen each
+    look classified every one of them again (about 15 ms of CPU)."""
+    lexicon = lex()
+    buf = sc.ScreenBuf()
+    buf.feed(R08 + "请输入 execute r1：".encode())  # (an unfinished line too)
+    first = sc.read(buf, lexicon)
+    calls = counting(lexicon, monkeypatch)
+    assert sc.read(buf, lexicon) is first
+    assert calls == []
+    buf.feed(b"")  # (an empty read changes nothing)
+    assert sc.read(buf, lexicon) is first
+
+
+def test_each_new_line_is_classified_once_and_the_view_is_the_one_from_scratch(
+    monkeypatch,
+):
+    """Read after every piece D prints, past the end of the line memory: each
+    committed line is classified once, and every view equals the one a fresh
+    buffer given the same bytes at once makes."""
+    import dataclasses
+
+    monkeypatch.setattr(sc, "LINES_KEPT", 40)
+    lexicon = lex()
+    calls = counting(lexicon, monkeypatch)
+    buf = sc.ScreenBuf()
+    data = R08 * 2
+    fed = 0
+    for size in [1, 7, 64, 300, 2048] * 400:
+        if fed >= len(data):
+            break
+        buf.feed(data[fed : fed + size])
+        fed += size
+        view = sc.read(buf, lexicon)
+        fresh = sc.ScreenBuf()
+        fresh.feed(data[:fed])
+        before = len(calls)
+        want = sc.read(fresh, lex())
+        assert len(calls) == before, "(the fresh one has its own lexicon)"
+        assert dataclasses.asdict(view) == dataclasses.asdict(want), fed
+    assert buf.count > 40 * 3 and len(buf.lines) == 40
+    assert len(calls) == buf.count, "every committed line once, no more"
+
+
+def test_another_lexicon_classifies_the_screen_again():
+    buf = sc.ScreenBuf()
+    buf.feed(R08)
+    zh = sc.read(buf, lex(lang="zh"))
+    en = sc.read(buf, lex(lang="en"))
+    assert en is not zh
+    assert en.counts != zh.counts, "(the zh screen is unrecognised in English)"
+    fresh = sc.ScreenBuf()
+    fresh.feed(R08)
+    assert en.counts == sc.read(fresh, lex(lang="en")).counts
+
+
+@pytest.mark.parametrize("profile", PROFILES)
+@pytest.mark.parametrize("lang", ["zh", "en"])
+def test_the_index_by_first_character_skips_no_template_that_matches(profile, lang):
+    """``classify`` tries only the templates whose fixed head starts with the
+    line's first character (or that have none): the same first match as trying
+    every template in order, for every sentence D can print and the r08 screen."""
+    lexicon = lex(profile, lang)
+    texts = sc.prompts()["profiles"][profile]["texts"][lang]
+    lines = [sample(t, grasp=texts["sub_inv_grasp"]) for t in texts.values()]
+    lines += R08.decode().split("\r\n") + ["", "   ", "x", "Homing over 30 steps"]
+    for text in lines:
+        if lexicon.tag_re.match(text):
+            continue  # (a tagged line never reaches the plain templates)
+        everyone = next(
+            (key for key, _k, regex, _n in lexicon.plain if regex.match(text.rstrip())),
+            None,
+        )
+        assert lexicon.classify(sc.Line(text, 0, 1)).key == everyone, text

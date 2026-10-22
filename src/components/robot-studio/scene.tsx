@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
@@ -18,10 +18,21 @@ import {
 } from "@/components/viewer/data-palette";
 import { FR3_JOINT_NAMES } from "@/lib/robot-studio/fr3-kinematics";
 import type { PreviewPose, Waypoint } from "./preview-state";
+import ToolModel, { tintMeasured } from "./tool-model";
+import type { ToolDraft } from "./tool-draft";
+import type { WorkspaceBox } from "./workspace-draft";
+const IGNORE_LOAD = () => {};
 
 export type StudioMode = "view" | "translate" | "rotate";
 type Props = {
   joints: number[];
+  poseVisible: boolean;
+  toolVisible: boolean;
+  openingRatio: number;
+  toolDraft: ToolDraft;
+  measuredJoints: number[] | null;
+  measuredOpeningRatio: number | null;
+  workspaceBox: WorkspaceBox | null;
   target: PreviewPose;
   mode: StudioMode;
   space: "world" | "local";
@@ -46,7 +57,11 @@ function disposeObject(object: THREE.Object3D) {
   });
 }
 
-function Robot({ joints, onLoad }: Pick<Props, "joints" | "onLoad">) {
+function Robot({
+  joints,
+  onLoad,
+  measured = false,
+}: Pick<Props, "joints" | "onLoad"> & { measured?: boolean }) {
   const [robot, setRobot] = useState<URDFRobot | null>(null);
   const { invalidate } = useThree();
   const currentJoints = useRef(joints);
@@ -102,6 +117,7 @@ function Robot({ joints, onLoad }: Pick<Props, "joints" | "onLoad">) {
         FR3_JOINT_NAMES.forEach((name, i) =>
           loaded?.setJointValue(name, currentJoints.current[i]),
         );
+        if (measured) tintMeasured(loaded);
         setRobot(loaded);
         onLoad(true);
         invalidate();
@@ -121,7 +137,7 @@ function Robot({ joints, onLoad }: Pick<Props, "joints" | "onLoad">) {
       cancelled = true;
       if (loaded) disposeObject(loaded);
     };
-  }, [invalidate, onLoad]);
+  }, [invalidate, onLoad, measured]);
   useEffect(() => {
     if (!robot) return;
     FR3_JOINT_NAMES.forEach((name, i) => robot.setJointValue(name, joints[i]));
@@ -159,7 +175,16 @@ function CameraView({
 }
 
 function SceneContents(props: Props) {
+  const { onLoad } = props;
   const [dragging, setDragging] = useState(false);
+  const [armReady, setArmReady] = useState<boolean | null>(null);
+  const [toolReady, setToolReady] = useState<boolean | null>(null);
+  const armLoaded = useCallback((ok: boolean) => setArmReady(ok), []);
+  const toolLoaded = useCallback((ok: boolean) => setToolReady(ok), []);
+  useEffect(() => {
+    if (armReady === false || toolReady === false) onLoad(false);
+    else if (armReady && toolReady) onLoad(true);
+  }, [armReady, toolReady, onLoad]);
   const targetObject = useMemo(() => new THREE.Group(), []);
   const { invalidate } = useThree();
   useEffect(() => {
@@ -235,14 +260,60 @@ function SceneContents(props: Props) {
         rotation={[Math.PI / 2, 0, 0]}
       />
       <axesHelper args={[0.16]} />
-      <Robot joints={props.joints} onLoad={props.onLoad} />
+      <group visible={props.poseVisible}>
+        <Robot joints={props.joints} onLoad={armLoaded} />
+        <group visible={props.toolVisible}>
+          <ToolModel
+            joints={props.joints}
+            openingRatio={props.openingRatio}
+            draft={props.toolDraft}
+            onLoad={toolLoaded}
+          />
+        </group>
+      </group>
+      {props.measuredJoints && (
+        <Robot joints={props.measuredJoints} onLoad={IGNORE_LOAD} measured />
+      )}
+      {props.measuredJoints && props.measuredOpeningRatio !== null && (
+        <ToolModel
+          joints={props.measuredJoints}
+          openingRatio={props.measuredOpeningRatio}
+          draft={props.toolDraft}
+          onLoad={IGNORE_LOAD}
+          measured
+        />
+      )}
+      {props.workspaceBox && (
+        <mesh
+          position={
+            props.workspaceBox.min.map(
+              (v, i) => (v + props.workspaceBox!.max[i]) / 2,
+            ) as [number, number, number]
+          }
+        >
+          <boxGeometry
+            args={
+              props.workspaceBox.max.map(
+                (v, i) => v - props.workspaceBox!.min[i],
+              ) as [number, number, number]
+            }
+          />
+          <meshBasicMaterial
+            color={mediaColor(3)}
+            wireframe
+            transparent
+            opacity={0.5}
+            depthWrite={false}
+          />
+        </mesh>
+      )}
       {props.waypoints.map((point, index) => (
         <mesh key={index} position={point.pose.position}>
           <sphereGeometry args={[0.008, 12, 8]} />
           <meshBasicMaterial color={mediaColor(2)} />
         </mesh>
       ))}
-      <primitive object={targetObject}>
+      <primitive object={targetObject} visible={props.poseVisible}>
         <axesHelper args={[0.11]} />
         <mesh>
           <sphereGeometry args={[0.009, 16, 10]} />

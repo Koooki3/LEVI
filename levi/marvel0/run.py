@@ -63,6 +63,7 @@ from levi.workspace import Workspace
 
 from . import command, deploy, net, record, stack, status
 from .errors import fail
+from .manual_worker import production_factory
 
 SCHEMA = "levi.marvel0.run.v1"
 RECORD_SCHEMA = "levi.marvel0.run_record.v1"
@@ -391,7 +392,9 @@ class Refuse(Exception):
     ``message`` and the facts as ``extra``."""
 
     def __init__(self, code, **extra):
-        if code in REFUSALS:
+        if code == "manual_refused":
+            self.status, text = 409, "Manual session refused: {reason_code}."
+        elif code in REFUSALS:
             self.status, text = REFUSALS[code]
         else:
             self.status, text = 409, WHY_NOT[code]
@@ -1273,6 +1276,11 @@ class Host:
     sleep: Callable = time.sleep
     # Run the 2 Hz watcher in a thread of its own (tests call ``tick`` by hand).
     background: bool = False
+    # Manual transport is never selected by HTTP, client.enabled or an env var.
+    # Only tests inject a synthetic factory and a trusted settled observer.
+    manual_factory: Callable = production_factory
+    manual_enabled: Callable = lambda: False
+    manual_settled: Callable = lambda engine: None
 
 
 def production_host() -> Host:
@@ -1425,6 +1433,9 @@ class Supervisor:
         self._preflighting = False
         self._watcher: threading.Thread | None = None
         self._cache: tuple | None = None
+        from .manual_supervision import ManualSessions
+
+        self.manual = ManualSessions(self)
 
     # ---- small things
 
@@ -1884,6 +1895,9 @@ class Supervisor:
         """The running client as a job (``levi stop`` refuses while it runs),
         or None."""
         with self._mutex:
+            manual_job = self.manual.active()
+            if manual_job is not None:
+                return manual_job
             rec = self._rec
             if rec is None or rec.get("phase") not in ("intent", "started"):
                 return None

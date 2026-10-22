@@ -1,12 +1,41 @@
 import { Euler, Quaternion } from "three";
 import { forwardPose } from "@/lib/robot-studio/fr3-kinematics";
+import {
+  angleToOpeningWidthM,
+  openingRatioToAngle,
+} from "@/lib/robot-studio/robotiq-2f85";
+import {
+  cloneToolDraft,
+  cloneTeleopDraft,
+  type ToolDraft,
+  type TeleopDraft,
+} from "./tool-draft";
+import {
+  cloneWorkspaceBox,
+  pointInWorkspace,
+  type WorkspaceBox,
+} from "./workspace-draft";
 
 export type PreviewPose = {
   position: [number, number, number];
   quaternion: [number, number, number, number];
 };
 export type PoseFields = [string, string, string, string, string, string];
-export type Waypoint = { joints: number[]; pose: PreviewPose };
+export type ToolPreview = { openingRatio: number; draft: ToolDraft };
+export type Waypoint = {
+  joints: number[];
+  pose: PreviewPose;
+  tool?: {
+    opening_ratio: number;
+    opening_width_m: number;
+    mount_draft: PreviewPose | null;
+    tcp_draft: PreviewPose | null;
+  };
+};
+export type ExecutionDraft = {
+  teleopDraft: TeleopDraft;
+  workspaceBox: WorkspaceBox | null;
+};
 export const MAX_WAYPOINTS = 100;
 const RAD = Math.PI / 180;
 
@@ -38,21 +67,43 @@ export function parsePoseFields(fields: PoseFields): PreviewPose | null {
   };
 }
 
-export function previewWaypoint(joints: readonly number[]): Waypoint {
+export function previewWaypoint(
+  joints: readonly number[],
+  tool?: ToolPreview,
+): Waypoint {
   const pose = forwardPose([...joints]);
-  return {
+  const saved: Waypoint = {
     joints: [...joints],
     pose: { position: [...pose.position], quaternion: [...pose.quaternion] },
   };
+  if (tool) {
+    const angle = openingRatioToAngle(tool.openingRatio);
+    const draft = cloneToolDraft(tool.draft);
+    saved.tool = {
+      opening_ratio: tool.openingRatio,
+      opening_width_m: angleToOpeningWidthM(angle),
+      mount_draft: draft.mount,
+      tcp_draft: draft.tcp,
+    };
+  }
+  return saved;
 }
 
 /** A design draft, never a robot command or a recorded demonstration. */
-export function exportPreview(waypoints: readonly Waypoint[]): string {
+export function exportPreview(
+  waypoints: readonly Waypoint[],
+  config?: ExecutionDraft,
+): string {
   if (!waypoints.length || waypoints.length > MAX_WAYPOINTS)
     throw new Error("Invalid waypoint count");
+  const workspaceBox = config ? cloneWorkspaceBox(config.workspaceBox) : null;
+  const teleop = config ? cloneTeleopDraft(config.teleopDraft) : undefined;
   return JSON.stringify(
     {
-      format: "levi_robot_preview_v1",
+      format:
+        config || waypoints.some((p) => p.tool)
+          ? "levi_robot_preview_v2"
+          : "levi_robot_preview_v1",
       robot: "fr3",
       base_frame: "fr3_link0",
       end_frame: "fr3_link8",
@@ -60,7 +111,46 @@ export function exportPreview(waypoints: readonly Waypoint[]): string {
       hardware_execution: false,
       collision_checked: false,
       calibrated_tool: false,
-      waypoints: waypoints.map((point) => previewWaypoint(point.joints)),
+      ...(config
+        ? {
+            execution_draft: {
+              motion_enabled: false,
+              teleop,
+              workspace_box: workspaceBox
+                ? {
+                    frame_id: "fr3_link0",
+                    target_frame: "fr3_link8",
+                    min_m: workspaceBox.min,
+                    max_m: workspaceBox.max,
+                    checks_tool_sweep: false,
+                  }
+                : null,
+            },
+          }
+        : {}),
+      waypoints: waypoints.map((point) => {
+        const saved = previewWaypoint(
+          point.joints,
+          point.tool
+            ? {
+                openingRatio: point.tool.opening_ratio,
+                draft: {
+                  mount: point.tool.mount_draft,
+                  tcp: point.tool.tcp_draft,
+                },
+              }
+            : undefined,
+        );
+        return config
+          ? {
+              ...saved,
+              within_workspace_draft: pointInWorkspace(
+                workspaceBox,
+                saved.pose.position,
+              ),
+            }
+          : saved;
+      }),
     },
     null,
     2,

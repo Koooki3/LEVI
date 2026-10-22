@@ -1,0 +1,131 @@
+{
+  "repository": "https://github.com/PickNikRobotics/ros2_robotiq_gripper",
+  "commit": "a74d007d8f2f06dc6a503ad21038ba869d4999a6",
+  "license": "BSD-3-Clause",
+  "copyright": "Copyright (c) 2022, PickNik Robotics",
+  "sources": {
+    "LICENSE": {
+      "url": "https://github.com/PickNikRobotics/ros2_robotiq_gripper/blob/a74d007d8f2f06dc6a503ad21038ba869d4999a6/LICENSE",
+      "bytes": 1524,
+      "sha256": "a47544ef0ad645c587e46348dc10e68b89c3e74732bd124c005cfcd8ede3b3b8"
+    },
+    "robotiq_description/package.xml": {
+      "url": "https://github.com/PickNikRobotics/ros2_robotiq_gripper/blob/a74d007d8f2f06dc6a503ad21038ba869d4999a6/robotiq_description/package.xml",
+      "bytes": 1236,
+      "sha256": "5395e79f5aa69af743f6dcec774107b6470ecd3bd87ab35f0556e1783ebe640f"
+    },
+    "robotiq_description/urdf/robotiq_2f_85_macro.urdf.xacro": {
+      "url": "https://github.com/PickNikRobotics/ros2_robotiq_gripper/blob/a74d007d8f2f06dc6a503ad21038ba869d4999a6/robotiq_description/urdf/robotiq_2f_85_macro.urdf.xacro",
+      "bytes": 13885,
+      "sha256": "0c144283f72a2d75feb3d90cb49b3cea3f76e19e6026dd169651ec94a3c96fb3"
+    },
+    "robotiq_description/meshes/visual/2f_85/robotiq_base.dae": {
+      "url": "https://github.com/PickNikRobotics/ros2_robotiq_gripper/blob/a74d007d8f2f06dc6a503ad21038ba869d4999a6/robotiq_description/meshes/visual/2f_85/robotiq_base.dae",
+      "bytes": 2159533,
+      "sha256": "761a79d586a48d367d60f146ca77ef7d2821ad790f7b1b1c93b061ac59799267"
+    },
+    "robotiq_description/meshes/visual/2f_85/left_knuckle.dae": {
+      "url": "https://github.com/PickNikRobotics/ros2_robotiq_gripper/blob/a74d007d8f2f06dc6a503ad21038ba869d4999a6/robotiq_description/meshes/visual/2f_85/left_knuckle.dae",
+      "bytes": 78865,
+      "sha256": "1b82214363d9548f3562be70e25cd23217a304c72ccd37bc1551cf1a3a64029d"
+    },
+    "robotiq_description/meshes/visual/2f_85/right_knuckle.dae": {
+      "url": "https://github.com/PickNikRobotics/ros2_robotiq_gripper/blob/a74d007d8f2f06dc6a503ad21038ba869d4999a6/robotiq_description/meshes/visual/2f_85/right_knuckle.dae",
+      "bytes": 79122,
+      "sha256": "532b6f6f8794883ff34995701036ca392461f26127757f92003db127693bc57c"
+    },
+    "robotiq_description/meshes/visual/2f_85/left_finger.dae": {
+      "url": "https://github.com/PickNikRobotics/ros2_robotiq_gripper/blob/a74d007d8f2f06dc6a503ad21038ba869d4999a6/robotiq_description/meshes/visual/2f_85/left_finger.dae",
+      "bytes": 191399,
+      "sha256": "5fb9e5659c735e48eb55269da431cf61b3b7a6745922c1932a7adefb1db86dc3"
+    },
+    "robotiq_description/meshes/visual/2f_85/right_finger.dae": {
+      "url": "https://github.com/PickNikRobotics/ros2_robotiq_gripper/blob/a74d007d8f2f06dc6a503ad21038ba869d4999a6/robotiq_description/meshes/visual/2f_85/right_finger.dae",
+      "bytes": 190861,
+      "sha256": "3b2245b5537eb596d7f8a4c64b12e3aedea46e365fc589019184d3b4200e664f"
+    },
+    "robotiq_description/meshes/visual/2f_85/left_inner_knuckle.dae": {
+      "url": "https://github.com/PickNikRobotics/ros2_robotiq_gripper/blob/a74d007d8f2f06dc6a503ad21038ba869d4999a6/robotiq_description/meshes/visual/2f_85/left_inner_knuckle.dae",
+      "bytes": 110219,
+      "sha256": "2df009ef28868c90a4904370f5f4995c74ec84e0b8ca1371044e0ea669edcd71"
+    },
+    "robotiq_description/meshes/visual/2f_85/right_inner_knuckle.dae": {
+      "url": "https://github.com/PickNikRobotics/ros2_robotiq_gripper/blob/a74d007d8f2f06dc6a503ad21038ba869d4999a6/robotiq_description/meshes/visual/2f_85/right_inner_knuckle.dae",
+      "bytes": 111109,
+      "sha256": "4cc6de99e177773ba755805b58b67537c3af24b2fd8f3a1bf4bbced87d6240a5"
+    },
+    "robotiq_description/meshes/visual/2f_85/left_finger_tip.dae": {
+      "url": "https://github.com/PickNikRobotics/ros2_robotiq_gripper/blob/a74d007d8f2f06dc6a503ad21038ba869d4999a6/robotiq_description/meshes/visual/2f_85/left_finger_tip.dae",
+      "bytes": 174578,
+      "sha256": "785ec7a83b4fc6357c211a39bb117833b1cfd4e9bccbef2efc7f35aeb2fdb92e"
+    },
+    "robotiq_description/meshes/visual/2f_85/right_finger_tip.dae": {
+      "url": "https://github.com/PickNikRobotics/ros2_robotiq_gripper/blob/a74d007d8f2f06dc6a503ad21038ba869d4999a6/robotiq_description/meshes/visual/2f_85/right_finger_tip.dae",
+      "bytes": 173460,
+      "sha256": "568371d25ddbcee8e432c0610bdcc7afcd1393d48d973eed92168e353eb4edf5"
+    }
+  },
+  "conversion_tool": {
+    "path": "scripts/robot-studio/vendor-fr3.py",
+    "bytes": 9473,
+    "sha256": "cd3d95cd60401533350066e4c6dd7970f7f54879ea4e95881ac1a7476c2d80dd"
+  },
+  "server_derivation": {
+    "source_name": "robotiq_gripper_server_ros2.py",
+    "bytes": 20152,
+    "sha256": "0227535877f04c22abddbad01fc1c60fef96a6a2dd5895f3ea55a3a2c9a9d90e",
+    "conversion_excerpt": "_X0 = 0.03060114\n_DX = 0.03152616 + 0.00563134\n_DZ = -0.00376347 + 0.04718515\n\nTHETA_OPEN = 0.0\nTHETA_CLOSED = 0.7929\nJOINT_NAME = \"robotiq_85_left_knuckle_joint\"\n\n\ndef _pad_x(theta: float) -> float:\n    return _X0 + _DX * math.cos(theta) - _DZ * math.sin(theta)\n\n\nSTROKE_M = 2.0 * (_pad_x(THETA_OPEN) - _pad_x(THETA_CLOSED))\n\n\ndef theta_to_width(theta: float) -> float:\n    \"\"\"Knuckle angle (rad) -> opening width (m), clamped to the usable range.\"\"\"\n    theta = min(max(float(theta), THETA_OPEN), THETA_CLOSED)\n    return max(0.0, 2.0 * (_pad_x(theta) - _pad_x(THETA_CLOSED)))\n\n\ndef width_to_theta(width: float) -> float:\n    \"\"\"Opening width (m) -> knuckle angle (rad). Monotonic, so bisect.\"\"\"\n    width = min(max(float(width), 0.0), STROKE_M)\n    low, high = THETA_OPEN, THETA_CLOSED\n    for _ in range(64):\n        mid = 0.5 * (low + high)\n        if theta_to_width(mid) > width:\n            low = mid\n        else:\n            high = mid\n    return 0.5 * (low + high)\n"
+  },
+  "standalone_frame": "gripper_mount",
+  "installation_calibrated": false,
+  "outputs": {
+    "LICENSE": {
+      "bytes": 1524,
+      "sha256": "a47544ef0ad645c587e46348dc10e68b89c3e74732bd124c005cfcd8ede3b3b8"
+    },
+    "SOURCE.md": {
+      "bytes": 2929,
+      "sha256": "2d614deb21e3fa186dec6432bdff4d1d49ad68f5f3e3d5f6bebc3458bd02c1a7"
+    },
+    "left_finger.glb": {
+      "bytes": 91132,
+      "sha256": "270969cfdde4570e019bec5a20adfbc90c7faa26c840f52bb872d74ce8b896bd"
+    },
+    "left_finger_tip.glb": {
+      "bytes": 86364,
+      "sha256": "24f89c4832223ef6f47b2ab7ee5d6b3d293df718b331aa935782ef465083ed7e"
+    },
+    "left_inner_knuckle.glb": {
+      "bytes": 52588,
+      "sha256": "ba223308f990c697a69a06e03e03a2fa5c1e0d9fde951c8df650b4218c890282"
+    },
+    "left_knuckle.glb": {
+      "bytes": 39572,
+      "sha256": "697e89b8c7d3cfcb8a9a48d70e81689df76fcc6cfa881d6f507913acf978a407"
+    },
+    "right_finger.glb": {
+      "bytes": 91132,
+      "sha256": "2b1036fc4896185f215b4fb6f65c3650e4e6a3f8ad17691b2ceeff44fbf59eec"
+    },
+    "right_finger_tip.glb": {
+      "bytes": 86364,
+      "sha256": "98e4e345c0a6935c2cf1ca82431ca98e4a5105e537116594b9a711be32c5b873"
+    },
+    "right_inner_knuckle.glb": {
+      "bytes": 52592,
+      "sha256": "892ed30b8701df0c002acc87903ddf4eb29cc3b8cc421b87417dfe0cb26d7ae5"
+    },
+    "right_knuckle.glb": {
+      "bytes": 39572,
+      "sha256": "56bd676ae7994a18235205c12aa920497ae359ab1951e0873e5cd8b2d730f24e"
+    },
+    "robotiq-2f85.urdf": {
+      "bytes": 4606,
+      "sha256": "32cfae46760dc9fbb8913e65ee69df38652a8f7d42c1cae8a2be011be5e5c5d9"
+    },
+    "robotiq_base.glb": {
+      "bytes": 1029784,
+      "sha256": "e25d155be17d6ba655a08c940fec16a3d63f55b3a6deebab2f4c9c5e46460e39"
+    }
+  }
+}

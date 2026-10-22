@@ -101,6 +101,16 @@ export const DEADLINES: Deadlines = {
   preview: 30_000,
 };
 
+/** A body sent as it is, with the Blob's own type as its Content-Type (a
+ * recorded clip); anything else is sent as JSON. */
+export interface RawBody {
+  raw: Blob;
+}
+const isRaw = (body: unknown): body is RawBody =>
+  typeof body === "object" &&
+  body !== null &&
+  (body as RawBody).raw instanceof Blob;
+
 export interface Marvel0Api {
   models(signal?: AbortSignal): Promise<ApiResult>;
   site(signal?: AbortSignal): Promise<ApiResult>;
@@ -163,11 +173,17 @@ export function createCaller({
           signal: request.signal,
           ...(body === undefined
             ? {}
-            : {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body),
-              }),
+            : isRaw(body)
+              ? {
+                  method: "POST",
+                  headers: { "Content-Type": body.raw.type },
+                  body: body.raw,
+                }
+              : {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(body),
+                }),
         }),
         cut,
       ]);

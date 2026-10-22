@@ -8,7 +8,10 @@
 // (selection.ts), chosen in the policy server card, so the command cannot ask
 // for another model than the server serves. A person copies the command into a
 // terminal, or starts the client from the Run card of this step, with a hand
-// on the physical e-stop; this card itself starts nothing.
+// on the physical e-stop; this card itself starts nothing. The voice card
+// above the task instruction (speech-panel.tsx) only proposes one of the
+// allowed instructions; pressing its Use fills the task instruction and does
+// nothing else.
 import { useMemo, useRef, useState, useEffect, type ReactNode } from "react";
 import { Check, ClipboardCopy, TriangleAlert } from "lucide-react";
 import { Badge, Button, Card, Field, Input, Select } from "@/components/ds";
@@ -42,6 +45,7 @@ import type { RunView } from "./run-logic";
 import { RunStart } from "./run-start";
 import type { Effective } from "./selection";
 import type { RunActions } from "./use-run-actions";
+import { SpeechPanel } from "./speech-panel";
 import type { Marvel0Catalog } from "./use-marvel0-actions";
 
 interface Made {
@@ -88,6 +92,7 @@ export function CommandPanel({
   const [local, setLocal] = useState<Partial<Record<FieldName, Say>>>({});
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
+  const taskInput = useRef<HTMLInputElement>(null);
   if (!models || !site || !initial || !selection) return null;
 
   // Model and RTC are the selection's, whatever else was typed.
@@ -180,6 +185,13 @@ export function CommandPanel({
               error={fieldError("model_id")}
               onUseAnother={onUseAnother}
             />
+            <SpeechPanel
+              modelId={form.modelId}
+              onUse={(prompt) => {
+                edit({ prompt });
+                taskInput.current?.focus();
+              }}
+            />
             <Field
               className="rg-span"
               label={t("marvel0.cmd.field.prompt")}
@@ -200,6 +212,7 @@ export function CommandPanel({
               error={fieldError("prompt")}
             >
               <Input
+                ref={taskInput}
                 value={form.prompt}
                 list="marvel0-known-prompts"
                 autoComplete="off"
@@ -763,15 +776,17 @@ function CommandResult({
         )}
       </div>
       <p className="rg-muted">{t("marvel0.cmd.result.hint")}</p>
-      {start}
-      <pre
-        ref={text}
-        lang="en"
-        className={`rg-command${stale ? " rg-command--stale" : ""}`}
-        data-testid="marvel0-command-text"
-      >
-        {preview.command}
-      </pre>
+      {!stale && start}
+      {!stale && (
+        <pre
+          ref={text}
+          lang="en"
+          className="rg-command"
+          data-testid="marvel0-command-text"
+        >
+          {preview.command}
+        </pre>
+      )}
       <p>
         {sayText(
           {

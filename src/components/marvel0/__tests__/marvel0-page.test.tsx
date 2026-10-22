@@ -235,10 +235,10 @@ describe("the marvel0 page", () => {
     expect(link.getAttribute("href")).toBe("/robot-studio");
     expect(card.textContent).toContain(en["marvel0.studio.title"]);
     expect(card.textContent).toContain(en["marvel0.studio.note"]);
-    // It says what the page is not: connected to a robot.
-    expect(en["marvel0.studio.title"]).toMatch(/offline/i);
-    expect(en["marvel0.studio.title"]).toMatch(/no robot connection/i);
-    expect(zh["marvel0.studio.title"]).toContain("不连接机器人");
+    // The expanded studio names the actual tool and keeps live motion gated.
+    expect(en["marvel0.studio.title"]).toContain("2F-85");
+    expect(en["marvel0.studio.note"]).toContain("Live motion remains gated");
+    expect(zh["marvel0.studio.note"]).toContain("真机运动仍受门禁限制");
     // One link only: the card is a way to the page, not a second control.
     expect(card.querySelectorAll("a, button")).toHaveLength(1);
     // Between the head and the first of the steps, not after the steps.
@@ -451,10 +451,25 @@ describe("the marvel0 page", () => {
       .filter((b) => !strip.contains(b))
       .map((b) => b.textContent?.trim());
     expect(buttons).toEqual(["Refresh"]);
-    // No link, form or field, except the one card to the offline 3D preview.
+    // Navigation can only scroll; the studio is the sole route link here.
+    const nav = host.querySelector("[data-testid=marvel0-step-nav]")!;
+    expect(
+      Array.from(nav.querySelectorAll("a"), (a) => a.getAttribute("href")),
+    ).toEqual([
+      "#marvel0-step-arm",
+      "#marvel0-step-policy",
+      "#marvel0-step-client",
+      "#marvel0-step-run",
+      "#marvel0-step-autonomy",
+    ]);
     const others = Array.from(
       host.querySelectorAll("a, form, input, select"),
-    ).filter((el) => !el.closest("[data-testid=marvel0-studio-link]"));
+    ).filter(
+      (el) =>
+        !el.closest(
+          "[data-testid=marvel0-studio-link], [data-testid=marvel0-step-nav]",
+        ),
+    );
     expect(others).toHaveLength(0);
   });
 

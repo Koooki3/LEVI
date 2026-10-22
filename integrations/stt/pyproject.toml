@@ -1,0 +1,42 @@
+[project]
+name = "levi-stt-worker"
+version = "0.1.0"
+description = "Isolated speech-to-text worker for LEVI's marvel0 voice input (Qwen3-ASR behind a Silero VAD gate)"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = "Apache-2.0"
+# Exact pins: the gate thresholds were measured with these versions
+# (scratchpad benchmark of 2026-10-20), and the weights are loaded without
+# trust_remote_code, so the model code is the installed transformers.
+dependencies = [
+  "numpy>=2.1,<3",
+  "torch==2.13.0",
+  "transformers==5.20.2",
+  "accelerate==1.15.0",
+  "silero-vad==6.2.3",
+]
+
+[project.scripts]
+levi-stt-worker = "levi_stt_worker.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["levi_stt_worker"]
+
+# The worker runs on the one Linux x86_64 workstation with the RTX 5090; a
+# universal lock would only add platforms that have no CUDA wheel.
+[tool.uv]
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+# torch 2.13.0 with CUDA 13.2 (arch list includes sm_120 for the 5090); the
+# core LEVI environment stays model-free.
+[[tool.uv.index]]
+name = "pytorch-cu132"
+url = "https://download.pytorch.org/whl/cu132"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu132" }]

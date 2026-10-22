@@ -20,6 +20,8 @@ package-lock.json
 /out/
 /public/*
 !/public/urdf/
+# The marvel0 voice card's AudioWorklet (loaded as /voice-worklet.js).
+!/public/voice-worklet.js
 
 # production
 /build
@@ -95,3 +97,6 @@ levi.md
 !/public/robots/
 /public/robots/*
 !/public/robots/fr3/
+
+# Pinned Robotiq preview assets.
+!/public/robots/robotiq-2f85/

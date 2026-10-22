@@ -413,7 +413,8 @@ and shown as **text to copy**.
 
 On the page (`/marvel_workstation`) they are steps 2 and 3, each beside the read-only
 status card of what it is about: the **Policy server** card and the **Demo
-client command** card. Nothing else on the page does anything.
+client command** card. Nothing else on the page does anything, except the **Speech input** card above
+the task instruction field, which only proposes a sentence for it ([Speech input](SPEECH.md)).
 
 They use the same local authentication as the other `/api/levi` routes (the web
 UI token; an agent's Bearer credential is refused), and both need the **marvel0 site
@@ -428,6 +429,14 @@ file** first. The two writes (deploy and stop) are a person's only.
 | `POST /api/levi/marvel0/deploy` | starts one policy server as a transient `systemd --user` unit (person only) |
 | `POST /api/levi/marvel0/deploy/stop` | stops the unit this panel started (person only) |
 | `GET /api/levi/marvel0/deploy/log` | the tail of that unit's log, printable, with every path cut to its last name (`?lines=`, 1 to 200, default 80) |
+| `GET /api/levi/marvel0/speech` | whether speech input is installed, what its worker is doing (`unavailable`, `off`, `loading`, `ready`, `busy` or `failed`) and whether it may run now (`gate`). Passive: it never starts the worker |
+| `POST /api/levi/marvel0/speech/transcribe` | one WAV recording (16 kHz mono 16-bit, at most 10 s) in; the transcript and the closest of the allowed task instructions out (person only) |
+| `POST /api/levi/marvel0/speech/match` | the same matching for a transcript the person edited. Text only; the worker is not touched (person only) |
+| `POST /api/levi/marvel0/speech/release` | stops the speech worker and frees its GPU memory; idempotent (person only) |
+
+#### Speech input
+
+The **Speech input** card fills the task instruction field of the client command panel from a spoken sentence, and nothing else: a local model transcribes a recording, LEVI offers the closest of the *allowed* task instructions, and only when a person clicks **Use** does that sentence from the list (never the transcript) reach the field. **Make command**, **Copy** and Enter in the client terminal stay separate actions of the person. Audio and transcripts are kept nowhere (not in a file, a log line or the deploy record), the model runs offline in its own process, and the physical GPU lock is not taken. Speech does not stop or pause the robot, nothing listens for a stop word, and the page says so next to the card. The routes above, the guards (no transcription while a policy server is starting, a client is connected or the arm lock is held), the settings (`LEVI_STT_WORKER_PYTHON`, `LEVI_STT_MODEL_DIR`, `LEVI_STT_MODEL`), the limits and what has not been verified are in [Speech input](SPEECH.md).
 
 #### What the panels never do
 

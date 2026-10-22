@@ -29,6 +29,7 @@ import { WordedText } from "./action-parts";
 import { autonomyApi, type AutonomyApi } from "./autonomy-api";
 import { AutonomyRunCard, StopCaption } from "./autonomy-run-card";
 import { PrepareCard } from "./autonomy-prepare";
+import { AutonomyPlan } from "./autonomy-overview";
 import {
   LIMITS,
   STATE_TONE,
@@ -226,6 +227,7 @@ export function AutonomyStep({
   const siteState = ready.value?.site.state ?? "ok";
   const unconfigured = ready.value !== null && siteState !== "ok";
   const showRun = hasRun(runView) || (run.loaded && runView === null);
+  const showRunCard = showRun && !(disabled && !runLive);
   const readProblem =
     ready.problem && !("format" in ready.problem) && !disabled
       ? ready.problem
@@ -313,7 +315,8 @@ export function AutonomyStep({
             </p>
           )}
           <div className="rg-autonomy__cards">
-            {showRun && !(disabled && !runLive) && (
+            {!showRunCard && <AutonomyPlan />}
+            {showRunCard && (
               <AutonomyRunCard poll={run} actions={actions} limits={limits} />
             )}
             {!runLive && !disabled && !unconfigured && ready.loaded && (

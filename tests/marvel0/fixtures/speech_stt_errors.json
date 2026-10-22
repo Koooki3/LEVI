@@ -1,0 +1,15 @@
+[
+  {"text": "pick the eggplant in the blew plate", "prompt": "pick the eggplant in the blue plate", "fix": ["blew", "blue"]},
+  {"text": "pick the egg plant in the blue plate", "prompt": "pick the eggplant in the blue plate", "fix": ["egg plant", "eggplant"]},
+  {"text": "pick the egg plan in the blue plate", "prompt": "pick the eggplant in the blue plate", "fix": ["egg plan", "eggplant"]},
+  {"text": "pick the eggplant in the blue plays", "prompt": "pick the eggplant in the blue plate", "fix": ["plays", "plates"]},
+  {"text": "stack the blades of same color together", "prompt": "stack the plates of same color together", "fix": ["blades", "plates"]},
+  {"text": "stuck the plates of same color together", "prompt": "stack the plates of same color together", "fix": ["stuck", "stack"]},
+  {"text": "stack the plates of same collar together", "prompt": "stack the plates of same color together", "fix": ["collar", "color"]},
+  {"text": "pick screens of same size into the empty slot of screw box", "prompt": "pick screws of same size into the empty slot of screw box", "fix": ["screens", "screws"]},
+  {"text": "place tomato on red plate then eggplant on blue play", "prompt": "place tomato on red plate then eggplant on blue plate", "fix": ["play", "plate"]},
+  {"text": "把茄籽放到蓝盘子里", "prompt": "pick the eggplant in the blue plate", "fix": ["茄籽", "茄子"]},
+  {"text": "把茄子放到兰盘子里", "prompt": "pick the eggplant in the blue plate", "fix": ["兰", "蓝"]},
+  {"text": "把茄子放到蓝盘字里", "prompt": "pick the eggplant in the blue plate", "fix": ["盘字", "盘子"]},
+  {"text": "把相同大小的螺思放进螺丝盒的空槽里", "prompt": "pick screws of same size into the empty slot of screw box", "fix": ["螺思", "螺丝"]}
+]

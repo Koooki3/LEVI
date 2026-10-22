@@ -37,12 +37,29 @@ import {
   type Waypoint,
 } from "./preview-state";
 import type { StudioMode } from "./scene";
+import type { RobotStudioMeasurement } from "@/types/robotStudio";
+import ToolPanel from "./tool-panel";
+import {
+  DEFAULT_TOOL_DRAFT,
+  isValidPreviewPose,
+  EMPTY_TELEOP_DRAFT,
+  type ToolDraft,
+  type TeleopDraft,
+} from "./tool-draft";
+import TelemetryPanel from "./telemetry-panel";
+import { measuredOpeningRatio } from "./telemetry-state";
+import WorkspacePanel from "./workspace-panel";
+import ManualControls from "./manual-controls";
+import ParameterPanel from "./parameter-panel";
+import type { ManualAnchor } from "./manual-api";
+import type { ManualDragController } from "./manual-session";
+import { pointInWorkspace, type WorkspaceBox } from "./workspace-draft";
 
 const Scene = dynamic(() => import("./scene"), { ssr: false });
 const FIELD_NAMES = ["X", "Y", "Z", "RX", "RY", "RZ"] as const;
 const START = forwardPose([...FR3_INITIAL_JOINTS]);
 type SolveState = {
-  kind: "ready" | "unreachable" | "invalid";
+  kind: "ready" | "unreachable" | "invalid" | "outside";
   positionError: number;
   orientationError: number;
 };
@@ -65,6 +82,21 @@ class SceneBoundary extends Component<
 
 export default function RobotStudio() {
   const { t } = useLocale();
+  const [openingRatio, setOpeningRatio] = useState(1);
+  const [toolDraft, setToolDraft] = useState<ToolDraft>(DEFAULT_TOOL_DRAFT);
+  const [teleopDraft, setTeleopDraft] =
+    useState<TeleopDraft>(EMPTY_TELEOP_DRAFT);
+  const [workspaceBox, setWorkspaceBox] = useState<WorkspaceBox | null>(null);
+  const [measurement, setMeasurement] = useState<RobotStudioMeasurement | null>(
+    null,
+  );
+  const [syncMode, setSyncMode] = useState<"offline" | "follow" | "edit">(
+    "offline",
+  );
+  const syncModeRef = useRef(syncMode);
+  const latestMeasuredRef = useRef<RobotStudioMeasurement | null>(null);
+  const [lastFollowSample, setLastFollowSample] =
+    useState<RobotStudioMeasurement | null>(null);
   const [joints, setJoints] = useState<number[]>([...FR3_INITIAL_JOINTS]);
   const jointsRef = useRef(joints);
   const [target, setTarget] = useState<PreviewPose>(START);
@@ -92,16 +124,28 @@ export default function RobotStudio() {
   } | null>(null);
   const frame = useRef<number | null>(null);
   const pendingTarget = useRef<PreviewPose | null>(null);
+  const manualController = useRef<ManualDragController | null>(null);
+  const receiveManualController = useCallback(
+    (controller: ManualDragController | null) => {
+      manualController.current = controller;
+    },
+    [],
+  );
 
   const updateJoints = useCallback((next: number[]) => {
     jointsRef.current = next;
     setJoints(next);
   }, []);
   const solveTarget = useCallback(
-    (next: PreviewPose) => {
-      setTarget(next);
-      setFields(poseFields(next));
+    (next: PreviewPose, box = workspaceBox) => {
       try {
+        if (!isValidPreviewPose(next)) throw new RangeError("Invalid target");
+        setTarget(next);
+        setFields(poseFields(next));
+        if (box && !pointInWorkspace(box, next.position)) {
+          setSolve({ kind: "outside", positionError: 0, orientationError: 0 });
+          return false;
+        }
         const result = solvePose(next, jointsRef.current);
         setSolve({
           kind: result.converged ? "ready" : "unreachable",
@@ -109,11 +153,13 @@ export default function RobotStudio() {
           orientationError: result.orientationError,
         });
         if (result.converged) updateJoints([...result.joints]);
+        return result.converged;
       } catch {
         setSolve({ kind: "invalid", positionError: 0, orientationError: 0 });
+        return false;
       }
     },
-    [updateJoints],
+    [updateJoints, workspaceBox],
   );
   const cancelPending = useCallback(() => {
     if (frame.current !== null) cancelAnimationFrame(frame.current);
@@ -121,27 +167,47 @@ export default function RobotStudio() {
     pendingTarget.current = null;
   }, []);
   useEffect(() => cancelPending, [cancelPending]);
+  const receiveManualAnchor = useCallback(
+    (anchor: ManualAnchor | null) => {
+      if (!anchor) return;
+      cancelPending();
+      const next = [...anchor.joints_rad];
+      updateJoints(next);
+      solveTarget(forwardPose(next));
+    },
+    [cancelPending, updateJoints, solveTarget],
+  );
   const onTarget = useCallback(
     (next: PreviewPose) => {
+      if (syncModeRef.current === "follow") return;
       pendingTarget.current = next;
       if (frame.current !== null) return;
       frame.current = requestAnimationFrame(() => {
         frame.current = null;
         const latest = pendingTarget.current;
         pendingTarget.current = null;
-        if (latest) solveTarget(latest);
+        if (latest) {
+          if (solveTarget(latest))
+            manualController.current?.target(latest.position);
+          else manualController.current?.revoke("preview_invalid");
+        }
       });
     },
     [solveTarget],
   );
   const onDragStart = useCallback(() => {
+    if (syncModeRef.current === "follow") return;
     dragStart.current = { joints: [...jointsRef.current], target, solve };
+    manualController.current?.beginDrag();
     setDragging(true);
   }, [target, solve]);
   const onDragEnd = useCallback(() => {
+    cancelPending();
+    manualController.current?.revoke("drag_end");
     setDragging(false);
-  }, []);
+  }, [cancelPending]);
   const cancelDrag = useCallback(() => {
+    manualController.current?.revoke("drag_cancel");
     cancelPending();
     const previous = dragStart.current;
     if (!previous) return;
@@ -175,17 +241,90 @@ export default function RobotStudio() {
     [],
   );
   const onSceneFailure = useCallback(() => setModel("failed"), []);
-  const reset = () => {
+  const applyFollowMeasurement = useCallback(
+    (measured: RobotStudioMeasurement) => {
+      // Feedback is displayed as received, even outside the draft workspace.
+      // Bounds govern editing, never alter or clamp the measured robot pose.
+      cancelPending();
+      const next = [...measured.joints_rad];
+      const pose = forwardPose(next);
+      updateJoints(next);
+      setTarget(pose);
+      setFields(poseFields(pose));
+      setLastFollowSample(measured);
+      const ratio = measuredOpeningRatio(measured);
+      if (ratio !== null) setOpeningRatio(ratio);
+      setSolve({
+        kind:
+          workspaceBox && !pointInWorkspace(workspaceBox, pose.position)
+            ? "outside"
+            : "ready",
+        positionError: 0,
+        orientationError: 0,
+      });
+    },
+    [cancelPending, updateJoints, workspaceBox],
+  );
+  const receiveMeasurement = useCallback(
+    (measured: RobotStudioMeasurement | null) => {
+      setMeasurement(measured);
+      if (!measured) return;
+      latestMeasuredRef.current = measured;
+      if (syncModeRef.current === "follow") applyFollowMeasurement(measured);
+    },
+    [applyFollowMeasurement],
+  );
+  const changeSyncMode = (next: typeof syncMode) => {
     cancelPending();
-    updateJoints([...FR3_INITIAL_JOINTS]);
-    setTarget(START);
-    setFields(poseFields(START));
+    setDragging(false);
+    dragStart.current = null;
+    setCancelRevision((v) => v + 1);
+    syncModeRef.current = next;
+    setSyncMode(next);
+  };
+  const changeReading = (enabled: boolean) => {
+    changeSyncMode(enabled ? "follow" : "offline");
+    setMeasurement(null);
+    if (enabled) {
+      latestMeasuredRef.current = null;
+      setLastFollowSample(null);
+    }
+  };
+  const followMeasurement = (measured: RobotStudioMeasurement | null) => {
+    changeSyncMode("follow");
+    // A fresh click aligns immediately. Otherwise keep the latest measured
+    // pose visibly stale, including feedback received while editing the target.
+    if (measured) receiveMeasurement(measured);
+    else {
+      setMeasurement(null);
+      const last = latestMeasuredRef.current;
+      if (last) applyFollowMeasurement(last);
+      else setLastFollowSample(null);
+    }
+  };
+  const acceptJointPreview = (next: number[], ratio?: number | null) => {
+    cancelPending();
+    const pose = forwardPose(next);
+    setTarget(pose);
+    setFields(poseFields(pose));
+    if (workspaceBox && !pointInWorkspace(workspaceBox, pose.position)) {
+      setSolve({ kind: "outside", positionError: 0, orientationError: 0 });
+      return false;
+    }
+    updateJoints(next);
+    if (ratio !== undefined && ratio !== null) setOpeningRatio(ratio);
     setSolve({ kind: "ready", positionError: 0, orientationError: 0 });
+    return true;
+  };
+  const reset = () => {
+    if (syncModeRef.current === "follow") return;
+    acceptJointPreview([...FR3_INITIAL_JOINTS], 1);
     setDragging(false);
     dragStart.current = null;
     setCancelRevision((v) => v + 1);
   };
   const applyFields = () => {
+    if (syncModeRef.current === "follow") return;
     cancelPending();
     const next = parsePoseFields(fields);
     if (!next) {
@@ -195,19 +334,31 @@ export default function RobotStudio() {
     solveTarget(next);
   };
   const changeJoint = (index: number, value: number) => {
-    cancelPending();
+    if (syncModeRef.current === "follow") return;
     const next = [...jointsRef.current];
     next[index] = value;
-    updateJoints(next);
-    const pose = forwardPose(next);
-    setTarget(pose);
-    setFields(poseFields(pose));
-    setSolve({ kind: "ready", positionError: 0, orientationError: 0 });
+    acceptJointPreview(next);
+  };
+  const useMeasuredPreview = (measured: RobotStudioMeasurement) => {
+    const accepted = acceptJointPreview(
+      [...measured.joints_rad],
+      measuredOpeningRatio(measured),
+    );
+    if (!accepted) return;
+    if (syncModeRef.current !== "offline") changeSyncMode("edit");
+    else {
+      setDragging(false);
+      dragStart.current = null;
+      setCancelRevision((v) => v + 1);
+    }
   };
   const download = () => {
-    const blob = new Blob([exportPreview(waypoints)], {
-      type: "application/json",
-    });
+    const blob = new Blob(
+      [exportPreview(waypoints, { teleopDraft, workspaceBox })],
+      {
+        type: "application/json",
+      },
+    );
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -219,9 +370,20 @@ export default function RobotStudio() {
   };
   const dirtyFields = fields.some((v, i) => v !== poseFields(target)[i]);
   const ready = model === "ready";
+  const following = syncMode === "follow";
+  const editable = ready && !following;
+  const activeMode = editable ? mode : "view";
+  const waitingForPose = following && !lastFollowSample;
+  const followStatus = measurement
+    ? "following"
+    : lastFollowSample
+      ? "lostFeedback"
+      : "waitingForPose";
   const canSave =
-    ready &&
+    editable &&
     solve.kind === "ready" &&
+    (!workspaceBox ||
+      pointInWorkspace(workspaceBox, target.position) === true) &&
     !dirtyFields &&
     !dragging &&
     waypoints.length < MAX_WAYPOINTS;
@@ -235,7 +397,13 @@ export default function RobotStudio() {
           <p className="rs-description">{t("robotStudio.description")}</p>
         </div>
         <div className="rs-header-links">
-          <Badge>{t("robotStudio.offline")}</Badge>
+          <Badge>
+            {t(
+              syncMode === "offline"
+                ? "robotStudio.offline"
+                : "robotStudio.state.readOnlyMapping",
+            )}
+          </Badge>
           <Link className="ds-focus rs-link" href="/marvel_workstation">
             {t("robotStudio.console")}
           </Link>
@@ -251,8 +419,8 @@ export default function RobotStudio() {
             >
               <Button
                 size="sm"
-                variant={mode === "view" ? "primary" : "ghost"}
-                aria-pressed={mode === "view"}
+                variant={activeMode === "view" ? "primary" : "ghost"}
+                aria-pressed={activeMode === "view"}
                 onClick={() => setMode("view")}
               >
                 {t("robotStudio.view")}
@@ -260,8 +428,9 @@ export default function RobotStudio() {
               <Button
                 size="sm"
                 icon={Move3D}
-                variant={mode === "translate" ? "primary" : "ghost"}
-                aria-pressed={mode === "translate"}
+                disabled={following}
+                variant={activeMode === "translate" ? "primary" : "ghost"}
+                aria-pressed={activeMode === "translate"}
                 onClick={() => setMode("translate")}
               >
                 {t("robotStudio.translate")}
@@ -269,8 +438,9 @@ export default function RobotStudio() {
               <Button
                 size="sm"
                 icon={Rotate3D}
-                variant={mode === "rotate" ? "primary" : "ghost"}
-                aria-pressed={mode === "rotate"}
+                disabled={following}
+                variant={activeMode === "rotate" ? "primary" : "ghost"}
+                aria-pressed={activeMode === "rotate"}
                 onClick={() => setMode("rotate")}
               >
                 {t("robotStudio.rotate")}
@@ -292,8 +462,19 @@ export default function RobotStudio() {
             <SceneBoundary key={sceneKey} onFailure={onSceneFailure}>
               <Scene
                 joints={joints}
+                poseVisible={!waitingForPose}
+                toolVisible={
+                  !following || measuredOpeningRatio(lastFollowSample) !== null
+                }
+                openingRatio={openingRatio}
+                toolDraft={toolDraft}
+                measuredJoints={
+                  !following && measurement ? [...measurement.joints_rad] : null
+                }
+                measuredOpeningRatio={measuredOpeningRatio(measurement)}
+                workspaceBox={workspaceBox}
                 target={target}
-                mode={ready ? mode : "view"}
+                mode={activeMode}
                 space={space}
                 view={view}
                 viewRevision={viewRevision}
@@ -328,8 +509,20 @@ export default function RobotStudio() {
               </div>
             )}
             <div className="rs-scene-caption">
-              <span>{t("robotStudio.modelLabel")}</span>
-              <span>{t("robotStudio.targetLabel")}</span>
+              <span>
+                {t(
+                  following
+                    ? "robotStudio.state." + followStatus
+                    : "robotStudio.modelLabel",
+                )}
+              </span>
+              <span>
+                {t(
+                  following
+                    ? "robotStudio.state.measuredFlange"
+                    : "robotStudio.targetLabel",
+                )}
+              </span>
             </div>
           </div>
           <div className="rs-viewbar">
@@ -356,11 +549,23 @@ export default function RobotStudio() {
               {t("robotStudio.fit")}
             </Button>
           </div>
-          <p className="rs-hint">{t("robotStudio.dragHint")}</p>
+          <p className="rs-hint">
+            {t(
+              following
+                ? "robotStudio.state.followHint"
+                : "robotStudio.dragHint",
+            )}
+          </p>
         </section>
         <aside className="rs-inspector" aria-label={t("robotStudio.target")}>
           <section className="rs-panel-section">
-            <h2>{t("robotStudio.target")}</h2>
+            <h2>
+              {t(
+                following
+                  ? "robotStudio.state.measuredPose"
+                  : "robotStudio.target",
+              )}
+            </h2>
             <p className="rs-meta">{t("robotStudio.frameHint")}</p>
             <form
               onSubmit={(e) => {
@@ -368,7 +573,7 @@ export default function RobotStudio() {
                 applyFields();
               }}
             >
-              <fieldset disabled={!ready}>
+              <fieldset disabled={!editable}>
                 <legend>{t("robotStudio.position")}</legend>
                 <div className="rs-fields">
                   {FIELD_NAMES.slice(0, 3).map((name, i) => (
@@ -384,7 +589,7 @@ export default function RobotStudio() {
                         step="0.1"
                         min="-2000"
                         max="2000"
-                        value={fields[i]}
+                        value={waitingForPose ? "" : fields[i]}
                         onChange={(e) =>
                           setFields(
                             (old) =>
@@ -398,7 +603,7 @@ export default function RobotStudio() {
                   ))}
                 </div>
               </fieldset>
-              <fieldset disabled={!ready}>
+              <fieldset disabled={!editable}>
                 <legend>{t("robotStudio.orientation")}</legend>
                 <div className="rs-fields">
                   {FIELD_NAMES.slice(3).map((name, i) => (
@@ -414,7 +619,7 @@ export default function RobotStudio() {
                         step="0.1"
                         min="-360"
                         max="360"
-                        value={fields[i + 3]}
+                        value={waitingForPose ? "" : fields[i + 3]}
                         onChange={(e) =>
                           setFields(
                             (old) =>
@@ -428,7 +633,7 @@ export default function RobotStudio() {
                   ))}
                 </div>
               </fieldset>
-              <Button type="submit" disabled={!ready}>
+              <Button type="submit" disabled={!editable}>
                 {t("robotStudio.apply")}
               </Button>
             </form>
@@ -439,13 +644,22 @@ export default function RobotStudio() {
               aria-atomic="true"
             >
               <strong>
-                {solve.kind === "ready"
-                  ? t("robotStudio.solved")
-                  : solve.kind === "invalid"
-                    ? t("robotStudio.invalid")
-                    : t("robotStudio.unreachable")}
+                {following
+                  ? t("robotStudio.state." + followStatus)
+                  : solve.kind === "ready"
+                    ? t("robotStudio.solved")
+                    : solve.kind === "outside"
+                      ? t("robotStudio.workspace.outside")
+                      : solve.kind === "invalid"
+                        ? t("robotStudio.invalid")
+                        : t("robotStudio.unreachable")}
               </strong>
-              {solve.kind !== "ready" && <p>{t("robotStudio.lastValid")}</p>}
+              {!following && solve.kind !== "ready" && (
+                <p>{t("robotStudio.lastValid")}</p>
+              )}
+              {following && !waitingForPose && solve.kind === "outside" && (
+                <p>{t("robotStudio.state.measuredOutside")}</p>
+              )}
             </div>
             {solve.kind === "unreachable" && (
               <p className="rs-meta">
@@ -464,7 +678,7 @@ export default function RobotStudio() {
               icon={RotateCcw}
               variant="ghost"
               size="sm"
-              disabled={!ready}
+              disabled={!editable}
               onClick={reset}
             >
               {t("robotStudio.reset")}
@@ -479,7 +693,9 @@ export default function RobotStudio() {
                     <span>
                       {name.replace("fr3_joint", "J")}
                       <output>
-                        {((joints[i] * 180) / Math.PI).toFixed(1)}°
+                        {waitingForPose
+                          ? "—"
+                          : ((joints[i] * 180) / Math.PI).toFixed(1) + "°"}
                       </output>
                     </span>
                     <input
@@ -489,7 +705,8 @@ export default function RobotStudio() {
                       max={FR3_JOINT_LIMITS[i].upper}
                       step="0.001"
                       value={joints[i]}
-                      disabled={!ready}
+                      disabled={!editable}
+                      hidden={waitingForPose}
                       onChange={(e) => changeJoint(i, Number(e.target.value))}
                     />
                   </label>
@@ -497,6 +714,53 @@ export default function RobotStudio() {
               </div>
             </details>
           </section>
+          <div hidden={following}>
+            <ToolPanel
+              openingRatio={openingRatio}
+              onOpeningRatio={setOpeningRatio}
+              draft={toolDraft}
+              onDraft={setToolDraft}
+              teleopDraft={teleopDraft}
+              onTeleopDraft={setTeleopDraft}
+              disabled={!editable || dragging}
+            />
+          </div>
+          <WorkspacePanel
+            value={workspaceBox}
+            targetPosition={waitingForPose ? null : target.position}
+            onChange={(box) => {
+              cancelPending();
+              setWorkspaceBox(box);
+              if (following) {
+                setSolve({
+                  kind:
+                    box && !pointInWorkspace(box, target.position)
+                      ? "outside"
+                      : "ready",
+                  positionError: 0,
+                  orientationError: 0,
+                });
+              } else solveTarget(target, box);
+            }}
+            disabled={!ready || dragging}
+          />
+          <TelemetryPanel
+            onMeasurement={receiveMeasurement}
+            onEnabledChange={changeReading}
+            following={following}
+            onFollowMeasurement={followMeasurement}
+            onUseMeasurement={useMeasuredPreview}
+            canUsePreview={ready && !dragging}
+          />
+          <ParameterPanel />
+          <ManualControls
+            workspaceBox={workspaceBox}
+            teleopDraft={teleopDraft}
+            targetPosition={target.position}
+            canDrag={editable && mode === "translate" && solve.kind === "ready"}
+            onSessionAnchor={receiveManualAnchor}
+            onController={receiveManualController}
+          />
           <section className="rs-panel-section">
             <h2>{t("robotStudio.waypoints")}</h2>
             <p className="rs-meta">{t("robotStudio.waypointHint")}</p>
@@ -510,7 +774,10 @@ export default function RobotStudio() {
                 size="sm"
                 disabled={!canSave}
                 onClick={() =>
-                  setWaypoints((old) => [...old, previewWaypoint(joints)])
+                  setWaypoints((old) => [
+                    ...old,
+                    previewWaypoint(joints, { openingRatio, draft: toolDraft }),
+                  ])
                 }
               >
                 {t("robotStudio.add")}

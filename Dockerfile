@@ -4,6 +4,8 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY src ./src
+# public/voice-worklet.js is the voice card's AudioWorklet, served as /voice-worklet.js.
+COPY public ./public
 COPY next.config.ts postcss.config.mjs tsconfig.json ./
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN bun run build

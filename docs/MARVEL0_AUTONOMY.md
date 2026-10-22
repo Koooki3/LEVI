@@ -35,6 +35,16 @@ switch is on again. The first real use is staged with the owner present and a ha
 
 ## What the card shows
 
+The workstation has five in-page navigation links. They scroll to the existing
+steps and do not start a service. The run card adds a compact operational
+overview below Stop: the task, round, current subtask step and cap, completed
+and discarded rounds, and the loop stages. Only a fresh, explicit state
+highlights a stage. Waiting, closing, unknown and stale readings infer no
+stage; earlier stages are never marked complete. Reverse reset returns to
+round release. Unknown counters stay blank rather than becoming zero.
+Human labels remain on the existing keys, and the detailed run page remains
+available only after terminal D ends.
+
 Top to bottom, in the order of a run. While a hosted D lives the prepare part is hidden; once it has ended the run's
 summary stays and the next run can be prepared.
 
@@ -239,6 +249,12 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 “停止”和“强制结束”仍然可用。开关重新打开之前，不能准备或启动新的运行。第一次真机使用分阶段进行，用户在场、手放急停（设计第 12 节）。
 
 ## 卡片显示什么
+
+工作站提供五个页内导航入口，只滚动到既有步骤，不启动服务。运行卡片在停止按钮
+下方集中显示任务、轮次、当前子任务步数及上限、完成和丢弃轮次，以及运行流程。
+阶段高亮只采用新鲜且明确的状态；等待、收尾、未知或过期记录不推断阶段，也不把
+前序步骤标为已完成。反向复位后返回轮次放行。未知计数保留为空，不补成零。
+人工标注仍使用原有按键，详细运行页面仍在终端 D 结束后才开放。
 
 自上而下，按一次运行的顺序。托管的 D 活着时，准备部分隐藏；它结束后，这次运行的摘要保留，可以准备下一次。
 

@@ -163,6 +163,12 @@ app.include_router(pool_router)
 from .marvel0.api import router as marvel0_router
 
 app.include_router(marvel0_router)
+from .robot_studio.api import router as robot_studio_router
+
+app.include_router(robot_studio_router)
+from .marvel0.speech_api import router as marvel0_speech_router
+
+app.include_router(marvel0_speech_router)
 
 
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)

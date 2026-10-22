@@ -53,6 +53,8 @@ const SOURCES = [
   // Step 5, the autonomy system (its own words are also checked against the
   // backend's codes in autonomy-catalog.test.ts).
   "components/marvel0/autonomy-doc.ts",
+  "components/marvel0/autonomy-overview.tsx",
+  "components/marvel0/workstation-nav.tsx",
   "components/marvel0/autonomy-logic.ts",
   "components/marvel0/autonomy-keys.tsx",
   "components/marvel0/autonomy-run-card.tsx",
@@ -60,6 +62,12 @@ const SOURCES = [
   "components/marvel0/autonomy-step.tsx",
   "components/marvel0/autonomy-lazy.tsx",
   "components/marvel0/use-autonomy.ts",
+  // The voice card above the task instruction (its words for the backend's
+  // codes are also checked in speech-i18n.test.ts).
+  "components/marvel0/speech-logic.ts",
+  "components/marvel0/speech-panel.tsx",
+  "components/marvel0/speech-session.ts",
+  "components/marvel0/voice-capture.ts",
   // The card to the offline 3D preview.
   "components/marvel0/studio-link.tsx",
   // The navigation entry's word after its label.

@@ -25,10 +25,10 @@ body. No answer names a path.
 """
 
 import threading
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from . import run, stack_act
 from .deploy_api import person_only
@@ -174,3 +174,90 @@ def run_end(body: EndBody):
 def run_log(lines: int = 80):
     """The last printable lines of the client's log (1-200)."""
     return supervisor().log(lines)
+
+
+# Software-stage translation sessions share this process's Supervisor. Every
+# transport is selected in Python; the production factory refuses stop_unproven.
+Positive = Annotated[FiniteFloat, Field(gt=0)]
+Point = Annotated[list[FiniteFloat], Field(min_length=3, max_length=3)]
+Sequence = Annotated[int, Field(ge=0)]
+
+
+class ManualLimits(Closed):
+    box_min_m: Point
+    box_max_m: Point
+    max_delta_m: Positive
+    max_step_m: Positive
+    max_velocity_m_s: Positive
+    period_s: Positive
+    max_reading_age_s: Positive
+    max_anchor_age_s: Positive
+    deadman_timeout_s: Positive
+    target_timeout_s: Positive
+    max_orientation_drift_rad: Positive
+    quaternion_norm_tolerance: Positive
+    max_settle_age_s: Positive
+
+
+class ManualChallenge(Closed):
+    limits: ManualLimits
+
+
+class ManualStart(ManualChallenge):
+    request_id: str
+    challenge: str
+    confirm: str
+    attest: Attest
+
+
+class ManualIdentity(Closed):
+    request_id: str
+    session_id: str
+    generation: Annotated[int, Field(gt=0)]
+
+
+class ManualTarget(ManualIdentity):
+    anchor_id: str
+    sequence: Sequence
+    delta_position_m: Point
+
+
+class ManualDeadman(ManualIdentity):
+    sequence: Sequence
+    pressed: bool
+
+
+@router.get("/arm/manual")
+def manual_view():
+    """Capability/stop evidence only; never opens a robot connection."""
+    return supervisor().manual.view()
+
+
+@router.post("/arm/manual/challenge", dependencies=[Depends(person_only)])
+def manual_challenge(body: ManualChallenge):
+    return _answer(supervisor().manual.challenge, body.model_dump())
+
+
+@router.post("/arm/manual/start", status_code=202, dependencies=[Depends(person_only)])
+def manual_start(body: ManualStart):
+    return _answer(supervisor().manual.start, body.model_dump())
+
+
+@router.post("/arm/manual/target", dependencies=[Depends(person_only)])
+def manual_target(body: ManualTarget):
+    return _answer(supervisor().manual.target, body.model_dump())
+
+
+@router.post("/arm/manual/deadman", dependencies=[Depends(person_only)])
+def manual_deadman(body: ManualDeadman):
+    return _answer(supervisor().manual.deadman, body.model_dump())
+
+
+@router.post("/arm/manual/stop", dependencies=[Depends(person_only)])
+def manual_stop(body: ManualIdentity):
+    return _answer(supervisor().manual.stop, body.model_dump())
+
+
+@router.post("/arm/manual/end", dependencies=[Depends(person_only)])
+def manual_end(body: ManualIdentity):
+    return _answer(supervisor().manual.end, body.model_dump())

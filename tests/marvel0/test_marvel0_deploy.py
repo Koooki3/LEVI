@@ -3064,6 +3064,37 @@ def test_a_deployed_server_goes_from_starting_to_ready(marvel0):
     assert_no_paths(marvel0, view)
 
 
+@pytest.mark.parametrize("model", [SFT, CFG])
+def test_long_checkpoint_line_is_ready_while_log_display_stays_bounded(
+    tmp_path, monkeypatch, model
+):
+    nested = tmp_path / ("p" * 180)
+    nested.mkdir()
+    r = Marvel0(nested, monkeypatch)
+    r.deploy(model=model, accept_unverified=True)
+    r.server_comes_up(model=model, cfg=model == CFG)
+    assert len(r.norm_line(model)) > deploy.LINE_CHARS
+    result = deploy.scan(r.log_path(), r.ckpt(model), 8000)
+    assert result.norm
+    assert deploy.complete(result, rtc=True, cfg_capable=model == CFG)
+    assert not deploy.scan(r.log_path(), r.ckpt(model) + "-other", 8000).norm
+    shown = deploy.page_lines(r.log_path(), 50)
+    assert any(line.endswith("checkpoint: norm_stats.json") for line in shown)
+    assert all(str(nested) not in line for line in shown)
+    for lines in (
+        result.tail,
+        deploy.read_head(r.log_path()),
+        deploy.read_tail(r.log_path()),
+        deploy.page_lines(r.log_path(), 50),
+    ):
+        assert lines and all(len(line) <= deploy.LINE_CHARS for line in lines)
+    r.sup.invalidate()
+    view = r.sup.status()
+    assert view["state"] == "ready"
+    assert view["readiness"]["norm_stats"] is True
+    assert view["deploy"]["ready_at"] == record.iso(r.clock.now())
+
+
 def test_a_plain_server_is_ready_without_rtc_lines(marvel0):
     running(marvel0, rtc=False)
     view = marvel0.sup.status()

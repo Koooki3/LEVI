@@ -131,6 +131,15 @@ class ScreenBuf:
         self._cur: list = []
         self._pos = 0
         self._start = base  # offset of the current line's first byte
+        # What ``read`` derived from this buffer, so that a look at a screen that
+        # did not change costs nothing and a new line is classified once: the
+        # ``Seen`` of every committed line (aligned with ``lines``), the lexicon
+        # and line count they were made with, and the last view with its key.
+        self._seen: deque = deque(maxlen=LINES_KEPT)
+        self._seen_lex = None
+        self._seen_count = 0
+        self._view_key: tuple | None = None
+        self._view = None
 
     # ---- input
 
@@ -246,6 +255,7 @@ class Lexicon:
         self.tag_setup = texts["tag_setup"]
         self.join = texts["join"]
         self.plain: list = []  # (key, kind, regex, names) of untagged templates
+        heads: dict = {}  # key -> the template's fixed text before its first {x}
         for key, template in texts.items():
             if key in ("tag", "tag_setup", "join") or key in BODY_KINDS:
                 continue
@@ -273,8 +283,21 @@ class Lexicon:
             else:
                 regex, names = template_regex(template)
             self.plain.append((key, self._kind_of(key), regex, tuple(names)))
+            heads[key] = PLACEHOLDER.split(template.rstrip())[0]
         # Most literal first: a template with fewer placeholders is more specific.
         self.plain.sort(key=lambda item: (len(item[3]), -len(item[2].pattern)))
+        # Each regex is anchored at its fixed head, so a line can only match the
+        # templates whose head starts with the line's first character, or that have
+        # none: those, in the same order, are all ``classify`` tries.
+        self._plain_any = [item for item in self.plain if not heads[item[0]]]
+        self._plain_by_first = {
+            first: [
+                item
+                for item in self.plain
+                if not heads[item[0]] or heads[item[0]][0] == first
+            ]
+            for first in {head[0] for head in heads.values() if head}
+        }
         self.body: list = []  # tagged bodies
         for key, kind in BODY_KINDS.items():
             if key in texts:
@@ -299,6 +322,7 @@ class Lexicon:
             body = self.join.replace("{happened}", happened).replace("{todo}", todo)
             regex, names = template_regex(body)
             self.waits.append((happened_key, todo_key, reason, regex, tuple(names)))
+        self._phrase_re = template_regex(texts["run_type_phrase"])[0]
         self.grasp_word = texts["sub_inv_grasp"]
         self.restore_todos = set(profile.get("restore_todos", ()))
         self.restore_phases = set(profile.get("restore_phases", ()))
@@ -348,8 +372,10 @@ class Lexicon:
             if found is not None:
                 return found
             return Seen("tagged", None, n=n, total=total, tagged=True, **base)
-        for key, kind, regex, names in self.plain:
-            match = regex.match(text.rstrip())
+        stripped = text.rstrip()
+        candidates = self._plain_by_first.get(stripped[:1], self._plain_any)
+        for key, kind, regex, names in candidates:
+            match = regex.match(stripped)
             if match:
                 groups = match.groups()
                 seen = Seen(kind, key, groups=groups, names=names, **base)
@@ -401,8 +427,7 @@ class Lexicon:
 
     def phrase_of(self, text: str) -> str | None:
         """The phrase a ``Type <phrase>:`` prompt asks for, or None."""
-        regex, _names = template_regex(self.texts["run_type_phrase"])
-        match = regex.match(text.rstrip())
+        match = self._phrase_re.match(text.rstrip())
         return match.group(1) if match else None
 
 
@@ -453,12 +478,55 @@ TRAILERS = (
 
 
 def read(buf: ScreenBuf, lex: Lexicon) -> ScreenView:
-    """The classified screen and its open prompt."""
-    view = ScreenView(lines=buf.count, bytes=buf.bytes_seen)
-    lines = list(buf.lines)
-    first = buf.count - len(lines)
-    seen = [lex.classify(line, first + i + 1) for i, line in enumerate(lines)]
+    """The classified screen and its open prompt.
+
+    The watcher looks four times a second and the 1500 lines a full screen
+    holds used to be classified at every look (about 15 ms of CPU each). Now
+    every committed line is classified **once** (``_classified``) and a look at a
+    buffer that did not change since the last one with the same lexicon returns
+    **the same view object**: the rules only read a view, never change one."""
     partial = buf.partial
+    key = (buf.count, buf.bytes_seen, buf.offset, len(buf.lines), partial)
+    if buf._view is not None and buf._seen_lex is lex and buf._view_key == key:
+        return buf._view
+    view = _read(buf, lex, partial)
+    buf._view_key, buf._view = key, view
+    return view
+
+
+def _classified(buf: ScreenBuf, lex: Lexicon) -> list:
+    """The ``Seen`` of every committed line of ``buf``, oldest first. Lines are
+    only ever appended (the oldest drop off the front), so only the ones
+    committed since the last call are classified; anything that does not line up
+    (another lexicon, a buffer changed some other way) classifies them all."""
+    lines = buf.lines
+    cache = buf._seen
+    first = buf.count - len(lines)
+    new = buf.count - buf._seen_count
+    if buf._seen_lex is lex and 0 <= new <= len(lines):
+        for pos in range(len(lines) - new, len(lines)):
+            cache.append(lex.classify(lines[pos], first + pos + 1))
+        if len(cache) != len(lines) or (
+            lines
+            and (
+                cache[0].start != lines[0].start
+                or cache[-1].start != lines[-1].start
+                or cache[-1].end != lines[-1].end
+            )
+        ):
+            new = -1  # (out of step: start again)
+    else:
+        new = -1
+    if new < 0:
+        cache.clear()
+        cache.extend(lex.classify(line, first + i + 1) for i, line in enumerate(lines))
+    buf._seen_lex, buf._seen_count = lex, buf.count
+    return list(cache)
+
+
+def _read(buf: ScreenBuf, lex: Lexicon, partial: Line | None) -> ScreenView:
+    view = ScreenView(lines=buf.count, bytes=buf.bytes_seen)
+    seen = _classified(buf, lex)
     if partial is not None:
         phrase = lex.phrase_of(partial.text)
         if phrase is not None:

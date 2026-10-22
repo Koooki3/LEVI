@@ -577,22 +577,22 @@ _ABSOLUTE = re.compile(
 )
 
 
-def _printable(data) -> list:
+def _printable(data, *, truncate=True) -> list:
     out = []
     for line in data.decode("utf-8", "replace").splitlines():
         line = _CONTROL.sub("", _ANSI.sub("", line))
         if line.strip():
-            out.append(line[:LINE_CHARS])
+            out.append(line[:LINE_CHARS] if truncate else line)
     return out
 
 
-def _read_lines(path, limit, tail) -> list:
+def _read_lines(path, limit, tail, *, truncate=True) -> list:
     # read_regular decides from lstat, so a link or a FIFO is never opened.
     try:
         data, _, _ = probes.read_regular(path, limit, tail=tail)
     except OSError:
         return []
-    return _printable(data)
+    return _printable(data, truncate=truncate)
 
 
 def read_head(path, limit=HEAD_BYTES) -> list:
@@ -622,8 +622,10 @@ def scan(path, checkpoint_dir, port) -> Scan:
     """What the log says: the readiness lines (head and tail), a classified
     failure (xla_oom, argparse, address_in_use, traceback) and the last
     printable lines."""
-    head = read_head(path)
-    tail = read_tail(path)
+    # Readiness needs the complete checkpoint path; the page's line limit
+    # must not truncate evidence. Both reads retain their existing byte caps.
+    head = _read_lines(path, HEAD_BYTES, False, truncate=False)
+    tail = _read_lines(path, TAIL_BYTES, True, truncate=False)
     lines = head + tail
     wanted = str(checkpoint_dir).rstrip("/") + "/norm_stats.json"
 
@@ -650,7 +652,7 @@ def scan(path, checkpoint_dir, port) -> Scan:
         cfg=seen("cfg"),
         listening=seen("listening", lambda m: int(m.group(1)) == port),
         failure=failure,
-        tail=tail[-TAIL_LINES:],
+        tail=[line[:LINE_CHARS] for line in tail[-TAIL_LINES:]],
     )
 
 
@@ -673,7 +675,9 @@ def page_lines(path, count) -> list:
     """The last ``count`` (1..``MAX_PAGE_LINES``) printable lines of the log,
     for the page."""
     count = max(1, min(int(count), MAX_PAGE_LINES))
-    return [page_line(line) for line in read_tail(path)][-count:]
+    # Redact full paths before shortening the display, preserving the basename.
+    lines = _read_lines(path, TAIL_BYTES, True, truncate=False)
+    return [page_line(line)[:LINE_CHARS] for line in lines][-count:]
 
 
 # --- the state -----------------------------------------------------------------------

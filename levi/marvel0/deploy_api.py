@@ -26,6 +26,8 @@ import threading
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict
 
+from levi.stt import manager as stt_manager
+
 from . import deploy
 from .errors import fail
 
@@ -90,7 +92,13 @@ def deploy_start(body: DeployBody):
     """Start the policy server for a model (person only). Refused, with the
     reason, while anything else holds the port, the arm, the GPU lock or the
     memory it needs."""
-    return supervisor().deploy(body.model_dump())
+    # A speech worker still loaded would hold GPU memory the checks below count
+    # against the deploy: stop it, wait until its process is gone, and let none
+    # start until the deploy has answered (by then its status says `starting`,
+    # which the speech gate refuses). Best effort: a failed release is logged
+    # and never fails the deploy; it can delay it by about two seconds.
+    with stt_manager.held_off():
+        return supervisor().deploy(body.model_dump())
 
 
 @router.post("/deploy/stop", dependencies=[Depends(person_only)])

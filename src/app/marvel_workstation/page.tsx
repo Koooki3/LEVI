@@ -49,6 +49,7 @@ import { holdEnabled } from "@/components/marvel0/run-logic";
 import { StackPanel } from "@/components/marvel0/stack-panel";
 import { stackApi } from "@/components/marvel0/stack-api";
 import { StudioLink } from "@/components/marvel0/studio-link";
+import { WorkstationNav } from "@/components/marvel0/workstation-nav";
 import { useMarvel0Poll } from "@/components/marvel0/use-marvel0-poll";
 import { useRunActions } from "@/components/marvel0/use-run-actions";
 import { useRunPoll } from "@/components/marvel0/use-run-poll";
@@ -150,6 +151,7 @@ export default function Marvel0Page() {
             </Note>
           ))}
           <ChainStrip chain={chain} cause={view.stack.cause} />
+          <WorkstationNav />
           {!ownRunLive && <IdleBannerView banner={view.banner} />}
           <StackPanel
             api={stackApi}

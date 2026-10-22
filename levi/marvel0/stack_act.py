@@ -164,7 +164,7 @@ HEAVY_SHOW = "--property=Id,LoadState,ActiveState,TasksCurrent"
 HEAVY_GLOB = "heavy-gate-*"
 HEAVY_TERMINAL = ("finish", "interrupted", "cancelled", "aborted", "exhausted")
 HEAVY_UNIT = re.compile(
-    r"heavy-gate-(pytest-file|pytest-dir|bun-test|bun-validate)-\d+-\d+-[0-9a-f]{6}"
+    r"heavy-gate-(pytest-file|pytest-dir|bun-test|bun-validate|bun-build)-\d+-\d+-[0-9a-f]{6}"
 )
 HEAVY_STATES = ("clear", "running", "unknown")
 # What the start before A can be waiting for (``act.sequence.wait.holds``).

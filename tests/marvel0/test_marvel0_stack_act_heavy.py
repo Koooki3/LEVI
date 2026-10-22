@@ -124,13 +124,14 @@ def heavy(log, systemd, now=NOW):
 # --- the decision, on logs in the gate's own form ---------------------------------------------
 
 
-def test_a_job_whose_scope_holds_processes_is_running(log):
-    u = unit_name(1, "bun-validate")
-    write_log(log, launched(60, u, "bun-validate"))
+@pytest.mark.parametrize("kind", ["bun-validate", "bun-build"])
+def test_a_job_whose_scope_holds_processes_is_running(log, kind):
+    u = unit_name(1, kind)
+    write_log(log, launched(60, u, kind))
     systemd = Systemd({u + ".scope": ("loaded", "active", "9")})
     got = heavy(log, systemd)
     assert got["state"] == "running" and got["count"] == 1
-    assert got["kinds"] == ["bun-validate"] and got["why"] is None
+    assert got["kinds"] == [kind] and got["why"] is None
     assert systemd.asked == [u + ".scope"]
 
 

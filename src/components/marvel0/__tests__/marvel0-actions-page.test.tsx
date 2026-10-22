@@ -93,7 +93,8 @@ describe("the marvel0 with its action cards", () => {
     await tick(3, 5);
     // The status routes, the policy server's, the stack's and the client's,
     // and the two of step 5 (readiness, and the hosted terminal D); the log is
-    // read only while it is wanted.
+    // read only while it is wanted. The voice card reads its passive state
+    // once (it never starts the speech worker).
     expect(new Set(calls.map((call) => call.path))).toEqual(
       new Set([
         ...READS.slice(0, 5),
@@ -101,6 +102,7 @@ describe("the marvel0 with its action cards", () => {
         RUN,
         "/api/levi/marvel0/aeri",
         "/api/levi/marvel0/aeri/run",
+        "/api/levi/marvel0/speech?model_id=pi05_fr3_all_step49999",
       ]),
     );
     for (const call of calls) {

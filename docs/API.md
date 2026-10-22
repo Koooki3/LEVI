@@ -347,3 +347,31 @@ Model management requires the operator session; an external agent cannot approve
 | `POST /ollama/runtime/stop` | Stop the recorded owned process |
 
 `TaskContext` accepts `supervision: none | shadow | supervised` and `teacher_grant`; `supervision.pending` / `supervision.feedback` are ordinary capabilities restricted to the assigned teacher or the operator. See [Local models](OLLAMA.md).
+
+
+## Robot Studio passive state
+
+`GET /api/levi/robot-studio/state` returns a bounded, authenticated, display-only workspace snapshot. It starts no producer or controller and grants no motion permission. Missing/invalid/stale data remains explicit. See [Robot Studio](ROBOT_STUDIO.md#passive-measured-state-preparation) for the closed file schema and freshness rules.
+
+中文：该 GET 只读取工作区内已有快照，不启动来源或控制器，不授予运动权限；缺失、无效和过期分别显示。完整结构与边界见 [中文说明](ROBOT_STUDIO.zh-CN.md#被动实测状态接入准备)。
+
+
+### Robot Studio manual-session software boundary
+
+`GET /api/levi/marvel0/arm/manual` returns `levi.marvel0.manual.v1`, including
+capabilities, admission state and stop evidence; production returns
+`reason_code=stop_unproven` and `can_start=false`. It opens no hardware connection.
+Person-only strict POSTs under that path: `/challenge` (all required limits),
+`/start` (limits, one-time challenge, typed confirmation, attestations, request ID),
+`/target` (session/generation/anchor/sequence plus relative `delta_position_m`),
+`/deadman` (session/generation/sequence and pressed), `/stop` and `/end`
+(session/generation/request ID). Targets never accept a URL, transport selector,
+absolute pose, quaternion, gripper command or browser current state. Bearer agent
+credentials are refused. Ordinary API authentication applies to the GET as well.
+Stop closes admission independently of the normal request guard; it is not an
+emergency stop or physical settled proof. End retains the arm lock unless a
+trusted injected observer supplies synthetic settled evidence. Production has no
+real execution transport. See [Robot Studio](ROBOT_STUDIO.md) and its
+[Chinese guide](ROBOT_STUDIO.zh-CN.md) for the offline scope and remaining gates.
+
+Manual status includes `start_request_id` (nullable), identifying the originating accepted start, including during preparation. Unknown-start cleanup requires an exact match and synthetic-only capabilities; recovery never grants drag admission. Stop/end need only session ID and generation, so a preparing session without a pose anchor can also be revoked.

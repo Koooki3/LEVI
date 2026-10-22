@@ -28,6 +28,7 @@ import { Notice } from "./notice";
 import { sayText } from "./marvel0-say";
 import { KeyConfirm, KeysBlock, useKeyPress } from "./autonomy-keys";
 import { KEY_IDS, type KeyId, type RunView } from "./autonomy-doc";
+import { AutonomyOverview } from "./autonomy-overview";
 import {
   LIMITS,
   RUN_FRESH_MS,
@@ -828,6 +829,11 @@ export function AutonomyRunCard({
             )}
           </p>
           <StopFrame poll={poll} actions={actions} />
+          <AutonomyOverview
+            run={run}
+            current={poll.current}
+            lastOk={poll.lastOk}
+          />
           <div
             className="rg-arun__status"
             data-testid="marvel0-autonomy-status"

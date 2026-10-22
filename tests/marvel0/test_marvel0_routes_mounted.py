@@ -29,7 +29,7 @@ from test_marvel0_stack import Machine as StackMachine
 # the first request read the machine at import time (huggingface_hub reads the
 # boot id), which the guard of test_marvel0_deploy.py forbids during a test.
 from levi.agent import legacy, security  # noqa: F401
-from levi.marvel0 import aeri_run_api, api, deploy_api, run_api, stack_api
+from levi.marvel0 import aeri_run_api, api, deploy_api, run_api, speech_api, stack_api
 from levi.service import app
 
 TOKEN = "test-ui-token"
@@ -77,6 +77,14 @@ ROUTES = [
     ("POST", f"{BASE}/run/hold"),
     ("POST", f"{BASE}/run/end"),
     ("GET", f"{BASE}/run/log"),
+    # Manual preview/control admission shares run_api's supervisor.
+    ("GET", f"{BASE}/arm/manual"),
+    ("POST", f"{BASE}/arm/manual/challenge"),
+    ("POST", f"{BASE}/arm/manual/start"),
+    ("POST", f"{BASE}/arm/manual/target"),
+    ("POST", f"{BASE}/arm/manual/deadman"),
+    ("POST", f"{BASE}/arm/manual/stop"),
+    ("POST", f"{BASE}/arm/manual/end"),
     # The AERI preparation card (``aeri_api.py``).
     ("GET", f"{BASE}/aeri"),
     ("POST", f"{BASE}/aeri/prepare"),
@@ -91,6 +99,14 @@ ROUTES = [
     ("POST", f"{BASE}/aeri/run/end"),
     ("POST", f"{BASE}/aeri/run/presence"),
     ("GET", f"{BASE}/aeri/run/log"),
+]
+# The voice input's routes live on their own router (``speech_api.py``); their
+# token, person and body checks are in test_marvel0_speech_route_mounted.py.
+SPEECH_ROUTES = [
+    ("GET", f"{BASE}/speech"),
+    ("POST", f"{BASE}/speech/transcribe"),
+    ("POST", f"{BASE}/speech/match"),
+    ("POST", f"{BASE}/speech/release"),
 ]
 # Every route that changes something: a person's, never a Bearer credential's.
 WRITES = [
@@ -203,6 +219,12 @@ def test_the_router_of_the_service_holds_each_route_once():
         for method in sorted(route.methods - {"HEAD"})
     ]
     assert sorted(pairs) == sorted((path, method) for method, path in ROUTES)
+    speech = [
+        (route.path, method)
+        for route in speech_api.router.routes
+        for method in sorted(route.methods - {"HEAD"})
+    ]
+    assert sorted(speech) == sorted((path, method) for method, path in SPEECH_ROUTES)
 
 
 def test_the_service_serves_each_route_once():
@@ -211,10 +233,10 @@ def test_the_service_serves_each_route_once():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         schema = get_openapi(title="marvel0", version="1", routes=app.routes)["paths"]
-    for method, path in ROUTES:
+    for method, path in ROUTES + SPEECH_ROUTES:
         assert method.lower() in schema[path], (method, path)
     assert sorted(p for p in schema if p.startswith(BASE)) == sorted(
-        {path for _, path in ROUTES}
+        {path for _, path in ROUTES + SPEECH_ROUTES}
     )
     assert [
         str(w.message) for w in caught if "api_levi_marvel0" in str(w.message)

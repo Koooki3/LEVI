@@ -774,6 +774,33 @@ describe("presence", () => {
 });
 
 describe("hosting off, no site section, a run that cannot be read", () => {
+  test("hosting off shows a static plan without run facts or write requests", async () => {
+    const f = await openStep({
+      run: runDoc("idle_disabled"),
+      ready: readyDoc("disabled"),
+    });
+    const plan = $(f.host, "marvel0-autonomy-plan");
+    expect(text(plan)).toContain(E["marvel0.autonomy.plan.title"]);
+    expect(plan?.querySelectorAll("ol li")).toHaveLength(6);
+    expect(plan?.querySelector("[aria-current], dl, button, a")).toBeNull();
+    expect($(f.host, "marvel0-autonomy-run")).toBeNull();
+    expect($(f.host, "marvel0-autonomy-prepare-card")).toBeNull();
+    expect(f.state.calls).toEqual([]);
+  });
+
+  test("idle hosting shows the plan, while a live or unreadable run keeps its card", async () => {
+    const idle = await openStep({ run: runDoc("idle") });
+    expect($(idle.host, "marvel0-autonomy-plan")).not.toBeNull();
+    expect($(idle.host, "marvel0-autonomy-run")).toBeNull();
+    expect(idle.state.calls).toEqual([]);
+    const live = await openStep({ run: runDoc("forward_running") });
+    expect($(live.host, "marvel0-autonomy-plan")).toBeNull();
+    expect($(live.host, "marvel0-autonomy-overview")).not.toBeNull();
+    const unreadable = await openStep({ run: null });
+    expect($(unreadable.host, "marvel0-autonomy-plan")).toBeNull();
+    expect($(unreadable.host, "marvel0-autonomy-run")).not.toBeNull();
+  });
+
   test("the control file has no [aeri] section: said, nothing to press", async () => {
     const { host } = await openStep({
       run: runDoc("idle_disabled"),
