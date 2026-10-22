@@ -26,6 +26,9 @@ import {
   type Script,
 } from "./speech-fixtures";
 
+// Bun runs afterEach hooks in registration order. Restore the clock before
+// setupDom awaits React unmount; audio/network fakes stay installed until after it.
+afterEach(() => jest.useRealTimers());
 setupDom();
 
 const ALL_MODEL = "pi05_fr3_all_step49999";
@@ -35,7 +38,6 @@ let audio: FakeAudio | null = null;
 afterEach(() => {
   audio?.restore();
   audio = null;
-  jest.useRealTimers();
   try {
     localStorage.clear();
   } catch {
