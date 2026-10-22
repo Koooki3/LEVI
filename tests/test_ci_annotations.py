@@ -92,6 +92,19 @@ def test_hook_survives_a_report_without_reprcrash(monkeypatch):
         {"error": [SimpleNamespace(nodeid="", longrepr="collection failed")]}
     )
     conftest.pytest_terminal_summary(rep, 2, None)
-    assert "(collection)" in rep.lines[0] and rep.lines[1].endswith(
-        "::collection failed"
-    )
+    assert "(collection)" in rep.lines[0] and "file=" not in rep.lines[1]
+    assert rep.lines[1].endswith("::collection failed")
+
+
+def test_an_annotation_without_a_test_file_names_no_file():
+    out = ci.lines([("error", "(collection)", "boom")])
+    assert out[1].startswith("::error title=error%3A (collection)::boom")
+
+
+def test_hook_does_nothing_when_the_script_is_missing(monkeypatch, tmp_path):
+    # tests/test_netguard.py copies this conftest into a pytester directory without scripts/
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(conftest, "CI_ANNOTATIONS", tmp_path / "missing.py")
+    rep = _Reporter({"failed": [_report("tests/t.py::test_a", "x")]})
+    conftest.pytest_terminal_summary(rep, 1, None)
+    assert rep.lines == []

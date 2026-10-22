@@ -41,8 +41,9 @@ def lines(failures: list[tuple[str, str, str]]) -> list[str]:
     for kind, nodeid, message in failures[: MAX_ANNOTATIONS - 1]:
         first = message.strip().splitlines()[0] if message.strip() else ""
         path = nodeid.split("::", 1)[0]
+        where = f"file={_prop(path)}," if path.endswith(".py") else ""
         out.append(
-            f"::error file={_prop(path)},title={_prop(f'{kind}: {nodeid}'[:200])}::"
+            f"::error {where}title={_prop(f'{kind}: {nodeid}'[:200])}::"
             + _data(first[:MAX_MESSAGE])
         )
     return out

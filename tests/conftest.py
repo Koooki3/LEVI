@@ -59,17 +59,19 @@ def scaled(seconds: float) -> float:
 
 # On GitHub Actions the failed tests' names go out as error annotations, the one
 # part of a run that can be read without signing in (scripts/ci_annotations.py).
-_ci_spec = importlib.util.spec_from_file_location(
-    "levi_ci_annotations",
-    Path(__file__).resolve().parent.parent / "scripts" / "ci_annotations.py",
+# Loaded only there and only if present: some tests copy this conftest into a
+# pytester directory that has no scripts/ next to it.
+CI_ANNOTATIONS = (
+    Path(__file__).resolve().parent.parent / "scripts" / "ci_annotations.py"
 )
-ci_annotations = importlib.util.module_from_spec(_ci_spec)
-_ci_spec.loader.exec_module(ci_annotations)
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
-    if os.environ.get("GITHUB_ACTIONS") != "true":
+    if os.environ.get("GITHUB_ACTIONS") != "true" or not CI_ANNOTATIONS.is_file():
         return
+    spec = importlib.util.spec_from_file_location("levi_ci_annotations", CI_ANNOTATIONS)
+    ci_annotations = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ci_annotations)
     failures = []
     for kind in ("failed", "error"):
         for report in terminalreporter.stats.get(kind, []):
