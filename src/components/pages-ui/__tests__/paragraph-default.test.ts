@@ -9,8 +9,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const read = (rel: string) =>
-  readFileSync(join(import.meta.dir, rel), "utf8");
+const read = (rel: string) => readFileSync(join(import.meta.dir, rel), "utf8");
 const pages = read("../pages.css");
 const ds = read("../../../styles/ds.css");
 

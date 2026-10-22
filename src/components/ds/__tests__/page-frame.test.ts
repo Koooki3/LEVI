@@ -59,7 +59,8 @@ describe("the page frame", () => {
 
   test("every page that used an old frame now carries .ds-page", () => {
     const pages: Record<string, RegExp> = {
-      "components/home/home-dashboard.tsx": /className="ds-page ds-page--reading levi-home"/,
+      "components/home/home-dashboard.tsx":
+        /className="ds-page ds-page--reading levi-home"/,
       "app/guide/page.tsx": /className="ds-page ds-page--reading levi-reading"/,
       "app/workbench/page.tsx": /className="ds-root ds-page pg-workbench"/,
       "app/live/page.tsx": /className="ds-root ds-page pg-workbench pg-live"/,

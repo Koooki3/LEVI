@@ -10,7 +10,10 @@ import { Card } from "../Display";
 
 setupDom();
 
-const ds = readFileSync(join(import.meta.dir, "../../../styles/ds.css"), "utf8");
+const ds = readFileSync(
+  join(import.meta.dir, "../../../styles/ds.css"),
+  "utf8",
+);
 const block = (selector: string) => {
   const at = ds.indexOf(`\n${selector} {`);
   expect(at).toBeGreaterThan(-1);
@@ -21,7 +24,7 @@ describe("Card footer", () => {
   test("a footer renders last, in its own slot; without one there is no slot", async () => {
     const { host } = await render(
       <>
-        <Card title="With" footer={<a href="/x">All</a>}>
+        <Card title="With" footer={<button type="button">All</button>}>
           <p>body</p>
         </Card>
         <Card title="Without">
@@ -55,13 +58,13 @@ describe("card grid and panel", () => {
 
   test("a panel is 12/16 inside with an md radius; a state edge is an inset shadow, never a border width", () => {
     const panel = block(".ds-panel");
-    expect(panel).toMatch(
-      /padding:\s*var\(--ds-space-3\) var\(--ds-space-4\)/,
-    );
+    expect(panel).toMatch(/padding:\s*var\(--ds-space-3\) var\(--ds-space-4\)/);
     expect(panel).toMatch(/border-radius:\s*var\(--ds-radius-md\)/);
     for (const tone of ["info", "success", "warning", "danger"]) {
       const rule = block(`.ds-panel--${tone}`);
-      expect(rule).toMatch(new RegExp(`box-shadow:\\s*inset [^;]*var\\(--ds-${tone}\\)`));
+      expect(rule).toMatch(
+        new RegExp(`box-shadow:\\s*inset [^;]*var\\(--ds-${tone}\\)`),
+      );
       expect(rule).not.toMatch(/border|padding|margin/);
     }
   });

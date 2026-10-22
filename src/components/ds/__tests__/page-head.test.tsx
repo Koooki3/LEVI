@@ -11,8 +11,7 @@ import { PageHead } from "../PageHead";
 
 setupDom();
 
-const read = (rel: string) =>
-  readFileSync(join(import.meta.dir, rel), "utf8");
+const read = (rel: string) => readFileSync(join(import.meta.dir, rel), "utf8");
 const ds = read("../../../styles/ds.css");
 const pages = read("../../pages-ui/pages.css");
 const rule = (css: string, selector: string) => {
@@ -35,7 +34,10 @@ describe("PageHead", () => {
     const row = head.querySelector(".ds-page-head__row") as HTMLElement;
     expect(row.firstElementChild?.tagName).toBe("H1");
     const tools = row.querySelector(".ds-page-head__tools") as HTMLElement;
-    expect([...tools.children].map((c) => c.tagName)).toEqual(["SPAN", "BUTTON"]);
+    expect([...tools.children].map((c) => c.tagName)).toEqual([
+      "SPAN",
+      "BUTTON",
+    ]);
     expect(head.lastElementChild?.className).toBe("ds-page-head__lead");
   });
 

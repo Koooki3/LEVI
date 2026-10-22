@@ -134,7 +134,10 @@ describe("detectFr3Replay: generic arms never get joints", () => {
     const names = [...range(1, 7).map((i) => `joint_${i}`), ...poseEuler];
     const result = detectFr3Replay({ robot_type: "generic_arm" }, [
       ...keys("observation.state", names),
-      ...keys("action", range(1, 7).map((i) => `joint_${i}`)),
+      ...keys(
+        "action",
+        range(1, 7).map((i) => `joint_${i}`),
+      ),
     ]);
     expect(result.mode).toBe("pose");
     expect(result.rotation).toBe("euler");
@@ -240,7 +243,10 @@ describe("detectFr3Replay: none", () => {
   test("eight joints (joint_0..joint_7) are not a 7-joint arm", () => {
     const result = detectFr3Replay(
       { robot_type: "fr3" },
-      keys("observation.state", range(0, 8).map((i) => `joint_${i}`)),
+      keys(
+        "observation.state",
+        range(0, 8).map((i) => `joint_${i}`),
+      ),
     );
     expect(result.mode).toBe("none");
     expect(result.reason).toContain("not 7 numbered");

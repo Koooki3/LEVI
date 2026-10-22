@@ -11,11 +11,12 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BREAKPOINT } from "../../../lib/design/motion";
+import { NAV_ROW_BELOW } from "../../shell/commands";
 
 const SRC = join(import.meta.dir, "../../..");
 
-// measured on feat/layout-p4-spacing-check (2026-10-21, after P1's 999 px);
-// only lower these
+// measured on feat/layout-p4-spacing-check (2026-10-21, after P1's 999 px),
+// re-checked on main 033ec1de (2026-10-22, header at 1170 px); only lower these
 const SPACING_ALLOWED: Record<string, number> = {
   "app/report/report.css": 1,
   "components/pages-ui/pages.css": 221,
@@ -27,6 +28,8 @@ const SPACING_ALLOWED: Record<string, number> = {
 const BREAKPOINTS_ALLOWED: Record<string, number> = {
   "app/report/report.css": 1,
   "components/live/results.css": 1,
+  // measured on main 033ec1de when the layout work was rebased (2026-10-22)
+  "components/marvel0/autonomy-styles.css": 2,
   "components/marvel0/marvel0-dock.css": 1,
   "components/marvel0/marvel0-styles.css": 4,
   "components/pages-ui/agent-content.css": 1,
@@ -43,11 +46,11 @@ const PX = /(?<![\w.])-?(\d+(?:\.\d+)?)px\b/g;
 // every width in a media condition, also in `(min-width: a) and (max-width: b)`
 const MEDIA = /@media([^{]*)\{/g;
 const WIDTH = /\((?:min|max)-width:\s*(\d+)px\)/g;
-// BREAKPOINT, plus the header's two-row width (shell.css, 999/1000), where
-// .ds-page also narrows its sides (layout P1: one left edge for both)
-const HEADER_TWO_ROW = 1000;
+// BREAKPOINT, plus the header's two-row width (NAV_ROW_BELOW, shell.css), where
+// .ds-page also narrows its sides (layout P1: one left edge for both); read
+// from commands.ts so a change of the header's width moves this check too
 const ALLOWED_WIDTHS = new Set(
-  [...Object.values(BREAKPOINT), HEADER_TWO_ROW].flatMap((w) => [w, w - 1]),
+  [...Object.values(BREAKPOINT), NAV_ROW_BELOW].flatMap((w) => [w, w - 1]),
 );
 
 function cssFiles(): string[] {
@@ -85,10 +88,18 @@ describe("spacing and breakpoints only go down", () => {
       @media (max-width: 899px) { .d { gap: var(--ds-space-2) } }
       @media (max-width: 960px) { .e { padding: 0 } }
       .f { margin: -6px 0 -1px; }
-      @media (min-width: 1000px) and (max-width: 1239px) { .g { gap: 0 } }`;
-    expect(counts(sample)).toEqual({ spacing: 4, breakpoints: 2, unreadable: 0 });
-    expect(counts("@media (width <= 900px) { .h { gap: 0 } }").unreadable).toBe(1);
-    expect(counts("@media (max-width: 60em) { .h { gap: 0 } }").unreadable).toBe(1);
+      @media (min-width: 1170px) and (max-width: 1239px) { .g { gap: 0 } }`;
+    expect(counts(sample)).toEqual({
+      spacing: 4,
+      breakpoints: 2,
+      unreadable: 0,
+    });
+    expect(counts("@media (width <= 900px) { .h { gap: 0 } }").unreadable).toBe(
+      1,
+    );
+    expect(
+      counts("@media (max-width: 60em) { .h { gap: 0 } }").unreadable,
+    ).toBe(1);
   });
 
   for (const file of cssFiles()) {
@@ -104,7 +115,10 @@ describe("spacing and breakpoints only go down", () => {
         got.breakpoints,
         `${file}: ${got.breakpoints} media widths outside BREAKPOINT (${[...ALLOWED_WIDTHS].join("/")}), allowance ${allowedBreakpoints}`,
       ).toBe(allowedBreakpoints);
-      expect(got.unreadable, `${file}: a media condition this check cannot read`).toBe(0);
+      expect(
+        got.unreadable,
+        `${file}: a media condition this check cannot read`,
+      ).toBe(0);
     });
   }
 });

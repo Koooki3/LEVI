@@ -79,10 +79,13 @@ describe("indexAt", () => {
 
 describe("sampleAt", () => {
   test("joints are linearly interpolated", () => {
-    const joints = track([0, 1], [
-      [0, 1, -2],
-      [1, 3, 2],
-    ]);
+    const joints = track(
+      [0, 1],
+      [
+        [0, 1, -2],
+        [1, 3, 2],
+      ],
+    );
     const out = sampleAt(0.25, joints, "linear");
     expect(out[0]).toBeCloseTo(0.25, 12);
     expect(out[1]).toBeCloseTo(1.5, 12);
@@ -113,10 +116,13 @@ describe("sampleAt", () => {
   });
 
   test("one kind per column: x linear, rz angle, gripper step", () => {
-    const pose = track([0, 2], [
-      [0, 3.1, 1],
-      [2, -3.1, 0],
-    ]);
+    const pose = track(
+      [0, 2],
+      [
+        [0, 3.1, 1],
+        [2, -3.1, 0],
+      ],
+    );
     const out = sampleAt(1, pose, ["linear", "angle", "step"]);
     expect(out[0]).toBeCloseTo(1, 12);
     expect(out[1]).toBe(3.1);
@@ -124,10 +130,13 @@ describe("sampleAt", () => {
   });
 
   test("a kinds list of the wrong length is an error", () => {
-    const pose = track([0, 1], [
-      [0, 0],
-      [1, 1],
-    ]);
+    const pose = track(
+      [0, 1],
+      [
+        [0, 0],
+        [1, 1],
+      ],
+    );
     expect(() => sampleAt(0.5, pose, ["linear"])).toThrow(RangeError);
   });
 
