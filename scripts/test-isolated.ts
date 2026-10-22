@@ -68,16 +68,6 @@ await Promise.all(
       if (r.code) {
         console.log(`\n=== FAILED ${file} (${(r.ms / 1000).toFixed(1)} s) ===`);
         console.log(r.out.trimEnd());
-      } else if (
-        file === "src/components/marvel0/__tests__/speech-command.test.tsx"
-      ) {
-        // Temporary CI diagnosis: retain only this file's bounded trace on a
-        // passing run too. Failures already print the complete output above.
-        const trace = stripAnsi(r.out)
-          .split("\n")
-          .filter((line) => line.startsWith("SPEECH_CI_TRACE "))
-          .slice(0, 930);
-        if (trace.length) console.log(trace.join("\n"));
       }
     }
   }),
