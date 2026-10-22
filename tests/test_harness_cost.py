@@ -35,7 +35,9 @@ def test_an_external_run_gets_a_lower_bound_then_its_report(bench, dataset):
     assert record["provider_kind"] == "external"
     assert record["tokens"]["source"] == "delivered_lower_bound"
     assert record["tokens"]["value"] == record["tokens"]["delivered"] > 0
-    assert record["seconds"]["tool"] >= 0 and record["seconds"]["wall"] > 0
+    # wall_seconds is rounded to 0.1 s (ledger.py): a run this short can read 0.0
+    # on a fast runner (CI run 39721849462, agent leg)
+    assert record["seconds"]["tool"] >= 0 and record["seconds"]["wall"] >= 0
     invoke(
         wb,
         agent,

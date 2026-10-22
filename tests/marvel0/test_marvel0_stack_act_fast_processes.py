@@ -275,10 +275,22 @@ def test_the_chain_runs_to_c_on_the_real_ticker_with_real_processes(make):
     assert all(isinstance(v, float) for v in took_s.values()), took_s
     assert took_s["c_preflight"] >= 0.9  # (the slower of the two checks)
     assert PORT == 5056
-    # and the way out is the same as ever
-    m.act.sequence_stop(m.stop_all_body("stop-all-fast01"))
-    for _ in range(300):
-        if m.act.advance()["state"] != "running":
-            break
-        time.sleep(0.05)
+    # and the way out is the same as ever. The monitor writes again once A is
+    # gone (as drive() does in the chain tests): B is stopped last, and on a slow
+    # runner the health file of A's time was stale by then (CI run 39721849462,
+    # both legs, B not idle; never on this machine)
+    stop.clear()
+    threading.Thread(target=monitor, daemon=True).start()
+    try:
+        assert m.act.sequence_stop(m.stop_all_body("stop-all-fast01")) == {
+            "done": "sequence_stop_started"
+        }
+        for _ in range(300):
+            seq = m.act.advance()
+            if seq["state"] != "running":
+                break
+            time.sleep(0.05)
+    finally:
+        stop.set()
+    assert (seq["state"], seq["reason"]) == ("done", None), seq
     assert {k: m.terminal(k)["state"] for k in "abc"} == {k: "idle" for k in "abc"}
