@@ -31,8 +31,12 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from check_aeri_prompts import assignments
 
 OUT = ROOT / "levi" / "marvel0" / "aeri_prompts.json"
+# The maintainer's checkout (it holds lab/worktrees/); elsewhere, such as on CI,
+# this repository itself: the profiles' worktrees are then absent and the tests
+# that need them skip, but importing this module must not fail.
 LAB = next(
-    p for p in Path(__file__).resolve().parents if (p / "lab" / "worktrees").is_dir()
+    (p for p in Path(__file__).resolve().parents if (p / "lab" / "worktrees").is_dir()),
+    ROOT,
 )
 PROFILES = {
     "harvest-5bc750ca": {

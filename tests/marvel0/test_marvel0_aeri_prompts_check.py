@@ -233,3 +233,18 @@ def test_the_regeneration_is_the_committed_file():
     )
     assert done.returncode == 0, done.stdout + done.stderr
     assert regen.OUT == check.PROMPTS
+
+
+def test_the_regeneration_module_imports_where_there_is_no_lab_folder():
+    """CI has no lab/worktrees/: importing the module (as this file does) must not
+    fail there, or every test run stops at collection (CI run 39721227486)."""
+    source = (ROOT / "tests" / "marvel0" / "regen_aeri_prompts.py").read_text()
+    fake = Path("/nonexistent-levi-checkout/tests/marvel0/regen_aeri_prompts.py")
+    namespace = {"__file__": str(fake), "__name__": "regen_without_lab"}
+    before = list(sys.path)
+    try:
+        exec(compile(source, str(fake), "exec"), namespace)  # noqa: S102 -- this repo's own module, under a path with no lab/
+    finally:
+        sys.path[:] = before
+    assert namespace["LAB"] == fake.parents[2]
+    assert namespace["PROFILES"]["main-297a74c3"]["repo"] == fake.parents[2]
