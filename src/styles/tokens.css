@@ -101,6 +101,8 @@
      margins): reading pages 1200, work pages 1360. */
   --ds-page-max-reading: 1200px;
   --ds-page-max-wide: 1360px;
+  /* The frame's current width; .ds-page and .ds-page--reading pick one. */
+  --ds-page-max: var(--ds-page-max-wide);
   --ds-page-inset: var(--ds-space-6);
   --ds-page-top: var(--ds-space-8);
   --ds-page-bottom: var(--ds-space-16);
