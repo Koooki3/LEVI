@@ -609,22 +609,23 @@ describe("the dead and the stuck", () => {
     expect(stop(host)).toBeNull();
   });
 
-  test("the link to the run's own page is not there while D lives", async () => {
-    for (const name of [
-      "launching",
-      "await_release",
-      "forward_running",
-      "stopping",
-      "stalled",
-      "orphaned",
-    ]) {
+  test.each([
+    "launching",
+    "await_release",
+    "forward_running",
+    "stopping",
+    "stalled",
+    "orphaned",
+  ])(
+    "the link to the run's own page is not there while D lives: %s",
+    async (name) => {
       const { host } = await openStep({ run: runDoc(name) });
       expect([name, $(host, "marvel0-autonomy-run-link")]).toEqual([
         name,
         null,
       ]);
-    }
-  });
+    },
+  );
 
   test("exited by the hang-up chain's SIGKILL: said with the signal, and the units left behind are listed", async () => {
     const { host } = await openStep({ run: runDoc("ended_hangup") });
