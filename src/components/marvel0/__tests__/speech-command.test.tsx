@@ -7,6 +7,7 @@ import {
   afterAll,
   afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   jest,
@@ -39,6 +40,15 @@ beforeAll(() => jest.useFakeTimers());
 afterAll(() => jest.useRealTimers());
 // Effects dispose their resources synchronously; verify that before restoring
 // audio and fetch. Keep rendering and interactions asynchronous.
+let advanceStage = "not-entered";
+let idleBoundary = "not-entered";
+beforeEach(() => {
+  advanceStage = "not-entered";
+  idleBoundary = "not-entered";
+});
+afterEach(() => {
+  console.log("SPEECH_ADVANCE_STAGE", advanceStage, idleBoundary);
+});
 setupDom({ unmount: "sync" });
 
 const ALL = "pi05_fr3_all_step49999";
@@ -102,8 +112,11 @@ async function flushAll() {
 }
 const advance = (ms: number) =>
   act(async () => {
+    advanceStage = "before-timers";
     jest.advanceTimersByTime(ms);
+    advanceStage = "after-timers";
     for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    advanceStage = "after-microtasks";
   });
 
 /** The core as the voice card meets it. `heard` is the match the next clip gets. */
@@ -243,8 +256,11 @@ describe("the voice card in the Client command card", () => {
     // Each passive read answers before the next 30 s refresh. One 180 s
     // jump would expire those requests before their Promise bodies can settle.
     for (let refresh = 0; refresh < 6; refresh += 1) {
+      idleBoundary = "advance";
       await advance(30_000);
+      idleBoundary = "flush";
       await flushAll();
+      idleBoundary = "assert";
       expect(mic(h).disabled).toBe(false);
       expect(
         h.host.querySelector("[data-testid=marvel0-speech-problem]"),
