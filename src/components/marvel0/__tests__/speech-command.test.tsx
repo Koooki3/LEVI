@@ -4,7 +4,6 @@
 import { render, setupDom } from "@/components/ds/__tests__/dom";
 import { act } from "react";
 import * as React from "react";
-import nodeTimers from "node:timers";
 import {
   afterAll,
   afterEach,
@@ -35,162 +34,44 @@ import {
   type FakeAudio,
 } from "./speech-fixtures";
 
-// Temporary, bounded CI diagnostics: synchronous observations only. Preserve
-// every await and forward the native immediate once with its original handle.
-let traceCase = 0;
-let traceLines = 0;
-const traceBuffer: string[] = [];
-let traceActive = true;
-let traceCurrentStage = "module";
-type TraceOperation = { id: number; test: number; label: string };
-let traceNextOperation = 0;
-let traceActiveOperation: TraceOperation | null = null;
-let immediateScheduled = 0;
-let immediateStarted = 0;
-let immediateReturned = 0;
-const pendingImmediates = new Map<number, { test: number; stage: string }>();
-const reactTraceInternals = (
-  React as unknown as {
-    __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: {
-      actQueue?: readonly unknown[] | null;
-    };
-  }
-).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
-function traceSpeech(
-  event: string,
-  detail: Record<string, unknown> = {},
-  force = false,
-) {
-  if (!traceActive || (!force && traceLines >= 900)) return;
-  traceLines += 1;
-  traceBuffer.push(
-    "SPEECH_CI_TRACE " +
-      JSON.stringify({
-        event,
-        sequence: traceLines,
-        test: traceCase,
-        stage: traceCurrentStage,
-        operation: traceActiveOperation,
-        // Bun 1.3.10 also virtualizes saved hrtime/Date references: these are
-        // clock-state diagnostics, not independent measurements of wall time.
-        dateNow: Date.now(),
-        performanceNow: performance.now(),
-        virtualHrtime: String(process.hrtime.bigint()),
-        actQueueLength: reactTraceInternals?.actQueue?.length ?? null,
-        scheduled: immediateScheduled,
-        started: immediateStarted,
-        returned: immediateReturned,
-        pending: pendingImmediates.size,
-        ...detail,
-      }),
-  );
-}
-// Keep test-body and immediate callbacks free of output writes. A hook flush
-// can still affect later continuations, so the first blocked operation matters.
-function flushTrace() {
-  if (traceBuffer.length) console.log(traceBuffer.splice(0).join("\n"));
-}
-function traceBegin(label: string): TraceOperation {
-  const operation = {
-    id: ++traceNextOperation,
-    test: traceActiveOperation?.test ?? traceCase,
-    label,
-  };
-  traceActiveOperation = operation;
-  traceCurrentStage = label + ":start";
-  traceSpeech("stage.start");
-  return operation;
-}
-function traceEnd(operation: TraceOperation) {
-  traceActiveOperation = operation;
-  traceCurrentStage = operation.label + ":end";
-  traceSpeech("stage.end");
-}
-const originalImmediate = nodeTimers.setImmediate;
-const originalImmediateDescriptor = Object.getOwnPropertyDescriptor(
-  nodeTimers,
-  "setImmediate",
-)!;
-nodeTimers.setImmediate = function (
-  this: unknown,
-  callback: (...args: unknown[]) => unknown,
-  ...args: unknown[]
-) {
-  const id = ++immediateScheduled;
-  const origin = {
-    test: traceActiveOperation?.test ?? traceCase,
-    stage: traceCurrentStage,
-    operation: traceActiveOperation?.id ?? null,
-  };
-  pendingImmediates.set(id, origin);
-  traceSpeech("immediate.schedule", { immediate: id, origin });
-  return Reflect.apply(originalImmediate, this, [
-    function (this: unknown, ...callbackArgs: unknown[]) {
-      immediateStarted += 1;
-      traceSpeech("immediate.run", { immediate: id, origin });
-      try {
-        return Reflect.apply(callback, this, callbackArgs);
-      } finally {
-        immediateReturned += 1;
-        pendingImmediates.delete(id);
-        traceSpeech("immediate.return", { immediate: id, origin });
-      }
-    },
-    ...args,
-  ]);
-} as typeof nodeTimers.setImmediate;
+// Temporary low-interference CI observation. Test bodies only assign a static
+// stage and operation number; the first exit snapshot is the useful boundary.
+let probeCase = 0;
+let probeSequence = 0;
+let probeStage = "module";
+let probeOperation = 0;
+let probeNextOperation = 0;
 beforeEach(() => {
-  traceCase += 1;
-  traceActiveOperation = null;
-  traceCurrentStage = "test.begin";
-  traceSpeech("test.begin", {}, true);
+  probeCase += 1;
+  probeStage = "test.begin";
+  probeOperation = 0;
 });
 afterEach(() => {
-  traceSpeech(
-    "test.body-exit",
-    {
-      pendingOrigins: Array.from(pendingImmediates, ([id, origin]) => ({
-        id,
-        ...origin,
-      })).slice(0, 12),
-    },
-    true,
-  );
-  flushTrace();
-});
-afterAll(() => {
-  traceSpeech("file.end", {}, true);
-  traceActive = false;
-  flushTrace();
-  Object.defineProperty(
-    nodeTimers,
-    "setImmediate",
-    originalImmediateDescriptor,
+  const internals = (
+    React as unknown as {
+      __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: {
+        actQueue?: readonly unknown[] | null;
+      };
+    }
+  ).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  console.log(
+    "SPEECH_CI_TRACE",
+    JSON.stringify({
+      event: "test.body-exit",
+      mode: "minimal-stage",
+      sequence: ++probeSequence,
+      test: probeCase,
+      stage: probeStage,
+      operation: probeOperation,
+      actQueueLength: internals?.actQueue?.length ?? null,
+    }),
   );
 });
 
 // Keep one clock throughout this file, including effect cleanup.
 // Restoring and reinstalling Bun timers between tests resets performance.now().
 // Restore real time before setupDom unregisters the browser globals.
-beforeAll(() => {
-  traceSpeech(
-    "clock.before-fake",
-    {
-      globalImmediateIsSaved: globalThis.setImmediate === originalImmediate,
-      globalTimeoutIsNode: globalThis.setTimeout === nodeTimers.setTimeout,
-    },
-    true,
-  );
-  jest.useFakeTimers();
-  traceSpeech(
-    "clock.after-fake",
-    {
-      globalImmediateIsSaved: globalThis.setImmediate === originalImmediate,
-      globalTimeoutIsNode: globalThis.setTimeout === nodeTimers.setTimeout,
-    },
-    true,
-  );
-});
+beforeAll(() => jest.useFakeTimers());
 afterAll(() => jest.useRealTimers());
 // Effects dispose their resources synchronously; verify that before restoring
 // audio and fetch. Keep rendering and interactions asynchronous.
@@ -246,46 +127,24 @@ afterEach(() => {
       restoreFetch = () => {};
       clipboard.length = 0;
       pendingStatus = null;
-      traceSpeech("test.cleanup-restored", {}, true);
     }
   }
 });
 
 async function flushAll() {
-  const traceAwait1 = traceBegin("act@fa3:99");
+  const probeAwait1 = ++probeNextOperation;
+  probeOperation = probeAwait1;
+  probeStage = "act@fa3:99:start";
   await act(async () => {
-    const traceCallback = traceActiveOperation;
-    traceSpeech("act.callback.enter", {
-      callback: "act@fa3:99",
-      operation: traceCallback,
-    });
-
     for (let i = 0; i < 40; i += 1) await Promise.resolve();
-
-    traceActiveOperation = traceCallback;
-    traceSpeech("act.callback.return", {
-      callback: "act@fa3:99",
-      operation: traceCallback,
-    });
   });
-  traceEnd(traceAwait1);
+  probeOperation = probeAwait1;
+  probeStage = "act@fa3:99:end";
 }
 const advance = (ms: number) =>
   act(async () => {
-    const traceCallback = traceActiveOperation;
-    traceSpeech("act.callback.enter", {
-      callback: "act@fa3:104",
-      operation: traceCallback,
-    });
-
     jest.advanceTimersByTime(ms);
     for (let i = 0; i < 10; i += 1) await Promise.resolve();
-
-    traceActiveOperation = traceCallback;
-    traceSpeech("act.callback.return", {
-      callback: "act@fa3:104",
-      operation: traceCallback,
-    });
   });
 
 /** The core as the voice card meets it. `heard` is the match the next clip gets. */
@@ -352,14 +211,20 @@ async function open(heard?: () => Record<string, unknown>) {
       onUseAnother={() => {}}
     />
   );
-  const traceAwait2 = traceBegin("render@fa3:173");
+  const probeAwait2 = ++probeNextOperation;
+  probeOperation = probeAwait2;
+  probeStage = "render@fa3:173:start";
   const view = await render(
     panel(effectiveSelection(models, NO_CHOICE, null)!),
   );
-  traceEnd(traceAwait2);
-  const traceAwait3 = traceBegin("flushAll@fa3:176");
+  probeOperation = probeAwait2;
+  probeStage = "render@fa3:173:end";
+  const probeAwait3 = ++probeNextOperation;
+  probeOperation = probeAwait3;
+  probeStage = "flushAll@fa3:176:start";
   await flushAll();
-  traceEnd(traceAwait3);
+  probeOperation = probeAwait3;
+  probeStage = "flushAll@fa3:176:end";
   /** Another model selected on the page (the policy server card's control). */
   const select = (modelId: string) =>
     view.rerender(
@@ -378,19 +243,7 @@ const use = (h: H) =>
 const prompt = (h: H) => field(card(h), "Task instruction") as HTMLInputElement;
 const fire = (target: Element, event: Event) =>
   act(async () => {
-    const traceCallback = traceActiveOperation;
-    traceSpeech("act.callback.enter", {
-      callback: "act@fa3:194",
-      operation: traceCallback,
-    });
-
     target.dispatchEvent(event);
-
-    traceActiveOperation = traceCallback;
-    traceSpeech("act.callback.return", {
-      callback: "act@fa3:194",
-      operation: traceCallback,
-    });
   });
 const pointer = (target: Element, type: string) =>
   fire(
@@ -406,64 +259,65 @@ const pointer = (target: Element, type: string) =>
 
 /** Hold the button for `ms`, then let the 200 ms tail and the upload finish. */
 async function speak(h: H, ms = 1000) {
-  const traceAwait4 = traceBegin("pointer@fa3:211");
+  const probeAwait4 = ++probeNextOperation;
+  probeOperation = probeAwait4;
+  probeStage = "pointer@fa3:211:start";
   await pointer(mic(h), "pointerdown");
-  traceEnd(traceAwait4);
-  const traceAwait5 = traceBegin("flushAll@fa3:212");
+  probeOperation = probeAwait4;
+  probeStage = "pointer@fa3:211:end";
+  const probeAwait5 = ++probeNextOperation;
+  probeOperation = probeAwait5;
+  probeStage = "flushAll@fa3:212:start";
   await flushAll();
-  traceEnd(traceAwait5);
-  const traceAwait6 = traceBegin("act@fa3:213");
-  await act(async () => {
-    const traceCallback = traceActiveOperation;
-    traceSpeech("act.callback.enter", {
-      callback: "act@fa3:213",
-      operation: traceCallback,
-    });
-    const diagnosticResult = h.audio.seconds(ms / 1000);
-    traceActiveOperation = traceCallback;
-    traceSpeech("act.callback.return", {
-      callback: "act@fa3:213",
-      operation: traceCallback,
-    });
-    return diagnosticResult;
-  });
-  traceEnd(traceAwait6);
-  const traceAwait7 = traceBegin("advance@fa3:214");
+  probeOperation = probeAwait5;
+  probeStage = "flushAll@fa3:212:end";
+  const probeAwait6 = ++probeNextOperation;
+  probeOperation = probeAwait6;
+  probeStage = "act@fa3:213:start";
+  await act(async () => h.audio.seconds(ms / 1000));
+  probeOperation = probeAwait6;
+  probeStage = "act@fa3:213:end";
+  const probeAwait7 = ++probeNextOperation;
+  probeOperation = probeAwait7;
+  probeStage = "advance@fa3:214:start";
   await advance(ms);
-  traceEnd(traceAwait7); // a hold, not a tap
-  const traceAwait8 = traceBegin("pointer@fa3:215");
+  probeOperation = probeAwait7;
+  probeStage = "advance@fa3:214:end"; // a hold, not a tap
+  const probeAwait8 = ++probeNextOperation;
+  probeOperation = probeAwait8;
+  probeStage = "pointer@fa3:215:start";
   await pointer(mic(h), "pointerup");
-  traceEnd(traceAwait8);
-  const traceAwait9 = traceBegin("act@fa3:216");
-  await act(async () => {
-    const traceCallback = traceActiveOperation;
-    traceSpeech("act.callback.enter", {
-      callback: "act@fa3:216",
-      operation: traceCallback,
-    });
-    const diagnosticResult = h.audio.seconds(0.2);
-    traceActiveOperation = traceCallback;
-    traceSpeech("act.callback.return", {
-      callback: "act@fa3:216",
-      operation: traceCallback,
-    });
-    return diagnosticResult;
-  });
-  traceEnd(traceAwait9);
-  const traceAwait10 = traceBegin("advance@fa3:217");
+  probeOperation = probeAwait8;
+  probeStage = "pointer@fa3:215:end";
+  const probeAwait9 = ++probeNextOperation;
+  probeOperation = probeAwait9;
+  probeStage = "act@fa3:216:start";
+  await act(async () => h.audio.seconds(0.2));
+  probeOperation = probeAwait9;
+  probeStage = "act@fa3:216:end";
+  const probeAwait10 = ++probeNextOperation;
+  probeOperation = probeAwait10;
+  probeStage = "advance@fa3:217:start";
   await advance(200);
-  traceEnd(traceAwait10);
-  const traceAwait11 = traceBegin("flushAll@fa3:218");
+  probeOperation = probeAwait10;
+  probeStage = "advance@fa3:217:end";
+  const probeAwait11 = ++probeNextOperation;
+  probeOperation = probeAwait11;
+  probeStage = "flushAll@fa3:218:start";
   await flushAll();
-  traceEnd(traceAwait11);
+  probeOperation = probeAwait11;
+  probeStage = "flushAll@fa3:218:end";
 }
 const posts = (h: H) => h.seen.filter((call) => call.init?.method === "POST");
 
 describe("the voice card in the Client command card", () => {
   test("sits above the task instruction field, once, and not in a dialog", async () => {
-    const traceAwait12 = traceBegin("open@fa3:224");
+    const probeAwait12 = ++probeNextOperation;
+    probeOperation = probeAwait12;
+    probeStage = "open@fa3:224:start";
     const h = await open();
-    traceEnd(traceAwait12);
+    probeOperation = probeAwait12;
+    probeStage = "open@fa3:224:end";
     expect(
       h.host.querySelectorAll("[data-testid=marvel0-speech]"),
     ).toHaveLength(1);
@@ -481,18 +335,27 @@ describe("the voice card in the Client command card", () => {
   });
 
   test("opening and waiting reads the voice state and nothing else: no microphone, no write", async () => {
-    const traceAwait13 = traceBegin("open@fa3:242");
+    const probeAwait13 = ++probeNextOperation;
+    probeOperation = probeAwait13;
+    probeStage = "open@fa3:242:start";
     const h = await open();
-    traceEnd(traceAwait13);
+    probeOperation = probeAwait13;
+    probeStage = "open@fa3:242:end";
     // Each passive read answers before the next 30 s refresh. One 180 s
     // jump would expire those requests before their Promise bodies can settle.
     for (let refresh = 0; refresh < 6; refresh += 1) {
-      const traceAwait14 = traceBegin("advance@fa3:246");
+      const probeAwait14 = ++probeNextOperation;
+      probeOperation = probeAwait14;
+      probeStage = "advance@fa3:246:start";
       await advance(30_000);
-      traceEnd(traceAwait14);
-      const traceAwait15 = traceBegin("flushAll@fa3:247");
+      probeOperation = probeAwait14;
+      probeStage = "advance@fa3:246:end";
+      const probeAwait15 = ++probeNextOperation;
+      probeOperation = probeAwait15;
+      probeStage = "flushAll@fa3:247:start";
       await flushAll();
-      traceEnd(traceAwait15);
+      probeOperation = probeAwait15;
+      probeStage = "flushAll@fa3:247:end";
       expect(mic(h).disabled).toBe(false);
       expect(
         h.host.querySelector("[data-testid=marvel0-speech-problem]"),
@@ -520,9 +383,12 @@ describe("the voice card in the Client command card", () => {
 
   test("leaving the card aborts a pending status read without opening the microphone", async () => {
     pendingStatus = { signal: null, aborts: 0 };
-    const traceAwait16 = traceBegin("open@fa3:275");
+    const probeAwait16 = ++probeNextOperation;
+    probeOperation = probeAwait16;
+    probeStage = "open@fa3:275:start";
     const h = await open();
-    traceEnd(traceAwait16);
+    probeOperation = probeAwait16;
+    probeStage = "open@fa3:275:end";
     expect(h.seen).toHaveLength(1);
     expect(pendingStatus.signal?.aborted).toBe(false);
     expect(pendingStatus.aborts).toBe(0);
@@ -533,13 +399,19 @@ describe("the voice card in the Client command card", () => {
   });
 
   test("a press asks for the microphone once; the clip goes up as a 16 kHz mono WAV; Use fills the task instruction and nothing else", async () => {
-    const traceAwait17 = traceBegin("open@fa3:286");
+    const probeAwait17 = ++probeNextOperation;
+    probeOperation = probeAwait17;
+    probeStage = "open@fa3:286:start";
     const h = await open();
-    traceEnd(traceAwait17);
+    probeOperation = probeAwait17;
+    probeStage = "open@fa3:286:end";
     expect(prompt(h).value).toBe("pick the eggplant in the blue plate");
-    const traceAwait18 = traceBegin("speak@fa3:288");
+    const probeAwait18 = ++probeNextOperation;
+    probeOperation = probeAwait18;
+    probeStage = "speak@fa3:288:start";
     await speak(h);
-    traceEnd(traceAwait18);
+    probeOperation = probeAwait18;
+    probeStage = "speak@fa3:288:end";
     expect(h.audio.getUserMediaCalls).toBe(1);
 
     const [upload] = posts(h);
@@ -569,25 +441,18 @@ describe("the voice card in the Client command card", () => {
     expect(prompt(h).value).toBe("pick the eggplant in the blue plate");
     expect(h.calls.preview).toHaveLength(0);
 
-    const traceAwait19 = traceBegin("advance@fa3:318");
+    const probeAwait19 = ++probeNextOperation;
+    probeOperation = probeAwait19;
+    probeStage = "advance@fa3:318:start";
     await advance(800);
-    traceEnd(traceAwait19);
-    const traceAwait20 = traceBegin("act@fa3:319");
-    await act(async () => {
-      const traceCallback = traceActiveOperation;
-      traceSpeech("act.callback.enter", {
-        callback: "act@fa3:319",
-        operation: traceCallback,
-      });
-      const diagnosticResult = use(h)!.click();
-      traceActiveOperation = traceCallback;
-      traceSpeech("act.callback.return", {
-        callback: "act@fa3:319",
-        operation: traceCallback,
-      });
-      return diagnosticResult;
-    });
-    traceEnd(traceAwait20);
+    probeOperation = probeAwait19;
+    probeStage = "advance@fa3:318:end";
+    const probeAwait20 = ++probeNextOperation;
+    probeOperation = probeAwait20;
+    probeStage = "act@fa3:319:start";
+    await act(async () => use(h)!.click());
+    probeOperation = probeAwait20;
+    probeStage = "act@fa3:319:end";
     expect(prompt(h).value).toBe(KNOWN[1]);
     expect(document.activeElement).toBe(prompt(h));
     // Use is one press: nothing was made, copied or asked of the preview route
@@ -599,97 +464,97 @@ describe("the voice card in the Client command card", () => {
     expect(h.host.textContent).toContain("Nothing has started");
 
     // the command is made by the existing button, with the sentence in the body
-    const traceAwait21 = traceBegin("act@fa3:331");
-    await act(async () => {
-      const traceCallback = traceActiveOperation;
-      traceSpeech("act.callback.enter", {
-        callback: "act@fa3:331",
-        operation: traceCallback,
-      });
-      const diagnosticResult = button(card(h), "Make the command")!.click();
-      traceActiveOperation = traceCallback;
-      traceSpeech("act.callback.return", {
-        callback: "act@fa3:331",
-        operation: traceCallback,
-      });
-      return diagnosticResult;
-    });
-    traceEnd(traceAwait21);
-    const traceAwait22 = traceBegin("flushAll@fa3:332");
+    const probeAwait21 = ++probeNextOperation;
+    probeOperation = probeAwait21;
+    probeStage = "act@fa3:331:start";
+    await act(async () => button(card(h), "Make the command")!.click());
+    probeOperation = probeAwait21;
+    probeStage = "act@fa3:331:end";
+    const probeAwait22 = ++probeNextOperation;
+    probeOperation = probeAwait22;
+    probeStage = "flushAll@fa3:332:start";
     await flushAll();
-    traceEnd(traceAwait22);
+    probeOperation = probeAwait22;
+    probeStage = "flushAll@fa3:332:end";
     expect(h.calls.preview).toHaveLength(1);
     expect(h.calls.preview[0].prompt).toBe(KNOWN[1]);
     expect(clipboard).toEqual([]);
   });
 
   test("a second press within the 8 s the microphone is kept does not ask the browser again", async () => {
-    const traceAwait23 = traceBegin("open@fa3:339");
+    const probeAwait23 = ++probeNextOperation;
+    probeOperation = probeAwait23;
+    probeStage = "open@fa3:339:start";
     const h = await open();
-    traceEnd(traceAwait23);
-    const traceAwait24 = traceBegin("speak@fa3:340");
+    probeOperation = probeAwait23;
+    probeStage = "open@fa3:339:end";
+    const probeAwait24 = ++probeNextOperation;
+    probeOperation = probeAwait24;
+    probeStage = "speak@fa3:340:start";
     await speak(h);
-    traceEnd(traceAwait24);
-    const traceAwait25 = traceBegin("advance@fa3:341");
+    probeOperation = probeAwait24;
+    probeStage = "speak@fa3:340:end";
+    const probeAwait25 = ++probeNextOperation;
+    probeOperation = probeAwait25;
+    probeStage = "advance@fa3:341:start";
     await advance(3000);
-    traceEnd(traceAwait25);
-    const traceAwait26 = traceBegin("speak@fa3:342");
+    probeOperation = probeAwait25;
+    probeStage = "advance@fa3:341:end";
+    const probeAwait26 = ++probeNextOperation;
+    probeOperation = probeAwait26;
+    probeStage = "speak@fa3:342:start";
     await speak(h);
-    traceEnd(traceAwait26);
+    probeOperation = probeAwait26;
+    probeStage = "speak@fa3:342:end";
     expect(h.audio.getUserMediaCalls).toBe(1);
     expect(posts(h)).toHaveLength(2);
-    const traceAwait27 = traceBegin("advance@fa3:345");
+    const probeAwait27 = ++probeNextOperation;
+    probeOperation = probeAwait27;
+    probeStage = "advance@fa3:345:start";
     await advance(8000);
-    traceEnd(traceAwait27);
+    probeOperation = probeAwait27;
+    probeStage = "advance@fa3:345:end";
     expect(h.audio.streams[0].track.readyState).toBe("ended");
   });
 
   test("a command that was already made turns stale when Use changes the task instruction, and is not made again", async () => {
-    const traceAwait28 = traceBegin("open@fa3:350");
+    const probeAwait28 = ++probeNextOperation;
+    probeOperation = probeAwait28;
+    probeStage = "open@fa3:350:start";
     const h = await open();
-    traceEnd(traceAwait28);
-    const traceAwait29 = traceBegin("act@fa3:351");
-    await act(async () => {
-      const traceCallback = traceActiveOperation;
-      traceSpeech("act.callback.enter", {
-        callback: "act@fa3:351",
-        operation: traceCallback,
-      });
-      const diagnosticResult = button(card(h), "Make the command")!.click();
-      traceActiveOperation = traceCallback;
-      traceSpeech("act.callback.return", {
-        callback: "act@fa3:351",
-        operation: traceCallback,
-      });
-      return diagnosticResult;
-    });
-    traceEnd(traceAwait29);
-    const traceAwait30 = traceBegin("flushAll@fa3:352");
+    probeOperation = probeAwait28;
+    probeStage = "open@fa3:350:end";
+    const probeAwait29 = ++probeNextOperation;
+    probeOperation = probeAwait29;
+    probeStage = "act@fa3:351:start";
+    await act(async () => button(card(h), "Make the command")!.click());
+    probeOperation = probeAwait29;
+    probeStage = "act@fa3:351:end";
+    const probeAwait30 = ++probeNextOperation;
+    probeOperation = probeAwait30;
+    probeStage = "flushAll@fa3:352:start";
     await flushAll();
-    traceEnd(traceAwait30);
+    probeOperation = probeAwait30;
+    probeStage = "flushAll@fa3:352:end";
     expect(h.calls.preview).toHaveLength(1);
-    const traceAwait31 = traceBegin("speak@fa3:354");
+    const probeAwait31 = ++probeNextOperation;
+    probeOperation = probeAwait31;
+    probeStage = "speak@fa3:354:start";
     await speak(h);
-    traceEnd(traceAwait31);
-    const traceAwait32 = traceBegin("advance@fa3:355");
+    probeOperation = probeAwait31;
+    probeStage = "speak@fa3:354:end";
+    const probeAwait32 = ++probeNextOperation;
+    probeOperation = probeAwait32;
+    probeStage = "advance@fa3:355:start";
     await advance(800);
-    traceEnd(traceAwait32);
-    const traceAwait33 = traceBegin("act@fa3:356");
-    await act(async () => {
-      const traceCallback = traceActiveOperation;
-      traceSpeech("act.callback.enter", {
-        callback: "act@fa3:356",
-        operation: traceCallback,
-      });
-      const diagnosticResult = use(h)!.click();
-      traceActiveOperation = traceCallback;
-      traceSpeech("act.callback.return", {
-        callback: "act@fa3:356",
-        operation: traceCallback,
-      });
-      return diagnosticResult;
-    });
-    traceEnd(traceAwait33);
+    probeOperation = probeAwait32;
+    probeStage = "advance@fa3:355:end";
+    const probeAwait33 = ++probeNextOperation;
+    probeOperation = probeAwait33;
+    probeStage = "act@fa3:356:start";
+    await act(async () => use(h)!.click());
+    probeOperation = probeAwait33;
+    probeStage = "act@fa3:356:end";
     const result = h.host.querySelector(
       "[data-testid=marvel0-command-result]",
     )!;
@@ -697,53 +562,61 @@ describe("the voice card in the Client command card", () => {
     expect(
       result.querySelector("[data-testid=marvel0-command-text]"),
     ).toBeNull();
-    const traceAwait34 = traceBegin("advance@fa3:364");
+    const probeAwait34 = ++probeNextOperation;
+    probeOperation = probeAwait34;
+    probeStage = "advance@fa3:364:start";
     await advance(1000);
-    traceEnd(traceAwait34);
+    probeOperation = probeAwait34;
+    probeStage = "advance@fa3:364:end";
     expect(h.calls.preview).toHaveLength(1);
     expect(h.calls.preview).toHaveLength(1);
   });
 
   test("Enter in the transcript's editor matches again and does not press 'Make the command'", async () => {
-    const traceAwait35 = traceBegin("open@fa3:370");
+    const probeAwait35 = ++probeNextOperation;
+    probeOperation = probeAwait35;
+    probeStage = "open@fa3:370:start";
     const h = await open(() => matchC());
-    traceEnd(traceAwait35);
-    const traceAwait36 = traceBegin("speak@fa3:371");
+    probeOperation = probeAwait35;
+    probeStage = "open@fa3:370:end";
+    const probeAwait36 = ++probeNextOperation;
+    probeOperation = probeAwait36;
+    probeStage = "speak@fa3:371:start";
     await speak(h);
-    traceEnd(traceAwait36);
-    const traceAwait37 = traceBegin("act@fa3:372");
-    await act(async () => {
-      const traceCallback = traceActiveOperation;
-      traceSpeech("act.callback.enter", {
-        callback: "act@fa3:372",
-        operation: traceCallback,
-      });
-      const diagnosticResult = button(h.host, "Edit the text")!.click();
-      traceActiveOperation = traceCallback;
-      traceSpeech("act.callback.return", {
-        callback: "act@fa3:372",
-        operation: traceCallback,
-      });
-      return diagnosticResult;
-    });
-    traceEnd(traceAwait37);
+    probeOperation = probeAwait36;
+    probeStage = "speak@fa3:371:end";
+    const probeAwait37 = ++probeNextOperation;
+    probeOperation = probeAwait37;
+    probeStage = "act@fa3:372:start";
+    await act(async () => button(h.host, "Edit the text")!.click());
+    probeOperation = probeAwait37;
+    probeStage = "act@fa3:372:end";
     const input = h.host.querySelector<HTMLInputElement>(
       "input[data-speech-draft]",
     )!;
-    const traceAwait38 = traceBegin("type@fa3:376");
+    const probeAwait38 = ++probeNextOperation;
+    probeOperation = probeAwait38;
+    probeStage = "type@fa3:376:start";
     await type(input, "stack plates");
-    traceEnd(traceAwait38);
+    probeOperation = probeAwait38;
+    probeStage = "type@fa3:376:end";
     const enter = new KeyboardEvent("keydown", {
       key: "Enter",
       bubbles: true,
       cancelable: true,
     });
-    const traceAwait39 = traceBegin("fire@fa3:382");
+    const probeAwait39 = ++probeNextOperation;
+    probeOperation = probeAwait39;
+    probeStage = "fire@fa3:382:start";
     await fire(input, enter);
-    traceEnd(traceAwait39);
-    const traceAwait40 = traceBegin("flushAll@fa3:383");
+    probeOperation = probeAwait39;
+    probeStage = "fire@fa3:382:end";
+    const probeAwait40 = ++probeNextOperation;
+    probeOperation = probeAwait40;
+    probeStage = "flushAll@fa3:383:start";
     await flushAll();
-    traceEnd(traceAwait40);
+    probeOperation = probeAwait40;
+    probeStage = "flushAll@fa3:383:end";
     expect(enter.defaultPrevented).toBe(true);
     expect(h.calls.preview).toHaveLength(0);
     const matches = h.seen.filter((call) =>
@@ -758,26 +631,38 @@ describe("the voice card in the Client command card", () => {
 
   test("selecting another model on the page revalidates the proposal against it", async () => {
     let restricted = false;
-    const traceAwait41 = traceBegin("open@fa3:398");
+    const probeAwait41 = ++probeNextOperation;
+    probeOperation = probeAwait41;
+    probeStage = "open@fa3:398:start";
     const h = await open(() =>
       restricted
         ? matchC({ family: "restricted", allowed: RESTRICTED })
         : matchA(KNOWN[2]),
     );
-    traceEnd(traceAwait41);
-    const traceAwait42 = traceBegin("speak@fa3:403");
+    probeOperation = probeAwait41;
+    probeStage = "open@fa3:398:end";
+    const probeAwait42 = ++probeNextOperation;
+    probeOperation = probeAwait42;
+    probeStage = "speak@fa3:403:start";
     await speak(h);
-    traceEnd(traceAwait42);
+    probeOperation = probeAwait42;
+    probeStage = "speak@fa3:403:end";
     expect(
       h.host.querySelector("[data-testid=marvel0-speech-best]"),
     ).not.toBeNull();
     restricted = true;
-    const traceAwait43 = traceBegin("h.select@fa3:408");
+    const probeAwait43 = ++probeNextOperation;
+    probeOperation = probeAwait43;
+    probeStage = "h.select@fa3:408:start";
     await h.select(SP);
-    traceEnd(traceAwait43);
-    const traceAwait44 = traceBegin("flushAll@fa3:409");
+    probeOperation = probeAwait43;
+    probeStage = "h.select@fa3:408:end";
+    const probeAwait44 = ++probeNextOperation;
+    probeOperation = probeAwait44;
+    probeStage = "flushAll@fa3:409:start";
     await flushAll();
-    traceEnd(traceAwait44);
+    probeOperation = probeAwait44;
+    probeStage = "flushAll@fa3:409:end";
     const matches = h.seen.filter((call) =>
       call.path.endsWith("/speech/match"),
     );
@@ -790,41 +675,24 @@ describe("the voice card in the Client command card", () => {
     expect(
       h.host.querySelector("[data-testid=marvel0-speech-best]"),
     ).toBeNull();
-    const traceAwait45 = traceBegin("advance@fa3:422");
+    const probeAwait45 = ++probeNextOperation;
+    probeOperation = probeAwait45;
+    probeStage = "advance@fa3:422:start";
     await advance(800);
-    traceEnd(traceAwait45);
-    const traceAwait46 = traceBegin("act@fa3:423");
-    await act(async () => {
-      const traceCallback = traceActiveOperation;
-      traceSpeech("act.callback.enter", {
-        callback: "act@fa3:423",
-        operation: traceCallback,
-      });
-      const diagnosticResult = radios[0].click();
-      traceActiveOperation = traceCallback;
-      traceSpeech("act.callback.return", {
-        callback: "act@fa3:423",
-        operation: traceCallback,
-      });
-      return diagnosticResult;
-    });
-    traceEnd(traceAwait46);
-    const traceAwait47 = traceBegin("act@fa3:424");
-    await act(async () => {
-      const traceCallback = traceActiveOperation;
-      traceSpeech("act.callback.enter", {
-        callback: "act@fa3:424",
-        operation: traceCallback,
-      });
-      const diagnosticResult = use(h)!.click();
-      traceActiveOperation = traceCallback;
-      traceSpeech("act.callback.return", {
-        callback: "act@fa3:424",
-        operation: traceCallback,
-      });
-      return diagnosticResult;
-    });
-    traceEnd(traceAwait47);
+    probeOperation = probeAwait45;
+    probeStage = "advance@fa3:422:end";
+    const probeAwait46 = ++probeNextOperation;
+    probeOperation = probeAwait46;
+    probeStage = "act@fa3:423:start";
+    await act(async () => radios[0].click());
+    probeOperation = probeAwait46;
+    probeStage = "act@fa3:423:end";
+    const probeAwait47 = ++probeNextOperation;
+    probeOperation = probeAwait47;
+    probeStage = "act@fa3:424:start";
+    await act(async () => use(h)!.click());
+    probeOperation = probeAwait47;
+    probeStage = "act@fa3:424:end";
     expect(prompt(h).value).toBe(RESTRICTED[0]);
   });
 });
@@ -834,12 +702,18 @@ describe("the action section of the page", () => {
     audio = installFakeAudio();
     network();
     const { api } = fakeApi();
-    const traceAwait48 = traceBegin("render@fa3:434");
+    const probeAwait48 = ++probeNextOperation;
+    probeOperation = probeAwait48;
+    probeStage = "render@fa3:434:start";
     const view = await render(<Marvel0Actions api={api} />);
-    traceEnd(traceAwait48);
-    const traceAwait49 = traceBegin("flushAll@fa3:435");
+    probeOperation = probeAwait48;
+    probeStage = "render@fa3:434:end";
+    const probeAwait49 = ++probeNextOperation;
+    probeOperation = probeAwait49;
+    probeStage = "flushAll@fa3:435:start";
     await flushAll();
-    traceEnd(traceAwait49);
+    probeOperation = probeAwait49;
+    probeStage = "flushAll@fa3:435:end";
     expect(
       view.host.querySelectorAll("[data-testid=marvel0-speech-mic]"),
     ).toHaveLength(1);

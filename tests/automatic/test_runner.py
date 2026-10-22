@@ -29,6 +29,7 @@ from test_launch import (  # noqa: F401 - fixtures
 
 from levi.automatic import control, launch, runner
 from levi.automatic.journal import Journal
+from levi.automatic.orchestrator import Orchestrator
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -315,8 +316,25 @@ def test_a_scene_answer_reaches_a_person_check_only(tmp_path, fake_systemd, atte
     served.join()
 
 
-def test_a_second_runner_of_a_live_run_is_refused(tmp_path, fake_systemd):
+def test_a_second_runner_of_a_live_run_is_refused(
+    tmp_path, fake_systemd, monkeypatch
+):
+    held = threading.Event()
+    original_run = Orchestrator.run
+
+    def run_until_held(self, *args, **kwargs):
+        state = original_run(self, *args, **kwargs)
+        if state == "WAIT_HUMAN":
+            held.set()
+        return state
+
+    # The journal's WAIT_HUMAN commit is visible before its transaction
+    # releases the state lock. An in-flight stop may legitimately return
+    # stop_requested and be consumed on reaching that hold. This test stops
+    # a settled run, after run() also finishes its final note writes.
+    monkeypatch.setattr(Orchestrator, "run", run_until_held)
     found, run_dir, served = waiting_run(tmp_path, fake_systemd)
+    wait_until(held.is_set)
     before = (run_dir / "runner.json").read_bytes()
     second = runner.serve(run_dir, found.plan_sha256, attach=True)
     assert second.code == "E_RUNNER_ALIVE" and second.exit_code == 2
@@ -324,7 +342,8 @@ def test_a_second_runner_of_a_live_run_is_refused(tmp_path, fake_systemd):
     with pytest.raises(launch.LaunchRefused) as caught:
         launch.attach(run_dir, backend="foreground")
     assert caught.value.code == "E_RUNNER_ALIVE"
-    send(run_dir, control.command("stop", "stop-1", "op-1"))
+    stopped = send(run_dir, control.command("stop", "stop-1", "op-1"))
+    assert stopped["ok"] and stopped["code"] == "completed", stopped
     served.join()
     with pytest.raises(launch.LaunchRefused) as caught:
         launch.attach(run_dir, backend="foreground")
