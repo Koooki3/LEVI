@@ -495,17 +495,25 @@ describe("a level B key stands behind a window", () => {
       call.op === "key"
         ? refusal(429, "key_too_soon")
         : { ok: true, status: 202, data: {} };
-    await wait(200);
+    // The clock refreshes asynchronously; elapsed wall time alone does not
+    // prove that React has enabled the key and rendered the confirmation.
+    await waitFor(() => !keyButton(f.host, "release_round")!.disabled, {
+      label: "the release key to be armed",
+    });
     await click(keyButton(f.host, "release_round"));
-    await tickAll(dialog()!);
+    const window = await waitFor(dialog, { label: "the key confirmation" });
+    await tickAll(window);
     await click(
-      Array.from(dialog()!.querySelectorAll("button")).find((b) =>
+      Array.from(window.querySelectorAll("button")).find((b) =>
         text(b).startsWith(E["marvel0.autonomy.key.release_round"]),
       )!,
     );
-    await tick(3, 10);
-    expect(text($(dialog()!, "marvel0-autonomy-key-refused"))).toContain(
-      E["marvel0.autonomy.err.key_too_soon"],
+    await waitFor(
+      () =>
+        text($(window, "marvel0-autonomy-key-refused")).includes(
+          E["marvel0.autonomy.err.key_too_soon"],
+        ),
+      { label: "the key refusal in words" },
     );
   });
 
