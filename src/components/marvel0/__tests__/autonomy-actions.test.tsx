@@ -505,14 +505,15 @@ describe("what the card says besides the keys", () => {
     );
   });
 
-  test("the fixed sentence is there in every state and says what the buttons are and are not", async () => {
-    for (const name of [
-      "idle",
-      "await_release",
-      "forward_running",
-      "stalled",
-      "ended_done",
-    ]) {
+  test.each([
+    "idle",
+    "await_release",
+    "forward_running",
+    "stalled",
+    "ended_done",
+  ])(
+    "the fixed sentence is there in every state and says what the buttons are and are not: %s",
+    async (name) => {
       const { host } = await openStep({ run: runDoc(name) });
       const honest = $(host, "marvel0-autonomy-honest")!;
       expect([name, text(honest)]).toEqual([
@@ -520,27 +521,28 @@ describe("what the card says besides the keys", () => {
         E["marvel0.autonomy.honest"],
       ]);
       expect(honest.closest("details")).toBeNull();
-    }
-    expect(E["marvel0.autonomy.honest"]).toMatch(/not an emergency stop/);
-    expect(E["marvel0.autonomy.honest"]).toMatch(/Stop is Ctrl\+C/);
-    expect(E["marvel0.autonomy.honest"]).toMatch(
-      /cannot stop another program of the same account/,
-    );
-  });
+      expect(E["marvel0.autonomy.honest"]).toMatch(/not an emergency stop/);
+      expect(E["marvel0.autonomy.honest"]).toMatch(/Stop is Ctrl\+C/);
+      expect(E["marvel0.autonomy.honest"]).toMatch(
+        /cannot stop another program of the same account/,
+      );
+    },
+  );
 
-  test("nothing in the card shows the vision model's judgement", async () => {
-    for (const name of [
-      "await_release",
-      "forward_running",
-      "reverse_running",
-      "ended_done",
-    ]) {
+  test.each([
+    "await_release",
+    "forward_running",
+    "reverse_running",
+    "ended_done",
+  ])(
+    "nothing in the card shows the vision model's judgement: %s",
+    async (name) => {
       const { host } = await openStep({ run: runDoc(name) });
       expect(text(host)).not.toMatch(
         /subtask_check|subtask_retry|subtask_plan/,
       );
-    }
-  });
+    },
+  );
 });
 
 describe("how the card is laid out", () => {
