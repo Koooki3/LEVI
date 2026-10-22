@@ -194,19 +194,24 @@ def start_download(store, name, request_id):
 
 
 def download(store, job_id):
-    try:
-        item = store.get("model_downloads", job_id)
-    except KeyError:
-        raise ValueError("Unknown model download") from None
-    public = {key: value for key, value in item.items() if key != "config"}
-    if item["status"] in {"running", "queued"}:
-        with store.connect() as db:
+    # Read the job and its lease from one SQLite snapshot. Otherwise _finish
+    # can publish a terminal status and release the lease between these reads,
+    # making the reader combine an old running job with a new missing lease.
+    with store.connect() as db:
+        if not db.in_transaction:
+            db.execute("BEGIN")
+        try:
+            item = store.get("model_downloads", job_id)
+        except KeyError:
+            raise ValueError("Unknown model download") from None
+        public = {key: value for key, value in item.items() if key != "config"}
+        if item["status"] in {"running", "queued"}:
             lease = db.execute(
                 "SELECT expires FROM leases WHERE id=? AND owner=?",
                 (_lease(ProviderConfig.model_validate(item["config"])), job_id),
             ).fetchone()
-        if not lease or lease[0] <= time.time():
-            public["status"] = "interrupted"
+            if not lease or lease[0] <= time.time():
+                public["status"] = "interrupted"
     return public
 
 

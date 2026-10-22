@@ -3,7 +3,15 @@
 // filled task instruction, and what must NOT happen on the way.
 import { render, setupDom } from "@/components/ds/__tests__/dom";
 import { act } from "react";
-import { afterEach, describe, expect, jest, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  jest,
+  test,
+} from "bun:test";
 import { readModels, readSite } from "../catalog-logic";
 import { CommandPanel } from "../command-panel";
 import { Marvel0Actions } from "../marvel0-actions";
@@ -24,9 +32,11 @@ import {
   type FakeAudio,
 } from "./speech-fixtures";
 
-// Bun runs afterEach hooks in registration order. Restore the clock before
-// setupDom awaits React unmount; audio/network fakes stay installed until after it.
-afterEach(() => jest.useRealTimers());
+// Keep one clock throughout this file, including asynchronous React teardown.
+// Restoring and reinstalling Bun timers between tests resets performance.now().
+// Restore real time before setupDom unregisters the browser globals.
+beforeAll(() => jest.useFakeTimers());
+afterAll(() => jest.useRealTimers());
 setupDom();
 
 const ALL = "pi05_fr3_all_step49999";
@@ -101,7 +111,6 @@ function network(
 }
 
 async function open(heard?: () => Record<string, unknown>) {
-  jest.useFakeTimers();
   audio = installFakeAudio();
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -351,7 +360,6 @@ describe("the voice card in the Client command card", () => {
 
 describe("the action section of the page", () => {
   test("has one microphone control, outside every dialog, even with the policy server card beside it", async () => {
-    jest.useFakeTimers();
     audio = installFakeAudio();
     network();
     const { api } = fakeApi();

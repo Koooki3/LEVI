@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import os
-import select
+import selectors
 import signal
 import struct
 import subprocess
@@ -79,15 +79,18 @@ class Worker:
         """The next event, or None at EOF; fails the test after ``timeout``."""
         assert self.proc.stdout is not None
         deadline = time.monotonic() + scaled(timeout)
-        while b"\n" not in self._buffer:
-            remaining = deadline - time.monotonic()
-            assert remaining > 0, "no event from the worker in time"
-            if not select.select([self.proc.stdout], [], [], remaining)[0]:
-                continue
-            chunk = os.read(self.proc.stdout.fileno(), 65536)
-            if not chunk:
-                return None
-            self._buffer += chunk
+        # Full-suite runs can allocate valid pipes above select()'s FD_SETSIZE.
+        with selectors.DefaultSelector() as reader:
+            reader.register(self.proc.stdout, selectors.EVENT_READ)
+            while b"\n" not in self._buffer:
+                remaining = deadline - time.monotonic()
+                assert remaining > 0, "no event from the worker in time"
+                if not reader.select(remaining):
+                    continue
+                chunk = os.read(self.proc.stdout.fileno(), 65536)
+                if not chunk:
+                    return None
+                self._buffer += chunk
         line, self._buffer = self._buffer.split(b"\n", 1)
         return json.loads(line)
 
@@ -190,6 +193,28 @@ def test_ready_event_and_results_follow_the_contract(fake):
     assert (
         "把茄子" not in err and "eggplant" not in err
     )  # the transcript never goes to stderr
+
+
+def test_worker_events_support_a_pipe_above_select_fd_setsize(fake):
+    fcntl = pytest.importorskip("fcntl")
+    resource = pytest.importorskip("resource")
+    if resource.getrlimit(resource.RLIMIT_NOFILE)[0] <= 1024:
+        pytest.skip("this platform cannot allocate a descriptor above FD_SETSIZE")
+    proc = fake([{"heard": False, "reason": "low_confidence"}])
+    assert proc.proc.stdout is not None
+    high_fd = fcntl.fcntl(proc.proc.stdout.fileno(), fcntl.F_DUPFD, 1024)
+    proc.proc.stdout.close()
+    proc.proc.stdout = os.fdopen(high_fd, "rb", buffering=0)
+    assert proc.proc.stdout.fileno() >= 1024
+    assert proc.event()["event"] == "ready"
+    proc.send(request("high-fd"))
+    assert proc.event() == {
+        "event": "result",
+        "id": "high-fd",
+        "heard": False,
+        "reason": "low_confidence",
+    }
+    assert proc.finish()[:2] == (0, [])
 
 
 def test_eof_on_stdin_is_a_clean_exit(fake):

@@ -12,6 +12,7 @@ kills whatever a test left behind, outside the page's own calls."""
 import os
 import signal
 import subprocess
+import threading
 import time
 
 from . import fake_specs
@@ -36,9 +37,17 @@ class Proc:
 class ProcessHost:
     def __init__(self, wrapper=None):
         self.units = {}  # name -> Proc
+        self._units_lock = threading.Lock()
         self.wrapper = wrapper
         self.commands = []  # every argv the page asked to run
         self.oneshot_timeouts = []  # one-shots RuntimeMaxSec had to end
+
+    def _collect(self, name, proc):
+        """A status read and a stop can observe the same clean exit.
+        Collect that instance once, never a later unit with the same name."""
+        with self._units_lock:
+            if proc is not None and self.units.get(name) is proc:
+                self.units.pop(name)
 
     # -- the runner the page uses (behind ``stack.guarded``)
     def run(self, argv, timeout_s):
@@ -62,7 +71,7 @@ class ProcessHost:
             name = argv[3].removesuffix(".service")
             proc = self.units.get(name)
             if proc is not None and not proc.alive():
-                del self.units[name]
+                self._collect(name, proc)
             return 0, ""
         raise AssertionError(f"unexpected command {argv}")
 
@@ -88,19 +97,23 @@ class ProcessHost:
                 env[key] = value
         if "--pipe" in options:
             return self._oneshot(command, props, env, timeout_s)
-        if name in self.units and self.units[name].alive():
-            return 1, f"Unit {name}.service was already loaded or has a fragment file."
-        out = props["StandardOutput"].split("append:", 1)[1]
-        with open(out, "ab", buffering=0) as log:
-            popen = subprocess.Popen(
-                command,
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-                env=env,
-            )
-        self.units[name] = Proc(popen, name, command, props)
+        with self._units_lock:
+            if name in self.units and self.units[name].alive():
+                return (
+                    1,
+                    f"Unit {name}.service was already loaded or has a fragment file.",
+                )
+            out = props["StandardOutput"].split("append:", 1)[1]
+            with open(out, "ab", buffering=0) as log:
+                popen = subprocess.Popen(
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                    env=env,
+                )
+            self.units[name] = Proc(popen, name, command, props)
         return 0, ""
 
     def _oneshot(self, command, props, env, timeout_s):
@@ -144,7 +157,7 @@ class ProcessHost:
             not proc.alive() and proc.popen.returncode == 0 and not proc.timed_out
         ):
             # (a unit that exited cleanly is collected, as systemd does)
-            self.units.pop(name, None)
+            self._collect(name, proc)
             return (
                 f"Id={unit}\nLoadState=not-found\nActiveState=inactive\nSubState=dead\n"
             )
@@ -178,7 +191,7 @@ class ProcessHost:
         if proc is None:
             return 0, ""
         if not proc.alive():
-            del self.units[name]
+            self._collect(name, proc)
             return 0, ""
         signame = proc.props.get("KillSignal", "SIGTERM")
         wait_s = float(proc.props.get("TimeoutStopSec", "5"))
@@ -193,16 +206,18 @@ class ProcessHost:
             assert proc.props.get("SendSIGKILL") == "no"
             proc.timed_out = True
             return 1, "stop timed out"
-        del self.units[name]
+        self._collect(name, proc)
         return 0, ""
 
     # -- test hygiene (never the page's)
     def reap(self):
-        for proc in list(self.units.values()):
+        with self._units_lock:
+            units = list(self.units.items())
+        for name, proc in units:
             if proc.alive():
                 try:
                     os.killpg(proc.popen.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
             proc.popen.wait(timeout=5)
-        self.units.clear()
+            self._collect(name, proc)
