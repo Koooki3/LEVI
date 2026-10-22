@@ -200,7 +200,16 @@ describe("the voice card in the Client command card", () => {
 
   test("opening and waiting reads the voice state and nothing else: no microphone, no write", async () => {
     const h = await open();
-    await advance(180_000);
+    // Each passive read answers before the next 30 s refresh. One 180 s
+    // jump would expire those requests before their Promise bodies can settle.
+    for (let refresh = 0; refresh < 6; refresh += 1) {
+      await advance(30_000);
+      await flushAll();
+      expect(mic(h).disabled).toBe(false);
+      expect(
+        h.host.querySelector("[data-testid=marvel0-speech-problem]"),
+      ).toBeNull();
+    }
     expect(h.seen).toHaveLength(7);
     expect(
       h.seen.every(
@@ -210,6 +219,13 @@ describe("the voice card in the Client command card", () => {
       ),
     ).toBe(true);
     expect(h.seen[0].init?.method).toBeUndefined();
+    expect(
+      h.seen.every(
+        (call) =>
+          call.init?.method === undefined && call.init?.body === undefined,
+      ),
+    ).toBe(true);
+    expect(posts(h)).toHaveLength(0);
     expect(h.audio.getUserMediaCalls).toBe(0);
     expect(h.calls.preview).toHaveLength(0);
   });
