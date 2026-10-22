@@ -55,16 +55,17 @@ async function pressKey(host: ParentNode, id: string) {
 }
 
 describe("Stop", () => {
-  test("it is a block of its own while D lives, whatever the state, full width, and the only solid danger button of the card", async () => {
-    for (const name of [
-      "launching",
-      "await_phrase",
-      "services",
-      "await_release",
-      "forward_running",
-      "busy_external",
-      "unknown_drift",
-    ]) {
+  test.each([
+    "launching",
+    "await_phrase",
+    "services",
+    "await_release",
+    "forward_running",
+    "busy_external",
+    "unknown_drift",
+  ])(
+    "Stop keeps its own full-width danger block while D lives: %s",
+    async (name) => {
       const { host } = await openStep({ run: runDoc(name) });
       const frame = $(host, "marvel0-autonomy-stop-frame")!;
       expect([name, frame !== null]).toEqual([name, true]);
@@ -80,8 +81,8 @@ describe("Stop", () => {
             : 0),
       );
       expect(text(frame)).toContain(E["marvel0.autonomy.stop.button"]);
-    }
-  });
+    },
+  );
 
   test("it says it is not an emergency stop, that the arm stays where it is and that it is sent once", async () => {
     const { host } = await openStep({ run: runDoc("forward_running") });
@@ -92,21 +93,17 @@ describe("Stop", () => {
     expect(caption).toMatch(/Once per run/);
   });
 
-  test("it is not there when no D lives (nothing hosted, ended, exited by a signal)", async () => {
-    for (const name of [
-      "idle",
-      "ended_done",
-      "ended_refused",
-      "ended_hangup",
-    ]) {
+  test.each(["idle", "ended_done", "ended_refused", "ended_hangup"])(
+    "Stop is absent when no D lives: %s",
+    async (name) => {
       const { host } = await openStep({ run: runDoc(name) });
       expect([name, $(host, "marvel0-autonomy-stop-frame")]).toEqual([
         name,
         null,
       ]);
       expect([name, $(host, "marvel0-autonomy-dock")]).toEqual([name, null]);
-    }
-  });
+    },
+  );
 
   test("one click is one request with the closed body of the route (no seen, no token); a double click is still one", async () => {
     const { host, state } = await openStep({ run: runDoc("forward_running") });
