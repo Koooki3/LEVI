@@ -21,13 +21,20 @@ from levi.live import owned_runtime as owned
 from levi.live import owned_supervisor as sup
 
 CHILD = r"""
-import signal, sys, time
-events, role, mode = sys.argv[1:4]
+import json, signal, sys, time
+from pathlib import Path
+events, role, mode, ready = sys.argv[1:5]
 def log(text):
     with open(events, "a") as f:
         f.write(text + "\n")
 if mode == "stubborn":
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
+# A supervisor launcher return does not mean this child installed its handler.
+marker = Path(ready)
+pending = marker.with_suffix(".tmp")
+pending.write_text(json.dumps({"role": role, "mode": mode}))
+pending.replace(marker)
+if mode == "stubborn":
     while True:
         time.sleep(0.05)
 if mode == "early":
@@ -111,7 +118,15 @@ def main():
         if modes.get(role) == "launch_fail":
             raise RuntimeError("fake launch failure")
         proc = subprocess.Popen(
-            [sys.executable, "-c", CHILD, events, role, modes.get(role, "normal")],
+            [
+                sys.executable,
+                "-c",
+                CHILD,
+                events,
+                role,
+                modes.get(role, "normal"),
+                str(Path(events).with_name(f"worker-ready-{role}.json")),
+            ],
             stdin=subprocess.PIPE,
             start_new_session=True,
         )

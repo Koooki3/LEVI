@@ -166,7 +166,19 @@ class Rig:
         raise AssertionError("timeout waiting for " + str(path) + "\n" + self.log())
 
     def wait_exit(self, timeout=20):
-        return self.proc.wait(timeout=timeout)
+        try:
+            return self.proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            for label, path in (
+                ("supervisor stderr", self.stderr),
+                ("stop receipt", self.state / "stop-receipt.json"),
+            ):
+                try:
+                    detail = path.read_text()
+                except OSError as unavailable:
+                    detail = f"<unavailable: {unavailable}>"
+                error.add_note(f"{label}:\n{detail}")
+            raise
 
     def log(self):
         return self.stderr.read_text()
@@ -222,6 +234,7 @@ def test_ready_then_sigterm_stops_every_worker_before_exit(rig):
 def test_stubborn_worker_is_killed_by_group_then_confirmed(rig):
     rig.start(modes={"judge": "stubborn"})
     rig.wait_file(rig.state / "ready.json")
+    rig.wait_file(rig.tmp / "worker-ready-judge.json")
     rig.proc.send_signal(signal.SIGTERM)
     assert rig.wait_exit() == sup.EX_OK, rig.log()
     assert "escalating SIGKILL" in rig.log()
