@@ -3,14 +3,13 @@
 // filled task instruction, and what must NOT happen on the way.
 import { render, setupDom } from "@/components/ds/__tests__/dom";
 import { act } from "react";
+import { installApplicationClock } from "./application-clock";
 import {
   afterAll,
   afterEach,
   beforeAll,
-  beforeEach,
   describe,
   expect,
-  jest,
   test,
 } from "bun:test";
 import { readModels, readSite } from "../catalog-logic";
@@ -33,22 +32,15 @@ import {
   type FakeAudio,
 } from "./speech-fixtures";
 
-// Keep one clock throughout this file, including effect cleanup.
-// Restoring and reinstalling Bun timers between tests resets performance.now().
-// Restore real time before setupDom unregisters the browser globals.
-beforeAll(() => jest.useFakeTimers());
-afterAll(() => jest.useRealTimers());
+// Install after React loads so its captured host clocks stay real.
+// Keep the application clock through cleanup; restore before DOM globals.
+let clock: ReturnType<typeof installApplicationClock>;
+beforeAll(() => {
+  clock = installApplicationClock();
+});
+afterAll(() => clock.restore());
 // Effects dispose their resources synchronously; verify that before restoring
 // audio and fetch. Keep rendering and interactions asynchronous.
-let advanceStage = "not-entered";
-let idleBoundary = "not-entered";
-beforeEach(() => {
-  advanceStage = "not-entered";
-  idleBoundary = "not-entered";
-});
-afterEach(() => {
-  console.log("SPEECH_ADVANCE_STAGE", advanceStage, idleBoundary);
-});
 setupDom({ unmount: "sync" });
 
 const ALL = "pi05_fr3_all_step49999";
@@ -112,11 +104,8 @@ async function flushAll() {
 }
 const advance = (ms: number) =>
   act(async () => {
-    advanceStage = "before-timers";
-    jest.advanceTimersByTime(ms);
-    advanceStage = "after-timers";
+    clock.advance(ms);
     for (let i = 0; i < 10; i += 1) await Promise.resolve();
-    advanceStage = "after-microtasks";
   });
 
 /** The core as the voice card meets it. `heard` is the match the next clip gets. */
@@ -256,11 +245,8 @@ describe("the voice card in the Client command card", () => {
     // Each passive read answers before the next 30 s refresh. One 180 s
     // jump would expire those requests before their Promise bodies can settle.
     for (let refresh = 0; refresh < 6; refresh += 1) {
-      idleBoundary = "advance";
       await advance(30_000);
-      idleBoundary = "flush";
       await flushAll();
-      idleBoundary = "assert";
       expect(mic(h).disabled).toBe(false);
       expect(
         h.host.querySelector("[data-testid=marvel0-speech-problem]"),
