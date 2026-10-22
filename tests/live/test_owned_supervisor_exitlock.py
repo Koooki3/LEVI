@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -94,7 +95,7 @@ if mode == "launch_receipt_none":
     receipt.driver_observer = SimpleNamespace(require_held=lambda: None)
     supervisor.workers["failed"] = receipt
 for signum in (signal.SIGTERM, signal.SIGINT):
-    signal.signal(signum, lambda *_: supervisor.stop_requested.set())
+    signal.signal(signum, supervisor.request_stop_from_signal)
 (base / "started.json").write_text(json.dumps({
     "leader": leader_identity.__dict__, "leaf": survivor_identity.__dict__
 }))
@@ -208,3 +209,160 @@ def test_unconfirmed_shutdown_retains_lock_until_complete_proof(tmp_path, mode):
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
+
+
+def test_signal_handler_returns_while_stop_event_lock_is_held(tmp_path):
+    # A regression to Event.set in the real handler deadlocks this child;
+    # subprocess.run kills and reaps only that child when the bound expires.
+    script = r"""
+import json, signal
+from types import SimpleNamespace
+from levi.live import owned_supervisor as sup
+supervisor = sup.Supervisor(SimpleNamespace(poll_s=600), None, None, None, None)
+for number in (signal.SIGTERM, signal.SIGINT):
+    signal.signal(number, supervisor.request_stop_from_signal)
+with supervisor.stop_requested._cond:
+    signal.raise_signal(signal.SIGTERM)
+    signal.raise_signal(signal.SIGINT)
+    assert supervisor.stop_is_requested()
+    assert not supervisor.stop_requested.is_set()
+assert supervisor._wait_for_stop() is True
+print(json.dumps({"returned": True, "stop_requested": supervisor.stop_is_requested()}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"returned": True, "stop_requested": True}
+
+
+@pytest.mark.parametrize("source", ["signal", "event", "healthy"])
+def test_stop_wait_bounds_signal_latency_without_accelerating_monitor(
+    monkeypatch, source
+):
+    supervisor = sup.Supervisor(SimpleNamespace(poll_s=600), None, None, None, None)
+    clock, waits, monitored = [0.0], [], []
+
+    class Event:
+        flag = False
+
+        def is_set(self):
+            return self.flag
+
+        def set(self):
+            self.flag = True
+
+        def wait(self, timeout):
+            waits.append(timeout)
+            if len(waits) == 1:
+                if source == "signal":
+                    supervisor.request_stop_from_signal(signal.SIGTERM, None)
+                elif source == "event":
+                    self.set()
+            if self.flag:
+                return True
+            clock[0] += timeout
+            return False
+
+    def monitor():
+        monitored.append(clock[0])
+        return sup.EX_WORKER_DIED, "controlled monitor result"
+
+    supervisor.stop_requested = Event()
+    monkeypatch.setattr(sup.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(supervisor, "monitor_once", monitor)
+    code, reason = supervisor.run_until_stop()
+    assert waits and 0 < min(waits) <= max(waits) <= 0.05
+    if source == "healthy":
+        assert monitored == pytest.approx([600])
+        assert sum(waits) == pytest.approx(600)
+        assert (code, reason) == (sup.EX_WORKER_DIED, "controlled monitor result")
+    else:
+        assert monitored == []
+        assert clock[0] <= 0.05
+        assert (code, reason) == (sup.EX_OK, "stop requested")
+
+
+@pytest.mark.parametrize("source", ["signal", "event"])
+@pytest.mark.parametrize("phase", ["before", "during"])
+def test_launch_honors_both_stop_sources_without_launching_next_role(
+    tmp_path, source, phase
+):
+    roles = [SimpleNamespace(role=name, capability_id=name) for name in ("a", "b")]
+    config = SimpleNamespace(roles=roles, launch_timeout_s=1)
+    launched = []
+
+    def request_stop():
+        if source == "signal":
+            supervisor.request_stop_from_signal(signal.SIGTERM, None)
+        else:
+            supervisor.stop_requested.set()
+
+    def launcher(
+        factory,
+        scope,
+        driver_observer,
+        broker,
+        lease,
+        role,
+        group_scope,
+        state,
+        *,
+        timeout_s,
+    ):
+        launched.append(role)
+        if phase == "during":
+            request_stop()
+        return object()
+
+    plan = sup.SupervisorPlan(
+        None, None, {role.role: role for role in roles}, tmp_path, launcher=launcher
+    )
+    group = SimpleNamespace(scopes={role.role: object() for role in roles})
+    supervisor = sup.Supervisor(config, None, None, group, plan)
+    if phase == "before":
+        request_stop()
+    supervisor.launch_all()
+    assert launched == ([] if phase == "before" else ["a"])
+    assert set(supervisor.workers) == set(launched)
+
+
+@pytest.mark.parametrize("source", ["signal", "event"])
+def test_main_routes_launch_stop_to_shutdown_before_ready(
+    tmp_path, monkeypatch, source
+):
+    config = SimpleNamespace(roles=(), state_dir=tmp_path)
+    plan = sup.SupervisorPlan(None, None, {}, tmp_path)
+    registrations, shutdowns = {}, []
+    monkeypatch.setattr(sup, "verify_launch_evidence", lambda *_: (None, None))
+    monkeypatch.setattr(sup, "build_containment", lambda *_: (None, None))
+    monkeypatch.setattr(
+        sup.signal,
+        "signal",
+        lambda number, handler: registrations.setdefault(number, handler),
+    )
+
+    def launch(supervisor):
+        if source == "signal":
+            registrations[signal.SIGTERM](signal.SIGTERM, None)
+        else:
+            supervisor.stop_requested.set()
+
+    def shutdown(supervisor, code, reason):
+        shutdowns.append((code, reason))
+        return code
+
+    def not_ready(supervisor):
+        pytest.fail("launch stop must not reach ready publication")
+
+    monkeypatch.setattr(sup.Supervisor, "launch_all", launch)
+    monkeypatch.setattr(sup.Supervisor, "shutdown", shutdown)
+    monkeypatch.setattr(sup.Supervisor, "group_observer", not_ready)
+    assert sup.run(config, {}, setup=lambda _: plan) == sup.EX_OK
+    assert shutdowns == [(sup.EX_OK, "stop requested during launch")]
+    assert not (tmp_path / "ready.json").exists()

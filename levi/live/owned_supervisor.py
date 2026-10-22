@@ -262,7 +262,27 @@ class Supervisor:
         self.identity, self.group_scope, self.plan = identity, group_scope, plan
         self.workers = {}
         self.stop_requested = threading.Event()
+        self._signal_stop_requested = False
         self.reason = None
+
+    def request_stop_from_signal(self, _number, _frame):
+        # Python signal handlers may re-enter while Event.set/wait holds its
+        # non-reentrant Condition lock. Only publish a lock-free latch here.
+        self._signal_stop_requested = True
+
+    def stop_is_requested(self):
+        return self._signal_stop_requested or self.stop_requested.is_set()
+
+    def _wait_for_stop(self):
+        deadline = time.monotonic() + self.config.poll_s
+        while not self.stop_is_requested():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            # Preserve the monitor cadence while bounding signal-latch latency.
+            # Thread callers of Event.set still wake this wait immediately.
+            self.stop_requested.wait(min(0.05, remaining))
+        return True
 
     def launch_all(self):
         launcher = self.plan.launcher or owned.OwnedModelWorker.launch
@@ -273,7 +293,7 @@ class Supervisor:
                     EX_SETUP, "setup", f"factory for {member.role} differs from config"
                 )
         for member in self.config.roles:
-            if self.stop_requested.is_set():
+            if self.stop_is_requested():
                 return
             try:
                 self.workers[member.role] = launcher(
@@ -341,7 +361,7 @@ class Supervisor:
         return None
 
     def run_until_stop(self):
-        while not self.stop_requested.wait(self.config.poll_s):
+        while not self._wait_for_stop():
             failure = self.monitor_once()
             if failure is not None:
                 self.reason = failure
@@ -491,13 +511,13 @@ def run(config, env, setup=None):
         raise Refused(EX_SETUP, "setup", "setup must return a SupervisorPlan")
     supervisor = Supervisor(config, observer, identity, group_scope, plan)
     for number in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(number, lambda *_: supervisor.stop_requested.set())
+        signal.signal(number, supervisor.request_stop_from_signal)
     try:
         supervisor.launch_all()
     except Refused as exc:
         _log(f"REFUSED [{exc.stage}] {exc.reason}")
         return supervisor.shutdown(exc.code, exc.reason)
-    if supervisor.stop_requested.is_set():
+    if supervisor.stop_is_requested():
         return supervisor.shutdown(EX_OK, "stop requested during launch")
     try:
         supervisor.group_observer()  # complete exact membership before "ready"
