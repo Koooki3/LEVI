@@ -32,12 +32,14 @@ import {
   type FakeAudio,
 } from "./speech-fixtures";
 
-// Keep one clock throughout this file, including asynchronous React teardown.
+// Keep one clock throughout this file, including effect cleanup.
 // Restoring and reinstalling Bun timers between tests resets performance.now().
 // Restore real time before setupDom unregisters the browser globals.
 beforeAll(() => jest.useFakeTimers());
 afterAll(() => jest.useRealTimers());
-setupDom();
+// Effects dispose their resources synchronously; verify that before restoring
+// audio and fetch. Keep rendering and interactions asynchronous.
+setupDom({ unmount: "sync" });
 
 const ALL = "pi05_fr3_all_step49999";
 const SP = "pi05_fr3_sp_v1";
@@ -63,11 +65,34 @@ type Seen = { path: string; init?: RequestInit };
 let audio: FakeAudio | null = null;
 let restoreFetch = () => {};
 const clipboard: string[] = [];
+let pendingStatus: { signal: AbortSignal | null; aborts: number } | null = null;
 afterEach(() => {
-  audio?.restore();
-  audio = null;
-  restoreFetch();
-  clipboard.length = 0;
+  try {
+    expect(document.body.childElementCount).toBe(0);
+    for (const stream of audio?.streams ?? [])
+      expect(stream.track.readyState).toBe("ended");
+    for (const context of audio?.contexts ?? []) {
+      expect(context.state).toBe("closed");
+      if (context.workletNode) {
+        expect(context.workletNode.connected).toBe(false);
+        expect(context.workletNode.port.onmessage).toBeNull();
+      }
+    }
+    if (pendingStatus) {
+      expect(pendingStatus.signal?.aborted).toBe(true);
+      expect(pendingStatus.aborts).toBe(1);
+    }
+  } finally {
+    try {
+      audio?.restore();
+    } finally {
+      audio = null;
+      restoreFetch();
+      restoreFetch = () => {};
+      clipboard.length = 0;
+      pendingStatus = null;
+    }
+  }
 });
 
 async function flushAll() {
@@ -92,8 +117,23 @@ function network(
     seen.push({ path, init });
     const json = (body: unknown) =>
       new Response(JSON.stringify(body), { status: 200 });
-    if (path.split("?")[0] === "/api/levi/marvel0/speech")
+    if (path.split("?")[0] === "/api/levi/marvel0/speech") {
+      if (pendingStatus) {
+        const pending = pendingStatus;
+        pending.signal = init?.signal ?? null;
+        return await new Promise<Response>((_resolve, reject) => {
+          pending.signal?.addEventListener(
+            "abort",
+            () => {
+              pending.aborts += 1;
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        });
+      }
       return json(statusAnswer());
+    }
     if (path.startsWith("/api/levi/marvel0/speech/transcribe")) {
       const id = new URL(path, "http://127.0.0.1").searchParams.get(
         "request_id",
@@ -228,6 +268,18 @@ describe("the voice card in the Client command card", () => {
     expect(posts(h)).toHaveLength(0);
     expect(h.audio.getUserMediaCalls).toBe(0);
     expect(h.calls.preview).toHaveLength(0);
+  });
+
+  test("leaving the card aborts a pending status read without opening the microphone", async () => {
+    pendingStatus = { signal: null, aborts: 0 };
+    const h = await open();
+    expect(h.seen).toHaveLength(1);
+    expect(pendingStatus.signal?.aborted).toBe(false);
+    expect(pendingStatus.aborts).toBe(0);
+    expect(h.audio.getUserMediaCalls).toBe(0);
+    expect(posts(h)).toHaveLength(0);
+    expect(h.calls.preview).toHaveLength(0);
+    // The afterEach assertions observe cancellation after setupDom unmounts.
   });
 
   test("a press asks for the microphone once; the clip goes up as a 16 kHz mono WAV; Use fills the task instruction and nothing else", async () => {

@@ -137,7 +137,9 @@ export function mockMatchMedia(matching: string[]): () => void {
  * this module's top level): register the DOM before the file's tests,
  * unmount after each test, and remove the globals after the file.
  */
-export function setupDom(): void {
+export function setupDom({
+  unmount = "async",
+}: { unmount?: "async" | "sync" } = {}): void {
   beforeAll(() => {
     if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
     (
@@ -147,7 +149,11 @@ export function setupDom(): void {
   afterEach(async () => {
     while (mounted.length) {
       const { root, host } = mounted.pop()!;
-      await act(async () => root.unmount());
+      // Opt in only when the file verifies synchronous effect/resource cleanup.
+      // Awaiting even a sync act callback would add a completion macrotask.
+      // Rendering and interactions keep their asynchronous act boundaries.
+      if (unmount === "sync") act(() => root.unmount());
+      else await act(async () => root.unmount());
       host.remove();
     }
     document.body.innerHTML = "";
