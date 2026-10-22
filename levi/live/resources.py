@@ -309,9 +309,13 @@ def trim_cache(
     workbench_state, cap_gib, *, keep=(), min_age_s=6 * 3600, now=None
 ) -> dict:
     """Delete the oldest regenerable run folders until the total is under
-    ``cap_gib``. ``keep``: path fragments (run ids) that must stay (a batch in
-    progress). Returns ``{"before", "after", "removed"}`` in bytes / count."""
+    ``cap_gib``. ``keep``: run ids that must stay (a batch in progress), matched
+    against the run folder's name exactly (``runs/<run id>/``), never as a
+    fragment of the path: a workspace path or another run id that contains a
+    kept id does not protect every run. Returns ``{"before", "after",
+    "removed"}`` in bytes / count."""
     now = time.time() if now is None else now
+    kept = {k for k in keep if k}
     rows = run_files(workbench_state)
     total = sum(r[2] for r in rows)
     before, removed = total, 0
@@ -319,7 +323,7 @@ def trim_cache(
     for target, mtime, size in sorted(rows, key=lambda r: r[1]):
         if total <= cap:
             break
-        if now - mtime < min_age_s or any(k and k in str(target) for k in keep):
+        if now - mtime < min_age_s or target.parent.name in kept:
             continue
         shutil.rmtree(target, ignore_errors=True)
         total -= size
