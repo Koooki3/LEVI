@@ -37,6 +37,7 @@
 .rg-dock__where {
   font-variant-numeric: tabular-nums;
   font-weight: var(--ds-weight-semibold);
+  overflow-wrap: anywhere;
 }
 .rg-dock__stale {
   color: var(--ds-warning);
@@ -46,6 +47,8 @@
   margin: 0;
   color: var(--ds-text-secondary);
   font-size: var(--ds-text-caption-size);
+  line-height: var(--ds-text-caption-line);
+  overflow-wrap: anywhere;
 }
 .rg-dock .rg-dock__hold {
   flex: 0 0 auto;
@@ -59,6 +62,20 @@
   color: var(--ds-danger);
   font-weight: var(--ds-weight-medium);
 }
+/* A tablet keeps the explanation on its own row, rather than squeezing it
+ * between two wide actions. Stop keeps its height and stays in the dock. */
+@media (max-width: 899px) {
+  .rg-dock {
+    flex-wrap: wrap;
+  }
+  .rg-dock__info {
+    flex-basis: 100%;
+  }
+  .rg-dock .rg-dock__hold {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
 @media (max-width: 720px) {
   .rg-dock {
     flex-direction: column;
@@ -69,6 +86,7 @@
     padding: var(--ds-space-2) var(--ds-space-3);
   }
   .rg-dock .rg-dock__hold {
+    flex: 0 0 auto;
     min-width: 0;
     width: 100%;
   }
