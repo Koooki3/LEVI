@@ -52,9 +52,14 @@ def cfg(tmp_path, **online_over):
     c.gpu.lock_file = ""
     # Never the real model server's port: the status file asks it in manual
     # mode, and the test guard refuses a connection to it.
-    c.vllm.port = free_port()
+    # Keep both reservations until selected: a closed socket can yield the
+    # same ephemeral port on the next bind, making an invalid configuration.
+    with socket.socket() as vllm_socket, socket.socket() as online_socket:
+        vllm_socket.bind(("127.0.0.1", 0))
+        online_socket.bind(("127.0.0.1", 0))
+        c.vllm.port = vllm_socket.getsockname()[1]
+        c.online.port = online_socket.getsockname()[1]
     c.online.enabled = True
-    c.online.port = free_port()
     for key, value in online_over.items():
         setattr(c.online, key, value)
     return c.validate()
@@ -170,6 +175,32 @@ def post(judge, body):
 
 
 # --- configuration ----------------------------------------------------------------------
+
+
+def test_cfg_reserves_distinct_ports_before_releasing_either(tmp_path, monkeypatch):
+    # Deterministically reuse the lowest port as soon as its socket closes.
+    # The old two sequential free_port() calls therefore select the same port.
+    bound = set()
+
+    class Port:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            bound.remove(self.port)
+
+        def bind(self, address):
+            assert address == ("127.0.0.1", 0)
+            self.port = min({32101, 32102} - bound)
+            bound.add(self.port)
+
+        def getsockname(self):
+            return "127.0.0.1", self.port
+
+    monkeypatch.setattr(socket, "socket", Port)
+    c = cfg(tmp_path)
+    assert (c.vllm.port, c.online.port) == (32101, 32102)
+    assert bound == set()
 
 
 def test_online_is_off_by_default_on_loopback_port_7882_with_the_final_state_spec():
