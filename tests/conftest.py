@@ -57,6 +57,32 @@ def scaled(seconds: float) -> float:
     return seconds * time_scale()
 
 
+# On GitHub Actions the failed tests' names go out as error annotations, the one
+# part of a run that can be read without signing in (scripts/ci_annotations.py).
+_ci_spec = importlib.util.spec_from_file_location(
+    "levi_ci_annotations",
+    Path(__file__).resolve().parent.parent / "scripts" / "ci_annotations.py",
+)
+ci_annotations = importlib.util.module_from_spec(_ci_spec)
+_ci_spec.loader.exec_module(ci_annotations)
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    failures = []
+    for kind in ("failed", "error"):
+        for report in terminalreporter.stats.get(kind, []):
+            nodeid = getattr(report, "nodeid", "") or "(collection)"
+            crash = getattr(getattr(report, "longrepr", None), "reprcrash", None)
+            message = getattr(crash, "message", None) or str(
+                getattr(report, "longrepr", "") or ""
+            )
+            failures.append((kind, nodeid, message))
+    for line in ci_annotations.lines(failures):
+        terminalreporter.write_line(line)
+
+
 def pytest_configure(config):
     global _NETGUARD_LOG_DIR
     config.addinivalue_line(
