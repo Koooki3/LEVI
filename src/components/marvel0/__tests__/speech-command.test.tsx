@@ -39,6 +39,7 @@ import {
 // every await and forward the native immediate once with its original handle.
 let traceCase = 0;
 let traceLines = 0;
+const traceBuffer: string[] = [];
 let traceActive = true;
 let traceCurrentStage = "module";
 type TraceOperation = { id: number; test: number; label: string };
@@ -62,27 +63,32 @@ function traceSpeech(
 ) {
   if (!traceActive || (!force && traceLines >= 900)) return;
   traceLines += 1;
-  console.log(
-    "SPEECH_CI_TRACE",
-    JSON.stringify({
-      event,
-      sequence: traceLines,
-      test: traceCase,
-      stage: traceCurrentStage,
-      operation: traceActiveOperation,
-      // Bun 1.3.10 also virtualizes saved hrtime/Date references: these are
-      // clock-state diagnostics, not independent measurements of wall time.
-      dateNow: Date.now(),
-      performanceNow: performance.now(),
-      virtualHrtime: String(process.hrtime.bigint()),
-      actQueueLength: reactTraceInternals?.actQueue?.length ?? null,
-      scheduled: immediateScheduled,
-      started: immediateStarted,
-      returned: immediateReturned,
-      pending: pendingImmediates.size,
-      ...detail,
-    }),
+  traceBuffer.push(
+    "SPEECH_CI_TRACE " +
+      JSON.stringify({
+        event,
+        sequence: traceLines,
+        test: traceCase,
+        stage: traceCurrentStage,
+        operation: traceActiveOperation,
+        // Bun 1.3.10 also virtualizes saved hrtime/Date references: these are
+        // clock-state diagnostics, not independent measurements of wall time.
+        dateNow: Date.now(),
+        performanceNow: performance.now(),
+        virtualHrtime: String(process.hrtime.bigint()),
+        actQueueLength: reactTraceInternals?.actQueue?.length ?? null,
+        scheduled: immediateScheduled,
+        started: immediateStarted,
+        returned: immediateReturned,
+        pending: pendingImmediates.size,
+        ...detail,
+      }),
   );
+}
+// Keep test-body and immediate callbacks free of output writes. A hook flush
+// can still affect later continuations, so the first blocked operation matters.
+function flushTrace() {
+  if (traceBuffer.length) console.log(traceBuffer.splice(0).join("\n"));
 }
 function traceBegin(label: string): TraceOperation {
   const operation = {
@@ -150,10 +156,12 @@ afterEach(() => {
     },
     true,
   );
+  flushTrace();
 });
 afterAll(() => {
   traceSpeech("file.end", {}, true);
   traceActive = false;
+  flushTrace();
   Object.defineProperty(
     nodeTimers,
     "setImmediate",
