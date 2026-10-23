@@ -485,6 +485,78 @@ def test_only_authentic_dry_starting_record_is_visible(tmp_path, monkeypatch, ch
         api._locate(handle.run_id)
 
 
+@pytest.mark.usefixtures("fake_systemd")
+@pytest.mark.parametrize(
+    "phase",
+    ["plan_only", "header_during_read", "wrong_plan", "torn_header", "corrupt_header"],
+)
+def test_authenticated_dry_start_is_visible_across_plan_and_header_publication(
+    tmp_path, monkeypatch, phase
+):
+    """The runner publishes plan before header; readers may straddle both writes."""
+    from levi.automatic import journal
+
+    monkeypatch.setenv("LEVI_AERI_HOME", str(tmp_path / "home"))
+    job = write_job(tmp_path)
+    request = launch.LaunchRequest(
+        job_path=str(job),
+        execution_mode="dry_run",
+        backend="systemd",
+        entry="cli",
+        principal={"kind": "operator", "id": "test"},
+    )
+    planned = launch.plan(request)
+    handle = launch.launch(
+        request, plan_sha256=planned.plan_sha256, launch_token=planned.launch_token
+    )
+    directory = Path(handle.run_dir)
+    record = launch.read_record(directory / launch.LAUNCH_RECORD)
+    frozen = record["plan"]
+    if phase == "header_during_read":
+        original = journal.read_plan
+        published = False
+
+        def publish_after_read(where):
+            nonlocal published
+            kept = original(where)
+            if not published:
+                published = True
+                Journal.create(
+                    directory,
+                    run_id=handle.run_id,
+                    plan_sha256=planned.plan_sha256,
+                    levi_commit=None,
+                    authority={
+                        "principal_kind": "orchestrator",
+                        "principal_id": "test",
+                        "session_id": "test",
+                        "process": journal.process_identity(),
+                        "command_id": None,
+                    },
+                    plan=frozen,
+                ).close()
+            return kept
+
+        monkeypatch.setattr(journal, "read_plan", publish_after_read)
+    else:
+        kept = dict(frozen)
+        if phase == "wrong_plan":
+            kept["mode"] = "assisted"
+        journal.keep_plan(directory, kept, journal.plan_digest(kept))
+        if phase == "torn_header":
+            (directory / journal.JOURNAL).write_bytes(b'{"partial":')
+        elif phase == "corrupt_header":
+            (directory / journal.JOURNAL).write_bytes(b"{}\n")
+    if phase in ("wrong_plan", "torn_header", "corrupt_header"):
+        with pytest.raises(launch.LaunchRefused):
+            launch.registered_run(handle.run_id)
+    else:
+        entry, found = launch.registered_run(handle.run_id)
+        assert entry["run_id"] == handle.run_id and found == directory
+        expected = "PREFLIGHT" if phase == "header_during_read" else "INIT"
+        assert api._locate(handle.run_id).state == expected
+
+
 def test_http_resume_of_a_standalone_real_run_is_refused_and_writes_nothing(
     client,  # noqa: F811 - fixture
     tmp_path,

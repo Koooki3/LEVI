@@ -1037,13 +1037,15 @@ def registered_run(run_id, path=None):
         expected_dir = run_dir_of(dry_folder(run_id, request.keep_dir, path), run_id)
         if directory != expected_dir:
             raise LaunchRefused("E_REQUEST", "dry-run directory differs from launch")
+        # The writer publishes the retained plan before the header. Read in
+        # reverse order so a newly observed header cannot precede our plan read.
+        scan = Journal.read(directory)
         try:
             kept = read_plan(directory)
         except JournalError:
             raise LaunchRefused(
                 "E_PLAN_CHANGED", "retained dry-run plan is invalid"
             ) from None
-        scan = Journal.read(directory)
         if "registration_mac" in record:
             key = _read_key(home(path) / KEY_FILE)
             if not hmac.compare_digest(
@@ -1073,7 +1075,15 @@ def registered_run(run_id, path=None):
                 raise LaunchRefused(
                     "E_PLAN_CHANGED", "authenticated dry-run plan is invalid"
                 )
-            if kept is None and not scan.events and not scan.corrupt and not scan.torn:
+            # A signed launch remains visible both before plan publication
+            # and between plan publication and the first complete header.
+            # A mismatched retained plan is never a starting window.
+            if (
+                not scan.events
+                and not scan.corrupt
+                and not scan.torn
+                and (kept is None or kept["plan_sha256"] == record["plan_sha256"])
+            ):
                 return entry, directory
         if (
             kept is None

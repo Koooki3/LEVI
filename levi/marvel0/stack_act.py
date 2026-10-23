@@ -3275,6 +3275,10 @@ class Act:
         for key, code in (("a", "gate.a_running"), ("b", "gate.b_running")):
             if ctx.states[key]["state"] != "ready":
                 raise ActRefuse(code)
+        return self._start_preflight_c(ctx)
+
+    def _start_preflight_c(self, ctx: Ctx) -> dict:
+        """Begin the checks with the context the caller just validated."""
         op = self._begin("preflight_c")
         self._spawn(op, lambda: self._preflight_c_worker(op, ctx))
         return {"done": "preflight_started", "kind": "preflight_c"}
@@ -4114,8 +4118,19 @@ class Act:
         if ctx.busy:
             return
         self._seq_locked(
-            seq, "sequence_preflight_c", self._do_preflight_c, keep="_pre_op"
+            seq, "sequence_preflight_c", lambda r: self._chain_preflight_c(seq, r)
         )
+
+    def _chain_preflight_c(self, seq, r) -> None:
+        # Readiness can change after the tick's first look. Under the machine
+        # lock, wait for unknown stages just as _chain_up does outside it;
+        # never begin the checks with an older, ready context.
+        ctx = self._context(r, holding=True)
+        if not self._chain_up(seq, ctx, "a", "b"):
+            return
+        self._start_preflight_c(ctx)
+        with self._op_lock:
+            seq["_pre_op"] = self._op
 
     def _seq_c(self, seq, ctx: Ctx) -> None:
         if not self._chain_up(seq, ctx, "a", "b"):

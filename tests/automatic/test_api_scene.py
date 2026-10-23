@@ -5,6 +5,7 @@
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from conftest import scaled
@@ -33,7 +34,7 @@ DIGEST = "ab" * 32
 
 
 @pytest.fixture
-def ask(client, roots, tmp_path, fake_systemd):
+def ask(client, roots, tmp_path, fake_systemd, request):
     """A waiting human-assisted run with one open scene question."""
     write_job(roots, tmp_path, name="r-scene", strategy="human_assisted")
     job_id = job_id_of(client, "r-scene")
@@ -41,6 +42,13 @@ def ask(client, roots, tmp_path, fake_systemd):
     assert post_run(client, plan, job_id).status_code == 202
     run_dir = Path(launch.read_record(launch.index_path("r-scene"))["run_dir"])
     served = Served(run_dir, plan["plan_sha256"])
+    # Register cleanup before any setup assertion: pytest does not resume a
+    # yield fixture whose setup failed, but always runs its finalizers.
+    request.addfinalizer(
+        lambda: served.close(
+            stop_by_page(client, "r-scene", "stop-end"), timeout=scaled(15), strict=True
+        )
+    )
     wait_for(lambda: client.get(f"{BASE}/runs/r-scene").json()["state"] == "WAIT_HUMAN")
     frame = "cd" * 32
     question = {
@@ -67,13 +75,50 @@ def ask(client, roots, tmp_path, fake_systemd):
     transport = human.FileTransport(run_dir / "scene")
     transport.ask(question)
     yield client, run_dir, transport, question
-    # The runner thread and its command pump end here, not after the
-    # thread check (CI: both outlived a 30 s join and failed the test). The
-    # stop is the path that stops the arm on the real robot: one that did not
-    # end the run fails the test (strict), after the threads are ended.
-    served.close(
-        stop_by_page(client, "r-scene", "stop-end"), timeout=scaled(15), strict=True
+
+
+def test_scene_setup_failure_still_closes_runner_and_command_pump(
+    client, roots, tmp_path, fake_systemd, monkeypatch
+):
+    """Fail before yield after the runner starts; execute pytest's finalizer."""
+    finalizers = []
+    started = []
+    original_served, original_wait = Served, wait_for
+
+    def served(*args):
+        value = original_served(*args)
+        started.append(value)
+        return value
+
+    def fail_after_ready(predicate):
+        original_wait(predicate)
+        raise RuntimeError("injected scene setup failure")
+
+    monkeypatch.setitem(ask.__wrapped__.__globals__, "Served", served)
+    monkeypatch.setitem(ask.__wrapped__.__globals__, "wait_for", fail_after_ready)
+    fixture = ask.__wrapped__(
+        client,
+        roots,
+        tmp_path,
+        fake_systemd,
+        SimpleNamespace(addfinalizer=finalizers.append),
     )
+    try:
+        with pytest.raises(RuntimeError, match="injected scene setup failure"):
+            next(fixture)
+        assert len(finalizers) == 1 and len(started) == 1
+    finally:
+        try:
+            for finish in reversed(finalizers):
+                finish()
+        finally:
+            # Even a regression which loses the finalizer must not leak this
+            # test's runner into later tests. The assertion above still fails.
+            for value in started:
+                if value.thread.is_alive() or value.pumps():
+                    value.close(stop_by_page(client, "r-scene", "stop-fallback"))
+    assert not started[0].thread.is_alive()
+    assert started[0].pumps() == [] and not started[0].forced
 
 
 def answer(client, **over):

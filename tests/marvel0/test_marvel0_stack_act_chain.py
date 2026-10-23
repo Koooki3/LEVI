@@ -10,6 +10,8 @@ never outlives the process.
 Nothing here starts a process or opens a socket (the guard of
 ``test_marvel0_deploy.py``)."""
 
+import dataclasses
+
 import pytest
 from stack_act_machine import (
     CONTROLLERS_OUT,
@@ -468,6 +470,73 @@ def test_c_is_started_only_with_a_check_made_in_this_chain(m):
     assert m.act._c_pre is None
     assert m.act.advance()["step"] == "c_preflight"  # (the op, made in this tick)
     assert m.act._c_pre is not None
+
+
+@pytest.mark.parametrize("key", ["a", "b"])
+def test_c_preflight_waits_when_a_stage_becomes_unknown_under_the_lock(
+    m, monkeypatch, key
+):
+    to_step(m, "c_preflight")
+    assert m.terminal(key)["state"] == "ready"
+    old_op = m.act._op
+    context = m.act._context
+    locked = m.act._locked
+    inside = False
+    observed = []
+
+    def changed_context(r, holding=False):
+        ctx = context(r, holding=holding)
+        if inside and holding:
+            observed.append(ctx.states[key]["state"])
+            changed = {
+                **ctx.states[key],
+                "state": "unknown",
+                "reason": f"{key}.health_lost",
+            }
+            return dataclasses.replace(ctx, states={**ctx.states, key: changed})
+        return ctx
+
+    def lock_then_lose_health(action, call):
+        nonlocal inside
+        assert action == "sequence_preflight_c"
+        inside = True
+        try:
+            return locked(action, call)
+        finally:
+            inside = False
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.act, "_context", changed_context)
+        patch.setattr(m.act, "_locked", lock_then_lose_health)
+        seq = m.act.advance()
+    assert observed == ["ready"]  # the change is only in the locked recheck
+    assert (seq["state"], seq["step"]) == ("running", "c_preflight")
+    assert seq["reason"] is None
+    assert m.act._seq.get("_pre_op") is None
+    assert m.act._op is old_op and m.act._c_pre is None
+    assert m.oneshots_of("check_fr3_ee_frame") == [] and m.systemd_runs("c") == []
+    assert m.run_chain()["state"] == "done"
+
+
+@pytest.mark.parametrize("key", ["a", "b"])
+def test_c_preflight_refuses_a_stage_that_stops_under_the_lock(m, monkeypatch, key):
+    to_step(m, "c_preflight")
+    assert m.terminal(key)["state"] == "ready"
+    locked = m.act._locked
+
+    def lock_then_stop(action, call):
+        assert action == "sequence_preflight_c"
+        del m.units[key]
+        if key == "a":
+            m.sockets = {"state": "inactive", "detail": ""}
+            m.no_manager()
+        return locked(action, call)
+
+    monkeypatch.setattr(m.act, "_locked", lock_then_stop)
+    seq = m.act.advance()
+    assert (seq["state"], seq["reason"]) == ("failed", f"{key}_lost")
+    assert m.act._seq.get("_pre_op") is None and m.act._c_pre is None
+    assert m.oneshots_of("check_fr3_ee_frame") == [] and m.systemd_runs("c") == []
 
 
 # --- C that fails ---------------------------------------------------------------------------
