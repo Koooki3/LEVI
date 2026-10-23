@@ -82,6 +82,7 @@ ROUTES = [
     ("POST", f"{BASE}/arm/manual/challenge"),
     ("POST", f"{BASE}/arm/manual/start"),
     ("POST", f"{BASE}/arm/manual/target"),
+    ("POST", f"{BASE}/arm/manual/gripper"),
     ("POST", f"{BASE}/arm/manual/deadman"),
     ("POST", f"{BASE}/arm/manual/stop"),
     ("POST", f"{BASE}/arm/manual/end"),

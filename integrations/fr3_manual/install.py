@@ -14,8 +14,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-PACKAGE = Path("/home/marvel/work/franka_control/robot_server/fr3_robot_server")
-WORKSPACE = Path("/home/marvel/work/wenkai")
 SHARED = ("franka_server_ros2.py", "robotiq_gripper_server_ros2.py")
 HELPERS = {
     "protocol.py": "fr3_manual_protocol.py",
@@ -193,7 +191,7 @@ class Plan:
 
 
 def prepare(package, artifacts):
-    """Internal temp-fixture test seam. CLI permits only PACKAGE."""
+    """Prepare the explicitly supplied package; no machine path is inferred."""
     package = checked_path(package)
     artifacts = checked_path(artifacts)
     sources = {}
@@ -426,25 +424,40 @@ def main(argv=None):
         help="explicitly write the reviewed fixed package",
     )
     parser.add_argument(
+        "--package",
+        type=Path,
+        required=True,
+        help="explicit authorized ROS package directory; no default target",
+    )
+    parser.add_argument(
+        "--archive-root",
+        type=Path,
+        help="existing authorized archive containment directory (required for apply)",
+    )
+    parser.add_argument(
         "--archive",
         type=Path,
-        help="new backup directory under /home/marvel/work/wenkai (required for apply)",
+        help="new backup directory within --archive-root (required for apply)",
     )
     args = parser.parse_args(argv)
     try:
-        # No caller flag, environment variable or symlink may select another target.
-        checked_path(PACKAGE)
+        # Explicit offline tool configuration does not authorize a target.
+        # The caller must already have approval for package and archive paths.
+        package = checked_path(args.package)
         artifacts = checked_path(Path(__file__).absolute().parent)
-        if not artifacts.is_relative_to(WORKSPACE):
-            raise Refused("installer must run from approved workspace")
-        plan = prepare(PACKAGE, artifacts)
+        plan = prepare(package, artifacts)
         print(json.dumps(plan.report(), indent=2))
         if args.apply:
-            if args.archive is None:
-                raise Refused("--apply requires explicit --archive")
+            if args.archive is None or args.archive_root is None:
+                raise Refused("--apply requires explicit --archive-root and --archive")
+            archive_root = checked_path(args.archive_root)
+            if not archive_root.is_dir():
+                raise Refused("--archive-root must be an existing directory")
             checked_path(args.archive, allow_missing=True)
-            if not args.archive.is_relative_to(WORKSPACE):
-                raise Refused("archive must stay within approved workspace")
+            if args.archive == archive_root or not args.archive.is_relative_to(
+                archive_root
+            ):
+                raise Refused("archive must be a new child of explicit --archive-root")
             if all(e.before == e.after for e in plan.entries):
                 print(
                     "Already installed exactly; no files changed and no archive created."
@@ -463,8 +476,8 @@ def main(argv=None):
                         }
                     )
                 )
-        elif args.archive is not None:
-            raise Refused("--archive is only accepted with --apply")
+        elif args.archive is not None or args.archive_root is not None:
+            raise Refused("--archive and --archive-root are only accepted with --apply")
         return 0
     except (Refused, OSError, ValueError, SyntaxError, UnicodeDecodeError) as exc:
         print("REFUSED: " + str(exc), file=sys.stderr)

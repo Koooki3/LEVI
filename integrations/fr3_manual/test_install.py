@@ -1,6 +1,8 @@
 """Only temporary fixture packages; never calls CLI apply/shared paths."""
 
+import contextlib
 import difflib
+import io
 import json
 import stat
 import tempfile
@@ -192,6 +194,98 @@ class InstallerTests(unittest.TestCase):
         link.symlink_to(archive, target_is_directory=True)
         with self.assertRaisesRegex(I.Refused, "symlink"):
             I.apply(plan, link)
+
+    def cli(self, *args):
+        with (
+            patch.object(I, "__file__", str(self.artifacts / "install.py")),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            return I.main(list(args))
+
+    def test_cli_requires_explicit_package(self):
+        with (
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit) as caught,
+        ):
+            I.main(["--check"])
+        self.assertEqual(caught.exception.code, 2)
+
+    def test_cli_explicit_package_check_is_read_only(self):
+        before = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        with patch.object(
+            I, "apply", side_effect=AssertionError("check attempted apply")
+        ):
+            self.assertEqual(self.cli("--package", str(self.package)), 0)
+        self.assertEqual(
+            before, {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        )
+
+    def test_cli_apply_requires_explicit_archive_root(self):
+        archive = self.root / "archive"
+        self.assertEqual(
+            self.cli(
+                "--apply", "--package", str(self.package), "--archive", str(archive)
+            ),
+            2,
+        )
+        self.assertFalse(archive.exists())
+
+    def test_cli_archive_cannot_escape_authorized_root(self):
+        archive_root = self.root / "allowed"
+        archive_root.mkdir()
+        archive = self.root / "outside"
+        self.assertEqual(
+            self.cli(
+                "--apply",
+                "--package",
+                str(self.package),
+                "--archive-root",
+                str(archive_root),
+                "--archive",
+                str(archive),
+            ),
+            2,
+        )
+        self.assertFalse(archive.exists())
+        self.assertEqual(
+            self.cli(
+                "--apply",
+                "--package",
+                str(self.package),
+                "--archive-root",
+                str(archive_root),
+                "--archive",
+                str(archive_root),
+            ),
+            2,
+        )
+
+    def test_cli_explicit_apply_and_idempotent_exact_install(self):
+        archive_root = self.root / "allowed"
+        archive_root.mkdir()
+        archive = archive_root / "backup"
+        args = (
+            "--apply",
+            "--package",
+            str(self.package),
+            "--archive-root",
+            str(archive_root),
+            "--archive",
+            str(archive),
+        )
+        self.assertEqual(self.cli(*args), 0)
+        self.assertTrue(json.loads((archive / "manifest.json").read_text())["complete"])
+        before = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        self.assertEqual(self.cli(*args), 0)
+        self.assertEqual(
+            before, {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        )
+
+    def test_cli_rejects_symlink_package(self):
+        alias = self.root / "package-link"
+        alias.symlink_to(self.package, target_is_directory=True)
+        self.assertEqual(self.cli("--check", "--package", str(alias)), 2)
 
     def test_invalid_helper_syntax_never_modifies_target(self):
         (self.artifacts / "adapter.py").write_text("def broken(\n")

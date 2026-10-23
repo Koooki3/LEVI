@@ -81,10 +81,31 @@ session; recover server/hardware ownership explicitly with human review if fresh
 
 ## Installation / 安装
 
-`python3 integrations/fr3_manual/install.py --check` performs a read-only baseline, patch and syntax check.
-Use `--apply --archive /home/marvel/work/wenkai/<new-backup-directory>` only after review.
-The installer rejects symlinks and unexpected changes, preserves original file modes, and records backups
-and per-file replacement receipts. Replacement is atomic per file, not across all files. It never restarts services.
+The installer requires an explicit authorized package directory; it has no machine-specific target,
+archive location, environment lookup or home-directory default. Supplying a path configures this offline
+tool and does not grant permission to modify that directory. Obtain approval for the actual package and
+archive root before applying. Only the two baseline-matched server files and the two named helpers are
+within its change scope.
 
-默认 `--check` 只读核对。审查后使用 `--apply --archive <新的备份目录>` 安装；逐文件保留备份和回执。
-多文件安装不是整体事务；部分失败须按回执恢复，不可直接重启机器人服务。安装不会启动控制器。
+Read-only check (also the default when `--check` is omitted):
+
+```sh
+python3 integrations/fr3_manual/install.py --check --package /absolute/path/to/fr3_robot_server
+```
+
+After review, use an existing authorized archive root and a new child backup directory:
+
+```sh
+python3 integrations/fr3_manual/install.py --apply --package /absolute/path/to/fr3_robot_server \
+  --archive-root /absolute/path/to/authorized/archive \
+  --archive /absolute/path/to/authorized/archive/new-backup-directory
+```
+
+The installer rejects symlinks and unexpected changes, preserves original file modes, and records backups
+and write-ahead pending entries before each replacement. Replacement is atomic per file, not across all
+files. On failure, inspect every planned target's actual original/post hash and mode; never infer recovery
+from the `installed` list alone. It never starts controllers or restarts services.
+
+必须显式指定已获授权的 `--package`，没有机器路径默认值；默认只读核对。审查后安装还须明确
+`--archive-root` 和其中全新的 `--archive` 子目录。路径参数不代替修改授权。逐文件先备份并记录
+待写入项；部分失败须检查全部计划文件的实际哈希和权限，不能仅依赖已安装名单，不可直接重启服务。

@@ -142,8 +142,10 @@ const MAY_MOVE = new Set([
 ]);
 
 describe("HOLD", () => {
-  test("is on in every view of the backend in which the arm may move, and not there in the others (no red frame around a disabled button)", async () => {
-    for (const name of RUN_VIEWS) {
+  // Each case owns one polling harness and cleans it up before the next view.
+  test.each(RUN_VIEWS)(
+    "is on only when the arm may move: %s (no disabled red frame)",
+    async (name) => {
       const doc = runDoc(name);
       const { host } = await open(name);
       const expected = MAY_MOVE.has(doc.state) || doc.may_move === true;
@@ -153,8 +155,8 @@ describe("HOLD", () => {
         name,
         host.querySelector("[data-testid=marvel0-run-hold-frame]") !== null,
       ]).toEqual([name, expected]);
-    }
-  });
+    },
+  );
 
   test("HOLD is the only solid danger button of the card; the page's one e-stop line is the caption beside it", async () => {
     const { host } = await open("running");
