@@ -600,10 +600,29 @@ def test_another_core_holding_the_operation_lock_gets_423(http, world):
 def test_a_systemctl_that_hangs_times_out(http, world, monkeypatch):
     monkeypatch.setattr(service_control, "START_TIMEOUT_S", 0.5)
     world.systemctl.set(delay={"start": 5})
-    op = http.post("/api/levi/live/service/start", json=start_body(), headers=UI).json()
-    done = wait_op(http, op["operation_id"])
-    assert done["state"] == "failed" and done["result"] == "systemd_timeout"
-    # The slot is free again.
+    audit = service_control.audit
+    finished_audit = threading.Event()
+    release_audit = threading.Event()
+
+    def paused_audit(target, row):
+        if row.get("phase") == "finished":
+            finished_audit.set()
+            assert release_audit.wait(10), "the test did not release the finished audit"
+        audit(target, row)
+
+    monkeypatch.setattr(service_control, "audit", paused_audit)
+    try:
+        op = http.post("/api/levi/live/service/start", json=start_body(), headers=UI).json()
+        assert finished_audit.wait(10), "the operation did not reach the finished audit"
+        done = wait_op(http, op["operation_id"])
+        assert done["state"] == "failed" and done["result"] == "systemd_timeout"
+        # The terminal result is visible before audit and slot cleanup finish.
+        active = service_control.OPERATIONS.current()
+        assert active is not None and active.id == op["operation_id"]
+    finally:
+        release_audit.set()
+    assert service_control.OPERATIONS.wait_idle()
+    # The audit, slot cleanup and flock release have all finished.
     assert service_control.OPERATIONS.current() is None
     assert world.audit()[-1]["result"] == "systemd_timeout"
 
