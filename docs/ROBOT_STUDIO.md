@@ -2,7 +2,7 @@
 
 [简体中文](ROBOT_STUDIO.zh-CN.md)
 
-Open **FR3 interactive preview** from the **FR3 3D** link of the top bar, from the card under the title of the marvel_workstation page, or in the command palette (`Ctrl+K` / `⌘K`), or visit `/robot-studio`; the page links back to marvel_workstation. This is a design workspace with optional read-only measured-state mapping. It loads pinned local FR3/tool models, lets you move and rotate a local flange target, and exports preview points. The optional state view reads existing passive snapshots; it does not send robot commands or record a physical demonstration.
+Open **FR3 interactive preview** from the **FR3 3D** link of the top bar, from the card under the title of the marvel_workstation page, or in the command palette (`Ctrl+K` / `⌘K`), or visit `/robot-studio`; the page links back to marvel_workstation. This is a design workspace with optional read-only measured-state mapping. It loads pinned local FR3/tool models, lets you move and rotate a local flange target, and exports preview points. The default state view follows read-only measured feedback. A separately confirmed manual session can send bounded translations and finite gripper goals; opening the page starts no controller or motion.
 
 ## Using the preview
 
@@ -48,23 +48,24 @@ The boundary editor uses six coordinates in the robot base frame `fr3_link0`: mi
 
 The configuration editor stores optional linear/angular speed, position/rotation step, command timeout and gripper rate. Empty values remain null; the page supplies no site-specific defaults. **These are exported drafts, not active hardware constraints.** Fast mouse movement does not transmit commands. A future execution supervisor must impose server-side limits independently of browser event rate: elapsed monotonic control time, translation and rotation rates, bounded increments, acceleration where required, current/target workspace and swept-tool checks, fresh measured feedback, sequence/expiry and a dead-man/watchdog. Existing controller limits, client enable, readiness and ownership rules cannot be overridden by these fields.
 
-## Passive measured-state preparation
+## Read-only measured-state integration
 
-“Read snapshots” opts into `GET /api/levi/robot-studio/state`. It reads only an existing `LEVI_WORKSPACE/robot-studio/telemetry.json`; the page does not create a producer, subscribe to ROS, contact robot-server ports or start a controller. No producer is installed or started by this change. Missing data is therefore shown as “No snapshot producer connected”, not as a connected robot.
+The page opens in **Follow robot** mode with read-only polling enabled. On the real product, an explicit `[manual] enabled = true` in the local control file selects the reviewed Robot Server v1 reader at the site's fixed `server.robot_server_url`. It performs only `GET /manual/v1/state`; it does not start a manual session, activate a controller, or send a pose/gripper command. The server must have the reviewed integration in [`integrations/fr3_manual`](../integrations/fr3_manual/README.md) installed and restarted by the operator. A missing/old/unreachable source is shown as unavailable, with no illustrative pose presented as measured.
 
+When real-source configuration is off, the existing bounded `LEVI_WORKSPACE/robot-studio/telemetry.json` reader remains available. Live reads use source monotonic timestamps and independent arm/gripper freshness; an unavailable gripper does not erase valid arm joints. The server reports its Desk EE separately: it is not presumed to equal model `fr3_link8`.
 The reader accepts only a bounded regular file at that fixed path, rejects symbolic-link path components, and validates finite vectors, units, schema, timestamps and quaternions. States are fresh, stale, missing, invalid or unavailable. Only samples at most one second old expose a measurement. Future skew above 50 ms is invalid; smaller tolerated skew reports a nonnegative age. The browser also expires a response by monotonic elapsed time if polling stops. The authenticated route exposes no mutation/start/enable endpoint, and read success is not readiness or motion permission.
 
 ### Initial alignment and follow/edit modes
 
-Selecting “Read snapshots” enters **Follow robot** mode automatically. Until the first fresh sample arrives, the arm/target are hidden and pose fields remain empty; the illustrative initial pose is never labelled measured. The first sample directly sets all seven model joints, the flange pose computed by FK and, when available, continuous gripper opening. Later samples update this read-only white model. No IK solve changes measured joints. A measured flange outside the draft box is displayed unchanged, with a notice; it cannot become an editable starting target while outside. Model mounting/TCP still use the unverified draft, so joint alignment does not establish measured tool calibration.
+Opening the page or reconnecting enters **Follow robot** mode automatically. Until the first fresh sample arrives, the arm/target are hidden and pose fields remain empty; the illustrative initial pose is never labelled measured. The first sample directly sets all seven model joints, the flange pose computed by FK and, when available, continuous gripper opening. Later samples update this read-only white model. No IK solve changes measured joints. A measured flange outside the draft box is displayed unchanged, with a notice; it cannot become an editable starting target while outside. Model mounting/TCP still use the unverified draft, so joint alignment does not establish measured tool calibration.
 
 “Edit target from measured pose” rechecks freshness at click time and starts a local editable target from that feedback. Further feedback updates the blue measured overlay without overwriting the white target or its gripper draft, including during dragging. “Follow robot” resumes measured display; switching into follow cancels queued local dragging. Applied box edits never re-solve or alter the followed joint sample. A missing or expired sample freezes the last followed pose with an explicit lost/expired notice; it never restores illustrative initial joints. Stopping reading preserves the current local pose, and enabling reading again waits for a new fresh sample.
 
 Measured gripper angle and measured physical width remain distinct source fields. Missing or model-out-of-range gripper feedback hides the tool in follow mode instead of inventing an opening; the raw feedback remains visible when present. In edit mode an unknown gripper does not replace the current local opening draft. Reported EE frame names are displayed verbatim rather than assumed to be the flange or Robotiq TCP.
 
-The page requests the next snapshot 500 ms after the previous request completes, expires measurements by source age plus request/elapsed time, and aborts a request after 1.2 seconds. This is periodic read-only visualization, not a servo control loop. No live producer is installed by this change; it still requires a separately approved read-only integration before a real rig can populate these samples.
+The page requests the next snapshot 500 ms after the previous request completes, expires measurements by source age plus request/elapsed time, and aborts a request after 1.2 seconds. This is periodic read-only visualization, not a servo control loop. The reviewed Robot Server integration supplies these measurements after its operator-controlled restart. The rendering remains periodic visualization, not motion control.
 
-A separately reviewed read-only producer would publish this closed schema (example values below are synthetic, not this rig's calibration or feedback):
+An optional file-based read-only producer uses this closed schema (example values below are synthetic, not this rig's calibration or feedback):
 
 ```json
 {
@@ -85,59 +86,26 @@ All keys are required; gripper/reported_ee may be null. Gripper is exactly one o
 
 Tool-aware export uses `levi_robot_preview_v2`. Each pose snapshots its continuous opening and unverified mount/TCP. The execution draft carries units in its field names and, when present, a base-frame workspace box with `checks_tool_sweep: false`. Existing poses are rechecked against the current box and marked true/false/null; they are not silently converted into approved commands. `hardware_execution`, `calibrated_tool`, `collision_checked` and `execution_draft.motion_enabled` stay false. The older helper format remains available for flange-only drafts without tool/config data.
 
-Live movement, a live snapshot producer, real tool calibration and collection remain separate integration tasks.
+Tool calibration and demonstration collection remain separate from this display and manual-control session.
 
 
-## Supervised translation software (offline acceptance)
+## Supervised manual translation and gripper control
 
-The manual-session panel prepares a relative **translation-only** drag session.
-It reuses the preview workspace box, linear speed and position step draft. All
-additional time, displacement and feedback tolerances start blank; the page does
-not infer site-approved physical limits. The extra fields are software test
-configuration, not calibrated robot operating limits. Rotations and gripper
-commands are excluded from this execution session; gripper opening remains a
-continuous local model preview.
+The real adapter is opt-in through `[manual] enabled = true`. The default test host remains disabled, and synthetic factories exist only for offline tests. The UI requires a one-time challenge, the phrase `start real translation session`, and explicit operator attestations. No browser pose, preview hash or telemetry read grants motion permission.
 
-The product currently reports `stop_unproven` and **cannot start this session**.
-Its real transport factory always refuses, regardless of the evaluation client's
-`enabled` switch or form parameters. This version adds no robot connection,
-controller startup, error clearing, homing or physical gripper command.
-The synthetic transport is injected by Python tests only, never selected by a
-browser request, environment switch or public fake/real toggle.
+The session starts from fresh server feedback and owns the same arm lock as hosted evaluation. Dragging applies base-frame translation relative to that measured anchor; orientation stays fixed. The visual flange comes from measured joints and FK, while the backend applies the same translation delta to Desk EE. Rotation remains local preview only. Workspace, displacement, per-step and speed limits, feedback age, anchor age, heartbeat and target expiry are explicit required values; they have no inferred physical defaults. Four additional explicit stop thresholds are `settle_window_s`, `settle_position_m`, `settle_angle_rad`, and `gripper_settle_rad`.
 
-With an injected test backend, a person reviews a one-time challenge, types its
-phrase and checks the three attestations. The backend creates an authoritative
-anchor (reading identity, seven joints, position and exact quaternion); the model
-aligns from those joints. Dragging translates relative to that anchor in base
-coordinates and preserves its orientation. The server checks reading/tool/path
-conditions, the complete displacement, each bounded step and Euclidean speed,
-workspace, strictly increasing sequences and deadlines. It coalesces targets and
-allows one in-flight send. Idle time cannot accumulate a larger movement budget.
-A preview plan hash or a browser-provided current pose never grants execution.
+The independent real-gripper control sends one finite `opening_ratio` target (0 closed, 1 open) per hold. Subsequent held ticks send only heartbeat. The local preview slider does not drive hardware. A target has its own finite lifetime; release, blur, hidden page, cancellation or missing heartbeat closes admission and requests cancellation. No reverse goal queue is retained.
 
-Release, cancellation, Escape, loss of focus, a hidden/unmounted page, invalid
-feedback or expired target/deadman closes admission and discards pending goals.
-An unknown or late acknowledgment locks the session against resumption. Closing
-admission proves only that this sender admits no further command: it is not a
-physical stop. Counters distinguish accepted targets, local sends,
-acknowledgments and synthetic settled evidence. The existing `run.Supervisor`
-and arm lock own this mode too, so hosted evaluation/stack/service actions keep
-their normal active-job protections. The lock remains held when stopping or
-command delivery is unproven; the HTTP end body cannot supply stop evidence.
-Both challenge and start reject active or unreadable AERI ownership, including a hosted terminal D that has not yet taken the arm lock.
+The v1 server independently enforces identity, sequence, expiry and bounds, serializes legacy mutations against manual ownership, and watches freshness without browser participation. Closing sends a measured hold pose and cancels the exact gripper action, including a goal accepted late. Neither HTTP acknowledgement nor cancellation acknowledgement is physical stop evidence: release of ownership requires subsequent fresh arm/gripper feedback within the configured settle window plus a terminal action result. Unknown delivery or stop retains ownership. The end body cannot provide this evidence.
 
-A future real transport requires a separately reviewed stop actuator/observer,
-site limits and tool/base calibration, trusted live feedback/planner integration,
-and explicit hardware commissioning approval. The pure injected reader/path
-boundary avoids duplicating the parallel MARVEL0 state/IK/planner work. Software
-fixtures establish no physical stopping distance, collision clearance or safe
-velocity. No motion automatically resumes after a restart.
+A failed capabilities read before start leaves the local lock available. Once a start may have reached the server, the owner is retained until proved ended. State includes `start_request_id` for bounded recovery of this page's own request; recovery never rearms motion. Stop proof is explicitly physical or synthetic. A successful remote end receipt can be reused locally after an audit failure without sending end again.
 
-A start response can be lost after acceptance. State exposes the originating `start_request_id`; the page retains its own request ID and uses one bounded GET to recover only that synthetic owner for stop/end. It never arms from recovery. An unmatched/unknown request stays `stop_unproven`; explicit Refresh or Stop may check it again, without a background retry loop. Stop/end responses must match the owner and explicitly report closed admission.
+Installing the integration does not start the Robot Server. Its existing startup may activate impedance, so the operator performs that restart and hardware acceptance. Offline tests establish protocol behavior only, not stopping distance, collision clearance, tool calibration or safe operating limits. No automatic motion resumes after a restart.
 
 ## Parameter capabilities and proposals
 
-The parameter panel separates local preview drafts, Cartesian impedance updates awaiting per-parameter acceptance/readback, gripper startup configuration, and unsupported online joint-torque/acceleration/force-threshold changes. This is a reviewed software capability list, not a probe of the live controller. Current controller values remain unavailable. No parameter mutation endpoint or real transport is added.
+The parameter panel separates local preview drafts, Cartesian impedance updates awaiting per-parameter acceptance/readback, gripper startup configuration, and unsupported online joint-torque/acceleration/force-threshold changes. This is a reviewed software capability list, not a probe of the live controller. Current controller values remain unavailable. No parameter mutation endpoint is added; manual motion transport does not implement online torque, acceleration, impedance or force-configuration writes.
 
 The optional limit proposal starts empty. Joint torque and acceleration use complete seven-joint groups; Cartesian acceleration and external-force stop thresholds are scalar proposals. A partially filled group or a nonpositive/nonfinite value blocks export. No hardware maximum or operating default is inferred. These names explicitly denote limits/stop thresholds, not torque or contact-force control targets. The server's Cartesian torque observation must not be presented as seven joint torques.
 

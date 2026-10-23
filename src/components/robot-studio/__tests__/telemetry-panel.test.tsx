@@ -56,8 +56,6 @@ describe("read-only snapshot polling", () => {
           canUsePreview
         />,
       );
-      expect(calls).toHaveLength(0);
-      await click(button(host, "Read snapshots"));
       expect(calls).toHaveLength(1);
       expect(calls[0].method).toBe("GET");
       await act(async () => {
@@ -94,7 +92,6 @@ describe("read-only snapshot polling", () => {
           canUsePreview
         />,
       );
-      await click(button(host, "Read snapshots"));
       await flush();
       expect(button(host, "Copy measured pose").disabled).toBe(false);
       clock = 1000;
@@ -127,24 +124,23 @@ test("follow and edit actions recheck freshness and report opt-in changes", asyn
   };
   try {
     const { host, rerender } = await render(<TelemetryPanel {...props} />);
-    await click(button(host, "Read snapshots"));
     await flush();
-    expect(optIns).toEqual([true]);
+    expect(optIns).toEqual([]);
     expect(host.textContent).toContain("Gripper model unavailable");
-    await click(button(host, "Follow robot"));
+    await click(button(host, "Follow actual robot"));
     expect(follows.at(-1)?.joints_rad).toEqual([...FR3_INITIAL_JOINTS]);
     await rerender(<TelemetryPanel {...props} following />);
-    expect(button(host, "Follow robot").disabled).toBe(true);
-    await click(button(host, "Edit target from measured pose"));
+    expect(button(host, "Follow actual robot").disabled).toBe(true);
+    await click(button(host, "Edit target from actual pose"));
     expect(edits).toHaveLength(1);
     clock = 1000;
-    await click(button(host, "Edit target from measured pose"));
+    await click(button(host, "Edit target from actual pose"));
     expect(edits).toHaveLength(1);
     await rerender(<TelemetryPanel {...props} />);
-    await click(button(host, "Follow robot"));
+    await click(button(host, "Follow actual robot"));
     expect(follows.at(-1)).toBeNull();
     await click(button(host, "Stop reading"));
-    expect(optIns).toEqual([true, false]);
+    expect(optIns).toEqual([false]);
   } finally {
     globalThis.fetch = original;
     time.mockRestore();

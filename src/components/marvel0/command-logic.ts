@@ -77,6 +77,55 @@ export function initialCommandForm(
   };
 }
 
+/** The complete, typed dataclass form saved with a run. Missing or malformed
+ * fields are not reconstructed from today's site defaults. */
+export function commandFormFromRun(value: unknown): CommandForm | null {
+  const item = rec(value);
+  if (!item) return null;
+  const modelId = item.model_id;
+  const prompt = item.prompt;
+  const maxSteps = item.max_steps;
+  const evalNum = item.eval_num;
+  const minZ = item.min_z;
+  const rtc = bool(item.rtc);
+  const horizon = item.rtc_horizon;
+  const group = item.rollout_group;
+  const note = item.note;
+  const hz = item.control_hz;
+  if (
+    typeof modelId !== "string" ||
+    !modelId.trim() ||
+    typeof prompt !== "string" ||
+    !prompt.trim() ||
+    typeof maxSteps !== "number" ||
+    !Number.isInteger(maxSteps) ||
+    typeof evalNum !== "number" ||
+    !Number.isInteger(evalNum) ||
+    typeof minZ !== "number" ||
+    !Number.isFinite(minZ) ||
+    rtc === null ||
+    typeof horizon !== "number" ||
+    !Number.isInteger(horizon) ||
+    typeof group !== "string" ||
+    typeof note !== "string" ||
+    typeof hz !== "number" ||
+    !Number.isInteger(hz)
+  )
+    return null;
+  return {
+    modelId,
+    prompt,
+    maxSteps: String(maxSteps),
+    evalNum: String(evalNum),
+    minZ: String(minZ),
+    rtc,
+    horizon: String(horizon),
+    group,
+    note,
+    hz: String(hz),
+  };
+}
+
 /** What the server fills in for an empty field, as the site and the model say
  * it, for the placeholders and the hints. */
 export function placeholders(

@@ -10,6 +10,7 @@ import {
   type ManualOwner,
   type ManualLimits,
   type ManualPoint,
+  type ManualStopLimits,
   type ManualView,
 } from "./manual-api";
 
@@ -92,6 +93,32 @@ export function syntheticStartAllowed(view: ManualView | null): boolean {
     view.capabilities.can_start === true
   );
 }
+export const productionView = (view: ManualView | null): boolean =>
+  !!view &&
+  view.environment === "production" &&
+  view.capabilities.real_motion === true &&
+  view.capabilities.synthetic_only === false;
+export const manualStartAllowed = (view: ManualView | null): boolean =>
+  syntheticStartAllowed(view) ||
+  (!!view &&
+    productionView(view) &&
+    ["idle", "ended"].includes(view.state) &&
+    view.capabilities.can_start === true);
+export function validManualStopLimits(
+  value: ManualStopLimits | null,
+): value is ManualStopLimits {
+  return (
+    !!value &&
+    [
+      value.settle_window_s,
+      value.settle_position_m,
+      value.settle_angle_rad,
+      value.gripper_settle_rad,
+    ].every((v) => Number.isFinite(v) && v > 0)
+  );
+}
+const admittedView = (view: ManualView) =>
+  syntheticView(view) || productionView(view);
 const reasonOf = (error: unknown) =>
   error instanceof ManualApiError ? error.reason : "api_failed";
 function ownerOnly(id: ManualOwner): ManualOwner {
@@ -115,7 +142,7 @@ function matchingStartOwner(
   view: ManualView,
   requestID: string,
 ): ManualOwner | null {
-  return syntheticView(view) && view.start_request_id === requestID
+  return admittedView(view) && view.start_request_id === requestID
     ? ownerOf(view)
     : null;
 }
@@ -141,7 +168,7 @@ function cloneAnchor(anchor: ManualAnchor): ManualAnchor {
 }
 
 /** DOM-independent lifecycle; an API acknowledgement never proves physical stop.
- * The only executable transport admitted here is explicitly synthetic. */
+ * Production requires an explicit capability tuple and physical stop evidence. */
 export class ManualSessionController implements ManualDragController {
   private state: ManualSnapshot = {
     phase: "unavailable",
@@ -157,6 +184,10 @@ export class ManualSessionController implements ManualDragController {
   private permission = false;
   private challenge: ManualChallenge | null = null;
   private limits: ManualLimits | null = null;
+  private realSession = false;
+  private stopLimits: ManualStopLimits | null = null;
+  private gripperRatio: number | null = null;
+  private gripperSent = false;
   private owner: ManualIdentity | null = null;
   private origin: ManualPoint | null = null;
   private desired: ManualPoint = [0, 0, 0];
@@ -206,7 +237,7 @@ export class ManualSessionController implements ManualDragController {
       if (
         ["unavailable", "ready", "closed", "fault"].includes(this.state.phase)
       ) {
-        this.permission = syntheticStartAllowed(view);
+        this.permission = manualStartAllowed(view);
         this.emit({
           phase: this.permission ? "ready" : "unavailable",
           reason: view.reason_code,
@@ -219,11 +250,14 @@ export class ManualSessionController implements ManualDragController {
       }
     }
   }
-  async review(limits: ManualLimits | null): Promise<void> {
+  async review(
+    limits: ManualLimits | null,
+    stopLimits: ManualStopLimits | null = null,
+  ): Promise<void> {
     if (
       this.disposed ||
       !this.permission ||
-      !syntheticStartAllowed(this.state.view) ||
+      !manualStartAllowed(this.state.view) ||
       !["ready"].includes(this.state.phase)
     )
       return;
@@ -231,6 +265,12 @@ export class ManualSessionController implements ManualDragController {
       this.emit({ reason: "limits_required" });
       return;
     }
+    if (productionView(this.state.view) && !validManualStopLimits(stopLimits)) {
+      this.emit({ reason: "stop_limits_required" });
+      return;
+    }
+    this.realSession = productionView(this.state.view);
+    this.stopLimits = stopLimits ? { ...stopLimits } : null;
     const epoch = ++this.epoch;
     this.limits = {
       ...limits,
@@ -239,8 +279,16 @@ export class ManualSessionController implements ManualDragController {
     };
     this.emit({ phase: "starting", reason: "", confirm: null });
     try {
-      const challenge = await this.api.challenge({ limits: this.limits });
+      const challenge = await this.api.challenge({
+        limits: this.limits,
+        ...(this.stopLimits ? { stop_limits: this.stopLimits } : {}),
+      });
       if (this.disposed || epoch !== this.epoch) return;
+      if (
+        productionView(this.state.view) &&
+        challenge.confirm !== "start real translation session"
+      )
+        throw new ManualApiError("invalid_confirmation");
       this.challenge = challenge;
       this.emit({ phase: "review", confirm: challenge.confirm });
     } catch (error) {
@@ -279,12 +327,16 @@ export class ManualSessionController implements ManualDragController {
       returned = await this.api.start({
         request_id: startRequestID,
         limits,
+        ...(this.stopLimits ? { stop_limits: this.stopLimits } : {}),
         challenge: challenge.challenge,
         confirm,
         attest: { ...attest },
       });
       if (this.closedStartRequests.has(startRequestID)) return;
-      const own = matchingStartOwner(returned, startRequestID);
+      const own =
+        productionView(returned) === this.realSession
+          ? matchingStartOwner(returned, startRequestID)
+          : null;
       if (this.disposed || epoch !== this.epoch) {
         this.uncertainStart = true;
         if (own) await this.closeIdentity(own, this.epoch, startRequestID);
@@ -300,6 +352,8 @@ export class ManualSessionController implements ManualDragController {
         !validManualAnchor(returned.anchor)
       )
         throw new ManualApiError("invalid_anchor");
+      // UI uses the joint-FK flange. A base translation delta is independent
+      // of the fixed Desk EE/tool offset held by the backend anchor.
       const origin = forwardPose(returned.anchor.joints_rad).position;
       this.owner = id;
       this.origin = [...origin];
@@ -321,9 +375,10 @@ export class ManualSessionController implements ManualDragController {
         reason: "stop_unproven",
         confirm: null,
       });
-      const own = returned
-        ? matchingStartOwner(returned, startRequestID)
-        : null;
+      const own =
+        returned && productionView(returned) === this.realSession
+          ? matchingStartOwner(returned, startRequestID)
+          : null;
       if (own) await this.closeIdentity(own, this.epoch, startRequestID);
       else await this.recoverUnknownStart();
     } finally {
@@ -339,6 +394,7 @@ export class ManualSessionController implements ManualDragController {
       !this.limits
     )
       return false;
+    this.gripperRatio = null;
     this.lastDeadman = this.clock.now();
     this.desired = [0, 0, 0];
     this.emit({ phase: "holding", reason: "" });
@@ -346,8 +402,32 @@ export class ManualSessionController implements ManualDragController {
     this.schedule();
     return true;
   }
+  beginGripper(openingRatio: number): boolean {
+    if (
+      !this.api.gripper ||
+      this.state.view?.capabilities.gripper !== true ||
+      !Number.isFinite(openingRatio) ||
+      openingRatio < 0 ||
+      openingRatio > 1 ||
+      this.state.phase !== "armed"
+    )
+      return false;
+    this.gripperRatio = openingRatio;
+    this.gripperSent = false;
+    this.lastDeadman = this.clock.now();
+    this.emit({ phase: "holding", reason: "" });
+    void this.pump();
+    this.schedule();
+    return true;
+  }
   target(position: ManualPoint): void {
-    if (this.state.phase !== "holding" || !this.origin || !this.limits) return;
+    if (
+      this.state.phase !== "holding" ||
+      !this.origin ||
+      !this.limits ||
+      this.gripperRatio !== null
+    )
+      return;
     const delta = point(position)
       ? (position.map((v, i) => v - this.origin![i]) as ManualPoint)
       : null;
@@ -384,9 +464,8 @@ export class ManualSessionController implements ManualDragController {
   private accepted(view: ManualView, id: ManualIdentity) {
     if (
       !sameIdentity(view, id) ||
-      view.environment !== "synthetic" ||
-      view.capabilities.real_motion !== false ||
-      view.capabilities.synthetic_only !== true ||
+      !admittedView(view) ||
+      productionView(view) !== this.realSession ||
       view.admission !== "open" ||
       !["owned_idle", "moving"].includes(view.state)
     )
@@ -413,16 +492,30 @@ export class ManualSessionController implements ManualDragController {
       if (epoch !== this.epoch || this.state.phase !== "holding") return;
       this.accepted(alive, id);
       this.lastDeadman = this.clock.now();
+      // One finite gripper goal per explicit hold; later ticks only renew deadman.
+      if (this.gripperRatio !== null && this.gripperSent) return;
+      if (this.gripperRatio !== null) this.gripperSent = true;
       const position = [...this.desired] as ManualPoint;
-      const moved = await this.api.target(
-        {
-          ...id,
-          request_id: this.clock.requestId(),
-          sequence: ++this.sequence,
-          delta_position_m: position,
-        },
-        request.signal,
-      );
+      const moved =
+        this.gripperRatio !== null
+          ? await this.api.gripper!(
+              {
+                ...id,
+                request_id: this.clock.requestId(),
+                sequence: ++this.sequence,
+                opening_ratio: this.gripperRatio,
+              },
+              request.signal,
+            )
+          : await this.api.target(
+              {
+                ...id,
+                request_id: this.clock.requestId(),
+                sequence: ++this.sequence,
+                delta_position_m: position,
+              },
+              request.signal,
+            );
       if (epoch !== this.epoch || this.state.phase !== "holding") return;
       this.accepted(moved, id);
     } catch (error) {
@@ -447,7 +540,7 @@ export class ManualSessionController implements ManualDragController {
     const id = this.owner;
     const epoch = ++this.epoch;
     this.permission = false;
-    this.owner = null;
+    // Keep owner identity until physical stop/end has been proven.
     this.origin = null;
     this.desired = [0, 0, 0];
     this.challenge = null;
@@ -489,7 +582,10 @@ export class ManualSessionController implements ManualDragController {
         const view = await Promise.resolve().then(() => this.api.status());
         if (this.pendingStartRequestID !== wanted) return;
         this.emit({ view });
-        const own = matchingStartOwner(view, wanted);
+        const own =
+          productionView(view) === this.realSession
+            ? matchingStartOwner(view, wanted)
+            : null;
         if (!own) {
           this.emit({ phase: "fault", reason: "stop_unproven", anchor: null });
           return;
@@ -523,7 +619,8 @@ export class ManualSessionController implements ManualDragController {
         });
         if (
           !sameOwner(stopped, id) ||
-          !syntheticView(stopped) ||
+          !admittedView(stopped) ||
+          productionView(stopped) !== this.realSession ||
           stopped.admission !== "closed"
         )
           throw new ManualApiError("stop_unproven");
@@ -533,11 +630,14 @@ export class ManualSessionController implements ManualDragController {
         });
         if (
           !sameOwner(ended, id) ||
-          !syntheticView(ended) ||
+          !admittedView(ended) ||
+          productionView(ended) !== this.realSession ||
           ended.state !== "ended" ||
-          ended.admission !== "closed"
+          ended.admission !== "closed" ||
+          (productionView(ended) && ended.stop_evidence !== "physical_settled")
         )
           throw new ManualApiError("stop_unproven");
+        this.owner = null;
         if (startRequestID) this.closedStartRequests.add(startRequestID);
         if (this.pendingStartRequestID === startRequestID) {
           this.pendingStartRequestID = null;
@@ -554,7 +654,11 @@ export class ManualSessionController implements ManualDragController {
       } catch (error) {
         if (this.pendingStartRequestID) this.uncertainStart = true;
         if (epoch === this.epoch)
-          this.emit({ phase: "fault", reason: reasonOf(error), anchor: null });
+          this.emit({
+            phase: "fault",
+            reason: this.realSession ? "stop_unproven" : reasonOf(error),
+            anchor: null,
+          });
       }
     })();
     this.closing.set(key, close);

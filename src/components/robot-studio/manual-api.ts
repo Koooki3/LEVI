@@ -23,6 +23,12 @@ export type ManualLimits = {
   quaternion_norm_tolerance: number;
   max_settle_age_s: number;
 };
+export type ManualStopLimits = {
+  settle_window_s: number;
+  settle_position_m: number;
+  settle_angle_rad: number;
+  gripper_settle_rad: number;
+};
 export type ManualAttest = {
   estop: boolean;
   scene_reset: boolean;
@@ -49,6 +55,7 @@ export type ManualView = {
     real_motion: boolean;
     synthetic_only: boolean;
     can_start: boolean;
+    gripper?: boolean;
   };
   reason_code: string;
   admission: "open" | "closed";
@@ -68,10 +75,14 @@ export type ManualCommand = ManualIdentity & {
 
 export interface ManualApi {
   status(signal?: AbortSignal): Promise<ManualView>;
-  challenge(body: { limits: ManualLimits }): Promise<ManualChallenge>;
+  challenge(body: {
+    limits: ManualLimits;
+    stop_limits?: ManualStopLimits;
+  }): Promise<ManualChallenge>;
   start(body: {
     request_id: string;
     limits: ManualLimits;
+    stop_limits?: ManualStopLimits;
     challenge: string;
     confirm: string;
     attest: ManualAttest;
@@ -82,6 +93,10 @@ export interface ManualApi {
   ): Promise<ManualView>;
   deadman(
     body: ManualCommand & { pressed: boolean },
+    signal?: AbortSignal,
+  ): Promise<ManualView>;
+  gripper?(
+    body: ManualCommand & { opening_ratio: number },
     signal?: AbortSignal,
   ): Promise<ManualView>;
   stop(body: ManualOwner & { request_id: string }): Promise<ManualView>;
@@ -157,6 +172,7 @@ function viewOf(value: unknown): ManualView {
       real_motion: value.capabilities.real_motion,
       synthetic_only: value.capabilities.synthetic_only,
       can_start: value.capabilities.can_start,
+      gripper: value.capabilities.gripper === true,
     },
     reason_code: typeof value.reason_code === "string" ? value.reason_code : "",
     admission: value.admission,
@@ -221,6 +237,18 @@ export function createManualApi({
           generation: body.generation,
           sequence: body.sequence,
           pressed: body.pressed,
+        },
+        signal,
+      ),
+    gripper: (body, signal) =>
+      post(
+        "gripper",
+        {
+          request_id: body.request_id,
+          session_id: body.session_id,
+          generation: body.generation,
+          sequence: body.sequence,
+          opening_ratio: body.opening_ratio,
         },
         signal,
       ),

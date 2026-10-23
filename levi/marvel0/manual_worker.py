@@ -101,8 +101,18 @@ class PoseWorker:
                 self._in_flight = False
 
 
-def production_factory(*args, **kwargs):
-    """The production entry stays closed regardless of configuration or env."""
+def production_factory(config):
+    """Explicitly configured person-start path; views never call this factory."""
     from .manual import ManualRefused
+    from .manual_transport import create
 
-    raise ManualRefused("stop_unproven")
+    if type(config) is not dict or not {
+        "session_id",
+        "generation",
+        "limits",
+        "stop_limits",
+        "robot_server_url",
+        "audit",
+    } <= set(config):
+        raise ManualRefused("stop_unproven")
+    return create(config)

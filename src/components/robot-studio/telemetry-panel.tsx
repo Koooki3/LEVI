@@ -30,7 +30,7 @@ export default function TelemetryPanel({
   canUsePreview,
 }: Props) {
   const { t } = useLocale();
-  const [enabled, setEnabled] = useState(false);
+  const [enabled, setEnabled] = useState(true);
   const [state, setState] = useState<RobotStudioState | null>(null);
   const [failed, setFailed] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -66,7 +66,6 @@ export default function TelemetryPanel({
         }
       } catch {
         if (!disposed) {
-          setState(null);
           setFailed(true);
         }
       } finally {
@@ -86,7 +85,8 @@ export default function TelemetryPanel({
       request?.abort();
     };
   }, [enabled]);
-  const measurement = enabled ? freshMeasurement(state, elapsed) : null;
+  const measurement =
+    enabled && !failed ? freshMeasurement(state, elapsed) : null;
   useEffect(() => {
     onMeasurement(measurement);
   }, [measurement, onMeasurement]);
@@ -113,47 +113,57 @@ export default function TelemetryPanel({
       {enabled && !measurement && (
         <p className="rs-meta">{t("robotStudio.state.noProducer")}</p>
       )}
+      <dl className="rs-state-facts" aria-live="polite">
+        <div>
+          <dt>{t("robotStudio.state.source")}</dt>
+          <dd>{state?.source_id || "—"}</dd>
+        </div>
+        <div>
+          <dt>{t("robotStudio.state.age")}</dt>
+          <dd>
+            {typeof state?.age_s === "number"
+              ? Math.max(0, state.age_s * 1000 + elapsed).toFixed(0) + " ms"
+              : "—"}
+          </dd>
+        </div>
+      </dl>
       {measurement && (
-        <dl className="rs-state-facts">
-          <div>
-            <dt>{t("robotStudio.state.source")}</dt>
-            <dd>{state?.source_id}</dd>
-          </div>
-          <div>
-            <dt>{t("robotStudio.state.age")}</dt>
-            <dd>
-              {Math.max(0, (state?.age_s ?? 0) * 1000 + elapsed).toFixed(0)} ms
-            </dd>
-          </div>
-          <div>
-            <dt>{t("robotStudio.state.joints")}</dt>
-            <dd>
-              {measurement.joints_rad
-                .map((q) => ((q * 180) / Math.PI).toFixed(1))
-                .join(" · ")}
-              °
-            </dd>
-          </div>
-          <div>
-            <dt>{t("robotStudio.state.gripper")}</dt>
-            <dd>
-              {!gripper
-                ? "—"
-                : "opening_width_m" in gripper
-                  ? (gripper.opening_width_m! * 1000).toFixed(1) + " mm"
-                  : gripper.knuckle_angle_rad!.toFixed(4) + " rad"}
-            </dd>
-          </div>
-          {measurement.reported_ee && (
+        <details>
+          <summary>{t("robotStudio.state.details")}</summary>
+          <dl className="rs-state-facts">
             <div>
-              <dt>{t("robotStudio.state.reportedFrame")}</dt>
+              <dt>{t("robotStudio.state.joints")}</dt>
               <dd>
-                {measurement.reported_ee.frame_id} →{" "}
-                {measurement.reported_ee.end_frame}
+                {measurement.joints_rad
+                  .map((q) => ((q * 180) / Math.PI).toFixed(1))
+                  .join(" · ")}
+                °
               </dd>
             </div>
-          )}
-        </dl>
+            <div>
+              <dt>{t("robotStudio.state.gripper")}</dt>
+              <dd>
+                {!gripper
+                  ? "—"
+                  : "opening_width_m" in gripper
+                    ? (gripper.opening_width_m! * 1000).toFixed(1) + " mm"
+                    : gripper.knuckle_angle_rad!.toFixed(4) + " rad"}
+              </dd>
+            </div>
+            {measurement.reported_ee && (
+              <div>
+                <dt>{t("robotStudio.state.reportedFrame")}</dt>
+                <dd>
+                  {measurement.reported_ee.frame_id} →{" "}
+                  {measurement.reported_ee.end_frame}
+                </dd>
+              </div>
+            )}
+          </dl>
+        </details>
+      )}
+      {measurement?.reported_ee && (
+        <p className="rs-meta">{t("robotStudio.state.eeSeparation")}</p>
       )}
       {measurement && measuredOpeningRatio(measurement) === null && (
         <p className="rs-meta">{t("robotStudio.state.gripperUnknown")}</p>

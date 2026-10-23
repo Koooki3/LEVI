@@ -199,8 +199,16 @@ class ManualLimits(Closed):
     max_settle_age_s: Positive
 
 
+class ManualStopLimits(Closed):
+    settle_window_s: Positive
+    settle_position_m: Positive
+    settle_angle_rad: Positive
+    gripper_settle_rad: Positive
+
+
 class ManualChallenge(Closed):
     limits: ManualLimits
+    stop_limits: ManualStopLimits | None = None
 
 
 class ManualStart(ManualChallenge):
@@ -220,6 +228,11 @@ class ManualTarget(ManualIdentity):
     anchor_id: str
     sequence: Sequence
     delta_position_m: Point
+
+
+class ManualGripper(ManualIdentity):
+    sequence: Sequence
+    opening_ratio: Annotated[FiniteFloat, Field(ge=0, le=1)]
 
 
 class ManualDeadman(ManualIdentity):
@@ -246,6 +259,11 @@ def manual_start(body: ManualStart):
 @router.post("/arm/manual/target", dependencies=[Depends(person_only)])
 def manual_target(body: ManualTarget):
     return _answer(supervisor().manual.target, body.model_dump())
+
+
+@router.post("/arm/manual/gripper", dependencies=[Depends(person_only)])
+def manual_gripper(body: ManualGripper):
+    return _answer(supervisor().manual.gripper, body.model_dump())
 
 
 @router.post("/arm/manual/deadman", dependencies=[Depends(person_only)])

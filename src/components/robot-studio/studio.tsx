@@ -83,6 +83,8 @@ class SceneBoundary extends Component<
 export default function RobotStudio() {
   const { t } = useLocale();
   const [openingRatio, setOpeningRatio] = useState(1);
+  const [previewGripperMeasured, setPreviewGripperMeasured] = useState(false);
+  const [previewOpeningEdited, setPreviewOpeningEdited] = useState(false);
   const [toolDraft, setToolDraft] = useState<ToolDraft>(DEFAULT_TOOL_DRAFT);
   const [teleopDraft, setTeleopDraft] =
     useState<TeleopDraft>(EMPTY_TELEOP_DRAFT);
@@ -91,9 +93,10 @@ export default function RobotStudio() {
     null,
   );
   const [syncMode, setSyncMode] = useState<"offline" | "follow" | "edit">(
-    "offline",
+    "follow",
   );
   const syncModeRef = useRef(syncMode);
+  const freshMeasuredRef = useRef<RobotStudioMeasurement | null>(null);
   const latestMeasuredRef = useRef<RobotStudioMeasurement | null>(null);
   const [lastFollowSample, setLastFollowSample] =
     useState<RobotStudioMeasurement | null>(null);
@@ -173,13 +176,15 @@ export default function RobotStudio() {
       cancelPending();
       const next = [...anchor.joints_rad];
       updateJoints(next);
+      // Desk EE may include a tool transform; the model target is joint FK flange.
+      // The session sends a translation delta, so the fixed offset cancels.
       solveTarget(forwardPose(next));
     },
     [cancelPending, updateJoints, solveTarget],
   );
   const onTarget = useCallback(
     (next: PreviewPose) => {
-      if (syncModeRef.current === "follow") return;
+      if (syncModeRef.current === "follow" || !freshMeasuredRef.current) return;
       pendingTarget.current = next;
       if (frame.current !== null) return;
       frame.current = requestAnimationFrame(() => {
@@ -196,7 +201,7 @@ export default function RobotStudio() {
     [solveTarget],
   );
   const onDragStart = useCallback(() => {
-    if (syncModeRef.current === "follow") return;
+    if (syncModeRef.current === "follow" || !freshMeasuredRef.current) return;
     dragStart.current = { joints: [...jointsRef.current], target, solve };
     manualController.current?.beginDrag();
     setDragging(true);
@@ -267,12 +272,20 @@ export default function RobotStudio() {
   );
   const receiveMeasurement = useCallback(
     (measured: RobotStudioMeasurement | null) => {
+      freshMeasuredRef.current = measured;
       setMeasurement(measured);
-      if (!measured) return;
+      if (!measured) {
+        cancelPending();
+        manualController.current?.revoke("feedback_stale");
+        setDragging(false);
+        dragStart.current = null;
+        setCancelRevision((v) => v + 1);
+        return;
+      }
       latestMeasuredRef.current = measured;
       if (syncModeRef.current === "follow") applyFollowMeasurement(measured);
     },
-    [applyFollowMeasurement],
+    [applyFollowMeasurement, cancelPending],
   );
   const changeSyncMode = (next: typeof syncMode) => {
     cancelPending();
@@ -283,12 +296,13 @@ export default function RobotStudio() {
     setSyncMode(next);
   };
   const changeReading = (enabled: boolean) => {
-    changeSyncMode(enabled ? "follow" : "offline");
+    void enabled;
+    changeSyncMode("follow");
+    if (latestMeasuredRef.current)
+      applyFollowMeasurement(latestMeasuredRef.current);
+    freshMeasuredRef.current = null;
     setMeasurement(null);
-    if (enabled) {
-      latestMeasuredRef.current = null;
-      setLastFollowSample(null);
-    }
+    manualController.current?.revoke("reading_changed");
   };
   const followMeasurement = (measured: RobotStudioMeasurement | null) => {
     changeSyncMode("follow");
@@ -317,14 +331,15 @@ export default function RobotStudio() {
     return true;
   };
   const reset = () => {
-    if (syncModeRef.current === "follow") return;
+    if (syncModeRef.current === "follow" || !freshMeasuredRef.current) return;
     acceptJointPreview([...FR3_INITIAL_JOINTS], 1);
+    setPreviewOpeningEdited(true);
     setDragging(false);
     dragStart.current = null;
     setCancelRevision((v) => v + 1);
   };
   const applyFields = () => {
-    if (syncModeRef.current === "follow") return;
+    if (syncModeRef.current === "follow" || !freshMeasuredRef.current) return;
     cancelPending();
     const next = parsePoseFields(fields);
     if (!next) {
@@ -334,17 +349,20 @@ export default function RobotStudio() {
     solveTarget(next);
   };
   const changeJoint = (index: number, value: number) => {
-    if (syncModeRef.current === "follow") return;
+    if (syncModeRef.current === "follow" || !freshMeasuredRef.current) return;
     const next = [...jointsRef.current];
     next[index] = value;
     acceptJointPreview(next);
   };
   const useMeasuredPreview = (measured: RobotStudioMeasurement) => {
+    if (!freshMeasuredRef.current) return;
     const accepted = acceptJointPreview(
       [...measured.joints_rad],
       measuredOpeningRatio(measured),
     );
     if (!accepted) return;
+    setPreviewGripperMeasured(measuredOpeningRatio(measured) !== null);
+    setPreviewOpeningEdited(false);
     if (syncModeRef.current !== "offline") changeSyncMode("edit");
     else {
       setDragging(false);
@@ -371,12 +389,12 @@ export default function RobotStudio() {
   const dirtyFields = fields.some((v, i) => v !== poseFields(target)[i]);
   const ready = model === "ready";
   const following = syncMode === "follow";
-  const editable = ready && !following;
+  const editable = ready && !following && measurement !== null;
   const activeMode = editable ? mode : "view";
-  const waitingForPose = following && !lastFollowSample;
+  const waitingForPose = !latestMeasuredRef.current;
   const followStatus = measurement
     ? "following"
-    : lastFollowSample
+    : latestMeasuredRef.current
       ? "lostFeedback"
       : "waitingForPose";
   const canSave =
@@ -394,14 +412,16 @@ export default function RobotStudio() {
         <div>
           <p className="rs-eyebrow">{t("robotStudio.eyebrow")}</p>
           <h1>{t("robotStudio.title")}</h1>
-          <p className="rs-description">{t("robotStudio.description")}</p>
+          <p className="rs-description">
+            {t("robotStudio.state.workspaceDescription")}
+          </p>
         </div>
         <div className="rs-header-links">
           <Badge>
             {t(
-              syncMode === "offline"
-                ? "robotStudio.offline"
-                : "robotStudio.state.readOnlyMapping",
+              following
+                ? "robotStudio.state.readOnlyMapping"
+                : "robotStudio.state.editing",
             )}
           </Badge>
           <Link className="ds-focus rs-link" href="/marvel_workstation">
@@ -409,6 +429,14 @@ export default function RobotStudio() {
           </Link>
         </div>
       </header>
+      <TelemetryPanel
+        onMeasurement={receiveMeasurement}
+        onEnabledChange={changeReading}
+        following={following}
+        onFollowMeasurement={followMeasurement}
+        onUseMeasurement={useMeasuredPreview}
+        canUsePreview={ready && !dragging}
+      />
       <div className="rs-layout">
         <section className="rs-stage" aria-label={t("robotStudio.viewport")}>
           <div className="rs-toolbar">
@@ -428,7 +456,7 @@ export default function RobotStudio() {
               <Button
                 size="sm"
                 icon={Move3D}
-                disabled={following}
+                disabled={!editable}
                 variant={activeMode === "translate" ? "primary" : "ghost"}
                 aria-pressed={activeMode === "translate"}
                 onClick={() => setMode("translate")}
@@ -438,7 +466,7 @@ export default function RobotStudio() {
               <Button
                 size="sm"
                 icon={Rotate3D}
-                disabled={following}
+                disabled={!editable}
                 variant={activeMode === "rotate" ? "primary" : "ghost"}
                 aria-pressed={activeMode === "rotate"}
                 onClick={() => setMode("rotate")}
@@ -458,20 +486,33 @@ export default function RobotStudio() {
               </Select>
             </label>
           </div>
+          <p className="rs-meta" data-testid="tool-mount-status">
+            {t(
+              toolDraft.mount === null
+                ? "robotStudio.state.mountUncalibrated"
+                : "robotStudio.state.mountDraftUnverified",
+            )}
+          </p>
           <div className="rs-canvas" data-theme="dark">
             <SceneBoundary key={sceneKey} onFailure={onSceneFailure}>
               <Scene
                 joints={joints}
                 poseVisible={!waitingForPose}
                 toolVisible={
-                  !following || measuredOpeningRatio(lastFollowSample) !== null
+                  following
+                    ? measuredOpeningRatio(lastFollowSample) !== null
+                    : previewGripperMeasured || previewOpeningEdited
                 }
                 openingRatio={openingRatio}
                 toolDraft={toolDraft}
                 measuredJoints={
-                  !following && measurement ? [...measurement.joints_rad] : null
+                  !following && latestMeasuredRef.current
+                    ? [...latestMeasuredRef.current.joints_rad]
+                    : null
                 }
-                measuredOpeningRatio={measuredOpeningRatio(measurement)}
+                measuredOpeningRatio={measuredOpeningRatio(
+                  latestMeasuredRef.current,
+                )}
                 workspaceBox={workspaceBox}
                 target={target}
                 mode={activeMode}
@@ -511,9 +552,11 @@ export default function RobotStudio() {
             <div className="rs-scene-caption">
               <span>
                 {t(
-                  following
+                  !measurement
                     ? "robotStudio.state." + followStatus
-                    : "robotStudio.modelLabel",
+                    : following
+                      ? "robotStudio.state.following"
+                      : "robotStudio.state.editing",
                 )}
               </span>
               <span>
@@ -717,7 +760,10 @@ export default function RobotStudio() {
           <div hidden={following}>
             <ToolPanel
               openingRatio={openingRatio}
-              onOpeningRatio={setOpeningRatio}
+              onOpeningRatio={(ratio) => {
+                setOpeningRatio(ratio);
+                setPreviewOpeningEdited(true);
+              }}
               draft={toolDraft}
               onDraft={setToolDraft}
               teleopDraft={teleopDraft}
@@ -744,14 +790,7 @@ export default function RobotStudio() {
             }}
             disabled={!ready || dragging}
           />
-          <TelemetryPanel
-            onMeasurement={receiveMeasurement}
-            onEnabledChange={changeReading}
-            following={following}
-            onFollowMeasurement={followMeasurement}
-            onUseMeasurement={useMeasuredPreview}
-            canUsePreview={ready && !dragging}
-          />
+
           <ParameterPanel />
           <ManualControls
             workspaceBox={workspaceBox}

@@ -102,6 +102,14 @@ export interface Episode {
   target: number | null;
 }
 
+/** The saved command form of one run, whitelisted by the backend. */
+export interface RunRecord {
+  runId: string | null;
+  phase: string | null;
+  lockReleased: boolean | null;
+  form: Record<string, unknown> | null;
+}
+
 export interface PreflightRow {
   code: string;
   /** `ok`, `refuse`, `unknown`, or `warn` (a hint that never refuses). */
@@ -117,6 +125,8 @@ export interface RunView {
   mayMove: boolean;
   reason: Worded<Say> | null;
   episode: Episode | null;
+  /** Identity and original form of the hosted run, when the backend provides it. */
+  run: RunRecord | null;
   preflight: PreflightRow[];
   actions: Record<ActionId, RunAction>;
   /** Epoch seconds of the sample. */
@@ -167,6 +177,18 @@ function episode(raw: unknown): Episode | null {
     max: num(item.max_steps) ?? num(item.max),
     counted: num(item.counted),
     target: num(item.target),
+  };
+}
+
+function runRecord(raw: unknown): RunRecord | null {
+  const item = rec(raw);
+  if (!item) return null;
+  const form = rec(item.form);
+  return {
+    runId: str(item.run_id, 120),
+    phase: str(item.phase, 40),
+    lockReleased: bool(item.lock_released),
+    form: form ? { ...form } : null,
   };
 }
 
@@ -229,6 +251,7 @@ export function runView(raw: unknown, known: Known): RunView | null {
         )
       : null,
     episode: shown,
+    run: runRecord(doc.run),
     preflight: list(doc.preflight).flatMap((entry) =>
       preflightRow(entry, known),
     ),

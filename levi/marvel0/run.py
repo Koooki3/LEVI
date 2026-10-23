@@ -1006,11 +1006,22 @@ def _run_view(f: Facts) -> dict | None:
     began = rec.get("created_epoch")
     return {
         "run_id": rec.get("run_id"),
+        "phase": rec.get("phase"),
         "group": rec.get("group"),
         "task_folder": rec.get("task_folder"),
         "model_id": rec.get("model_id"),
         "rtc": rec.get("rtc"),
         "prompt": rec.get("prompt"),
+        # Only the original user-editable form, never argv, environment or paths.
+        # The next-episode UI uses this after confirmed client exit; start still
+        # performs the normal current-site validation and human confirmation.
+        "form": {
+            item.name: rec["form"][item.name]
+            for item in dataclasses.fields(command.Form)
+            if item.name in rec["form"]
+        }
+        if isinstance(rec.get("form"), dict)
+        else None,
         "started_at": _iso(began),
         "age_s": round(f.now - began, 1) if isinstance(began, (int, float)) else None,
     }
@@ -1205,6 +1216,21 @@ def _control_enabled() -> bool:
         return False
 
 
+def _manual_enabled() -> bool:
+    """Manual v1 is opt-in; checking the local switch never contacts hardware."""
+    try:
+        from . import control_site
+
+        loaded = control_site.load()
+        return bool(
+            loaded is not None
+            and not loaded.manual_errors
+            and loaded.manual.enabled is True
+        )
+    except Exception:  # noqa: BLE001 - unreadable control is disabled
+        return False
+
+
 def _deploy_view() -> dict:
     from . import deploy_api
 
@@ -1276,15 +1302,15 @@ class Host:
     sleep: Callable = time.sleep
     # Run the 2 Hz watcher in a thread of its own (tests call ``tick`` by hand).
     background: bool = False
-    # Manual transport is never selected by HTTP, client.enabled or an env var.
-    # Only tests inject a synthetic factory and a trusted settled observer.
+    # Generic/test hosts default off. Only production_host reads the explicit
+    # manual site switch; person-start constructs the fixed server transport.
     manual_factory: Callable = production_factory
     manual_enabled: Callable = lambda: False
     manual_settled: Callable = lambda engine: None
 
 
 def production_host() -> Host:
-    return Host(background=True)
+    return Host(background=True, manual_enabled=_manual_enabled)
 
 
 def _identity(pid) -> dict | None:
@@ -1888,6 +1914,16 @@ class Supervisor:
             f, d, c = self._current()
             c.preflight = preflight
             body = document(f, d, c)
+            if body["run"] is not None:
+                # Read after _current has finalized the process and under the
+                # same mutex as _release. A key acknowledgement is not exit.
+                body["run"]["lock_released"] = (
+                    (self._rec or {}).get("phase") == "ended"
+                    and self._master is None
+                    and self._arm_fd is None
+                    and self._child is None
+                )
+                body["run"]["phase"] = (self._rec or {}).get("phase")
             self._cache = (h.monotonic(), body)
             return body
 

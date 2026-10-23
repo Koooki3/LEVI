@@ -1,0 +1,10 @@
+{
+  "franka_server_ros2.py": {
+    "baseline_sha256": "73443e2ba21206d2235138f1a0612f58cd04579ca7087bf25a77d3f52a6ba26b",
+    "patched_sha256": "52bb7b643a156d3c7cd0f8a5b06e4e94c5037b5d86a349302faf69c795dfffe4"
+  },
+  "robotiq_gripper_server_ros2.py": {
+    "baseline_sha256": "0227535877f04c22abddbad01fc1c60fef96a6a2dd5895f3ea55a3a2c9a9d90e",
+    "patched_sha256": "dd3011ae8d4f7c686527a13a6ce41f27995fda6016fa2c81e41845b84646d3b4"
+  }
+}

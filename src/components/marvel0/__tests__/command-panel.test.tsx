@@ -85,6 +85,7 @@ async function open(
   status: ReturnType<typeof readDeploy> = readDeploy(idle()),
   zhLanguage = false,
   over: Partial<Effective> = {},
+  resumeBody: Record<string, unknown> | null = null,
 ) {
   if (zhLanguage) localStorage.setItem("levi-language", "zh");
   const { api, calls } = fakeApi(canned);
@@ -97,6 +98,7 @@ async function open(
         status={status}
         selection={selection}
         onUseAnother={() => used.push("another")}
+        resumeBody={resumeBody}
       />
     );
     return zhLanguage ? <LocaleProvider>{card}</LocaleProvider> : card;
@@ -121,6 +123,82 @@ const make = async (host: HTMLElement) => {
 };
 
 describe("the Client command card", () => {
+  test("a resumed run pins every saved parameter and previews the same body with only the prompt changed", async () => {
+    const saved = {
+      model_id: SFT,
+      prompt: "old task",
+      max_steps: 500,
+      eval_num: 4,
+      min_z: 0.03,
+      rtc: true,
+      rtc_horizon: 7,
+      rollout_group: "original_group",
+      note: "original note",
+      control_hz: 20,
+    };
+    const { host, calls } = await open(
+      { preview: ok(preview()) },
+      readDeploy(ready()),
+      false,
+      {},
+      saved,
+    );
+    await waitFor(
+      () => host.querySelector("[data-testid=marvel0-command-resumed]"),
+      {
+        label: "the saved run form",
+      },
+    );
+    const prompt = field(host, "Task instruction")!;
+    const steps = field(host, "Max steps per episode (--max-timesteps)")!;
+    expect((steps as HTMLInputElement).disabled).toBe(true);
+    expect((prompt as HTMLInputElement).disabled).toBe(false);
+    await type(prompt, "new task");
+    await make(host);
+    expect(calls.preview[0]).toEqual({ ...saved, prompt: "new task" });
+  });
+
+  test("exiting the saved-form mode keeps the changed prompt and lets the person edit other parameters", async () => {
+    const saved = {
+      model_id: SFT,
+      prompt: "old task",
+      max_steps: 500,
+      eval_num: 4,
+      min_z: 0.03,
+      rtc: true,
+      rtc_horizon: 7,
+      rollout_group: "original_group",
+      note: "original note",
+      control_hz: 20,
+    };
+    const { host, calls } = await open(
+      { preview: ok(preview()) },
+      readDeploy(ready()),
+      false,
+      {},
+      saved,
+    );
+    await waitFor(
+      () => host.querySelector("[data-testid=marvel0-command-resumed]"),
+      {
+        label: "the saved run form",
+      },
+    );
+    const prompt = field(host, "Task instruction")!;
+    await type(prompt, "new task");
+    await click(button(host, en["marvel0.episodeChange.editAll"])!);
+    const steps = field(host, "Max steps per episode (--max-timesteps)")!;
+    expect((steps as HTMLInputElement).disabled).toBe(false);
+    expect((prompt as HTMLInputElement).value).toBe("new task");
+    await type(steps, "321");
+    await make(host);
+    expect(calls.preview[0]).toMatchObject({
+      ...saved,
+      max_steps: 321,
+      prompt: "new task",
+    });
+  });
+
   test("says what it writes, how to run it, and that the arm's settings come from the site file", async () => {
     const { host } = await open();
     expect(text(card(host))).toContain(en["marvel0.cmd.scope"]);

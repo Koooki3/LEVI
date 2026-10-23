@@ -1,0 +1,73 @@
+--- a/franka_server_ros2.py
++++ b/franka_server_ros2.py
+@@ -39,6 +39,7 @@
+ 
+ from fr3_robot_server import fr3_kinematics
+ from fr3_robot_server import fr3_reset_plan
++from fr3_robot_server.fr3_manual_adapter import install as install_manual_protocol
+ 
+ 
+ FLAGS = flags.FLAGS
+@@ -102,6 +103,9 @@
+         self.force = np.zeros(3)
+         self.torque = np.zeros(3)
+         self.jacobian = np.zeros((6, 7))
++        self.manual_sample_lock = threading.RLock()
++        self.manual_frame = None
++        self.last_joint_monotonic = None
+         self.pose_update_count = 0
+         self.joint_state_update_count = 0
+         self.wrench_update_count = 0
+@@ -392,23 +396,27 @@
+     # ======================== State callbacks ========================
+ 
+     def _set_pose(self, msg: PoseStamped):
+-        pos = msg.pose.position
+-        ori = msg.pose.orientation
+-        self.pos = np.array([pos.x, pos.y, pos.z, ori.x, ori.y, ori.z, ori.w])
+-        self.pose_update_count += 1
+-        self.last_pose_walltime = time.time()
+-        self.last_pose_monotonic = time.monotonic()
++        with self.manual_sample_lock:
++            self.manual_frame = msg.header.frame_id
++            pos = msg.pose.position
++            ori = msg.pose.orientation
++            self.pos = np.array([pos.x, pos.y, pos.z, ori.x, ori.y, ori.z, ori.w])
++            self.pose_update_count += 1
++            self.last_pose_walltime = time.time()
++            self.last_pose_monotonic = time.monotonic()
+ 
+     def _set_joint_state(self, msg: JointState):
+-        if len(msg.position) >= 7:
+-            self.q = np.array(msg.position[:7])
+-        if len(msg.velocity) >= 7:
+-            self.dq = np.array(msg.velocity[:7])
+-        self.joint_state_update_count += 1
+-        try:
+-            self.vel = self.jacobian @ self.dq
+-        except Exception:
+-            self.vel = np.zeros(6)
++        with self.manual_sample_lock:
++            if len(msg.position) >= 7:
++                self.last_joint_monotonic = time.monotonic()
++                self.q = np.array(msg.position[:7])
++            if len(msg.velocity) >= 7:
++                self.dq = np.array(msg.velocity[:7])
++            self.joint_state_update_count += 1
++            try:
++                self.vel = self.jacobian @ self.dq
++            except Exception:
++                self.vel = np.zeros(6)
+ 
+     def _set_wrench(self, msg: WrenchStamped):
+         f = msg.wrench.force
+@@ -728,6 +736,9 @@
+     else:
+         node.get_logger().warn("No fresh robot state; impedance activation deferred")
+ 
++    # No manual start/route activates controllers or homes the arm.
++    install_manual_protocol(webapp, robot_server, gripper_server, request, jsonify)
++
+     # ==================== Flask Routes ====================
+ 
+     @webapp.before_request

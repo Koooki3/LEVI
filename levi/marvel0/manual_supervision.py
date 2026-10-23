@@ -1,9 +1,8 @@
 """Manual child mode of the existing run.Supervisor; no second owner/arm lock.
 
-Production is deliberately unavailable. Only a Python-injected synthetic factory
-can create an engine. It is not an HTTP/profile/env switch. Pending Claude state
-and planner work will supply trusted readings through that boundary only after
-review; neither browser current poses nor preview-plan hashes authorize motion.
+The explicitly enabled production factory starts a bound v1 robot session only
+on a person action. Synthetic factories remain injectable for offline tests.
+Browser current poses and preview-plan hashes never authorize motion.
 """
 
 import hashlib
@@ -18,6 +17,7 @@ from .manual_worker import production_factory
 
 SCHEMA = "levi.marvel0.manual.v1"
 CONFIRM = "start synthetic translation session"
+REAL_CONFIRM = "start real translation session"
 
 
 class ManualSessions:
@@ -50,7 +50,9 @@ class ManualSessions:
             {
                 "time": self.sup._iso(),
                 "actor": "person",
-                "via": "manual_synthetic",
+                "via": "manual_real"
+                if self.sup.host.manual_factory is production_factory
+                else "manual_synthetic",
                 "event": event,
                 **fields,
             },
@@ -62,7 +64,7 @@ class ManualSessions:
         # This comparison is not an authorization boundary against same-account
         # Python edits. It prevents an accidental real enable through site/UI.
         h = self.sup.host
-        if h.manual_factory is production_factory:
+        if h.manual_factory is production_factory and not h.manual_enabled():
             return "stop_unproven"
         if not h.manual_enabled():
             return "manual_disabled"
@@ -99,17 +101,26 @@ class ManualSessions:
                     else "preparing",
                     "admission": "closed",
                     "stop_evidence": "unproven",
-                    "environment": "synthetic",
+                    "environment": "production"
+                    if self.sup.host.manual_factory is production_factory
+                    else "synthetic",
                     "capabilities": {
                         "can_start": False,
-                        "real_motion": False,
-                        "synthetic_only": True,
+                        "real_motion": self.sup.host.manual_factory
+                        is production_factory,
+                        "synthetic_only": self.sup.host.manual_factory
+                        is not production_factory,
+                        "gripper": False,
                     },
                 }
             if self.engine is not None:
                 body = self.engine.view()
                 body["start_request_id"] = self.start_request_id
-                body["environment"] = "synthetic"
+                body["environment"] = (
+                    "production"
+                    if body["capabilities"].get("real_motion")
+                    else "synthetic"
+                )
                 body["capabilities"]["can_start"] = (
                     self.fd is None and self._gate() is None
                 )
@@ -131,15 +142,22 @@ class ManualSessions:
                 else "synthetic",
                 "capabilities": {
                     "can_start": gate is None,
-                    "real_motion": False,
-                    "synthetic_only": True,
+                    "real_motion": self.sup.host.manual_factory is production_factory
+                    and gate is None,
+                    "synthetic_only": self.sup.host.manual_factory
+                    is not production_factory,
+                    "gripper": self.sup.host.manual_factory is production_factory
+                    and gate is None,
                 },
             }
 
     @staticmethod
     def _binding(body):
         data = json.dumps(
-            body["limits"], allow_nan=False, sort_keys=True, separators=(",", ":")
+            {"limits": body["limits"], "stop_limits": body.get("stop_limits")},
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
         )
         return {"manual_limits": hashlib.sha256(data.encode()).hexdigest()}
 
@@ -165,12 +183,24 @@ class ManualSessions:
         with self.sup._mutex:
             self._require_idle(aeri_row)
             issued = self.sup.challenges.issue("manual_start", self._binding(body))
-            return {"schema": SCHEMA, "confirm": CONFIRM, **issued}
+            return {
+                "schema": SCHEMA,
+                "confirm": REAL_CONFIRM
+                if self.sup.host.manual_factory is production_factory
+                else CONFIRM,
+                **issued,
+            }
 
     def start(self, body):
         sup = self.sup
         request_id = sup._request_id(body)
-        if body.get("confirm") != CONFIRM:
+        expected_confirm = (
+            REAL_CONFIRM
+            if sup.host.manual_factory is production_factory
+            and sup.host.manual_enabled()
+            else CONFIRM
+        )
+        if body.get("confirm") != expected_confirm:
             self._refuse("confirm_required")
         attest = body.get("attest") or {}
         if not all(
@@ -181,6 +211,14 @@ class ManualSessions:
         gate = self._gate()
         if gate:
             self._refuse(gate)
+        if sup.host.manual_factory is production_factory:
+            from .manual import ManualRefused
+            from .manual_transport import stop_limits
+
+            try:
+                stop_limits(body.get("stop_limits"))
+            except ManualRefused as exc:
+                self._refuse(exc.code)
         sup.adopt()
         directory = sup._folder(sup.site_loader(), create=True)
         sup._dir = directory
@@ -235,9 +273,21 @@ class ManualSessions:
                     "generation": intent["generation"],
                     "limits": body["limits"],
                     "audit": self._audit,
+                    **(
+                        {
+                            "stop_limits": body.get("stop_limits"),
+                            "robot_server_url": sup.site_loader().server.robot_server_url,
+                            "now": sup.host.monotonic,
+                        }
+                        if sup.host.manual_factory is production_factory
+                        else {}
+                    ),
                 }
             )
-            if engine.view()["capabilities"].get("real_motion") is not False:
+            if (
+                sup.host.manual_factory is not production_factory
+                and engine.view()["capabilities"].get("real_motion") is not False
+            ):
                 engine.stop(reason="synthetic_required")
                 self._refuse("synthetic_required")
         except ManualRefused as exc:
@@ -294,7 +344,7 @@ class ManualSessions:
                 target=self._watch,
                 args=(engine,),
                 daemon=True,
-                name="levi-manual-synthetic",
+                name="levi-manual-session",
             ).start()
         return self.view()
 
@@ -371,6 +421,16 @@ class ManualSessions:
             },
         )
 
+    def gripper(self, body):
+        return self._call(
+            body,
+            "gripper",
+            **{
+                k: body[k]
+                for k in ("session_id", "generation", "sequence", "opening_ratio")
+            },
+        )
+
     def deadman(self, body):
         return self._call(
             body,
@@ -412,7 +472,11 @@ class ManualSessions:
         engine = self._engine(body)
         try:
             engine.stop(reason="end_requested")
-            evidence = self.sup.host.manual_settled(engine)
+            evidence = (
+                engine.physical_evidence()
+                if engine.view()["capabilities"].get("real_motion")
+                else self.sup.host.manual_settled(engine)
+            )
             engine.end(evidence)
         except ManualRefused as exc:
             self._refuse(exc.code)

@@ -7,7 +7,7 @@
 // one policy server unit this page created, the second writes the demo
 // client's command and can start it, the third holds and drives the client
 // the page hosts.
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { Button } from "@/components/ds";
 import { RefreshCw } from "lucide-react";
@@ -18,6 +18,11 @@ import { marvel0Api, type Marvel0Api } from "./deploy-api";
 import type { DeployStatus } from "./deploy-logic";
 import { StepHeading } from "./marvel0-card";
 import { RunPanel } from "./run-panel";
+import type { EpisodeChangeStatus } from "./run-panel";
+import { goTo } from "./chain-strip";
+import { COMMAND_ANCHOR } from "./chain-logic";
+import { commandFormFromRun } from "./command-logic";
+import { bodyWithNextPrompt, confirmedRunExit } from "./episode-change";
 import { effectiveSelection, useChoice } from "./selection";
 import type { RunActions } from "./use-run-actions";
 import type { RunPoll } from "./use-run-poll";
@@ -53,9 +58,24 @@ export function Marvel0Actions({
    * the last read is not current. The chain at the top follows it. */
   onDeploy?: (status: DeployStatus | null) => void;
 }) {
+  type EpisodeOperation = {
+    state: EpisodeChangeStatus["state"];
+    runId: string;
+    form: Record<string, unknown>;
+    prompt: string;
+  };
   const { t } = useLocale();
   const catalog = useMarvel0Catalog(api);
   const [logOpen, setLogOpen] = useState(false);
+  const [episodeOperation, setEpisodeOperation] =
+    useState<EpisodeOperation | null>(null);
+  const [episodeBody, setEpisodeBody] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
+  const attemptedRun = useRef<string | null>(null);
+  const observedRunId = useRef<string | null>(null);
+  const episodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const poll = useDeployPoll(api, { pollMs, logOpen });
   const choice = useChoice();
   const selection = effectiveSelection(
@@ -78,6 +98,109 @@ export function Marvel0Actions({
       isSiteProblem(problem) && !isFormat(problem!),
   );
   const ready = !site && catalog.loaded;
+  const changeInstruction = async (prompt: string) => {
+    const view = run?.value;
+    const record = view?.run;
+    const runId = record?.runId;
+    const form = record?.form;
+    if (
+      episodeOperation ||
+      !run?.current ||
+      view?.state !== "at_gate" ||
+      !runId ||
+      !form ||
+      !commandFormFromRun(form) ||
+      !view.actions.end_at_gate.allowed ||
+      runActions?.working !== null ||
+      prompt.trim() === "" ||
+      prompt === form.prompt ||
+      !runActions ||
+      attemptedRun.current === runId
+    )
+      return;
+    attemptedRun.current = runId;
+    const operation = { state: "ending" as const, runId, form, prompt };
+    setEpisodeOperation(operation);
+    episodeTimer.current = setTimeout(() => {
+      setEpisodeOperation((current) =>
+        current?.runId === runId &&
+        (current.state === "ending" || current.state === "waiting")
+          ? { ...current, state: "unknown" }
+          : current,
+      );
+    }, 45_000);
+    let sent = false;
+    try {
+      sent = await runActions.press("end_at_gate");
+    } catch {
+      // An interrupted request may have reached the host; never send it again.
+      setEpisodeOperation({ ...operation, state: "unknown" });
+      return;
+    }
+    if (sent) {
+      setEpisodeOperation({ ...operation, state: "waiting" });
+      return;
+    }
+    const uncertain = runActions.refused?.failure.status === 0;
+    setEpisodeOperation({
+      ...operation,
+      state: uncertain ? "unknown" : "refused",
+    });
+  };
+
+  useEffect(() => {
+    if (
+      !episodeOperation ||
+      (episodeOperation.state !== "waiting" &&
+        episodeOperation.state !== "unknown")
+    )
+      return;
+    const current = run?.value;
+    if (!run?.current || !current) return;
+    const record = current.run;
+    if (record?.runId && record.runId !== episodeOperation.runId) {
+      setEpisodeOperation({ ...episodeOperation, state: "unknown" });
+      return;
+    }
+    if (record?.runId !== episodeOperation.runId) return;
+    if (current.state === "failed") {
+      setEpisodeOperation({ ...episodeOperation, state: "failed" });
+      if (episodeTimer.current) clearTimeout(episodeTimer.current);
+      return;
+    }
+    if (!confirmedRunExit(current, episodeOperation.runId)) return;
+    if (episodeTimer.current) clearTimeout(episodeTimer.current);
+    const body = bodyWithNextPrompt(
+      episodeOperation.form,
+      episodeOperation.prompt,
+    );
+    setEpisodeOperation({ ...episodeOperation, state: "ready" });
+    goTo(COMMAND_ANCHOR);
+    // The command card will preview this saved body and still requires the
+    // ordinary explicit start confirmation.
+    setEpisodeBody(body);
+  }, [episodeOperation, run]);
+
+  useEffect(() => {
+    const nextRunId = run?.value?.run?.runId;
+    if (!nextRunId) return;
+    if (observedRunId.current && observedRunId.current !== nextRunId) {
+      if (episodeTimer.current) clearTimeout(episodeTimer.current);
+      attemptedRun.current = null;
+      setEpisodeOperation(null);
+      setEpisodeBody(null);
+    }
+    observedRunId.current = nextRunId;
+  }, [run?.value?.run?.runId]);
+  useEffect(
+    () => () => {
+      if (episodeTimer.current) clearTimeout(episodeTimer.current);
+    },
+    [],
+  );
+  const changeStatus: EpisodeChangeStatus = episodeOperation
+    ? { state: episodeOperation.state, runId: episodeOperation.runId }
+    : { state: "idle" };
   return (
     <div className="rg-steps" data-testid="marvel0-actions">
       <section
@@ -147,6 +270,7 @@ export function Marvel0Actions({
               onUseAnother={useAnother}
               run={run?.value ?? null}
               runActions={runActions}
+              resumeBody={episodeBody}
             />
           )}
           {clientStatus}
@@ -161,7 +285,12 @@ export function Marvel0Actions({
           <StepHeading n={4} id="marvel0-step-run">
             {t("marvel0.step.run")}
           </StepHeading>
-          <RunPanel poll={run} actions={runActions} />
+          <RunPanel
+            poll={run}
+            actions={runActions}
+            episodeChange={changeStatus}
+            onChangeInstruction={changeInstruction}
+          />
         </section>
       )}
     </div>

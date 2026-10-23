@@ -29,7 +29,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { Badge, Button, Card, Progress } from "@/components/ds";
+import { Badge, Button, Card, Field, Input, Progress } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Notice } from "./notice";
 import { RefusedBlock, WordedText } from "./action-parts";
@@ -58,6 +58,25 @@ import {
 import type { RunPoll } from "./use-run-poll";
 import { RUN_FRESH_MS } from "./use-run-poll";
 import type { RunActions } from "./use-run-actions";
+import { commandFormFromRun } from "./command-logic";
+
+export type EpisodeChangeStatus =
+  | { state: "idle" }
+  | { state: "ending" | "waiting"; runId: string }
+  | { state: "unknown" | "refused" | "failed"; runId: string }
+  | { state: "ready"; runId: string };
+
+const EPISODE_CHANGE_KEY: Record<
+  Exclude<EpisodeChangeStatus["state"], "idle">,
+  string
+> = {
+  ending: "marvel0.episodeChange.ending",
+  waiting: "marvel0.episodeChange.waiting",
+  unknown: "marvel0.episodeChange.unknown",
+  refused: "marvel0.episodeChange.refused",
+  failed: "marvel0.episodeChange.failed",
+  ready: "marvel0.episodeChange.ready",
+};
 
 /** Notices of the backend that the card already says in its own place (the
  * caption beside HOLD, the keys' "moves the arm home"): not listed again. */
@@ -331,12 +350,18 @@ function StartOff({ view }: { view: RunView }) {
 export function RunPanel({
   poll,
   actions,
+  episodeChange = { state: "idle" },
+  onChangeInstruction,
 }: {
   poll: RunPoll;
   actions: RunActions;
+  episodeChange?: EpisodeChangeStatus;
+  onChangeInstruction?: (prompt: string) => void;
 }) {
   const { t } = useLocale();
   const [ending, setEnding] = useState(false);
+  const [changeOpen, setChangeOpen] = useState(false);
+  const [nextPrompt, setNextPrompt] = useState("");
   const view = poll.value;
   const state = view?.state ?? null;
   // HOLD goes by the last state seen, however old: a client that was running
@@ -557,6 +582,117 @@ export function RunPanel({
           </Button>
           <span className="rg-muted">{t("marvel0.run.end_at_gate_hint")}</span>
         </div>
+      )}
+      {view && state === "at_gate" && onChangeInstruction && (
+        <section
+          className="rg-run__episode-change"
+          data-testid="marvel0-episode-change"
+        >
+          <p className="rg-muted">{t("marvel0.episodeChange.explanation")}</p>
+          {episodeChange.state === "idle" ? (
+            <>
+              <Button
+                variant="secondary"
+                disabled={
+                  !poll.current ||
+                  !view.run?.runId ||
+                  !commandFormFromRun(view.run.form) ||
+                  !view.actions.end_at_gate.allowed ||
+                  actions.working !== null
+                }
+                onClick={() => {
+                  setNextPrompt(view.run?.form?.prompt as string);
+                  setChangeOpen(true);
+                }}
+                data-testid="marvel0-episode-change-open"
+              >
+                {t("marvel0.episodeChange.open")}
+              </Button>
+              {(!view.run?.runId || !commandFormFromRun(view.run.form)) && (
+                <p className="rg-warn" role="status">
+                  {t("marvel0.episodeChange.formUnavailable")}
+                </p>
+              )}
+              {changeOpen && (
+                <div className="rg-run__episode-change-form">
+                  <Field label={t("marvel0.episodeChange.promptLabel")}>
+                    <Input
+                      autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      value={nextPrompt}
+                      onChange={(event) => setNextPrompt(event.target.value)}
+                      data-testid="marvel0-episode-change-prompt"
+                    />
+                  </Field>
+                  <div className="rg-actions-row">
+                    <Button
+                      variant="primary"
+                      disabled={
+                        !poll.current ||
+                        !nextPrompt.trim() ||
+                        nextPrompt === view.run?.form?.prompt ||
+                        !view.run?.runId ||
+                        !commandFormFromRun(view.run.form) ||
+                        !view.actions.end_at_gate.allowed ||
+                        actions.working !== null
+                      }
+                      onClick={() => onChangeInstruction(nextPrompt)}
+                      data-testid="marvel0-episode-change-confirm"
+                    >
+                      {t("marvel0.episodeChange.endAndPrepare")}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      disabled={episodeChange.state !== "idle"}
+                      onClick={() => setChangeOpen(false)}
+                    >
+                      {t("Cancel")}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <p
+              role="status"
+              className={
+                episodeChange.state === "unknown" ||
+                episodeChange.state === "failed"
+                  ? "rg-warn"
+                  : "rg-muted"
+              }
+              data-testid="marvel0-episode-change-status"
+              data-state={episodeChange.state}
+            >
+              {t(EPISODE_CHANGE_KEY[episodeChange.state])}
+            </p>
+          )}
+        </section>
+      )}
+      {view &&
+        state !== null &&
+        state !== "at_gate" &&
+        ["running", "awaiting_label", "homing"].includes(state) && (
+          <p className="rg-muted" data-testid="marvel0-episode-change-blocked">
+            {t("marvel0.episodeChange.finishCurrent")}
+          </p>
+        )}
+      {episodeChange.state !== "idle" && (!view || state !== "at_gate") && (
+        <p
+          role="status"
+          className={
+            episodeChange.state === "unknown" ||
+            episodeChange.state === "failed"
+              ? "rg-warn"
+              : "rg-muted"
+          }
+          data-testid="marvel0-episode-change-status"
+          data-state={episodeChange.state}
+        >
+          {t(EPISODE_CHANGE_KEY[episodeChange.state])}
+        </p>
       )}
       {view && state !== "at_gate" && (frozen || endable) && !endInFrame && (
         // How a client that is starting or lost ends, apart from HOLD.

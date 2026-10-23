@@ -310,10 +310,9 @@ describe("no start or stop asks for a typed phrase", () => {
   const dir = join(import.meta.dir, "..");
   const source = (file: string) => readFileSync(join(dir, file), "utf8");
 
-  test("the shared window, the run card and the hosted client's start have no text field at all", () => {
+  test("the shared window and hosted client's start have no text field at all", () => {
     for (const file of [
       "confirm-window.tsx",
-      "run-panel.tsx",
       "run-start.tsx",
       "stack-panel.tsx",
       "stack-sequence.tsx",
@@ -323,6 +322,13 @@ describe("no start or stop asks for a typed phrase", () => {
         file,
         /<Input\b|<textarea|type="text"/.test(source(file)),
       ]).toEqual([file, false]);
+  });
+
+  test("the run card's only text field is the explicit next-episode instruction", () => {
+    const card = source("run-panel.tsx");
+    expect(card.match(/<Input\b/g)).toHaveLength(1);
+    expect(card).toContain('data-testid="marvel0-episode-change-prompt"');
+    expect(card).toContain('t("marvel0.episodeChange.promptLabel")');
   });
 
   test("the stack window has one field, the override, and the policy server card has the scale and the extra phrase", () => {

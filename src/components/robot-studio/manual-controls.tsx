@@ -11,10 +11,12 @@ import {
   type ManualAttest,
   type ManualLimits,
   type ManualPoint,
+  type ManualStopLimits,
 } from "./manual-api";
 import {
   ManualSessionController,
-  syntheticStartAllowed,
+  manualStartAllowed,
+  productionView,
   validManualLimits,
   type ManualDragController,
   type ManualSnapshot,
@@ -30,6 +32,12 @@ export type ManualControlsProps = {
   api?: ManualApi;
 };
 
+export const MANUAL_STOP_LIMIT_KEYS = [
+  "settle_window_s",
+  "settle_position_m",
+  "settle_angle_rad",
+  "gripper_settle_rad",
+] as const;
 export const MANUAL_EXTRA_LIMIT_KEYS = [
   "max_delta_m",
   "period_s",
@@ -91,6 +99,8 @@ export default function ManualControls({
 }: ManualControlsProps) {
   const { t } = useLocale();
   const [fields, setFields] = useState<ExtraFields>(emptyFields);
+  const [stopFields, setStopFields] = useState<Record<string, string>>({});
+  const [gripperRatio, setGripperRatio] = useState("");
   const [confirm, setConfirm] = useState("");
   const [attest, setAttest] = useState<ManualAttest>({
     estop: false,
@@ -117,11 +127,19 @@ export default function ManualControls({
     [],
   );
   const limits = manualLimitsFromDraft(workspaceBox, teleopDraft, fields);
+  const real = productionView(snapshot.view);
+  const stopLimits = Object.fromEntries(
+    MANUAL_STOP_LIMIT_KEYS.map((key) => [key, Number(stopFields[key] || NaN)]),
+  ) as ManualStopLimits;
+  const validStop = MANUAL_STOP_LIMIT_KEYS.every(
+    (key) => Number.isFinite(stopLimits[key]) && stopLimits[key] > 0,
+  );
   const configKey = JSON.stringify({
     workspaceBox,
     speed: teleopDraft.linearSpeedMps,
     step: teleopDraft.positionStepMm,
     fields,
+    stopFields,
   });
   const previousConfig = useRef(configKey);
   useEffect(() => {
@@ -202,10 +220,14 @@ export default function ManualControls({
   const locked = ["review", "starting", "armed", "holding", "closing"].includes(
     snapshot.phase,
   );
-  const allowed = syntheticStartAllowed(snapshot.view);
+  const allowed = manualStartAllowed(snapshot.view);
   const reason = snapshot.reason || snapshot.view?.reason_code;
   const canReview =
-    snapshot.phase === "ready" && allowed && limits !== null && canDrag;
+    snapshot.phase === "ready" &&
+    allowed &&
+    limits !== null &&
+    canDrag &&
+    (!real || validStop);
   const allAttested = attest.estop && attest.scene_reset && attest.area_clear;
   const evidence = snapshot.view?.stop_evidence;
   const stopReason =
@@ -241,7 +263,9 @@ export default function ManualControls({
         {t(
           snapshot.view?.environment === "synthetic"
             ? "robotStudio.manual.synthetic"
-            : "robotStudio.manual.productionDisabled",
+            : real
+              ? "robotStudio.manual.production"
+              : "robotStudio.manual.productionDisabled",
         )}
       </p>
       <p className="rs-manual-status" role="status" aria-live="polite">
@@ -323,6 +347,64 @@ export default function ManualControls({
           </div>
         </fieldset>
       </details>
+      {real && (
+        <fieldset disabled={locked}>
+          <legend>{t("robotStudio.manual.stopLimits")}</legend>
+          {MANUAL_STOP_LIMIT_KEYS.map((name) => (
+            <label key={name}>
+              <span>{t("robotStudio.manual." + name)}</span>
+              <input
+                className="ds-input ds-focus"
+                type="number"
+                min="0"
+                step="any"
+                aria-label={t("robotStudio.manual." + name)}
+                value={stopFields[name] || ""}
+                onChange={(event) =>
+                  setStopFields((old) => ({
+                    ...old,
+                    [name]: event.target.value,
+                  }))
+                }
+              />
+            </label>
+          ))}
+        </fieldset>
+      )}
+      <p className="rs-meta">{t("robotStudio.manual.translationOnly")}</p>
+      {real && snapshot.view?.capabilities.gripper === true && (
+        <fieldset>
+          <legend>{t("robotStudio.manual.realGripper")}</legend>
+          <p className="rs-meta">{t("robotStudio.manual.gripperHint")}</p>
+          <input
+            className="ds-input ds-focus"
+            type="number"
+            min="0"
+            max="1"
+            step="any"
+            aria-label={t("robotStudio.manual.openingRatio")}
+            value={gripperRatio}
+            disabled={snapshot.phase !== "armed"}
+            onChange={(event) => setGripperRatio(event.target.value)}
+          />
+          <Button
+            size="sm"
+            disabled={
+              snapshot.phase !== "armed" ||
+              !gripperRatio.trim() ||
+              !Number.isFinite(Number(gripperRatio)) ||
+              Number(gripperRatio) < 0 ||
+              Number(gripperRatio) > 1
+            }
+            onPointerDown={(event) => {
+              if (event.button === 0)
+                instance.current?.beginGripper(Number(gripperRatio));
+            }}
+          >
+            {t("robotStudio.manual.holdGripper")}
+          </Button>
+        </fieldset>
+      )}
       <div className="rs-manual-actions">
         <Button
           size="sm"
@@ -330,7 +412,7 @@ export default function ManualControls({
           onClick={() => {
             setConfirm("");
             setAttest({ estop: false, scene_reset: false, area_clear: false });
-            void instance.current?.review(limits);
+            void instance.current?.review(limits, real ? stopLimits : null);
           }}
         >
           {t("robotStudio.manual.review")}
@@ -392,7 +474,11 @@ export default function ManualControls({
             disabled={!canDrag || confirm !== snapshot.confirm || !allAttested}
             onClick={() => void instance.current?.start(confirm, attest)}
           >
-            {t("robotStudio.manual.start")}
+            {t(
+              real
+                ? "robotStudio.manual.startReal"
+                : "robotStudio.manual.start",
+            )}
           </Button>
         </div>
       )}

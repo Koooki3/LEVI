@@ -1,0 +1,53 @@
+--- a/robotiq_gripper_server_ros2.py
++++ b/robotiq_gripper_server_ros2.py
+@@ -148,6 +148,10 @@
+         self.action_name = f"{ns}/robotiq_gripper_controller/gripper_cmd"
+         self.state_topic = f"{ns}/joint_states"
+ 
++        self.manual_sample_lock = threading.RLock()
++        self.manual_sample_seq = 0
++        self.manual_sample_monotonic = None
++        self.manual_theta = None
+         self.has_gripper_state = False
+         self.gripper_pos = 1.0
+         self.binary_gripper_pose = 0
+@@ -236,10 +240,14 @@
+         if not math.isfinite(theta):
+             return
+ 
+-        width = theta_to_width(theta)
+-        self.gripper_pos = width / STROKE_M if STROKE_M > 0.0 else 0.0
+-        self.has_gripper_state = True
+-        self.binary_gripper_pose = int(self.gripper_pos <= self.CLOSED_THRESHOLD)
++        with self.manual_sample_lock:
++            self.manual_theta = theta
++            self.manual_sample_monotonic = time.monotonic()
++            self.manual_sample_seq += 1
++            width = theta_to_width(theta)
++            self.gripper_pos = width / STROKE_M if STROKE_M > 0.0 else 0.0
++            self.has_gripper_state = True
++            self.binary_gripper_pose = int(self.gripper_pos <= self.CLOSED_THRESHOLD)
+ 
+     def _gripper_pos_scalar(self) -> float:
+         return float(np.asarray(self.gripper_pos).reshape(-1)[0])
+@@ -425,6 +433,20 @@
+         self._clear_goal_state(goal_kind, goal_token)
+         self._dispatch_pending_goal()
+ 
++    def manual_send_ratio(self, opening_ratio):
++        """Finite direct action, called only under manual protocol ownership.
++
++        No legacy queue/debounce path and no blocking action-server wait.
++        Cancellation acknowledgement is not a physical stop receipt.
++        """
++        if not self.gripper_client.server_is_ready():
++            raise RuntimeError("gripper_action_server_unavailable")
++        goal = GripperCommand.Goal()
++        # Existing calibrated physical stroke; ratio 0=closed, 1=open.
++        goal.command.position = float(width_to_theta(opening_ratio * STROKE_M))
++        goal.command.max_effort = self.max_effort
++        return self.gripper_client.send_goal_async(goal)
++
+     # --- GripperServer interface --------------------------------------------
+ 
+     def open(self):

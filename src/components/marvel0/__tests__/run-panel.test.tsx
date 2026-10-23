@@ -25,6 +25,7 @@ import {
   textFields,
   tick,
   tickAll,
+  type as typeInto,
 } from "./actions-helpers";
 import { RUN_VIEWS, runDoc } from "./ctl-fixtures";
 
@@ -83,20 +84,35 @@ function fake(initial: Doc) {
   return { api, state };
 }
 
-function Harness({ api }: { api: RunApi }) {
+function Harness({
+  api,
+  onChangeInstruction,
+}: {
+  api: RunApi;
+  onChangeInstruction?: (prompt: string) => void;
+}) {
   const poll = useRunPoll(api, { pollMs: 25 });
   const actions = useRunActions(api, poll);
-  return <RunPanel poll={poll} actions={actions} />;
+  return (
+    <RunPanel
+      poll={poll}
+      actions={actions}
+      onChangeInstruction={onChangeInstruction}
+    />
+  );
 }
 
 async function open(
   name: string,
   change?: (doc: Doc) => void,
   zhLanguage = false,
+  onChangeInstruction?: (prompt: string) => void,
 ) {
   if (zhLanguage) localStorage.setItem("levi-language", "zh");
   const f = fake(runDoc(name, change));
-  const element = <Harness api={f.api} />;
+  const element = (
+    <Harness api={f.api} onChangeInstruction={onChangeInstruction} />
+  );
   const view = await render(
     zhLanguage ? <LocaleProvider>{element}</LocaleProvider> : element,
   );
@@ -399,6 +415,58 @@ describe("the key each state waits for", () => {
     expect(
       text(host.querySelector("[data-testid=marvel0-run-refused]")),
     ).toContain("Server sentence");
+  });
+});
+
+describe("changing the next instruction", () => {
+  test("at the gate, asks for the new prompt and hands it to the caller without sending Enter or starting", async () => {
+    const prompts: string[] = [];
+    const { host, state } = await open(
+      "at_gate",
+      (doc) => {
+        doc.run = {
+          run_id: "run-1",
+          phase: "started",
+          form: {
+            model_id: "pi05_fr3_all_step49999",
+            prompt: "old task",
+            max_steps: 500,
+            eval_num: 5,
+            min_z: 0.025,
+            rtc: true,
+            rtc_horizon: 10,
+            rollout_group: "saved_group",
+            note: "saved",
+            control_hz: 10,
+          },
+        };
+      },
+      false,
+      (prompt) => prompts.push(prompt),
+    );
+    await click(button(host, en["marvel0.episodeChange.open"])!);
+    const input = host.querySelector(
+      "[data-testid=marvel0-episode-change-prompt]",
+    ) as HTMLInputElement;
+    expect(input.value).toBe("old task");
+    await typeInto(input, "new task");
+    await click(button(host, en["marvel0.episodeChange.endAndPrepare"])!);
+    expect(prompts).toEqual(["new task"]);
+    expect(state.order).toEqual([]);
+  });
+
+  test("running, labeling and homing only tell the user to finish the current episode", async () => {
+    for (const name of ["running", "awaiting_label", "homing"]) {
+      const { host } = await open(name, (doc) => {
+        doc.run = { run_id: "run-1", form: {} };
+      });
+      expect(
+        host.querySelector("[data-testid=marvel0-episode-change-blocked]"),
+      ).not.toBeNull();
+      expect(
+        host.querySelector("[data-testid=marvel0-episode-change-open]"),
+      ).toBeNull();
+    }
   });
 });
 

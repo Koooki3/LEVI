@@ -2,13 +2,13 @@
 
 from fastapi import APIRouter, Response
 
-from .state import snapshot
+from .remote_state import snapshot
 
 router = APIRouter(prefix="/api/levi/robot-studio", tags=["robot-studio"])
 
 
 @router.get("/state")
 def robot_studio_state(response: Response):
-    """Read an existing workspace snapshot. No producer or motion is started."""
+    """Read measured display telemetry; no session, controller or motion is started."""
     response.headers["Cache-Control"] = "no-store"
     return snapshot()

@@ -31,6 +31,7 @@ import {
   readPreview,
   serverMatch,
   warningSay,
+  commandFormFromRun,
   type CommandForm,
   type FieldName,
   type Preview,
@@ -62,6 +63,7 @@ export function CommandPanel({
   onUseAnother,
   run = null,
   runActions,
+  resumeBody = null,
 }: {
   api: Marvel0Api;
   catalog: Marvel0Catalog;
@@ -76,6 +78,8 @@ export function CommandPanel({
    * offers "Start the client" next to Copy. */
   run?: RunView | null;
   runActions?: RunActions;
+  /** Saved body of an ended run with only its prompt replaced. */
+  resumeBody?: Record<string, unknown> | null;
 }) {
   const { t } = useLocale();
   const models = catalog.models;
@@ -91,24 +95,61 @@ export function CommandPanel({
   const [failure, setFailure] = useState<ApiFailure | null>(null);
   const [local, setLocal] = useState<Partial<Record<FieldName, Say>>>({});
   const [pending, setPending] = useState(false);
+  const [resumeBodyKey, setResumeBodyKey] = useState<string | null>(null);
+  const [resumePrompt, setResumePrompt] = useState<string | null>(null);
+  const [resumeMode, setResumeMode] = useState(false);
   const busy = useRef(false);
   const taskInput = useRef<HTMLInputElement>(null);
+  const previousResume = useRef<{ form: CommandForm; prompt: string } | null>(
+    null,
+  );
+  const savedForm = resumeBody ? commandFormFromRun(resumeBody) : null;
+  const savedKey = resumeBody ? bodyKey(resumeBody) : null;
+  useEffect(() => {
+    if (savedForm && savedKey && resumeBodyKey !== savedKey) {
+      setResumeBodyKey(savedKey);
+      setResumePrompt(savedForm.prompt);
+      setResumeMode(true);
+      previousResume.current = { form: savedForm, prompt: savedForm.prompt };
+      setMade(null);
+      setFailure(null);
+      setLocal({});
+      taskInput.current?.focus();
+    } else if (!resumeBody && previousResume.current) {
+      const saved = previousResume.current;
+      setEdits({ ...saved.form, prompt: saved.prompt });
+      setResumeMode(false);
+      setResumeBodyKey(null);
+      setResumePrompt(null);
+      previousResume.current = null;
+    }
+  }, [savedForm, savedKey, resumeBodyKey]);
   if (!models || !site || !initial || !selection) return null;
 
-  // Model and RTC are the selection's, whatever else was typed.
-  const form: CommandForm = {
-    ...initial,
-    ...edits,
-    modelId: selection.modelId,
-    rtc: selection.rtc,
-  };
+  // A resumed run is pinned to its saved form. Only the prompt remains editable;
+  // its request body carries every other field verbatim from that run.
+  const resuming =
+    resumeMode && savedForm !== null && savedKey === resumeBodyKey;
+  const form: CommandForm = resuming
+    ? { ...savedForm, prompt: resumePrompt ?? savedForm.prompt }
+    : {
+        ...initial,
+        ...edits,
+        modelId: selection.modelId,
+        rtc: selection.rtc,
+      };
   const edit = (change: Partial<CommandForm>) =>
     setEdits((cur) => ({ ...cur, ...change }));
   const model = models.models.find((m) => m.id === form.modelId) ?? null;
   const hints = placeholders(form, models, site);
   const control = site.control;
   const facts = rateFacts(form, models, site);
-  const { body, errors } = commandBody(form, control?.default ?? DEFAULT_HZ);
+  const built = commandBody(form, control?.default ?? DEFAULT_HZ);
+  const body =
+    resuming && resumeBody
+      ? { ...resumeBody, prompt: form.prompt }
+      : built.body;
+  const errors = built.errors;
   const key = bodyKey(body);
   const stale = made !== null && made.key !== key;
   const server = serverMatch({ modelId: form.modelId, rtc: form.rtc }, status);
@@ -169,6 +210,27 @@ export function CommandPanel({
       title={t("marvel0.cmd.title")}
       description={t("marvel0.cmd.scope")}
     >
+      {resuming && (
+        <div className="rg-actions-row" data-testid="marvel0-command-resumed">
+          <p className="rg-muted" role="status">
+            {t("marvel0.episodeChange.promptOnly")}
+          </p>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              if (!savedForm) return;
+              const prompt = resumePrompt ?? savedForm.prompt;
+              setEdits({ ...savedForm, prompt });
+              setResumeMode(false);
+              previousResume.current = null;
+            }}
+            data-testid="marvel0-command-edit-parameters"
+          >
+            {t("marvel0.episodeChange.editAll")}
+          </Button>
+        </div>
+      )}
       <form
         className="rg-form rg-form--grid"
         onSubmit={(event) => {
@@ -185,13 +247,15 @@ export function CommandPanel({
               error={fieldError("model_id")}
               onUseAnother={onUseAnother}
             />
-            <SpeechPanel
-              modelId={form.modelId}
-              onUse={(prompt) => {
-                edit({ prompt });
-                taskInput.current?.focus();
-              }}
-            />
+            {!resuming && (
+              <SpeechPanel
+                modelId={form.modelId}
+                onUse={(prompt) => {
+                  edit({ prompt });
+                  taskInput.current?.focus();
+                }}
+              />
+            )}
             <Field
               className="rg-span"
               label={t("marvel0.cmd.field.prompt")}
@@ -220,7 +284,13 @@ export function CommandPanel({
                 autoCorrect="off"
                 spellCheck={false}
                 lang="en"
-                onChange={(event) => edit({ prompt: event.target.value })}
+                onChange={(event) => {
+                  if (resuming) {
+                    setResumePrompt(event.target.value);
+                    if (previousResume.current)
+                      previousResume.current.prompt = event.target.value;
+                  } else edit({ prompt: event.target.value });
+                }}
               />
             </Field>
             <datalist id="marvel0-known-prompts">
@@ -244,6 +314,7 @@ export function CommandPanel({
             >
               <Input
                 value={form.maxSteps}
+                disabled={resuming}
                 inputMode="numeric"
                 autoComplete="off"
                 onChange={(event) => edit({ maxSteps: event.target.value })}
@@ -262,6 +333,7 @@ export function CommandPanel({
             >
               <Input
                 value={form.evalNum}
+                disabled={resuming}
                 inputMode="numeric"
                 autoComplete="off"
                 onChange={(event) => edit({ evalNum: event.target.value })}
@@ -280,6 +352,7 @@ export function CommandPanel({
             >
               <Input
                 value={form.minZ}
+                disabled={resuming}
                 inputMode="decimal"
                 autoComplete="off"
                 onChange={(event) => edit({ minZ: event.target.value })}
@@ -302,6 +375,7 @@ export function CommandPanel({
             >
               <Input
                 value={form.horizon}
+                disabled={resuming}
                 inputMode="numeric"
                 autoComplete="off"
                 placeholder={hints.horizon}
@@ -313,6 +387,7 @@ export function CommandPanel({
                 control={control}
                 facts={facts}
                 value={form.hz}
+                disabled={resuming}
                 lowered={hints.horizonLoweredFrom}
                 horizon={hints.horizon}
                 error={fieldError("control_hz")}
@@ -327,6 +402,7 @@ export function CommandPanel({
             >
               <Input
                 value={form.group}
+                disabled={resuming}
                 autoComplete="off"
                 autoCapitalize="none"
                 autoCorrect="off"
@@ -350,6 +426,7 @@ export function CommandPanel({
             >
               <Input
                 value={form.note}
+                disabled={resuming}
                 autoComplete="off"
                 autoCapitalize="none"
                 autoCorrect="off"
@@ -442,6 +519,7 @@ function Rate({
   control,
   facts,
   value,
+  disabled = false,
   lowered,
   horizon,
   error,
@@ -450,6 +528,7 @@ function Rate({
   control: ControlView;
   facts: ControlFacts;
   value: string;
+  disabled?: boolean;
   /** The site's RTC horizon default when this rate lowers it. */
   lowered: number | null;
   /** What an empty horizon field means at this rate. */
@@ -593,6 +672,7 @@ function Rate({
         <Select
           data-testid="marvel0-command-hz"
           value={value}
+          disabled={disabled}
           onChange={(event) => onChange(event.target.value)}
         >
           {control.options.map((hz) => (

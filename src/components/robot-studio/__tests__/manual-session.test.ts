@@ -15,6 +15,7 @@ import {
   ManualSessionController,
   validManualLimits,
   syntheticStartAllowed,
+  manualStartAllowed,
 } from "../manual-session";
 
 const attest = { estop: true, scene_reset: true, area_clear: true };
@@ -328,7 +329,7 @@ describe("person-owned synthetic manual drag lifecycle", () => {
 });
 
 describe("manual same-origin HTTP adapter contracts", () => {
-  test("strict deadman/stop/end bodies omit anchor_id while target retains it", async () => {
+  test("strict deadman/gripper/stop/end bodies omit anchor_id while target retains it", async () => {
     const original = globalThis.fetch;
     const sent: {
       path: string;
@@ -373,6 +374,12 @@ describe("manual same-origin HTTP adapter contracts", () => {
         sequence: 2,
         delta_position_m: [0.001, 0, 0],
       });
+      await api.gripper!({
+        ...id,
+        request_id: "gripper-request",
+        sequence: 3,
+        opening_ratio: 0.5,
+      });
       await api.stop({ ...id, request_id: "stop-request" });
       await api.end({ ...id, request_id: "end-request" });
       const body = (action: string) =>
@@ -380,6 +387,13 @@ describe("manual same-origin HTTP adapter contracts", () => {
       expect(Object.keys(body("deadman").body).sort()).toEqual([
         "generation",
         "pressed",
+        "request_id",
+        "sequence",
+        "session_id",
+      ]);
+      expect(Object.keys(body("gripper").body).sort()).toEqual([
+        "generation",
+        "opening_ratio",
         "request_id",
         "sequence",
         "session_id",
@@ -395,7 +409,7 @@ describe("manual same-origin HTTP adapter contracts", () => {
       expect(body("target").body.delta_position_m).toEqual([0.001, 0, 0]);
       expect(
         sent.filter((entry) => entry.init?.method === "POST"),
-      ).toHaveLength(4);
+      ).toHaveLength(5);
       expect(
         sent.every((entry) =>
           entry.path.startsWith("/api/levi/marvel0/arm/manual"),
@@ -957,4 +971,132 @@ describe("start response request binding through the real HTTP adapter", () => {
       },
     );
   }
+});
+
+describe("production manual capability and stop proof", () => {
+  const realView = (active = false): ManualView => ({
+    ...view(active),
+    environment: "production",
+    capabilities: {
+      real_motion: true,
+      synthetic_only: false,
+      can_start: !active,
+      gripper: true,
+    },
+  });
+  const stopLimits = {
+    settle_window_s: 0.2,
+    settle_position_m: 0.001,
+    settle_angle_rad: 0.01,
+    gripper_settle_rad: 0.01,
+  };
+  test("only exact production capability tuple permits review; reading sends no writes", async () => {
+    expect(manualStartAllowed(realView())).toBe(true);
+    expect(
+      manualStartAllowed({
+        ...realView(),
+        capabilities: { ...realView().capabilities, synthetic_only: true },
+      }),
+    ).toBe(false);
+    const f = fixture();
+    f.api.status = async () => realView();
+    await f.controller.refresh();
+    expect(f.calls).toHaveLength(0);
+    await f.controller.review(fixtureLimits());
+    expect(f.controller.snapshot().reason).toBe("stop_limits_required");
+    expect(f.calls).toHaveLength(0);
+  });
+  test("real confirmation and stop limits bind challenge/start; gripper shares deadman sequence", async () => {
+    const f = fixture();
+    let requestID = "";
+    const active = () => ({ ...realView(true), start_request_id: requestID });
+    f.api.status = async () => realView();
+    f.api.challenge = async (body) => {
+      f.calls.push({ kind: "challenge", body });
+      return {
+        challenge: "real-nonce",
+        confirm: "start real translation session",
+      };
+    };
+    f.api.start = async (body) => {
+      requestID = body.request_id;
+      f.calls.push({ kind: "start", body });
+      return active();
+    };
+    f.api.deadman = async (body) => {
+      f.calls.push({ kind: "deadman", body });
+      return active();
+    };
+    f.api.gripper = async (body) => {
+      f.calls.push({ kind: "gripper", body });
+      return active();
+    };
+    f.api.stop = async () => ({
+      ...active(),
+      admission: "closed",
+      state: "held",
+      stop_evidence: "admission_closed",
+    });
+    f.api.end = async () => ({
+      ...active(),
+      admission: "closed",
+      state: "ended",
+      stop_evidence: "physical_settled",
+    });
+    await f.controller.refresh();
+    await f.controller.review(fixtureLimits(), stopLimits);
+    await f.controller.start("start real translation session", attest);
+    expect(f.controller.snapshot().phase).toBe("armed");
+    expect(
+      (f.calls.find((x) => x.kind === "start")!.body as Record<string, unknown>)
+        .stop_limits,
+    ).toEqual(stopLimits);
+    expect(f.controller.beginGripper(1.1)).toBe(false);
+    expect(f.controller.beginGripper(0.4)).toBe(true);
+    await settle();
+    const commands = f.calls.filter((x) =>
+      ["deadman", "gripper"].includes(x.kind),
+    );
+    expect(commands.map((x) => x.kind)).toEqual(["deadman", "gripper"]);
+    expect(
+      (commands[1].body as Record<string, unknown>).sequence,
+    ).toBeGreaterThan((commands[0].body as { sequence: number }).sequence);
+    for (let tick = 0; tick < 4; tick++) {
+      f.advance(20);
+      await settle();
+    }
+    f.controller.target([0.9, 0.9, 0.9]);
+    expect(f.calls.filter((x) => x.kind === "gripper")).toHaveLength(1);
+    expect(f.calls.filter((x) => x.kind === "target")).toHaveLength(0);
+    expect(f.calls.filter((x) => x.kind === "deadman")).toHaveLength(5);
+    f.controller.revoke("release");
+    await settle();
+    expect(f.controller.snapshot().phase).toBe("closed");
+  });
+  test("a synthetic end response cannot prove a real session stopped", async () => {
+    const f = fixture();
+    let requestID = "";
+    f.api.status = async () => realView();
+    f.api.challenge = async () => ({
+      challenge: "nonce",
+      confirm: "start real translation session",
+    });
+    f.api.start = async (body) => {
+      requestID = body.request_id;
+      return { ...realView(true), start_request_id: requestID };
+    };
+    f.api.stop = async () => ({
+      ...realView(true),
+      admission: "closed",
+      state: "held",
+    });
+    await f.controller.refresh();
+    await f.controller.review(fixtureLimits(), stopLimits);
+    await f.controller.start("start real translation session", attest);
+    f.controller.revoke("release");
+    await settle();
+    expect(f.controller.snapshot().phase).toBe("fault");
+    expect(f.controller.snapshot().reason).toBe("stop_unproven");
+    expect(f.controller.beginDrag()).toBe(false);
+  });
 });

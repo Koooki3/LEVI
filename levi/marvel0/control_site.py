@@ -130,6 +130,11 @@ class AeriControl:
 
 
 @dataclass(frozen=True)
+class ManualControl:
+    enabled: bool = False
+
+
+@dataclass(frozen=True)
 class ControlSite:
     stack: StackControl
     client: ClientControl
@@ -139,6 +144,8 @@ class ControlSite:
     # client off, and nothing here can switch it on.
     aeri: AeriControl = AeriControl()
     aeri_errors: tuple = ()
+    manual: ManualControl = ManualControl()
+    manual_errors: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -291,7 +298,7 @@ def parse(data, origin="main_checkout") -> ControlSite:
     elif data["schema"] != SCHEMA:
         errors.append({"field": "schema", "code": "range"})
     for key in data:
-        if key not in ("schema", "stack", "client", "aeri"):
+        if key not in ("schema", "stack", "client", "aeri", "manual"):
             errors.append({"field": key, "code": "unknown_key"})
     stack = _section(data, "stack", STACK_CHECKS, errors)
     client = _section(data, "client", CLIENT_CHECKS, errors)
@@ -304,12 +311,17 @@ def parse(data, origin="main_checkout") -> ControlSite:
     if errors:
         raise ControlSiteError(errors)
     aeri, aeri_errors = _aeri_section(data)
+    manual_errors = []
+    manual = _section(data, "manual", {"enabled": _flag}, manual_errors)
+    manual_control = ManualControl() if manual_errors else ManualControl(**manual)
     return ControlSite(
         StackControl(**stack),
         ClientControl(**client),
         origin,
         aeri=aeri,
         aeri_errors=aeri_errors,
+        manual=manual_control,
+        manual_errors=tuple((e["field"], e["code"]) for e in manual_errors),
     )
 
 

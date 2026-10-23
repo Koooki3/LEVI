@@ -4,6 +4,7 @@ import zh from "@/i18n/zh.json";
 import { readModels, readSite } from "../catalog-logic";
 import {
   bodyKey,
+  commandFormFromRun,
   commandBody,
   initialCommandForm,
   placeholders,
@@ -28,6 +29,36 @@ const base = (over: Partial<CommandForm> = {}): CommandForm => ({
 });
 
 describe("the form as it opens", () => {
+  test("accepts only a complete saved run form and does not infer missing values", () => {
+    const form = {
+      model_id: "pi05_fr3_all_step49999",
+      prompt: "pick the eggplant in the blue plate",
+      max_steps: 500,
+      eval_num: 5,
+      min_z: 0.025,
+      rtc: true,
+      rtc_horizon: 7,
+      rollout_group: "saved_group",
+      note: "saved note",
+      control_hz: 20,
+    };
+    expect(commandFormFromRun(form)).toEqual({
+      modelId: form.model_id,
+      prompt: form.prompt,
+      maxSteps: "500",
+      evalNum: "5",
+      minZ: "0.025",
+      rtc: true,
+      horizon: "7",
+      group: "saved_group",
+      note: "saved note",
+      hz: "20",
+    });
+    const incomplete: Record<string, unknown> = { ...form };
+    delete incomplete.max_steps;
+    expect(commandFormFromRun(incomplete)).toBeNull();
+  });
+
   test("holds the site's defaults and leaves what the server fills in empty", () => {
     expect(initialCommandForm(models, site)).toEqual({
       modelId: "pi05_fr3_all_step49999",

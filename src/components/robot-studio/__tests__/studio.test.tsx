@@ -25,6 +25,14 @@ type WorkspaceProps = ComponentProps<
 type TelemetryProps = ComponentProps<
   typeof import("../telemetry-panel").default
 >;
+type ToolPanelProps = ComponentProps<typeof import("../tool-panel").default>;
+let toolPanel: ToolPanelProps;
+mock.module("../tool-panel", () => ({
+  default: (props: ToolPanelProps) => {
+    toolPanel = props;
+    return null;
+  },
+}));
 let workspace: WorkspaceProps;
 let telemetry: TelemetryProps;
 type ManualProps = ComponentProps<typeof import("../manual-controls").default>;
@@ -79,11 +87,18 @@ async function solveDrag(position: [number, number, number]) {
   });
 }
 
+async function renderEditing() {
+  const rendered = await render(<RobotStudio />);
+  const actual = measured(0, 1);
+  await act(async () => telemetry.onMeasurement(actual));
+  await act(async () => telemetry.onUseMeasurement(actual));
+  return rendered;
+}
+
 describe("Robot Studio interaction", () => {
-  test("renders an explicit offline workspace, saves and undoes solved poses", async () => {
-    const { host } = await render(<RobotStudio />);
-    expect(host.textContent).toContain("Offline preview");
-    expect(host.textContent).toContain("not connected to a robot");
+  test("editing from fresh actual state saves and undoes solved poses", async () => {
+    const { host } = await renderEditing();
+    expect(host.textContent).toContain("Editing target");
     expect((button(host, "Add pose") as HTMLButtonElement).disabled).toBe(
       false,
     );
@@ -96,13 +111,13 @@ describe("Robot Studio interaction", () => {
     );
   });
   test("the link back goes to the marvel_workstation page (the old /marvel0 only redirects)", async () => {
-    const { host } = await render(<RobotStudio />);
+    const { host } = await renderEditing();
     const link = host.querySelector<HTMLAnchorElement>("a.rs-link")!;
     expect(link.getAttribute("href")).toBe("/marvel_workstation");
     expect(link.textContent).toBe("Open marvel_workstation");
   });
   test("an unreachable drag keeps the accepted pose and blocks saving", async () => {
-    const { host } = await render(<RobotStudio />);
+    const { host } = await renderEditing();
     const accepted = [...scene.joints];
     await solveDrag([1.8, 1.8, 1.8]);
     expect(scene.joints).toEqual(accepted);
@@ -116,7 +131,7 @@ describe("Robot Studio interaction", () => {
     );
   });
   test("Escape restores the pose from the beginning of a drag", async () => {
-    const { host } = await render(<RobotStudio />);
+    const { host } = await renderEditing();
     const target = scene.target;
     await act(async () => scene.onDragStart());
     await solveDrag([1.8, 1.8, 1.8]);
@@ -128,7 +143,7 @@ describe("Robot Studio interaction", () => {
     expect(host.textContent).toContain("Preview pose solved");
   });
   test("cancelling a drag that began from an unsolved target preserves the failure", async () => {
-    const { host } = await render(<RobotStudio />);
+    const { host } = await renderEditing();
     await solveDrag([1.8, 1.8, 1.8]);
     await act(async () => scene.onDragStart());
     await solveDrag([1.7, 1.7, 1.7]);
@@ -140,7 +155,7 @@ describe("Robot Studio interaction", () => {
     expect((button(host, "Add pose") as HTMLButtonElement).disabled).toBe(true);
   });
   test("losing focus discards queued drag movement", async () => {
-    await render(<RobotStudio />);
+    await renderEditing();
     const target = scene.target;
     await act(async () => scene.onDragStart());
     await act(async () => {
@@ -155,7 +170,7 @@ describe("Robot Studio interaction", () => {
     expect(scene.joints).toEqual([...FR3_INITIAL_JOINTS]);
   });
   test("loading failure disables pose writes and exposes retry", async () => {
-    const { host } = await render(<RobotStudio />);
+    const { host } = await renderEditing();
     await act(async () => scene.onLoad(false));
     expect(host.textContent).toContain("The 3D model could not load");
     expect((button(host, "Add pose") as HTMLButtonElement).disabled).toBe(true);
@@ -165,7 +180,7 @@ describe("Robot Studio interaction", () => {
 });
 
 test("reset and measured-copy obey the same applied box as dragging", async () => {
-  const { host } = await render(<RobotStudio />);
+  const { host } = await renderEditing();
   const candidate = [...FR3_INITIAL_JOINTS];
   candidate[0] = 0.25;
   await act(async () =>
@@ -224,9 +239,9 @@ function measured(
 describe("measured initial alignment and follow/edit separation", () => {
   test("waits for feedback, aligns all joints and gripper, and freezes the last pose on expiry", async () => {
     const { host } = await render(<RobotStudio />);
-    await act(async () => telemetry.onEnabledChange(true));
     expect(telemetry.following).toBe(true);
     expect(scene.poseVisible).toBe(false);
+    expect(manualPanel.canDrag).toBe(false);
     expect(scene.mode).toBe("view");
     expect(
       (host.querySelector('[aria-label="X (mm)"]') as HTMLInputElement).value,
@@ -314,9 +329,9 @@ describe("measured initial alignment and follow/edit separation", () => {
     await act(async () => telemetry.onEnabledChange(false));
     expect(scene.joints).toEqual(actual.joints_rad);
     expect(scene.target).toEqual(forwardPose(actual.joints_rad));
-    expect(scene.mode).toBe("translate");
+    expect(scene.mode).toBe("view");
     await act(async () => telemetry.onEnabledChange(true));
-    expect(scene.poseVisible).toBe(false);
+    expect(scene.poseVisible).toBe(true);
   });
   test("enabling follow discards a queued drag before accepting the measured start", async () => {
     await render(<RobotStudio />);
@@ -361,7 +376,7 @@ test("returning to follow after expiry freezes the latest measured edit overlay"
 
 describe("manual drag integration", () => {
   test("the server joint anchor aligns the model before a manual drag", async () => {
-    await render(<RobotStudio />);
+    await renderEditing();
     const joints = [...FR3_INITIAL_JOINTS];
     joints[0] += 0.05;
     const pose = forwardPose(joints);
@@ -385,7 +400,7 @@ describe("manual drag integration", () => {
     expect(scene.target.position).toEqual(pose.position);
   });
   test("only solved targets reach the bridge and drag end revokes it", async () => {
-    await render(<RobotStudio />);
+    await renderEditing();
     manualBridge.beginDrag.mockClear();
     manualBridge.target.mockClear();
     manualBridge.revoke.mockClear();
@@ -400,7 +415,7 @@ describe("manual drag integration", () => {
     expect(manualBridge.revoke).toHaveBeenCalledWith("drag_end");
   });
   test("release discards a queued RAF target instead of sending a final goal", async () => {
-    await render(<RobotStudio />);
+    await renderEditing();
     manualBridge.target.mockClear();
     await act(async () => {
       scene.onDragStart();
@@ -413,7 +428,7 @@ describe("manual drag integration", () => {
 });
 
 test("a nonfinite 3D target with a workspace box revokes without sending", async () => {
-  await render(<RobotStudio />);
+  await renderEditing();
   await act(async () =>
     workspace.onChange({ min: [-1, -1, 0], max: [1, 1, 1] }),
   );
@@ -423,4 +438,81 @@ test("a nonfinite 3D target with a workspace box revokes without sending", async
   await solveDrag([Number.NaN, 0, 0]);
   expect(manualBridge.target).not.toHaveBeenCalled();
   expect(manualBridge.revoke).toHaveBeenCalledWith("preview_invalid");
+});
+
+test("feedback loss while editing freezes actual ghost, cancels motion and blocks drag", async () => {
+  const { host } = await renderEditing();
+  const latest = measured(0.35, 0.6);
+  await act(async () => telemetry.onMeasurement(latest));
+  const draft = scene.target;
+  manualBridge.beginDrag.mockClear();
+  manualBridge.target.mockClear();
+  manualBridge.revoke.mockClear();
+  await act(async () => telemetry.onMeasurement(null));
+  expect(scene.measuredJoints).toEqual(latest.joints_rad);
+  expect(scene.measuredOpeningRatio).toBeCloseTo(0.6);
+  expect(scene.target).toEqual(draft);
+  expect(scene.mode).toBe("view");
+  expect(manualPanel.canDrag).toBe(false);
+  expect(manualBridge.revoke).toHaveBeenCalledWith("feedback_stale");
+  await act(async () => scene.onDragStart());
+  await solveDrag([1.8, 1.8, 1.8]);
+  expect(manualBridge.beginDrag).not.toHaveBeenCalled();
+  expect(manualBridge.target).not.toHaveBeenCalled();
+  expect(scene.target).toEqual(draft);
+  expect(host.textContent).toContain("Last measured pose shown");
+});
+
+test("default follow ignores reported Desk EE offset when mapping model flange", async () => {
+  await render(<RobotStudio />);
+  const actual = measured(0.15, 0.25);
+  actual.reported_ee = {
+    position_m: [9, 8, 7],
+    quaternion_xyzw: [0, 0, 0, 1],
+    frame_id: "base",
+    end_frame: "robot_server_desk_EE",
+  };
+  manualBridge.beginDrag.mockClear();
+  manualBridge.target.mockClear();
+  await act(async () => telemetry.onMeasurement(actual));
+  expect(scene.joints).toEqual(actual.joints_rad);
+  expect(scene.target).toEqual(forwardPose(actual.joints_rad));
+  expect(scene.openingRatio).toBeCloseTo(0.25);
+  expect(manualPanel.canDrag).toBe(false);
+  await act(async () => scene.onDragStart());
+  expect(manualBridge.beginDrag).not.toHaveBeenCalled();
+  expect(manualBridge.target).not.toHaveBeenCalled();
+});
+
+test("unknown measured gripper stays hidden when entering target edit", async () => {
+  const { host } = await render(<RobotStudio />);
+  const actual = measured(0.25, null);
+  await act(async () => telemetry.onMeasurement(actual));
+  expect(scene.toolVisible).toBe(false);
+  expect(
+    host.querySelector('[data-testid="tool-mount-status"]')?.textContent,
+  ).toContain("not calibrated");
+  await act(async () => telemetry.onUseMeasurement(actual));
+  expect(telemetry.following).toBe(false);
+  expect(scene.toolVisible).toBe(false);
+  // Merely receiving an arm-only sample while editing cannot invent an opening.
+  await act(async () => telemetry.onMeasurement(measured(0.3, null)));
+  expect(scene.toolVisible).toBe(false);
+  expect(scene.measuredOpeningRatio).toBeNull();
+  await act(async () => toolPanel.onOpeningRatio(0.4));
+  expect(scene.toolVisible).toBe(true);
+  expect(scene.openingRatio).toBeCloseTo(0.4);
+  // Explicit preview editing does not manufacture actual gripper feedback.
+  expect(scene.measuredOpeningRatio).toBeNull();
+  await act(async () =>
+    toolPanel.onDraft({
+      mount: { position: [0, 0, 0], quaternion: [0, 0, 0, 1] },
+      tcp: null,
+    }),
+  );
+  await act(async () => telemetry.onFollowMeasurement(actual));
+  expect(
+    host.querySelector('[data-testid="tool-mount-status"]')?.textContent,
+  ).toContain("unverified draft");
+  expect(scene.toolVisible).toBe(false);
 });
