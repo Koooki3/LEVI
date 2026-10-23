@@ -563,7 +563,13 @@ EXPECTED_SUMMARY = {
 @pytest.mark.parametrize("hz", sorted(EXPECTED_SUMMARY))
 def test_the_summary_shows_every_derived_value(tmp_path, hz):
     summary = rendered(tmp_path, {"control_hz": hz}).control
-    assert summary == {"hz": hz, "reference_hz": 10, **EXPECTED_SUMMARY[hz]}
+    assert summary == {
+        "inference_mode": "rtc",
+        "vlash": None,
+        "hz": hz,
+        "reference_hz": 10,
+        **EXPECTED_SUMMARY[hz],
+    }
 
 
 def test_the_summary_of_an_open_loop_form_has_no_rtc_margin(tmp_path):
@@ -663,3 +669,26 @@ def test_the_drift_check_fails_when_the_client_drops_a_string_the_rate_stands_on
     capsys.readouterr()
     assert main(["--root", str(client_tree(tmp_path, drop=key, name="dropped"))]) == 1
     assert f"MISSING {key}" in capsys.readouterr().out
+
+
+def test_vlash_summary_keeps_its_mode_overlap_and_full_chunk_horizon(tmp_path):
+    summary = rendered(
+        tmp_path,
+        {"inference_mode": "vlash", "rtc": False, "vlash_overlap_steps": 3},
+    ).control
+    assert summary == {
+        "inference_mode": "vlash",
+        "vlash": {"overlap_steps": 3, "experimental": True},
+        "hz": 10,
+        "reference_hz": 10,
+        "period_ms": 100.0,
+        "episode_s": 50.0,
+        "step_cap_m": 0.1,
+        "step_cap_rad": 0.35,
+        "speed_cap_m_s": 1.0,
+        "speed_cap_rad_s": 3.5,
+        "chunk_s": 1.0,
+        "horizon_s": 1.0,
+        "latency_beats": 3,
+        "rtc": None,
+    }

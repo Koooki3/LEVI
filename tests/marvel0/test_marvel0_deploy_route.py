@@ -37,6 +37,12 @@ LOG = "/api/levi/marvel0/deploy/log"
 # The status of every refusal, written out from the API contract (not taken
 # from deploy.REFUSALS, which must agree with it).
 CONTRACT = {
+    "inference_mode_invalid": 422,
+    "inference_mode_conflict": 422,
+    "invalid_type": 422,
+    "vlash_overlap_out_of_range": 422,
+    "vlash_overlap_not_allowed": 422,
+    "vlash_model_incompatible": 422,
     "request_id_invalid": 400,
     "confirm_required": 400,
     "model_unknown": 422,
@@ -186,6 +192,8 @@ DEPLOY_KEYS = {
     "model_id",
     "config",
     "rtc",
+    "inference_mode",
+    "vlash_overlap_steps",
     "fraction",
     "cfg_guidance_scale",
     "phase",
@@ -213,6 +221,7 @@ def test_the_state_document_has_exactly_the_contracts_keys(client, marvel0):
     assert set(idle["readiness"]) == {
         "norm_stats",
         "rtc_enabled",
+        "vlash_enabled",
         "rtc_warmup",
         "cfg",
         "listening",
@@ -657,3 +666,33 @@ def test_no_answer_of_a_session_names_a_path(client, marvel0):
         assert_no_paths(marvel0, answer)
     assert json.dumps(answers).count("levi-aeri-policy-manual-marvel0-") > 0
     assert not re.search(r"/home/|/tmp/", json.dumps(answers))
+
+
+def test_vlash_deploy_route_preserves_exact_mode_and_overlap(client, marvel0):
+    script = Path(marvel0.site.openpi_checkout) / "lab/vlash/serve_policy_vlash.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("# fake VLASH serving entrypoint")
+    for relative in (
+        "lab/vlash/runtime.py",
+        "lab/vlash/run_collect_vlash.py",
+        "examples/fr3_local/run_robotiq_client.py",
+        "examples/fr3_local/run_robotiq_client_collect_data.py",
+    ):
+        source = Path(marvel0.site.openpi_checkout) / relative
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("# fake isolated source")
+    answer = post(client, rtc=False, inference_mode="vlash", vlash_overlap_steps=3)
+    assert answer.status_code == 202
+    deployed = answer.json()["deploy"]
+    assert set(deployed) == DEPLOY_KEYS
+    assert {
+        key: deployed[key] for key in ("rtc", "inference_mode", "vlash_overlap_steps")
+    } == {
+        "rtc": False,
+        "inference_mode": "vlash",
+        "vlash_overlap_steps": 3,
+    }
+    view = client.get(DEPLOY).json()
+    assert view["deploy"] == deployed
+    assert view["readiness"]["vlash_enabled"] is False
+    assert view["readiness"]["rtc_enabled"] is None
