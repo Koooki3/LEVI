@@ -1,4 +1,5 @@
 "use client";
+import { modeLabel } from "./inference-mode";
 // The pieces of the Policy server card that only show: the chosen model, the
 // state with what the log has said, the checks before a deploy and the unit's
 // log. Nothing here sends a request; the card (deploy-panel.tsx) owns every
@@ -116,14 +117,10 @@ export function StatusBlock({
         <code key="c">{deploy.config ?? "?"}</code>,
       ],
       [
-        t("marvel0.deploy.fact.rtc"),
-        deploy.rtc === null
+        t("marvel0.inference.label"),
+        deploy.rtc === null && !deploy.inferenceMode
           ? t("marvel0.value.unknown")
-          : t(
-              deploy.rtc
-                ? "marvel0.deploy.value.on"
-                : "marvel0.deploy.value.off",
-            ),
+          : t(modeLabel(deploy.inferenceMode, deploy.rtc)),
       ],
       [
         t("marvel0.deploy.fact.fraction"),

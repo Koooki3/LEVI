@@ -9,6 +9,7 @@
 // The rules are pure functions (`effectiveSelection`); `useChoice` only keeps
 // what the person picked.
 import { useCallback, useMemo, useState } from "react";
+import { inferenceMode, type InferenceMode } from "./inference-mode";
 import type { ModelsView } from "./catalog-logic";
 import type { DeployStatus } from "./deploy-logic";
 
@@ -16,6 +17,8 @@ import type { DeployStatus } from "./deploy-logic";
 export interface Choice {
   modelId: string | null;
   rtc: boolean | null;
+  inferenceMode?: InferenceMode;
+  vlashOverlapSteps?: string;
   /** The guidance strength as typed; empty is the server's default. */
   scale: string;
 }
@@ -26,6 +29,8 @@ export type SelectionSource = "server" | "choice" | "default";
 export interface Effective {
   modelId: string;
   rtc: boolean;
+  inferenceMode?: InferenceMode;
+  vlashOverlapSteps?: string;
   /** The guidance strength the running server uses; null: none or not known. */
   cfgScale: number | null;
   /** Where the model comes from: the server this page runs, the person's
@@ -56,14 +61,23 @@ export function effectiveSelection(
   if (running && models.models.some((m) => m.id === running.modelId))
     return {
       modelId: running.modelId!,
-      rtc: running.rtc ?? models.defaults.rtc,
+      rtc: inferenceMode(running.inferenceMode, running.rtc) === "rtc",
+      inferenceMode: inferenceMode(running.inferenceMode, running.rtc),
+      vlashOverlapSteps: String(running.vlashOverlapSteps ?? 2),
       cfgScale: running.cfgScale,
       source: "server",
     };
   const picked = models.models.find((m) => m.id === choice.modelId);
   return {
     modelId: (picked ?? models.models[0]).id,
-    rtc: choice.rtc ?? models.defaults.rtc,
+    rtc:
+      inferenceMode(choice.inferenceMode, choice.rtc ?? models.defaults.rtc) ===
+      "rtc",
+    inferenceMode: inferenceMode(
+      choice.inferenceMode,
+      choice.rtc ?? models.defaults.rtc,
+    ),
+    vlashOverlapSteps: choice.vlashOverlapSteps ?? "2",
     cfgScale: null,
     source: picked ? "choice" : "default",
   };

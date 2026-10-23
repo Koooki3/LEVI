@@ -1,4 +1,5 @@
 "use client";
+import { modeLabel } from "./inference-mode";
 // The Client command card of the marvel0: a form for the demo client's
 // run (task instruction, steps, eval number, lowest height, RTC horizon, group,
 // note) and the exact command for it. LEVI's backend validates the form and
@@ -137,6 +138,8 @@ export function CommandPanel({
         ...edits,
         modelId: selection.modelId,
         rtc: selection.rtc,
+        inferenceMode: selection.inferenceMode,
+        vlashOverlapSteps: selection.vlashOverlapSteps,
       };
   const edit = (change: Partial<CommandForm>) =>
     setEdits((cur) => ({ ...cur, ...change }));
@@ -152,7 +155,10 @@ export function CommandPanel({
   const errors = built.errors;
   const key = bodyKey(body);
   const stale = made !== null && made.key !== key;
-  const server = serverMatch({ modelId: form.modelId, rtc: form.rtc }, status);
+  const server = serverMatch(
+    { modelId: form.modelId, rtc: form.rtc, inferenceMode: form.inferenceMode },
+    status,
+  );
   const remote: Partial<
     Record<string, ReturnType<typeof fieldMessages>[string]>
   > = failure ? fieldMessages(failure, { site }) : {};
@@ -244,7 +250,11 @@ export function CommandPanel({
           <>
             <Follow
               selection={selection}
-              error={fieldError("model_id")}
+              error={
+                fieldError("model_id") ??
+                fieldError("inference_mode") ??
+                fieldError("vlash_overlap_steps")
+              }
               onUseAnother={onUseAnother}
             />
             {!resuming && (
@@ -766,11 +776,7 @@ function Follow({
             {
               key: "marvel0.cmd.follow_rtc",
               params: {
-                rtc: t(
-                  selection.rtc
-                    ? "marvel0.deploy.value.on"
-                    : "marvel0.deploy.value.off",
-                ),
+                rtc: t(modeLabel(selection.inferenceMode, selection.rtc)),
               },
             },
             t,
@@ -873,11 +879,7 @@ function CommandResult({
             key: "marvel0.cmd.result.needs",
             params: {
               model: modelLabel,
-              rtc: t(
-                preview.needs.rtc
-                  ? "marvel0.deploy.value.on"
-                  : "marvel0.deploy.value.off",
-              ),
+              rtc: t(modeLabel(preview.needs.inferenceMode, preview.needs.rtc)),
             },
           },
           t,

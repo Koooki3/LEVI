@@ -1,3 +1,8 @@
+import {
+  inferenceMode,
+  validOverlap,
+  type InferenceMode,
+} from "./inference-mode";
 // Pure mapping for the Client command card of the marvel0: the form, the
 // body of `POST /api/levi/marvel0/command/preview`, and the answer in words. The
 // command is text to copy; nothing here runs, writes or starts anything.
@@ -27,6 +32,8 @@ export const FIELDS = [
   "eval_num",
   "min_z",
   "rtc",
+  "inference_mode",
+  "vlash_overlap_steps",
   "rtc_horizon",
   "rollout_group",
   "note",
@@ -42,6 +49,8 @@ export interface CommandForm {
   evalNum: string;
   minZ: string;
   rtc: boolean;
+  inferenceMode?: InferenceMode;
+  vlashOverlapSteps?: string;
   /** The RTC execute horizon, or the open-loop horizon when RTC is off. */
   horizon: string;
   group: string;
@@ -118,7 +127,9 @@ export function commandFormFromRun(value: unknown): CommandForm | null {
     maxSteps: String(maxSteps),
     evalNum: String(evalNum),
     minZ: String(minZ),
-    rtc,
+    rtc: inferenceMode(item.inference_mode, rtc) === "rtc",
+    inferenceMode: inferenceMode(item.inference_mode, rtc),
+    vlashOverlapSteps: String(item.vlash_overlap_steps ?? 2),
     horizon: String(horizon),
     group,
     note,
@@ -140,15 +151,23 @@ export function placeholders(
   horizonLoweredFrom: number | null;
 } {
   const model = models.models.find((entry) => entry.id === form.modelId);
-  const limit = form.rtc ? site.caps.rtcHorizon : site.caps.openLoop;
+  const mode = inferenceMode(form.inferenceMode, form.rtc);
+  const rtc = mode === "rtc";
+  const limit = rtc ? site.caps.rtcHorizon : site.caps.openLoop;
   // At a rate above the reference one an empty RTC horizon is the largest that
   // still leaves room for the inference latency (the backend does the same).
   const horizon =
-    form.rtc && site.control
+    rtc && site.control
       ? rtcHorizonDefault(site.control, limit.default, rateOf(form))
       : limit.default;
   return {
-    group: model ? (form.rtc ? model.groupRtc : model.groupPlain) : "",
+    group: model
+      ? mode === "vlash"
+        ? (model.groupVlash ?? `${model.id}_vlash_demo`)
+        : rtc
+          ? model.groupRtc
+          : model.groupPlain
+      : "",
     horizon: String(horizon),
     horizonMax: limit.max,
     horizonLoweredFrom: horizon < limit.default ? limit.default : null,
@@ -189,7 +208,7 @@ export function rateFacts(
     hz: rateOf(form),
     steps,
     horizon,
-    rtc: form.rtc,
+    rtc: inferenceMode(form.inferenceMode, form.rtc) === "rtc",
   });
 }
 
@@ -239,7 +258,15 @@ export function commandBody(
     else body[field] = parsed.value;
   };
   for (const [field, text, whole] of numbers) put(field, text, whole);
-  body.rtc = form.rtc;
+  const mode = inferenceMode(form.inferenceMode, form.rtc);
+  body.rtc = mode === "rtc";
+  body.inference_mode = mode;
+  if (mode === "vlash") {
+    if (!validOverlap(form.vlashOverlapSteps))
+      errors.vlash_overlap_steps = { key: "marvel0.inference.overlap_error" };
+    else
+      body.vlash_overlap_steps = Number(form.vlashOverlapSteps?.trim() || "2");
+  }
   put("rtc_horizon", form.horizon, true);
   // The default rate is left out, so the command is the one it always was.
   put("control_hz", form.hz, true);
@@ -260,7 +287,7 @@ export interface Preview {
   /** The text to copy. */
   command: string;
   /** The policy server this command needs. */
-  needs: { modelId: string; rtc: boolean };
+  needs: { modelId: string; rtc: boolean; inferenceMode?: InferenceMode };
   verified: boolean;
   warnings: PreviewWarning[];
 }
@@ -285,7 +312,11 @@ export function readPreview(data: unknown): Preview | null {
   if (!command.trim() || !modelId || rtc === null) return null;
   return {
     command,
-    needs: { modelId, rtc },
+    needs: {
+      modelId,
+      rtc: inferenceMode(needs?.inference_mode, rtc) === "rtc",
+      inferenceMode: inferenceMode(needs?.inference_mode, rtc),
+    },
     verified: bool(rec(body.model)?.verified) === true,
     warnings: list(body.warnings).flatMap((entry) => {
       const item = rec(entry);
@@ -353,6 +384,7 @@ export type MatchKind =
   | "starting"
   | "other_model"
   | "needs_rtc"
+  | "other_mode"
   | "by_hand"
   | "unknown";
 
@@ -362,6 +394,7 @@ const MATCH_KEY: Record<MatchKind, string> = {
   starting: "marvel0.cmd.server.starting",
   other_model: "marvel0.cmd.server.other_model",
   needs_rtc: "marvel0.cmd.server.needs_rtc",
+  other_mode: "marvel0.cmd.server.other_mode",
   by_hand: "marvel0.cmd.server.by_hand",
   unknown: "marvel0.cmd.server.unknown",
 };
@@ -370,7 +403,7 @@ const MATCH_KEY: Record<MatchKind, string> = {
  * refuses a server that does not match its model, and an RTC client needs an
  * RTC server. Advice, not a gate: the command is made either way. */
 export function serverMatch(
-  command: { modelId: string; rtc: boolean },
+  command: { modelId: string; rtc: boolean; inferenceMode?: InferenceMode },
   status: DeployStatus | null,
 ): { kind: MatchKind; good: boolean; say: Say } {
   const make = (kind: MatchKind, params?: Record<string, string>) => ({
@@ -389,6 +422,11 @@ export function serverMatch(
     return make("unknown");
   if (running.modelId !== command.modelId)
     return make("other_model", { running: running.modelId });
-  if (command.rtc && !running.rtc) return make("needs_rtc");
+  const wanted = inferenceMode(command.inferenceMode, command.rtc);
+  const served = inferenceMode(running.inferenceMode, running.rtc);
+  if (wanted !== served)
+    return make(
+      wanted === "rtc" && served === "plain" ? "needs_rtc" : "other_mode",
+    );
   return make("match");
 }

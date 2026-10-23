@@ -331,13 +331,17 @@ describe("no start or stop asks for a typed phrase", () => {
     expect(card).toContain('t("marvel0.episodeChange.promptLabel")');
   });
 
-  test("the stack window has one field, the override, and the policy server card has the scale and the extra phrase", () => {
+  test("the stack window has one field, the override, and the policy server card has overlap, scale and the extra phrase", () => {
     expect(source("stack-dialog.tsx").match(/<Input\b/g)).toHaveLength(1);
     expect(source("stack-dialog.tsx")).toContain("spec.override");
     // The pause of the whole stack's start is a switch (a choice), not a field.
     expect(source("stack-dialog.tsx").match(/<Switch\b/g)).toHaveLength(1);
-    // The scale of the guidance and the extra phrase.
-    expect(source("deploy-panel.tsx").match(/<Input\b/g)).toHaveLength(2);
+    // VLASH overlap and guidance scale are settings; only the stop override is a phrase.
+    const policy = source("deploy-panel.tsx");
+    expect(policy.match(/<Input\b/g)).toHaveLength(3);
+    expect(policy).toContain("vlashOverlapSteps");
+    expect(policy).toContain("scale: event.target.value");
+    expect(policy).toContain("setOverride(event.target.value)");
   });
 
   test("the hint 'Type exactly: {phrase}' is used only for those two overrides", () => {

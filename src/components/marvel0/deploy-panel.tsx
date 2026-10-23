@@ -13,6 +13,12 @@
 // Cancel with the initial focus, Confirm). The page sends the action's fixed
 // confirmation phrase itself; the one phrase a person types is the extra one
 // that stops the server under a connected client.
+import {
+  inferenceMode,
+  modeLabel,
+  validOverlap,
+  type InferenceMode,
+} from "./inference-mode";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CircleCheck,
@@ -31,7 +37,6 @@ import {
   Field,
   Input,
   Select,
-  Switch,
 } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Note } from "@/components/pages-ui/feedback";
@@ -160,7 +165,12 @@ export function DeployPanel({
           {
             ...edits,
             ...(effective
-              ? { modelId: effective.modelId, rtc: effective.rtc }
+              ? {
+                  modelId: effective.modelId,
+                  rtc: effective.rtc,
+                  inferenceMode: effective.inferenceMode,
+                  vlashOverlapSteps: effective.vlashOverlapSteps,
+                }
               : {}),
             scale: held
               ? effective?.cfgScale === null ||
@@ -176,15 +186,26 @@ export function DeployPanel({
   const modelId = form?.modelId ?? "";
   const model: ModelRow | null = models.find((m) => m.id === modelId) ?? null;
   const edit = (change: Partial<DeployForm>) => {
-    const { modelId: pickedModel, rtc, scale: typedScale, ...own } = change;
+    const {
+      modelId: pickedModel,
+      rtc,
+      inferenceMode: mode,
+      vlashOverlapSteps,
+      scale: typedScale,
+      ...own
+    } = change;
     if (
       pickedModel !== undefined ||
       rtc !== undefined ||
+      mode !== undefined ||
+      vlashOverlapSteps !== undefined ||
       typedScale !== undefined
     )
       shared.pick({
         ...(pickedModel !== undefined ? { modelId: pickedModel } : {}),
         ...(rtc !== undefined ? { rtc } : {}),
+        ...(mode !== undefined ? { inferenceMode: mode } : {}),
+        ...(vlashOverlapSteps !== undefined ? { vlashOverlapSteps } : {}),
         ...(typedScale !== undefined ? { scale: typedScale } : {}),
       });
     if (Object.keys(own).length > 0)
@@ -425,13 +446,49 @@ export function DeployPanel({
                     {t("marvel0.deploy.form.held")}
                   </p>
                 )}
-                <Switch
-                  label={t("marvel0.deploy.form.rtc")}
-                  description={t("marvel0.deploy.form.rtc_hint")}
-                  checked={form.rtc}
-                  disabled={held}
-                  onChange={(event) => edit({ rtc: event.target.checked })}
-                />
+                <Field
+                  label={t("marvel0.inference.label")}
+                  hint={t("marvel0.inference.hint")}
+                >
+                  <Select
+                    value={inferenceMode(form.inferenceMode, form.rtc)}
+                    disabled={held}
+                    onChange={(event) =>
+                      edit({
+                        inferenceMode: event.target.value as InferenceMode,
+                        rtc: event.target.value === "rtc",
+                      })
+                    }
+                  >
+                    {(["plain", "rtc", "vlash"] as const).map((mode) => (
+                      <option key={mode} value={mode}>
+                        {t(modeLabel(mode))}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                {form.inferenceMode === "vlash" && (
+                  <Field
+                    label={t("marvel0.inference.overlap")}
+                    hint={t("marvel0.inference.overlap_hint")}
+                    error={
+                      !validOverlap(form.vlashOverlapSteps)
+                        ? t("marvel0.inference.overlap_error")
+                        : undefined
+                    }
+                  >
+                    <Input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={form.vlashOverlapSteps ?? "2"}
+                      disabled={held}
+                      onChange={(event) =>
+                        edit({ vlashOverlapSteps: event.target.value })
+                      }
+                    />
+                  </Field>
+                )}
                 <Field label={t("marvel0.deploy.form.fraction")}>
                   <Select
                     value={form.fraction === null ? "" : String(form.fraction)}
@@ -636,12 +693,8 @@ export function DeployPanel({
                   <code key="c">{model.config}</code>,
                 ],
                 [
-                  t("marvel0.deploy.fact.rtc"),
-                  t(
-                    form.rtc
-                      ? "marvel0.deploy.dialog.rtc_on"
-                      : "marvel0.deploy.dialog.rtc_off",
-                  ),
+                  t("marvel0.inference.label"),
+                  t(modeLabel(form.inferenceMode, form.rtc)),
                 ],
                 [
                   t("marvel0.deploy.fact.fraction"),

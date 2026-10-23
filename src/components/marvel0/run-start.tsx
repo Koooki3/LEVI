@@ -7,6 +7,7 @@
 // The page sends the confirmation phrase itself; nothing is typed. The copy of
 // the command stays as the manual route. The checks stop mistakes, not another
 // program of the same account.
+import { modeLabel } from "./inference-mode";
 import { useState } from "react";
 import { Play } from "lucide-react";
 import { Button } from "@/components/ds";
@@ -91,12 +92,8 @@ export function RunStart({
               </dd>
             </div>
             <div className="rg-fact">
-              <dt>{t("marvel0.deploy.fact.rtc")}</dt>
-              <dd>
-                {t(
-                  rtc ? "marvel0.deploy.value.on" : "marvel0.deploy.value.off",
-                )}
-              </dd>
+              <dt>{t("marvel0.inference.label")}</dt>
+              <dd>{t(modeLabel(form.inference_mode, rtc))}</dd>
             </div>
             <div className="rg-fact">
               <dt>{t("marvel0.cmd.field.group")}</dt>

@@ -46,6 +46,7 @@ import shlex
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 
+from . import inference_mode
 from . import site as marvel0_site
 from .models import GROUP_MAX_CHARS, RESTRICTED_PROMPTS, default_group
 
@@ -142,6 +143,7 @@ GROUPS = (
         ("--new", "switch", "const"),
         ("--step-by-step", "switch", "const"),
         ("--rtc", "switch", "form"),
+        ("--vlash-overlap-steps", "value", "form"),
         ("--rtc-execute-horizon", "value", "form"),
         ("--open-loop-horizon", "value", "form"),
     ),
@@ -161,6 +163,8 @@ FIELDS = (
     "min_z",
     "rtc",
     "rtc_horizon",
+    "inference_mode",
+    "vlash_overlap_steps",
     "rollout_group",
     "note",
     "control_hz",
@@ -192,6 +196,12 @@ class Form:
     rollout_group: str
     note: str
     control_hz: int = CONTROL_HZ_DEFAULT  # one of CONTROL_HZ_OPTIONS
+    inference_mode: str | None = None
+    vlash_overlap_steps: int | None = None
+
+    def __post_init__(self):
+        if self.inference_mode is None:
+            object.__setattr__(self, "inference_mode", "rtc" if self.rtc else "plain")
 
 
 @dataclass(frozen=True)
@@ -253,6 +263,12 @@ def control_summary(site, form) -> dict:
     cap_rad = float(scaled_cap(site.safety.max_step_rad, hz))
     beats = latency_beats(hz)
     out = {
+        "inference_mode": form.inference_mode,
+        "vlash": (
+            {"overlap_steps": form.vlash_overlap_steps, "experimental": True}
+            if form.inference_mode == "vlash"
+            else None
+        ),
         "hz": hz,
         "reference_hz": REFERENCE_HZ,
         "period_ms": _seconds(1000 / hz),
@@ -262,7 +278,10 @@ def control_summary(site, form) -> dict:
         "speed_cap_m_s": _seconds(cap_m * hz),
         "speed_cap_rad_s": _seconds(cap_rad * hz),
         "chunk_s": _seconds(ACTION_HORIZON / hz),
-        "horizon_s": _seconds(form.rtc_horizon / hz),
+        "horizon_s": _seconds(
+            (ACTION_HORIZON if form.inference_mode == "vlash" else form.rtc_horizon)
+            / hz
+        ),
         "latency_beats": beats,
         "rtc": None,
     }
@@ -440,11 +459,22 @@ def _validate(site, restricted, model_id, body):
     )
     min_z = _min_z(site, body)
     control_hz = _control_hz(body)
-    rtc = body.get("rtc")
-    if rtc is None:
-        rtc = True
-    if not isinstance(rtc, bool):
-        raise FormError("invalid_type", "rtc", "rtc must be true or false")
+    try:
+        mode = inference_mode.resolve(body)
+        overlap = (
+            inference_mode.overlap(body.get("vlash_overlap_steps"))
+            if mode == "vlash"
+            else None
+        )
+        if mode != "vlash" and body.get("vlash_overlap_steps") is not None:
+            raise inference_mode.ModeError(
+                "vlash_overlap_not_allowed",
+                "vlash_overlap_steps",
+                "overlap belongs only to VLASH",
+            )
+    except inference_mode.ModeError as exc:
+        raise FormError(exc.code, exc.field, str(exc)) from exc
+    rtc = mode == "rtc"
     horizon = _whole(
         body,
         "rtc_horizon",
@@ -457,7 +487,7 @@ def _validate(site, restricted, model_id, body):
     )
     group = body.get("rollout_group")
     if group is None:
-        group = default_group(model_id, rtc)
+        group = default_group(model_id, mode)
     if not isinstance(group, str):
         raise FormError("invalid_type", "rollout_group", "rollout_group must be text")
     if not _GROUP.fullmatch(group) or ".." in group:
@@ -470,7 +500,11 @@ def _validate(site, restricted, model_id, body):
     note = _text(
         body,
         "note",
-        f"marvel0 page: {model_id} rtc={'on' if rtc else 'off'} horizon={horizon}{rate}",
+        (
+            f"marvel0 page: {model_id} vlash experimental overlap={overlap}{rate}"
+            if mode == "vlash"
+            else f"marvel0 page: {model_id} rtc={'on' if rtc else 'off'} horizon={horizon}{rate}"
+        ),
     )
     problem = marvel0_site.prompt_reason(note, caps.note_max_chars)
     if problem:
@@ -488,6 +522,8 @@ def _validate(site, restricted, model_id, body):
         group,
         note,
         control_hz,
+        mode,
+        overlap,
     )
 
 
@@ -497,7 +533,14 @@ def validate(site, model, body) -> Form:
     named = body.get("model_id")
     if named is not None and named != model.id:
         raise FormError("model_unknown", "model_id", "the body names another model")
-    return _validate(site, model.restricted, model.id, body)
+    form = _validate(site, model.restricted, model.id, body)
+    if form.inference_mode == "vlash" and not inference_mode.capable(model.config):
+        raise FormError(
+            "vlash_model_incompatible",
+            "model_id",
+            "VLASH requires an audited state-conditioned FR3 absolute pose/gripper config",
+        )
+    return form
 
 
 # --- the command ----------------------------------------------------------------------------
@@ -534,7 +577,9 @@ def _values(site, form) -> dict:
     }
     if form.control_hz != CONTROL_HZ_DEFAULT:
         values["--control-hz"] = ("value", str(form.control_hz))
-    if form.rtc:
+    if form.inference_mode == "vlash":
+        values["--vlash-overlap-steps"] = ("value", str(form.vlash_overlap_steps))
+    elif form.rtc:
         values["--rtc"] = ("switch", True)
         values["--rtc-execute-horizon"] = ("value", str(form.rtc_horizon))
     else:
@@ -546,7 +591,10 @@ def _lines(site, form) -> list:
     """The argv in the lines of the text: the prefix in two, then one list of
     tokens per group of flags."""
     values = _values(site, form)
-    lines = [PREFIX[:4], PREFIX[4:]]
+    prefix = list(PREFIX)
+    if form.inference_mode == "vlash":
+        prefix[-1] = inference_mode.VLASH_CLIENT
+    lines = [prefix[:4], prefix[4:]]
     for group in GROUPS:
         tokens = [
             token
@@ -615,7 +663,14 @@ def verify_argv(argv, site, restricted) -> None:
     count of numbers after a tuple flag, the form's values valid again (for a
     model of the restricted family, its instructions only), and every other
     token what the site file dictates."""
-    if argv[: len(PREFIX)] != PREFIX:
+    prefix = list(PREFIX)
+    vlash = (
+        len(argv) >= len(PREFIX)
+        and argv[len(PREFIX) - 1] == inference_mode.VLASH_CLIENT
+    )
+    if vlash:
+        prefix[-1] = inference_mode.VLASH_CLIENT
+    if argv[: len(PREFIX)] != prefix:
         raise SelfCheckError("the command does not start with the fixed prefix")
     found = _read_back(argv)
     rtc = found.get("--rtc") is True
@@ -626,12 +681,19 @@ def verify_argv(argv, site, restricted) -> None:
             "eval_num": int(found["--eval-num"]),
             "min_z": float(found["--min-z"]),
             "rtc": rtc,
-            "rtc_horizon": int(
-                found["--rtc-execute-horizon" if rtc else "--open-loop-horizon"]
+            "rtc_horizon": (
+                site.caps.open_loop_default
+                if vlash
+                else int(
+                    found["--rtc-execute-horizon" if rtc else "--open-loop-horizon"]
+                )
             ),
             "rollout_group": found["--rollout-group"],
             "note": found["--eval-note"],
         }
+        if vlash:
+            body["inference_mode"] = "vlash"
+            body["vlash_overlap_steps"] = int(found["--vlash-overlap-steps"])
         if "--control-hz" in found:
             body["control_hz"] = int(found["--control-hz"])
         form = _validate(site, restricted, None, body)

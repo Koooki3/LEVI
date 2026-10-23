@@ -55,11 +55,11 @@
           "level": "ok",
           "params": {
             "served": "pi05_fr3_all_step49999",
-            "served_rtc": "on",
+            "served_rtc": "rtc",
             "wanted": "pi05_fr3_all_step49999",
-            "wanted_rtc": "on"
+            "wanted_rtc": "rtc"
           },
-          "text": "The policy server serves the model and RTC setting of the form."
+          "text": "The policy server serves the model and inference mode of the form."
         },
         {
           "code": "no_connection",

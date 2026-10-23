@@ -67,6 +67,12 @@ const BY_CODE: Record<string, string> = {
   stop_failed: "marvel0.err.stop_failed",
   stop_incomplete: "marvel0.err.stop_incomplete",
   invalid_type: "marvel0.err.invalid_type",
+  inference_mode_invalid: "marvel0.err.inference_mode_invalid",
+  inference_mode_conflict: "marvel0.err.inference_mode_conflict",
+  vlash_overlap_out_of_range: "marvel0.err.vlash_overlap_out_of_range",
+  vlash_overlap_not_allowed: "marvel0.err.vlash_overlap_not_allowed",
+  vlash_model_incompatible: "marvel0.err.vlash_model_incompatible",
+
   min_z_not_positive: "marvel0.err.min_z_not_positive",
   min_z_below_floor: "marvel0.err.min_z_below_floor",
   min_z_above_home: "marvel0.err.min_z_above_home",

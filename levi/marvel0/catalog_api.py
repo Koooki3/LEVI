@@ -40,6 +40,8 @@ class PreviewBody(BaseModel):
     eval_num: int | None = None
     min_z: float | None = None
     rtc: bool | None = None
+    inference_mode: str | None = None
+    vlash_overlap_steps: int | None = None
     rtc_horizon: int | None = None
     rollout_group: str | None = None
     note: str | None = None
@@ -103,6 +105,8 @@ def command_preview(body: PreviewBody):
             "model_id": model.id,
             "config": model.config,
             "rtc": form.rtc,
+            "inference_mode": form.inference_mode,
+            "vlash_overlap_steps": form.vlash_overlap_steps,
         },
         "cwd": preview.cwd,
         "env": preview.env,

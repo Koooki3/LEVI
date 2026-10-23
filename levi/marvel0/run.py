@@ -61,7 +61,7 @@ from levi.live import gpumgr, jsonio
 from levi.setup import probes
 from levi.workspace import Workspace
 
-from . import command, deploy, net, record, stack, status
+from . import command, deploy, inference_mode, net, record, stack, status
 from .errors import fail
 from .manual_worker import production_factory
 
@@ -327,7 +327,7 @@ CHECK_OK = {
     "product": "This is the product LEVI.",
     "run_idle": "No client is running.",
     "policy_ready": "The policy server of this page is ready.",
-    "policy_matches": "The policy server serves the model and RTC setting of the form.",
+    "policy_matches": "The policy server serves the model and inference mode of the form.",
     "no_connection": "Nobody is connected to the policy server.",
     "no_session": "No evaluation session is active.",
     "arm_lock": "The arm lock is free.",
@@ -343,8 +343,8 @@ CHECK_REFUSE = {
     "the run.",
     "run_idle": "A client is still running; end it first.",
     "policy_ready": "The policy server of this page is not ready ({state}).",
-    "policy_matches": "The server serves {served} (RTC {served_rtc}); the form "
-    "asks for {wanted} (RTC {wanted_rtc}).",
+    "policy_matches": "The server serves {served} (mode {served_rtc}); the form "
+    "asks for {wanted} (mode {wanted_rtc}).",
     "no_connection": "{count} connection(s) to the policy server; another client "
     "may be running.",
     "no_session": "An evaluation session is active ({count}); end it first.",
@@ -1011,6 +1011,8 @@ def _run_view(f: Facts) -> dict | None:
         "task_folder": rec.get("task_folder"),
         "model_id": rec.get("model_id"),
         "rtc": rec.get("rtc"),
+        "inference_mode": inference_mode.recorded(rec),
+        "vlash_overlap_steps": rec.get("vlash_overlap_steps"),
         "prompt": rec.get("prompt"),
         # Only the original user-editable form, never argv, environment or paths.
         # The next-episode UI uses this after confirmed client exit; start still
@@ -1396,10 +1398,11 @@ def _group_of(form_body: dict) -> str:
 
     group = form_body.get("rollout_group")
     if group is None:
-        rtc = form_body.get("rtc")
-        group = models.default_group(
-            str(form_body.get("model_id")), True if rtc is None else bool(rtc)
-        )
+        try:
+            mode = inference_mode.resolve(form_body)
+        except inference_mode.ModeError as exc:
+            raise FormRefuse(command.FormError(exc.code, exc.field, str(exc))) from exc
+        group = models.default_group(str(form_body.get("model_id")), mode)
     return str(group)
 
 
@@ -1787,20 +1790,15 @@ class Supervisor:
             ready, state = False, "ready, but not started by this page"
         rows.append(check_row("policy_ready", ready, state=state))
         if form is not None:
-            matches = (
-                None
-                if view is None
-                else served.get("model_id") == form.model_id
-                and bool(served.get("rtc")) == form.rtc
-            )
+            matches = None if view is None else inference_mode.matches(served, form)
             rows.append(
                 check_row(
                     "policy_matches",
                     matches,
                     served=str(served.get("model_id") or "none"),
-                    served_rtc="on" if served.get("rtc") else "off",
+                    served_rtc=inference_mode.recorded(served),
                     wanted=form.model_id,
-                    wanted_rtc="on" if form.rtc else "off",
+                    wanted_rtc=form.inference_mode,
                 )
             )
         count = listener.get("established")
@@ -2200,6 +2198,8 @@ class Supervisor:
             "port": site.port,
             "model_id": form.model_id,
             "rtc": form.rtc,
+            "inference_mode": form.inference_mode,
+            "vlash_overlap_steps": form.vlash_overlap_steps,
             "prompt": form.prompt,
             "form": dataclasses.asdict(form),
             "argv_sha256": hashlib.sha256(

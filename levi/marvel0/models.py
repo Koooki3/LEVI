@@ -27,6 +27,7 @@ from pathlib import Path
 
 from levi.automatic import policies
 
+from . import inference_mode
 from . import site as marvel0_site
 
 SCHEMA = "levi.marvel0.models.v1"
@@ -59,6 +60,14 @@ class Model:
     warnings: tuple  # policies.PolicyEntry.warnings codes, without paths
 
     @property
+    def vlash_capable(self) -> bool:
+        return inference_mode.capable(self.config)
+
+    @property
+    def action_horizon(self) -> int | None:
+        return 10 if self.vlash_capable else None
+
+    @property
     def labels(self) -> tuple:
         return () if self.verified else (UNVERIFIED,)
 
@@ -67,6 +76,11 @@ class Model:
             "id": self.id,
             "config": self.config,
             "cfg_capable": self.cfg_capable,
+            "vlash_capable": self.vlash_capable,
+            "action_horizon": self.action_horizon,
+            "inference_modes": ["plain", "rtc"]
+            + (["vlash"] if self.vlash_capable else []),
+            "vlash_experimental": True,
             "restricted_prompts": self.restricted,
             "verified": self.verified,
             "labels": list(self.labels),
@@ -78,6 +92,7 @@ class Model:
             "rollout_group_default": {
                 "rtc": default_group(self.id, True),
                 "plain": default_group(self.id, False),
+                "vlash": default_group(self.id, "vlash"),
             },
         }
 
@@ -91,7 +106,9 @@ class Catalog:
 
 def default_group(model_id: str, rtc: bool) -> str:
     """The rollout group a run of this model is filed under by default."""
-    return f"{model_id}_rtc_demo" if rtc else f"{model_id}_demo"
+    if rtc == "vlash":
+        return f"{model_id}_vlash_demo"
+    return f"{model_id}_rtc_demo" if rtc is True or rtc == "rtc" else f"{model_id}_demo"
 
 
 def default_group_fits(model_id: str) -> bool:

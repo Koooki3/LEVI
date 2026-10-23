@@ -156,6 +156,8 @@ def test_preview_answers_the_documented_command(machine):
         "model_id": "pi05_fr3_all_step49999",
         "config": "pi05_fr3_all_state",
         "rtc": True,
+        "inference_mode": "rtc",
+        "vlash_overlap_steps": None,
     }
     assert doc["argv"] == golden_argv(tmp_path)
     assert doc["cwd"] == str(tmp_path / "openpi")

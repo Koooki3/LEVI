@@ -1,3 +1,8 @@
+import {
+  inferenceMode,
+  validOverlap,
+  type InferenceMode,
+} from "./inference-mode";
 // Pure mapping for the Policy server card of the marvel0: the answer of
 // `GET /api/levi/marvel0/deploy` in, one view model out; the requests of the two
 // writes; the words of what the server answered. No React and no fetching, so
@@ -99,6 +104,8 @@ export interface DeployInfo {
   modelId: string | null;
   config: string | null;
   rtc: boolean | null;
+  inferenceMode?: InferenceMode;
+  vlashOverlapSteps?: number | null;
   fraction: number | null;
   /** The guidance scale of the deploy; null when it has none. */
   cfgScale: number | null;
@@ -123,6 +130,7 @@ export interface DeployStatus {
     normStats: boolean | null;
     rtcEnabled: boolean | null;
     rtcWarmup: boolean | null;
+    vlashEnabled?: boolean | null;
     cfg: boolean | null;
     listening: boolean | null;
   };
@@ -176,7 +184,9 @@ function readInfo(part: unknown): DeployInfo | null {
     unit: str(item.unit, 80),
     modelId: str(item.model_id, 120),
     config: str(item.config, 120),
-    rtc: bool(item.rtc),
+    rtc: inferenceMode(item.inference_mode, bool(item.rtc)) === "rtc",
+    inferenceMode: inferenceMode(item.inference_mode, bool(item.rtc)),
+    vlashOverlapSteps: num(item.vlash_overlap_steps),
     fraction: num(item.fraction),
     cfgScale: num(item.cfg_guidance_scale),
     phase: str(item.phase, 40),
@@ -224,6 +234,7 @@ export function readDeploy(data: unknown): DeployStatus | null {
       normStats: bool(readiness?.norm_stats),
       rtcEnabled: bool(readiness?.rtc_enabled),
       rtcWarmup: bool(readiness?.rtc_warmup),
+      vlashEnabled: bool(readiness?.vlash_enabled),
       cfg: bool(readiness?.cfg),
       listening: bool(readiness?.listening),
     },
@@ -310,6 +321,7 @@ const FAILURE_KEY: Record<string, string> = {
   address_in_use: "marvel0.deploy.failure.address_in_use",
   traceback: "marvel0.deploy.failure.traceback",
   rtc_not_ready: "marvel0.deploy.failure.rtc_not_ready",
+  vlash_not_ready: "marvel0.deploy.failure.vlash_not_ready",
   cfg_not_confirmed: "marvel0.deploy.failure.cfg_not_confirmed",
   start_timeout: "marvel0.deploy.failure.start_timeout",
   exited: "marvel0.deploy.failure.exited",
@@ -360,7 +372,13 @@ export function shownDeploy(status: DeployStatus): DeployInfo | null {
 }
 
 export interface ReadinessRow {
-  id: "norm_stats" | "rtc_enabled" | "rtc_warmup" | "cfg" | "listening";
+  id:
+    | "norm_stats"
+    | "rtc_enabled"
+    | "rtc_warmup"
+    | "vlash_enabled"
+    | "cfg"
+    | "listening";
   /** Catalogue key. */
   label: string;
   /** What the log said: yes, not yet, or null when nothing has been read. */
@@ -394,6 +412,12 @@ export function readinessRows(status: DeployStatus): ReadinessRow[] {
         value: r.rtcWarmup,
       },
     );
+  if (deploy.inferenceMode === "vlash")
+    rows.push({
+      id: "vlash_enabled",
+      label: "marvel0.deploy.ready.vlash_enabled",
+      value: r.vlashEnabled ?? null,
+    });
   if (deploy.cfgScale !== null)
     rows.push({ id: "cfg", label: "marvel0.deploy.ready.cfg", value: r.cfg });
   rows.push({
@@ -615,6 +639,8 @@ export function newRequestId(): string {
 export interface DeployForm {
   modelId: string;
   rtc: boolean;
+  inferenceMode?: InferenceMode;
+  vlashOverlapSteps?: string;
   /** One of the site's presets; null when there is none. */
   fraction: number | null;
   /** The guidance scale as typed; empty is the server's default. */
@@ -708,6 +734,11 @@ export function deployBlock(
       key: "marvel0.deploy.block.check",
       params: { reason: blocking.say.say ?? { raw: blocking.say.text } },
     });
+  if (
+    inferenceMode(form.inferenceMode, form.rtc) === "vlash" &&
+    !validOverlap(form.vlashOverlapSteps)
+  )
+    return plain({ key: "marvel0.inference.overlap_error" });
   if (!model) return plain({ key: "marvel0.deploy.block.no_model" });
   const row = presetRows(status).find(
     (preset) =>
@@ -756,7 +787,15 @@ export function deployBody(
   return {
     request_id: requestId,
     model_id: model.id,
-    rtc: form.rtc,
+    rtc: inferenceMode(form.inferenceMode, form.rtc) === "rtc",
+    inference_mode: inferenceMode(form.inferenceMode, form.rtc),
+    ...(inferenceMode(form.inferenceMode, form.rtc) === "vlash"
+      ? {
+          vlash_overlap_steps: form.vlashOverlapSteps?.trim()
+            ? Number(form.vlashOverlapSteps)
+            : 2,
+        }
+      : {}),
     fraction: form.fraction,
     cfg_guidance_scale: parseScale(form.scale, model, site).value,
     accept_unverified: !model.verified && form.acceptUnverified,

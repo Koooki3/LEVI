@@ -849,6 +849,7 @@ describe("the requests", () => {
       request_id: "req-12345678",
       model_id: "pi05_fr3_all_step49999",
       rtc: true,
+      inference_mode: "rtc",
       fraction: 0.22,
       cfg_guidance_scale: null,
       accept_unverified: false,

@@ -67,6 +67,8 @@ class DeployBody(BaseModel):
     request_id: str
     model_id: str
     rtc: bool
+    inference_mode: str | None = None
+    vlash_overlap_steps: int | None = None
     fraction: float
     cfg_guidance_scale: float | None = None
     accept_unverified: bool = False

@@ -27,6 +27,7 @@ export interface ModelRow {
   /** The rollout group a run of this model is filed under by default. */
   groupRtc: string;
   groupPlain: string;
+  groupVlash?: string;
 }
 
 export interface SkippedRow {
@@ -60,6 +61,7 @@ function readModel(entry: unknown): ModelRow | null {
       .filter((warning): warning is string => warning !== null),
     groupRtc: str(groups?.rtc, 120) ?? `${id}_rtc_demo`,
     groupPlain: str(groups?.plain, 120) ?? `${id}_demo`,
+    groupVlash: str(groups?.vlash, 120) ?? `${id}_vlash_demo`,
   };
 }
 

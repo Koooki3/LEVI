@@ -25,6 +25,8 @@ describe("the page's one selected model", () => {
     expect(effectiveSelection(models, NO_CHOICE, readDeploy(idle()))).toEqual({
       modelId: SFT,
       rtc: true,
+      inferenceMode: "rtc",
+      vlashOverlapSteps: "2",
       cfgScale: null,
       source: "default",
     });
@@ -37,7 +39,14 @@ describe("the page's one selected model", () => {
         { modelId: CFG, rtc: false, scale: "" },
         readDeploy(idle()),
       ),
-    ).toEqual({ modelId: CFG, rtc: false, cfgScale: null, source: "choice" });
+    ).toEqual({
+      modelId: CFG,
+      rtc: false,
+      inferenceMode: "plain",
+      vlashOverlapSteps: "2",
+      cfgScale: null,
+      source: "choice",
+    });
   });
 
   test("a pick that left the list falls back to the first model", () => {

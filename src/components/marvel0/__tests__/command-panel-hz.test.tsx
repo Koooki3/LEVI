@@ -65,7 +65,9 @@ async function open(
   const models = readModels(modelsAnswer());
   const selection = {
     ...effectiveSelection(models, NO_CHOICE, status)!,
-    ...(options.rtc === false ? { rtc: false } : {}),
+    ...(options.rtc === false
+      ? { rtc: false, inferenceMode: "plain" as const }
+      : {}),
   };
   const started: Started[] = [];
   const runActions: RunActions = {
@@ -156,6 +158,7 @@ describe("the control rate field", () => {
         eval_num: 5,
         min_z: 0.025,
         rtc: true,
+        inference_mode: "rtc",
       },
     ]);
   });

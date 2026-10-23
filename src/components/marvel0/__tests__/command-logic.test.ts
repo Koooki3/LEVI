@@ -37,6 +37,7 @@ describe("the form as it opens", () => {
       eval_num: 5,
       min_z: 0.025,
       rtc: true,
+      inference_mode: "rtc",
       rtc_horizon: 7,
       rollout_group: "saved_group",
       note: "saved note",
@@ -49,6 +50,8 @@ describe("the form as it opens", () => {
       evalNum: "5",
       minZ: "0.025",
       rtc: true,
+      inferenceMode: "rtc",
+      vlashOverlapSteps: "2",
       horizon: "7",
       group: "saved_group",
       note: "saved note",
@@ -105,6 +108,7 @@ describe("the request body", () => {
       eval_num: 5,
       min_z: 0.025,
       rtc: true,
+      inference_mode: "rtc",
     });
   });
 
@@ -123,6 +127,7 @@ describe("the request body", () => {
       eval_num: 5,
       min_z: 0.025,
       rtc: true,
+      inference_mode: "rtc",
       rtc_horizon: 7,
       rollout_group: "my_group",
       note: "first try",
@@ -227,7 +232,11 @@ describe("readPreview", () => {
   test("reads the command and what server it needs", () => {
     expect(readPreview(preview())).toEqual({
       command: COMMAND,
-      needs: { modelId: "pi05_fr3_all_step49999", rtc: true },
+      needs: {
+        modelId: "pi05_fr3_all_step49999",
+        rtc: true,
+        inferenceMode: "rtc",
+      },
       verified: true,
       warnings: [],
     });
@@ -295,7 +304,7 @@ describe("whether the policy server fits the command", () => {
 
   test("a ready server of the same model and mode fits", () => {
     expect(match(ready(), sft, true).kind).toBe("match");
-    expect(match(ready(), sft, false).kind).toBe("match");
+    expect(match(ready(), sft, false).kind).toBe("other_mode");
   });
 
   test("a client with RTC needs a server with RTC", () => {

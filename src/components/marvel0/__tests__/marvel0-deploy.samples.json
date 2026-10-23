@@ -97,7 +97,8 @@
       "listening": null,
       "norm_stats": null,
       "rtc_enabled": null,
-      "rtc_warmup": null
+      "rtc_warmup": null,
+      "vlash_enabled": null
     },
     "reason": null,
     "sampled_at": "2026-10-15T01:46:40+08:00",
@@ -138,6 +139,7 @@
       "config": "pi05_fr3_all_state",
       "fraction": 0.22,
       "gpu_lock": "taken",
+      "inference_mode": "rtc",
       "model_id": "pi05_fr3_all_step49999",
       "phase": "started",
       "ready_at": null,
@@ -154,7 +156,8 @@
         "manifest": false
       },
       "started_at": "2026-10-15T01:46:40+08:00",
-      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999"
+      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999",
+      "vlash_overlap_steps": null
     },
     "gpu": {
       "free_mib_at_final_check": 23507,
@@ -239,6 +242,7 @@
       "config": "pi05_fr3_all_state",
       "fraction": 0.22,
       "gpu_lock": "taken",
+      "inference_mode": "rtc",
       "model_id": "pi05_fr3_all_step49999",
       "phase": "started",
       "ready_at": null,
@@ -255,7 +259,8 @@
         "manifest": false
       },
       "started_at": "2026-10-15T01:46:40+08:00",
-      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999"
+      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999",
+      "vlash_overlap_steps": null
     },
     "estop": {
       "always": true,
@@ -293,7 +298,8 @@
       "listening": false,
       "norm_stats": false,
       "rtc_enabled": false,
-      "rtc_warmup": false
+      "rtc_warmup": false,
+      "vlash_enabled": null
     },
     "reason": null,
     "sampled_at": "2026-10-15T01:46:40+08:00",
@@ -431,7 +437,8 @@
       "listening": null,
       "norm_stats": null,
       "rtc_enabled": null,
-      "rtc_warmup": null
+      "rtc_warmup": null,
+      "vlash_enabled": null
     },
     "reason": {
       "code": "hand_started",
@@ -565,7 +572,8 @@
       "listening": null,
       "norm_stats": null,
       "rtc_enabled": null,
-      "rtc_warmup": null
+      "rtc_warmup": null,
+      "vlash_enabled": null
     },
     "reason": null,
     "sampled_at": "2026-10-15T01:46:40+08:00",
@@ -668,6 +676,7 @@
       "config": "pi05_fr3_all_state",
       "fraction": 0.22,
       "gpu_lock": "taken",
+      "inference_mode": "rtc",
       "model_id": "pi05_fr3_all_step49999",
       "phase": "stopped",
       "ready_at": "2026-10-15T01:46:40+08:00",
@@ -684,7 +693,8 @@
         "manifest": false
       },
       "started_at": "2026-10-15T01:46:40+08:00",
-      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999"
+      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999",
+      "vlash_overlap_steps": null
     },
     "estop": {
       "always": true,
@@ -719,7 +729,8 @@
       "listening": true,
       "norm_stats": true,
       "rtc_enabled": true,
-      "rtc_warmup": true
+      "rtc_warmup": true,
+      "vlash_enabled": null
     },
     "reason": null,
     "sampled_at": "2026-10-15T01:46:50+08:00",
@@ -759,7 +770,8 @@
       "listening": false,
       "norm_stats": false,
       "rtc_enabled": false,
-      "rtc_warmup": false
+      "rtc_warmup": false,
+      "vlash_enabled": null
     },
     "lines": [],
     "log_id": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999-20261014T174640Z.log",
@@ -773,7 +785,8 @@
       "listening": false,
       "norm_stats": false,
       "rtc_enabled": false,
-      "rtc_warmup": false
+      "rtc_warmup": false,
+      "vlash_enabled": null
     },
     "lines": [
       "INFO:root:Loading model...",
@@ -790,7 +803,8 @@
       "listening": true,
       "norm_stats": true,
       "rtc_enabled": true,
-      "rtc_warmup": true
+      "rtc_warmup": true,
+      "vlash_enabled": null
     },
     "lines": [
       "INFO:root:Loading model...",
@@ -811,71 +825,91 @@
     },
     "models": [
       {
+        "action_horizon": 10,
         "cfg_capable": false,
         "config": "pi05_fr3_all_state",
         "id": "pi05_fr3_all_step49999",
+        "inference_modes": ["plain", "rtc", "vlash"],
         "labels": [],
         "restricted_prompts": false,
         "rollout_group_default": {
           "plain": "pi05_fr3_all_step49999_demo",
-          "rtc": "pi05_fr3_all_step49999_rtc_demo"
+          "rtc": "pi05_fr3_all_step49999_rtc_demo",
+          "vlash": "pi05_fr3_all_step49999_vlash_demo"
         },
         "size_bytes": 3,
         "step": null,
         "variant": null,
         "verified": true,
         "version": null,
+        "vlash_capable": true,
+        "vlash_experimental": true,
         "warnings": []
       },
       {
+        "action_horizon": 10,
         "cfg_capable": true,
         "config": "pi05_fr3_all_state_cfg",
         "id": "recap_cfg_r1_step10000_jax",
+        "inference_modes": ["plain", "rtc", "vlash"],
         "labels": ["unverified"],
         "restricted_prompts": false,
         "rollout_group_default": {
           "plain": "recap_cfg_r1_step10000_jax_demo",
-          "rtc": "recap_cfg_r1_step10000_jax_rtc_demo"
+          "rtc": "recap_cfg_r1_step10000_jax_rtc_demo",
+          "vlash": "recap_cfg_r1_step10000_jax_vlash_demo"
         },
         "size_bytes": 54,
         "step": 10000,
         "variant": null,
         "verified": false,
         "version": null,
+        "vlash_capable": true,
+        "vlash_experimental": true,
         "warnings": []
       },
       {
+        "action_horizon": 10,
         "cfg_capable": true,
         "config": "pi05_fr3_all_state_cfg",
         "id": "recap_cfg_r2_best_step14300_jax",
+        "inference_modes": ["plain", "rtc", "vlash"],
         "labels": ["unverified"],
         "restricted_prompts": false,
         "rollout_group_default": {
           "plain": "recap_cfg_r2_best_step14300_jax_demo",
-          "rtc": "recap_cfg_r2_best_step14300_jax_rtc_demo"
+          "rtc": "recap_cfg_r2_best_step14300_jax_rtc_demo",
+          "vlash": "recap_cfg_r2_best_step14300_jax_vlash_demo"
         },
         "size_bytes": 70,
         "step": 14300,
         "variant": "best",
         "verified": false,
         "version": null,
+        "vlash_capable": true,
+        "vlash_experimental": true,
         "warnings": []
       },
       {
+        "action_horizon": 10,
         "cfg_capable": true,
         "config": "pi05_fr3_all_state_cfg",
         "id": "recap_cfg_r2_step15000_jax",
+        "inference_modes": ["plain", "rtc", "vlash"],
         "labels": ["unverified"],
         "restricted_prompts": false,
         "rollout_group_default": {
           "plain": "recap_cfg_r2_step15000_jax_demo",
-          "rtc": "recap_cfg_r2_step15000_jax_rtc_demo"
+          "rtc": "recap_cfg_r2_step15000_jax_rtc_demo",
+          "vlash": "recap_cfg_r2_step15000_jax_vlash_demo"
         },
         "size_bytes": 54,
         "step": 15000,
         "variant": null,
         "verified": false,
         "version": null,
+        "vlash_capable": true,
+        "vlash_experimental": true,
         "warnings": []
       }
     ],
@@ -956,6 +990,7 @@
       "episode_s": 50.0,
       "horizon_s": 0.6,
       "hz": 10,
+      "inference_mode": "rtc",
       "latency_beats": 3,
       "period_ms": 100.0,
       "reference_hz": 10,
@@ -967,7 +1002,8 @@
       "speed_cap_m_s": 1.0,
       "speed_cap_rad_s": 3.5,
       "step_cap_m": 0.1,
-      "step_cap_rad": 0.35
+      "step_cap_rad": 0.35,
+      "vlash": null
     },
     "cwd": "/path/to/openpi",
     "env": ["no_proxy=localhost,127.0.0.1,::1"],
@@ -982,8 +1018,10 @@
     "schema": "levi.marvel0.command.v1",
     "server_requirements": {
       "config": "pi05_fr3_all_state",
+      "inference_mode": "rtc",
       "model_id": "pi05_fr3_all_step49999",
-      "rtc": true
+      "rtc": true,
+      "vlash_overlap_steps": null
     },
     "warnings": [
       {
@@ -1076,6 +1114,7 @@
       "episode_s": 50.0,
       "horizon_s": 0.8,
       "hz": 10,
+      "inference_mode": "rtc",
       "latency_beats": 3,
       "period_ms": 100.0,
       "reference_hz": 10,
@@ -1087,7 +1126,8 @@
       "speed_cap_m_s": 1.0,
       "speed_cap_rad_s": 3.5,
       "step_cap_m": 0.1,
-      "step_cap_rad": 0.35
+      "step_cap_rad": 0.35,
+      "vlash": null
     },
     "cwd": "/path/to/openpi",
     "env": ["no_proxy=localhost,127.0.0.1,::1"],
@@ -1102,8 +1142,10 @@
     "schema": "levi.marvel0.command.v1",
     "server_requirements": {
       "config": "pi05_fr3_all_state_cfg",
+      "inference_mode": "rtc",
       "model_id": "recap_cfg_r2_best_step14300_jax",
-      "rtc": true
+      "rtc": true,
+      "vlash_overlap_steps": null
     },
     "warnings": [
       {
@@ -1194,6 +1236,7 @@
       "config": "pi05_fr3_all_state",
       "fraction": 0.22,
       "gpu_lock": "taken",
+      "inference_mode": "rtc",
       "model_id": "pi05_fr3_all_step49999",
       "phase": "started",
       "ready_at": "2026-10-15T01:46:40+08:00",
@@ -1210,7 +1253,8 @@
         "manifest": false
       },
       "started_at": "2026-10-15T01:46:40+08:00",
-      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999"
+      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999",
+      "vlash_overlap_steps": null
     },
     "estop": {
       "always": true,
@@ -1248,7 +1292,8 @@
       "listening": true,
       "norm_stats": true,
       "rtc_enabled": true,
-      "rtc_warmup": true
+      "rtc_warmup": true,
+      "vlash_enabled": null
     },
     "reason": null,
     "sampled_at": "2026-10-15T01:46:50+08:00",
@@ -1355,6 +1400,7 @@
       "config": "pi05_fr3_all_state_cfg",
       "fraction": 0.22,
       "gpu_lock": "taken",
+      "inference_mode": "rtc",
       "model_id": "recap_cfg_r2_best_step14300_jax",
       "phase": "started",
       "ready_at": "2026-10-15T01:46:50+08:00",
@@ -1371,7 +1417,8 @@
         "manifest": false
       },
       "started_at": "2026-10-15T01:46:40+08:00",
-      "unit": "levi-aeri-policy-manual-marvel0-recap-cfg-r2-best-step14300-jax"
+      "unit": "levi-aeri-policy-manual-marvel0-recap-cfg-r2-best-step14300-jax",
+      "vlash_overlap_steps": null
     },
     "estop": {
       "always": true,
@@ -1409,7 +1456,8 @@
       "listening": true,
       "norm_stats": true,
       "rtc_enabled": true,
-      "rtc_warmup": true
+      "rtc_warmup": true,
+      "vlash_enabled": null
     },
     "reason": null,
     "sampled_at": "2026-10-15T01:46:50+08:00",
@@ -1518,6 +1566,7 @@
       "config": "pi05_fr3_all_state",
       "fraction": 0.22,
       "gpu_lock": "taken",
+      "inference_mode": "rtc",
       "model_id": "pi05_fr3_all_step49999",
       "phase": "started",
       "ready_at": "2026-10-15T01:46:40+08:00",
@@ -1534,7 +1583,8 @@
         "manifest": false
       },
       "started_at": "2026-10-15T01:46:40+08:00",
-      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999"
+      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999",
+      "vlash_overlap_steps": null
     },
     "estop": {
       "always": true,
@@ -1572,7 +1622,8 @@
       "listening": true,
       "norm_stats": true,
       "rtc_enabled": true,
-      "rtc_warmup": true
+      "rtc_warmup": true,
+      "vlash_enabled": null
     },
     "reason": null,
     "sampled_at": "2026-10-15T01:46:50+08:00",
@@ -1839,6 +1890,7 @@
       "config": "pi05_fr3_all_state",
       "fraction": 0.22,
       "gpu_lock": "taken",
+      "inference_mode": "rtc",
       "model_id": "pi05_fr3_all_step49999",
       "phase": "started",
       "ready_at": null,
@@ -1855,7 +1907,8 @@
         "manifest": false
       },
       "started_at": "2026-10-15T01:46:40+08:00",
-      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999"
+      "unit": "levi-aeri-policy-manual-marvel0-pi05-fr3-all-step49999",
+      "vlash_overlap_steps": null
     },
     "estop": {
       "always": true,
@@ -1893,7 +1946,8 @@
       "listening": false,
       "norm_stats": false,
       "rtc_enabled": false,
-      "rtc_warmup": false
+      "rtc_warmup": false,
+      "vlash_enabled": null
     },
     "reason": null,
     "sampled_at": "2026-10-15T01:46:40+08:00",

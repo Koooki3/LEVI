@@ -50,6 +50,7 @@ const SOURCES = [
   "components/marvel0/use-run-actions.ts",
   "components/marvel0/use-run-poll.ts",
   "components/marvel0/selection.ts",
+  "components/marvel0/inference-mode.ts",
   // Step 5, the autonomy system (its own words are also checked against the
   // backend's codes in autonomy-catalog.test.ts).
   "components/marvel0/autonomy-doc.ts",
@@ -88,7 +89,13 @@ for (const file of SOURCES)
     (/[._]$/.test(name) ? families : []).push(name);
     if (!/[._]$/.test(name)) named.add(name);
   }
-const inFamily = (key: string) => families.some((p) => key.startsWith(p));
+// modeLabel constructs this exact family. Do not accept arbitrary inference.* keys.
+const modeKeys = ["plain", "rtc", "vlash"].map(
+  (mode) => `marvel0.inference.${mode}`,
+);
+for (const key of modeKeys) named.add(key);
+const inFamily = (key: string) =>
+  families.some((p) => p !== "marvel0.inference." && key.startsWith(p));
 
 const both = (key: string) => key in en && key in zh;
 

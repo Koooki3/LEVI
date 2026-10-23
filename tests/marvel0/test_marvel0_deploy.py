@@ -3048,6 +3048,7 @@ def test_a_deployed_server_goes_from_starting_to_ready(marvel0):
     assert view["readiness"] == {
         "norm_stats": True,
         "rtc_enabled": True,
+        "vlash_enabled": None,
         "rtc_warmup": True,
         "cfg": None,
         "listening": False,
@@ -3461,6 +3462,7 @@ def test_the_log_is_the_printable_tail_without_paths(marvel0):
     assert log["classification"] == {
         "norm_stats": True,
         "rtc_enabled": True,
+        "vlash_enabled": None,
         "rtc_warmup": True,
         "cfg": None,
         "listening": True,
@@ -3781,3 +3783,61 @@ def test_subprocess_is_used_only_by_the_one_runner():
     assert code_of("deploy.py").count("subprocess.run") == 1
     for name in ("net.py", "record.py", "deploy_api.py"):
         assert not [x for x in code_of(name) if "subprocess" in x]
+
+
+def test_vlash_deploy_uses_separate_entrypoint_and_needs_protocol(marvel0):
+    script = Path(marvel0.site.openpi_checkout) / "lab/vlash/serve_policy_vlash.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("# fake serving entrypoint")
+    extra_sources = [
+        "lab/vlash/runtime.py",
+        "lab/vlash/run_collect_vlash.py",
+        "examples/fr3_local/run_robotiq_client.py",
+        "examples/fr3_local/run_robotiq_client_collect_data.py",
+    ]
+    for relative in extra_sources:
+        source = Path(marvel0.site.openpi_checkout) / relative
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("# fake isolated source")
+    marvel0.deploy(rtc=False, inference_mode="vlash", vlash_overlap_steps=3)
+    marvel0.server_comes_up(rtc=False)
+    marvel0.sup.invalidate()
+    view = marvel0.sup.status()
+    assert view["state"] != "ready"
+    assert view["deploy"]["inference_mode"] == "vlash"
+    assert view["deploy"]["vlash_overlap_steps"] == 3
+    assert set(extra_sources + ["lab/vlash/serve_policy_vlash.py"]).issubset(
+        view["deploy"]["source_hash"]["files"]
+    )
+    unit = record.unit_name(SFT)
+    argv = marvel0.units[unit]["argv"]
+    assert "lab/vlash/serve_policy_vlash.py" in argv
+    assert argv[argv.index("--vlash-overlap-steps") + 1] == "3"
+    marvel0.log("VLASH enabled: protocol=10")
+    marvel0.sup.invalidate()
+    assert marvel0.sup.status()["state"] != "ready"
+    marvel0.log("VLASH enabled: protocol=1")
+    marvel0.sup.invalidate()
+    view = marvel0.sup.status()
+    assert view["state"] == "ready"
+    assert view["readiness"]["vlash_enabled"] is True
+    assert view["readiness"]["rtc_enabled"] is None
+
+
+@pytest.mark.parametrize(
+    "kw,code",
+    [
+        ({"inference_mode": "vlash", "rtc": True}, "inference_mode_conflict"),
+        (
+            {"inference_mode": "plain", "rtc": False, "vlash_overlap_steps": 2},
+            "vlash_overlap_not_allowed",
+        ),
+        (
+            {"inference_mode": "vlash", "rtc": False, "vlash_overlap_steps": 10},
+            "vlash_overlap_out_of_range",
+        ),
+    ],
+)
+def test_deploy_refuses_mode_conflicts_before_running(marvel0, kw, code):
+    assert marvel0.refused(marvel0.deploy, **kw)[1] == code
+    assert not marvel0.units

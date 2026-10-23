@@ -621,6 +621,8 @@ def test_the_form_has_exactly_the_documented_fields():
         "rollout_group",
         "note",
         "control_hz",
+        "inference_mode",
+        "vlash_overlap_steps",
     ]
 
 
@@ -634,6 +636,7 @@ def test_the_flags_of_the_form_are_a_closed_list():
         "--min-z",
         "--rtc",
         "--rtc-execute-horizon",
+        "--vlash-overlap-steps",
         "--open-loop-horizon",
         "--rollout-group",
         "--eval-note",
@@ -1030,3 +1033,106 @@ def test_the_prefix_is_the_aeri_form():
         "python",
         SCRIPT,
     ]
+
+
+@pytest.mark.parametrize(
+    "mode,rtc", [("plain", False), ("rtc", True), ("vlash", False)]
+)
+def test_explicit_inference_modes_and_legacy(tmp_path, mode, rtc):
+    site, mdl, form = form_for(tmp_path, {"inference_mode": mode, "rtc": rtc})
+    assert form.inference_mode == mode and form.rtc is rtc
+    preview = C.render(site, mdl, form)
+    C.verify_argv(preview.argv, site, mdl.restricted)
+    if mode == "vlash":
+        assert preview.argv[len(C.PREFIX) - 1] == "lab/vlash/run_collect_vlash.py"
+        assert "--vlash-overlap-steps=2" in preview.argv
+        assert not any(
+            a.startswith(("--rtc", "--open-loop-horizon")) for a in preview.argv
+        )
+        assert form.rollout_group.endswith("_vlash_demo")
+        assert "vlash experimental" in form.note
+        assert preview.control["inference_mode"] == "vlash"
+    else:
+        assert preview.argv[len(C.PREFIX) - 1] == C.SCRIPT
+        assert not any(a.startswith("--vlash") for a in preview.argv)
+    assert form_for(tmp_path, {"rtc": rtc})[2].inference_mode == (
+        "rtc" if rtc else "plain"
+    )
+
+
+@pytest.mark.parametrize("mode,rtc", [("plain", True), ("rtc", False), ("vlash", True)])
+def test_modes_refuse_conflicting_rtc(tmp_path, mode, rtc):
+    assert (
+        refused(tmp_path, {"inference_mode": mode, "rtc": rtc}).code
+        == "inference_mode_conflict"
+    )
+
+
+@pytest.mark.parametrize("overlap", [0, -1, 10, 11, True, 2.5, "2"])
+def test_vlash_overlap_is_strictly_inside_chunk(tmp_path, overlap):
+    assert (
+        refused(
+            tmp_path, {"inference_mode": "vlash", "vlash_overlap_steps": overlap}
+        ).code
+        == "vlash_overlap_out_of_range"
+    )
+
+
+def test_vlash_refuses_unaudited_state_space(tmp_path):
+    assert (
+        refused(
+            tmp_path, {"inference_mode": "vlash"}, mdl=model(config="pi05_fr3_all")
+        ).code
+        == "vlash_model_incompatible"
+    )
+    assert (
+        refused(tmp_path, {"rtc": False, "vlash_overlap_steps": 2}).code
+        == "vlash_overlap_not_allowed"
+    )
+
+
+def test_vlash_argv_cannot_be_relabelled_plain_or_rtc(tmp_path):
+    site, mdl, form = form_for(tmp_path, {"inference_mode": "vlash"})
+    argv = C.render(site, mdl, form).argv
+    for modified in (
+        argv + ["--rtc"],
+        [C.SCRIPT if x == "lab/vlash/run_collect_vlash.py" else x for x in argv],
+    ):
+        with pytest.raises(C.SelfCheckError):
+            C.verify_argv(modified, site, mdl.restricted)
+
+
+def test_vlash_matching_distinguishes_plain_and_overlap(tmp_path):
+    from levi.marvel0.inference_mode import matches
+
+    _, _, form = form_for(tmp_path, {"inference_mode": "vlash"})
+    served = {"model_id": form.model_id, "rtc": False}
+    assert not matches(served, form)
+    served.update(inference_mode="vlash", vlash_overlap_steps=2)
+    assert matches(served, form)
+    assert not matches({**served, "vlash_overlap_steps": 3}, form)
+    assert not matches({**served, "rtc": True}, form)
+
+
+def test_aeri_closed_schema_refuses_manual_vlash_fields():
+    from pydantic import ValidationError
+
+    from levi.marvel0.aeri_api import PrepareBody
+
+    with pytest.raises(ValidationError) as exc:
+        PrepareBody.model_validate(
+            {
+                "request_id": "vlash-aeri",
+                "mode": "external",
+                "task": "eggplant",
+                "rounds": 1,
+                "steps": 5,
+                "start_home": False,
+                "confirm": "prepare",
+                "inference_mode": "vlash",
+            }
+        )
+    assert any(
+        e["type"] == "extra_forbidden" and e["loc"] == ("inference_mode",)
+        for e in exc.value.errors()
+    )

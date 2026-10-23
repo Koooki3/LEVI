@@ -1490,3 +1490,33 @@ def test_the_drift_check_is_read_only_and_needs_a_folder(tmp_path):
     main(["--root", str(root)])
     assert {p.name: p.read_bytes() for p in root.iterdir()} == before
     assert main(["--root", str(tmp_path / "nowhere")]) == 2
+
+
+def test_vlash_run_requires_exact_mode_and_overlap(machine):
+    form = command.validate(
+        machine.site,
+        MODEL,
+        machine.form(rtc=False, inference_mode="vlash", vlash_overlap_steps=2),
+    )
+
+    def policy_row():
+        return next(
+            r
+            for r in machine.sup._preflight(machine.site, form)
+            if r["code"] == "policy_matches"
+        )
+
+    machine.deploy = machine.ready_view(rtc=False)
+    assert policy_row()["level"] == "refuse"
+    machine.deploy["deploy"].update(inference_mode="vlash", vlash_overlap_steps=3)
+    assert policy_row()["level"] == "refuse"
+    machine.deploy["deploy"]["vlash_overlap_steps"] = 2
+    assert policy_row()["level"] == "ok"
+
+
+def test_vlash_run_group_and_conflicts_are_not_plain(machine):
+    assert run._group_of(machine.form(rtc=False, inference_mode="vlash")).endswith(
+        "_vlash_demo"
+    )
+    with pytest.raises(run.FormRefuse):
+        run._group_of(machine.form(rtc=True, inference_mode="vlash"))

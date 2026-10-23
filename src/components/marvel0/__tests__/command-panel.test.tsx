@@ -77,7 +77,13 @@ function selectionFor(
   over: Partial<Effective> = {},
   models = readModels(modelsAnswer()),
 ): Effective {
-  return { ...effectiveSelection(models, NO_CHOICE, status)!, ...over };
+  return {
+    ...effectiveSelection(models, NO_CHOICE, status)!,
+    ...over,
+    ...(over.rtc !== undefined && over.inferenceMode === undefined
+      ? { inferenceMode: over.rtc ? ("rtc" as const) : ("plain" as const) }
+      : {}),
+  };
 }
 
 async function open(
@@ -312,7 +318,7 @@ describe("the model, RTC and guidance strength follow the policy server card", (
     const { host, used } = await open();
     expect(text(follow(host))).toContain(`follows the policy server: ${SFT}`);
     expect(follow(host).getAttribute("data-source")).toBe("default");
-    expect(text(follow(host))).toContain("RTC on");
+    expect(text(follow(host))).toContain("Mode: RTC");
     await click(button(follow(host), "use another model")!);
     expect(used).toEqual(["another"]);
   });
@@ -332,7 +338,7 @@ describe("the model, RTC and guidance strength follow the policy server card", (
     );
     expect(follow(host).getAttribute("data-source")).toBe("server");
     expect(text(follow(host))).toContain(`follows the policy server: ${CFG}`);
-    expect(text(follow(host))).toContain("RTC off");
+    expect(text(follow(host))).toContain("Mode: Plain inference");
     expect(text(follow(host))).toContain("Guidance strength 1.5");
     await make(host);
     expect(calls.preview[0]).toMatchObject({ model_id: CFG, rtc: false });
@@ -366,6 +372,26 @@ describe("the model, RTC and guidance strength follow the policy server card", (
 });
 
 describe("making the command", () => {
+  test("VLASH selection follows into preview with its own scheduler and overlap", async () => {
+    const { host, calls } = await open(undefined, readDeploy(idle()), false, {
+      rtc: false,
+      inferenceMode: "vlash",
+      vlashOverlapSteps: "3",
+    });
+    expect(
+      text(host.querySelector("[data-testid=marvel0-command-follow]")),
+    ).toContain("Mode: VLASH");
+    expect(
+      (field(card(host), "Rollout group") as HTMLInputElement).placeholder,
+    ).toBe(`${SFT}_vlash_demo`);
+    await make(host);
+    expect(calls.preview[0]).toMatchObject({
+      inference_mode: "vlash",
+      rtc: false,
+      vlash_overlap_steps: 3,
+    });
+  });
+
   test("sends the form once and shows the command to copy, with what server it needs", async () => {
     withClipboard();
     const { host, calls } = await open();
@@ -378,6 +404,7 @@ describe("making the command", () => {
         eval_num: 5,
         min_z: 0.025,
         rtc: true,
+        inference_mode: "rtc",
       },
     ]);
     const result = host.querySelector("[data-testid=marvel0-command-result]")!;
@@ -386,7 +413,7 @@ describe("making the command", () => {
     expect(pre.getAttribute("lang")).toBe("en");
     expect(pre.textContent).toBe(COMMAND);
     expect(text(result)).toContain(
-      `This command needs a policy server deployed for ${SFT}, RTC on.`,
+      `This command needs a policy server deployed for ${SFT}, mode RTC.`,
     );
     expect(text(result)).toContain(en["marvel0.cmd.hands"]);
     expect(text(result)).toContain("This page has not run it.");

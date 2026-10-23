@@ -96,17 +96,56 @@ describe("one selected model for the whole page", () => {
     ).toBe(`${CFG}_rtc_demo`);
   });
 
-  test("RTC chosen in the policy server card changes the command's horizon and group", async () => {
-    core(idle());
+  test("plain, RTC and VLASH chosen in the policy card synchronise command mode and group", async () => {
+    const calls = core(idle());
     const { host } = await render(<Marvel0Page />);
     await loaded(host);
     const command = host.querySelector(
       "[data-testid=marvel0-command]",
     ) as HTMLElement;
-    expect(field(command, "RTC execute horizon")).not.toBeNull();
-    await click(field(policy(host), "RTC (real-time chunking)")!);
-    expect(field(command, "Open-loop horizon")).not.toBeNull();
-    expect(follow(host).textContent).toContain("RTC off");
+    const mode = field<HTMLSelectElement>(policy(host), "Inference mode");
+    expect(Array.from(mode.options, (option) => option.value)).toEqual([
+      "plain",
+      "rtc",
+      "vlash",
+    ]);
+    for (const [value, label, group] of [
+      ["plain", "Plain inference", `${SFT}_demo`],
+      ["rtc", "RTC", `${SFT}_rtc_demo`],
+      ["vlash", "VLASH", `${SFT}_vlash_demo`],
+    ] as const) {
+      await choose(mode, value);
+      expect(mode.value).toBe(value);
+      expect(follow(host).textContent).toContain(`Mode: ${label}`);
+      expect(
+        field(
+          command,
+          value === "rtc" ? "RTC execute horizon" : "Open-loop horizon",
+        ),
+      ).not.toBeNull();
+      expect(
+        field<HTMLInputElement>(command, "Rollout group").placeholder,
+      ).toBe(group);
+      const overlap = field<HTMLInputElement>(
+        policy(host),
+        "VLASH overlap steps",
+      );
+      if (value === "vlash") expect(overlap.value).toBe("2");
+      else expect(overlap).toBeNull();
+      await click(button(command, "Make the command")!);
+      await tick(3, 10);
+      const requests = calls.filter(
+        (call) =>
+          call.path === `${P}/command/preview` && call.init?.method === "POST",
+      );
+      const body = JSON.parse(String(requests.at(-1)!.init!.body));
+      expect(body).toMatchObject({
+        inference_mode: value,
+        rtc: value === "rtc",
+      });
+      if (value === "vlash") expect(body.vlash_overlap_steps).toBe(2);
+      else expect(body).not.toHaveProperty("vlash_overlap_steps");
+    }
   });
 
   test("the command made for the selection asks for that model", async () => {
@@ -134,46 +173,63 @@ describe("one selected model for the whole page", () => {
     void calls;
   });
 
-  test("while this page's server runs a model, that model, its RTC and its strength are the command's, and the policy card's controls are read-only", async () => {
-    core(
-      ready({
-        deploy: deployInfo({
-          model_id: CFG,
-          rtc: false,
-          cfg_guidance_scale: 1.5,
+  test.each(["plain", "rtc", "vlash"] as const)(
+    "running %s locks the policy model, mode and strength to the command",
+    async (mode) => {
+      core(
+        ready({
+          deploy: deployInfo({
+            model_id: CFG,
+            rtc: mode === "rtc",
+            inference_mode: mode,
+            vlash_overlap_steps: mode === "vlash" ? 3 : null,
+            cfg_guidance_scale: 1.5,
+          }),
         }),
-      }),
-    );
-    const { host } = await render(<Marvel0Page />);
-    await loaded(host);
-    await waitFor(
-      () => follow(host)?.getAttribute("data-source") === "server",
-      {
-        label: "the follow badge",
-      },
-    );
-    expect(follow(host).textContent).toContain(
-      `follows the policy server: ${CFG}`,
-    );
-    expect(follow(host).textContent).toContain("RTC off");
-    expect(follow(host).textContent).toContain("Guidance strength 1.5");
-    const model = field<HTMLSelectElement>(policy(host), "Model")!;
-    expect(model.value).toBe(CFG);
-    expect(model.disabled).toBe(true);
-    expect(
-      (field(policy(host), "RTC (real-time chunking)") as HTMLInputElement)
-        .disabled,
-    ).toBe(true);
-    expect(
-      host.querySelector("[data-testid=marvel0-deploy-held]"),
-    ).not.toBeNull();
-    // The old warnings cannot occur: the command fits the server.
-    expect(
-      host
-        .querySelector("[data-testid=marvel0-command-server]")!
-        .getAttribute("data-kind"),
-    ).toBe("match");
-  });
+      );
+      const { host } = await render(<Marvel0Page />);
+      await loaded(host);
+      await waitFor(
+        () => follow(host)?.getAttribute("data-source") === "server",
+        {
+          label: "the follow badge",
+        },
+      );
+      expect(follow(host).textContent).toContain(
+        `follows the policy server: ${CFG}`,
+      );
+      expect(follow(host).textContent).toContain(
+        `Mode: ${mode === "plain" ? "Plain inference" : mode === "rtc" ? "RTC" : "VLASH"}`,
+      );
+      expect(follow(host).textContent).toContain("Guidance strength 1.5");
+      const model = field<HTMLSelectElement>(policy(host), "Model")!;
+      expect(model.value).toBe(CFG);
+      expect(model.disabled).toBe(true);
+      const selectedMode = field<HTMLSelectElement>(
+        policy(host),
+        "Inference mode",
+      );
+      expect(selectedMode.value).toBe(mode);
+      expect(selectedMode.disabled).toBe(true);
+      if (mode === "vlash") {
+        const overlap = field<HTMLInputElement>(
+          policy(host),
+          "VLASH overlap steps",
+        );
+        expect(overlap.value).toBe("3");
+        expect(overlap.disabled).toBe(true);
+      }
+      expect(
+        host.querySelector("[data-testid=marvel0-deploy-held]"),
+      ).not.toBeNull();
+      // The old warnings cannot occur: the command fits the server.
+      expect(
+        host
+          .querySelector("[data-testid=marvel0-command-server]")!
+          .getAttribute("data-kind"),
+      ).toBe("match");
+    },
+  );
 
   test("use another model takes the keyboard to the policy server card's model control", async () => {
     core(idle());

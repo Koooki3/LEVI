@@ -242,6 +242,7 @@ describe("the catalog, the site and the preview as the backend writes them", () 
     expect(preview.needs).toEqual({
       modelId: "pi05_fr3_all_step49999",
       rtc: true,
+      inferenceMode: "rtc",
     });
     expect(preview.command).not.toContain("/tmp/");
   });

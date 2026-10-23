@@ -114,9 +114,13 @@ describe("the Policy server card", () => {
       `${CFG} · pi05_fr3_all_state_cfg · unverified`,
     ]);
     expect(models.value).toBe(SFT);
-    const rtc = field(c, "RTC (real-time chunking)")!;
-    expect(rtc.getAttribute("role")).toBe("switch");
-    expect((rtc as HTMLInputElement).checked).toBe(true);
+    const mode = field(c, "Inference mode") as HTMLSelectElement;
+    expect(mode.value).toBe("rtc");
+    expect(Array.from(mode.options, (option) => option.value)).toEqual([
+      "plain",
+      "rtc",
+      "vlash",
+    ]);
     const fraction = field<HTMLSelectElement>(c, "VRAM fraction")!;
     expect(Array.from(fraction.options).map((o) => o.value)).toEqual([
       "0.22",
@@ -172,6 +176,27 @@ describe("the Policy server card", () => {
 });
 
 describe("deploying", () => {
+  test("VLASH is a functional exclusive mode and sends its overlap", async () => {
+    const { host, calls } = await open({ startDeploy: ok(deployed(), 202) });
+    const c = card(host);
+    expect(field(c, "VLASH overlap steps")).toBeNull();
+    await choose(field(c, "Inference mode")!, "vlash");
+    const overlap = field<HTMLInputElement>(c, "VLASH overlap steps");
+    expect(overlap.value).toBe("2");
+    await type(overlap, "0");
+    expect(button(c, "Deploy")!.disabled).toBe(true);
+    await type(overlap, "3");
+    await click(button(c, "Deploy")!);
+    expect(text(dialog(host))).toContain("VLASH");
+    await click(button(dialog(host)!, "Deploy")!);
+    await tick();
+    expect(calls.startDeploy[0]).toMatchObject({
+      inference_mode: "vlash",
+      rtc: false,
+      vlash_overlap_steps: 3,
+    });
+  });
+
   test("Deploy opens a confirm window (nothing to type), Cancel in focus; Confirm sends one request with exactly the choices and the page's phrase", async () => {
     const { host, calls } = await open({
       startDeploy: ok(deployed(), 202),
@@ -199,6 +224,7 @@ describe("deploying", () => {
       request_id: body.request_id,
       model_id: SFT,
       rtc: true,
+      inference_mode: "rtc",
       fraction: 0.22,
       cfg_guidance_scale: null,
       accept_unverified: false,
@@ -251,10 +277,10 @@ describe("deploying", () => {
   test("RTC off and another fraction are what is sent", async () => {
     const { host, calls } = await open({ startDeploy: ok(deployed(), 202) });
     const c = card(host);
-    await click(field(c, "RTC (real-time chunking)")!);
+    await choose(field(c, "Inference mode")!, "plain");
     await choose(field<HTMLSelectElement>(c, "VRAM fraction"), "0.3");
     await click(button(c, "Deploy")!);
-    expect(text(dialog(host))).toContain("RTC off");
+    expect(text(dialog(host))).toContain("Plain inference");
     expect(text(dialog(host))).toContain("0.30");
     await click(button(dialog(host)!, "Deploy")!);
     await tick();

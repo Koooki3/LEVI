@@ -60,7 +60,7 @@ from levi.live import gpumgr
 from levi.own_units import OwnUnits
 from levi.setup import probes
 
-from . import net, record
+from . import inference_mode, net, record
 from .errors import fail
 
 # --- refusals ------------------------------------------------------------------------
@@ -68,6 +68,18 @@ from .errors import fail
 # code -> (HTTP status, message). The messages hold no path; a few take the
 # facts of the refusal (``Refuse.extra``) through ``{}`` fields.
 REFUSALS = {
+    "inference_mode_invalid": (422, "Choose plain, rtc or vlash"),
+    "inference_mode_conflict": (422, "The RTC flag conflicts with inference_mode"),
+    "invalid_type": (422, "The inference mode flags have invalid types"),
+    "vlash_overlap_out_of_range": (
+        422,
+        "VLASH overlap must be an integer greater than zero and below action_horizon",
+    ),
+    "vlash_overlap_not_allowed": (422, "VLASH overlap belongs only to VLASH"),
+    "vlash_model_incompatible": (
+        422,
+        "VLASH requires an audited state-conditioned FR3 absolute pose/gripper config",
+    ),
     "request_id_invalid": (
         400,
         "request_id is 8-80 characters of A-Z, a-z, 0-9 and . _ : -",
@@ -392,11 +404,15 @@ FIXED_ENV = {"PYTHONUNBUFFERED": "1", "no_proxy": "localhost,127.0.0.1,::1"}
 SHOW_ENVIRONMENT = ["systemctl", "--user", "show-environment"]
 
 
-def serve_script(rtc) -> str:
+def serve_script(rtc, mode=None) -> str:
+    if mode == "vlash":
+        return inference_mode.VLASH_SCRIPT
     return "scripts/serve_policy_rtc.py" if rtc else "scripts/serve_policy.py"
 
 
-def server_argv(site, model, rtc, cfg_scale, checkpoint_dir) -> list:
+def server_argv(
+    site, model, rtc, cfg_scale, checkpoint_dir, *, mode=None, vlash_overlap_steps=None
+) -> list:
     """The command the unit runs: the checkout's own Python (not ``uv run``),
     the script relative to the unit's working directory, the top-level flags
     before ``policy:checkpoint`` (tyro), the checkpoint by absolute path. The
@@ -404,7 +420,17 @@ def server_argv(site, model, rtc, cfg_scale, checkpoint_dir) -> list:
     No token holds a character systemd would expand or split on."""
     if bool(model.cfg_capable) != (cfg_scale is not None):
         raise ValueError("a guidance scale goes with a CFG model and with no other")
-    argv = [site.python, serve_script(rtc), PORT_FLAG, str(site.port)]
+    mode = inference_mode.resolve(
+        {"rtc": rtc, "inference_mode": mode}, default_rtc=False
+    )
+    if mode == "vlash" and not inference_mode.capable(model.config):
+        raise ValueError("VLASH requires an audited FR3 state/action contract")
+    argv = [site.python, serve_script(rtc, mode), PORT_FLAG, str(site.port)]
+    if mode == "vlash":
+        argv += [
+            "--vlash-overlap-steps",
+            str(inference_mode.overlap(vlash_overlap_steps)),
+        ]
     if cfg_scale is not None:
         argv += [CFG_FLAG, str(float(cfg_scale))]
     argv += [
@@ -475,7 +501,18 @@ def unit_env(manager_env_text, site) -> UnitEnv:
 
 
 def systemd_run_argv(
-    site, unit, model, rtc, fraction, cfg_scale, log_path, env, checkpoint_dir
+    site,
+    unit,
+    model,
+    rtc,
+    fraction,
+    cfg_scale,
+    log_path,
+    env,
+    checkpoint_dir,
+    *,
+    mode=None,
+    vlash_overlap_steps=None,
 ) -> list:
     """The ``systemd-run --user`` command for the unit; ``exec_argv`` is the
     part after ``--``. ``KillSignal=SIGINT`` is the Ctrl+C of the terminal; the
@@ -506,7 +543,15 @@ def systemd_run_argv(
     run.append(f"--setenv=XLA_PYTHON_CLIENT_MEM_FRACTION={float(fraction)!r}")
     run += [f"--setenv={name}={value}" for name, value in env.setenv.items()]
     run.append("--")
-    run += server_argv(site, model, rtc, cfg_scale, checkpoint_dir)
+    run += server_argv(
+        site,
+        model,
+        rtc,
+        cfg_scale,
+        checkpoint_dir,
+        mode=mode,
+        vlash_overlap_steps=vlash_overlap_steps,
+    )
     return run
 
 
@@ -542,6 +587,7 @@ MAX_PAGE_LINES = 200
 # The lines a ready server wrote (serve_policy.py, rtc_policy.py,
 # serve_policy_rtc.py, policy_config.py and the websockets server).
 READY_RE = {
+    "vlash": re.compile(r"VLASH enabled: protocol=1(?:\s|$|,)"),
     "norm": re.compile(r"Using norm stats shipped with the checkpoint: (\S+)"),
     "rtc": re.compile(
         r"RTC enabled: max_guidance_weight=\S+, schedule=\S+, (plain|advantage-CFG) policy"
@@ -610,6 +656,7 @@ def read_tail(path, limit=TAIL_BYTES) -> list:
 class Scan:
     norm: bool = False  # the norm stats of THIS checkpoint
     rtc_enabled: bool = False
+    vlash_enabled: bool = False
     warmup: bool = False
     warmup_skipped: bool = False
     cfg: bool = False
@@ -647,6 +694,7 @@ def scan(path, checkpoint_dir, port) -> Scan:
     return Scan(
         norm=seen("norm", lambda m: m.group(1) == wanted),
         rtc_enabled=seen("rtc"),
+        vlash_enabled=seen("vlash"),
         warmup=seen("warmup"),
         warmup_skipped=seen("warmup_skipped"),
         cfg=seen("cfg"),
@@ -656,12 +704,13 @@ def scan(path, checkpoint_dir, port) -> Scan:
     )
 
 
-def complete(result, rtc, cfg_capable) -> bool:
+def complete(result, rtc, cfg_capable, mode=None) -> bool:
     """Has the server logged everything its configuration promises?"""
     return bool(
         result.norm
         and result.listening
         and (not rtc or (result.rtc_enabled and result.warmup))
+        and (mode != "vlash" or result.vlash_enabled)
         and (not cfg_capable or result.cfg)
     )
 
@@ -741,7 +790,8 @@ def _own(f, rec) -> Derived:
     cfg = rec.get("cfg_guidance_scale") is not None
     running = f.unit in RUNNING
     ours = bool(f.listeners)
-    finished = complete(result, rtc, cfg)
+    mode = inference_mode.recorded(rec)
+    finished = complete(result, rtc, cfg, mode)
     kind = result.failure
     # A traceback or an out-of-memory error of one request on a server that came
     # up is not a failed start.
@@ -750,6 +800,8 @@ def _own(f, rec) -> Derived:
     ):
         return _failed(kind, running)
     if ours and result.listening and (f.listening_age_s or 0.0) >= LISTEN_GRACE_S:
+        if mode == "vlash" and not result.vlash_enabled:
+            return _failed("vlash_not_ready", True)
         if rtc and not (result.rtc_enabled and result.warmup):
             return _failed("rtc_not_ready", True)
         if cfg and not result.cfg:
@@ -836,6 +888,7 @@ FAILURES = {
     "argparse": "The server did not accept its command line; the log shows why.",
     "address_in_use": "The port was taken when the server tried to listen.",
     "traceback": "The server stopped with an error; the log shows it.",
+    "vlash_not_ready": "The server listens but never confirmed VLASH protocol=1.",
     "rtc_not_ready": "The server listens but never logged that RTC is enabled and "
     "warmed up. An RTC deploy without that is a failed deploy: stop it and read "
     "the log.",
@@ -1176,20 +1229,29 @@ class Supervisor:
             raise Refuse("checkpoint_invalid")
         return str(target)
 
-    def _runtime_files(self, site, rtc):
-        script = Path(site.openpi_checkout) / serve_script(rtc)
+    def _runtime_files(self, site, rtc, mode=None):
+        script = Path(site.openpi_checkout) / serve_script(rtc, mode)
         python = site.python
         if not (os.path.isfile(python) and os.access(python, os.X_OK)):
             raise Refuse("runtime_files_missing")
         if not script.is_file():
             raise Refuse("runtime_files_missing")
 
-    def _source(self, site) -> dict:
+    def _source(self, site, mode=None) -> dict:
         """The sha256 of the openpi files the site lists. A manifest named in
         the site file must agree with them; with none they are only recorded."""
         base = Path(site.openpi_checkout)
         files = {}
-        for rel in site.source.hash_files:
+        paths = list(site.source.hash_files)
+        if mode == "vlash":
+            paths += [
+                inference_mode.VLASH_SCRIPT,
+                inference_mode.VLASH_CLIENT,
+                "lab/vlash/runtime.py",
+                "examples/fr3_local/run_robotiq_client.py",
+                "examples/fr3_local/run_robotiq_client_collect_data.py",
+            ]
+        for rel in dict.fromkeys(paths):
             try:
                 files[rel] = self.host.hash_file(str(base / rel))
             except OSError:
@@ -1243,7 +1305,17 @@ class Supervisor:
                 raise Refuse("cfg_scale_out_of_range")
         if not model.verified and not body.get("accept_unverified"):
             raise Refuse("unverified_not_accepted")
-        return model, bool(body.get("rtc")), fraction, scale
+        try:
+            mode = inference_mode.resolve(body, default_rtc=False)
+            if mode == "vlash":
+                inference_mode.overlap(body.get("vlash_overlap_steps"))
+                if not inference_mode.capable(model.config):
+                    raise Refuse("vlash_model_incompatible")
+            elif body.get("vlash_overlap_steps") is not None:
+                raise Refuse("vlash_overlap_not_allowed")
+        except inference_mode.ModeError as exc:
+            raise Refuse(exc.code) from exc
+        return model, mode == "rtc", fraction, scale
 
     # ---- requests: stored, replayed, one at a time
 
@@ -1389,9 +1461,15 @@ class Supervisor:
         is sent again is answered even if the catalog changed meanwhile.)"""
         host = self.host
         model, rtc, fraction, scale = self._form(site, body)
+        inference = inference_mode.resolve(body, default_rtc=False)
+        overlap = (
+            inference_mode.overlap(body.get("vlash_overlap_steps"))
+            if inference == "vlash"
+            else None
+        )
         checkpoint = self._checkpoint(site, model)
-        self._runtime_files(site, rtc)
-        source = self._source(site)
+        self._runtime_files(site, rtc, inference)
+        source = self._source(site, inference)
         try:
             old = record.read_record(directory)
         except record.RecordCorrupt:
@@ -1415,9 +1493,27 @@ class Supervisor:
         created = host.now()
         unit = record.unit_name(model.id)
         log_path = record.log_path(directory, unit, created)
-        executed = server_argv(site, model, rtc, scale, checkpoint)
+        executed = server_argv(
+            site,
+            model,
+            rtc,
+            scale,
+            checkpoint,
+            mode=inference,
+            vlash_overlap_steps=overlap,
+        )
         command = systemd_run_argv(
-            site, unit, model, rtc, fraction, scale, log_path, env, checkpoint
+            site,
+            unit,
+            model,
+            rtc,
+            fraction,
+            scale,
+            log_path,
+            env,
+            checkpoint,
+            mode=inference,
+            vlash_overlap_steps=overlap,
         )
         needed = required_mib(fraction, gpu.total_mib, site.gpu.margin_mib)
         notes = [] if source["manifest"] else ["source_hash_unmanifested"]
@@ -1428,6 +1524,8 @@ class Supervisor:
             "model_id": model.id,
             "config": model.config,
             "rtc": rtc,
+            "inference_mode": inference,
+            "vlash_overlap_steps": overlap,
             "fraction": fraction,
             "cfg_guidance_scale": scale,
             "checkpoint_dir": checkpoint,
@@ -1672,6 +1770,8 @@ class Supervisor:
             "model_id": rec.get("model_id"),
             "config": rec.get("config"),
             "rtc": rec.get("rtc"),
+            "inference_mode": inference_mode.recorded(rec),
+            "vlash_overlap_steps": rec.get("vlash_overlap_steps"),
             "fraction": rec.get("fraction"),
             "cfg_guidance_scale": rec.get("cfg_guidance_scale"),
             "phase": rec.get("phase"),
@@ -2010,6 +2110,7 @@ class Supervisor:
             return {
                 "norm_stats": None,
                 "rtc_enabled": None,
+                "vlash_enabled": None,
                 "rtc_warmup": None,
                 "cfg": None,
                 "listening": None,
@@ -2017,6 +2118,9 @@ class Supervisor:
         return {
             "norm_stats": result.norm,
             "rtc_enabled": result.rtc_enabled if rtc else None,
+            "vlash_enabled": result.vlash_enabled
+            if rec and inference_mode.recorded(rec) == "vlash"
+            else None,
             "rtc_warmup": result.warmup if rtc else None,
             "cfg": result.cfg if cfg else None,
             "listening": result.listening,
