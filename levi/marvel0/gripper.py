@@ -1,4 +1,4 @@
-"""The gripper test: two buttons, open and close, through the gripper stack B's
+"""Finite open, close and opening-ratio goals through the gripper stack B's
 controller, and nothing else.
 
 One ``ros2 action send_goal`` to ``/robotiq/robotiq_gripper_controller/
@@ -30,6 +30,7 @@ the person who presses the button has attested that hands are clear. That
 attestation is a recorded click, not a proof.
 """
 
+import math
 import re
 
 from . import stack_units
@@ -140,21 +141,82 @@ def unit_name(now) -> str:
     return f"{stack_units.ONESHOT_PREFIX}gripper-{int(now)}"
 
 
-def execute(run, specs, action, now, unit_hook=None, cancelled=None) -> dict:
-    """Run one test (``action``: ``open`` or ``close``) and say what came of
+MISSING_RATIO = object()
+
+
+# Nominal URDF geometry, identical to src/lib/robot-studio/robotiq-2f85.ts
+# and franka_control/robot_server/fr3_robot_server/robotiq_gripper_server_ros2.py.
+# These link translations convert opening width, not installation safety limits.
+_PAD_X0 = 0.03060114
+_PAD_DX = 0.03152616 + 0.00563134
+_PAD_DZ = -0.00376347 + 0.04718515
+
+
+def _pad_x(theta):
+    return _PAD_X0 + _PAD_DX * math.cos(theta) - _PAD_DZ * math.sin(theta)
+
+
+def _opening_ratio_to_position(ratio):
+    opened = stack_units.GRIPPER_POSITIONS["open"]
+    closed = stack_units.GRIPPER_POSITIONS["close"]
+    if ratio == 0:
+        return closed
+    if ratio == 1:
+        return opened
+    closed_pad = _pad_x(closed)
+    width = ratio * 2 * (_pad_x(opened) - closed_pad)
+    low, high = opened, closed
+    # Same monotonic inverse as the existing frontend and shared server.
+    for _ in range(64):
+        middle = 0.5 * (low + high)
+        if 2 * (_pad_x(middle) - closed_pad) > width:
+            low = middle
+        else:
+            high = middle
+    return 0.5 * (low + high)
+
+
+def target_position(action, opening_ratio=MISSING_RATIO):
+    """Validate one bounded goal; opening ratio 0 is closed and 1 is open."""
+    if action == "position":
+        if (
+            type(opening_ratio) not in (int, float)
+            or not 0 <= opening_ratio <= 1
+            or not math.isfinite(opening_ratio)
+        ):
+            raise ValueError("position requires a finite opening_ratio in [0, 1]")
+        return _opening_ratio_to_position(opening_ratio)
+    if not isinstance(action, str) or action not in stack_units.GRIPPER_POSITIONS:
+        raise ValueError("unknown gripper action")
+    if opening_ratio is not MISSING_RATIO:
+        raise ValueError("opening_ratio is only valid for position")
+    return stack_units.GRIPPER_POSITIONS[action]
+
+
+def execute(
+    run,
+    specs,
+    action,
+    now,
+    unit_hook=None,
+    cancelled=None,
+    opening_ratio=MISSING_RATIO,
+) -> dict:
+    """Run one bounded goal (``open``, ``close``, or ``position``) and report
     it: ``{"action", "ok", "code", "reached", "stalled", "at"}``. ``run`` is the
     host's guarded runner; ``unit_hook(name)`` is told the one-shot unit's name
     before it starts, so that a stop of B can end the test (SIGINT, which
     cancels the goal); ``cancelled()`` is asked after that, and a test that was
     ended meanwhile is not started."""
-    if action not in stack_units.GRIPPER_POSITIONS:
-        raise ValueError(f"not a gripper action: {action!r}")
+    position = target_position(action, opening_ratio)
+    target = {"opening_ratio": opening_ratio} if action == "position" else {}
     unit = unit_name(now)
     if unit_hook is not None:
         unit_hook(unit)
     if cancelled is not None and cancelled():
         return {
             "action": action,
+            **target,
             "ok": False,
             "code": "cancelled",
             "reached": None,
@@ -163,10 +225,10 @@ def execute(run, specs, action, now, unit_hook=None, cancelled=None) -> dict:
         }
     argv = stack_units.oneshot_argv(
         unit,
-        specs.gripper_cmd(stack_units.GRIPPER_POSITIONS[action]),
+        specs.gripper_cmd(position),
         RUNTIME_MAX_S,
         f"FR3 gripper test ({action})",
     )
     code, text = run(argv, RUN_TIMEOUT_S)
     result = judge(code, text)
-    return {"action": action, **result, "at": round(now, 3)}
+    return {"action": action, **target, **result, "at": round(now, 3)}

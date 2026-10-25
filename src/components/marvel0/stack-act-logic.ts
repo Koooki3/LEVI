@@ -127,7 +127,7 @@ export interface MarkerAct {
 }
 
 export interface GripperLast {
-  action: "open" | "close" | null;
+  action: "open" | "close" | "position" | null;
   ok: boolean | null;
   /** The backend's word for how it ended (`reached`, `stalled`, ...). */
   code: string | null;
@@ -430,7 +430,11 @@ function markerAct(
 function gripperAct(raw: Rec | null, known: Known, real: boolean): GripperAct {
   const last = rec(raw?.last);
   const action =
-    last?.action === "open" || last?.action === "close" ? last.action : null;
+    last?.action === "open" ||
+    last?.action === "close" ||
+    last?.action === "position"
+      ? last.action
+      : null;
   return {
     running: raw?.state === "running",
     canRun: real && bool(raw?.can_run) === true,

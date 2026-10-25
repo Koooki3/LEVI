@@ -77,6 +77,43 @@
 .rs-toolbar {
   border-bottom: 1px solid var(--ds-separator);
 }
+.rs-control-hint,
+.rs-readiness {
+  padding: var(--ds-space-3) var(--ds-space-4);
+  border-bottom: 1px solid var(--ds-separator);
+  background: var(--ds-surface-2);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+}
+.rs-readiness {
+  margin-block: var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+}
+.rs-readiness ul {
+  margin: var(--ds-space-2) 0 0;
+  padding-left: var(--ds-space-4);
+  display: grid;
+  gap: var(--ds-space-2);
+}
+.rs-readiness button {
+  text-align: left;
+  cursor: pointer;
+}
+.rs-configuration-transfer textarea {
+  width: 100%;
+  min-height: 8rem;
+  resize: vertical;
+  margin-block: var(--ds-space-2);
+  font-family: var(--ds-font-mono);
+}
+[data-testid="studio-gripper-controls"] input[type="range"] {
+  width: 100%;
+  accent-color: var(--ds-text-primary);
+}
+[data-testid="studio-gripper-controls"] output {
+  font-variant-numeric: tabular-nums;
+}
 .rs-modes {
   display: flex;
   align-items: center;

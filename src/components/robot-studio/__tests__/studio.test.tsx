@@ -28,11 +28,13 @@ type TelemetryProps = ComponentProps<
 type ToolPanelProps = ComponentProps<typeof import("../tool-panel").default>;
 let toolPanel: ToolPanelProps;
 mock.module("../tool-panel", () => ({
+  TeleopDraftEditor: () => null,
   default: (props: ToolPanelProps) => {
     toolPanel = props;
     return null;
   },
 }));
+mock.module("../gripper-controls", () => ({ default: () => null }));
 let workspace: WorkspaceProps;
 let telemetry: TelemetryProps;
 type ManualProps = ComponentProps<typeof import("../manual-controls").default>;
@@ -237,6 +239,33 @@ function measured(
 }
 
 describe("measured initial alignment and follow/edit separation", () => {
+  test("importing a boundary outside the target immediately revokes drag eligibility", async () => {
+    const { host } = await renderEditing();
+    expect(manualPanel.canDrag).toBe(true);
+    await act(async () =>
+      manualPanel.onConfigurationDraft?.(
+        { min: [-1, -1, -1], max: [-0.5, 0.5, 0.5] },
+        { linearSpeedMps: 0.02, positionStepMm: 1 },
+      ),
+    );
+    expect(manualPanel.canDrag).toBe(false);
+    expect(host.textContent).toContain("outside");
+    expect((button(host, "Add pose") as HTMLButtonElement).disabled).toBe(true);
+  });
+  test("viewport toolbar enters editing from measured state without starting a session", async () => {
+    const { host } = await render(<RobotStudio />);
+    const edit = button(host, "Edit target") as HTMLButtonElement;
+    expect(edit.disabled).toBe(true);
+    await act(async () => telemetry.onMeasurement(measured(0.25)));
+    expect(edit.disabled).toBe(false);
+    await click(edit);
+    expect(telemetry.following).toBe(false);
+    expect(scene.mode).toBe("translate");
+    expect(manualPanel.canDrag).toBe(true);
+    await click(button(host, "Follow measured state"));
+    expect(scene.mode).toBe("view");
+    expect(manualPanel.canDrag).toBe(false);
+  });
   test("waits for feedback, aligns all joints and gripper, and freezes the last pose on expiry", async () => {
     const { host } = await render(<RobotStudio />);
     expect(telemetry.following).toBe(true);

@@ -280,7 +280,12 @@ function ServerLine({ act }: { act: ActView }) {
 function GripperLastLine({ last }: { last: GripperLast | null }) {
   const { t } = useLocale();
   if (!last) return <p className="rg-muted">{t("marvel0.ctl.gripper.none")}</p>;
-  const what = last.action === "close" ? "close" : "open";
+  const what =
+    last.action === "close"
+      ? "close"
+      : last.action === "open"
+        ? "open"
+        : "position";
   const outcome = gripperOutcome(last);
   const age =
     last.at === null ? null : Math.max(0, Date.now() / 1000 - last.at);

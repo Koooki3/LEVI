@@ -122,6 +122,7 @@ PHRASES = {
     "marker_adopt": "adopt marker",
     "gripper_open": "gripper open",
     "gripper_close": "gripper close",
+    "gripper_position": "gripper position",
 }
 REQUEST_ID = re.compile(r"[A-Za-z0-9._:-]{8,80}")
 ANSWERS_KEPT = 64

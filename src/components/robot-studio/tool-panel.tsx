@@ -36,6 +36,7 @@ export type ToolPanelProps = {
   teleopDraft: TeleopDraft;
   onTeleopDraft: (draft: TeleopDraft) => void;
   disabled?: boolean;
+  showTeleop?: boolean;
 };
 
 const AXES = ["X", "Y", "Z", "RX", "RY", "RZ"] as const;
@@ -151,7 +152,7 @@ function PoseDraftEditor({
   );
 }
 
-function TeleopDraftEditor({
+export function TeleopDraftEditor({
   draft,
   onDraft,
   disabled,
@@ -229,6 +230,7 @@ export function ToolPanel({
   teleopDraft,
   onTeleopDraft,
   disabled = false,
+  showTeleop = true,
 }: ToolPanelProps) {
   const { t } = useLocale();
   const id = useId();
@@ -463,11 +465,13 @@ export function ToolPanel({
           onApply={(tcp) => onDraft({ ...draft, tcp })}
         />
       </details>
-      <TeleopDraftEditor
-        draft={teleopDraft}
-        onDraft={onTeleopDraft}
-        disabled={disabled}
-      />
+      {showTeleop && (
+        <TeleopDraftEditor
+          draft={teleopDraft}
+          onDraft={onTeleopDraft}
+          disabled={disabled}
+        />
+      )}
     </section>
   );
 }

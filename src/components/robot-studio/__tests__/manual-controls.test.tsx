@@ -15,6 +15,7 @@ import ManualControls, { MANUAL_EXTRA_LIMIT_KEYS } from "../manual-controls";
 import type { ManualAnchor, ManualApi, ManualView } from "../manual-api";
 import type { ManualDragController } from "../manual-session";
 import { EMPTY_TELEOP_DRAFT } from "../tool-draft";
+import { exportManualConfiguration } from "../manual-config";
 
 setupDom();
 const text = (key: string) =>
@@ -124,6 +125,87 @@ const base = {
 };
 
 describe("manual controls require a person and preserve stop gates", () => {
+  test("missing-limit links reveal the folded input without starting a session", async () => {
+    const f = fakeApi();
+    const { host } = await render(
+      <ManualControls
+        {...base}
+        api={f.api}
+        onSessionAnchor={() => {}}
+        onController={() => {}}
+      />,
+    );
+    await waitFor(() => host.querySelector('[data-phase="ready"]'));
+    const link = button(host, "period_s");
+    expect(link).toBeDefined();
+    await click(link);
+    expect(
+      host.querySelector<HTMLDetailsElement>("#rs-manual-limits")?.open,
+    ).toBe(true);
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(
+      text("period_s"),
+    );
+    expect(f.calls).toEqual(["GET"]);
+  });
+  test("import fills numeric drafts and shared inputs without restoring motion permission", async () => {
+    const f = fakeApi();
+    const imported: unknown[] = [];
+    const { host } = await render(
+      <ManualControls
+        {...base}
+        api={f.api}
+        onConfigurationDraft={(box, teleop) => imported.push({ box, teleop })}
+        onSessionAnchor={() => {}}
+        onController={() => {}}
+      />,
+    );
+    await waitFor(() => host.querySelector('[data-phase="ready"]'));
+    const limits = {
+      box_min_m: [-1, -1, -1] as [number, number, number],
+      box_max_m: [1, 1, 1] as [number, number, number],
+      max_delta_m: 0.1,
+      max_step_m: 0.001,
+      max_velocity_m_s: 0.02,
+      period_s: 0.02,
+      max_reading_age_s: 0.3,
+      max_anchor_age_s: 2,
+      deadman_timeout_s: 0.2,
+      target_timeout_s: 0.2,
+      max_orientation_drift_rad: 0.02,
+      quaternion_norm_tolerance: 0.001,
+      max_settle_age_s: 0.3,
+    };
+    const content = exportManualConfiguration(limits, {
+      settle_window_s: 0.2,
+      settle_position_m: 0.001,
+      settle_angle_rad: 0.001,
+      gripper_settle_rad: 0.001,
+    });
+    const textarea = host.querySelector("textarea")!;
+    await act(async () => {
+      textarea.focus();
+      Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )!.set!.call(textarea, content);
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      textarea.dispatchEvent(
+        new KeyboardEvent("keyup", { key: "e", bubbles: true }),
+      );
+    });
+    const importButton = Array.from(host.querySelectorAll("button")).find(
+      (b) => b.textContent === en["robotStudio.controls.importConfiguration"],
+    );
+    await click(importButton!);
+    expect(imported).toEqual([
+      {
+        box: { min: [-1, -1, -1], max: [1, 1, 1] },
+        teleop: { linearSpeedMps: 0.02, positionStepMm: 1 },
+      },
+    ]);
+    expect(f.calls).toEqual(["GET"]);
+    expect(host.querySelector('[data-phase="ready"]')).not.toBeNull();
+  });
   test("mount reads only GET and presents stop_unproven before missing configuration", async () => {
     const f = fakeApi(true);
     const { host } = await render(

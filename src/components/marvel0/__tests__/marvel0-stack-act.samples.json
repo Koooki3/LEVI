@@ -392,7 +392,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -724,6 +725,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -1126,7 +1128,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -1440,6 +1443,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -1842,7 +1846,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -2136,6 +2141,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -2542,7 +2548,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -2858,6 +2865,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -3265,7 +3273,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -3557,6 +3566,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -3971,7 +3981,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -4303,6 +4314,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -4717,7 +4729,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -5035,6 +5048,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -5449,7 +5463,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -5774,6 +5789,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -6188,7 +6204,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -6513,6 +6530,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -6928,7 +6946,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -7306,6 +7325,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -7726,7 +7746,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -8117,6 +8138,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -8537,7 +8559,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -8955,6 +8978,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -9373,7 +9397,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -9698,6 +9723,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -10111,7 +10137,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -10432,6 +10459,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -10841,7 +10869,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -11230,6 +11259,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -11637,7 +11667,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -11995,6 +12026,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -12400,7 +12432,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -12799,6 +12832,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -13206,7 +13240,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -13583,6 +13618,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -13997,7 +14033,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -14400,6 +14437,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -14814,7 +14852,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -15217,6 +15256,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -15633,7 +15673,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -16101,6 +16142,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -16521,7 +16563,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -16975,6 +17018,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -17384,7 +17428,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -17798,6 +17843,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -18200,7 +18246,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -18590,6 +18637,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -18992,7 +19040,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -19407,6 +19456,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -19814,7 +19864,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -20200,6 +20251,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -20614,7 +20666,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -21017,6 +21070,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -21431,7 +21485,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -21852,6 +21907,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -22263,7 +22319,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -22647,6 +22704,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -23063,7 +23121,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -23447,6 +23506,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -23873,7 +23933,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -24257,6 +24318,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -24677,7 +24739,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -25131,6 +25194,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -25549,7 +25613,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -25938,6 +26003,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -26347,7 +26413,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -26673,6 +26740,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -27084,7 +27152,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -27432,6 +27501,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -27858,7 +27928,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -28269,6 +28340,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -28689,7 +28761,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -29103,6 +29176,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -29512,7 +29586,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -29826,6 +29901,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -30233,7 +30309,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -30564,6 +30641,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -30974,7 +31052,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -31274,6 +31353,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -31684,7 +31764,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -31984,6 +32065,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -32393,7 +32475,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -32693,6 +32776,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -33112,7 +33196,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -33554,6 +33639,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },
@@ -33973,7 +34059,8 @@
         "marker_touch": "set marker",
         "marker_adopt": "adopt marker",
         "gripper_open": "gripper open",
-        "gripper_close": "gripper close"
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
       },
       "act": {
         "schema": "levi.marvel0.stack_act.v1",
@@ -34199,6 +34286,7 @@
           "marker_clear": "clear marker",
           "gripper_open": "gripper open",
           "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
           "sequence_stop": "stop whole stack",
           "client_override": "stop robot server with client connected"
         },

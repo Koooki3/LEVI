@@ -530,3 +530,61 @@ def test_no_answer_names_a_path(client, m):
 def test_the_doc_of_every_route_says_what_it_does():
     for route in stack_act_api.router.routes:
         assert (route.endpoint.__doc__ or "").strip(), route.path
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"action": "position"},
+        {"action": "position", "opening_ratio": None},
+        {"action": "position", "opening_ratio": True},
+        {"action": "position", "opening_ratio": "0.5"},
+        {"action": "position", "opening_ratio": -0.1},
+        {"action": "position", "opening_ratio": 1.1},
+        {"action": "open", "opening_ratio": None},
+        {"action": "close", "opening_ratio": 0.5},
+    ],
+)
+def test_gripper_route_refuses_invalid_position_contract(client, m, body):
+    answer = client.post(
+        f"{BASE}/b/gripper", json={**body_of(m, f"{BASE}/b/gripper"), **body}
+    )
+    assert answer.status_code == 422
+
+
+def test_gripper_position_route_runs_once_and_reports_ratio(client, m):
+    m.start_a()
+    m.start_b()
+    body = {
+        **body_of(m, f"{BASE}/b/gripper"),
+        "action": "position",
+        "confirm": "gripper position",
+        "opening_ratio": 0.5,
+    }
+    answer = client.post(f"{BASE}/b/gripper", json=body)
+    assert answer.status_code == 202
+    assert answer.json() == {
+        "done": "gripper_test_started",
+        "action": "position",
+        "opening_ratio": 0.5,
+    }
+    assert (
+        client.get(BASE).json()["act"]["gripper_test"]["last"]["opening_ratio"] == 0.5
+    )
+    assert client.post(f"{BASE}/b/gripper", json=body).json()["repeated"] is True
+
+
+@pytest.mark.parametrize("ratio", [float("nan"), float("inf"), -float("inf")])
+def test_gripper_api_model_refuses_nonfinite_ratio(ratio):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        stack_act_api.GripperBody.model_validate(
+            {
+                "request_id": "grip-nonfinite-0001",
+                "action": "position",
+                "opening_ratio": ratio,
+                "confirm": "gripper position",
+                "attest": {"hands_clear": True},
+            }
+        )

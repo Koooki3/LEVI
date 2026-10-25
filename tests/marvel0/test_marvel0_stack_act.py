@@ -26,7 +26,7 @@ from stack_act_machine import (
 from test_marvel0_deploy import forbid_real_machine  # noqa: F401 - the guard
 from test_marvel0_stack import _sock
 
-from levi.marvel0 import net, record, stack, stack_act, stack_units
+from levi.marvel0 import gripper, net, record, stack, stack_act, stack_units
 
 
 @pytest.fixture
@@ -1727,3 +1727,85 @@ def test_a_failing_deferred_call_does_not_fail_the_request_that_asked_for_it(m, 
             {"request_id": "req-deferred-01"}, "preflight_a", act, phrase=False
         ) == {"done": "x"}
     assert "deferred call" in caplog.text
+
+
+@pytest.mark.parametrize("ratio", [0, 0.25, 1])
+def test_position_gripper_uses_calibrated_endpoints_and_replays_once(m, ratio):
+    m.start_a()
+    m.start_b()
+    m.oneshots.clear()
+    body = {
+        **m.body("gripper_position", "grip-position-0001"),
+        "action": "position",
+        "opening_ratio": ratio,
+        "attest": {"hands_clear": True},
+    }
+    answer = m.act.gripper(body)
+    assert answer == {
+        "done": "gripper_test_started",
+        "action": "position",
+        "opening_ratio": ratio,
+    }
+    position = gripper.target_position("position", ratio)
+    assert f"position: {position}, max_effort: 0.0" in m.oneshots[0][-1]
+    assert m.doc()["gripper_test"]["last"]["opening_ratio"] == ratio
+    assert m.act.gripper(body)["repeated"] is True
+    assert len(m.oneshots) == 1
+    assert refused(m.act.gripper, {**body, "opening_ratio": 0.6}) == "request_id_used"
+
+
+@pytest.mark.parametrize(
+    "ratio", [None, True, False, "0.5", -0.1, 1.1, float("nan"), float("inf")]
+)
+def test_direct_position_gripper_refuses_invalid_ratio_without_dispatch(m, ratio):
+    body = {
+        **m.body("gripper_position", "grip-invalid-0001"),
+        "action": "position",
+        "opening_ratio": ratio,
+    }
+    assert refused(m.act.gripper, body) == "attest_invalid"
+    assert not m.oneshots
+
+
+def test_direct_gripper_requires_ratio_only_for_position(m):
+    for body in (
+        {"action": "position"},
+        {"action": "open", "opening_ratio": None},
+        {"action": "close", "opening_ratio": 0.5},
+        {"action": []},
+    ):
+        assert refused(m.act.gripper, body) == "attest_invalid"
+    assert not m.oneshots
+
+
+@pytest.mark.parametrize("name", sorted(G_BREAKS))
+def test_position_gripper_retains_each_existing_gate(m, name):
+    m.start_a()
+    m.start_b()
+    m.oneshots.clear()
+    G_BREAKS[name][0](m)
+    body = {
+        **m.body("gripper_position", "grip-gated-0001"),
+        "action": "position",
+        "opening_ratio": 0.5,
+        "attest": {"hands_clear": True},
+    }
+    assert refused(m.act.gripper, body) == G_BREAKS[name][1]
+    assert not m.oneshots
+
+
+def test_position_gripper_keeps_hands_clear_and_phrase_checks(m):
+    m.start_a()
+    m.start_b()
+    m.oneshots.clear()
+    body = {
+        **m.body("gripper_position", "grip-attest-0001"),
+        "action": "position",
+        "opening_ratio": 0.5,
+    }
+    assert refused(m.act.gripper, body) == "attest_missing"
+    assert (
+        refused(m.act.gripper, {**body, "confirm": "gripper open"})
+        == "confirm_required"
+    )
+    assert not m.oneshots

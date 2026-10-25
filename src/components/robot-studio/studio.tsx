@@ -38,7 +38,9 @@ import {
 } from "./preview-state";
 import type { StudioMode } from "./scene";
 import type { RobotStudioMeasurement } from "@/types/robotStudio";
-import ToolPanel from "./tool-panel";
+import ToolPanel, { TeleopDraftEditor } from "./tool-panel";
+import GripperControls from "./gripper-controls";
+import { revealManualConfiguration } from "./manual-config";
 import {
   DEFAULT_TOOL_DRAFT,
   isValidPreviewPose,
@@ -354,7 +356,7 @@ export default function RobotStudio() {
     next[index] = value;
     acceptJointPreview(next);
   };
-  const useMeasuredPreview = (measured: RobotStudioMeasurement) => {
+  const editMeasuredPreview = (measured: RobotStudioMeasurement) => {
     if (!freshMeasuredRef.current) return;
     const accepted = acceptJointPreview(
       [...measured.joints_rad],
@@ -405,6 +407,18 @@ export default function RobotStudio() {
     !dirtyFields &&
     !dragging &&
     waypoints.length < MAX_WAYPOINTS;
+  const changeWorkspace = (box: WorkspaceBox | null) => {
+    cancelPending();
+    setWorkspaceBox(box);
+    if (following) {
+      setSolve({
+        kind:
+          box && !pointInWorkspace(box, target.position) ? "outside" : "ready",
+        positionError: 0,
+        orientationError: 0,
+      });
+    } else solveTarget(target, box);
+  };
 
   return (
     <>
@@ -434,12 +448,41 @@ export default function RobotStudio() {
         onEnabledChange={changeReading}
         following={following}
         onFollowMeasurement={followMeasurement}
-        onUseMeasurement={useMeasuredPreview}
+        onUseMeasurement={editMeasuredPreview}
         canUsePreview={ready && !dragging}
       />
       <div className="rs-layout">
         <section className="rs-stage" aria-label={t("robotStudio.viewport")}>
           <div className="rs-toolbar">
+            <div
+              id="rs-editor-controls"
+              className="rs-modes"
+              role="group"
+              aria-label={t("robotStudio.controls.mode")}
+            >
+              <Button
+                size="sm"
+                aria-pressed={following}
+                onClick={() => followMeasurement(freshMeasuredRef.current)}
+              >
+                {t("robotStudio.controls.follow")}
+              </Button>
+              <Button
+                id="rs-edit-target"
+                size="sm"
+                aria-pressed={!following}
+                disabled={!ready || !measurement || dragging}
+                onClick={() => {
+                  const fresh = freshMeasuredRef.current;
+                  if (fresh) {
+                    editMeasuredPreview(fresh);
+                    setMode("translate");
+                  }
+                }}
+              >
+                {t("robotStudio.controls.edit")}
+              </Button>
+            </div>
             <div
               className="rs-modes"
               role="group"
@@ -486,6 +529,22 @@ export default function RobotStudio() {
               </Select>
             </label>
           </div>
+          {following && (
+            <div className="rs-control-hint" role="status">
+              <span>{t("robotStudio.controls.followHint")}</span>
+              {solve.kind === "outside" && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() =>
+                    revealManualConfiguration("rs-workspace-configuration")
+                  }
+                >
+                  {t("robotStudio.controls.outside")}
+                </Button>
+              )}
+            </div>
+          )}
           <p className="rs-meta" data-testid="tool-mount-status">
             {t(
               toolDraft.mount === null
@@ -601,6 +660,9 @@ export default function RobotStudio() {
           </p>
         </section>
         <aside className="rs-inspector" aria-label={t("robotStudio.target")}>
+          <GripperControls
+            measuredOpeningRatio={measuredOpeningRatio(measurement)}
+          />
           <section className="rs-panel-section">
             <h2>
               {t(
@@ -769,35 +831,38 @@ export default function RobotStudio() {
               teleopDraft={teleopDraft}
               onTeleopDraft={setTeleopDraft}
               disabled={!editable || dragging}
+              showTeleop={false}
             />
           </div>
-          <WorkspacePanel
-            value={workspaceBox}
-            targetPosition={waitingForPose ? null : target.position}
-            onChange={(box) => {
-              cancelPending();
-              setWorkspaceBox(box);
-              if (following) {
-                setSolve({
-                  kind:
-                    box && !pointInWorkspace(box, target.position)
-                      ? "outside"
-                      : "ready",
-                  positionError: 0,
-                  orientationError: 0,
-                });
-              } else solveTarget(target, box);
-            }}
-            disabled={!ready || dragging}
-          />
+          <section id="rs-teleop-configuration" className="rs-panel-section">
+            <h2>{t("robotStudio.controls.motionDraft")}</h2>
+            <TeleopDraftEditor
+              draft={teleopDraft}
+              onDraft={setTeleopDraft}
+              disabled={!ready || dragging}
+            />
+          </section>
+          <div id="rs-workspace-configuration">
+            <WorkspacePanel
+              value={workspaceBox}
+              targetPosition={waitingForPose ? null : target.position}
+              onChange={changeWorkspace}
+              disabled={!ready || dragging}
+            />
+          </div>
 
           <ParameterPanel />
           <ManualControls
+            independentGripper
             workspaceBox={workspaceBox}
             teleopDraft={teleopDraft}
             targetPosition={target.position}
             canDrag={editable && mode === "translate" && solve.kind === "ready"}
             onSessionAnchor={receiveManualAnchor}
+            onConfigurationDraft={(box, teleop) => {
+              changeWorkspace(box);
+              setTeleopDraft((old) => ({ ...old, ...teleop }));
+            }}
             onController={receiveManualController}
           />
           <section className="rs-panel-section">

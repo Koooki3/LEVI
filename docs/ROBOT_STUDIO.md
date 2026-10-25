@@ -6,7 +6,7 @@ Open **FR3 interactive preview** from the **FR3 3D** link of the top bar, from t
 
 ## Using the preview
 
-1. Wait for the local model to load. Select **Translate** or **Rotate** and drag an axis arrow or rotation ring. Drag the background to orbit and scroll to zoom. **View** hides the target handles.
+1. Wait for fresh measured feedback and the local model. In the viewport toolbar choose **Edit target**, then **Translate** or **Rotate** and drag an axis arrow or rotation ring. **Follow measured state** returns to the measured view. Drag the background to orbit and scroll to zoom. **View** hides the target handles.
 2. Choose base or flange axes for the handles. Numeric position fields always use the base frame in millimeters; orientation fields use XYZ Euler angles in degrees. Internally the solver uses meters and `xyzw` quaternions.
 3. Edit fields and choose **Apply target** for keyboard operation. Expand **Joints and limits** to explore individual joint angles. **Esc** during a drag restores the pose at its start; losing window focus also cancels a drag. **Restore initial preview** restores an illustrative model pose only.
 4. An unsolved target remains visible while the model keeps its last valid pose. The page reports the solver residual and prevents saving that target. A numerical solver can fail even for a reachable target near limits; it is not a reachability proof.
@@ -34,7 +34,7 @@ A later integration belongs behind a separately reviewed backend adapter, not in
 - Record camera observations, measured state, the post-limit action actually sent, gripper conventions, acquisition timestamps and control source. Keep the proposed preview target distinct from the command and the measured state.
 - Preserve the existing human-only authorization for robot motion and collection, and use the coordinated service/driver ownership protocol.
 
-The page contains no live transport, robot IP setting, robot command fetch or start-collection action. Software review and offline tests are separate from on-hardware acceptance.
+Preview editing and export send no motion. Explicit manual translation and the separate real-gripper controls below use guarded backend transports. Software review and offline tests are separate from on-hardware acceptance.
 
 ## Robotiq 2F-85 preview
 
@@ -75,7 +75,7 @@ An optional file-based read-only producer uses this closed schema (example value
   "sequence": 1,
   "sampled_at_epoch": 1800000000.0,
   "joints_rad": [0.0, -0.785398, 0.0, -2.356194, 0.0, 1.570796, 0.785398],
-  "gripper": {"knuckle_angle_rad": 0.4},
+  "gripper": { "knuckle_angle_rad": 0.4 },
   "reported_ee": null
 }
 ```
@@ -88,14 +88,15 @@ Tool-aware export uses `levi_robot_preview_v2`. Each pose snapshots its continuo
 
 Tool calibration and demonstration collection remain separate from this display and manual-control session.
 
-
 ## Supervised manual translation and gripper control
 
 The real adapter is opt-in through `[manual] enabled = true`. The default test host remains disabled, and synthetic factories exist only for offline tests. The UI requires a one-time challenge, the phrase `start real translation session`, and explicit operator attestations. No browser pose, preview hash or telemetry read grants motion permission.
 
 The session starts from fresh server feedback and owns the same arm lock as hosted evaluation. Dragging applies base-frame translation relative to that measured anchor; orientation stays fixed. The visual flange comes from measured joints and FK, while the backend applies the same translation delta to Desk EE. Rotation remains local preview only. Workspace, displacement, per-step and speed limits, feedback age, anchor age, heartbeat and target expiry are explicit required values; they have no inferred physical defaults. Four additional explicit stop thresholds are `settle_window_s`, `settle_position_m`, `settle_angle_rad`, and `gripper_settle_rad`.
 
-The independent real-gripper control sends one finite `opening_ratio` target (0 closed, 1 open) per hold. Subsequent held ticks send only heartbeat. The local preview slider does not drive hardware. A target has its own finite lifetime; release, blur, hidden page, cancellation or missing heartbeat closes admission and requests cancellation. No reverse goal queue is retained.
+The viewport inspector starts with **Real gripper control**, independent of the translation session. Click Open/Close once, or adjust the target slider and release it to send one finite goal through stack B. The click/release acknowledges the inline hands-clear notice. The goal continues after release until its result or the existing timeout/cancellation; pointer cancellation, Escape or blur before release sends nothing. Fresh measured gripper feedback, B readiness, a free arm lock, no hosted run or client and no other operation remain required. Network uncertainty disables further sends without automatic retry. Measured opening and target opening are displayed separately. The older **Robotiq 2F-85 preview** slider still changes only the local model.
+
+`POST /api/levi/marvel0/stack/b/gripper` retains its human-only guard. Existing open/close bodies are unchanged. A position request uses `action: "position"`, `opening_ratio` in `[0,1]`, `confirm: "gripper position"` and `attest: {"hands_clear": true}` plus a unique `request_id`. The ratio is nominal jaw-opening width (0 closed, 1 open), converted with the same nonlinear geometry as the model; no mounting calibration is inferred. The same finite ROS action, exclusivity, result checks, timeout and cancellation apply.
 
 The v1 server independently enforces identity, sequence, expiry and bounds, serializes legacy mutations against manual ownership, and watches freshness without browser participation. Closing sends a measured hold pose and cancels the exact gripper action, including a goal accepted late. Neither HTTP acknowledgement nor cancellation acknowledgement is physical stop evidence: release of ownership requires subsequent fresh arm/gripper feedback within the configured settle window plus a terminal action result. Unknown delivery or stop retains ownership. The end body cannot provide this evidence.
 
@@ -112,3 +113,9 @@ The optional limit proposal starts empty. Joint torque and acceleration use comp
 “Export proposal” downloads `levi.robot_studio.parameter_proposal.v1` with units in the keys, unknown groups as null, and `hardware_execution`, `hardware_values_read` and `approved_limits` all false. Every capability has `can_apply: false`. It is separate from the pose preview and does not change the manual-session configuration, its deadman, or its stop gate. Controller updates need validated ranges, authoritative acceptance/readback and a separately reviewed adapter; gripper force/speed changes require a reviewed startup-configuration workflow.
 
 Manual-session counters appear as a compact four-cell grid. Accepted targets, local sends, acknowledgments and synthetic settled evidence retain their separate meanings and display unknown when absent.
+
+## Translation configuration workflow
+
+The viewport toolbar exposes follow/edit directly. The translation card lists missing configuration with links that open and focus the relevant input. Speed/step drafts remain accessible while following feedback. Workspace limits and all session/stop thresholds stay empty until explicitly provided. An out-of-bound measured flange stays visible and points to workspace configuration instead of silently enabling editing.
+
+**Import / export manual configuration** uses `levi.robot-studio.manual-config.v1` JSON with complete `limits` and `stop_limits`. Paste previously reviewed numeric settings and choose Import into draft; exporting downloads the complete configuration. Import never starts a session, restores attestations or supplies safe defaults. The operator still reviews the draft and explicitly starts each real translation session. Unsupported rotation, physical calibration and online dynamics writes remain unchanged.

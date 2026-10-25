@@ -10,7 +10,8 @@
   runs), ``POST .../b/probe`` (only whether a gripper stack runs: allowed with
   A up, touches no FCI port) and ``POST .../c/preflight`` (QoS, gripper
   controllers, end-effector frame): read-only checks that a start needs;
-- ``POST .../b/gripper`` with ``action`` ``open`` | ``close``: the gripper test;
+- ``POST .../b/gripper`` with ``action`` ``open`` | ``close`` | ``position``:
+  one finite gripper goal (``position`` also requires ``opening_ratio``);
 - ``POST .../sequence/start`` and ``.../sequence/cancel``: the guided start of
   M, the marker and A; with ``through = "c"`` it goes on by itself to B and C
   (one confirm window up front carries every confirmation; ``pause_before_b`` /
@@ -43,7 +44,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from . import stack, stack_act, stack_api
+from . import gripper, stack, stack_act, stack_api
 from .deploy_api import person_only
 from .errors import fail
 
@@ -120,9 +121,19 @@ class MarkerBody(Closed):
 
 class GripperBody(Closed):
     request_id: str
-    action: Literal["open", "close"]
+    action: Literal["open", "close", "position"]
+    opening_ratio: float | None = None
     confirm: str
     attest: dict[str, bool] = {}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _bounded_target(cls, data):
+        if isinstance(data, dict):
+            gripper.target_position(
+                data.get("action"), data.get("opening_ratio", gripper.MISSING_RATIO)
+            )
+        return data
 
 
 def _answer(call, response: Response, accepted=202):
@@ -206,8 +217,13 @@ def preflight_c(body: CheckBody, response: Response):
 
 @router.post("/stack/b/gripper", dependencies=[Depends(person_only)])
 def gripper_test(body: GripperBody, response: Response):
-    """Open or close the gripper once, through B's controller (person only)."""
-    return _answer(lambda: act().gripper(body.model_dump()), response)
+    """Send one finite open, close or opening-ratio goal through B (person only)."""
+    payload = body.model_dump(
+        exclude={"opening_ratio"}
+        if "opening_ratio" not in body.model_fields_set
+        else set()
+    )
+    return _answer(lambda: act().gripper(payload), response)
 
 
 @router.post("/stack/sequence/start", dependencies=[Depends(person_only)])

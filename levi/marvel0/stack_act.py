@@ -70,6 +70,7 @@ from levi.live import gpumgr
 from levi.setup import probes
 
 from . import control_site, deploy, gripper, net, record, site, stack, stack_units
+from .gripper import MISSING_RATIO
 
 LOG = logging.getLogger(__name__)
 SCHEMA = "levi.marvel0.stack_act.v1"
@@ -235,6 +236,7 @@ PHRASE_NAMES = (
     "marker_clear",
     "gripper_open",
     "gripper_close",
+    "gripper_position",
     "sequence_stop",
 )
 # Why a guided start (or stop) ended, besides the codes of a refusal (``TEXT``).
@@ -3326,8 +3328,12 @@ class Act:
     # -- the gripper test ---------------------------------------------------------
     def gripper(self, body) -> dict:
         action = body.get("action")
-        if action not in stack_units.GRIPPER_POSITIONS:
-            raise ActRefuse("attest_invalid", keys=str(action))
+        try:
+            gripper.target_position(
+                action, body.get("opening_ratio", gripper.MISSING_RATIO)
+            )
+        except ValueError:
+            raise ActRefuse("attest_invalid", keys="action/opening_ratio") from None
         self.require_enabled()
         return self._write(
             body, f"gripper_{action}", lambda r: self._do_gripper(action, body, r)
@@ -3340,10 +3346,20 @@ class Act:
             raise ActRefuse(blockers[0]["code"], **blockers[0]["params"])
         self._attested("gripper", body)
         op = self._begin("gripper", "b")
-        self._spawn(op, lambda: self._gripper_worker(op, ctx, action))
-        return {"done": "gripper_test_started", "action": action}
+        self._spawn(
+            op,
+            lambda: self._gripper_worker(
+                op, ctx, action, body.get("opening_ratio", gripper.MISSING_RATIO)
+            ),
+        )
+        target = (
+            {"opening_ratio": body["opening_ratio"]} if action == "position" else {}
+        )
+        return {"done": "gripper_test_started", "action": action, **target}
 
-    def _gripper_worker(self, op, ctx: Ctx, action) -> None:
+    def _gripper_worker(
+        self, op, ctx: Ctx, action, opening_ratio=MISSING_RATIO
+    ) -> None:
         def told(unit):
             op["_unit"] = unit  # (a stop of B ends the test through its unit)
 
@@ -3354,6 +3370,7 @@ class Act:
             self.now(),
             unit_hook=told,
             cancelled=lambda: op["_superseded"],
+            opening_ratio=opening_ratio,
         )
         if op["_superseded"]:
             # Stopped by the stop of B: SIGINT cancelled the goal, or nothing

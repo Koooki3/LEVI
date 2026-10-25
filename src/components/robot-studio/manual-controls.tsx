@@ -5,6 +5,11 @@ import { useLocale } from "@/components/levi-locale";
 import { isValidWorkspaceBox, type WorkspaceBox } from "./workspace-draft";
 import type { TeleopDraft } from "./tool-draft";
 import {
+  exportManualConfiguration,
+  parseManualConfiguration,
+  revealManualConfiguration,
+} from "./manual-config";
+import {
   manualApi,
   type ManualAnchor,
   type ManualApi,
@@ -27,6 +32,11 @@ export type ManualControlsProps = {
   teleopDraft: TeleopDraft;
   targetPosition: ManualPoint;
   canDrag: boolean;
+  independentGripper?: boolean;
+  onConfigurationDraft?: (
+    box: WorkspaceBox,
+    teleop: Pick<TeleopDraft, "linearSpeedMps" | "positionStepMm">,
+  ) => void;
   onSessionAnchor: (anchor: ManualAnchor | null) => void;
   onController: (controller: ManualDragController | null) => void;
   api?: ManualApi;
@@ -93,6 +103,8 @@ export default function ManualControls({
   teleopDraft,
   targetPosition,
   canDrag,
+  independentGripper = false,
+  onConfigurationDraft,
   onSessionAnchor,
   onController,
   api = manualApi,
@@ -102,6 +114,8 @@ export default function ManualControls({
   const [stopFields, setStopFields] = useState<Record<string, string>>({});
   const [gripperRatio, setGripperRatio] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [configurationText, setConfigurationText] = useState("");
+  const [configurationError, setConfigurationError] = useState(false);
   const [attest, setAttest] = useState<ManualAttest>({
     estop: false,
     scene_reset: false,
@@ -228,6 +242,59 @@ export default function ManualControls({
     limits !== null &&
     canDrag &&
     (!real || validStop);
+  const missing: { label: string; target: string }[] = [];
+  if (!canDrag)
+    missing.push({
+      label: t("robotStudio.controls.editFirst"),
+      target: "rs-edit-target",
+    });
+  if (!isValidWorkspaceBox(workspaceBox))
+    missing.push({
+      label: t("robotStudio.manual.sharedBox"),
+      target: "rs-workspace-configuration",
+    });
+  if (
+    !(
+      typeof teleopDraft.linearSpeedMps === "number" &&
+      teleopDraft.linearSpeedMps > 0
+    )
+  )
+    missing.push({
+      label: t("robotStudio.manual.sharedVelocity"),
+      target: "rs-teleop-configuration",
+    });
+  if (
+    !(
+      typeof teleopDraft.positionStepMm === "number" &&
+      teleopDraft.positionStepMm > 0
+    )
+  )
+    missing.push({
+      label: t("robotStudio.manual.sharedStep"),
+      target: "rs-teleop-configuration",
+    });
+  for (const key of MANUAL_EXTRA_LIMIT_KEYS) {
+    const value = Number(fields[key]);
+    if (
+      !fields[key].trim() ||
+      !Number.isFinite(value) ||
+      value <= 0 ||
+      (key === "quaternion_norm_tolerance" && value >= 1) ||
+      (key === "max_orientation_drift_rad" && value > Math.PI)
+    )
+      missing.push({
+        label: t("robotStudio.manual." + key),
+        target: "rs-manual-" + key,
+      });
+  }
+  if (real)
+    for (const key of MANUAL_STOP_LIMIT_KEYS) {
+      if (!Number.isFinite(stopLimits[key]) || stopLimits[key] <= 0)
+        missing.push({
+          label: t("robotStudio.manual." + key),
+          target: "rs-manual-" + key,
+        });
+    }
   const allAttested = attest.estop && attest.scene_reset && attest.area_clear;
   const evidence = snapshot.view?.stop_evidence;
   const stopReason =
@@ -271,20 +338,135 @@ export default function ManualControls({
       <p className="rs-manual-status" role="status" aria-live="polite">
         {t("robotStudio.manual.phase." + snapshot.phase)}
       </p>
-      <h3>{t("robotStudio.manual.counters")}</h3>
-      <dl className="rs-manual-facts rs-manual-counters">
-        {(["accepted", "sent", "acknowledged", "settled"] as const).map(
-          (key) => (
-            <div key={key} data-counter={key}>
-              <dt>{t("robotStudio.manual." + key)}</dt>
-              <dd>{counterValue(key)}</dd>
-            </div>
-          ),
+      {missing.length > 0 && (
+        <div
+          className="rs-readiness"
+          data-testid="manual-missing-configuration"
+        >
+          <h3>{t("robotStudio.controls.missing")}</h3>
+          <ul>
+            {missing.map(({ label, target }) => (
+              <li key={target + label}>
+                <button
+                  type="button"
+                  className="rs-link"
+                  onClick={() => revealManualConfiguration(target)}
+                >
+                  {label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <details className="rs-configuration-transfer">
+        <summary>{t("robotStudio.controls.configuration")}</summary>
+        <p className="rs-meta">{t("robotStudio.controls.configurationHint")}</p>
+        <label>
+          <span>{t("robotStudio.controls.configurationJson")}</span>
+          <textarea
+            className="ds-input ds-focus"
+            rows={5}
+            value={configurationText}
+            disabled={locked}
+            maxLength={16384}
+            onChange={(event) => {
+              setConfigurationText(event.target.value);
+              setConfigurationError(false);
+            }}
+          />
+        </label>
+        <div className="rs-actions">
+          <Button
+            size="sm"
+            disabled={
+              locked || !onConfigurationDraft || !configurationText.trim()
+            }
+            onClick={() => {
+              if (locked || !onConfigurationDraft) return;
+              const config = parseManualConfiguration(configurationText);
+              if (!config) {
+                setConfigurationError(true);
+                return;
+              }
+              const next = emptyFields();
+              for (const key of MANUAL_EXTRA_LIMIT_KEYS)
+                next[key] = String(config.limits[key]);
+              setFields(next);
+              setStopFields(
+                Object.fromEntries(
+                  MANUAL_STOP_LIMIT_KEYS.map((key) => [
+                    key,
+                    String(config.stop_limits[key]),
+                  ]),
+                ),
+              );
+              setAttest({
+                estop: false,
+                scene_reset: false,
+                area_clear: false,
+              });
+              setConfirm("");
+              setConfigurationError(false);
+              onConfigurationDraft(
+                {
+                  min: [...config.limits.box_min_m],
+                  max: [...config.limits.box_max_m],
+                },
+                {
+                  linearSpeedMps: config.limits.max_velocity_m_s,
+                  positionStepMm: config.limits.max_step_m * 1000,
+                },
+              );
+            }}
+          >
+            {t("robotStudio.controls.importConfiguration")}
+          </Button>
+          <Button
+            size="sm"
+            disabled={locked || !limits || !validStop}
+            onClick={() => {
+              if (locked || !limits || !validStop) return;
+              const content = exportManualConfiguration(limits, stopLimits);
+              setConfigurationText(content);
+              const url = URL.createObjectURL(
+                new Blob([content], { type: "application/json" }),
+              );
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = "fr3-manual-configuration.json";
+              document.body.appendChild(link);
+              link.click();
+              link.remove();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }}
+          >
+            {t("robotStudio.controls.exportConfiguration")}
+          </Button>
+        </div>
+        {configurationError && (
+          <p className="rs-meta" role="alert">
+            {t("robotStudio.controls.invalidConfiguration")}
+          </p>
         )}
-      </dl>
-      <p className="rs-meta rs-manual-stop-evidence">
-        {t("robotStudio.manual.stopEvidence")} <code>{stopReason}</code>
-      </p>
+      </details>
+      <details>
+        <summary>{t("robotStudio.controls.diagnostics")}</summary>
+        <h3>{t("robotStudio.manual.counters")}</h3>
+        <dl className="rs-manual-facts rs-manual-counters">
+          {(["accepted", "sent", "acknowledged", "settled"] as const).map(
+            (key) => (
+              <div key={key} data-counter={key}>
+                <dt>{t("robotStudio.manual." + key)}</dt>
+                <dd>{counterValue(key)}</dd>
+              </div>
+            ),
+          )}
+        </dl>
+        <p className="rs-meta rs-manual-stop-evidence">
+          {t("robotStudio.manual.stopEvidence")} <code>{stopReason}</code>
+        </p>
+      </details>
       {reason && (
         <p className="rs-meta">
           {t("robotStudio.manual.gate")}{" "}
@@ -301,7 +483,7 @@ export default function ManualControls({
       {!canDrag && (
         <p className="rs-meta">{t("robotStudio.manual.dragRequired")}</p>
       )}
-      <details>
+      <details id="rs-manual-limits">
         <summary>{t("robotStudio.manual.sharedDraft")}</summary>
         <dl className="rs-manual-facts">
           <div>
@@ -329,7 +511,7 @@ export default function ManualControls({
           <legend>{t("robotStudio.manual.extraLimits")}</legend>
           <div className="rs-manual-fields">
             {MANUAL_EXTRA_LIMIT_KEYS.map((name) => (
-              <label key={name}>
+              <label key={name} id={"rs-manual-" + name}>
                 <span>{t("robotStudio.manual." + name)}</span>
                 <input
                   className="ds-input ds-focus"
@@ -351,7 +533,7 @@ export default function ManualControls({
         <fieldset disabled={locked}>
           <legend>{t("robotStudio.manual.stopLimits")}</legend>
           {MANUAL_STOP_LIMIT_KEYS.map((name) => (
-            <label key={name}>
+            <label key={name} id={"rs-manual-" + name}>
               <span>{t("robotStudio.manual." + name)}</span>
               <input
                 className="ds-input ds-focus"
@@ -372,39 +554,41 @@ export default function ManualControls({
         </fieldset>
       )}
       <p className="rs-meta">{t("robotStudio.manual.translationOnly")}</p>
-      {real && snapshot.view?.capabilities.gripper === true && (
-        <fieldset>
-          <legend>{t("robotStudio.manual.realGripper")}</legend>
-          <p className="rs-meta">{t("robotStudio.manual.gripperHint")}</p>
-          <input
-            className="ds-input ds-focus"
-            type="number"
-            min="0"
-            max="1"
-            step="any"
-            aria-label={t("robotStudio.manual.openingRatio")}
-            value={gripperRatio}
-            disabled={snapshot.phase !== "armed"}
-            onChange={(event) => setGripperRatio(event.target.value)}
-          />
-          <Button
-            size="sm"
-            disabled={
-              snapshot.phase !== "armed" ||
-              !gripperRatio.trim() ||
-              !Number.isFinite(Number(gripperRatio)) ||
-              Number(gripperRatio) < 0 ||
-              Number(gripperRatio) > 1
-            }
-            onPointerDown={(event) => {
-              if (event.button === 0)
-                instance.current?.beginGripper(Number(gripperRatio));
-            }}
-          >
-            {t("robotStudio.manual.holdGripper")}
-          </Button>
-        </fieldset>
-      )}
+      {!independentGripper &&
+        real &&
+        snapshot.view?.capabilities.gripper === true && (
+          <fieldset>
+            <legend>{t("robotStudio.manual.realGripper")}</legend>
+            <p className="rs-meta">{t("robotStudio.manual.gripperHint")}</p>
+            <input
+              className="ds-input ds-focus"
+              type="number"
+              min="0"
+              max="1"
+              step="any"
+              aria-label={t("robotStudio.manual.openingRatio")}
+              value={gripperRatio}
+              disabled={snapshot.phase !== "armed"}
+              onChange={(event) => setGripperRatio(event.target.value)}
+            />
+            <Button
+              size="sm"
+              disabled={
+                snapshot.phase !== "armed" ||
+                !gripperRatio.trim() ||
+                !Number.isFinite(Number(gripperRatio)) ||
+                Number(gripperRatio) < 0 ||
+                Number(gripperRatio) > 1
+              }
+              onPointerDown={(event) => {
+                if (event.button === 0)
+                  instance.current?.beginGripper(Number(gripperRatio));
+              }}
+            >
+              {t("robotStudio.manual.holdGripper")}
+            </Button>
+          </fieldset>
+        )}
       <div className="rs-manual-actions">
         <Button
           size="sm"

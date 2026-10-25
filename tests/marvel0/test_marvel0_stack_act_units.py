@@ -5,6 +5,7 @@ lists, the ready and failure rules read the lines the programs print, and the
 wrapper is the reviewed file. Nothing here starts a process."""
 
 import hashlib
+import math
 import os
 import re
 from pathlib import Path
@@ -918,3 +919,33 @@ def test_a_one_shot_unit_does_not_wait_for_what_its_command_leaves_behind():
     )
     assert f"--property=TimeoutStopSec={stack_units.ONESHOT_STOP_S}" in argv
     assert stack_units.ONESHOT_STOP_S <= 2
+
+
+@pytest.mark.parametrize("ratio", [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1])
+def test_gripper_position_roundtrips_nominal_opening_width(ratio):
+    # Independent forward URDF geometry used by angleToOpeningRatio in the UI.
+    def pad_x(theta):
+        return (
+            0.03060114
+            + (0.03152616 + 0.00563134) * math.cos(theta)
+            - (-0.00376347 + 0.04718515) * math.sin(theta)
+        )
+
+    opened = stack_units.GRIPPER_POSITIONS["open"]
+    closed = stack_units.GRIPPER_POSITIONS["close"]
+    theta = gripper.target_position("position", ratio)
+    if ratio == 0:
+        assert theta == closed
+    elif ratio == 1:
+        assert theta == opened
+    else:
+        # Analytic inversion checks the bisection through a different method.
+        dx, dz = 0.03152616 + 0.00563134, -0.00376347 + 0.04718515
+        target_x = pad_x(closed) + ratio * (pad_x(opened) - pad_x(closed))
+        expected = math.acos((target_x - 0.03060114) / math.hypot(dx, dz)) - math.atan2(
+            dz, dx
+        )
+        assert theta == pytest.approx(expected, abs=1e-12)
+        assert theta != pytest.approx(closed * (1 - ratio), abs=1e-5)
+    measured_ratio = (pad_x(theta) - pad_x(closed)) / (pad_x(opened) - pad_x(closed))
+    assert measured_ratio == pytest.approx(ratio, abs=1e-12)

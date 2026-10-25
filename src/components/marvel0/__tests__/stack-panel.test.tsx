@@ -710,6 +710,17 @@ describe("the other writes", () => {
     expect(last.getAttribute("data-outcome")).toBe("stalled");
     expect(text(last)).toContain("stalled");
   });
+  test("a position result never claims that the gripper opened", async () => {
+    const { host } = await open(
+      stackDoc("gripper_success", (doc) => {
+        doc.act.gripper_test.last.action = "position";
+        doc.act.gripper_test.last.opening_ratio = 0;
+      }),
+    );
+    const last = host.querySelector("[data-testid=marvel0-gripper-last]")!;
+    expect(text(last)).toContain("target opening was reached");
+    expect(text(last)).not.toContain("opened");
+  });
 
   test("A's FCI check and the checks before C are one click, no window", async () => {
     const { host, state } = await open(stackDoc("idle"));
