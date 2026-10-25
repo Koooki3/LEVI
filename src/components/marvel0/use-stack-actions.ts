@@ -5,7 +5,8 @@
 // code. The writes are the person's: nothing here starts by itself, and the
 // guided sequences are only started by a click on their own buttons. A confirm
 // window sends the action's fixed confirmation phrase (the spec's), never
-// text a person typed; only the override of a stop of C is typed.
+// text a person typed; only the override of a stop of C is typed. Gripper
+// open/close clicks acknowledge their inline notice and need no window.
 import { useCallback, useRef, useState } from "react";
 import { RequestIds } from "@/components/live/live-service-logic";
 import en from "@/i18n/en.json";
@@ -96,6 +97,8 @@ export interface StackActions {
     spec: DialogSpec,
     input: ConfirmInput,
   ) => Promise<Outcome>;
+  /** One human open/close click acknowledges only the inline hands-clear notice. */
+  gripper: (action: "open" | "close", phrase: string) => Promise<Outcome>;
   /** Runs a check that needs no dialog (A's FCI check, the checks before C). */
   check: (comp: "A" | "C") => Promise<Outcome>;
   /** Ends the guided start or stop; nothing that already runs is stopped. */
@@ -197,6 +200,14 @@ export function useStackActions(
     [api, run],
   );
 
+  const gripper = useCallback(
+    (action: "open" | "close", phrase: string) =>
+      run(workKey({ kind: "gripper", action }), (id) =>
+        api.gripper(gripperBody(id, action, phrase, { hands_clear: true })),
+      ),
+    [api, run],
+  );
+
   const check = useCallback(
     (comp: "A" | "C") =>
       run(workKey({ kind: "preflight", comp }), (id) =>
@@ -223,6 +234,7 @@ export function useStackActions(
     done,
     answered,
     confirm,
+    gripper,
     check,
     cancelSequence,
     clear,

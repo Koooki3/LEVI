@@ -5,7 +5,8 @@
 // beside it when it is off, and the terminal's extras (A's FCI check, the
 // checks before C, B's gripper test). What each shows is decided in
 // stack-act-logic.ts; a click only asks the caller to open a dialog or run a
-// check. Nothing here talks to the backend.
+// check. Gripper buttons dispatch one explicitly clicked action through the
+// shared action hook; the other controls retain their confirmation dialogs.
 import {
   Check,
   CircleDashed,
@@ -27,6 +28,7 @@ import {
   canCheckServer,
   gripperOutcome,
   operationRunning,
+  phraseFor,
   readinessProgress,
   startControl,
   stopControl,
@@ -461,16 +463,14 @@ export function CompControls({
   );
 }
 
-/** B's gripper test: open and close, one dialog each (hands clear, a click),
- * with the backend's reason beside them when they are off and the last result. */
+/** One explicit open/close click acknowledges the visible hands-clear notice.
+ * Backend gates, request identity, busy locking and the last result are shared. */
 export function GripperTest({
   act,
   actions,
-  ask,
 }: {
   act: ActView;
   actions: StackActions;
-  ask: (want: DialogKind) => void;
 }) {
   const { t } = useLocale();
   const g = act.gripper;
@@ -493,12 +493,19 @@ export function GripperTest({
       <h4 id="marvel0-gripper-title" className="rg-gripper__title">
         {t("marvel0.ctl.gripper.title")}
       </h4>
+      <p className="rg-muted" id="marvel0-gripper-click-notice">
+        {t("marvel0.ctl.gripper.single_click")}
+      </p>
       <div className="rg-comp__buttons">
         <Button
           icon={MoveHorizontal}
           loading={actions.working === "gripper:open"}
           disabled={off}
-          onClick={() => ask({ kind: "gripper", action: "open" })}
+          aria-describedby="marvel0-gripper-click-notice"
+          onClick={() => {
+            if (!off)
+              void actions.gripper("open", phraseFor(act, "gripper_open"));
+          }}
         >
           {t("marvel0.ctl.btn.gripper_open")}
         </Button>
@@ -506,7 +513,11 @@ export function GripperTest({
           icon={Hand}
           loading={actions.working === "gripper:close"}
           disabled={off}
-          onClick={() => ask({ kind: "gripper", action: "close" })}
+          aria-describedby="marvel0-gripper-click-notice"
+          onClick={() => {
+            if (!off)
+              void actions.gripper("close", phraseFor(act, "gripper_close"));
+          }}
         >
           {t("marvel0.ctl.btn.gripper_close")}
         </Button>

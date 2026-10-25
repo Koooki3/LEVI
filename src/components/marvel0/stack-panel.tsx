@@ -486,7 +486,7 @@ export function StackPanel({
                       }
                     />
                     {comp === "B" && (
-                      <GripperTest act={act} actions={actions} ask={open} />
+                      <GripperTest act={act} actions={actions} />
                     )}
                   </>
                 ) : card.id === "desk" ? (

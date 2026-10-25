@@ -628,27 +628,74 @@ describe("the other writes", () => {
     expect(dialog(host)).toBeNull();
   });
 
-  test("the gripper test is a tick and a click and sends the page's phrase", async () => {
-    const { host, state } = await open(stackDoc("b_ready"));
-    const test_ = host.querySelector(
-      "[data-testid=marvel0-gripper-test]",
-    ) as HTMLElement;
-    await click(button(test_, "Open gripper")!);
-    const d = dialog(host)!;
-    expect(textFields(d)).toHaveLength(0);
-    expect(document.activeElement).toBe(button(d, "Cancel"));
-    expect(text(d)).toContain(en["marvel0.ctl.hazard.gripper"]);
-    expect(button(d, "Open gripper")!.disabled).toBe(true);
-    await tickBox(d, /Hands and objects are clear/);
-    await doubleClick(button(d, "Open gripper")!);
-    await tick(3, 10);
-    expect(state.calls).toHaveLength(1);
-    expect(state.calls[0]).toMatchObject({ op: "gripper" });
-    expect(state.calls[0].body).toMatchObject({
-      action: "open",
-      confirm: "gripper open",
-      attest: { hands_clear: true },
+  for (const action of ["open", "close"] as const)
+    test(`one ${action} click sends the gripper action without a dialog`, async () => {
+      const { host, state } = await open(stackDoc("b_ready"));
+      const test_ = host.querySelector(
+        "[data-testid=marvel0-gripper-test]",
+      ) as HTMLElement;
+      const control = button(test_, en[`marvel0.ctl.btn.gripper_${action}`])!;
+      const notice = test_.querySelector("#marvel0-gripper-click-notice")!;
+      expect(text(notice)).toContain(en["marvel0.ctl.gripper.single_click"]);
+      expect(control.getAttribute("aria-describedby")).toBe(notice.id);
+      expect(state.calls).toHaveLength(0);
+      await click(control);
+      await tick(3, 10);
+      expect(dialog(host)).toBeNull();
+      expect(state.calls).toHaveLength(1);
+      expect(state.calls[0]).toEqual({
+        op: "gripper",
+        body: {
+          request_id: expect.any(String),
+          action,
+          confirm: `gripper ${action}`,
+          attest: { hands_clear: true },
+        },
+      });
     });
+
+  test("a double gripper click sends once and locks both buttons while pending", async () => {
+    const { host, state } = await open(stackDoc("b_ready"));
+    const pending: Array<(value: ApiResult) => void> = [];
+    state.answer = () =>
+      new Promise<ApiResult>((resolve) => {
+        pending.push(resolve);
+      });
+    try {
+      await doubleClick(button(host, "Open gripper")!);
+      expect(state.calls).toHaveLength(1);
+      expect(dialog(host)).toBeNull();
+      expect(button(host, "Open gripper")!.disabled).toBe(true);
+      expect(button(host, "Close gripper")!.disabled).toBe(true);
+    } finally {
+      await act(async () => {
+        for (const finish of pending)
+          finish({ ok: true, status: 202, data: {} });
+      });
+    }
+    await waitFor(() => !button(host, "Open gripper")!.disabled);
+  });
+
+  test("a direct gripper refusal remains beside the buttons without a dialog", async () => {
+    const { host, state } = await open(stackDoc("b_ready"));
+    state.answer = () =>
+      errorOf(409, {
+        detail: {
+          code: "gripper_b_not_ready",
+          message: "Gripper stack not ready",
+        },
+      });
+    await click(button(host, "Close gripper")!);
+    await waitFor(() =>
+      host.querySelector(
+        '[data-testid="marvel0-gripper-test"] [role="alert"][data-code="gripper_b_not_ready"]',
+      ),
+    );
+    expect(dialog(host)).toBeNull();
+    expect(state.calls).toHaveLength(1);
+    expect(
+      text(host.querySelector("[data-testid=marvel0-gripper-test]")),
+    ).toContain(en["marvel0.ctl.block.gripper_b_not_ready"]);
   });
 
   test("the last gripper result is shown: reached, or stalled", async () => {
@@ -865,7 +912,7 @@ describe("the other writes", () => {
 });
 
 describe("no window of the arm stack asks for a typed phrase", () => {
-  // Every start, stop, marker and gripper window, with the stack in the state
+  // Every remaining start, stop and marker window, with the stack in the state
   // in which its button is on: ticks and a click, nothing to type. The one
   // field that exists is the override of a stop of C with a client on it.
   const cases: Array<{
@@ -928,12 +975,6 @@ describe("no window of the arm stack asks for a typed phrase", () => {
       view: "c_ready_with_client",
       fields: 1,
       open: (h) => click(button(comp(h, "C"), en["marvel0.ctl.btn.stop_C"])!),
-    },
-    {
-      name: "gripper close",
-      view: "b_ready",
-      fields: 0,
-      open: (h) => click(button(h, "Close gripper")!),
     },
     {
       name: "set marker",

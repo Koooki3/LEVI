@@ -5621,6 +5621,7 @@
   "marvel0.ctl.check.c_controllers": "夹爪控制器",
   "marvel0.ctl.check.c_ee_frame": "末端坐标系",
   "marvel0.ctl.gripper.title": "夹爪测试",
+  "marvel0.ctl.gripper.single_click": "点击即执行所选动作，并确认手和物体已离开夹爪区域。",
   "marvel0.ctl.gripper.none": "本服务启动以来还没有做过夹爪测试。",
   "marvel0.ctl.gripper.running": "夹爪正在动；停下后会给出结果。",
   "marvel0.ctl.gripper.last_open_reached": "上一次测试：打开，已到位（{ago}）。",

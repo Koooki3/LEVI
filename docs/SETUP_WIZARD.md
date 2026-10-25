@@ -12,6 +12,13 @@ on the probes; it is described at the end of "Status probes": the status route
 is read-only, and the page's policy server panel starts and stops one policy
 server unit and nothing else.
 
+Step 1's **Open gripper** and **Close gripper** buttons each send one action
+on a single click, without a confirmation dialog. The visible notice makes
+that click the confirmation that hands and objects are clear of the jaws.
+Backend readiness and ownership checks, request deduplication, busy/stale
+button disabling, and the result/error display remain in place. The 3D
+preview slider remains a local model control.
+
 ## Recipes
 
 A recipe is one excerpt of the machine's operator guide (a Markdown file)

@@ -5621,6 +5621,7 @@
   "marvel0.ctl.check.c_controllers": "Gripper controllers",
   "marvel0.ctl.check.c_ee_frame": "End-effector frame",
   "marvel0.ctl.gripper.title": "Gripper test",
+  "marvel0.ctl.gripper.single_click": "Click to perform the selected action once and confirm hands and objects are clear of the jaws.",
   "marvel0.ctl.gripper.none": "No gripper test since this service started.",
   "marvel0.ctl.gripper.running": "The gripper is moving; the result comes when it stops.",
   "marvel0.ctl.gripper.last_open_reached": "Last test: opened, the position was reached ({ago}).",
