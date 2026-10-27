@@ -12,7 +12,6 @@ protected port is used.
 These tests start processes and wait for them; they take a few seconds each."""
 
 import socket
-import subprocess
 import threading
 import time
 
@@ -27,8 +26,12 @@ from levi.marvel0 import net, stack_act
 
 
 class Listener:
-    """A loopback server that takes every connection and closes it at once (the
-    arm's FCI port is the real one; this is a stand-in on an unprotected port)."""
+    """A loopback server that takes every connection and closes it once the
+    client has closed or reset it (the arm's FCI port is the real one; this is a
+    stand-in on an unprotected port). It never closes first: the side that
+    closes first keeps the TIME_WAIT socket, and on a loaded machine a server
+    that closed at once sometimes beat the client to it, so the client's socket
+    these tests count was not there (2026-10-27, pytest -n 4)."""
 
     def __init__(self):
         self.sock = socket.socket()
@@ -49,7 +52,13 @@ class Listener:
                 continue
             except OSError:
                 return
-            conn.close()
+            with conn:
+                conn.settimeout(2)
+                try:
+                    while conn.recv(1024):
+                        pass
+                except OSError:  # a reset, or a client that never closes
+                    pass
 
     def close(self):
         self.alive = False
@@ -122,14 +131,8 @@ def make(tmp_path):
     yield build
     for m in made:
         m.processes.reap()
-    assert (
-        subprocess.run(
-            ["pgrep", "-f", str(fake_specs.HERE / "fake_")],
-            capture_output=True,
-            check=False,
-        ).returncode
-        == 1
-    ), "a stand-in program was left running"
+    leftover = fake_specs.leftover_standins(tmp_path)
+    assert not leftover, f"a stand-in program was left running: {leftover}"
 
 
 def probe_request(n=1):
@@ -274,7 +277,7 @@ def test_the_chain_runs_to_c_on_the_real_ticker_with_real_processes(make):
     took_s = {i["step"]: i["took_s"] for i in seq["steps"]}
     assert all(isinstance(v, float) for v in took_s.values()), took_s
     assert took_s["c_preflight"] >= 0.9  # (the slower of the two checks)
-    assert PORT == 5056
+    assert PORT not in (5000, 5001, 5100, 8000)  # never a robot port
     # and the way out is the same as ever. The monitor writes again once A is
     # gone (as drive() does in the chain tests): B is stopped last, and on a slow
     # runner the health file of A's time was stale by then (CI run 39721849462,

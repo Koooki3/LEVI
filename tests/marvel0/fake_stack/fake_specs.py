@@ -4,6 +4,7 @@ scripts of this folder. ``assert_fake`` is the guard every rehearsal runs
 first: no unit may run anything but this interpreter on these scripts (or the
 reviewed wrapper in front of them)."""
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,6 +16,22 @@ SCRIPTS = {
     name: HERE / f"{name}.py" for name in ("fake_a", "fake_b", "fake_c", "fake_oneshot")
 }
 ENV_FILE = HERE / "fake_env.sh"
+
+
+def leftover_standins(root) -> list[str]:
+    """The stand-in programs still running that belong to the test whose folder
+    is ``root``: every stand-in's command line names a file under its test's
+    folder (``--health=``, ``--alive=``, the one-shots' alive file). A check of
+    every stand-in on the machine blamed a test for the stand-ins of another
+    test file running at the same time (pytest -n, 2026-10-27)."""
+    listed = subprocess.run(
+        ["pgrep", "-af", str(HERE / "fake_")],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout
+    mine = f"{Path(root)}/"
+    return [line for line in listed.splitlines() if mine in line]
 
 
 def assert_fake(argv, *, wrapper=None) -> None:

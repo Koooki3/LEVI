@@ -8,7 +8,6 @@ stand-in is ever run, nothing touches a robot, no protected port is used."""
 import os
 import signal
 import socket
-import subprocess
 import time
 
 import pytest
@@ -35,14 +34,8 @@ def make(tmp_path):
     yield build
     for m in made:
         m.processes.reap()
-    assert (
-        subprocess.run(
-            ["pgrep", "-f", str(fake_specs.HERE / "fake_")],
-            capture_output=True,
-            check=False,
-        ).returncode
-        == 1
-    ), "a stand-in program was left running"
+    leftover = fake_specs.leftover_standins(tmp_path)
+    assert not leftover, f"a stand-in program was left running: {leftover}"
 
 
 def bring_up(m):

@@ -4,15 +4,17 @@
 ``fake_stack/process_host.py`` (the stop signal, the time to stop and
 ``SendSIGKILL`` are honoured from the properties the page passed), and the
 programs are the stand-ins of ``fake_stack/``: they print the real ready lines,
-write a fake health file, and one of them listens on the unprotected loopback
-port 5056. Modes make them slow, never ready, crash, ignore SIGINT, print a
-line twice or leave one out. Nothing but a stand-in is ever run (the host
-checks every argv), nothing touches a robot, and no protected port is used.
+write a fake health file, and one of them listens on an unprotected loopback
+port (``PORT``, free when this module is imported). Modes make them slow, never
+ready, crash, ignore SIGINT, print a line twice or leave one out. Nothing but a
+stand-in is ever run (the host checks every argv), nothing touches a robot, and
+no protected port is used.
 
 These tests start processes and wait for them; they take a few seconds each."""
 
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -24,7 +26,18 @@ from stack_act_machine import ActMachine
 
 from levi.marvel0 import net, record, stack, stack_act, stack_units
 
-PORT = 5056
+
+def _free_port():
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+# The stand-in C's port, one per pytest process: a fixed 5056 was taken by the
+# stand-ins of another test file when two pytest processes ran at once
+# (pytest -n, or a second worktree's run). The kernel picks it from the
+# ephemeral range, so it is never a robot port (5000, 5001, 5100, 8000).
+PORT = _free_port()
 FAKE_ENV = fake_specs.ENV_FILE
 
 
@@ -139,14 +152,8 @@ def make(tmp_path):
     yield build
     for m in made:
         m.processes.reap()
-    assert (
-        subprocess.run(
-            ["pgrep", "-f", str(fake_specs.HERE / "fake_")],
-            capture_output=True,
-            check=False,
-        ).returncode
-        == 1
-    ), "a stand-in program was left running"
+    leftover = fake_specs.leftover_standins(tmp_path)
+    assert not leftover, f"a stand-in program was left running: {leftover}"
 
 
 def start(m, key):
