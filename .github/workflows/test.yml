@@ -3,19 +3,23 @@ name: LEVI checks
 on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
+# A newer push to the same branch makes the older run's result moot: cancel it
+# instead of letting both hold runners. (In October 2026 one integration branch
+# queued 18 runs in four hours, each 30 to 45 minutes.)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  # The frontend does not depend on the Python profile, so it runs once here
-  # instead of in both legs of `validate` below. Only three Python test files
-  # mention bun or node_modules (test_levi_build, test_live_portable,
-  # test_ollama_browser) and they use fake directories, so the legs install no
-  # Node dependencies.
+  # The frontend does not depend on the Python profile. Only three Python test
+  # files mention bun or node_modules (test_levi_build, test_live_portable,
+  # test_ollama_browser) and they use fake directories, so the Python jobs
+  # install no Node dependencies.
   frontend:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       NEXT_TELEMETRY_DISABLED: "1"
-      # The frontend tests' wait helper reads this (src/components/ds/__tests__/dom.ts);
-      # it was set for the validate step when that ran in the matrix job below.
+      # The frontend tests' wait helper reads this (src/components/ds/__tests__/dom.ts).
       LEVI_TEST_TIME_SCALE: "2"
     steps:
       - uses: actions/checkout@v7
@@ -25,23 +29,20 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run validate
       - run: bun run build
-  validate:
-    strategy:
-      # Both legs report: a failure in one must not cancel the other, or a
-      # flaky test hides whether the other dependency set passes.
-      fail-fast: false
-      matrix:
-        agent: [false, true]
-    # Pinned instead of ubuntu-latest, which moves to Ubuntu 26 from
-    # 2026-10-19 (actions/runner-images#14748). Re-evaluate once Ubuntu 26
-    # images are GA and ffmpeg, uv and bun are known to work there (or when
-    # GitHub announces the end of the 24.04 image).
+
+  # Without the optional `agent` extra only two things can differ from the full
+  # run below: a module that imports an extra's package at import time, and the
+  # tests that skip or branch on the extra. scripts/no_extras_check.py checks
+  # exactly those (about a minute) instead of running the whole suite twice.
+  # The static checks run here once, not in every Python job.
+  python-base:
+    name: python (no extras)
     runs-on: ubuntu-24.04
-    # A full run takes about 15 minutes; a hung test must not hold a runner
-    # for the default 6 hours.
-    timeout-minutes: 45
+    timeout-minutes: 15
+    # Keep in step with the env of the `python` job below.
     env:
       LEVI_WORKSPACE: ${{ github.workspace }}/.state
+      # LEVI keeps managed caches inside its workspace (levi/paths.py).
       UV_CACHE_DIR: ${{ github.workspace }}/.state/.cache/uv
       NEXT_TELEMETRY_DISABLED: "1"
       # A fresh CI workspace must not download the DROID test sample.
@@ -51,31 +52,72 @@ jobs:
       # get twice their wall-clock budget (tests/conftest.py, scaled()).
       LEVI_TEST_TIME_SCALE: "2"
     steps:
-      # Node 24 releases (the Node 20 runtime is deprecated on the runners).
       - uses: actions/checkout@v7
         with:
-          # `levi dev check-contracts` compares the AERI contract snapshots with the
-          # ones on main (merge-base), which needs the full history.
+          # `levi dev check-contracts` compares the AERI contract snapshots with
+          # the ones on main (merge-base), which needs the full history.
           fetch-depth: 0
       # setup-uv publishes no floating major tag since v8; pin the release.
       - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-local-path: ${{ github.workspace }}/.state/.cache/uv
       - uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version: "1.3.10"
       - run: mkdir -p .state/tmp/build
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - if: ${{ !matrix.agent }}
-        run: uv sync --locked --group dev
-      - if: ${{ matrix.agent }}
-        run: uv sync --locked --group dev --extra agent
+      - run: uv sync --locked --group dev
       # Compare the AERI schemas with main's (actions/checkout leaves no local
       # main on pull requests and tag pushes); needs the full history.
       - run: uv run --no-sync levi dev check-contracts --base origin/main
       - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync python scripts/no_extras_check.py imports
       - id: pytest
         run: >-
-          uv run --no-sync pytest --basetemp=.state/tmp/build/pytest
+          uv run --no-sync pytest $(python3 scripts/no_extras_check.py tests)
+          --basetemp=.state/tmp/build/pytest
           --junitxml=.state/tmp/build/junit.xml -rfE
+      - name: Failed tests summary
+        if: ${{ failure() && steps.pytest.conclusion == 'failure' }}
+        run: python3 scripts/ci_junit_summary.py .state/tmp/build/junit.xml >> "$GITHUB_STEP_SUMMARY"
+
+  # The whole suite, once, with the `agent` extra installed (a superset of the
+  # default install: the two differed in exactly 3 skipped tests). Four
+  # workers, one test file per worker at a time (--dist loadfile), so the tests
+  # of one file keep their order and their module-level state.
+  python:
+    name: python (full, agent extra)
+    runs-on: ubuntu-24.04
+    # On 4 workstation cores the suite took 527 s with 4 workers (about 28 min
+    # in one process); a hung test fails on its own after the per-test timeout
+    # (pyproject.toml), so this limit only catches the runner itself.
+    timeout-minutes: 30
+    # Keep in step with the env of the `python-base` job above.
+    env:
+      LEVI_WORKSPACE: ${{ github.workspace }}/.state
+      UV_CACHE_DIR: ${{ github.workspace }}/.state/.cache/uv
+      NEXT_TELEMETRY_DISABLED: "1"
+      LEVI_DROID_SAMPLE: "off"
+      CUDA_VISIBLE_DEVICES: ""
+      LEVI_TEST_TIME_SCALE: "2"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-local-path: ${{ github.workspace }}/.state/.cache/uv
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: "1.3.10"
+      - run: mkdir -p .state/tmp/build
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: uv sync --locked --group dev --extra agent
+      - id: pytest
+        run: >-
+          uv run --no-sync pytest -n 4 --dist loadfile
+          --basetemp=.state/tmp/build/pytest
+          --junitxml=.state/tmp/build/junit.xml --durations=25 -rfE
       # The failed tests' names (and first lines of their messages) in the
       # run's summary page, so a failure is identifiable without the logs.
       - name: Failed tests summary
@@ -85,7 +127,7 @@ jobs:
         if: ${{ failure() && steps.pytest.conclusion == 'failure' }}
         uses: actions/upload-artifact@v7
         with:
-          name: pytest-junit-agent-${{ matrix.agent }}
+          name: pytest-junit-full
           path: .state/tmp/build/junit.xml
           if-no-files-found: ignore
           retention-days: 14

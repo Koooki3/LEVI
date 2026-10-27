@@ -37,6 +37,8 @@ Changelog = "https://github.com/Koooki3/LEVI/blob/main/CHANGELOG.md"
 [dependency-groups]
 dev = [
     "pytest>=8,<10",
+    "pytest-timeout>=2.3,<3",
+    "pytest-xdist>=3.6,<4",
     "httpx>=0.28,<1",
     "playwright>=1.50,<2",
     "ruff>=0.16.6",
@@ -54,3 +56,8 @@ packages = ["levi", "backend"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# A test that hangs fails on its own after this many seconds (pytest-timeout,
+# SIGALRM), with its name and stack, instead of holding the run until the CI
+# job's limit cancels it with no result. The slowest test takes about 80 s on
+# the workstation; LEVI_TEST_TIME_SCALE=2 doubles that on a shared runner.
+timeout = 300

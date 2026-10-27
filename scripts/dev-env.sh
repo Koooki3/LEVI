@@ -2,7 +2,7 @@
 # Give this checkout or worktree its own Python and Bun dependencies, quickly.
 #
 #   scripts/dev-env.sh          # uv sync --group dev, bun install (frozen)
-#   scripts/dev-env.sh --agent  # also the `agent` extra (CI's second leg)
+#   scripts/dev-env.sh --agent  # also the `agent` extra (CI's full pytest run)
 #
 # Both installers link from their global caches (uv: hardlinks, bun:
 # --backend=hardlink), so a warm install takes about a second and adds almost no
