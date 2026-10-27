@@ -31,13 +31,13 @@ import pyarrow.parquet as pq
 from .. import catalog, children, links, naming, paths
 from ..revision import dataset_revision
 from ..versions import is_dataset_v2
+from ..worker_jobs import log_tail
 from . import advantage, checkpoints, signature, store
 
 ACTIVE = {"queued", "running"}
 FINISHED = {"succeeded", "failed", "cancelled"}
 PLAN_SCHEMA = "levi.recap_value.plan.v1"
 WORKER_PROJECT = paths.PROJECT / "integrations" / "recap_value"
-LOG_TAIL_BYTES = 4000
 # Finished job records kept per dataset (newest first); older ones are
 # removed with their files. A succeeded job's plan and worker output are
 # removed as soon as its result is published; a failed or cancelled job keeps
@@ -800,19 +800,6 @@ def start(
 # ---------------------------------------------------------------- lifecycle
 
 
-def _log_tail(job: dict[str, Any]) -> str | None:
-    try:
-        data = Path(str(job.get("log_path"))).read_bytes()
-    except OSError:
-        return None
-    if not data:
-        return None
-    tail = data[-LOG_TAIL_BYTES:].decode("utf-8", errors="replace")
-    if len(data) > LOG_TAIL_BYTES:
-        tail = "...(truncated)...\n" + tail
-    return re.sub(r"(?i)(token|authorization)=[^&\s]+", r"\1=<redacted>", tail).strip()
-
-
 def _key(job: dict[str, Any]) -> tuple[str, str]:
     return (
         (
@@ -908,7 +895,7 @@ def _finish_watch(job, reason):
                 job.update(
                     status="failed",
                     error=reason,
-                    error_detail=_log_tail(job),
+                    error_detail=log_tail(job),
                     finished_at=time.time(),
                 )
                 _save(job)
@@ -996,14 +983,14 @@ def collect(job: dict[str, Any]) -> dict[str, Any]:
                 job.update(
                     status="failed",
                     error=f"RECAP value worker result rejected: {exc}",
-                    error_detail=_log_tail(job),
+                    error_detail=log_tail(job),
                     finished_at=time.time(),
                 )
         else:
             job.update(
                 status="failed",
                 error=f"RECAP value worker exited without a result (code {return_code})",
-                error_detail=_log_tail(job),
+                error_detail=log_tail(job),
                 finished_at=time.time(),
             )
         _save(job)

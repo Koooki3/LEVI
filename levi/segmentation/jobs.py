@@ -18,7 +18,6 @@ import contextlib
 import fcntl
 import json
 import os
-import re
 import shutil
 import signal
 import subprocess
@@ -30,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import catalog, children, links, naming, paths
+from ..worker_jobs import log_tail
 from . import models
 
 ACTIVE = {"queued", "running"}
@@ -37,7 +37,6 @@ FINISHED = {"succeeded", "failed", "cancelled"}
 KINDS = ("label", "distil")
 WORKER_PROJECT = paths.PROJECT / "integrations" / "segmentation"
 SAM3_PROJECT = paths.PROJECT / "integrations" / "sam3"
-LOG_TAIL_BYTES = 4000
 PUBLIC_KEYS = (
     "id",
     "kind",
@@ -392,19 +391,6 @@ def start(
 # ---------------------------------------------------------------- lifecycle
 
 
-def _log_tail(job: dict[str, Any]) -> str | None:
-    try:
-        data = Path(str(job.get("log_path"))).read_bytes()
-    except OSError:
-        return None
-    if not data:
-        return None
-    tail = data[-LOG_TAIL_BYTES:].decode("utf-8", errors="replace")
-    if len(data) > LOG_TAIL_BYTES:
-        tail = "...(truncated)...\n" + tail
-    return re.sub(r"(?i)(token|authorization)=[^&\s]+", r"\1=<redacted>", tail).strip()
-
-
 def _alive(job: dict[str, Any]) -> bool:
     process = _PROCESSES.get(_key(job))
     if process is not None:
@@ -480,7 +466,7 @@ def _finish_watch(job, reason):
                 current.update(
                     status="failed",
                     error=reason,
-                    error_detail=_log_tail(current),
+                    error_detail=log_tail(current),
                     finished_at=time.time(),
                 )
                 _save(current)
@@ -585,14 +571,14 @@ def collect(job: dict[str, Any], publish: Publisher | None = None) -> dict[str, 
                 job.update(
                     status="failed",
                     error=f"Segmentation worker result rejected: {exc}",
-                    error_detail=_log_tail(job),
+                    error_detail=log_tail(job),
                     finished_at=time.time(),
                 )
         else:
             job.update(
                 status="failed",
                 error=f"Segmentation worker exited without a result (code {return_code})",
-                error_detail=_log_tail(job),
+                error_detail=log_tail(job),
                 finished_at=time.time(),
             )
         _save(job)
