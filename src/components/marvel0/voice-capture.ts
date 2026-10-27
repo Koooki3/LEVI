@@ -592,7 +592,9 @@ export class VoiceCapture implements CaptureLike {
       sink = ctx.createGain();
       sink.gain.value = 0;
       sink.connect(ctx.destination);
-      const rig = { stream, ctx, wanted } as Rig;
+      // A default opened in place of the chosen input is never reused: it is
+      // released after its recording, so the next press tries the chosen one.
+      const rig = { stream, ctx, wanted: fallback ? null : wanted } as Rig;
       const built = await this.makeNode(ctx, gen, (pcm, peak, rms) =>
         this.block(rig, pcm, peak, rms),
       );

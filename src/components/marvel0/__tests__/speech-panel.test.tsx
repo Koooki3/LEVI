@@ -176,7 +176,11 @@ describe("the microphone picker", () => {
 
   test("lists the system default and the connected inputs without opening anything; the default is used", async () => {
     const h = await open({ devices: [CAMERA, UGREEN] });
-    expect(options(h)).toEqual(["System default", CAMERA.label, UGREEN.label]);
+    expect(options(h)).toEqual([
+      "Default (the browser picks)",
+      CAMERA.label,
+      UGREEN.label,
+    ]);
     expect(select(h).value).toBe("");
     expect(h.audio.getUserMediaCalls).toBe(0);
     expect(h.captures.current.device).toBeNull();
@@ -240,7 +244,7 @@ describe("the microphone picker", () => {
 
   test("names kept back until the microphone is allowed: the default, a hint, and the names after the first opening", async () => {
     const h = await open({ devices: [{ deviceId: "", label: "" }] });
-    expect(options(h)).toEqual(["System default"]);
+    expect(options(h)).toEqual(["Default (the browser picks)"]);
     expect(text(h)).toContain(en["marvel0.speech.mic.pick.hidden"]);
     h.audio.setDevices([CAMERA, UGREEN], false);
     const before = h.audio.enumerateCalls;
@@ -249,14 +253,18 @@ describe("the microphone picker", () => {
     );
     await flushAll();
     expect(h.audio.enumerateCalls).toBe(before + 1);
-    expect(options(h)).toEqual(["System default", CAMERA.label, UGREEN.label]);
+    expect(options(h)).toEqual([
+      "Default (the browser picks)",
+      CAMERA.label,
+      UGREEN.label,
+    ]);
     expect(text(h)).not.toContain(en["marvel0.speech.mic.pick.hidden"]);
   });
 
   test("a remembered input stays selected while the names are kept back", async () => {
     remember(UGREEN);
     const h = await open({ devices: [{ deviceId: "", label: "" }] });
-    expect(options(h)).toEqual(["System default", UGREEN.label]);
+    expect(options(h)).toEqual(["Default (the browser picks)", UGREEN.label]);
     expect(select(h).value).toBe(UGREEN.deviceId);
     expect(h.captures.current.device).toBe(UGREEN.deviceId);
   });
@@ -300,6 +308,83 @@ describe("the microphone picker", () => {
     expect(select(h).disabled).toBe(false);
   });
 
+  test("is locked while a recording is being sent", async () => {
+    const pending = deferred<ReturnType<typeof ok>>();
+    const h = await open({
+      devices: [CAMERA, UGREEN],
+      script: { transcribe: () => pending.promise },
+    });
+    await speak(h);
+    expect(h.host.querySelector("[data-phase=uploading]")).not.toBeNull();
+    expect(select(h).disabled).toBe(true);
+    pending.resolve(ok(heardAnswer(h.calls.transcribe[0].requestId, matchA())));
+    await flushAll();
+    expect(select(h).disabled).toBe(false);
+  });
+
+  test("a capture made again (new props) is given the chosen input too", async () => {
+    remember(UGREEN);
+    const h = await open({ devices: [CAMERA, UGREEN] });
+    const first = h.captures.current;
+    const other = captureFactory();
+    await h.rerender(
+      <SpeechPanel
+        api={h.api}
+        modelId={ALL_MODEL}
+        onUse={() => undefined}
+        createCapture={other.make}
+      />,
+    );
+    await flushAll();
+    expect(first.disposed).toBe(true);
+    expect(other.current.device).toBe(UGREEN.deviceId);
+  });
+
+  test("a missing input can be forgotten: the default from now on, even when it comes back", async () => {
+    remember(UGREEN);
+    const h = await open({ devices: [CAMERA] });
+    const forget = q(h, "marvel0-speech-mic-forget") as HTMLButtonElement;
+    expect(forget.textContent).toBe(en["marvel0.speech.mic.pick.forget"]);
+    await act(async () => forget.click());
+    await flushAll();
+    expect(stored()).toBeNull();
+    expect(q(h, "marvel0-speech-mic-missing")).toBeNull();
+    expect(q(h, "marvel0-speech-mic-forget")).toBeNull();
+    expect(select(h).value).toBe("");
+    await act(async () => h.audio.setDevices([CAMERA, UGREEN]));
+    await flushAll();
+    expect(h.captures.current.device).toBeNull();
+  });
+
+  test("what the last opening used is cleared once that input is unplugged", async () => {
+    remember(UGREEN);
+    const h = await open({ devices: [CAMERA, UGREEN] });
+    await act(async () =>
+      h.captures.current.opened({ id: UGREEN.deviceId, label: UGREEN.label }),
+    );
+    await flushAll();
+    expect(q(h, "marvel0-speech-mic-in-use")).not.toBeNull();
+    await act(async () => h.audio.setDevices([CAMERA]));
+    await flushAll();
+    expect(q(h, "marvel0-speech-mic-in-use")).toBeNull();
+    expect(q(h, "marvel0-speech-mic-missing")).not.toBeNull();
+  });
+
+  test("its notes appear inside one status region that is there before any note", async () => {
+    remember(UGREEN);
+    const h = await open({ devices: [CAMERA, UGREEN] });
+    const region = q(h, "marvel0-speech-mic-status")!;
+    expect(region.getAttribute("role")).toBe("status");
+    expect(region.textContent).toBe("");
+    await act(async () => h.audio.setDevices([CAMERA]));
+    await flushAll();
+    expect(q(h, "marvel0-speech-mic-status")).toBe(region);
+    expect(
+      region.querySelector("[data-testid=marvel0-speech-mic-missing]"),
+    ).not.toBeNull();
+    expect(region.querySelectorAll("[role=status]")).toHaveLength(0);
+  });
+
   test("is not shown on a page that cannot capture, and lists nothing there", async () => {
     const h = await open({ secure: false, devices: [CAMERA] });
     expect(q(h, "marvel0-speech-mic-pick")).toBeNull();
@@ -308,7 +393,7 @@ describe("the microphone picker", () => {
 
   test("speaks Chinese", async () => {
     const h = await open({ devices: [CAMERA], zhLanguage: true });
-    expect(options(h)).toEqual(["系统默认", CAMERA.label]);
+    expect(options(h)).toEqual(["默认（由浏览器决定）", CAMERA.label]);
     expect(text(h)).toContain(zh["marvel0.speech.mic.pick.label"]);
     expect(text(h)).toContain(zh["marvel0.speech.mic.pick.hint"]);
   });

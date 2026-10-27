@@ -432,6 +432,52 @@ describe("the chosen input", () => {
     expect(h.clips).toHaveLength(1);
   });
 
+  test("NotFoundError for the chosen input is treated as a missing input too", async () => {
+    const h = harness({ devices: [CAMERA], goneAs: "NotFoundError" });
+    h.cap.setDevice(UGREEN.deviceId);
+    await clipOnce(h);
+    expect(h.audio.getUserMediaCalls).toBe(2);
+    expect(h.opened).toEqual([
+      { id: CAMERA.deviceId, label: CAMERA.label, fallback: true },
+    ]);
+    expect(h.errors).toEqual([]);
+  });
+
+  test("an abort while the chosen input is being asked for makes no second request for the default", async () => {
+    const h = harness({ gate: true, devices: [CAMERA] });
+    h.cap.setDevice(UGREEN.deviceId);
+    const started = h.cap.start();
+    await settle();
+    h.cap.abort();
+    h.audio.open();
+    expect(await started).toBe(false);
+    await settle();
+    expect(h.audio.getUserMediaCalls).toBe(1);
+    expect(h.audio.streams).toHaveLength(0);
+    expect(h.opened).toEqual([]);
+    expect(h.errors).toEqual([]);
+    expect(h.mic).toEqual([]);
+  });
+
+  test("the default opened in place of the chosen input is not kept: the next press tries the chosen one again", async () => {
+    const h = harness({ devices: [CAMERA] });
+    h.cap.setDevice(UGREEN.deviceId);
+    await clipOnce(h);
+    expect(h.opened[0].fallback).toBe(true);
+    // Released right after its recording, not kept warm for 8 s.
+    expect(h.audio.streams[0].track.readyState).toBe("ended");
+    expect(h.mic).toEqual([true, false]);
+    // Plugged back in: the next press gets it.
+    h.audio.setDevices([CAMERA, UGREEN]);
+    await clipOnce(h);
+    expect(h.audio.constraints.at(-1)).toEqual(micConstraints(UGREEN.deviceId));
+    expect(h.opened[1]).toEqual({
+      id: UGREEN.deviceId,
+      label: UGREEN.label,
+      fallback: false,
+    });
+  });
+
   test("a refusal other than a missing input is not papered over with the default", async () => {
     const h = harness({ devices: [UGREEN], error: "NotAllowedError" });
     h.cap.setDevice(UGREEN.deviceId);

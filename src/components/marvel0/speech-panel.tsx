@@ -246,9 +246,9 @@ export function SpeechPanel({
   );
 }
 
-/** Which microphone a press opens: the system default or one of the inputs,
- * remembered in this browser. It also says which input the last opening
- * used, so a camera's microphone taken by mistake shows. */
+/** Which microphone a press opens: the browser's default or one of the
+ * inputs, remembered in this browser. It also says which input the last
+ * opening used, so a camera's microphone taken by mistake shows. */
 function MicField({ mics, disabled }: { mics: MicPicker; disabled: boolean }) {
   const { t } = useLocale();
   const name = (label: string, index: number) =>
@@ -282,40 +282,57 @@ function MicField({ mics, disabled }: { mics: MicPicker; disabled: boolean }) {
           ))}
         </Select>
       </Field>
-      {mics.missing && (
-        <div data-testid="marvel0-speech-mic-missing">
-          <Note tone="warning" role="status">
-            <SayLine
-              say={{
-                key: "marvel0.speech.mic.pick.missing",
-                params: { label: mics.missing.label || noName },
-              }}
-            />
-          </Note>
-        </div>
-      )}
-      {mics.inUse &&
-        (mics.inUse.fallback ? (
-          <div data-testid="marvel0-speech-mic-fallback">
-            <Note tone="warning" role="status">
+      {/* One live region that stays mounted, so a note that appears in it is
+          announced (a region mounted together with its text often is not). */}
+      <div role="status" data-testid="marvel0-speech-mic-status">
+        {mics.missing && (
+          <div data-testid="marvel0-speech-mic-missing">
+            <Note tone="warning">
               <SayLine
                 say={{
-                  key: "marvel0.speech.mic.pick.fallback",
-                  params: { label: mics.inUse.label || noName },
+                  key: "marvel0.speech.mic.pick.missing",
+                  params: { label: mics.missing.label || noName },
                 }}
               />
             </Note>
           </div>
-        ) : (
-          <p className="rg-muted" data-testid="marvel0-speech-mic-in-use">
-            <SayLine
-              say={{
-                key: "marvel0.speech.mic.pick.in_use",
-                params: { label: mics.inUse.label || noName },
-              }}
-            />
-          </p>
-        ))}
+        )}
+        {mics.inUse &&
+          (mics.inUse.fallback ? (
+            <div data-testid="marvel0-speech-mic-fallback">
+              <Note tone="warning">
+                <SayLine
+                  say={{
+                    key: "marvel0.speech.mic.pick.fallback",
+                    params: { label: mics.inUse.label || noName },
+                  }}
+                />
+              </Note>
+            </div>
+          ) : (
+            <p className="rg-muted" data-testid="marvel0-speech-mic-in-use">
+              <SayLine
+                say={{
+                  key: "marvel0.speech.mic.pick.in_use",
+                  params: { label: mics.inUse.label || noName },
+                }}
+              />
+            </p>
+          ))}
+      </div>
+      {mics.missing && (
+        <div className="rg-actions-row">
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={disabled}
+            data-testid="marvel0-speech-mic-forget"
+            onClick={() => mics.choose(null)}
+          >
+            {t("marvel0.speech.mic.pick.forget")}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

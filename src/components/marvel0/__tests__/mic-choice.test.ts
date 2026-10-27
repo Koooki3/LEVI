@@ -69,11 +69,21 @@ describe("micList", () => {
       inputs: [],
       hidden: true,
     });
-    // An id without a name is still listed, as unnamed.
+    // Ids but no name at all (Firefox before permission): listed, unnamed.
     expect(micList([input("abc", "")])).toEqual({
       known: true,
       inputs: [{ id: "abc", label: "" }],
       hidden: true,
+    });
+  });
+
+  test("one unnamed virtual source among named inputs does not hide the list", () => {
+    expect(
+      micList([input(UGREEN.id, UGREEN.label), input("virtual-1", "")]),
+    ).toEqual({
+      known: true,
+      inputs: [UGREEN, { id: "virtual-1", label: "" }],
+      hidden: false,
     });
   });
 

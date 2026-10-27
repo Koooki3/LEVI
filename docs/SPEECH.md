@@ -8,7 +8,7 @@ marvel0 页面的评测客户端命令卡片可以用语音填写任务指令。
 
 It does:
 
-- record while a button is held (at most 10 seconds) as 16 kHz mono 16-bit WAV, in the browser, from the microphone chosen on the card (the system default unless another one is chosen, see below); the page must be opened as `http://127.0.0.1:7860` or `http://localhost:7860` (a browser gives the microphone to no other address);
+- record while a button is held (at most 10 seconds) as 16 kHz mono 16-bit WAV, in the browser, from the microphone chosen on the card (the browser's default unless another one is chosen, see below); the page must be opened as `http://127.0.0.1:7860` or `http://localhost:7860` (a browser gives the microphone to no other address);
 - transcribe it with `Qwen3-ASR-1.7B` (Apache-2.0) in a **separate worker process** on this machine's GPU, offline, started on the first recording and gone after two minutes without one;
 - compare the transcript with the allowed instructions (below) and offer the closest: tier **A** pre-selects one, **B** offers the best three, **C** lists all of them, **V** (a stop, negation or unsafe word) offers none;
 - change the task instruction field only when you click **Use**.
@@ -26,7 +26,7 @@ It never:
 
 它会做的：
 
-- 按住按钮时在浏览器里录音（最长 10 秒），格式是 16 kHz 单声道 16 位 WAV，用的是卡片上选定的麦克风（没有另选时是系统默认，见下）；页面必须以 `http://127.0.0.1:7860` 或 `http://localhost:7860` 打开（浏览器不会把麦克风给任何其他地址）；
+- 按住按钮时在浏览器里录音（最长 10 秒），格式是 16 kHz 单声道 16 位 WAV，用的是卡片上选定的麦克风（没有另选时是浏览器的默认麦克风，见下）；页面必须以 `http://127.0.0.1:7860` 或 `http://localhost:7860` 打开（浏览器不会把麦克风给任何其他地址）；
 - 用 `Qwen3-ASR-1.7B`（Apache-2.0）在本机 GPU 上的**独立工作进程**里转写，离线运行；第一次录音时启动，两分钟没有新录音就退出；
 - 把转写文字和允许的指令（见下）比较并给出最接近的：A 档预选一句，B 档给出最好的三句，C 档列出全部，V 档（出现“停”、否定或不安全的词）不给候选；
 - 只有你点击“使用”时才改任务指令框。
@@ -44,21 +44,21 @@ It never:
 
 ## Choosing the microphone / 选择麦克风
 
-A workstation often has several inputs: a dedicated USB microphone, a camera's microphone, the board's jack. The system default is not always the one the person talks into, so the card has a **Microphone** list above the talk button.
+A workstation often has several inputs: a dedicated USB microphone, a camera's microphone, the board's jack. The default input is not always the one the person talks into, so the card has a **Microphone** list above the talk button.
 
-- The list holds **System default** and the connected audio inputs. It is read with the browser's `enumerateDevices`, which opens no microphone and asks nothing; it is read again when an input is plugged in or out and after the microphone was opened. Until this page has been allowed to use the microphone once, browsers keep the names back: the list then holds only the default and says to press the talk button once.
-- A choice is remembered in this browser only (`localStorage`, the input's id and name). It is not sent to LEVI and is not shared with other browsers or people. Where the browser's storage cannot be used (a private window, blocked site data) the card uses the default.
-- A press opens the chosen input with `deviceId: {exact}`, so the browser cannot quietly substitute another one. Changing the choice releases a microphone that is still kept open from the last recording; a recording in progress finishes on its input.
-- A remembered input that is not connected is kept: the card says it is missing and uses the system default until it is plugged back in. If the browser changed the input's id, the input with the same name is used when exactly one input has that name. If the chosen input vanishes between the list and the press, that recording uses the default and the card warns about it.
-- After each opening the card says which input was used ("Recording from: …"), so a camera microphone taken by mistake shows before the transcript is trusted.
+- The list holds **Default (the browser picks)** and the connected audio inputs. The default is whatever the browser opens when no input is named: Firefox follows the system's default input, Chrome its own microphone setting (the camera icon in the address bar, or `chrome://settings/content/microphone`), which may differ from the system's. The list is read with the browser's `enumerateDevices`, which opens no microphone and asks nothing; it is read again when an input is plugged in or out and after the microphone was opened. Until this page has been allowed to use the microphone once, browsers keep the names back: the list then holds only the default and says to press the talk button once.
+- A choice is remembered in this browser only (`localStorage`, the input's id and name). It is not sent to LEVI and is not shared with other browsers or people. Where the browser's storage cannot be written (blocked site data), the choice still applies on the page but is not remembered after a reload.
+- A press opens the chosen input with `deviceId: {exact}`, so the browser cannot quietly substitute another one. Changing the choice releases a microphone that is still kept open from the last recording; a recording in progress finishes on its input, and that input is released right after it.
+- A remembered input that is not connected is kept: the card says it is missing and uses the default until it is plugged back in, and offers **Use the default from now on** to forget it. If the browser changed the input's id, the input with the same name is used when exactly one input has that name. If the chosen input vanishes between the list and the press, that recording uses the default and the card warns about it; that microphone is not kept open, so the next press tries the chosen input again.
+- After each opening the card says which input was used ("Recording from: …"), so a camera microphone taken by mistake shows before the transcript is trusted. The notes are in one status region that screen readers announce.
 
-工作站上常有好几个输入设备：专用的 USB 麦克风、相机自带的麦克风、主板的接口。系统默认的不一定是人对着说话的那个，所以卡片在说话按钮上方有一个**麦克风**列表。
+工作站上常有好几个输入设备：专用的 USB 麦克风、相机自带的麦克风、主板的接口。默认的输入设备不一定是人对着说话的那个，所以卡片在说话按钮上方有一个**麦克风**列表。
 
-- 列表里是**系统默认**和已连接的音频输入。它用浏览器的 `enumerateDevices` 读取，不会打开麦克风，也不会弹出询问；插拔设备时、以及麦克风打开过之后会重新读取。本页第一次获准使用麦克风之前，浏览器不给出设备名称：这时列表里只有系统默认，并提示先按一次说话按钮。
-- 选择只记在这个浏览器里（`localStorage`，设备的 ID 和名称），不会发给 LEVI，也不会和别的浏览器或别人共享。浏览器存储不能用时（隐私窗口、网站数据被禁止），卡片使用系统默认。
-- 按下按钮时用 `deviceId: {exact}` 打开选定的设备，浏览器不能悄悄换成别的设备。改选设备会立即释放上一段录音后还保持打开的麦克风；正在进行的录音则在原来的设备上录完。
-- 记住的设备没有接上时，选择会保留：卡片提示它不在，在它重新插上之前使用系统默认。浏览器换了设备 ID 时，如果正好只有一个设备叫同样的名称，就用那一个。选定的设备在列表读取之后、按下之前消失的，这一次录音使用系统默认，卡片会给出警告。
-- 每次打开麦克风后，卡片显示用的是哪个设备（“录音用的麦克风：…”），所以误用了相机麦克风时，在采信转写之前就能看出来。
+- 列表里是**默认（由浏览器决定）**和已连接的音频输入。“默认”指不指定设备时浏览器打开的那个：Firefox 跟随系统的默认输入，Chrome 用它自己的麦克风设置（地址栏里的摄像头图标，或 `chrome://settings/content/microphone`），可能和系统的不同。列表用浏览器的 `enumerateDevices` 读取，不会打开麦克风，也不会弹出询问；插拔设备时、以及麦克风打开过之后会重新读取。本页第一次获准使用麦克风之前，浏览器不给出设备名称：这时列表里只有默认，并提示先按一次说话按钮。
+- 选择只记在这个浏览器里（`localStorage`，设备的 ID 和名称），不会发给 LEVI，也不会和别的浏览器或别人共享。浏览器存储写不进去时（网站数据被禁止），选择在当前页面仍然有效，但刷新后不会记住。
+- 按下按钮时用 `deviceId: {exact}` 打开选定的设备，浏览器不能悄悄换成别的设备。改选设备会立即释放上一段录音后还保持打开的麦克风；正在进行的录音在原来的设备上录完，录完立即释放该设备。
+- 记住的设备没有接上时，选择会保留：卡片提示它不在，在它重新插上之前使用默认麦克风，并提供“以后都用默认麦克风”按钮来忘掉它。浏览器换了设备 ID 时，如果正好只有一个设备叫同样的名称，就用那一个。选定的设备在列表读取之后、按下之前消失的，这一次录音使用默认麦克风，卡片会给出警告；这个麦克风不会保持打开，下一次按下会重新尝试选定的设备。
+- 每次打开麦克风后，卡片显示用的是哪个设备（“录音用的麦克风：…”），所以误用了相机麦克风时，在采信转写之前就能看出来。这些提示放在同一个状态区域里，读屏软件会播报。
 
 ## Which instructions are allowed / 哪些指令是允许的
 

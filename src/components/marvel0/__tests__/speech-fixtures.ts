@@ -371,6 +371,9 @@ export interface FakeAudioOptions {
    * getUserMedia refuses an `exact` deviceId that is not in it, as a browser
    * does (OverconstrainedError), and opens the first input for the default. */
   devices?: FakeDevice[];
+  /** The error an `exact` id that is not in `devices` raises (browsers use
+   * OverconstrainedError; some report NotFoundError). */
+  goneAs?: "OverconstrainedError" | "NotFoundError";
 }
 
 export interface FakeDevice {
@@ -628,7 +631,9 @@ export function installFakeAudio(options: FakeAudioOptions = {}): FakeAudio {
             : inputs()[0];
           if (!device)
             throw Object.assign(new Error("no such device"), {
-              name: asked ? "OverconstrainedError" : "NotFoundError",
+              name: asked
+                ? (options.goneAs ?? "OverconstrainedError")
+                : "NotFoundError",
             });
         }
         const stream = new FakeStream();

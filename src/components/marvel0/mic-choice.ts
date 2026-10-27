@@ -59,18 +59,25 @@ const PSEUDO_IDS = new Set(["default", "communications"]);
 export function micList(devices: readonly DeviceInfoLike[]): MicList {
   const inputs: MicInput[] = [];
   const seen = new Set<string>();
-  let hidden = false;
+  // Kept back: an input without an id (Chromium before permission), or no
+  // input with a name at all. One unnamed virtual source among named ones
+  // does not make the whole list hidden.
+  let noId = false;
+  let anyAudio = false;
+  let anyName = false;
   for (const device of devices) {
     if (device.kind !== "audioinput") continue;
+    anyAudio = true;
     const id = typeof device.deviceId === "string" ? device.deviceId : "";
     const label = typeof device.label === "string" ? device.label.trim() : "";
-    if (!id || !label) hidden = true;
+    if (!id) noId = true;
+    if (label) anyName = true;
     if (!id || PSEUDO_IDS.has(id) || seen.has(id) || id.length > MAX_FIELD)
       continue;
     seen.add(id);
     inputs.push({ id, label: label.slice(0, MAX_FIELD) });
   }
-  return { known: true, inputs, hidden };
+  return { known: true, inputs, hidden: noId || (anyAudio && !anyName) };
 }
 
 export type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;

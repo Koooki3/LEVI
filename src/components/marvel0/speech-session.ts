@@ -249,9 +249,11 @@ export function useSpeechSession({
     setMicChoice(resolved.renamed);
   }, [resolved.renamed]);
 
-  // The next press opens the resolved input.
+  // The next press opens the resolved input; what the last opening used no
+  // longer describes it (an unplugged input is not "recording from" any more).
   useEffect(() => {
     capture.current?.setDevice?.(resolved.deviceId);
+    setInUse(null);
   }, [resolved.deviceId]);
 
   const chooseMic = useCallback(
