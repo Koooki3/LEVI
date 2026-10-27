@@ -252,9 +252,3 @@ export function cardChoices(
     if (card && !out.includes(card)) out.push(card);
   return out;
 }
-
-/** The unblind request is allowed only while results are blind and the
- * campaign has not ended without a report. */
-export function canUnblind(view: CampaignView): boolean {
-  return view.blinded;
-}

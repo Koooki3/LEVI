@@ -233,10 +233,6 @@ export function releaseTone(value: ReleaseClass): ClassTone {
   }
 }
 
-export function releaseClassLabel(value: string): string {
-  return RELEASE_CLASS_LABELS[value as ReleaseClass] ?? value;
-}
-
 /** Counts per release class in listing order; classes with none are left out. */
 export function sortedClasses(
   counts: Partial<Record<ReleaseClass, number>>,

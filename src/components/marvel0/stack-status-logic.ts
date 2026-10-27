@@ -7,7 +7,6 @@ import type { Say } from "./marvel0-logic";
 import { bool, list, num, rec, str, type Rec } from "./marvel0-json";
 
 export const STACK_SCHEMA = "levi.marvel0.stack.v1";
-export const STACK_PATH = "/api/levi/marvel0/stack";
 export const STACK_POLL_MS = 2_000;
 
 /** The order of the rows: M first (it comes up first), then A, B, C, the

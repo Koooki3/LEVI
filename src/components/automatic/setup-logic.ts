@@ -26,8 +26,6 @@ export const SAFETY_ITEM_KEYS = [
   "automatic.setup.safety.still",
 ] as const;
 
-export const SAFETY_ITEM_COUNT = SAFETY_ITEM_KEYS.length;
-
 /** Whether the step's command may only be copied after the safety list. */
 export function needsSafetyChecklist(step: SetupStep): boolean {
   return step.level === 4 && step.mode !== "native";
@@ -80,15 +78,6 @@ export function countByStatus(steps: SetupStep[]): Record<SetupStatus, number> {
 export function openSteps(steps: SetupStep[], checked: ReadonlySet<string>) {
   return steps.filter((step) => step.status !== "ok" && !checked.has(step.id))
     .length;
-}
-
-export function firstOpenIndex(
-  steps: SetupStep[],
-  checked: ReadonlySet<string>,
-): number {
-  return steps.findIndex(
-    (step) => step.status !== "ok" && !checked.has(step.id),
-  );
 }
 
 export const LEVEL_KEYS: Record<SetupLevel, string> = {

@@ -17,7 +17,6 @@ import type {
   Sam3JobStatus,
   Sam3Plan,
   Sam3PromptPreset,
-  Sam3Revision,
 } from "../types/object-annotation.types";
 import type {
   RecapComparison,
@@ -90,10 +89,6 @@ export function isAnnotateBackendEnabled(): boolean {
   return !!ENV_URL;
 }
 
-export function getAnnotateBackendUrl(): string | null {
-  return ENV_URL;
-}
-
 export interface DatasetIdent {
   repoId?: string | null;
   localPath?: string | null;
@@ -107,16 +102,6 @@ function buildUrl(path: string, ident: DatasetIdent): string {
   if (ident.revision) url.searchParams.set("revision", ident.revision);
   if (ident.localPath) url.searchParams.set("local_path", ident.localPath);
   return url.toString();
-}
-
-export async function pingBackend(): Promise<boolean> {
-  if (!ENV_URL) return false;
-  try {
-    const res = await annotationFetch(endpoint("/api/health"));
-    return res.ok;
-  } catch {
-    return false;
-  }
 }
 
 export async function loadDataset(
@@ -462,55 +447,12 @@ export async function exportDataset(
   return res.json();
 }
 
-export interface PushToHubResult {
-  ok: boolean;
-  repo_id: string;
-  url: string;
-  message: string;
-}
-
-export async function pushToHub(
-  ident: DatasetIdent,
-  hfToken: string,
-  pushInPlace: boolean,
-  newRepoId: string | null,
-  privateRepo: boolean,
-  commitMessage: string,
-): Promise<PushToHubResult> {
-  if (!ENV_URL) throw new Error("Annotate backend not configured");
-  const res = await annotationFetch(endpoint("/api/push_to_hub"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      repo_id: ident.repoId || null,
-      revision: ident.revision || null,
-      local_path: ident.localPath || null,
-      hf_token: hfToken,
-      push_in_place: pushInPlace,
-      new_repo_id: newRepoId || null,
-      private: privateRepo,
-      commit_message: commitMessage,
-    }),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => `${res.status}`);
-    throw new Error(text || `push: ${res.status}`);
-  }
-  return res.json();
-}
-
 export async function getSam3Status(): Promise<Sam3Capabilities> {
   const response = await annotationFetch(endpoint("/api/sam3/status"), {
     cache: "no-store",
   });
   if (!response.ok) throw new Error("SAM3 status: " + response.status);
   return response.json() as Promise<Sam3Capabilities>;
-}
-
-export async function getSam3Capabilities(): Promise<Sam3Capabilities> {
-  // Keep the old client name for extensions while using the richer global
-  // status response.
-  return getSam3Status();
 }
 
 export async function startSam3CheckpointDownload(): Promise<
@@ -587,20 +529,6 @@ export async function runSam3(
     const text = await response.text().catch(() => `${response.status}`);
     throw new Error(text || `SAM3 run: ${response.status}`);
   }
-  return response.json();
-}
-
-export async function fetchSam3Revisions(
-  ident: DatasetIdent,
-): Promise<{ current: string | null; revisions: Sam3Revision[] }> {
-  if (!ENV_URL) return { current: null, revisions: [] };
-  const response = await annotationFetch(
-    buildUrl("/api/sam3/revisions", ident),
-    {
-      cache: "no-store",
-    },
-  );
-  if (!response.ok) throw new Error(`SAM3 revisions: ${response.status}`);
   return response.json();
 }
 

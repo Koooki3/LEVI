@@ -138,24 +138,6 @@ export function buildSpeechAtom(timestamp: number, text: string): LanguageAtom {
   };
 }
 
-/**
- * Whether ``atom`` should render on the camera identified by ``cameraKey``.
- *
- * - row-level ``atom.camera`` is the source of truth (lerobot PR 3467);
- *   ``null`` means camera-agnostic and renders everywhere;
- *   a non-null value matches only its own camera.
- * - For backwards compatibility with annotations that were created before the
- *   row-level field existed (visualizer-only payloads with an in-JSON
- *   ``camera`` key inside the VQA answer), the caller is responsible for the
- *   payload-level fallback — see ``video-overlay-canvas.tsx``.
- */
-export function atomMatchesCamera(
-  atom: LanguageAtom,
-  cameraKey: string,
-): boolean {
-  return atom.camera == null || atom.camera === cameraKey;
-}
-
 // --- VQA answer shapes -------------------------------------------------------
 
 export type VqaAnswer =
@@ -232,53 +214,6 @@ export function parseVqaAnswer(
 }
 
 // --- Atom helpers used by the editor UI --------------------------------------
-
-export interface EpisodeAtoms {
-  persistent: LanguageAtom[];
-  events: LanguageAtom[];
-}
-
-/** Group all atoms for an episode by their target column. */
-export function partitionAtoms(atoms: LanguageAtom[]): EpisodeAtoms {
-  const persistent: LanguageAtom[] = [];
-  const events: LanguageAtom[] = [];
-  for (const a of atoms) {
-    if (columnForStyle(a.style) === "language_persistent") persistent.push(a);
-    else events.push(a);
-  }
-  persistent.sort((a, b) => a.timestamp - b.timestamp);
-  events.sort((a, b) => a.timestamp - b.timestamp);
-  return { persistent, events };
-}
-
-export function atomsByStyle(
-  atoms: LanguageAtom[],
-  style: LanguageStyle,
-): LanguageAtom[] {
-  return atoms.filter((a) => a.style === style);
-}
-
-export function activeAt(
-  persistent: LanguageAtom[],
-  style: LanguageStyle,
-  t: number,
-): LanguageAtom | null {
-  let best: LanguageAtom | null = null;
-  for (const a of persistent) {
-    if (a.style !== style) continue;
-    if (a.timestamp > t) break;
-    best = a;
-  }
-  return best;
-}
-
-export function eventsAt(
-  events: LanguageAtom[],
-  t: number,
-  windowSec = 1 / 60,
-): LanguageAtom[] {
-  return events.filter((a) => Math.abs(a.timestamp - t) <= windowSec);
-}
 
 /**
  * Snap a timestamp to the nearest source-frame timestamp. Linear scan; episodes

@@ -59,38 +59,6 @@ export const INSTRUCTION_MAX = 500;
 export const SUCCESS_CONDITION_MAX = 500;
 export const RESET_INSTRUCTION_MAX = 2000;
 
-export const SCHEDULE_KINDS: {
-  value: ScheduleKind;
-  exploratory: boolean;
-  key: string;
-}[] = [
-  {
-    value: "counterbalanced_segments",
-    exploratory: false,
-    key: "automatic.wizard.schedule.counterbalanced_segments",
-  },
-  {
-    value: "randomized_blocks",
-    exploratory: false,
-    key: "automatic.wizard.schedule.randomized_blocks",
-  },
-  {
-    value: "latin_square",
-    exploratory: false,
-    key: "automatic.wizard.schedule.latin_square",
-  },
-  {
-    value: "interleaved",
-    exploratory: true,
-    key: "automatic.wizard.schedule.interleaved",
-  },
-  {
-    value: "blocked",
-    exploratory: true,
-    key: "automatic.wizard.schedule.blocked",
-  },
-];
-
 /** The label bases of a campaign (the report's names; an automatic basis is
  * always called unreviewed, and only the adjudicated one says ground truth). */
 export const LABEL_BASES: { value: string; key: string }[] = [

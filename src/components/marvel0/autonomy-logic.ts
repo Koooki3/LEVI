@@ -110,7 +110,6 @@ export const READY_FRESH_MS = 12_000;
 export const PREPARE_PHRASE = "prepare aeri run";
 export const LIVE_STOP_PHRASE = "stop live service";
 export const LEFTOVERS_PHRASE = "stop leftover aeri units";
-export const DEFAULT_END_PHRASE = "end terminal D";
 /** The phrase of a start: the backend's template (`start aeri {name}`) with the
  * run's name put in. */
 export const startPhrase = (
@@ -612,10 +611,6 @@ export function keyVM(run: RunView, key: KeyView, ctx: KeyCtx): KeyVM {
     ? { key, mode: "wait", waitMs, why: null, lock: null }
     : { key, mode: "ready", waitMs: 0, why: null, lock: null };
 }
-
-/** The keys that must be given the clock: B and C keys not yet clickable. */
-export const needsClock = (vms: KeyVM[]): boolean =>
-  vms.some((vm) => vm.mode === "wait" || vm.lock === "sent");
 
 // -- Stop
 

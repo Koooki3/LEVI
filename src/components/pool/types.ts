@@ -28,7 +28,6 @@ export const POLICY_METHODS = [
   "other",
   "unknown",
 ] as const;
-export type PolicyMethod = (typeof POLICY_METHODS)[number];
 
 export const METHOD_LABELS: Record<string, string> = {
   direct: "Direct deployment",

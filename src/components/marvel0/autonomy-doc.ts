@@ -107,7 +107,6 @@ export const NOTICE_CODES = [
   "screen_drift",
   "key_unconfirmed",
 ] as const;
-export type NoticeCode = (typeof NOTICE_CODES)[number];
 
 export const READY_LEVELS = ["ok", "warn", "refuse", "unknown"] as const;
 export type ReadyLevel = (typeof READY_LEVELS)[number];

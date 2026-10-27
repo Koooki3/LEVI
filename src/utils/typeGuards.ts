@@ -62,16 +62,6 @@ export function isValidTaskIndex(value: unknown): value is number {
 }
 
 /**
- * Type guard for HTMLVideoElement
- *
- * @param element - Element to check
- * @returns True if element is an HTMLVideoElement
- */
-export function isVideoElement(element: unknown): element is HTMLVideoElement {
-  return element instanceof HTMLVideoElement;
-}
-
-/**
  * Safe string conversion
  * Converts any value to a string safely
  *

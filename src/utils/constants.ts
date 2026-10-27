@@ -25,13 +25,6 @@ export const CHART_CONFIG = {
   SERIES_NAME_DELIMITER: " | ",
 } as const;
 
-// Video player configuration
-export const VIDEO_PLAYER = {
-  JUMP_SECONDS: 5,
-  STEP_SIZE: 0.01,
-  DEBOUNCE_MS: 200,
-} as const;
-
 // HTTP configuration
 export const HTTP = {
   TIMEOUT_MS: 10000,

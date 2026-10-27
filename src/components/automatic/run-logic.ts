@@ -10,7 +10,6 @@ import type {
   ResetMode,
   RunEvent,
   RunProgress,
-  RunSnapshot,
 } from "./types";
 
 // ── State graph ───────────────────────────────────────────────────────────
@@ -271,10 +270,6 @@ export function nextPollDelay(opts: {
   return Math.min(MAX_BACKOFF_MS, base * 2 ** Math.min(opts.failures ?? 0, 5));
 }
 
-export function snapshotBlind(snapshot: RunSnapshot | null): boolean {
-  return isBlind(snapshot?.pending_card);
-}
-
 // ── Durations ─────────────────────────────────────────────────────────────
 
 /** A duration in the page language: `t` is the catalogue lookup. */
@@ -292,14 +287,6 @@ export function localDuration(ms: number, t: (key: string) => string): string {
   return t("automatic.duration.h")
     .replace("{h}", String(Math.floor(minutes / 60)))
     .replace("{m}", String(minutes % 60));
-}
-
-export function durationText(ms: number): string {
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 60) return `${seconds} s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} min ${seconds % 60} s`;
-  return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
 // ── Metrics ───────────────────────────────────────────────────────────────

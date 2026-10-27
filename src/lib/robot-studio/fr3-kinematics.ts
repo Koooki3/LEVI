@@ -20,7 +20,6 @@ export interface PoseSolution {
   iterations: number;
   reason?: "invalid-input" | "unreachable" | "no-convergence";
 }
-export const FR3_BASE_FRAME = "fr3_link0";
 export const FR3_FLANGE_FRAME = "fr3_link8";
 export const FR3_JOINT_NAMES = Object.freeze(
   chain.slice(0, 7).map((j) => j.name),

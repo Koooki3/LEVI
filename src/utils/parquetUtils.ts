@@ -1,7 +1,6 @@
 import {
   asyncBufferFromUrl,
   parquetMetadataAsync,
-  parquetRead,
   parquetReadObjects,
   type AsyncBuffer,
   type FileMetaData,
@@ -662,32 +661,6 @@ export async function readParquetRowsByGlobalIndex(
     parquetFileIndexes.delete(url);
   }
   return null;
-}
-
-// Read specific columns from the Parquet file
-export async function readParquetColumn(
-  fileBuffer: ParquetFile,
-  columns: string[],
-  options?: { rowStart?: number; rowEnd?: number },
-): Promise<unknown[][]> {
-  if (options?.rowStart === undefined && options?.rowEnd === undefined) {
-    assertFullReadAllowed(fileBuffer, "Reading this Parquet file");
-  }
-  return new Promise((resolve, reject) => {
-    try {
-      parquetRead({
-        file: fileBuffer,
-        columns: columns.length > 0 ? columns : undefined,
-        rowStart: options?.rowStart,
-        rowEnd: options?.rowEnd,
-        onComplete: (data: unknown[][]) => {
-          resolve(data);
-        },
-      });
-    } catch (error) {
-      reject(error);
-    }
-  });
 }
 
 export async function readParquetAsObjects(

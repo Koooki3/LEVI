@@ -77,16 +77,3 @@ export function listBrowserStorageKeys(
     return [];
   }
 }
-
-export function browserStorageAvailable(area: BrowserStorageArea): boolean {
-  try {
-    const storage = getStorage(area);
-    if (!storage) return false;
-    const probe = `__levi_storage_probe_${area}__`;
-    storage.setItem(probe, "1");
-    storage.removeItem(probe);
-    return true;
-  } catch {
-    return false;
-  }
-}
