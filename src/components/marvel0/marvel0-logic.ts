@@ -385,6 +385,25 @@ function noHealth(
   };
 }
 
+/** What a red light that follows from the stack means for Desk: terminal A
+ * not running (the monitor sees Desk only through A, so Desk's mode, FCI and
+ * joint locks are not known), or A running with its hardware interface not
+ * active (usually locked joints or FCI off in Desk). Null for any other red
+ * light. Read from the monitor's red_cause, or, from an older monitor, from its
+ * reasons. */
+function deskRed(part: Rec | null): "needs_arm" | "inactive" | null {
+  if (!redFollowsFromStack(part)) return null;
+  const cause = str(part?.red_cause, 40);
+  if (cause !== null) return cause === "stack_down" ? "needs_arm" : "inactive";
+  const reasons = list(part?.reasons).map((entry) => str(entry) ?? "");
+  const managerDown = reasons.some((r) =>
+    r.startsWith("controller_manager_unreachable"),
+  );
+  return bool(part?.hardware_active) === false && !managerDown
+    ? "inactive"
+    : "needs_arm";
+}
+
 function deskCard(health: Health): Marvel0Card {
   const title = "marvel0.desk.title";
   const hint = "marvel0.desk.hint";
@@ -420,7 +439,30 @@ function deskCard(health: Health): Marvel0Card {
       notes: [...detailOf(part), ...sameAsMonitor(notes)],
       hint,
     };
-  if (health.state === "red")
+  if (health.state === "red") {
+    // A red light that only says the stack is not up is not a Desk fault: the
+    // card says what it cannot see, or what Desk usually lacks.
+    const why = deskRed(part);
+    if (why === "needs_arm")
+      return {
+        id: "desk",
+        title,
+        state: "unknown",
+        summary: k("marvel0.desk.needs_arm"),
+        facts,
+        notes,
+        hint,
+      };
+    if (why === "inactive")
+      return {
+        id: "desk",
+        title,
+        state: "not_started",
+        summary: k("marvel0.desk.inactive"),
+        facts,
+        notes,
+        hint,
+      };
     return {
       id: "desk",
       title,
@@ -430,6 +472,7 @@ function deskCard(health: Health): Marvel0Card {
       notes,
       hint,
     };
+  }
   const state: Marvel0State =
     hardware === null ? "unknown" : hardware ? "ok" : "not_started";
   return {
@@ -467,6 +510,11 @@ const STACK_DOWN_REASON =
  * fault of the arm or its link, whatever the controller flag says. Anything
  * else is still a red light. */
 function redFollowsFromStack(part: Rec | null): boolean {
+  // A monitor since 2026-10-27 says it itself (red_cause): terminal A not
+  // running, or its hardware interface not active, is the stack, not a fault.
+  const cause = str(part?.red_cause, 40);
+  if (cause !== null)
+    return cause === "stack_down" || cause === "hardware_inactive";
   const reasons = list(part?.reasons).map((entry) => str(entry));
   if (reasons.length === 0 || list(part?.current_errors).length > 0)
     return false;
@@ -612,7 +660,16 @@ function monitorCard(health: Health): Marvel0Card {
     case "ok":
       return { ...base, state: "ok", summary: k("marvel0.monitor.ok"), facts };
     case "red":
-      return { ...base, state: "red", summary: k(RED_LIGHT), facts };
+      // The monitor itself works; a light that only follows from the stack
+      // is told on the Desk and A cards.
+      return redFollowsFromStack(part)
+        ? {
+            ...base,
+            state: "ok",
+            summary: k("marvel0.monitor.ok_red_follows"),
+            facts,
+          }
+        : { ...base, state: "red", summary: k(RED_LIGHT), facts };
     case "offline":
       return {
         ...base,

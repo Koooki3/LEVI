@@ -797,7 +797,7 @@ prewarm = true                  # 必需：在线判定从不冷启动 vLLM
 ## 服务读取的机器人侧接口
 
 - **C2 会话**：`<根>/.eval_sessions/<group>__<task_folder>.json`，schema `levi.eval.session.v1`（`state`：`standby homing running waiting_reset fault stopped finished`）。10 秒没有更新且进程已不在，或超过一小时未更新（回收的 pid 不能让它复活），会话算 `crashed`。`waiting_reset_since`（本次等待第一次进入 `waiting_reset` 的纪元秒；闸门的提前量从它算起，旧客户端不写时从本服务第一次看到该会话算起；会话在机器人上或在两集之间时，监督进程至少每秒看一次）、`run_id`（被续跑的评测轮）、`episode.no`（本次会话的集序号）、`episode.counted`（该轮累计有效片段数）原样传给页面。`incomplete_*` 的中止原因：`fr3_fault`、`user_quit`、`interrupted`、`process_killed`（只有 `fr3_fault` 把数据集标成故障；所有原因都按类计数）。
-- **C3 FR3 健康**：`fr3_health.json`，schema `levi.fr3.health.v1`（优先 `updated_at_epoch`，否则 `updated_at`）。缺失或超过 `fr3.stale_s` 是**离线**，不是红灯。`red_light` 还包括：5 秒没有实时机器人状态、5 秒连不上 controller manager、没有 Franka 硬件组件；服务只显示，不据此行动。
+- **C3 FR3 健康**：`fr3_health.json`，schema `levi.fr3.health.v1`（优先 `updated_at_epoch`，否则 `updated_at`）。缺失或超过 `fr3.stale_s` 是**离线**，不是红灯。`red_light` 还包括：5 秒没有实时机器人状态、5 秒连不上 controller manager、没有 Franka 硬件组件；服务只显示，不据此行动。2026-10-27 起监视器还写 `stack`（`up`；controller manager 5 秒没应答为 `down`；否则 `unknown`）和 `red_cause`（`robot_fault`、`hardware_missing`、`hardware_inactive`、`no_robot_state` 或 `stack_down`，不是红灯时为 null）；`red_light` 对客户端的含义不变。工作站页面据此把“只是因为终端 A 没运行”的红灯显示为 A 卡片“未启动”、Desk 卡片“A 启动前未知”，而不是故障；没有这两个字段的旧版监视器文件，仍按原因列表判断。
 
 ## HTTP API（`/api/levi/live/*`）
 

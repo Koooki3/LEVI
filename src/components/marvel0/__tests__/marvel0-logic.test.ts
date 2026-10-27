@@ -507,9 +507,14 @@ describe("terminal A when the red light only follows from the stack not running"
     expect(
       card("arm", red([...STACK_DOWN, "waiting_for_first_robot_state"])).state,
     ).toBe("not_started");
-    // The Desk and monitor cards report the light as it is.
-    expect(found.desk.state).toBe("red");
-    expect(found.monitor.state).toBe("red");
+    // Not a Desk fault and not a monitor fault (2026-10-27: Desk was unlocked
+    // with FCI on, and both cards showed the red light): with the hardware
+    // interface down and the controller manager answering, Desk usually lacks
+    // unlocked joints or FCI; the monitor itself works.
+    expect(found.desk.state).toBe("not_started");
+    expect(summary(found.desk)).toBe("marvel0.desk.inactive");
+    expect(found.monitor.state).toBe("ok");
+    expect(summary(found.monitor)).toBe("marvel0.monitor.ok_red_follows");
   });
 
   test("a reason that is not stack-down next to it keeps the light red", () => {
@@ -539,10 +544,26 @@ describe("terminal A when the red light only follows from the stack not running"
     expect(found.arm.hint).toBe("marvel0.arm.hint_red_follows");
     // The reasons stay visible as written.
     expect(found.arm.notes).toEqual(STACK_DOWN);
-    // The Desk and monitor cards report the light as it is.
-    expect(found.desk.state).toBe("red");
-    expect(found.monitor.state).toBe("red");
+    // Terminal A is not running (the controller manager does not answer): the
+    // monitor cannot see Desk at all, so Desk is unknown, not a fault, and the
+    // monitor itself works.
+    expect(found.desk.state).toBe("unknown");
+    expect(summary(found.desk)).toBe("marvel0.desk.needs_arm");
     expect(found.desk.hint).toBe("marvel0.desk.hint");
+    expect(found.monitor.state).toBe("ok");
+    expect(summary(found.monitor)).toBe("marvel0.monitor.ok_red_follows");
+  });
+
+  test("any other red light stays red on the Desk and monitor cards too", () => {
+    for (const setup of [
+      red([...STACK_DOWN, "cartesian reflex"]),
+      red(STACK_DOWN, { current_errors: ["joint_reflex"] }),
+      red(["robot_state_no_data"], { hardware_active: true }),
+    ]) {
+      const found = cards(view(setup));
+      expect(found.desk.state).toBe("red");
+      expect(found.monitor.state).toBe("red");
+    }
   });
 
   test("each kind alone is enough, with what the monitor appends to it", () => {
@@ -659,6 +680,89 @@ describe("terminal A when the red light only follows from the stack not running"
     expect(
       card("arm", setupStatus({ fr3_health: { state: "missing" } })).state,
     ).toBe("unknown");
+  });
+});
+
+describe("the monitor's own red_cause (fr3_health_monitor.py since 2026-10-27)", () => {
+  // A newer monitor says why the light is red; the field wins over the
+  // reasons, which an older monitor leaves the cards to read.
+  const red = (red_cause: unknown, over: Record<string, unknown> = {}) =>
+    setupStatus({
+      fr3_health: healthPart({
+        state: "red",
+        hardware_active: null,
+        controller_active: null,
+        reasons: ["controller_manager_unreachable 60s", "robot_state_no_data"],
+        red_cause,
+        stack: red_cause === "stack_down" ? "down" : "up",
+        ...over,
+      }),
+    });
+
+  test("stack_down: Desk unknown until A runs, A not started, the monitor fine", () => {
+    const found = cards(view(red("stack_down")));
+    expect(found.desk.state).toBe("unknown");
+    expect(summary(found.desk)).toBe("marvel0.desk.needs_arm");
+    expect(found.arm.state).toBe("not_started");
+    expect(summary(found.arm)).toBe("marvel0.arm.red_follows");
+    expect(found.monitor.state).toBe("ok");
+    expect(summary(found.monitor)).toBe("marvel0.monitor.ok_red_follows");
+  });
+
+  test("hardware_inactive: Desk usually lacks unlocked joints or FCI", () => {
+    const found = cards(
+      view(
+        red("hardware_inactive", {
+          hardware_active: false,
+          reasons: ["hardware_interface=inactive", "robot_state_no_data"],
+        }),
+      ),
+    );
+    expect(found.desk.state).toBe("not_started");
+    expect(summary(found.desk)).toBe("marvel0.desk.inactive");
+    expect(found.arm.state).toBe("not_started");
+    expect(found.monitor.state).toBe("ok");
+  });
+
+  test("a fault the monitor names stays red, whatever the reasons look like", () => {
+    for (const cause of [
+      "robot_fault",
+      "hardware_missing",
+      "no_robot_state",
+      "a_cause_this_page_does_not_know",
+    ]) {
+      const found = cards(view(red(cause)));
+      expect([found.desk.state, found.arm.state, found.monitor.state]).toEqual([
+        "red",
+        "red",
+        "red",
+      ]);
+    }
+  });
+
+  test("a light that is not red is not changed by a stray red_cause", () => {
+    const found = cards(
+      view(
+        setupStatus({
+          fr3_health: healthPart({ state: "ok", red_cause: "stack_down" }),
+        }),
+      ),
+    );
+    expect(found.monitor.state).toBe("ok");
+    expect(summary(found.monitor)).toBe("marvel0.monitor.ok");
+  });
+
+  test("the new sentences have words in both languages", () => {
+    for (const key of [
+      "marvel0.desk.needs_arm",
+      "marvel0.desk.inactive",
+      "marvel0.monitor.ok_red_follows",
+    ]) {
+      expect((en as Record<string, string>)[key]).toBeTruthy();
+      expect((zh as Record<string, string>)[key]).toBeTruthy();
+    }
+    expect(zh["marvel0.desk.needs_arm"]).toContain("Desk");
+    expect(en["marvel0.desk.inactive"]).toContain("FCI");
   });
 });
 

@@ -466,6 +466,32 @@ def test_fr3_health(proc, tmp_path):
     )
 
 
+def test_fr3_health_passes_the_monitors_stack_and_red_cause(proc, tmp_path):
+    """The monitor's own word on why the light is red reaches the page
+    (2026-10-27); an older monitor's file, or a value this page does not know,
+    reads as not said."""
+    health = tmp_path / "fr3_health.json"
+
+    def status(**fields):
+        health.write_text(
+            json.dumps({"updated_at_epoch": 2_000_000_000.0 - 1, **fields})
+        )
+        return probe().status(P.Context(proc=str(proc.root), health_file=str(health)))[
+            "fr3_health"
+        ]
+
+    out = status(red_light=True, stack="down", red_cause="stack_down")
+    assert (out["state"], out["stack"], out["red_cause"]) == (
+        "red",
+        "down",
+        "stack_down",
+    )
+    old = status(red_light=True)
+    assert (old["state"], old["stack"], old["red_cause"]) == ("red", None, None)
+    odd = status(red_light=True, stack=["down"], red_cause="<script>")
+    assert (odd["stack"], odd["red_cause"]) == (None, None)
+
+
 def test_disks_have_labels_not_paths(proc, tmp_path):
     out = probe().status(
         P.Context(

@@ -136,6 +136,22 @@ ENV_RECORDER_DIR = "LEVI_FR3_RECORDER_DIR"
 ENV_GPU_LOCK = "LEVI_GPU_LOCK_FILE"
 
 
+# fr3_health_monitor.py's ``stack`` and ``red_cause`` (contract C3, additive):
+# only these values reach the page, anything else reads as not said.
+HEALTH_STACK = ("up", "down", "unknown")
+HEALTH_RED_CAUSES = (
+    "robot_fault",
+    "hardware_missing",
+    "hardware_inactive",
+    "no_robot_state",
+    "stack_down",
+)
+
+
+def _known(value, allowed):
+    return value if isinstance(value, str) and value in allowed else None
+
+
 @dataclass(frozen=True)
 class Context:
     """Where to look. Built from the environment and the live configuration
@@ -1017,6 +1033,10 @@ class Probes:
             "controller_active": value.get("controller_active"),
             "command_success_rate": value.get("command_success_rate"),
             "reasons": [str(r)[:200] for r in (value.get("reasons") or [])[:10]],
+            # Since 2026-10-27 the monitor says whether terminal A runs and why
+            # the light is red; an older monitor leaves them out (None).
+            "stack": _known(value.get("stack"), HEALTH_STACK),
+            "red_cause": _known(value.get("red_cause"), HEALTH_RED_CAUSES),
         }
         if age > c.health_stale_s:
             return {
