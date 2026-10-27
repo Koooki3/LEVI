@@ -19,7 +19,10 @@ is then graded episode by episode against it, deterministically:
 is then producing the teacher's annotation, not merely something plausible.
 """
 
+import time
+
 from ..events.boundary_metrics import match_segments, segment_f1_counts
+from .layout import dataset_dir, read_json, write_json
 
 IOU = 0.3
 THRESHOLDS = {
@@ -29,6 +32,43 @@ THRESHOLDS = {
     "outcome_time_accuracy": 0.75,
     "boundary_mae": 1.0,  # seconds, lower is better
 }
+
+
+def reference_path(state, key, task):
+    return dataset_dir(state, key) / "teaching" / f"reference-{task}.json"
+
+
+def save_reference(store, key, task, change_id, *, description=""):
+    """Freeze a committed teacher changeset as the reference for ``task``."""
+    change = store.get("changes", change_id)
+    if change["status"] != "committed":
+        raise ValueError("Only committed work can be a reference")
+    rejected = {k for k, v in change.get("decisions", {}).items() if v == "rejected"}
+    episodes = {}
+    for index, p in enumerate(change["proposals"]):
+        if str(index) in rejected or p["kind"] != "segment":
+            continue
+        episodes.setdefault(f"episode_{p['episode_index']:06d}", []).append(
+            {
+                "subtask": p.get("subtask_id"),
+                "start": p["start"],
+                "end": p.get("end"),
+                "outcome": p.get("outcome"),
+                "content": p["content"],
+            }
+        )
+    value = {
+        "schema": "levi.harness.reference.v1",
+        "task": task,
+        "description": description,
+        "dataset_key": key,
+        "run_id": change["run_id"],
+        "changeset": change_id,
+        "episodes": episodes,
+        "saved_at": time.time(),
+    }
+    write_json(reference_path(store.state, key, task), value)
+    return value
 
 
 def episode(reference, candidate):
@@ -98,6 +138,74 @@ def grade(reference, candidate_episodes):
     }
 
 
+def segments_of_change(change, *, learner=False):
+    """Segments per episode from a changeset (or a learner's raw outputs)."""
+    episodes = {}
+    for p in change["proposals"]:
+        if p["kind"] != "segment":
+            continue
+        episodes.setdefault(f"episode_{p['episode_index']:06d}", []).append(
+            {
+                "subtask": p.get("subtask_id"),
+                "start": p["start"],
+                "end": p.get("end"),
+                "outcome": p.get("outcome"),
+                "content": p["content"],
+            }
+        )
+    return episodes
+
+
+def learner_segments(store, run_id):
+    """The learner's own final outputs, before any teacher revision.
+
+    Per episode the last phase is the answer: refine over coarse, and the
+    batches of a long episode (refine-1, refine-2, ...) over both, each
+    contributing the proposals that start in its window.
+    """
+    phases = {}
+    batches = {}
+    for record in store.list("teaching"):
+        if record["run_id"] != run_id or record.get("status") == "superseded":
+            continue
+        phase, ep = record["phase"], record["episode"]
+        if phase.startswith("refine-"):
+            window = record["summary"].get("refine_only") or {}
+            batches.setdefault(ep, []).extend(
+                p
+                for p in record["learner_output"]["proposals"]
+                if window.get("start", 0) <= p["start"] < window.get("end", 1e18)
+            )
+            continue
+        rank = {"coarse": 0, "refine": 1}.get(phase, 0)
+        current = phases.get(ep)
+        if current is None or rank >= current[0]:
+            phases[ep] = (rank, record["learner_output"]["proposals"])
+    for ep, proposals in batches.items():
+        phases[ep] = (2, sorted(proposals, key=lambda p: p["start"]))
+    return {
+        f"episode_{ep:06d}": [
+            {
+                "subtask": p.get("subtask_id"),
+                "start": p["start"],
+                "end": p.get("end"),
+                "outcome": p.get("outcome"),
+                "content": p["content"],
+            }
+            for p in proposals
+            if p["kind"] == "segment"
+        ]
+        for ep, (_, proposals) in phases.items()
+    }
+
+
+def load_reference(state, key, task):
+    value = read_json(reference_path(state, key, task))
+    if value is None:
+        raise KeyError(f"No reference {task!r} for {key}")
+    return value
+
+
 # Episode-level review tasks: is this episode the dataset's task, and did it
 # succeed? The reference holds one verdict per episode.
 REVIEW_THRESHOLDS = {"task_match_accuracy": 0.95, "outcome_accuracy": 0.85}
@@ -117,6 +225,30 @@ def review_verdicts(proposals):
             row["outcome"] = p.get("outcome")
         row["notes"].append(p.get("content", "")[:200])
     return verdicts
+
+
+def save_review_reference(store, key, task, change_id, *, description=""):
+    change = store.get("changes", change_id)
+    if change["status"] != "committed":
+        raise ValueError("Only committed work can be a reference")
+    rejected = {k for k, v in change.get("decisions", {}).items() if v == "rejected"}
+    kept = [p for i, p in enumerate(change["proposals"]) if str(i) not in rejected]
+    run = store.get("runs", change["run_id"])
+    value = {
+        "schema": "levi.harness.reference.v1",
+        "kind": "review",
+        "task": task,
+        "description": description,
+        "dataset_key": key,
+        "run_id": change["run_id"],
+        "revision": change.get("published_revision"),
+        "instruction": run["context"]["instruction"],
+        "cameras": run["context"]["cameras"],
+        "episodes": dict(sorted(review_verdicts(kept).items())),
+        "saved_at": time.time(),
+    }
+    write_json(reference_path(store.state, key, task), value)
+    return value
 
 
 def grade_review(reference, candidate):
@@ -154,3 +286,24 @@ def grade_review(reference, candidate):
         "episodes": rows,
         "thresholds": REVIEW_THRESHOLDS,
     }
+
+
+def learner_review(store, run_id):
+    """The learner's own review verdicts, before any teacher revision."""
+    proposals = []
+    for record in store.list("teaching"):
+        if record["run_id"] == run_id:
+            proposals += record["learner_output"]["proposals"]
+    return review_verdicts(proposals)
+
+
+def grades_path(state, key):
+    return dataset_dir(state, key) / "teaching" / "grades.json"
+
+
+def record_grade(state, key, row):
+    """Append one graded round to the dataset's learning curve."""
+    rows = read_json(grades_path(state, key)) or []
+    rows.append(row)
+    write_json(grades_path(state, key), rows)
+    return rows

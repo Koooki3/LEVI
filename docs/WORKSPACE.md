@@ -45,7 +45,7 @@ Every agent run that ends (committed, cancelled, failed) is closed exactly once,
 | `outputs/LEVI/datasets/<name>/teaching/` | Teacher feedback per phase (`<run>/episode_NNNNNN-<phase>.json`), frozen references (`reference-<task>.json`) and the learner's grades (`grades.json`). |
 | `outputs/LEVI/workbench/knowledge/candidates.json` | Local notes that could become built-in knowledge (`levi/knowledge/*.md`), refreshed at every run closure; a person promotes or rejects them (`levi agent knowledge`, see [Built-in knowledge](KNOWLEDGE.md)). |
 | `outputs/LEVI/workbench/memory/workspace.json` | Notes about using LEVI itself (e.g. how to read a request), shared by every dataset. |
-| `outputs/LEVI/workbench/models/ollama/` | The LEVI-owned Ollama process record, its log, and the GPU guard's last-busy record. |
+| `outputs/LEVI/workbench/models/ollama/` | The LEVI-owned Ollama process record and its log. |
 | `outputs/LEVI/workbench/memory/<name>.json` | The dataset's local memory. Cost part (every closed run, measured): `cost_profiles` per agent key (API model, local VLM, external MCP) with medians of tokens and seconds per episode, `cost_latest`, `cost_hints`. Verified part: only human-committed segments, per `episode_NNNNNN` with the run and revision they came from; subtask/outcome statistics, recurring uncertainty and failure reasons, cost per episode, lessons from published improvements. Handed to the next task at plan time (`run.harness.memory`). `levi agent memory show|search|rebuild`. |
 | `outputs/LEVI/workbench/improvements/<name>/<slug>.json` | One file per improvement candidate, named for what it changes (e.g. `refine-at-coarse-change.json`). Harness candidates move proposed → evaluating → qualified → awaiting_authorization → published → observing → retained/rolled_back; software candidates end resolved/rejected. Publishing, retaining, rolling back and resolving need a person: `levi agent improvements list|show|publish|reject|retain|rollback|resolve`. A run keeps the harness parameters it was planned with (`run.harness`, covered by the plan digest). |
 
@@ -173,7 +173,7 @@ Not a "raw" format, but relevant: LEVI can register and fully use **any** v2.0/v
 download jobs and annotation-phase teaching records. These are durable records,
 not cleanup caches. A LEVI-owned Ollama instance uses
 `outputs/LEVI/workbench/models/ollama/` for its process identity, home and log
-(plus the GPU guard's `gpu-last-busy.json`) and `checkpoints/ollama/` for model
+and `checkpoints/ollama/` for model
 storage. Ollama's internal content-addressed blobs are the one naming exception;
 do not rename them. An Ollama service you run yourself keeps its own paths. See
 [Local models](OLLAMA.md).

@@ -1,8 +1,9 @@
-"""SAM3 worker protocol and CPU-safe fake provider.
+"""SAM3 plan validation and a CPU-safe fake provider.
 
 The real adapter is intentionally loaded only in the isolated integrations
-environment.  These structures are shared with the control plane and can be
-tested without importing torch or initializing CUDA.
+environment. ``validate_annotations_for_plan`` checks a worker's results
+against the frozen plan, and ``fake_annotations`` stands in for the worker in
+tests; neither imports torch or initializes CUDA.
 """
 
 from __future__ import annotations

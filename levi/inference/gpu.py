@@ -655,9 +655,6 @@ def require_free(config=None):
     )
 
 
-# Compatibility for callers and tests of the fixed-window guard.
-
-
 # --- acting on it -------------------------------------------------------------
 
 
