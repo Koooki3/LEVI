@@ -316,7 +316,8 @@ export function useSpeechSession({
       const next = { id: news.to.id, label: news.to.label, replaced: own };
       writeMicChoice(storage, next);
       setMicChoice(next);
-      setSwitched({ to: news.to, from: news.from });
+      // The note names the microphone the card will go back to.
+      setSwitched({ to: news.to, from: own });
       setRestored(null);
       setOffers([]);
     } else if (news.kind === "offer")

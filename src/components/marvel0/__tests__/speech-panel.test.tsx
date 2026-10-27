@@ -568,6 +568,33 @@ describe("new and changed microphones", () => {
     expect(q(h, "marvel0-speech-mic-switched")).toBeNull();
   });
 
+  test("a second swap still names, and goes back to, the person's own microphone", async () => {
+    const HEADSET = { deviceId: "hs-1", label: "Someone's USB Headset" };
+    const YETI = { deviceId: "yeti-1", label: "Blue Yeti" };
+    remember(UGREEN);
+    seen(CAMERA, UGREEN);
+    const h = await open({ devices: [CAMERA, UGREEN] });
+    await plug(h, [CAMERA]);
+    await plug(h, [CAMERA, HEADSET]);
+    expect(h.captures.current.device).toBe(HEADSET.deviceId);
+    await plug(h, [CAMERA]);
+    await plug(h, [CAMERA, YETI]);
+    expect(h.captures.current.device).toBe(YETI.deviceId);
+    const note = q(h, "marvel0-speech-mic-switched")?.textContent ?? "";
+    expect(note).toContain(UGREEN.label);
+    expect(note).not.toContain(HEADSET.label);
+    expect(stored()?.replaced).toEqual({
+      id: UGREEN.deviceId,
+      label: UGREEN.label,
+    });
+    await plug(h, [CAMERA, YETI, UGREEN]);
+    expect(h.captures.current.device).toBe(UGREEN.deviceId);
+    // Unplugged again: "used again" no longer stands next to "not connected".
+    await plug(h, [CAMERA, YETI]);
+    expect(q(h, "marvel0-speech-mic-missing")).not.toBeNull();
+    expect(q(h, "marvel0-speech-mic-restored")).toBeNull();
+  });
+
   test("the microphone chosen before is used again even while the stand-in is still connected", async () => {
     remember(UGREEN);
     seen(CAMERA, UGREEN);

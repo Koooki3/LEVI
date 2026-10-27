@@ -267,6 +267,7 @@ function MicField({ mics, disabled }: { mics: MicPicker; disabled: boolean }) {
   // A switch that was undone by the input going away again is told by the
   // "not connected" note instead.
   const switched = mics.missing ? null : mics.switched;
+  const restored = mics.missing ? null : mics.restored;
   return (
     <div className="rg-speech__mic" data-testid="marvel0-speech-mic-pick">
       <Field
@@ -310,12 +311,12 @@ function MicField({ mics, disabled }: { mics: MicPicker; disabled: boolean }) {
             </Note>
           </div>
         )}
-        {mics.restored && (
+        {restored && (
           <p className="rg-muted" data-testid="marvel0-speech-mic-restored">
             <SayLine
               say={{
                 key: "marvel0.speech.mic.pick.restored",
-                params: { label: mics.restored.label || noName },
+                params: { label: restored.label || noName },
               }}
             />
           </p>
