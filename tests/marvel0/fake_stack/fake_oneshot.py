@@ -72,6 +72,8 @@ for item in list(rest):
     if item.startswith("delay="):
         delay = float(item.split("=", 1)[1])
         rest.remove(item)
+    elif item.startswith("owner="):  # the test folder, for leftover_standins only
+        rest.remove(item)
 time.sleep(delay)
 if kind == "gripper":
     position, mode = rest

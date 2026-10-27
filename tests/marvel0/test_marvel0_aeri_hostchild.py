@@ -606,6 +606,9 @@ def test_say_never_raises(monkeypatch):
     hostchild._say("anything")  # (a handler that raised would escape into main)
 
 
+# It sets SIGALRM to the default and then lets hostchild install a handler
+# that kills its process group: pytest-timeout's signal method must stay out.
+@pytest.mark.timeout(60, method="thread")
 def test_the_hangup_handlers_are_installed_grace_timer_first(monkeypatch, tmp_path):
     """A hang-up that arrives at once must find SIGALRM's handler in place."""
     order = []

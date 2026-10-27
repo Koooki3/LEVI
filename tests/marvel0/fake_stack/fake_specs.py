@@ -21,7 +21,7 @@ ENV_FILE = HERE / "fake_env.sh"
 def leftover_standins(root) -> list[str]:
     """The stand-in programs still running that belong to the test whose folder
     is ``root``: every stand-in's command line names a file under its test's
-    folder (``--health=``, ``--alive=``, the one-shots' alive file). A check of
+    folder (``--health=``, ``--alive=``, the one-shots' ``owner=``). A check of
     every stand-in on the machine blamed a test for the stand-ins of another
     test file running at the same time (pytest -n, 2026-10-27)."""
     listed = subprocess.run(
@@ -137,7 +137,9 @@ def fake_specs(
         )
 
     def one_shot(*args, delay=0.0):
-        extra = [f"delay={delay}"] if delay else []
+        # owner= names the test's folder (the health file lives there), so a
+        # leaked one-shot is found by leftover_standins like the long-lived ones.
+        extra = ([f"delay={delay}"] if delay else []) + [f"owner={health}"]
         return stack_units.check_argv(
             behind([py, str(SCRIPTS["fake_oneshot"]), *args, *extra]), long_lived=False
         )

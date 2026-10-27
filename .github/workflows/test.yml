@@ -5,9 +5,11 @@ permissions:
   contents: read
 # A newer push to the same branch makes the older run's result moot: cancel it
 # instead of letting both hold runners. (In October 2026 one integration branch
-# queued 18 runs in four hours, each 30 to 45 minutes.)
+# queued 18 runs in four hours, each 30 to 45 minutes.) Every push to main keeps
+# its own run (its own group): a release needs a finished run on its exact sha
+# (docs/RELEASING.md; lab tooling reads a cancelled run as red).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: true
 jobs:
   # The frontend does not depend on the Python profile. Only three Python test
@@ -15,6 +17,10 @@ jobs:
   # test_ollama_browser) and they use fake directories, so the Python jobs
   # install no Node dependencies.
   frontend:
+    # Pinned instead of ubuntu-latest, which moves to Ubuntu 26 from
+    # 2026-10-19 (actions/runner-images#14748). Re-evaluate once Ubuntu 26
+    # images are GA and ffmpeg, uv and bun are known to work there (or when
+    # GitHub announces the end of the 24.04 image). Same for every job below.
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -30,11 +36,12 @@ jobs:
       - run: bun run validate
       - run: bun run build
 
-  # Without the optional `agent` extra only two things can differ from the full
-  # run below: a module that imports an extra's package at import time, and the
-  # tests that skip or branch on the extra. scripts/no_extras_check.py checks
-  # exactly those (about a minute) instead of running the whole suite twice.
-  # The static checks run here once, not in every Python job.
+  # Without the optional `agent` extra a default install can differ from the
+  # full run below in three ways: a module or an import statement that needs an
+  # extra's package, a test module that no longer imports, and the tests that
+  # skip or branch on the extra. scripts/no_extras_check.py and
+  # `pytest --collect-only` check exactly those (a couple of minutes) instead of
+  # running the whole suite twice. The static checks run here once.
   python-base:
     name: python (no extras)
     runs-on: ubuntu-24.04
@@ -60,8 +67,9 @@ jobs:
       # setup-uv publishes no floating major tag since v8; pin the release.
       - uses: astral-sh/setup-uv@v10.2.0
         with:
-          enable-cache: true
-          cache-local-path: ${{ github.workspace }}/.state/.cache/uv
+          # Caching is on by default (UV_CACHE_DIR); one cache per job, since
+          # the two jobs install different package sets.
+          cache-suffix: ${{ github.job }}
       - uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version: "1.3.10"
@@ -73,11 +81,14 @@ jobs:
       - run: uv run --no-sync levi dev check-contracts --base origin/main
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync python scripts/no_extras_check.py imports
+      - run: uv run --no-sync pytest --collect-only -q
       - id: pytest
-        run: >-
-          uv run --no-sync pytest $(python3 scripts/no_extras_check.py tests)
-          --basetemp=.state/tmp/build/pytest
-          --junitxml=.state/tmp/build/junit.xml -rfE
+        # The list on its own line: if it fails, the step fails here instead of
+        # an empty list running the whole suite.
+        run: |
+          files=$(python3 scripts/no_extras_check.py tests)
+          uv run --no-sync pytest $files --basetemp=.state/tmp/build/pytest \
+            --junitxml=.state/tmp/build/junit.xml -rfE
       - name: Failed tests summary
         if: ${{ failure() && steps.pytest.conclusion == 'failure' }}
         run: python3 scripts/ci_junit_summary.py .state/tmp/build/junit.xml >> "$GITHUB_STEP_SUMMARY"
@@ -103,10 +114,16 @@ jobs:
       LEVI_TEST_TIME_SCALE: "2"
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Tests read files of earlier commits (`git show <sha>:…`, e.g. the
+          # old_config fixture of tests/test_live_gpu.py); a shallow clone
+          # skips them.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v10.2.0
         with:
-          enable-cache: true
-          cache-local-path: ${{ github.workspace }}/.state/.cache/uv
+          # Caching is on by default (UV_CACHE_DIR); one cache per job, since
+          # the two jobs install different package sets.
+          cache-suffix: ${{ github.job }}
       - uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version: "1.3.10"

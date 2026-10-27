@@ -84,9 +84,12 @@ def listener():
 def test_a_plain_close_leaves_a_socket_the_arm_guard_counts_for_a_minute(listener):
     """The control: this is what the old check did to the machine."""
     client = socket.create_connection(("127.0.0.1", listener.port), timeout=2)
+    mine = client.getsockname()[1]
     client.close()
     time.sleep(0.3)
-    assert len(leftovers(listener.port)) == 1
+    # Only this client's socket: another worker's listener may have had this
+    # port number less than a minute ago.
+    assert len([s for s in leftovers(listener.port) if s.local_port == mine]) == 1
 
 
 def test_the_fci_check_leaves_no_socket_behind(listener):
@@ -277,7 +280,7 @@ def test_the_chain_runs_to_c_on_the_real_ticker_with_real_processes(make):
     took_s = {i["step"]: i["took_s"] for i in seq["steps"]}
     assert all(isinstance(v, float) for v in took_s.values()), took_s
     assert took_s["c_preflight"] >= 0.9  # (the slower of the two checks)
-    assert PORT not in (5000, 5001, 5100, 8000)  # never a robot port
+    assert PORT not in stack_act.PROTECTED_PORTS  # never a robot port
     # and the way out is the same as ever. The monitor writes again once A is
     # gone (as drive() does in the chain tests): B is stopped last, and on a slow
     # runner the health file of A's time was stale by then (CI run 39721849462,
