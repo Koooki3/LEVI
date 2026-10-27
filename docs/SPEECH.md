@@ -53,9 +53,10 @@ A workstation often has several inputs: a dedicated USB microphone, a camera's m
 - After each opening the card says which input was used ("Recording from: …"), so a camera microphone taken by mistake shows before the transcript is trusted. The notes are in one status region that screen readers announce.
 - **Any microphone, no setup.** Whatever rate (44.1, 48, 96 kHz…) and number of channels an input delivers, the page mixes it to mono and resamples it to the 16 kHz the model takes, so a USB microphone works as soon as the system lists it. A recording whose loudest sample is below -30 dBFS is still sent, and the card says it was very quiet: move closer, or raise that microphone's input volume in the system sound settings (a new microphone often comes with a low one). Below -50 dBFS nothing is sent.
 - **Swapping microphones.** The browser also remembers which inputs it has seen, by name (ids may change between sessions; the list holds names only). The first list it ever sees is only recorded. Later, an input never seen before is new:
-  - the chosen input is not connected and exactly one new input appeared: that is a swap, and the card switches to the new one, remembers it and says so, with a button to use the default instead;
+  - the chosen input is not connected and exactly one new input appeared: that is a swap, and the card switches to the new one, remembers it and says so, with a button to use the default instead. A new input that is still offered counts too, so plugging the new microphone in before unplugging the old one also switches. The card keeps the person's own choice and goes back to it as soon as it is connected again (also while the new one is still plugged in); any choice the person makes ends that;
   - otherwise (the chosen one is still connected, nothing was chosen, or several are new) the card only offers each new input ("Use …", or "Not now"); it never switches to one by itself, so a newly connected camera does not take over;
-  - an input without a name is never treated as new. An offer goes when its input is unplugged, and is not repeated once dismissed.
+  - an input without a name is never treated as new, and neither is the input in use (a profile change can rename it). An offer goes when its input is unplugged, and is shown once: it is not repeated after a reload or after the input is plugged out and in again, whether or not it was dismissed.
+- With the page open in several tabs, the first tab to see a change handles it; reload the others. The seen list holds the names of up to 64 inputs this browser has listed (on a shared account, other people's too) and never leaves the browser; clearing the site data of this address removes it, and the choice with it.
 
 工作站上常有好几个输入设备：专用的 USB 麦克风、相机自带的麦克风、主板的接口。默认的输入设备不一定是人对着说话的那个，所以卡片在说话按钮上方有一个**麦克风**列表。
 
@@ -66,9 +67,10 @@ A workstation often has several inputs: a dedicated USB microphone, a camera's m
 - 每次打开麦克风后，卡片显示用的是哪个设备（“录音用的麦克风：…”），所以误用了相机麦克风时，在采信转写之前就能看出来。这些提示放在同一个状态区域里，读屏软件会播报。
 - **任何麦克风都不用设置。** 不管输入设备给出什么采样率（44.1、48、96 kHz……）和几个声道，页面都会混成单声道并重采样到模型要的 16 kHz，所以 USB 麦克风只要系统能识别就能用。录音最响的采样低于 -30 dBFS 时仍然发送，卡片会提示声音很小：请靠近，或在系统声音设置里调高这个麦克风的输入音量（新麦克风的默认音量常常偏低）。低于 -50 dBFS 时不发送。
 - **更换麦克风。** 浏览器还会按名称记住见过哪些输入设备（设备 ID 可能每次会话都变；记录里只有名称）。第一次看到的列表只记录下来。之后，没见过的设备就是新的：
-  - 选定的设备没有接上，并且正好出现了一个新设备：这就是更换，卡片自动改用新设备、记住它并提示，同时提供改用默认麦克风的按钮；
+  - 选定的设备没有接上，并且正好出现了一个新设备：这就是更换，卡片自动改用新设备、记住它并提示，同时提供改用默认麦克风的按钮。还在提示中的新设备也算，所以先插新麦克风、再拔旧的，同样会切换。卡片会记住人原来的选择，一旦它重新接上就换回去（新设备还接着时也一样）；人自己做了任何选择后就不再换回；
   - 其他情况（选定的设备还接着、没有选过、或新设备不止一个）卡片只提示每个新设备（“改用 …”或“暂不使用”），不会自己切换，所以新接上的相机不会被自动选上；
-  - 没有名称的设备永远不算新设备。提示的设备被拔掉后提示消失；点过“暂不使用”就不再提示。
+  - 没有名称的设备永远不算新设备，正在使用的设备也不算（配置变化可能让它换个名字）。提示的设备被拔掉后提示消失；每个新设备只提示一次：不论有没有点过“暂不使用”，刷新页面或拔插之后都不再提示。
+- 同时在几个标签页打开本页时，由最先看到变化的标签页处理；其他标签页请刷新。已见设备列表最多记 64 个本浏览器列出过的设备名称（共用账户时也包括别人的设备），不会离开浏览器；清除这个地址的网站数据会把它连同选择一起删掉。
 
 ## Which instructions are allowed / 哪些指令是允许的
 
@@ -193,9 +195,11 @@ All under `/api/levi/marvel0/`. All four are a person's: the web UI token is nee
 
 Measured on the RTX 5090 on 2026-10-20 with synthetic speech (Kokoro): the 1.7B model peaks at 4,878 MiB, loads in about 0.4 s warm and 1 s cold, transcribes a 2 s command in 0.08 to 0.11 s and a 10 s one in 0.24 to 0.27 s; 21 to 22 of 22 English and Chinese commands were right (two runs), and silence and noise gave nothing. The tests of this part use a stand-in worker and fake machine state: real processes and pipes, no model.
 
+On 2026-10-27 the owner used the card on marvel0 with a UGREEN USB MIC-CM727 (chosen in the microphone list) and a real voice: the microphone and the transcription worked. That is one person, one microphone and one session, not an accuracy measurement.
+
 **Not verified:**
 
-- real human voices and a real microphone (synthetic speech is an upper bound; mixed Chinese and English, 0 dB signal-to-noise, 1.4 times speaking speed and several people talking at once were wrong in the benchmark, which is why every transcript needs a person's confirmation);
+- accuracy over many real voices and microphones (synthetic speech is an upper bound; mixed Chinese and English, 0 dB signal-to-noise, 1.4 times speaking speed and several people talking at once were wrong in the benchmark, which is why every transcript needs a person's confirmation);
 - the effect of the worker on a running arm controller (a GPU burst of 0.1 to 0.3 s and a few threads at `nice` 19 on the site's cores, never measured with the controller active; the core list is a guess); try it with the owner present;
 - the guards against a real policy server, a real client and a real arm lock: the tests build the deploy status document with fakes (the arm-lock row is the deploy's own `_check_arm`);
 - that a worker exit gives the GPU memory back as measured for the benchmark processes, through this manager and a policy deploy at the 0.45 fraction;
@@ -204,9 +208,11 @@ Measured on the RTX 5090 on 2026-10-20 with synthetic speech (Kokoro): the 1.7B 
 
 用 Kokoro 合成的语音于 2026-10-20 在 RTX 5090 上实测：1.7B 模型峰值 4878 MiB，暖加载约 0.4 秒、冷加载约 1 秒，2 秒指令转写 0.08 到 0.11 秒，10 秒的 0.24 到 0.27 秒；22 句中英文指令对了 21 到 22 句（两次运行），静音和噪声没有输出。这一部分的测试用一个替身工作进程和假的机器状态：真实的进程和管道，没有模型。
 
+2026-10-27 用户在 marvel0 上用 UGREEN USB MIC-CM727（在麦克风列表里选定）和真人声音试用了卡片：麦克风和转写都正常。这只是一个人、一只麦克风、一次试用，不是准确率测量。
+
 **尚未验证：**
 
-- 真人声音和真实麦克风（合成语音只是上限；基准里中英文混说、0 dB 信噪比、1.4 倍语速和多人同时说话都会出错，所以每一条转写都需要人确认）；
+- 多种真人声音和麦克风下的准确率（合成语音只是上限；基准里中英文混说、0 dB 信噪比、1.4 倍语速和多人同时说话都会出错，所以每一条转写都需要人确认）；
 - 工作进程对正在运行的机械臂控制器的影响（0.1 到 0.3 秒的 GPU 脉冲和 `nice` 19 下站点核心上的几个线程，从未在控制器激活时测过；核心列表是猜测）；请在主人在场时试；
 - 对真实策略服务器、真实客户端和真实手臂锁的守卫：测试用假对象构造部署状态文档（手臂锁一行就是部署自己的 `_check_arm`）；
 - 经由这个管理器、在 0.45 比例的策略部署旁边，工作进程退出后是否像基准里的进程那样归还显存；

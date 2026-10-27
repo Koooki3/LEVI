@@ -9,6 +9,7 @@ import {
   readMicChoice,
   readSeenMics,
   resolveMic,
+  restoredMic,
   writeMicChoice,
   writeSeenMics,
   type MicList,
@@ -294,5 +295,84 @@ describe("new microphones", () => {
     expect(
       micNews(listOf(CAMERA, virtual), seenOf(CAMERA, UGREEN), UGREEN),
     ).toEqual({ news: { kind: "none" }, seen: seenOf(UGREEN, CAMERA) });
+  });
+});
+
+describe("after an automatic swap", () => {
+  const NEWMIC = { id: "rode-1", label: "RODE NT-USB Mini" };
+  const swapped = {
+    ...NEWMIC,
+    replaced: { id: UGREEN.id, label: UGREEN.label },
+  };
+  const seenOf = (...inputs: Array<{ label: string }>) =>
+    inputs.map((input) => `name:${input.label}`);
+
+  test("the replaced choice is stored and read back; a broken one is ignored", () => {
+    const { storage, data } = memoryStorage();
+    writeMicChoice(storage, swapped);
+    expect(JSON.parse(data.get(MIC_CHOICE_KEY)!)).toEqual(swapped);
+    expect(readMicChoice(storage)).toEqual(swapped);
+    data.set(
+      MIC_CHOICE_KEY,
+      JSON.stringify({ ...NEWMIC, replaced: { id: "default", label: "x" } }),
+    );
+    expect(readMicChoice(storage)).toEqual(NEWMIC);
+  });
+
+  test("an id found again by name keeps the replaced choice", () => {
+    const moved = { id: "rode-2", label: NEWMIC.label };
+    expect(resolveMic(swapped, listOf(moved)).renamed).toEqual({
+      ...swapped,
+      id: "rode-2",
+    });
+  });
+
+  test("the person's own choice is used again once it is connected, by id or by name", () => {
+    expect(restoredMic(NEWMIC, listOf(UGREEN, NEWMIC))).toBeNull();
+    expect(restoredMic(swapped, listOf(NEWMIC))).toBeNull();
+    expect(restoredMic(swapped, listOf(NEWMIC, UGREEN))).toEqual(UGREEN);
+    const moved = { id: "ugreen-9", label: UGREEN.label };
+    expect(restoredMic(swapped, listOf(moved))).toEqual(moved);
+    expect(restoredMic(swapped, UNKNOWN_LIST)).toBeNull();
+    expect(
+      restoredMic(swapped, { known: true, inputs: [UGREEN], hidden: true }),
+    ).toBeNull();
+  });
+
+  test("plugging the new microphone in before unplugging the old one is a swap too", () => {
+    // NEWMIC was offered (still showing) while UGREEN was connected; now
+    // UGREEN is out.
+    expect(
+      micNews(listOf(CAMERA, NEWMIC), seenOf(CAMERA, UGREEN, NEWMIC), UGREEN, [
+        NEWMIC,
+      ]).news,
+    ).toEqual({ kind: "swap", to: NEWMIC, from: UGREEN });
+    // Dismissed (no longer pending): no swap.
+    expect(
+      micNews(listOf(CAMERA, NEWMIC), seenOf(CAMERA, UGREEN, NEWMIC), UGREEN)
+        .news,
+    ).toEqual({ kind: "none" });
+    // A pending one that is gone too does not count.
+    expect(
+      micNews(listOf(CAMERA), seenOf(CAMERA, UGREEN, NEWMIC), UGREEN, [NEWMIC])
+        .news,
+    ).toEqual({ kind: "none" });
+    // A pending one and a fresh one: two candidates, offered only.
+    const other = { id: "other-1", label: "Other USB Mic" };
+    expect(
+      micNews(
+        listOf(CAMERA, NEWMIC, other),
+        seenOf(CAMERA, UGREEN, NEWMIC),
+        UGREEN,
+        [NEWMIC],
+      ).news,
+    ).toEqual({ kind: "offer", inputs: [other] });
+  });
+
+  test("the input in use is never news, even under a name not seen before", () => {
+    const renamed = { id: UGREEN.id, label: "UGREEN USB MIC-CM727 Mono" };
+    expect(
+      micNews(listOf(CAMERA, renamed), seenOf(CAMERA, UGREEN), UGREEN).news,
+    ).toEqual({ kind: "none" });
   });
 });

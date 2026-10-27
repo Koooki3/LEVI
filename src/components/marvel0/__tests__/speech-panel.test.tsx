@@ -449,7 +449,11 @@ describe("new and changed microphones", () => {
     const h = await open({ devices: [CAMERA, NEWMIC] });
     expect(h.captures.current.device).toBe(NEWMIC.deviceId);
     expect(select(h).value).toBe(NEWMIC.deviceId);
-    expect(stored()).toEqual({ id: NEWMIC.deviceId, label: NEWMIC.label });
+    expect(stored()).toEqual({
+      id: NEWMIC.deviceId,
+      label: NEWMIC.label,
+      replaced: { id: UGREEN.deviceId, label: UGREEN.label },
+    });
     const note = q(h, "marvel0-speech-mic-switched")?.textContent ?? "";
     expect(note).toContain(NEWMIC.label);
     expect(note).toContain(UGREEN.label);
@@ -539,6 +543,77 @@ describe("new and changed microphones", () => {
     await advance(400);
     await pointer(mic(h), "pointerup");
     await act(async () => h.captures.current.deliver({ peakDb: -8 }));
+    await flushAll();
+    expect(q(h, "marvel0-speech-mic-quiet")).toBeNull();
+  });
+
+  test("after a swap, the microphone chosen before is used again once it is back", async () => {
+    remember(UGREEN);
+    seen(CAMERA, UGREEN);
+    const h = await open({ devices: [CAMERA, UGREEN] });
+    await plug(h, [CAMERA]);
+    await plug(h, [CAMERA, NEWMIC]);
+    expect(h.captures.current.device).toBe(NEWMIC.deviceId);
+    // The stand-in goes too: its absence is reported, nothing is lost.
+    await plug(h, [CAMERA]);
+    expect(h.captures.current.device).toBeNull();
+    // The person's own microphone comes back.
+    await plug(h, [CAMERA, UGREEN]);
+    expect(h.captures.current.device).toBe(UGREEN.deviceId);
+    expect(stored()).toEqual({ id: UGREEN.deviceId, label: UGREEN.label });
+    expect(q(h, "marvel0-speech-mic-restored")?.textContent).toContain(
+      UGREEN.label,
+    );
+    expect(q(h, "marvel0-speech-mic-missing")).toBeNull();
+    expect(q(h, "marvel0-speech-mic-switched")).toBeNull();
+  });
+
+  test("the microphone chosen before is used again even while the stand-in is still connected", async () => {
+    remember(UGREEN);
+    seen(CAMERA, UGREEN);
+    const h = await open({ devices: [CAMERA, NEWMIC] });
+    expect(h.captures.current.device).toBe(NEWMIC.deviceId);
+    await plug(h, [CAMERA, NEWMIC, UGREEN]);
+    expect(h.captures.current.device).toBe(UGREEN.deviceId);
+    expect(all(h, "marvel0-speech-mic-offer")).toHaveLength(0);
+  });
+
+  test("a choice of the person's after a swap is final: the old microphone coming back changes nothing", async () => {
+    remember(UGREEN);
+    seen(CAMERA, UGREEN);
+    const h = await open({ devices: [CAMERA, NEWMIC] });
+    await choose(select(h), CAMERA.deviceId);
+    await flushAll();
+    expect(stored()).toEqual({ id: CAMERA.deviceId, label: CAMERA.label });
+    await plug(h, [CAMERA, NEWMIC, UGREEN]);
+    expect(h.captures.current.device).toBe(CAMERA.deviceId);
+    expect(q(h, "marvel0-speech-mic-restored")).toBeNull();
+  });
+
+  test("plugging the new microphone in first, then unplugging the old one, also switches", async () => {
+    remember(UGREEN);
+    seen(CAMERA, UGREEN);
+    const h = await open({ devices: [CAMERA, UGREEN] });
+    await plug(h, [CAMERA, UGREEN, NEWMIC]);
+    expect(all(h, "marvel0-speech-mic-offer")).toHaveLength(1);
+    expect(h.captures.current.device).toBe(UGREEN.deviceId);
+    await plug(h, [CAMERA, NEWMIC]);
+    expect(h.captures.current.device).toBe(NEWMIC.deviceId);
+    expect(q(h, "marvel0-speech-mic-switched")).not.toBeNull();
+    expect(all(h, "marvel0-speech-mic-offer")).toHaveLength(0);
+  });
+
+  test("the very-quiet note goes when the next recording starts", async () => {
+    const h = await open({ devices: [CAMERA, UGREEN] });
+    await pointer(mic(h), "pointerdown");
+    await advance(400);
+    await pointer(mic(h), "pointerup");
+    await act(async () => h.captures.current.deliver({ peakDb: -40 }));
+    await flushAll();
+    expect(q(h, "marvel0-speech-mic-quiet")).not.toBeNull();
+    await armed();
+    await advance(60_000);
+    await pointer(mic(h), "pointerdown");
     await flushAll();
     expect(q(h, "marvel0-speech-mic-quiet")).toBeNull();
   });

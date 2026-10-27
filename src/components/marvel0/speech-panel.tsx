@@ -310,6 +310,16 @@ function MicField({ mics, disabled }: { mics: MicPicker; disabled: boolean }) {
             </Note>
           </div>
         )}
+        {mics.restored && (
+          <p className="rg-muted" data-testid="marvel0-speech-mic-restored">
+            <SayLine
+              say={{
+                key: "marvel0.speech.mic.pick.restored",
+                params: { label: mics.restored.label || noName },
+              }}
+            />
+          </p>
+        )}
         {mics.offers.map((input) => (
           <p
             key={input.id}

@@ -19,8 +19,11 @@
 //     never seen is new: when the chosen input is gone and exactly one new
 //     input appeared, that is a swap and the card switches to it; otherwise
 //     (the chosen one is still there, nothing was chosen, or several are new)
-//     it only offers the new ones. The first list ever seen is recorded
-//     without offering anything.
+//     it only offers the new ones. A new input that is still offered counts
+//     for a swap too, so the order of plugging does not matter. A swap keeps
+//     the person's own choice and goes back to it once it is connected again.
+//     The input in use is never offered. The first list ever seen is
+//     recorded without offering anything.
 
 /** The part of MediaDeviceInfo read here. */
 export interface DeviceInfoLike {
@@ -53,6 +56,10 @@ export const UNKNOWN_LIST: MicList = {
 export interface MicChoice {
   id: string;
   label: string;
+  /** Set only by an automatic swap: the person's own choice it replaced. It
+   * is used again as soon as it is connected; any choice of the person's
+   * clears it. */
+  replaced?: { id: string; label: string };
 }
 
 export const MIC_CHOICE_KEY = "levi.marvel0.speech.mic.v1";
@@ -115,10 +122,26 @@ export function readMicChoice(storage: StorageLike | null): MicChoice | null {
       label.length > MAX_FIELD
     )
       return null;
-    return { id, label };
+    const replaced = readReplaced((value as Record<string, unknown>).replaced);
+    return replaced ? { id, label, replaced } : { id, label };
   } catch {
     return null;
   }
+}
+
+function readReplaced(value: unknown): MicChoice["replaced"] | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const { id, label } = value as Record<string, unknown>;
+  if (
+    typeof id !== "string" ||
+    typeof label !== "string" ||
+    !id ||
+    PSEUDO_IDS.has(id) ||
+    id.length > MAX_FIELD ||
+    label.length > MAX_FIELD
+  )
+    return undefined;
+  return { id, label };
 }
 
 /** Stores the choice (null: the system default). False when it could not. */
@@ -132,7 +155,11 @@ export function writeMicChoice(
     else
       storage.setItem(
         MIC_CHOICE_KEY,
-        JSON.stringify({ id: choice.id, label: choice.label }),
+        JSON.stringify(
+          choice.replaced
+            ? { id: choice.id, label: choice.label, replaced: choice.replaced }
+            : { id: choice.id, label: choice.label },
+        ),
       );
     return true;
   } catch {
@@ -168,10 +195,24 @@ export function resolveMic(
       return {
         deviceId: same[0].id,
         missing: null,
-        renamed: { id: same[0].id, label: choice.label },
+        renamed: { ...choice, id: same[0].id },
       };
   }
   return { deviceId: null, missing: choice, renamed: null };
+}
+
+/** The person's own choice to go back to: the one an automatic swap
+ * replaced, now that it is connected again (by id, or by name under a new
+ * id). Null while it is not, or when the list cannot tell. */
+export function restoredMic(
+  choice: MicChoice | null,
+  list: MicList,
+): MicChoice | null {
+  const replaced = choice?.replaced;
+  if (!replaced || !list.known || list.hidden) return null;
+  const found = resolveMic(replaced, list);
+  if (found.deviceId === null) return null;
+  return { id: found.deviceId, label: replaced.label };
 }
 
 // -- inputs seen before: telling a new microphone
@@ -245,6 +286,9 @@ export function micNews(
   list: MicList,
   seen: readonly string[] | null,
   choice: MicChoice | null,
+  /** Inputs still offered (not dismissed): they count for a swap too, so
+   * plugging the new microphone in before unplugging the old one works. */
+  pending: readonly MicInput[] = [],
 ): { news: MicNews; seen: string[] | null } {
   if (!list.known || list.hidden) return { news: { kind: "none" }, seen: null };
   const named = list.inputs.filter((input) => micKey(input) !== null);
@@ -253,13 +297,26 @@ export function micNews(
   const known = new Set(seen);
   const current = new Set(keys);
   const next = [...seen.filter((key) => !current.has(key)), ...keys];
-  const fresh = named.filter((input) => !known.has(micKey(input) as string));
-  if (fresh.length === 0) return { news: { kind: "none" }, seen: next };
-  const gone = choice !== null && resolveMic(choice, list).missing !== null;
-  if (gone && fresh.length === 1)
+  // The input in use is never news, even under a name not seen before (a
+  // profile change can rename it).
+  const resolved = choice ? resolveMic(choice, list) : null;
+  const inUse = resolved?.deviceId ?? null;
+  const fresh = named.filter(
+    (input) => input.id !== inUse && !known.has(micKey(input) as string),
+  );
+  const waiting = pending.filter(
+    (input) =>
+      input.id !== inUse &&
+      list.inputs.some((entry) => entry.id === input.id) &&
+      !fresh.some((entry) => entry.id === input.id),
+  );
+  const gone = choice !== null && resolved?.missing !== null;
+  const candidates = [...fresh, ...waiting];
+  if (gone && candidates.length === 1)
     return {
-      news: { kind: "swap", to: fresh[0], from: choice },
+      news: { kind: "swap", to: candidates[0], from: choice },
       seen: next,
     };
+  if (fresh.length === 0) return { news: { kind: "none" }, seen: next };
   return { news: { kind: "offer", inputs: fresh }, seen: next };
 }

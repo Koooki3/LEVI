@@ -42,6 +42,7 @@ import {
   readMicChoice,
   readSeenMics,
   resolveMic,
+  restoredMic,
   writeMicChoice,
   writeSeenMics,
   type MicChoice,
@@ -98,6 +99,9 @@ export interface MicPicker {
   /** The chosen input was gone and one new input appeared: the card switched
    * to it on its own (`from` is the one it replaced). */
   switched: { to: MicInput; from: MicChoice } | null;
+  /** The person's own choice that a swap had replaced is connected again and
+   * is used again. */
+  restored: MicChoice | null;
   /** The peak (dBFS) of the last recording when it was very quiet. */
   quietDb: number | null;
   /** A person's choice; it also settles any offer or switch. */
@@ -157,9 +161,12 @@ export function useSpeechSession({
   const [inUse, setInUse] = useState<DeviceInUse | null>(null);
   const [offers, setOffers] = useState<MicInput[]>([]);
   const [switched, setSwitched] = useState<MicPicker["switched"]>(null);
+  const [restored, setRestored] = useState<MicChoice | null>(null);
   const [quietDb, setQuietDb] = useState<number | null>(null);
   const choiceRef = useRef(micChoice);
   choiceRef.current = micChoice;
+  const offersRef = useRef(offers);
+  offersRef.current = offers;
   const resolved = useMemo(
     () => resolveMic(micChoice, micInputs),
     [micChoice, micInputs],
@@ -278,6 +285,7 @@ export function useSpeechSession({
   useEffect(() => {
     capture.current?.setDevice?.(resolved.deviceId);
     setInUse((prev) => (prev?.fallback ? prev : null));
+    setQuietDb(null);
   }, [resolved.deviceId]);
 
   // New microphones: a swap (the chosen one gone, exactly one new) switches
@@ -295,13 +303,21 @@ export function useSpeechSession({
       micInputs,
       readSeenMics(storage),
       choiceRef.current,
+      offersRef.current,
     );
     if (seen) writeSeenMics(storage, seen);
     if (news.kind === "swap") {
-      const next = { id: news.to.id, label: news.to.label };
+      // Keep the person's own choice (not an earlier automatic one) to go
+      // back to when it is connected again.
+      const own = news.from.replaced ?? {
+        id: news.from.id,
+        label: news.from.label,
+      };
+      const next = { id: news.to.id, label: news.to.label, replaced: own };
       writeMicChoice(storage, next);
       setMicChoice(next);
       setSwitched({ to: news.to, from: news.from });
+      setRestored(null);
       setOffers([]);
     } else if (news.kind === "offer")
       setOffers((prev) => [
@@ -311,6 +327,17 @@ export function useSpeechSession({
         ),
       ]);
   }, [micInputs]);
+
+  // After a swap: the person's own choice is connected again, so it is used.
+  useEffect(() => {
+    const back = restoredMic(micChoice, micInputs);
+    if (!back) return;
+    writeMicChoice(browserStorage(), back);
+    setMicChoice(back);
+    setSwitched(null);
+    setRestored(back);
+    setOffers((prev) => prev.filter((input) => input.id !== back.id));
+  }, [micChoice, micInputs]);
 
   const chooseMic = useCallback(
     (id: string | null) => {
@@ -325,6 +352,7 @@ export function useSpeechSession({
       setInUse(null);
       setOffers([]);
       setSwitched(null);
+      setRestored(null);
       setQuietDb(null);
     },
     [micInputs.inputs],
@@ -455,6 +483,7 @@ export function useSpeechSession({
         onState: (next, prev) => {
           // A new recording starts from idle: it is the newest request.
           if (prev === "idle") {
+            setQuietDb(null);
             inflight.current?.abort();
             seq.current += 1;
             dispatch({ type: "begin", seq: seq.current });
@@ -655,6 +684,7 @@ export function useSpeechSession({
       inUse,
       offers,
       switched,
+      restored,
       quietDb,
       choose: chooseMic,
       dismiss: dismissMics,
@@ -667,6 +697,7 @@ export function useSpeechSession({
       inUse,
       offers,
       switched,
+      restored,
       quietDb,
       chooseMic,
       dismissMics,
