@@ -14,6 +14,13 @@
 //     is used and the card says so, and the input is used again once it is
 //     back. An id that changed (a browser may rotate ids between sessions) is
 //     found again by its name when exactly one input carries it.
+//   * Microphones get swapped. The browser also remembers which inputs it has
+//     seen (by name, since ids may change; never audio). An input that was
+//     never seen is new: when the chosen input is gone and exactly one new
+//     input appeared, that is a swap and the card switches to it; otherwise
+//     (the chosen one is still there, nothing was chosen, or several are new)
+//     it only offers the new ones. The first list ever seen is recorded
+//     without offering anything.
 
 /** The part of MediaDeviceInfo read here. */
 export interface DeviceInfoLike {
@@ -165,4 +172,94 @@ export function resolveMic(
       };
   }
   return { deviceId: null, missing: choice, renamed: null };
+}
+
+// -- inputs seen before: telling a new microphone
+
+export const MIC_SEEN_KEY = "levi.marvel0.speech.mic.seen.v1";
+/** At most this many inputs are remembered; the longest unseen go first. */
+const MAX_SEEN = 64;
+/** A recording whose loudest sample is below this (dBFS) is very quiet: the
+ * microphone is far away or its input volume is low. Speech with the
+ * browser's gain control on peaks well above it. (Below -50 dBFS a clip is
+ * not sent at all: see voice-capture.ts.) */
+export const QUIET_PEAK_DB = -30;
+
+/** How an input is recognised across sessions: by its name, since a browser
+ * may give it another id in the next session. An input without a name cannot
+ * be recognised and is never treated as new. */
+export function micKey(input: MicInput): string | null {
+  return input.label ? `name:${input.label}` : null;
+}
+
+/** The inputs seen before, longest unseen first; null when this browser never
+ * recorded any (the first list is then recorded without offering anything). */
+export function readSeenMics(storage: StorageLike | null): string[] | null {
+  if (!storage) return null;
+  try {
+    const raw = storage.getItem(MIC_SEEN_KEY);
+    if (raw === null) return null;
+    const value = JSON.parse(raw) as unknown;
+    if (!Array.isArray(value)) return null;
+    return value
+      .filter(
+        (key): key is string =>
+          typeof key === "string" &&
+          key.startsWith("name:") &&
+          key.length <= MAX_FIELD + 5,
+      )
+      .slice(-MAX_SEEN);
+  } catch {
+    return null;
+  }
+}
+
+export function writeSeenMics(
+  storage: StorageLike | null,
+  keys: readonly string[],
+): boolean {
+  if (!storage) return false;
+  try {
+    storage.setItem(MIC_SEEN_KEY, JSON.stringify(keys.slice(-MAX_SEEN)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export type MicNews =
+  /** Nothing new (or the list cannot tell yet). */
+  | { kind: "none" }
+  /** The first list this browser sees: recorded, nothing offered. */
+  | { kind: "first" }
+  /** The chosen input is gone and exactly one new input appeared: a swap. */
+  | { kind: "swap"; to: MicInput; from: MicChoice }
+  /** New inputs to offer (the chosen one is still there, nothing was
+   * chosen, or more than one is new). */
+  | { kind: "offer"; inputs: MicInput[] };
+
+/** What the connected inputs that were never seen mean, and the seen list to
+ * store (the connected ones moved to the end). A list that keeps the names
+ * back tells nothing. */
+export function micNews(
+  list: MicList,
+  seen: readonly string[] | null,
+  choice: MicChoice | null,
+): { news: MicNews; seen: string[] | null } {
+  if (!list.known || list.hidden) return { news: { kind: "none" }, seen: null };
+  const named = list.inputs.filter((input) => micKey(input) !== null);
+  const keys = named.map((input) => micKey(input) as string);
+  if (seen === null) return { news: { kind: "first" }, seen: keys };
+  const known = new Set(seen);
+  const current = new Set(keys);
+  const next = [...seen.filter((key) => !current.has(key)), ...keys];
+  const fresh = named.filter((input) => !known.has(micKey(input) as string));
+  if (fresh.length === 0) return { news: { kind: "none" }, seen: next };
+  const gone = choice !== null && resolveMic(choice, list).missing !== null;
+  if (gone && fresh.length === 1)
+    return {
+      news: { kind: "swap", to: fresh[0], from: choice },
+      seen: next,
+    };
+  return { news: { kind: "offer", inputs: fresh }, seen: next };
 }

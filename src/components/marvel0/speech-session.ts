@@ -16,6 +16,9 @@
 //     page opens, when one is plugged in or out, and after the microphone was
 //     allowed (the names appear then). The person's choice is kept in this
 //     browser (mic-choice.ts) and handed to the capture before each press.
+//     A microphone never seen before is offered, or taken on its own when it
+//     replaces a chosen one that is gone (a swap). A recording that comes out
+//     very quiet is still sent, and the card says how to raise the level.
 //
 // Nothing here writes a field, starts the client, or touches the clipboard:
 // the one thing it hands out is `onUse(sentence)`, and only for a sentence of
@@ -31,12 +34,16 @@ import {
 import { newRequestId } from "./deploy-logic";
 import type { ApiFailure } from "./deploy-api";
 import {
+  QUIET_PEAK_DB,
   UNKNOWN_LIST,
   browserStorage,
   micList,
+  micNews,
   readMicChoice,
+  readSeenMics,
   resolveMic,
   writeMicChoice,
+  writeSeenMics,
   type MicChoice,
   type MicInput,
   type MicList,
@@ -86,7 +93,17 @@ export interface MicPicker {
   missing: MicChoice | null;
   /** The input the last opening used. */
   inUse: DeviceInUse | null;
+  /** New inputs (never seen in this browser) offered to switch to. */
+  offers: MicInput[];
+  /** The chosen input was gone and one new input appeared: the card switched
+   * to it on its own (`from` is the one it replaced). */
+  switched: { to: MicInput; from: MicChoice } | null;
+  /** The peak (dBFS) of the last recording when it was very quiet. */
+  quietDb: number | null;
+  /** A person's choice; it also settles any offer or switch. */
   choose: (id: string | null) => void;
+  /** Leaves the offered inputs alone. */
+  dismiss: () => void;
 }
 
 export interface SpeechSession {
@@ -138,6 +155,11 @@ export function useSpeechSession({
   const [micInputs, setMicInputs] = useState<MicList>(UNKNOWN_LIST);
   const [micChoice, setMicChoice] = useState<MicChoice | null>(null);
   const [inUse, setInUse] = useState<DeviceInUse | null>(null);
+  const [offers, setOffers] = useState<MicInput[]>([]);
+  const [switched, setSwitched] = useState<MicPicker["switched"]>(null);
+  const [quietDb, setQuietDb] = useState<number | null>(null);
+  const choiceRef = useRef(micChoice);
+  choiceRef.current = micChoice;
   const resolved = useMemo(
     () => resolveMic(micChoice, micInputs),
     [micChoice, micInputs],
@@ -250,11 +272,45 @@ export function useSpeechSession({
   }, [resolved.renamed]);
 
   // The next press opens the resolved input; what the last opening used no
-  // longer describes it (an unplugged input is not "recording from" any more).
+  // longer describes it (an unplugged input is not "recording from" any
+  // more). A fallback warning stays: that recording did use the default,
+  // even when the list found the chosen input again meanwhile.
   useEffect(() => {
     capture.current?.setDevice?.(resolved.deviceId);
-    setInUse(null);
+    setInUse((prev) => (prev?.fallback ? prev : null));
   }, [resolved.deviceId]);
+
+  // New microphones: a swap (the chosen one gone, exactly one new) switches
+  // on its own; anything else is offered. Offers of inputs that went away
+  // are dropped.
+  useEffect(() => {
+    if (!micInputs.known) return;
+    const connected = (input: MicInput) =>
+      micInputs.inputs.some((entry) => entry.id === input.id);
+    setOffers((prev) =>
+      prev.every(connected) ? prev : prev.filter(connected),
+    );
+    const storage = browserStorage();
+    const { news, seen } = micNews(
+      micInputs,
+      readSeenMics(storage),
+      choiceRef.current,
+    );
+    if (seen) writeSeenMics(storage, seen);
+    if (news.kind === "swap") {
+      const next = { id: news.to.id, label: news.to.label };
+      writeMicChoice(storage, next);
+      setMicChoice(next);
+      setSwitched({ to: news.to, from: news.from });
+      setOffers([]);
+    } else if (news.kind === "offer")
+      setOffers((prev) => [
+        ...prev.filter(connected),
+        ...news.inputs.filter(
+          (input) => !prev.some((entry) => entry.id === input.id),
+        ),
+      ]);
+  }, [micInputs]);
 
   const chooseMic = useCallback(
     (id: string | null) => {
@@ -267,9 +323,13 @@ export function useSpeechSession({
       writeMicChoice(browserStorage(), next);
       setMicChoice(next);
       setInUse(null);
+      setOffers([]);
+      setSwitched(null);
+      setQuietDb(null);
     },
     [micInputs.inputs],
   );
+  const dismissMics = useCallback(() => setOffers([]), []);
 
   const micOptions = useMemo(() => {
     const id = resolved.deviceId;
@@ -336,6 +396,8 @@ export function useSpeechSession({
       const mine = seq.current;
       const forModel = modelRef.current;
       const requestId = newRequestId();
+      // A very quiet clip is still sent; the card says how to fix the level.
+      setQuietDb(clip.peakDb < QUIET_PEAK_DB ? clip.peakDb : null);
       dispatch({ type: "uploading", seq: mine });
       api
         .transcribe(
@@ -591,7 +653,11 @@ export function useSpeechSession({
       chosen: resolved.deviceId,
       missing: resolved.missing,
       inUse,
+      offers,
+      switched,
+      quietDb,
       choose: chooseMic,
+      dismiss: dismissMics,
     }),
     [
       micOptions,
@@ -599,7 +665,11 @@ export function useSpeechSession({
       resolved.deviceId,
       resolved.missing,
       inUse,
+      offers,
+      switched,
+      quietDb,
       chooseMic,
+      dismissMics,
     ],
   );
 

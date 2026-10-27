@@ -1,11 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import {
   MIC_CHOICE_KEY,
+  MIC_SEEN_KEY,
   UNKNOWN_LIST,
+  micKey,
   micList,
+  micNews,
   readMicChoice,
+  readSeenMics,
   resolveMic,
   writeMicChoice,
+  writeSeenMics,
   type MicList,
   type StorageLike,
 } from "../mic-choice";
@@ -182,5 +187,112 @@ describe("resolveMic", () => {
       resolveMic({ id: "gone", label: "" }, listOf({ id: "x", label: "" }))
         .missing,
     ).toEqual({ id: "gone", label: "" });
+  });
+});
+
+describe("new microphones", () => {
+  const NEWMIC = { id: "rode-1", label: "RODE NT-USB Mini" };
+  const seenOf = (...inputs: Array<{ label: string }>) =>
+    inputs.map((input) => `name:${input.label}`);
+
+  test("an input is recognised by its name; one without a name cannot be", () => {
+    expect(micKey(UGREEN)).toBe(`name:${UGREEN.label}`);
+    expect(micKey({ id: "x", label: "" })).toBeNull();
+  });
+
+  test("the seen list is stored, read back, capped, and survives bad storage", () => {
+    const { storage, data } = memoryStorage();
+    expect(readSeenMics(storage)).toBeNull();
+    expect(writeSeenMics(storage, seenOf(UGREEN, CAMERA))).toBe(true);
+    expect(readSeenMics(storage)).toEqual(seenOf(UGREEN, CAMERA));
+    const many = Array.from({ length: 80 }, (_, i) => `name:mic ${i}`);
+    writeSeenMics(storage, many);
+    expect(readSeenMics(storage)).toEqual(many.slice(-64));
+    data.set(MIC_SEEN_KEY, JSON.stringify(["name:ok", 3, "id:x", ""]));
+    expect(readSeenMics(storage)).toEqual(["name:ok"]);
+    data.set(MIC_SEEN_KEY, "{not json");
+    expect(readSeenMics(storage)).toBeNull();
+    expect(readSeenMics(throwing)).toBeNull();
+    expect(writeSeenMics(throwing, ["name:a"])).toBe(false);
+  });
+
+  test("a list that keeps names back, or is not read yet, tells nothing and stores nothing", () => {
+    expect(micNews(UNKNOWN_LIST, null, null)).toEqual({
+      news: { kind: "none" },
+      seen: null,
+    });
+    expect(
+      micNews(
+        { known: true, inputs: [], hidden: true },
+        seenOf(UGREEN),
+        UGREEN,
+      ),
+    ).toEqual({ news: { kind: "none" }, seen: null });
+  });
+
+  test("the first list ever is recorded without offering anything", () => {
+    expect(micNews(listOf(CAMERA, UGREEN), null, null)).toEqual({
+      news: { kind: "first" },
+      seen: seenOf(CAMERA, UGREEN),
+    });
+  });
+
+  test("nothing new: the connected inputs move to the end of the seen list", () => {
+    const old = { label: "Old headset" };
+    expect(
+      micNews(listOf(UGREEN), seenOf(UGREEN, old, CAMERA), UGREEN),
+    ).toEqual({
+      news: { kind: "none" },
+      seen: seenOf(old, CAMERA, UGREEN),
+    });
+  });
+
+  test("ids that changed between sessions do not make a known microphone new", () => {
+    const moved = { id: "ugreen-9", label: UGREEN.label };
+    expect(
+      micNews(listOf(CAMERA, moved), seenOf(CAMERA, UGREEN), null).news,
+    ).toEqual({ kind: "none" });
+  });
+
+  test("a swap: the chosen microphone is gone and exactly one new one appeared", () => {
+    expect(
+      micNews(listOf(CAMERA, NEWMIC), seenOf(CAMERA, UGREEN), UGREEN),
+    ).toEqual({
+      news: { kind: "swap", to: NEWMIC, from: UGREEN },
+      seen: seenOf(UGREEN, CAMERA, NEWMIC),
+    });
+  });
+
+  test("a new microphone is only offered while the chosen one is connected, or nothing was chosen", () => {
+    const seen = seenOf(CAMERA, UGREEN);
+    expect(micNews(listOf(CAMERA, UGREEN, NEWMIC), seen, UGREEN).news).toEqual({
+      kind: "offer",
+      inputs: [NEWMIC],
+    });
+    expect(micNews(listOf(CAMERA, UGREEN, NEWMIC), seen, null).news).toEqual({
+      kind: "offer",
+      inputs: [NEWMIC],
+    });
+    // The chosen one found again under a new id is not gone.
+    const moved = { id: "ugreen-9", label: UGREEN.label };
+    expect(micNews(listOf(moved, NEWMIC), seen, UGREEN).news).toEqual({
+      kind: "offer",
+      inputs: [NEWMIC],
+    });
+  });
+
+  test("several new microphones are offered, never switched to", () => {
+    const other = { id: "cam-mic-2", label: "USB Camera Analog Stereo" };
+    expect(
+      micNews(listOf(CAMERA, NEWMIC, other), seenOf(CAMERA, UGREEN), UGREEN)
+        .news,
+    ).toEqual({ kind: "offer", inputs: [NEWMIC, other] });
+  });
+
+  test("an input without a name is never new, so never switched to", () => {
+    const virtual = { id: "virtual-7", label: "" };
+    expect(
+      micNews(listOf(CAMERA, virtual), seenOf(CAMERA, UGREEN), UGREEN),
+    ).toEqual({ news: { kind: "none" }, seen: seenOf(UGREEN, CAMERA) });
   });
 });

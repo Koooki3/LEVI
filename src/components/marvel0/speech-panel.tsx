@@ -6,7 +6,7 @@
 // command and copying it stay the two separate presses they were, and nothing
 // here starts the client or the arm: voice cannot stop or pause the robot, and
 // the card says so next to the microphone at all times.
-import { Fragment, useId, type ReactNode } from "react";
+import { Fragment, useId, useRef, type ReactNode } from "react";
 import { Mic, RefreshCw } from "lucide-react";
 import {
   Badge,
@@ -251,6 +251,7 @@ export function SpeechPanel({
  * opening used, so a camera's microphone taken by mistake shows. */
 function MicField({ mics, disabled }: { mics: MicPicker; disabled: boolean }) {
   const { t } = useLocale();
+  const select = useRef<HTMLSelectElement>(null);
   const name = (label: string, index: number) =>
     label ||
     sayText(
@@ -258,6 +259,14 @@ function MicField({ mics, disabled }: { mics: MicPicker; disabled: boolean }) {
       t,
     );
   const noName = { key: "marvel0.speech.mic.pick.no_name" };
+  /** A choice made by a button that then goes away: focus stays on the list. */
+  const chooseFromButton = (id: string | null) => {
+    mics.choose(id);
+    select.current?.focus();
+  };
+  // A switch that was undone by the input going away again is told by the
+  // "not connected" note instead.
+  const switched = mics.missing ? null : mics.switched;
   return (
     <div className="rg-speech__mic" data-testid="marvel0-speech-mic-pick">
       <Field
@@ -269,6 +278,7 @@ function MicField({ mics, disabled }: { mics: MicPicker; disabled: boolean }) {
         )}
       >
         <Select
+          ref={select}
           value={mics.chosen ?? ""}
           disabled={disabled}
           data-testid="marvel0-speech-mic-select"
@@ -285,6 +295,35 @@ function MicField({ mics, disabled }: { mics: MicPicker; disabled: boolean }) {
       {/* One live region that stays mounted, so a note that appears in it is
           announced (a region mounted together with its text often is not). */}
       <div role="status" data-testid="marvel0-speech-mic-status">
+        {switched && (
+          <div data-testid="marvel0-speech-mic-switched">
+            <Note tone="info">
+              <SayLine
+                say={{
+                  key: "marvel0.speech.mic.pick.switched",
+                  params: {
+                    label: switched.to.label || noName,
+                    previous: switched.from.label || noName,
+                  },
+                }}
+              />
+            </Note>
+          </div>
+        )}
+        {mics.offers.map((input) => (
+          <p
+            key={input.id}
+            className="rg-muted"
+            data-testid="marvel0-speech-mic-offer"
+          >
+            <SayLine
+              say={{
+                key: "marvel0.speech.mic.pick.offer",
+                params: { label: input.label || noName },
+              }}
+            />
+          </p>
+        ))}
         {mics.missing && (
           <div data-testid="marvel0-speech-mic-missing">
             <Note tone="warning">
@@ -319,18 +358,62 @@ function MicField({ mics, disabled }: { mics: MicPicker; disabled: boolean }) {
               />
             </p>
           ))}
+        {mics.quietDb !== null && (
+          <div data-testid="marvel0-speech-mic-quiet">
+            <Note tone="warning">
+              {sayText(
+                {
+                  key: "marvel0.speech.mic.pick.quiet",
+                  params: { db: Math.round(mics.quietDb) },
+                },
+                t,
+              )}
+            </Note>
+          </div>
+        )}
       </div>
-      {mics.missing && (
+      {(switched || mics.offers.length > 0 || mics.missing) && (
         <div className="rg-actions-row">
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={disabled}
-            data-testid="marvel0-speech-mic-forget"
-            onClick={() => mics.choose(null)}
-          >
-            {t("marvel0.speech.mic.pick.forget")}
-          </Button>
+          {mics.offers.map((input, index) => (
+            <Button
+              key={input.id}
+              size="sm"
+              disabled={disabled}
+              data-testid="marvel0-speech-mic-use-new"
+              onClick={() => chooseFromButton(input.id)}
+            >
+              <SayLine
+                say={{
+                  key: "marvel0.speech.mic.pick.use_new",
+                  params: { label: name(input.label, index) },
+                }}
+              />
+            </Button>
+          ))}
+          {mics.offers.length > 0 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              data-testid="marvel0-speech-mic-dismiss"
+              onClick={() => {
+                mics.dismiss();
+                select.current?.focus();
+              }}
+            >
+              {t("marvel0.speech.mic.pick.dismiss")}
+            </Button>
+          )}
+          {(switched || mics.missing) && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={disabled}
+              data-testid="marvel0-speech-mic-forget"
+              onClick={() => chooseFromButton(null)}
+            >
+              {t("marvel0.speech.mic.pick.forget")}
+            </Button>
+          )}
         </div>
       )}
     </div>

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, jest, test } from "bun:test";
 import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
 import { LocaleProvider } from "@/components/levi-locale";
-import { MIC_CHOICE_KEY } from "../mic-choice";
+import { MIC_CHOICE_KEY, MIC_SEEN_KEY } from "../mic-choice";
 import { SpeechPanel } from "../speech-panel";
 import { button, choose, nothing, refused, type } from "./actions-helpers";
 import {
@@ -396,6 +396,172 @@ describe("the microphone picker", () => {
     expect(options(h)).toEqual(["默认（由浏览器决定）", CAMERA.label]);
     expect(text(h)).toContain(zh["marvel0.speech.mic.pick.label"]);
     expect(text(h)).toContain(zh["marvel0.speech.mic.pick.hint"]);
+  });
+});
+
+describe("new and changed microphones", () => {
+  const UGREEN = {
+    deviceId: "ugreen-1",
+    label: "UGREEN USB MIC-CM727 Analog Stereo",
+  };
+  const CAMERA = {
+    deviceId: "insta-1",
+    label: "Insta360 Ace Pro 2 Analog Stereo",
+  };
+  const NEWMIC = { deviceId: "rode-1", label: "RODE NT-USB Mini" };
+  const remember = (device: FakeDevice) =>
+    localStorage.setItem(
+      MIC_CHOICE_KEY,
+      JSON.stringify({ id: device.deviceId, label: device.label }),
+    );
+  const seen = (...devices: FakeDevice[]) =>
+    localStorage.setItem(
+      MIC_SEEN_KEY,
+      JSON.stringify(devices.map((device) => `name:${device.label}`)),
+    );
+  const stored = () => {
+    const raw = localStorage.getItem(MIC_CHOICE_KEY);
+    return raw ? (JSON.parse(raw) as { id: string; label: string }) : null;
+  };
+  const select = (h: H) =>
+    q(h, "marvel0-speech-mic-select") as HTMLSelectElement;
+  const all = (h: H, testid: string) =>
+    Array.from(h.host.querySelectorAll<HTMLElement>(`[data-testid=${testid}]`));
+  const plug = async (h: H, devices: FakeDevice[]) => {
+    await act(async () => h.audio.setDevices(devices));
+    await flushAll();
+  };
+
+  test("the first list a browser sees is only recorded: nothing offered, nothing switched", async () => {
+    const h = await open({ devices: [CAMERA, UGREEN] });
+    expect(all(h, "marvel0-speech-mic-offer")).toHaveLength(0);
+    expect(q(h, "marvel0-speech-mic-switched")).toBeNull();
+    expect(JSON.parse(localStorage.getItem(MIC_SEEN_KEY)!)).toEqual([
+      `name:${CAMERA.label}`,
+      `name:${UGREEN.label}`,
+    ]);
+    expect(h.captures.current.device).toBeNull();
+  });
+
+  test("a swap found when the page opens: the new microphone is used and remembered, and the card says so", async () => {
+    remember(UGREEN);
+    seen(CAMERA, UGREEN);
+    const h = await open({ devices: [CAMERA, NEWMIC] });
+    expect(h.captures.current.device).toBe(NEWMIC.deviceId);
+    expect(select(h).value).toBe(NEWMIC.deviceId);
+    expect(stored()).toEqual({ id: NEWMIC.deviceId, label: NEWMIC.label });
+    const note = q(h, "marvel0-speech-mic-switched")?.textContent ?? "";
+    expect(note).toContain(NEWMIC.label);
+    expect(note).toContain(UGREEN.label);
+    expect(q(h, "marvel0-speech-mic-missing")).toBeNull();
+    // Undo: the default from now on.
+    await act(async () =>
+      (q(h, "marvel0-speech-mic-forget") as HTMLButtonElement).click(),
+    );
+    await flushAll();
+    expect(h.captures.current.device).toBeNull();
+    expect(stored()).toBeNull();
+    expect(q(h, "marvel0-speech-mic-switched")).toBeNull();
+    expect(document.activeElement).toBe(select(h));
+  });
+
+  test("a swap while the page is open: unplug the old one, plug in the new one", async () => {
+    remember(UGREEN);
+    seen(CAMERA, UGREEN);
+    const h = await open({ devices: [CAMERA, UGREEN] });
+    expect(h.captures.current.device).toBe(UGREEN.deviceId);
+    await plug(h, [CAMERA]);
+    expect(q(h, "marvel0-speech-mic-missing")).not.toBeNull();
+    await plug(h, [CAMERA, NEWMIC]);
+    expect(h.captures.current.device).toBe(NEWMIC.deviceId);
+    expect(q(h, "marvel0-speech-mic-switched")).not.toBeNull();
+    expect(q(h, "marvel0-speech-mic-missing")).toBeNull();
+  });
+
+  test("an extra microphone while the chosen one is connected is offered, not taken", async () => {
+    remember(UGREEN);
+    seen(CAMERA, UGREEN);
+    const h = await open({ devices: [CAMERA, UGREEN] });
+    await plug(h, [CAMERA, UGREEN, NEWMIC]);
+    expect(h.captures.current.device).toBe(UGREEN.deviceId);
+    expect(
+      all(h, "marvel0-speech-mic-offer").map((element) => element.textContent),
+    ).toEqual([`New microphone found: ${NEWMIC.label}.`]);
+    const take = q(h, "marvel0-speech-mic-use-new") as HTMLButtonElement;
+    expect(take.textContent).toBe(`Use ${NEWMIC.label}`);
+    await act(async () => take.click());
+    await flushAll();
+    expect(h.captures.current.device).toBe(NEWMIC.deviceId);
+    expect(stored()?.id).toBe(NEWMIC.deviceId);
+    expect(all(h, "marvel0-speech-mic-offer")).toHaveLength(0);
+    expect(document.activeElement).toBe(select(h));
+  });
+
+  test("an offer can be dismissed, is not repeated after a reload, and goes when the microphone is unplugged", async () => {
+    seen(CAMERA, UGREEN);
+    const h = await open({ devices: [CAMERA, UGREEN, NEWMIC] });
+    expect(all(h, "marvel0-speech-mic-offer")).toHaveLength(1);
+    await act(async () =>
+      (q(h, "marvel0-speech-mic-dismiss") as HTMLButtonElement).click(),
+    );
+    await flushAll();
+    expect(all(h, "marvel0-speech-mic-offer")).toHaveLength(0);
+    expect(h.captures.current.device).toBeNull();
+    // It is seen now: plugging it out and in again offers nothing.
+    await plug(h, [CAMERA, UGREEN]);
+    await plug(h, [CAMERA, UGREEN, NEWMIC]);
+    expect(all(h, "marvel0-speech-mic-offer")).toHaveLength(0);
+  });
+
+  test("an offered microphone that is unplugged is no longer offered", async () => {
+    seen(CAMERA, UGREEN);
+    const h = await open({ devices: [CAMERA, UGREEN, NEWMIC] });
+    expect(all(h, "marvel0-speech-mic-offer")).toHaveLength(1);
+    await plug(h, [CAMERA, UGREEN]);
+    expect(all(h, "marvel0-speech-mic-offer")).toHaveLength(0);
+    expect(q(h, "marvel0-speech-mic-use-new")).toBeNull();
+  });
+
+  test("a very quiet recording is still sent, and the card says how to raise the level", async () => {
+    const h = await open({ devices: [CAMERA, UGREEN] });
+    await pointer(mic(h), "pointerdown");
+    await advance(400);
+    await pointer(mic(h), "pointerup");
+    await act(async () => h.captures.current.deliver({ peakDb: -38.4 }));
+    await flushAll();
+    expect(h.calls.transcribe).toHaveLength(1);
+    expect(q(h, "marvel0-speech-mic-quiet")?.textContent).toContain(
+      "peak -38 dBFS",
+    );
+    await armed();
+    await advance(60_000);
+    await pointer(mic(h), "pointerdown");
+    await advance(400);
+    await pointer(mic(h), "pointerup");
+    await act(async () => h.captures.current.deliver({ peakDb: -8 }));
+    await flushAll();
+    expect(q(h, "marvel0-speech-mic-quiet")).toBeNull();
+  });
+
+  test("a fallback warning stays when the chosen microphone is found again during that opening", async () => {
+    // Names kept back at load, the remembered one connected under a new id:
+    // the exact id fails, the default opens, then the names reveal the move.
+    remember(UGREEN);
+    const moved = { deviceId: "ugreen-2", label: UGREEN.label };
+    const h = await open({ devices: [{ deviceId: "", label: "" }] });
+    h.audio.setDevices([CAMERA, moved], false);
+    await act(async () =>
+      h.captures.current.opened({
+        id: CAMERA.deviceId,
+        label: CAMERA.label,
+        fallback: true,
+      }),
+    );
+    await flushAll();
+    expect(h.captures.current.device).toBe("ugreen-2");
+    expect(q(h, "marvel0-speech-mic-fallback")?.textContent).toContain(
+      CAMERA.label,
+    );
   });
 });
 

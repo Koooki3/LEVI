@@ -46,19 +46,29 @@ It never:
 
 A workstation often has several inputs: a dedicated USB microphone, a camera's microphone, the board's jack. The default input is not always the one the person talks into, so the card has a **Microphone** list above the talk button.
 
-- The list holds **Default (the browser picks)** and the connected audio inputs. The default is whatever the browser opens when no input is named: Firefox follows the system's default input, Chrome its own microphone setting (the camera icon in the address bar, or `chrome://settings/content/microphone`), which may differ from the system's. The list is read with the browser's `enumerateDevices`, which opens no microphone and asks nothing; it is read again when an input is plugged in or out and after the microphone was opened. Until this page has been allowed to use the microphone once, browsers keep the names back: the list then holds only the default and says to press the talk button once.
+- The list holds **Default (the browser picks)** and the connected audio inputs. The default is whatever the browser opens when no input is named: Firefox uses the system's default input (its permission prompt may also let the person pick one), Chrome its own microphone setting (the camera icon in the address bar, or `chrome://settings/content/microphone`), which may differ from the system's. The list is read with the browser's `enumerateDevices`, which opens no microphone and asks nothing; it is read again when an input is plugged in or out and after the microphone was opened. Until this page has been allowed to use the microphone once, browsers keep the names back: the list then holds only the default and says to press the talk button once.
 - A choice is remembered in this browser only (`localStorage`, the input's id and name). It is not sent to LEVI and is not shared with other browsers or people. Where the browser's storage cannot be written (blocked site data), the choice still applies on the page but is not remembered after a reload.
 - A press opens the chosen input with `deviceId: {exact}`, so the browser cannot quietly substitute another one. Changing the choice releases a microphone that is still kept open from the last recording; a recording in progress finishes on its input, and that input is released right after it.
 - A remembered input that is not connected is kept: the card says it is missing and uses the default until it is plugged back in, and offers **Use the default from now on** to forget it. If the browser changed the input's id, the input with the same name is used when exactly one input has that name. If the chosen input vanishes between the list and the press, that recording uses the default and the card warns about it; that microphone is not kept open, so the next press tries the chosen input again.
 - After each opening the card says which input was used ("Recording from: …"), so a camera microphone taken by mistake shows before the transcript is trusted. The notes are in one status region that screen readers announce.
+- **Any microphone, no setup.** Whatever rate (44.1, 48, 96 kHz…) and number of channels an input delivers, the page mixes it to mono and resamples it to the 16 kHz the model takes, so a USB microphone works as soon as the system lists it. A recording whose loudest sample is below -30 dBFS is still sent, and the card says it was very quiet: move closer, or raise that microphone's input volume in the system sound settings (a new microphone often comes with a low one). Below -50 dBFS nothing is sent.
+- **Swapping microphones.** The browser also remembers which inputs it has seen, by name (ids may change between sessions; the list holds names only). The first list it ever sees is only recorded. Later, an input never seen before is new:
+  - the chosen input is not connected and exactly one new input appeared: that is a swap, and the card switches to the new one, remembers it and says so, with a button to use the default instead;
+  - otherwise (the chosen one is still connected, nothing was chosen, or several are new) the card only offers each new input ("Use …", or "Not now"); it never switches to one by itself, so a newly connected camera does not take over;
+  - an input without a name is never treated as new. An offer goes when its input is unplugged, and is not repeated once dismissed.
 
 工作站上常有好几个输入设备：专用的 USB 麦克风、相机自带的麦克风、主板的接口。默认的输入设备不一定是人对着说话的那个，所以卡片在说话按钮上方有一个**麦克风**列表。
 
-- 列表里是**默认（由浏览器决定）**和已连接的音频输入。“默认”指不指定设备时浏览器打开的那个：Firefox 跟随系统的默认输入，Chrome 用它自己的麦克风设置（地址栏里的摄像头图标，或 `chrome://settings/content/microphone`），可能和系统的不同。列表用浏览器的 `enumerateDevices` 读取，不会打开麦克风，也不会弹出询问；插拔设备时、以及麦克风打开过之后会重新读取。本页第一次获准使用麦克风之前，浏览器不给出设备名称：这时列表里只有默认，并提示先按一次说话按钮。
+- 列表里是**默认（由浏览器决定）**和已连接的音频输入。“默认”指不指定设备时浏览器打开的那个：Firefox 用系统的默认输入（它的权限弹窗也可能让人另选一个），Chrome 用它自己的麦克风设置（地址栏里的摄像头图标，或 `chrome://settings/content/microphone`），可能和系统的不同。列表用浏览器的 `enumerateDevices` 读取，不会打开麦克风，也不会弹出询问；插拔设备时、以及麦克风打开过之后会重新读取。本页第一次获准使用麦克风之前，浏览器不给出设备名称：这时列表里只有默认，并提示先按一次说话按钮。
 - 选择只记在这个浏览器里（`localStorage`，设备的 ID 和名称），不会发给 LEVI，也不会和别的浏览器或别人共享。浏览器存储写不进去时（网站数据被禁止），选择在当前页面仍然有效，但刷新后不会记住。
 - 按下按钮时用 `deviceId: {exact}` 打开选定的设备，浏览器不能悄悄换成别的设备。改选设备会立即释放上一段录音后还保持打开的麦克风；正在进行的录音在原来的设备上录完，录完立即释放该设备。
 - 记住的设备没有接上时，选择会保留：卡片提示它不在，在它重新插上之前使用默认麦克风，并提供“以后都用默认麦克风”按钮来忘掉它。浏览器换了设备 ID 时，如果正好只有一个设备叫同样的名称，就用那一个。选定的设备在列表读取之后、按下之前消失的，这一次录音使用默认麦克风，卡片会给出警告；这个麦克风不会保持打开，下一次按下会重新尝试选定的设备。
 - 每次打开麦克风后，卡片显示用的是哪个设备（“录音用的麦克风：…”），所以误用了相机麦克风时，在采信转写之前就能看出来。这些提示放在同一个状态区域里，读屏软件会播报。
+- **任何麦克风都不用设置。** 不管输入设备给出什么采样率（44.1、48、96 kHz……）和几个声道，页面都会混成单声道并重采样到模型要的 16 kHz，所以 USB 麦克风只要系统能识别就能用。录音最响的采样低于 -30 dBFS 时仍然发送，卡片会提示声音很小：请靠近，或在系统声音设置里调高这个麦克风的输入音量（新麦克风的默认音量常常偏低）。低于 -50 dBFS 时不发送。
+- **更换麦克风。** 浏览器还会按名称记住见过哪些输入设备（设备 ID 可能每次会话都变；记录里只有名称）。第一次看到的列表只记录下来。之后，没见过的设备就是新的：
+  - 选定的设备没有接上，并且正好出现了一个新设备：这就是更换，卡片自动改用新设备、记住它并提示，同时提供改用默认麦克风的按钮；
+  - 其他情况（选定的设备还接着、没有选过、或新设备不止一个）卡片只提示每个新设备（“改用 …”或“暂不使用”），不会自己切换，所以新接上的相机不会被自动选上；
+  - 没有名称的设备永远不算新设备。提示的设备被拔掉后提示消失；点过“暂不使用”就不再提示。
 
 ## Which instructions are allowed / 哪些指令是允许的
 
@@ -190,7 +200,7 @@ Measured on the RTX 5090 on 2026-10-20 with synthetic speech (Kokoro): the 1.7B 
 - the guards against a real policy server, a real client and a real arm lock: the tests build the deploy status document with fakes (the arm-lock row is the deploy's own `_check_arm`);
 - that a worker exit gives the GPU memory back as measured for the benchmark processes, through this manager and a policy deploy at the 0.45 fraction;
 - matching quality for instructions other than the five of the sample site file;
-- the microphone list in real browsers: the tests use a fake `mediaDevices` that follows the specification (hidden names before permission, `OverconstrainedError` for an `exact` id that is gone); how Chrome and Firefox name and re-number inputs on this machine has not been checked.
+- the microphone list in real browsers: the tests use a fake `mediaDevices` that follows the specification (hidden names before permission, `OverconstrainedError` for an `exact` id that is gone); how Chrome and Firefox name and re-number inputs on this machine, and whether the -30 dBFS "very quiet" line suits real voices, has not been checked.
 
 用 Kokoro 合成的语音于 2026-10-20 在 RTX 5090 上实测：1.7B 模型峰值 4878 MiB，暖加载约 0.4 秒、冷加载约 1 秒，2 秒指令转写 0.08 到 0.11 秒，10 秒的 0.24 到 0.27 秒；22 句中英文指令对了 21 到 22 句（两次运行），静音和噪声没有输出。这一部分的测试用一个替身工作进程和假的机器状态：真实的进程和管道，没有模型。
 
@@ -201,7 +211,7 @@ Measured on the RTX 5090 on 2026-10-20 with synthetic speech (Kokoro): the 1.7B 
 - 对真实策略服务器、真实客户端和真实手臂锁的守卫：测试用假对象构造部署状态文档（手臂锁一行就是部署自己的 `_check_arm`）；
 - 经由这个管理器、在 0.45 比例的策略部署旁边，工作进程退出后是否像基准里的进程那样归还显存；
 - 站点文件示例里那五句之外的指令的匹配质量；
-- 真实浏览器里的麦克风列表：测试用的是按规范行为伪造的 `mediaDevices`（获准前不给名称，`exact` 的 ID 不存在时抛 `OverconstrainedError`）；Chrome 和 Firefox 在这台机器上怎样命名设备、何时更换设备 ID，还没有核对。
+- 真实浏览器里的麦克风列表：测试用的是按规范行为伪造的 `mediaDevices`（获准前不给名称，`exact` 的 ID 不存在时抛 `OverconstrainedError`）；Chrome 和 Firefox 在这台机器上怎样命名设备、何时更换设备 ID，以及 -30 dBFS 的“声音很小”界线是否适合真人声音，还没有核对。
 
 
 ## Fresh proposals / 提案时效
