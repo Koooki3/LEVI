@@ -263,6 +263,8 @@ export class FakeCapture implements CaptureLike {
   stops = 0;
   aborts = 0;
   disposed = false;
+  /** Every `setDevice` call, in order. */
+  devices: Array<string | null> = [];
   private readonly listeners = new Set<(next: CaptureState) => void>();
   constructor(readonly events: CaptureEvents) {}
 
@@ -297,7 +299,19 @@ export class FakeCapture implements CaptureLike {
     this.disposed = true;
     this.listeners.clear();
   }
+  setDevice(deviceId: string | null) {
+    this.devices.push(deviceId);
+  }
+  /** The input the capture would use next (the last `setDevice`). */
+  get device(): string | null | undefined {
+    return this.devices[this.devices.length - 1];
+  }
   // -- drivers
+  /** The microphone opened on this input. */
+  opened(device: { id: string | null; label: string; fallback?: boolean }) {
+    this.events.onMic?.(true);
+    this.events.onDevice?.({ fallback: false, ...device });
+  }
   /** The recording ended and produced a clip. */
   deliver(over: Partial<Clip> = {}) {
     this.set("encoding");
@@ -353,12 +367,27 @@ export interface FakeAudioOptions {
   /** getUserMedia rejects with an error of this name. */
   error?: string;
   secure?: boolean;
+  /** What enumerateDevices lists (kind defaults to audioinput). With a list,
+   * getUserMedia refuses an `exact` deviceId that is not in it, as a browser
+   * does (OverconstrainedError), and opens the first input for the default. */
+  devices?: FakeDevice[];
+}
+
+export interface FakeDevice {
+  deviceId: string;
+  label: string;
+  kind?: string;
 }
 
 export class FakeTrack {
   readyState: "live" | "ended" = "live";
+  label = "";
+  deviceId = "";
   private readonly handlers: Array<() => void> = [];
   constructor(private readonly stream: FakeStream) {}
+  getSettings() {
+    return this.deviceId ? { deviceId: this.deviceId } : {};
+  }
   stop() {
     this.readyState = "ended";
     this.stream.active = false;
@@ -396,6 +425,12 @@ export class FakeNode {
 
 export interface FakeAudio {
   getUserMediaCalls: number;
+  /** The constraints of every getUserMedia call, in order. */
+  constraints: MediaStreamConstraints[];
+  enumerateCalls: number;
+  /** Replaces the device list and fires `devicechange` (unless `fire` is
+   * false: the browser revealing names after permission fires nothing). */
+  setDevices(devices: FakeDevice[], fire?: boolean): void;
   contexts: FakeContext[];
   streams: FakeStream[];
   /** The rates the contexts were asked for (undefined: the device's own). */
@@ -483,8 +518,20 @@ export function installFakeAudio(options: FakeAudioOptions = {}): FakeAudio {
   };
   const deviceRate = options.deviceRate ?? 48000;
   let gate = options.gate ? deferred<void>() : null;
+  let devices = options.devices;
+  const changeListeners = new Set<() => void>();
+  const inputs = () =>
+    (devices ?? []).filter(
+      (device) => (device.kind ?? "audioinput") === "audioinput",
+    );
   const audio: FakeAudio = {
     getUserMediaCalls: 0,
+    constraints: [],
+    enumerateCalls: 0,
+    setDevices(next, fire = true) {
+      devices = next;
+      if (fire) for (const listener of [...changeListeners]) listener();
+    },
     contexts: [],
     streams: [],
     requestedRates: [],
@@ -558,8 +605,9 @@ export function installFakeAudio(options: FakeAudioOptions = {}): FakeAudio {
   Object.defineProperty(navigatorObject, "mediaDevices", {
     configurable: true,
     value: {
-      getUserMedia: async () => {
+      getUserMedia: async (constraints: MediaStreamConstraints = {}) => {
         audio.getUserMediaCalls += 1;
+        audio.constraints.push(constraints);
         if (gate) {
           await gate.promise;
           gate = null;
@@ -568,9 +616,41 @@ export function installFakeAudio(options: FakeAudioOptions = {}): FakeAudio {
           throw Object.assign(new Error(options.error), {
             name: options.error,
           });
+        const asked =
+          typeof constraints.audio === "object"
+            ? (constraints.audio.deviceId as { exact?: string } | undefined)
+                ?.exact
+            : undefined;
+        let device: FakeDevice | undefined;
+        if (devices) {
+          device = asked
+            ? inputs().find((input) => input.deviceId === asked)
+            : inputs()[0];
+          if (!device)
+            throw Object.assign(new Error("no such device"), {
+              name: asked ? "OverconstrainedError" : "NotFoundError",
+            });
+        }
         const stream = new FakeStream();
+        stream.track.label = device?.label ?? "";
+        stream.track.deviceId = device?.deviceId ?? "";
         audio.streams.push(stream);
         return stream;
+      },
+      enumerateDevices: async () => {
+        audio.enumerateCalls += 1;
+        return (devices ?? []).map((device) => ({
+          deviceId: device.deviceId,
+          label: device.label,
+          kind: device.kind ?? "audioinput",
+          groupId: "",
+        }));
+      },
+      addEventListener: (type: string, listener: () => void) => {
+        if (type === "devicechange") changeListeners.add(listener);
+      },
+      removeEventListener: (type: string, listener: () => void) => {
+        if (type === "devicechange") changeListeners.delete(listener);
       },
     },
   });

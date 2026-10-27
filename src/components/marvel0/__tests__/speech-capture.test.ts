@@ -3,8 +3,10 @@ import { afterEach, describe, expect, jest, test } from "bun:test";
 import {
   VoiceCapture,
   attachPushToTalk,
+  micConstraints,
   type CaptureOptions,
   type Clip,
+  type DeviceInUse,
 } from "../voice-capture";
 import {
   installFakeAudio,
@@ -42,6 +44,7 @@ function harness(
   const mic: boolean[] = [];
   const levels: number[] = [];
   const states: string[] = [];
+  const opened: DeviceInUse[] = [];
   const cap = new VoiceCapture(
     {
       onClip: (clip) => clips.push(clip),
@@ -49,10 +52,11 @@ function harness(
       onMic: (open) => mic.push(open),
       onLevel: (level) => levels.push(level.rmsDb),
       onState: (next) => states.push(next),
+      onDevice: (device) => opened.push(device),
     },
     options,
   );
-  return { audio: fake, cap, clips, errors, mic, levels, states };
+  return { audio: fake, cap, clips, errors, mic, levels, states, opened };
 }
 
 /** Parses a clip's WAV: the header fields and the samples. */
@@ -375,6 +379,109 @@ describe("VoiceCapture", () => {
     const wav = await parse(h.clips[0]);
     const peak = Math.max(...Array.from(wav.samples, Math.abs));
     expect(peak / 32767).toBeCloseTo(0.2, 1); // the mean of 0.5 and -0.1
+  });
+});
+
+describe("the chosen input", () => {
+  const UGREEN = { deviceId: "ugreen-1", label: "UGREEN USB MIC-CM727" };
+  const CAMERA = { deviceId: "insta-1", label: "Insta360 Ace Pro 2" };
+  /** Records 0.6 s and lets the clip come out; the microphone stays warm. */
+  async function clipOnce(h: ReturnType<typeof harness>) {
+    expect(await h.cap.start()).toBe(true);
+    h.audio.seconds(0.6);
+    h.cap.stop();
+    jest.advanceTimersByTime(200);
+  }
+
+  test("without a choice nothing names a device; the input that opened is reported", async () => {
+    const h = harness({ devices: [CAMERA, UGREEN] });
+    await clipOnce(h);
+    expect(h.audio.constraints).toEqual([{ audio: { channelCount: 1 } }]);
+    expect(h.opened).toEqual([
+      { id: CAMERA.deviceId, label: CAMERA.label, fallback: false },
+    ]);
+    expect(h.clips).toHaveLength(1);
+  });
+
+  test("a chosen input is asked for exactly, so the browser cannot substitute another", async () => {
+    const h = harness({ devices: [CAMERA, UGREEN] });
+    h.cap.setDevice(UGREEN.deviceId);
+    await clipOnce(h);
+    expect(h.audio.constraints).toEqual([
+      { audio: { channelCount: 1, deviceId: { exact: UGREEN.deviceId } } },
+    ]);
+    expect(micConstraints(UGREEN.deviceId)).toEqual(h.audio.constraints[0]);
+    expect(h.opened).toEqual([
+      { id: UGREEN.deviceId, label: UGREEN.label, fallback: false },
+    ]);
+    expect(h.errors).toEqual([]);
+  });
+
+  test("a chosen input that is gone opens the default for this press and says so", async () => {
+    const h = harness({ devices: [CAMERA] });
+    h.cap.setDevice(UGREEN.deviceId);
+    await clipOnce(h);
+    expect(h.audio.constraints).toEqual([
+      { audio: { channelCount: 1, deviceId: { exact: UGREEN.deviceId } } },
+      { audio: { channelCount: 1 } },
+    ]);
+    expect(h.opened).toEqual([
+      { id: CAMERA.deviceId, label: CAMERA.label, fallback: true },
+    ]);
+    expect(h.errors).toEqual([]);
+    expect(h.clips).toHaveLength(1);
+  });
+
+  test("a refusal other than a missing input is not papered over with the default", async () => {
+    const h = harness({ devices: [UGREEN], error: "NotAllowedError" });
+    h.cap.setDevice(UGREEN.deviceId);
+    expect(await h.cap.start()).toBe(false);
+    expect(h.audio.getUserMediaCalls).toBe(1);
+    expect(h.errors).toEqual(["denied"]);
+    expect(h.opened).toEqual([]);
+  });
+
+  test("changing the input releases a warm microphone at once, and the next press opens the new one", async () => {
+    const h = harness({ devices: [CAMERA, UGREEN] });
+    await clipOnce(h);
+    expect(h.mic).toEqual([true]);
+    h.cap.setDevice(UGREEN.deviceId);
+    expect(h.mic).toEqual([true, false]);
+    expect(h.audio.streams[0].track.readyState).toBe("ended");
+    expect(h.audio.contexts[0].state).toBe("closed");
+    await clipOnce(h);
+    expect(h.audio.getUserMediaCalls).toBe(2);
+    expect(h.opened.map((device) => device.id)).toEqual([
+      CAMERA.deviceId,
+      UGREEN.deviceId,
+    ]);
+    // Setting the same input again changes nothing.
+    h.cap.setDevice(UGREEN.deviceId);
+    expect(h.mic).toEqual([true, false, true]);
+  });
+
+  test("a change during a recording keeps that recording on its input, then releases it at once", async () => {
+    const h = harness({ devices: [CAMERA, UGREEN] });
+    expect(await h.cap.start()).toBe(true);
+    h.audio.seconds(0.5);
+    h.cap.setDevice(UGREEN.deviceId);
+    expect(h.audio.streams[0].track.readyState).toBe("live");
+    h.audio.seconds(0.2);
+    h.cap.stop();
+    jest.advanceTimersByTime(200);
+    expect(h.clips).toHaveLength(1);
+    expect(h.clips[0].ms).toBeGreaterThan(650);
+    // Not kept warm for 8 s: it is no longer the chosen input.
+    expect(h.audio.streams[0].track.readyState).toBe("ended");
+    expect(h.mic).toEqual([true, false]);
+    await h.cap.start();
+    expect(h.audio.getUserMediaCalls).toBe(2);
+    expect(h.audio.streams[0].track.readyState).toBe("ended");
+    expect(h.opened[1]).toEqual({
+      id: UGREEN.deviceId,
+      label: UGREEN.label,
+      fallback: false,
+    });
   });
 });
 

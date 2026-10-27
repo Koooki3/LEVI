@@ -16,6 +16,10 @@
 //   * A clip is at most `maxMs` long, counted in audio frames (with a
 //     wall-clock backstop for a device that stops delivering), and runs on for
 //     `tailMs` after the release so the end of the last word is not cut.
+//   * `setDevice` picks the input (mic-choice.ts); null is the system default.
+//     A chosen input that cannot be found is replaced by the default for that
+//     opening, and `onDevice` says which input was opened and whether that
+//     happened. Changing the input releases a warm microphone at once.
 //
 // Nothing here touches the network, storage or the DOM beyond the button the
 // press handlers are attached to.
@@ -98,6 +102,16 @@ export const CAPTURE_DEFAULTS: CaptureOptions = {
   forceScriptProcessor: false,
 };
 
+/** The input a press opened. */
+export interface DeviceInUse {
+  /** The browser's id of it, when it says. */
+  id: string | null;
+  /** Its name ("" when the browser gives none). */
+  label: string;
+  /** A chosen input could not be found and the system default was opened. */
+  fallback: boolean;
+}
+
 export interface CaptureEvents {
   onState?(next: CaptureState, prev: CaptureState): void;
   onLevel?(level: Level): void;
@@ -105,6 +119,8 @@ export interface CaptureEvents {
   onError?(error: CaptureError): void;
   /** The microphone was opened (true) or released (false). */
   onMic?(open: boolean): void;
+  /** Which input was opened (after `onMic(true)`). */
+  onDevice?(device: DeviceInUse): void;
 }
 
 /** The part of the capture the card uses; tests replace it. */
@@ -116,6 +132,8 @@ export interface CaptureLike {
   abort(): void;
   dispose(): void;
   addStateListener(listener: (next: CaptureState) => void): () => void;
+  /** The input the next opening uses (null: the system default). */
+  setDevice?(deviceId: string | null): void;
 }
 
 // -- what the browser offers
@@ -296,17 +314,51 @@ interface Rig {
   node: AudioNode;
   sink: GainNode;
   path: Clip["path"];
+  /** The input that was asked for when it was opened. */
+  wanted: string | null;
 }
 
 /** Thrown inside `open` when the capture was aborted or disposed meanwhile. */
 class Superseded extends Error {}
 class GraphError extends Error {}
 
-const CONSTRAINTS: MediaStreamConstraints = {
-  // Advisory: a device may deliver stereo at 44.1 or 48 kHz whatever is asked.
-  // The browser's defaults for echo, noise and gain stay on.
-  audio: { channelCount: 1 },
-};
+/** What `getUserMedia` is asked for: `channelCount` is advisory (a device may
+ * deliver stereo at 44.1 or 48 kHz whatever is asked) and the browser's
+ * defaults for echo, noise and gain stay on. A chosen input is asked for
+ * `exact`, so the browser never quietly substitutes another one. */
+export function micConstraints(
+  deviceId: string | null,
+): MediaStreamConstraints {
+  return {
+    audio: deviceId
+      ? { channelCount: 1, deviceId: { exact: deviceId } }
+      : { channelCount: 1 },
+  };
+}
+
+/** The chosen input is not there (unplugged, or its id changed). */
+function inputGone(error: unknown): boolean {
+  const name =
+    typeof error === "object" && error !== null && "name" in error
+      ? String((error as { name: unknown }).name)
+      : "";
+  return name === "OverconstrainedError" || name === "NotFoundError";
+}
+
+/** The input a stream came from, as far as the browser tells. */
+function deviceOf(stream: MediaStream, fallback: boolean): DeviceInUse {
+  const track = stream.getAudioTracks()[0] as MediaStreamTrack | undefined;
+  let id: string | null = null;
+  try {
+    const settings = track?.getSettings?.();
+    if (typeof settings?.deviceId === "string" && settings.deviceId)
+      id = settings.deviceId;
+  } catch {
+    // a browser without getSettings
+  }
+  const label = typeof track?.label === "string" ? track.label : "";
+  return { id, label, fallback };
+}
 
 export class VoiceCapture implements CaptureLike {
   state: CaptureState = "idle";
@@ -322,6 +374,8 @@ export class VoiceCapture implements CaptureLike {
   private disposed = false;
   private wantStop = false;
   private cancelled = false;
+  /** The input to open (null: the system default). */
+  private deviceId: string | null = null;
   private warmTimer: ReturnType<typeof setTimeout> | undefined;
   private tailTimer: ReturnType<typeof setTimeout> | undefined;
   private limitTimer: ReturnType<typeof setTimeout> | undefined;
@@ -355,6 +409,16 @@ export class VoiceCapture implements CaptureLike {
     this.events.onError?.({ code });
   }
 
+  /** The input the next opening uses. A warm microphone that is idle is the
+   * old input and is released now; a recording (or an opening) in progress
+   * goes on with the input it started on, and the next press opens the new one. */
+  setDevice(deviceId: string | null): void {
+    const next = deviceId || null;
+    if (next === this.deviceId) return;
+    this.deviceId = next;
+    if (this.state === "idle") this.release();
+  }
+
   /** Starts a recording (called from a press). Resolves true once it records.
    * The first press opens the microphone, which may ask the person; a release
    * before that is answered with `not_ready`, never with an empty clip. */
@@ -368,7 +432,11 @@ export class VoiceCapture implements CaptureLike {
       this.fail(support);
       return false;
     }
-    if (!this.rig || !this.rig.stream.active) {
+    if (
+      !this.rig ||
+      !this.rig.stream.active ||
+      this.rig.wanted !== this.deviceId
+    ) {
       this.release();
       this.setState("requesting");
       const gen = this.gen;
@@ -455,6 +523,11 @@ export class VoiceCapture implements CaptureLike {
 
   private armWarm() {
     clearTimeout(this.warmTimer);
+    // The input was changed meanwhile: the old one is not kept warm.
+    if (this.rig && this.rig.wanted !== this.deviceId) {
+      this.release();
+      return;
+    }
     this.warmTimer = setTimeout(() => this.release(), this.o.keepWarmMs);
   }
 
@@ -487,7 +560,18 @@ export class VoiceCapture implements CaptureLike {
 
   private async open(gen: number): Promise<void> {
     const env = micEnv();
-    const stream = await env.mediaDevices!.getUserMedia(CONSTRAINTS);
+    const wanted = this.deviceId;
+    let stream: MediaStream;
+    let fallback = false;
+    try {
+      stream = await env.mediaDevices!.getUserMedia(micConstraints(wanted));
+    } catch (error) {
+      // The chosen input is gone: the system default, and the card says so.
+      if (wanted === null || !inputGone(error)) throw error;
+      if (gen !== this.gen) throw new Superseded();
+      stream = await env.mediaDevices!.getUserMedia(micConstraints(null));
+      fallback = true;
+    }
     if (gen !== this.gen) {
       stopTracks(stream);
       throw new Superseded();
@@ -508,7 +592,7 @@ export class VoiceCapture implements CaptureLike {
       sink = ctx.createGain();
       sink.gain.value = 0;
       sink.connect(ctx.destination);
-      const rig = { stream, ctx } as Rig;
+      const rig = { stream, ctx, wanted } as Rig;
       const built = await this.makeNode(ctx, gen, (pcm, peak, rms) =>
         this.block(rig, pcm, peak, rms),
       );
@@ -522,6 +606,7 @@ export class VoiceCapture implements CaptureLike {
         ?.addEventListener("ended", () => this.lost(rig));
       this.rig = rig;
       this.events.onMic?.(true);
+      this.events.onDevice?.(deviceOf(stream, fallback));
     } catch (error) {
       cleanup();
       throw error;

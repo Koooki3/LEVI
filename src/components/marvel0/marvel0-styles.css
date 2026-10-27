@@ -1475,6 +1475,13 @@
 .rg-speech p {
   margin: 0;
 }
+.rg-speech__mic {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  min-width: 0;
+  max-width: 36rem;
+}
 .rg-speech__talk {
   display: flex;
   flex-wrap: wrap;

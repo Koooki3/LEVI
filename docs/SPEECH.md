@@ -8,7 +8,7 @@ marvel0 页面的评测客户端命令卡片可以用语音填写任务指令。
 
 It does:
 
-- record while a button is held (at most 10 seconds) as 16 kHz mono 16-bit WAV, in the browser; the page must be opened as `http://127.0.0.1:7860` or `http://localhost:7860` (a browser gives the microphone to no other address);
+- record while a button is held (at most 10 seconds) as 16 kHz mono 16-bit WAV, in the browser, from the microphone chosen on the card (the system default unless another one is chosen, see below); the page must be opened as `http://127.0.0.1:7860` or `http://localhost:7860` (a browser gives the microphone to no other address);
 - transcribe it with `Qwen3-ASR-1.7B` (Apache-2.0) in a **separate worker process** on this machine's GPU, offline, started on the first recording and gone after two minutes without one;
 - compare the transcript with the allowed instructions (below) and offer the closest: tier **A** pre-selects one, **B** offers the best three, **C** lists all of them, **V** (a stop, negation or unsafe word) offers none;
 - change the task instruction field only when you click **Use**.
@@ -26,7 +26,7 @@ It never:
 
 它会做的：
 
-- 按住按钮时在浏览器里录音（最长 10 秒），格式是 16 kHz 单声道 16 位 WAV；页面必须以 `http://127.0.0.1:7860` 或 `http://localhost:7860` 打开（浏览器不会把麦克风给任何其他地址）；
+- 按住按钮时在浏览器里录音（最长 10 秒），格式是 16 kHz 单声道 16 位 WAV，用的是卡片上选定的麦克风（没有另选时是系统默认，见下）；页面必须以 `http://127.0.0.1:7860` 或 `http://localhost:7860` 打开（浏览器不会把麦克风给任何其他地址）；
 - 用 `Qwen3-ASR-1.7B`（Apache-2.0）在本机 GPU 上的**独立工作进程**里转写，离线运行；第一次录音时启动，两分钟没有新录音就退出；
 - 把转写文字和允许的指令（见下）比较并给出最接近的：A 档预选一句，B 档给出最好的三句，C 档列出全部，V 档（出现“停”、否定或不安全的词）不给候选；
 - 只有你点击“使用”时才改任务指令框。
@@ -41,6 +41,24 @@ It never:
 - 保存音频或文字。音频只存在于内存和工作进程的管道里；转写文字只存在于给页面的回答里（以及页面内存里 60 秒）。两者都不写入文件、日志、错误信息或 URL。日志只有请求 ID、一个结果词、字节数和 SHA-256 的前八个字符；
 - 把任何东西发到本机之外：模型离线运行（`HF_HUB_OFFLINE=1`），不涉及云端识别，也不涉及语言模型；
 - 取物理 GPU 锁或使用 `levi/inference/gpu.py`（前者会挡住策略服务器部署，后者恰好在策略服务器运行时拒绝）。
+
+## Choosing the microphone / 选择麦克风
+
+A workstation often has several inputs: a dedicated USB microphone, a camera's microphone, the board's jack. The system default is not always the one the person talks into, so the card has a **Microphone** list above the talk button.
+
+- The list holds **System default** and the connected audio inputs. It is read with the browser's `enumerateDevices`, which opens no microphone and asks nothing; it is read again when an input is plugged in or out and after the microphone was opened. Until this page has been allowed to use the microphone once, browsers keep the names back: the list then holds only the default and says to press the talk button once.
+- A choice is remembered in this browser only (`localStorage`, the input's id and name). It is not sent to LEVI and is not shared with other browsers or people. Where the browser's storage cannot be used (a private window, blocked site data) the card uses the default.
+- A press opens the chosen input with `deviceId: {exact}`, so the browser cannot quietly substitute another one. Changing the choice releases a microphone that is still kept open from the last recording; a recording in progress finishes on its input.
+- A remembered input that is not connected is kept: the card says it is missing and uses the system default until it is plugged back in. If the browser changed the input's id, the input with the same name is used when exactly one input has that name. If the chosen input vanishes between the list and the press, that recording uses the default and the card warns about it.
+- After each opening the card says which input was used ("Recording from: …"), so a camera microphone taken by mistake shows before the transcript is trusted.
+
+工作站上常有好几个输入设备：专用的 USB 麦克风、相机自带的麦克风、主板的接口。系统默认的不一定是人对着说话的那个，所以卡片在说话按钮上方有一个**麦克风**列表。
+
+- 列表里是**系统默认**和已连接的音频输入。它用浏览器的 `enumerateDevices` 读取，不会打开麦克风，也不会弹出询问；插拔设备时、以及麦克风打开过之后会重新读取。本页第一次获准使用麦克风之前，浏览器不给出设备名称：这时列表里只有系统默认，并提示先按一次说话按钮。
+- 选择只记在这个浏览器里（`localStorage`，设备的 ID 和名称），不会发给 LEVI，也不会和别的浏览器或别人共享。浏览器存储不能用时（隐私窗口、网站数据被禁止），卡片使用系统默认。
+- 按下按钮时用 `deviceId: {exact}` 打开选定的设备，浏览器不能悄悄换成别的设备。改选设备会立即释放上一段录音后还保持打开的麦克风；正在进行的录音则在原来的设备上录完。
+- 记住的设备没有接上时，选择会保留：卡片提示它不在，在它重新插上之前使用系统默认。浏览器换了设备 ID 时，如果正好只有一个设备叫同样的名称，就用那一个。选定的设备在列表读取之后、按下之前消失的，这一次录音使用系统默认，卡片会给出警告。
+- 每次打开麦克风后，卡片显示用的是哪个设备（“录音用的麦克风：…”），所以误用了相机麦克风时，在采信转写之前就能看出来。
 
 ## Which instructions are allowed / 哪些指令是允许的
 
@@ -171,7 +189,8 @@ Measured on the RTX 5090 on 2026-10-20 with synthetic speech (Kokoro): the 1.7B 
 - the effect of the worker on a running arm controller (a GPU burst of 0.1 to 0.3 s and a few threads at `nice` 19 on the site's cores, never measured with the controller active; the core list is a guess); try it with the owner present;
 - the guards against a real policy server, a real client and a real arm lock: the tests build the deploy status document with fakes (the arm-lock row is the deploy's own `_check_arm`);
 - that a worker exit gives the GPU memory back as measured for the benchmark processes, through this manager and a policy deploy at the 0.45 fraction;
-- matching quality for instructions other than the five of the sample site file.
+- matching quality for instructions other than the five of the sample site file;
+- the microphone list in real browsers: the tests use a fake `mediaDevices` that follows the specification (hidden names before permission, `OverconstrainedError` for an `exact` id that is gone); how Chrome and Firefox name and re-number inputs on this machine has not been checked.
 
 用 Kokoro 合成的语音于 2026-10-20 在 RTX 5090 上实测：1.7B 模型峰值 4878 MiB，暖加载约 0.4 秒、冷加载约 1 秒，2 秒指令转写 0.08 到 0.11 秒，10 秒的 0.24 到 0.27 秒；22 句中英文指令对了 21 到 22 句（两次运行），静音和噪声没有输出。这一部分的测试用一个替身工作进程和假的机器状态：真实的进程和管道，没有模型。
 
@@ -181,7 +200,8 @@ Measured on the RTX 5090 on 2026-10-20 with synthetic speech (Kokoro): the 1.7B 
 - 工作进程对正在运行的机械臂控制器的影响（0.1 到 0.3 秒的 GPU 脉冲和 `nice` 19 下站点核心上的几个线程，从未在控制器激活时测过；核心列表是猜测）；请在主人在场时试；
 - 对真实策略服务器、真实客户端和真实手臂锁的守卫：测试用假对象构造部署状态文档（手臂锁一行就是部署自己的 `_check_arm`）；
 - 经由这个管理器、在 0.45 比例的策略部署旁边，工作进程退出后是否像基准里的进程那样归还显存；
-- 站点文件示例里那五句之外的指令的匹配质量。
+- 站点文件示例里那五句之外的指令的匹配质量；
+- 真实浏览器里的麦克风列表：测试用的是按规范行为伪造的 `mediaDevices`（获准前不给名称，`exact` 的 ID 不存在时抛 `OverconstrainedError`）；Chrome 和 Firefox 在这台机器上怎样命名设备、何时更换设备 ID，还没有核对。
 
 
 ## Fresh proposals / 提案时效

@@ -15,6 +15,7 @@ import {
   Input,
   Radio,
   RadioGroup,
+  Select,
   type Tone,
 } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
@@ -40,7 +41,11 @@ import {
   type Problem as SpeechProblem,
   type Proposal,
 } from "./speech-logic";
-import { useSpeechSession, type SpeechSession } from "./speech-session";
+import {
+  useSpeechSession,
+  type MicPicker,
+  type SpeechSession,
+} from "./speech-session";
 import type { CaptureEvents, CaptureLike } from "./voice-capture";
 
 const ENGINE_TONE: Record<EngineState, Tone> = {
@@ -153,6 +158,13 @@ export function SpeechPanel({
         <Note tone="warning">{t("marvel0.speech.no_estop")}</Note>
       </div>
 
+      {!micProblem && (
+        <MicField
+          mics={session.mics}
+          disabled={recording || state.phase === "uploading"}
+        />
+      )}
+
       <div className="rg-speech__talk">
         <Button
           ref={session.attach}
@@ -231,6 +243,80 @@ export function SpeechPanel({
         <ProposalCard session={session} proposal={state.proposal} />
       )}
     </section>
+  );
+}
+
+/** Which microphone a press opens: the system default or one of the inputs,
+ * remembered in this browser. It also says which input the last opening
+ * used, so a camera's microphone taken by mistake shows. */
+function MicField({ mics, disabled }: { mics: MicPicker; disabled: boolean }) {
+  const { t } = useLocale();
+  const name = (label: string, index: number) =>
+    label ||
+    sayText(
+      { key: "marvel0.speech.mic.pick.unnamed", params: { n: index + 1 } },
+      t,
+    );
+  const noName = { key: "marvel0.speech.mic.pick.no_name" };
+  return (
+    <div className="rg-speech__mic" data-testid="marvel0-speech-mic-pick">
+      <Field
+        label={t("marvel0.speech.mic.pick.label")}
+        hint={t(
+          mics.hidden
+            ? "marvel0.speech.mic.pick.hidden"
+            : "marvel0.speech.mic.pick.hint",
+        )}
+      >
+        <Select
+          value={mics.chosen ?? ""}
+          disabled={disabled}
+          data-testid="marvel0-speech-mic-select"
+          onChange={(event) => mics.choose(event.target.value || null)}
+        >
+          <option value="">{t("marvel0.speech.mic.pick.default")}</option>
+          {mics.options.map((input, index) => (
+            <option key={input.id} value={input.id}>
+              {name(input.label, index)}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      {mics.missing && (
+        <div data-testid="marvel0-speech-mic-missing">
+          <Note tone="warning" role="status">
+            <SayLine
+              say={{
+                key: "marvel0.speech.mic.pick.missing",
+                params: { label: mics.missing.label || noName },
+              }}
+            />
+          </Note>
+        </div>
+      )}
+      {mics.inUse &&
+        (mics.inUse.fallback ? (
+          <div data-testid="marvel0-speech-mic-fallback">
+            <Note tone="warning" role="status">
+              <SayLine
+                say={{
+                  key: "marvel0.speech.mic.pick.fallback",
+                  params: { label: mics.inUse.label || noName },
+                }}
+              />
+            </Note>
+          </div>
+        ) : (
+          <p className="rg-muted" data-testid="marvel0-speech-mic-in-use">
+            <SayLine
+              say={{
+                key: "marvel0.speech.mic.pick.in_use",
+                params: { label: mics.inUse.label || noName },
+              }}
+            />
+          </p>
+        ))}
+    </div>
   );
 }
 

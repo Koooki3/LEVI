@@ -4,8 +4,9 @@ import { afterEach, describe, expect, jest, test } from "bun:test";
 import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
 import { LocaleProvider } from "@/components/levi-locale";
+import { MIC_CHOICE_KEY } from "../mic-choice";
 import { SpeechPanel } from "../speech-panel";
-import { button, nothing, refused, type } from "./actions-helpers";
+import { button, choose, nothing, refused, type } from "./actions-helpers";
 import {
   KNOWN,
   RESTRICTED,
@@ -23,6 +24,7 @@ import {
   ok,
   statusAnswer,
   type FakeAudio,
+  type FakeDevice,
   type Script,
 } from "./speech-fixtures";
 
@@ -69,14 +71,16 @@ async function open({
   modelId = ALL_MODEL,
   zhLanguage = false,
   secure = true,
+  devices,
 }: {
   script?: Script;
   modelId?: string;
   zhLanguage?: boolean;
   secure?: boolean;
+  devices?: FakeDevice[];
 } = {}) {
   jest.useFakeTimers();
-  audio = installFakeAudio({ secure });
+  audio = installFakeAudio({ secure, devices });
   if (zhLanguage) localStorage.setItem("levi-language", "zh");
   const captures = captureFactory();
   const fake = fakeSpeechApi({ transcribe: echo(), ...script });
@@ -146,6 +150,169 @@ async function speak(h: H, ms = 400) {
 
 /** Waits out the 800 ms before Use may be pressed. */
 const armed = () => advance(800);
+
+describe("the microphone picker", () => {
+  const UGREEN = {
+    deviceId: "ugreen-1",
+    label: "UGREEN USB MIC-CM727 Analog Stereo",
+  };
+  const CAMERA = {
+    deviceId: "insta-1",
+    label: "Insta360 Ace Pro 2 Analog Stereo",
+  };
+  const remember = (device: FakeDevice) =>
+    localStorage.setItem(
+      MIC_CHOICE_KEY,
+      JSON.stringify({ id: device.deviceId, label: device.label }),
+    );
+  const stored = () => {
+    const raw = localStorage.getItem(MIC_CHOICE_KEY);
+    return raw ? (JSON.parse(raw) as { id: string; label: string }) : null;
+  };
+  const select = (h: H) =>
+    q(h, "marvel0-speech-mic-select") as HTMLSelectElement;
+  const options = (h: H) =>
+    Array.from(select(h).options).map((option) => option.textContent);
+
+  test("lists the system default and the connected inputs without opening anything; the default is used", async () => {
+    const h = await open({ devices: [CAMERA, UGREEN] });
+    expect(options(h)).toEqual(["System default", CAMERA.label, UGREEN.label]);
+    expect(select(h).value).toBe("");
+    expect(h.audio.getUserMediaCalls).toBe(0);
+    expect(h.captures.current.device).toBeNull();
+    expect(text(h)).toContain(en["marvel0.speech.mic.pick.hint"]);
+    expect(q(h, "marvel0-speech-mic-missing")).toBeNull();
+  });
+
+  test("a choice goes to the capture and is remembered in this browser, never sent to LEVI", async () => {
+    const h = await open({ devices: [CAMERA, UGREEN] });
+    await choose(select(h), UGREEN.deviceId);
+    await flushAll();
+    expect(select(h).value).toBe(UGREEN.deviceId);
+    expect(h.captures.current.device).toBe(UGREEN.deviceId);
+    expect(stored()).toEqual({ id: UGREEN.deviceId, label: UGREEN.label });
+    expect(JSON.stringify(h.calls)).not.toContain(UGREEN.deviceId);
+    expect(JSON.stringify(h.calls)).not.toContain("UGREEN");
+    // Back to the default: the choice is forgotten.
+    await choose(select(h), "");
+    await flushAll();
+    expect(h.captures.current.device).toBeNull();
+    expect(stored()).toBeNull();
+  });
+
+  test("a remembered input is used when the page opens", async () => {
+    remember(UGREEN);
+    const h = await open({ devices: [CAMERA, UGREEN] });
+    expect(select(h).value).toBe(UGREEN.deviceId);
+    expect(h.captures.current.device).toBe(UGREEN.deviceId);
+  });
+
+  test("a remembered input that is unplugged: the default is used and the card says so; plugged back, it is used again", async () => {
+    remember(UGREEN);
+    const h = await open({ devices: [CAMERA] });
+    expect(select(h).value).toBe("");
+    expect(h.captures.current.device).toBeNull();
+    expect(q(h, "marvel0-speech-mic-missing")?.textContent).toContain(
+      UGREEN.label,
+    );
+    expect(stored()?.id).toBe(UGREEN.deviceId);
+    await act(async () => h.audio.setDevices([CAMERA, UGREEN]));
+    await flushAll();
+    expect(q(h, "marvel0-speech-mic-missing")).toBeNull();
+    expect(select(h).value).toBe(UGREEN.deviceId);
+    expect(h.captures.current.device).toBe(UGREEN.deviceId);
+    // Unplugged during the session: back to the default at once.
+    await act(async () => h.audio.setDevices([CAMERA]));
+    await flushAll();
+    expect(h.captures.current.device).toBeNull();
+    expect(q(h, "marvel0-speech-mic-missing")).not.toBeNull();
+  });
+
+  test("an input found again under a new id is the same microphone, and its new id is remembered", async () => {
+    remember(UGREEN);
+    const moved = { deviceId: "ugreen-2", label: UGREEN.label };
+    const h = await open({ devices: [CAMERA, moved] });
+    expect(select(h).value).toBe("ugreen-2");
+    expect(h.captures.current.device).toBe("ugreen-2");
+    expect(stored()).toEqual({ id: "ugreen-2", label: UGREEN.label });
+    expect(q(h, "marvel0-speech-mic-missing")).toBeNull();
+  });
+
+  test("names kept back until the microphone is allowed: the default, a hint, and the names after the first opening", async () => {
+    const h = await open({ devices: [{ deviceId: "", label: "" }] });
+    expect(options(h)).toEqual(["System default"]);
+    expect(text(h)).toContain(en["marvel0.speech.mic.pick.hidden"]);
+    h.audio.setDevices([CAMERA, UGREEN], false);
+    const before = h.audio.enumerateCalls;
+    await act(async () =>
+      h.captures.current.opened({ id: CAMERA.deviceId, label: CAMERA.label }),
+    );
+    await flushAll();
+    expect(h.audio.enumerateCalls).toBe(before + 1);
+    expect(options(h)).toEqual(["System default", CAMERA.label, UGREEN.label]);
+    expect(text(h)).not.toContain(en["marvel0.speech.mic.pick.hidden"]);
+  });
+
+  test("a remembered input stays selected while the names are kept back", async () => {
+    remember(UGREEN);
+    const h = await open({ devices: [{ deviceId: "", label: "" }] });
+    expect(options(h)).toEqual(["System default", UGREEN.label]);
+    expect(select(h).value).toBe(UGREEN.deviceId);
+    expect(h.captures.current.device).toBe(UGREEN.deviceId);
+  });
+
+  test("says which input the last opening used, and warns when the default replaced the chosen one", async () => {
+    const h = await open({ devices: [CAMERA, UGREEN] });
+    await act(async () =>
+      h.captures.current.opened({ id: CAMERA.deviceId, label: CAMERA.label }),
+    );
+    await flushAll();
+    expect(q(h, "marvel0-speech-mic-in-use")?.textContent).toContain(
+      CAMERA.label,
+    );
+    await act(async () =>
+      h.captures.current.opened({
+        id: CAMERA.deviceId,
+        label: CAMERA.label,
+        fallback: true,
+      }),
+    );
+    await flushAll();
+    expect(q(h, "marvel0-speech-mic-fallback")?.textContent).toContain(
+      CAMERA.label,
+    );
+    expect(q(h, "marvel0-speech-mic-in-use")).toBeNull();
+    // A new choice clears what the old input said.
+    await choose(select(h), UGREEN.deviceId);
+    await flushAll();
+    expect(q(h, "marvel0-speech-mic-fallback")).toBeNull();
+  });
+
+  test("is locked while recording", async () => {
+    const h = await open({ devices: [CAMERA, UGREEN] });
+    expect(select(h).disabled).toBe(false);
+    await pointer(mic(h), "pointerdown");
+    expect(select(h).disabled).toBe(true);
+    await advance(400);
+    await pointer(mic(h), "pointerup");
+    await act(async () => h.captures.current.cancel());
+    await flushAll();
+    expect(select(h).disabled).toBe(false);
+  });
+
+  test("is not shown on a page that cannot capture, and lists nothing there", async () => {
+    const h = await open({ secure: false, devices: [CAMERA] });
+    expect(q(h, "marvel0-speech-mic-pick")).toBeNull();
+    expect(h.audio.enumerateCalls).toBe(0);
+  });
+
+  test("speaks Chinese", async () => {
+    const h = await open({ devices: [CAMERA], zhLanguage: true });
+    expect(options(h)).toEqual(["系统默认", CAMERA.label]);
+    expect(text(h)).toContain(zh["marvel0.speech.mic.pick.label"]);
+    expect(text(h)).toContain(zh["marvel0.speech.mic.pick.hint"]);
+  });
+});
 
 describe("what the card always says", () => {
   const SENTENCE =

@@ -12,6 +12,11 @@
 //   * A proposal is armed for Use after 800 ms and expires after 60 s.
 //   * Leaving the page aborts what is in flight and releases the microphone.
 //
+//   * The inputs are listed with `enumerateDevices` (it opens nothing) when the
+//     page opens, when one is plugged in or out, and after the microphone was
+//     allowed (the names appear then). The person's choice is kept in this
+//     browser (mic-choice.ts) and handed to the capture before each press.
+//
 // Nothing here writes a field, starts the client, or touches the clipboard:
 // the one thing it hands out is `onUse(sentence)`, and only for a sentence of
 // the allowed list that the person pressed Use for.
@@ -25,6 +30,17 @@ import {
 } from "react";
 import { newRequestId } from "./deploy-logic";
 import type { ApiFailure } from "./deploy-api";
+import {
+  UNKNOWN_LIST,
+  browserStorage,
+  micList,
+  readMicChoice,
+  resolveMic,
+  writeMicChoice,
+  type MicChoice,
+  type MicInput,
+  type MicList,
+} from "./mic-choice";
 import type { SpeechApi } from "./speech-api";
 import {
   PROPOSAL_TTL_MS,
@@ -49,12 +65,29 @@ import {
   type CaptureEvents,
   type CaptureLike,
   type Clip,
+  type DeviceInUse,
 } from "./voice-capture";
 
 /** After this long away, the tab reads the voice state again when it returns. */
 const STATUS_STALE_MS = 30_000;
 
 export type MicSupport = "unknown" | "ok" | "insecure_context" | "unsupported";
+
+/** The microphone picker of the card. */
+export interface MicPicker {
+  /** The inputs to offer besides the system default: the connected ones, and
+   * the remembered one while the list cannot tell whether it is connected. */
+  options: MicInput[];
+  /** The browser keeps the names back until the microphone is allowed. */
+  hidden: boolean;
+  /** The id the next press opens; null: the system default. */
+  chosen: string | null;
+  /** A chosen input that is not connected now (the default is used). */
+  missing: MicChoice | null;
+  /** The input the last opening used. */
+  inUse: DeviceInUse | null;
+  choose: (id: string | null) => void;
+}
 
 export interface SpeechSession {
   state: SpeechState;
@@ -63,6 +96,7 @@ export interface SpeechSession {
   mic: MicSupport;
   /** The microphone is open (recording, or kept for a few seconds). */
   micOpen: boolean;
+  mics: MicPicker;
   /** The ref of the button that talks. */
   attach: (button: HTMLElement | null) => void;
   /** The ref of the level bar; the session sets `--rg-level` on it (0..1). */
@@ -101,6 +135,15 @@ export function useSpeechSession({
   const [read, setRead] = useState<StatusRead>({ kind: "loading" });
   const [mic, setMic] = useState<MicSupport>("unknown");
   const [micOpen, setMicOpen] = useState(false);
+  const [micInputs, setMicInputs] = useState<MicList>(UNKNOWN_LIST);
+  const [micChoice, setMicChoice] = useState<MicChoice | null>(null);
+  const [inUse, setInUse] = useState<DeviceInUse | null>(null);
+  const resolved = useMemo(
+    () => resolveMic(micChoice, micInputs),
+    [micChoice, micInputs],
+  );
+  const deviceRef = useRef<string | null>(resolved.deviceId);
+  deviceRef.current = resolved.deviceId;
 
   // The latest values for callbacks that outlive a render. An action moves the
   // state in the ref at once too, so two calls in one event (a double press of
@@ -170,6 +213,69 @@ export function useSpeechSession({
       statusCall.current?.abort();
     };
   }, [recheck]);
+
+  // -- the inputs
+
+  const listSeq = useRef(0);
+  /** Reads the inputs; an answer overtaken by a newer read is dropped. */
+  const listInputs = useCallback(() => {
+    const devices = (globalThis as { navigator?: Navigator }).navigator
+      ?.mediaDevices;
+    if (typeof devices?.enumerateDevices !== "function") return;
+    listSeq.current += 1;
+    const mine = listSeq.current;
+    devices
+      .enumerateDevices()
+      .then((list) => {
+        if (alive.current && mine === listSeq.current)
+          setMicInputs(micList(list));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (micSupport() !== "ok") return;
+    setMicChoice(readMicChoice(browserStorage()));
+    listInputs();
+    const devices = navigator.mediaDevices;
+    devices.addEventListener?.("devicechange", listInputs);
+    return () => devices.removeEventListener?.("devicechange", listInputs);
+  }, [listInputs]);
+
+  // The remembered input came back under a new id: remember that id.
+  useEffect(() => {
+    if (!resolved.renamed) return;
+    writeMicChoice(browserStorage(), resolved.renamed);
+    setMicChoice(resolved.renamed);
+  }, [resolved.renamed]);
+
+  // The next press opens the resolved input.
+  useEffect(() => {
+    capture.current?.setDevice?.(resolved.deviceId);
+  }, [resolved.deviceId]);
+
+  const chooseMic = useCallback(
+    (id: string | null) => {
+      let next: MicChoice | null = null;
+      if (id !== null) {
+        const input = micInputs.inputs.find((entry) => entry.id === id);
+        if (!input) return;
+        next = { id: input.id, label: input.label };
+      }
+      writeMicChoice(browserStorage(), next);
+      setMicChoice(next);
+      setInUse(null);
+    },
+    [micInputs.inputs],
+  );
+
+  const micOptions = useMemo(() => {
+    const id = resolved.deviceId;
+    if (!micChoice || id === null) return micInputs.inputs;
+    if (micInputs.inputs.some((input) => input.id === id))
+      return micInputs.inputs;
+    return [{ id, label: micChoice.label }, ...micInputs.inputs];
+  }, [micChoice, micInputs.inputs, resolved.deviceId]);
 
   // -- requests
 
@@ -298,9 +404,16 @@ export function useSpeechSession({
         onClip: upload,
         onError: ({ code }) => dispatch({ type: "mic_problem", code }),
         onMic: (open) => {
-          if (alive.current) setMicOpen(open);
+          if (!alive.current) return;
+          setMicOpen(open);
+          // Allowed now: the browser gives the inputs' names.
+          if (open) listInputs();
+        },
+        onDevice: (device) => {
+          if (alive.current) setInUse(device);
         },
       });
+      cap.setDevice?.(deviceRef.current);
       capture.current = cap;
       // The state of the voice input decides, at the moment of the press,
       // whether a capture may start at all.
@@ -324,7 +437,7 @@ export function useSpeechSession({
     },
     // `paint` is stable (refs only).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [createCapture, upload],
+    [createCapture, upload, listInputs],
   );
 
   // The page left: the microphone goes with it.
@@ -469,6 +582,25 @@ export function useSpeechSession({
       .catch(() => undefined);
   }, [api, recheck]);
 
+  const mics = useMemo<MicPicker>(
+    () => ({
+      options: micOptions,
+      hidden: micInputs.hidden,
+      chosen: resolved.deviceId,
+      missing: resolved.missing,
+      inUse,
+      choose: chooseMic,
+    }),
+    [
+      micOptions,
+      micInputs.hidden,
+      resolved.deviceId,
+      resolved.missing,
+      inUse,
+      chooseMic,
+    ],
+  );
+
   return useMemo(
     () => ({
       state,
@@ -476,6 +608,7 @@ export function useSpeechSession({
       availability: availability(read),
       mic,
       micOpen,
+      mics,
       attach,
       meter,
       use,
@@ -507,6 +640,7 @@ export function useSpeechSession({
       read,
       mic,
       micOpen,
+      mics,
       attach,
       meter,
       use,
