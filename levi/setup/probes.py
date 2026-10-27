@@ -1036,7 +1036,9 @@ class Probes:
             # Since 2026-10-27 the monitor says whether terminal A runs and why
             # the light is red; an older monitor leaves them out (None).
             "stack": _known(value.get("stack"), HEALTH_STACK),
-            "red_cause": _known(value.get("red_cause"), HEALTH_RED_CAUSES),
+            # A cause this page does not know yet stays a fault ("other").
+            "red_cause": _known(value.get("red_cause"), HEALTH_RED_CAUSES)
+            or ("other" if isinstance(value.get("red_cause"), str) else None),
         }
         if age > c.health_stale_s:
             return {

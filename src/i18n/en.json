@@ -4781,7 +4781,7 @@
   "marvel0.server.hint": "Read from the kernel's socket table; this page never connects to the port.",
   "marvel0.monitor.title": "Terminal M: health monitor",
   "marvel0.monitor.ok": "The monitor is writing the health file and reports no red light.",
-  "marvel0.monitor.ok_red_follows": "The monitor runs. Its red light only says the arm stack is not up (see the Desk and A cards); clients refuse to run until it is.",
+  "marvel0.monitor.ok_red_follows": "The monitor runs. Its red light only says terminal A is not running (see the Desk and A cards); clients refuse to run until it does.",
   "marvel0.monitor.offline": "The health file has stopped updating: the monitor is not running or is stuck.",
   "marvel0.monitor.missing": "No health file: the monitor is not running.",
   "marvel0.monitor.hint": "A stale file is not a red light.",

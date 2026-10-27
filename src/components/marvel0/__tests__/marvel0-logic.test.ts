@@ -513,8 +513,8 @@ describe("terminal A when the red light only follows from the stack not running"
     // unlocked joints or FCI; the monitor itself works.
     expect(found.desk.state).toBe("not_started");
     expect(summary(found.desk)).toBe("marvel0.desk.inactive");
-    expect(found.monitor.state).toBe("ok");
-    expect(summary(found.monitor)).toBe("marvel0.monitor.ok_red_follows");
+    // An inactive interface can also follow a fault: the monitor card stays red.
+    expect(found.monitor.state).toBe("red");
   });
 
   test("a reason that is not stack-down next to it keeps the light red", () => {
@@ -721,7 +721,8 @@ describe("the monitor's own red_cause (fr3_health_monitor.py since 2026-10-27)",
     expect(found.desk.state).toBe("not_started");
     expect(summary(found.desk)).toBe("marvel0.desk.inactive");
     expect(found.arm.state).toBe("not_started");
-    expect(found.monitor.state).toBe("ok");
+    // It can also follow a fault, so the monitor card keeps the red light.
+    expect(found.monitor.state).toBe("red");
   });
 
   test("a fault the monitor names stays red, whatever the reasons look like", () => {
@@ -729,6 +730,7 @@ describe("the monitor's own red_cause (fr3_health_monitor.py since 2026-10-27)",
       "robot_fault",
       "hardware_missing",
       "no_robot_state",
+      "other",
       "a_cause_this_page_does_not_know",
     ]) {
       const found = cards(view(red(cause)));

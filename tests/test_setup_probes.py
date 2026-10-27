@@ -489,7 +489,9 @@ def test_fr3_health_passes_the_monitors_stack_and_red_cause(proc, tmp_path):
     old = status(red_light=True)
     assert (old["state"], old["stack"], old["red_cause"]) == ("red", None, None)
     odd = status(red_light=True, stack=["down"], red_cause="<script>")
-    assert (odd["stack"], odd["red_cause"]) == (None, None)
+    assert (odd["stack"], odd["red_cause"]) == (None, "other")
+    junk = status(red_light=True, red_cause=["stack_down"])
+    assert junk["red_cause"] is None
 
 
 def test_disks_have_labels_not_paths(proc, tmp_path):

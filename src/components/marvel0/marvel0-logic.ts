@@ -660,9 +660,10 @@ function monitorCard(health: Health): Marvel0Card {
     case "ok":
       return { ...base, state: "ok", summary: k("marvel0.monitor.ok"), facts };
     case "red":
-      // The monitor itself works; a light that only follows from the stack
-      // is told on the Desk and A cards.
-      return redFollowsFromStack(part)
+      // The monitor itself works; a light that only says terminal A is not
+      // running is told on the Desk and A cards. An inactive hardware
+      // interface stays red here: usually Desk, but it can follow a fault.
+      return deskRed(part) === "needs_arm"
         ? {
             ...base,
             state: "ok",

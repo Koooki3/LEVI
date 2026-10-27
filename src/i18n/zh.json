@@ -4781,7 +4781,7 @@
   "marvel0.server.hint": "来自内核的套接字表；本页从不连接该端口。",
   "marvel0.monitor.title": "终端 M：健康监视器",
   "marvel0.monitor.ok": "监视器在更新健康文件，没有报红灯。",
-  "marvel0.monitor.ok_red_follows": "监视器在正常运行。它的红灯只说明手臂栈还没起来（见 Desk 和 A 卡片）；栈起来之前客户端会拒绝运行。",
+  "marvel0.monitor.ok_red_follows": "监视器在正常运行。它的红灯只说明终端 A 没在运行（见 Desk 和 A 卡片）；A 运行之前客户端会拒绝运行。",
   "marvel0.monitor.offline": "健康文件停止更新：监视器没有运行或卡住了。",
   "marvel0.monitor.missing": "没有健康文件：监视器没有运行。",
   "marvel0.monitor.hint": "文件过期不等于红灯。",
