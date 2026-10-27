@@ -1,24 +1,9 @@
 """Opt-in model adapter; optional packages are imported only on execution."""
 
-from typing import Protocol
 from urllib.parse import urlsplit
 
 from .schema import LOCAL_MODEL_KINDS, ModelOutput, ProviderConfig
 from .security import endpoint_addresses
-
-
-class ModelProvider(Protocol):
-    def generate(self, config, instruction, summary, evidence, artifacts, budget): ...
-
-
-class FixtureProvider:
-    """Injected by tests only; deliberately absent from UI/provider configuration."""
-
-    def __init__(self, output):
-        self.output = ModelOutput.model_validate(output)
-
-    def generate(self, *args):
-        return self.output, {"requests": 1, "tokens": 0, "fixture": True}
 
 
 class RoutedProvider:

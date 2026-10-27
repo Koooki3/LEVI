@@ -82,12 +82,6 @@ def _examples(state, limit=4):
     return memory.get("interpretations", [])[-limit:]
 
 
-def _definitions_from_memory(state, key):
-    """Subtask definitions this dataset was annotated with before."""
-    memory = read_json(memory_path(state, key)) or {}
-    return memory.get("definitions", [])
-
-
 def prompt(state, text):
     from . import knowledge
     from .teaching import workspace_notes

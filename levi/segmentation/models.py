@@ -15,7 +15,6 @@ import json
 import os
 import re
 import shutil
-import time
 from pathlib import Path
 from typing import Any
 
@@ -188,60 +187,6 @@ def worker_spec(name: str) -> dict[str, Any]:
         "tracker": {**DEFAULT_TRACKER, **(manifest.get("tracker") or {})},
         "fp16": True,
     }
-
-
-def import_weights(
-    weights: Path,
-    name: str,
-    concepts: list[str],
-    *,
-    architecture: str = "rf-detr-seg-small",
-    note: str | None = None,
-    link: bool = False,
-) -> Path:
-    """Register a student trained elsewhere (concepts in the model's class
-    order). Its provenance is whatever ``note`` says; LEVI did not score it."""
-    if architecture not in ARCHITECTURES:
-        raise ValueError(f"architecture must be one of {', '.join(ARCHITECTURES)}")
-    if not concepts:
-        raise ValueError("concepts are required, in the model's class order")
-    source = Path(weights).expanduser().resolve()
-    if not source.is_file():
-        raise FileNotFoundError(source)
-    directory = folder(name)
-    if (directory / MANIFEST).exists():
-        raise FileExistsError(f"A model named {name} already exists")
-    directory.mkdir(parents=True, exist_ok=True)
-    target = directory / WEIGHTS
-    if link:
-        try:
-            os.link(source, target)
-        except OSError:
-            shutil.copyfile(source, target)
-    else:
-        shutil.copyfile(source, target)
-    manifest = {
-        "schema": SCHEMA,
-        "name": name,
-        "provider": "student",
-        "architecture": architecture,
-        "concepts": list(concepts),
-        "class_names": list(concepts),
-        "confidence": 0.4,
-        "tracker": dict(DEFAULT_TRACKER),
-        "teacher": {"name": "unknown (imported)"},
-        "datasets": [],
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "licence": dict(LICENCES),
-        "imported_from": str(source),
-        "note": note,
-        "metrics": {"heldout_vs_teacher": None},
-        "weights": WEIGHTS,
-    }
-    (directory / MANIFEST).write_text(
-        json.dumps(manifest, indent=1, ensure_ascii=False)
-    )
-    return directory
 
 
 def delete(name: str) -> None:

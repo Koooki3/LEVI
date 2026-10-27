@@ -6,7 +6,6 @@ After opt-in, legacy writes require the revision observed by that editor.
 
 import functools
 import inspect
-import json
 import shutil
 import uuid
 from contextlib import contextmanager, nullcontext
@@ -136,7 +135,3 @@ def editor(*, read_only=False, internal=False):
         return wrapped
 
     return decorate
-
-
-def response_json(response):
-    return json.loads(response.body)

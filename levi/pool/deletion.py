@@ -148,11 +148,6 @@ def _owner_of_output(target: Path, job: dict) -> str | None:
     return claimants[0] if len(claimants) == 1 else None
 
 
-def _owner_of_partial(partial: Path) -> str | None:
-    header = read(partial / journal.HEADER, None) or {}
-    return header.get("job_id")
-
-
 def _episode_count(target: Path, record: dict | None) -> int | None:
     if record and record.get("counts"):
         return record["counts"].get("episodes")

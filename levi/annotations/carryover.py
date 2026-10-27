@@ -274,18 +274,6 @@ def carry_over(
         return result
 
 
-def rekey_view(name: str, old_view: Path, new_view: Path) -> dict:
-    from levi.agent.legacy import transaction
-    from levi.agent.store import Store, dataset_lock
-
-    store = Store(catalog.STATE)
-    with (
-        dataset_lock(catalog.STATE, name),
-        transaction(catalog.STATE, name, expected=store.head(name)),
-    ):
-        return _rekey_view(name, old_view, new_view)
-
-
 @contextlib.contextmanager
 def rekey_views(names: list[str], old_view: Path, new_view: Path):
     """Rekey every shared-view namespace, restoring labels if publication fails.

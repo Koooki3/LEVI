@@ -322,9 +322,3 @@ def build(
             _BUILT.clear()
         _BUILT[key] = payload
     return payload
-
-
-def last_modified(config) -> float | None:
-    """When the statistics last changed (epoch seconds), for a cheap check."""
-    stamps = [item[3] / 1e9 for item in _stamp(config.live_dir)]
-    return max(stamps) if stamps else None

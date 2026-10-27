@@ -264,11 +264,6 @@ def any_active(sessions: dict, states=DEFAULT_ACTIVE) -> bool:
     return any(s.active(states) for s in sessions.values())
 
 
-def latest_activity(sessions: dict) -> float | None:
-    times = [s.updated_at for s in sessions.values() if s.updated_at]
-    return max(times) if times else None
-
-
 # --- FR3 health (C3) --------------------------------------------------------
 
 

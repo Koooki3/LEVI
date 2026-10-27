@@ -29,12 +29,5 @@ class PilotMessage(Contract):
     text: str = Field(min_length=1, max_length=12000)
 
 
-class RuntimeProfile(Contract):
-    id: Literal["codex", "claude"]
-    executable: str | None = None
-    enabled: bool = True
-    authentication: str = "unknown"
-
-
 class PermissionDecision(Contract):
     option_id: str

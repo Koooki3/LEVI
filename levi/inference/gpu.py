@@ -656,16 +656,6 @@ def require_free(config=None):
 
 
 # Compatibility for callers and tests of the fixed-window guard.
-def _seen_path():
-    return _state_dir() / "ollama" / "gpu-last-busy.json"
-
-
-def mark_busy(rows):
-    _write(_seen_path(), {"at": time.time(), "processes": rows})
-
-
-def last_busy():
-    return _read(_seen_path(), None)
 
 
 # --- acting on it -------------------------------------------------------------

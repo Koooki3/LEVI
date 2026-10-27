@@ -7,52 +7,8 @@ tested without importing torch or initializing CUDA.
 
 from __future__ import annotations
 
-from typing import Any
-
-from pydantic import BaseModel, ConfigDict, Field
-
-from .rle import encode_rle, validate_rle
+from .rle import encode_rle
 from .schema import ObjectAnnotation, Sam3Plan
-
-
-class WorkerRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    type: str
-    session_id: str | None = None
-    resource_path: str | None = None
-    frame_index: int | None = Field(default=None, ge=0)
-    text: str | None = None
-    points: list[list[float]] | None = None
-    point_labels: list[int] | None = None
-    bounding_boxes: list[list[float]] | None = None
-
-
-class WorkerResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    type: str
-    session_id: str | None = None
-    frame_index: int | None = None
-    outputs: list[dict[str, Any]] = Field(default_factory=list)
-    error: str | None = None
-
-
-def validate_worker_output(output: dict[str, Any]) -> None:
-    """Validate the small output contract before it reaches a sidecar."""
-
-    for key in ("frame_index", "timestamp", "camera_key", "objects"):
-        if key not in output:
-            raise ValueError(f"worker output missing {key!r}")
-    if not isinstance(output["objects"], list):
-        raise TypeError("worker output objects must be a list")
-    for item in output["objects"]:
-        if not isinstance(item, dict):
-            raise TypeError("worker object must be an object")
-        rle = item.get("mask_rle")
-        if not isinstance(rle, dict):
-            raise TypeError("worker object mask_rle must be an object")
-        validate_rle(rle)
 
 
 def validate_annotations_for_plan(

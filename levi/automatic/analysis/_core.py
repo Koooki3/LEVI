@@ -167,13 +167,6 @@ def clean_binary_pairs(
     return a.astype(np.int64), b.astype(np.int64), dropped
 
 
-def clean_binary(values, name: str = "values") -> tuple[np.ndarray, int]:
-    arr, dropped = clean_floats(values, name)
-    if not np.isin(arr, (0.0, 1.0)).all():
-        raise AnalysisInputError(f"{name} must hold 0/1 outcomes")
-    return arr.astype(np.int64), dropped
-
-
 def check_seed(seed) -> int:
     if isinstance(seed, bool) or not isinstance(seed, (int, np.integer)):
         raise AnalysisInputError("seed must be an int (randomness is always explicit)")
