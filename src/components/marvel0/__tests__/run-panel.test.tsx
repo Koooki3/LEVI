@@ -14,7 +14,7 @@ import zh from "@/i18n/zh.json";
 import { LocaleProvider } from "@/components/levi-locale";
 import { errorOf, type ApiResult } from "../deploy-api";
 import type { RunApi } from "../run-api";
-import { RunPanel } from "../run-panel";
+import { RunPanel, type ChangeAttest } from "../run-panel";
 import { RunStart } from "../run-start";
 import { runView } from "../run-logic";
 import { useRunActions } from "../use-run-actions";
@@ -89,7 +89,7 @@ function Harness({
   onChangeInstruction,
 }: {
   api: RunApi;
-  onChangeInstruction?: (prompt: string) => void;
+  onChangeInstruction?: (prompt: string, attest: ChangeAttest) => void;
 }) {
   const poll = useRunPoll(api, { pollMs: 25 });
   const actions = useRunActions(api, poll);
@@ -106,7 +106,7 @@ async function open(
   name: string,
   change?: (doc: Doc) => void,
   zhLanguage = false,
-  onChangeInstruction?: (prompt: string) => void,
+  onChangeInstruction?: (prompt: string, attest: ChangeAttest) => void,
 ) {
   if (zhLanguage) localStorage.setItem("levi-language", "zh");
   const f = fake(runDoc(name, change));
@@ -421,8 +421,8 @@ describe("the key each state waits for", () => {
 });
 
 describe("changing the next instruction", () => {
-  test("at the gate, asks for the new prompt and hands it to the caller without sending Enter or starting", async () => {
-    const prompts: string[] = [];
+  test("at the gate an empty field keeps the instruction; a new one turns Enter off and, after the three ticks, goes to the caller", async () => {
+    const changes: Array<[string, ChangeAttest]> = [];
     const { host, state } = await open(
       "at_gate",
       (doc) => {
@@ -444,16 +444,50 @@ describe("changing the next instruction", () => {
         };
       },
       false,
-      (prompt) => prompts.push(prompt),
+      (prompt, attest) => changes.push([prompt, attest]),
     );
-    await click(button(host, en["marvel0.episodeChange.open"])!);
     const input = host.querySelector(
       "[data-testid=marvel0-episode-change-prompt]",
     ) as HTMLInputElement;
-    expect(input.value).toBe("old task");
+    // Empty field: the current instruction is shown and Enter is on.
+    expect(input.value).toBe("");
+    expect(input.placeholder).toBe("old task");
+    const enter = () =>
+      host.querySelector('[data-action="enter"]') as HTMLButtonElement;
+    expect(enter().disabled).toBe(false);
+    expect(
+      host.querySelector("[data-testid=marvel0-episode-change-open]"),
+    ).toBeNull();
+    // The same instruction typed again is no change.
+    await typeInto(input, "old task");
+    expect(enter().disabled).toBe(false);
+    // A new one: Enter is off (it would start with the old one) until the
+    // field is applied or cleared.
     await typeInto(input, "new task");
-    await click(button(host, en["marvel0.episodeChange.endAndPrepare"])!);
-    expect(prompts).toEqual(["new task"]);
+    expect(enter().disabled).toBe(true);
+    expect(
+      host.querySelector("[data-testid=marvel0-run-enter-off]"),
+    ).not.toBeNull();
+    await click(button(host, en["marvel0.episodeChange.keep"])!);
+    expect(input.value).toBe("");
+    expect(enter().disabled).toBe(false);
+
+    await typeInto(input, "new task");
+    await click(button(host, en["marvel0.episodeChange.restart"])!);
+    const win = host.ownerDocument.querySelector(
+      "[role=dialog]",
+    ) as HTMLElement;
+    expect(
+      text(win.querySelector("[data-testid=marvel0-episode-change-to]")),
+    ).toBe("new task");
+    const go = button(win, en["marvel0.episodeChange.go"])!;
+    expect((go as HTMLButtonElement).disabled).toBe(true);
+    await tickAll(win);
+    await click(go);
+    expect(changes).toEqual([
+      ["new task", { estop: true, scene_reset: true, area_clear: true }],
+    ]);
+    // The panel itself sends nothing: no Enter, no start.
     expect(state.order).toEqual([]);
   });
 

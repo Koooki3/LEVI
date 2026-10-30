@@ -62,9 +62,14 @@ import { commandFormFromRun } from "./command-logic";
 
 export type EpisodeChangeStatus =
   | { state: "idle" }
-  | { state: "ending" | "waiting"; runId: string }
+  | { state: "ending" | "waiting" | "restarting"; runId: string }
   | { state: "unknown" | "refused" | "failed"; runId: string }
   | { state: "ready"; runId: string };
+
+/** The three things only a person can check before a client starts; the same
+ * ticks as the start window (run-start.tsx). */
+export const CHANGE_ACKS = ["estop", "scene_reset", "area_clear"] as const;
+export type ChangeAttest = Record<(typeof CHANGE_ACKS)[number], boolean>;
 
 const EPISODE_CHANGE_KEY: Record<
   Exclude<EpisodeChangeStatus["state"], "idle">,
@@ -72,6 +77,7 @@ const EPISODE_CHANGE_KEY: Record<
 > = {
   ending: "marvel0.episodeChange.ending",
   waiting: "marvel0.episodeChange.waiting",
+  restarting: "marvel0.episodeChange.restarting",
   unknown: "marvel0.episodeChange.unknown",
   refused: "marvel0.episodeChange.refused",
   failed: "marvel0.episodeChange.failed",
@@ -92,9 +98,14 @@ const ICON: Partial<Record<ActionId, typeof Play>> = {
 function ArmedActions({
   view,
   actions,
+  enterOff = false,
 }: {
   view: RunView;
   actions: RunActions;
+  /** A new instruction waits in the gate's field: Enter would start the next
+   * episode with the old one, so it is off until the field is applied or
+   * cleared. */
+  enterOff?: boolean;
 }) {
   const { t } = useLocale();
   const ids = armedActions(view.state);
@@ -143,7 +154,11 @@ function ArmedActions({
               icon={ICON[id]}
               data-action={id}
               loading={actions.working === id}
-              disabled={!action.allowed || actions.working !== null}
+              disabled={
+                !action.allowed ||
+                actions.working !== null ||
+                (id === "enter" && enterOff)
+              }
               onClick={() => void actions.press(id as KeyAction)}
             >
               {t(ACTION_KEY[id])}
@@ -151,6 +166,11 @@ function ArmedActions({
           );
         })}
       </div>
+      {enterOff && ids.includes("enter") && (
+        <p className="rg-block" data-testid="marvel0-run-enter-off">
+          {t("marvel0.episodeChange.enterBlocked")}
+        </p>
+      )}
       {blind && (
         <p className="rg-muted" data-testid="marvel0-run-blind">
           {t("marvel0.run.blind_home")}
@@ -356,7 +376,7 @@ export function RunPanel({
   poll: RunPoll;
   actions: RunActions;
   episodeChange?: EpisodeChangeStatus;
-  onChangeInstruction?: (prompt: string) => void;
+  onChangeInstruction?: (prompt: string, attest: ChangeAttest) => void;
 }) {
   const { t } = useLocale();
   const [ending, setEnding] = useState(false);
@@ -364,6 +384,30 @@ export function RunPanel({
   const [nextPrompt, setNextPrompt] = useState("");
   const view = poll.value;
   const state = view?.state ?? null;
+  // The field belongs to one run: a new client starts with it empty.
+  const runId = view?.run?.runId ?? null;
+  const [promptRun, setPromptRun] = useState<string | null>(runId);
+  if (promptRun !== runId) {
+    setPromptRun(runId);
+    setNextPrompt("");
+    setChangeOpen(false);
+  }
+  const currentPrompt =
+    typeof view?.run?.form?.prompt === "string" ? view.run.form.prompt : null;
+  const wanted = nextPrompt.trim();
+  const changing =
+    onChangeInstruction !== undefined &&
+    state === "at_gate" &&
+    wanted !== "" &&
+    wanted !== currentPrompt;
+  const canChange =
+    changing &&
+    poll.current &&
+    !!view?.run?.runId &&
+    commandFormFromRun(view.run.form) !== null &&
+    view.actions.end_at_gate.allowed &&
+    actions.working === null &&
+    episodeChange.state === "idle";
   // HOLD goes by the last state seen, however old: a client that was running
   // when the answers stop is the case in which it matters most.
   const holdOn = holdEnabled(poll.lastSeen);
@@ -556,7 +600,9 @@ export function RunPanel({
         </div>
       )}
 
-      {view && !frozen && <ArmedActions view={view} actions={actions} />}
+      {view && !frozen && (
+        <ArmedActions view={view} actions={actions} enterOff={changing} />
+      )}
       {view && <ExitHome view={view} actions={actions} />}
       {refusedHere && (
         <RefusedBlock
@@ -588,71 +634,87 @@ export function RunPanel({
           className="rg-run__episode-change"
           data-testid="marvel0-episode-change"
         >
-          <p className="rg-muted">{t("marvel0.episodeChange.explanation")}</p>
           {episodeChange.state === "idle" ? (
             <>
-              <Button
-                variant="secondary"
-                disabled={
-                  !poll.current ||
-                  !view.run?.runId ||
-                  !commandFormFromRun(view.run.form) ||
-                  !view.actions.end_at_gate.allowed ||
-                  actions.working !== null
-                }
-                onClick={() => {
-                  setNextPrompt(view.run?.form?.prompt as string);
-                  setChangeOpen(true);
-                }}
-                data-testid="marvel0-episode-change-open"
-              >
-                {t("marvel0.episodeChange.open")}
-              </Button>
-              {(!view.run?.runId || !commandFormFromRun(view.run.form)) && (
-                <p className="rg-warn" role="status">
-                  {t("marvel0.episodeChange.formUnavailable")}
+              <Field label={t("marvel0.episodeChange.promptLabel")}>
+                <Input
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  value={nextPrompt}
+                  placeholder={currentPrompt ?? ""}
+                  onChange={(event) => setNextPrompt(event.target.value)}
+                  data-testid="marvel0-episode-change-prompt"
+                />
+              </Field>
+              {currentPrompt !== null && (
+                <p className="rg-muted" data-testid="marvel0-episode-current">
+                  {t("marvel0.episodeChange.current").replace(
+                    "{prompt}",
+                    currentPrompt,
+                  )}
                 </p>
               )}
-              {changeOpen && (
-                <div className="rg-run__episode-change-form">
-                  <Field label={t("marvel0.episodeChange.promptLabel")}>
-                    <Input
-                      autoComplete="off"
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      value={nextPrompt}
-                      onChange={(event) => setNextPrompt(event.target.value)}
-                      data-testid="marvel0-episode-change-prompt"
-                    />
-                  </Field>
-                  <div className="rg-actions-row">
-                    <Button
-                      variant="primary"
-                      disabled={
-                        !poll.current ||
-                        !nextPrompt.trim() ||
-                        nextPrompt === view.run?.form?.prompt ||
-                        !view.run?.runId ||
-                        !commandFormFromRun(view.run.form) ||
-                        !view.actions.end_at_gate.allowed ||
-                        actions.working !== null
-                      }
-                      onClick={() => onChangeInstruction(nextPrompt)}
-                      data-testid="marvel0-episode-change-confirm"
-                    >
-                      {t("marvel0.episodeChange.endAndPrepare")}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      disabled={episodeChange.state !== "idle"}
-                      onClick={() => setChangeOpen(false)}
-                    >
-                      {t("Cancel")}
-                    </Button>
-                  </div>
+              {changing && (
+                <div className="rg-actions-row">
+                  <Button
+                    variant="primary"
+                    icon={RefreshCw}
+                    disabled={!canChange}
+                    onClick={() => setChangeOpen(true)}
+                    data-testid="marvel0-episode-change-open"
+                  >
+                    {t("marvel0.episodeChange.restart")}
+                  </Button>
+                  <Button variant="ghost" onClick={() => setNextPrompt("")}>
+                    {t("marvel0.episodeChange.keep")}
+                  </Button>
                 </div>
               )}
+              {changing &&
+                (!view.run?.runId || !commandFormFromRun(view.run.form)) && (
+                  <p className="rg-warn" role="status">
+                    {t("marvel0.episodeChange.formUnavailable")}
+                  </p>
+                )}
+              <ConfirmWindow
+                open={changeOpen && canChange}
+                testId="marvel0-episode-change-dialog"
+                title={t("marvel0.episodeChange.restart")}
+                intro={t("marvel0.episodeChange.explanation")}
+                facts={
+                  <dl className="rg-facts">
+                    <div className="rg-fact">
+                      <dt>{t("marvel0.episodeChange.from")}</dt>
+                      <dd>{currentPrompt ?? ""}</dd>
+                    </div>
+                    <div className="rg-fact">
+                      <dt>{t("marvel0.episodeChange.to")}</dt>
+                      <dd data-testid="marvel0-episode-change-to">{wanted}</dd>
+                    </div>
+                  </dl>
+                }
+                estop={t("marvel0.run.start.estop")}
+                hazards={[t("marvel0.run.start.first_enter")]}
+                notes={[t("marvel0.stack.gates_scope")]}
+                attest={CHANGE_ACKS.map((name) => ({
+                  code: name,
+                  label: wordOf(t, "marvel0.run.ack.", name),
+                }))}
+                confirmLabel={t("marvel0.episodeChange.go")}
+                confirmIcon={RefreshCw}
+                ready={canChange}
+                onCancel={() => setChangeOpen(false)}
+                onConfirm={(ticked) => {
+                  setChangeOpen(false);
+                  onChangeInstruction(wanted, {
+                    estop: ticked.estop === true,
+                    scene_reset: ticked.scene_reset === true,
+                    area_clear: ticked.area_clear === true,
+                  });
+                }}
+              />
             </>
           ) : (
             <p

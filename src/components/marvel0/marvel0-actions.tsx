@@ -18,11 +18,12 @@ import { marvel0Api, type Marvel0Api } from "./deploy-api";
 import type { DeployStatus } from "./deploy-logic";
 import { StepHeading } from "./marvel0-card";
 import { RunPanel } from "./run-panel";
-import type { EpisodeChangeStatus } from "./run-panel";
+import type { ChangeAttest, EpisodeChangeStatus } from "./run-panel";
 import { goTo } from "./chain-strip";
 import { COMMAND_ANCHOR } from "./chain-logic";
 import { commandFormFromRun } from "./command-logic";
 import { bodyWithNextPrompt, confirmedRunExit } from "./episode-change";
+import { startPhrase } from "./run-logic";
 import { effectiveSelection, useChoice } from "./selection";
 import type { RunActions } from "./use-run-actions";
 import type { RunPoll } from "./use-run-poll";
@@ -63,6 +64,7 @@ export function Marvel0Actions({
     runId: string;
     form: Record<string, unknown>;
     prompt: string;
+    attest: ChangeAttest;
   };
   const { t } = useLocale();
   const catalog = useMarvel0Catalog(api);
@@ -76,6 +78,7 @@ export function Marvel0Actions({
   const attemptedRun = useRef<string | null>(null);
   const observedRunId = useRef<string | null>(null);
   const episodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const restartedRun = useRef<string | null>(null);
   const poll = useDeployPoll(api, { pollMs, logOpen });
   const choice = useChoice();
   const selection = effectiveSelection(
@@ -98,7 +101,7 @@ export function Marvel0Actions({
       isSiteProblem(problem) && !isFormat(problem!),
   );
   const ready = !site && catalog.loaded;
-  const changeInstruction = async (prompt: string) => {
+  const changeInstruction = async (prompt: string, attest: ChangeAttest) => {
     const view = run?.value;
     const record = view?.run;
     const runId = record?.runId;
@@ -119,7 +122,7 @@ export function Marvel0Actions({
     )
       return;
     attemptedRun.current = runId;
-    const operation = { state: "ending" as const, runId, form, prompt };
+    const operation = { state: "ending" as const, runId, form, prompt, attest };
     setEpisodeOperation(operation);
     episodeTimer.current = setTimeout(() => {
       setEpisodeOperation((current) =>
@@ -174,12 +177,34 @@ export function Marvel0Actions({
       episodeOperation.form,
       episodeOperation.prompt,
     );
-    setEpisodeOperation({ ...episodeOperation, state: "ready" });
-    goTo(COMMAND_ANCHOR);
-    // The command card will preview this saved body and still requires the
-    // ordinary explicit start confirmation.
-    setEpisodeBody(body);
-  }, [episodeOperation, run]);
+    // The old client is gone and its lock released: start the new one with
+    // the saved form, the new instruction and the ticks the person gave in the
+    // change window. It stops at the start gate; nothing moves before the
+    // person presses Enter there. One attempt per run.
+    if (restartedRun.current === episodeOperation.runId) return;
+    restartedRun.current = episodeOperation.runId;
+    const operation = episodeOperation;
+    const fallBack = () => {
+      // The start was refused or not answered: step 3 shows the same body
+      // and the ordinary start window (the refusal stays on the run card).
+      setEpisodeOperation({ ...operation, state: "ready" });
+      goTo(COMMAND_ANCHOR);
+      setEpisodeBody(body);
+    };
+    const group =
+      typeof body.rollout_group === "string" ? body.rollout_group : "";
+    setEpisodeOperation({ ...operation, state: "restarting" });
+    if (!runActions || !group) {
+      fallBack();
+      return;
+    }
+    runActions
+      .start(body, startPhrase(current, group), operation.attest)
+      .then((ok) => {
+        if (!ok) fallBack();
+      })
+      .catch(fallBack);
+  }, [episodeOperation, run, runActions]);
 
   useEffect(() => {
     const nextRunId = run?.value?.run?.runId;

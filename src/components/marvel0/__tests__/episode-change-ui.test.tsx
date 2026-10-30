@@ -11,7 +11,7 @@ import { Marvel0Actions } from "../marvel0-actions";
 import { runView } from "../run-logic";
 import type { RunActions } from "../use-run-actions";
 import type { RunPoll } from "../use-run-poll";
-import { fakeApi, button, type as typeInto } from "./actions-helpers";
+import { fakeApi, button, tickAll, type as typeInto } from "./actions-helpers";
 import { runDoc } from "./ctl-fixtures";
 
 setupDom();
@@ -59,22 +59,32 @@ function poll(state: string, runId: string): RunPoll {
 }
 
 describe("the next-instruction workflow on the full action page", () => {
-  test("waits for exit, recovers an unknown on a later same-run poll, and resets for a new run", async () => {
+  type Started = {
+    form: Record<string, unknown>;
+    phrase: string;
+    ack: Record<string, boolean>;
+  };
+  function harness(startResult: () => Promise<boolean>) {
     const { api } = fakeApi();
     const calls: string[] = [];
-    let throwOnPress = false;
+    const starts: Started[] = [];
+    const control = { throwOnPress: false };
     const actions: RunActions = {
       working: null,
       holding: false,
       refused: null,
       press: async (action) => {
         calls.push(action);
-        if (throwOnPress) throw new Error("connection interrupted");
+        if (control.throwOnPress) throw new Error("connection interrupted");
         return true;
       },
       hold: async () => true,
       end: async () => true,
-      start: async () => true,
+      start: async (form, phrase, ack) => {
+        calls.push("start");
+        starts.push({ form, phrase, ack: { ...ack } });
+        return startResult();
+      },
       clear: () => {},
     };
     const page = (state: string, runId: string) => (
@@ -85,101 +95,103 @@ describe("the next-instruction workflow on the full action page", () => {
         runActions={actions}
       />
     );
-    const view = await render(page("at_gate", "run-1"));
-    await waitFor(
-      () => view.host.querySelector("[data-testid=marvel0-command]"),
-      { label: "the command form" },
-    );
-    await waitFor(
-      () =>
-        view.host.querySelector("[data-testid=marvel0-episode-change-open]"),
-      { label: "the gate action" },
+    return { calls, starts, control, page };
+  }
+
+  async function changeTo(host: HTMLElement, prompt: string) {
+    const field = (await waitFor(
+      () => host.querySelector("[data-testid=marvel0-episode-change-prompt]"),
+      { label: "the gate's instruction field" },
+    )) as HTMLInputElement;
+    await typeInto(field, prompt);
+    await click(button(host, en["marvel0.episodeChange.restart"])!);
+    const win = host.ownerDocument.querySelector(
+      "[role=dialog]",
+    ) as HTMLElement;
+    await tickAll(win);
+    await click(button(win, en["marvel0.episodeChange.go"])!);
+  }
+
+  const status = (host: HTMLElement, state: string) =>
+    host.querySelector(
+      `[data-testid="marvel0-episode-change-status"][data-state="${state}"]`,
     );
 
-    await click(button(view.host, en["marvel0.episodeChange.open"])!);
-    const firstPrompt = view.host.querySelector(
-      "[data-testid=marvel0-episode-change-prompt]",
-    ) as HTMLInputElement;
-    await typeInto(firstPrompt, "next task");
-    await click(button(view.host, en["marvel0.episodeChange.endAndPrepare"])!);
-    await waitFor(
-      () =>
-        view.host.querySelector(
-          '[data-testid="marvel0-episode-change-status"][data-state="waiting"]',
-        ),
-      { label: "waiting for exit after the HTTP acknowledgement" },
-    );
-    expect(calls).toEqual(["end_at_gate"]);
+  test("ends at the gate, waits for the same run's exit, then starts the new client once with the saved form, the new instruction and the ticks", async () => {
+    const h = harness(async () => true);
+    const view = await render(h.page("at_gate", "run-1"));
+    await changeTo(view.host, "next task");
+    await waitFor(() => status(view.host, "waiting"), {
+      label: "waiting for exit after the HTTP acknowledgement",
+    });
+    expect(h.calls).toEqual(["end_at_gate"]);
+
+    // Still the old client, still at the gate: nothing more is sent.
+    await view.rerender(h.page("at_gate", "run-1"));
+    expect(h.calls).toEqual(["end_at_gate"]);
+
+    await view.rerender(h.page("done", "run-1"));
+    await waitFor(() => status(view.host, "restarting"), {
+      label: "the automatic start",
+    });
+    expect(h.calls).toEqual(["end_at_gate", "start"]);
+    expect(h.starts[0].form).toEqual({ ...savedForm, prompt: "next task" });
+    expect(h.starts[0].phrase).toBe("start client saved_group");
+    expect(h.starts[0].ack).toEqual({
+      estop: true,
+      scene_reset: true,
+      area_clear: true,
+    });
+    // Further reads of the ended run start nothing more.
+    await view.rerender(h.page("done", "run-1"));
+    expect(h.calls).toEqual(["end_at_gate", "start"]);
     expect(
       view.host.querySelector("[data-testid=marvel0-command-resumed]"),
     ).toBeNull();
 
-    await view.rerender(page("done", "run-1"));
-    await waitFor(
+    // The new client reaches its gate: a fresh, empty field.
+    await view.rerender(h.page("at_gate", "run-2"));
+    const field = (await waitFor(
       () =>
-        view.host.querySelector(
-          '[data-testid="marvel0-episode-change-status"][data-state="ready"]',
-        ),
-      { label: "same-run exit and lock-release proof" },
-    );
+        view.host.querySelector("[data-testid=marvel0-episode-change-prompt]"),
+      { label: "the next run's field" },
+    )) as HTMLInputElement;
+    expect(field.value).toBe("");
+  });
+
+  test("a refused start fills step 3 with the saved form and the new instruction instead", async () => {
+    const h = harness(async () => false);
+    const view = await render(h.page("at_gate", "run-1"));
+    await changeTo(view.host, "next task");
+    await view.rerender(h.page("done", "run-1"));
+    await waitFor(() => status(view.host, "ready"), {
+      label: "the manual fallback",
+    });
+    expect(h.calls).toEqual(["end_at_gate", "start"]);
     await waitFor(
       () => view.host.querySelector("[data-testid=marvel0-command-resumed]"),
       { label: "the preserved form" },
     );
-    let prompt = view.host.querySelector(
+    const prompt = view.host.querySelector(
       '[data-testid="marvel0-command"] input[list="marvel0-known-prompts"]',
     ) as HTMLInputElement;
     expect(prompt.value).toBe("next task");
-    expect(
-      (
-        view.host.querySelector(
-          '[data-testid="marvel0-command"] input',
-        ) as HTMLInputElement
-      ).disabled,
-    ).toBe(false);
+  });
 
-    // A new run clears the old operation and unpins the command form while
-    // carrying the changed instruction into ordinary editable fields.
-    await view.rerender(page("at_gate", "run-2"));
-    await waitFor(
-      () =>
-        !view.host.querySelector("[data-testid=marvel0-command-resumed]") &&
-        view.host.querySelector("[data-testid=marvel0-episode-change-open]"),
-      { label: "the next run's fresh workflow" },
-    );
-    prompt = view.host.querySelector(
-      '[data-testid="marvel0-command"] input[list="marvel0-known-prompts"]',
-    ) as HTMLInputElement;
-    expect(prompt.value).toBe("next task");
-
-    throwOnPress = true;
-    await click(button(view.host, en["marvel0.episodeChange.open"])!);
-    const nextPrompt = view.host.querySelector(
-      "[data-testid=marvel0-episode-change-prompt]",
-    ) as HTMLInputElement;
-    await typeInto(nextPrompt, "third task");
-    await click(button(view.host, en["marvel0.episodeChange.endAndPrepare"])!);
-    await waitFor(
-      () =>
-        view.host.querySelector(
-          '[data-testid="marvel0-episode-change-status"][data-state="unknown"]',
-        ),
-      { label: "the uncertain request" },
-    );
-    expect(calls).toEqual(["end_at_gate", "end_at_gate"]);
-
-    await act(async () => view.rerender(page("done", "run-2")));
-    await waitFor(
-      () =>
-        view.host.querySelector(
-          '[data-testid="marvel0-episode-change-status"][data-state="ready"]',
-        ),
-      { label: "later confirmation without another mutation" },
-    );
-    expect(calls).toEqual(["end_at_gate", "end_at_gate"]);
-    prompt = view.host.querySelector(
-      '[data-testid="marvel0-command"] input[list="marvel0-known-prompts"]',
-    ) as HTMLInputElement;
-    expect(prompt.value).toBe("third task");
+  test("an interrupted end is never resent; a later confirmed exit of the same run still restarts once", async () => {
+    const h = harness(async () => true);
+    h.control.throwOnPress = true;
+    const view = await render(h.page("at_gate", "run-1"));
+    await changeTo(view.host, "third task");
+    await waitFor(() => status(view.host, "unknown"), {
+      label: "the uncertain request",
+    });
+    expect(h.calls).toEqual(["end_at_gate"]);
+    await act(async () => view.rerender(h.page("done", "run-1")));
+    await waitFor(() => status(view.host, "restarting"), {
+      label: "later confirmation without another end",
+    });
+    expect(h.calls).toEqual(["end_at_gate", "start"]);
+    expect(h.starts[0].form.prompt).toBe("third task");
   });
 });
