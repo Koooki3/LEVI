@@ -6315,5 +6315,15 @@
   "marvel0.err.inference_mode_conflict": "The RTC flag conflicts with the selected inference mode. Choose one mode.",
   "marvel0.err.vlash_overlap_out_of_range": "VLASH overlap must be a positive integer below the model action horizon.",
   "marvel0.err.vlash_overlap_not_allowed": "Overlap steps apply only to VLASH.",
-  "marvel0.err.vlash_model_incompatible": "VLASH compatibility has not been confirmed for this checkpoint configuration. The backend refused it."
+  "marvel0.err.vlash_model_incompatible": "VLASH compatibility has not been confirmed for this checkpoint configuration. The backend refused it.",
+  "marvel0.speech.generated.title": "Written in the datasets' most common phrasing (generated: not an instruction the policy was trained on)",
+  "marvel0.speech.generated.note": "Frame: {frame}, used in {n} episodes of the datasets. Read it before you use it.",
+  "marvel0.speech.generated.outside": "Words outside the known object list: {words}",
+  "marvel0.speech.generated.original": "A dataset instruction with the same meaning (the policy may know this wording better):",
+  "marvel0.speech.btn.use_generated": "Use the generated sentence",
+  "marvel0.speech.btn.use_original": "Use the dataset sentence",
+  "marvel0.speech.generated.why.no_task": "No sentence was generated: say an action, an object and where it goes, for example “put the eggplant into the blue bowl”.",
+  "marvel0.speech.generated.why.unsupported": "No sentence was generated: “same”, “corresponding”, “from” and similar words do not fit a frame. Choose from the list below.",
+  "marvel0.speech.generated.why.no_frame": "No sentence was generated: the datasets have no sentence for this action.",
+  "marvel0.speech.generated.why.untranslated": "No sentence was generated: these object names have no English yet: {names}. Say them in English, or edit the text."
 }

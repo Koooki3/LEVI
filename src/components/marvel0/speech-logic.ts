@@ -4,15 +4,19 @@
 // microphone: the rules can be tested on their own.
 //
 // A voice result is a PROPOSAL. It changes nothing until a person presses Use,
-// and Use hands over one sentence of the allowed list the server sent, never
-// the transcript. Rules kept here:
+// and Use hands over one sentence of the allowed list the server sent, or the
+// sentence the server generated in the datasets' most common phrasing (shown
+// as generated; owner decision 2026-10-30), never the transcript. Rules kept
+// here:
 //   * only the newest request (a recording, an edited text, a model switch)
 //     can become the proposal: every request has a sequence number and an
 //     answer for another number is dropped;
 //   * a proposal lives 60 s, and Use works only after it has been on screen
 //     for 800 ms;
 //   * a result with a stop, negation or unsafe flag has no candidates at all;
-//   * a sentence is offered only if it is in the server's allowed list.
+//   * a sentence is offered only if it is in the server's allowed list, or is
+//     the generated sentence (or its dataset original) of a result without a
+//     flag, for a model that is not of the restricted family.
 import type { ApiFailure } from "./deploy-api";
 import { sayFailure } from "./marvel0-failure";
 import { bool, list, num, rec, str, type Worded } from "./marvel0-json";
@@ -140,8 +144,84 @@ export interface Match {
   family: "restricted" | "all";
   best: Candidate | null;
   alternatives: Candidate[];
-  /** Every sentence this model may be given; the only ones Use can hand over. */
+  /** Every sentence of the allowed list (Use can also hand over the
+   * generated sentence below, labelled as such). */
   allowed: string[];
+  /** A sentence written in the datasets' most common phrasing, or why there
+   * is none (owner decision 2026-10-30). Absent from older answers. */
+  generated?: Generated | null;
+}
+
+export type GeneratedStatus =
+  | "ok"
+  | "vetoed"
+  | "restricted"
+  | "no_task"
+  | "unsupported"
+  | "no_frame"
+  | "untranslated";
+export interface GeneratedSlot {
+  said: string;
+  english: string;
+  source: "lexicon" | "english" | "translation";
+}
+export interface Generated {
+  status: GeneratedStatus;
+  /** Null unless `status` is "ok". Not in the allowed list by design. */
+  prompt: string | null;
+  frames: string[];
+  episodes: number;
+  slots: GeneratedSlot[];
+  untranslated: string[];
+  /** A dataset instruction with the same meaning, offered beside. */
+  datasetOriginal: string | null;
+}
+
+const GENERATED_STATUSES: GeneratedStatus[] = [
+  "ok",
+  "vetoed",
+  "restricted",
+  "no_task",
+  "unsupported",
+  "no_frame",
+  "untranslated",
+];
+const SLOT_SOURCES: GeneratedSlot["source"][] = [
+  "lexicon",
+  "english",
+  "translation",
+];
+
+function readGenerated(value: unknown): Generated | null {
+  const item = rec(value);
+  const status = GENERATED_STATUSES.find((entry) => entry === item?.status);
+  if (!item || !status) return null;
+  const prompt = status === "ok" ? exactPrompt(item.prompt) : null;
+  if (status === "ok" && !prompt) return null;
+  return {
+    status,
+    prompt,
+    frames: list(item.frames)
+      .map((entry) => plain(entry, 80))
+      .filter((entry): entry is string => entry !== null)
+      .slice(0, 4),
+    episodes: Math.max(0, Math.floor(num(item.episodes) ?? 0)),
+    slots: list(item.slots)
+      .flatMap((entry) => {
+        const slot = rec(entry);
+        const said = plain(slot?.said, 40);
+        const english = plain(slot?.english, 40);
+        const source = SLOT_SOURCES.find((s) => s === slot?.source);
+        return said && english && source ? [{ said, english, source }] : [];
+      })
+      .slice(0, 8),
+    untranslated: list(item.untranslated)
+      .map((entry) => plain(entry, 40))
+      .filter((entry): entry is string => entry !== null)
+      .slice(0, 8),
+    datasetOriginal:
+      status === "ok" ? exactPrompt(item.dataset_original) : null,
+  };
 }
 
 const TIERS: Tier[] = ["A", "B", "C", "V"];
@@ -219,6 +299,7 @@ export function readMatch(data: unknown): Match | null {
     alternatives,
     allowed,
     revision: plain(body.allowed_revision, 64),
+    generated: readGenerated(body.generated),
   };
   const effective = effectiveTier(match);
   if ((effective === "A" || effective === "B") && !best) return null;
@@ -228,6 +309,28 @@ export function readMatch(data: unknown): Match | null {
 /** A flag or a V tier means no candidates, whatever else the answer says. */
 export const effectiveTier = (match: Match): Tier =>
   match.flag !== null || match.tier === "V" ? "V" : match.tier;
+
+/** The generated sentence and its dataset original, when Use may hand them
+ * over: never for a V result or the restricted family, whatever the answer
+ * says about them. */
+export function generatedPrompts(match: Match): string[] {
+  const generated = match.generated;
+  if (
+    !generated ||
+    generated.status !== "ok" ||
+    !generated.prompt ||
+    effectiveTier(match) === "V" ||
+    match.family !== "all"
+  )
+    return [];
+  return [
+    ...new Set(
+      [generated.prompt, generated.datasetOriginal].filter(
+        (entry): entry is string => entry !== null,
+      ),
+    ),
+  ];
+}
 
 export type HeardReason =
   | "no_speech"
@@ -632,8 +735,9 @@ export function canUse(
     !proposal.checking &&
     age >= USE_DELAY_MS &&
     age < PROPOSAL_TTL_MS &&
-    visiblePrompts(proposal).includes(prompt) &&
-    proposal.match.allowed.includes(prompt)
+    ((visiblePrompts(proposal).includes(prompt) &&
+      proposal.match.allowed.includes(prompt)) ||
+      generatedPrompts(proposal.match).includes(prompt))
   );
 }
 

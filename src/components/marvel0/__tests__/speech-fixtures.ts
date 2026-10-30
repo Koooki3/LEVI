@@ -689,3 +689,20 @@ export function installFakeAudio(options: FakeAudioOptions = {}): FakeAudio {
       undefined;
   return audio;
 }
+
+/** The generated block of a match (owner decision 2026-10-30). */
+export function generated(over: Rec = {}): Rec {
+  return {
+    status: "ok",
+    prompt: "pick eggplant into blue bowl",
+    frames: ["pick {A} into {B}"],
+    episodes: 117,
+    slots: [
+      { said: "茄子", english: "eggplant", source: "lexicon" },
+      { said: "碗", english: "bowl", source: "lexicon" },
+    ],
+    untranslated: [],
+    dataset_original: "put eggplant into blue bowl",
+    ...over,
+  };
+}

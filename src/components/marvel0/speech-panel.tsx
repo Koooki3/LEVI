@@ -28,8 +28,10 @@ import {
   MAX_SECONDS,
   candidateOf,
   describeCandidate,
+  effectiveTier,
   engineSay,
   failureWords,
+  generatedPrompts,
   heardSay,
   languageSay,
   micSay,
@@ -38,6 +40,7 @@ import {
   topChoices,
   type EngineState,
   type Flag,
+  type GeneratedStatus,
   type Problem as SpeechProblem,
   type Proposal,
 } from "./speech-logic";
@@ -569,10 +572,137 @@ function ProposalCard({
       {view === "V" ? (
         <FlagBanner flag={proposal.match.flag} />
       ) : (
-        <Choices session={session} proposal={proposal} view={view} />
+        <>
+          <GeneratedChoice session={session} proposal={proposal} />
+          <Choices session={session} proposal={proposal} view={view} />
+        </>
       )}
       <p className="rg-muted">{t("marvel0.speech.expires")}</p>
     </section>
+  );
+}
+
+/** Why there is no generated sentence (vetoed and restricted show nothing). */
+const GENERATED_WHY: Partial<Record<GeneratedStatus, string>> = {
+  no_task: "marvel0.speech.generated.why.no_task",
+  unsupported: "marvel0.speech.generated.why.unsupported",
+  no_frame: "marvel0.speech.generated.why.no_frame",
+  untranslated: "marvel0.speech.generated.why.untranslated",
+};
+
+/** The sentence written in the datasets' most common phrasing, above the
+ * matched instructions. It is labelled as generated (not an instruction the
+ * policy was trained on) and handed over only by its own Use press. */
+function GeneratedChoice({
+  session,
+  proposal,
+}: {
+  session: SpeechSession;
+  proposal: Proposal;
+}) {
+  const { t } = useLocale();
+  const generated = proposal.match.generated;
+  if (
+    !generated ||
+    effectiveTier(proposal.match) === "V" ||
+    proposal.match.family !== "all" ||
+    generated.status === "vetoed" ||
+    generated.status === "restricted"
+  )
+    return null;
+  const usable = generatedPrompts(proposal.match);
+  if (generated.status !== "ok" || !generated.prompt || usable.length === 0)
+    return (
+      <p className="rg-muted" data-testid="marvel0-speech-generated-none">
+        {sayText(
+          {
+            key: GENERATED_WHY[generated.status] ?? GENERATED_WHY.no_task,
+            params: { names: generated.untranslated.join(", ") },
+          },
+          t,
+        )}
+      </p>
+    );
+  const blocked = !proposal.armed || proposal.checking;
+  const prompt = generated.prompt;
+  const original = generated.datasetOriginal;
+  return (
+    <div
+      className="rg-speech__generated"
+      data-testid="marvel0-speech-generated"
+    >
+      <p className="rg-muted">{t("marvel0.speech.generated.title")}</p>
+      <p
+        className="rg-speech__prompt"
+        lang="en"
+        data-testid="marvel0-speech-generated-prompt"
+      >
+        <bdi>{prompt}</bdi>
+      </p>
+      <p className="rg-muted">
+        {sayText(
+          {
+            key: "marvel0.speech.generated.note",
+            params: {
+              frame: generated.frames.join(" then "),
+              n: generated.episodes,
+            },
+          },
+          t,
+        )}
+      </p>
+      {generated.slots.some((slot) => slot.source !== "lexicon") && (
+        <p className="rg-muted" data-testid="marvel0-speech-generated-slots">
+          {sayText(
+            {
+              key: "marvel0.speech.generated.outside",
+              params: {
+                words: generated.slots
+                  .filter((slot) => slot.source !== "lexicon")
+                  .map((slot) =>
+                    slot.said === slot.english
+                      ? slot.english
+                      : `${slot.said} → ${slot.english}`,
+                  )
+                  .join(", "),
+              },
+            },
+            t,
+          )}
+        </p>
+      )}
+      <div className="rg-actions-row">
+        <Button
+          variant="primary"
+          disabled={blocked}
+          data-testid="marvel0-speech-use-generated"
+          onClick={() => session.use(prompt)}
+        >
+          {t("marvel0.speech.btn.use_generated")}
+        </Button>
+      </div>
+      {original && usable.includes(original) && (
+        <>
+          <p className="rg-muted">{t("marvel0.speech.generated.original")}</p>
+          <p
+            className="rg-speech__prompt"
+            lang="en"
+            data-testid="marvel0-speech-generated-original"
+          >
+            <bdi>{original}</bdi>
+          </p>
+          <div className="rg-actions-row">
+            <Button
+              disabled={blocked}
+              data-testid="marvel0-speech-use-original"
+              onClick={() => session.use(original)}
+            >
+              {t("marvel0.speech.btn.use_original")}
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

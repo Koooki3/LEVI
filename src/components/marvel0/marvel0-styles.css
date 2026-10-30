@@ -1534,6 +1534,12 @@
 .rg-speech__prompt {
   font-weight: var(--ds-weight-semibold);
 }
+.rg-speech__generated {
+  display: grid;
+  gap: var(--ds-space-2);
+  padding-bottom: var(--ds-space-3);
+  border-bottom: 1px solid var(--ds-separator);
+}
 .rg-speech__choices {
   max-height: 16rem;
   overflow: auto;

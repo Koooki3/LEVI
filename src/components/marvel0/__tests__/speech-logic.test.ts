@@ -15,6 +15,7 @@ import {
   effectiveTier,
   engineSay,
   failureWords,
+  generatedPrompts,
   heardSay,
   initialSpeech,
   languageSay,
@@ -40,6 +41,7 @@ import {
   KNOWN,
   RESTRICTED,
   candidate,
+  generated,
   heardAnswer,
   matchA,
   matchB,
@@ -785,4 +787,78 @@ test("allowed task strings retain exact whitespace and reject invisible values",
   ]) {
     expect(readMatch(matchA(bad, { allowed: [bad] }))).toBeNull();
   }
+});
+
+describe("the generated sentence (owner decision 2026-10-30)", () => {
+  const armed = (raw: Record<string, unknown>, at = 1000) =>
+    speechReducer(withProposal(raw, at), { type: "arm", id: 1 });
+  const GEN = "pick eggplant into blue bowl";
+  const ORIGINAL = "put eggplant into blue bowl";
+
+  test("is read with its slots, and only an ok status carries a sentence", () => {
+    const match = readMatch(matchC({ generated: generated() }))!;
+    expect(match.generated).toMatchObject({
+      status: "ok",
+      prompt: GEN,
+      datasetOriginal: ORIGINAL,
+      episodes: 117,
+    });
+    expect(match.generated!.slots).toHaveLength(2);
+    const none = readMatch(
+      matchC({ generated: generated({ status: "untranslated" }) }),
+    )!;
+    expect(none.generated).toMatchObject({
+      status: "untranslated",
+      prompt: null,
+      datasetOriginal: null,
+    });
+  });
+
+  test("an unknown status, or an ok without a clean sentence, is dropped", () => {
+    for (const bad of [
+      generated({ status: "maybe" }),
+      generated({ prompt: " pick eggplant " }),
+      generated({ prompt: "pick\u0000eggplant" }),
+      generated({ prompt: 3 }),
+      "ok",
+      null,
+    ])
+      expect(readMatch(matchC({ generated: bad }))!.generated).toBeNull();
+    expect(readMatch(matchC())!.generated).toBeNull();
+  });
+
+  test("Use takes the generated sentence and its original, and nothing else outside the list", () => {
+    const state = armed(matchC({ generated: generated() }));
+    expect(canUse(state, GEN, 1800)).toBe(true);
+    expect(canUse(state, ORIGINAL, 1800)).toBe(true);
+    expect(canUse(state, "pick eggplant into red bowl", 1800)).toBe(false);
+    expect(canUse(state, GEN, 1799)).toBe(false);
+  });
+
+  test("never for a flagged result or the restricted family", () => {
+    expect(
+      generatedPrompts(readMatch(matchV("stop", { generated: generated() }))!),
+    ).toEqual([]);
+    const restricted = readMatch(
+      matchC({
+        family: "restricted",
+        allowed: RESTRICTED,
+        generated: generated(),
+      }),
+    )!;
+    expect(generatedPrompts(restricted)).toEqual([]);
+    expect(
+      canUse(
+        armed(
+          matchC({
+            family: "restricted",
+            allowed: RESTRICTED,
+            generated: generated(),
+          }),
+        ),
+        GEN,
+        1800,
+      ),
+    ).toBe(false);
+  });
 });

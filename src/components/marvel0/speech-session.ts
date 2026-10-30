@@ -21,8 +21,9 @@
 //     very quiet is still sent, and the card says how to raise the level.
 //
 // Nothing here writes a field, starts the client, or touches the clipboard:
-// the one thing it hands out is `onUse(sentence)`, and only for a sentence of
-// the allowed list that the person pressed Use for.
+// the one thing it hands out is `onUse(sentence)`, and only for a sentence the
+// person pressed Use for that `canUse` accepts (the allowed list, or the
+// labelled generated sentence).
 import {
   useCallback,
   useEffect,

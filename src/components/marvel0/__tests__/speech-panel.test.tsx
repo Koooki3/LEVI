@@ -14,6 +14,7 @@ import {
   captureFactory,
   deferred,
   fakeSpeechApi,
+  generated,
   heardAnswer,
   installFakeAudio,
   matchA,
@@ -1628,4 +1629,135 @@ test("the existing live region announces when a proposal arrives", async () => {
   await speak(h);
   expect(q(h, "marvel0-speech-status")).toBe(live);
   expect(live.textContent).toBe(en["marvel0.speech.review_ready"]);
+});
+
+describe("the generated sentence", () => {
+  const useGenerated = (h: H) =>
+    q(h, "marvel0-speech-use-generated") as HTMLButtonElement | null;
+  const useOriginal = (h: H) =>
+    q(h, "marvel0-speech-use-original") as HTMLButtonElement | null;
+
+  test("is shown above the matched instructions, labelled as generated, and Use hands it over", async () => {
+    const h = await open({
+      script: { transcribe: echo(matchC({ generated: generated() })) },
+    });
+    await speak(h);
+    const block = q(h, "marvel0-speech-generated")!;
+    expect(block).not.toBeNull();
+    expect(q(h, "marvel0-speech-generated-prompt")?.textContent).toBe(
+      "pick eggplant into blue bowl",
+    );
+    expect(block.textContent).toContain(en["marvel0.speech.generated.title"]);
+    expect(block.textContent).toContain("pick {A} into {B}");
+    expect(block.textContent).toContain("117");
+    // above the list of the allowed instructions
+    const list = q(h, "marvel0-speech-tier-list")!;
+    expect(
+      block.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(useGenerated(h)!.disabled).toBe(true);
+    await armed();
+    await act(async () => useGenerated(h)!.click());
+    await flushAll();
+    expect(h.used).toEqual(["pick eggplant into blue bowl"]);
+  });
+
+  test("offers the dataset sentence with the same meaning beside it", async () => {
+    const h = await open({
+      script: { transcribe: echo(matchC({ generated: generated() })) },
+    });
+    await speak(h);
+    expect(q(h, "marvel0-speech-generated-original")?.textContent).toBe(
+      "put eggplant into blue bowl",
+    );
+    await armed();
+    await act(async () => useOriginal(h)!.click());
+    await flushAll();
+    expect(h.used).toEqual(["put eggplant into blue bowl"]);
+  });
+
+  test("names the words that came from outside the object list", async () => {
+    const h = await open({
+      script: {
+        transcribe: echo(
+          matchC({
+            generated: generated({
+              prompt: "pick zucchini on pink plate",
+              dataset_original: null,
+              slots: [
+                { said: "zucchini", english: "zucchini", source: "english" },
+                { said: "plate", english: "plate", source: "lexicon" },
+              ],
+            }),
+          }),
+        ),
+      },
+    });
+    await speak(h);
+    expect(q(h, "marvel0-speech-generated-slots")?.textContent).toContain(
+      "zucchini",
+    );
+    expect(useOriginal(h)).toBeNull();
+  });
+
+  test("a flagged result shows no generated sentence even if the answer carries one", async () => {
+    const h = await open({
+      script: {
+        transcribe: echo(matchV("negation", { generated: generated() })),
+      },
+    });
+    await speak(h);
+    expect(q(h, "marvel0-speech-generated")).toBeNull();
+    expect(useGenerated(h)).toBeNull();
+    expect(h.used).toEqual([]);
+  });
+
+  test("the restricted family gets no generated sentence even if the answer carries one", async () => {
+    const h = await open({
+      modelId: SP_MODEL,
+      script: {
+        transcribe: echo(
+          matchC({
+            family: "restricted",
+            allowed: RESTRICTED,
+            generated: generated(),
+          }),
+        ),
+      },
+    });
+    await speak(h);
+    expect(q(h, "marvel0-speech-generated")).toBeNull();
+    expect(q(h, "marvel0-speech-generated-none")).toBeNull();
+  });
+
+  test("says why there is none, with the names that need English", async () => {
+    const h = await open({
+      script: {
+        transcribe: echo(
+          matchC({
+            generated: generated({
+              status: "untranslated",
+              prompt: null,
+              dataset_original: null,
+              untranslated: ["榴莲"],
+            }),
+          }),
+        ),
+      },
+    });
+    await speak(h);
+    const none = q(h, "marvel0-speech-generated-none")!;
+    expect(none.textContent).toContain("榴莲");
+    expect(useGenerated(h)).toBeNull();
+  });
+
+  test("an answer without the generated block works as before", async () => {
+    const h = await open({ script: { transcribe: echo(matchA(KNOWN[2])) } });
+    await speak(h);
+    expect(q(h, "marvel0-speech-generated")).toBeNull();
+    expect(q(h, "marvel0-speech-generated-none")).toBeNull();
+    await armed();
+    await act(async () => use(h)!.click());
+    expect(h.used).toEqual([KNOWN[2]]);
+  });
 });

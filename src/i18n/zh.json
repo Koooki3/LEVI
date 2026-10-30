@@ -6315,5 +6315,15 @@
   "marvel0.err.inference_mode_conflict": "RTC 标记与所选推理模式冲突，请只选择一种模式。",
   "marvel0.err.vlash_overlap_out_of_range": "VLASH 重叠步数必须为正整数，并小于模型的动作块长度。",
   "marvel0.err.vlash_overlap_not_allowed": "重叠步数仅适用于 VLASH。",
-  "marvel0.err.vlash_model_incompatible": "该 checkpoint 配置的 VLASH 兼容性尚未确认，后端已拒绝。"
+  "marvel0.err.vlash_model_incompatible": "该 checkpoint 配置的 VLASH 兼容性尚未确认，后端已拒绝。",
+  "marvel0.speech.generated.title": "按数据集最常见的句式生成（模板生成，不在训练过的指令里）",
+  "marvel0.speech.generated.note": "句式：{frame}，数据集里有 {n} 个片段用这个句式。使用前请先读一遍。",
+  "marvel0.speech.generated.outside": "不在已知物体词表里的词：{words}",
+  "marvel0.speech.generated.original": "数据集里意思相同的原句（策略可能更熟悉这个说法）：",
+  "marvel0.speech.btn.use_generated": "使用生成句",
+  "marvel0.speech.btn.use_original": "使用数据集原句",
+  "marvel0.speech.generated.why.no_task": "没有生成句子：需要说出动作、物体和放到哪里，例如“把茄子放到蓝色碗里”。",
+  "marvel0.speech.generated.why.unsupported": "没有生成句子：“相同”“对应”“从……”这类说法套不进句式，请从下面的列表里选。",
+  "marvel0.speech.generated.why.no_frame": "没有生成句子：数据集里没有这个动作的句式。",
+  "marvel0.speech.generated.why.untranslated": "没有生成句子：这些物体名还没有英文：{names}。可以用英文说，或者修改文字。"
 }
