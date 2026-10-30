@@ -814,6 +814,28 @@ describe("the generated sentence (owner decision 2026-10-30)", () => {
     });
   });
 
+  test("guesses are read; an unknown slot source drops the slot", () => {
+    const match = readMatch(
+      matchC({
+        generated: generated({
+          slots: [
+            { said: "pearl", english: "pear", source: "repair" },
+            { said: "x", english: "x", source: "invented" },
+          ],
+          repairs: [{ heard: "pearl", as: "pear" }, { heard: 3 }],
+        }),
+      }),
+    )!;
+    expect(match.generated!.slots).toEqual([
+      { said: "pearl", english: "pear", source: "repair" },
+    ]);
+    expect(match.generated!.repairs).toEqual([{ heard: "pearl", as: "pear" }]);
+    expect(
+      readMatch(matchC({ generated: generated({ status: "unclear" }) }))!
+        .generated!.status,
+    ).toBe("unclear");
+  });
+
   test("an unknown status, or an ok without a clean sentence, is dropped", () => {
     for (const bad of [
       generated({ status: "maybe" }),

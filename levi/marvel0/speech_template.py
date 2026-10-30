@@ -40,6 +40,7 @@ Status = Literal[
     "unsupported",  # a relation (same, corresponding, from ...) a frame cannot hold
     "no_frame",  # the datasets have no frame for this action
     "untranslated",  # an object name has no English yet
+    "unclear",  # a word was heard that no slot can hold (a number, another script)
 ]
 
 # A step's destination preposition, as the datasets write it.
@@ -79,13 +80,19 @@ class Frames:
     # "<action> <noun>" and by "<noun>" (lexicon concepts): "into" a bowl,
     # "on" a plate, "on" a cup that is stacked on but "into" one poured into.
     place_for: Mapping[str, str]
-    sentences: Mapping[str, int]  # cleaned dataset instruction -> episodes
+    # Dataset instructions exactly as written, with episodes: only task
+    # instructions (no "Reset:"), and only ones the matcher reads cleanly (no
+    # stop, negation, unsafe mark or unknown word). The dataset original
+    # offered beside a generated sentence is one of these.
+    sentences: Mapping[str, int]
 
 
 class Slot(TypedDict):
     said: str
     english: str
-    source: Literal["lexicon", "english", "translation"]
+    # "repair": the matcher guessed this word from a likely recognition
+    # mistake ("pearl" -> "pear"); the page shows it as a guess.
+    source: Literal["lexicon", "repair", "english", "translation"]
 
 
 class Generated(TypedDict):
@@ -96,6 +103,7 @@ class Generated(TypedDict):
     slots: list[Slot]
     untranslated: list[str]
     dataset_original: str | None
+    repairs: list[dict[str, str]]  # {"heard", "as"}: every guessed word
 
 
 # ------------------------------------------------------------------ frames ----
@@ -168,7 +176,8 @@ def learn_frames(counts: Mapping[str, int]) -> Frames:
         text = instruction_text(raw)
         if not text:
             continue
-        sentences[text] += episodes
+        if _offerable(raw):
+            sentences[raw.strip()] += episodes
         previous: str | None = None
         for step in _STEP_SPLIT.split(text):
             found = _frame_of_step(step)
@@ -214,6 +223,16 @@ def learn_frames(counts: Mapping[str, int]) -> Frames:
     return Frames(by_action, place_for, dict(sentences))
 
 
+def _offerable(raw: str) -> bool:
+    """A dataset instruction that may be offered as written: a task (not a
+    "Reset:" one), and read by the strict matcher without a flag or an
+    unknown word."""
+    if _RESET.match(raw) or raw != raw.strip() or not raw:
+        return False
+    text, parsed = matcher._candidate(raw)
+    return matcher._flag(text, parsed) is None and parsed.unknown_units == 0
+
+
 # ---------------------------------------------------------------- reading ----
 _ENGLISH_FORM: Final[dict[str, str]] = {}
 for _form, _concept in lexicon.EN_CONCEPTS.items():
@@ -225,6 +244,8 @@ class _Thing:
     modifiers: frozenset[str]
     noun: str | None  # lexicon concept, or None for a word outside the lexicon
     said: str  # what was heard for the noun
+    repaired: bool = False  # the noun is the matcher's guess
+    placed: bool = False  # a place word ("into", "on") or a verb came before it
 
 
 @dataclass(frozen=True)
@@ -235,21 +256,33 @@ class _Step:
 
 
 class _SlotReader(matcher._Reader):
-    """The matcher's reader, also keeping where an unknown word was heard."""
+    """The matcher's reader, also keeping where an unknown word was heard and
+    what it could not keep at all (a number, another script)."""
+
+    def __init__(self, repair: bool) -> None:
+        super().__init__(repair)
+        self.dropped: list[str] = []
 
     def miss(self, text: str, units: int = 1) -> None:
         super().miss(text, units)
         if matcher._ENGLISH_WORD.fullmatch(text) or matcher._CJK.fullmatch(text):
             self.tokens.append(matcher._Tok("U", "unknown", text, text))
+        else:
+            self.dropped.append(text)
 
 
-def _read(words: str) -> tuple[list[matcher._Tok], set[str]]:
+def _read(words: str) -> tuple[list[matcher._Tok], set[str], list[str]]:
+    """Tokens (veto words left out; "P" marks a place word), the concepts
+    heard, and the words no token holds."""
     reader = _SlotReader(repair=True)
     pieces = matcher._TOKEN.findall(words)
     at = 0
     while at < len(pieces):
         piece = pieces[at]
-        if matcher._CJK.fullmatch(piece):
+        if piece in _PLACES:
+            reader.tokens.append(matcher._Tok("P", "exact", piece, piece))
+            at += 1
+        elif matcher._CJK.fullmatch(piece):
             reader.chinese(piece)
             at += 1
         elif piece[0].isdigit():
@@ -258,7 +291,8 @@ def _read(words: str) -> tuple[list[matcher._Tok], set[str]]:
         else:
             at = reader.english(pieces, at)
     concepts = {t.concept for t in reader.tokens}
-    return [t for t in reader.tokens if t.concept not in matcher._VETO], concepts
+    kept = [t for t in reader.tokens if t.concept not in matcher._VETO]
+    return kept, concepts, reader.dropped
 
 
 def _steps(tokens: Sequence[matcher._Tok]) -> list[_Step]:
@@ -277,6 +311,7 @@ def _steps(tokens: Sequence[matcher._Tok]) -> list[_Step]:
         relations: set[str] = set()
         things: list[_Thing] = []
         pending: set[str] = set()
+        placed = False
         last = ""
         for tok in group:
             kind = tok.concept[0]
@@ -284,25 +319,47 @@ def _steps(tokens: Sequence[matcher._Tok]) -> list[_Step]:
                 # Unknown words next to each other name one thing: "dragon fruit".
                 joined = things[-1]
                 things[-1] = _Thing(
-                    joined.modifiers, None, f"{joined.said} {tok.heard}"
+                    joined.modifiers,
+                    None,
+                    f"{joined.said} {tok.heard}",
+                    placed=joined.placed,
                 )
             elif tok.concept == "U":
-                things.append(_Thing(frozenset(pending), None, tok.heard))
-                pending = set()
+                things.append(
+                    _Thing(frozenset(pending), None, tok.heard, placed=placed)
+                )
+                pending, placed = set(), False
+            elif tok.concept == "P":
+                placed = True
             elif kind == "A":
                 acts.append(tok.concept)
+                # A Chinese verb carries its place: 放到, 放进, 叠在.
+                placed = placed or bool(matcher._CJK.fullmatch(tok.heard))
             elif kind == "R":
                 relations.add(tok.concept)
             elif kind == "J":
                 pending.add(tok.concept)
             elif kind == "N":
-                things.append(_Thing(frozenset(pending), tok.concept, tok.heard))
-                pending = set()
-            last = tok.concept
+                things.append(
+                    _Thing(
+                        frozenset(pending),
+                        tok.concept,
+                        tok.heard,
+                        repaired=tok.repaired,
+                        placed=placed,
+                    )
+                )
+                pending, placed = set(), False
+            if tok.concept != "P":
+                last = tok.concept
         if pending and things:
-            last = things[-1]
+            end = things[-1]
             things[-1] = _Thing(
-                last.modifiers | frozenset(pending), last.noun, last.said
+                end.modifiers | frozenset(pending),
+                end.noun,
+                end.said,
+                end.repaired,
+                end.placed,
             )
         steps.append(_Step(tuple(acts), tuple(things), frozenset(relations)))
     return steps
@@ -323,14 +380,32 @@ def _empty(status: Status, untranslated: Sequence[str] = ()) -> Generated:
         "slots": [],
         "untranslated": list(untranslated),
         "dataset_original": None,
+        "repairs": [],
     }
+
+
+# Words that say where or how, never what: not an object name.
+_NOT_NAMES: Final = frozenset(
+    """left right up down back out forward forwards backward backwards away
+    here there over under front behind side top bottom middle center centre
+    now again later quick slow gently carefully please thing stuff""".split()  # noqa: SIM905
+)
+
+
+def _said_name(said: str) -> bool:
+    """An object name said in English: one to three words, none of them a
+    direction or a manner (the words that ended up as "pick apple on left")."""
+    words = said.split(" ")
+    return len(words) <= 3 and not any(
+        w in _NOT_NAMES or w.endswith("ly") for w in words
+    )
 
 
 def unknown_names(transcript: str) -> list[str]:
     """The Chinese object names outside the lexicon (what a translator gets)."""
     if not isinstance(transcript, str):
         return []
-    tokens, _ = _read(matcher._clean(transcript).words)
+    tokens, _, _ = _read(matcher._clean(transcript).words)
     return sorted(
         {
             t.heard
@@ -357,30 +432,43 @@ def generate(
     if family != "all":
         return _empty("restricted")
     text = matcher._clean(transcript)
-    tokens, concepts = _read(text.words)
+    tokens, concepts, dropped = _read(text.words)
     if text.unsafe or {"STOP", "NEG"} & concepts:
         return _empty("vetoed")
+    if dropped:
+        return _empty("unclear")
     steps = _steps(tokens)
     if not steps:
         return _empty("no_task")
     rendered: list[str] = []
     used: list[Frame] = []
+    actions: list[str] = []
     slots: list[Slot] = []
     untranslated: list[str] = []
     action: str | None = None
     for step in steps:
         if step.relations:
             return _empty("unsupported")
-        action = step.acts[0] if step.acts else action
+        # "pick up the cup and pour it": the specific action is the task; two
+        # specific ones in one step are more than a frame can say.
+        specific = sorted({a for a in step.acts if a != "A:MOVE"})
+        if len(specific) > 1:
+            return _empty("unsupported")
+        action = specific[0] if specific else (step.acts[0] if step.acts else action)
         if action is None or len(step.things) != 2:
             return _empty("no_task")
+        destination = step.things[1]
+        if destination.noun is None and not destination.placed:
+            return _empty("no_task")  # "move the apple left": no place was said
         frame = frames.by_action.get(action)
         if frame is None:
             return _empty("no_frame")
+        actions.append(action)
         nouns = []
         for thing in step.things:
             if thing.noun is not None:
-                english, source = _ENGLISH_FORM[thing.noun], "lexicon"
+                english = _ENGLISH_FORM[thing.noun]
+                source = "repair" if thing.repaired else "lexicon"
             elif matcher._CJK.fullmatch(thing.said):
                 english = translate(thing.said) if translate else None
                 english = _english_name(english)
@@ -388,8 +476,10 @@ def generate(
                 if english is None:
                     untranslated.append(thing.said)
                     continue
-            else:
+            elif _said_name(thing.said):
                 english, source = thing.said, "english"
+            else:
+                return _empty("unclear")
             slots.append({"said": thing.said, "english": english, "source": source})
             nouns.append(_phrase(thing, english))
         if len(nouns) != 2:
@@ -402,7 +492,7 @@ def generate(
     if untranslated:
         return _empty("untranslated", sorted(set(untranslated)))
     prompt = " then ".join(rendered)
-    if not _reads_back(prompt, steps, slots):
+    if not _reads_back(prompt, steps, actions):
         return _empty("no_task")
     original = _dataset_original(prompt, frames)
     return {
@@ -413,6 +503,7 @@ def generate(
         "slots": slots,
         "untranslated": [],
         "dataset_original": original,
+        "repairs": [{"heard": t.heard, "as": t.spelled} for t in tokens if t.repaired],
     }
 
 
@@ -456,19 +547,22 @@ def _english_name(value: str | None) -> str | None:
     return name
 
 
-def _reads_back(prompt: str, steps: Sequence[_Step], slots: Sequence[Slot]) -> bool:
-    """The strict reader must find the heard steps in the sentence: same
-    actions' frames aside, the same objects with the same modifiers, in order."""
+def _reads_back(prompt: str, steps: Sequence[_Step], actions: Sequence[str]) -> bool:
+    """The reader must find the heard steps in the sentence: the same specific
+    action (a move is the generic one), the same objects with the same
+    modifiers, in order, and nothing it could not read."""
     text = matcher._clean(prompt)
     if not prompt or text.unsafe:
         return False
-    tokens, concepts = _read(text.words)
-    if {"STOP", "NEG"} & concepts:
+    tokens, concepts, dropped = _read(text.words)
+    if {"STOP", "NEG"} & concepts or dropped:
         return False
     again = _steps(tokens)
-    if len(again) != len(steps):
+    if len(again) != len(steps) or len(actions) != len(steps):
         return False
-    for heard, written in zip(steps, again, strict=True):
+    for heard, written, action in zip(steps, again, actions, strict=True):
+        if set(written.acts) - {"A:MOVE"} != {action} - {"A:MOVE"}:
+            return False
         if len(heard.things) != len(written.things):
             return False
         for h, w in zip(heard.things, written.things, strict=True):
@@ -486,7 +580,7 @@ def _dataset_original(prompt: str, frames: Frames) -> str | None:
     found = [
         (episodes, sentence)
         for sentence, episodes in frames.sentences.items()
-        if sentence != prompt and matcher._signature(sentence) == want
+        if sentence.lower() != prompt and matcher._signature(sentence) == want
     ]
     if not found:
         return None

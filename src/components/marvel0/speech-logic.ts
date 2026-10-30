@@ -159,11 +159,18 @@ export type GeneratedStatus =
   | "no_task"
   | "unsupported"
   | "no_frame"
-  | "untranslated";
+  | "untranslated"
+  | "unclear";
 export interface GeneratedSlot {
   said: string;
   english: string;
-  source: "lexicon" | "english" | "translation";
+  /** "repair": the server guessed this word from a likely recognition
+   * mistake; the card shows it as a guess. */
+  source: "lexicon" | "repair" | "english" | "translation";
+}
+export interface GeneratedRepair {
+  heard: string;
+  as: string;
 }
 export interface Generated {
   status: GeneratedStatus;
@@ -175,6 +182,8 @@ export interface Generated {
   untranslated: string[];
   /** A dataset instruction with the same meaning, offered beside. */
   datasetOriginal: string | null;
+  /** Every word the server guessed (heard -> read as). */
+  repairs: GeneratedRepair[];
 }
 
 const GENERATED_STATUSES: GeneratedStatus[] = [
@@ -185,9 +194,11 @@ const GENERATED_STATUSES: GeneratedStatus[] = [
   "unsupported",
   "no_frame",
   "untranslated",
+  "unclear",
 ];
 const SLOT_SOURCES: GeneratedSlot["source"][] = [
   "lexicon",
+  "repair",
   "english",
   "translation",
 ];
@@ -221,6 +232,14 @@ function readGenerated(value: unknown): Generated | null {
       .slice(0, 8),
     datasetOriginal:
       status === "ok" ? exactPrompt(item.dataset_original) : null,
+    repairs: list(item.repairs)
+      .flatMap((entry) => {
+        const repair = rec(entry);
+        const heard = plain(repair?.heard, 40);
+        const as = plain(repair?.as, 40);
+        return heard && as ? [{ heard, as }] : [];
+      })
+      .slice(0, 8),
   };
 }
 

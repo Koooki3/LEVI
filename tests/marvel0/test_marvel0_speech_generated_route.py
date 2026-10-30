@@ -129,3 +129,40 @@ def test_a_failing_generation_leaves_the_match_standing(
     answer = response.json()["match"]
     assert answer["tier"] in {"A", "B", "C"}
     assert answer["generated"]["prompt"] is None
+
+
+def test_malformed_rows_are_skipped_and_the_rest_still_counts(
+    catalog_of, tmp_path, monkeypatch
+):
+    catalog_of("a", ["pick peach on green plate"] * 2)
+    with (tmp_path / "data/a/meta/episodes.jsonl").open("a") as handle:
+        handle.write('[1]\n"x"\n{not json\n' + json.dumps({"tasks": "a string"}) + "\n")
+    folder = tmp_path / "data/b/meta/episodes/chunk-000"
+    folder.mkdir(parents=True)
+    pq.write_table(
+        pa.table({"tasks": ["pour water into red cup", None]}),
+        folder / "file-000.parquet",
+    )
+    from levi import catalog
+
+    entries = catalog.datasets()
+    entries["b"] = {"path": str(tmp_path / "data/b"), "revision": "r1"}
+
+    monkeypatch.setattr(catalog, "datasets", lambda: entries)
+    key, counts = speech_api._dataset_instructions()
+    frames = speech_api._frames()
+    assert counts == {"pick peach on green plate": 2}
+    assert [name for name, _ in key] == ["a", "b"]
+    assert frames.by_action["A:MOVE"].verb == "pick"
+
+
+def test_an_entry_without_a_folder_does_not_defeat_the_cache(catalog_of, monkeypatch):
+    from levi import catalog
+
+    catalog_of("a", ["pick peach on green plate"])
+    real = catalog.datasets
+    monkeypatch.setattr(
+        catalog, "datasets", lambda: {**real(), "ghost": {"revision": "r9"}}
+    )
+    first = speech_api._frames()
+    assert speech_api._frames() is first

@@ -582,12 +582,17 @@ function ProposalCard({
   );
 }
 
-/** Why there is no generated sentence (vetoed and restricted show nothing). */
-const GENERATED_WHY: Partial<Record<GeneratedStatus, string>> = {
+/** Why there is no generated sentence (an ok, vetoed or restricted result
+ * never shows this line). */
+const GENERATED_WHY: Record<
+  Exclude<GeneratedStatus, "ok" | "vetoed" | "restricted">,
+  string
+> = {
   no_task: "marvel0.speech.generated.why.no_task",
   unsupported: "marvel0.speech.generated.why.unsupported",
   no_frame: "marvel0.speech.generated.why.no_frame",
   untranslated: "marvel0.speech.generated.why.untranslated",
+  unclear: "marvel0.speech.generated.why.unclear",
 };
 
 /** The sentence written in the datasets' most common phrasing, above the
@@ -611,18 +616,21 @@ function GeneratedChoice({
   )
     return null;
   const usable = generatedPrompts(proposal.match);
-  if (generated.status !== "ok" || !generated.prompt || usable.length === 0)
+  if (generated.status !== "ok") {
+    const status = generated.status;
     return (
       <p className="rg-muted" data-testid="marvel0-speech-generated-none">
         {sayText(
           {
-            key: GENERATED_WHY[generated.status] ?? GENERATED_WHY.no_task,
+            key: GENERATED_WHY[status],
             params: { names: generated.untranslated.join(", ") },
           },
           t,
         )}
       </p>
     );
+  }
+  if (!generated.prompt || usable.length === 0) return null;
   const blocked = !proposal.armed || proposal.checking;
   const prompt = generated.prompt;
   const original = generated.datasetOriginal;
@@ -651,14 +659,35 @@ function GeneratedChoice({
           t,
         )}
       </p>
-      {generated.slots.some((slot) => slot.source !== "lexicon") && (
+      {generated.repairs.length > 0 && (
+        <p className="rg-muted" data-testid="marvel0-speech-generated-repairs">
+          {sayText(
+            {
+              key: "marvel0.speech.generated.guessed",
+              params: {
+                words: generated.repairs
+                  .map((repair) => `${repair.heard} → ${repair.as}`)
+                  .join(", "),
+              },
+            },
+            t,
+          )}
+        </p>
+      )}
+      {generated.slots.some(
+        (slot) => slot.source === "english" || slot.source === "translation",
+      ) && (
         <p className="rg-muted" data-testid="marvel0-speech-generated-slots">
           {sayText(
             {
               key: "marvel0.speech.generated.outside",
               params: {
                 words: generated.slots
-                  .filter((slot) => slot.source !== "lexicon")
+                  .filter(
+                    (slot) =>
+                      slot.source === "english" ||
+                      slot.source === "translation",
+                  )
                   .map((slot) =>
                     slot.said === slot.english
                       ? slot.english

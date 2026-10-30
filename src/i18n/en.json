@@ -6325,5 +6325,7 @@
   "marvel0.speech.generated.why.no_task": "No sentence was generated: say an action, an object and where it goes, for example “put the eggplant into the blue bowl”.",
   "marvel0.speech.generated.why.unsupported": "No sentence was generated: “same”, “corresponding”, “from” and similar words do not fit a frame. Choose from the list below.",
   "marvel0.speech.generated.why.no_frame": "No sentence was generated: the datasets have no sentence for this action.",
-  "marvel0.speech.generated.why.untranslated": "No sentence was generated: these object names have no English yet: {names}. Say them in English, or edit the text."
+  "marvel0.speech.generated.why.untranslated": "No sentence was generated: these object names have no English yet: {names}. Say them in English, or edit the text.",
+  "marvel0.speech.generated.guessed": "Guessed from what was heard, check before you use it: {words}",
+  "marvel0.speech.generated.why.unclear": "No sentence was generated: some words fit no slot (a number, a word in another language, a direction such as “left”). Edit the text, or say it again."
 }

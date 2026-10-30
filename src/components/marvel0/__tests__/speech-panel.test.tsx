@@ -1751,6 +1751,52 @@ describe("the generated sentence", () => {
     expect(useGenerated(h)).toBeNull();
   });
 
+  test("a guessed word is shown as a guess, not as a word outside the list", async () => {
+    const h = await open({
+      script: {
+        transcribe: echo(
+          matchC({
+            generated: generated({
+              prompt: "pick pear into bowl",
+              dataset_original: null,
+              slots: [
+                { said: "pearl", english: "pear", source: "repair" },
+                { said: "bowl", english: "bowl", source: "lexicon" },
+              ],
+              repairs: [{ heard: "pearl", as: "pear" }],
+            }),
+          }),
+        ),
+      },
+    });
+    await speak(h);
+    expect(q(h, "marvel0-speech-generated-repairs")?.textContent).toContain(
+      "pearl → pear",
+    );
+    expect(q(h, "marvel0-speech-generated-slots")).toBeNull();
+  });
+
+  test("an unclear result says why and offers nothing", async () => {
+    const h = await open({
+      script: {
+        transcribe: echo(
+          matchC({
+            generated: generated({
+              status: "unclear",
+              prompt: null,
+              dataset_original: null,
+            }),
+          }),
+        ),
+      },
+    });
+    await speak(h);
+    expect(q(h, "marvel0-speech-generated-none")?.textContent).toBe(
+      en["marvel0.speech.generated.why.unclear"],
+    );
+    expect(useGenerated(h)).toBeNull();
+  });
+
   test("an answer without the generated block works as before", async () => {
     const h = await open({ script: { transcribe: echo(matchA(KNOWN[2])) } });
     await speak(h);

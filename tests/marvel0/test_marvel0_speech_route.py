@@ -837,6 +837,7 @@ GENERATED_KEYS = {
     "slots",
     "untranslated",
     "dataset_original",
+    "repairs",
 }
 
 

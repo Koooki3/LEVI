@@ -396,6 +396,22 @@ _frames_lock = threading.Lock()
 _frames_cache: tuple[tuple, object] | None = None
 
 
+def _counted_datasets(items: dict) -> list[tuple[str, dict]]:
+    """The catalog entries whose instructions count: not a namespace (it
+    shares its base's episodes), and with a folder to read."""
+    return [
+        (name, entry)
+        for name, entry in sorted(items.items())
+        if isinstance(entry, dict)
+        and not entry.get("base")
+        and (entry.get("view") or entry.get("path"))
+    ]
+
+
+def _catalog_key(counted: list[tuple[str, dict]]) -> tuple:
+    return tuple((name, str(entry.get("revision"))) for name, entry in counted)
+
+
 def _dataset_instructions() -> tuple[tuple, dict[str, int]]:
     """``(catalog key, {instruction: episodes})`` over the registered datasets
     (a namespace shares its base's episodes and is not counted twice)."""
@@ -403,23 +419,26 @@ def _dataset_instructions() -> tuple[tuple, dict[str, int]]:
 
     from levi import catalog
 
-    rows: list[tuple[str, int]] = []
-    key = []
-    for name, entry in sorted(catalog.datasets().items()):
-        if entry.get("base"):
-            continue
-        root = entry.get("view") or entry.get("path")
-        if not root:
-            continue
-        key.append((name, str(entry.get("revision"))))
-        rows.extend(_episode_tasks(Path(root)))
     from . import speech_template
 
-    return tuple(key), speech_template.counts_from(rows)
+    counted = _counted_datasets(catalog.datasets())
+    rows: list[tuple[str, int]] = []
+    for _name, entry in counted:
+        rows.extend(_episode_tasks(Path(entry.get("view") or entry.get("path"))))
+    return _catalog_key(counted), speech_template.counts_from(rows)
+
+
+def _task_strings(tasks) -> list[str]:
+    """The instructions of one episode row: a list of strings, else none (a
+    lone string is not iterated letter by letter)."""
+    if not isinstance(tasks, (list, tuple)):
+        return []
+    return [task for task in tasks if isinstance(task, str)]
 
 
 def _episode_tasks(root) -> list[tuple[str, int]]:
-    """(instruction, episodes) of one dataset; an unreadable one gives none."""
+    """(instruction, episodes) of one dataset; a malformed row is skipped, an
+    unreadable dataset gives none, and neither stops the others."""
     from collections import Counter
 
     counts: Counter[str] = Counter()
@@ -428,10 +447,12 @@ def _episode_tasks(root) -> list[tuple[str, int]]:
         if episodes.is_file():
             with episodes.open(encoding="utf-8") as handle:
                 for line in handle:
-                    tasks = json.loads(line).get("tasks") if line.strip() else None
-                    for task in tasks if isinstance(tasks, list) else ():
-                        if isinstance(task, str):
-                            counts[task] += 1
+                    try:
+                        row = json.loads(line) if line.strip() else None
+                    except ValueError:
+                        continue
+                    if isinstance(row, dict):
+                        counts.update(_task_strings(row.get("tasks")))
             return list(counts.items())
         files = sorted((root / "meta/episodes").glob("chunk-*/file-*.parquet"))
         if files:
@@ -440,10 +461,8 @@ def _episode_tasks(root) -> list[tuple[str, int]]:
             for file in files:
                 table = pq.read_table(file, columns=["tasks"])
                 for tasks in table.column("tasks").to_pylist():
-                    for task in tasks or ():
-                        if isinstance(task, str):
-                            counts[task] += 1
-    except (OSError, ValueError, KeyError) as exc:
+                    counts.update(_task_strings(tasks))
+    except Exception as exc:  # noqa: BLE001 - one dataset never stops the others
         log.warning("a dataset's instructions were not read (%s)", type(exc).__name__)
         return []
     return list(counts.items())
@@ -455,11 +474,7 @@ def _frames():
 
     from . import speech_template
 
-    key = tuple(
-        (name, str(entry.get("revision")))
-        for name, entry in sorted(catalog.datasets().items())
-        if not entry.get("base")
-    )
+    key = _catalog_key(_counted_datasets(catalog.datasets()))
     with _frames_lock:
         if _frames_cache is not None and _frames_cache[0] == key:
             return _frames_cache[1]
@@ -487,6 +502,7 @@ def _generated(transcript: str, family: str) -> dict:
             "slots": [],
             "untranslated": [],
             "dataset_original": None,
+            "repairs": [],
         }
 
 

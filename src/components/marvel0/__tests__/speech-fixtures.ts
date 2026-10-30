@@ -703,6 +703,7 @@ export function generated(over: Rec = {}): Rec {
     ],
     untranslated: [],
     dataset_original: "put eggplant into blue bowl",
+    repairs: [],
     ...over,
   };
 }
