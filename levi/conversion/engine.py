@@ -15,19 +15,41 @@ from .progress import Progress
 
 
 def fingerprint(source: Path):
-    """Capture size/mtime manifest, used before/after jobs to detect concurrent edits."""
+    """Capture size/mtime manifest, used before/after jobs to detect concurrent edits.
+
+    The background sync calls this for every raw capture every few seconds,
+    so it walks with ``os.scandir`` (one ``stat`` per file) instead of
+    ``rglob``. The digest must stay what the ``rglob`` version gave, because
+    built views store it: same rows, in pathlib's order (by path components),
+    symlinked directories listed as links and not entered, unreadable
+    directories skipped (tests/test_fingerprint.py compares the two)."""
     import hashlib
 
     rows = []
-    for p in sorted(source.rglob("*")):
-        rel = p.relative_to(source).as_posix()
-        if p.is_symlink():
-            # Links matter (conversion refuses them), whatever they point to.
-            rows.append((rel, "link", os.readlink(p)))
-        elif p.is_file():
-            st = p.stat()
-            rows.append((rel, st.st_size, st.st_mtime_ns))
-    return hashlib.sha256(json.dumps(rows).encode()).hexdigest()
+
+    def walk(directory: str, parts: tuple[str, ...]):
+        try:
+            with os.scandir(directory) as it:
+                entries = list(it)
+        except PermissionError:
+            return
+        for entry in entries:
+            here = (*parts, entry.name)
+            rel = "/".join(here)
+            if entry.is_symlink():
+                # Links matter (conversion refuses them), whatever they point to.
+                rows.append((here, (rel, "link", os.readlink(entry.path))))
+            elif entry.is_file():
+                st = entry.stat()
+                rows.append((here, (rel, st.st_size, st.st_mtime_ns)))
+            elif entry.is_dir():
+                walk(entry.path, here)
+
+    if os.path.isdir(source):  # rglob yields nothing for a missing source
+        walk(os.fspath(source), ())
+    rows.sort(key=lambda row: row[0])
+    manifest = [row for _, row in rows]
+    return hashlib.sha256(json.dumps(manifest).encode()).hexdigest()
 
 
 def execute(
