@@ -22,10 +22,15 @@ def fingerprint(source: Path):
     ``rglob``. The digest must stay what the ``rglob`` version gave, because
     built views store it: same rows, in pathlib's order (by path components),
     symlinked directories listed as links and not entered, unreadable
-    directories skipped (tests/test_fingerprint.py compares the two)."""
+    directories skipped, a file that vanishes during the walk skipped, a
+    source that is not a directory empty (tests/test_fingerprint.py compares
+    the two)."""
+    import errno
     import hashlib
 
     rows = []
+    # What pathlib's is_file/is_symlink treat as "not there" (3.11 _IGNORED_ERRNOS).
+    gone = (errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP)
 
     def walk(directory: str, parts: tuple[str, ...]):
         try:
@@ -36,16 +41,21 @@ def fingerprint(source: Path):
         for entry in entries:
             here = (*parts, entry.name)
             rel = "/".join(here)
-            if entry.is_symlink():
-                # Links matter (conversion refuses them), whatever they point to.
-                rows.append((here, (rel, "link", os.readlink(entry.path))))
-            elif entry.is_file():
-                st = entry.stat()
-                rows.append((here, (rel, st.st_size, st.st_mtime_ns)))
-            elif entry.is_dir():
-                walk(entry.path, here)
+            try:
+                if entry.is_symlink():
+                    # Links matter (conversion refuses them), whatever they point to.
+                    rows.append((here, (rel, "link", os.readlink(entry.path))))
+                elif entry.is_file():
+                    st = entry.stat()
+                    rows.append((here, (rel, st.st_size, st.st_mtime_ns)))
+                elif entry.is_dir():
+                    walk(entry.path, here)
+            except OSError as exc:
+                if exc.errno not in gone:
+                    raise
 
-    if os.path.isdir(source):  # rglob yields nothing for a missing source
+    # Path.is_dir as rglob uses it: missing -> nothing, unreadable parent -> raises.
+    if Path(source).is_dir():
         walk(os.fspath(source), ())
     rows.sort(key=lambda row: row[0])
     manifest = [row for _, row in rows]

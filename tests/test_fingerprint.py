@@ -93,3 +93,52 @@ def test_symlinked_source_is_walked(capture, tmp_path):
     alias = tmp_path / "alias"
     alias.symlink_to(capture)
     assert fingerprint(alias) == rglob_fingerprint(alias) == fingerprint(capture)
+
+
+def test_a_file_that_vanishes_during_the_walk_is_skipped_like_rglob(
+    capture, monkeypatch
+):
+    # The entry is listed (its type known from the listing) and gone before
+    # its stat: rglob's is_file() swallowed that; the walk must skip it too.
+    gone = capture / "demo_2" / "metadata.json"
+    from levi.conversion import engine
+
+    original_scandir = os.scandir
+
+    def scandir_then_delete(path):
+        it = original_scandir(path)
+        if os.fspath(path).endswith("demo_2"):
+            entries = list(it)
+            it.close()
+            gone.unlink()
+
+            class Listed:
+                def __enter__(self):
+                    return iter(entries)
+
+                def __exit__(self, *exc):
+                    return False
+
+            return Listed()
+        return it
+
+    monkeypatch.setattr(engine.os, "scandir", scandir_then_delete)
+    digest = fingerprint(capture)
+    monkeypatch.undo()
+    assert digest == rglob_fingerprint(capture)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any directory")
+def test_a_source_under_an_unsearchable_parent_raises_like_rglob(tmp_path):
+    parent = tmp_path / "locked"
+    source = parent / "capture"
+    source.mkdir(parents=True)
+    (source / "a.txt").write_text("x")
+    parent.chmod(0o600)  # readable, not searchable
+    try:
+        with pytest.raises(PermissionError):
+            rglob_fingerprint(source)
+        with pytest.raises(PermissionError):
+            fingerprint(source)
+    finally:
+        parent.chmod(0o755)
