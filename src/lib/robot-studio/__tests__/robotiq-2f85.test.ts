@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { Window } from "happy-dom";
 import URDFLoader from "urdf-loader";
 import { Box3, Vector3, type Mesh, type Material } from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { robotGlbLoader } from "../glb-loader";
 import {
   ROBOTIQ_CLOSED_ANGLE,
   ROBOTIQ_DRIVE_JOINT,
@@ -200,7 +200,7 @@ describe("Robotiq 2F-85 offline model and physical opening", () => {
   });
 
   test("GLTFLoader can decode every local GLB with meter-scale geometry", async () => {
-    const loader = new GLTFLoader();
+    const loader = robotGlbLoader();
     const files = Object.keys(source.outputs).filter((name) =>
       name.endsWith(".glb"),
     );

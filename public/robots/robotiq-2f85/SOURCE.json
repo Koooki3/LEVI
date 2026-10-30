@@ -84,48 +84,54 @@
       "sha256": "a47544ef0ad645c587e46348dc10e68b89c3e74732bd124c005cfcd8ede3b3b8"
     },
     "SOURCE.md": {
-      "bytes": 2929,
-      "sha256": "2d614deb21e3fa186dec6432bdff4d1d49ad68f5f3e3d5f6bebc3458bd02c1a7"
+      "bytes": 3591,
+      "sha256": "64de4c765fd5546063ff0097066b08a5c626646786a41964ecd1077a561e9718"
     },
     "left_finger.glb": {
-      "bytes": 91132,
-      "sha256": "270969cfdde4570e019bec5a20adfbc90c7faa26c840f52bb872d74ce8b896bd"
+      "bytes": 19276,
+      "sha256": "16efd32722f3c554b9f45dee1d033d87b9b27ab211416f6652f0bba7a8be559c"
     },
     "left_finger_tip.glb": {
-      "bytes": 86364,
-      "sha256": "24f89c4832223ef6f47b2ab7ee5d6b3d293df718b331aa935782ef465083ed7e"
+      "bytes": 18136,
+      "sha256": "f3fcc26cbdb4c263548b85d635b6b6665221fbc5545df4c457def282d6272c07"
     },
     "left_inner_knuckle.glb": {
-      "bytes": 52588,
-      "sha256": "ba223308f990c697a69a06e03e03a2fa5c1e0d9fde951c8df650b4218c890282"
+      "bytes": 12292,
+      "sha256": "734b393aab7b239541ccdafb366de3f11c35909e82b06e798efed89645730bd2"
     },
     "left_knuckle.glb": {
-      "bytes": 39572,
-      "sha256": "697e89b8c7d3cfcb8a9a48d70e81689df76fcc6cfa881d6f507913acf978a407"
+      "bytes": 9208,
+      "sha256": "0a23059cb00ce2ae5eb050cc17bd317ae6b7e76e7dcca70f2eabae1844ba90f7"
     },
     "right_finger.glb": {
-      "bytes": 91132,
-      "sha256": "2b1036fc4896185f215b4fb6f65c3650e4e6a3f8ad17691b2ceeff44fbf59eec"
+      "bytes": 19264,
+      "sha256": "8a9c21071257a59322cafdc255792774c035cbe690fc298e82bedc50fd0d1352"
     },
     "right_finger_tip.glb": {
-      "bytes": 86364,
-      "sha256": "98e4e345c0a6935c2cf1ca82431ca98e4a5105e537116594b9a711be32c5b873"
+      "bytes": 18132,
+      "sha256": "1114d0d26d9b714829d0d54b764f7954e73b7bdd8279e293bb8c36a74200c30d"
     },
     "right_inner_knuckle.glb": {
-      "bytes": 52592,
-      "sha256": "892ed30b8701df0c002acc87903ddf4eb29cc3b8cc421b87417dfe0cb26d7ae5"
+      "bytes": 12276,
+      "sha256": "63aa2a0d76fd2ba8ba4e5fea16b4809bdaf172c6d3b70be93eed8137bbd02be4"
     },
     "right_knuckle.glb": {
-      "bytes": 39572,
-      "sha256": "56bd676ae7994a18235205c12aa920497ae359ab1951e0873e5cd8b2d730f24e"
+      "bytes": 9208,
+      "sha256": "ec4c024dd4780ca49362fb0162fcde4fc6f3ccc199e0130a9bb0de19fbb6742c"
     },
     "robotiq-2f85.urdf": {
       "bytes": 4606,
       "sha256": "32cfae46760dc9fbb8913e65ee69df38652a8f7d42c1cae8a2be011be5e5c5d9"
     },
     "robotiq_base.glb": {
-      "bytes": 1029784,
-      "sha256": "e25d155be17d6ba655a08c940fec16a3d63f55b3a6deebab2f4c9c5e46460e39"
+      "bytes": 170428,
+      "sha256": "ea00035242be2c4b7eed946c2e163134ddc0181d702f205b5b77c46aef17b049"
     }
+  },
+  "mesh_compression": {
+    "tool": "gltfpack@0.22.0",
+    "flags": ["-cc", "-kn", "-km", "-vp", "16"],
+    "script": "scripts/robot-studio/compress-glb.py",
+    "note": "meshopt compression, 16-bit positions, no simplification; decode with the meshopt decoder"
   }
 }

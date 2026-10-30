@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import URDFLoader, { type URDFRobot } from "urdf-loader";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { robotGlbLoader } from "@/lib/robot-studio/glb-loader";
 import { forwardPose } from "@/lib/robot-studio/fr3-kinematics";
 import {
   ROBOTIQ_MODEL_URL,
@@ -86,7 +86,7 @@ export default function ToolModel({
       });
     const loader = new URDFLoader(manager);
     loader.loadMeshCb = (path, resourceManager, done) => {
-      new GLTFLoader(resourceManager).load(
+      robotGlbLoader(resourceManager).load(
         path,
         (model) => done(model.scene),
         undefined,

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { Window } from "happy-dom";
 import URDFLoader from "urdf-loader";
 import { Box3, Quaternion, Vector3 } from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { robotGlbLoader } from "../glb-loader";
 import {
   FR3_FLANGE_FRAME,
   FR3_INITIAL_JOINTS,
@@ -148,7 +148,7 @@ describe("nominal offline FR3 flange", () => {
   });
 
   test("GLTFLoader decodes every local visual with meter-scale link coordinates", async () => {
-    const loader = new GLTFLoader();
+    const loader = robotGlbLoader();
     for (let link = 0; link < 8; link++) {
       const data = readFileSync(new URL(`link${link}.glb`, base));
       const buffer = data.buffer.slice(
@@ -168,15 +168,29 @@ describe("nominal offline FR3 flange", () => {
         ),
       ).toBeLessThan(0.5);
       if (link === 1) {
-        // Upstream shoulder DAE is in mm and has this row-major matrix.
-        // GLB is column-major; GLTFLoader must recover the original translation/scale.
-        near(gltf.scene.children[0].position.toArray(), [0, 0, -0.192]);
-        near(gltf.scene.children[0].scale.toArray(), [0.001, 0.001, 0.001]);
+        // Upstream shoulder DAE is in mm with a -0.192 m offset (row-major
+        // matrix). After meshopt compression the node also carries the
+        // dequantization, so check where the geometry lands, not the node:
+        // the bounds of the uncompressed conversion, to 0.01 mm.
+        const expected = [-0.055, -0.1294, -0.192, 0.055, 0.055, 0.055];
+        const got = [...bounds.min.toArray(), ...bounds.max.toArray()];
+        got.forEach((v, i) =>
+          expect(Math.abs(v - expected[i])).toBeLessThan(1e-5),
+        );
       }
       gltf.scene.traverse((object) => {
         if ("geometry" in object)
           (object.geometry as { dispose(): void }).dispose();
       });
+    }
+  });
+
+  test("every vendored mesh is meshopt-compressed (re-run compress-glb.py after vendoring)", () => {
+    for (let link = 0; link < 8; link++) {
+      const data = readFileSync(new URL(`link${link}.glb`, base));
+      const length = data.readUInt32LE(12);
+      const json = JSON.parse(data.subarray(20, 20 + length).toString("utf8"));
+      expect(json.extensionsUsed ?? []).toContain("EXT_meshopt_compression");
     }
   });
 

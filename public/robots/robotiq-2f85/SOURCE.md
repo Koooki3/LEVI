@@ -16,6 +16,11 @@ converted to GLB with the existing standard-library FR3 converter; triangle
 indices, normals, diffuse colors and node transforms are retained without
 simplification. Coordinates stay Z-up, in meters; GLB does not trigger any
 implicit coordinate rotation in Three.js.
+The GLBs are then stored meshopt-compressed with 16-bit quantized positions
+(`scripts/robot-studio/compress-glb.py`, gltfpack 0.22.0, no simplification):
+12.3 MB became 1.47 MB for both robots, and decoded vertices lie within
+0.004 mm of the uncompressed conversion. Loaders need the meshopt decoder
+(`src/lib/robot-studio/glb-loader.ts`).
 
 Opening width follows the source URDF geometry and the existing shared Robotiq
 server derivation. With `x0=0.03060114`, `dx=0.03152616+0.00563134`,
@@ -40,3 +45,7 @@ transform as a draft until checked by a person. This asset never issues commands
 为 server 的闭合角；URDF 的 0.8 rad 上限不被当作闭合目标。开度比例是物理
 宽度比例，不是角度线性比例。安装平移/旋转、转接板、工具朝向、TCP、实物
 指垫配置仍待核对；本文件不含真机运动接口，也不是碰撞或采集安全认证。
+
+GLB 随后以 meshopt 压缩、坐标 16 位量化保存（`scripts/robot-studio/compress-glb.py`，
+gltfpack 0.22.0，不减面）：两台设备合计 12.3 MB 降到 1.47 MB，解码后的顶点与未压缩
+版本相差不超过 0.004 mm。加载时需要 meshopt 解码器（`src/lib/robot-studio/glb-loader.ts`）。

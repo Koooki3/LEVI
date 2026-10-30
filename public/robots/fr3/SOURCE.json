@@ -111,40 +111,46 @@
       "sha256": "44326830a6773dd6611cdf9947045eeb3276ea4e3ca47a05272816c862c8e386"
     },
     "link0.glb": {
-      "bytes": 2876288,
-      "sha256": "7e6721e8cbf652ad31598e15f96f05874ad396424d630395a3a48b4009e346ad"
+      "bytes": 319080,
+      "sha256": "1b5208aa29ad152bd4c6c41a7513b2011335e0d8c6d9e4048792a86fd846c290"
     },
     "link1.glb": {
-      "bytes": 373816,
-      "sha256": "4e7b30f84c080a267ac097781d9f4816d06f66453d96ff80caf19da6c783b6d5"
+      "bytes": 40104,
+      "sha256": "34fc1b7032de8eac92c8a1ba4c623b4fe56362dbb84994b7830d37e4053ffd09"
     },
     "link2.glb": {
-      "bytes": 373804,
-      "sha256": "6919672c23c006db55157f02cb56e86acf655ad650177acfe948cbc900471348"
+      "bytes": 40412,
+      "sha256": "b52adcd9f4e3b78a931960213b5ed35b4c78328ea402b24c944ae0560a15a5dd"
     },
     "link3.glb": {
-      "bytes": 999032,
-      "sha256": "a11a3dfba95d1fb1901ff7248bbd28c45fe419072934664c5617af6fc125702f"
+      "bytes": 103108,
+      "sha256": "0d1c10f9c5f412a66914acdcb91361ca3a783adf92c7e0bc64c6c6222d74606b"
     },
     "link4.glb": {
-      "bytes": 999072,
-      "sha256": "8891106c85ae2083ca5724b11394281972978fe1a270e43f9129b8a0428ee1e5"
+      "bytes": 106372,
+      "sha256": "5024674d12f892a36d442051e55359001b821226c63e8df5c4571c26928e7a89"
     },
     "link5.glb": {
-      "bytes": 1301776,
-      "sha256": "d935dbb29b7a16502c1522418324594ecab9bdf163380a91d7f8684254c45ece"
+      "bytes": 137368,
+      "sha256": "e04635d4e7ec9399783b4414ab2999093476f8f3ab2a42af5493b4d7b6a16841"
     },
     "link6.glb": {
-      "bytes": 2083796,
-      "sha256": "9e8308791486cb2a6abced645b41de76ea5d4e809a3c0183ff0753fe171002bb"
+      "bytes": 230284,
+      "sha256": "64349e2c26a8c8b766d470be12108e848e53bf712dc16ecf1e9057b470f22e94"
     },
     "link7.glb": {
-      "bytes": 1734196,
-      "sha256": "61dd0d1e78c2aecac84ff26f068fd8c76d7f954ed087642c55e860fc34c60550"
+      "bytes": 201620,
+      "sha256": "b5f61b88aa501a39ef5dae2ac77589d8e76ebea8168b41365aebeb7af2a3ade6"
     },
     "utils.xacro": {
       "bytes": 11741,
       "sha256": "b6819d3530d760ae8f4a318348d0125f3a2ae67bf03bfc965060d8388fd060f7"
     }
+  },
+  "mesh_compression": {
+    "tool": "gltfpack@0.22.0",
+    "flags": ["-cc", "-kn", "-km", "-vp", "16"],
+    "script": "scripts/robot-studio/compress-glb.py",
+    "note": "meshopt compression, 16-bit positions, no simplification; decode with the meshopt decoder"
   }
 }

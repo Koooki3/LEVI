@@ -5,7 +5,7 @@ import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import URDFLoader, { type URDFRobot } from "urdf-loader";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { robotGlbLoader } from "@/lib/robot-studio/glb-loader";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { bindTargetControls, type TargetCallbacks } from "./transform-session";
 import {
@@ -79,7 +79,7 @@ function Robot({
     // The typed error callback requires an Object3D; URDFLoader ignores it when err is set.
     loader.loadMeshCb = (path, resourceManager, done) => {
       if (path.endsWith(".glb")) {
-        new GLTFLoader(resourceManager).load(
+        robotGlbLoader(resourceManager).load(
           path,
           (gltf) => done(gltf.scene),
           undefined,
