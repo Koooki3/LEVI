@@ -14,11 +14,6 @@ The eight detailed DAE visual meshes were converted to indexed GLB while
 retaining triangle topology, normals, diffuse colors and scene node transforms.
 There is no mesh simplification. The link coordinates remain in meters, Z-up;
 DAE row-major scene matrices become equivalent GLB column-major matrices.
-The GLBs are then stored meshopt-compressed with 16-bit quantized positions
-(`scripts/robot-studio/compress-glb.py`, gltfpack 0.22.0, no simplification):
-12.3 MB became 1.47 MB for both robots, and decoded vertices lie within
-0.004 mm of the uncompressed conversion. Loaders need the meshopt decoder
-(`src/lib/robot-studio/glb-loader.ts`).
 No collision or inertial model, accelerometers, gripper, or measured TCP is included.
 The base frame is `fr3_link0`; the preview endpoint is the flange `fr3_link8`,
 0.107 m along link7's Z axis. The initial pose is illustrative, not robot feedback.
@@ -37,7 +32,16 @@ behavior, or hardware safety, and do not send any physical motion commands.
 位置限位及法兰偏移；GLB 保留原始三角面、法线、材质颜色与节点变换，无减面。
 只提供离线机械臂与法兰预览，没有碰撞认证、夹爪或实测 TCP 标定。初始姿态为
 示意状态，不是真机反馈。求解不收敛时保留最后有效关节姿态，不输出部分解。
-GLB 随后以 meshopt 压缩、坐标 16 位量化保存（`scripts/robot-studio/compress-glb.py`，
-gltfpack 0.22.0，不减面）：两台设备合计 12.3 MB 降到 1.47 MB，解码后的顶点与未压缩
-版本相差不超过 0.004 mm。加载时需要 meshopt 解码器（`src/lib/robot-studio/glb-loader.ts`）。
 此模型不会发送真机动作，也不能作为安全运动规划或采集授权依据。
+
+Mesh compression: the GLBs are stored meshopt-compressed with 16-bit quantized
+positions (`scripts/robot-studio/compress-glb.py`, gltfpack 0.22.0). There is
+no simplification; gltfpack drops a few degenerate (zero-area) triangles. On
+2026-10-30 the meshes of both robots went from 12.3 MB to 1.47 MB, and decoded
+vertices lie within 0.004 mm of the uncompressed conversion. Loaders need the
+meshopt decoder (`src/lib/robot-studio/glb-loader.ts`).
+
+网格压缩：GLB 以 meshopt 压缩、坐标 16 位量化保存（`scripts/robot-studio/compress-glb.py`，
+gltfpack 0.22.0）。不减面，只去掉少量面积为零的退化三角形。2026-10-30 两台设备的网格
+合计从 12.3 MB 降到 1.47 MB，解码后的顶点与未压缩版本相差不超过 0.004 mm。加载时需要
+meshopt 解码器（`src/lib/robot-studio/glb-loader.ts`）。

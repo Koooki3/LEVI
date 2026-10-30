@@ -199,6 +199,17 @@ describe("Robotiq 2F-85 offline model and physical opening", () => {
     }
   });
 
+  test("every vendored mesh is meshopt-compressed (re-run compress-glb.py after vendoring)", () => {
+    for (const name of Object.keys(source.outputs).filter((n) =>
+      n.endsWith(".glb"),
+    )) {
+      const data = readFileSync(new URL(name, base));
+      const length = data.readUInt32LE(12);
+      const json = JSON.parse(data.subarray(20, 20 + length).toString("utf8"));
+      expect(json.extensionsUsed ?? []).toContain("EXT_meshopt_compression");
+    }
+  });
+
   test("GLTFLoader can decode every local GLB with meter-scale geometry", async () => {
     const loader = robotGlbLoader();
     const files = Object.keys(source.outputs).filter((name) =>
