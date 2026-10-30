@@ -70,6 +70,9 @@ export type EpisodeChangeStatus =
  * ticks as the start window (run-start.tsx). */
 export const CHANGE_ACKS = ["estop", "scene_reset", "area_clear"] as const;
 export type ChangeAttest = Record<(typeof CHANGE_ACKS)[number], boolean>;
+/** While the old client is being ended or the new one started, Enter stays
+ * off; after a refusal or an unknown end it is the person's again. */
+const CHANGE_IN_FLIGHT = new Set(["ending", "waiting", "restarting"]);
 
 const EPISODE_CHANGE_KEY: Record<
   Exclude<EpisodeChangeStatus["state"], "idle">,
@@ -387,7 +390,9 @@ export function RunPanel({
   // The field belongs to one run: a new client starts with it empty.
   const runId = view?.run?.runId ?? null;
   const [promptRun, setPromptRun] = useState<string | null>(runId);
-  if (promptRun !== runId) {
+  // A read that fails for a while shows no run (null): that is not a new
+  // client, and the typed instruction stays.
+  if (runId !== null && promptRun !== runId) {
     setPromptRun(runId);
     setNextPrompt("");
     setChangeOpen(false);
@@ -601,7 +606,14 @@ export function RunPanel({
       )}
 
       {view && !frozen && (
-        <ArmedActions view={view} actions={actions} enterOff={changing} />
+        <ArmedActions
+          view={view}
+          actions={actions}
+          enterOff={
+            (changing && episodeChange.state === "idle") ||
+            CHANGE_IN_FLIGHT.has(episodeChange.state)
+          }
+        />
       )}
       {view && <ExitHome view={view} actions={actions} />}
       {refusedHere && (
@@ -686,6 +698,20 @@ export function RunPanel({
                 facts={
                   <dl className="rg-facts">
                     <div className="rg-fact">
+                      <dt>{t("marvel0.deploy.fact.model")}</dt>
+                      <dd>
+                        <code>{String(view.run?.form?.model_id ?? "")}</code>
+                      </dd>
+                    </div>
+                    <div className="rg-fact">
+                      <dt>{t("marvel0.cmd.field.group")}</dt>
+                      <dd>
+                        <code>
+                          {String(view.run?.form?.rollout_group ?? "")}
+                        </code>
+                      </dd>
+                    </div>
+                    <div className="rg-fact">
                       <dt>{t("marvel0.episodeChange.from")}</dt>
                       <dd>{currentPrompt ?? ""}</dd>
                     </div>
@@ -708,6 +734,7 @@ export function RunPanel({
                 onCancel={() => setChangeOpen(false)}
                 onConfirm={(ticked) => {
                   setChangeOpen(false);
+                  setNextPrompt("");
                   onChangeInstruction(wanted, {
                     estop: ticked.estop === true,
                     scene_reset: ticked.scene_reset === true,

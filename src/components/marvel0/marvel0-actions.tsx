@@ -34,6 +34,10 @@ import {
   type ReadProblem,
 } from "./use-marvel0-actions";
 
+/** How long after the person's confirmation the new client may still be
+ * started on their ticks; later, step 3 is filled instead. */
+const AUTO_START_WITHIN_MS = 60_000;
+
 export function Marvel0Actions({
   api = marvel0Api,
   pollMs,
@@ -65,6 +69,8 @@ export function Marvel0Actions({
     form: Record<string, unknown>;
     prompt: string;
     attest: ChangeAttest;
+    /** When the person confirmed the change (ms). */
+    confirmedAt: number;
   };
   const { t } = useLocale();
   const catalog = useMarvel0Catalog(api);
@@ -122,7 +128,14 @@ export function Marvel0Actions({
     )
       return;
     attemptedRun.current = runId;
-    const operation = { state: "ending" as const, runId, form, prompt, attest };
+    const operation = {
+      state: "ending" as const,
+      runId,
+      form,
+      prompt,
+      attest,
+      confirmedAt: Date.now(),
+    };
     setEpisodeOperation(operation);
     episodeTimer.current = setTimeout(() => {
       setEpisodeOperation((current) =>
@@ -185,6 +198,8 @@ export function Marvel0Actions({
     restartedRun.current = episodeOperation.runId;
     const operation = episodeOperation;
     const fallBack = () => {
+      // A newer run already took the card: this change is over.
+      if (observedRunId.current !== operation.runId) return;
       // The start was refused or not answered: step 3 shows the same body
       // and the ordinary start window (the refusal stays on the run card).
       setEpisodeOperation({ ...operation, state: "ready" });
@@ -194,7 +209,10 @@ export function Marvel0Actions({
     const group =
       typeof body.rollout_group === "string" ? body.rollout_group : "";
     setEpisodeOperation({ ...operation, state: "restarting" });
-    if (!runActions || !group) {
+    // The ticks describe the moment of the change: an exit confirmed long
+    // after it (an unknown end that settled later) is not started on them.
+    const late = Date.now() - operation.confirmedAt > AUTO_START_WITHIN_MS;
+    if (!runActions || !group || late) {
       fallBack();
       return;
     }

@@ -1,5 +1,5 @@
 import { act } from "react";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
 import en from "@/i18n/en.json";
 import {
   click,
@@ -64,7 +64,10 @@ describe("the next-instruction workflow on the full action page", () => {
     phrase: string;
     ack: Record<string, boolean>;
   };
-  function harness(startResult: () => Promise<boolean>) {
+  function harness(
+    startResult: () => Promise<boolean>,
+    pressResult: () => Promise<boolean> = async () => true,
+  ) {
     const { api } = fakeApi();
     const calls: string[] = [];
     const starts: Started[] = [];
@@ -76,7 +79,7 @@ describe("the next-instruction workflow on the full action page", () => {
       press: async (action) => {
         calls.push(action);
         if (control.throwOnPress) throw new Error("connection interrupted");
-        return true;
+        return pressResult();
       },
       hold: async () => true,
       end: async () => true,
@@ -193,5 +196,51 @@ describe("the next-instruction workflow on the full action page", () => {
     });
     expect(h.calls).toEqual(["end_at_gate", "start"]);
     expect(h.starts[0].form.prompt).toBe("third task");
+  });
+  const enterButton = (host: HTMLElement) =>
+    host.querySelector('[data-action="enter"]') as HTMLButtonElement | null;
+
+  test("a refused end gives Start next episode back to the person", async () => {
+    const h = harness(
+      async () => true,
+      async () => false,
+    );
+    const view = await render(h.page("at_gate", "run-1"));
+    await changeTo(view.host, "next task");
+    await waitFor(() => status(view.host, "refused"), {
+      label: "the refused end",
+    });
+    expect(enterButton(view.host)?.disabled).toBe(false);
+    expect(h.calls).toEqual(["end_at_gate"]);
+  });
+
+  test("Start next episode stays off while the old client is being ended", async () => {
+    const h = harness(async () => true);
+    const view = await render(h.page("at_gate", "run-1"));
+    await changeTo(view.host, "next task");
+    await waitFor(() => status(view.host, "waiting"), { label: "waiting" });
+    expect(enterButton(view.host)?.disabled).toBe(true);
+  });
+
+  test("an exit confirmed more than a minute after the confirmation fills step 3 and starts nothing", async () => {
+    const h = harness(async () => true);
+    h.control.throwOnPress = true;
+    const view = await render(h.page("at_gate", "run-1"));
+    await changeTo(view.host, "late task");
+    await waitFor(() => status(view.host, "unknown"), { label: "unknown" });
+    setSystemTime(new Date(Date.now() + 61_000));
+    try {
+      await act(async () => view.rerender(h.page("done", "run-1")));
+      await waitFor(() => status(view.host, "ready"), {
+        label: "the step-3 fallback",
+      });
+    } finally {
+      setSystemTime();
+    }
+    expect(h.calls).toEqual(["end_at_gate"]);
+    await waitFor(
+      () => view.host.querySelector("[data-testid=marvel0-command-resumed]"),
+      { label: "the preserved form" },
+    );
   });
 });
