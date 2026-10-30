@@ -379,10 +379,115 @@ def _allowed_revision(allowed, family: str) -> str:
 def _match(transcript: str, allowed: tuple, family: str):
     try:
         result = _matcher().match_transcript(transcript, allowed, family=family)
-        return {**result, "allowed_revision": _allowed_revision(allowed, family)}
+        return {
+            **result,
+            "allowed_revision": _allowed_revision(allowed, family),
+            "generated": _generated(transcript, family),
+        }
     except Exception as exc:  # noqa: BLE001 - the text is not in the log, only the kind
         log.warning("matching failed (%s)", type(exc).__name__)
         raise refuse("speech_failed") from None
+
+
+# ------------------------------------------------------------ generated ----
+# The datasets' instructions with their episode counts, read once per catalog
+# revision: the frames a spoken task is written in (speech_template).
+_frames_lock = threading.Lock()
+_frames_cache: tuple[tuple, object] | None = None
+
+
+def _dataset_instructions() -> tuple[tuple, dict[str, int]]:
+    """``(catalog key, {instruction: episodes})`` over the registered datasets
+    (a namespace shares its base's episodes and is not counted twice)."""
+    from pathlib import Path
+
+    from levi import catalog
+
+    rows: list[tuple[str, int]] = []
+    key = []
+    for name, entry in sorted(catalog.datasets().items()):
+        if entry.get("base"):
+            continue
+        root = entry.get("view") or entry.get("path")
+        if not root:
+            continue
+        key.append((name, str(entry.get("revision"))))
+        rows.extend(_episode_tasks(Path(root)))
+    from . import speech_template
+
+    return tuple(key), speech_template.counts_from(rows)
+
+
+def _episode_tasks(root) -> list[tuple[str, int]]:
+    """(instruction, episodes) of one dataset; an unreadable one gives none."""
+    from collections import Counter
+
+    counts: Counter[str] = Counter()
+    try:
+        episodes = root / "meta/episodes.jsonl"
+        if episodes.is_file():
+            with episodes.open(encoding="utf-8") as handle:
+                for line in handle:
+                    tasks = json.loads(line).get("tasks") if line.strip() else None
+                    for task in tasks if isinstance(tasks, list) else ():
+                        if isinstance(task, str):
+                            counts[task] += 1
+            return list(counts.items())
+        files = sorted((root / "meta/episodes").glob("chunk-*/file-*.parquet"))
+        if files:
+            import pyarrow.parquet as pq
+
+            for file in files:
+                table = pq.read_table(file, columns=["tasks"])
+                for tasks in table.column("tasks").to_pylist():
+                    for task in tasks or ():
+                        if isinstance(task, str):
+                            counts[task] += 1
+    except (OSError, ValueError, KeyError) as exc:
+        log.warning("a dataset's instructions were not read (%s)", type(exc).__name__)
+        return []
+    return list(counts.items())
+
+
+def _frames():
+    global _frames_cache
+    from levi import catalog
+
+    from . import speech_template
+
+    key = tuple(
+        (name, str(entry.get("revision")))
+        for name, entry in sorted(catalog.datasets().items())
+        if not entry.get("base")
+    )
+    with _frames_lock:
+        if _frames_cache is not None and _frames_cache[0] == key:
+            return _frames_cache[1]
+    key, counts = _dataset_instructions()
+    frames = speech_template.learn_frames(counts)
+    with _frames_lock:
+        _frames_cache = (key, frames)
+    return frames
+
+
+def _generated(transcript: str, family: str) -> dict:
+    """A sentence in the datasets' most common phrasing (labelled generated),
+    or the reason there is none. Its failure never fails the match."""
+    from . import speech_template
+
+    try:
+        return speech_template.generate(transcript, _frames(), family=family)
+    except Exception as exc:  # noqa: BLE001 - the match stands without it
+        log.warning("generation failed (%s)", type(exc).__name__)
+        return {
+            "status": "no_frame",
+            "prompt": None,
+            "frames": [],
+            "episodes": 0,
+            "slots": [],
+            "untranslated": [],
+            "dataset_original": None,
+        }
 
 
 # ---------------------------------------------------------------- reading a request

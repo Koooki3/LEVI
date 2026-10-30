@@ -18,7 +18,7 @@ It never:
 - starts, stops or connects to the policy server, the client or the arm stack, presses Enter, or sends a motion command; the sequence **Use**, **Make command**, **Copy** is three separate clicks of yours;
 - stops or pauses the robot. There is no voice stop and nothing on the page listens for one. **Speech cannot stop the arm: use the physical e-stop.** The page says so next to the card, permanently;
 - changes any other field (`--min-z`, RTC, steps, episode count, rollout group, note, the confirmation phrases of the deploy card, the automatic-evaluation wizard);
-- puts the transcript into a command. The form check accepts almost any text for a non-restricted model, so the speech path is stricter by design: only a sentence of the allowed list can reach the field;
+- puts the transcript into a command. The form check accepts almost any text for a non-restricted model, so the speech path is stricter by design: what can reach the field is a sentence of the allowed list, or the sentence LEVI generated in the datasets' most common phrasing, shown as generated (see [Generated sentences](#generated-sentences--生成句)); never the transcript itself;
 - listens continuously, waits for a wake word, or keeps the microphone open between recordings;
 - keeps audio or text. The audio exists in memory and in the worker's pipe; the transcript only in the answer to the page (and in the page's memory for 60 seconds). Neither goes to a file, a log line, an error message or a URL. The log gets the request id, an outcome word, byte counts and eight characters of a SHA-256;
 - sends anything off the machine: the model runs offline (`HF_HUB_OFFLINE=1`), and no cloud recogniser and no language model is involved;
@@ -36,7 +36,7 @@ It never:
 - 启动、停止或连接策略服务器、客户端或机械臂栈，按 Enter，或发运动命令；“使用”“生成命令”“复制”是你的三次独立点击；
 - 让机器人停下或暂停。没有语音停机，页面上也没有任何东西在听停止词。**语音不能让机械臂停下，请按物理急停。** 页面在卡片旁永久写着这句话；
 - 改任何其他字段（`--min-z`、RTC、步数、片段数、rollout 组、备注、部署卡片的确认短语、自动评测向导）；
-- 把转写文字放进命令。非受限模型的表单检查几乎放过任何文字，所以语音这条路故意更严：只有允许列表里的句子才能进入输入框；
+- 把转写文字放进命令。非受限模型的表单检查几乎放过任何文字，所以语音这条路故意更严：能进入输入框的只有允许列表里的句子，或者 LEVI 按数据集最常见句式生成、并标明是生成句的那一句（见[生成句](#generated-sentences--生成句)）；转写原文本身永远不会进去；
 - 持续监听、等唤醒词，或在两次录音之间保持麦克风打开；
 - 保存音频或文字。音频只存在于内存和工作进程的管道里；转写文字只存在于给页面的回答里（以及页面内存里 60 秒）。两者都不写入文件、日志、错误信息或 URL。日志只有请求 ID、一个结果词、字节数和 SHA-256 的前八个字符；
 - 把任何东西发到本机之外：模型离线运行（`HF_HUB_OFFLINE=1`），不涉及云端识别，也不涉及语言模型；
@@ -82,29 +82,49 @@ The matcher (`levi/marvel0/speech_match.py`, standard library only, no model) re
 
 匹配器（`levi/marvel0/speech_match.py`，只用标准库，没有模型）把转写文字和每一句允许的指令都按中英文读成同一种结构（步骤、动作、带颜色或大小的物体、顺序），再给差异打分。在 375 句手写句子和 1611 条程序生成的近似错句上，它从没有在 A 档放过一句错的指令；字符串相似度（difflib、WRatio、句向量）在任何阈值下都做不到。有两条性质保证这一点，`check_allowed_set` 在每次请求时检查：允许指令里的每个词都在匹配器的词表里，且任意两句允许指令之间不会近到混淆。检查不通过时（例如站点文件新加了一句指令）回答是 `speech_allowed_set_invalid`（412），工作进程不会被碰；处理办法是把报告的词加进 `levi/marvel0/speech_lexicon.py`。
 
+## Generated sentences / 生成句
+
+Owner decision 2026-10-30: besides the closest allowed instruction, the card offers a sentence **written** from what was said, in the phrasing the registered datasets use most, instead of only retrieving one. `levi/marvel0/speech_template.py` (standard library only) reads the action and the objects of the transcript, English or Chinese, through the matcher's lexicon, and puts them into a frame learned from the task instructions of every dataset in the catalog, weighted by episodes (a `Reset:` prefix is ignored, a namespace is not counted twice; the frames are read again when a dataset's revision changes):
+
+- the verb is the one used most for that action, for example `pick` for placing, `stack`, `pour`;
+- the preposition follows the destination as the datasets write it: `into` a bowl or drawer, `in` a basket, `on` a plate; an action keeps its own (`stack ... on` a cup even though water is poured `into` one);
+- steps joined by "then" / 然后 become frames joined by `then`; a step without its verb keeps the previous action;
+- an object outside the lexicon said in English is kept as said ("dragon fruit"); one said in Chinese needs an English name first (a small offline translation model is the planned second stage), and until then the card says which names had none.
+
+What keeps it safe: the block is labelled "generated: not an instruction the policy was trained on" and shows the frame and how many episodes use it; only its own **Use** press hands it over, after the same 800 ms and freshness checks as any proposal; a dataset instruction with the same meaning is shown beside it, since the policy may know that wording better; nothing is generated for a result with a stop, negation or unsafe flag, or for a model of the restricted family (both the server and the page enforce this); a frame that cannot hold the request ("same colour", "corresponding", "from ...", one object without a place) gives no sentence and says why; and the sentence is read back with the matcher's reader and must contain exactly the heard objects with their colours and sizes. Speech still never starts, stops or moves anything. The answer field is `match.generated`: `status` (`ok`, `vetoed`, `restricted`, `no_task`, `unsupported`, `no_frame`, `untranslated`), `prompt`, `frames`, `episodes`, `slots` (`said`, `english`, `source`), `untranslated`, `dataset_original`.
+
+维护者 2026-10-30 决定：除了最接近的允许指令，卡片还给出一句按所说内容**生成**的句子，用已登记数据集里最常见的说法，而不是只检索一句已有的。`levi/marvel0/speech_template.py`（只用标准库）通过匹配器的词表读出转写里的动作和物体（中英文都可以），填进从目录里所有数据集的任务指令中学到的句式；统计按片段数加权（忽略 `Reset:` 前缀，命名空间不重复计数；数据集版本变化时重新读取）：
+
+- 动词取这个动作最常用的，例如放置用 `pick`，还有 `stack`、`pour`；
+- 介词跟着目标物体走，和数据集的写法一致：碗和抽屉用 `into`，篮子用 `in`，盘子用 `on`；动作有自己固定用法的保留自己的（杯子叠放用 `stack ... on`，即使倒水是 `into`）；
+- 用 then / 然后 连接的几步，生成用 `then` 连接的几个句式；没说动词的一步沿用前一步的动作；
+- 词表外的物体用英文说出时照原样保留（“dragon fruit”）；用中文说出的需要先有英文名（计划第二期用一个小型离线翻译模型），在那之前卡片会说明哪些名字没有英文。
+
+安全措施：这一块标明“模板生成，不在训练过的指令里”，并显示句式和用它的片段数；只有点它自己的**使用**才会交出，和其他提案一样要过 800 毫秒和时效检查；数据集里意思相同的原句并排给出，因为策略可能更熟悉那个说法；结果带停止、否定或不安全标记时，以及受限族模型，都不生成（服务端和页面都检查）；句式装不下的请求（“相同颜色”“对应”“从……”、只有一个物体没有目标）不给句子并说明原因；生成的句子会用匹配器的读取器回读，必须正好包含听到的物体及其颜色和大小。语音仍然不能启动、停止或移动任何东西。回答字段是 `match.generated`：`status`（`ok`、`vetoed`、`restricted`、`no_task`、`unsupported`、`no_frame`、`untranslated`）、`prompt`、`frames`、`episodes`、`slots`（`said`、`english`、`source`）、`untranslated`、`dataset_original`。
+
 ## When it refuses / 什么时候拒绝
 
 Every transcription asks the policy deploy's passive status (`GET /api/levi/marvel0/deploy`, cached for two seconds, so no extra `nvidia-smi` or socket read) and refuses when:
 
-| Reason | Refusal | Status | Meaning |
-| --- | --- | --- | --- |
-| `policy_starting` | `speech_policy_starting` | 409 | the policy server is `starting`, or its state is `unknown` (also when the status cannot be read) |
-| `client_connected` | `speech_client_connected` | 409 | a client is connected to the policy port: a run may be moving the arm, and the task instruction is the client's start parameter, so changing it now means nothing |
-| `arm_in_use` | `speech_arm_in_use` | 409 | the AERI arm lock is held or cannot be read (the deploy's own check) |
-| `gpu_insufficient` | `speech_gpu_insufficient` | 409 | the worker is not loaded and fewer than 5000 MiB plus the site's `gpu.margin_mib` are free |
-| `gpu_unreadable` | `speech_gpu_unreadable` | 503 | the worker is not loaded and the GPU's memory use cannot be read |
+| Reason             | Refusal                   | Status | Meaning                                                                                                                                                           |
+| ------------------ | ------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `policy_starting`  | `speech_policy_starting`  | 409    | the policy server is `starting`, or its state is `unknown` (also when the status cannot be read)                                                                  |
+| `client_connected` | `speech_client_connected` | 409    | a client is connected to the policy port: a run may be moving the arm, and the task instruction is the client's start parameter, so changing it now means nothing |
+| `arm_in_use`       | `speech_arm_in_use`       | 409    | the AERI arm lock is held or cannot be read (the deploy's own check)                                                                                              |
+| `gpu_insufficient` | `speech_gpu_insufficient` | 409    | the worker is not loaded and fewer than 5000 MiB plus the site's `gpu.margin_mib` are free                                                                        |
+| `gpu_unreadable`   | `speech_gpu_unreadable`   | 503    | the worker is not loaded and the GPU's memory use cannot be read                                                                                                  |
 
 A running arm stack alone is **not** a reason: it is the normal state during operation. Before a policy server is deployed, the deploy route releases the speech worker, so its roughly 4.9 GB never counts against the deploy's memory check.
 
 每次转写都会读取策略部署的被动状态（`GET /api/levi/marvel0/deploy`，缓存两秒，所以不会多一次 `nvidia-smi` 或套接字读取），出现下面的情形就拒绝：
 
-| 原因 | 拒绝码 | 状态码 | 含义 |
-| --- | --- | --- | --- |
-| `policy_starting` | `speech_policy_starting` | 409 | 策略服务器是 `starting`，或状态为 `unknown`（状态读不到时也算） |
-| `client_connected` | `speech_client_connected` | 409 | 有客户端连在策略端口上：可能正在运行并驱动机械臂，而任务指令是客户端的启动参数，此时修改没有意义 |
-| `arm_in_use` | `speech_arm_in_use` | 409 | AERI 手臂锁被占用或读不到（部署自己的检查） |
-| `gpu_insufficient` | `speech_gpu_insufficient` | 409 | 工作进程尚未加载，且空闲显存少于 5000 MiB 加站点文件的 `gpu.margin_mib` |
-| `gpu_unreadable` | `speech_gpu_unreadable` | 503 | 工作进程尚未加载，且读不到 GPU 的显存占用 |
+| 原因               | 拒绝码                    | 状态码 | 含义                                                                                             |
+| ------------------ | ------------------------- | ------ | ------------------------------------------------------------------------------------------------ |
+| `policy_starting`  | `speech_policy_starting`  | 409    | 策略服务器是 `starting`，或状态为 `unknown`（状态读不到时也算）                                  |
+| `client_connected` | `speech_client_connected` | 409    | 有客户端连在策略端口上：可能正在运行并驱动机械臂，而任务指令是客户端的启动参数，此时修改没有意义 |
+| `arm_in_use`       | `speech_arm_in_use`       | 409    | AERI 手臂锁被占用或读不到（部署自己的检查）                                                      |
+| `gpu_insufficient` | `speech_gpu_insufficient` | 409    | 工作进程尚未加载，且空闲显存少于 5000 MiB 加站点文件的 `gpu.margin_mib`                          |
+| `gpu_unreadable`   | `speech_gpu_unreadable`   | 503    | 工作进程尚未加载，且读不到 GPU 的显存占用                                                        |
 
 只是机械臂栈在运行**不是**拒绝的理由：那是操作时的常态。部署策略服务器之前，部署路由会先释放语音工作进程，所以它约 4.9 GB 的显存不会计入部署的显存检查。
 
@@ -123,12 +143,12 @@ export LEVI_STT_WORKER_PYTHON=$PWD/integrations/stt/.venv/bin/python   # optiona
 
 ## Settings / 设置
 
-| Setting | Default | |
-| --- | --- | --- |
-| `LEVI_STT_WORKER_PYTHON` | `integrations/stt/.venv/bin/python` | the worker environment's Python / 工作进程环境的 Python |
-| `LEVI_STT_MODEL_DIR` | `$LEVI_WORKSPACE/checkpoints/stt` | the folder of model folders (must be inside the workspace) / 存放模型文件夹的目录（必须在工作区内） |
-| `LEVI_STT_MODEL` | `qwen3-asr-1.7b-hf` | the model folder's name; `fake` runs the worker's `fake` provider (LEVI's own Python, no model, no GPU) for tests and demonstrations / 模型文件夹名；`fake` 运行工作进程的 `fake` 提供者（用 LEVI 自己的 Python，没有模型、不用 GPU），供测试和演示 |
-| `LEVI_STT_FAKE_SCRIPT` | unset | with `fake`: a JSON file of scripted answers, consumed in order (tests only) / 配合 `fake`：按顺序消费的脚本答案 JSON 文件（仅测试用） |
+| Setting                  | Default                             |                                                                                                                                                                                                                                                     |
+| ------------------------ | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LEVI_STT_WORKER_PYTHON` | `integrations/stt/.venv/bin/python` | the worker environment's Python / 工作进程环境的 Python                                                                                                                                                                                             |
+| `LEVI_STT_MODEL_DIR`     | `$LEVI_WORKSPACE/checkpoints/stt`   | the folder of model folders (must be inside the workspace) / 存放模型文件夹的目录（必须在工作区内）                                                                                                                                                 |
+| `LEVI_STT_MODEL`         | `qwen3-asr-1.7b-hf`                 | the model folder's name; `fake` runs the worker's `fake` provider (LEVI's own Python, no model, no GPU) for tests and demonstrations / 模型文件夹名；`fake` 运行工作进程的 `fake` 提供者（用 LEVI 自己的 Python，没有模型、不用 GPU），供测试和演示 |
+| `LEVI_STT_FAKE_SCRIPT`   | unset                               | with `fake`: a JSON file of scripted answers, consumed in order (tests only) / 配合 `fake`：按顺序消费的脚本答案 JSON 文件（仅测试用）                                                                                                              |
 
 Everything else is a constant: recordings of 0.3 to 10.5 s and at most 400,000 bytes; one transcription at a time and at most 10 a minute; idle exit after 120 s; 45 s to start and 20 s per transcription (the browser allows 75 s in total); free GPU memory of 5000 MiB plus the site margin for a cold start. The worker runs at `nice` 19, on the cores of the site file's `[unit] cpu_affinity` (the template's `8-15` is a guess nobody has confirmed), with 2 threads (`OMP_NUM_THREADS=2`) and `LEVI_GPU_LOCK_FILE` empty. Of LEVI's environment it receives only what it needs to find its libraries and the GPU: not the UI token, not Hugging Face credentials.
 
@@ -138,40 +158,40 @@ Everything else is a constant: recordings of 0.3 to 10.5 s and at most 400,000 b
 
 All under `/api/levi/marvel0/`. All four are a person's: the web UI token is needed, an agent's Bearer credential is refused (`403 person_only`), and the site file must be valid first (`412`). Errors have the shape of the other marvel0 routes: `{"detail": {"code", "message", ...}}`; no answer names a path.
 
-| Route | What it does |
-| --- | --- |
-| `GET speech` | `levi.marvel0.speech.status.v1`: `state` (`unavailable`, `off`, `loading`, `ready`, `busy` or `failed`), `reason` (`{code, text}` for `unavailable` and `failed`), `installed` (`worker`, `model`), `model`, `device`, `limits` (`max_seconds` 10, `max_bytes` 400000), `idle_seconds`, and `gate` (`allowed` and the `reasons` above). Passive: it never starts the worker |
+| Route                                                  | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET speech`                                           | `levi.marvel0.speech.status.v1`: `state` (`unavailable`, `off`, `loading`, `ready`, `busy` or `failed`), `reason` (`{code, text}` for `unavailable` and `failed`), `installed` (`worker`, `model`), `model`, `device`, `limits` (`max_seconds` 10, `max_bytes` 400000), `idle_seconds`, and `gate` (`allowed` and the `reasons` above). Passive: it never starts the worker                                                                                                                                                           |
 | `POST speech/transcribe?request_id=<id>&model_id=<id>` | the body is one WAV recording (`Content-Type: audio/wav`); `request_id` is 8 to 80 characters of `A-Za-z0-9._:-`; `model_id` is optional. Answers `levi.marvel0.speech.v1`: `heard`, `reason` (`no_speech`, `language`, `low_confidence`, `empty` when `heard` is false: a normal answer, not an error), `transcript`, `language` (`English` or `Chinese`), `match` (the matcher's result: `tier`, `flag`, `family`, `best`, `alternatives`, `allowed`), `engine` (`model`, `device`, `loaded_now`) and `timing_ms` (`load`, `infer`) |
-| `POST speech/match` | `{"transcript", "model_id"?}` (a closed form, at most 500 characters): the same matching for a transcript the person edited. Text only; the worker is not touched |
-| `POST speech/release` | stops the worker and frees its GPU memory; answers `{"state": "off", "released": true}` every time |
+| `POST speech/match`                                    | `{"transcript", "model_id"?}` (a closed form, at most 500 characters): the same matching for a transcript the person edited. Text only; the worker is not touched                                                                                                                                                                                                                                                                                                                                                                     |
+| `POST speech/release`                                  | stops the worker and frees its GPU memory; answers `{"state": "off", "released": true}` every time                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 **The recording.** Exactly a 44-byte WAV header and 16 kHz mono 16-bit samples: `RIFF`, the file size, `WAVE`, a 16-byte `fmt ` chunk, then the `data` chunk that runs to the end of the file, with both sizes matching the bytes. No other chunk, no other rate, no stereo. A bigger `Content-Length` than 400,000 is refused before anything is read, and the stream is counted as it arrives, so a sender that lies about its length or sends none is stopped at the same cap. No decoder or `ffmpeg` sees these bytes; the worker reads the samples only after this check.
 
-| Refusal | Status | When |
-| --- | --- | --- |
-| `request_id_invalid` | 400 | `request_id` missing or not 8 to 80 characters of `A-Za-z0-9._:-` |
-| `speech_body_invalid` | 400 | `speech/match` body not the closed JSON form, or an upload cut off |
-| `audio_too_short` | 400 | the recording is shorter than 0.3 s |
-| `audio_too_large` | 413 | more than 400,000 bytes, or longer than 10.5 s |
-| `audio_format` | 415 | not `audio/wav`, or not exactly the layout above |
-| `model_unknown` | 422 | `model_id` is not offered by the model catalog |
-| `speech_not_installed` / `speech_model_missing` | 503 | the worker environment / the model is not installed |
-| `speech_manifest_mismatch` | 503 | the model files do not match their manifest |
-| `speech_gpu_unreadable` | 503 | see the guards above |
-| `speech_policy_starting`, `speech_client_connected`, `speech_arm_in_use`, `speech_gpu_insufficient` | 409 | see the guards above |
-| `speech_allowed_set_invalid` | 412 | the allowed instructions cannot be told apart reliably |
-| `speech_busy` | 429 | one transcription at a time, no queue (`reason: in_flight`), and at most 10 a minute (`reason: rate_limit`, with `retry_after_s`) |
-| `speech_failed` | 502 | the worker failed or answered out of turn; it was stopped and the next request starts a new one |
-| `speech_timeout` | 504 | the worker did not answer in 20 s (or load in 45 s); its whole process group was killed |
+| Refusal                                                                                             | Status | When                                                                                                                              |
+| --------------------------------------------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `request_id_invalid`                                                                                | 400    | `request_id` missing or not 8 to 80 characters of `A-Za-z0-9._:-`                                                                 |
+| `speech_body_invalid`                                                                               | 400    | `speech/match` body not the closed JSON form, or an upload cut off                                                                |
+| `audio_too_short`                                                                                   | 400    | the recording is shorter than 0.3 s                                                                                               |
+| `audio_too_large`                                                                                   | 413    | more than 400,000 bytes, or longer than 10.5 s                                                                                    |
+| `audio_format`                                                                                      | 415    | not `audio/wav`, or not exactly the layout above                                                                                  |
+| `model_unknown`                                                                                     | 422    | `model_id` is not offered by the model catalog                                                                                    |
+| `speech_not_installed` / `speech_model_missing`                                                     | 503    | the worker environment / the model is not installed                                                                               |
+| `speech_manifest_mismatch`                                                                          | 503    | the model files do not match their manifest                                                                                       |
+| `speech_gpu_unreadable`                                                                             | 503    | see the guards above                                                                                                              |
+| `speech_policy_starting`, `speech_client_connected`, `speech_arm_in_use`, `speech_gpu_insufficient` | 409    | see the guards above                                                                                                              |
+| `speech_allowed_set_invalid`                                                                        | 412    | the allowed instructions cannot be told apart reliably                                                                            |
+| `speech_busy`                                                                                       | 429    | one transcription at a time, no queue (`reason: in_flight`), and at most 10 a minute (`reason: rate_limit`, with `retry_after_s`) |
+| `speech_failed`                                                                                     | 502    | the worker failed or answered out of turn; it was stopped and the next request starts a new one                                   |
+| `speech_timeout`                                                                                    | 504    | the worker did not answer in 20 s (or load in 45 s); its whole process group was killed                                           |
 
 全部在 `/api/levi/marvel0/` 下。四个接口都只限本人：需要网页界面令牌，智能体的 Bearer 凭据会被拒绝（`403 person_only`），并且站点文件必须先有效（否则 `412`）。错误的形状和 marvel0 的其他接口相同：`{"detail": {"code", "message", ...}}`；任何回答都不含路径。
 
-| 接口 | 作用 |
-| --- | --- |
-| `GET speech` | `levi.marvel0.speech.status.v1`：`state`（`unavailable`、`off`、`loading`、`ready`、`busy` 或 `failed`）、`reason`（`unavailable` 和 `failed` 时是 `{code, text}`）、`installed`（`worker`、`model`）、`model`、`device`、`limits`（`max_seconds` 为 10，`max_bytes` 为 400000）、`idle_seconds`，以及 `gate`（`allowed` 和上面的 `reasons`）。被动：从不启动工作进程 |
+| 接口                                                   | 作用                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET speech`                                           | `levi.marvel0.speech.status.v1`：`state`（`unavailable`、`off`、`loading`、`ready`、`busy` 或 `failed`）、`reason`（`unavailable` 和 `failed` 时是 `{code, text}`）、`installed`（`worker`、`model`）、`model`、`device`、`limits`（`max_seconds` 为 10，`max_bytes` 为 400000）、`idle_seconds`，以及 `gate`（`allowed` 和上面的 `reasons`）。被动：从不启动工作进程                                                                                                                                  |
 | `POST speech/transcribe?request_id=<id>&model_id=<id>` | 请求体是一段 WAV 录音（`Content-Type: audio/wav`）；`request_id` 是 8 到 80 个 `A-Za-z0-9._:-` 字符；`model_id` 可省略。回答 `levi.marvel0.speech.v1`：`heard`、`reason`（`heard` 为 false 时是 `no_speech`、`language`、`low_confidence` 或 `empty`：这是正常结果，不是错误）、`transcript`、`language`（`English` 或 `Chinese`）、`match`（匹配器的结果：`tier`、`flag`、`family`、`best`、`alternatives`、`allowed`）、`engine`（`model`、`device`、`loaded_now`）和 `timing_ms`（`load`、`infer`） |
-| `POST speech/match` | `{"transcript", "model_id"?}`（封闭的表单，最多 500 个字符）：对人修改过的转写文字重新匹配。纯文本，不碰工作进程 |
-| `POST speech/release` | 停止工作进程并释放它的显存；每次都回答 `{"state": "off", "released": true}` |
+| `POST speech/match`                                    | `{"transcript", "model_id"?}`（封闭的表单，最多 500 个字符）：对人修改过的转写文字重新匹配。纯文本，不碰工作进程                                                                                                                                                                                                                                                                                                                                                                                       |
+| `POST speech/release`                                  | 停止工作进程并释放它的显存；每次都回答 `{"state": "off", "released": true}`                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 **录音格式。** 恰好是 44 字节的 WAV 头加 16 kHz 单声道 16 位采样：`RIFF`、文件大小、`WAVE`、16 字节的 `fmt ` 块，然后是一直到文件末尾的 `data` 块，两个大小都和字节数一致。不接受别的块、别的采样率或立体声。`Content-Length` 超过 400000 时，在读任何字节之前就拒绝；数据流到达时还会计数，所以谎报长度或不带长度的发送者也在同一个上限停下。没有任何解码器或 `ffmpeg` 接触这些字节；工作进程在这项检查之后才读采样。拒绝的错误码和状态码见上面的英文表格。
 
@@ -218,7 +238,6 @@ On 2026-10-27 the owner used the card on marvel0 with a UGREEN USB MIC-CM727 (ch
 - 经由这个管理器、在 0.45 比例的策略部署旁边，工作进程退出后是否像基准里的进程那样归还显存；
 - 站点文件示例里那五句之外的指令的匹配质量；
 - 真实浏览器里的麦克风列表：测试用的是按规范行为伪造的 `mediaDevices`（获准前不给名称，`exact` 的 ID 不存在时抛 `OverconstrainedError`）；Chrome 和 Firefox 在这台机器上怎样命名设备、何时更换设备 ID，以及 -30 dBFS 的“声音很小”界线是否适合真人声音，还没有核对。
-
 
 ## Fresh proposals / 提案时效
 

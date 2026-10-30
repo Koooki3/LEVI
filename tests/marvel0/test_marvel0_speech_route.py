@@ -829,12 +829,23 @@ def test_the_rate_limiter_by_itself():
 
 # --------------------------------------------------------------- the answer
 
+GENERATED_KEYS = {
+    "status",
+    "prompt",
+    "frames",
+    "episodes",
+    "slots",
+    "untranslated",
+    "dataset_original",
+}
+
 
 def test_a_transcription_answers_with_the_contract_shape(machine):
     response = machine.post()
     assert response.status_code == 200
     answer = response.json()
     assert re.fullmatch(r"[0-9a-f]{64}", answer["match"].pop("allowed_revision"))
+    assert set(answer["match"].pop("generated")) == GENERATED_KEYS
     assert answer == {
         "schema": "levi.marvel0.speech.v1",
         "ok": True,

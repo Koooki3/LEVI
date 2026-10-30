@@ -741,9 +741,9 @@ def test_the_real_allowed_lists_pass_the_load_time_check(world):
 
 def test_check_allowed_set_reports_a_word_the_lexicon_does_not_know():
     problems = M.check_allowed_set(
-        [*worlds()["W5"], "pick the banana in the blue plate"]
+        [*worlds()["W5"], "pick the zucchini in the blue plate"]
     )
-    assert len(problems) == 1 and "banana" in problems[0] and "I1" in problems[0]
+    assert len(problems) == 1 and "zucchini" in problems[0] and "I1" in problems[0]
     assert M.check_allowed_set(["pick the eggplant in the blue plate quickly"])
 
 
