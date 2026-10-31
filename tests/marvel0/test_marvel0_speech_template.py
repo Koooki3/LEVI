@@ -494,3 +494,59 @@ def test_particles_and_attached_characters_are_not_names(frames, said):
 @pytest.mark.parametrize("bad", ["hold on", "hold it", "followed by", "pick up"])
 def test_the_name_filter_refuses_phrases_itself(bad):
     assert T._english_name(bad) is None
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "往杯子里倒水",
+        "往碗里放苹果",
+        "往盒子里放积木",
+        "向篮子里放香蕉",
+        "朝碗里放个苹果",
+        "往篮子里放香蕉然后往碗里放苹果",
+    ],
+)
+def test_a_destination_named_first_with_wang_gives_no_sentence(frames, said):
+    # The frame's order would swap the two ("pour cup into water").
+    asked = []
+    result = gen(said, frames, translate=lambda zh: asked.append(zh) or "thing")
+    assert (result["status"], result["prompt"], asked) == ("no_task", None, [])
+
+
+def test_a_destination_after_the_object_with_wang_works(frames):
+    done = gen("把茄子往蓝色碗里放", frames)
+    assert done["status"] == "ok" and done["prompt"].endswith("eggplant into blue bowl")
+
+
+@pytest.mark.parametrize("said", ["把苹果往左放", "往左放一点", "把苹果向上放到碗里"])
+def test_a_direction_with_wang_is_not_a_place(frames, said):
+    asked = []
+    result = gen(said, frames, translate=lambda zh: asked.append(zh) or "thing")
+    assert (result["status"], asked) == ("no_task", [])
+
+
+@pytest.mark.parametrize("name", ["向日葵", "朝天椒", "哈密瓜"])
+def test_a_name_starting_with_a_marker_or_a_particle_stays_whole(frames, name):
+    assert T.unknown_names(f"把{name}放到蓝色碗里") == [name]
+
+
+@pytest.mark.parametrize(
+    "said", ["把茄子放到蓝色碗里啦", "把茄子放到蓝色碗里哈", "把茄子放到蓝色碗里头"]
+)
+def test_a_final_particle_or_a_locative_tail_changes_nothing(frames, said):
+    assert gen(said, frames)["prompt"] == gen("把茄子放到蓝色碗里", frames)["prompt"]
+
+
+@pytest.mark.parametrize("said", ["把一号盘子放到蓝色碗里", "把二号碗放到绿色盘子上"])
+def test_a_numbered_thing_is_unclear(frames, said):
+    asked = []
+    result = gen(said, frames, translate=lambda zh: asked.append(zh) or "thing")
+    assert (result["status"], asked) == ("unclear", [])
+
+
+@pytest.mark.parametrize(
+    "bad", ["apple and banana", "on plate", "into bowl", "cup with lid"]
+)
+def test_the_name_filter_refuses_joining_and_place_words(bad):
+    assert T._english_name(bad) is None

@@ -1172,3 +1172,20 @@ def test_install_refuses_a_nested_or_indexed_weight_file_that_is_not_pinned(
             install.install_model(tmp_path / "models", "text", source)
         assert caught.value.code == "manifest_mismatch"
     assert not (tmp_path / "models" / "text").exists()
+
+
+def test_install_refuses_an_index_with_values_that_are_not_names(tmp_path, monkeypatch):
+    import hashlib
+
+    from levi_stt_worker import install
+    from levi_stt_worker.errors import StartupError
+
+    pinned = {"model.safetensors": hashlib.sha256(b"weights").hexdigest()}
+    monkeypatch.setitem(install.TRANSLATION_MODELS, "text", ("org/text", "rev", pinned))
+    source = snapshot(tmp_path)
+    (source / "model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": {"a": "model.safetensors", "b": 3}})
+    )
+    with pytest.raises(StartupError) as caught:
+        install.install_model(tmp_path / "models", "text", source)
+    assert caught.value.code == "manifest_mismatch"

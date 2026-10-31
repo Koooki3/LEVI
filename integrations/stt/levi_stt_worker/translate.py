@@ -109,7 +109,10 @@ def _free_gpu() -> None:
     """Give back what a failed load allocated (best effort, no import of its
     own: nothing was allocated if torch was never imported)."""
     import contextlib
+    import gc
     import sys
+
+    gc.collect()
 
     torch = sys.modules.get("torch")
     if torch is not None:
@@ -143,6 +146,7 @@ class QwenTextTranslator:
         if self._broken:
             raise RequestError("translate_unavailable", self._broken)
         began = time.perf_counter()
+        failure = None
         try:
             from .manifest import verify_manifest
 
@@ -162,13 +166,16 @@ class QwenTextTranslator:
                 use_safetensors=True,
             ).eval()
         except (StartupError, ImportError, OSError, ValueError) as error:
-            message = (
+            failure = (
                 f"The translation model cannot be loaded ({type(error).__name__})."
             )
-            if not isinstance(error, OSError):  # a read error may pass
-                self._broken = message
+        if failure is not None:
+            # Outside the handler: the exception, its traceback and any
+            # half-loaded weights they hold are gone before the cache is freed.
+            # The service does not ask this worker again (manager).
+            self._broken = failure
             _free_gpu()
-            raise RequestError("translate_unavailable", message) from None
+            raise RequestError("translate_unavailable", failure)
         if {p.device.type for p in model.parameters()} != {"cuda"}:
             # An offloaded layer would run a 4B model on the arm controller's cores.
             del model

@@ -6332,7 +6332,7 @@
   "marvel0.speech.btn.use_generated": "使用生成句",
   "marvel0.speech.btn.use_original": "使用数据集原句",
   "marvel0.speech.generated.why.no_task": "没有生成句子：需要说出动作、物体和放到哪里，例如“把茄子放到蓝色碗里”。",
-  "marvel0.speech.generated.why.unsupported": "没有生成句子：“相同”“对应”“从……”这类说法套不进句式，请从下面的列表里选。",
+  "marvel0.speech.generated.why.unsupported": "没有生成句子：“相同”“对应”“从……”、用“和”连起来的两样东西这类说法套不进句式，请从下面的列表里选。",
   "marvel0.speech.generated.why.no_frame": "没有生成句子：数据集里没有这个动作的句式。",
   "marvel0.speech.generated.why.untranslated": "没有生成句子：这些物体名还没有英文：{names}。可以用英文说，或者修改文字。",
   "marvel0.speech.generated.guessed": "根据听到的内容猜测修正，使用前请核对：{words}",
@@ -6352,5 +6352,5 @@
   "marvel0.speech.generated.not_asked.gpu_memory": "没有翻译：GPU 空闲显存不够加载翻译模型。",
   "marvel0.speech.generated.not_asked.no_time": "没有翻译：这次请求的时间用完了。修改文字可以再试。",
   "marvel0.speech.generated.not_asked.failed": "没有翻译：翻译失败。请再试一次，或者用英文说这些名称。",
-  "marvel0.speech.generated.why.unclear": "没有生成句子：有些词放不进句式（数字、其他语言的词，或“左边”这类方向词）。请修改文字，或者再说一次。"
+  "marvel0.speech.generated.why.unclear": "没有生成句子：有些词放不进句式，或者可以有两种读法（数字、其他语言的词、“左边”这类方向词、“文件夹”这种可能含动词的名字）。请修改文字，或者再说一次。"
 }

@@ -52,10 +52,12 @@ def _unpinned_index_entries(folder: Path, weights: dict[str, str]) -> list[str]:
     if not index.exists():
         return []
     try:
-        mapped = set(json.loads(index.read_text())["weight_map"].values())
+        mapped = list(json.loads(index.read_text())["weight_map"].values())
     except (ValueError, KeyError, TypeError, AttributeError):
+        mapped = None
+    if mapped is None or not all(isinstance(name, str) for name in mapped):
         return ["model.safetensors.index.json"]
-    return sorted(name for name in mapped if name not in weights)
+    return sorted({name for name in mapped if name not in weights})
 
 
 def install_model(model_dir: Path, name: str, source: Path | None = None) -> Path:

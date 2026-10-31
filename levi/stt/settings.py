@@ -68,12 +68,13 @@ TRANSLATE_MAX_BYTES = 1024
 # (SPEECH_DEADLINES in src/components/marvel0/speech-api.ts). A translation
 # after either gets only what is left of these budgets (at most
 # TRANSLATE_TIMEOUT_S); a worker that misses it is stopped, which takes up to
-# 2 * GRACE_S (4 s) more, and the budgets leave room for that, so the server
-# answers before the page stops waiting and the request lock is free again.
+# about 4.5 s more (the manager's two GRACE_S waits and the children record),
+# and the budgets leave room for that, so the server answers before the page
+# stops waiting and the request lock is free again.
 # With less than TRANSLATE_MIN_S left no translation is tried; one is begun
 # only with TRANSLATE_NAME_S a name left, plus TRANSLATE_LOAD_S for the load.
 TRANSCRIBE_BUDGET_S = 68
-MATCH_BUDGET_S = 10
+MATCH_BUDGET_S = 9.5
 TRANSLATE_MIN_S = 3
 TRANSLATE_LOAD_S = 5.5
 TRANSLATE_NAME_S = 1.0

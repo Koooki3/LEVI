@@ -50,21 +50,6 @@ from . import speech_template as template
 Reason = Literal["not_object", "known_as", "unchecked"]
 
 _VARIANTS: Final = str.maketrans({"桔": "橘", "菓": "果"})
-# Words that join or place things, never part of one object's name.
-_NOT_IN_NAME: Final = frozenset(
-    [
-        "and",
-        "or",
-        "with",
-        "plus",
-        "beside",
-        "besides",
-        "next",
-        "near",
-        "between",
-        "then",
-    ]
-) | frozenset(template._PLACES)
 _SUFFIXES: Final = "子儿头"
 _ZH_FORMS: Final[dict[str, tuple[str, ...]]] = {}
 for _form, _concept in lexicon.ZH_CONCEPTS.items():
@@ -98,10 +83,7 @@ def object_name(answer: str | None) -> str | None:
     if name is None:
         return None
     words = name.split(" ")
-    if any(
-        word in template._NOT_NAMES or word in _NOT_IN_NAME or word.endswith("ly")
-        for word in words
-    ):
+    if any(word in template._NOT_NAMES or word.endswith("ly") for word in words):
         return None
     concepts = [matcher._lookup_english(word) for word in words]
     if all(found is not None and found[0].startswith("J:") for found in concepts):

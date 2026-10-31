@@ -6332,7 +6332,7 @@
   "marvel0.speech.btn.use_generated": "Use the generated sentence",
   "marvel0.speech.btn.use_original": "Use the dataset sentence",
   "marvel0.speech.generated.why.no_task": "No sentence was generated: say an action, an object and where it goes, for example “put the eggplant into the blue bowl”.",
-  "marvel0.speech.generated.why.unsupported": "No sentence was generated: “same”, “corresponding”, “from” and similar words do not fit a frame. Choose from the list below.",
+  "marvel0.speech.generated.why.unsupported": "No sentence was generated: “same”, “corresponding”, “from”, two things joined by “and” (和) and similar wordings do not fit a frame. Choose from the list below.",
   "marvel0.speech.generated.why.no_frame": "No sentence was generated: the datasets have no sentence for this action.",
   "marvel0.speech.generated.why.untranslated": "No sentence was generated: these object names have no English yet: {names}. Say them in English, or edit the text.",
   "marvel0.speech.generated.guessed": "Guessed from what was heard, check before you use it: {words}",
@@ -6352,5 +6352,5 @@
   "marvel0.speech.generated.not_asked.gpu_memory": "Not translated: the GPU has too little free memory for the translation model.",
   "marvel0.speech.generated.not_asked.no_time": "Not translated: this request ran out of time. Edit the text to try again.",
   "marvel0.speech.generated.not_asked.failed": "Not translated: the translation failed. Try again, or say the names in English.",
-  "marvel0.speech.generated.why.unclear": "No sentence was generated: some words fit no slot (a number, a word in another language, a direction such as “left”). Edit the text, or say it again."
+  "marvel0.speech.generated.why.unclear": "No sentence was generated: some words fit no slot or can be read two ways (a number, a word in another language, a direction such as “left”, a name such as 文件夹 that could also hold a verb). Edit the text, or say it again."
 }

@@ -280,12 +280,14 @@ class _SlotReader(matcher._Reader):
         ``_glue`` for which adjacent pieces become one name outside the lexicon
         (the translator gets it whole). A filler between two characters of an
         unknown name stays in it (擀面杖); one before or after it does not (把,
-        的, and 往/向/朝/着 here); 儿 after a thing and 号 after a size belong
-        to them (碗儿, 大号); 和/跟/与/或/及 are kept as a conjunction, which
-        ``generate`` does not put into a frame. What cannot be told apart is
-        not guessed: a one-character unknown piece right after 上/下/中/面/点/
-        起/全/里/内 (上衣 would be 衣) and an unknown piece + 夹 + another verb
-        (文件夹放到, or 榴莲夹放到?) make the sentence ``unclear``."""
+        的, and 着/啦/哈 here, 头 after 里/上: 碗里头); 儿 after a thing and 号
+        after a size belong to them (碗儿, 大号); 和/跟/与/或/及 are kept as a
+        conjunction (``C``) and 往/向/朝 before a known word as a destination
+        marker (``D``: 往碗里放, not 向日葵), which ``generate`` checks. What
+        cannot be told apart is not guessed: a one-character unknown piece
+        right after 上/下/中/面/点/起/全/里/内 (上衣 would be 衣), an unknown
+        piece + 夹 + another verb (文件夹放到, or 榴莲夹放到?) and a numbered
+        thing (一号盘子) make the sentence ``unclear``."""
         spans: list[tuple[int, int]] = []  # characters of each token of this run
         first = len(self.tokens)
         gap: list[str] = []
@@ -294,12 +296,19 @@ class _SlotReader(matcher._Reader):
         at = 0
         while at < len(run):
             char = run[at]
-            joins = char in _CONJUNCTIONS_ZH
-            token = None if joins else self._chinese_token(run, at)
-            if token or joins:
+            marker, size = None, 1
+            if char in _CONJUNCTIONS_ZH:
+                marker = "C"
+            elif char in _TOWARDS_ZH and run[at + 1 : at + 2] in _DIRECTIONS_ZH:
+                marker, size = "W", 2  # 往左, 向上: a direction, not a place
+            elif char in _TOWARDS_ZH and self._chinese_token(run, at + 1):
+                marker = "D"
+            token = None if marker else self._chinese_token(run, at)
+            if token or marker:
                 self._flush_at(gap, gap_span, spans, run)
                 gap, held = [], []
-                tok, size = token or (matcher._Tok("C", "exact", char, char), 1)
+                said = run[at : at + size]
+                tok, size = token or (matcher._Tok(marker, "exact", said, said), size)
                 self.tokens.append(tok)
                 spans.append((at, at + size))
                 at += size
@@ -311,8 +320,23 @@ class _SlotReader(matcher._Reader):
             ):
                 spans[-1] = (spans[-1][0], at + 1)  # 碗儿, 大号
                 at += 1
+            elif char == "号" and at > 0 and run[at - 1] in _NUMERALS_ZH:
+                self.dropped.append(run[at - 1 : at + 1])  # 一号盘子: which one?
+                at += 1
             else:
-                if char not in lexicon.FILLERS_ZH and char not in _FILLERS_HERE:
+                locative_tail = (
+                    char == "头" and at > 0 and run[at - 1] in "里上外前后下"
+                )
+                particle = char in _PARTICLES_ZH and (
+                    at + 1 == len(run)
+                    or run[at + 1] in lexicon.FILLERS_ZH
+                    or self._chinese_token(run, at + 1) is not None
+                )  # 放好啦, 拿着苹果; not 哈密瓜
+                if (
+                    char not in lexicon.FILLERS_ZH
+                    and not particle
+                    and not locative_tail
+                ):
                     gap_span = (gap_span[0] if gap else at, at + 1)
                     gap += [*held, char] if gap else [char]
                     held = []
@@ -342,9 +366,14 @@ class _SlotReader(matcher._Reader):
 
 _CONJUNCTIONS_ZH: Final = frozenset("和跟与或及")
 _NOUN_ENDINGS: Final = frozenset("子头儿")
-# Fillers for the template's reader only: directions and particles before a
-# thing (往碗里放, 拿着苹果), never part of a new name.
-_FILLERS_HERE: Final = frozenset("往向朝着")
+# Particles, fillers for the template's reader at the end of a run or before
+# a known word (拿着苹果, 放好啦), never inside a name (哈密瓜).
+_PARTICLES_ZH: Final = frozenset("着啦哈咯呗嘞")
+# "Towards": before a known word it marks the destination (往碗里放), before
+# a direction it is one (往左).
+_TOWARDS_ZH: Final = frozenset("往向朝")
+_DIRECTIONS_ZH: Final = frozenset("左右前后上下")
+_NUMERALS_ZH: Final = frozenset("一二三四五六七八九十两0123456789")
 # Matcher fillers that also start many object names (上衣, 点心, 面条, 中药).
 _NAME_STARTS: Final = frozenset("上下中面点起全里内")
 
@@ -467,6 +496,20 @@ def _read(
     concepts = {t.concept for t in reader.tokens}
     kept = [t for t in reader.tokens if t.concept not in matcher._VETO]
     return kept, concepts, reader.dropped
+
+
+def _destination_first(tokens: Sequence[matcher._Tok]) -> bool:
+    """A step names its destination (往/向/朝, ``D``) before its first thing:
+    the frame's order would swap the two."""
+    seen_thing = False
+    for tok in tokens:
+        if tok.concept == "T":
+            seen_thing = False
+        elif tok.concept == "U" or tok.concept.startswith("N:"):
+            seen_thing = True
+        elif tok.concept == "D" and not seen_thing:
+            return True
+    return False
 
 
 def _steps(tokens: Sequence[matcher._Tok]) -> list[_Step]:
@@ -615,6 +658,10 @@ def generate(
     if any(t.concept == "C" for t in tokens):
         # 红色和蓝色的积木, 苹果和香蕉: a frame holds one thing per slot.
         return _empty("unsupported")
+    if _destination_first(tokens) or any(t.concept == "W" for t in tokens):
+        # 往碗里放苹果: the frame would put the bowl first ("pick bowl on
+        # apple"); 往左放: a direction is not a place.
+        return _empty("no_task")
     steps = _steps(tokens)
     if not steps:
         return _empty("no_task")
@@ -708,6 +755,22 @@ def _place(frames: Frames, frame: Frame, destination: str | None) -> str:
     return frame.place
 
 
+# Words that join or place things, never part of one object's name.
+_NOT_IN_NAME: Final = frozenset(
+    [
+        "and",
+        "or",
+        "with",
+        "plus",
+        "beside",
+        "besides",
+        "next",
+        "near",
+        "between",
+        "then",
+    ]
+) | frozenset(_PLACES)
+
 # A translated name: one to three words of letters (a hyphen inside a word),
 # with at most a final full stop, which translators add.
 _NAME: Final = re.compile(r"[a-z]+(?:-[a-z]+)*(?: [a-z]+(?:-[a-z]+)*){0,2}")
@@ -723,7 +786,7 @@ def _english_name(value: str | None) -> str | None:
         return None
     words = [w for w in text.split(" ") if w not in _ARTICLES]
     name = " ".join(words)
-    if not _NAME.fullmatch(name):
+    if not _NAME.fullmatch(name) or any(w in _NOT_IN_NAME for w in words):
         return None
     concepts = {
         matcher._lookup_english(w)[0] for w in words if matcher._lookup_english(w)
