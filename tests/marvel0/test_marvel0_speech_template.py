@@ -153,6 +153,57 @@ def test_a_chinese_name_outside_the_lexicon_needs_a_translation(frames):
 
 
 @pytest.mark.parametrize(
+    ("said", "name"),
+    [
+        ("把蓝莓放到蓝色盘子里", "蓝莓"),  # 蓝 is blue
+        ("把卷笔刀放到蓝色盘子里", "卷笔刀"),  # 笔 pen, 刀 knife
+        ("把玩具车放到蓝色盘子里", "玩具车"),  # 玩具 toy
+        ("把陶瓷杯放到蓝色盘子里", "陶瓷杯"),  # 杯 cup
+        ("把红色的榴莲放到蓝色盘子里", "榴莲"),  # 的 keeps red a modifier
+    ],
+)
+def test_a_new_name_holding_a_lexicon_word_reaches_the_translator_whole(
+    frames, said, name
+):
+    assert T.unknown_names(said) == [name]
+    asked = []
+    result = gen(said, frames, translate=lambda zh: asked.append(zh) or "new thing")
+    assert asked == [name] and result["status"] == "ok"
+
+
+def test_a_known_compound_is_left_alone(frames):
+    assert T.unknown_names("把蓝色碗放到绿色盘子上") == []
+    assert (
+        gen("把蓝色碗放到绿色盘子上", frames)["prompt"]
+        == "pick blue bowl on green plate"
+    )
+
+
+def test_a_translated_name_holding_lexicon_words_reads_back_as_one_name(frames):
+    names = {
+        "卷笔刀": "pencil sharpener",
+        "陶瓷杯": "ceramic cup",
+        "乒乓球": "ping pong ball",
+    }
+    result = gen("把卷笔刀放到蓝色盘子里", frames, translate=names.get)
+    assert result["prompt"] == "pick pencil sharpener on blue plate"
+    result = gen("把乒乓球放进陶瓷杯里", frames, translate=names.get)
+    assert result["prompt"] == "pick ping pong ball on ceramic cup"
+    assert [slot["english"] for slot in result["slots"]] == [
+        "ping pong ball",
+        "ceramic cup",
+    ]
+
+
+def test_a_place_word_keeps_two_unknown_english_names_apart(frames):
+    result = gen("put durian into rambutan", frames)
+    assert [slot["said"] for slot in result["slots"]] == ["durian", "rambutan"]
+    assert gen("put dragon fruit into blue bowl", frames)["slots"][0]["said"] == (
+        "dragon fruit"
+    )
+
+
+@pytest.mark.parametrize(
     "bad",
     [None, "", "stop the robot now please", "do not", "then", "durian; rm", "a b c d"],
 )

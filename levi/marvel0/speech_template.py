@@ -270,16 +270,101 @@ class _SlotReader(matcher._Reader):
         else:
             self.dropped.append(text)
 
+    def chinese(self, run: str) -> None:
+        """As the matcher's, then one name for a glued span of things.
 
-def _read(words: str) -> tuple[list[matcher._Tok], set[str], list[str]]:
+        A Chinese compound needs no space and puts its head last, so a name
+        outside the lexicon often holds a lexicon word: 蓝莓 (blueberry) reads
+        as 蓝 (blue) + 莓, 卷笔刀 (pencil sharpener) as 卷 + 笔 (pen) + 刀
+        (knife), 玩具车 as 玩具 (toy) + 车. Adjacent pieces of one run that are
+        each a thing, a modifier or unknown, at least one of them unknown, are
+        one name outside the lexicon (the translator gets it whole); a filler
+        such as 的 between them keeps them apart (红色的榴莲 is red + 榴莲)."""
+        spans: list[tuple[int, int]] = []  # characters of each token of this run
+        first = len(self.tokens)
+        gap: list[str] = []
+        gap_span = (0, 0)  # from the gap's first character to after its last
+        at = 0
+        while at < len(run):
+            token = self._chinese_token(run, at)
+            if token:
+                self._flush_at(gap, gap_span, spans)
+                gap = []
+                self.tokens.append(token[0])
+                spans.append((at, at + token[1]))
+                at += token[1]
+            else:
+                if run[at] not in lexicon.FILLERS_ZH:
+                    gap_span = (gap_span[0] if gap else at, at + 1)
+                    gap.append(run[at])
+                at += 1
+        self._flush_at(gap, gap_span, spans)
+        self.tokens[first:] = _glue(self.tokens[first:], spans)
+
+    def _flush_at(
+        self, gap: list[str], span: tuple[int, int], spans: list[tuple[int, int]]
+    ) -> None:
+        before = len(self.tokens)
+        self._flush(gap)
+        if len(self.tokens) > before:
+            spans.append(span)
+
+
+def _thing_part(tok: matcher._Tok) -> bool:
+    return tok.concept == "U" or tok.concept.startswith(("N:", "J:"))
+
+
+def _glue(
+    tokens: list[matcher._Tok], spans: list[tuple[int, int]]
+) -> list[matcher._Tok]:
+    """``tokens`` (one run's, with their character ``spans``) with every
+    adjacent span of thing parts that holds an unknown one joined into one
+    unknown token."""
+    out: list[matcher._Tok] = []
+    group: list[matcher._Tok] = []
+    end = -1
+
+    def close() -> None:
+        if len(group) > 1 and any(t.concept == "U" for t in group):
+            said = "".join(t.heard for t in group)
+            out.append(matcher._Tok("U", "unknown", said, said))
+        else:
+            out.extend(group)
+        group.clear()
+
+    for tok, (start, stop) in zip(tokens, spans, strict=True):
+        if _thing_part(tok) and group and start == end:
+            group.append(tok)
+        else:
+            close()
+            if _thing_part(tok):
+                group.append(tok)
+            else:
+                out.append(tok)
+        end = stop
+    close()
+    return out
+
+
+def _read(
+    words: str, opaque: Sequence[str] = ()
+) -> tuple[list[matcher._Tok], set[str], list[str]]:
     """Tokens (veto words left out; "P" marks a place word), the concepts
-    heard, and the words no token holds."""
+    heard, and the words no token holds. Each phrase of ``opaque`` (a
+    translated name, as it stands in a generated sentence) is one unknown
+    token, whatever lexicon words it holds ("pencil sharpener")."""
     reader = _SlotReader(repair=True)
     pieces = matcher._TOKEN.findall(words)
+    names = sorted({tuple(name.split(" ")) for name in opaque}, key=len, reverse=True)
     at = 0
     while at < len(pieces):
         piece = pieces[at]
-        if piece in _PLACES:
+        name = next((n for n in names if tuple(pieces[at : at + len(n)]) == n), None)
+        if name:
+            said = " ".join(name)
+            reader.tokens.append(matcher._Tok("U", "unknown", said, said))
+            at += len(name)
+        elif piece in _PLACES:
             reader.tokens.append(matcher._Tok("P", "exact", piece, piece))
             at += 1
         elif matcher._CJK.fullmatch(piece):
@@ -350,8 +435,9 @@ def _steps(tokens: Sequence[matcher._Tok]) -> list[_Step]:
                     )
                 )
                 pending, placed = set(), False
-            if tok.concept != "P":
-                last = tok.concept
+            # A place word between two unknown words keeps them apart:
+            # "put durian into rambutan" names two things.
+            last = tok.concept
         if pending and things:
             end = things[-1]
             things[-1] = _Thing(
@@ -492,7 +578,8 @@ def generate(
     if untranslated:
         return _empty("untranslated", sorted(set(untranslated)))
     prompt = " then ".join(rendered)
-    if not _reads_back(prompt, steps, actions):
+    translated = [slot["english"] for slot in slots if slot["source"] == "translation"]
+    if not _reads_back(prompt, steps, actions, translated):
         return _empty("no_task")
     original = _dataset_original(prompt, frames)
     return {
@@ -547,14 +634,20 @@ def _english_name(value: str | None) -> str | None:
     return name
 
 
-def _reads_back(prompt: str, steps: Sequence[_Step], actions: Sequence[str]) -> bool:
+def _reads_back(
+    prompt: str,
+    steps: Sequence[_Step],
+    actions: Sequence[str],
+    translated: Sequence[str] = (),
+) -> bool:
     """The reader must find the heard steps in the sentence: the same specific
     action (a move is the generic one), the same objects with the same
-    modifiers, in order, and nothing it could not read."""
+    modifiers, in order, and nothing it could not read. A ``translated`` name
+    is read as the one unknown name it was heard as."""
     text = matcher._clean(prompt)
     if not prompt or text.unsafe:
         return False
-    tokens, concepts, dropped = _read(text.words)
+    tokens, concepts, dropped = _read(text.words, translated)
     if {"STOP", "NEG"} & concepts or dropped:
         return False
     again = _steps(tokens)
