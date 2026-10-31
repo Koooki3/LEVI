@@ -499,6 +499,44 @@ describe("in-chunk acceleration", () => {
     await make(host);
     expect(calls.preview[1]).toMatchObject({ chunk_accel: true });
   });
+
+  test("a resumed accelerated run edited under RTC stays off when plain is chosen later", async () => {
+    // final review 2026-10-31: the restored value came back on by itself once plain was chosen
+    const saved = {
+      model_id: SFT,
+      prompt: "old task",
+      max_steps: 500,
+      eval_num: 4,
+      min_z: 0.03,
+      rtc: false,
+      inference_mode: "plain",
+      rtc_horizon: 7,
+      rollout_group: "original_group",
+      note: "original note",
+      control_hz: 10,
+      chunk_accel: true,
+    };
+    const { host, calls, choose } = await open(
+      { preview: ok(preview()) },
+      readDeploy(ready()),
+      false,
+      { rtc: true },
+      saved,
+    );
+    await waitFor(
+      () => host.querySelector("[data-testid=marvel0-command-resumed]"),
+      { label: "the saved run form" },
+    );
+    await click(button(host, en["marvel0.episodeChange.editAll"])!);
+    expect(accel(host).checked).toBe(false);
+    await choose({ rtc: false });
+    expect(accel(host).disabled).toBe(false);
+    expect(accel(host).checked).toBe(false);
+    await make(host);
+    expect(calls.preview[calls.preview.length - 1]).not.toHaveProperty(
+      "chunk_accel",
+    );
+  });
 });
 
 describe("the model, RTC and guidance strength follow the policy server card", () => {

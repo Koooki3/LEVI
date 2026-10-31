@@ -30,12 +30,17 @@ def _defines(tree, name):
 
 
 def check_client(root):
-    """What run_collect_accel.py wraps must exist as it expects: the policy query and the recorder's metadata, close
-    (with extra) and abort (with detail)."""
+    """What run_collect_accel.py wraps must exist as it expects: the policy query, the episode, the action check, the
+    eval log's header, and the recorder's metadata, close (with extra) and abort (with detail)."""
     rc = ast.parse((root / "examples/fr3_local/run_robotiq_client.py").read_text())
-    for fn in ("_query_policy", "_run_episode"):
+    for fn in ("_query_policy", "_run_episode", "_clamp_action", "EvalLog"):
         if _defines(rc, fn) is None:
             raise ValueError("client function missing: " + fn)
+    log = _defines(rc, "EvalLog")
+    if not any(
+        isinstance(n, ast.Attribute) and n.attr == "header" for n in ast.walk(log)
+    ):
+        raise ValueError("EvalLog no longer keeps a header")
     co = ast.parse(
         (root / "examples/fr3_local/run_robotiq_client_collect_data.py").read_text()
     )

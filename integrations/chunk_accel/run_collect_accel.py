@@ -3,8 +3,9 @@
 Every chunk the server returns goes through ChunkAccel.plan (accel.py) before the collector's open-loop loop executes
 it; the collector keeps every gate, clamp, jump check, keyboard key and the recording. A hurried chunk is shorter, so
 the loop executes it and re-queries sooner. Plain inference only: RTC and VLASH schedule chunks themselves.
-Recorded: policy.chunk_accel (the settings) in every demo, eval.chunk_accel (that episode's counts; eval.abort_detail.chunk_accel
-for an aborted one).
+Recorded: policy.chunk_accel (the settings) in every demo and in the session's eval log header, eval.chunk_accel (that
+episode's counts, aborted episodes included; eval.abort_detail.chunk_accel in LEVI's unattended mode). The collector's
+action check is wrapped too: an accepted action counts toward the gripper hold, a refused jump does not.
 """
 
 import dataclasses
@@ -27,7 +28,7 @@ class Args(collector.Args):
 
 
 def install(args) -> ChunkAccel:
-    """Wrap the collector's policy query and its recorder; returns the episode's accelerator."""
+    """Wrap the collector's policy query, action check, eval log and recorder; returns the episode's accelerator."""
     accel = ChunkAccel(
         args.open_loop_horizon,
         args.control_hz,
@@ -35,19 +36,17 @@ def install(args) -> ChunkAccel:
         tau=args.accel_tau,
     )
     rc, recorder = collector.rc, collector.RolloutRecorder
-    query, metadata, close, abort = (
+    query, clamp, eval_init, metadata, close, abort = (
         rc._query_policy,
+        rc._clamp_action,
+        rc.EvalLog.__init__,
         recorder._session_metadata,
         recorder.close,
         recorder.abort,
     )
 
-    def hurried_query(client, obs, state, prompt):
-        return accel.plan(query(client, obs, state, prompt), state)
-
-    def session_metadata(self):
-        md = metadata(self)
-        md["policy"]["chunk_accel"] = {
+    def settings():
+        return {
             "experimental": True,
             "speed_m_s": accel.speed,
             "tau_s": accel.tau,
@@ -56,6 +55,26 @@ def install(args) -> ChunkAccel:
             "rot_max_rad": accel.rot_max,
             "grip_hold_ticks": accel.grip_hold,
         }
+
+    def hurried_query(client, obs, state, prompt):
+        return accel.plan(query(client, obs, state, prompt), state)
+
+    def checked_action(action, current, args_):
+        # the collector refuses a jump (notes STEP/ROT), executes nothing and re-queries; anything else is sent
+        out, notes = clamp(action, current, args_)
+        if any(str(n).startswith(("STEP", "ROT")) for n in notes):
+            accel.rejected()
+        else:
+            accel.executed(out)
+        return out, notes
+
+    def eval_log_init(self, *a, **k):
+        eval_init(self, *a, **k)
+        self.header["chunk_accel"] = settings()
+
+    def session_metadata(self):
+        md = metadata(self)
+        md["policy"]["chunk_accel"] = settings()
         return md
 
     def close_(
@@ -84,7 +103,12 @@ def install(args) -> ChunkAccel:
         accel.reset()  # every episode starts fresh, recorded or not (a failed recorder never calls close)
         return run_episode(*args, **kwargs)
 
-    rc._query_policy, rc._run_episode = hurried_query, run_episode_
+    rc._query_policy, rc._run_episode, rc._clamp_action = (
+        hurried_query,
+        run_episode_,
+        checked_action,
+    )
+    rc.EvalLog.__init__ = eval_log_init
     recorder._session_metadata, recorder.close, recorder.abort = (
         session_metadata,
         close_,

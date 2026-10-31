@@ -6323,6 +6323,7 @@
   "marvel0.cmd.result.chunk_accel": "In-chunk acceleration (experimental) is on: straight chunks run as a ramp at up to {speed} m/s, with the target leading the controller's {tau} s lag.",
   "marvel0.err.chunk_accel_requires_plain": "In-chunk acceleration runs only with plain inference. Turn it off, or choose plain inference in the policy server card.",
   "marvel0.err.chunk_accel_requires_10hz": "In-chunk acceleration runs only at the policy's 10 Hz. Turn it off, or choose 10 Hz.",
+  "marvel0.err.chunk_accel_requires_binarized_gripper": "In-chunk acceleration needs a binarized gripper, and this site sends the gripper value unbinarized (safety.binarize_gripper in site.toml). Turn it off.",
   "marvel0.cmd.warning.chunk_accel_experimental": "In-chunk acceleration is experimental and has not run on the real robot: straight chunks run faster. Keep a hand on the physical e-stop.",
   "marvel0.speech.generated.title": "Written in the datasets' most common phrasing (generated: not an instruction the policy was trained on)",
   "marvel0.speech.generated.note": "Frame: {frame}, used in {n} episodes of the datasets. Read it before you use it.",

@@ -325,6 +325,25 @@ describe("fieldMessages", () => {
     expect(sayText(rate.chunk_accel.say!, catalogue("zh"))).toMatch(/10 Hz/);
   });
 
+  test("the binarized-gripper refusal of in-chunk acceleration belongs to its switch", () => {
+    const grip = fieldMessages(
+      fail(
+        "chunk_accel_requires_binarized_gripper",
+        { field: "chunk_accel" },
+        422,
+      ),
+      {},
+    );
+    expect(Object.keys(grip)).toEqual(["chunk_accel"]);
+    expect(grip.chunk_accel.say).toEqual({
+      key: "marvel0.err.chunk_accel_requires_binarized_gripper",
+    });
+    for (const lang of ["en", "zh"] as const)
+      expect(sayText(grip.chunk_accel.say!, catalogue(lang))).toMatch(
+        /binarize_gripper/,
+      );
+  });
+
   test("in-chunk acceleration's refusals belong to its switch, in both languages", () => {
     const plainOnly = fieldMessages(
       fail("chunk_accel_requires_plain", { field: "chunk_accel" }, 422),

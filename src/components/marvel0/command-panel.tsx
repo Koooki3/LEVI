@@ -147,10 +147,12 @@ export function CommandPanel({
   const selectedMode = selection
     ? inferenceMode(selection.inferenceMode, selection.rtc)
     : null;
+  // It also reacts to the edited value: a saved accelerated run restored while RTC or VLASH is chosen is cleared too
+  // (final review 2026-10-31: it came back on when plain was chosen later).
   useEffect(() => {
-    if (selectedMode !== null && selectedMode !== "plain")
-      setEdits((cur) => (cur.chunkAccel ? { ...cur, chunkAccel: false } : cur));
-  }, [selectedMode]);
+    if (selectedMode !== null && selectedMode !== "plain" && edits.chunkAccel)
+      setEdits((cur) => ({ ...cur, chunkAccel: false }));
+  }, [selectedMode, edits.chunkAccel]);
   if (!models || !site || !initial || !selection) return null;
 
   // A resumed run is pinned to its saved form. Only the prompt remains editable;

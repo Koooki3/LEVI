@@ -1206,6 +1206,17 @@ def test_chunk_accel_argv_cannot_be_relabelled(tmp_path):
         )
 
 
+def test_chunk_accel_needs_a_binarized_gripper(tmp_path):
+    # final review 2026-10-31: the page accepted it, and the accelerated client then refused to start
+    site = make_site(tmp_path, safety={"binarize_gripper": False})
+    err = refused(tmp_path, {"chunk_accel": True}, site=site)
+    assert (err.code, err.field) == (
+        "chunk_accel_requires_binarized_gripper",
+        "chunk_accel",
+    )
+    C.validate(site, model(), {"prompt": PROMPT})  # without the switch the site is fine
+
+
 @pytest.mark.parametrize("hz", [5, 20, 25, 50])
 def test_chunk_accel_runs_at_10hz_only(tmp_path, hz):
     err = refused(tmp_path, {"chunk_accel": True, "control_hz": hz})

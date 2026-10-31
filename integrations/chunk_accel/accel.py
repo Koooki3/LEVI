@@ -13,7 +13,8 @@ behind the ramp's end along its direction are dropped (at most `max_skip`), so a
 does not pull the target back.
 
 Pure numpy. Every action this returns still passes the client's own clamps and jump checks; nothing here talks to the
-robot, the server or a camera.
+robot, the server or a camera. The client reports every action it accepts (`executed`) or refuses (`rejected`): the
+gripper hold counts executed actions only, so a plan the client threw away never shortens it.
 """
 
 from __future__ import annotations
@@ -96,11 +97,12 @@ class ChunkAccel:
         self.reset()
 
     def reset(self) -> None:
-        """A new episode, or the client threw the last plan away (rejected jump, failed step)."""
+        """A new episode."""
         self.last = None  # the last action handed out
         self.direction = None  # unit direction of the last ramp, None if the last chunk was not hurried
-        # actions handed out since the last gripper change (the start counts as old)
+        # actions the client accepted since the last gripper change, the change included (the start counts as old)
         self.since_grip = self.grip_hold
+        self.exec_g = None  # the gripper (closed or not) of the last accepted action
         self.issued_g = None  # the measured state's gripper (the last command issued) at the previous plan
         self.stats = {
             "chunks": 0,
@@ -108,14 +110,28 @@ class ChunkAccel:
             "ticks_planned": 0,
             "ticks_saved": 0,
             "dropped_behind": 0,
+            "rejected": 0,
             "why_not": {
                 "gripper": 0,
                 "after_gripper": 0,
                 "curved": 0,
                 "rotation": 0,
                 "no_gain": 0,
+                "not_finite": 0,
             },
         }
+
+    def executed(self, action) -> None:
+        """The client accepted ``action`` (it passed the jump checks) and sends it this tick."""
+        g = _closed(np.asarray(action)[6])
+        changed = self.exec_g is not None and g != self.exec_g
+        self.since_grip = 1 if changed else self.since_grip + 1
+        self.exec_g = g
+
+    def rejected(self) -> None:
+        """The client refused an action (a jump) and threw the rest of the plan away: nothing ran, nothing counts."""
+        self.direction = None
+        self.stats["rejected"] += 1
 
     def summary(self) -> dict:
         s = self.stats
@@ -230,8 +246,16 @@ class ChunkAccel:
         n_end = min(
             len(chunk), self.horizon
         )  # the client's open-loop horizon is never extended
+        # a NaN or inf pose in the executed part: the client gets the policy's actions exactly as without the switch
+        # (a NaN gripper is not a pose: the client binarizes it as closed, and the gripper test does the same)
+        finite = bool(np.isfinite(np.asarray(chunk[:n_end, :6], np.float64)).all())
         start = 0
-        if self.direction is not None and self.last is not None and n_end > 1:
+        if (
+            finite
+            and self.direction is not None
+            and self.last is not None
+            and n_end > 1
+        ):
             pos = chunk[:, :3].astype(np.float64)
             heading = pos[n_end - 1] - pos[0]
             length = float(np.linalg.norm(heading))
@@ -255,10 +279,13 @@ class ChunkAccel:
                 ):
                     start += 1
         seg = chunk[start:n_end]
-        m = self._ticks(seg)
-        while m < len(seg) and self._too_steep(self._ramp(seg, m)):
-            m += 1  # the lead makes big steps on a short ramp
-        why = self._why_not(chunk, seg, m, prev_g)
+        if finite:
+            m = self._ticks(seg)
+            while m < len(seg) and self._too_steep(self._ramp(seg, m)):
+                m += 1  # the lead makes big steps on a short ramp
+            why = self._why_not(chunk, seg, m, prev_g)
+        else:
+            why = "not_finite"
         self.stats["chunks"] += 1
         self.stats["dropped_behind"] += start
         if why is None:
@@ -273,19 +300,5 @@ class ChunkAccel:
             self.direction = None
             self.stats["why_not"][why] += 1
         self.stats["ticks_planned"] += len(out)
-        changed = prev_g is not None and _closed(prev_g) != _closed(out[0, 6])
-        self.since_grip = 0 if changed else self.since_grip
-        flips = sum(
-            _closed(out[i, 6]) != _closed(out[i - 1, 6]) for i in range(1, len(out))
-        )
-        if flips:
-            last_flip = max(
-                i
-                for i in range(1, len(out))
-                if _closed(out[i, 6]) != _closed(out[i - 1, 6])
-            )
-            self.since_grip = len(out) - last_flip
-        else:
-            self.since_grip += len(out)
         self.last = np.asarray(out[-1], dtype=np.float64).copy()
         return out

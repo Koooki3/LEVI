@@ -508,6 +508,13 @@ def _validate(site, restricted, model_id, body):
             "chunk_accel",
             "in-chunk acceleration runs at the policy's 10 Hz only",
         )
+    if accel and not site.safety.binarize_gripper:
+        # the client's gripper test is for binarized commands; it refuses to start without them
+        raise FormError(
+            "chunk_accel_requires_binarized_gripper",
+            "chunk_accel",
+            "in-chunk acceleration needs a binarized gripper (site safety.binarize_gripper)",
+        )
     rtc = mode == "rtc"
     horizon = _whole(
         body,

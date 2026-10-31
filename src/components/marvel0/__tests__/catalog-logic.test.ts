@@ -27,6 +27,7 @@ describe("readModels", () => {
       groupRtc: "pi05_fr3_all_step49999_rtc_demo",
       groupPlain: "pi05_fr3_all_step49999_demo",
       groupVlash: "pi05_fr3_all_step49999_vlash_demo",
+      groupAccel: "pi05_fr3_all_step49999_accel_demo",
     });
     expect(view.models[1]).toMatchObject({ cfgCapable: true, verified: false });
     expect(view.skipped).toEqual([

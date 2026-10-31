@@ -23,6 +23,14 @@ def chunk(step=0.005, n=10, g=1.0, curve=0.0, x0=0.45, rot=0.0):
     return np.column_stack([p, e, np.full(n, g)]).astype(np.float32)
 
 
+def run(a, c, state=None):
+    """Plan a chunk and let the client accept every action of the plan, as the wrapped action check reports it."""
+    out = a.plan(c, state)
+    for row in out:
+        a.executed(row)
+    return out
+
+
 def on_segment(points, a, b, tol=1e-6):
     ab = b - a
     s = (points - a) @ ab / max(float(ab @ ab), 1e-12)
@@ -60,14 +68,38 @@ class RuleTests(unittest.TestCase):
 
     def test_no_hurry_for_a_second_after_a_gripper_change(self):
         a = ChunkAccel(6, 10.0)
-        a.plan(chunk(g=1.0))
+        run(a, chunk(g=1.0))
         closed = chunk(g=0.0, step=0.0)
-        self.assertEqual(len(a.plan(closed)), 6)  # the change itself
+        self.assertEqual(len(run(a, closed)), 6)  # the change itself
         self.assertEqual(
-            len(a.plan(closed)), 6
-        )  # 6 actions since it: still holding (10 needed)
+            len(run(a, closed)), 6
+        )  # 6 executed since it: still holding (10 needed)
         self.assertEqual(a.stats["why_not"]["after_gripper"], 1)
-        self.assertLess(len(a.plan(closed)), 6)  # 12 since it
+        self.assertLess(len(run(a, closed)), 6)  # 12 since it
+
+    def test_a_plan_the_client_refused_does_not_count_toward_the_hold(self):
+        # final review 2026-10-31: the hold counted handed-out actions, so two refused plans let a chunk be hurried
+        # 0.1 s after a close
+        a = ChunkAccel(6, 10.0)
+        run(a, chunk(g=1.0))
+        closed = chunk(g=0.0, step=0.0)
+        run(a, closed)  # the close, executed: 6 since it
+        for _ in range(2):  # refused by the client's jump check: nothing ran
+            a.plan(closed)
+            a.rejected()
+        self.assertEqual(len(a.plan(closed)), 6)  # still holding
+        self.assertEqual(a.stats["why_not"]["after_gripper"], 3)
+        self.assertEqual(a.stats["rejected"], 2)
+
+    def test_a_non_finite_action_leaves_the_chunk_as_the_policy_gave_it(self):
+        # final review 2026-10-31: a NaN angle was spread over the ramp, a NaN position raised in the rule
+        a = ChunkAccel(6, 10.0)
+        for row, col in ((5, 3), (0, 0)):
+            c = chunk()
+            c[row, col] = np.nan
+            np.testing.assert_array_equal(a.plan(c), c[:6])
+        self.assertEqual(a.stats["why_not"]["not_finite"], 2)
+        self.assertEqual(a.stats["hurried"], 0)
 
     def test_curved_or_turning_chunks_are_not_hurried(self):
         a = ChunkAccel(6, 10.0)
@@ -207,9 +239,20 @@ class RuleTests(unittest.TestCase):
 
 class WrapperTests(unittest.TestCase):
     def test_install_wraps_the_query_and_records_settings_and_counts(self):
+        notes = []
+
+        class EvalLog:
+            def __init__(self, path, args, prompt, meta=None):
+                self.header = {"schema": "fr3_local.eval_log.v1"}
+
         rc = types.SimpleNamespace(
             _query_policy=lambda client, obs, state, prompt: chunk(),
             _run_episode=lambda *args, **kwargs: ("success", {}),
+            _clamp_action=lambda action, current, args: (
+                np.asarray(action, np.float32),
+                list(notes),
+            ),
+            EvalLog=EvalLog,
         )
         calls = {}
 
@@ -251,12 +294,24 @@ class WrapperTests(unittest.TestCase):
         accel = mod.install(args)
         out = rc._query_policy(None, None, None, "p")
         self.assertLess(len(out), 6)
+        # the action check: an accepted action counts toward the gripper hold, a refused jump does not
+        held = accel.since_grip
+        rc._clamp_action(out[0], None, args)
+        self.assertEqual(accel.since_grip, held + 1)
+        notes.append("STEP 0.120m")
+        rc._clamp_action(out[1], None, args)
+        self.assertEqual((accel.since_grip, accel.stats["rejected"]), (held + 1, 1))
+        self.assertIsNone(accel.direction)
+        log = rc.EvalLog("eval.json", args, "p")
+        self.assertEqual(log.header["chunk_accel"]["speed_m_s"], accel.speed)
+        self.assertEqual(log.header["schema"], "fr3_local.eval_log.v1")
         rec = Recorder()
         self.assertEqual(
             rec._session_metadata()["policy"]["chunk_accel"]["speed_m_s"], accel.speed
         )
         self.assertEqual(rec.close("success", "key", True, {}), "closed")
         self.assertEqual(calls["close"]["chunk_accel"]["hurried"], 1)
+        self.assertEqual(calls["close"]["chunk_accel"]["rejected"], 1)
         self.assertEqual(accel.stats["chunks"], 0)  # reset for the next episode
         rc._query_policy(None, None, None, "p")
         self.assertEqual(rc._run_episode(), ("success", {}))
