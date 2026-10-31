@@ -496,3 +496,24 @@ def test_preview_with_chunk_accel_answers_its_client_and_a_plain_server(machine)
     assert refused.status_code == 422
     assert "chunk_accel_requires_plain" in refused.text
     assert preview(client, chunk_accel="true").status_code == 422
+
+
+def test_preview_with_rule_v2_answers_its_flag_and_refuses_it_without_the_switch(
+    machine,
+):
+    client, _ = machine
+    doc = preview(client, chunk_accel=True, chunk_accel_rule="v2").json()
+    assert "--accel-rule=v2" in doc["argv"]
+    assert doc["control"]["chunk_accel"]["rule"] == "v2"
+    assert "chunk_accel_rule_v2" in [w["code"] for w in doc["warnings"]]
+    # v1 written out is the command without it
+    v1 = preview(client, chunk_accel=True, chunk_accel_rule="v1").json()
+    assert v1["argv"] == preview(client, chunk_accel=True).json()["argv"]
+    assert v1["control"]["chunk_accel"]["rule"] == "v1"
+    alone = preview(client, rtc=False, chunk_accel_rule="v2")
+    assert alone.status_code == 422
+    assert "chunk_accel_rule_needs_switch" in alone.text
+    for bad in ("v3", 2, True):
+        assert (
+            preview(client, chunk_accel=True, chunk_accel_rule=bad).status_code == 422
+        )

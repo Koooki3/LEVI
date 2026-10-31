@@ -94,6 +94,7 @@ class Model:
                 "plain": default_group(self.id, False),
                 "vlash": default_group(self.id, "vlash"),
                 "accel": default_group(self.id, "accel"),
+                "accel_v2": default_group(self.id, "accel_v2"),
             },
         }
 
@@ -111,14 +112,22 @@ def default_group(model_id: str, rtc: bool) -> str:
         return f"{model_id}_vlash_demo"
     if rtc == "accel":
         return f"{model_id}_accel_demo"
+    if rtc == "accel_v2":  # in-chunk acceleration with rule v2, apart from v1's runs
+        return f"{model_id}_accel_v2_demo"
     return f"{model_id}_rtc_demo" if rtc is True or rtc == "rtc" else f"{model_id}_demo"
 
 
+# Every default group the form can resolve: RTC, plain, VLASH, and in-chunk acceleration with rule v1 and v2.
+DEFAULT_GROUP_MODES = (True, False, "vlash", "accel", "accel_v2")
+
+
 def default_group_fits(model_id: str) -> bool:
-    """Whether the default rollout group of this model, in either mode, is one
-    the client command form accepts (``<id>_rtc_demo`` is the longer one)."""
+    """Whether every default rollout group of this model is one the client
+    command form accepts (``<id>_accel_v2_demo`` is the longest): a model is
+    offered only if no mode's default form is refused for its group."""
     return all(
-        len(default_group(model_id, rtc)) <= GROUP_MAX_CHARS for rtc in (True, False)
+        len(default_group(model_id, mode)) <= GROUP_MAX_CHARS
+        for mode in DEFAULT_GROUP_MODES
     )
 
 

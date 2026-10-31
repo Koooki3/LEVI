@@ -71,8 +71,8 @@ VALUE = [
     "--remote-host", "--remote-port", "--view-camera-id", "--wrist-camera-id",
     "--franka-server-url", "--prompt", "--max-timesteps", "--control-hz", "--eval-num",
     "--min-z", "--home-duration-s", "--max-xy", "--max-step-m", "--max-step-rad", "--levi-mode",
-    "--vlash-overlap-steps", "--rtc-execute-horizon", "--open-loop-horizon", "--rollout-root",
-    "--rollout-group", "--eval-note",
+    "--vlash-overlap-steps", "--rtc-execute-horizon", "--open-loop-horizon", "--accel-rule",
+    "--rollout-root", "--rollout-group", "--eval-note",
 ]  # fmt: skip
 SWITCH = [
     "--binarize-gripper", "--require-matching-server", "--allow-unknown-prompt",

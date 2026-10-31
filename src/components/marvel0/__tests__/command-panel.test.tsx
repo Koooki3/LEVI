@@ -539,6 +539,307 @@ describe("in-chunk acceleration", () => {
   });
 });
 
+describe("the rule of in-chunk acceleration", () => {
+  const accel = (host: HTMLElement) =>
+    card(host).querySelector<HTMLInputElement>(
+      "[data-testid=marvel0-command-chunk-accel] input[role=switch]",
+    )!;
+  const rule = (host: HTMLElement, value: "v1" | "v2") =>
+    card(host).querySelector<HTMLInputElement>(
+      `[data-testid=marvel0-command-chunk-accel-rule-${value}]`,
+    );
+  const box = (host: HTMLElement) =>
+    card(host).querySelector("[data-testid=marvel0-command-chunk-accel]")!;
+  const savedV2 = {
+    model_id: SFT,
+    prompt: "old task",
+    max_steps: 500,
+    eval_num: 4,
+    min_z: 0.03,
+    rtc: false,
+    inference_mode: "plain",
+    rtc_horizon: 7,
+    rollout_group: "original_group",
+    note: "original note",
+    control_hz: 10,
+    chunk_accel: true,
+    chunk_accel_rule: "v2",
+  };
+
+  test("hidden while the switch is off; on, v1 is chosen and nothing more is sent, v2 sends its rule", async () => {
+    const { host, calls } = await open(undefined, readDeploy(idle()), false, {
+      rtc: false,
+    });
+    expect(rule(host, "v1")).toBeNull();
+    expect(rule(host, "v2")).toBeNull();
+    await click(accel(host));
+    expect(rule(host, "v1")!.checked).toBe(true);
+    expect(rule(host, "v2")!.checked).toBe(false);
+    expect(rule(host, "v1")!.disabled).toBe(false);
+    expect(rule(host, "v2")!.disabled).toBe(false);
+    // two radio buttons of one group (arrow keys move between them), each with its words
+    expect(rule(host, "v1")!.type).toBe("radio");
+    expect(rule(host, "v1")!.name).toBe(rule(host, "v2")!.name);
+    expect(rule(host, "v1")!.closest("fieldset")).not.toBeNull();
+    for (const key of [
+      "marvel0.cmd.field.chunk_accel_rule",
+      "marvel0.cmd.field.chunk_accel_rule_v1",
+      "marvel0.cmd.field.chunk_accel_rule_v1_hint",
+      "marvel0.cmd.field.chunk_accel_rule_v2",
+      "marvel0.cmd.field.chunk_accel_rule_v2_hint",
+    ] as const)
+      expect(text(box(host)), key).toContain(en[key]);
+    expect(card(host).querySelectorAll("[role=switch]")).toHaveLength(1);
+    expect(card(host).querySelectorAll("select")).toHaveLength(0);
+    await make(host);
+    expect(calls.preview[0]).toMatchObject({ chunk_accel: true });
+    expect(calls.preview[0]).not.toHaveProperty("chunk_accel_rule");
+    await click(rule(host, "v2")!);
+    expect(rule(host, "v2")!.checked).toBe(true);
+    expect(rule(host, "v1")!.checked).toBe(false);
+    await make(host);
+    expect(calls.preview[1]).toMatchObject({
+      inference_mode: "plain",
+      chunk_accel: true,
+      chunk_accel_rule: "v2",
+    });
+  });
+
+  test("the group placeholder follows the rule", async () => {
+    const { host } = await open(undefined, readDeploy(idle()), false, {
+      rtc: false,
+    });
+    const group = () =>
+      (field(card(host), "Rollout group") as HTMLInputElement).placeholder;
+    await click(accel(host));
+    expect(group()).toBe(`${SFT}_accel_demo`);
+    await click(rule(host, "v2")!);
+    expect(group()).toBe(`${SFT}_accel_v2_demo`);
+  });
+
+  test("turned off, the choice is kept but nothing is sent; on again it is still v2", async () => {
+    const { host, calls } = await open(undefined, readDeploy(idle()), false, {
+      rtc: false,
+    });
+    await click(accel(host));
+    await click(rule(host, "v2")!);
+    await click(accel(host));
+    expect(rule(host, "v2")).toBeNull();
+    await make(host);
+    expect(calls.preview[0]).not.toHaveProperty("chunk_accel");
+    expect(calls.preview[0]).not.toHaveProperty("chunk_accel_rule");
+    await click(accel(host));
+    expect(rule(host, "v2")!.checked).toBe(true);
+  });
+
+  test("with RTC chosen it is hidden and not sent; back to plain and on again it is still v2", async () => {
+    const { host, calls, choose } = await open(
+      undefined,
+      readDeploy(idle()),
+      false,
+      { rtc: false },
+    );
+    await click(accel(host));
+    await click(rule(host, "v2")!);
+    await choose({ rtc: true });
+    expect(rule(host, "v1")).toBeNull();
+    expect(rule(host, "v2")).toBeNull();
+    await make(host);
+    expect(calls.preview[0]).not.toHaveProperty("chunk_accel_rule");
+    await choose({ rtc: false });
+    expect(accel(host).checked).toBe(false);
+    expect(rule(host, "v2")).toBeNull();
+    await click(accel(host));
+    expect(rule(host, "v2")!.checked).toBe(true);
+  });
+
+  test("editing every parameter of a v2 run with the server's group and note, then choosing v1, files it under v1's default", async () => {
+    // review 2026-11-01: the saved v2 group and note were restored as typed text and sent with the v1 command
+    const defaults = {
+      ...savedV2,
+      rollout_group: `${SFT}_accel_v2_demo`,
+      note: `marvel0 page: ${SFT} chunk accel experimental rule=v2 horizon=7`,
+    };
+    const { host, calls } = await open(
+      { preview: ok(preview()) },
+      readDeploy(ready()),
+      false,
+      { rtc: false },
+      defaults,
+    );
+    await waitFor(
+      () => host.querySelector("[data-testid=marvel0-command-resumed]"),
+      { label: "the saved run form" },
+    );
+    await click(button(host, en["marvel0.episodeChange.editAll"])!);
+    const group = field(card(host), "Rollout group") as HTMLInputElement;
+    const note = field(card(host), "Note") as HTMLInputElement;
+    expect(group.value).toBe("");
+    expect(note.value).toBe("");
+    expect(group.placeholder).toBe(`${SFT}_accel_v2_demo`);
+    await click(rule(host, "v1")!);
+    expect(group.placeholder).toBe(`${SFT}_accel_demo`);
+    await make(host);
+    const body = calls.preview[calls.preview.length - 1];
+    expect(body).toMatchObject({ chunk_accel: true });
+    expect(body).not.toHaveProperty("chunk_accel_rule");
+    expect(body).not.toHaveProperty("rollout_group");
+    expect(body).not.toHaveProperty("note");
+  });
+
+  test("when the saved run goes away, its form stays without the server's group and note", async () => {
+    const defaults = {
+      ...savedV2,
+      rollout_group: `${SFT}_accel_v2_demo`,
+      note: `marvel0 page: ${SFT} chunk accel experimental rule=v2 horizon=7`,
+    };
+    const { api, calls } = fakeApi({ preview: ok(preview()) });
+    const status = readDeploy(ready());
+    const panel = (resumeBody: Record<string, unknown> | null) => (
+      <CommandPanel
+        api={api}
+        catalog={catalog()}
+        status={status}
+        selection={selectionFor(status, { rtc: false })}
+        onUseAnother={() => {}}
+        resumeBody={resumeBody}
+      />
+    );
+    const view = await render(panel(defaults));
+    await waitFor(
+      () => view.host.querySelector("[data-testid=marvel0-command-resumed]"),
+      { label: "the saved run form" },
+    );
+    await view.rerender(panel(null));
+    const { host } = view;
+    expect(host.querySelector("[data-testid=marvel0-command-resumed]")).toBe(
+      null,
+    );
+    const group = field(card(host), "Rollout group") as HTMLInputElement;
+    expect(group.value).toBe("");
+    expect((field(card(host), "Note") as HTMLInputElement).value).toBe("");
+    expect(rule(host, "v2")!.checked).toBe(true);
+    await click(rule(host, "v1")!);
+    expect(group.placeholder).toBe(`${SFT}_accel_demo`);
+    await make(host);
+    const body = calls.preview[calls.preview.length - 1];
+    expect(body).not.toHaveProperty("rollout_group");
+    expect(body).not.toHaveProperty("note");
+  });
+
+  test("editing every parameter keeps a group and note the person typed", async () => {
+    const { host, calls } = await open(
+      { preview: ok(preview()) },
+      readDeploy(ready()),
+      false,
+      { rtc: false },
+      savedV2,
+    );
+    await waitFor(
+      () => host.querySelector("[data-testid=marvel0-command-resumed]"),
+      { label: "the saved run form" },
+    );
+    await click(button(host, en["marvel0.episodeChange.editAll"])!);
+    await click(rule(host, "v1")!);
+    await make(host);
+    expect(calls.preview[calls.preview.length - 1]).toMatchObject({
+      rollout_group: "original_group",
+      note: "original note",
+    });
+  });
+
+  test("a resumed v2 run keeps v2 in the body, shown and disabled; editing every parameter keeps it", async () => {
+    const { host, calls } = await open(
+      { preview: ok(preview()) },
+      readDeploy(ready()),
+      false,
+      { rtc: false },
+      savedV2,
+    );
+    await waitFor(
+      () => host.querySelector("[data-testid=marvel0-command-resumed]"),
+      { label: "the saved run form" },
+    );
+    expect(rule(host, "v2")!.checked).toBe(true);
+    expect(rule(host, "v2")!.disabled).toBe(true);
+    expect(rule(host, "v1")!.disabled).toBe(true);
+    await type(field(host, "Task instruction")!, "new task");
+    await make(host);
+    expect(calls.preview[0]).toEqual({ ...savedV2, prompt: "new task" });
+    await click(button(host, en["marvel0.episodeChange.editAll"])!);
+    expect(rule(host, "v2")!.checked).toBe(true);
+    expect(rule(host, "v2")!.disabled).toBe(false);
+    await make(host);
+    expect(calls.preview[1]).toMatchObject({
+      chunk_accel: true,
+      chunk_accel_rule: "v2",
+    });
+  });
+
+  test("the server's refusal of the rule lands under the choice, in the page's words", async () => {
+    const { host } = await open(
+      {
+        preview: refused(
+          422,
+          "chunk_accel_rule_invalid",
+          { field: "chunk_accel_rule" },
+          "English rule sentence",
+        ),
+      },
+      readDeploy(idle()),
+      false,
+      { rtc: false },
+    );
+    await click(accel(host));
+    await click(rule(host, "v2")!);
+    await make(host);
+    expect(text(box(host).querySelector(".ds-field__error"))).toBe(
+      en["marvel0.err.chunk_accel_rule_invalid"],
+    );
+    expect(rule(host, "v2")!.getAttribute("aria-invalid")).toBe("true");
+    const described = rule(host, "v2")!.getAttribute("aria-describedby")!;
+    expect(text(card(host).querySelector(`[id="${described}"]`))).toBe(
+      en["marvel0.err.chunk_accel_rule_invalid"],
+    );
+    expect(text(card(host))).not.toContain("English rule sentence");
+    expect(
+      host.querySelector("[data-testid=marvel0-command-problem]"),
+    ).toBeNull();
+  });
+
+  test("the result names the rule the server answered", async () => {
+    const { host } = await open(
+      {
+        preview: ok(
+          preview({
+            control: {
+              hz: 10,
+              chunk_accel: {
+                enabled: true,
+                experimental: true,
+                speed_m_s: 0.25,
+                tau_s: 0.2,
+                rule: "v2",
+              },
+            },
+          }),
+        ),
+      },
+      readDeploy(idle()),
+      false,
+      { rtc: false },
+    );
+    await click(accel(host));
+    await click(rule(host, "v2")!);
+    await make(host);
+    const line = host.querySelector(
+      "[data-testid=marvel0-command-chunk-accel-on]",
+    );
+    expect(text(line)).toContain("rule v2");
+    expect(text(line)).toContain("up to 0.25 m/s");
+  });
+});
+
 describe("the model, RTC and guidance strength follow the policy server card", () => {
   const follow = (host: HTMLElement) =>
     host.querySelector("[data-testid=marvel0-command-follow]") as HTMLElement;

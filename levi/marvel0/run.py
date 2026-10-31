@@ -1014,6 +1014,8 @@ def _run_view(f: Facts) -> dict | None:
         "inference_mode": inference_mode.recorded(rec),
         "vlash_overlap_steps": rec.get("vlash_overlap_steps"),
         "chunk_accel": rec.get("chunk_accel") is True,
+        # a record from before the rule ran v1, the client's default
+        "chunk_accel_rule": "v2" if rec.get("chunk_accel_rule") == "v2" else "v1",
         "prompt": rec.get("prompt"),
         # Only the original user-editable form, never argv, environment or paths.
         # The next-episode UI uses this after confirmed client exit; start still
@@ -1406,7 +1408,7 @@ def _group_of(form_body: dict) -> str:
         except inference_mode.ModeError as exc:
             raise FormRefuse(command.FormError(exc.code, exc.field, str(exc))) from exc
         if form_body.get("chunk_accel") is True:
-            mode = "accel"
+            mode = "accel_v2" if form_body.get("chunk_accel_rule") == "v2" else "accel"
         group = models.default_group(str(form_body.get("model_id")), mode)
     return str(group)
 
@@ -2206,6 +2208,7 @@ class Supervisor:
             "inference_mode": form.inference_mode,
             "vlash_overlap_steps": form.vlash_overlap_steps,
             "chunk_accel": form.chunk_accel,
+            "chunk_accel_rule": form.chunk_accel_rule,
             "prompt": form.prompt,
             "form": dataclasses.asdict(form),
             "argv_sha256": hashlib.sha256(

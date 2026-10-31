@@ -6,8 +6,10 @@ import {
   bodyKey,
   chunkAccelAllowed,
   chunkAccelRateOk,
+  chunkAccelRuleOf,
   commandFormFromRun,
   commandBody,
+  editableSavedForm,
   initialCommandForm,
   placeholders,
   readPreview,
@@ -296,7 +298,7 @@ describe("in-chunk acceleration", () => {
     expect(
       readPreview(preview({ control: { hz: 10, chunk_accel: on } }))!
         .chunkAccel,
-    ).toEqual({ speedMS: 0.25, tauS: 0.2 });
+    ).toEqual({ speedMS: 0.25, tauS: 0.2, rule: "v1" });
     for (const control of [
       undefined,
       { hz: 10, chunk_accel: null },
@@ -309,19 +311,115 @@ describe("in-chunk acceleration", () => {
       ).toBeUndefined();
   });
 
-  test("the result line is worded in both languages with its numbers", () => {
+  test("the result line is worded in both languages with its numbers and rule", () => {
     for (const lang of ["en", "zh"] as const) {
       const text = sayText(
         {
           key: "marvel0.cmd.result.chunk_accel",
-          params: { speed: 0.25, tau: 0.2 },
+          params: { rule: "v2", speed: 0.25, tau: 0.2 },
         },
         catalogue(lang),
       );
       expect(text).toContain("0.25 m/s");
       expect(text).toContain("0.2");
+      expect(text).toContain("v2");
       expect(text).not.toContain("{");
     }
+  });
+
+  test("rule v1, the default, adds nothing to the body: a v1 command is the one it always was", () => {
+    const on = { ...plain, chunkAccel: true };
+    const always = commandBody(base(on)).body;
+    expect(always).not.toHaveProperty("chunk_accel_rule");
+    expect(commandBody(base({ ...on, chunkAccelRule: "v1" })).body).toEqual(
+      always,
+    );
+    expect(chunkAccelRuleOf(base())).toBe("v1");
+  });
+
+  test("rule v2 is sent only with the switch on, plain inference and 10 Hz", () => {
+    expect(
+      commandBody(base({ ...plain, chunkAccel: true, chunkAccelRule: "v2" }))
+        .body,
+    ).toMatchObject({ chunk_accel: true, chunk_accel_rule: "v2" });
+    for (const over of [
+      { ...plain, chunkAccel: false },
+      { ...plain },
+      { ...plain, chunkAccel: true, hz: "20" },
+      { rtc: true, inferenceMode: "rtc" as const, chunkAccel: true },
+      { rtc: false, inferenceMode: "vlash" as const, chunkAccel: true },
+    ]) {
+      const body = commandBody(base({ ...over, chunkAccelRule: "v2" })).body;
+      expect(body, JSON.stringify(over)).not.toHaveProperty("chunk_accel_rule");
+    }
+  });
+
+  test("a changed rule changes the request key", () => {
+    const on = { ...plain, chunkAccel: true };
+    expect(
+      bodyKey(commandBody(base({ ...on, chunkAccelRule: "v2" })).body),
+    ).not.toBe(bodyKey(commandBody(base(on)).body));
+  });
+
+  test("a saved v2 run round-trips into the form and back into the same body; a run without the rule is v1", () => {
+    const saved = {
+      model_id: "pi05_fr3_all_step49999",
+      prompt: "pick the eggplant in the blue plate",
+      max_steps: 500,
+      eval_num: 5,
+      min_z: 0.025,
+      rtc: false,
+      inference_mode: "plain",
+      rtc_horizon: 7,
+      rollout_group: "saved_group",
+      note: "saved note",
+      control_hz: 10,
+      chunk_accel: true,
+      chunk_accel_rule: "v2",
+    };
+    const form = commandFormFromRun(saved)!;
+    expect(form.chunkAccelRule).toBe("v2");
+    const sent: Record<string, unknown> = { ...saved };
+    delete sent.control_hz;
+    expect(commandBody(form).body).toEqual(sent);
+    // a run from before the rule, a v1 run and anything else are v1
+    const old: Record<string, unknown> = { ...saved };
+    delete old.chunk_accel_rule;
+    for (const run of [
+      old,
+      { ...saved, chunk_accel_rule: "v1" },
+      { ...saved, chunk_accel_rule: "V2" },
+    ]) {
+      const back = commandFormFromRun(run)!;
+      expect(chunkAccelRuleOf(back)).toBe("v1");
+      expect(commandBody(back).body).not.toHaveProperty("chunk_accel_rule");
+    }
+  });
+
+  test("the preview's control part names the rule: v2 when it says so, else v1", () => {
+    const on = {
+      enabled: true,
+      experimental: true,
+      speed_m_s: 0.25,
+      tau_s: 0.2,
+    };
+    const rule = (chunk_accel: Record<string, unknown>) =>
+      readPreview(preview({ control: { hz: 10, chunk_accel } }))!.chunkAccel
+        ?.rule;
+    expect(rule({ ...on, rule: "v2" })).toBe("v2");
+    expect(rule({ ...on, rule: "v1" })).toBe("v1");
+    // an answer from before the rule ran v1
+    expect(rule(on)).toBe("v1");
+    expect(rule({ ...on, rule: "v9" })).toBe("v1");
+  });
+
+  test("the warning of rule v2 is worded in both languages", () => {
+    const said = warningSay({ code: "chunk_accel_rule_v2", text: "English" });
+    expect(said.say).toEqual({
+      key: "marvel0.cmd.warning.chunk_accel_rule_v2",
+    });
+    for (const lang of ["en", "zh"] as const)
+      expect(sayText(said.say!, catalogue(lang))).not.toMatch(/^marvel0\./);
   });
 });
 
@@ -350,6 +448,51 @@ describe("what the form shows as its defaults", () => {
     expect(
       placeholders(base({ rtc: true, chunkAccel: true }), models, site).group,
     ).toBe("pi05_fr3_all_step49999_rtc_demo");
+  });
+
+  test("with rule v2 the default group is the v2 one the backend files it under", () => {
+    const v2 = { rtc: false, chunkAccel: true, chunkAccelRule: "v2" as const };
+    expect(placeholders(base(v2), models, site).group).toBe(
+      "pi05_fr3_all_step49999_accel_v2_demo",
+    );
+    // the rule alone, without the switch, files nothing apart
+    expect(
+      placeholders(base({ ...v2, chunkAccel: false }), models, site).group,
+    ).toBe("pi05_fr3_all_step49999_demo");
+    expect(
+      placeholders(base({ ...v2, chunkAccelRule: "v1" }), models, site).group,
+    ).toBe("pi05_fr3_all_step49999_accel_demo");
+  });
+
+  test("a saved form opened for editing loses only the group and note the server filled in", () => {
+    // review 2026-11-01: they were kept as typed text, so a rule or mode chosen next was filed under the old default
+    const id = "pi05_fr3_all_step49999";
+    const v2 = {
+      rtc: false,
+      inferenceMode: "plain" as const,
+      chunkAccel: true,
+      chunkAccelRule: "v2" as const,
+    };
+    const filled = base({
+      ...v2,
+      group: `${id}_accel_v2_demo`,
+      note: `marvel0 page: ${id} chunk accel experimental rule=v2 horizon=7`,
+    });
+    expect(editableSavedForm(filled, models, site)).toEqual({
+      ...filled,
+      group: "",
+      note: "",
+    });
+    // v1's default is not v2's: a v2 run filed under it was typed so
+    const typed = base({ ...v2, group: `${id}_accel_demo`, note: "my note" });
+    expect(editableSavedForm(typed, models, site)).toEqual(typed);
+    expect(
+      editableSavedForm(
+        base({ rtc: true, group: `${id}_rtc_demo` }),
+        models,
+        site,
+      ).group,
+    ).toBe("");
   });
 
   test("a model that is not in the list has no group to show", () => {

@@ -254,7 +254,7 @@ ROS 日志目录取 `LEVI_ROS_LOG_DIR`，其次 `ROS_LOG_DIR`，再次 `~/.ros/l
 
 #### 模型列表
 
-一个检查点要同时满足下列条件才会列出：它是带 `params/` 的 JAX 检查点，且策略发现认为它可部署；角色是 `forward`；服务配置在 `known_configs` 里；站点没有排除它；文件夹名只含普通字符（字母、数字、`.`、`_`、`-`）且不超过 71 个字符（默认的 rollout 组名 `<名称>_rtc_demo` 必须不超过命令表单接受的 80 个字符，否则列出了这个模型，它的默认表单却会被拒绝）；**顶层**的 `norm_stats.json` 是普通文件。最后一条很关键：策略服务器只读检查点顶层自带的归一化统计，而策略发现也会接受 `assets/` 下的文件。没有列出的文件夹在 `skipped` 里写明原因，取第一条不满足的规则：`unsafe_name`、`name_too_long`、`excluded_by_site`、`not_deployable`、`not_jax`、`role_not_forward`、`config_unknown` 或 `no_toplevel_norm_stats`。时间反向的 reset 检查点是典型例子：它不是正向策略，归一化统计也只在 `assets/` 下，所以不会列出（站点文件另外也把它放在 `excluded` 里）。文件夹本身的问题（例如它不存在）在 `problems` 里。
+一个检查点要同时满足下列条件才会列出：它是带 `params/` 的 JAX 检查点，且策略发现认为它可部署；角色是 `forward`；服务配置在 `known_configs` 里；站点没有排除它；文件夹名只含普通字符（字母、数字、`.`、`_`、`-`）且不超过 66 个字符（每种默认的 rollout 组名都必须不超过命令表单接受的 80 个字符；最长的是 chunk 内加速规则 v2 的 `<名称>_accel_v2_demo`，多 14 个字符。否则列出了这个模型，它的默认表单却会被拒绝）；**顶层**的 `norm_stats.json` 是普通文件。最后一条很关键：策略服务器只读检查点顶层自带的归一化统计，而策略发现也会接受 `assets/` 下的文件。没有列出的文件夹在 `skipped` 里写明原因，取第一条不满足的规则：`unsafe_name`、`name_too_long`、`excluded_by_site`、`not_deployable`、`not_jax`、`role_not_forward`、`config_unknown` 或 `no_toplevel_norm_stats`。时间反向的 reset 检查点是典型例子：它不是正向策略，归一化统计也只在 `assets/` 下，所以不会列出（站点文件另外也把它放在 `excluded` 里）。文件夹本身的问题（例如它不存在）在 `problems` 里。
 
 只有 `cfg_configs` 里的配置接受 `--cfg-guidance-scale`。`pi05_fr3_sp` 系列（以及 `restricted_prefixes` 里的）只接受客户端那两条任务指令。不在 `verified` 里的选项带 `unverified` 标签：它没有真机 GPU 部署记录，部署它除了确认语（由确认弹窗发送），还要 `accept_unverified`。文件夹 30 秒内只读一次。
 

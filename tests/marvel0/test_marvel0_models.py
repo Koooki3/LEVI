@@ -143,13 +143,15 @@ def test_a_folder_name_whose_default_group_is_over_80_is_skipped(tmp_path):
 
 def test_the_longest_name_whose_default_group_fits_is_offered(tmp_path):
     root = make_checkpoints(tmp_path, [])
-    fits, over = long_name(71), long_name(72)  # 71 + 9 = 80, 72 + 9 = 81
+    # the longest default group is v2's "<name>_accel_v2_demo": 66 + 14 = 80, 67 + 14 = 81
+    fits, over = long_name(66), long_name(67)
     for name in (fits, over):
         make_checkpoint(root, name, config="pi05_fr3_all_state", role="forward")
     catalog = M.build(make_site(tmp_path))
     assert [m.id for m in catalog.models] == [fits]
     assert reasons(catalog) == {over: "name_too_long"}
-    assert len(M.default_group(fits, True)) == 80
+    assert len(M.default_group(fits, "accel_v2")) == 80
+    assert len(M.default_group(over, True)) <= 80  # its RTC group alone would fit
 
 
 def test_a_name_that_is_both_unsafe_and_long_says_unsafe_first(tmp_path):
@@ -394,6 +396,7 @@ def test_the_view_is_the_contract(tmp_path):
         "plain": "pi05_fr3_all_step49999_demo",
         "vlash": "pi05_fr3_all_step49999_vlash_demo",
         "accel": "pi05_fr3_all_step49999_accel_demo",
+        "accel_v2": "pi05_fr3_all_step49999_accel_v2_demo",
     }
     assert view["models"][1]["labels"] == ["unverified"]
     assert {"id": "reset_r1_step20000", "reason": "excluded_by_site"} in view["skipped"]

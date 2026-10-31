@@ -5,9 +5,12 @@ the page shows the command and a person pastes it into a terminal of their own.
 What a person may choose is the form: model, task instruction, step and episode
 limits, the control rate (``--control-hz``: 5, 10, 20, 25 or 50, nothing else),
 ``--min-z`` (never below the site floor, always below the home height), RTC on
-or off with its horizon, rollout group and note. Everything else is fixed by
-the site file and no form can reach it: the camera serials, the robot server
-and policy server addresses, the home pose and its duration, every safety limit
+or off with its horizon, rollout group and note, and, with plain inference at
+10 Hz, in-chunk acceleration (another client entry point) with its rule
+(``--accel-rule=v2``; v1 is the client's default and is not written).
+Everything else is fixed by the site file and no form can reach it: the camera
+serials, the robot server and policy server addresses, the home pose and its
+duration, every safety limit
 (``--max-xy``, ``--max-step-m``, ``--max-step-rad``, the three angle ranges,
 ``--binarize-gripper``, ``--require-matching-server``,
 ``--allow-unknown-prompt``), the rollout root, and three constants: the
@@ -49,6 +52,9 @@ from dataclasses import field as dataclass_field
 from . import inference_mode
 from . import site as marvel0_site
 from .models import GROUP_MAX_CHARS, RESTRICTED_PROMPTS, default_group
+
+# Form's default rule (inside that class body the name inference_mode is a field)
+CHUNK_ACCEL_RULE_DEFAULT = inference_mode.CHUNK_ACCEL_RULE_DEFAULT
 
 SCRIPT = "examples/fr3_local/run_robotiq_client_collect_data.py"
 NO_PROXY = "no_proxy=localhost,127.0.0.1,::1"
@@ -146,6 +152,7 @@ GROUPS = (
         ("--vlash-overlap-steps", "value", "form"),
         ("--rtc-execute-horizon", "value", "form"),
         ("--open-loop-horizon", "value", "form"),
+        ("--accel-rule", "value", "form"),  # the accelerated client only, v2 only
     ),
     (
         ("--rollout-root", "value", "site"),
@@ -169,6 +176,7 @@ FIELDS = (
     "note",
     "control_hz",
     "chunk_accel",
+    "chunk_accel_rule",
 )
 
 
@@ -200,6 +208,8 @@ class Form:
     inference_mode: str | None = None
     vlash_overlap_steps: int | None = None
     chunk_accel: bool = False  # in-chunk acceleration client (plain inference only)
+    # its rule, one of inference_mode.CHUNK_ACCEL_RULES; v2 needs chunk_accel
+    chunk_accel_rule: str = CHUNK_ACCEL_RULE_DEFAULT
 
     def __post_init__(self):
         if self.inference_mode is None:
@@ -292,6 +302,7 @@ def control_summary(site, form) -> dict:
                 "experimental": True,
                 "speed_m_s": inference_mode.CHUNK_ACCEL_SPEED_M_S,
                 "tau_s": inference_mode.CHUNK_ACCEL_TAU_S,
+                "rule": form.chunk_accel_rule,
             }
             if form.chunk_accel
             else None
@@ -515,6 +526,25 @@ def _validate(site, restricted, model_id, body):
             "chunk_accel",
             "in-chunk acceleration needs a binarized gripper (site safety.binarize_gripper)",
         )
+    rule = body.get("chunk_accel_rule")
+    rule = inference_mode.CHUNK_ACCEL_RULE_DEFAULT if rule is None else rule
+    if not isinstance(rule, str):
+        raise FormError(
+            "invalid_type", "chunk_accel_rule", "chunk_accel_rule must be text"
+        )
+    if rule not in inference_mode.CHUNK_ACCEL_RULES:
+        raise FormError(
+            "chunk_accel_rule_invalid",
+            "chunk_accel_rule",
+            "the in-chunk acceleration rule is v1 or v2",
+        )
+    if rule != inference_mode.CHUNK_ACCEL_RULE_DEFAULT and not accel:
+        # v1 without the switch is the default every form has; another rule alone would be ignored silently
+        raise FormError(
+            "chunk_accel_rule_needs_switch",
+            "chunk_accel_rule",
+            "rule v2 belongs to in-chunk acceleration: turn it on, or leave the rule at v1",
+        )
     rtc = mode == "rtc"
     horizon = _whole(
         body,
@@ -528,7 +558,10 @@ def _validate(site, restricted, model_id, body):
     )
     group = body.get("rollout_group")
     if group is None:
-        group = default_group(model_id, "accel" if accel else mode)
+        # v2's runs are filed apart from v1's, so the two can be compared
+        group = default_group(
+            model_id, ("accel_v2" if rule == "v2" else "accel") if accel else mode
+        )
     if not isinstance(group, str):
         raise FormError("invalid_type", "rollout_group", "rollout_group must be text")
     if not _GROUP.fullmatch(group) or ".." in group:
@@ -544,6 +577,8 @@ def _validate(site, restricted, model_id, body):
         (
             f"marvel0 page: {model_id} vlash experimental overlap={overlap}{rate}"
             if mode == "vlash"
+            else f"marvel0 page: {model_id} chunk accel experimental rule=v2 horizon={horizon}{rate}"
+            if accel and rule == "v2"
             else f"marvel0 page: {model_id} chunk accel experimental horizon={horizon}{rate}"
             if accel
             else f"marvel0 page: {model_id} rtc={'on' if rtc else 'off'} horizon={horizon}{rate}"
@@ -568,6 +603,7 @@ def _validate(site, restricted, model_id, body):
         mode,
         overlap,
         accel,
+        rule,
     )
 
 
@@ -628,6 +664,12 @@ def _values(site, form) -> dict:
         values["--rtc-execute-horizon"] = ("value", str(form.rtc_horizon))
     else:
         values["--open-loop-horizon"] = ("value", str(form.rtc_horizon))
+    if (
+        form.chunk_accel
+        and form.chunk_accel_rule != inference_mode.CHUNK_ACCEL_RULE_DEFAULT
+    ):
+        # v1 is the client's default: a v1 command is the one it always was
+        values["--accel-rule"] = ("value", form.chunk_accel_rule)
     return values
 
 
@@ -748,6 +790,15 @@ def verify_argv(argv, site, restricted) -> None:
             body["vlash_overlap_steps"] = int(found["--vlash-overlap-steps"])
         if accel:
             body["chunk_accel"] = True
+        if "--accel-rule" in found:
+            # only the accelerated client takes it, and only for v2 (v1 is never written)
+            if not accel:
+                raise SelfCheckError("--accel-rule belongs to the accelerated client")
+            if found["--accel-rule"] == inference_mode.CHUNK_ACCEL_RULE_DEFAULT or (
+                found["--accel-rule"] not in inference_mode.CHUNK_ACCEL_RULES
+            ):
+                raise SelfCheckError("--accel-rule is written for v2 only")
+            body["chunk_accel_rule"] = found["--accel-rule"]
         if "--control-hz" in found:
             body["control_hz"] = int(found["--control-hz"])
         form = _validate(site, restricted, None, body)
@@ -903,6 +954,15 @@ def _warnings(site, model, form) -> list:
                 "chunk_accel_experimental",
                 "In-chunk acceleration is experimental and has not run on the real robot: "
                 "straight chunks run faster; keep a hand on the physical e-stop.",
+            )
+        )
+    if form.chunk_accel and form.chunk_accel_rule == "v2":
+        out.append(
+            _warning(
+                "chunk_accel_rule_v2",
+                "Rule v2 also hurries curved chunks and the actions before a gripper change, and sends the "
+                "gripper command with the arm settled, not while it moves as in the teleoperated demos; it has "
+                "only been replayed open loop.",
             )
         )
     table = _task_floor(form.prompt)

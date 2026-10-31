@@ -375,20 +375,30 @@ def test_the_catalog_offers_exactly_the_names_whose_default_form_is_accepted(
     tmp_path,
 ):
     # The catalog leaves out a folder whose default group is over the form's
-    # 80 characters: its default form would be refused. The two limits are one.
+    # 80 characters: its default form would be refused. The two limits are one,
+    # for every default form the page can send (review 2026-11-01: a 67-71
+    # character id was offered, and its v2 default form was refused).
     site = make_site(tmp_path)
+    forms = {
+        "rtc": {"rtc": True},
+        "plain": {"rtc": False},
+        "vlash": {"inference_mode": "vlash"},
+        "accel": {"chunk_accel": True},
+        "accel_v2": {"chunk_accel": True, "chunk_accel_rule": "v2"},
+    }
     for length in range(60, 81):
         name = "m" * (length - len("_step49999")) + "_step49999"
         accepted = {}
-        for rtc in (True, False):
+        for mode, body in forms.items():
             try:
-                C.validate(site, model(id=name), {"prompt": PROMPT, "rtc": rtc})
-                accepted[rtc] = True
+                C.validate(site, model(id=name), {"prompt": PROMPT, **body})
+                accepted[mode] = True
             except C.FormError as error:
-                assert error.code == "rollout_group_invalid", (length, rtc)
-                accepted[rtc] = False
+                assert error.code == "rollout_group_invalid", (length, mode)
+                accepted[mode] = False
         assert M.default_group_fits(name) == all(accepted.values()), length
-        assert M.default_group_fits(name) == (length <= 71), length
+        assert M.default_group_fits(name) == (length <= 66), length
+    assert len(M.default_group("m" * 66, "accel_v2")) == 80
 
 
 def test_the_rollout_group_defaults_from_the_model_and_the_mode(tmp_path):
@@ -624,6 +634,7 @@ def test_the_form_has_exactly_the_documented_fields():
         "inference_mode",
         "vlash_overlap_steps",
         "chunk_accel",
+        "chunk_accel_rule",
     ]
 
 
@@ -639,6 +650,7 @@ def test_the_flags_of_the_form_are_a_closed_list():
         "--rtc-execute-horizon",
         "--vlash-overlap-steps",
         "--open-loop-horizon",
+        "--accel-rule",
         "--rollout-group",
         "--eval-note",
     }
@@ -1221,3 +1233,132 @@ def test_chunk_accel_needs_a_binarized_gripper(tmp_path):
 def test_chunk_accel_runs_at_10hz_only(tmp_path, hz):
     err = refused(tmp_path, {"chunk_accel": True, "control_hz": hz})
     assert (err.code, err.field) == ("chunk_accel_requires_10hz", "chunk_accel")
+
+
+# ---- in-chunk acceleration, rule v2 ----
+
+
+def test_chunk_accel_rule_v1_is_the_default_and_writes_nothing(tmp_path):
+    # every v1 command is the one the switch always made: no --accel-rule, the same group and note
+    site, mdl, on = form_for(tmp_path, {"chunk_accel": True})
+    for body in ({"chunk_accel_rule": None}, {"chunk_accel_rule": "v1"}):
+        _, _, form = form_for(tmp_path, {"chunk_accel": True, **body})
+        assert form.chunk_accel_rule == "v1"
+        assert C.render(site, mdl, form).argv == C.render(site, mdl, on).argv
+    preview = C.render(site, mdl, on)
+    assert on.chunk_accel_rule == "v1"
+    assert not any(t.startswith("--accel-rule") for t in preview.argv)
+    assert on.rollout_group == f"{mdl.id}_accel_demo"
+    assert on.note == f"marvel0 page: {mdl.id} chunk accel experimental horizon=6"
+    assert preview.control["chunk_accel"]["rule"] == "v1"
+    assert "chunk_accel_rule_v2" not in [w["code"] for w in preview.warnings]
+    # without the switch v1 is what every form has, and nothing changes either
+    _, _, plain = form_for(tmp_path, {"rtc": False})
+    _, _, plain_v1 = form_for(tmp_path, {"rtc": False, "chunk_accel_rule": "v1"})
+    assert plain.chunk_accel_rule == plain_v1.chunk_accel_rule == "v1"
+    assert C.render(site, mdl, plain_v1).argv == C.render(site, mdl, plain).argv
+
+
+def test_chunk_accel_rule_v2_renders_its_flag_group_note_and_warning(tmp_path):
+    from levi.marvel0.inference_mode import CHUNK_ACCEL_CLIENT
+
+    site, mdl, form = form_for(
+        tmp_path, {"chunk_accel": True, "chunk_accel_rule": "v2"}
+    )
+    preview = C.render(site, mdl, form)
+    assert form.chunk_accel and form.chunk_accel_rule == "v2"
+    assert preview.argv[len(C.PREFIX) - 1] == CHUNK_ACCEL_CLIENT
+    assert [t for t in preview.argv if t.startswith("--accel-rule")] == [
+        "--accel-rule=v2"
+    ]
+    assert "--accel-rule=v2" in preview.command
+    assert form.rollout_group == f"{mdl.id}_accel_v2_demo"
+    assert (
+        form.note
+        == f"marvel0 page: {mdl.id} chunk accel experimental rule=v2 horizon=6"
+    )
+    assert preview.control["chunk_accel"] == {
+        "enabled": True,
+        "experimental": True,
+        "speed_m_s": 0.25,
+        "tau_s": 0.2,
+        "rule": "v2",
+    }
+    codes = [w["code"] for w in preview.warnings]
+    assert "chunk_accel_experimental" in codes and "chunk_accel_rule_v2" in codes
+    # the rest of the command is v1's, with the same group and note
+    _, _, v1 = form_for(
+        tmp_path,
+        {"chunk_accel": True, "rollout_group": form.rollout_group, "note": form.note},
+    )
+    base = C.render(site, mdl, v1).argv
+    assert [t for t in preview.argv if t != "--accel-rule=v2"] == base
+
+
+def test_chunk_accel_rule_v2_round_trips_through_verify_argv(tmp_path):
+    site, mdl, form = form_for(
+        tmp_path, {"chunk_accel": True, "chunk_accel_rule": "v2"}
+    )
+    argv = C.render(site, mdl, form).argv
+    C.verify_argv(
+        argv, site, mdl.restricted
+    )  # read back as rule v2 and rendered again the same
+
+
+def test_chunk_accel_rule_v2_needs_the_switch(tmp_path):
+    for body in ({}, {"chunk_accel": False}, {"chunk_accel": None}, {"rtc": False}):
+        err = refused(tmp_path, {**body, "chunk_accel_rule": "v2"})
+        assert (err.code, err.field) == (
+            "chunk_accel_rule_needs_switch",
+            "chunk_accel_rule",
+        )
+
+
+@pytest.mark.parametrize("value", ["v3", "V2", "", "2", "v2 "])
+def test_chunk_accel_rule_must_be_v1_or_v2(tmp_path, value):
+    err = refused(tmp_path, {"chunk_accel": True, "chunk_accel_rule": value})
+    assert (err.code, err.field) == ("chunk_accel_rule_invalid", "chunk_accel_rule")
+
+
+@pytest.mark.parametrize("value", [2, True, ["v2"]])
+def test_chunk_accel_rule_must_be_text(tmp_path, value):
+    err = refused(tmp_path, {"chunk_accel": True, "chunk_accel_rule": value})
+    assert (err.code, err.field) == ("invalid_type", "chunk_accel_rule")
+
+
+def test_chunk_accel_rule_argv_cannot_be_relabelled(tmp_path):
+    from levi.marvel0.inference_mode import CHUNK_ACCEL_CLIENT
+
+    site, mdl, form = form_for(
+        tmp_path, {"chunk_accel": True, "chunk_accel_rule": "v2"}
+    )
+    argv = C.render(site, mdl, form).argv
+    at = argv.index("--accel-rule=v2")
+    # another value, the default written out, or a second token instead of =value
+    for token in (
+        ["--accel-rule=v1"],
+        ["--accel-rule=v3"],
+        ["--accel-rule"],
+        ["--accel-rule", "v2"],
+    ):
+        with pytest.raises(C.SelfCheckError):
+            C.verify_argv(argv[:at] + token + argv[at + 1 :], site, mdl.restricted)
+    with pytest.raises(C.SelfCheckError):
+        C.verify_argv(argv + ["--accel-rule=v2"], site, mdl.restricted)
+    # the flag with the ordinary client
+    with pytest.raises(C.SelfCheckError, match="accelerated client"):
+        C.verify_argv(
+            [C.SCRIPT if x == CHUNK_ACCEL_CLIENT else x for x in argv],
+            site,
+            mdl.restricted,
+        )
+    # and added to an ordinary plain command
+    _, _, plain = form_for(tmp_path, {"rtc": False})
+    plain_argv = C.render(site, mdl, plain).argv
+    with pytest.raises(C.SelfCheckError, match="accelerated client"):
+        C.verify_argv(plain_argv + ["--accel-rule=v2"], site, mdl.restricted)
+    # a v1 command given the flag is not a v2 command (its group and note are v1's)
+    _, _, v1 = form_for(tmp_path, {"chunk_accel": True})
+    v1_argv = C.render(site, mdl, v1).argv
+    with pytest.raises(C.SelfCheckError):
+        C.verify_argv(v1_argv + ["--accel-rule=v2"], site, mdl.restricted)

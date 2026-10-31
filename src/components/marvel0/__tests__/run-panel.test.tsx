@@ -827,6 +827,24 @@ describe("starting from the page", () => {
     expect(text(dialog(on.host)!)).toContain(
       `${en["marvel0.inference.plain"]} + ${accel}`,
     );
+    // a v1 command (the default) names no rule
+    expect(text(dialog(on.host)!)).not.toContain(
+      en["marvel0.cmd.field.chunk_accel_rule_v2_short"],
+    );
+  });
+
+  test("the mode names rule v2 when the command has it", async () => {
+    const accel = en["marvel0.cmd.field.chunk_accel"];
+    const v2 = await openStart("idle_ready", false, "my_group", {
+      rtc: false,
+      inference_mode: "plain",
+      chunk_accel: true,
+      chunk_accel_rule: "v2",
+    });
+    await click(button(v2.host, "Start the client")!);
+    expect(text(dialog(v2.host)!)).toContain(
+      `${en["marvel0.inference.plain"]} + ${accel}, rule v2`,
+    );
   });
 
   test("Cancel, Escape and a tick that does not outlive its window: nothing is sent", async () => {

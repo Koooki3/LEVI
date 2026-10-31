@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT / "examples/fr3_local"))
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 import run_robotiq_client_collect_data as collector
 import tyro
-from accel import SPEED, TAU, ChunkAccel
+from accel import RULES, SPEED, TAU, ChunkAccel
 
 
 @dataclasses.dataclass
@@ -25,6 +25,9 @@ class Args(collector.Args):
     accel_speed: float = SPEED  # m/s along a hurried chunk's ramp
     # s, the controller's setpoint low-pass: 0.2 at filter 0.005, 0.1 at 0.01
     accel_tau: float = TAU
+    # v1: straight gripper-free chunks only; v2: also curved chunks (along their path) and the actions before a
+    # gripper change (settled before the gripper command), with a 6 cm target-to-arm guard (accel.py)
+    accel_rule: str = "v1"
 
 
 def install(args) -> ChunkAccel:
@@ -34,6 +37,7 @@ def install(args) -> ChunkAccel:
         args.control_hz,
         speed=args.accel_speed,
         tau=args.accel_tau,
+        rule=args.accel_rule,
     )
     rc, recorder = collector.rc, collector.RolloutRecorder
     query, clamp, eval_init, metadata, close, abort = (
@@ -48,6 +52,7 @@ def install(args) -> ChunkAccel:
     def settings():
         return {
             "experimental": True,
+            "rule": accel.rule,
             "speed_m_s": accel.speed,
             "tau_s": accel.tau,
             "gap_m": accel.gap,
@@ -132,6 +137,8 @@ def main(args):
         raise ValueError(
             "accel_speed must be in (0, 0.30] m/s and accel_tau in [0, 0.3] s"
         )
+    if args.accel_rule not in RULES:
+        raise ValueError(f"accel_rule must be one of {RULES}")
     install(args)
     collector.main(args)
 

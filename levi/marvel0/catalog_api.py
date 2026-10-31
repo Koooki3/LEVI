@@ -17,6 +17,8 @@ answer names a path on the machine except the preview's text to copy (``cwd``,
 ``argv``, ``command``) and the missing site file's own location.
 """
 
+from typing import Literal
+
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict
 
@@ -43,6 +45,7 @@ class PreviewBody(BaseModel):
     inference_mode: str | None = None
     vlash_overlap_steps: int | None = None
     chunk_accel: bool | None = None
+    chunk_accel_rule: Literal["v1", "v2"] | None = None
     rtc_horizon: int | None = None
     rollout_group: str | None = None
     note: str | None = None

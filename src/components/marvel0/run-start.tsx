@@ -97,6 +97,9 @@ export function RunStart({
                 {t(modeLabel(form.inference_mode, rtc))}
                 {form.chunk_accel === true &&
                   ` + ${t("marvel0.cmd.field.chunk_accel")}`}
+                {form.chunk_accel === true &&
+                  form.chunk_accel_rule === "v2" &&
+                  `, ${t("marvel0.cmd.field.chunk_accel_rule_v2_short")}`}
               </dd>
             </div>
             <div className="rg-fact">

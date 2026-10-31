@@ -28,6 +28,7 @@ describe("readModels", () => {
       groupPlain: "pi05_fr3_all_step49999_demo",
       groupVlash: "pi05_fr3_all_step49999_vlash_demo",
       groupAccel: "pi05_fr3_all_step49999_accel_demo",
+      groupAccelV2: "pi05_fr3_all_step49999_accel_v2_demo",
     });
     expect(view.models[1]).toMatchObject({ cfgCapable: true, verified: false });
     expect(view.skipped).toEqual([
@@ -48,6 +49,27 @@ describe("readModels", () => {
       }),
     )!;
     expect(view.models.map((m) => m.restrictedPrompts)).toEqual([true, false]);
+  });
+
+  test("the default group of rule v2 is the server's when it names one", () => {
+    const view = readModels(
+      modelsAnswer({
+        models: [
+          model({
+            rollout_group_default: {
+              rtc: "r",
+              plain: "p",
+              accel: "a1",
+              accel_v2: "server_v2_group",
+            },
+          }),
+        ],
+      }),
+    )!;
+    expect(view.models[0]).toMatchObject({
+      groupAccel: "a1",
+      groupAccelV2: "server_v2_group",
+    });
   });
 
   test("a model is unverified unless the server says it is verified", () => {

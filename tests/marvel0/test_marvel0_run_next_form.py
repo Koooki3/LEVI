@@ -50,3 +50,17 @@ def test_production_manual_switch_is_explicit_and_fail_closed(monkeypatch):
         ),
     )
     assert run.production_host().manual_enabled() is False
+
+
+def test_the_run_view_carries_the_acceleration_rule_and_an_old_record_ran_v1():
+    v2 = {"run_id": "new", "created_epoch": 1, "chunk_accel": True}
+    view = _run_view(SimpleNamespace(record={**v2, "chunk_accel_rule": "v2"}, now=2))
+    assert (view["chunk_accel"], view["chunk_accel_rule"]) == (True, "v2")
+    # a record from before the rule, or one holding anything else, is v1 (the client's default)
+    for rule in ({}, {"chunk_accel_rule": None}, {"chunk_accel_rule": "v3"}):
+        view = _run_view(SimpleNamespace(record={**v2, **rule}, now=2))
+        assert view["chunk_accel_rule"] == "v1", rule
+    assert (
+        _run_view(SimpleNamespace(record={"run_id": "old"}, now=2))["chunk_accel_rule"]
+        == "v1"
+    )

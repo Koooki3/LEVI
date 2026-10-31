@@ -7,6 +7,10 @@ VLASH_CLIENT = "lab/vlash/run_collect_vlash.py"
 CHUNK_ACCEL_CLIENT = "lab/chunk_accel/run_collect_accel.py"
 CHUNK_ACCEL_SPEED_M_S = 0.25  # the client's default ramp speed (accel.SPEED)
 CHUNK_ACCEL_TAU_S = 0.2  # the controller's setpoint low-pass it leads by (accel.TAU)
+# The client's --accel-rule (accel.RULES): v1, its default, hurries straight gripper-free chunks only; v2 also re-times
+# curved chunks along their path and hurries the actions before a gripper change (docs/CHUNK_ACCEL.md, "Rule v2").
+CHUNK_ACCEL_RULES = ("v1", "v2")
+CHUNK_ACCEL_RULE_DEFAULT = "v1"
 # Audited state-conditioned FR3 configs: absolute pose+gripper at the wire, H=10.
 # This is a space contract, not evidence of VLASH delay-aware fine-tuning.
 VLASH_CONFIGS = frozenset(("pi05_fr3_all_state", "pi05_fr3_all_state_cfg"))

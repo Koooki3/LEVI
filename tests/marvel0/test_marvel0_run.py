@@ -1514,6 +1514,20 @@ def test_vlash_run_requires_exact_mode_and_overlap(machine):
     assert policy_row()["level"] == "ok"
 
 
+def test_an_accelerated_run_group_follows_its_rule_as_the_form_does(machine):
+    # _group_of names the group before validation; it must be the one command._validate files the run under
+    for extra, suffix in (
+        ({}, "_accel_demo"),
+        ({"chunk_accel_rule": "v1"}, "_accel_demo"),
+        ({"chunk_accel_rule": "v2"}, "_accel_v2_demo"),
+    ):
+        body = machine.form(rtc=False, chunk_accel=True, **extra)
+        assert run._group_of(body) == f"{SFT}{suffix}", extra
+        assert command.validate(
+            machine.site, MODEL, body
+        ).rollout_group == run._group_of(body)
+
+
 def test_vlash_run_group_and_conflicts_are_not_plain(machine):
     assert run._group_of(machine.form(rtc=False, inference_mode="vlash")).endswith(
         "_vlash_demo"

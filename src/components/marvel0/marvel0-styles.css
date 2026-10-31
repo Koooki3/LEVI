@@ -1406,6 +1406,11 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+/* The rule of in-chunk acceleration sits under its switch, indented as its part. */
+.rg-accel-rule {
+  margin-top: var(--ds-space-2);
+  padding-left: var(--ds-space-4);
+}
 
 /* In-page links carry no control action. The grid is navigation, not progress. */
 .rg-workstation-nav {

@@ -370,4 +370,32 @@ describe("fieldMessages", () => {
       key: "marvel0.err.invalid_type",
     });
   });
+
+  test("the rule's refusals belong to its choice, in both languages", () => {
+    for (const code of [
+      "chunk_accel_rule_needs_switch",
+      "chunk_accel_rule_invalid",
+    ]) {
+      const messages = fieldMessages(
+        fail(code, { field: "chunk_accel_rule" }, 422),
+        {},
+      );
+      expect(Object.keys(messages), code).toEqual(["chunk_accel_rule"]);
+      expect(messages.chunk_accel_rule.say).toEqual({
+        key: `marvel0.err.${code}`,
+      });
+      for (const lang of ["en", "zh"] as const)
+        expect(
+          sayText(messages.chunk_accel_rule.say!, catalogue(lang)),
+          `${code} ${lang}`,
+        ).toMatch(/v1/);
+    }
+    const wrongType = fieldMessages(
+      fail("invalid_type", { field: "chunk_accel_rule" }, 422),
+      {},
+    );
+    expect(wrongType.chunk_accel_rule.say).toEqual({
+      key: "marvel0.err.invalid_type",
+    });
+  });
 });

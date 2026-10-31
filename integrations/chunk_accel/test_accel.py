@@ -1,6 +1,7 @@
 """Chunk acceleration: the rule (accel.py) and the client wrapper (run_collect_accel.py) without openpi, robot or GPU."""
 
 import importlib
+import itertools
 import sys
 import types
 import unittest
@@ -9,7 +10,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
-from accel import ChunkAccel
+from accel import GAP_GUARD, GRIP_EXTRA, SETTLE_TAU, ChunkAccel
 
 
 def chunk(step=0.005, n=10, g=1.0, curve=0.0, x0=0.45, rot=0.0):
@@ -229,12 +230,106 @@ class RuleTests(unittest.TestCase):
             abs(float(out[0, 3]) - float(first[-1, 3])), a.max_rot_jump + 1e-9
         )
 
+    def test_an_unknown_rule_is_refused(self):
+        with self.assertRaises(ValueError):
+            ChunkAccel(6, 10.0, rule="v3")
+
     def test_reset_forgets_the_episode(self):
         a = ChunkAccel(6, 10.0)
         a.plan(chunk())
         a.reset()
         self.assertEqual(a.stats["chunks"], 0)
         self.assertIsNone(a.last)
+
+
+def dist_to_polyline(x, P):
+    best = np.inf
+    for a, b in itertools.pairwise(P):
+        ab = b - a
+        s = np.clip((x - a) @ ab / max(float(ab @ ab), 1e-18), 0.0, 1.0)
+        best = min(best, float(np.linalg.norm(a + s * ab - x)))
+    return best
+
+
+class RuleV2Tests(unittest.TestCase):
+    """Rule v2 (study V4g): the actions before a gripper change, curved chunks along their path, the gap guard."""
+
+    def test_the_actions_before_a_gripper_change_are_hurried_and_the_arm_settles_before_it(
+        self,
+    ):
+        c = chunk(step=0.008, n=16)
+        c[12:, 6] = 0.0  # closes at index 12 of the executed sixteen
+        state = np.r_[c[0, :6], 1.0]
+        np.testing.assert_array_equal(
+            ChunkAccel(16, 10.0).plan(c, state), c
+        )  # v1 keeps the whole chunk
+        a = ChunkAccel(16, 10.0, rule="v2")
+        out = a.plan(c, state)
+        self.assertEqual(a.stats["hurried_prefix"], 1)
+        self.assertLess(len(out), 16)
+        k = int(np.argmax(out[:, 6] == 0.0))  # the gripper action
+        np.testing.assert_array_equal(
+            out[k:], c[12:]
+        )  # from the gripper action on: the policy's own pace
+        np.testing.assert_array_equal(
+            out[k - 1 - GRIP_EXTRA : k], np.repeat(c[11:12], GRIP_EXTRA + 1, axis=0)
+        )  # the pre-gripper action is held before it
+        np.testing.assert_allclose(out[0], c[0])
+        self.assertTrue(
+            on_segment(
+                out[:k, :3].astype(float),
+                c[0, :3].astype(float),
+                c[11, :3].astype(float),
+            )
+        )
+        self.assertTrue(np.all(out[:k, 6] == 1.0))
+
+    def test_no_prefix_within_a_second_of_the_last_gripper_change(self):
+        a = ChunkAccel(16, 10.0, rule="v2")
+        pose = chunk(n=1)[0, :6]
+        for g in (
+            1.0,
+            0.0,
+            0.0,
+        ):  # open, then a close and one more action: 2 executed since the change
+            a.executed(np.r_[pose, g])
+        self.assertEqual(a.since_grip, 2)
+        c = chunk(step=0.008, n=16, g=0.0)
+        c[12:, 6] = 1.0  # opens again
+        np.testing.assert_array_equal(a.plan(c), c)
+        self.assertEqual(a.stats["why_not"]["prefix_after_gripper"], 1)
+
+    def test_a_curved_chunk_is_retimed_along_its_own_path(self):
+        c = chunk(step=0.01, n=10, curve=0.01)
+        state = np.r_[c[0, :6], 1.0]
+        b = ChunkAccel(10, 10.0)
+        np.testing.assert_array_equal(b.plan(c, state), c)
+        self.assertEqual(b.stats["why_not"]["curved"], 1)
+        a = ChunkAccel(10, 10.0, rule="v2")
+        out = a.plan(c, state)
+        self.assertLess(len(out), 10)
+        self.assertEqual((a.stats["hurried"], a.stats["hurried_path"]), (1, 1))
+        np.testing.assert_allclose(out[0], c[0])
+        np.testing.assert_allclose(out[-1], c[9])
+        P = c[:, :3].astype(np.float64)
+        for x in out[:, :3].astype(np.float64):
+            self.assertLess(dist_to_polyline(x, P), 1e-6)  # never off the path
+        self.assertLessEqual(
+            float(np.max(np.linalg.norm(np.diff(out[:, :3], axis=0), axis=1))),
+            a.max_jump + 1e-9,
+        )
+
+    def test_the_gap_guard_gives_more_ticks_when_the_arm_lags(self):
+        c = chunk(step=0.012, n=10)
+        lagging = np.r_[c[0, :3] - [0.03, 0.0, 0.0], c[0, 3:6], 1.0]
+        n1 = len(ChunkAccel(10, 10.0).plan(c, lagging))
+        a = ChunkAccel(10, 10.0, rule="v2")
+        out = a.plan(c, lagging)
+        self.assertGreater(len(out), n1)
+        x, k = lagging[:3].astype(np.float64), np.exp(-a.dt / SETTLE_TAU)
+        for u in out[:, :3].astype(np.float64):
+            self.assertLessEqual(float(np.linalg.norm(u - x)), GAP_GUARD + 1e-9)
+            x = u + (x - u) * k
 
 
 class WrapperTests(unittest.TestCase):
@@ -309,6 +404,7 @@ class WrapperTests(unittest.TestCase):
         self.assertEqual(
             rec._session_metadata()["policy"]["chunk_accel"]["speed_m_s"], accel.speed
         )
+        self.assertEqual(rec._session_metadata()["policy"]["chunk_accel"]["rule"], "v1")
         self.assertEqual(rec.close("success", "key", True, {}), "closed")
         self.assertEqual(calls["close"]["chunk_accel"]["hurried"], 1)
         self.assertEqual(calls["close"]["chunk_accel"]["rejected"], 1)
@@ -323,9 +419,11 @@ class WrapperTests(unittest.TestCase):
             {"control_hz": 20.0},
             {"step_by_step": True},
             {"binarize_gripper": False},
+            {"accel_rule": "v3"},
         ):
             with self.assertRaises(ValueError):
                 mod.main(mod.Args(**bad))
+        self.assertEqual(mod.install(mod.Args(accel_rule="v2")).rule, "v2")
         sys.modules.pop("run_robotiq_client_collect_data", None)
         sys.modules.pop("run_collect_accel", None)
 

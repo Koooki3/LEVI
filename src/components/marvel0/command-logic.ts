@@ -39,6 +39,7 @@ export const FIELDS = [
   "note",
   "control_hz",
   "chunk_accel",
+  "chunk_accel_rule",
 ] as const;
 export type FieldName = (typeof FIELDS)[number];
 
@@ -61,7 +62,21 @@ export interface CommandForm {
   hz: string;
   /** In-chunk acceleration (experimental); sent only with plain inference. */
   chunkAccel?: boolean;
+  /** Its rule; absent is v1, the client's default. Kept while the switch is
+   * off, sent only with the switch on (and only v2). */
+  chunkAccelRule?: ChunkAccelRule;
 }
+
+/** The rules of in-chunk acceleration (`--accel-rule`): v1 hurries straight
+ * gripper-free chunks; v2 also curved chunks and the actions before a gripper
+ * change. v1 is the default and is never sent. */
+export const CHUNK_ACCEL_RULES = ["v1", "v2"] as const;
+export type ChunkAccelRule = (typeof CHUNK_ACCEL_RULES)[number];
+
+/** The rule of the form: v2 only when chosen, v1 otherwise. */
+export const chunkAccelRuleOf = (
+  form: Pick<CommandForm, "chunkAccelRule">,
+): ChunkAccelRule => (form.chunkAccelRule === "v2" ? "v2" : "v1");
 
 /** Whether the form's inference mode lets in-chunk acceleration be asked for:
  * the backend allows it with plain inference only. */
@@ -148,8 +163,9 @@ export function commandFormFromRun(value: unknown): CommandForm | null {
     group,
     note,
     hz: String(hz),
-    // Missing (an older run) means off.
+    // Missing (an older run) means off, and the rule v1.
     ...(item.chunk_accel === true && { chunkAccel: true }),
+    ...(item.chunk_accel_rule === "v2" && { chunkAccelRule: "v2" as const }),
   };
 }
 
@@ -183,12 +199,38 @@ export function placeholders(
         : rtc
           ? model.groupRtc
           : form.chunkAccel === true
-            ? (model.groupAccel ?? `${model.id}_accel_demo`)
+            ? chunkAccelRuleOf(form) === "v2"
+              ? (model.groupAccelV2 ?? `${model.id}_accel_v2_demo`)
+              : (model.groupAccel ?? `${model.id}_accel_demo`)
             : model.groupPlain
       : "",
     horizon: String(horizon),
     horizonMax: limit.max,
     horizonLoweredFrom: horizon < limit.default ? limit.default : null,
+  };
+}
+
+/** How every note the server writes when none is given starts (command.py's
+ * default note). */
+export const DEFAULT_NOTE_PREFIX = "marvel0 page: ";
+
+/** A saved run's form opened for editing every parameter. The server saved
+ * the group and note it filled in for that run; they are emptied again when
+ * they are those defaults, so a mode or rule chosen next gets its own default
+ * group and note (review 2026-11-01: after "Edit all parameters", v1 episodes
+ * were filed under the v2 run's `<model>_accel_v2_demo` with its v2 note). */
+export function editableSavedForm(
+  saved: CommandForm,
+  models: ModelsView,
+  site: SiteView,
+): CommandForm {
+  return {
+    ...saved,
+    group:
+      saved.group === placeholders(saved, models, site).group
+        ? ""
+        : saved.group,
+    note: saved.note.startsWith(DEFAULT_NOTE_PREFIX) ? "" : saved.note,
   };
 }
 
@@ -286,8 +328,11 @@ export function commandBody(
       body.vlash_overlap_steps = Number(form.vlashOverlapSteps?.trim() || "2");
   }
   // Sent only when on, so a command without it is the one it always was.
-  if (form.chunkAccel === true && mode === "plain" && chunkAccelRateOk(form))
+  if (form.chunkAccel === true && mode === "plain" && chunkAccelRateOk(form)) {
     body.chunk_accel = true;
+    // v1 is the default: a v1 command is the one the switch always made
+    if (chunkAccelRuleOf(form) === "v2") body.chunk_accel_rule = "v2";
+  }
   put("rtc_horizon", form.horizon, true);
   // The default rate is left out, so the command is the one it always was.
   put("control_hz", form.hz, true);
@@ -312,8 +357,9 @@ export interface Preview {
   verified: boolean;
   warnings: PreviewWarning[];
   /** In-chunk acceleration of this command (`control.chunk_accel`); absent
-   * when it is off or the answer does not say. */
-  chunkAccel?: { speedMS: number; tauS: number };
+   * when it is off or the answer does not say. The rule is v1 unless the
+   * answer says v2. */
+  chunkAccel?: { speedMS: number; tauS: number; rule: ChunkAccelRule };
 }
 
 /** A warning of the preview: `params` are the numbers its sentence holds, for
@@ -340,7 +386,13 @@ export function readPreview(data: unknown): Preview | null {
   return {
     ...(accel?.enabled === true &&
       speedMS !== null &&
-      tauS !== null && { chunkAccel: { speedMS, tauS } }),
+      tauS !== null && {
+        chunkAccel: {
+          speedMS,
+          tauS,
+          rule: accel.rule === "v2" ? ("v2" as const) : ("v1" as const),
+        },
+      }),
     command,
     needs: {
       modelId,
@@ -363,6 +415,7 @@ const WARNING_KEY: Record<string, string> = {
   rtc_margin_low: "marvel0.cmd.warning.rtc_margin_low",
   min_z_below_task_table: "marvel0.cmd.warning.min_z_below_task_table",
   chunk_accel_experimental: "marvel0.cmd.warning.chunk_accel_experimental",
+  chunk_accel_rule_v2: "marvel0.cmd.warning.chunk_accel_rule_v2",
 };
 
 /** The warnings of a control rate other than the default: their sentences hold

@@ -29,6 +29,8 @@ export interface ModelRow {
   groupPlain: string;
   groupVlash?: string;
   groupAccel?: string;
+  /** In-chunk acceleration with rule v2, filed apart from v1. */
+  groupAccelV2?: string;
 }
 
 export interface SkippedRow {
@@ -64,6 +66,7 @@ function readModel(entry: unknown): ModelRow | null {
     groupPlain: str(groups?.plain, 120) ?? `${id}_demo`,
     groupVlash: str(groups?.vlash, 120) ?? `${id}_vlash_demo`,
     groupAccel: str(groups?.accel, 120) ?? `${id}_accel_demo`,
+    groupAccelV2: str(groups?.accel_v2, 120) ?? `${id}_accel_v2_demo`,
   };
 }
 

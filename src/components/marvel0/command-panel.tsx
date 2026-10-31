@@ -28,6 +28,8 @@ import {
   Card,
   Field,
   Input,
+  Radio,
+  RadioGroup,
   Select,
   Switch,
 } from "@/components/ds";
@@ -37,11 +39,15 @@ import { Refusal, WordedText } from "./action-parts";
 import { COMMAND_ANCHOR } from "./chain-logic";
 import { wordOf } from "./ctl-text";
 import {
+  CHUNK_ACCEL_RULES,
   DEFAULT_HZ,
   bodyKey,
   chunkAccelAllowed,
   chunkAccelRateOk,
+  chunkAccelRuleOf,
+  type ChunkAccelRule,
   commandBody,
+  editableSavedForm,
   initialCommandForm,
   placeholders,
   rateFacts,
@@ -135,13 +141,17 @@ export function CommandPanel({
       taskInput.current?.focus();
     } else if (!resumeBody && previousResume.current) {
       const saved = previousResume.current;
-      setEdits({ ...saved.form, prompt: saved.prompt });
+      const editable =
+        models && site
+          ? editableSavedForm(saved.form, models, site)
+          : saved.form;
+      setEdits({ ...editable, prompt: saved.prompt });
       setResumeMode(false);
       setResumeBodyKey(null);
       setResumePrompt(null);
       previousResume.current = null;
     }
-  }, [savedForm, savedKey, resumeBodyKey]);
+  }, [savedForm, savedKey, resumeBodyKey, models, site]);
   // The switch belongs to plain inference: when the followed mode leaves plain it is turned off, so coming back to
   // plain never turns it on again by itself.
   const selectedMode = selection
@@ -255,7 +265,10 @@ export function CommandPanel({
             onClick={() => {
               if (!savedForm) return;
               const prompt = resumePrompt ?? savedForm.prompt;
-              setEdits({ ...savedForm, prompt });
+              setEdits({
+                ...editableSavedForm(savedForm, models, site),
+                prompt,
+              });
               setResumeMode(false);
               previousResume.current = null;
             }}
@@ -458,6 +471,9 @@ export function CommandPanel({
               disabled={resuming}
               error={fieldError("chunk_accel")}
               onChange={(chunkAccel) => edit({ chunkAccel })}
+              rule={chunkAccelRuleOf(form)}
+              ruleError={fieldError("chunk_accel_rule")}
+              onRule={(chunkAccelRule) => edit({ chunkAccelRule })}
             />
             <Field
               className="rg-span"
@@ -786,9 +802,22 @@ function Rate({
   );
 }
 
+/** The words of each rule: a name and one line on what it hurries. */
+const RULE_TEXT: Record<ChunkAccelRule, { label: string; hint: string }> = {
+  v1: {
+    label: "marvel0.cmd.field.chunk_accel_rule_v1",
+    hint: "marvel0.cmd.field.chunk_accel_rule_v1_hint",
+  },
+  v2: {
+    label: "marvel0.cmd.field.chunk_accel_rule_v2",
+    hint: "marvel0.cmd.field.chunk_accel_rule_v2_hint",
+  },
+};
+
 /** In-chunk acceleration (experimental): one switch, on only with plain
  * inference; with RTC or VLASH it is shown off and disabled, with the reason
- * in words. */
+ * in words. While it is on, its rule is chosen under it (two radio buttons);
+ * the choice is kept while it is off, and sent only while it is on. */
 function ChunkAccel({
   on,
   allowed,
@@ -796,6 +825,9 @@ function ChunkAccel({
   disabled,
   error,
   onChange,
+  rule,
+  ruleError,
+  onRule,
 }: {
   on: boolean;
   /** The form's inference mode is plain and its rate 10 Hz. */
@@ -805,11 +837,15 @@ function ChunkAccel({
   disabled: boolean;
   error?: string;
   onChange: (on: boolean) => void;
+  rule: ChunkAccelRule;
+  ruleError?: string;
+  onRule: (rule: ChunkAccelRule) => void;
 }) {
   const { t } = useLocale();
   const id = useId();
   const reasonId = `${id}-reason`;
   const errorId = `${id}-error`;
+  const ruleErrorId = `${id}-rule-error`;
   return (
     <div className="rg-span" data-testid="marvel0-command-chunk-accel">
       <Switch
@@ -836,6 +872,33 @@ function ChunkAccel({
       {error && (
         <p id={errorId} className="ds-field__error">
           {error}
+        </p>
+      )}
+      {allowed && on && (
+        <RadioGroup
+          legend={t("marvel0.cmd.field.chunk_accel_rule")}
+          className="rg-accel-rule"
+        >
+          {CHUNK_ACCEL_RULES.map((value) => (
+            <Radio
+              key={value}
+              name={`${id}-rule`}
+              value={value}
+              checked={rule === value}
+              disabled={disabled}
+              aria-invalid={ruleError ? true : undefined}
+              aria-describedby={ruleError ? ruleErrorId : undefined}
+              data-testid={`marvel0-command-chunk-accel-rule-${value}`}
+              onChange={() => onRule(value)}
+              label={t(RULE_TEXT[value].label)}
+              description={t(RULE_TEXT[value].hint)}
+            />
+          ))}
+        </RadioGroup>
+      )}
+      {ruleError && (
+        <p id={ruleErrorId} className="ds-field__error">
+          {ruleError}
         </p>
       )}
     </div>
@@ -1002,6 +1065,7 @@ function CommandResult({
             {
               key: "marvel0.cmd.result.chunk_accel",
               params: {
+                rule: preview.chunkAccel.rule,
                 speed: preview.chunkAccel.speedMS,
                 tau: preview.chunkAccel.tauS,
               },

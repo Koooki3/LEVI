@@ -570,8 +570,9 @@ known` lists; `known` is the suggestion list for the other models.
 A checkpoint is offered only when it is a JAX checkpoint with `params/` that the
 policy discovery calls deployable, its role is `forward`, its serving config is
 in `known_configs`, the site does not exclude it, its folder name is plain
-(letters, digits, `.`, `_`, `-`) and at most 71 characters (the default rollout
-group `<name>_rtc_demo` must fit the 80 the command form accepts: a longer name
+(letters, digits, `.`, `_`, `-`) and at most 66 characters (every default rollout
+group must fit the 80 the command form accepts, and the longest,
+`<name>_accel_v2_demo` for in-chunk acceleration rule v2, adds 14: a longer name
 would be offered with a default form that is refused), and a **top-level**
 `norm_stats.json` is a regular file. The last rule matters: the policy server
 reads only the norm stats shipped at the top of the checkpoint, and policy

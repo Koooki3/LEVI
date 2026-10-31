@@ -834,6 +834,7 @@
         "restricted_prompts": false,
         "rollout_group_default": {
           "accel": "pi05_fr3_all_step49999_accel_demo",
+          "accel_v2": "pi05_fr3_all_step49999_accel_v2_demo",
           "plain": "pi05_fr3_all_step49999_demo",
           "rtc": "pi05_fr3_all_step49999_rtc_demo",
           "vlash": "pi05_fr3_all_step49999_vlash_demo"
@@ -857,6 +858,7 @@
         "restricted_prompts": false,
         "rollout_group_default": {
           "accel": "recap_cfg_r1_step10000_jax_accel_demo",
+          "accel_v2": "recap_cfg_r1_step10000_jax_accel_v2_demo",
           "plain": "recap_cfg_r1_step10000_jax_demo",
           "rtc": "recap_cfg_r1_step10000_jax_rtc_demo",
           "vlash": "recap_cfg_r1_step10000_jax_vlash_demo"
@@ -880,6 +882,7 @@
         "restricted_prompts": false,
         "rollout_group_default": {
           "accel": "recap_cfg_r2_best_step14300_jax_accel_demo",
+          "accel_v2": "recap_cfg_r2_best_step14300_jax_accel_v2_demo",
           "plain": "recap_cfg_r2_best_step14300_jax_demo",
           "rtc": "recap_cfg_r2_best_step14300_jax_rtc_demo",
           "vlash": "recap_cfg_r2_best_step14300_jax_vlash_demo"
@@ -903,6 +906,7 @@
         "restricted_prompts": false,
         "rollout_group_default": {
           "accel": "recap_cfg_r2_step15000_jax_accel_demo",
+          "accel_v2": "recap_cfg_r2_step15000_jax_accel_v2_demo",
           "plain": "recap_cfg_r2_step15000_jax_demo",
           "rtc": "recap_cfg_r2_step15000_jax_rtc_demo",
           "vlash": "recap_cfg_r2_step15000_jax_vlash_demo"

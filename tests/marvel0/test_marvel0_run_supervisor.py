@@ -100,6 +100,39 @@ def test_a_start_launches_the_form_once_with_the_allowlisted_environment(machine
     assert m.view()["state"] == "starting"
 
 
+def test_a_v2_accelerated_start_launches_its_rule_and_records_it(machine):
+    import hashlib
+
+    from test_marvel0_run import MODEL
+
+    from levi.marvel0 import command, inference_mode
+
+    m = machine
+    m.deploy = m.ready_view(rtc=False)  # acceleration runs with plain inference
+    body = {"rtc": False, "chunk_accel": True, "chunk_accel_rule": "v2"}
+    answer = m.start(**body)
+    assert answer["created"] is True
+    # the test machine runs the fake client in place of the prefix; the flags are the rendered ones
+    spec = json.loads(m.log_path().with_suffix(".spec.json").read_text())
+    assert [t for t in spec["argv"] if t.startswith("--accel-rule")] == [
+        "--accel-rule=v2"
+    ]
+    rec = m.record()
+    # what was hosted is the accelerated client's command
+    argv = command.render(
+        m.site, MODEL, command.validate(m.site, MODEL, m.form(**body))
+    ).argv
+    assert argv[len(command.PREFIX) - 1] == inference_mode.CHUNK_ACCEL_CLIENT
+    hosted = "\0".join(run.hosted_argv(argv)).encode()
+    assert rec["argv_sha256"] == hashlib.sha256(hosted).hexdigest()
+    assert (rec["chunk_accel"], rec["chunk_accel_rule"]) == (True, "v2")
+    assert rec["form"]["chunk_accel_rule"] == "v2"
+    assert rec["group"].endswith("_accel_v2_demo")
+    view = m.view()["run"]
+    assert (view["chunk_accel"], view["chunk_accel_rule"]) == (True, "v2")
+    assert view["form"]["chunk_accel_rule"] == "v2"
+
+
 def test_the_whole_run_holds_the_arm_lock_and_lets_go_at_the_end(machine):
     m = machine
     arm = m.tmp / "arm.lock"
