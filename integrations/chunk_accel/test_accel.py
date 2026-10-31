@@ -155,6 +155,48 @@ class RuleTests(unittest.TestCase):
         np.testing.assert_array_equal(a.plan(closed, state), closed[:6])
         self.assertEqual(a.stats["why_not"]["gripper"], 1)
 
+    def test_a_press_and_retract_along_the_chord_is_not_straight(self):
+        # final review 2026-10-31: distance to the infinite line called it straight and the press was never sent
+        a = ChunkAccel(10, 10.0)
+        c = chunk(step=0.0)
+        c[:, 2] = [0.24, 0.23, 0.22, 0.21, 0.20, 0.21, 0.22, 0.23, 0.24, 0.25]
+        np.testing.assert_array_equal(a.plan(c), c[:10])
+        self.assertEqual(a.stats["why_not"]["curved"], 1)
+
+    def test_the_issued_gripper_command_in_the_state_restarts_the_hold(self):
+        # the client may throw a planned close away (rejected jump) or send it late (rate limit): the measured
+        # state's gripper is what was issued
+        a = ChunkAccel(6, 10.0)
+        closed = chunk(g=0.0, step=0.0)
+        open_state = np.r_[closed[0, :6], 1.0]
+        closed_state = np.r_[closed[0, :6], 0.0]
+        a.plan(chunk(), open_state)
+        self.assertEqual(a.stats["hurried"], 1)
+        np.testing.assert_array_equal(
+            a.plan(closed, open_state), closed[:6]
+        )  # planned close
+        self.assertEqual(
+            len(a.plan(closed, closed_state)), 6
+        )  # issued only now: the hold starts
+        self.assertEqual(a.stats["why_not"]["after_gripper"], 1)
+
+    def test_a_nan_gripper_counts_as_closed_like_the_client_binarizes_it(self):
+        a = ChunkAccel(6, 10.0)
+        c = chunk()
+        c[:, 6] = np.nan
+        np.testing.assert_array_equal(a.plan(c, np.r_[c[0, :6], 1.0]), c[:6])
+        self.assertEqual(a.stats["why_not"]["gripper"], 1)
+
+    def test_the_drop_rule_never_makes_a_rotation_jump(self):
+        a = ChunkAccel(6, 10.0)
+        first = a.plan(chunk())
+        c = chunk(x0=float(first[-1, 0]) - 0.012)
+        c[:, 3] = float(first[-1, 3]) + 0.12 * np.arange(10)
+        out = a.plan(c)
+        self.assertLessEqual(
+            abs(float(out[0, 3]) - float(first[-1, 3])), a.max_rot_jump + 1e-9
+        )
+
     def test_reset_forgets_the_episode(self):
         a = ChunkAccel(6, 10.0)
         a.plan(chunk())
@@ -166,7 +208,8 @@ class RuleTests(unittest.TestCase):
 class WrapperTests(unittest.TestCase):
     def test_install_wraps_the_query_and_records_settings_and_counts(self):
         rc = types.SimpleNamespace(
-            _query_policy=lambda client, obs, state, prompt: chunk()
+            _query_policy=lambda client, obs, state, prompt: chunk(),
+            _run_episode=lambda *args, **kwargs: ("success", {}),
         )
         calls = {}
 
@@ -215,6 +258,11 @@ class WrapperTests(unittest.TestCase):
         self.assertEqual(rec.close("success", "key", True, {}), "closed")
         self.assertEqual(calls["close"]["chunk_accel"]["hurried"], 1)
         self.assertEqual(accel.stats["chunks"], 0)  # reset for the next episode
+        rc._query_policy(None, None, None, "p")
+        self.assertEqual(rc._run_episode(), ("success", {}))
+        self.assertEqual(
+            accel.stats["chunks"], 0
+        )  # and at every episode start, recorded or not
         for bad in (
             {"rtc": True},
             {"control_hz": 20.0},

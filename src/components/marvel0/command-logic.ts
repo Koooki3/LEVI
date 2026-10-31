@@ -69,6 +69,11 @@ export const chunkAccelAllowed = (
   form: Pick<CommandForm, "inferenceMode" | "rtc">,
 ): boolean => inferenceMode(form.inferenceMode, form.rtc) === "plain";
 
+/** The accelerated client runs at the policy's own 10 Hz only (it refuses any
+ * other rate, and so does the backend). */
+export const chunkAccelRateOk = (form: Pick<CommandForm, "hz">): boolean =>
+  rateOf(form as CommandForm) === DEFAULT_HZ;
+
 /** The rate a client runs at when none is written (the backend's default). */
 export const DEFAULT_HZ = 10;
 
@@ -281,7 +286,8 @@ export function commandBody(
       body.vlash_overlap_steps = Number(form.vlashOverlapSteps?.trim() || "2");
   }
   // Sent only when on, so a command without it is the one it always was.
-  if (form.chunkAccel === true && mode === "plain") body.chunk_accel = true;
+  if (form.chunkAccel === true && mode === "plain" && chunkAccelRateOk(form))
+    body.chunk_accel = true;
   put("rtc_horizon", form.horizon, true);
   // The default rate is left out, so the command is the one it always was.
   put("control_hz", form.hz, true);

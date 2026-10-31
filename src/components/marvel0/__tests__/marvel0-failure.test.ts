@@ -313,6 +313,18 @@ describe("fieldMessages", () => {
     expect(fieldMessages(fail("command_self_check", {}, 500), {})).toEqual({});
   });
 
+  test("the 10 Hz refusal of in-chunk acceleration belongs to its switch", () => {
+    const rate = fieldMessages(
+      fail("chunk_accel_requires_10hz", { field: "chunk_accel" }, 422),
+      {},
+    );
+    expect(Object.keys(rate)).toEqual(["chunk_accel"]);
+    expect(rate.chunk_accel.say).toEqual({
+      key: "marvel0.err.chunk_accel_requires_10hz",
+    });
+    expect(sayText(rate.chunk_accel.say!, catalogue("zh"))).toMatch(/10 Hz/);
+  });
+
   test("in-chunk acceleration's refusals belong to its switch, in both languages", () => {
     const plainOnly = fieldMessages(
       fail("chunk_accel_requires_plain", { field: "chunk_accel" }, 422),

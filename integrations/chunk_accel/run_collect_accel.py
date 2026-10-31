@@ -78,7 +78,13 @@ def install(args) -> ChunkAccel:
         accel.reset()
         return abort(self, reason, stats, detail)
 
-    rc._query_policy = hurried_query
+    run_episode = rc._run_episode
+
+    def run_episode_(*args, **kwargs):
+        accel.reset()  # every episode starts fresh, recorded or not (a failed recorder never calls close)
+        return run_episode(*args, **kwargs)
+
+    rc._query_policy, rc._run_episode = hurried_query, run_episode_
     recorder._session_metadata, recorder.close, recorder.abort = (
         session_metadata,
         close_,

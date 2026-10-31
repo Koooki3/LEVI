@@ -73,6 +73,7 @@ const BY_CODE: Record<string, string> = {
   vlash_overlap_not_allowed: "marvel0.err.vlash_overlap_not_allowed",
   vlash_model_incompatible: "marvel0.err.vlash_model_incompatible",
   chunk_accel_requires_plain: "marvel0.err.chunk_accel_requires_plain",
+  chunk_accel_requires_10hz: "marvel0.err.chunk_accel_requires_10hz",
 
   min_z_not_positive: "marvel0.err.min_z_not_positive",
   min_z_below_floor: "marvel0.err.min_z_below_floor",
@@ -270,6 +271,7 @@ const FORM_CODES = new Set([
   "unknown_field",
   "model_unknown",
   "chunk_accel_requires_plain",
+  "chunk_accel_requires_10hz",
 ]);
 
 /** The refusals of a form, by the field each is about: LEVI's own form codes

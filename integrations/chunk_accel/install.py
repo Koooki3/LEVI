@@ -33,8 +33,9 @@ def check_client(root):
     """What run_collect_accel.py wraps must exist as it expects: the policy query and the recorder's metadata, close
     (with extra) and abort (with detail)."""
     rc = ast.parse((root / "examples/fr3_local/run_robotiq_client.py").read_text())
-    if _defines(rc, "_query_policy") is None:
-        raise ValueError("client function _query_policy missing")
+    for fn in ("_query_policy", "_run_episode"):
+        if _defines(rc, fn) is None:
+            raise ValueError("client function missing: " + fn)
     co = ast.parse(
         (root / "examples/fr3_local/run_robotiq_client_collect_data.py").read_text()
     )

@@ -46,7 +46,8 @@ def wrap(a):
 
 
 def _closed(g) -> bool:
-    return float(g) < 0.5
+    # as the client binarizes it (1.0 if g >= 0.5 else 0.0): NaN is closed
+    return not float(g) >= 0.5
 
 
 class ChunkAccel:
@@ -98,9 +99,9 @@ class ChunkAccel:
         """A new episode, or the client threw the last plan away (rejected jump, failed step)."""
         self.last = None  # the last action handed out
         self.direction = None  # unit direction of the last ramp, None if the last chunk was not hurried
-        self.since_grip = (
-            self.grip_hold
-        )  # actions handed out since the last gripper change (the start counts as old)
+        # actions handed out since the last gripper change (the start counts as old)
+        self.since_grip = self.grip_hold
+        self.issued_g = None  # the measured state's gripper (the last command issued) at the previous plan
         self.stats = {
             "chunks": 0,
             "hurried": 0,
@@ -148,7 +149,8 @@ class ChunkAccel:
         rel = seg[:, :3] - p0
         if d > 1e-9:
             u = chord / d
-            off = rel - np.outer(rel @ u, u)
+            # to the SEGMENT, not the infinite line: a press-and-retract along the chord is not straight
+            off = rel - np.outer(np.clip(rel @ u, 0.0, d), u)
         else:
             off = rel
         if float(np.max(np.linalg.norm(off, axis=1))) > self.dev:
@@ -208,10 +210,22 @@ class ChunkAccel:
         ):
             self.direction = None
         # the gripper value the arm was last sent: the last action handed out, else the measured state's (episode start)
+        # The gripper value the arm was last sent. The measured state carries the command fr3_env actually issued; it
+        # beats the last action handed out, which the client may have thrown away (a rejected jump) or not sent yet
+        # (the gripper rate limit). A change seen there restarts the hold.
+        issued = float(state[6]) if state is not None and len(state) >= 7 else None
+        if (
+            issued is not None
+            and self.issued_g is not None
+            and _closed(issued) != _closed(self.issued_g)
+        ):
+            self.since_grip = 0
+        if issued is not None:
+            self.issued_g = issued
         prev_g = (
-            self.last[6]
-            if self.last is not None
-            else (float(state[6]) if state is not None and len(state) >= 7 else None)
+            issued
+            if issued is not None
+            else (self.last[6] if self.last is not None else None)
         )
         n_end = min(
             len(chunk), self.horizon
@@ -234,6 +248,10 @@ class ChunkAccel:
                     and ahead[start] < 0.0
                     and float(np.linalg.norm(pos[start + 1] - self.last[:3]))
                     <= self.max_jump
+                    and float(
+                        np.max(np.abs(wrap(chunk[start + 1, 3:6] - self.last[3:6])))
+                    )
+                    <= self.max_rot_jump
                 ):
                     start += 1
         seg = chunk[start:n_end]

@@ -1204,3 +1204,9 @@ def test_chunk_accel_argv_cannot_be_relabelled(tmp_path):
             site,
             mdl.restricted,
         )
+
+
+@pytest.mark.parametrize("hz", [5, 20, 25, 50])
+def test_chunk_accel_runs_at_10hz_only(tmp_path, hz):
+    err = refused(tmp_path, {"chunk_accel": True, "control_hz": hz})
+    assert (err.code, err.field) == ("chunk_accel_requires_10hz", "chunk_accel")

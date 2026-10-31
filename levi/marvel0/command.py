@@ -501,6 +501,13 @@ def _validate(site, restricted, model_id, body):
             "chunk_accel",
             "in-chunk acceleration runs with plain inference only",
         )
+    if accel and control_hz != CONTROL_HZ_DEFAULT:
+        # the client refuses any other rate: its steps and timing are for the policy's own 10 Hz
+        raise FormError(
+            "chunk_accel_requires_10hz",
+            "chunk_accel",
+            "in-chunk acceleration runs at the policy's 10 Hz only",
+        )
     rtc = mode == "rtc"
     horizon = _whole(
         body,

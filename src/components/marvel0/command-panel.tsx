@@ -40,6 +40,7 @@ import {
   DEFAULT_HZ,
   bodyKey,
   chunkAccelAllowed,
+  chunkAccelRateOk,
   commandBody,
   initialCommandForm,
   placeholders,
@@ -426,13 +427,32 @@ export function CommandPanel({
                 lowered={hints.horizonLoweredFrom}
                 horizon={hints.horizon}
                 error={fieldError("control_hz")}
-                onChange={(hz) => edit({ hz })}
+                onChange={(hz) =>
+                  // another rate turns the switch off (the accelerated client runs at 10 Hz only)
+                  edit(
+                    Number(hz) === DEFAULT_HZ
+                      ? { hz }
+                      : { hz, chunkAccel: false },
+                  )
+                }
               />
             )}
             <ChunkAccel
               on={form.chunkAccel === true}
-              allowed={chunkAccelAllowed(form)}
-              mode={t(modeLabel(form.inferenceMode, form.rtc))}
+              allowed={chunkAccelAllowed(form) && chunkAccelRateOk(form)}
+              why={
+                chunkAccelAllowed(form)
+                  ? {
+                      key: "marvel0.cmd.field.chunk_accel_needs_10hz",
+                      params: { hz: rateOf(form) },
+                    }
+                  : {
+                      key: "marvel0.cmd.field.chunk_accel_needs_plain",
+                      params: {
+                        mode: t(modeLabel(form.inferenceMode, form.rtc)),
+                      },
+                    }
+              }
               disabled={resuming}
               error={fieldError("chunk_accel")}
               onChange={(chunkAccel) => edit({ chunkAccel })}
@@ -770,16 +790,16 @@ function Rate({
 function ChunkAccel({
   on,
   allowed,
-  mode,
+  why,
   disabled,
   error,
   onChange,
 }: {
   on: boolean;
-  /** The form's inference mode is plain. */
+  /** The form's inference mode is plain and its rate 10 Hz. */
   allowed: boolean;
-  /** The form's inference mode, in words. */
-  mode: string;
+  /** Why it is not allowed, in words of the page. */
+  why: Say;
   disabled: boolean;
   error?: string;
   onChange: (on: boolean) => void;
@@ -808,13 +828,7 @@ function ChunkAccel({
           className="rg-muted"
           data-testid="marvel0-command-chunk-accel-why"
         >
-          {sayText(
-            {
-              key: "marvel0.cmd.field.chunk_accel_needs_plain",
-              params: { mode },
-            },
-            t,
-          )}
+          {sayText(why, t)}
         </p>
       )}
       {error && (

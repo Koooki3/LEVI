@@ -5,6 +5,7 @@ import { readModels, readSite } from "../catalog-logic";
 import {
   bodyKey,
   chunkAccelAllowed,
+  chunkAccelRateOk,
   commandFormFromRun,
   commandBody,
   initialCommandForm,
@@ -229,6 +230,15 @@ describe("in-chunk acceleration", () => {
       ).not.toHaveProperty("chunk_accel");
   });
 
+  test("runs at 10 Hz only: at another rate it is not sent", () => {
+    // final review 2026-10-31: the client refuses any other rate at launch
+    expect(chunkAccelRateOk(base({ hz: "10" }))).toBe(true);
+    expect(chunkAccelRateOk(base({ hz: "20" }))).toBe(false);
+    expect(
+      commandBody(base({ ...plain, chunkAccel: true, hz: "20" })).body,
+    ).not.toHaveProperty("chunk_accel");
+  });
+
   test("is allowed with plain inference only", () => {
     expect(chunkAccelAllowed(plain)).toBe(true);
     expect(chunkAccelAllowed({ rtc: false })).toBe(true);
@@ -257,13 +267,16 @@ describe("in-chunk acceleration", () => {
       rtc_horizon: 7,
       rollout_group: "saved_group",
       note: "saved note",
-      control_hz: 20,
+      // 10 Hz, the only rate acceleration runs at; the body leaves the default rate out
+      control_hz: 10,
       chunk_accel: true,
     };
     const form = commandFormFromRun(saved)!;
     expect(form.chunkAccel).toBe(true);
     expect(form.inferenceMode).toBe("plain");
-    expect(commandBody(form).body).toEqual(saved);
+    const sent: Record<string, unknown> = { ...saved };
+    delete sent.control_hz;
+    expect(commandBody(form).body).toEqual(sent);
     // Missing (a run from before the switch) or not true is off.
     const old: Record<string, unknown> = { ...saved };
     delete old.chunk_accel;
