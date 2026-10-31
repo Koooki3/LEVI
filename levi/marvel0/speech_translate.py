@@ -103,16 +103,6 @@ def object_name(answer: str | None) -> str | None:
         for word in words
     ):
         return None
-    parsed = matcher._parse(name, repair=False)
-    if (
-        parsed.stop
-        or parsed.neg
-        or any(
-            tok.concept == "T" or tok.concept.startswith(("A:", "R:"))
-            for tok in parsed.tokens
-        )
-    ):
-        return None  # "hold on", "followed by", "pick up"
     concepts = [matcher._lookup_english(word) for word in words]
     if all(found is not None and found[0].startswith("J:") for found in concepts):
         return None  # only a colour or a size

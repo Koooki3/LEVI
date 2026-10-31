@@ -105,6 +105,18 @@ def same_field(text: str) -> bool | None:
     return None if match is None else match.group(1) == "true"
 
 
+def _free_gpu() -> None:
+    """Give back what a failed load allocated (best effort, no import of its
+    own: nothing was allocated if torch was never imported)."""
+    import contextlib
+    import sys
+
+    torch = sys.modules.get("torch")
+    if torch is not None:
+        with contextlib.suppress(Exception):  # nothing more to free
+            torch.cuda.empty_cache()
+
+
 class QwenTextTranslator:
     """A transformers-native chat model (bf16, entirely on the GPU) that is
     loaded on the first ``translate`` call and kept until the worker exits."""
@@ -150,14 +162,17 @@ class QwenTextTranslator:
                 use_safetensors=True,
             ).eval()
         except (StartupError, ImportError, OSError, ValueError) as error:
-            self._broken = (
+            message = (
                 f"The translation model cannot be loaded ({type(error).__name__})."
             )
-            raise RequestError("translate_unavailable", self._broken) from None
+            if not isinstance(error, OSError):  # a read error may pass
+                self._broken = message
+            _free_gpu()
+            raise RequestError("translate_unavailable", message) from None
         if {p.device.type for p in model.parameters()} != {"cuda"}:
             # An offloaded layer would run a 4B model on the arm controller's cores.
             del model
-            torch.cuda.empty_cache()
+            _free_gpu()
             self._broken = "The translation model is not fully on the GPU."
             raise RequestError("translate_unavailable", self._broken)
         self._tokenizer, self._model = tokenizer, model

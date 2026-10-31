@@ -201,7 +201,7 @@ def test_a_translated_name_holding_lexicon_words_reads_back_as_one_name(frames):
 def test_a_conjunction_keeps_two_things_apart(frames, said):
     asked = []
     result = gen(said, frames, translate=lambda zh: asked.append(zh) or "thing")
-    assert result["status"] == "no_task" and asked == []
+    assert result["status"] == "unsupported" and asked == []
     assert all("和" not in n and "跟" not in n for n in T.unknown_names(said))
 
 
@@ -224,8 +224,6 @@ def test_a_size_or_a_colour_with_se_before_a_new_name_stays_a_modifier(
     [
         ("把夹子放到蓝色盘子上", "夹子"),
         ("把插头放到蓝色盘子上", "插头"),
-        ("把文件夹放到蓝色盘子上", "文件夹"),
-        ("把衣夹放到蓝色盘子上", "衣夹"),
         ("把擀面杖放到蓝色盘子上", "擀面杖"),  # 面 is a filler elsewhere
     ],
 )
@@ -416,3 +414,83 @@ def test_a_long_run_of_unknown_words_never_reaches_the_sentence(frames):
 def test_a_word_no_slot_holds_makes_it_unclear(frames, said):
     result = gen(said, frames)
     assert result["status"] == "unclear" and result["prompt"] is None
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "把红色和蓝色的积木放到盒子里",
+        "把红色跟蓝色的积木放到盒子里",
+        "把红色或蓝色的积木放到盒子里",
+        "把红色和蓝色积木放到盒子里",
+        "把大和小的碗放到托盘上",
+        "把苹果放到红色和蓝色的碗里",
+        "把和服放到盘子上",
+    ],
+)
+def test_a_conjunction_never_merges_two_colours_or_sizes(frames, said):
+    asked = []
+    result = gen(said, frames, translate=lambda zh: asked.append(zh) or "thing")
+    assert (result["status"], result["prompt"], asked) == ("unsupported", None, [])
+
+
+@pytest.mark.parametrize(
+    "said",
+    ["把文件夹放到蓝色盘子上", "把衣夹放到蓝色盘子上", "把榴莲夹放到蓝色盘子上"],
+)
+def test_an_unknown_piece_before_jia_and_a_verb_is_unclear(frames, said):
+    # 文件夹放到 (a folder) and 榴莲夹放到 (clamp the durian, put it) read the
+    # same: nothing is guessed and the model is not asked.
+    asked = []
+    result = gen(said, frames, translate=lambda zh: asked.append(zh) or "thing")
+    assert (result["status"], asked) == ("unclear", [])
+
+
+@pytest.mark.parametrize(
+    "verb", ["叠放", "堆放", "码放", "摞放", "搬运", "取放", "拿放", "递放"]
+)
+def test_two_verbs_after_a_new_name_stay_verbs(frames, verb):
+    said = f"把榴莲{verb}在蓝色盘子上"
+    assert T.unknown_names(said) == ["榴莲"]
+
+
+def test_a_stack_verb_pair_keeps_its_action(frames):
+    done = gen("把榴莲叠放在蓝色盘子上", frames, translate=lambda zh: "durian")
+    assert done["status"] == "ok" and done["prompt"].startswith("stack ")
+
+
+@pytest.mark.parametrize(
+    "said", ["把上衣放到碗里", "把点心放到碗里", "把面条放到碗里", "把面膜放到碗里"]
+)
+def test_a_one_character_piece_after_a_name_start_is_unclear(frames, said):
+    asked = []
+    result = gen(said, frames, translate=lambda zh: asked.append(zh) or "thing")
+    assert (result["status"], asked) == ("unclear", [])
+
+
+def test_a_lone_one_character_name_after_ba_is_still_asked(frames):
+    asked = []
+    gen("把壶放到蓝色盘子上", frames, translate=lambda zh: asked.append(zh) or "kettle")
+    assert asked == ["壶"]
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "把苹果往碗里放",
+        "把苹果向碗里放",
+        "拿着苹果放到碗里",
+        "把苹果放到碗儿里",
+        "把苹果放到大号碗里",
+    ],
+)
+def test_particles_and_attached_characters_are_not_names(frames, said):
+    assert T.unknown_names(said) == []
+    asked = []
+    gen(said, frames, translate=lambda zh: asked.append(zh) or "thing")
+    assert asked == []
+
+
+@pytest.mark.parametrize("bad", ["hold on", "hold it", "followed by", "pick up"])
+def test_the_name_filter_refuses_phrases_itself(bad):
+    assert T._english_name(bad) is None

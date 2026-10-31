@@ -4,6 +4,7 @@ snapshot), checksum of the weights against the pinned hash, then
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from pathlib import Path
@@ -44,6 +45,19 @@ def _download(repo: str, revision: str, target: Path, scratch: Path) -> None:
     )
 
 
+def _unpinned_index_entries(folder: Path, weights: dict[str, str]) -> list[str]:
+    """The shard files a ``model.safetensors.index.json`` names that are not
+    pinned (the loader joins each name onto the folder, ``..`` included)."""
+    index = folder / "model.safetensors.index.json"
+    if not index.exists():
+        return []
+    try:
+        mapped = set(json.loads(index.read_text())["weight_map"].values())
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return ["model.safetensors.index.json"]
+    return sorted(name for name in mapped if name not in weights)
+
+
 def install_model(model_dir: Path, name: str, source: Path | None = None) -> Path:
     """Install ``name`` under ``model_dir`` and return its folder. An existing
     folder that verifies is left alone; one that does not is an error (it is
@@ -79,7 +93,12 @@ def install_model(model_dir: Path, name: str, source: Path | None = None) -> Pat
                     f"{weight} is not the pinned revision of {repo}.",
                     3,
                 )
-        extra = [p.name for p in partial.glob("*.safetensors") if p.name not in weights]
+        extra = [
+            p.relative_to(partial).as_posix()
+            for p in partial.rglob("*.safetensors")
+            if p.relative_to(partial).as_posix() not in weights
+        ]
+        extra += _unpinned_index_entries(partial, weights)
         if extra:
             raise StartupError(
                 "manifest_mismatch",

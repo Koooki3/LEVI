@@ -197,6 +197,7 @@ export type UntranslatedWhy =
   | "blocked"
   | "not_loaded"
   | "busy"
+  | "rate_limit"
   | "gpu_memory"
   | "no_time"
   | "failed";
@@ -245,6 +246,7 @@ const UNTRANSLATED_WHY: UntranslatedWhy[] = [
   "blocked",
   "not_loaded",
   "busy",
+  "rate_limit",
   "gpu_memory",
   "no_time",
   "failed",

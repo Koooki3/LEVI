@@ -359,9 +359,11 @@ class Manager:
         refuse. ``timeout_s`` (at most ``TRANSLATE_TIMEOUT_S``) counts from this
         call and covers ``may_load``, the load and the answers; a worker that
         misses it is retired like one that misses a transcription's deadline.
-        A first load with less than ``TRANSLATE_LOAD_MIN_S`` left is not begun
-        (``SttError("no_time")``), and names or a timeout outside the limits
-        are refused (``translate_invalid``) before anything is sent."""
+        A request is not begun without ``TRANSLATE_NAME_S`` a name left (plus
+        ``TRANSLATE_LOAD_S`` for a first load, checked again after
+        ``may_load``): ``SttError("no_time")``. Names or a timeout outside the
+        limits are refused (``translate_invalid``) before anything is sent. A
+        worker that answers ``translate_unavailable`` is not asked again."""
         deadline = time.monotonic() + min(timeout_s, settings.TRANSLATE_TIMEOUT_S)
         valid = (
             isinstance(names, list)
@@ -390,11 +392,15 @@ class Manager:
                 raise SttError(
                     "translate_unavailable", "no translation model is configured"
                 )
+            need = settings.TRANSLATE_NAME_S * len(names)
             if not worker.translator_loaded:
-                if deadline - time.monotonic() < settings.TRANSLATE_LOAD_MIN_S:
+                need += settings.TRANSLATE_LOAD_S
+                if deadline - time.monotonic() < need:
                     raise SttError("no_time", "too little time left to load the model")
                 if may_load is not None:
                     may_load()
+            if deadline - time.monotonic() < need:
+                raise SttError("no_time", "too little time left for these names")
             try:
                 return self._translate_exchange(
                     worker, request_id, names, body, deadline
@@ -406,6 +412,19 @@ class Manager:
                 raise
         finally:
             self._request.release()
+
+    def can_translate(self) -> str | None:
+        """Passive: None when ``translate`` would ask the worker now, else the
+        code it would refuse with (``not_loaded``, ``busy``,
+        ``translate_unavailable``)."""
+        worker = self._current()
+        if worker is None or worker.proc.poll() is not None:
+            return "not_loaded"
+        if self._request.locked() or worker.phase == "busy":
+            return "busy"
+        if worker.phase != "ready":
+            return "not_loaded"
+        return None if worker.translation else "translate_unavailable"
 
     def _translate_exchange(
         self,
@@ -439,6 +458,8 @@ class Manager:
                 raise self._error(worker, "worker_error")
             with self._lock:
                 worker.phase, worker.last_used = "ready", self._clock()
+                if answer.code == "translate_unavailable":
+                    worker.translation = False  # its model cannot be loaded
             raise answer
         with self._lock:
             worker.phase, worker.last_used = "ready", self._clock()

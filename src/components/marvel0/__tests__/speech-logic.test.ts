@@ -956,6 +956,9 @@ describe("the generated sentence (owner decision 2026-10-30)", () => {
     expect(
       why({ status: "untranslated", untranslated_why: "later" }),
     ).toBeNull();
+    expect(
+      why({ status: "untranslated", untranslated_why: "rate_limit" }),
+    ).toBe("rate_limit");
     expect(why({ untranslated_why: "busy" })).toBeNull();
     expect(
       readMatch(matchC({ generated: generated({ translations: undefined }) }))!

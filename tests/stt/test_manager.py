@@ -681,11 +681,13 @@ def test_a_refusal_of_the_names_keeps_the_worker(make):
 
 
 def test_a_late_translation_retires_the_worker(make):
-    manager = make([{}, TRANSLATED, {**TRANSLATED, "delay": 3.0}], translation=True)
+    manager = make([{}, TRANSLATED, {**TRANSLATED, "delay": 60.0}], translation=True)
     manager.transcribe(REQ, WAV)
     manager.translate(REQ, NAMES)  # the text model is loaded
+    # Enough time to begin (TRANSLATE_NAME_S a name), far too little to answer.
+    timeout_s = settings.TRANSLATE_NAME_S * len(NAMES) + scaled(0.5)
     with pytest.raises(SttError) as caught:
-        manager.translate(REQ, NAMES, timeout_s=scaled(0.5))
+        manager.translate(REQ, NAMES, timeout_s=timeout_s)
     assert caught.value.code == "timeout"
     assert manager.status()["state"] in ("failed", "off")
     wait_until(
@@ -749,9 +751,37 @@ def test_a_first_load_is_not_begun_without_time_for_it(make):
             REQ,
             NAMES,
             lambda: asked.append(1),
-            timeout_s=settings.TRANSLATE_LOAD_MIN_S - 0.5,
+            timeout_s=settings.TRANSLATE_LOAD_S,
         )
     assert caught.value.code == "no_time" and asked == []
     assert [r["kind"] for r in requests_of(manager)] == ["transcribe"]
-    answer = manager.translate(REQ, NAMES, timeout_s=settings.TRANSLATE_LOAD_MIN_S + 1)
+    answer = manager.translate(REQ, NAMES, timeout_s=settings.TRANSLATE_LOAD_S + 3)
     assert answer.items[0]["english"] == "kumquat"
+
+
+def test_can_translate_says_why_without_asking(make):
+    manager = make(
+        [{}, {"do": "error", "code": "translate_unavailable"}], translation=True
+    )
+    assert manager.can_translate() == "not_loaded"
+    manager.transcribe(REQ, WAV)
+    assert manager.can_translate() is None
+    with pytest.raises(SttError):
+        manager.translate(REQ, NAMES, timeout_s=settings.TRANSLATE_TIMEOUT_S)
+    # A worker whose model cannot be loaded is not asked again.
+    assert manager.can_translate() == "translate_unavailable"
+    with pytest.raises(SttError) as caught:
+        manager.translate(REQ, NAMES)
+    assert caught.value.code == "translate_unavailable"
+    assert [r["kind"] for r in requests_of(manager)] == ["transcribe", "translate"]
+
+
+def test_the_time_needed_grows_with_the_names(make):
+    manager = make([{}, TRANSLATED], translation=True)
+    manager.transcribe(REQ, WAV)
+    four = ["金桔", "订书机", "荔枝", "芒果"]
+    need = settings.TRANSLATE_LOAD_S + settings.TRANSLATE_NAME_S * len(four)
+    with pytest.raises(SttError) as caught:
+        manager.translate(REQ, four, timeout_s=need - 0.5)
+    assert caught.value.code == "no_time"
+    assert [r["kind"] for r in requests_of(manager)] == ["transcribe"]

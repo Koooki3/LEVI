@@ -39,6 +39,9 @@ class TranslatingManager(FakeManager):
         self.translate_error = None
         self.text_loaded = False
 
+    def can_translate(self):
+        return None if self.view["state"] == "ready" else "not_loaded"
+
     def translate(self, request_id, names, may_load=None, timeout_s=20):
         self.translated.append((request_id, list(names), timeout_s))
         if self.translate_error:
@@ -194,8 +197,19 @@ def test_the_memory_is_read_fresh_before_the_load_and_only_then(machine):
 def test_translations_have_their_own_rate_limit(machine, monkeypatch):
     monkeypatch.setattr(speech_api, "TRANSLATE_RATE", speech_api.RateLimit(1, 60.0))
     assert match(machine)["status"] == "ok"
-    assert match(machine, "把荔枝放到蓝色碗里")["untranslated_why"] == "busy"
+    assert match(machine, "把荔枝放到蓝色碗里")["untranslated_why"] == "rate_limit"
     assert len(machine.manager.translated) == 1
+
+
+def test_a_refusal_before_the_worker_uses_no_rate_limit_slot(machine, monkeypatch):
+    limiter = speech_api.RateLimit(1, 60.0)
+    monkeypatch.setattr(speech_api, "TRANSLATE_RATE", limiter)
+    machine.manager.view["state"] = "off"
+    for _ in range(3):
+        assert match(machine)["untranslated_why"] == "not_loaded"
+    machine.manager.view["state"] = "ready"
+    assert match(machine)["status"] == "ok"
+    assert machine.manager.translated and limiter.take() > 0
 
 
 def test_with_no_time_left_nothing_is_asked(machine, monkeypatch):

@@ -70,12 +70,13 @@ TRANSLATE_MAX_BYTES = 1024
 # TRANSLATE_TIMEOUT_S); a worker that misses it is stopped, which takes up to
 # 2 * GRACE_S (4 s) more, and the budgets leave room for that, so the server
 # answers before the page stops waiting and the request lock is free again.
-# With less than TRANSLATE_MIN_S left no translation is tried, and the first
-# one (the load) needs TRANSLATE_LOAD_MIN_S.
+# With less than TRANSLATE_MIN_S left no translation is tried; one is begun
+# only with TRANSLATE_NAME_S a name left, plus TRANSLATE_LOAD_S for the load.
 TRANSCRIBE_BUDGET_S = 68
 MATCH_BUDGET_S = 10
 TRANSLATE_MIN_S = 3
-TRANSLATE_LOAD_MIN_S = 8
+TRANSLATE_LOAD_S = 5.5
+TRANSLATE_NAME_S = 1.0
 RATE_PER_MINUTE = 10
 OMP_THREADS = 2
 

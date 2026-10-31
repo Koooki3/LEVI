@@ -276,11 +276,16 @@ class _SlotReader(matcher._Reader):
         A Chinese compound needs no space and puts its head last, so a name
         outside the lexicon often holds a lexicon word: 蓝莓 (blueberry) reads
         as 蓝 (blue) + 莓, 卷笔刀 (pencil sharpener) as 卷 + 笔 (pen) + 刀
-        (knife), 玩具车 as 玩具 (toy) + 车, 文件夹 as 文件 + 夹 (a verb). See
+        (knife), 玩具车 as 玩具 (toy) + 车, 夹子 as 夹 (a verb) + 子. See
         ``_glue`` for which adjacent pieces become one name outside the lexicon
         (the translator gets it whole). A filler between two characters of an
         unknown name stays in it (擀面杖); one before or after it does not (把,
-        的); 和/跟/与/或/及 always separate two things."""
+        的, and 往/向/朝/着 here); 儿 after a thing and 号 after a size belong
+        to them (碗儿, 大号); 和/跟/与/或/及 are kept as a conjunction, which
+        ``generate`` does not put into a frame. What cannot be told apart is
+        not guessed: a one-character unknown piece right after 上/下/中/面/点/
+        起/全/里/内 (上衣 would be 衣) and an unknown piece + 夹 + another verb
+        (文件夹放到, or 榴莲夹放到?) make the sentence ``unclear``."""
         spans: list[tuple[int, int]] = []  # characters of each token of this run
         first = len(self.tokens)
         gap: list[str] = []
@@ -292,34 +297,63 @@ class _SlotReader(matcher._Reader):
             joins = char in _CONJUNCTIONS_ZH
             token = None if joins else self._chinese_token(run, at)
             if token or joins:
-                self._flush_at(gap, gap_span, spans)
+                self._flush_at(gap, gap_span, spans, run)
                 gap, held = [], []
                 tok, size = token or (matcher._Tok("C", "exact", char, char), 1)
                 self.tokens.append(tok)
                 spans.append((at, at + size))
                 at += size
+            elif (
+                not gap
+                and spans
+                and spans[-1][1] == at
+                and _attaches(self.tokens[-1], char)
+            ):
+                spans[-1] = (spans[-1][0], at + 1)  # 碗儿, 大号
+                at += 1
             else:
-                if char not in lexicon.FILLERS_ZH:
+                if char not in lexicon.FILLERS_ZH and char not in _FILLERS_HERE:
                     gap_span = (gap_span[0] if gap else at, at + 1)
                     gap += [*held, char] if gap else [char]
                     held = []
                 elif gap:
                     held.append(char)
                 at += 1
-        self._flush_at(gap, gap_span, spans)
-        self.tokens[first:] = _glue(self.tokens[first:], spans)
+        self._flush_at(gap, gap_span, spans, run)
+        glued, unclear = _glue(self.tokens[first:], spans)
+        self.tokens[first:] = glued
+        self.dropped += unclear
 
     def _flush_at(
-        self, gap: list[str], span: tuple[int, int], spans: list[tuple[int, int]]
+        self,
+        gap: list[str],
+        span: tuple[int, int],
+        spans: list[tuple[int, int]],
+        run: str,
     ) -> None:
         before = len(self.tokens)
         self._flush(gap)
         if len(self.tokens) > before:
             spans.append(span)
+            if len(gap) == 1 and span[0] > 0 and run[span[0] - 1] in _NAME_STARTS:
+                # 上衣 read as 上 + 衣: the name may have lost its first character.
+                self.dropped.append(run[span[0] - 1] + gap[0])
 
 
 _CONJUNCTIONS_ZH: Final = frozenset("和跟与或及")
 _NOUN_ENDINGS: Final = frozenset("子头儿")
+# Fillers for the template's reader only: directions and particles before a
+# thing (往碗里放, 拿着苹果), never part of a new name.
+_FILLERS_HERE: Final = frozenset("往向朝着")
+# Matcher fillers that also start many object names (上衣, 点心, 面条, 中药).
+_NAME_STARTS: Final = frozenset("上下中面点起全里内")
+
+
+def _attaches(tok: matcher._Tok, char: str) -> bool:
+    """儿 after a thing (碗儿) and 号 after a size (大号) belong to them."""
+    return (char == "儿" and tok.concept.startswith("N:")) or (
+        char == "号" and tok.concept in _SIZE_FIRST
+    )
 
 
 def _thing_part(tok: matcher._Tok) -> bool:
@@ -336,11 +370,13 @@ def _modifier_first(tok: matcher._Tok) -> bool:
 
 def _verbs_in_names(
     tokens: list[matcher._Tok], spans: list[tuple[int, int]]
-) -> set[int]:
-    """Indexes of one-character verbs that are part of a name: before a lone
-    noun ending (夹子, 插头), or after an unknown piece and right before
-    another verb (文件夹放到, 衣夹放到). "拿金桔放到" keeps 拿 a verb."""
-    found = set()
+) -> tuple[set[int], list[str]]:
+    """Indexes of one-character verbs that are part of a name, before a lone
+    noun ending (夹子, 插头), and the pieces that cannot be told apart: an
+    unknown piece + 夹 + another verb is a name (文件夹放到) or a verb (榴莲夹
+    放到). Other verb pairs stay verbs (叠放, 搬运); "拿金桔放到" keeps 拿."""
+    found: set[int] = set()
+    unclear: list[str] = []
     for i, tok in enumerate(tokens):
         if not tok.concept.startswith("A:") or len(tok.heard) != 1:
             continue
@@ -348,25 +384,28 @@ def _verbs_in_names(
         glued_next = nxt is not None and spans[i + 1][0] == spans[i][1]
         glued_prev = i > 0 and spans[i - 1][1] == spans[i][0]
         before_ending = glued_next and nxt.concept == "U" and nxt.heard in _NOUN_ENDINGS
-        ends_a_name = (
-            glued_prev
+        if before_ending:
+            found.add(i)
+        elif (
+            tok.heard == "夹"
+            and glued_prev
             and tokens[i - 1].concept == "U"
             and glued_next
             and nxt.concept.startswith("A:")
-        )
-        if before_ending or ends_a_name:
-            found.add(i)
-    return found
+        ):
+            unclear.append(tokens[i - 1].heard + tok.heard)
+    return found, unclear
 
 
 def _glue(
     tokens: list[matcher._Tok], spans: list[tuple[int, int]]
-) -> list[matcher._Tok]:
+) -> tuple[list[matcher._Tok], list[str]]:
     """``tokens`` (one run's, with their character ``spans``) with every
     adjacent span of thing parts (and verbs inside a name, see
     ``_verbs_in_names``) that holds an unknown one joined into one unknown
-    token; a leading size or 色 colour word stays a modifier."""
-    in_names = _verbs_in_names(tokens, spans)
+    token, a leading size or 色 colour word left a modifier; and the pieces
+    that cannot be told apart."""
+    in_names, unclear = _verbs_in_names(tokens, spans)
     out: list[matcher._Tok] = []
     group: list[matcher._Tok] = []
     end = -1
@@ -393,7 +432,7 @@ def _glue(
                 out.append(tok)
         end = stop
     close()
-    return out
+    return out, unclear
 
 
 def _read(
@@ -573,6 +612,9 @@ def generate(
         return _empty("vetoed")
     if dropped:
         return _empty("unclear")
+    if any(t.concept == "C" for t in tokens):
+        # 红色和蓝色的积木, 苹果和香蕉: a frame holds one thing per slot.
+        return _empty("unsupported")
     steps = _steps(tokens)
     if not steps:
         return _empty("no_task")
@@ -690,6 +732,16 @@ def _english_name(value: str | None) -> str | None:
         c.startswith(("A:", "T", "R:")) for c in concepts
     ):
         return None
+    parsed = matcher._parse(name, repair=False)
+    if (
+        parsed.stop
+        or parsed.neg
+        or any(
+            t.concept == "T" or t.concept.startswith(("A:", "R:"))
+            for t in parsed.tokens
+        )
+    ):
+        return None  # a phrase: "hold on", "followed by", "pick up"
     return name
 
 

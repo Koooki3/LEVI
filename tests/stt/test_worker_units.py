@@ -1148,3 +1148,27 @@ def test_names_in_the_matchers_cjk_range_are_accepted():
     from levi_stt_worker.serve import parse_names
 
     assert parse_names(json.dumps({"names": ["㐀鿿"]}).encode()) == ["㐀鿿"]
+
+
+def test_install_refuses_a_nested_or_indexed_weight_file_that_is_not_pinned(
+    tmp_path, monkeypatch
+):
+    import hashlib
+
+    from levi_stt_worker import install
+    from levi_stt_worker.errors import StartupError
+
+    pinned = {"model.safetensors": hashlib.sha256(b"weights").hexdigest()}
+    monkeypatch.setitem(install.TRANSLATION_MODELS, "text", ("org/text", "rev", pinned))
+    nested = snapshot(tmp_path / "a")
+    (nested / "sub").mkdir()
+    (nested / "sub" / "extra.safetensors").write_bytes(b"other")
+    indexed = snapshot(tmp_path / "b")
+    (indexed / "model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": {"w": "../outside.safetensors"}})
+    )
+    for source in (nested, indexed):
+        with pytest.raises(StartupError) as caught:
+            install.install_model(tmp_path / "models", "text", source)
+        assert caught.value.code == "manifest_mismatch"
+    assert not (tmp_path / "models" / "text").exists()

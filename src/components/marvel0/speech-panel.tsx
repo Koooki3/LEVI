@@ -769,6 +769,7 @@ const NOT_ASKED_TEXT: Record<UntranslatedWhy, string> = {
   blocked: "marvel0.speech.generated.not_asked.blocked",
   not_loaded: "marvel0.speech.generated.not_asked.not_loaded",
   busy: "marvel0.speech.generated.not_asked.busy",
+  rate_limit: "marvel0.speech.generated.not_asked.rate_limit",
   gpu_memory: "marvel0.speech.generated.not_asked.gpu_memory",
   no_time: "marvel0.speech.generated.not_asked.no_time",
   failed: "marvel0.speech.generated.not_asked.failed",

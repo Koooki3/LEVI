@@ -608,8 +608,8 @@ def _translator(site, request_id: str, budget_s: float) -> Callable:
     translations of the Chinese object names the template could not fill
     (``speech_template.generate``'s ``untranslated``), and, when some got none,
     why (``untranslated_why``: ``off``, ``not_installed``, ``too_many``,
-    ``blocked``, ``not_loaded``, ``busy``, ``gpu_memory``, ``no_time`` or
-    ``failed``). ``budget_s`` counts from now: what is left of it when the
+    ``blocked``, ``not_loaded``, ``busy``, ``rate_limit``, ``gpu_memory``,
+    ``no_time`` or ``failed``). ``budget_s`` counts from now: what is left of it when the
     names are asked bounds the translation."""
     deadline = time.monotonic() + budget_s
 
@@ -638,8 +638,11 @@ def _translator(site, request_id: str, budget_s: float) -> Callable:
         left = deadline - time.monotonic()
         if left < stt_settings.TRANSLATE_MIN_S:
             return verdicts, "no_time"
+        refused = manager().can_translate()
+        if refused is not None:
+            return verdicts, TRANSLATE_WHY.get(refused, "failed")
         if TRANSLATE_RATE.take():
-            return verdicts, "busy"
+            return verdicts, "rate_limit"
         try:
             answer = manager().translate(
                 request_id, missing, _text_model_check(site), timeout_s=left
