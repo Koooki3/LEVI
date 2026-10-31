@@ -393,6 +393,7 @@ def test_the_view_is_the_contract(tmp_path):
         "rtc": "pi05_fr3_all_step49999_rtc_demo",
         "plain": "pi05_fr3_all_step49999_demo",
         "vlash": "pi05_fr3_all_step49999_vlash_demo",
+        "accel": "pi05_fr3_all_step49999_accel_demo",
     }
     assert view["models"][1]["labels"] == ["unverified"]
     assert {"id": "reset_r1_step20000", "reason": "excluded_by_site"} in view["skipped"]

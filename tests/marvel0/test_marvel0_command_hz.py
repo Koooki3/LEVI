@@ -569,6 +569,7 @@ def test_the_summary_shows_every_derived_value(tmp_path, hz):
         "hz": hz,
         "reference_hz": 10,
         **EXPECTED_SUMMARY[hz],
+        "chunk_accel": None,
     }
 
 
@@ -691,4 +692,5 @@ def test_vlash_summary_keeps_its_mode_overlap_and_full_chunk_horizon(tmp_path):
         "horizon_s": 1.0,
         "latency_beats": 3,
         "rtc": None,
+        "chunk_accel": None,
     }

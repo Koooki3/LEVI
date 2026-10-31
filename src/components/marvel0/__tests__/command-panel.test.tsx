@@ -304,9 +304,200 @@ describe("the Client command card", () => {
     const inputs = Array.from(
       card(host).querySelectorAll("input, select"),
     ).length;
-    expect(inputs).toBe(7); // prompt, steps, eval, min z, horizon, group, note
+    // prompt, steps, eval, min z, horizon, in-chunk acceleration, group, note
+    expect(inputs).toBe(8);
     expect(card(host).querySelectorAll("select").length).toBe(0);
-    expect(card(host).querySelector("[role=switch]")).toBeNull();
+    const switches = card(host).querySelectorAll("[role=switch]");
+    expect(switches).toHaveLength(1);
+    expect(
+      switches[0].closest("[data-testid=marvel0-command-chunk-accel]"),
+    ).not.toBeNull();
+  });
+});
+
+describe("in-chunk acceleration", () => {
+  const accel = (host: HTMLElement) =>
+    card(host).querySelector<HTMLInputElement>(
+      "[data-testid=marvel0-command-chunk-accel] input[role=switch]",
+    )!;
+  const why = (host: HTMLElement) =>
+    card(host).querySelector("[data-testid=marvel0-command-chunk-accel-why]");
+
+  test("with plain inference it is off by default, and on it is sent; off it is left out", async () => {
+    const { host, calls } = await open(undefined, readDeploy(idle()), false, {
+      rtc: false,
+    });
+    expect(text(card(host))).toContain(en["marvel0.cmd.field.chunk_accel"]);
+    expect(text(card(host))).toContain(
+      en["marvel0.cmd.field.chunk_accel_hint"],
+    );
+    expect(accel(host).checked).toBe(false);
+    expect(accel(host).disabled).toBe(false);
+    expect(why(host)).toBeNull();
+    await make(host);
+    expect(calls.preview[0]).not.toHaveProperty("chunk_accel");
+    await click(accel(host));
+    expect(accel(host).checked).toBe(true);
+    await make(host);
+    expect(calls.preview[1]).toMatchObject({
+      inference_mode: "plain",
+      rtc: false,
+      chunk_accel: true,
+    });
+  });
+
+  test("with RTC or VLASH it is disabled with the reason, and never sent", async () => {
+    for (const over of [
+      { rtc: true },
+      { rtc: false, inferenceMode: "vlash" as const },
+    ]) {
+      const { host, calls } = await open(
+        undefined,
+        readDeploy(idle()),
+        false,
+        over,
+      );
+      expect(accel(host).disabled).toBe(true);
+      expect(accel(host).checked).toBe(false);
+      const mode = over.inferenceMode === "vlash" ? "VLASH" : "RTC";
+      expect(text(why(host))).toBe(
+        `Not available with ${mode}: in-chunk acceleration runs only with plain inference.`,
+      );
+      expect(accel(host).getAttribute("aria-describedby")).toBe(why(host)!.id);
+      await make(host);
+      expect(calls.preview[0]).not.toHaveProperty("chunk_accel");
+    }
+  });
+
+  test("turned on with plain inference, then RTC chosen: shown off and not sent", async () => {
+    const { host, calls, choose } = await open(
+      undefined,
+      readDeploy(idle()),
+      false,
+      { rtc: false },
+    );
+    await click(accel(host));
+    await choose({ rtc: true });
+    expect(accel(host).checked).toBe(false);
+    expect(accel(host).disabled).toBe(true);
+    await make(host);
+    expect(calls.preview[0]).not.toHaveProperty("chunk_accel");
+    // back to plain: it stays off until someone turns it on again (review 2026-10-31)
+    await choose({ rtc: false });
+    expect(accel(host).disabled).toBe(false);
+    expect(accel(host).checked).toBe(false);
+  });
+
+  test("a changed switch marks the command on show as no longer matching", async () => {
+    const { host } = await open(undefined, readDeploy(idle()), false, {
+      rtc: false,
+    });
+    await make(host);
+    const result = () =>
+      host.querySelector("[data-testid=marvel0-command-result]") as HTMLElement;
+    expect(result().getAttribute("data-stale")).toBeNull();
+    await click(accel(host));
+    expect(result().getAttribute("data-stale")).toBe("true");
+    await click(accel(host));
+    expect(result().getAttribute("data-stale")).toBeNull();
+  });
+
+  test("the server's refusal lands under the switch, in the page's words", async () => {
+    const { host } = await open(
+      {
+        preview: refused(
+          422,
+          "chunk_accel_requires_plain",
+          { field: "chunk_accel" },
+          "English chunk_accel sentence",
+        ),
+      },
+      readDeploy(idle()),
+      false,
+      { rtc: false },
+    );
+    await click(accel(host));
+    await make(host);
+    const box = card(host).querySelector(
+      "[data-testid=marvel0-command-chunk-accel]",
+    )!;
+    expect(text(box.querySelector(".ds-field__error"))).toBe(
+      en["marvel0.err.chunk_accel_requires_plain"],
+    );
+    expect(accel(host).getAttribute("aria-invalid")).toBe("true");
+    expect(text(card(host))).not.toContain("English chunk_accel sentence");
+    expect(
+      host.querySelector("[data-testid=marvel0-command-problem]"),
+    ).toBeNull();
+  });
+
+  test("the result says it is on, with the speed and lag the server answered", async () => {
+    const { host } = await open(
+      {
+        preview: ok(
+          preview({
+            control: {
+              hz: 10,
+              chunk_accel: {
+                enabled: true,
+                experimental: true,
+                speed_m_s: 0.25,
+                tau_s: 0.2,
+              },
+            },
+          }),
+        ),
+      },
+      readDeploy(idle()),
+      false,
+      { rtc: false },
+    );
+    await click(accel(host));
+    await make(host);
+    const line = host.querySelector(
+      "[data-testid=marvel0-command-chunk-accel-on]",
+    );
+    expect(text(line)).toContain("up to 0.25 m/s");
+    expect(text(line)).toContain("0.2 s lag");
+  });
+
+  test("a resumed run with it on keeps it in the body and shows it, disabled", async () => {
+    const saved = {
+      model_id: SFT,
+      prompt: "old task",
+      max_steps: 500,
+      eval_num: 4,
+      min_z: 0.03,
+      rtc: false,
+      inference_mode: "plain",
+      rtc_horizon: 7,
+      rollout_group: "original_group",
+      note: "original note",
+      control_hz: 10,
+      chunk_accel: true,
+    };
+    const { host, calls } = await open(
+      { preview: ok(preview()) },
+      readDeploy(ready()),
+      false,
+      { rtc: false },
+      saved,
+    );
+    await waitFor(
+      () => host.querySelector("[data-testid=marvel0-command-resumed]"),
+      { label: "the saved run form" },
+    );
+    expect(accel(host).checked).toBe(true);
+    expect(accel(host).disabled).toBe(true);
+    await type(field(host, "Task instruction")!, "new task");
+    await make(host);
+    expect(calls.preview[0]).toEqual({ ...saved, prompt: "new task" });
+    // Editing every parameter keeps the switch as the run had it.
+    await click(button(host, en["marvel0.episodeChange.editAll"])!);
+    expect(accel(host).checked).toBe(true);
+    expect(accel(host).disabled).toBe(false);
+    await make(host);
+    expect(calls.preview[1]).toMatchObject({ chunk_accel: true });
   });
 });
 

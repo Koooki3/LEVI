@@ -38,6 +38,7 @@ export const FIELDS = [
   "rollout_group",
   "note",
   "control_hz",
+  "chunk_accel",
 ] as const;
 export type FieldName = (typeof FIELDS)[number];
 
@@ -58,7 +59,15 @@ export interface CommandForm {
   /** The control rate in Hz, one of the site's options (a select, so always a
    * whole number as text); the default rate when the server offers none. */
   hz: string;
+  /** In-chunk acceleration (experimental); sent only with plain inference. */
+  chunkAccel?: boolean;
 }
+
+/** Whether the form's inference mode lets in-chunk acceleration be asked for:
+ * the backend allows it with plain inference only. */
+export const chunkAccelAllowed = (
+  form: Pick<CommandForm, "inferenceMode" | "rtc">,
+): boolean => inferenceMode(form.inferenceMode, form.rtc) === "plain";
 
 /** The rate a client runs at when none is written (the backend's default). */
 export const DEFAULT_HZ = 10;
@@ -134,6 +143,8 @@ export function commandFormFromRun(value: unknown): CommandForm | null {
     group,
     note,
     hz: String(hz),
+    // Missing (an older run) means off.
+    ...(item.chunk_accel === true && { chunkAccel: true }),
   };
 }
 
@@ -166,7 +177,9 @@ export function placeholders(
         ? (model.groupVlash ?? `${model.id}_vlash_demo`)
         : rtc
           ? model.groupRtc
-          : model.groupPlain
+          : form.chunkAccel === true
+            ? (model.groupAccel ?? `${model.id}_accel_demo`)
+            : model.groupPlain
       : "",
     horizon: String(horizon),
     horizonMax: limit.max,
@@ -267,6 +280,8 @@ export function commandBody(
     else
       body.vlash_overlap_steps = Number(form.vlashOverlapSteps?.trim() || "2");
   }
+  // Sent only when on, so a command without it is the one it always was.
+  if (form.chunkAccel === true && mode === "plain") body.chunk_accel = true;
   put("rtc_horizon", form.horizon, true);
   // The default rate is left out, so the command is the one it always was.
   put("control_hz", form.hz, true);
@@ -290,6 +305,9 @@ export interface Preview {
   needs: { modelId: string; rtc: boolean; inferenceMode?: InferenceMode };
   verified: boolean;
   warnings: PreviewWarning[];
+  /** In-chunk acceleration of this command (`control.chunk_accel`); absent
+   * when it is off or the answer does not say. */
+  chunkAccel?: { speedMS: number; tauS: number };
 }
 
 /** A warning of the preview: `params` are the numbers its sentence holds, for
@@ -310,7 +328,13 @@ export function readPreview(data: unknown): Preview | null {
   const modelId = str(needs?.model_id, 120);
   const rtc = bool(needs?.rtc);
   if (!command.trim() || !modelId || rtc === null) return null;
+  const accel = rec(rec(body.control)?.chunk_accel);
+  const speedMS = num(accel?.speed_m_s);
+  const tauS = num(accel?.tau_s);
   return {
+    ...(accel?.enabled === true &&
+      speedMS !== null &&
+      tauS !== null && { chunkAccel: { speedMS, tauS } }),
     command,
     needs: {
       modelId,
@@ -332,6 +356,7 @@ const WARNING_KEY: Record<string, string> = {
   unverified_model: "marvel0.cmd.warning.unverified_model",
   rtc_margin_low: "marvel0.cmd.warning.rtc_margin_low",
   min_z_below_task_table: "marvel0.cmd.warning.min_z_below_task_table",
+  chunk_accel_experimental: "marvel0.cmd.warning.chunk_accel_experimental",
 };
 
 /** The warnings of a control rate other than the default: their sentences hold

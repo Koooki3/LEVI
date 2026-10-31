@@ -168,6 +168,7 @@ FIELDS = (
     "rollout_group",
     "note",
     "control_hz",
+    "chunk_accel",
 )
 
 
@@ -198,6 +199,7 @@ class Form:
     control_hz: int = CONTROL_HZ_DEFAULT  # one of CONTROL_HZ_OPTIONS
     inference_mode: str | None = None
     vlash_overlap_steps: int | None = None
+    chunk_accel: bool = False  # in-chunk acceleration client (plain inference only)
 
     def __post_init__(self):
         if self.inference_mode is None:
@@ -284,6 +286,16 @@ def control_summary(site, form) -> dict:
         ),
         "latency_beats": beats,
         "rtc": None,
+        "chunk_accel": (
+            {
+                "enabled": True,
+                "experimental": True,
+                "speed_m_s": inference_mode.CHUNK_ACCEL_SPEED_M_S,
+                "tau_s": inference_mode.CHUNK_ACCEL_TAU_S,
+            }
+            if form.chunk_accel
+            else None
+        ),
     }
     if form.rtc:
         reached = form.rtc_horizon + beats
@@ -460,7 +472,10 @@ def _validate(site, restricted, model_id, body):
     min_z = _min_z(site, body)
     control_hz = _control_hz(body)
     try:
-        mode = inference_mode.resolve(body)
+        # RTC is the page's default mode; asking for acceleration alone means plain inference
+        mode = inference_mode.resolve(
+            body, default_rtc=body.get("chunk_accel") is not True
+        )
         overlap = (
             inference_mode.overlap(body.get("vlash_overlap_steps"))
             if mode == "vlash"
@@ -474,6 +489,18 @@ def _validate(site, restricted, model_id, body):
             )
     except inference_mode.ModeError as exc:
         raise FormError(exc.code, exc.field, str(exc)) from exc
+    accel = body.get("chunk_accel")
+    accel = False if accel is None else accel
+    if not isinstance(accel, bool):
+        raise FormError(
+            "invalid_type", "chunk_accel", "chunk_accel must be true or false"
+        )
+    if accel and mode != "plain":
+        raise FormError(
+            "chunk_accel_requires_plain",
+            "chunk_accel",
+            "in-chunk acceleration runs with plain inference only",
+        )
     rtc = mode == "rtc"
     horizon = _whole(
         body,
@@ -487,7 +514,7 @@ def _validate(site, restricted, model_id, body):
     )
     group = body.get("rollout_group")
     if group is None:
-        group = default_group(model_id, mode)
+        group = default_group(model_id, "accel" if accel else mode)
     if not isinstance(group, str):
         raise FormError("invalid_type", "rollout_group", "rollout_group must be text")
     if not _GROUP.fullmatch(group) or ".." in group:
@@ -503,6 +530,8 @@ def _validate(site, restricted, model_id, body):
         (
             f"marvel0 page: {model_id} vlash experimental overlap={overlap}{rate}"
             if mode == "vlash"
+            else f"marvel0 page: {model_id} chunk accel experimental horizon={horizon}{rate}"
+            if accel
             else f"marvel0 page: {model_id} rtc={'on' if rtc else 'off'} horizon={horizon}{rate}"
         ),
     )
@@ -524,6 +553,7 @@ def _validate(site, restricted, model_id, body):
         control_hz,
         mode,
         overlap,
+        accel,
     )
 
 
@@ -594,6 +624,8 @@ def _lines(site, form) -> list:
     prefix = list(PREFIX)
     if form.inference_mode == "vlash":
         prefix[-1] = inference_mode.VLASH_CLIENT
+    elif form.chunk_accel:
+        prefix[-1] = inference_mode.CHUNK_ACCEL_CLIENT
     lines = [prefix[:4], prefix[4:]]
     for group in GROUPS:
         tokens = [
@@ -668,8 +700,14 @@ def verify_argv(argv, site, restricted) -> None:
         len(argv) >= len(PREFIX)
         and argv[len(PREFIX) - 1] == inference_mode.VLASH_CLIENT
     )
+    accel = (
+        len(argv) >= len(PREFIX)
+        and argv[len(PREFIX) - 1] == inference_mode.CHUNK_ACCEL_CLIENT
+    )
     if vlash:
         prefix[-1] = inference_mode.VLASH_CLIENT
+    elif accel:
+        prefix[-1] = inference_mode.CHUNK_ACCEL_CLIENT
     if argv[: len(PREFIX)] != prefix:
         raise SelfCheckError("the command does not start with the fixed prefix")
     found = _read_back(argv)
@@ -694,6 +732,8 @@ def verify_argv(argv, site, restricted) -> None:
         if vlash:
             body["inference_mode"] = "vlash"
             body["vlash_overlap_steps"] = int(found["--vlash-overlap-steps"])
+        if accel:
+            body["chunk_accel"] = True
         if "--control-hz" in found:
             body["control_hz"] = int(found["--control-hz"])
         form = _validate(site, restricted, None, body)
@@ -843,6 +883,14 @@ def _warnings(site, model, form) -> list:
     rtc = _rtc_warning(form)
     if rtc:
         out.append(rtc)
+    if form.chunk_accel:
+        out.append(
+            _warning(
+                "chunk_accel_experimental",
+                "In-chunk acceleration is experimental and has not run on the real robot: "
+                "straight chunks run faster; keep a hand on the physical e-stop.",
+            )
+        )
     table = _task_floor(form.prompt)
     if form.min_z < table:
         out.append(

@@ -47,7 +47,8 @@
           "horizon": 6,
           "reached": 8,
           "margin": 2
-        }
+        },
+        "chunk_accel": null
       },
       "warnings": [
         "min_z_below_task_table",
@@ -90,7 +91,8 @@
           "horizon": 6,
           "reached": 9,
           "margin": 1
-        }
+        },
+        "chunk_accel": null
       },
       "warnings": ["min_z_below_task_table"],
       "flags": [
@@ -128,7 +130,8 @@
           "horizon": 4,
           "reached": 10,
           "margin": 0
-        }
+        },
+        "chunk_accel": null
       },
       "warnings": [
         "min_z_below_task_table",
@@ -172,7 +175,8 @@
           "horizon": 2,
           "reached": 10,
           "margin": 0
-        }
+        },
+        "chunk_accel": null
       },
       "warnings": [
         "min_z_below_task_table",
@@ -216,7 +220,8 @@
           "horizon": 1,
           "reached": 16,
           "margin": -6
-        }
+        },
+        "chunk_accel": null
       },
       "warnings": [
         "rtc_never_fits",
@@ -259,7 +264,8 @@
         "chunk_s": 2.0,
         "horizon_s": 1.2,
         "latency_beats": 2,
-        "rtc": null
+        "rtc": null,
+        "chunk_accel": null
       },
       "warnings": [
         "min_z_below_task_table",
@@ -299,7 +305,8 @@
         "chunk_s": 0.5,
         "horizon_s": 0.3,
         "latency_beats": 6,
-        "rtc": null
+        "rtc": null,
+        "chunk_accel": null
       },
       "warnings": [
         "min_z_below_task_table",
@@ -340,7 +347,8 @@
         "chunk_s": 0.2,
         "horizon_s": 0.12,
         "latency_beats": 15,
-        "rtc": null
+        "rtc": null,
+        "chunk_accel": null
       },
       "warnings": [
         "min_z_below_task_table",
@@ -387,7 +395,8 @@
           "horizon": 5,
           "reached": 13,
           "margin": -3
-        }
+        },
+        "chunk_accel": null
       },
       "warnings": [
         "rtc_margin_low",
@@ -432,7 +441,8 @@
           "horizon": 4,
           "reached": 10,
           "margin": 0
-        }
+        },
+        "chunk_accel": null
       },
       "warnings": [
         "min_z_below_task_table",
@@ -477,7 +487,8 @@
           "horizon": 8,
           "reached": 14,
           "margin": -4
-        }
+        },
+        "chunk_accel": null
       },
       "warnings": [
         "rtc_margin_low",
@@ -523,7 +534,8 @@
           "horizon": 1,
           "reached": 16,
           "margin": -6
-        }
+        },
+        "chunk_accel": null
       },
       "warnings": [
         "rtc_never_fits",

@@ -4,6 +4,7 @@ import zh from "@/i18n/zh.json";
 import { readModels, readSite } from "../catalog-logic";
 import {
   bodyKey,
+  chunkAccelAllowed,
   commandFormFromRun,
   commandBody,
   initialCommandForm,
@@ -205,6 +206,112 @@ describe("the request body", () => {
   });
 });
 
+describe("in-chunk acceleration", () => {
+  const plain = { rtc: false, inferenceMode: "plain" as const };
+
+  test("is sent only when on and the mode is plain", () => {
+    expect(commandBody(base(plain)).body).not.toHaveProperty("chunk_accel");
+    expect(
+      commandBody(base({ ...plain, chunkAccel: false })).body,
+    ).not.toHaveProperty("chunk_accel");
+    expect(
+      commandBody(base({ ...plain, chunkAccel: true })).body,
+    ).toMatchObject({ inference_mode: "plain", chunk_accel: true });
+    for (const mode of [
+      { rtc: true, inferenceMode: "rtc" as const },
+      { rtc: false, inferenceMode: "vlash" as const },
+      // An old form without the mode: RTC on means RTC.
+      { rtc: true },
+    ])
+      expect(
+        commandBody(base({ ...mode, chunkAccel: true })).body,
+        JSON.stringify(mode),
+      ).not.toHaveProperty("chunk_accel");
+  });
+
+  test("is allowed with plain inference only", () => {
+    expect(chunkAccelAllowed(plain)).toBe(true);
+    expect(chunkAccelAllowed({ rtc: false })).toBe(true);
+    expect(chunkAccelAllowed({ rtc: true })).toBe(false);
+    expect(chunkAccelAllowed({ rtc: true, inferenceMode: "rtc" })).toBe(false);
+    expect(chunkAccelAllowed({ rtc: false, inferenceMode: "vlash" })).toBe(
+      false,
+    );
+  });
+
+  test("a changed switch changes the request key", () => {
+    const off = bodyKey(commandBody(base(plain)).body);
+    const on = bodyKey(commandBody(base({ ...plain, chunkAccel: true })).body);
+    expect(on).not.toBe(off);
+  });
+
+  test("a saved run with it on round-trips into the form and back into the same body", () => {
+    const saved = {
+      model_id: "pi05_fr3_all_step49999",
+      prompt: "pick the eggplant in the blue plate",
+      max_steps: 500,
+      eval_num: 5,
+      min_z: 0.025,
+      rtc: false,
+      inference_mode: "plain",
+      rtc_horizon: 7,
+      rollout_group: "saved_group",
+      note: "saved note",
+      control_hz: 20,
+      chunk_accel: true,
+    };
+    const form = commandFormFromRun(saved)!;
+    expect(form.chunkAccel).toBe(true);
+    expect(form.inferenceMode).toBe("plain");
+    expect(commandBody(form).body).toEqual(saved);
+    // Missing (a run from before the switch) or not true is off.
+    const old: Record<string, unknown> = { ...saved };
+    delete old.chunk_accel;
+    expect(commandFormFromRun(old)!.chunkAccel).toBeUndefined();
+    expect(
+      commandFormFromRun({ ...saved, chunk_accel: "yes" })!.chunkAccel,
+    ).toBeUndefined();
+  });
+
+  test("the preview's control part says whether it is on, with its numbers", () => {
+    const on = {
+      enabled: true,
+      experimental: true,
+      speed_m_s: 0.25,
+      tau_s: 0.2,
+    };
+    expect(
+      readPreview(preview({ control: { hz: 10, chunk_accel: on } }))!
+        .chunkAccel,
+    ).toEqual({ speedMS: 0.25, tauS: 0.2 });
+    for (const control of [
+      undefined,
+      { hz: 10, chunk_accel: null },
+      { hz: 10, chunk_accel: { ...on, enabled: false } },
+      { hz: 10, chunk_accel: { ...on, speed_m_s: "fast" } },
+    ])
+      expect(
+        readPreview(preview({ control }))!.chunkAccel,
+        JSON.stringify(control),
+      ).toBeUndefined();
+  });
+
+  test("the result line is worded in both languages with its numbers", () => {
+    for (const lang of ["en", "zh"] as const) {
+      const text = sayText(
+        {
+          key: "marvel0.cmd.result.chunk_accel",
+          params: { speed: 0.25, tau: 0.2 },
+        },
+        catalogue(lang),
+      );
+      expect(text).toContain("0.25 m/s");
+      expect(text).toContain("0.2");
+      expect(text).not.toContain("{");
+    }
+  });
+});
+
 describe("what the form shows as its defaults", () => {
   test("the group of the model for the mode, the horizon of the site for the mode", () => {
     expect(placeholders(base(), models, site)).toEqual({
@@ -219,6 +326,17 @@ describe("what the form shows as its defaults", () => {
       horizonMax: 10,
       horizonLoweredFrom: null,
     });
+  });
+
+  test("with in-chunk acceleration the default group is the accel one the backend files it under", () => {
+    // review 2026-10-31: the page showed <id>_demo while the backend used <id>_accel_demo, so the start phrase
+    // never matched and every start from the page was refused
+    expect(
+      placeholders(base({ rtc: false, chunkAccel: true }), models, site).group,
+    ).toBe("pi05_fr3_all_step49999_accel_demo");
+    expect(
+      placeholders(base({ rtc: true, chunkAccel: true }), models, site).group,
+    ).toBe("pi05_fr3_all_step49999_rtc_demo");
   });
 
   test("a model that is not in the list has no group to show", () => {

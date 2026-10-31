@@ -483,3 +483,16 @@ def test_the_preview_holds_a_path_only_in_cwd_command_and_argv(machine):
     rest = {k: v for k, v in doc.items() if k not in {"cwd", "command", "argv"}}
     assert str(tmp_path) not in json.dumps(rest)
     assert not PATH_IN_TEXT.search(json.dumps(rest))
+
+
+def test_preview_with_chunk_accel_answers_its_client_and_a_plain_server(machine):
+    client, _ = machine
+    doc = preview(client, chunk_accel=True).json()
+    assert "lab/chunk_accel/run_collect_accel.py" in doc["argv"]
+    assert doc["server_requirements"]["inference_mode"] == "plain"
+    assert doc["server_requirements"]["rtc"] is False
+    assert doc["control"]["chunk_accel"]["experimental"] is True
+    refused = preview(client, chunk_accel=True, rtc=True)
+    assert refused.status_code == 422
+    assert "chunk_accel_requires_plain" in refused.text
+    assert preview(client, chunk_accel="true").status_code == 422

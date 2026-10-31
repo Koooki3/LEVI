@@ -42,6 +42,7 @@ class PreviewBody(BaseModel):
     rtc: bool | None = None
     inference_mode: str | None = None
     vlash_overlap_steps: int | None = None
+    chunk_accel: bool | None = None
     rtc_horizon: int | None = None
     rollout_group: str | None = None
     note: str | None = None

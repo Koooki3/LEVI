@@ -1013,6 +1013,7 @@ def _run_view(f: Facts) -> dict | None:
         "rtc": rec.get("rtc"),
         "inference_mode": inference_mode.recorded(rec),
         "vlash_overlap_steps": rec.get("vlash_overlap_steps"),
+        "chunk_accel": rec.get("chunk_accel") is True,
         "prompt": rec.get("prompt"),
         # Only the original user-editable form, never argv, environment or paths.
         # The next-episode UI uses this after confirmed client exit; start still
@@ -1399,9 +1400,13 @@ def _group_of(form_body: dict) -> str:
     group = form_body.get("rollout_group")
     if group is None:
         try:
-            mode = inference_mode.resolve(form_body)
+            mode = inference_mode.resolve(
+                form_body, default_rtc=form_body.get("chunk_accel") is not True
+            )
         except inference_mode.ModeError as exc:
             raise FormRefuse(command.FormError(exc.code, exc.field, str(exc))) from exc
+        if form_body.get("chunk_accel") is True:
+            mode = "accel"
         group = models.default_group(str(form_body.get("model_id")), mode)
     return str(group)
 
@@ -2200,6 +2205,7 @@ class Supervisor:
             "rtc": form.rtc,
             "inference_mode": form.inference_mode,
             "vlash_overlap_steps": form.vlash_overlap_steps,
+            "chunk_accel": form.chunk_accel,
             "prompt": form.prompt,
             "form": dataclasses.asdict(form),
             "argv_sha256": hashlib.sha256(

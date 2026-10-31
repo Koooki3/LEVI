@@ -28,6 +28,7 @@ export interface ModelRow {
   groupRtc: string;
   groupPlain: string;
   groupVlash?: string;
+  groupAccel?: string;
 }
 
 export interface SkippedRow {
@@ -62,6 +63,7 @@ function readModel(entry: unknown): ModelRow | null {
     groupRtc: str(groups?.rtc, 120) ?? `${id}_rtc_demo`,
     groupPlain: str(groups?.plain, 120) ?? `${id}_demo`,
     groupVlash: str(groups?.vlash, 120) ?? `${id}_vlash_demo`,
+    groupAccel: str(groups?.accel, 120) ?? `${id}_accel_demo`,
   };
 }
 

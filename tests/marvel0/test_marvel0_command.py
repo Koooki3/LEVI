@@ -623,6 +623,7 @@ def test_the_form_has_exactly_the_documented_fields():
         "control_hz",
         "inference_mode",
         "vlash_overlap_steps",
+        "chunk_accel",
     ]
 
 
@@ -1136,3 +1137,70 @@ def test_aeri_closed_schema_refuses_manual_vlash_fields():
         e["type"] == "extra_forbidden" and e["loc"] == ("inference_mode",)
         for e in exc.value.errors()
     )
+
+
+# ---- in-chunk acceleration (integrations/chunk_accel) ----
+
+
+def test_chunk_accel_renders_its_client_over_plain_inference(tmp_path):
+    from levi.marvel0.inference_mode import CHUNK_ACCEL_CLIENT
+
+    site, mdl, form = form_for(tmp_path, {"chunk_accel": True})
+    preview = C.render(site, mdl, form)
+    assert form.chunk_accel and form.inference_mode == "plain"
+    assert preview.argv[len(C.PREFIX) - 1] == CHUNK_ACCEL_CLIENT
+    assert "--rtc" not in preview.argv
+    assert any(t.startswith("--open-loop-horizon=") for t in preview.argv)
+    assert form.rollout_group == f"{mdl.id}_accel_demo"
+    assert preview.control["chunk_accel"]["enabled"] is True
+    assert "chunk_accel_experimental" in [w["code"] for w in preview.warnings]
+    # the rest of the command is the plain one
+    _, _, plain = form_for(
+        tmp_path, {"rtc": False, "rollout_group": form.rollout_group, "note": form.note}
+    )
+    base = C.render(site, mdl, plain).argv
+    assert preview.argv[len(C.PREFIX) :] == base[len(C.PREFIX) :]
+
+
+def test_chunk_accel_is_off_by_default_and_none_means_off(tmp_path):
+    for body in ({}, {"chunk_accel": None}, {"chunk_accel": False}):
+        site, mdl, form = form_for(tmp_path, body)
+        assert form.chunk_accel is False
+        assert C.render(site, mdl, form).control["chunk_accel"] is None
+
+
+@pytest.mark.parametrize(
+    "body", [{"rtc": True}, {"inference_mode": "rtc"}, {"inference_mode": "vlash"}]
+)
+def test_chunk_accel_requires_plain_inference(tmp_path, body):
+    err = refused(tmp_path, {**body, "chunk_accel": True})
+    assert (err.code, err.field) == ("chunk_accel_requires_plain", "chunk_accel")
+
+
+@pytest.mark.parametrize("value", [1, "true", 0.0])
+def test_chunk_accel_must_be_a_bool(tmp_path, value):
+    err = refused(tmp_path, {"chunk_accel": value})
+    assert (err.code, err.field) == ("invalid_type", "chunk_accel")
+
+
+def test_chunk_accel_argv_cannot_be_relabelled(tmp_path):
+    from levi.marvel0.inference_mode import CHUNK_ACCEL_CLIENT
+
+    site, mdl, form = form_for(tmp_path, {"chunk_accel": True})
+    argv = C.render(site, mdl, form).argv
+    C.verify_argv(argv, site, mdl.restricted)
+    with pytest.raises(C.SelfCheckError):
+        C.verify_argv(argv + ["--rtc"], site, mdl.restricted)
+    # the same flags with the ordinary client are an ordinary plain command (the stricter one)
+    C.verify_argv(
+        [C.SCRIPT if x == CHUNK_ACCEL_CLIENT else x for x in argv], site, mdl.restricted
+    )
+    # an RTC command cannot be given the accelerated client either
+    _, _, rtc = form_for(tmp_path, {"rtc": True})
+    rtc_argv = C.render(site, mdl, rtc).argv
+    with pytest.raises(C.SelfCheckError):
+        C.verify_argv(
+            [CHUNK_ACCEL_CLIENT if x == C.SCRIPT else x for x in rtc_argv],
+            site,
+            mdl.restricted,
+        )

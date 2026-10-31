@@ -312,4 +312,31 @@ describe("fieldMessages", () => {
     expect(fieldMessages(fail("site_missing", {}, 412), {})).toEqual({});
     expect(fieldMessages(fail("command_self_check", {}, 500), {})).toEqual({});
   });
+
+  test("in-chunk acceleration's refusals belong to its switch, in both languages", () => {
+    const plainOnly = fieldMessages(
+      fail("chunk_accel_requires_plain", { field: "chunk_accel" }, 422),
+      {},
+    );
+    expect(Object.keys(plainOnly)).toEqual(["chunk_accel"]);
+    expect(plainOnly.chunk_accel.say).toEqual({
+      key: "marvel0.err.chunk_accel_requires_plain",
+    });
+    for (const lang of ["en", "zh"] as const)
+      expect(
+        sayText(plainOnly.chunk_accel.say!, catalogue(lang)),
+        lang,
+      ).not.toMatch(/^marvel0\./);
+    expect(sayText(plainOnly.chunk_accel.say!, catalogue("zh"))).toMatch(
+      /[一-鿿]/,
+    );
+    const wrongType = fieldMessages(
+      fail("invalid_type", { field: "chunk_accel" }, 422),
+      {},
+    );
+    expect(Object.keys(wrongType)).toEqual(["chunk_accel"]);
+    expect(wrongType.chunk_accel.say).toEqual({
+      key: "marvel0.err.invalid_type",
+    });
+  });
 });

@@ -1,5 +1,5 @@
 "use client";
-import { modeLabel } from "./inference-mode";
+import { inferenceMode, modeLabel } from "./inference-mode";
 // The Client command card of the marvel0: a form for the demo client's
 // run (task instruction, steps, eval number, lowest height, RTC horizon, group,
 // note) and the exact command for it. LEVI's backend validates the form and
@@ -13,9 +13,24 @@ import { modeLabel } from "./inference-mode";
 // above the task instruction (speech-panel.tsx) only proposes one of the
 // allowed instructions; pressing its Use fills the task instruction and does
 // nothing else.
-import { useMemo, useRef, useState, useEffect, type ReactNode } from "react";
+import {
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useEffect,
+  type ReactNode,
+} from "react";
 import { Check, ClipboardCopy, TriangleAlert } from "lucide-react";
-import { Badge, Button, Card, Field, Input, Select } from "@/components/ds";
+import {
+  Badge,
+  Button,
+  Card,
+  Field,
+  Input,
+  Select,
+  Switch,
+} from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Note } from "@/components/pages-ui/feedback";
 import { Refusal, WordedText } from "./action-parts";
@@ -24,6 +39,7 @@ import { wordOf } from "./ctl-text";
 import {
   DEFAULT_HZ,
   bodyKey,
+  chunkAccelAllowed,
   commandBody,
   initialCommandForm,
   placeholders,
@@ -125,6 +141,15 @@ export function CommandPanel({
       previousResume.current = null;
     }
   }, [savedForm, savedKey, resumeBodyKey]);
+  // The switch belongs to plain inference: when the followed mode leaves plain it is turned off, so coming back to
+  // plain never turns it on again by itself.
+  const selectedMode = selection
+    ? inferenceMode(selection.inferenceMode, selection.rtc)
+    : null;
+  useEffect(() => {
+    if (selectedMode !== null && selectedMode !== "plain")
+      setEdits((cur) => (cur.chunkAccel ? { ...cur, chunkAccel: false } : cur));
+  }, [selectedMode]);
   if (!models || !site || !initial || !selection) return null;
 
   // A resumed run is pinned to its saved form. Only the prompt remains editable;
@@ -404,6 +429,14 @@ export function CommandPanel({
                 onChange={(hz) => edit({ hz })}
               />
             )}
+            <ChunkAccel
+              on={form.chunkAccel === true}
+              allowed={chunkAccelAllowed(form)}
+              mode={t(modeLabel(form.inferenceMode, form.rtc))}
+              disabled={resuming}
+              error={fieldError("chunk_accel")}
+              onChange={(chunkAccel) => edit({ chunkAccel })}
+            />
             <Field
               className="rg-span"
               label={t("marvel0.cmd.field.group")}
@@ -731,6 +764,68 @@ function Rate({
   );
 }
 
+/** In-chunk acceleration (experimental): one switch, on only with plain
+ * inference; with RTC or VLASH it is shown off and disabled, with the reason
+ * in words. */
+function ChunkAccel({
+  on,
+  allowed,
+  mode,
+  disabled,
+  error,
+  onChange,
+}: {
+  on: boolean;
+  /** The form's inference mode is plain. */
+  allowed: boolean;
+  /** The form's inference mode, in words. */
+  mode: string;
+  disabled: boolean;
+  error?: string;
+  onChange: (on: boolean) => void;
+}) {
+  const { t } = useLocale();
+  const id = useId();
+  const reasonId = `${id}-reason`;
+  const errorId = `${id}-error`;
+  return (
+    <div className="rg-span" data-testid="marvel0-command-chunk-accel">
+      <Switch
+        checked={allowed && on}
+        disabled={disabled || !allowed}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={
+          [!allowed && reasonId, error && errorId].filter(Boolean).join(" ") ||
+          undefined
+        }
+        onChange={(event) => onChange(event.target.checked)}
+        label={t("marvel0.cmd.field.chunk_accel")}
+        description={t("marvel0.cmd.field.chunk_accel_hint")}
+      />
+      {!allowed && (
+        <p
+          id={reasonId}
+          className="rg-muted"
+          data-testid="marvel0-command-chunk-accel-why"
+        >
+          {sayText(
+            {
+              key: "marvel0.cmd.field.chunk_accel_needs_plain",
+              params: { mode },
+            },
+            t,
+          )}
+        </p>
+      )}
+      {error && (
+        <p id={errorId} className="ds-field__error">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** The model, RTC and guidance strength the command follows, read-only, with
  * the way back to where they are chosen. */
 function Follow({
@@ -885,6 +980,20 @@ function CommandResult({
           t,
         )}
       </p>
+      {preview.chunkAccel && (
+        <p data-testid="marvel0-command-chunk-accel-on">
+          {sayText(
+            {
+              key: "marvel0.cmd.result.chunk_accel",
+              params: {
+                speed: preview.chunkAccel.speedMS,
+                tau: preview.chunkAccel.tauS,
+              },
+            },
+            t,
+          )}
+        </p>
+      )}
       {preview.warnings.length > 0 && (
         <div data-testid="marvel0-command-warnings">
           <strong>{t("marvel0.cmd.warnings.title")}</strong>

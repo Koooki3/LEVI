@@ -759,9 +759,10 @@ describe("starting from the page", () => {
     name = "idle_ready",
     stale = false,
     group = "my_group",
+    formOver: Record<string, unknown> = {},
   ) {
     const f = fake(runDoc(name));
-    const form = { model_id: "m", prompt: "p", rtc: true };
+    const form = { model_id: "m", prompt: "p", rtc: true, ...formOver };
     function Start() {
       const poll = useRunPoll(f.api, { pollMs: 25 });
       const actions = useRunActions(f.api, poll);
@@ -809,6 +810,23 @@ describe("starting from the page", () => {
       attest: { estop: true, scene_reset: true, area_clear: true },
     });
     expect(dialog(host)).toBeNull();
+  });
+
+  test("the mode names in-chunk acceleration when the command has it on", async () => {
+    const accel = en["marvel0.cmd.field.chunk_accel"];
+    const off = await openStart();
+    await click(button(off.host, "Start the client")!);
+    expect(text(dialog(off.host)!)).not.toContain(accel);
+    await click(button(dialog(off.host)!, "Cancel")!);
+    const on = await openStart("idle_ready", false, "my_group", {
+      rtc: false,
+      inference_mode: "plain",
+      chunk_accel: true,
+    });
+    await click(button(on.host, "Start the client")!);
+    expect(text(dialog(on.host)!)).toContain(
+      `${en["marvel0.inference.plain"]} + ${accel}`,
+    );
   });
 
   test("Cancel, Escape and a tick that does not outlive its window: nothing is sent", async () => {

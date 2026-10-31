@@ -148,6 +148,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -323,6 +324,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -496,6 +498,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -657,6 +660,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -1087,6 +1091,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -1309,6 +1314,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -1525,6 +1531,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -1696,6 +1703,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -1871,6 +1879,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -2043,6 +2052,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -2215,6 +2225,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -2386,6 +2397,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -2751,6 +2763,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -2916,6 +2929,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -3620,6 +3634,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -3789,6 +3804,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -3958,6 +3974,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -4119,6 +4136,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -4273,6 +4291,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",
@@ -4438,6 +4457,7 @@
     },
     "run": {
       "age_s": 300.0,
+      "chunk_accel": false,
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
       "inference_mode": "rtc",

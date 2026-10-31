@@ -3,6 +3,10 @@
 MODES = ("plain", "rtc", "vlash")
 VLASH_SCRIPT = "lab/vlash/serve_policy_vlash.py"
 VLASH_CLIENT = "lab/vlash/run_collect_vlash.py"
+# In-chunk acceleration (integrations/chunk_accel): a client-side switch over plain inference, not a scheduler mode.
+CHUNK_ACCEL_CLIENT = "lab/chunk_accel/run_collect_accel.py"
+CHUNK_ACCEL_SPEED_M_S = 0.25  # the client's default ramp speed (accel.SPEED)
+CHUNK_ACCEL_TAU_S = 0.2  # the controller's setpoint low-pass it leads by (accel.TAU)
 # Audited state-conditioned FR3 configs: absolute pose+gripper at the wire, H=10.
 # This is a space contract, not evidence of VLASH delay-aware fine-tuning.
 VLASH_CONFIGS = frozenset(("pi05_fr3_all_state", "pi05_fr3_all_state_cfg"))

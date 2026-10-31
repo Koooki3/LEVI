@@ -93,6 +93,7 @@ class Model:
                 "rtc": default_group(self.id, True),
                 "plain": default_group(self.id, False),
                 "vlash": default_group(self.id, "vlash"),
+                "accel": default_group(self.id, "accel"),
             },
         }
 
@@ -108,6 +109,8 @@ def default_group(model_id: str, rtc: bool) -> str:
     """The rollout group a run of this model is filed under by default."""
     if rtc == "vlash":
         return f"{model_id}_vlash_demo"
+    if rtc == "accel":
+        return f"{model_id}_accel_demo"
     return f"{model_id}_rtc_demo" if rtc is True or rtc == "rtc" else f"{model_id}_demo"
 
 

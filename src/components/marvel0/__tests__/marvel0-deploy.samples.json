@@ -833,6 +833,7 @@
         "labels": [],
         "restricted_prompts": false,
         "rollout_group_default": {
+          "accel": "pi05_fr3_all_step49999_accel_demo",
           "plain": "pi05_fr3_all_step49999_demo",
           "rtc": "pi05_fr3_all_step49999_rtc_demo",
           "vlash": "pi05_fr3_all_step49999_vlash_demo"
@@ -855,6 +856,7 @@
         "labels": ["unverified"],
         "restricted_prompts": false,
         "rollout_group_default": {
+          "accel": "recap_cfg_r1_step10000_jax_accel_demo",
           "plain": "recap_cfg_r1_step10000_jax_demo",
           "rtc": "recap_cfg_r1_step10000_jax_rtc_demo",
           "vlash": "recap_cfg_r1_step10000_jax_vlash_demo"
@@ -877,6 +879,7 @@
         "labels": ["unverified"],
         "restricted_prompts": false,
         "rollout_group_default": {
+          "accel": "recap_cfg_r2_best_step14300_jax_accel_demo",
           "plain": "recap_cfg_r2_best_step14300_jax_demo",
           "rtc": "recap_cfg_r2_best_step14300_jax_rtc_demo",
           "vlash": "recap_cfg_r2_best_step14300_jax_vlash_demo"
@@ -899,6 +902,7 @@
         "labels": ["unverified"],
         "restricted_prompts": false,
         "rollout_group_default": {
+          "accel": "recap_cfg_r2_step15000_jax_accel_demo",
           "plain": "recap_cfg_r2_step15000_jax_demo",
           "rtc": "recap_cfg_r2_step15000_jax_rtc_demo",
           "vlash": "recap_cfg_r2_step15000_jax_vlash_demo"
@@ -986,6 +990,7 @@
     ],
     "command": "cd /path/to/openpi && \\\n  env -u VIRTUAL_ENV no_proxy=localhost,127.0.0.1,::1 \\\n  uv run --no-sync --with pyrealsense2==2.55.1.6486 python examples/fr3_local/run_robotiq_client_collect_data.py \\\n  --remote-host=127.0.0.1 --remote-port=8000 --view-camera-id=262622274256 --wrist-camera-id=262622275490 --franka-server-url=http://127.0.0.1:5000/ \\\n  '--prompt=pick the eggplant in the blue plate' \\\n  --max-timesteps=500 --eval-num=5 --min-z=0.025 \\\n  --home-pose 0.481902 -0.011145 0.235951 3.119139 0.008288 -0.883962 --home-duration-s=3.0 \\\n  --max-xy=0.85 --max-step-m=0.1 --max-step-rad=0.35 --rx-range 1.5 4.03 --ry-range -0.74 0.96 --rz-range -2.44 0.77 \\\n  --binarize-gripper --require-matching-server --no-allow-unknown-prompt \\\n  --levi-mode=off --new --no-step-by-step --rtc --rtc-execute-horizon=6 \\\n  --rollout-root=/path/to/rollouts --rollout-group=pi05_fr3_all_step49999_rtc_demo '--eval-note=marvel0 page: pi05_fr3_all_step49999 rtc=on horizon=6'",
     "control": {
+      "chunk_accel": null,
       "chunk_s": 1.0,
       "episode_s": 50.0,
       "horizon_s": 0.6,
@@ -1110,6 +1115,7 @@
     ],
     "command": "cd /path/to/openpi && \\\n  env -u VIRTUAL_ENV no_proxy=localhost,127.0.0.1,::1 \\\n  uv run --no-sync --with pyrealsense2==2.55.1.6486 python examples/fr3_local/run_robotiq_client_collect_data.py \\\n  --remote-host=127.0.0.1 --remote-port=8000 --view-camera-id=262622274256 --wrist-camera-id=262622275490 --franka-server-url=http://127.0.0.1:5000/ \\\n  '--prompt=pick the eggplant in the blue plate' \\\n  --max-timesteps=500 --eval-num=5 --min-z=0.03 \\\n  --home-pose 0.481902 -0.011145 0.235951 3.119139 0.008288 -0.883962 --home-duration-s=3.0 \\\n  --max-xy=0.85 --max-step-m=0.1 --max-step-rad=0.35 --rx-range 1.5 4.03 --ry-range -0.74 0.96 --rz-range -2.44 0.77 \\\n  --binarize-gripper --require-matching-server --no-allow-unknown-prompt \\\n  --levi-mode=off --new --no-step-by-step --rtc --rtc-execute-horizon=8 \\\n  --rollout-root=/path/to/rollouts --rollout-group=recap_cfg_r2_best_step14300_jax_rtc_demo '--eval-note=marvel0 page: recap_cfg_r2_best_step14300_jax rtc=on horizon=8'",
     "control": {
+      "chunk_accel": null,
       "chunk_s": 1.0,
       "episode_s": 50.0,
       "horizon_s": 0.8,

@@ -93,7 +93,11 @@ export function RunStart({
             </div>
             <div className="rg-fact">
               <dt>{t("marvel0.inference.label")}</dt>
-              <dd>{t(modeLabel(form.inference_mode, rtc))}</dd>
+              <dd>
+                {t(modeLabel(form.inference_mode, rtc))}
+                {form.chunk_accel === true &&
+                  ` + ${t("marvel0.cmd.field.chunk_accel")}`}
+              </dd>
             </div>
             <div className="rg-fact">
               <dt>{t("marvel0.cmd.field.group")}</dt>
