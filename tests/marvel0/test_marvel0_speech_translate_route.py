@@ -59,6 +59,7 @@ class TranslatingManager(FakeManager):
 @pytest.fixture
 def machine(tmp_path, monkeypatch, catalog_of):  # noqa: F811
     monkeypatch.setattr(speech_api, "_translated", OrderedDict())
+    monkeypatch.setattr(speech_api, "TRANSLATE_RATE", speech_api.RateLimit(100, 60.0))
     monkeypatch.setattr(settings, "translation_state", lambda: "ready")
     catalog_of(
         "a", ["pick peach on green plate"] * 5 + ["put eggplant into blue bowl"] * 2
@@ -145,6 +146,7 @@ def test_a_restricted_model_never_asks_the_model(machine):
         ("translate_gpu", "gpu_memory"),
         ("timeout", "failed"),
         ("failed", "failed"),
+        ("no_time", "no_time"),
     ],
 )
 def test_why_a_name_got_no_translation_is_said(machine, code, why):
@@ -179,6 +181,21 @@ def test_the_text_model_loads_only_with_room_on_the_gpu(machine):
     assert match(machine)["untranslated_why"] == "gpu_memory"
     machine.policy.doc = policy_status(free_mib=needed)
     assert match(machine)["status"] == "ok"
+
+
+def test_the_memory_is_read_fresh_before_the_load_and_only_then(machine):
+    # The cached status may be from before the speech worker itself loaded.
+    match(machine)
+    assert machine.policy.invalidated == 1
+    match(machine, "把荔枝放到蓝色碗里")  # the text model is loaded now
+    assert machine.policy.invalidated == 1
+
+
+def test_translations_have_their_own_rate_limit(machine, monkeypatch):
+    monkeypatch.setattr(speech_api, "TRANSLATE_RATE", speech_api.RateLimit(1, 60.0))
+    assert match(machine)["status"] == "ok"
+    assert match(machine, "把荔枝放到蓝色碗里")["untranslated_why"] == "busy"
+    assert len(machine.manager.translated) == 1
 
 
 def test_with_no_time_left_nothing_is_asked(machine, monkeypatch):

@@ -195,6 +195,70 @@ def test_a_translated_name_holding_lexicon_words_reads_back_as_one_name(frames):
     ]
 
 
+@pytest.mark.parametrize(
+    "said", ["把苹果和香蕉放到碗里", "把金桔和荔枝放到碗里", "把苹果跟榴莲放到碗里"]
+)
+def test_a_conjunction_keeps_two_things_apart(frames, said):
+    asked = []
+    result = gen(said, frames, translate=lambda zh: asked.append(zh) or "thing")
+    assert result["status"] == "no_task" and asked == []
+    assert all("和" not in n and "跟" not in n for n in T.unknown_names(said))
+
+
+@pytest.mark.parametrize(
+    ("said", "prompt"),
+    [
+        ("把红色榴莲放到蓝色盘子上", "pick red durian on blue plate"),
+        ("把大榴莲放到蓝色盘子上", "pick big durian on blue plate"),
+    ],
+)
+def test_a_size_or_a_colour_with_se_before_a_new_name_stays_a_modifier(
+    frames, said, prompt
+):
+    assert T.unknown_names(said) == ["榴莲"]
+    assert gen(said, frames, translate=lambda zh: "durian")["prompt"] == prompt
+
+
+@pytest.mark.parametrize(
+    ("said", "name"),
+    [
+        ("把夹子放到蓝色盘子上", "夹子"),
+        ("把插头放到蓝色盘子上", "插头"),
+        ("把文件夹放到蓝色盘子上", "文件夹"),
+        ("把衣夹放到蓝色盘子上", "衣夹"),
+        ("把擀面杖放到蓝色盘子上", "擀面杖"),  # 面 is a filler elsewhere
+    ],
+)
+def test_a_verb_or_a_filler_inside_a_new_name_stays_in_it(frames, said, name):
+    assert T.unknown_names(said) == [name]
+
+
+def test_a_verb_before_a_new_name_stays_a_verb(frames):
+    assert T.unknown_names("拿金桔放到蓝色盘子上") == ["金桔"]
+    assert T.unknown_names("把金桔拿起来放到蓝色盘子上") == ["金桔"]
+
+
+def test_no_same_meaning_sentence_when_a_slot_is_outside_the_lexicon():
+    frames = T.learn_frames(
+        {"pick pen on blue plate": 3, "pick peach on green plate": 5}
+    )
+    # The matcher's signature ignores unknown words: "pencil sharpener" and
+    # "durian" would otherwise match "pick pen ..." and "pick ... plate".
+    done = gen(
+        "把卷笔刀放到蓝色盘子上", frames, translate=lambda zh: "pencil sharpener"
+    )
+    assert done["prompt"] == "pick pencil sharpener on blue plate"
+    assert done["dataset_original"] is None
+    assert gen("put the durian on the blue plate", frames)["dataset_original"] is None
+    assert gen("把笔放到蓝色盘子上", frames)["dataset_original"] is None  # same wording
+
+
+def test_a_hyphenated_translation_reads_back(frames):
+    done = gen("把乒乓球放到蓝色盘子上", frames, translate=lambda zh: "ping-pong ball")
+    assert done["status"] == "ok"
+    assert done["prompt"] == "pick ping-pong ball on blue plate"
+
+
 def test_a_place_word_keeps_two_unknown_english_names_apart(frames):
     result = gen("put durian into rambutan", frames)
     assert [slot["said"] for slot in result["slots"]] == ["durian", "rambutan"]

@@ -9,17 +9,22 @@ name the same kind of object. This module decides, with the standard library
 only, which answers may be used:
 
 1. **An object name.** One to three plain English words that pass the template's
-   own filter (``speech_template._english_name``: no action, step separator,
-   relation, stop or negation word), not a direction or manner word, and not
-   only a colour or a size. ``NONE`` (the model's "not an object") fails here.
-2. **Not an object the lexicon already knows.** The name was not in the lexicon,
-   so an English that is a lexicon thing ("orange" for 金桔, "pencil" for 蜡笔)
-   names an object the lexicon knows under other Chinese names: refused, and the
-   page shows those names (``known_as``).
+   own filter (``speech_template._english_name``), and that the matcher reads
+   without a stop or negation phrase ("hold on"), an action, a step separator
+   ("followed by") or a relation; no place word ("on", "into"), conjunction
+   ("and", "with"), direction or manner word, and not only a colour or a size.
+   ``NONE`` (the model's "not an object") fails here.
+2. **Not an object the lexicon already knows** (plurals included). The name was
+   not in the lexicon, so an English that is a lexicon thing ("orange" for 金桔,
+   "pencil" for 蜡笔) names an object the lexicon knows under other Chinese
+   names: refused, and the page shows those names (``known_as``).
 3. **Checked.** The back-translation is the same name (after NFKC, traditional
-   -> simplified, 桔 = 橘, a trailing 子/儿/头 dropped), or one contains the other
-   (at least two characters), **or** the two share at least half of the shorter
-   one's characters and the model judges them the same object. Otherwise the
+   -> simplified, 桔 = 橘, a trailing 子/儿/头 dropped). A back-translation that
+   is only part of the name said (牙刷架, a toothbrush holder, back as 牙刷) is
+   refused: the translation dropped what made it a different object. One that
+   holds the whole name and more (乐高 back as 乐高积木), or that shares at
+   least half of the shorter one's characters (花椰菜 and 花菜), passes only
+   when the model also judges the two the same object. Otherwise the
    translation is ``unchecked`` and refused.
 
 Measured on 2026-10-31 with Qwen3-4B-Instruct-2507 (levi-hub
@@ -45,6 +50,21 @@ from . import speech_template as template
 Reason = Literal["not_object", "known_as", "unchecked"]
 
 _VARIANTS: Final = str.maketrans({"桔": "橘", "菓": "果"})
+# Words that join or place things, never part of one object's name.
+_NOT_IN_NAME: Final = frozenset(
+    [
+        "and",
+        "or",
+        "with",
+        "plus",
+        "beside",
+        "besides",
+        "next",
+        "near",
+        "between",
+        "then",
+    ]
+) | frozenset(template._PLACES)
 _SUFFIXES: Final = "子儿头"
 _ZH_FORMS: Final[dict[str, tuple[str, ...]]] = {}
 for _form, _concept in lexicon.ZH_CONCEPTS.items():
@@ -78,8 +98,21 @@ def object_name(answer: str | None) -> str | None:
     if name is None:
         return None
     words = name.split(" ")
-    if any(word in template._NOT_NAMES or word.endswith("ly") for word in words):
+    if any(
+        word in template._NOT_NAMES or word in _NOT_IN_NAME or word.endswith("ly")
+        for word in words
+    ):
         return None
+    parsed = matcher._parse(name, repair=False)
+    if (
+        parsed.stop
+        or parsed.neg
+        or any(
+            tok.concept == "T" or tok.concept.startswith(("A:", "R:"))
+            for tok in parsed.tokens
+        )
+    ):
+        return None  # "hold on", "followed by", "pick up"
     concepts = [matcher._lookup_english(word) for word in words]
     if all(found is not None and found[0].startswith("J:") for found in concepts):
         return None  # only a colour or a size
@@ -87,16 +120,24 @@ def object_name(answer: str | None) -> str | None:
 
 
 def known_concept(name: str) -> str | None:
-    """Rule 2: the lexicon thing an English name is, or None."""
-    for form in (name, name.removesuffix("s")):
-        concept = lexicon.EN_CONCEPTS.get(form)
+    """Rule 2: the lexicon thing an English name is (any plural form), or None."""
+    words = name.split(" ")
+    forms = [name]
+    if len(words) == 1:
+        found = matcher._lookup_english(name)
+        forms.append(found[0] if found else "")
+    else:
+        forms += [" ".join([*words[:-1], stem]) for stem in matcher._stems(words[-1])]
+    for form in forms:
+        concept = form if form.startswith("N:") else lexicon.EN_CONCEPTS.get(form)
         if concept and concept.startswith("N:"):
             return concept
     return None
 
 
 def _norm(text: str | None) -> str:
-    text = unicodedata.normalize("NFKC", text or "").translate(
+    text = text if isinstance(text, str) else ""
+    text = unicodedata.normalize("NFKC", text).translate(
         lexicon.TRADITIONAL_TO_SIMPLIFIED
     )
     return "".join(ch for ch in text.translate(_VARIANTS) if matcher._CJK.fullmatch(ch))
@@ -107,16 +148,15 @@ def _strip(text: str) -> str:
 
 
 def back_matches(said: str, back: str | None) -> bool:
-    """Rule 3, first part: the back-translation names the same thing."""
+    """Rule 3, first part: the back-translation is the same name."""
     z, b = _norm(said), _norm(back)
-    if not z or not b:
-        return False
-    return (
-        z == b
-        or _strip(z) == _strip(b)
-        or (len(z) >= 2 and z in b)
-        or (len(b) >= 2 and b in z)
-    )
+    return bool(z and b) and (z == b or _strip(z) == _strip(b))
+
+
+def back_is_part(said: str, back: str | None) -> bool:
+    """The back-translation is only part of the name said (牙刷架 -> 牙刷)."""
+    z, b = _norm(said), _norm(back)
+    return bool(b) and len(b) < len(z) and b in z
 
 
 def shared_half(said: str, back: str | None) -> bool:
@@ -138,6 +178,8 @@ def judge(
         return Verdict(said, name, None, "", "known_as", _ZH_FORMS.get(concept, ()))
     if back_matches(said, chinese):
         return Verdict(said, name, chinese, "back_translation", None)
+    if back_is_part(said, chinese):
+        return Verdict(said, name, chinese, "", "unchecked")
     if same is True and shared_half(said, chinese):
         return Verdict(said, name, chinese, "back_translation_and_judgement", None)
     return Verdict(said, name, chinese, "", "unchecked")

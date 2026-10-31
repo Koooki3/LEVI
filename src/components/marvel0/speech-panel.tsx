@@ -632,9 +632,7 @@ function GeneratedChoice({
             t,
           )}
         </p>
-        {status === "untranslated" && (
-          <TranslationRefusals generated={generated} />
-        )}
+        <TranslationRefusals generated={generated} />
       </>
     );
   }
@@ -780,15 +778,21 @@ const NOT_ASKED_TEXT: Record<UntranslatedWhy, string> = {
  * the check it failed, or why the model was not asked at all. */
 function TranslationRefusals({ generated }: { generated: Generated }) {
   const { t } = useLocale();
-  const refused = generated.translations.filter((item) => !item.ok);
-  if (refused.length === 0 && !generated.untranslatedWhy) return null;
+  // After a failed generation every answer is shown, a passed one too: the
+  // sentence may have failed for another reason.
+  const shown = generated.translations;
+  if (shown.length === 0 && !generated.untranslatedWhy) return null;
   return (
     <ul className="rg-muted" data-testid="marvel0-speech-generated-refused">
-      {refused.map((item) => (
-        <li key={item.said} data-refusal={item.reason ?? undefined}>
+      {shown.map((item) => (
+        <li key={item.said} data-refusal={item.reason ?? "none"}>
           {sayText(
             {
-              key: REFUSAL_TEXT[item.reason ?? "not_object"],
+              key: item.ok
+                ? "marvel0.speech.generated.refused.passed"
+                : item.reason === "unchecked" && !item.back
+                  ? "marvel0.speech.generated.refused.no_back"
+                  : REFUSAL_TEXT[item.reason ?? "not_object"],
               params: {
                 said: item.said,
                 english: item.english ?? "",

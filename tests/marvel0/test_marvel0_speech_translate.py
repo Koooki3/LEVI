@@ -89,7 +89,7 @@ def test_a_wrong_translation_is_caught_by_its_back_translation(said, english, ba
         ("金桔", "kumquat", "金桔", None, "back_translation"),
         ("金桔", "kumquat", "金橘", None, "back_translation"),  # 桔 = 橘
         ("柿子", "persimmon", "柿", None, "back_translation"),  # 子 dropped
-        ("乐高", "lego", "乐高积木", None, "back_translation"),  # contains
+        ("乐高", "lego", "乐高积木", True, "back_translation_and_judgement"),
         ("膠棒", "glue stick", "胶棒", None, "back_translation"),  # traditional
         ("花椰菜", "cauliflower", "花菜", True, "back_translation_and_judgement"),
     ],
@@ -152,3 +152,55 @@ def test_missing_answers_are_never_accepted():
     assert translate.judge("金桔", "kumquat", None, True).reason == "unchecked"
     assert translate.judge("金桔", "kumquat", "", True).reason == "unchecked"
     assert translate.judge("金桔", "kumquat", "kumquat", True).reason == "unchecked"
+
+
+@pytest.mark.parametrize(
+    ("said", "english", "back"),
+    [
+        ("牙刷架", "toothbrush", "牙刷"),
+        ("鼠标垫", "mouse", "鼠标"),
+        ("眼镜盒", "glasses", "眼镜"),
+        ("红色榴莲", "durian", "榴莲"),
+    ],
+)
+def test_a_back_translation_that_is_only_part_of_the_name_is_refused(
+    said, english, back
+):
+    # The translation dropped what made it another object, judged same or not.
+    assert translate.judge(said, english, back, True).reason == "unchecked"
+
+
+def test_a_longer_back_translation_needs_the_models_judgement():
+    assert translate.judge("乐高", "lego", "乐高积木", None).reason == "unchecked"
+    assert translate.judge("牙刷", "toothbrush holder", "牙刷架", False).reason == (
+        "unchecked"
+    )
+
+
+@pytest.mark.parametrize(
+    "english", ["peaches", "potatoes", "tomatoes", "strawberries", "boxes"]
+)
+def test_a_plural_of_a_lexicon_object_is_known(english):
+    assert translate.judge("某物", english, "某物", True).reason == "known_as"
+
+
+@pytest.mark.parametrize(
+    "english",
+    [
+        "hold on",  # a stop phrase
+        "hold it",
+        "followed by",  # a step separator
+        "apple and banana",
+        "cup with lid",
+        "beside bowl",
+        "on plate",
+        "pick up",
+    ],
+)
+def test_a_phrase_that_is_not_one_object_is_refused(english):
+    assert translate.judge("某物", english, "某物", True).reason == "not_object"
+
+
+@pytest.mark.parametrize("back", [3, ["金桔"], b"x"])
+def test_an_answer_of_the_wrong_type_never_raises(back):
+    assert translate.judge("金桔", "kumquat", back, True).reason == "unchecked"

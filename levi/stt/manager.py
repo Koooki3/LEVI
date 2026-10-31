@@ -356,9 +356,26 @@ class Manager:
         one-at-a-time rule with ``transcribe``. ``may_load`` is called, under the
         request lock, before a worker whose text model has not answered yet is
         asked (that load takes its own GPU memory), and raises ``SttError`` to
-        refuse. ``timeout_s`` (at most ``TRANSLATE_TIMEOUT_S``) covers the load
-        and the answers; a worker that misses it is retired like one that
-        misses a transcription's deadline."""
+        refuse. ``timeout_s`` (at most ``TRANSLATE_TIMEOUT_S``) counts from this
+        call and covers ``may_load``, the load and the answers; a worker that
+        misses it is retired like one that misses a transcription's deadline.
+        A first load with less than ``TRANSLATE_LOAD_MIN_S`` left is not begun
+        (``SttError("no_time")``), and names or a timeout outside the limits
+        are refused (``translate_invalid``) before anything is sent."""
+        deadline = time.monotonic() + min(timeout_s, settings.TRANSLATE_TIMEOUT_S)
+        valid = (
+            isinstance(names, list)
+            and 1 <= len(names) <= settings.TRANSLATE_MAX_NAMES
+            and all(
+                isinstance(n, str) and 1 <= len(n) <= settings.TRANSLATE_MAX_CHARS
+                for n in names
+            )
+        )
+        body = (
+            json.dumps({"names": names}, ensure_ascii=False).encode() if valid else b""
+        )
+        if not valid or len(body) > settings.TRANSLATE_MAX_BYTES or not timeout_s > 0:
+            raise SttError("translate_invalid", "the names or the timeout are invalid")
         if not self._request.acquire(blocking=False):
             raise SttError("busy", "a speech request is already running")
         try:
@@ -373,14 +390,14 @@ class Manager:
                 raise SttError(
                     "translate_unavailable", "no translation model is configured"
                 )
-            if not worker.translator_loaded and may_load is not None:
-                may_load()
+            if not worker.translator_loaded:
+                if deadline - time.monotonic() < settings.TRANSLATE_LOAD_MIN_S:
+                    raise SttError("no_time", "too little time left to load the model")
+                if may_load is not None:
+                    may_load()
             try:
                 return self._translate_exchange(
-                    worker,
-                    request_id,
-                    names,
-                    min(timeout_s, settings.TRANSLATE_TIMEOUT_S),
+                    worker, request_id, names, body, deadline
                 )
             except SttError:
                 raise
@@ -391,12 +408,15 @@ class Manager:
             self._request.release()
 
     def _translate_exchange(
-        self, worker: _Worker, request_id: str, names: list[str], timeout_s: float
+        self,
+        worker: _Worker,
+        request_id: str,
+        names: list[str],
+        body: bytes,
+        deadline: float,
     ) -> Translation:
         with self._lock:
             worker.phase = "busy"
-        deadline = time.monotonic() + timeout_s
-        body = json.dumps({"names": list(names)}, ensure_ascii=False).encode("utf-8")
         header = json.dumps(
             {"op": "translate", "id": request_id, "bytes": len(body)},
             separators=(",", ":"),

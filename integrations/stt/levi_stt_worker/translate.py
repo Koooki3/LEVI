@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from .common import TRANSLATE_ANSWER_CHARS, TRANSLATE_MAX_NEW_TOKENS, clean_text, log
-from .errors import RequestError
+from .errors import RequestError, StartupError
 
 SYSTEM_FORWARD = (
     "You translate the Chinese name of a physical object, one that a robot arm can pick up or put "
@@ -114,38 +114,53 @@ class QwenTextTranslator:
         self._device = device
         self._model: Any = None
         self._tokenizer: Any = None
+        # Why the model cannot be loaded, once found: asked again it answers at
+        # once instead of hashing 7.6 GB and failing the same way.
+        self._broken: str | None = None
 
     @property
     def loaded(self) -> bool:
         return self._model is not None
 
     def _load(self) -> int:
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-
-        from .manifest import verify_manifest
-
+        """Load the model, or raise ``RequestError("translate_unavailable")``
+        (remembered) for a folder that fails its manifest, cannot be read or
+        does not fit entirely on the GPU, so the speech worker stays. A CUDA
+        error or out-of-memory propagates: the service then replaces the
+        worker, which frees what was allocated."""
+        if self._broken:
+            raise RequestError("translate_unavailable", self._broken)
         began = time.perf_counter()
-        verify_manifest(self._folder)
-        self._tokenizer = AutoTokenizer.from_pretrained(
-            self._folder, local_files_only=True
-        )
-        model = AutoModelForCausalLM.from_pretrained(
-            self._folder,
-            dtype=torch.bfloat16,
-            device_map=self._device,
-            attn_implementation="sdpa",
-            local_files_only=True,
-            use_safetensors=True,
-        ).eval()
+        try:
+            from .manifest import verify_manifest
+
+            verify_manifest(self._folder)
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+
+            tokenizer = AutoTokenizer.from_pretrained(
+                self._folder, local_files_only=True
+            )
+            model = AutoModelForCausalLM.from_pretrained(
+                self._folder,
+                dtype=torch.bfloat16,
+                device_map=self._device,
+                attn_implementation="sdpa",
+                local_files_only=True,
+                use_safetensors=True,
+            ).eval()
+        except (StartupError, ImportError, OSError, ValueError) as error:
+            self._broken = (
+                f"The translation model cannot be loaded ({type(error).__name__})."
+            )
+            raise RequestError("translate_unavailable", self._broken) from None
         if {p.device.type for p in model.parameters()} != {"cuda"}:
             # An offloaded layer would run a 4B model on the arm controller's cores.
             del model
-            raise RequestError(
-                "translate_unavailable",
-                "The translation model is not fully on the GPU.",
-            )
-        self._model = model
+            torch.cuda.empty_cache()
+            self._broken = "The translation model is not fully on the GPU."
+            raise RequestError("translate_unavailable", self._broken)
+        self._tokenizer, self._model = tokenizer, model
         return round((time.perf_counter() - began) * 1000)
 
     def _answer(self, messages: list[dict[str, str]]) -> str:

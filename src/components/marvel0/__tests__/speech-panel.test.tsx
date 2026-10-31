@@ -1824,6 +1824,42 @@ describe("the generated sentence", () => {
     expect(useGenerated(h)).toBeNull();
   });
 
+  test("after a failed sentence, a passed translation and a missing back-translation are shown", async () => {
+    const h = await open({
+      script: {
+        transcribe: echo(
+          matchC({
+            generated: generated({
+              status: "no_task",
+              prompt: null,
+              dataset_original: null,
+              translations: [
+                translation(),
+                translation({
+                  said: "榴莲",
+                  english: "durian",
+                  back: null,
+                  check: null,
+                  ok: false,
+                  reason: "unchecked",
+                }),
+              ],
+            }),
+          }),
+        ),
+      },
+    });
+    await speak(h);
+    const list = q(h, "marvel0-speech-generated-refused")!;
+    expect(list.querySelector('[data-refusal="none"]')?.textContent).toContain(
+      "kumquat",
+    );
+    expect(
+      list.querySelector('[data-refusal="unchecked"]')?.textContent,
+    ).not.toContain("“”");
+    expect(useGenerated(h)).toBeNull();
+  });
+
   test("says why the names were not translated at all", async () => {
     const h = await open({
       script: {

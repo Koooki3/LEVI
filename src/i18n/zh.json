@@ -6339,6 +6339,8 @@
   "marvel0.speech.generated.translated": "由本地模型翻译，并经回译核对（→ 后是回译）：{words}。使用这句话前请先核对。",
   "marvel0.speech.generated.refused.not_object": "{said}：本地模型没有给出物体名。",
   "marvel0.speech.generated.refused.known_as": "{said}：本地模型译成“{english}”，这是词表里已有的物体，中文叫 {known}。如果指的就是它，请说 {known}。",
+  "marvel0.speech.generated.refused.passed": "{said}：本地模型译成“{english}”（回译“{back}”），但用它写不出句子。",
+  "marvel0.speech.generated.refused.no_back": "{said}：本地模型译成“{english}”，但没有给出回译，所以不用。",
   "marvel0.speech.generated.refused.unchecked": "{said}：本地模型译成“{english}”，但回译是“{back}”，对不上，所以不用。",
   "marvel0.speech.generated.not_asked.off": "物体名翻译已关闭（LEVI_STT_TRANSLATE_MODEL=off）。",
   "marvel0.speech.generated.not_asked.not_installed": "翻译模型没有安装，这些名称没有翻译（见 docs/SPEECH.md）。",

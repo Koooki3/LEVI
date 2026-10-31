@@ -79,6 +79,13 @@ def install_model(model_dir: Path, name: str, source: Path | None = None) -> Pat
                     f"{weight} is not the pinned revision of {repo}.",
                     3,
                 )
+        extra = [p.name for p in partial.glob("*.safetensors") if p.name not in weights]
+        if extra:
+            raise StartupError(
+                "manifest_mismatch",
+                f"{len(extra)} weight file(s) are not part of the pinned revision of {repo}.",
+                3,
+            )
         write_manifest(partial)
         partial.replace(target)
     finally:

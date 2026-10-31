@@ -6339,6 +6339,8 @@
   "marvel0.speech.generated.translated": "Translated by the local model and checked by translating back (→): {words}. Check them before you use the sentence.",
   "marvel0.speech.generated.refused.not_object": "{said}: the local model gave no object name for it.",
   "marvel0.speech.generated.refused.known_as": "{said}: the local model says “{english}”, which the object list already knows as {known}. If you meant that object, say {known}.",
+  "marvel0.speech.generated.refused.passed": "{said}: the local model says “{english}” (back: “{back}”), but no sentence could be written with it.",
+  "marvel0.speech.generated.refused.no_back": "{said}: the local model says “{english}” but gave no back-translation, so it is not used.",
   "marvel0.speech.generated.refused.unchecked": "{said}: the local model says “{english}”, but that translates back as “{back}”, so it is not used.",
   "marvel0.speech.generated.not_asked.off": "Translation of object names is turned off (LEVI_STT_TRANSLATE_MODEL=off).",
   "marvel0.speech.generated.not_asked.not_installed": "The translation model is not installed, so these names were not translated (see docs/SPEECH.md).",

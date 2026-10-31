@@ -276,27 +276,35 @@ class _SlotReader(matcher._Reader):
         A Chinese compound needs no space and puts its head last, so a name
         outside the lexicon often holds a lexicon word: 蓝莓 (blueberry) reads
         as 蓝 (blue) + 莓, 卷笔刀 (pencil sharpener) as 卷 + 笔 (pen) + 刀
-        (knife), 玩具车 as 玩具 (toy) + 车. Adjacent pieces of one run that are
-        each a thing, a modifier or unknown, at least one of them unknown, are
-        one name outside the lexicon (the translator gets it whole); a filler
-        such as 的 between them keeps them apart (红色的榴莲 is red + 榴莲)."""
+        (knife), 玩具车 as 玩具 (toy) + 车, 文件夹 as 文件 + 夹 (a verb). See
+        ``_glue`` for which adjacent pieces become one name outside the lexicon
+        (the translator gets it whole). A filler between two characters of an
+        unknown name stays in it (擀面杖); one before or after it does not (把,
+        的); 和/跟/与/或/及 always separate two things."""
         spans: list[tuple[int, int]] = []  # characters of each token of this run
         first = len(self.tokens)
         gap: list[str] = []
+        held: list[str] = []  # fillers after the gap's last character
         gap_span = (0, 0)  # from the gap's first character to after its last
         at = 0
         while at < len(run):
-            token = self._chinese_token(run, at)
-            if token:
+            char = run[at]
+            joins = char in _CONJUNCTIONS_ZH
+            token = None if joins else self._chinese_token(run, at)
+            if token or joins:
                 self._flush_at(gap, gap_span, spans)
-                gap = []
-                self.tokens.append(token[0])
-                spans.append((at, at + token[1]))
-                at += token[1]
+                gap, held = [], []
+                tok, size = token or (matcher._Tok("C", "exact", char, char), 1)
+                self.tokens.append(tok)
+                spans.append((at, at + size))
+                at += size
             else:
-                if run[at] not in lexicon.FILLERS_ZH:
+                if char not in lexicon.FILLERS_ZH:
                     gap_span = (gap_span[0] if gap else at, at + 1)
-                    gap.append(run[at])
+                    gap += [*held, char] if gap else [char]
+                    held = []
+                elif gap:
+                    held.append(char)
                 at += 1
         self._flush_at(gap, gap_span, spans)
         self.tokens[first:] = _glue(self.tokens[first:], spans)
@@ -310,21 +318,62 @@ class _SlotReader(matcher._Reader):
             spans.append(span)
 
 
+_CONJUNCTIONS_ZH: Final = frozenset("和跟与或及")
+_NOUN_ENDINGS: Final = frozenset("子头儿")
+
+
 def _thing_part(tok: matcher._Tok) -> bool:
     return tok.concept == "U" or tok.concept.startswith(("N:", "J:"))
+
+
+def _modifier_first(tok: matcher._Tok) -> bool:
+    """A size or a colour word with 色 (红色, 大): a modifier even right
+    before a new name (红色榴莲 is red + 榴莲, as with 的)."""
+    return tok.concept in _SIZE_FIRST or (
+        tok.concept.startswith("J:") and tok.heard.endswith("色")
+    )
+
+
+def _verbs_in_names(
+    tokens: list[matcher._Tok], spans: list[tuple[int, int]]
+) -> set[int]:
+    """Indexes of one-character verbs that are part of a name: before a lone
+    noun ending (夹子, 插头), or after an unknown piece and right before
+    another verb (文件夹放到, 衣夹放到). "拿金桔放到" keeps 拿 a verb."""
+    found = set()
+    for i, tok in enumerate(tokens):
+        if not tok.concept.startswith("A:") or len(tok.heard) != 1:
+            continue
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+        glued_next = nxt is not None and spans[i + 1][0] == spans[i][1]
+        glued_prev = i > 0 and spans[i - 1][1] == spans[i][0]
+        before_ending = glued_next and nxt.concept == "U" and nxt.heard in _NOUN_ENDINGS
+        ends_a_name = (
+            glued_prev
+            and tokens[i - 1].concept == "U"
+            and glued_next
+            and nxt.concept.startswith("A:")
+        )
+        if before_ending or ends_a_name:
+            found.add(i)
+    return found
 
 
 def _glue(
     tokens: list[matcher._Tok], spans: list[tuple[int, int]]
 ) -> list[matcher._Tok]:
     """``tokens`` (one run's, with their character ``spans``) with every
-    adjacent span of thing parts that holds an unknown one joined into one
-    unknown token."""
+    adjacent span of thing parts (and verbs inside a name, see
+    ``_verbs_in_names``) that holds an unknown one joined into one unknown
+    token; a leading size or 色 colour word stays a modifier."""
+    in_names = _verbs_in_names(tokens, spans)
     out: list[matcher._Tok] = []
     group: list[matcher._Tok] = []
     end = -1
 
     def close() -> None:
+        while len(group) > 1 and _modifier_first(group[0]):
+            out.append(group.pop(0))
         if len(group) > 1 and any(t.concept == "U" for t in group):
             said = "".join(t.heard for t in group)
             out.append(matcher._Tok("U", "unknown", said, said))
@@ -332,12 +381,13 @@ def _glue(
             out.extend(group)
         group.clear()
 
-    for tok, (start, stop) in zip(tokens, spans, strict=True):
-        if _thing_part(tok) and group and start == end:
+    for i, (tok, (start, stop)) in enumerate(zip(tokens, spans, strict=True)):
+        part = _thing_part(tok) or i in in_names
+        if part and group and start == end:
             group.append(tok)
         else:
             close()
-            if _thing_part(tok):
+            if part:
                 group.append(tok)
             else:
                 out.append(tok)
@@ -578,10 +628,19 @@ def generate(
     if untranslated:
         return _empty("untranslated", sorted(set(untranslated)))
     prompt = " then ".join(rendered)
-    translated = [slot["english"] for slot in slots if slot["source"] == "translation"]
+    # A translated name as the reader sees it in the sentence ("ping-pong").
+    translated = [
+        matcher._clean(slot["english"]).words
+        for slot in slots
+        if slot["source"] == "translation"
+    ]
     if not _reads_back(prompt, steps, actions, translated):
         return _empty("no_task")
-    original = _dataset_original(prompt, frames)
+    # The matcher's signature ignores a word outside the lexicon, so with one
+    # in a slot a "same meaning" sentence may name another object ("pencil
+    # sharpener" would match "pick pen ...").
+    outside = any(slot["source"] in ("translation", "english") for slot in slots)
+    original = None if outside else _dataset_original(prompt, frames)
     return {
         "status": "ok",
         "prompt": prompt,

@@ -1019,8 +1019,10 @@ def test_the_core_and_the_worker_agree_on_the_translation_limits():
     from levi.stt import settings
 
     assert settings.DEFAULT_TRANSLATE_MODEL == common.DEFAULT_TRANSLATION_MODEL
+    assert settings.TRANSLATE_MODELS == tuple(common.TRANSLATION_MODELS)
     assert settings.TRANSLATE_MAX_NAMES == common.TRANSLATE_MAX_NAMES
     assert settings.TRANSLATE_MAX_CHARS == common.TRANSLATE_MAX_CHARS
+    assert settings.TRANSLATE_MAX_BYTES == common.TRANSLATE_MAX_BYTES
 
 
 @pytest.mark.parametrize(
@@ -1070,6 +1072,46 @@ def test_the_text_translator_loads_nothing_until_asked(tmp_path):
     translator = QwenTextTranslator(tmp_path / "missing", "cuda")
     assert translator.loaded is False
     translator.close()
+
+
+def test_a_broken_model_folder_is_unavailable_and_not_checked_again(
+    tmp_path, monkeypatch
+):
+    # Not "internal": that would make the service stop the speech worker on
+    # every request, after hashing 7.6 GB each time.
+    from levi_stt_worker import manifest
+    from levi_stt_worker.errors import RequestError
+    from levi_stt_worker.translate import QwenTextTranslator
+
+    checks = []
+    real = manifest.verify_manifest
+    monkeypatch.setattr(
+        manifest,
+        "verify_manifest",
+        lambda folder: checks.append(folder) or real(folder),
+    )
+    translator = QwenTextTranslator(tmp_path / "missing", "cuda")
+    for _ in range(2):
+        with pytest.raises(RequestError) as caught:
+            translator.translate(["金桔"])
+        assert caught.value.code == "translate_unavailable"
+    assert len(checks) == 1 and translator.loaded is False
+
+
+def test_install_refuses_a_weight_file_that_is_not_pinned(tmp_path, monkeypatch):
+    import hashlib
+
+    from levi_stt_worker import install
+    from levi_stt_worker.errors import StartupError
+
+    source = snapshot(tmp_path)
+    (source / "model-extra.safetensors").write_bytes(b"other")
+    pinned = {"model.safetensors": hashlib.sha256(b"weights").hexdigest()}
+    monkeypatch.setitem(install.TRANSLATION_MODELS, "text", ("org/text", "rev", pinned))
+    with pytest.raises(StartupError) as caught:
+        install.install_model(tmp_path / "models", "text", source)
+    assert caught.value.code == "manifest_mismatch"
+    assert not (tmp_path / "models" / "text").exists()
 
 
 class BrokenTranslator:

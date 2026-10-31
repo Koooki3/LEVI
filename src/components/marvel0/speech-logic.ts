@@ -258,7 +258,18 @@ function readTranslation(value: unknown): GeneratedTranslation[] {
   // A refusal needs its reason; a use needs its English and how it passed.
   const english = plain(item.english, 64);
   const check = CHECKS.find((entry) => entry === item.check) ?? null;
-  if (item.ok ? !english || !check || reason : !reason) return [];
+  const knownAs = list(item.known_as)
+    .map((entry) => plain(entry, 16))
+    .filter((entry): entry is string => entry !== null)
+    .slice(0, 8);
+  // A use needs its English and how it passed; a refusal its reason, and
+  // what that reason shows (the English; the lexicon's names for known_as).
+  const complete = item.ok
+    ? Boolean(english && check) && !reason
+    : reason === "not_object" ||
+      (reason === "unchecked" && Boolean(english)) ||
+      (reason === "known_as" && Boolean(english) && knownAs.length > 0);
+  if (!complete) return [];
   return [
     {
       said,
@@ -267,10 +278,7 @@ function readTranslation(value: unknown): GeneratedTranslation[] {
       check: item.ok ? check : null,
       ok: item.ok,
       reason: item.ok ? null : reason,
-      knownAs: list(item.known_as)
-        .map((entry) => plain(entry, 16))
-        .filter((entry): entry is string => entry !== null)
-        .slice(0, 8),
+      knownAs,
     },
   ];
 }
@@ -281,6 +289,28 @@ function readGenerated(value: unknown): Generated | null {
   if (!item || !status) return null;
   const prompt = status === "ok" ? exactPrompt(item.prompt) : null;
   if (status === "ok" && !prompt) return null;
+  const translations = list(item.translations)
+    .flatMap(readTranslation)
+    .slice(0, 8);
+  const slots = list(item.slots)
+    .flatMap((entry) => {
+      const slot = rec(entry);
+      const said = plain(slot?.said, 40);
+      const english = plain(slot?.english, 40);
+      const source = SLOT_SOURCES.find((s) => s === slot?.source);
+      return said && english && source ? [{ said, english, source }] : [];
+    })
+    .slice(0, 8);
+  // A translated name is offered only with the verdict that passed it.
+  const unvouched = slots.some(
+    (slot) =>
+      slot.source === "translation" &&
+      !translations.some(
+        (item) =>
+          item.ok && item.said === slot.said && item.english === slot.english,
+      ),
+  );
+  if (status === "ok" && unvouched) return null;
   return {
     status,
     prompt,
@@ -289,15 +319,7 @@ function readGenerated(value: unknown): Generated | null {
       .filter((entry): entry is string => entry !== null)
       .slice(0, 4),
     episodes: Math.max(0, Math.floor(num(item.episodes) ?? 0)),
-    slots: list(item.slots)
-      .flatMap((entry) => {
-        const slot = rec(entry);
-        const said = plain(slot?.said, 40);
-        const english = plain(slot?.english, 40);
-        const source = SLOT_SOURCES.find((s) => s === slot?.source);
-        return said && english && source ? [{ said, english, source }] : [];
-      })
-      .slice(0, 8),
+    slots,
     untranslated: list(item.untranslated)
       .map((entry) => plain(entry, 40))
       .filter((entry): entry is string => entry !== null)
@@ -312,7 +334,7 @@ function readGenerated(value: unknown): Generated | null {
         return heard && as ? [{ heard, as }] : [];
       })
       .slice(0, 8),
-    translations: list(item.translations).flatMap(readTranslation).slice(0, 4),
+    translations,
     untranslatedWhy:
       status === "untranslated"
         ? (UNTRANSLATED_WHY.find((entry) => entry === item.untranslated_why) ??

@@ -904,6 +904,48 @@ describe("the generated sentence (owner decision 2026-10-30)", () => {
     expect(match.generated!.untranslatedWhy).toBe("busy");
   });
 
+  test("a refusal needs what its reason shows", () => {
+    const read = (over: Record<string, unknown>) =>
+      readMatch(
+        matchC({
+          generated: generated({
+            status: "untranslated",
+            translations: [
+              translation({ ok: false, check: null, back: null, ...over }),
+            ],
+          }),
+        }),
+      )!.generated!.translations;
+    expect(read({ reason: "not_object", english: null })).toHaveLength(1);
+    expect(read({ reason: "unchecked", english: null })).toEqual([]);
+    expect(read({ reason: "unchecked" })).toHaveLength(1);
+    expect(read({ reason: "known_as", known_as: [] })).toEqual([]);
+    expect(read({ reason: "known_as", known_as: ["球"] })).toHaveLength(1);
+  });
+
+  test("a translated slot is offered only with the verdict that passed it", () => {
+    const slots = [
+      { said: "金桔", english: "kumquat", source: "translation" },
+      { said: "碗", english: "bowl", source: "lexicon" },
+    ];
+    const read = (translations: unknown[]) =>
+      readMatch(
+        matchC({
+          generated: generated({
+            prompt: "pick kumquat into blue bowl",
+            slots,
+            translations,
+          }),
+        }),
+      )!.generated;
+    expect(read([translation()])?.prompt).toBe("pick kumquat into blue bowl");
+    expect(read([])).toBeNull();
+    expect(read([translation({ english: "orange" })])).toBeNull();
+    expect(
+      read([translation({ ok: false, reason: "unchecked", check: null })]),
+    ).toBeNull();
+  });
+
   test("why nothing was translated is read only for an untranslated result", () => {
     const why = (over: Record<string, unknown>) =>
       readMatch(matchC({ generated: generated(over) }))!.generated!

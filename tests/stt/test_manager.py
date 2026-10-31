@@ -681,8 +681,9 @@ def test_a_refusal_of_the_names_keeps_the_worker(make):
 
 
 def test_a_late_translation_retires_the_worker(make):
-    manager = make([{}, {**TRANSLATED, "delay": 3.0}], translation=True)
+    manager = make([{}, TRANSLATED, {**TRANSLATED, "delay": 3.0}], translation=True)
     manager.transcribe(REQ, WAV)
+    manager.translate(REQ, NAMES)  # the text model is loaded
     with pytest.raises(SttError) as caught:
         manager.translate(REQ, NAMES, timeout_s=scaled(0.5))
     assert caught.value.code == "timeout"
@@ -713,3 +714,44 @@ def test_translate_is_refused_at_once_while_a_transcription_runs(make):
         assert caught.value.code == "busy"
     finally:
         thread.join(scaled(10))
+
+
+@pytest.mark.parametrize(
+    ("names", "timeout_s"),
+    [
+        ([], 5),
+        (["金桔"] * 5, 5),
+        (["金" * 17], 5),
+        ([3], 5),
+        ("金桔", 5),
+        (["金桔"], 0),
+        (["金桔"], -1),
+    ],
+)
+def test_names_or_a_timeout_outside_the_limits_are_refused_unsent(
+    make, names, timeout_s
+):
+    manager = make([{}, TRANSLATED], translation=True)
+    manager.transcribe(REQ, WAV)
+    with pytest.raises(SttError) as caught:
+        manager.translate(REQ, names, timeout_s=timeout_s)
+    assert caught.value.code == "translate_invalid"
+    assert [r["kind"] for r in requests_of(manager)] == ["transcribe"]
+    assert manager.status()["state"] == "ready"
+
+
+def test_a_first_load_is_not_begun_without_time_for_it(make):
+    manager = make([{}, TRANSLATED], translation=True)
+    manager.transcribe(REQ, WAV)
+    asked = []
+    with pytest.raises(SttError) as caught:
+        manager.translate(
+            REQ,
+            NAMES,
+            lambda: asked.append(1),
+            timeout_s=settings.TRANSLATE_LOAD_MIN_S - 0.5,
+        )
+    assert caught.value.code == "no_time" and asked == []
+    assert [r["kind"] for r in requests_of(manager)] == ["transcribe"]
+    answer = manager.translate(REQ, NAMES, timeout_s=settings.TRANSLATE_LOAD_MIN_S + 1)
+    assert answer.items[0]["english"] == "kumquat"

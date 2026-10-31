@@ -123,6 +123,10 @@ class Policy:
         self.doc = policy_status()
         self.error = None
         self.reads = 0
+        self.invalidated = 0
+
+    def invalidate(self):
+        self.invalidated += 1
 
     def status(self):
         self.reads += 1

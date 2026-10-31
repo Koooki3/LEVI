@@ -555,7 +555,11 @@ TRANSLATE_WHY = {
     "translate_invalid": "failed",
     "translate_blocked": "blocked",
     "translate_gpu": "gpu_memory",
+    "no_time": "no_time",
 }
+# Each translation is up to 12 short generations on the GPU; the match route
+# has no rate limit of its own, so translations get one (as transcriptions).
+TRANSLATE_RATE = RateLimit(stt_settings.RATE_PER_MINUTE, 60.0)
 
 
 def _verdict_view(verdict) -> dict:
@@ -572,9 +576,21 @@ def _verdict_view(verdict) -> dict:
 
 def _text_model_check(site) -> Callable[[], None]:
     """``may_load`` for ``Manager.translate``: the gate is open and the GPU has
-    room for the text model (``TRANSLATE_VRAM_MIB`` plus the site margin)."""
+    room for the text model (``TRANSLATE_VRAM_MIB`` plus the site margin). The
+    status is read fresh: the cached one may be from before the speech worker
+    itself loaded (a cold start takes about a second), and would count its
+    memory as free."""
 
     def check() -> None:
+        try:
+            deploy_api.supervisor().invalidate()
+        except Exception as exc:  # noqa: BLE001 - no fresh reading, no load
+            log.warning(
+                "the policy status cache could not be cleared (%s)", type(exc).__name__
+            )
+            raise SttError(
+                "translate_gpu", "the GPU memory cannot be read now"
+            ) from None
         status = _policy_status()
         if gate(site, status, loaded=True):
             raise SttError("translate_blocked", "the speech gate is closed")
@@ -622,6 +638,8 @@ def _translator(site, request_id: str, budget_s: float) -> Callable:
         left = deadline - time.monotonic()
         if left < stt_settings.TRANSLATE_MIN_S:
             return verdicts, "no_time"
+        if TRANSLATE_RATE.take():
+            return verdicts, "busy"
         try:
             answer = manager().translate(
                 request_id, missing, _text_model_check(site), timeout_s=left
@@ -755,10 +773,10 @@ async def speech_match_text(request: Request):
 
 
 def _match_text(site, transcript: str, model_id) -> dict:
-    allowed, family = _allowed(site, model_id)
     translator = _translator(
         site, f"match:{secrets.token_hex(6)}", stt_settings.MATCH_BUDGET_S
     )
+    allowed, family = _allowed(site, model_id)
     return {
         "schema": MATCH_SCHEMA,
         "match": _match(transcript, allowed, family, translator),

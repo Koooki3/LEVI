@@ -184,6 +184,9 @@ def test_the_translation_model_is_passed_only_when_it_is_installed_and_on(
     assert "--translate-model" not in settings.command("")
     monkeypatch.setenv("LEVI_STT_TRANSLATE_MODEL", "../escape")
     assert settings.translation_state() == "model_name_invalid"
+    # Only a model whose prompts were evaluated, not any folder (the speech one).
+    monkeypatch.setenv("LEVI_STT_TRANSLATE_MODEL", "qwen3-asr-1.7b-hf")
+    assert settings.translation_state() == "model_name_invalid"
 
 
 def test_the_core_modules_import_without_the_model_stack():

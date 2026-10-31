@@ -31,6 +31,8 @@ from .. import paths
 DEFAULT_MODEL = "qwen3-asr-1.7b-hf"
 FAKE_MODEL = "fake"
 DEFAULT_TRANSLATE_MODEL = "qwen3-4b-instruct-2507"
+# The text models whose prompts were evaluated (the worker's TRANSLATION_MODELS).
+TRANSLATE_MODELS = ("qwen3-4b-instruct-2507",)
 TRANSLATE_OFF = "off"
 MANIFEST = "MANIFEST.sha256"
 DEVICE = "cuda"
@@ -52,22 +54,28 @@ STT_VRAM_MIB = 5000
 # The free GPU memory loading the translation model needs besides the site's
 # margin (measured peak of Qwen3-4B-Instruct-2507 in bf16: 9359 MiB, 2026-10-31).
 TRANSLATE_VRAM_MIB = 9500
-# A translate request answers three short questions per name (at most four
-# names, each at most 16 characters: the worker's own limits in
-# integrations/stt/levi_stt_worker/common.py); measured 0.28 s per question on
-# the RTX 5090, plus 1.5 s to load the text model from the page cache.
+# A translate request answers up to three short questions per name (at most
+# four names of at most 16 characters, a body of at most 1024 bytes: the
+# worker's own limits in integrations/stt/levi_stt_worker/common.py). Measured
+# 2026-11-01 on the RTX 5090 next to a training job: 0.75 s a name; the first
+# request also loads the text model, 5.0 s (3.5 s of it the manifest's sha256
+# of 7.6 GB).
 TRANSLATE_TIMEOUT_S = 20
 TRANSLATE_MAX_NAMES = 4
 TRANSLATE_MAX_CHARS = 16
+TRANSLATE_MAX_BYTES = 1024
 # The page gives up on a transcription at 75 s and on a match at 15 s
 # (SPEECH_DEADLINES in src/components/marvel0/speech-api.ts). A translation
 # after either gets only what is left of these budgets (at most
-# TRANSLATE_TIMEOUT_S), so the server answers before the page stops waiting and
-# the request lock is free again; with less than TRANSLATE_MIN_S left none is
-# tried.
-TRANSCRIBE_BUDGET_S = 70
-MATCH_BUDGET_S = 12
+# TRANSLATE_TIMEOUT_S); a worker that misses it is stopped, which takes up to
+# 2 * GRACE_S (4 s) more, and the budgets leave room for that, so the server
+# answers before the page stops waiting and the request lock is free again.
+# With less than TRANSLATE_MIN_S left no translation is tried, and the first
+# one (the load) needs TRANSLATE_LOAD_MIN_S.
+TRANSCRIBE_BUDGET_S = 68
+MATCH_BUDGET_S = 10
 TRANSLATE_MIN_S = 3
+TRANSLATE_LOAD_MIN_S = 8
 RATE_PER_MINUTE = 10
 OMP_THREADS = 2
 
@@ -142,7 +150,7 @@ def translation_state() -> str:
     name = translate_model_name()
     if name == TRANSLATE_OFF:
         return "off"
-    if not _MODEL_NAME.fullmatch(name) or ".." in name:
+    if name not in TRANSLATE_MODELS:
         return "model_name_invalid"
     if provider() == "fake":
         return "ready"

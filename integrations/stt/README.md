@@ -11,7 +11,7 @@ Isolated speech-to-text worker for the marvel0 page's voice input. LEVI's servic
 .venv/bin/python -m levi_stt_worker.cli verify-model --model-dir D   # sha256 of every file against MANIFEST.sha256
 ```
 
-The installer downloads one pinned commit into `<model-dir>/qwen3-asr-1.7b-hf/`, refuses weights whose sha256 differs from the pinned one, and writes `MANIFEST.sha256` (`sha256sum -c` format). It uses a scratch Hugging Face cache inside the model folder and removes it; the shared cache is never written. `qwen3-asr-0.6b-hf` (2.5 GB of GPU memory in the benchmark, not run through this worker) is the low-memory alternative. `qwen3-4b-instruct-2507` (`Qwen/Qwen3-4B-Instruct-2507`, three pinned weight files, each checked) is the text model that translates Chinese object names for the voice card's generated sentence; LEVI passes it with `--translate-model` when it is installed.
+The installer downloads one pinned commit into `<model-dir>/qwen3-asr-1.7b-hf/`, refuses weights whose sha256 differs from the pinned one, and writes `MANIFEST.sha256` (`sha256sum -c` format). It uses a scratch Hugging Face cache inside the model folder and removes it; the shared cache is never written. `qwen3-asr-0.6b-hf` (2.5 GB of GPU memory in the benchmark, not run through this worker) is the low-memory alternative. `qwen3-4b-instruct-2507` (`Qwen/Qwen3-4B-Instruct-2507`; its three weight files and `tokenizer.json` are pinned by sha256, and any other `*.safetensors` is refused) is the text model that translates Chinese object names for the voice card's generated sentence; LEVI passes it with `--translate-model` when it is installed.
 
 ## Protocol
 
@@ -39,7 +39,7 @@ stdout, one JSON line per event:
 
 A bad WAV is answered and the next request is served. A malformed or oversized header and a short read cannot be recovered without guessing where the next request starts, so the worker answers once (`internal`, `too_long`, `audio_invalid`) and exits with code 2. EOF, `shutdown` and SIGTERM exit 0 and free the GPU. fd 1 is moved to stderr after the worker takes a private copy for events, so a library `print` cannot corrupt the protocol. stderr carries request id, byte count, a sha256 prefix and the outcome; never a transcript or a path.
 
-A translate request may announce at most 1,024 bytes. The text model is loaded on the first translate request, entirely on the GPU (bf16, about 9.4 GB), and kept until the worker exits; the log line has the id, the number of names and the time, never a name. The prompts are in `translate.py` and are the ones the 2026-10-31 evaluation measured (`programs/rig-console/reviews/voice-translate-20261031.md`); changing one means running that evaluation again.
+A translate request may announce at most 1,024 bytes. The text model is loaded on the first translate request, entirely on the GPU (bf16, about 9.4 GB), and kept until the worker exits; a folder that fails its manifest, cannot be read or does not fit on the GPU answers `translate_unavailable`, now and for every later request (the worker stays); a CUDA error or out-of-memory during the load is `internal`; the log line has the id, the number of names and the time, never a name. The prompts are in `translate.py` and are the ones the 2026-10-31 evaluation measured (`programs/rig-console/reviews/voice-translate-20261031.md`); changing one means running that evaluation again.
 
 ## Gates
 
