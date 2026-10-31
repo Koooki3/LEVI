@@ -973,3 +973,136 @@ def test_install_knows_only_pinned_models():
     for repo, revision, weights_sha in MODELS.values():
         assert repo.startswith("Qwen/Qwen3-ASR-") and repo.endswith("-hf")
         assert len(revision) == 40 and len(weights_sha) == 64
+
+
+def test_install_checks_every_pinned_weight_file_of_a_translation_model(
+    tmp_path, monkeypatch
+):
+    import hashlib
+
+    from levi_stt_worker import install
+    from levi_stt_worker.errors import StartupError
+    from levi_stt_worker.manifest import verify_manifest
+
+    source = snapshot(tmp_path)
+    (source / "model-2.safetensors").write_bytes(b"more")
+    pinned = {
+        "model.safetensors": hashlib.sha256(b"weights").hexdigest(),
+        "model-2.safetensors": hashlib.sha256(b"more").hexdigest(),
+    }
+    monkeypatch.setitem(install.TRANSLATION_MODELS, "text", ("org/text", "rev", pinned))
+    target = install.install_model(tmp_path / "models", "text", source)
+    assert "model-2.safetensors" in verify_manifest(target)
+    monkeypatch.setitem(
+        install.TRANSLATION_MODELS,
+        "text2",
+        ("org/text", "rev", {**pinned, "model-3.safetensors": "0" * 64}),
+    )
+    with pytest.raises(StartupError) as caught:
+        install.install_model(tmp_path / "models", "text2", source)
+    assert caught.value.code == "manifest_mismatch"
+    assert not (tmp_path / "models" / "text2").exists()
+
+
+def test_the_translation_models_are_pinned():
+    from levi_stt_worker.common import DEFAULT_TRANSLATION_MODEL, TRANSLATION_MODELS
+
+    assert DEFAULT_TRANSLATION_MODEL in TRANSLATION_MODELS
+    for repo, revision, weights in TRANSLATION_MODELS.values():
+        assert repo.startswith("Qwen/") and len(revision) == 40
+        assert weights and all(len(sha) == 64 for sha in weights.values())
+
+
+def test_the_core_and_the_worker_agree_on_the_translation_limits():
+    from levi_stt_worker import common
+
+    from levi.stt import settings
+
+    assert settings.DEFAULT_TRANSLATE_MODEL == common.DEFAULT_TRANSLATION_MODEL
+    assert settings.TRANSLATE_MAX_NAMES == common.TRANSLATE_MAX_NAMES
+    assert settings.TRANSLATE_MAX_CHARS == common.TRANSLATE_MAX_CHARS
+
+
+@pytest.mark.parametrize(
+    ("text", "key", "expected"),
+    [
+        ('{"english": "kumquat"}', "english", "kumquat"),
+        ('Sure! {"english" : "dragon fruit"} done', "english", "dragon fruit"),
+        ('{"chinese": "金桔"}', "chinese", "金桔"),
+        ('{"english": kumquat}', "english", None),
+        ("", "english", None),
+        ('{"english": "' + "x" * 200 + '"}', "english", "x" * 64),
+    ],
+)
+def test_the_answer_field_is_read_from_json_like_text(text, key, expected):
+    from levi_stt_worker.translate import field
+
+    assert field(text, key) == expected
+
+
+def test_the_same_field_is_a_boolean_or_none():
+    from levi_stt_worker.translate import same_field
+
+    assert same_field('{"same": true}') is True
+    assert same_field('{"same":false}') is False
+    assert same_field('{"same": "yes"}') is None
+
+
+def test_the_prompts_end_with_the_question_and_carry_the_shots():
+    from levi_stt_worker import translate
+
+    forward = translate.forward_messages("金桔")
+    assert forward[0]["role"] == "system" and forward[-1] == {
+        "role": "user",
+        "content": "金桔",
+    }
+    assert len(forward) == 1 + 2 * len(translate.SHOTS_FORWARD) + 1
+    assert json.loads(forward[2]["content"]) == {"english": "eggplant"}
+    assert translate.back_messages("kumquat")[-1]["content"] == "kumquat"
+    assert translate.same_messages("金桔", "kumquat")[-1]["content"] == (
+        "Chinese: 金桔\nEnglish: kumquat"
+    )
+
+
+def test_the_text_translator_loads_nothing_until_asked(tmp_path):
+    from levi_stt_worker.translate import QwenTextTranslator
+
+    translator = QwenTextTranslator(tmp_path / "missing", "cuda")
+    assert translator.loaded is False
+    translator.close()
+
+
+class BrokenTranslator:
+    def __init__(self):
+        self.calls = 0
+
+    def translate(self, names):
+        self.calls += 1
+        raise RuntimeError("金桔 never reaches an event")
+
+
+def test_a_failing_translator_is_an_internal_error_and_the_loop_goes_on():
+    from levi_stt_worker.serve import Emitter, serve_loop
+
+    body = json.dumps({"names": ["金桔"]}, ensure_ascii=False).encode()
+    stream = (
+        request("t-1", body, op="translate")
+        + request("r-1", wav_bytes(1.0))
+        + b'{"op":"shutdown"}\n'
+    )
+    translator = BrokenTranslator()
+    reader, writer = io.BytesIO(stream), io.BytesIO()
+    code = serve_loop(
+        reader, Emitter(writer), ScriptedProvider([HEARD]), 10.0, translator
+    )
+    events = [json.loads(line) for line in writer.getvalue().splitlines()]
+    assert code == 0 and translator.calls == 1
+    assert events[0]["event"] == "error" and events[0]["code"] == "internal"
+    assert "金桔" not in events[0]["message"]
+    assert events[1] == {"event": "result", "id": "r-1", **HEARD}
+
+
+def test_names_in_the_matchers_cjk_range_are_accepted():
+    from levi_stt_worker.serve import parse_names
+
+    assert parse_names(json.dumps({"names": ["㐀鿿"]}).encode()) == ["㐀鿿"]

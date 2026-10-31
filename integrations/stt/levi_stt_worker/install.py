@@ -8,7 +8,7 @@ import os
 import shutil
 from pathlib import Path
 
-from .common import MODELS
+from .common import MODELS, TRANSLATION_MODELS
 from .errors import StartupError
 from .manifest import file_sha256, verify_manifest, write_manifest
 
@@ -48,9 +48,14 @@ def install_model(model_dir: Path, name: str, source: Path | None = None) -> Pat
     """Install ``name`` under ``model_dir`` and return its folder. An existing
     folder that verifies is left alone; one that does not is an error (it is
     never overwritten or deleted here)."""
-    if name not in MODELS:
-        raise ValueError(f"unknown model {name!r}; known: {', '.join(sorted(MODELS))}")
-    repo, revision, weights_sha = MODELS[name]
+    if name in MODELS:
+        repo, revision, weights_sha = MODELS[name]
+        weights = {WEIGHTS: weights_sha}
+    elif name in TRANSLATION_MODELS:
+        repo, revision, weights = TRANSLATION_MODELS[name]
+    else:
+        known = ", ".join(sorted({*MODELS, *TRANSLATION_MODELS}))
+        raise ValueError(f"unknown model {name!r}; known: {known}")
     target = model_dir / name
     if target.exists():
         verify_manifest(target)
@@ -67,12 +72,13 @@ def install_model(model_dir: Path, name: str, source: Path | None = None) -> Pat
         else:
             _download(repo, revision, partial, scratch)
         shutil.rmtree(partial / ".cache", ignore_errors=True)
-        if file_sha256(partial / WEIGHTS) != weights_sha:
-            raise StartupError(
-                "manifest_mismatch",
-                f"{WEIGHTS} is not the pinned revision of {repo}.",
-                3,
-            )
+        for weight, sha in weights.items():
+            if not (partial / weight).is_file() or file_sha256(partial / weight) != sha:
+                raise StartupError(
+                    "manifest_mismatch",
+                    f"{weight} is not the pinned revision of {repo}.",
+                    3,
+                )
         write_manifest(partial)
         partial.replace(target)
     finally:

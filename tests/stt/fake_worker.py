@@ -10,6 +10,9 @@ in a file beside the script):
 
 - ``result`` (``text``, ``language``, ``infer``, ``delay``), ``heard_false``
   (``reason``), ``error`` (``code``, ``message``);
+- ``translation`` answers a translate request: ``items`` maps a name to its
+  ``english``/``chinese``/``same`` (a name not there gets ``english: NONE``),
+  ``loaded_now``, ``delay``, and ``bad_item`` answers for a name nobody asked;
 - misbehaviour: ``sleep`` (never answers), ``crash`` (exits), ``garbage`` (a
   line that is not JSON, or ``line``), ``oversize`` (a very long line without a newline),
   ``short`` (half a line, then exits), ``wrong_id``, ``extra_line`` (a result
@@ -19,6 +22,7 @@ in a file beside the script):
 
 ``--start`` changes how it starts: ``ok``, ``never`` (no ``ready``), ``manifest``
 (the manifest error), ``crash``, ``garbage``, ``cpu`` (ready on the CPU).
+``--translation on`` makes its ready event say a translator is configured.
 Everything it did is appended to the ``--record`` file as JSON lines (pid,
 argv, selected environment, one line per request with its byte count and
 SHA-256); it writes only lengths to stderr.
@@ -48,7 +52,9 @@ ENV_KEYS = (
 # ------------------------------------------------------------ the test side
 
 
-def command(tmp_path, script=(), *, start="ok", record=None, delay=0.0):
+def command(
+    tmp_path, script=(), *, start="ok", record=None, delay=0.0, translation=False
+):
     """A ``command(cpu_affinity)`` for ``Manager`` that runs this file."""
     script_file = Path(tmp_path) / "worker-script.json"
     script_file.write_text(json.dumps(list(script)))
@@ -67,6 +73,8 @@ def command(tmp_path, script=(), *, start="ok", record=None, delay=0.0):
             str(delay),
             "--cpu-affinity",
             cpu_affinity,
+            "--translation",
+            "on" if translation else "off",
         ]
         return argv + (["--record", str(record)] if record else [])
 
@@ -115,13 +123,40 @@ def _result(request_id, step):
     }
 
 
-def _act(step, request_id):
+def _translation(request_id, step, data):
+    if step.get("delay"):
+        time.sleep(step["delay"])
+    names = json.loads(data)["names"]
+    if step.get("bad_item"):
+        names = ["别的", *names[1:]]
+    table = step.get("items", {})
+    items = [
+        {
+            "name": name,
+            "english": table.get(name, {}).get("english", "NONE"),
+            "chinese": table.get(name, {}).get("chinese"),
+            "same": table.get(name, {}).get("same"),
+        }
+        for name in names
+    ]
+    return {
+        "event": "translation",
+        "id": request_id,
+        "items": items,
+        "loaded_now": step.get("loaded_now", False),
+        "timing_ms": {"load": 0, "infer": 3},
+    }
+
+
+def _act(step, request_id, data=b""):
     do = step.get("do", "result")
     if step.get("grandchild"):
         child = subprocess.Popen(["sleep", "60"])
         _note(_arg("--record"), grandchild=child.pid)
     if do == "result":
         _emit(_result(request_id, step))
+    elif do == "translation":
+        _emit(_translation(request_id, step, data))
     elif do == "heard_false":
         _emit(
             {
@@ -195,6 +230,7 @@ def serve():
                 "device": device,
                 "load_s": 0.01,
                 "vram_mib": 1,
+                "translation": _arg("--translation", "off") == "on",
             }
         )
     cursor = Path(_arg("--script") + ".cursor")
@@ -210,6 +246,7 @@ def serve():
         _note(
             record,
             op="request",
+            kind=message["op"],
             id=message["id"],
             bytes=len(data),
             sha256=hashlib.sha256(data).hexdigest(),
@@ -218,7 +255,9 @@ def serve():
         done = int(cursor.read_text()) if cursor.exists() else 0
         cursor.write_text(str(done + 1))
         _act(
-            script[done] if done < len(script) else {"do": "heard_false"}, message["id"]
+            script[done] if done < len(script) else {"do": "heard_false"},
+            message["id"],
+            data,
         )
 
 

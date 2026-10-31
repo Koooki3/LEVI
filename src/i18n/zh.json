@@ -6336,5 +6336,18 @@
   "marvel0.speech.generated.why.no_frame": "没有生成句子：数据集里没有这个动作的句式。",
   "marvel0.speech.generated.why.untranslated": "没有生成句子：这些物体名还没有英文：{names}。可以用英文说，或者修改文字。",
   "marvel0.speech.generated.guessed": "根据听到的内容猜测修正，使用前请核对：{words}",
+  "marvel0.speech.generated.translated": "由本地模型翻译，并经回译核对（→ 后是回译）：{words}。使用这句话前请先核对。",
+  "marvel0.speech.generated.refused.not_object": "{said}：本地模型没有给出物体名。",
+  "marvel0.speech.generated.refused.known_as": "{said}：本地模型译成“{english}”，这是词表里已有的物体，中文叫 {known}。如果指的就是它，请说 {known}。",
+  "marvel0.speech.generated.refused.unchecked": "{said}：本地模型译成“{english}”，但回译是“{back}”，对不上，所以不用。",
+  "marvel0.speech.generated.not_asked.off": "物体名翻译已关闭（LEVI_STT_TRANSLATE_MODEL=off）。",
+  "marvel0.speech.generated.not_asked.not_installed": "翻译模型没有安装，这些名称没有翻译（见 docs/SPEECH.md）。",
+  "marvel0.speech.generated.not_asked.too_many": "新的物体名太多，一次最多翻译 4 个。",
+  "marvel0.speech.generated.not_asked.blocked": "没有翻译：策略服务或机械臂正在使用。",
+  "marvel0.speech.generated.not_asked.not_loaded": "没有翻译：语音模型没有加载。先录一次音让它加载，再修改文字。",
+  "marvel0.speech.generated.not_asked.busy": "没有翻译：另一个语音请求正在进行，请再试一次。",
+  "marvel0.speech.generated.not_asked.gpu_memory": "没有翻译：GPU 空闲显存不够加载翻译模型。",
+  "marvel0.speech.generated.not_asked.no_time": "没有翻译：这次请求的时间用完了。修改文字可以再试。",
+  "marvel0.speech.generated.not_asked.failed": "没有翻译：翻译失败。请再试一次，或者用英文说这些名称。",
   "marvel0.speech.generated.why.unclear": "没有生成句子：有些词放不进句式（数字、其他语言的词，或“左边”这类方向词）。请修改文字，或者再说一次。"
 }

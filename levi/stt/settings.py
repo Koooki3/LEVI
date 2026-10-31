@@ -1,6 +1,6 @@
 """What the speech worker is run with.
 
-Three environment settings, as for the segmentation worker (a site-file key
+Four environment settings, as for the segmentation worker (a site-file key
 would turn every existing site file into a 412):
 
 - ``LEVI_STT_WORKER_PYTHON``: the worker environment's Python (default
@@ -10,6 +10,11 @@ would turn every existing site file into a 412):
 - ``LEVI_STT_MODEL``: the model folder's name (default ``qwen3-asr-1.7b-hf``).
   The name ``fake`` selects the worker's ``fake`` provider: LEVI's own Python,
   no model and no GPU (tests and demonstrations).
+- ``LEVI_STT_TRANSLATE_MODEL``: the folder (in the same model folder) of the
+  model that translates Chinese object names for the voice card's generated
+  sentence (default ``qwen3-4b-instruct-2507``); ``off`` turns translation
+  off. A folder that is not installed also leaves it off. With the ``fake``
+  speech model, any name other than ``off`` selects the fake translator.
 
 Everything else is a constant. ``worker_state`` only looks at files: it never
 imports the model stack, and it names no path.
@@ -25,6 +30,8 @@ from .. import paths
 
 DEFAULT_MODEL = "qwen3-asr-1.7b-hf"
 FAKE_MODEL = "fake"
+DEFAULT_TRANSLATE_MODEL = "qwen3-4b-instruct-2507"
+TRANSLATE_OFF = "off"
 MANIFEST = "MANIFEST.sha256"
 DEVICE = "cuda"
 MAX_SECONDS = 10
@@ -42,6 +49,25 @@ REQUEST_TIMEOUT_S = 20
 # The free GPU memory a cold start needs besides the site's margin (measured
 # peak of the 1.7B model: 4878 MiB).
 STT_VRAM_MIB = 5000
+# The free GPU memory loading the translation model needs besides the site's
+# margin (measured peak of Qwen3-4B-Instruct-2507 in bf16: 9359 MiB, 2026-10-31).
+TRANSLATE_VRAM_MIB = 9500
+# A translate request answers three short questions per name (at most four
+# names, each at most 16 characters: the worker's own limits in
+# integrations/stt/levi_stt_worker/common.py); measured 0.28 s per question on
+# the RTX 5090, plus 1.5 s to load the text model from the page cache.
+TRANSLATE_TIMEOUT_S = 20
+TRANSLATE_MAX_NAMES = 4
+TRANSLATE_MAX_CHARS = 16
+# The page gives up on a transcription at 75 s and on a match at 15 s
+# (SPEECH_DEADLINES in src/components/marvel0/speech-api.ts). A translation
+# after either gets only what is left of these budgets (at most
+# TRANSLATE_TIMEOUT_S), so the server answers before the page stops waiting and
+# the request lock is free again; with less than TRANSLATE_MIN_S left none is
+# tried.
+TRANSCRIBE_BUDGET_S = 70
+MATCH_BUDGET_S = 12
+TRANSLATE_MIN_S = 3
 RATE_PER_MINUTE = 10
 OMP_THREADS = 2
 
@@ -105,6 +131,30 @@ def worker_state() -> WorkerState:
     return WorkerState(True, True)
 
 
+def translate_model_name() -> str:
+    return os.getenv("LEVI_STT_TRANSLATE_MODEL") or DEFAULT_TRANSLATE_MODEL
+
+
+def translation_state() -> str:
+    """``ready`` (installed and on), ``off`` (turned off) or a reason code it is
+    not available: ``model_name_invalid``, ``model_dir_outside_workspace``,
+    ``model_missing``. Files only, like ``worker_state``."""
+    name = translate_model_name()
+    if name == TRANSLATE_OFF:
+        return "off"
+    if not _MODEL_NAME.fullmatch(name) or ".." in name:
+        return "model_name_invalid"
+    if provider() == "fake":
+        return "ready"
+    try:
+        folder = model_dir() / name
+    except ValueError:
+        return "model_dir_outside_workspace"
+    if not (folder / MANIFEST).is_file():
+        return "model_missing"
+    return "ready"
+
+
 def command(cpu_affinity: str) -> list[str]:
     """The worker's command line (``cpu_affinity`` is the site's
     ``unit.cpu_affinity``; empty leaves the worker unpinned)."""
@@ -125,6 +175,11 @@ def command(cpu_affinity: str) -> list[str]:
         str(MAX_SECONDS),
         "--cpu-affinity",
         cpu_affinity,
+        *(
+            ["--translate-model", translate_model_name()]
+            if translation_state() == "ready"
+            else []
+        ),
         "--provider",
         provider(),
     ]

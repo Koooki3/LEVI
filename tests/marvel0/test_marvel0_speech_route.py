@@ -838,6 +838,8 @@ GENERATED_KEYS = {
     "untranslated",
     "dataset_original",
     "repairs",
+    "translations",
+    "untranslated_why",
 }
 
 

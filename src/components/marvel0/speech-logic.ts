@@ -172,6 +172,34 @@ export interface GeneratedRepair {
   heard: string;
   as: string;
 }
+/** Why a machine translation of a Chinese object name was not used
+ * (levi/marvel0/speech_translate.py). */
+export type TranslationRefusal = "not_object" | "known_as" | "unchecked";
+/** What the local model answered for one Chinese object name outside the
+ * lexicon, and whether its answer passed the check. */
+export interface GeneratedTranslation {
+  said: string;
+  /** The English the slot gets when `ok`; else the model's answer, if any. */
+  english: string | null;
+  /** That English translated back into Chinese. */
+  back: string | null;
+  check: "back_translation" | "back_translation_and_judgement" | null;
+  ok: boolean;
+  reason: TranslationRefusal | null;
+  /** The lexicon's Chinese names when the English names a known object. */
+  knownAs: string[];
+}
+/** Why the names of an "untranslated" result were not asked at all. */
+export type UntranslatedWhy =
+  | "off"
+  | "not_installed"
+  | "too_many"
+  | "blocked"
+  | "not_loaded"
+  | "busy"
+  | "gpu_memory"
+  | "no_time"
+  | "failed";
 export interface Generated {
   status: GeneratedStatus;
   /** Null unless `status` is "ok". Not in the allowed list by design. */
@@ -184,6 +212,9 @@ export interface Generated {
   datasetOriginal: string | null;
   /** Every word the server guessed (heard -> read as). */
   repairs: GeneratedRepair[];
+  /** The model's answers for Chinese object names outside the lexicon. */
+  translations: GeneratedTranslation[];
+  untranslatedWhy: UntranslatedWhy | null;
 }
 
 const GENERATED_STATUSES: GeneratedStatus[] = [
@@ -202,6 +233,47 @@ const SLOT_SOURCES: GeneratedSlot["source"][] = [
   "english",
   "translation",
 ];
+const REFUSALS: TranslationRefusal[] = ["not_object", "known_as", "unchecked"];
+const CHECKS: NonNullable<GeneratedTranslation["check"]>[] = [
+  "back_translation",
+  "back_translation_and_judgement",
+];
+const UNTRANSLATED_WHY: UntranslatedWhy[] = [
+  "off",
+  "not_installed",
+  "too_many",
+  "blocked",
+  "not_loaded",
+  "busy",
+  "gpu_memory",
+  "no_time",
+  "failed",
+];
+
+function readTranslation(value: unknown): GeneratedTranslation[] {
+  const item = rec(value);
+  const said = plain(item?.said, 40);
+  if (!item || !said || typeof item.ok !== "boolean") return [];
+  const reason = REFUSALS.find((entry) => entry === item.reason) ?? null;
+  // A refusal needs its reason; a use needs its English and how it passed.
+  const english = plain(item.english, 64);
+  const check = CHECKS.find((entry) => entry === item.check) ?? null;
+  if (item.ok ? !english || !check || reason : !reason) return [];
+  return [
+    {
+      said,
+      english,
+      back: plain(item.back, 64),
+      check: item.ok ? check : null,
+      ok: item.ok,
+      reason: item.ok ? null : reason,
+      knownAs: list(item.known_as)
+        .map((entry) => plain(entry, 16))
+        .filter((entry): entry is string => entry !== null)
+        .slice(0, 8),
+    },
+  ];
+}
 
 function readGenerated(value: unknown): Generated | null {
   const item = rec(value);
@@ -240,6 +312,12 @@ function readGenerated(value: unknown): Generated | null {
         return heard && as ? [{ heard, as }] : [];
       })
       .slice(0, 8),
+    translations: list(item.translations).flatMap(readTranslation).slice(0, 4),
+    untranslatedWhy:
+      status === "untranslated"
+        ? (UNTRANSLATED_WHY.find((entry) => entry === item.untranslated_why) ??
+          null)
+        : null,
   };
 }
 

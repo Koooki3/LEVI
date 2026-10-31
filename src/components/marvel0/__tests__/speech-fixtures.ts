@@ -704,6 +704,22 @@ export function generated(over: Rec = {}): Rec {
     untranslated: [],
     dataset_original: "put eggplant into blue bowl",
     repairs: [],
+    translations: [],
+    untranslated_why: null,
+    ...over,
+  };
+}
+
+/** The server's verdict on one translated name (speech_translate.judge). */
+export function translation(over: Rec = {}): Rec {
+  return {
+    said: "金桔",
+    english: "kumquat",
+    back: "金桔",
+    check: "back_translation",
+    ok: true,
+    reason: null,
+    known_as: [],
     ...over,
   };
 }

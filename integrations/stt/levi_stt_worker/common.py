@@ -51,6 +51,30 @@ MODELS: dict[str, tuple[str, str, str]] = {
 DEFAULT_MODEL = "qwen3-asr-1.7b-hf"
 MANIFEST_NAME = "MANIFEST.sha256"
 
+# ---- object-name translation (voice input, generated sentences) ---------------
+# folder name -> (Hugging Face repo, pinned commit, {weight file: sha256 (LFS
+# object id of that commit)}). Chosen on 2026-10-31 from four local candidates on
+# 81 Chinese object names plus a frozen held-out set of 40 (levi-hub
+# programs/rig-console/reviews/voice-translate-20261031.md): 31 of the 40
+# held-out names passed the checks, none of them wrongly.
+TRANSLATION_MODELS: dict[str, tuple[str, str, dict[str, str]]] = {
+    "qwen3-4b-instruct-2507": (
+        "Qwen/Qwen3-4B-Instruct-2507",
+        "cdbee75f17c01a7cc42f958dc650907174af0554",
+        {
+            "model-00001-of-00003.safetensors": "75311d91bb08cf0b882913da464a1e722a31fb44db35208663487efb7a3d8ed6",
+            "model-00002-of-00003.safetensors": "0b48adbb1f60e901153d91907ba11ce63bd4b8b584482e730f48808d055dfba1",
+            "model-00003-of-00003.safetensors": "7dd39ccca5e4de123c74c14af44c9bf2eb75df33b4614382af0134528e060d5d",
+        },
+    ),
+}
+DEFAULT_TRANSLATION_MODEL = "qwen3-4b-instruct-2507"
+TRANSLATE_MAX_NAMES = 4  # object names in one request (a spoken task has two per step)
+TRANSLATE_MAX_CHARS = 16  # characters of one Chinese name
+TRANSLATE_MAX_BYTES = 1024  # the request body (UTF-8 JSON)
+TRANSLATE_MAX_NEW_TOKENS = 24  # one short JSON answer
+TRANSLATE_ANSWER_CHARS = 64  # longest answer field passed back
+
 REQUEST_ID = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 

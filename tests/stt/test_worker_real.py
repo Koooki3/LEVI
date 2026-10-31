@@ -95,7 +95,9 @@ def request(request_id: str, payload: bytes) -> bytes:
     )
 
 
-def run_worker(stdin: bytes, timeout: float = 180) -> tuple[int, list[dict], str]:
+def run_worker(
+    stdin: bytes, timeout: float = 180, extra: tuple[str, ...] = ()
+) -> tuple[int, list[dict], str]:
     env = {
         **os.environ,
         "HF_HUB_OFFLINE": "1",
@@ -117,6 +119,7 @@ def run_worker(stdin: bytes, timeout: float = 180) -> tuple[int, list[dict], str
             "cuda",
             "--max-seconds",
             "10",
+            *extra,
         ],
         input=stdin,
         capture_output=True,
@@ -190,3 +193,60 @@ def test_real_model_transcribes_a_spoken_command():
     assert result["heard"] is True and result["language"] == "English"
     assert "eggplant" in result["text"].lower()
     assert result["text"].lower() not in err.lower()  # the transcript is not on stderr
+
+
+TRANSLATE_MODEL = "qwen3-4b-instruct-2507"
+
+
+def translate_request(request_id: str, names: list[str]) -> bytes:
+    body = json.dumps({"names": names}, ensure_ascii=False).encode()
+    header = {"op": "translate", "id": request_id, "bytes": len(body)}
+    return json.dumps(header).encode() + b"\n" + body
+
+
+@pytest.mark.skipif(
+    not (model_dir() / TRANSLATE_MODEL / "MANIFEST.sha256").exists(),
+    reason="the translation model is not installed",
+)
+def test_real_text_model_translates_and_the_check_keeps_only_good_names():
+    """About 15 GB of GPU memory (speech and text model): run it through the
+    resource driver like the rest of this file."""
+    from levi.marvel0 import speech_translate
+
+    names = ["金桔", "卷笔刀", "停下"]
+    stream = (
+        translate_request("t-1", names)
+        + translate_request("t-2", ["火龙果"])
+        + b'{"op":"shutdown"}\n'
+    )
+    code, events, err = run_worker(
+        stream, timeout=300, extra=("--translate-model", TRANSLATE_MODEL)
+    )
+    assert code == 0, err
+    ready, first, second = events
+    assert ready["translation"] is True
+    assert first["event"] == "translation" and first["loaded_now"] is True
+    assert [item["name"] for item in first["items"]] == names
+    assert second["loaded_now"] is False and second["timing_ms"]["load"] == 0
+    verdicts = {
+        item["name"]: speech_translate.judge(
+            item["name"], item["english"], item["chinese"], item["same"]
+        )
+        for item in first["items"] + second["items"]
+    }
+    assert verdicts["金桔"].ok and verdicts["金桔"].english == "kumquat"
+    assert verdicts["火龙果"].ok and verdicts["火龙果"].english in (
+        "dragon fruit",
+        "dragonfruit",
+        "pitaya",
+    )
+    assert not verdicts["卷笔刀"].ok or verdicts["卷笔刀"].english == "pencil sharpener"
+    assert verdicts["停下"].reason == "not_object"
+    for name in [*names, "火龙果", "kumquat"]:
+        assert name not in err  # no name or answer reaches the log
+    print(
+        "translate ms:",
+        first["timing_ms"],
+        second["timing_ms"],
+        {n: (v.english, v.back, v.reason) for n, v in verdicts.items()},
+    )

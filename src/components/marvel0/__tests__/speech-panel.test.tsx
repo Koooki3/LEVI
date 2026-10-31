@@ -24,6 +24,7 @@ import {
   matchedAnswer,
   ok,
   statusAnswer,
+  translation,
   type FakeAudio,
   type FakeDevice,
   type Script,
@@ -1749,6 +1750,100 @@ describe("the generated sentence", () => {
     const none = q(h, "marvel0-speech-generated-none")!;
     expect(none.textContent).toContain("榴莲");
     expect(useGenerated(h)).toBeNull();
+  });
+
+  test("a translated name is shown with its back-translation", async () => {
+    const h = await open({
+      script: {
+        transcribe: echo(
+          matchC({
+            generated: generated({
+              prompt: "pick kumquat into blue bowl",
+              dataset_original: null,
+              slots: [
+                { said: "金桔", english: "kumquat", source: "translation" },
+                { said: "碗", english: "bowl", source: "lexicon" },
+              ],
+              translations: [translation()],
+            }),
+          }),
+        ),
+      },
+    });
+    await speak(h);
+    expect(q(h, "marvel0-speech-generated-translated")?.textContent).toContain(
+      "金桔 → kumquat (→ 金桔)",
+    );
+    expect(q(h, "marvel0-speech-generated-slots")).toBeNull();
+    expect(useGenerated(h)).not.toBeNull();
+  });
+
+  test("says what the model answered for a name it could not use", async () => {
+    const h = await open({
+      script: {
+        transcribe: echo(
+          matchC({
+            generated: generated({
+              status: "untranslated",
+              prompt: null,
+              dataset_original: null,
+              untranslated: ["卷笔刀", "皮球"],
+              translations: [
+                translation({
+                  said: "卷笔刀",
+                  english: "eraser",
+                  back: "橡皮擦",
+                  check: null,
+                  ok: false,
+                  reason: "unchecked",
+                }),
+                translation({
+                  said: "皮球",
+                  english: "ball",
+                  back: null,
+                  check: null,
+                  ok: false,
+                  reason: "known_as",
+                  known_as: ["球", "小球"],
+                }),
+              ],
+            }),
+          }),
+        ),
+      },
+    });
+    await speak(h);
+    const list = q(h, "marvel0-speech-generated-refused")!;
+    expect(list.textContent).toContain("eraser");
+    expect(list.textContent).toContain("橡皮擦");
+    expect(list.textContent).toContain("球, 小球");
+    expect(
+      list.querySelector('[data-refusal="known_as"]')?.textContent,
+    ).toContain("ball");
+    expect(q(h, "marvel0-speech-generated-not-asked")).toBeNull();
+    expect(useGenerated(h)).toBeNull();
+  });
+
+  test("says why the names were not translated at all", async () => {
+    const h = await open({
+      script: {
+        transcribe: echo(
+          matchC({
+            generated: generated({
+              status: "untranslated",
+              prompt: null,
+              dataset_original: null,
+              untranslated: ["榴莲"],
+              untranslated_why: "not_loaded",
+            }),
+          }),
+        ),
+      },
+    });
+    await speak(h);
+    expect(q(h, "marvel0-speech-generated-not-asked")?.textContent).toContain(
+      en["marvel0.speech.generated.not_asked.not_loaded"],
+    );
   });
 
   test("a guessed word is shown as a guess, not as a word outside the list", async () => {

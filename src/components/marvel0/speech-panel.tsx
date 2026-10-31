@@ -40,9 +40,12 @@ import {
   topChoices,
   type EngineState,
   type Flag,
+  type Generated,
   type GeneratedStatus,
   type Problem as SpeechProblem,
   type Proposal,
+  type TranslationRefusal,
+  type UntranslatedWhy,
 } from "./speech-logic";
 import {
   useSpeechSession,
@@ -619,15 +622,20 @@ function GeneratedChoice({
   if (generated.status !== "ok") {
     const status = generated.status;
     return (
-      <p className="rg-muted" data-testid="marvel0-speech-generated-none">
-        {sayText(
-          {
-            key: GENERATED_WHY[status],
-            params: { names: generated.untranslated.join(", ") },
-          },
-          t,
+      <>
+        <p className="rg-muted" data-testid="marvel0-speech-generated-none">
+          {sayText(
+            {
+              key: GENERATED_WHY[status],
+              params: { names: generated.untranslated.join(", ") },
+            },
+            t,
+          )}
+        </p>
+        {status === "untranslated" && (
+          <TranslationRefusals generated={generated} />
         )}
-      </p>
+      </>
     );
   }
   if (!generated.prompt || usable.length === 0) return null;
@@ -674,25 +682,41 @@ function GeneratedChoice({
           )}
         </p>
       )}
-      {generated.slots.some(
-        (slot) => slot.source === "english" || slot.source === "translation",
-      ) && (
+      {generated.slots.some((slot) => slot.source === "english") && (
         <p className="rg-muted" data-testid="marvel0-speech-generated-slots">
           {sayText(
             {
               key: "marvel0.speech.generated.outside",
               params: {
                 words: generated.slots
-                  .filter(
-                    (slot) =>
-                      slot.source === "english" ||
-                      slot.source === "translation",
-                  )
-                  .map((slot) =>
-                    slot.said === slot.english
-                      ? slot.english
-                      : `${slot.said} → ${slot.english}`,
-                  )
+                  .filter((slot) => slot.source === "english")
+                  .map((slot) => slot.english)
+                  .join(", "),
+              },
+            },
+            t,
+          )}
+        </p>
+      )}
+      {generated.slots.some((slot) => slot.source === "translation") && (
+        <p
+          className="rg-muted"
+          data-testid="marvel0-speech-generated-translated"
+        >
+          {sayText(
+            {
+              key: "marvel0.speech.generated.translated",
+              params: {
+                words: generated.slots
+                  .filter((slot) => slot.source === "translation")
+                  .map((slot) => {
+                    const back = generated.translations.find(
+                      (item) => item.ok && item.said === slot.said,
+                    )?.back;
+                    return back
+                      ? `${slot.said} → ${slot.english} (→ ${back})`
+                      : `${slot.said} → ${slot.english}`;
+                  })
                   .join(", "),
               },
             },
@@ -732,6 +756,56 @@ function GeneratedChoice({
         </>
       )}
     </div>
+  );
+}
+
+const REFUSAL_TEXT: Record<TranslationRefusal, string> = {
+  not_object: "marvel0.speech.generated.refused.not_object",
+  known_as: "marvel0.speech.generated.refused.known_as",
+  unchecked: "marvel0.speech.generated.refused.unchecked",
+};
+const NOT_ASKED_TEXT: Record<UntranslatedWhy, string> = {
+  off: "marvel0.speech.generated.not_asked.off",
+  not_installed: "marvel0.speech.generated.not_asked.not_installed",
+  too_many: "marvel0.speech.generated.not_asked.too_many",
+  blocked: "marvel0.speech.generated.not_asked.blocked",
+  not_loaded: "marvel0.speech.generated.not_asked.not_loaded",
+  busy: "marvel0.speech.generated.not_asked.busy",
+  gpu_memory: "marvel0.speech.generated.not_asked.gpu_memory",
+  no_time: "marvel0.speech.generated.not_asked.no_time",
+  failed: "marvel0.speech.generated.not_asked.failed",
+};
+
+/** Why each Chinese object name got no English: the local model's answer and
+ * the check it failed, or why the model was not asked at all. */
+function TranslationRefusals({ generated }: { generated: Generated }) {
+  const { t } = useLocale();
+  const refused = generated.translations.filter((item) => !item.ok);
+  if (refused.length === 0 && !generated.untranslatedWhy) return null;
+  return (
+    <ul className="rg-muted" data-testid="marvel0-speech-generated-refused">
+      {refused.map((item) => (
+        <li key={item.said} data-refusal={item.reason ?? undefined}>
+          {sayText(
+            {
+              key: REFUSAL_TEXT[item.reason ?? "not_object"],
+              params: {
+                said: item.said,
+                english: item.english ?? "",
+                back: item.back ?? "",
+                known: item.knownAs.join(", "),
+              },
+            },
+            t,
+          )}
+        </li>
+      ))}
+      {generated.untranslatedWhy && (
+        <li data-testid="marvel0-speech-generated-not-asked">
+          {sayText({ key: NOT_ASKED_TEXT[generated.untranslatedWhy] }, t)}
+        </li>
+      )}
+    </ul>
   );
 }
 

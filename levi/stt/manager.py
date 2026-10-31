@@ -84,6 +84,8 @@ HEARD_NOT = ("no_speech", "language", "low_confidence", "empty")
 LANGUAGES = ("English", "Chinese")
 # What the worker may refuse a request with, and what it may refuse to start with.
 REQUEST_ERRORS = ("audio_invalid", "too_long", "internal")
+TRANSLATE_ERRORS = ("translate_unavailable", "translate_invalid", "internal")
+MAX_ANSWER = 64  # characters of one translation answer field
 START_ERRORS = {
     "manifest_mismatch": "manifest_mismatch",
     "model_missing": "model_missing",
@@ -132,6 +134,19 @@ class _Refused(Exception):
 
 
 @dataclass(frozen=True)
+class Translation:
+    """The worker's raw answers for each name, in request order: ``english``,
+    ``chinese`` (the English translated back) and ``same`` (whether the model
+    judges them the same kind of object). Whether one may be used is decided by
+    ``levi/marvel0/speech_translate.py``, not here."""
+
+    items: tuple
+    loaded_now: bool
+    load_ms: int
+    infer_ms: int
+
+
+@dataclass(frozen=True)
 class Transcript:
     """One answer of the worker. ``text`` and ``language`` are empty when
     ``heard`` is false; ``reason`` says why nothing was heard."""
@@ -161,6 +176,8 @@ class _Worker:
         self.watcher: threading.Thread | None = None
         self.retired = False
         self.cancelled = False  # a release killed it under a running request
+        self.translation = False  # the ready event said a translator is configured
+        self.translator_loaded = False  # its text model answered once
 
 
 def _wait(fd: int, events: int, timeout: float) -> bool:
@@ -324,6 +341,140 @@ class Manager:
         finally:
             self._request.release()
 
+    # ------------------------------------------------------------ translate
+
+    def translate(
+        self,
+        request_id: str,
+        names: list[str],
+        may_load: Callable[[], None] | None = None,
+        timeout_s: float = settings.TRANSLATE_TIMEOUT_S,
+    ) -> Translation:
+        """Ask the loaded worker's text model about Chinese object names (already
+        checked by the caller: one to four short names). Never starts a worker:
+        without a ready one it raises ``SttError("not_loaded")``. Shares the
+        one-at-a-time rule with ``transcribe``. ``may_load`` is called, under the
+        request lock, before a worker whose text model has not answered yet is
+        asked (that load takes its own GPU memory), and raises ``SttError`` to
+        refuse. ``timeout_s`` (at most ``TRANSLATE_TIMEOUT_S``) covers the load
+        and the answers; a worker that misses it is retired like one that
+        misses a transcription's deadline."""
+        if not self._request.acquire(blocking=False):
+            raise SttError("busy", "a speech request is already running")
+        try:
+            worker = self._current()
+            if (
+                worker is None
+                or worker.phase != "ready"
+                or worker.proc.poll() is not None
+            ):
+                raise SttError("not_loaded", "the speech worker is not loaded")
+            if not worker.translation:
+                raise SttError(
+                    "translate_unavailable", "no translation model is configured"
+                )
+            if not worker.translator_loaded and may_load is not None:
+                may_load()
+            try:
+                return self._translate_exchange(
+                    worker,
+                    request_id,
+                    names,
+                    min(timeout_s, settings.TRANSLATE_TIMEOUT_S),
+                )
+            except SttError:
+                raise
+            except Exception:
+                self._retire(worker, failure="protocol_error")
+                raise
+        finally:
+            self._request.release()
+
+    def _translate_exchange(
+        self, worker: _Worker, request_id: str, names: list[str], timeout_s: float
+    ) -> Translation:
+        with self._lock:
+            worker.phase = "busy"
+        deadline = time.monotonic() + timeout_s
+        body = json.dumps({"names": list(names)}, ensure_ascii=False).encode("utf-8")
+        header = json.dumps(
+            {"op": "translate", "id": request_id, "bytes": len(body)},
+            separators=(",", ":"),
+        )
+        try:
+            with worker.io:
+                if worker.retired:
+                    raise _Closed
+                self._send(worker, header.encode() + b"\n" + body, deadline)
+                event = self._event(worker, deadline)
+            answer = self._translation(event, request_id, names)
+        except _Timeout:
+            raise self._error(worker, "request_timeout") from None
+        except _Closed:
+            raise self._error(worker, "worker_exited") from None
+        except (_Violation, OSError):
+            raise self._error(worker, "protocol_error") from None
+        if isinstance(answer, SttError):
+            if answer.code == "internal":
+                raise self._error(worker, "worker_error")
+            with self._lock:
+                worker.phase, worker.last_used = "ready", self._clock()
+            raise answer
+        with self._lock:
+            worker.phase, worker.last_used = "ready", self._clock()
+            worker.translator_loaded = True
+        return answer
+
+    @staticmethod
+    def _translation(event: dict, request_id: str, names: list[str]):
+        """The checked translation, or the ``SttError`` of the worker's refusal;
+        ``_Violation`` for anything else. Answer fields are short strings (or
+        null), ``same`` a boolean (or null), one item per name in order."""
+        if event.get("id") != request_id:
+            raise _Violation("answer for another request")
+        kind = event.get("event")
+        if kind == "error":
+            code = event.get("code")
+            if code not in TRANSLATE_ERRORS:
+                raise _Violation("unknown error code")
+            if code == "internal":
+                return SttError("internal", REASONS["worker_error"])
+            return SttError(code, "the worker refused the translation")
+        if kind != "translation":
+            raise _Violation("expected translation")
+        items = event.get("items")
+        if not isinstance(items, list) or len(items) != len(names):
+            raise _Violation("bad items")
+        checked = []
+        for name, item in zip(names, items):
+            if not isinstance(item, dict) or item.get("name") != name:
+                raise _Violation("bad item")
+            fields = {}
+            for key in ("english", "chinese"):
+                value = item.get(key)
+                if value is not None and (
+                    not isinstance(value, str) or len(value) > MAX_ANSWER
+                ):
+                    raise _Violation("bad answer field")
+                fields[key] = value
+            same = item.get("same")
+            if same is not None and not isinstance(same, bool):
+                raise _Violation("bad same")
+            checked.append({"name": name, **fields, "same": same})
+        loaded_now = event.get("loaded_now")
+        timing = event.get("timing_ms")
+        timing = timing if isinstance(timing, dict) else {}
+
+        def ms(key: str) -> int:
+            value = timing.get(key)
+            return (
+                value
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+                else 0
+            )
+
+        return Translation(tuple(checked), loaded_now is True, ms("load"), ms("infer"))
+
     def _ready_worker(
         self, cpu_affinity: str, may_start: Callable[[], None] | None = None
     ) -> tuple:
@@ -456,6 +607,7 @@ class Manager:
             raise _Violation("expected ready")
         if settings.provider() != "fake" and event.get("device") != settings.DEVICE:
             raise _Refused("device_mismatch")
+        worker.translation = event.get("translation") is True
 
     # ------------------------------------------------------------ one request
 

@@ -19,7 +19,7 @@ import pytest
 from conftest import scaled, with_netguard
 
 WORKER_SRC = Path(__file__).resolve().parents[2] / "integrations" / "stt"
-READY_KEYS = {"event", "model", "device", "load_s", "vram_mib"}
+READY_KEYS = {"event", "model", "device", "load_s", "vram_mib", "translation"}
 
 
 def wav_bytes(seconds: float = 1.0) -> bytes:
@@ -641,3 +641,100 @@ def test_verify_model_command(tmp_path, manifest_tools):
     (folder / "config.json").write_text('{"x": 1}')
     bad = run_cli("verify-model", "--model-dir", str(tmp_path / "models"))
     assert bad.returncode == 3 and "manifest_mismatch" in bad.stderr
+
+
+# --------------------------------------------------------------- translation
+
+
+def translate_request(request_id: str, names) -> bytes:
+    body = json.dumps({"names": names}, ensure_ascii=False).encode()
+    return (
+        json.dumps({"op": "translate", "id": request_id, "bytes": len(body)}).encode()
+        + b"\n"
+        + body
+    )
+
+
+TRANSLATIONS = {
+    "translations": {"金桔": {"english": "kumquat", "chinese": "金桔", "same": True}},
+    "answers": [{"heard": False, "reason": "no_speech"}],
+}
+
+
+def test_without_a_translation_model_translate_is_refused_and_the_worker_goes_on(fake):
+    proc = fake(TRANSLATIONS)
+    assert proc.event()["translation"] is False
+    proc.send(translate_request("t-1", ["金桔"]) + request("req-1"))
+    refused = proc.event()
+    assert refused["event"] == "error" and refused["id"] == "t-1"
+    assert refused["code"] == "translate_unavailable"
+    assert proc.event()["id"] == "req-1"
+    proc.send(b'{"op":"shutdown"}\n')
+    assert proc.finish()[0] == 0
+
+
+def test_translations_follow_the_contract_and_never_reach_stderr(fake):
+    proc = fake(TRANSLATIONS, "--translate-model", "qwen3-4b-instruct-2507")
+    assert proc.event()["translation"] is True
+    proc.send(
+        translate_request("t-1", ["金桔", "榴莲"]) + translate_request("t-2", ["金桔"])
+    )
+    first, second = proc.event(), proc.event()
+    assert first == {
+        "event": "translation",
+        "id": "t-1",
+        "items": [
+            {"name": "金桔", "english": "kumquat", "chinese": "金桔", "same": True},
+            {"name": "榴莲", "english": "NONE", "chinese": None, "same": None},
+        ],
+        "loaded_now": True,
+        "timing_ms": {"load": 0, "infer": 1},
+    }
+    assert second["id"] == "t-2" and second["loaded_now"] is False
+    proc.send(b'{"op":"shutdown"}\n')
+    code, rest, err = proc.finish()
+    assert (code, rest) == (0, [])
+    assert "金桔" not in err and "kumquat" not in err
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b"not json",
+        b"{}",
+        json.dumps({"names": []}).encode(),
+        json.dumps({"names": ["a"]}).encode(),
+        json.dumps({"names": ["金桔"] * 5}, ensure_ascii=False).encode(),
+        json.dumps({"names": ["金" * 17]}, ensure_ascii=False).encode(),
+        json.dumps({"names": ["金桔"], "more": 1}, ensure_ascii=False).encode(),
+        b"\xff\xfe",
+    ],
+)
+def test_names_that_are_not_short_chinese_names_are_refused_in_sync(fake, body):
+    proc = fake(TRANSLATIONS, "--translate-model", "qwen3-4b-instruct-2507")
+    proc.event()
+    header = json.dumps({"op": "translate", "id": "t-1", "bytes": len(body)}).encode()
+    proc.send(header + b"\n" + body + translate_request("t-2", ["金桔"]))
+    refused = proc.event()
+    assert (refused["event"], refused["code"]) == ("error", "translate_invalid")
+    assert proc.event()["items"][0]["english"] == "kumquat", "the stream stays in sync"
+    proc.send(b'{"op":"shutdown"}\n')
+    assert proc.finish()[0] == 0
+
+
+def test_an_oversized_translate_announcement_ends_the_worker(fake):
+    proc = fake(TRANSLATIONS, "--translate-model", "qwen3-4b-instruct-2507")
+    proc.event()
+    proc.send(b'{"op":"translate","id":"t-1","bytes":5000}\n')
+    code, events, _ = proc.finish()
+    assert code == 2 and events[0]["code"] == "too_long"
+
+
+def test_a_scripted_translate_error_is_an_error_event(fake):
+    script = {**TRANSLATIONS, "translate_error": {"code": "translate_unavailable"}}
+    proc = fake(script, "--translate-model", "qwen3-4b-instruct-2507")
+    proc.event()
+    proc.send(translate_request("t-1", ["金桔"]))
+    assert proc.event()["code"] == "translate_unavailable"
+    proc.send(b'{"op":"shutdown"}\n')
+    assert proc.finish()[0] == 0

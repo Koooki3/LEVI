@@ -14,6 +14,12 @@ entries, or an object ``{"answers": [...], "load_delay_s": 0, "ready":
 
 and may carry ``"delay_s"`` to answer late (timeout tests). The WAV check and
 all protocol errors are the real ones: only the recognition is scripted.
+
+With ``--translate-model``, translate requests are answered from the object's
+``"translations"`` map: name -> ``{"english", "chinese", "same"}`` (a name that
+is not there gets ``{"english": "NONE"}``), ``"translate_error": {"code",
+"message"}`` refuses every translate request, and ``"translate_delay_s"`` answers
+late. The first request reports ``loaded_now``.
 """
 
 from __future__ import annotations
@@ -95,6 +101,45 @@ class FakeProvider:
             "avg_logprob": float(entry.get("avg_logprob", -0.1)),
             "speech_s": float(entry.get("speech_s", round(clip.seconds, 2))),
             "timing_ms": entry.get("timing_ms", {"vad": 1, "infer": 1}),
+        }
+
+    def close(self) -> None:
+        pass
+
+
+class FakeTranslator:
+    """Scripted translations (see the module docstring)."""
+
+    def __init__(self) -> None:
+        self._script = _load_script()
+        self._loaded = False
+
+    def translate(self, names: list[str]) -> dict[str, Any]:
+        failure = self._script.get("translate_error")
+        if isinstance(failure, dict):
+            raise RequestError(
+                str(failure.get("code", "internal")),
+                str(failure.get("message", "scripted failure")),
+            )
+        time.sleep(float(self._script.get("translate_delay_s", 0)))
+        table = self._script.get("translations", {})
+        items = []
+        for name in names:
+            entry = table.get(name) if isinstance(table, dict) else None
+            entry = entry if isinstance(entry, dict) else {"english": "NONE"}
+            items.append(
+                {
+                    "name": name,
+                    "english": entry.get("english"),
+                    "chinese": entry.get("chinese"),
+                    "same": entry.get("same"),
+                }
+            )
+        loaded_now, self._loaded = not self._loaded, True
+        return {
+            "items": items,
+            "loaded_now": loaded_now,
+            "timing_ms": {"load": 0, "infer": 1},
         }
 
     def close(self) -> None:

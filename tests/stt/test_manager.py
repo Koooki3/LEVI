@@ -4,6 +4,7 @@ and checks that no process of the worker's group, and no record in
 ``children``, is left."""
 
 import hashlib
+import json
 import os
 import signal
 import stat
@@ -57,12 +58,14 @@ class Clock:
 def make(tmp_path):
     built = []
 
-    def build(script=(), *, start="ok", record=True, **options):
+    def build(script=(), *, start="ok", record=True, translation=False, **options):
         folder = tmp_path / f"m{len(built)}"
         folder.mkdir()
         log = folder / "record.jsonl" if record else None
         manager = Manager(
-            command=fake_worker.command(folder, script, start=start, record=log),
+            command=fake_worker.command(
+                folder, script, start=start, record=log, translation=translation
+            ),
             installed=lambda: settings.WorkerState(True, True),
             cwd=folder,
             log_dir=folder / "log",
@@ -131,6 +134,7 @@ def test_the_worker_gets_the_exact_bytes_and_the_request_id(make):
     assert sent == [
         {
             "op": "request",
+            "kind": "transcribe",
             "id": REQ,
             "bytes": len(WAV),
             "sha256": hashlib.sha256(WAV).hexdigest(),
@@ -588,3 +592,124 @@ def test_the_python_of_the_tests_is_the_one_that_runs_the_stand_in(make):
     manager.transcribe(REQ, WAV)
     exe = os.readlink(f"/proc/{manager.worker_pid()}/exe")
     assert os.path.realpath(exe) == os.path.realpath(sys.executable)
+
+
+# --------------------------------------------------------------- translation
+
+NAMES = ["金桔", "订书机"]
+TRANSLATED = {
+    "do": "translation",
+    "loaded_now": True,
+    "items": {
+        "金桔": {"english": "kumquat", "chinese": "金桔", "same": True},
+        "订书机": {"english": "stapler", "chinese": "订书机", "same": True},
+    },
+}
+
+
+def requests_of(manager):
+    return [r for r in fake_worker.records(manager.record) if r.get("op") == "request"]
+
+
+def test_translate_never_starts_a_worker(make):
+    manager = make([TRANSLATED], translation=True)
+    with pytest.raises(SttError) as caught:
+        manager.translate(REQ, NAMES)
+    assert caught.value.code == "not_loaded"
+    assert pids(manager) == [] and manager.status()["state"] == "off"
+
+
+def test_translate_asks_the_loaded_worker_once_and_checks_load_only_first(make):
+    manager = make(
+        [{}, TRANSLATED, {**TRANSLATED, "loaded_now": False}], translation=True
+    )
+    manager.transcribe(REQ, WAV)
+    asked = []
+    answer = manager.translate("req-names-1", NAMES, lambda: asked.append(1))
+    assert [item["english"] for item in answer.items] == ["kumquat", "stapler"]
+    assert answer.items[0] == {
+        "name": "金桔",
+        "english": "kumquat",
+        "chinese": "金桔",
+        "same": True,
+    }
+    assert answer.loaded_now is True and asked == [1]
+    again = manager.translate("req-names-2", NAMES, lambda: asked.append(2))
+    assert again.loaded_now is False and asked == [1], "the text model is loaded"
+    sent = requests_of(manager)
+    assert [r["kind"] for r in sent] == ["transcribe", "translate", "translate"]
+    body = json.dumps({"names": NAMES}, ensure_ascii=False).encode()
+    assert sent[1]["bytes"] == len(body)
+    assert sent[1]["sha256"] == hashlib.sha256(body).hexdigest()
+    assert len(pids(manager)) == 1 and manager.status()["state"] == "ready"
+
+
+def test_a_worker_without_a_translator_refuses_and_stays(make):
+    manager = make([{}, TRANSLATED], translation=False)
+    manager.transcribe(REQ, WAV)
+    with pytest.raises(SttError) as caught:
+        manager.translate(REQ, NAMES)
+    assert caught.value.code == "translate_unavailable"
+    assert [r["kind"] for r in requests_of(manager)] == ["transcribe"]
+    assert manager.status()["state"] == "ready"
+
+
+def test_a_refused_load_sends_nothing_and_keeps_the_worker(make):
+    manager = make([{}, TRANSLATED], translation=True)
+    manager.transcribe(REQ, WAV)
+
+    def refuse():
+        raise SttError("translate_gpu", "too little memory")
+
+    with pytest.raises(SttError) as caught:
+        manager.translate(REQ, NAMES, refuse)
+    assert caught.value.code == "translate_gpu"
+    assert [r["kind"] for r in requests_of(manager)] == ["transcribe"]
+    assert manager.status()["state"] == "ready"
+
+
+def test_a_refusal_of_the_names_keeps_the_worker(make):
+    manager = make(
+        [{}, {"do": "error", "code": "translate_invalid"}, TRANSLATED], translation=True
+    )
+    manager.transcribe(REQ, WAV)
+    with pytest.raises(SttError) as caught:
+        manager.translate(REQ, NAMES)
+    assert caught.value.code == "translate_invalid"
+    assert manager.translate(REQ, NAMES).items[1]["english"] == "stapler"
+    assert len(pids(manager)) == 1
+
+
+def test_a_late_translation_retires_the_worker(make):
+    manager = make([{}, {**TRANSLATED, "delay": 3.0}], translation=True)
+    manager.transcribe(REQ, WAV)
+    with pytest.raises(SttError) as caught:
+        manager.translate(REQ, NAMES, timeout_s=scaled(0.5))
+    assert caught.value.code == "timeout"
+    assert manager.status()["state"] in ("failed", "off")
+    wait_until(
+        lambda: not any(alive(pid) for pid in pids(manager)), what="the worker gone"
+    )
+
+
+def test_an_answer_for_another_name_is_a_protocol_break(make):
+    manager = make([{}, {**TRANSLATED, "bad_item": True}], translation=True)
+    manager.transcribe(REQ, WAV)
+    with pytest.raises(SttError) as caught:
+        manager.translate(REQ, NAMES)
+    assert caught.value.code == "failed"
+    assert manager.status()["state"] in ("failed", "off")
+
+
+def test_translate_is_refused_at_once_while_a_transcription_runs(make):
+    manager = make([{}, {"delay": 1.0, "text": "slow"}], translation=True)
+    manager.transcribe(REQ, WAV)
+    thread = threading.Thread(target=lambda: manager.transcribe("req-00000002", WAV))
+    thread.start()
+    try:
+        wait_until(lambda: manager.status()["state"] == "busy", what="a busy worker")
+        with pytest.raises(SttError) as caught:
+            manager.translate(REQ, NAMES)
+        assert caught.value.code == "busy"
+    finally:
+        thread.join(scaled(10))

@@ -27,6 +27,9 @@ from .common import (
     MAX_HEADER_BYTES,
     MAX_REQUEST_BYTES,
     REQUEST_ID,
+    TRANSLATE_MAX_BYTES,
+    TRANSLATE_MAX_CHARS,
+    TRANSLATE_MAX_NAMES,
     log,
 )
 from .errors import ProtocolError, RequestError, StartupError, WorkerError
@@ -47,6 +50,14 @@ class Provider(Protocol):
     def close(self) -> None: ...
 
 
+class Translator(Protocol):
+    """Object-name translation (translate.py): loaded on its first request."""
+
+    def translate(self, names: list[str]) -> dict[str, Any]: ...
+
+    def close(self) -> None: ...
+
+
 @dataclass(frozen=True)
 class Options:
     provider: str
@@ -55,6 +66,7 @@ class Options:
     device: str
     max_seconds: float
     cpu_affinity: str
+    translate_model: str | None = None  # a folder in model_dir; None: no translation
 
 
 # ------------------------------------------------------------------ process
@@ -144,7 +156,7 @@ def read_header(reader: BinaryIO) -> dict[str, Any] | None:
     if op == "shutdown" and set(header) == {"op"}:
         return header
     request_id, size = header.get("id"), header.get("bytes")
-    if op != "transcribe" or set(header) != {"op", "id", "bytes"}:
+    if op not in ("transcribe", "translate") or set(header) != {"op", "id", "bytes"}:
         raise ProtocolError(
             "internal", "The request header has unknown or missing fields."
         )
@@ -152,11 +164,47 @@ def read_header(reader: BinaryIO) -> dict[str, Any] | None:
         raise ProtocolError("internal", "The request id is not valid.")
     if type(size) is not int or size < 0:
         raise ProtocolError("internal", "The byte count is not a non-negative integer.")
-    if size > MAX_REQUEST_BYTES:
+    if op == "transcribe" and size > MAX_REQUEST_BYTES:
         raise ProtocolError(
             "too_long", "The announced audio is larger than the allowed size."
         )
+    if op == "translate" and size > TRANSLATE_MAX_BYTES:
+        raise ProtocolError(
+            "too_long", "The announced names are larger than the allowed size."
+        )
     return header
+
+
+def parse_names(payload: bytes) -> list[str]:
+    """The names of a translate request: ``{"names": [...]}`` in UTF-8, one to
+    ``TRANSLATE_MAX_NAMES`` strings of one to ``TRANSLATE_MAX_CHARS`` Chinese
+    characters (U+3400 to U+9FFF, the matcher's range). Anything else is refused (the stream stays in sync: the bytes
+    were read)."""
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise RequestError(
+            "translate_invalid", "The names are not UTF-8 JSON."
+        ) from None
+    names = (
+        value.get("names")
+        if isinstance(value, dict) and set(value) == {"names"}
+        else None
+    )
+    if (
+        not isinstance(names, list)
+        or not 1 <= len(names) <= TRANSLATE_MAX_NAMES
+        or not all(
+            isinstance(n, str)
+            and 1 <= len(n) <= TRANSLATE_MAX_CHARS
+            and all("\u3400" <= ch <= "\u9fff" for ch in n)
+            for n in names
+        )
+    ):
+        raise RequestError(
+            "translate_invalid", "The names are not short Chinese object names."
+        )
+    return names
 
 
 def read_exact(reader: BinaryIO, size: int) -> bytes:
@@ -174,7 +222,11 @@ def read_exact(reader: BinaryIO, size: int) -> bytes:
 
 
 def serve_loop(
-    reader: BinaryIO, emit: Emitter, provider: Provider, max_seconds: float
+    reader: BinaryIO,
+    emit: Emitter,
+    provider: Provider,
+    max_seconds: float,
+    translator: Translator | None = None,
 ) -> int:
     while True:
         request_id: str | None = None
@@ -187,6 +239,9 @@ def serve_loop(
         except ProtocolError as error:
             emit.error(error, request_id)
             return EXIT_PROTOCOL
+        if header["op"] == "translate":
+            serve_translate(emit, translator, request_id, payload)
+            continue
         started = time.perf_counter()
         digest = hashlib.sha256(payload).hexdigest()[:12]
         try:
@@ -213,6 +268,42 @@ def serve_loop(
         )
 
 
+def serve_translate(
+    emit: Emitter, translator: Translator | None, request_id: str, payload: bytes
+) -> None:
+    """One translate request. A refusal or a failure is an ``error`` event and
+    the loop goes on; the log line has the id, the number of names and the
+    outcome, never a name."""
+    started = time.perf_counter()
+    count = 0
+    try:
+        if translator is None:
+            raise RequestError(
+                "translate_unavailable", "No translation model is configured."
+            )
+        names = parse_names(payload)
+        count = len(names)
+        body = translator.translate(names)
+    except RequestError as error:
+        emit.error(error, request_id)
+        outcome = error.code
+    except Exception as error:  # noqa: BLE001 - one bad request must not take the worker down
+        emit.error(
+            RequestError(
+                "internal", f"The translation failed ({type(error).__name__})."
+            ),
+            request_id,
+        )
+        outcome = "internal"
+    else:
+        emit({"event": "translation", "id": request_id, **body})
+        outcome = "translated"
+    log(
+        f"translate id={request_id} names={count} outcome={outcome} "
+        f"ms={round((time.perf_counter() - started) * 1000)}"
+    )
+
+
 # ------------------------------------------------------------------ startup
 
 
@@ -234,6 +325,22 @@ def make_provider(options: Options) -> Provider:
             "internal", "The speech worker environment is incomplete.", EXIT_STARTUP
         ) from None
     return QwenAsrProvider(folder, options.device)
+
+
+def make_translator(options: Options) -> Translator | None:
+    """The translator for ``--translate-model``, or None. Nothing is loaded
+    here: the model is read on the first translate request."""
+    if options.translate_model is None:
+        return None
+    if options.provider == "fake":
+        from .fake import FakeTranslator
+
+        return FakeTranslator()
+    from .translate import QwenTextTranslator
+
+    return QwenTextTranslator(
+        (options.model_dir or Path()) / options.translate_model, options.device
+    )
 
 
 def serve(options: Options) -> int:
@@ -260,11 +367,18 @@ def serve(options: Options) -> int:
     }
     ready.update(extra)
     ready["event"] = "ready"
+    translator: Translator | None = None
     try:
+        translator = make_translator(options)
+        ready["translation"] = translator is not None
         emit(ready)
-        return serve_loop(sys.stdin.buffer, emit, provider, options.max_seconds)
+        return serve_loop(
+            sys.stdin.buffer, emit, provider, options.max_seconds, translator
+        )
     except BrokenPipeError:
         log("the output pipe was closed")
         return 1
     finally:
+        if translator is not None:
+            translator.close()
         provider.close()

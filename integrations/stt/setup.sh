@@ -6,7 +6,9 @@
 # MODEL_DIR defaults to ${LEVI_WORKSPACE:-<checkout>/.state}/checkpoints/stt.
 # The model (Qwen/Qwen3-ASR-1.7B-hf at a pinned commit, 4.1 GB) is downloaded
 # into MODEL_DIR/qwen3-asr-1.7b-hf and MANIFEST.sha256 is written next to it;
-# the shared Hugging Face cache is never touched.
+# the shared Hugging Face cache is never touched. `./setup.sh --model
+# qwen3-4b-instruct-2507` installs the object-name translation model (7.6 GB)
+# the same way.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"

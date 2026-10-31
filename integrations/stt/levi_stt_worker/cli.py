@@ -3,6 +3,7 @@
     python -m levi_stt_worker.cli --check
     python -m levi_stt_worker.cli serve --model-dir D [--model N] [--device cuda]
         [--max-seconds 10] [--cpu-affinity 8-15] [--provider qwen3-asr|fake]
+        [--translate-model qwen3-4b-instruct-2507]
     python -m levi_stt_worker.cli install-model --model-dir D [--model N] [--from-dir SNAPSHOT]
     python -m levi_stt_worker.cli verify-model --model-dir D [--model N]
 
@@ -22,7 +23,7 @@ from importlib import metadata
 from pathlib import Path
 
 from . import __version__
-from .common import DEFAULT_MODEL, EXIT_STARTUP, MODEL_NAME, MODELS
+from .common import DEFAULT_MODEL, EXIT_STARTUP, MODEL_NAME, MODELS, TRANSLATION_MODELS
 
 REQUIRED = ("numpy", "torch", "transformers", "accelerate", "silero-vad")
 
@@ -67,11 +68,18 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--max-seconds", type=float, default=10.0)
     serve.add_argument("--cpu-affinity", default="")
     serve.add_argument("--provider", choices=["qwen3-asr", "fake"], default="qwen3-asr")
+    serve.add_argument(
+        "--translate-model",
+        type=_model_name,
+        help="a folder in --model-dir with the object-name translation model (loaded on first use)",
+    )
     install = commands.add_parser(
         "install-model", help="download the pinned model and write MANIFEST.sha256"
     )
     install.add_argument("--model-dir", type=Path, required=True)
-    install.add_argument("--model", choices=sorted(MODELS), default=DEFAULT_MODEL)
+    install.add_argument(
+        "--model", choices=sorted({*MODELS, *TRANSLATION_MODELS}), default=DEFAULT_MODEL
+    )
     install.add_argument(
         "--from-dir", type=Path, help="copy this local snapshot instead of downloading"
     )
@@ -103,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.device,
                 args.max_seconds,
                 args.cpu_affinity,
+                args.translate_model,
             )
         )
     if args.command in ("install-model", "verify-model"):

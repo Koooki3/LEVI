@@ -7,7 +7,8 @@
   16-bit, at most 10 s) in, the transcript out, with the closest of the allowed
   task instructions (``speech_match.py``);
 - ``POST /api/levi/marvel0/speech/match``: the same matching for a transcript
-  the person edited. Text only; the worker is not touched;
+  the person edited. Text only: it never starts the worker (a loaded one may
+  translate object names, below);
 - ``POST /api/levi/marvel0/speech/release``: stop the worker (idempotent).
 
 **A transcript is a proposal and nothing else.** The page shows it, the person
@@ -37,6 +38,15 @@ seconds and releases a loaded worker once they close (``set_guard``). The
 physical GPU lock is not taken (it would stop a policy deploy), and
 ``levi/inference/gpu.py`` is not used (its quiet-GPU rule would refuse exactly
 while the policy server runs).
+
+**Translated object names.** The sentence in the datasets' phrasing
+(``speech_template``) needs English object names. A Chinese name outside the
+matcher's lexicon is asked of the loaded worker's text model (forward
+translation, back-translation, same-object judgement), and only an answer that
+passes ``speech_translate.judge`` fills the slot. This never starts a worker,
+runs only while the gate is open, and loads the text model only when the GPU
+has ``TRANSLATE_VRAM_MIB`` plus the site margin free. Verdicts are kept in
+memory (``_TRANSLATED_MAX``, per text model), never on disk or in a log.
 """
 
 import hashlib
@@ -46,7 +56,8 @@ import logging
 import secrets
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
+from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
@@ -273,7 +284,7 @@ def gate(site, status, loaded: bool) -> list:
     return reasons
 
 
-def _gpu_reasons(site, gpu) -> list:
+def _gpu_reasons(site, gpu, reserved: int = stt_settings.STT_VRAM_MIB) -> list:
     free = gpu.get("free_mib") if isinstance(gpu, dict) else None
     if (
         not isinstance(gpu, dict)
@@ -283,7 +294,7 @@ def _gpu_reasons(site, gpu) -> list:
     ):
         return [("gpu_unreadable", {})]
     margin = site.gpu.margin_mib
-    needed = stt_settings.STT_VRAM_MIB + margin
+    needed = reserved + margin
     if free < needed:
         return [
             (
@@ -291,7 +302,7 @@ def _gpu_reasons(site, gpu) -> list:
                 {
                     "free_mib": free,
                     "required_mib": needed,
-                    "reserved_mib": stt_settings.STT_VRAM_MIB,
+                    "reserved_mib": reserved,
                     "margin_mib": margin,
                 },
             )
@@ -376,13 +387,13 @@ def _allowed_revision(allowed, family: str) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _match(transcript: str, allowed: tuple, family: str):
+def _match(transcript: str, allowed: tuple, family: str, translator=None):
     try:
         result = _matcher().match_transcript(transcript, allowed, family=family)
         return {
             **result,
             "allowed_revision": _allowed_revision(allowed, family),
-            "generated": _generated(transcript, family),
+            "generated": _generated(transcript, family, translator),
         }
     except Exception as exc:  # noqa: BLE001 - the text is not in the log, only the kind
         log.warning("matching failed (%s)", type(exc).__name__)
@@ -485,13 +496,37 @@ def _frames():
     return frames
 
 
-def _generated(transcript: str, family: str) -> dict:
+def _generated(transcript: str, family: str, translator=None) -> dict:
     """A sentence in the datasets' most common phrasing (labelled generated),
-    or the reason there is none. Its failure never fails the match."""
+    or the reason there is none. Its failure never fails the match.
+    ``translator`` (``_translator``) answers for Chinese object names outside
+    the lexicon; without it they stay untranslated."""
     from . import speech_template
 
     try:
-        return speech_template.generate(transcript, _frames(), family=family)
+        frames = _frames()
+        result = speech_template.generate(transcript, frames, family=family)
+        verdicts: dict = {}
+        why = None
+        # The model is asked only when names are all that is missing.
+        if result["status"] == "untranslated" and translator is not None:
+            verdicts, why = translator(result["untranslated"])
+            if any(v.ok for v in verdicts.values()):
+                result = speech_template.generate(
+                    transcript,
+                    frames,
+                    family=family,
+                    translate=lambda said: (
+                        verdicts[said].english
+                        if said in verdicts and verdicts[said].ok
+                        else None
+                    ),
+                )
+        return {
+            **result,
+            "translations": [_verdict_view(v) for v in verdicts.values()],
+            "untranslated_why": why if result["untranslated"] else None,
+        }
     except Exception as exc:  # noqa: BLE001 - the match stands without it
         log.warning("generation failed (%s)", type(exc).__name__)
         return {
@@ -503,7 +538,116 @@ def _generated(transcript: str, family: str) -> dict:
             "untranslated": [],
             "dataset_original": None,
             "repairs": [],
+            "translations": [],
+            "untranslated_why": None,
         }
+
+
+# ------------------------------------------------------------ translation ----
+_TRANSLATED_MAX = 256
+_translated: OrderedDict = OrderedDict()  # (text model, name) -> Verdict
+_translated_lock = threading.Lock()
+# SttError codes of ``Manager.translate`` -> ``untranslated_why``.
+TRANSLATE_WHY = {
+    "busy": "busy",
+    "not_loaded": "not_loaded",
+    "translate_unavailable": "not_installed",
+    "translate_invalid": "failed",
+    "translate_blocked": "blocked",
+    "translate_gpu": "gpu_memory",
+}
+
+
+def _verdict_view(verdict) -> dict:
+    return {
+        "said": verdict.said,
+        "english": verdict.english,
+        "back": verdict.back,
+        "check": verdict.check or None,
+        "ok": verdict.ok,
+        "reason": verdict.reason,
+        "known_as": list(verdict.known_as),
+    }
+
+
+def _text_model_check(site) -> Callable[[], None]:
+    """``may_load`` for ``Manager.translate``: the gate is open and the GPU has
+    room for the text model (``TRANSLATE_VRAM_MIB`` plus the site margin)."""
+
+    def check() -> None:
+        status = _policy_status()
+        if gate(site, status, loaded=True):
+            raise SttError("translate_blocked", "the speech gate is closed")
+        gpu = status.get("gpu") if isinstance(status, dict) else None
+        if _gpu_reasons(site, gpu, stt_settings.TRANSLATE_VRAM_MIB):
+            raise SttError(
+                "translate_gpu", "too little free GPU memory for the text model"
+            )
+
+    return check
+
+
+def _translator(site, request_id: str, budget_s: float) -> Callable:
+    """``names -> ({name: Verdict}, why)`` for ``_generated``: the checked
+    translations of the Chinese object names the template could not fill
+    (``speech_template.generate``'s ``untranslated``), and, when some got none,
+    why (``untranslated_why``: ``off``, ``not_installed``, ``too_many``,
+    ``blocked``, ``not_loaded``, ``busy``, ``gpu_memory``, ``no_time`` or
+    ``failed``). ``budget_s`` counts from now: what is left of it when the
+    names are asked bounds the translation."""
+    deadline = time.monotonic() + budget_s
+
+    def translate(names: list[str]) -> tuple[dict, str | None]:
+        from . import speech_translate
+
+        state = stt_settings.translation_state()
+        if state != "ready":
+            return {}, "off" if state == "off" else "not_installed"
+        model = stt_settings.translate_model_name()
+        verdicts: dict = {}
+        with _translated_lock:
+            for name in names:
+                if (model, name) in _translated:
+                    _translated.move_to_end((model, name))
+                    verdicts[name] = _translated[(model, name)]
+        missing = [name for name in names if name not in verdicts]
+        if not missing:
+            return verdicts, None
+        if len(missing) > stt_settings.TRANSLATE_MAX_NAMES or any(
+            len(name) > stt_settings.TRANSLATE_MAX_CHARS for name in missing
+        ):
+            return verdicts, "too_many"
+        if gate(site, _policy_status(), loaded=True):
+            return verdicts, "blocked"
+        left = deadline - time.monotonic()
+        if left < stt_settings.TRANSLATE_MIN_S:
+            return verdicts, "no_time"
+        try:
+            answer = manager().translate(
+                request_id, missing, _text_model_check(site), timeout_s=left
+            )
+        except SttError as exc:
+            return verdicts, TRANSLATE_WHY.get(exc.code, "failed")
+        with _translated_lock:
+            for item in answer.items:
+                verdict = speech_translate.judge(
+                    item["name"], item["english"], item["chinese"], item["same"]
+                )
+                verdicts[item["name"]] = verdict
+                _translated[(model, item["name"])] = verdict
+                _translated.move_to_end((model, item["name"]))
+            while len(_translated) > _TRANSLATED_MAX:
+                _translated.popitem(last=False)
+        log.info(
+            "speech translate names=%d passed=%d loaded_now=%s infer_ms=%d",
+            len(missing),
+            sum(verdicts[n].ok for n in missing),
+            answer.loaded_now,
+            answer.infer_ms,
+        )
+        return {name: verdicts[name] for name in names}, None
+
+    return translate
 
 
 # ---------------------------------------------------------------- reading a request
@@ -588,7 +732,8 @@ def speech_release():
 
 @router.post("/speech/match", dependencies=[Depends(person_only)])
 async def speech_match_text(request: Request):
-    """Match a transcript the person edited. Text only: no worker, no audio."""
+    """Match a transcript the person edited. Text only: no audio, and no
+    worker is started (a loaded one may translate object names)."""
     site = await run_in_threadpool(marvel0_site.require)
     raw = await _read_limited(request, MATCH_MAX_BYTES, "speech_body_invalid")
     try:
@@ -611,7 +756,13 @@ async def speech_match_text(request: Request):
 
 def _match_text(site, transcript: str, model_id) -> dict:
     allowed, family = _allowed(site, model_id)
-    return {"schema": MATCH_SCHEMA, "match": _match(transcript, allowed, family)}
+    translator = _translator(
+        site, f"match:{secrets.token_hex(6)}", stt_settings.MATCH_BUDGET_S
+    )
+    return {
+        "schema": MATCH_SCHEMA,
+        "match": _match(transcript, allowed, family, translator),
+    }
 
 
 @router.post("/speech/transcribe", dependencies=[Depends(person_only)])
@@ -655,6 +806,11 @@ def _transcribe(site, request_id: str, model_id, body: bytes) -> dict:
 
 
 def _run(site, request_id: str, model_id, body: bytes, facts: dict) -> dict:
+    # The translation's share of the page's wait starts now, not after the
+    # transcription.
+    translator = _translator(
+        site, f"{request_id}:names", stt_settings.TRANSCRIBE_BUDGET_S
+    )
     try:
         stt_wav.parse(body)
     except stt_wav.WavError as exc:
@@ -683,7 +839,7 @@ def _run(site, request_id: str, model_id, body: bytes, facts: dict) -> dict:
         facts.update(
             chars=len(result.text), text_mac=_fingerprint(result.text.encode())
         )
-        match = _match(result.text, allowed, family)
+        match = _match(result.text, allowed, family, translator)
     return {
         "schema": RESULT_SCHEMA,
         "ok": True,

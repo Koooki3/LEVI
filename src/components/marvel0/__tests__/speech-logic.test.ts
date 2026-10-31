@@ -49,6 +49,7 @@ import {
   matchV,
   matchedAnswer,
   statusAnswer,
+  translation,
 } from "./speech-fixtures";
 
 const catalogue = (lang: "en" | "zh") => (key: string) =>
@@ -834,6 +835,90 @@ describe("the generated sentence (owner decision 2026-10-30)", () => {
       readMatch(matchC({ generated: generated({ status: "unclear" }) }))!
         .generated!.status,
     ).toBe("unclear");
+  });
+
+  test("translations are read with their check; a malformed one is dropped", () => {
+    const refused = translation({
+      said: "卷笔刀",
+      english: "eraser",
+      back: "橡皮擦",
+      check: null,
+      ok: false,
+      reason: "unchecked",
+    });
+    const match = readMatch(
+      matchC({
+        generated: generated({
+          status: "untranslated",
+          untranslated: ["卷笔刀"],
+          untranslated_why: "busy",
+          translations: [
+            translation(),
+            refused,
+            translation({ ok: true, check: null }), // a use without its check
+            translation({ ok: false, reason: null }), // a refusal without a reason
+            translation({ ok: false, reason: "made_up" }),
+            translation({ said: 3 }),
+            translation({ ok: "yes" }),
+            translation({
+              said: "皮球",
+              english: "ball",
+              ok: false,
+              reason: "known_as",
+              check: null,
+              known_as: ["球", 7, "小球"],
+            }),
+          ],
+        }),
+      }),
+    )!;
+    expect(match.generated!.translations).toEqual([
+      {
+        said: "金桔",
+        english: "kumquat",
+        back: "金桔",
+        check: "back_translation",
+        ok: true,
+        reason: null,
+        knownAs: [],
+      },
+      {
+        said: "卷笔刀",
+        english: "eraser",
+        back: "橡皮擦",
+        check: null,
+        ok: false,
+        reason: "unchecked",
+        knownAs: [],
+      },
+      {
+        said: "皮球",
+        english: "ball",
+        back: "金桔",
+        check: null,
+        ok: false,
+        reason: "known_as",
+        knownAs: ["球", "小球"],
+      },
+    ]);
+    expect(match.generated!.untranslatedWhy).toBe("busy");
+  });
+
+  test("why nothing was translated is read only for an untranslated result", () => {
+    const why = (over: Record<string, unknown>) =>
+      readMatch(matchC({ generated: generated(over) }))!.generated!
+        .untranslatedWhy;
+    expect(
+      why({ status: "untranslated", untranslated_why: "gpu_memory" }),
+    ).toBe("gpu_memory");
+    expect(
+      why({ status: "untranslated", untranslated_why: "later" }),
+    ).toBeNull();
+    expect(why({ untranslated_why: "busy" })).toBeNull();
+    expect(
+      readMatch(matchC({ generated: generated({ translations: undefined }) }))!
+        .generated!.translations,
+    ).toEqual([]);
   });
 
   test("an unknown status, or an ok without a clean sentence, is dropped", () => {
