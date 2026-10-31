@@ -1189,3 +1189,49 @@ def test_install_refuses_an_index_with_values_that_are_not_names(tmp_path, monke
     with pytest.raises(StartupError) as caught:
         install.install_model(tmp_path / "models", "text", source)
     assert caught.value.code == "manifest_mismatch"
+
+
+def test_a_failed_load_frees_its_memory_after_the_handler(tmp_path, monkeypatch):
+    # Half-loaded weights are kept alive by the exception and its traceback
+    # inside the handler; the cache is emptied only once they are gone.
+    import types
+    import weakref
+
+    from levi_stt_worker import manifest, translate
+    from levi_stt_worker.errors import RequestError
+
+    monkeypatch.setattr(manifest, "verify_manifest", lambda folder: None)
+    loaded: list = []
+    freed: list = []
+
+    class Weights:
+        pass
+
+    def from_pretrained(*args, **kwargs):
+        weights = Weights()
+        weights.cycle = weights  # only the garbage collector frees it
+        loaded.append(weakref.ref(weights))
+        raise OSError("half loaded")
+
+    torch = types.ModuleType("torch")
+    torch.bfloat16 = "bf16"
+    torch.cuda = types.SimpleNamespace(
+        empty_cache=lambda: freed.append(all(ref() is None for ref in loaded))
+    )
+    transformers = types.ModuleType("transformers")
+    transformers.AutoTokenizer = types.SimpleNamespace(
+        from_pretrained=lambda *a, **k: object()
+    )
+    transformers.AutoModelForCausalLM = types.SimpleNamespace(
+        from_pretrained=from_pretrained
+    )
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.setitem(sys.modules, "transformers", transformers)
+    translator = translate.QwenTextTranslator(tmp_path, "cuda")
+    for _ in range(2):
+        with pytest.raises(RequestError) as caught:
+            translator.translate(["金桔"])
+        assert caught.value.code == "translate_unavailable"
+        assert caught.value.__context__ is None
+    assert freed == [True], "the cache was emptied while the weights were alive"
+    assert len(loaded) == 1, "a failed folder is not loaded again"

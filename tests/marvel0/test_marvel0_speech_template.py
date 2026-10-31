@@ -550,3 +550,40 @@ def test_a_numbered_thing_is_unclear(frames, said):
 )
 def test_the_name_filter_refuses_joining_and_place_words(bad):
     assert T._english_name(bad) is None
+
+
+@pytest.mark.parametrize(
+    "said",
+    ["把苹果放到碗外头", "把苹果放到碗前头", "把苹果放到盘子旁边", "把苹果放到碗左边"],
+)
+def test_a_place_beside_a_known_thing_is_not_a_name(frames, said):
+    # 碗外头 must not reach the model as 碗外 ("outer bowl").
+    asked = []
+    result = gen(said, frames, translate=lambda zh: asked.append(zh) or "thing")
+    assert (result["status"], asked) == ("no_task", [])
+
+
+@pytest.mark.parametrize("said", ["把茄子往那个蓝色碗里放", "把茄子朝着蓝色碗里放"])
+def test_wang_before_fillers_and_a_known_word_is_a_destination(frames, said):
+    done = gen(said, frames)
+    assert done["status"] == "ok" and done["prompt"].endswith("eggplant into blue bowl")
+
+
+def test_zhe_after_a_verb_is_a_particle(frames):
+    assert T.unknown_names("拿着榴莲放到蓝色碗里") == ["榴莲"]
+
+
+def test_a_number_before_an_unknown_name_stays_in_it(frames):
+    assert T.unknown_names("把五号电池放到蓝色碗里") == ["五号电池"]
+
+
+@pytest.mark.parametrize(
+    "bad", ["outer bowl", "outside bowl", "bowl rim", "above plate"]
+)
+def test_the_name_filter_refuses_place_words(bad):
+    assert T._english_name(bad) is None
+
+
+@pytest.mark.parametrize("said", ["拿起哈密瓜放到蓝色碗里", "拿哈密瓜放到蓝色碗里"])
+def test_only_zhe_is_a_particle_after_a_verb(frames, said):
+    assert T.unknown_names(said) == ["哈密瓜"]

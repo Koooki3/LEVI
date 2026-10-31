@@ -301,8 +301,18 @@ class _SlotReader(matcher._Reader):
                 marker = "C"
             elif char in _TOWARDS_ZH and run[at + 1 : at + 2] in _DIRECTIONS_ZH:
                 marker, size = "W", 2  # 往左, 向上: a direction, not a place
-            elif char in _TOWARDS_ZH and self._chinese_token(run, at + 1):
-                marker = "D"
+            elif char in _TOWARDS_ZH and self._known_after(run, at):
+                marker = "D"  # 往碗里, 往那个碗里, 朝着碗
+            elif (
+                char in _BESIDE_ZH
+                and not gap
+                and spans
+                and spans[-1][1] == at
+                and self.tokens[-1].concept.startswith("N:")
+            ):
+                # 碗外头, 盘子旁边, 碗左边: where, not part of a name
+                marker = "W"
+                size = 2 if run[at + 1 : at + 2] in _SIDE_TAILS_ZH else 1
             token = None if marker else self._chinese_token(run, at)
             if token or marker:
                 self._flush_at(gap, gap_span, spans, run)
@@ -320,7 +330,12 @@ class _SlotReader(matcher._Reader):
             ):
                 spans[-1] = (spans[-1][0], at + 1)  # 碗儿, 大号
                 at += 1
-            elif char == "号" and at > 0 and run[at - 1] in _NUMERALS_ZH:
+            elif (
+                char == "号"
+                and at > 0
+                and run[at - 1] in _NUMERALS_ZH
+                and self._known_after(run, at)
+            ):
                 self.dropped.append(run[at - 1 : at + 1])  # 一号盘子: which one?
                 at += 1
             else:
@@ -331,7 +346,14 @@ class _SlotReader(matcher._Reader):
                     at + 1 == len(run)
                     or run[at + 1] in lexicon.FILLERS_ZH
                     or self._chinese_token(run, at + 1) is not None
-                )  # 放好啦, 拿着苹果; not 哈密瓜
+                    or (
+                        char == "着"
+                        and not gap
+                        and bool(spans)
+                        and spans[-1][1] == at
+                        and self.tokens[-1].concept.startswith("A:")
+                    )
+                )  # 放好啦, 拿着苹果, 拿着榴莲 (only 着 after a verb); not 哈密瓜
                 if (
                     char not in lexicon.FILLERS_ZH
                     and not particle
@@ -347,6 +369,15 @@ class _SlotReader(matcher._Reader):
         glued, unclear = _glue(self.tokens[first:], spans)
         self.tokens[first:] = glued
         self.dropped += unclear
+
+    def _known_after(self, run: str, at: int) -> bool:
+        """A lexicon word follows ``run[at]``, fillers and particles skipped."""
+        j = at + 1
+        while j < len(run) and (
+            run[j] in lexicon.FILLERS_ZH or run[j] in _PARTICLES_ZH
+        ):
+            j += 1
+        return j < len(run) and self._chinese_token(run, j) is not None
 
     def _flush_at(
         self,
@@ -373,6 +404,9 @@ _PARTICLES_ZH: Final = frozenset("着啦哈咯呗嘞")
 # a direction it is one (往左).
 _TOWARDS_ZH: Final = frozenset("往向朝")
 _DIRECTIONS_ZH: Final = frozenset("左右前后上下")
+# Right after a known thing these say where (碗外头, 盘子旁边, 碗左边).
+_BESIDE_ZH: Final = frozenset("外前后旁左右边侧")
+_SIDE_TAILS_ZH: Final = frozenset("头面边")
 _NUMERALS_ZH: Final = frozenset("一二三四五六七八九十两0123456789")
 # Matcher fillers that also start many object names (上衣, 点心, 面条, 中药).
 _NAME_STARTS: Final = frozenset("上下中面点起全里内")
@@ -768,6 +802,14 @@ _NOT_IN_NAME: Final = frozenset(
         "near",
         "between",
         "then",
+        "outside",
+        "outer",
+        "inner",
+        "above",
+        "below",
+        "around",
+        "edge",
+        "rim",
     ]
 ) | frozenset(_PLACES)
 
