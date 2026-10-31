@@ -85,10 +85,15 @@ describe("one selected model for the whole page", () => {
       `follows the policy server: ${CFG}`,
     );
     expect(follow(host).getAttribute("data-source")).toBe("choice");
-    // The command card has no select and no switch.
+    // The command card has no select, and its only switch is in-chunk acceleration (2026-10-31): the model and
+    // the RTC/VLASH choice are the policy server card's.
     const command = host.querySelector("[data-testid=marvel0-command]")!;
     expect(command.querySelectorAll("select")).toHaveLength(0);
-    expect(command.querySelector("[role=switch]")).toBeNull();
+    const switches = [...command.querySelectorAll("[role=switch]")];
+    expect(switches).toHaveLength(1);
+    expect(
+      switches[0].closest("[data-testid=marvel0-command-chunk-accel]"),
+    ).not.toBeNull();
     // The default rollout group carries the full checkpoint name.
     expect(
       (field(command as HTMLElement, "Rollout group") as HTMLInputElement)
