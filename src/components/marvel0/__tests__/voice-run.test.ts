@@ -244,6 +244,15 @@ describe("which proposal runs by itself (re-review 2026-11-01)", () => {
     expect(pick(proposal(matchC({ generated: translated })))).toEqual(expected);
     expect(pick(proposal(matchB({ generated: translated })))).toEqual(expected);
     expect(TRANSLATED_DELAY_MS).toBeGreaterThan(VOICE_RUN_DELAY_MS);
+    // Even if an answer ever carried a dataset original beside a translated
+    // name, the sentence that runs is the one holding the shown names.
+    const withOriginal = generated({
+      ...translated,
+      dataset_original: "put eggplant into blue bowl",
+    });
+    expect(pick(proposal(matchC({ generated: withOriginal })))).toEqual(
+      expected,
+    );
   });
 
   test("the first gate needs an episode record", () => {

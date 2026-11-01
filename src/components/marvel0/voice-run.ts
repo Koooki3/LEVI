@@ -92,18 +92,22 @@ export function autoPick(proposal: Proposal, armedAt: number): AutoPick {
   if (generated.length > 0 && match.generated) {
     if (match.generated.repairs.length > 0) return { why: "guessed" };
     if (best !== null && !generated.includes(best)) return { why: "disagree" };
-    const prompt = best ?? match.generated.datasetOriginal ?? generated[0];
     // A name the local model translated is one the policy was never trained
-    // on: it runs after a longer countdown with the translation shown.
+    // on: it runs after a longer countdown with the translation shown, and
+    // always as the generated sentence itself (the one holding those names).
     const translated =
       best === null
         ? match.generated.slots
             .filter((slot) => slot.source === "translation")
             .map((slot) => `${slot.said} → ${slot.english}`)
         : [];
-    return translated.length > 0
-      ? { prompt, delayMs: TRANSLATED_DELAY_MS, translated }
-      : clear(prompt);
+    if (translated.length > 0)
+      return {
+        prompt: match.generated.prompt ?? generated[0],
+        delayMs: TRANSLATED_DELAY_MS,
+        translated,
+      };
+    return clear(best ?? match.generated.datasetOriginal ?? generated[0]);
   }
   if (best !== null) return clear(best);
   return { why: "choose" };
