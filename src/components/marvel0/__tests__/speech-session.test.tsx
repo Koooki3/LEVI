@@ -2,7 +2,15 @@
 // onUse no matter how it is called.
 import { render, setupDom } from "@/components/ds/__tests__/dom";
 import { act } from "react";
-import { afterEach, describe, expect, jest, test } from "bun:test";
+import { advanceInSteps, installApplicationClock } from "./application-clock";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { useSpeechSession, type SpeechSession } from "../speech-session";
 import {
   KNOWN,
@@ -19,13 +27,19 @@ import {
   type FakeAudio,
 } from "./speech-fixtures";
 
+// Install after React loads so its captured host clocks stay real. The
+// application clock stays through cleanup; restore it before the DOM globals go.
+let clock: ReturnType<typeof installApplicationClock>;
+beforeAll(() => {
+  clock = installApplicationClock();
+});
+afterAll(() => clock.restore());
 setupDom();
 
 let audio: FakeAudio | null = null;
 afterEach(() => {
   audio?.restore();
   audio = null;
-  jest.useRealTimers();
 });
 
 async function flushAll() {
@@ -35,8 +49,9 @@ async function flushAll() {
 }
 const advance = (ms: number) =>
   act(async () => {
-    jest.advanceTimersByTime(ms);
-    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    await advanceInSteps(clock, ms, async () => {
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
   });
 
 /** Calls use() the way a click would: inside act. */
@@ -46,7 +61,6 @@ const press = (h: { session: () => SpeechSession }, ...prompts: string[]) =>
   });
 
 async function open(match: Record<string, unknown> = matchA(KNOWN[2])) {
-  jest.useFakeTimers();
   audio = installFakeAudio();
   const captures = captureFactory();
   const { api } = fakeSpeechApi({
@@ -166,12 +180,11 @@ describe("use() of the sentence as heard", () => {
 
 describe("the timing of an answer", () => {
   test("is the page's wait from the release of the button, with the server's numbers", async () => {
-    jest.useFakeTimers();
     audio = installFakeAudio();
     const captures = captureFactory();
     const { api } = fakeSpeechApi({
       transcribe: (call) => {
-        jest.advanceTimersByTime(1800);
+        clock.advance(1800);
         return ok(
           heardAnswer(call.requestId, matchA(KNOWN[2]), {
             timing_ms: { load: 0, infer: 900, match: 100, total: 1200 },

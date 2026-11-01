@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { installApplicationClock } from "./application-clock";
+import { advanceInSteps, installApplicationClock } from "./application-clock";
 
 test("orders deadlines, cancels, and handles self-cancelling intervals and nested timers", () => {
   const clock = installApplicationClock();
@@ -91,4 +91,52 @@ test("restores descriptors while captured host clocks and native timers stay rea
   expect(performance).toBe(host);
   clock.restore();
   expect(() => clock.advance(0)).toThrow();
+});
+
+test("advanceInSteps settles Promise work between steps of at most 30 s", async () => {
+  const clock = installApplicationClock();
+  try {
+    const start = Date.now();
+    const seen: string[] = [];
+    // A periodic read whose answer lands one Promise turn after it is asked.
+    const read = setInterval(() => {
+      const asked = Date.now() - start;
+      seen.push(`ask@${asked}`);
+      void Promise.resolve().then(() => seen.push(`answer@${asked}`));
+    }, 30_000);
+    await advanceInSteps(clock, 120_000, async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    clearInterval(read);
+    expect(Date.now() - start).toBe(120_000);
+    expect(seen).toEqual([
+      "ask@30000",
+      "answer@30000",
+      "ask@60000",
+      "answer@60000",
+      "ask@90000",
+      "answer@90000",
+      "ask@120000",
+      "answer@120000",
+    ]);
+    // A short jump is one plain step, and zero still settles once.
+    let settled = 0;
+    await advanceInSteps(clock, 799, async () => void (settled += 1));
+    await advanceInSteps(clock, 0, async () => void (settled += 1));
+    expect(settled).toBe(2);
+    expect(Date.now() - start).toBe(120_799);
+    await expect(
+      advanceInSteps(clock, Infinity, async () => undefined),
+    ).rejects.toThrow();
+    await expect(
+      advanceInSteps(clock, -1, async () => undefined),
+    ).rejects.toThrow();
+    await expect(
+      advanceInSteps(clock, 5, async () => undefined, 0),
+    ).rejects.toThrow();
+    expect(Date.now() - start).toBe(120_799);
+  } finally {
+    clock.restore();
+  }
 });
