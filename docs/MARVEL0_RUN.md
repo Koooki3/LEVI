@@ -78,7 +78,9 @@ raw files and creates `.complete`. Each MJPG frame is a complete JPEG, so `GET /
 (`live_frame.py`, `Supervisor.frame`) reads the tail of the growing file (at most the last 1 MiB) and returns the last
 complete JPEG (`image/jpeg`, `Cache-Control: no-store`, `X-Levi-Frame-Age-Ms` and `X-Levi-Frame-Episode`). The folder is
 the one without `.complete` whose raw file was written most recently, among all task folders of this run's group, and only
-files written since the run began count; a link at any level is refused.
+files written since the run began count; the rollout root and the group folder are resolved, and a link below the group
+folder (task folder, episode folder, raw file) is refused. The route never adopts a client after a restart of the service
+(only `GET /run` does), so it answers `no_run` until the page's status read has.
 
 - **It reads files only.** No camera is opened, no port is connected to, nothing is sent to the client, the control loop
   is not touched. The route is a read like `/run/log`; it answers `404` with `no_run` (no active run of this page),
@@ -86,8 +88,12 @@ files written since the run began count; a link at any level is refused.
 - **Limits.** There is no picture between episodes: the client records frames only while an episode runs, and the page
   says so. The source is about 10 frames a second and the page asks about 4 times a second (one request at a time per
   camera, only while the run is active and the tab is visible), so a picture can be a few tenths of a second old; its age
-  and episode folder are written under it. The last picture stays for 3 seconds when the next one is missing. The client
-  buffers its video output, so the picture can also trail the camera by about one frame.
+  and episode folder are written under it. The last picture stays for 3 seconds when the next one is missing. The client's
+  video writer (OpenCV over FFmpeg) puts its output on disk in blocks of 256 KiB, so the file grows a few frames at a
+  time: the picture moves on in steps, about every 0.3-0.9 s at this machine's frame sizes, and can be that far behind
+  the camera; the age shown is that of the last block written, and the first picture of an episode appears only after
+  the first block (until then the page says the episode has no picture yet). Measured with cv2 4.11 in `openpi/.venv` by
+  the review of 2026-11-01.
 - The proxy of the page (`src/utils/backendProxy.ts`) passes the two `X-Levi-Frame-*` headers on, besides the content
   type and the cache policy it already passed.
 
@@ -259,13 +265,16 @@ with the owner at the arm and a hand on the emergency stop.
 （MJPG，每执行一个动作一帧，约每秒 10 帧）写进片段文件夹 `<采集根目录>/<组>/<任务文件夹>/demo_NNNN/`；片段结束时它把这些文件转成 mp4，
 删除原始文件，并创建 `.complete`。MJPG 的每一帧都是一张完整的 JPEG，所以 `GET /run/frame?camera=side|wrist`（`live_frame.py`、`Supervisor.frame`）
 读正在增长的文件的尾部（最多最后 1 MiB），返回最后一张完整的 JPEG（`image/jpeg`，`Cache-Control: no-store`，另有 `X-Levi-Frame-Age-Ms` 和 `X-Levi-Frame-Episode`）。
-选中的文件夹是本次运行所在组的所有任务文件夹里、没有 `.complete` 且原始文件最近写过的那一个，并且只算运行开始之后写过的文件；任何一层是链接都会被拒绝。
+选中的文件夹是本次运行所在组的所有任务文件夹里、没有 `.complete` 且原始文件最近写过的那一个，并且只算运行开始之后写过的文件；采集根目录和组文件夹本身按 realpath 解析，组文件夹以下（任务文件夹、片段文件夹、原始文件）任何一层是链接都会被拒绝。
+这个路由不会在服务重启后接管客户端（只有 `GET /run` 会），所以在页面的状态读取接管之前它回答 `no_run`。
 
 - **只读文件。** 不打开相机，不连接任何端口，不给客户端发送任何东西，不碰控制回路。这个路由和 `/run/log` 一样是读取；没有画面时返回 `404`，
   原因为 `no_run`（本页没有活动的运行）、`no_episode`（没有正在录制的片段）或 `no_frame`（还没有完整的一帧）；其他相机名返回 `422`。
 - **限制。** 片段之间没有画面：客户端只在片段运行期间记录画面，页面会这样说明。源头约每秒 10 帧，页面约每秒请求 4 次（每台相机同时只有一个请求，
   且只在运行进行中、标签页可见时请求），所以画面可能晚零点几秒；画面下方写着它的年龄和片段文件夹。下一张缺失时，上一张保留 3 秒。
-  客户端对视频输出有缓冲，画面还可能比相机慢约一帧。
+  客户端的视频写入器（OpenCV 经 FFmpeg）按 256 KiB 一块写盘，文件一次长几帧：画面是一跳一跳更新的，按这台机器的帧大小约每 0.3–0.9 秒一跳，
+  也可能比相机落后这么久；显示的年龄是最后写入那一块的时间，每个片段的第一张画面要等第一块写盘后才出现（之前页面会说片段还没有画面）。
+  数据来自 2026-11-01 审查时用 `openpi/.venv` 里的 cv2 4.11 实测。
 - 页面的代理（`src/utils/backendProxy.ts`）除了原来就转发的内容类型和缓存策略，现在也转发这两个 `X-Levi-Frame-*` 响应头。
 
 ## 这些门的分量，以及这里什么都不是

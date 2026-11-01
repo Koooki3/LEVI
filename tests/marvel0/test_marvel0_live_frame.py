@@ -160,6 +160,19 @@ def test_a_run_that_ended_has_no_picture_either(machine):
     assert reason(machine.sup.frame, "side") == "no_run"
 
 
+def test_a_frame_read_never_adopts_the_client(machine, monkeypatch):
+    """Adopting after a restart can hold the client: only GET /run does it."""
+    started(machine)
+    episode(machine)
+
+    def adopt():
+        raise AssertionError("frame() must not adopt")
+
+    monkeypatch.setattr(machine.sup, "adopt", adopt)
+    assert machine.sup.frame("side").episode == "demo_0001"
+    assert len(machine.signals) == 0
+
+
 def test_each_camera_gets_its_own_newest_frame(machine):
     started(machine)
     episode(machine, seed=1, age=0.25)
@@ -310,6 +323,7 @@ def test_the_route_answers_a_jpeg_that_is_never_cached(served):
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/jpeg"
     assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-levi-frame-episode"] == "demo_0004"
     assert int(response.headers["x-levi-frame-age-ms"]) == pytest.approx(250, abs=10)
     assert response.content == jpeg(14)
@@ -350,8 +364,9 @@ def test_a_camera_that_is_not_side_or_wrist_is_rejected(served, params):
     assert response.status_code == 422
 
 
-def test_the_route_is_a_read_that_needs_no_person(served):
-    """Like the log: a Bearer credential may read it (it is not ``person_only``)."""
+def test_the_route_is_not_person_only(served):
+    """Like the log, the route has no ``person_only`` dependency (this mounts the
+    router alone: in production the UI-token middleware still guards it)."""
     client, m = served
     started(m)
     episode(m)

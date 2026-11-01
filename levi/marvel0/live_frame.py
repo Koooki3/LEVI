@@ -11,8 +11,10 @@ so the tail of the growing file holds the newest picture; this module returns
 it. It opens no camera, connects to no port, signals nothing and writes
 nothing; the client and its control loop are not touched.
 
-Everything it opens is a regular file below the group folder, and a link at any
-level is refused (``lstat`` while walking, ``O_NOFOLLOW`` on the open).
+Everything it opens is a regular file below the group folder. The rollout root
+and the group folder themselves are resolved (``realpath``); a link below the
+group folder (task folder, episode folder, raw file) is refused (``lstat`` while
+walking, ``O_NOFOLLOW`` on the open).
 """
 
 from __future__ import annotations

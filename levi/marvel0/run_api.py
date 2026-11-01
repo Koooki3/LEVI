@@ -195,6 +195,7 @@ def run_frame(camera: Literal["side", "wrist"]):
         media_type="image/jpeg",
         headers={
             "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
             "X-Levi-Frame-Age-Ms": str(round(found.age_s * 1000)),
             "X-Levi-Frame-Episode": found.episode,
         },

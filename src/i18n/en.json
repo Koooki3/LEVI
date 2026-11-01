@@ -5715,7 +5715,7 @@
   "marvel0.run.notices": "Notes on the gates and the keys ({n})",
   "marvel0.run.scope": "Drives the client this page started: hold, the key it waits for, end.",
   "marvel0.live.title": "Live view",
-  "marvel0.live.lead": "The newest picture of each camera in the episode being recorded, asked for about four times a second. It is read from the video files the client writes while an episode runs, so it shows nothing between episodes and can lag the cameras by a moment. Nothing here opens a camera or sends the client anything.",
+  "marvel0.live.lead": "The newest picture of each camera in the episode being recorded, asked for about four times a second. It is read from the video files the client writes while an episode runs, so it shows nothing between episodes, moves on in small steps and can lag the cameras by up to about a second. Nothing here opens a camera or sends the client anything.",
   "marvel0.live.side": "Third-person view",
   "marvel0.live.wrist": "Wrist view",
   "marvel0.live.alt.side": "Newest frame of the third-person (side) camera",

@@ -2712,8 +2712,11 @@ class Supervisor:
         """The newest complete camera frame of the episode this page's run is
         recording (``GET /run/frame``), read from the client's raw video file
         (``live_frame.py``): while the run is active only. Raises
-        ``live_frame.NoFrame`` with ``no_run``, ``no_episode`` or ``no_frame``."""
-        self.adopt()
+        ``live_frame.NoFrame`` with ``no_run``, ``no_episode`` or ``no_frame``.
+
+        It never adopts a client after a restart of the service (``adopt`` can
+        hold the client): until the page's status read (``GET /run``) has
+        adopted, the answer is ``no_run``."""
         with self._mutex:
             rec = dict(self._rec or {})
         if rec.get("phase") not in ("intent", "started"):
