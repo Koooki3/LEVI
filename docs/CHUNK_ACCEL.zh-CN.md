@@ -1,8 +1,8 @@
 # chunk 内加速（实验）
 
-工作站的客户端命令多了一个开关：**chunk 内加速**。打开后，命令改用独立入口 `lab/chunk_accel/run_collect_accel.py` 运行 FR3 采集客户端；策略服务器、客户端原有的放行门、限幅、跳变检查、按键和录制都不变。只支持**普通推理、策略自己的 10 Hz**：与 RTC 或 VLASH 同时选会被拒绝（`chunk_accel_requires_plain`），其他控制频率也会被拒绝（`chunk_accel_requires_10hz`），站点不二值化夹爪时同样拒绝（`chunk_accel_requires_binarized_gripper`）；只开加速、不指定模式时按普通推理处理。开关打开后，下面可以选规则：**v1**（默认，见下文）或 **v2**（见[规则 v2](#规则-v2)）。没有指定组时，数据归到 `<model>_accel_demo`（v1）或 `<model>_accel_v2_demo`（v2）。
+工作站的客户端命令多了一个开关：**chunk 内加速**。打开后，命令改用独立入口运行 FR3 采集客户端（规则 v1、v2 用 `lab/chunk_accel/run_collect_accel.py`，规则 v3 用 `lab/chunk_accel/run_collect_phase.py`）；策略服务器、客户端原有的放行门、限幅、跳变检查、按键和录制都不变。规则 v1、v2 只支持**普通推理、策略自己的 10 Hz**：与 RTC 或 VLASH 同时选会被拒绝（`chunk_accel_requires_plain`）。规则 v3（见[规则 v3](#规则-v3相位时钟)）可与普通、RTC、VLASH 一起用。所有规则都要求策略自己的 10 Hz（`chunk_accel_requires_10hz`）和二值化夹爪的站点（`chunk_accel_requires_binarized_gripper`）。只开 v1 或 v2、不指定模式时按普通推理处理；只开 v3、不指定模式时按 RTC 处理，也就是页面的默认模式。开关打开后，下面可以选规则：**v3**（页面默认选它）、**v1**（见下文）或 **v2**（见[规则 v2](#规则-v2)）。没有指定组时，数据归到 `<model>_accel_demo`（v1）、`<model>_accel_v2_demo`（v2），v3 则按推理模式归到 `<model>_accel3_demo`、`<model>_rtc_accel3_demo` 或 `<model>_vlash_accel3_demo`。
 
-## 做了什么
+## 做了什么（规则 v1、v2）
 
 服务器返回的每个 chunk 在执行前先过一条规则。同时满足下面三条，这个 chunk 才加速：
 
@@ -16,7 +16,7 @@
 
 `D` 是弦长，`v` 为 0.25 m/s，`w` 为 0.8 rad/s。最后一项按这样取：如果手臂以 0.2 s 的时间常数靠近一个不动的目标，下一次观测时它会在离最后一个动作 5 mm 以内。今天的手臂达不到：下面的回放里，加速的 chunk 之后手臂离目标中位 8.5 mm（p90 11.2 mm），不比不加速时远（中位 8.9 mm）；只有 0.1 s 的滤波能到 5 mm 左右（p90 4.9 mm）。直线上的目标按 `tau`（控制器设定点低通的时间常数，0.2 s，`--accel-tau`）乘直线速度超前（抵消这个低通），但不会超出首尾两个动作之间的线段；相邻两个目标最多相差 5 cm（客户端会拒绝离实测位姿 10 cm 的目标）。加速后的 chunk 更短，客户端执行完就更早向策略要下一个。一段直线之后，如果下一个 chunk 继续朝同一方向走，它开头落在直线终点"后面"的动作最多丢掉 3 个，这样看不到速度的策略不会把目标往回拉。
 
-每个 demo 在 `policy.chunk_accel` 里记录设置（会话评测日志的表头里也有），在 `eval.chunk_accel` 里记录该 episode 的计数，中止的 episode 也一样（LEVI 无人值守模式写在 `eval.abort_detail.chunk_accel`）：chunk 数、加速数、省下的拍数、丢掉的动作数、被拒绝的跳变，以及其余 chunk 没加速的原因。位姿里有 NaN 或无穷大的 chunk 原样交给客户端（`not_finite`）。客户端在 RTC、VLASH、控制频率不是 10 Hz、逐步模式或夹爪未二值化时拒绝启动。第一次运行前先安装（见下）：页面不检查客户端文件是否存在。
+每个 demo 在 `policy.chunk_accel` 里记录设置（会话评测日志的表头里也有），在 `eval.chunk_accel` 里记录该 episode 的计数，中止的 episode 也一样（LEVI 无人值守模式写在 `eval.abort_detail.chunk_accel`）：chunk 数、加速数、省下的拍数、丢掉的动作数、被拒绝的跳变，以及其余 chunk 没加速的原因。位姿里有 NaN 或无穷大的 chunk 原样交给客户端（`not_finite`）。斜坡客户端（规则 v1、v2）在 RTC、VLASH、控制频率不是 10 Hz、逐步模式或夹爪未二值化时拒绝启动。第一次运行前先安装（见下）：页面不检查客户端文件是否存在。
 
 ## 预期收益
 
@@ -24,7 +24,7 @@
 
 ## 规则 v2
 
-v2 是同一个开关的第二条规则，用来在真机上和 v1 对比。页面只在开关打开时显示这个选择（两个单选按钮，各带一行说明）；关掉开关，或改选 RTC、VLASH、其他频率时，选择会保留，但不会发出去。选 v2 时命令多一个参数 `--accel-rule=v2`；v1 的命令没有这个参数，和以前开关生成的命令完全一样。表单字段是 `chunk_accel_rule`（`v1` 或 `v2`，不填就是 `v1`）；不开开关只选 v2 会被拒绝（`chunk_accel_rule_needs_switch`），其他值也会被拒绝：托管启动返回 `chunk_accel_rule_invalid`，预览接口的请求体有类型限制，返回一个普通的 422，里面写明是哪个字段。预览会写出规则（`control.chunk_accel.rule`）并多一条警告 `chunk_accel_rule_v2`；托管运行的记录保存 `chunk_accel_rule`（这个选择出现之前的记录按 `v1`），每个 demo 在 `policy.chunk_accel.rule` 里记录它。
+v2 是同一个开关的第二条规则，用来在真机上和 v1 对比。页面只在开关打开时显示这个选择（三个单选按钮，各带一行说明）；关掉开关或改选其他频率时，选择会保留，但不会发出去；改选 RTC 或 VLASH 时发出去的是规则 v3（v1、v2 只能与普通推理一起用），换回普通推理后原来的选择又回来。选 v2 时命令多一个参数 `--accel-rule=v2`；v1 的命令没有这个参数，和以前开关生成的命令完全一样。表单字段是 `chunk_accel_rule`（`v1`、`v2` 或 `v3`，不填就是 `v1`）；不开开关只选 v2 或 v3 会被拒绝（`chunk_accel_rule_needs_switch`），其他值也会被拒绝：托管启动返回 `chunk_accel_rule_invalid`，预览接口的请求体有类型限制，返回一个普通的 422，里面写明是哪个字段。预览会写出规则（`control.chunk_accel.rule`）并多一条警告 `chunk_accel_rule_v2`；托管运行的记录保存 `chunk_accel_rule`（这个选择出现之前的记录按 `v1`），每个 demo 在 `policy.chunk_accel.rule` 里记录它。
 
 **v2 需要这个版本的客户端。** 这个选择出现之前装的客户端没有 `--accel-rule`：带 `--accel-rule=v2` 时它在启动时因为不认识这个参数而退出（机械臂不会动）；v1 的命令照常运行，但用的是那次安装的旧规则，所以 A/B 的两边都不是这里的代码。页面不检查已安装的版本。更新时，先删掉 openpi 目录里的 `lab/chunk_accel/accel.py` 和 `lab/chunk_accel/run_collect_accel.py`，再运行一次 `install.py --apply`（见[适配器说明](../integrations/chunk_accel/README.md)）；安装脚本遇到内容不同的已有文件会拒绝覆盖。
 
@@ -38,8 +38,26 @@ v2 在 v1 之上多做了三件事（`integrations/chunk_accel/accel.py`；就�
 
 **夹爪。** v2 在机械臂停稳后才发夹爪指令。研究里对加速前缀的标定（更正后，所有组合并共有 50 个夹爪事件跟在加速前缀之后）中，发夹爪指令时手臂离夹爪变化前的位姿 **4.1 mm**（p90），速度 **14.4 mm/s**（p90）；不加速时同一批事件是 7.3 mm 和 34.2 mm/s。这和遥操作示教数据里合夹爪的方式不同：示教时手臂多半还在走。抓取会不会因此变化，要在真机上看。
 
-**证据的局限。** 回放是开环的，没有重新运行策略，所以策略对更快的手臂会怎样反应、停稳后再抓会不会改变抓取结果、任务成败，都不知道。没有模拟相机延迟。chunk 是从实测位姿反推的，比策略真实输出平滑，所以弯曲 chunk 的结果是它的最好情况。普通推理组只有 9 个 episode，中位数很容易变（多 7 拍就让 v1 从 0.821 变成 0.830），要同时看总时长比。v2 是实验功能，没有在真机上试过；研究建议先在真机上做 v1 的开 / 关对比，再试 v2。
+**证据的局限（规则 v1、v2）。** 回放是开环的，没有重新运行策略，所以策略对更快的手臂会怎样反应、停稳后再抓会不会改变抓取结果、任务成败，都不知道。没有模拟相机延迟。chunk 是从实测位姿反推的，比策略真实输出平滑，所以弯曲 chunk 的结果是它的最好情况。普通推理组只有 9 个 episode，中位数很容易变（多 7 拍就让 v1 从 0.821 变成 0.830），要同时看总时长比。v2 是实验功能，没有在真机上试过；研究建议先在真机上做 v1 的开 / 关对比，再试 v2。
+
+## 规则 v3：相位时钟
+
+v3 是同一个开关的第三条规则，也是第一条同时适用于 RTC 和 VLASH 的规则。它是另一种机制，不是 v1、v2 的调参：不再把每个 chunk 单独压缩、走到静止，而是用一个按策略行数计的**相位**（1 行是 0.1 s 的示教时间），每个 10 Hz 控制拍最多前进 λ 行，每拍发出的目标就是 chunk 在这个相位上的插值。控制频率、客户端自己对测量位姿的 0.10 m / 0.35 rad 检查、二值夹爪和控制器设置都不变。保证安全的是这些：
+
+- 目标始终在测量位姿的 0.08 m / 0.28 rad 之内（0.05 m 起开始软限制），相邻两次目标最多相差 0.05 m / 0.12 rad；手臂被挡住时重发上一个目标，连续 3 次就重新向策略要一个 chunk（RTC、VLASH；普通推理则保持这个目标，直到循环自己的下一次查询）。手臂被推得离上一个目标超过 0.08 m 时，目标会跟着走回手臂，每拍最多 0.05 m，而不是把手臂拉回去；
+- 每个夹爪变化行都落在它自己的那一行、只发一次；夹爪变化前 3 行到后 3 行内 λ 为 1；合爪要等手臂到 8 mm 以内且够慢（最多等 0.5 s），之后 λ 保持 1，直到手指动过并稳住；
+- 换 chunk（RTC）或接续 chunk（VLASH、普通）时的跳变，用 2 到 8 拍混合掉（偏移每拍最多动 25 mm 和 0.05 rad，跳变更大就需要更多拍，最多 8 拍）。
+
+**页面上。** 开关打开后，规则选择默认停在 v3（完成的功能直接打开）。下面有两个下拉框：**每拍最多走几行（λ）**，可选 2.0、2.5、3.0；**控制器滤波系数（α）**，可选 0.005 或 0.01。λ 留空（“默认”）时不发值，由服务器的数决定：`levi/marvel0/inference_mode.py` 里的 `CHUNK_ACCEL_V3_LAMBDA_DEFAULT`，是 3.0（最强的一档，见“证据”）；命令和结果里都会写出这个数。α 必须等于 `set_clip.py --show` 从控制器读回的值（现在是 0.005）；页面从不改控制器。RTC 的执行步数、开环 horizon 和 VLASH 的 overlap 是各模式自己的，默认值照旧。
+
+**命令。** v3 是独立的客户端（`lab/chunk_accel/run_collect_phase.py`，排在 VLASH 客户端之前，所以 v3 加 VLASH 也用这个客户端），总会写 `--phase-mode {plain|rtc|vlash}`、`--phase-lambda-max=<λ>` 和 `--phase-alpha=<α>`，后面是该模式自己的参数（`--open-loop-horizon`、`--rtc --rtc-execute-horizon`、`--vlash-overlap-steps`）；没有 `--accel-rule`。策略服务器是各模式自己的那个：加速不改变要服务什么，所以 RTC 命令需要 RTC 服务器（客户端会拒绝普通服务器）。`tests/marvel0/fixtures/chunk_accel_argv.json` 保存 v1、v2 和三种模式的 v3 的标准命令；v1、v2 的条目是在 v3 出现之前录下的，不能改。
+
+**表单。** `chunk_accel_rule` 取 `v3`，另有 `chunk_accel_lambda` 和 `chunk_accel_alpha`（数字；留空就是上面说的默认值）。这两个数只属于 v3：别的规则或没开开关时给了会被拒绝（`chunk_accel_v3_field_needs_v3`），页面没有提供的值同样（`chunk_accel_lambda_invalid`、`chunk_accel_alpha_invalid`；引擎为离线扫参接受 1.0 到 3.0 之间的值，页面只提供 2.0、2.5、3.0）。没给备注时，备注是 `marvel0 page: <id> chunk accel v3 mode=<mode> lambda=<λ> alpha=<α> horizon=<n>`（VLASH 是 `overlap=<n>`）。预览里的 `control.chunk_accel` 是 `{rule: "v3", mode, lambda_max, alpha}`（v3 没有斜坡速度），并带警告 `chunk_accel_v3` 和 `chunk_accel_v3_alpha`；托管运行的记录保存规则、λ 和 α，同一次运行的下一个 episode 从它们开始。模型文件夹名现在最长 62 个字符（以前是 66），这样最长的默认组 `<model>_vlash_accel3_demo` 才不超过组名的 80 个字符。
+
+**隐藏。** 要让 v3 少一种模式，把它从 `inference_mode.py` 的 `CHUNK_ACCEL_V3_MODES` 里删掉（之后返回 `chunk_accel_v3_mode_disabled`）；要整个隐藏 v3，把 `CHUNK_ACCEL_RULES` 改成 `("v1", "v2")`。页面在 `src/components/marvel0/command-logic.ts` 里重复了这些常量（站点接口不带它们），`tests/marvel0/test_chunk_accel_runtime.py` 在两份不一致、或页面选项超出 `integrations/chunk_accel/phase.py` 接受的范围时失败。关掉开关或选 v1，就撤销了 v3 在页面上做的一切。
+
+**证据。** 设计在 `fr3_accel_test/decisions/2026-11-01-phase-clock-design.md`（工作区里，不在本仓库）。设计里写的参数太保守：对已建成的引擎做回放，时长相对同模式不加速的比值是普通 0.927 / 0.916、RTC 0.788 / 0.792、VLASH 0.815（λ 2.0），用户在真机上看不出加速。原因是曲率限制把策略相邻两行之间 2–3 mm 的抖动当成急弯，在三分之一到一半的拍里把 λ 压在 1 附近。按用户的方向（明显的加速，同时兼顾稳定，不加过严的限制），2026-11-02 把默认值改成“强”配置：曲率在 50 mm 弧长上测（原来 15 mm），侧向加速度 2.4 m/s²（已验证的上限），夹爪窗口前 3 行、后 3 行（原来后 5 行），λ 每拍最多升 0.8（原来 0.6），合爪要等手臂到 8 mm 以内（原来 10 mm），λ 最高 3.0。在 129 个已录 episode（普通 17、RTC 96、VLASH 16）上，用带滞后的手臂模型，λ 3.0 时时长比中位数现在是**普通 0.762 / 0.753、RTC 0.647 / 0.653、VLASH 0.593**（新 chunk 接着指令路径 / 锚在滞后的手臂上），没有被拒的跳变，没有离手臂超过 0.08 m 的目标，没有超过 0.05 m 的单步，也没有因加速引起的 z 下限截断。没过的项：普通推理差 0.01 没到 0.75 的速度线；RTC 合爪时手臂离目标 11.4 mm（p90；不加速时 17.9 mm，线是 10 mm）；少数 RTC 和 VLASH 运行的目标速度到 0.44–0.47 m/s（线是 0.40；0.05 m 的单步限制把它封在 0.5 以下）；任务最后停下时，两个 VLASH episode 里模型手臂越过最后目标最多 11 mm。数字、改了哪些限制、放弃了哪些方案，见 `fr3_accel_test/variable_speed/phase_eval/results/DECISIONS_20261102_strong.md` 和台账 `fr3_accel_test/LIMITS_LEDGER.md`（E 节）。所有数字都来自模型：手臂模型在路径误差上大约比真机乐观 2 倍，回放是开环的（策略不会对更快的手臂做出反应，RTC 引导和 VLASH 的 future state 只是近似），抓得牢不牢、成不成功只有真机能测。真机上的验收线是配对中位数不超过 0.75（目标 0.70），且没有 `Jump exceeds the step limit`；抓不稳就在页面上选 λ 2.5 或 2.0。
 
 ## 限制
 
-实验功能，尚未在真机上运行。真机使用需要有人在场、手放急停的监督检查；预览会给出警告（`chunk_accel_experimental`）。不与 RTC、VLASH 叠加（两者自己调度 chunk）。客户端安装见[适配器说明](../integrations/chunk_accel/README.md)。
+实验功能，尚未在真机上运行。真机使用需要有人在场、手放急停的监督检查；预览会给出警告（v1、v2 是 `chunk_accel_experimental`，v3 是 `chunk_accel_v3`）。规则 v1、v2 不与 RTC、VLASH 叠加（两者自己调度 chunk）；规则 v3 就是为它们做的。客户端安装见[适配器说明](../integrations/chunk_accel/README.md)：v3 还需要那里的 `phase.py`、`schedulers.py` 和 `run_collect_phase.py`，页面不检查它们是否已安装。
