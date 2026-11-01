@@ -104,6 +104,10 @@ DEFAULTS = {
     "settle_stable_eps": 0.01,
     "settle_timeout_s": 1.0,
     "settle_unknown_s": 0.8,
+    "open_settle": True,
+    "open_settle_min_s": 0.3,
+    "open_settle_timeout_s": 0.8,
+    "open_settle_unknown_s": 0.5,
     "governor": True,
     "governor_margin_rows": 0.5,
     "early_trigger": True,
@@ -252,6 +256,9 @@ class TestValidation(unittest.TestCase):
             "gate_max_ticks": 6,
             "gate_dist_m": 0.011,
             "settle_timeout_s": 1.1,
+            "open_settle_min_s": 0.19,
+            "open_settle_timeout_s": 1.51,
+            "open_settle_unknown_s": 0.29,
             "reanchor_cos_min": 0.4,
             "hold_reset_after": 4,
             "w_pre_float": None,
@@ -285,6 +292,7 @@ class TestValidation(unittest.TestCase):
             {"blend_min_ticks": 4, "blend_max_ticks": 3},
             {"blend_max_ticks": 5, "blend_stretch_max_ticks": 4},
             {"settle_min_s": 0.9, "settle_timeout_s": 0.5},
+            {"open_settle_min_s": 0.9, "open_settle_timeout_s": 0.5},
         ):
             with self.assertRaises(ValueError, msg=str(kwargs)):
                 PhaseParams(**kwargs)
@@ -309,6 +317,7 @@ class TestGolden(unittest.TestCase):
             "plain_reanchor",
             "grip_gate",
             "grip_settle",
+            "open_settle",
             "governor",
             "early_trigger",
         ):
@@ -1035,11 +1044,49 @@ class TestCapsAndRates(unittest.TestCase):
         eng = PhaseEngine(PhaseParams(**base, a_lat=0.6, curv_len=0.015))
         log = run_open(eng, PerfectArm(m3[0]), m3, max_ticks=30)
         self.assertIn("kappa", {o.binding for _, o, _ in log})
+        # kappa with the shipped profile (lambda 3.0, a_lat 2.4, 50 mm arc): a real sharp turn, see below
         # window
         m4 = make_master(60, seed=2, step=0.003, turn=0.0, flips=[(14, 0.0)])
         eng = PhaseEngine(PhaseParams(**base))
         log = run_open(eng, PerfectArm(m4[0]), m4[:24], max_ticks=30)
         self.assertIn("window", {o.binding for _, o, _ in log})
+
+    def test_kappa_binds_on_a_sharp_turn_with_the_shipped_profile(self):
+        """The page default (lambda 3.0, a_lat 2.4 m/s^2, 50 mm of arc): a 135-degree turn between two 12-row legs of
+        10 mm rows (0.1 m/s at lambda 1) reads kappa ~ (3 pi / 4) / 0.05 m = 47 1/m at the vertex, so the curvature cap
+        sqrt(2.4 / 47) = 0.23 m/s, i.e. 2.3 rows per tick, sits under both lambda_max (3.0) and the lag cap (0.26 m/s,
+        2.6 rows). The engine slows for the corner, labels it kappa, and never exceeds the cap on the corner segments."""
+        params = PhaseParams.for_page(3.0, 0.005)
+        self.assertEqual((params.curv_len, params.derived()["a_lat"]), (0.05, 2.4))
+        n_leg, step = 12, 0.010
+        out_dir = np.array([math.cos(3 * math.pi / 4), math.sin(3 * math.pi / 4), 0.0])
+        pts = [np.array([0.40 + step * j, 0.0, 0.30]) for j in range(n_leg + 1)]
+        pts += [pts[n_leg] + step * j * out_dir for j in range(1, n_leg + 1)]
+        path = make_master(len(pts), seed=2, step=step, turn=0.0)
+        path[:, :3] = np.array(pts)
+        path[:, 3:6] = path[0, 3:6]  # no rotation: only the position caps
+        kap = phase.vertex_curvature(
+            path[:, :3].astype(np.float64), params.curv_len, params.curv_min_arc
+        )
+        self.assertGreater(float(kap[n_leg]), 40.0)
+        lam_k = math.sqrt(2.4 / float(kap[n_leg])) * DT / step
+        v_lag, _ = params.lag_caps(params.derived()["D_alpha"])
+        self.assertLess(
+            lam_k,
+            min(3.0, v_lag * DT / step) - 0.2,
+            "the corner cap must be the lowest",
+        )
+        eng = PhaseEngine(params)
+        log = run_open(eng, PerfectArm(path[0]), path, max_ticks=40)
+        self.assertIn("kappa", {o.binding for _, o, _ in log})
+        self.assertGreater(
+            max(o.lam for _, o, _ in log),
+            lam_k + 0.3,
+            "the legs run faster than the corner",
+        )
+        for u_before, o, _ in log:
+            if u_before < n_leg <= o.u + 1e-9:  # the tick that crosses the vertex
+                self.assertLessEqual(o.lam, lam_k + 1e-6)
 
     def test_braking_pass_enters_the_window_at_one(self):
         """Test 4: from lambda 2.5 into a window: lambda <= 1 at G - W_pre, each tick's fall within the braking law
@@ -1239,15 +1286,26 @@ class TestLeash(unittest.TestCase):
         resets = [i for i, (_, o) in enumerate(outs) if o.reset]
         self.assertEqual(len(resets), 1)
         r = resets[0]
+        self.assertTrue(outs[r][1].hold, "the reset comes on a hold tick")
+        # The stuck arm rings (its 2.65 Hz mode), so the target at the leash edge falls outside now and then: either three
+        # holds in a row end in the reset, or the third leash recovery without an uncut advance does (review 11-02 M1).
         run = outs[r - 2 : r + 1]
+        three_holds = all(o.hold for _, o in run)
         self.assertTrue(
-            all(o.hold for _, o in run), "three holds in a row end in the reset"
+            three_holds or eng.summary()["leash_recoveries"] >= 3,
+            "three holds in a row, or three recoveries, end in the reset",
         )
-        for (_, a), (_, b) in itertools.pairwise(run):
-            self.assertTrue(
-                np.array_equal(a.target, b.target), "a hold re-sends the same target"
-            )
-        self.assertFalse(run[0][1].reset or run[1][1].reset)
+        for (_, a), (mb, b) in itertools.pairwise(outs[: r + 1]):
+            if b.hold:  # a hold re-sends the same target, or moves it back just inside the leash (a recovery)
+                moved = float(
+                    np.linalg.norm(b.target[:3].astype(np.float64) - a.target[:3])
+                )
+                self.assertTrue(
+                    np.array_equal(a.target, b.target)
+                    or (moved <= 0.05 and b.dp <= 0.95 * 0.08 + 1e-6),
+                    (moved, b.dp),
+                )
+        self.assertFalse(any(o.reset for _, o in outs[:r]))
         self.assertFalse(eng.has_rows())
         for _, o in outs:  # a creep at the leash edge is a hold, not progress
             self.assertTrue(
@@ -1306,8 +1364,10 @@ class HeldArm:
 
 
 class TestLeashRecovery(unittest.TestCase):
-    """A last target that the arm has left behind (pushed 9 cm away) is walked back by at most one step limit per tick
-    (I5) until the normal bisection fits again; it must not hold the arm 9 cm off for ever (review finding)."""
+    """A last target that the arm has left behind (pushed 9 cm away) is moved back toward the arm, by at most one step
+    limit per tick (I5), until the normal bisection fits again; it must not hold the arm 9 cm off for ever (review
+    finding). It moves only as far as needed: to 0.95 of the hard leash, per bound, a bound that holds untouched
+    (review 11-02 M1: a full 50 mm step every time made a 50 mm sawtooth in contact)."""
 
     def _pushed(self, params, push, ticks=14, plain=False, rot=None):
         master = make_master(200, seed=4, step=0.006, turn=0.0)
@@ -1318,6 +1378,7 @@ class TestLeashRecovery(unittest.TestCase):
             out = eng.tick(Measured(arm.pose(), 0.0, k * DT))
             arm.step(out.target)
             eng.executed(out.target)
+        self.last_target = arm.pose()
         held = HeldArm(arm.pose())
         held.p[:3] += np.asarray(push, np.float32)
         if rot is not None:
@@ -1362,7 +1423,9 @@ class TestLeashRecovery(unittest.TestCase):
                 prev = t
             self.assertGreaterEqual(eng.summary()["leash_recoveries"], 1)
 
-    def test_recovery_distance_falls_every_tick(self):
+    def test_recovery_moves_the_target_back_just_inside_the_leash(self):
+        """9 cm off: the target moves 14 mm toward the arm, to 0.95 x 0.08 m (it used to move the full 50 mm step,
+        to 0.04 m)."""
         _eng, outs = self._pushed(
             PhaseParams(lambda_max=2.0), [0.0, 0.09, 0.0], ticks=6
         )
@@ -1374,7 +1437,41 @@ class TestLeashRecovery(unittest.TestCase):
         dp0 = float(
             np.linalg.norm(first.target[:3].astype(np.float64) - outs[0][0].pose[:3])
         )
-        self.assertAlmostEqual(dp0, 0.04, delta=1e-4)  # 0.09 - 0.05
+        self.assertAlmostEqual(dp0, 0.95 * 0.08, delta=1e-5)
+        moved = float(
+            np.linalg.norm(first.target[:3].astype(np.float64) - self.last_target[:3])
+        )
+        self.assertAlmostEqual(moved, 0.09 - 0.95 * 0.08, delta=1e-5)
+
+    def test_a_target_a_tenth_of_a_millimetre_outside_moves_at_most_5_mm(self):
+        eng, outs = self._pushed(
+            PhaseParams(lambda_max=3.0), [0.0, 0.0801, 0.0], ticks=1
+        )
+        _m, o = outs[0]
+        self.assertEqual(eng.summary()["leash_recoveries"], 1)
+        moved = float(
+            np.linalg.norm(o.target[:3].astype(np.float64) - self.last_target[:3])
+        )
+        self.assertLessEqual(moved, 0.005, "a 0.1 mm breach moved the target too far")
+        self.assertLessEqual(o.dp, 0.08)
+        self.assertGreaterEqual(o.dp, 0.95 * 0.08 - 1e-6)
+        np.testing.assert_array_equal(o.target[3:6], self.last_target[3:6])
+
+    def test_a_rotation_only_breach_leaves_the_translation_alone(self):
+        """6 cm off (inside 0.08 m) but 0.285 rad off in rz (outside 0.28 rad): only rz moves, to 0.95 x 0.28 rad."""
+        eng, outs = self._pushed(
+            PhaseParams(lambda_max=3.0),
+            [0.0, 0.06, 0.0],
+            rot=[0.0, 0.0, 0.285],
+            ticks=1,
+        )
+        m, o = outs[0]
+        self.assertTrue(o.hold)
+        self.assertEqual(eng.summary()["leash_recoveries"], 1)
+        np.testing.assert_array_equal(o.target[:5], self.last_target[:5])
+        d = wrap_to_pi(o.target[3:6].astype(np.float64) - m.pose[3:6])
+        self.assertAlmostEqual(abs(float(d[2])), 0.95 * 0.28, delta=1e-5)
+        self.assertLessEqual(o.dr, 0.28)
 
     def test_rotation_leash_is_walked_back_by_the_rotation_step(self):
         eng, outs = self._pushed(
@@ -1418,7 +1515,7 @@ class TestLeashRecovery(unittest.TestCase):
         pose = outs[-1][1].target.copy()
         pose[1] += 0.09  # the arm is 9 cm from the last target
         out = eng.tick(Measured(pose, None, outs[-1][0].t + DT))
-        self.assertAlmostEqual(out.dp, 0.04, delta=1e-4)
+        self.assertAlmostEqual(out.dp, 0.95 * 0.08, delta=1e-5)
         eng.executed(out.target)
         out2 = eng.tick(Measured(pose, None, outs[-1][0].t + 2 * DT))
         self.assertLess(out2.dp, out.dp + 1e-9)
@@ -1445,8 +1542,8 @@ class TestLeashRecovery(unittest.TestCase):
         out = eng.tick(Measured(pose, 0.0, 0.6))
         self.assertAlmostEqual(
             float(np.linalg.norm(out.target[:3].astype(np.float64) - last[:3])),
-            0.05,
-            delta=1e-4,
+            0.09 - 0.95 * 0.08,
+            delta=1e-5,
         )
 
 
@@ -1964,6 +2061,16 @@ class TestPlainSplice(unittest.TestCase):
                     self.assertLess(
                         m_ticks, 8
                     )  # and without a gripper window it saves ticks over the golden 8
+                else:
+                    # a close in the planned rows adds no placeholder ticks of its own: the walk to row 7 still
+                    # stops at the close row and the gripper window; the gate's wait survives the client's re-query
+                    # (replay of the 11-02 fixes: + gate_max_ticks + 1 parked plain H1 at the plan's end, 0.757 ->
+                    # 0.784)
+                    # (measured: 9 ticks predicted, 11 reached with 2 gate waits; the allowance predicted 15)
+                    waits = eng.summary()["gate_waits"]
+                    self.assertLessEqual(
+                        reached - m_ticks, waits + 1, (m_ticks, reached, waits)
+                    )
 
 
 class TestSwapReanchor(unittest.TestCase):
@@ -2308,6 +2415,246 @@ class TestGateAndSettle(unittest.TestCase):
             lambda k, tc: 0.0, lambda k, tc: 1.0 if tc is None else 0.0, params=params
         )
         self.assertGreater(max(o.lam for k, o in outs if k > tc + 3), 1.2)
+
+    # ---- the gate's wait across plan reloads (review 11-02 M2) ----
+    def _gate_reload_run(self, reload_after, plans, ticks=40):
+        """The arm parked 30 mm off the closing row (the gate is never ready); after every ``reload_after`` gate waits
+        the plan is reloaded synchronously with ``plans(n)`` (n = reload count), as plain's re-query or VLASH's reset
+        and sync do. Returns (ticks from the first gate wait to the close or None, gate waits, events)."""
+        eng = PhaseEngine(PhaseParams(lambda_max=3.0))
+        chunk = self._chunk()
+        eng.set_chunk(chunk, "sync")
+        pos = chunk[0].copy()
+        first, closed, run, n = None, None, 0, 0
+        for k in range(ticks):
+            x = pos.copy()
+            x[2] += 0.03
+            out = eng.tick(Measured(x, 0.0, k * DT))
+            eng.executed(out.target)
+            pos = out.target.copy()
+            if out.binding == "gate":
+                first = k if first is None else first
+                run += 1
+            if out.grip_event and out.grip_event["kind"] == "close":
+                closed = k
+                break
+            if run >= reload_after:
+                run, n = 0, n + 1
+                eng.set_chunk(plans(n), "sync")
+        s = eng.summary()
+        return (
+            None if closed is None else closed - first,
+            s["gate_waits"],
+            s["grip_events"],
+        )
+
+    def test_the_gate_wait_survives_plan_reloads(self):
+        """A reload after every 3 gate waits (plain's 6-tick placeholder, a VLASH reset per tick) used to restart the
+        5-tick wait every time: the close never went out. Measured across reloads, it goes out at the timeout."""
+        rest = self._chunk()[
+            self.G - 1 :
+        ].copy()  # row 0 open, row 1 closes: the same close, one row ahead
+        for every in (1, 2, 3, 4):
+            dk, _waits, events = self._gate_reload_run(every, lambda n: rest.copy())
+            self.assertIsNotNone(dk, f"reload every {every} gate waits: never closed")
+            self.assertLessEqual(dk, PhaseParams().gate_max_ticks + 2, f"every {every}")
+            ev = events[-1]
+            self.assertTrue(ev["gate_timeout"])
+            self.assertGreaterEqual(ev["gate_wait_s"], 0.45 - 1e-9)
+            self.assertLessEqual(
+                ev["gate_wait_s"], (PhaseParams().gate_max_ticks + 2) * DT + 1e-9
+            )
+
+    def test_a_plan_without_a_close_ahead_ends_the_wait(self):
+        """Two gate waits, then a plan that does not close: the wait is over. The close that comes back later waits its
+        full five ticks again (the reload itself does not end a wait; see the test above)."""
+        eng = PhaseEngine(PhaseParams(lambda_max=3.0))
+        chunk = self._chunk()
+        no_close = chunk[self.G - 1 :].copy()
+        no_close[:, 6] = 1.0
+        plans = iter([no_close, chunk[self.G - 1 :].copy()])
+        eng.set_chunk(chunk, "sync")
+        pos = chunk[0].copy()
+        waits, ev, since_reload = 0, None, 0
+        for k in range(40):
+            x = pos.copy()
+            x[2] += 0.03
+            out = eng.tick(Measured(x, 0.0, k * DT))
+            eng.executed(out.target)
+            pos = out.target.copy()
+            waits += out.binding == "gate"
+            since_reload += 1
+            if out.grip_event:
+                ev = out.grip_event
+                break
+            if (
+                waits == 2 and since_reload >= 2
+            ):  # 2 waits; then 2 ticks on the plan without a close
+                nxt = next(plans, None)
+                if nxt is not None:
+                    eng.set_chunk(nxt, "sync")
+                    since_reload = 0
+        self.assertIsNotNone(ev)
+        self.assertEqual(ev["kind"], "close")
+        self.assertEqual(waits, 2 + 5)
+        self.assertEqual(ev["gate_wait_ticks"], 5)
+
+    # ---- a close that a reload moved gets its own wait (review of the 11-02 fixes) ----
+    def _moved_close_run(self, shift_of_reload, reload_after=3, reloads=99, ticks=60):
+        """As _gate_reload_run (arm parked 30 mm above the target: never ready), but the n-th reload (at most
+        ``reloads``) moves the plan by shift_of_reload(n) metres in +x. Returns (gate waits per plan [A, B, ...],
+        close event or None, engine)."""
+        eng = PhaseEngine(PhaseParams(lambda_max=3.0))
+        chunk = self._chunk()
+        rest = chunk[self.G - 1 :].copy()
+        eng.set_chunk(chunk, "sync")
+        pos = chunk[0].copy()
+        waits, ev, n = [0], None, 0
+        for k in range(ticks):
+            x = pos.copy()
+            x[2] += 0.03
+            out = eng.tick(Measured(x, 0.0, k * DT))
+            eng.executed(out.target)
+            pos = out.target.copy()
+            waits[-1] += out.binding == "gate"
+            if out.grip_event and out.grip_event["kind"] == "close":
+                ev = out.grip_event
+                break
+            if waits[-1] >= reload_after and n < reloads:
+                n += 1
+                nxt = rest.copy()
+                nxt[:, 0] += shift_of_reload(n)
+                eng.set_chunk(nxt, "sync")
+                waits.append(0)
+        return waits, ev, eng
+
+    def test_a_close_moved_by_a_reload_waits_its_own_five_ticks(self):
+        """Three waits at A, then a reload moves the close 30 mm (> 2 x gate_dist_m): B waits its own 5 ticks and
+        0.45 s. Measured from A's first wait, B was released after 2 waits (0.5 s), with the arm wherever it was."""
+        waits, ev, _eng = self._moved_close_run(lambda n: 0.03, reloads=1)
+        self.assertIsNotNone(ev)
+        self.assertEqual(waits, [3, 5])
+        self.assertEqual(ev["gate_wait_ticks"], 5)
+        self.assertGreaterEqual(ev["gate_wait_s"], 0.45 - 1e-9)
+        self.assertTrue(ev["gate_timeout"])
+
+    def test_a_close_moved_less_than_twice_gate_dist_keeps_its_wait(self):
+        """A 10 mm move is the same close (the livelock fix): A's wait and its clock go on, so the close goes out at
+        A's timeout (0.45 s after A's first wait, the reload's walking tick included), after 3 + 1 waits."""
+        waits, ev, _eng = self._moved_close_run(lambda n: 0.010, reloads=1)
+        self.assertIsNotNone(ev)
+        self.assertEqual(waits, [3, 1])
+        self.assertEqual(ev["gate_wait_ticks"], 4)
+        self.assertGreaterEqual(ev["gate_wait_s"], 0.45 - 1e-9)
+
+    def test_a_close_that_moves_on_every_reload_goes_out_under_the_total_cap(self):
+        """30 mm on every reload after 3 waits: each place starts a new wait, so only the total cap
+        (2 x gate_max_ticks gate-held ticks) sends the close, after 2 waits at the place it reached (11 waits: [3, 3,
+        3, 2]), never later than twice the cap, not never."""
+        waits, ev, eng = self._moved_close_run(lambda n: 0.03 * n)
+        self.assertIsNotNone(ev, f"never closed: {waits}")
+        cap = 2 * PhaseParams().gate_max_ticks
+        self.assertGreaterEqual(sum(waits), cap, waits)
+        self.assertLessEqual(sum(waits), 2 * cap, waits)
+        # the place it closed at was looked at first
+        self.assertGreaterEqual(waits[-1], 2, waits)
+        self.assertEqual(eng.summary()["gate_waits"], sum(waits))
+        self.assertTrue(ev["gate_timeout"])
+
+    def test_a_rejected_gate_tick_restores_the_wait_and_its_place(self):
+        """rejected() rolls back the wait count, its start time, its place and the total (snapshot of 11-02)."""
+        eng = PhaseEngine(PhaseParams(lambda_max=3.0))
+        chunk = self._chunk()
+        eng.set_chunk(chunk, "sync")
+        pos = chunk[0].copy()
+        for k in range(30):
+            x = pos.copy()
+            x[2] += 0.03
+            before = (eng._gate_wait, eng._gate_since, eng._gate_pos, eng._gate_total)
+            out = eng.tick(Measured(x, 0.0, k * DT))
+            if out.binding == "gate":
+                eng.rejected()
+                after = (
+                    eng._gate_wait,
+                    eng._gate_since,
+                    eng._gate_pos,
+                    eng._gate_total,
+                )
+                self.assertEqual(after[0], before[0])
+                self.assertEqual(after[1], before[1])
+                self.assertIs(after[2], before[2])
+                self.assertEqual(after[3], before[3])
+                self.assertIsNone(eng._gate_since)  # it was the first gate tick
+                return
+            eng.executed(out.target)
+            pos = out.target.copy()
+        self.fail("the gate never waited")
+
+    # ---- the open settle (review 11-02 m1) ----
+    def _open_run(self, aperture_fn, params=None, ticks=24):
+        """An open at row 4, window and gate off, so only the open settle can hold lambda at 1. The issued value reads
+        open from the tick after the command. Returns (engine, command tick, [(k, out)])."""
+        params = params or PhaseParams(
+            lambda_max=2.5, w_pre=0, w_post=0, grip_gate=False
+        )
+        master = make_master(120, seed=15, step=0.003, turn=0.0, flips=[(4, 1.0)])
+        master[:4, 6] = 0.0
+        chunk = master[:80].copy()
+        eng = PhaseEngine(params)
+        eng.set_chunk(chunk, "sync")
+        pos = chunk[0].copy()
+        t_open = None
+        outs = []
+        for k in range(ticks):
+            x = pos.copy()
+            x[6] = 0.0 if t_open is None else 1.0
+            out = eng.tick(Measured(x, aperture_fn(k, t_open), k * DT))
+            eng.executed(out.target)
+            pos = out.target.copy()
+            if out.grip_event and t_open is None:
+                self.assertEqual(out.grip_event["kind"], "open")
+                t_open = k
+            outs.append((k, out))
+        return eng, t_open, outs
+
+    @staticmethod
+    def _released(t_open, outs):
+        return next(k - t_open for k, o in outs if k > t_open and o.lam > 1.0 + 1e-9)
+
+    def test_open_settle_waits_for_the_fingers_to_open_and_the_minimum_time(self):
+        def aperture(
+            k, t_open
+        ):  # grasp 0.62; the fingers start 0.2 s after the command, +0.1 per tick
+            if t_open is None:
+                return 0.62
+            j = k - t_open
+            return 0.62 if j < 2 else min(1.0, 0.62 + 0.1 * (j - 1))
+
+        eng, t_open, outs = self._open_run(aperture)
+        # the issued value reads open at j = 1; 0.3 s later (j = 4) the fingers have opened by > 0.02: released
+        self.assertEqual(self._released(t_open, outs), 4)
+        ev = eng.summary()["grip_events"][-1]
+        self.assertEqual(ev["kind"], "open")
+        self.assertAlmostEqual(ev["settle_s"], 0.3, places=9)
+        off = PhaseParams(
+            lambda_max=2.5, w_pre=0, w_post=0, grip_gate=False, open_settle=False
+        )
+        _e, t2, outs2 = self._open_run(aperture, params=off)
+        self.assertLessEqual(
+            self._released(t2, outs2), 2, "without the open settle lambda rises at once"
+        )
+
+    def test_open_settle_fingers_that_do_not_move_hold_until_the_timeout(self):
+        _eng, t_open, outs = self._open_run(lambda k, t: 0.62)
+        self.assertEqual(self._released(t_open, outs), 1 + 8)  # 0.8 s after j = 1
+
+    def test_open_settle_without_an_aperture_uses_time_only(self):
+        _eng, t_open, outs = self._open_run(lambda k, t: None)
+        self.assertEqual(self._released(t_open, outs), 1 + 5)  # 0.5 s after j = 1
+
+    def test_golden_has_no_open_settle(self):
+        self.assertIs(PhaseParams.golden_params().open_settle, False)
+        self.assertIs(PhaseParams(golden=True, open_settle=True).open_settle, False)
 
 
 class TestNonFinite(unittest.TestCase):

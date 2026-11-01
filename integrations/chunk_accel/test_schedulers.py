@@ -63,6 +63,9 @@ from schedulers import (
 
 GOLDEN = PhaseParams.golden_params()
 ACCEL = PhaseParams.for_page(2.5, 0.005)
+SHIPPED = PhaseParams.for_page(
+    3.0, 0.005
+)  # the page default (levi/marvel0/inference_mode.py)
 
 
 # ==============================================================================================================
@@ -1623,12 +1626,14 @@ class AccelRtcRef(RefMixin, AccelRtcTests, unittest.TestCase):
 
 
 class AccelRtcSpeedTests:
-    """Speed assertions of the accelerated RTC scheduler: they need the core (governor, leash, rates)."""
+    """Speed assertions of the accelerated RTC scheduler: they need the core (governor, leash, rates). Run at lambda 2.5
+    (``ACCEL``) and at the page default 3.0 (``SHIPPED``)."""
 
     H = 10
+    P = ACCEL
 
     def test_83_ms_replies_never_starve_the_pipeline(self):
-        r = run_line("rtc", ACCEL, self.make_engine, ticks=300)
+        r = run_line("rtc", self.P, self.make_engine, ticks=300)
         self.assertEqual(r["summary"]["starved_ticks"], 0)
         self.assertGreater(
             r["trace"][-1]["s"],
@@ -1638,25 +1643,25 @@ class AccelRtcSpeedTests:
 
     def test_real_latency_trace_starves_at_most_one_percent_of_ticks(self):
         r = run_line(
-            "rtc", ACCEL, self.make_engine, ticks=400, latencies=latency_trace(80)
+            "rtc", self.P, self.make_engine, ticks=400, latencies=latency_trace(80)
         )
         self.assertLessEqual(r["summary"]["starved_ticks"], 4)
         self.assertGreater(len(r["requests"]), 5)
 
     def test_a_tick_of_margin_on_the_expected_delay_removes_the_tail_starvation(self):
-        """The design's early trigger (margin 0) starves 1-5 % of the ticks behind a 3-tick reply (see
-        EARLY_MARGIN_TICKS); the default, one tick of margin, keeps the starved ticks at or under 1 % on five traces of
-        the measured distribution, and an explicit margin of 1 is the same run."""
+        """The design's early trigger (margin 0) starves up to ~5 % of the ticks behind a 3-tick reply at lambda 2.5
+        (see EARLY_MARGIN_TICKS); the default, one tick of margin, keeps the starved ticks at or under 1 % (4 of 400) on
+        five traces of the measured distribution, and an explicit margin of 1 is the same run."""
         self.assertEqual(schedulers.EARLY_MARGIN_TICKS, 1)
         starved, design, explicit = [], [], []
         for seed in (4, 5, 6, 7, 8):
             lat = latency_trace(80, seed=seed)
-            r = run_line("rtc", ACCEL, self.make_engine, ticks=400, latencies=lat)
+            r = run_line("rtc", self.P, self.make_engine, ticks=400, latencies=lat)
             starved.append(r["summary"]["starved_ticks"])
             design.append(
                 run_line(
                     "rtc",
-                    ACCEL,
+                    self.P,
                     self.make_engine,
                     ticks=400,
                     latencies=lat,
@@ -1666,7 +1671,7 @@ class AccelRtcSpeedTests:
             explicit.append(
                 run_line(
                     "rtc",
-                    ACCEL,
+                    self.P,
                     self.make_engine,
                     ticks=400,
                     latencies=lat,
@@ -1674,10 +1679,11 @@ class AccelRtcSpeedTests:
                 )["summary"]["starved_ticks"]
             )
         self.assertEqual(starved, explicit)
-        # 4 of 400 with the 11-01 spec rates; the 11-02 profile (rise 0.8 / jerk 0.45) gives 0, 4, 5, 0, 0 on these
-        # traces (0, 4, 4, 0, 0 at lambda 3.0): still about 1 %, and the replay's G-G (median starved per episode <= 1) passes
+        # Measured 2026-11-02 (strong profile, after the review fixes), starved ticks of 400 per trace, default margin:
+        # lambda 2.5: 0, 4, 4, 0, 0; lambda 3.0: 3, 4, 4, 0, 0 (at most 1.0 %). Margin 0: lambda 2.5: 5, 13, 19, 9, 5
+        # (up to 4.75 %); lambda 3.0: 3, 4, 4, 1, 0 (lambda 3.0 is held by its caps more often, so the trigger matters less).
         self.assertLessEqual(
-            max(starved), 5, f"starved ticks of 400 per trace: {starved}"
+            max(starved), 4, f"starved ticks of 400 per trace: {starved}"
         )
         self.assertGreater(
             sum(design), sum(starved), f"design formula {design} vs default {starved}"
@@ -1686,6 +1692,10 @@ class AccelRtcSpeedTests:
 
 class AccelRtcSpeed(RealMixin, AccelRtcSpeedTests, unittest.TestCase):
     pass
+
+
+class AccelRtcSpeedShipped(RealMixin, AccelRtcSpeedTests, unittest.TestCase):
+    P = SHIPPED
 
 
 class AccelRtcGoldenReal(RealMixin, AccelRtcTests, unittest.TestCase):
@@ -1826,12 +1836,13 @@ class AccelVlashRef(RefMixin, AccelVlashTests, unittest.TestCase):
 
 
 class AccelVlashSpeedTests:
-    """Speed assertions of the accelerated VLASH scheduler: they need the core."""
+    """Speed assertions of the accelerated VLASH scheduler: they need the core. Lambda 2.5 and the page default 3.0."""
 
     H = 10
+    P = ACCEL
 
     def test_83_ms_replies_never_starve_the_prefetch(self):
-        r = run_line("vlash", ACCEL, self.make_engine, ticks=300)
+        r = run_line("vlash", self.P, self.make_engine, ticks=300)
         self.assertEqual(r["summary"]["starvations"], 0)
         self.assertEqual(r["summary"]["sync_fallbacks"], 0)
         self.assertGreater(r["trace"][-1]["s"], 300 * 1.5)
@@ -1842,7 +1853,7 @@ class AccelVlashSpeedTests:
         for seed in (4, 5, 6, 7, 8):
             r = run_line(
                 "vlash",
-                ACCEL,
+                self.P,
                 self.make_engine,
                 ticks=400,
                 latencies=latency_trace(80, seed=seed),
@@ -1855,6 +1866,10 @@ class AccelVlashSpeedTests:
 
 class AccelVlashSpeed(RealMixin, AccelVlashSpeedTests, unittest.TestCase):
     pass
+
+
+class AccelVlashSpeedShipped(RealMixin, AccelVlashSpeedTests, unittest.TestCase):
+    P = SHIPPED
 
 
 class AccelVlashGoldenReal(RealMixin, AccelVlashTests, unittest.TestCase):
@@ -2333,10 +2348,11 @@ def change_rows(chunks):
 
 class GripperTests:
     params_golden = True
+    accel = ACCEL
     H = 10
 
     def _params(self):
-        return GOLDEN if self.params_golden else ACCEL
+        return GOLDEN if self.params_golden else self.accel
 
     def _check(self, r):
         flips = gripper_flips(r["trace"])
@@ -2448,6 +2464,308 @@ class GripperAccelReal(RealMixin, GripperTests, unittest.TestCase):
         self.assertGreater(
             len(gripper_flips(r["trace"])), 0, "the run reached the close"
         )
+
+
+class GripperShippedReal(RealMixin, GripperTests, unittest.TestCase):
+    """The same guarantees at the page default lambda 3.0."""
+
+    params_golden = False
+    accel = SHIPPED
+
+
+# ==============================================================================================================
+# Review 11-02 of the strong profile, at the shipped lambda 3.0: the leash recovery in contact (M1) and the close
+# gate across plan reloads (M2). Self-contained: a lag arm with a wall / floor and a z-floor clamp, no openpi.
+# ==============================================================================================================
+
+
+class WallArm:
+    """First-order lag toward the target (tau 0.27 s at 10 Hz); the arm cannot pass x > wall or z < floor; seeded
+    Gaussian noise on the measured position (an arm pressing on a contact reads 50-300 um of noise)."""
+
+    def __init__(self, x0, *, wall=None, floor=None, noise=0.0, seed=1, tau=0.27):
+        self.x = np.asarray(x0, np.float64).copy()
+        self.a = 1.0 - math.exp(-0.1 / tau)
+        self.wall, self.floor, self.noise = wall, floor, noise
+        self.rng = np.random.default_rng(seed)
+
+    def step(self, target):
+        self.x[:6] += self.a * (np.asarray(target[:6], np.float64) - self.x[:6])
+        self.x[6] = float(target[6])
+        if self.wall is not None:
+            self.x[0] = min(self.x[0], self.wall)
+        if self.floor is not None:
+            self.x[2] = max(self.x[2], self.floor)
+
+    def measure(self):
+        m = self.x.copy()
+        if self.noise:
+            m[:3] += self.rng.normal(0.0, self.noise, 3)
+        return m.astype(np.float32)
+
+
+def wall_obs(pose, aperture=0.08):
+    return {
+        "robot_state": {
+            "cartesian_position": np.asarray(pose, np.float32),
+            "gripper_position": aperture,
+        }
+    }
+
+
+def floor_clamp(target, measured, min_z=None):
+    """The two parts of the client's clamp these tests need: the z floor (min_z) and the jump refusal (0.10 m /
+    0.35 rad from the measured pose). Returns (sent, refused)."""
+    sent = np.asarray(target, np.float32).copy()
+    if min_z is not None and sent[2] < min_z:
+        sent[2] = min_z
+    sent[6] = 1.0 if sent[6] >= 0.5 else 0.0
+    d = np.asarray(target, np.float64) - np.asarray(measured, np.float64)
+    refused = (
+        float(np.linalg.norm(d[:3])) > 0.10
+        or float(np.abs(phase.wrap_to_pi(d[3:6])).max()) > 0.35
+    )
+    return sent, refused
+
+
+class ContactRecoveryTests(unittest.TestCase):
+    """M1: the policy keeps pushing +x (10 mm per row) into a wall the arm cannot pass, the measured pose carries 50 um
+    or 0.3 mm of noise. The target sits at the hard leash; noise puts it 0.1 mm outside now and then, and the recovery
+    used to walk it a full 50 mm step back (a 50 mm sawtooth at ~1.5 Hz). Now it moves back just inside the leash.
+
+    Measured on this setup (seeds 1-8, RTC execute horizon 6 and VLASH overlap 2): the largest backward step on a tick
+    without a running blend was 50.0 mm before the fix and 4.1-5.4 mm after. Ticks inside a min-jerk blend onto a newly
+    loaded chunk (which the policy computed from the blocked arm) move back by up to 11.1 mm: that is the blend,
+    bounded by blend_step_m (25 mm) less the plan's own progress, and it was there before the fix (9.0 mm with no
+    recovery at all), so it is bounded separately at 12 mm."""
+
+    @staticmethod
+    def _chunk(state):
+        rows = np.repeat(np.asarray(state, np.float64)[None, :], 10, axis=0)
+        rows[:, 0] += 0.010 * np.arange(1, 11)
+        rows[:, 6] = 1.0
+        return rows.astype(np.float32)
+
+    def _contact(self, mode, noise, seed, ticks=200):
+        clock = Clock()
+        arm = WallArm(
+            [0.45, 0.0, 0.20, 3.1, 0.0, -0.8, 1.0], wall=0.50, noise=noise, seed=seed
+        )
+        if mode == "rtc":
+            sched = PhaseRtcChunker(
+                lambda obs, prev, delay: (
+                    lambda: (self._chunk(obs["robot_state"]["cartesian_position"]), {})
+                ),
+                execute_horizon=6, period_s=0.1, params=SHIPPED, transport=SimTransport((1, 2)),
+                say=lambda _s: None, clock=clock.monotonic,
+            )  # fmt: skip
+        else:
+            sched = PhaseVlashChunker(
+                lambda obs, fut: (
+                    lambda: (self._chunk(obs["robot_state"]["cartesian_position"] if fut is None else fut), {})
+                ),
+                overlap_steps=2, horizon=10, params=SHIPPED, binarize_gripper=True,
+                transport=SimTransport((1, 2)), clock=clock.monotonic,
+            )  # fmt: skip
+        eng = sched.engine
+        prev, back_flat, back_all = None, 0.0, 0.0
+        for k in range(ticks):
+            clock.now = 0.1 * k
+            meas = arm.measure()
+            target = sched.next_action(wall_obs(meas))
+            sent, refused = floor_clamp(target, meas)
+            self.assertFalse(
+                refused, f"{mode} tick {k}: the client would refuse the target"
+            )
+            if mode == "vlash":
+                sched.action_adjusted(target, sent)
+            eng.executed(sent)
+            arm.step(sent)
+            tick = [r for r in eng.drain_records() if r["kind"] == "tick"][-1]
+            if prev is not None:
+                dx = float(sent[0]) - float(prev[0])
+                back_all = min(back_all, dx)
+                if tick["blend_w"] >= 1.0:
+                    back_flat = min(back_flat, dx)
+            prev = sent.copy()
+        return back_flat, back_all, eng.summary()
+
+    def test_contact_with_pose_noise_never_saws_the_target_back(self):
+        for mode in ("rtc", "vlash"):
+            for noise in (5e-5, 3e-4):
+                for seed in (1, 2, 3):
+                    flat, every, s = self._contact(mode, noise, seed)
+                    what = f"{mode} noise {noise * 1e3:.2f} mm seed {seed}"
+                    self.assertGreater(
+                        s["leash_recoveries"], 0, f"{what}: the leash never tripped"
+                    )
+                    self.assertGreaterEqual(
+                        flat, -0.010, f"{what}: backward step {flat * 1e3:.1f} mm"
+                    )
+                    self.assertGreaterEqual(
+                        every,
+                        -0.012,
+                        f"{what}: backward step in a blend {every * 1e3:.1f} mm",
+                    )
+                    self.assertLessEqual(s["dp_max_m"], 0.08 + 1e-6, what)
+                    self.assertLessEqual(s["step_max_m"], 0.05 + 1e-9, what)
+
+
+class GateAcrossReloadsTests(unittest.TestCase):
+    """M2: the close gate's 5-tick timeout must hold however often the plan is reloaded. The policy approaches a grasp
+    pose over 3 rows and closes there (row 0 once it is within 2 cm); the arm cannot reach the closing row: stopped
+    12 mm above it (fingers on the object) or held 10 mm above it by the client's min_z clamp. Before the fix plain at
+    horizon 6 (a re-query every 4-6 ticks) and VLASH under the clamp (action_adjusted -> reset -> sync every tick)
+    restarted the wait at each reload and never closed in 150 ticks; RTC closed at tick 8."""
+
+    Z_GRASP = 0.050
+    GRASP_XY = (0.50, 0.02)
+    # re-aim: after the first gate wait the policy closes at B instead, 60 mm on in +x and above the stop, approached at
+    # B_ROW per row (the close row stays inside every chunk) (verifier probe of the 11-02 fixes)
+    B = (0.56, 0.02, 0.080)
+    B_ROW = 0.010
+    _aim_b = False
+
+    def _policy(self, state):
+        st = np.asarray(state, np.float64)
+        goal = np.array([self.GRASP_XY[0], self.GRASP_XY[1], self.Z_GRASP])
+        rows = np.repeat(st[None, :], 10, axis=0)
+        n_app = 0 if np.linalg.norm(st[:3] - goal) < 0.02 else 3
+        if self._aim_b:
+            goal = np.array(self.B)
+            dist = float(np.linalg.norm(st[:3] - goal))
+            n_app = 0 if dist < 0.004 else min(9, int(np.ceil(dist / self.B_ROW)))
+        for j in range(10):
+            f = 1.0 if n_app == 0 else min(1.0, (j + 1) / n_app)
+            rows[j, :3] = st[:3] + f * (goal - st[:3])
+            rows[j, 6] = 0.0 if j >= n_app else 1.0
+        return rows.astype(np.float32)
+
+    def _run(
+        self,
+        mode,
+        *,
+        params=SHIPPED,
+        stop=None,
+        min_z=None,
+        h=6,
+        ticks=60,
+        re_aim=False,
+    ):
+        """-> (tick of the first gate wait or None, tick the close was sent or None). The engine and the measured pose
+        at the close are kept in self.eng / self.at_close."""
+        self._aim_b = False
+        clock = Clock()
+        arm = WallArm(
+            [0.47, 0.0, 0.12, 3.1, 0.0, -0.8, 1.0],
+            floor=None if stop is None else self.Z_GRASP + stop,
+        )
+        z_floor = None if min_z is None else self.Z_GRASP + min_z
+        if mode == "plain":
+            sched = PlainPhase(params, h, clock=clock.monotonic)
+        elif mode == "rtc":
+            sched = PhaseRtcChunker(
+                lambda obs, prev, d: (lambda: (self._policy(obs["robot_state"]["cartesian_position"]), {})),
+                execute_horizon=6, period_s=0.1, params=params, transport=SimTransport((1,)),
+                say=lambda _s: None, clock=clock.monotonic,
+            )  # fmt: skip
+        else:
+            sched = PhaseVlashChunker(
+                lambda obs, fut: (lambda: (self._policy(obs["robot_state"]["cartesian_position"]), {})),
+                overlap_steps=2, horizon=10, params=params, binarize_gripper=True,
+                transport=SimTransport((1,)), clock=clock.monotonic,
+            )  # fmt: skip
+        eng = self.eng = sched.engine
+        plan, idx, first_gate = None, 0, None
+        for k in range(ticks):
+            clock.now = 0.1 * k
+            state = arm.measure()
+            if mode == "plain":
+                if plan is None or idx >= min(h, len(plan)):
+                    plan, idx = sched.on_query(self._policy(state), state, 0.08), 0
+                idx += 1
+                target = sched.on_action(state, 0.08)
+            else:
+                target = sched.next_action(wall_obs(state))
+            sent, refused = floor_clamp(target, state, z_floor)
+            self.assertFalse(refused, f"{mode} tick {k}")
+            if mode == "vlash":
+                sched.action_adjusted(target, sent)
+            eng.executed(sent)
+            arm.step(sent)
+            if first_gate is None and eng.summary()["gate_waits"] > 0:
+                first_gate = k
+                self._aim_b = re_aim
+            if sent[6] < 0.5:
+                self.at_close = state
+                return first_gate, k
+        return first_gate, None
+
+    def _assert_closes_in_time(self, mode, **kw):
+        first, close = self._run(mode, **kw)
+        what = f"{mode} lambda {kw.get('params', SHIPPED).lambda_max} stop {kw.get('stop')} min_z {kw.get('min_z')}"
+        self.assertIsNotNone(first, f"{what}: the gate never waited")
+        self.assertIsNotNone(close, f"{what}: the close never went out")
+        self.assertLessEqual(
+            close - first,
+            PhaseParams().gate_max_ticks + 2,
+            f"{what}: {first} -> {close}",
+        )
+        return first, close
+
+    def test_plain_horizon_6_with_the_arm_stopped_12_mm_short_closes_at_the_timeout(
+        self,
+    ):
+        for lam in (3.0, 2.5, 2.0):
+            self._assert_closes_in_time(
+                "plain", params=PhaseParams.for_page(lam, 0.005), stop=0.012
+            )
+
+    def test_plain_with_a_min_z_clamp_10_mm_above_the_close_row_closes(self):
+        self._assert_closes_in_time("plain", min_z=0.010)
+
+    def test_vlash_with_a_min_z_clamp_10_mm_above_the_close_row_closes(self):
+        for lam in (3.0, 2.0):
+            self._assert_closes_in_time(
+                "vlash", params=PhaseParams.for_page(lam, 0.005), min_z=0.010
+            )
+
+    def test_plain_re_aimed_at_another_grasp_waits_for_the_arm_there(self):
+        """The wait started at A (arm stopped 12 mm short) must not release the close at B, 60 mm on: before the
+        location check the time since A's first wait (0.8-1.3 s) sent it on B's first gate tick with the arm 13.1 mm
+        off at 0.059 m/s (gate_timeout); the engine before the 11-02 fixes waited at B and closed 6.2 mm off."""
+        for lam in (3.0, 2.0):
+            first, close = self._run(
+                "plain",
+                params=PhaseParams.for_page(lam, 0.005),
+                stop=0.012,
+                re_aim=True,
+            )
+            what = f"plain lambda {lam}: first gate {first}, close {close}"
+            self.assertIsNotNone(close, what)
+            ev = [e for e in self.eng.summary()["grip_events"] if e["kind"] == "close"][
+                -1
+            ]
+            off_b = float(np.linalg.norm(self.at_close[:3] - np.array(self.B)))
+            self.assertLess(off_b, 0.02, f"{what}: the close went out at A, not B")
+            self.assertFalse(ev["gate_timeout"], f"{what}: {ev}")
+            self.assertLessEqual(
+                ev["arm_err_m"], PhaseParams().gate_dist_m, f"{what}: {ev}"
+            )
+            self.assertLessEqual(off_b, PhaseParams().gate_dist_m + 1e-3, what)
+
+    def test_rtc_is_unchanged(self):
+        """RTC reloads by swapping a reply in, which never restarted a wait that ran on: it closed at tick 8 before the
+        fix (the probe of the review) and still does."""
+        for kw in ({"stop": 0.012}, {"min_z": 0.010}):
+            _first, close = self._assert_closes_in_time("rtc", **kw)
+            self.assertEqual(close, 8, kw)
+
+    def test_golden_has_no_gate(self):
+        for mode in ("plain", "rtc", "vlash"):
+            first, close = self._run(mode, params=GOLDEN, stop=0.012)
+            self.assertIsNone(first, mode)
+            self.assertIsNotNone(close, mode)
 
 
 # ==============================================================================================================

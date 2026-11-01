@@ -9,7 +9,7 @@ path). Nothing here touches a real port: the servers bind 127.0.0.1 on 5071-5079
 Three layers, cheapest first:
   * client_check / install: the AST check and the installer on the real tree and on mutated copies (stdlib, no server);
   * the entry's hooks on stub client modules (header, trace, summary, close / abort, refusals) with the real engine;
-  * subprocess runs: 3 modes x 2 episodes x 60 steps at lambda 2.5, and the failure cases.
+  * subprocess runs: 3 modes x 2 episodes x 60 steps at lambda 2.5 and at the page default 3.0, and the failure cases.
 
 Run (pytest of the LEVI worktree venv; the client subprocesses use the openpi venv):
     OMP_NUM_THREADS=1 nice -n 19 taskset -c 8-11 .venv/bin/python -m pytest -q integrations/chunk_accel/e2e \
@@ -1125,17 +1125,31 @@ def test_an_rtc_episode_runs_on_stub_modules_through_hook_c_and_hook_b(world):
 
 
 @needs_openpi
+@pytest.mark.parametrize("lam", (2.5, 3.0))
 @pytest.mark.parametrize("mode", MODES)
-def test_two_episodes_of_sixty_steps_at_lambda_2_5(tmp_path, mode):
+def test_two_episodes_of_sixty_steps(tmp_path, mode, lam):
+    """lambda 2.5 and the page default 3.0 (review 11-02: nothing ran the shipped value end to end)."""
+    from phase import PhaseParams
+
     steps, episodes = 60, 2
     with Rig(tmp_path, mode, overlap=2) as rig:
-        rc, out = run_client(client_args(rig, tmp_path, steps=steps, episodes=episodes), tmp_path,
+        rc, out = run_client(client_args(rig, tmp_path, steps=steps, episodes=episodes, lam=lam), tmp_path,
                              keys=manual_keys(steps, episodes))  # fmt: skip
-        found = check_phase_run(tmp_path, rc, out, mode, episodes=episodes, rig=rig)
+        found = check_phase_run(
+            tmp_path, rc, out, mode, episodes=episodes, lam=lam, rig=rig
+        )
         assert (
             "close" in rig.robot.lag_stats()["grip_commands"]
         )  # the script's grasp happened (and the lag model ran)
     for m in found.values():
+        # the close gate's wait is bounded however often the plan is reloaded (review 11-02 M2: a plain re-query restarted
+        # it and one close slipped by 33 ticks): 0.5 s of wait, plus one tick that may hold a slow plain query (<= 0.3 s).
+        # And it is spent at the close it is for: the script's re-query moves the close 40-75 mm, and a wait carried
+        # over from the old place sent both plain closes 43-45 mm from the close row (review of the 11-02 fixes).
+        for ev in m["eval"]["chunk_accel"]["grip_events"]:
+            if ev["kind"] == "close":
+                assert ev["gate_wait_ticks"] <= 5 and ev["gate_wait_s"] <= 0.8, ev
+                assert ev["arm_err_m"] <= 2 * PhaseParams().gate_dist_m, ev
         # per-tick wall time: the engine plus the loop fit the 100 ms tick. The tail is the fake server's latency
         # (up to 261 ms) inside a plain tick, so only the median and a generous p99 are held.
         gaps = np.diff(
@@ -1321,15 +1335,30 @@ def test_a_frozen_arm_trips_the_leash_and_the_client_survives(tmp_path, mode):
         assert rc == 0 and "Traceback" not in out, out[-4000:]
     (m,) = demos(tmp_path).values()
     ca = m["eval"]["chunk_accel"]
-    assert_envelope(
-        assert_trace(ca, ticks_at_least=20), 2.5
-    )  # never beyond the leash unless holding
+    lines = assert_trace(ca, ticks_at_least=20)
+    assert_envelope(lines, 2.5)  # never beyond the leash unless holding
     assert ca["leash_holds"] >= 1, ca
     # the escape: the third hold drops the plan, the client refuses a target beyond 0.10 m, or (a last target the arm
-    # has been left behind by) the engine walks it back toward the arm
-    assert (
-        ca["hold_resets"] + m["eval"]["rejected_jumps"] + ca["leash_recoveries"] >= 1
-    ), (ca["hold_resets"], m["eval"]["rejected_jumps"], ca["leash_recoveries"])
+    # has been left behind by) the engine walks it back toward the arm. Plain also escapes through the loop's own next
+    # query, whose chunk starts at the frozen arm: every run of holds ends with a new chunk within the open-loop
+    # horizon (6). Without the placeholder's gate allowance (replay of the 11-02 fixes) that query comes after at most
+    # 2 holds, before a third could drop the plan.
+    escapes = ca["hold_resets"] + m["eval"]["rejected_jumps"] + ca["leash_recoveries"]
+    if mode == "plain":
+        holds = [r["k"] for r in lines if r["kind"] == "tick" and r["hold"]]
+        chunks = [r["k"] for r in lines if r["kind"] == "chunk"]
+        ends = [k for k in holds if k + 1 not in holds]  # the last hold of each run
+        for k in ends:
+            assert any(k < c <= k + 6 for c in chunks) or k == max(
+                r["k"] for r in lines if r["kind"] == "tick"
+            ), (k, holds, chunks)
+        assert ends, holds  # plain's escape is the per-run check above
+    else:
+        assert escapes >= 1, (
+            ca["hold_resets"],
+            m["eval"]["rejected_jumps"],
+            ca["leash_recoveries"],
+        )
 
 
 @needs_openpi

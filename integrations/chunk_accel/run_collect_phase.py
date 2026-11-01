@@ -78,7 +78,8 @@ class Args(collector.Args):
     # plain | rtc | vlash. rtc needs --rtc (+ --rtc-execute-horizon), vlash needs --vlash-overlap-steps; plain uses
     # --open-loop-horizon. The page writes all of them next to --phase-mode.
     phase_mode: str = "plain"
-    # rows per tick at most; [1, 3] (the page offers 2.0 / 2.5 / 3.0, default 3.0 since 2026-11-02)
+    # rows per tick at most; [1, 3]. The page offers 2.0 / 2.5 / 3.0 and the page default is 3.0 (2026-11-02); the page
+    # always writes this flag, so 2.0 here is only the default of a hand-typed command line.
     phase_lambda_max: float = 2.0
     # the controller's setpoint filter: must match `set_clip.py --show` (0.005 or 0.01)
     phase_alpha: float = 0.005

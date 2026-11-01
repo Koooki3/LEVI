@@ -45,6 +45,12 @@ CLIENT_MAX_RAD = 0.35
 # (otherwise the client would reject it and the old target would stay in force: the target is re-anchored instead).
 _RECOVER_MARGIN = 0.9
 _STEP_SAFETY = 1.0 - 1e-6
+# ... and it is moved back only as far as needed: until it sits this fraction of the hard leash from the measured pose,
+# per bound (translation; each rotation axis), a bound that holds is left alone. 0.95 puts it 4 mm / 14 mrad inside
+# 0.08 m / 0.28 rad: more than ten standard deviations of the 50-300 um pose noise of an arm pressing on a contact, so
+# the noise alone does not trip the next recovery, and a backward move of a few millimetres instead of the full 50 mm
+# step (review 11-02 M1: a 50 mm sawtooth at ~1.5 Hz in contact at lambda 3.0).
+_RECOVER_INSIDE = 0.95
 
 ALPHAS = (
     0.005,
@@ -72,6 +78,7 @@ _GOLDEN_FORCED = {
     "plain_reanchor": False,
     "grip_gate": False,
     "grip_settle": False,
+    "open_settle": False,
     "governor": False,
     "early_trigger": False,
 }
@@ -143,6 +150,9 @@ _RANGES = {
     "settle_stable_eps": (0.0, 0.01, True),
     "settle_timeout_s": (0.3, 1.0, False),
     "settle_unknown_s": (0.3, 1.0, False),
+    "open_settle_min_s": (0.2, 1.0, False),
+    "open_settle_timeout_s": (0.3, 1.5, False),
+    "open_settle_unknown_s": (0.3, 1.5, False),
     "governor_margin_rows": (0.0, 5.0, False),
     "delay_history": (1, 32, False),
 }
@@ -177,6 +187,7 @@ _BOOL_FIELDS = frozenset(
         "plain_reanchor",
         "grip_gate",
         "grip_settle",
+        "open_settle",
         "governor",
         "early_trigger",
     }
@@ -214,8 +225,10 @@ class PhaseParams:
     """
 
     # ---- page controls and mode switches ----
-    # RELAXED[2026-11-01] E9 was: effective ~1.05 rows per tick in v1/v2 (new knob; 11-02: page offers 2.0/2.5/3.0, default 3.0)
-    lambda_max: float = 2.0
+    # RELAXED[2026-11-01] E9 was: effective ~1.05 rows per tick in v1/v2 (new knob; 11-02: page offers 2.0/2.5/3.0, the page default is 3.0)
+    lambda_max: float = (
+        2.0  # the field's own default; the page always passes its value (for_page)
+    )
     alpha: float = 0.005
     golden: bool = False  # today's behaviour, bit for bit (I2); not a page option
     # RELAXED[2026-11-01] E10 was: v1 TAU 0.2 s lead along the chord (only when lead is on; default off, frozen at 04:30)
@@ -336,6 +349,20 @@ class PhaseParams:
     settle_unknown_s: float = (
         0.8  # aperture unknown (plain without a stage capture): time only
     )
+    # Open settle (review 11-02 m1): after an open (issued value 0 -> 1) lambda <= 1 until the fingers have visibly opened
+    # (aperture up by settle_aperture_delta) and open_settle_min_s has passed, or open_settle_timeout_s; with no aperture
+    # reading, open_settle_unknown_s. Gripper model (fr3_env, arms.GripperModel, lag_robot_server): the fingers start
+    # 0.2 s after the command and travel for 0.5 s; the clock starts at the tick the issued value first reads open, about
+    # one tick after the command. 0.3 s is then ~0.4 s after the command, 0.2 s into the travel (the model has opened by
+    # ~0.13 of aperture, the 0.02 test passes one tick earlier): the arm does not pull away while the fingers still touch
+    # the object. With w_post 3 the window already holds lambda at 1 to ~0.2 s after that tick, so the settle adds about one
+    # tick per open. The 0.75 s command throttle needs no time here: while it holds the open back, the issued value lags the
+    # command and lambda is held at 1 by that rule. 0.8 s = start delay + travel + one tick (fingers that have not moved by
+    # then are held by something waiting does not fix); 0.5 s without a reading = start delay + 60 % of the travel.
+    open_settle: bool = True
+    open_settle_min_s: float = 0.3
+    open_settle_timeout_s: float = 0.8
+    open_settle_unknown_s: float = 0.5
 
     # ---- inference governor, early trigger, delay bookkeeping (section 3.9) ----
     governor: bool = True
@@ -416,6 +443,10 @@ class PhaseParams:
         if self.settle_min_s > self.settle_timeout_s:
             raise ValueError(
                 "PhaseParams.settle_min_s must not exceed settle_timeout_s"
+            )
+        if self.open_settle_min_s > self.open_settle_timeout_s:
+            raise ValueError(
+                "PhaseParams.open_settle_min_s must not exceed open_settle_timeout_s"
             )
         if not self.golden and not (self.hard_leash and self.step_limit):
             raise ValueError(
@@ -566,6 +597,16 @@ _SNAP = 1e-9  # a phase this close to an integer row IS that row (float sums lik
 _GATE_STOP = (
     1e-3  # the close gate parks the phase this many rows before the closing row
 )
+# The close gate's wait belongs to one close: when the closing row it waits at lies more than this many gate_dist_m from
+# the row where the wait began (a reload moved the close: plain re-query, VLASH sync, an RTC swap, a jump between
+# chunks), the new close gets its own wait, so a wait spent at one place never releases a close somewhere else with the
+# arm still on its way (review of the 11-02 fixes: 13-45 mm at the release). Under a total cap of this many
+# gate_max_ticks gate-held ticks across such moves, so a close that moves on every reload still goes out. The cap
+# releases a close only after _GATE_AT_PLACE waits at its current place (a fresh place gets a look at the arm first;
+# plain with 75 mm chunk jumps: close error p90 28.8 -> 16.8 mm at the same speed), or unconditionally at twice the cap.
+_GATE_MOVED = 2.0
+_GATE_TOTAL = 2
+_GATE_AT_PLACE = 2
 _TICK_GAP_S = (
     1.0  # s without a tick after which a far-away last target is dropped (new episode)
 )
@@ -686,8 +727,10 @@ class PhaseEngine:
     queries again; a tick with no plan re-sends the last target as well. The last target is only re-anchored to the
     measured pose on the very first tick, or after more than a second without a tick if the arm is then outside the
     hard leash (the environment was reset). A last target that the arm itself has left behind (pushed away, bounced
-    off a contact) is walked back toward the measured pose by at most one step limit per tick (``_recovery_target``,
-    invariant I5 kept), never jumped; a stuck arm whose target is still inside the leash just holds.
+    off a contact) is moved back toward the measured pose just inside the leash, by at most one step limit per tick
+    (``_recovery_target``, invariant I5 kept), never jumped; a stuck arm whose target is still inside the leash just
+    holds. The close gate's wait survives plan reloads and ``reset`` (it ends when the close goes out, the command
+    changes or the plan has no close ahead).
 
     Additions to the section 6 interface (all optional, none changes a frozen signature): ``new_episode``,
     ``set_workspace`` (the client's clamp as a predicate, invariant I7), ``bump`` / ``note_value`` / ``note`` (the
@@ -744,8 +787,16 @@ class PhaseEngine:
         self._g_cmd = None
         self._blend = None
         self._blend_pending = False
+        # close gate: wait ticks and the time of the first one; both survive plan reloads and reset() (review 11-02 M2)
+        # while the close stays where the wait began (_gate_pos); _gate_total counts gate-held ticks across moves
         self._gate_wait = 0
+        self._gate_since = None
+        self._gate_pos = None
+        self._gate_total = 0
         self._holds = 0
+        self._recov_run = (
+            0  # leash recoveries since the last advance the hard leash did not cut
+        )
         # measurement
         self._m = None
         self._inflight = None
@@ -769,6 +820,10 @@ class PhaseEngine:
         self._settle_moved = False
         self._settle_stable = 0
         self._settle_event = None
+        self._osettle_active = False
+        self._osettle_t0 = 0.0
+        self._osettle_ap0 = None
+        self._osettle_event = None
         # proposal / commit bookkeeping
         self._prop = None
         self._prop_valid = False
@@ -786,7 +841,9 @@ class PhaseEngine:
         self._events: list[dict] = []
 
     def reset(self) -> None:
-        """Drop rows, blend, gate and hold state; lambda -> 1; the phase s is kept (so a reset never rewinds)."""
+        """Drop rows, blend and hold state; lambda -> 1; the phase s is kept (so a reset never rewinds). The close gate's
+        wait is kept: a plan reloaded after a reset that lands on the same close goes on counting toward the timeout
+        (otherwise a scheduler that resets every tick, or a plain placeholder shorter than the wait, never closes)."""
         self._R = None
         self._D = None
         self._G = []
@@ -794,8 +851,8 @@ class PhaseEngine:
         self._prof_key = None
         self._blend = None
         self._blend_pending = False
-        self._gate_wait = 0
         self._holds = 0
+        self._recov_run = 0
         self._lam = 1.0
         self._dlam = 0.0
         self._e_off = 0.0
@@ -1087,7 +1144,6 @@ class PhaseEngine:
         r64, r32 = self._check_rows(rows)
         self._install(r64, 0, self._s + 1.0, len(r64) - 1, r32[-1].copy(), kind)
         self._fresh = True  # the first tick lands exactly on row 0 (lambda 1), blended from the last target
-        self._gate_wait = 0
         self._e_off = 0.0
         self._start_blend(0.0)
         self._record_chunk(r32, kind, s_obs=self._s + 1.0)
@@ -1127,7 +1183,6 @@ class PhaseEngine:
         # swap in the new plan (origin s_obs); the old reference point was taken above
         self._install(r64, 0, s_obs, H - 1, r32[-1].copy(), "swap")
         self._fresh = False
-        self._gate_wait = 0
         if ref_p is not None and 0.0 <= u_new <= H - 1:
             if not old_over:
                 # the switch jump statistic of rtcc:233-237: None when the old plan is already over (the anchor
@@ -1257,16 +1312,33 @@ class PhaseEngine:
             self._e_off = min(self._e_off, p.lead_max_rows) if p.lead else 0.0
             self._start_blend(u0 + self._e_off)
         self._fresh = False
-        self._gate_wait = 0
         self._lists["splice_rows"].append(u0 + 1.0)
         self._record_chunk(r32, "plain", s_obs=self._s + 1.0, anchor=e_p)
         if self._golden:
             return h
         return self._open_loop_ticks(u0, h)
 
+    def _gate_clear(self) -> None:
+        """The close gate's wait is over (close sent, command changed, or no close ahead any more)."""
+        self._gate_wait, self._gate_since, self._gate_pos, self._gate_total = (
+            0,
+            None,
+            None,
+            0,
+        )
+
+    def _close_ahead(self) -> bool:
+        """The loaded plan still has a close (1 -> 0 against the commanded value) ahead of the phase."""
+        if self._R is None or self._g_ref() != 1:
+            return False
+        s, o, lo = self._s, self._o, self._lo
+        return any(o + g > s - _SNAP and _b(self._R[g - lo, 6]) == 0 for g in self._G)
+
     def _open_loop_ticks(self, u0: float, h: int) -> int:
         """Ticks the lambda law needs from phase u0 to row h-1 without any measurement-driven slowdown: the
-        closed loop can only be slower, so the plain loop never reaches the plan's end early."""
+        closed loop can only be slower, so the plain loop never reaches the plan's end early. No allowance for a
+        close gate wait: a re-query inside the wait keeps it (count and time survive the reload while the close
+        stays put), and a longer placeholder only parked the arm at the plan's end (replay of the 11-02 fixes)."""
         prof = self._profile(self._dhat)
         p, dt = self.params, self.dt
         u, lam, dlam = u0, self._lam, self._dlam
@@ -1390,8 +1462,16 @@ class PhaseEngine:
             self._settle_stable = 0
             last = self._events[-1] if self._events else None
             self._settle_event = last if last and last["kind"] == "close" else None
+        if gi == 1 and self._last_gi == 0 and p.open_settle:
+            self._osettle_active = True
+            self._osettle_t0 = float(m.t)
+            self._osettle_ap0 = m.aperture
+            last = self._events[-1] if self._events else None
+            self._osettle_event = last if last and last["kind"] == "open" else None
         if gi is not None:
             self._last_gi = gi
+        if self._osettle_active:
+            self._open_settle_step(m)
         if not self._settle_active:
             return
         dt_s = float(m.t) - self._settle_t0
@@ -1424,8 +1504,33 @@ class PhaseEngine:
                 )
             self._settle_event = None
 
+    def _open_settle_step(self, m: Measured) -> None:
+        """Open settle (``open_settle``): done when the fingers have opened by settle_aperture_delta and
+        open_settle_min_s has passed, at open_settle_timeout_s, or (no aperture reading) at open_settle_unknown_s."""
+        p = self.params
+        dt_s = float(m.t) - self._osettle_t0
+        ap, ap0 = m.aperture, self._osettle_ap0
+        if dt_s >= p.open_settle_timeout_s:
+            done = True
+        elif ap is None or ap0 is None:
+            done = dt_s >= p.open_settle_unknown_s
+        else:
+            done = dt_s >= p.open_settle_min_s and ap - ap0 >= p.settle_aperture_delta
+        if not done:
+            return
+        self._osettle_active = False
+        if self._osettle_event is not None:
+            self._osettle_event["settle_s"] = dt_s
+            self._emit(
+                {"kind": "grip", "phase": "settled", "k": self._k, "settle_s": dt_s}
+            )
+        self._osettle_event = None
+
     def _post_active(self) -> bool:
-        """Section 3.4 step 2: lambda <= 1 while the issued gripper value lags the command or the fingers settle."""
+        """Section 3.4 step 2: lambda <= 1 while the issued gripper value lags the command or the fingers settle
+        (after a close: ``grip_settle``; after an open: ``open_settle``)."""
+        if self.params.open_settle and self._osettle_active:
+            return True
         if not self.params.grip_settle:
             return False
         if self._settle_active:
@@ -1618,7 +1723,8 @@ class PhaseEngine:
             self._s, self._lam, self._dlam, self._e_off, self._fresh, self._T_prev,
             self._g_cmd, self._gate_wait, self._holds, self._dir_prev,
             None if self._blend is None else self._blend["k"],
-            self._blend_pending,
+            self._blend_pending, self._gate_since, self._recov_run,
+            self._gate_pos, self._gate_total,
         )  # fmt: skip
         k = self._k
         self._k += 1
@@ -1630,6 +1736,12 @@ class PhaseEngine:
         bind = prop["bind"]
         cap = prop["cap"]
         # ---- 7. close gate (section 3.6) ----
+        # The wait is measured from its first tick across plan reloads (set_chunk / swap / splice_plain / reset): it ends
+        # when the close is sent, the commanded gripper value changes, or the loaded plan no longer has a close ahead.
+        # Release at gate_max_ticks wait ticks or gate_max_ticks ticks of time (half a tick of slack for loop jitter).
+        # A close that a reload moved more than _GATE_MOVED * gate_dist_m starts its own wait (count and time), under a
+        # cap of _GATE_TOTAL * gate_max_ticks gate-held ticks in all (after _GATE_AT_PLACE waits at the current place;
+        # twice the cap is the hard backstop).
         hold_open = False
         gate_info = None
         u_c = _snap(s_c - o)
@@ -1642,20 +1754,47 @@ class PhaseEngine:
                 err = float(np.linalg.norm(self._x64[:3] - row[:3]))
                 spd = 0.0 if self._speed is None else self._speed
                 ready = bool(err <= p.gate_dist_m) and bool(spd <= p.gate_speed)
-                if ready or self._gate_wait >= p.gate_max_ticks:
+                gpos = np.asarray(row[:3], np.float64)
+                if (
+                    self._gate_since is not None
+                    and self._gate_pos is not None
+                    and float(np.linalg.norm(gpos - self._gate_pos))
+                    > _GATE_MOVED * p.gate_dist_m
+                ):
+                    self._gate_wait, self._gate_since = 0, None  # a different close
+                if self._gate_since is None:
+                    self._gate_since, self._gate_pos = float(m.t), gpos
+                waited_s = float(m.t) - self._gate_since
+                cap = _GATE_TOTAL * p.gate_max_ticks
+                timeout = (
+                    self._gate_wait >= p.gate_max_ticks
+                    or waited_s >= (p.gate_max_ticks - 0.5) * self.dt
+                    or (
+                        self._gate_total >= cap
+                        and (
+                            self._gate_wait >= _GATE_AT_PLACE
+                            or self._gate_total >= 2 * cap
+                        )
+                    )
+                )
+                if ready or timeout:
                     gate_info = {
                         "gate_wait_ticks": self._gate_wait,
+                        "gate_wait_s": waited_s,
                         "gate_timeout": not ready,
                         "arm_err_m": err,
                         "arm_speed_m_s": spd,
                     }
                 else:
                     self._gate_wait += 1
+                    self._gate_total += 1
                     hold_open = True
                     s_c = max(s, min(s_c, o + gf - _GATE_STOP))
                     u_c = s_c - o
                     bind = "gate"
                     self._st["gate_waits"] += 1
+            elif self._gate_since is not None and not self._close_ahead():
+                self._gate_clear()
         # ---- 8. issued phase e (section 3.5) ----
         e_prev = (s - o) + self._e_off
         e_c = u_c
@@ -1718,6 +1857,10 @@ class PhaseEngine:
         self._dlam = lam_eff - self._lam
         self._lam = lam_eff
         self._holds = 0
+        if alpha >= 1.0 or which != "hard_leash":
+            # an advance the hard leash did not cut: the arm keeps up, so earlier recoveries are history. One the leash
+            # cut leaves the count alone (a blocked arm alternates cut advances and recoveries: see _hold_tick).
+            self._recov_run = 0
         self._fresh = False
         bl = self._blend
         if bl is not None:
@@ -1758,12 +1901,15 @@ class PhaseEngine:
 
     def _recovery_target(self, x32):
         """The last target is outside the hard leash of the measured pose (the arm was pushed away, or bounced off a
-        contact): walk it back to the arm by at most one step limit per tick, so that invariant I5 holds and the
-        distance falls every tick until the normal bisection fits again. Returns ``(target, anchored)`` or None when
-        the last target is inside the leash (or nothing can be said about a non-finite pose). ``anchored`` is True
-        when even one step would leave a target the client rejects (the arm is more than about 0.14 m off): the
-        target is then re-anchored to the measured pose, because a rejected target leaves the old one in force and
-        the arm would be pulled back for ever (the client re-queries and yields to the arm in that case today)."""
+        contact): move it back toward the arm only as far as needed, so that invariant I5 holds and the normal
+        bisection fits again. Per bound: the translation moves by min(step_m, |x - T| - 0.95 hard_leash_m) along the
+        line to the arm, each rotation axis by min(step_rad, its excess over 0.95 hard_leash_rad); a bound that holds
+        (translation inside 0.08 m, or every axis inside 0.28 rad) is left untouched (``_RECOVER_INSIDE``). Returns
+        ``(target, anchored)`` or None when the last target is inside the leash (or nothing can be said about a
+        non-finite pose). ``anchored`` is True when even one full step would leave a target the client rejects (the
+        arm is more than about 0.14 m off): the target is then re-anchored to the measured pose, because a rejected
+        target leaves the old one in force and the arm would be pulled back for ever (the client re-queries and
+        yields to the arm in that case today)."""
         p = self.params
         Tp = self._T_prev
         if not (p.hard_leash and p.step_limit) or Tp is None:
@@ -1774,16 +1920,17 @@ class PhaseEngine:
             return None
         if self._within_hard_leash(Tp, x32):
             return None
+        T = Tp.copy()
         v = x64[:3] - t64[:3]
         n = float(np.linalg.norm(v))
-        cap_m = p.step_m * _STEP_SAFETY
-        if n > cap_m:
-            v = v * (cap_m / n)
-        cap_r = p.step_rad * _STEP_SAFETY
-        d = np.clip(wrap_to_pi(x64[3:6] - t64[3:6]), -cap_r, cap_r)
-        T = Tp.copy()
-        T[:3] = (t64[:3] + v).astype(np.float32)
-        T[3:6] = (t64[3:6] + d).astype(np.float32)
+        if n > p.hard_leash_m:
+            move = min(p.step_m * _STEP_SAFETY, n - _RECOVER_INSIDE * p.hard_leash_m)
+            T[:3] = (t64[:3] + v * (move / n)).astype(np.float32)
+        d = wrap_to_pi(x64[3:6] - t64[3:6])
+        if float(np.abs(d).max()) > p.hard_leash_rad:
+            need = np.maximum(np.abs(d) - _RECOVER_INSIDE * p.hard_leash_rad, 0.0)
+            d = np.sign(d) * np.minimum(need, p.step_rad * _STEP_SAFETY)
+            T[3:6] = (t64[3:6] + d).astype(np.float32)
         dp = float(np.linalg.norm(T[:3].astype(np.float64) - x64[:3]))
         dr = _rot_diff(T[3:6].astype(np.float64), x64[3:6])
         if (
@@ -1796,8 +1943,10 @@ class PhaseEngine:
 
     def _hold_tick(self, m, bind, *, cap=0.0, noplan=False) -> TickOut:
         """Re-send the last target unchanged (leash hold, gate park without progress, or no plan loaded). If that
-        target is itself outside the hard leash, send it one step closer to the measured pose instead (see
-        ``_recovery_target``); the tick still counts as a hold, so the third one in a row drops the plan."""
+        target is itself outside the hard leash, move it back just inside instead (see ``_recovery_target``); the
+        tick still counts as a hold, so the third one in a row drops the plan. Recoveries also count on their own:
+        an arm blocked by a contact alternates advances the leash cuts with recoveries (the advances end each run of
+        holds), and the hold_reset_after-th recovery without an uncut advance in between drops the plan as well."""
         p = self.params
         Tp = self._T_prev
         if Tp is None:
@@ -1818,6 +1967,8 @@ class PhaseEngine:
             # the blend offset was made against the old target: start it again from this one
             self._blend = None
             self._blend_pending = self._R is not None
+            if not noplan:
+                self._recov_run += 1
         _, dp, dr, _, _, _ = self._feasible(T32, x32, None)
         if not bool(np.isfinite(x32).all()):
             self._st["nonfinite"] += 1
@@ -1827,7 +1978,10 @@ class PhaseEngine:
         else:
             self._holds += 1
             self._st["leash_holds"] += 1
-            if self._holds >= p.hold_reset_after:
+            if (
+                self._holds >= p.hold_reset_after
+                or self._recov_run >= p.hold_reset_after
+            ):
                 reset = True
                 self._st["hold_resets"] += 1
         if reset:
@@ -1894,6 +2048,7 @@ class PhaseEngine:
             "arm_err_m": err,
             "arm_speed_m_s": spd,
             "gate_wait_ticks": int(gate_info["gate_wait_ticks"]) if gate_info else 0,
+            "gate_wait_s": float(gate_info["gate_wait_s"]) if gate_info else 0.0,
             "gate_timeout": bool(gate_info["gate_timeout"]) if gate_info else False,
             "settle_s": None,
             "exact": bool(exact),
@@ -1903,7 +2058,7 @@ class PhaseEngine:
                 gate_info["arm_err_m"],
                 gate_info["arm_speed_m_s"],
             )
-        self._gate_wait = 0
+        self._gate_clear()
         self._g_cmd = new
         self._events.append(ev)
         self._event_k = self._k - 1
@@ -1994,7 +2149,10 @@ class PhaseEngine:
         if not bool(np.isfinite(sent).all()):
             return
         self._T_prev = sent.copy()
-        self._g_cmd = _b(sent[6])
+        g = _b(sent[6])
+        if self._g_cmd is not None and g != self._g_cmd:
+            self._gate_clear()  # the commanded gripper changed: a gate wait is over
+        self._g_cmd = g
         self._snap_state = None
 
     def rejected(self) -> None:
@@ -2003,7 +2161,8 @@ class PhaseEngine:
         if st is None:
             return
         (self._s, self._lam, self._dlam, self._e_off, self._fresh, self._T_prev,
-         self._g_cmd, self._gate_wait, self._holds, self._dir_prev, bk, self._blend_pending) = st  # fmt: skip
+         self._g_cmd, self._gate_wait, self._holds, self._dir_prev, bk, self._blend_pending,
+         self._gate_since, self._recov_run, self._gate_pos, self._gate_total) = st  # fmt: skip
         if self._blend is not None and bk is not None:
             self._blend["k"] = bk
         elif bk is not None and self._blend is None:

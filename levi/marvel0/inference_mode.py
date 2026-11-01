@@ -29,9 +29,10 @@ CHUNK_ACCEL_V3_LAMBDAS = (
 # 3.0 with the "strong" profile of 2026-11-02 (phase.PhaseParams defaults: a_lat 2.4, 50 mm curvature arc, gripper window 3/3,
 # rise 0.8 / jerk 0.45, close gate 8 mm), chosen on the user's direction of 11-01 ("明显的加速提升和同时稳定性的balance", no
 # over-strict limits): the 11-01 spec profile gave duration ratios 0.79 (RTC) / 0.82 (VLASH) / 0.93 (plain), which the user
-# could not see. Offline replay of the strong profile at 3.0 (jump 0, real latency, H0 / H1): RTC 0.63 / 0.64, VLASH 0.59,
-# plain 0.76 / 0.75, with 0 rejected jumps, 0 targets over the 0.08 m leash, 0 steps over 0.05 m, contour p95 7 mm (golden
-# 6.7-7.0): fr3_accel_test/variable_speed/phase_eval/results/DECISIONS_20261102_strong.md, LIMITS_LEDGER.md E3, E6, E9, E13, E14.
+# could not see. Offline replay of the strong profile at 3.0 with the 11-02 review fixes (jump 0, real latency, H0 / H1): RTC
+# 0.651 / 0.656, VLASH 0.605, plain 0.762 / 0.757, with 0 rejected jumps, 0 targets over the 0.08 m leash, 0 steps over 0.05 m
+# (report_s9b.md):
+# fr3_accel_test/variable_speed/phase_eval/results/DECISIONS_20261102_strong.md, LIMITS_LEDGER.md E3, E6, E9, E13, E14.
 CHUNK_ACCEL_V3_LAMBDA_DEFAULT = 3.0
 # --phase-alpha: the controller's setpoint filter, which must be what `set_clip.py --show` reads back
 CHUNK_ACCEL_V3_ALPHAS = (0.005, 0.01)
