@@ -5052,6 +5052,8 @@
   "marvel0.deploy.dialog.stop_client": "有客户端连着。现在停止会切断它：它不会自己把机械臂送回起始位姿，也不会自己恢复。请把手放在实体急停上。",
   "marvel0.deploy.dialog.override": "有客户端连着时的额外短语",
   "marvel0.deploy.dialog.stop_wait": "停止最多需要 {s} 秒：服务单元有这么长时间结束。",
+  "marvel0.deploy.stop_line.direct": "这个按钮会立即执行，不再弹窗，并且只作用于本页启动的服务单元；服务单元最多有 {s} 秒结束。",
+  "marvel0.deploy.stop_line.client": "有客户端连着。先停止客户端，才能一键停止服务器；现在停止会打开确认窗口，并要求输入额外短语。",
   "marvel0.deploy.result.started": "已接受部署：策略服务器正在启动。需要 {required} MiB 空闲，最后检查时有 {free} MiB 空闲。",
   "marvel0.deploy.result.replayed": "这个请求之前已被接受；没有再启动一次。",
   "marvel0.deploy.stop_result.stopped": "策略服务器已停止：服务单元已不存在，端口上也没有监听。",

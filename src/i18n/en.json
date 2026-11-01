@@ -5052,6 +5052,8 @@
   "marvel0.deploy.dialog.stop_client": "A client is connected. Stopping now cuts it off: it will not return the arm to its start pose or recover by itself. Keep a hand on the physical e-stop.",
   "marvel0.deploy.dialog.override": "Extra phrase for a connected client",
   "marvel0.deploy.dialog.stop_wait": "Stopping can take up to {s} s: the unit is given that long to end.",
+  "marvel0.deploy.stop_line.direct": "This button acts at once, with no window, and only on the unit this page started. The unit is given up to {s} s to end.",
+  "marvel0.deploy.stop_line.client": "A client is connected. Stop the client first to stop the server with one press; stopping now opens a window and asks for an extra phrase.",
   "marvel0.deploy.result.started": "Deploy accepted: the policy server is starting. It needs {required} MiB free; {free} MiB were free at the final check.",
   "marvel0.deploy.result.replayed": "This request had already been accepted; nothing was started again.",
   "marvel0.deploy.stop_result.stopped": "The policy server is stopped: the unit is gone and nothing listens on the port.",

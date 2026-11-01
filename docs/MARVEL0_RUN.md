@@ -110,9 +110,10 @@ folder (task folder, episode folder, raw file) is refused. The route never adopt
 the same requests (ask for a token, then use it), forge the page's headers, write to the client's keyboard or signal its
 process. The tokens, phrases and checklist are clicks that are recorded, not proofs. **Nothing is typed any more**: every
 stop of the page, and the start of the arm stack, the policy server and the deploy, is one confirm window with its hazard
-sentences and tick boxes, and the page sends the phrase itself; the backend still checks it. Starting the hosted client is
-one press without a window (the press states the three checks the boxes used to ask; the phrase and the checklist are still
-sent and checked). The two overrides that cut
+sentences and tick boxes, and the page sends the phrase itself; the backend still checks it. Two actions are one press with
+no window: starting the hosted client (the press states the three checks the boxes used to ask; the phrase and the
+checklist are still sent and checked), and stopping the policy server while no client is connected to it (the page still
+sends the phrase, and the server still checks it and still refuses while a client is connected). The two overrides that cut
 something that is in use stay typed fields: stopping the robot server C with a client connected, and stopping the policy
 server with a client connected. The real barriers are Franka Desk and
 the **physical emergency stop; keep a hand on it**. **Nothing on this page is an emergency stop**: hold freezes the client,
@@ -292,8 +293,8 @@ with the owner at the arm and a hand on the emergency stop.
 ## 这些门的分量，以及这里什么都不是
 
 **这些门只防误操作，防不了同一账号下的其他程序**：任何以这个用户运行的程序都能发出同样的请求（先要令牌再用令牌）、伪造页面的请求头、直接写客户端的键盘或给它的进程发信号。
-令牌、短语和清单是被记录下来的点击，不是证明。**现在不需要再输入任何东西**：页面上每一次停止，以及机械臂栈、策略服务器和部署的启动，都是一个带危险提示和勾选项的确认弹窗，
-短语由页面自己发送，后端仍然核对它。启动托管客户端是一次没有弹窗的点击（这一下代表原来勾选框问的三项；短语和清单仍然发送并被核对）。仍然要手输的只有两个会切断正在使用的东西的覆盖：C 上有客户端连接时停止机器人服务器，以及有客户端连接时停止策略服务器。真正的屏障是 Franka Desk 和**物理急停；手要放在上面**。**页面上没有任何东西是急停**：保持只冻结客户端，不会让机械臂停下，
+令牌、短语和清单是被记录下来的点击，不是证明。**现在不需要再输入任何东西**：页面上的其他停止，以及机械臂栈、策略服务器和部署的启动，都是一个带危险提示和勾选项的确认弹窗，
+短语由页面自己发送，后端仍然核对它。有两个操作是一次点击、不弹窗：启动托管客户端（这一下代表原来勾选框问的三项；短语和清单仍然发送并被核对），以及策略服务器上没有客户端连着时的停止（页面仍自己发送短语，后端仍然核对，有客户端连着时后端仍然拒绝）。仍然要手输的只有两个会切断正在使用的东西的覆盖：C 上有客户端连接时停止机器人服务器，以及有客户端连接时停止策略服务器。真正的屏障是 Franka Desk 和**物理急停；手要放在上面**。**页面上没有任何东西是急停**：保持只冻结客户端，不会让机械臂停下，
 机械臂保持最后收到的目标；成功、失败、作废、退出和回车都会让机械臂不受任何限位检查地回位。agent 会话从不调用 `/run` 和 `/stack` 的写路由（在共享账号上这是规则，不是机制）。
 写操作只在产品 LEVI（主检出里的 `levi-product.service`）中生效；其他实例只显示运行状态并拒绝写操作（`not_product`）。核心结束时伪终端的主端关闭，内核会让客户端挂断。
 

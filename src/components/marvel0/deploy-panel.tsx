@@ -8,18 +8,20 @@
 //
 // What the card shows is decided in deploy-logic.ts; what the server refuses is
 // worded in marvel0-failure.ts. Both writes go through the same-origin proxy that
-// adds the person's token (nothing here reads one), carry a request id kept
-// across a retry, and are confirmed in a window (title, what the action does,
-// Cancel with the initial focus, Confirm). The page sends the action's fixed
-// confirmation phrase itself; the one phrase a person types is the extra one
-// that stops the server under a connected client.
+// adds the person's token (nothing here reads one) and carry a request id kept
+// across a retry. Deploy is confirmed in a window (title, what the action does,
+// Cancel with the initial focus, Confirm). Stop is one press when no client is
+// connected to the policy server: the page sends the fixed confirmation phrase
+// itself and the server still checks it. With a client connected the press opens
+// the confirm window instead, and the one phrase a person types is the extra one
+// that stops the server under that client (stopRoute in deploy-logic.ts).
 import {
   inferenceMode,
   modeLabel,
   validOverlap,
   type InferenceMode,
 } from "./inference-mode";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   CircleCheck,
   CircleDashed,
@@ -69,6 +71,7 @@ import {
   stopControl,
   stopPhrase,
   stopResult,
+  stopRoute,
   type ActionResult,
   type DeployForm,
   type DeployState,
@@ -151,6 +154,7 @@ export function DeployPanel({
   const [problem, setProblem] = useState<Problem | null>(null);
   const busy = useRef(false);
   const ids = useRef(new RequestIds(newRequestId)).current;
+  const stopLineId = useId();
 
   // The model, RTC and guidance strength are the page's one selection: this
   // card chooses them, the command and the run follow. While the policy
@@ -309,14 +313,27 @@ export function DeployPanel({
       // repeats that request, which is never carried out twice.
       if (answer.status !== 0) ids.release();
       setProblem({ action, failure: answer });
-      // A stop that met a client stays open: it needs the extra phrase.
-      if (!(action === "stop" && answer.code === "client_connected")) close();
+      // A stop that met a client needs the extra phrase: the window stays
+      // open, or opens when the press was a direct one (the client connected
+      // after the page last read the port).
+      if (action === "stop" && answer.code === "client_connected")
+        setDialog("stop");
+      else close();
     }
     poll.refresh();
   }
 
-  const clientsNow =
-    (control.clients ?? 0) > 0 || problem?.failure.code === "client_connected";
+  // A client is connected (the last read), or the server just refused the stop
+  // of the open window for one. A refusal left from a closed window does not
+  // count: the next press goes by what is read then, and the server checks
+  // again either way.
+  const route = stopRoute(
+    control,
+    dialog === "stop" &&
+      problem?.action === "stop" &&
+      problem.failure.code === "client_connected",
+  );
+  const clientsNow = route === "window";
   // The dialogs confirm only what the card would still offer: a state that
   // went stale, or changed under an open dialog, switches the button off.
   const deployReady =
@@ -331,6 +348,8 @@ export function DeployPanel({
     !control.operation &&
     !!status &&
     (!clientsNow || override === overridePhrase(status));
+  // How long a stop may take: the unit's own timeout and 30 s more.
+  const stopWaitS = site ? (site.unit.stopTimeoutS ?? 0) + 30 : null;
 
   const edge = EDGE[state];
   return (
@@ -590,17 +609,41 @@ export function DeployPanel({
                 {t("marvel0.deploy.btn.deploy")}
               </Button>
               {control.show && (
-                // Ends a process the client depends on: outlined in the
-                // danger colour; only HOLD is a solid danger button.
-                <Button
-                  variant="secondary"
-                  className="rg-btn--danger-outline"
-                  loading={pending === "stop"}
-                  disabled={stopOff}
-                  onClick={() => setDialog("stop")}
-                >
-                  {t("marvel0.deploy.btn.stop")}
-                </Button>
+                <>
+                  {/* Ends a process the client depends on: outlined in the
+                      danger colour; only HOLD is a solid danger button. */}
+                  <Button
+                    variant="secondary"
+                    className="rg-btn--danger-outline"
+                    loading={pending === "stop"}
+                    disabled={stopOff}
+                    aria-describedby={stopLineId}
+                    onClick={() => {
+                      // No client: one press stops the server. A client: the
+                      // window, where the extra phrase is typed.
+                      if (clientsNow) setDialog("stop");
+                      else if (stopReady) void send("stop");
+                    }}
+                  >
+                    {t("marvel0.deploy.btn.stop")}
+                  </Button>
+                  <span
+                    id={stopLineId}
+                    className="rg-muted"
+                    data-testid="marvel0-deploy-stop-line"
+                    data-route={route}
+                  >
+                    {clientsNow
+                      ? t("marvel0.deploy.stop_line.client")
+                      : sayText(
+                          {
+                            key: "marvel0.deploy.stop_line.direct",
+                            params: { s: stopWaitS ?? 0 },
+                          },
+                          t,
+                        )}
+                  </span>
+                </>
               )}
               {block && (
                 <span className="rg-muted" role="status">
@@ -756,7 +799,7 @@ export function DeployPanel({
                   sayText(
                     {
                       key: "marvel0.deploy.dialog.stop_wait",
-                      params: { s: (site.unit.stopTimeoutS ?? 0) + 30 },
+                      params: { s: stopWaitS ?? 0 },
                     },
                     t,
                   ),

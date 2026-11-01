@@ -52,6 +52,12 @@ const SFT = "pi05_fr3_all_step49999";
 const CFG = "recap_cfg_r2_best_step14300_jax";
 // The button names what it stops: nothing on this page reads as an emergency stop.
 const STOP = en["marvel0.deploy.btn.stop"];
+// A server with an evaluation client connected to its port.
+const connected = () =>
+  ready({
+    listener: { port: 8000, present: true, ours: true, established: 1 },
+    stop_blockers: ["client_connected"],
+  });
 
 async function open(
   canned: Canned = {},
@@ -524,22 +530,14 @@ describe("a server that runs", () => {
     });
   });
 
-  test("Stop opens a confirm window with nothing to type, Cancel in focus, and sends the page's phrase once", async () => {
+  test("with no client connected one press of Stop stops the server: no window, the page's phrase, one request", async () => {
     const { host, calls } = await open({
       deploy: ok(ready()),
       stopDeploy: ok(stopped()),
     });
     await click(button(card(host), STOP)!);
-    const d = dialog(host)!;
-    expect(text(d)).toContain("Stop the policy server");
-    expect(text(d)).toContain(UNIT);
-    expect(text(d)).toContain("never kills a process by number or name");
-    expect(textFields(d)).toHaveLength(0);
-    expect(document.activeElement).toBe(button(d, "Cancel"));
-    expect(button(d, STOP)!.disabled).toBe(false);
-    expect(button(d, STOP)!.className).toContain("ds-btn--danger");
-    await doubleClick(button(d, STOP)!);
     await tick();
+    expect(dialog(host)).toBeNull();
     expect(calls.stopDeploy).toHaveLength(1);
     expect(calls.stopDeploy[0]).toEqual({
       request_id: calls.stopDeploy[0].request_id,
@@ -549,19 +547,155 @@ describe("a server that runs", () => {
     expect(
       text(host.querySelector("[data-testid=marvel0-deploy-result]")),
     ).toContain("The policy server is stopped");
+    // The state is read again at once, as after a confirmed stop.
+    expect(calls.deploy).toBeGreaterThan(1);
+  });
+
+  test("one line next to Stop says what the press does, and the button is described by it", async () => {
+    const { host } = await open({ deploy: ok(ready()) });
+    const line = host.querySelector("[data-testid=marvel0-deploy-stop-line]")!;
+    const row = button(card(host), STOP)!.parentElement!;
+    expect(row.contains(line)).toBe(true);
+    expect(line.getAttribute("data-route")).toBe("direct");
+    // The wait is the unit's stop timeout (90 s in the site fixture) and 30 s.
+    expect(text(line)).toBe(
+      en["marvel0.deploy.stop_line.direct"].replace("{s}", "120"),
+    );
+    expect(text(line)).toContain("no window");
+    expect(button(card(host), STOP)!.getAttribute("aria-describedby")).toBe(
+      line.id,
+    );
+    // No Stop, no line: the server is idle.
+    const idleHost = await open();
+    expect(
+      idleHost.host.querySelector("[data-testid=marvel0-deploy-stop-line]"),
+    ).toBeNull();
+  });
+
+  test("while the stop is on its way the button is off and busy, and a press sends nothing more", async () => {
+    let release: (value: ReturnType<typeof ok>) => void = () => {};
+    const pending = new Promise<ReturnType<typeof ok>>((resolve) => {
+      release = resolve;
+    });
+    const { host, calls } = await open({
+      deploy: ok(ready()),
+      stopDeploy: () => pending,
+    });
+    await click(button(card(host), STOP)!);
+    expect(calls.stopDeploy).toHaveLength(1);
+    const going = button(card(host), STOP)!;
+    expect(going.disabled).toBe(true);
+    expect(going.getAttribute("aria-busy")).toBe("true");
+    expect(dialog(host)).toBeNull();
+    await click(going);
+    await tick();
+    expect(calls.stopDeploy).toHaveLength(1);
+    await act(async () => release(ok(stopped())));
+    await tick();
+    expect(calls.stopDeploy).toHaveLength(1);
+    expect(
+      text(host.querySelector("[data-testid=marvel0-deploy-result]")),
+    ).toContain("The policy server is stopped");
+  });
+
+  test("two presses in the same instant send one stop", async () => {
+    const { host, calls } = await open({
+      deploy: ok(ready()),
+      stopDeploy: ok(stopped()),
+    });
+    await doubleClick(button(card(host), STOP)!);
+    await tick();
+    expect(calls.stopDeploy).toHaveLength(1);
+  });
+
+  test("a press is refused on the card in the page's words, and with no answer the same request id is sent again", async () => {
+    let answers = 0;
+    const { host, calls } = await open({
+      deploy: ok(ready()),
+      stopDeploy: () => {
+        answers += 1;
+        return answers === 1
+          ? nothing()
+          : answers === 2
+            ? refused(502, "stop_incomplete", { unit: UNIT })
+            : ok(stopped());
+      },
+    });
+    await click(button(card(host), STOP)!);
+    await tick();
+    expect(dialog(host)).toBeNull();
+    expect(
+      host.querySelector("[data-testid=marvel0-deploy-problem]"),
+    ).not.toBeNull();
+    await click(button(card(host), STOP)!);
+    await tick();
+    expect(
+      text(host.querySelector("[data-testid=marvel0-deploy-problem]")),
+    ).toContain(`systemctl --user stop ${UNIT}`);
+    await click(button(card(host), STOP)!);
+    await tick();
+    const ids = calls.stopDeploy.map((b) => b.request_id);
+    expect(ids).toHaveLength(3);
+    expect(ids[1]).toBe(ids[0]); // no answer: the same request again
+    expect(ids[2]).not.toBe(ids[1]); // an answered refusal is final
+    expect(
+      host.querySelector("[data-testid=marvel0-deploy-problem]"),
+    ).toBeNull();
+  });
+
+  test("the server refusing the phrase is an internal error with the mismatch, not a prompt to type", async () => {
+    const { host } = await open({
+      deploy: ok(ready()),
+      stopDeploy: refused(400, "confirm_required", {
+        phrase: "stop policy server now",
+      }),
+    });
+    await click(button(card(host), STOP)!);
+    await tick();
+    expect(dialog(host)).toBeNull();
+    const shown = text(
+      host.querySelector("[data-testid=marvel0-deploy-problem]"),
+    );
+    expect(shown).toContain("Internal error");
+    expect(shown).toContain("stop policy server now");
+    expect(shown).not.toMatch(/type|typed/i);
+  });
+
+  test("a stop the server could not finish says what the person runs", async () => {
+    const { host } = await open({
+      deploy: ok(ready()),
+      stopDeploy: refused(502, "stop_incomplete", { unit: UNIT }),
+    });
+    await click(button(card(host), STOP)!);
+    await tick();
+    expect(
+      text(host.querySelector("[data-testid=marvel0-deploy-problem]")),
+    ).toContain(`systemctl --user stop ${UNIT}`);
+  });
+
+  test("with a client connected the press opens the window and sends nothing; the line says to stop the client first", async () => {
+    const { host, calls } = await open({
+      deploy: ok(connected()),
+      stopDeploy: ok(stopped({ client_override_used: true })),
+    });
+    const line = host.querySelector("[data-testid=marvel0-deploy-stop-line]")!;
+    expect(line.getAttribute("data-route")).toBe("window");
+    expect(text(line)).toBe(en["marvel0.deploy.stop_line.client"]);
+    expect(text(line)).toContain("Stop the client first");
+    await click(button(card(host), STOP)!);
+    expect(dialog(host)).not.toBeNull();
+    await tick();
+    expect(calls.stopDeploy).toHaveLength(0);
   });
 
   test("with a client connected the stop keeps the one typed phrase, the override, and says what happens to the client", async () => {
-    const connected = ready({
-      listener: { port: 8000, present: true, ours: true, established: 1 },
-      stop_blockers: ["client_connected"],
-    });
     const { host, calls } = await open({
-      deploy: ok(connected),
+      deploy: ok(connected()),
       stopDeploy: ok(stopped({ client_override_used: true })),
     });
     await click(button(card(host), STOP)!);
     const d = dialog(host)!;
+    expect(text(d)).toContain("Stop the policy server");
     expect(text(d)).toContain("A client is connected");
     expect(text(d)).toContain("Keep a hand on the physical e-stop");
     // The override is the only field; the base phrase is not typed.
@@ -578,8 +712,10 @@ describe("a server that runs", () => {
       "stop with client connected",
     );
     expect(button(d, STOP)!.disabled).toBe(false);
-    await click(button(d, STOP)!);
+    expect(button(d, STOP)!.className).toContain("ds-btn--danger");
+    await doubleClick(button(d, STOP)!);
     await tick();
+    expect(calls.stopDeploy).toHaveLength(1);
     expect(calls.stopDeploy[0]).toMatchObject({
       confirm: "stop policy server",
       client_override: "stop with client connected",
@@ -589,60 +725,110 @@ describe("a server that runs", () => {
     ).toContain("lost its server");
   });
 
-  test("a client that connects after the page last read is refused by the server and the dialog asks for the extra phrase", async () => {
-    const { host } = await open({
+  test("the card goes back to one press when the client leaves, and to the window when one connects", async () => {
+    let now: Record<string, unknown> = connected();
+    const { host } = await open({ deploy: () => ok(now) }, 20);
+    const route = () =>
+      host
+        .querySelector("[data-testid=marvel0-deploy-stop-line]")
+        ?.getAttribute("data-route");
+    expect(route()).toBe("window");
+    now = ready();
+    await waitFor(() => route() === "direct", { label: "one press again" });
+    now = connected();
+    await waitFor(() => route() === "window", { label: "the window again" });
+  });
+
+  test("a client that connects after the page last read: the server refuses the press, the window opens and asks for the extra phrase", async () => {
+    let asked = 0;
+    const { host, calls } = await open({
       deploy: ok(ready()),
-      stopDeploy: refused(409, "client_connected", { established: 1 }),
+      stopDeploy: () => {
+        asked += 1;
+        return asked === 1
+          ? refused(409, "client_connected", { established: 1 })
+          : ok(stopped({ client_override_used: true }));
+      },
     });
     await click(button(card(host), STOP)!);
-    await click(button(dialog(host)!, STOP)!);
     await tick();
+    expect(calls.stopDeploy).toHaveLength(1);
+    expect(calls.stopDeploy[0].client_override).toBe("");
     const d = dialog(host)!;
     expect(d).not.toBeNull();
     expect(text(d)).toContain("type the extra phrase to stop anyway");
-    expect(field(d, "Extra phrase for a connected client")).not.toBeNull();
     expect(textFields(d)).toHaveLength(1);
     expect(button(d, STOP)!.disabled).toBe(true);
-  });
-
-  test("the server refusing the phrase is an internal error with the mismatch, not a prompt to type", async () => {
-    const { host } = await open({
-      deploy: ok(ready()),
-      stopDeploy: refused(400, "confirm_required", {
-        phrase: "stop policy server now",
-      }),
-    });
-    await click(button(card(host), STOP)!);
-    await click(button(dialog(host)!, STOP)!);
-    await tick();
-    const shown = text(
-      host.querySelector("[data-testid=marvel0-deploy-problem]"),
-    );
-    expect(shown).toContain("Internal error");
-    expect(shown).toContain("stop policy server now");
-    expect(shown).not.toMatch(/type|typed/i);
-  });
-
-  test("a stop the server could not finish says what the person runs", async () => {
-    const { host } = await open({
-      deploy: ok(ready()),
-      stopDeploy: refused(502, "stop_incomplete", { unit: UNIT }),
-    });
-    await click(button(card(host), STOP)!);
-    await click(button(dialog(host)!, STOP)!);
-    await tick();
+    // The refusal is in the window, not also on the card.
     expect(
-      text(host.querySelector("[data-testid=marvel0-deploy-problem]")),
-    ).toContain(`systemctl --user stop ${UNIT}`);
+      host.querySelector("[data-testid=marvel0-deploy-problem]"),
+    ).toBeNull();
+    await type(
+      field(d, "Extra phrase for a connected client"),
+      "stop with client connected",
+    );
+    await click(button(d, STOP)!);
+    await tick();
+    expect(calls.stopDeploy).toHaveLength(2);
+    expect(calls.stopDeploy[1]).toMatchObject({
+      confirm: "stop policy server",
+      client_override: "stop with client connected",
+    });
+    expect(dialog(host)).toBeNull();
+  });
+
+  test("after that window was cancelled the refusal does not bind the next press: the read of the port does, and the server checks again", async () => {
+    let asked = 0;
+    const { host, calls } = await open({
+      deploy: ok(ready()),
+      stopDeploy: () => {
+        asked += 1;
+        return asked === 1
+          ? refused(409, "client_connected", { established: 1 })
+          : ok(stopped());
+      },
+    });
+    await click(button(card(host), STOP)!);
+    await tick();
+    await click(button(dialog(host)!, "Cancel")!);
+    expect(dialog(host)).toBeNull();
+    expect(calls.stopDeploy).toHaveLength(1);
+    await click(button(card(host), STOP)!);
+    await tick();
+    expect(dialog(host)).toBeNull();
+    expect(calls.stopDeploy).toHaveLength(2);
+    expect(calls.stopDeploy[1].client_override).toBe("");
+    expect(calls.stopDeploy[1].request_id).not.toBe(
+      calls.stopDeploy[0].request_id,
+    );
   });
 
   test("a deploy or stop that is already running keeps both buttons off", async () => {
     const running = ready({
       operation: { action: "stop", request_id: "abcdefgh", started_at: "t" },
     });
-    const { host } = await open({ deploy: ok(running) });
+    const { host, calls } = await open({ deploy: ok(running) });
     expect(button(card(host), STOP)!.disabled).toBe(true);
     expect(text(card(host))).toContain("A stop is running");
+    await click(button(card(host), STOP)!);
+    expect(calls.stopDeploy).toHaveLength(0);
+  });
+
+  test("a state that is not current keeps Stop off, and a press sends nothing", async () => {
+    let fail = false;
+    const { host, calls } = await open(
+      { deploy: () => (fail ? nothing() : ok(ready())) },
+      20,
+    );
+    expect(button(card(host), STOP)!.disabled).toBe(false);
+    fail = true;
+    await waitFor(() => (button(card(host), STOP)?.disabled ?? true) === true, {
+      label: "Stop to go off with the state",
+    });
+    const stale = button(card(host), STOP);
+    if (stale) await click(stale);
+    await tick();
+    expect(calls.stopDeploy).toHaveLength(0);
   });
 });
 
@@ -660,9 +846,13 @@ describe("a dialog that is open when the state changes", () => {
   });
 
   test("a stop is no longer confirmable once there is nothing to stop", async () => {
-    let now: Record<string, unknown> = ready();
+    let now: Record<string, unknown> = connected();
     const { host } = await open({ deploy: () => ok(now) }, 20);
     await click(button(card(host), STOP)!);
+    await type(
+      field(dialog(host)!, "Extra phrase for a connected client"),
+      "stop with client connected",
+    );
     expect(button(dialog(host)!, STOP)!.disabled).toBe(false);
     now = idle();
     await waitFor(() => card(host).getAttribute("data-state") === "idle", {
@@ -691,7 +881,7 @@ describe("a dialog that is open when the state changes", () => {
   test("a state that could not be read again closes the dialog, so its button cannot be pressed", async () => {
     let fail = false;
     const { host } = await open(
-      { deploy: () => (fail ? nothing() : ok(ready())) },
+      { deploy: () => (fail ? nothing() : ok(connected())) },
       20,
     );
     await click(button(card(host), STOP)!);
@@ -1277,11 +1467,32 @@ describe("the labels and what a lost state takes with it", () => {
   test("the stop buttons name the policy server, in both languages", async () => {
     expect(STOP).toBe("Stop policy server");
     expect(zh["marvel0.deploy.btn.stop"]).toBe("停止策略服务器");
-    const { host } = await open({ deploy: ok(ready()) });
+    const { host } = await open({ deploy: ok(connected()) });
+    expect(button(card(host), STOP)).toBeDefined();
     await click(button(card(host), STOP)!);
     expect(button(dialog(host)!, STOP)).toBeDefined();
     for (const node of host.querySelectorAll("button"))
       expect(node.textContent).not.toMatch(/e-?stop|emergency/i);
+  });
+
+  test("the line next to Stop is worded in Chinese, for a press and for a client", async () => {
+    const press = await open({ deploy: ok(ready()) }, 5000, true);
+    await waitFor(
+      () =>
+        text(
+          press.host.querySelector("[data-testid=marvel0-deploy-stop-line]"),
+        ) === zh["marvel0.deploy.stop_line.direct"].replace("{s}", "120"),
+      { label: "the Chinese line" },
+    );
+    const client = await open({ deploy: ok(connected()) }, 5000, true);
+    await waitFor(
+      () =>
+        text(
+          client.host.querySelector("[data-testid=marvel0-deploy-stop-line]"),
+        ) === zh["marvel0.deploy.stop_line.client"],
+      { label: "the Chinese line for a client" },
+    );
+    expect(zh["marvel0.deploy.stop_line.client"]).toMatch(/[一-鿿]/);
   });
 
   test("a stopping state the server says can be stopped again offers the button", async () => {

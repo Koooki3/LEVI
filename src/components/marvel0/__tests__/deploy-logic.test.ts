@@ -31,6 +31,7 @@ import {
   stopControl,
   stopPhrase,
   stopResult,
+  stopRoute,
   wantLog,
   type DeployForm,
   type DeployStatus,
@@ -964,6 +965,24 @@ describe("the Stop control", () => {
     expect(busy.show).toBe(true);
     expect(busy.clients).toBe(2);
     expect(stopControl(status(ready())).clients).toBe(0);
+  });
+
+  test("a press stops at once when no client is connected, and opens the window when one is or the server just said so", () => {
+    const route = (over: Record<string, unknown>, refusedClient = false) =>
+      stopRoute(stopControl(status(ready(over))), refusedClient);
+    const listening = (established: number | null) => ({
+      listener: { port: 8000, present: true, ours: true, established },
+    });
+    expect(route(listening(0))).toBe("direct");
+    expect(route(listening(1))).toBe("window");
+    expect(route(listening(3))).toBe("window");
+    // The server's own `client_connected` for the open window counts, however
+    // the last read of the port looked.
+    expect(route(listening(0), true)).toBe("window");
+    // An unreadable table is not a client the page can name: the press goes to
+    // the server, which cannot read the table either and refuses.
+    expect(route(listening(null))).toBe("direct");
+    expect(stopRoute(stopControl(null), false)).toBe("direct");
   });
 
   test("an unreadable socket table counts as a client being possible", () => {

@@ -841,6 +841,21 @@ export function stopControl(status: DeployStatus | null): StopControl {
   };
 }
 
+/** How a press of Stop goes. `direct`: no client is connected, so the press
+ * itself sends the stop (the page sends the fixed confirm phrase; the server
+ * still checks it and still refuses while a client is connected). `window`: a
+ * client is connected, or the server just refused a stop with
+ * `client_connected` (`refusedClient`, true while that window is open), so the
+ * confirm window asks for the typed override phrase. */
+export type StopRoute = "direct" | "window";
+
+export function stopRoute(
+  control: StopControl,
+  refusedClient: boolean,
+): StopRoute {
+  return (control.clients ?? 0) > 0 || refusedClient ? "window" : "direct";
+}
+
 // -- what a write answered
 
 export interface ActionResult {

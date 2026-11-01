@@ -615,10 +615,18 @@ terminal; the page can only see it once it listens." The Deploy button of the
 card is off, with the reason beside it, while the state is not `idle`,
 `failed` or `dead`, while a check blocks, while the chosen fraction needs more
 memory than is free, and while the state cannot be read. **Stop policy server** appears only
-when the server says the unit can be stopped; its confirm window sends the stop
-phrase itself and, when a client is connected, asks for the extra phrase to be
-typed (one of the two typed overrides that stay), and says how
-long the stop may take (`stop_timeout_s` + 30 seconds). For a server started by
+when the server says the unit can be stopped. With no client connected to the
+policy port it is one press: no window, the page sends the stop phrase itself
+(the server still checks it), the button is off and busy until the server has
+answered (a second press sends nothing), and a refusal is shown on the card. A
+line beside the button says so, and that the unit is given up to `stop_timeout_s`
++ 30 seconds to end. With a client connected, the card says in that line that
+the client must be stopped first for a one-press stop, and the press opens the
+confirm window as before: it sends the stop phrase itself, asks for the extra
+phrase to be typed (one of the two typed overrides that stay) and says how long
+the stop may take. A client that connects after the page last read the port is
+refused by the server (`client_connected`); the press then opens that same
+window. The server's own checks are unchanged. For a server started by
 hand there is no Stop, only the instruction to press Ctrl+C in its terminal. The
 page reads the state every 3 seconds while the tab is visible (not while it is
 hidden; the wait doubles up to 30 seconds after a failure, and an answer older
