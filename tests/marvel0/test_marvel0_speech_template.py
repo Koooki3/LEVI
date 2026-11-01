@@ -614,3 +614,43 @@ def test_a_chinese_place_word_is_unclear_and_never_translated(frames, said):
     # 这/里 are fillers, so 放到这里 has one thing only: no_task, also no sentence.
     assert result["status"] in {"unclear", "no_task"} and result["prompt"] is None
     assert asked == [] and T.unknown_names(said) == []
+
+
+# ------------------------------------------------- review 2026-11-01 (1, 2)
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "把苹果放到那边",
+        "把苹果放到边上",
+        "把苹果放到这儿",
+        "把苹果放到那头",
+        "把苹果放到侧面",
+        "把苹果放到对面",
+        "把苹果放到底下",
+        "把苹果放到附近",
+        "把苹果放到角落",
+    ],
+)
+def test_what_is_left_of_a_place_word_never_reaches_the_translator(frames, said):
+    asked = []
+    result = gen(said, frames, translate=lambda zh: asked.append(zh) or "son")
+    assert asked == [] and result["prompt"] is None
+    assert result["status"] in {"unclear", "no_task"}
+
+
+@pytest.mark.parametrize(
+    "said",
+    ["把苹果放到左边，旁边", "把苹果放到桌子，左边", "把金桔，柚子放到碗里"],
+)
+def test_chinese_pieces_are_never_joined_into_an_english_slot(frames, said):
+    result = gen(said, frames)
+    assert result["prompt"] is None
+    assert all(slot["source"] != "english" for slot in result["slots"])
+
+
+def test_english_words_next_to_each_other_still_name_one_thing(frames):
+    assert gen("put the dragon fruit into the red bowl", frames)["prompt"] == (
+        "pick dragon fruit into red bowl"
+    )

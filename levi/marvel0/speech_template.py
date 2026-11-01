@@ -566,8 +566,15 @@ def _steps(tokens: Sequence[matcher._Tok]) -> list[_Step]:
         last = ""
         for tok in group:
             kind = tok.concept[0]
-            if tok.concept == "U" and last == "U" and not pending:
-                # Unknown words next to each other name one thing: "dragon fruit".
+            if (
+                tok.concept == "U"
+                and last == "U"
+                and not pending
+                and matcher._ENGLISH_WORD.fullmatch(tok.heard)
+                and matcher._ENGLISH_WORD.fullmatch(things[-1].said.split(" ")[-1])
+            ):
+                # English words next to each other name one thing: "dragon fruit".
+                # Chinese pieces are never joined: 左边，旁边 is two places.
                 joined = things[-1]
                 things[-1] = _Thing(
                     joined.modifiers,
@@ -653,16 +660,23 @@ _NOT_NAMES: Final = frozenset(
 _ZH_PLACE_WORDS: Final = frozenset(
     """左边 右边 左侧 右侧 左面 右面 上面 下面 上边 下边 上方 下方 里面 里边
     外面 外边 旁边 前面 后面 前边 后边 前方 后方 中间 中央 这里 那里 这边 那边
-    这儿 那儿 左 右 上 下 里 外 前 后 旁""".split()  # noqa: SIM905
+    这儿 那儿 左 右 上 下 里 外 前 后 旁 附近 角落 对面 侧面 底下 边上
+    边 儿 头 侧 方 面 央 底 对""".split()  # noqa: SIM905
 )
+# The single characters on the last line are what is left of a place word once
+# the matcher has dropped 这/那/上/里/中 as fillers (那边 -> 边, 这儿 -> 儿,
+# 这头 -> 头, 下方 -> 方): heard alone, they are a place, never an object.
 
 
 def _said_name(said: str) -> bool:
-    """An object name said in English: one to three words, none of them a
-    direction or a manner (the words that ended up as "pick apple on left")."""
+    """An object name said in English: one to three plain words of letters,
+    none of them a direction or a manner (the words that ended up as "pick
+    apple on left"); Chinese never passes here, it needs a translation."""
     words = said.split(" ")
-    return len(words) <= 3 and not any(
-        w in _NOT_NAMES or w.endswith("ly") for w in words
+    return (
+        bool(_NAME.fullmatch(said))
+        and len(words) <= 3
+        and not any(w in _NOT_NAMES or w.endswith("ly") for w in words)
     )
 
 
