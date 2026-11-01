@@ -1765,15 +1765,17 @@ class PhaseEngine:
                 if self._gate_since is None:
                     self._gate_since, self._gate_pos = float(m.t), gpos
                 waited_s = float(m.t) - self._gate_since
-                cap = _GATE_TOTAL * p.gate_max_ticks
+                gate_cap = (
+                    _GATE_TOTAL * p.gate_max_ticks
+                )  # not `cap`: that is this tick's lambda cap (trace, TickOut)
                 timeout = (
                     self._gate_wait >= p.gate_max_ticks
                     or waited_s >= (p.gate_max_ticks - 0.5) * self.dt
                     or (
-                        self._gate_total >= cap
+                        self._gate_total >= gate_cap
                         and (
                             self._gate_wait >= _GATE_AT_PLACE
-                            or self._gate_total >= 2 * cap
+                            or self._gate_total >= 2 * gate_cap
                         )
                     )
                 )

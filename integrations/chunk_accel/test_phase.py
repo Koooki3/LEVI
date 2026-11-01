@@ -2561,6 +2561,39 @@ class TestGateAndSettle(unittest.TestCase):
         self.assertEqual(eng.summary()["gate_waits"], sum(waits))
         self.assertTrue(ev["gate_timeout"])
 
+    def test_a_close_that_moves_after_every_wait_goes_out_at_twice_the_cap(self):
+        """The close moves 30 mm after every gate-held tick, so it never waits 2 ticks at one place: only the hard
+        backstop (2 x the total cap = 20 gate-held ticks) sends it, not never."""
+        waits, ev, _eng = self._moved_close_run(
+            lambda n: 0.03 * n, reload_after=1, ticks=120
+        )
+        self.assertIsNotNone(ev, f"never closed: {waits}")
+        self.assertEqual(sum(waits), 2 * 2 * PhaseParams().gate_max_ticks, waits)
+        self.assertTrue(ev["gate_timeout"])
+
+    def test_gate_ticks_report_the_lambda_cap_not_the_gate_count(self):
+        """TickOut.cap (and the trace's "cap") is the tick's lambda cap, at most lambda_max, on gate-held ticks too
+        (review of b7768da3: a local named cap for the gate's total once overwrote it with 10)."""
+        eng = PhaseEngine(PhaseParams(lambda_max=3.0))
+        chunk = self._chunk()
+        eng.set_chunk(chunk, "sync")
+        pos = chunk[0].copy()
+        gate_caps = []
+        for k in range(40):
+            x = pos.copy()
+            x[2] += (
+                0.03  # parked above the target: never ready, the gate holds until its timeout
+            )
+            out = eng.tick(Measured(x, 0.0, k * DT))
+            eng.executed(out.target)
+            pos = out.target.copy()
+            self.assertLessEqual(out.cap, 3.0 + 1e-9, (k, out.binding))
+            if out.binding == "gate":
+                gate_caps.append(out.cap)
+            if out.grip_event and out.grip_event["kind"] == "close":
+                break
+        self.assertTrue(gate_caps, "the gate never held")
+
     def test_a_rejected_gate_tick_restores_the_wait_and_its_place(self):
         """rejected() rolls back the wait count, its start time, its place and the total (snapshot of 11-02)."""
         eng = PhaseEngine(PhaseParams(lambda_max=3.0))

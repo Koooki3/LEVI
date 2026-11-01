@@ -622,15 +622,17 @@ def test_install_refuses_a_client_that_lacks_a_symbol(tmp_path):
 
 @needs_tree
 def test_the_dry_run_on_the_real_tree_passes():
-    """install.py --openpi-root <real tree> without --apply: the acceptance of WP3."""
+    """install.py --openpi-root <real tree> without --apply: the acceptance of WP3. The tree may already be installed
+    (then its receipt exists): the dry run must leave the receipt exactly as it found it."""
     import install
 
+    receipt = OPENPI / "lab/chunk_accel" / install.RECEIPT
+    before = receipt.read_bytes() if receipt.exists() else None
     result = install.install(OPENPI, apply=False)
     assert result["applied"] is False
     assert {r["name"] for r in result["files"]} == set(install.FILES)
-    assert not (OPENPI / "lab/chunk_accel" / install.RECEIPT).exists(), (
-        "a dry run must not write the receipt"
-    )
+    after = receipt.read_bytes() if receipt.exists() else None
+    assert after == before, "a dry run must not write the receipt"
 
 
 # ============================================================================== the entry's hooks on stub client modules
@@ -1316,7 +1318,7 @@ def test_the_pages_argv_for_each_phase_form_parses_and_validates(tmp_path):
 
 
 @needs_openpi
-@pytest.mark.parametrize("mode", ("rtc", "plain"))
+@pytest.mark.parametrize("mode", ("rtc", "plain", "vlash"))
 def test_a_frozen_arm_trips_the_leash_and_the_client_survives(tmp_path, mode):
     """The robot stops reporting new poses 8.5 cm from where the plan expects the arm: the last target is out of the
     leash, the engine holds it (or walks it back to the arm), the escape (3 holds -> reset, or the client's own 0.10 m
@@ -1347,12 +1349,22 @@ def test_a_frozen_arm_trips_the_leash_and_the_client_survives(tmp_path, mode):
     if mode == "plain":
         holds = [r["k"] for r in lines if r["kind"] == "tick" and r["hold"]]
         chunks = [r["k"] for r in lines if r["kind"] == "chunk"]
-        ends = [k for k in holds if k + 1 not in holds]  # the last hold of each run
-        for k in ends:
-            assert any(k < c <= k + 6 for c in chunks) or k == max(
-                r["k"] for r in lines if r["kind"] == "tick"
-            ), (k, holds, chunks)
-        assert ends, holds  # plain's escape is the per-run check above
+        runs = []  # consecutive ticks with a hold
+        for k in holds:
+            if runs and k == runs[-1][-1] + 1:
+                runs[-1].append(k)
+            else:
+                runs.append([k])
+        last = max(r["k"] for r in lines if r["kind"] == "tick")
+        assert runs, holds
+        for run in runs:
+            # the escape: the loop's next query ends every run within 2 holds (or the third hold resets the plan),
+            # and a new chunk follows within the open-loop horizon unless the episode ended first
+            assert len(run) <= 2 or ca["hold_resets"] >= 1, (runs, chunks)
+            assert any(run[-1] < c <= run[-1] + 6 for c in chunks) or run[-1] == last, (
+                run,
+                chunks,
+            )
     else:
         assert escapes >= 1, (
             ca["hold_resets"],
