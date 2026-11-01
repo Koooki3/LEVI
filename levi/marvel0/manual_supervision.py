@@ -16,6 +16,17 @@ from levi.live import jsonio
 from .manual_worker import production_factory
 
 SCHEMA = "levi.marvel0.manual.v1"
+# How long a real session's end waits for what a release leaves in motion: the
+# last pose still being sent (its HTTP timeout is the session's target_timeout_s)
+# and the remote's measured settle window after the hold. A person's stop is
+# usually the release of the drag itself, so without this wait the end came
+# before the arm had settled and the session stayed owned (2026-10-30 17:01,
+# RIG-MANUAL-RELEASE-RACE). Bounded: an arm that does not settle is refused.
+END_SETTLE_EXTRA_S = 3.0
+END_SETTLE_MAX_S = 10.0
+END_SETTLE_POLL_S = 0.1
+# The refusals that mean "not yet", not "never".
+END_NOT_YET = frozenset({"physical_stop_unproven", "manual_request_in_flight"})
 CONFIRM = "start synthetic translation session"
 REAL_CONFIRM = "start real translation session"
 
@@ -465,6 +476,25 @@ class ManualSessions:
             self._refuse("audit_failed")
         return answer
 
+    def _physical_evidence(self, engine):
+        """The remote's proof of a settled stop, waiting a bounded time for it:
+        the last pose may still be in flight and the arm still settling when
+        the end arrives with the release."""
+        from .manual import ManualRefused
+
+        host = self.sup.host
+        wait = min(
+            END_SETTLE_MAX_S, engine.limits.target_timeout_s + END_SETTLE_EXTRA_S
+        )
+        deadline = host.monotonic() + wait
+        while True:
+            try:
+                return engine.physical_evidence()
+            except ManualRefused as exc:
+                if exc.code not in END_NOT_YET or host.monotonic() >= deadline:
+                    raise
+            host.sleep(END_SETTLE_POLL_S)
+
     def end(self, body):
         from .manual import ManualRefused
 
@@ -473,7 +503,7 @@ class ManualSessions:
         try:
             engine.stop(reason="end_requested")
             evidence = (
-                engine.physical_evidence()
+                self._physical_evidence(engine)
                 if engine.view()["capabilities"].get("real_motion")
                 else self.sup.host.manual_settled(engine)
             )

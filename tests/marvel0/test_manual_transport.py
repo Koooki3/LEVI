@@ -372,3 +372,97 @@ def test_queued_remote_dispatch_is_revoked_without_waiting_for_inflight_http():
     assert not first.is_alive() and not second.is_alive()
     assert "admission_closed" in errors
     assert not any(call[1] == "gripper" for call in remote.calls)
+
+
+# --- an end that arrives with the release (2026-10-30 17:01, RIG-MANUAL-RELEASE-RACE)
+
+
+class SettlingRemote(Remote):
+    """A remote on the supervisor's clock (the transport's) whose arm needs
+    ``settle_reads`` state reads after the stop to be measured settled, or never."""
+
+    def __init__(self, settle_reads, clock):
+        super().__init__()
+        self.settle_reads = settle_reads
+        self.reads_after_stop = 0
+        self.clock = clock
+
+    def request(self, method, path, body):
+        self.now = self.clock()
+        return super().request(method, path, body)
+
+    def state(self):
+        if self.entered.is_set() and self.settle_reads is not None:
+            self.reads_after_stop += 1
+            if self.reads_after_stop >= self.settle_reads and self.session:
+                self.evidence = "measured_settled"
+        return super().state()
+
+
+def real_session(m, monkeypatch, remote):
+    m.host.manual_factory = production_factory
+    m.host.manual_enabled = lambda: True
+    monkeypatch.setattr(
+        real.Transport,
+        "_http",
+        lambda self, method, path, body: remote.request(method, path, body),
+    )
+    challenge = m.sup.manual.challenge({"limits": LIMITS, "stop_limits": STOPS})
+    view = m.sup.manual.start(
+        {
+            "limits": LIMITS,
+            "stop_limits": STOPS,
+            "request_id": m.rid(),
+            "attest": ATTEST,
+            "confirm": challenge["confirm"],
+            "challenge": challenge["challenge"],
+        }
+    )
+    assert view["environment"] == "production" and view["state"] != "fault_locked"
+    return {"session_id": view["session_id"], "generation": view["generation"]}
+
+
+def test_an_end_with_the_release_waits_for_the_arm_to_settle(machine, monkeypatch):
+    m = machine
+    remote = SettlingRemote(settle_reads=4, clock=m.host.monotonic)
+    ident = real_session(m, monkeypatch, remote)
+    started = m.host.monotonic()
+    view = m.sup.manual.end({**ident, "request_id": m.rid()})
+    assert view["state"] == "ended" and view["stop_evidence"] == "physical_settled"
+    assert len([c for c in remote.calls if c[1] == "end"]) == 1
+    assert m.host.monotonic() - started < 3.3  # waited, within the bound
+    assert not flock_busy(m.tmp / "arm.lock") and m.sup.active() is None
+
+
+def test_an_arm_that_never_settles_is_refused_after_the_bound(machine, monkeypatch):
+    m = machine
+    remote = SettlingRemote(settle_reads=None, clock=m.host.monotonic)
+    ident = real_session(m, monkeypatch, remote)
+    started = m.host.monotonic()
+    with pytest.raises(run.Refuse) as refused:
+        m.sup.manual.end({**ident, "request_id": m.rid()})
+    assert refused.value.code == "manual_refused"
+    waited = m.host.monotonic() - started
+    assert 3.3 - 1e-6 <= waited < 3.5  # target_timeout_s 0.3 + 3.0, then refused
+    assert not [c for c in remote.calls if c[1] == "end"]
+    assert flock_busy(m.tmp / "arm.lock") and m.sup.active() is not None
+    remote.settle_reads = 1  # the arm settles later: a second end succeeds
+    assert m.sup.manual.end({**ident, "request_id": m.rid()})["state"] == "ended"
+    assert not flock_busy(m.tmp / "arm.lock")
+
+
+def test_a_refusal_that_is_not_waiting_is_not_waited_for(machine, monkeypatch):
+    m = machine
+    remote = SettlingRemote(settle_reads=1, clock=m.host.monotonic)
+    ident = real_session(m, monkeypatch, remote)
+    remote.instance = "another instance"  # the server restarted: never "not yet"
+    started = m.host.monotonic()
+    with pytest.raises(run.Refuse):
+        m.sup.manual.end({**ident, "request_id": m.rid()})
+    assert m.host.monotonic() - started < 0.2
+    assert flock_busy(m.tmp / "arm.lock")
+    if m.sup.manual.fd is not None:
+        import os
+
+        os.close(m.sup.manual.fd)
+        m.sup.manual.fd = None
