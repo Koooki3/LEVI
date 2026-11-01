@@ -540,6 +540,9 @@ export interface Proposal {
   /** The model of the form this match was made for. */
   forModel: string;
   shownAt: number;
+  /** When the words were first heard: a check against another model's list
+   * shows the same heard words anew (a new `shownAt`) but keeps this. */
+  heardAt?: number;
   /** Use may be pressed (the 800 ms are over). */
   armed: boolean;
   /** An edited text or a model switch is being matched again. */
@@ -672,12 +675,13 @@ function proposalOf(
     | "match"
     | "forModel"
     | "truncated"
-  > & { at: number },
+  > & { at: number; heardAt?: number },
 ): Proposal {
-  const { at, ...rest } = fields;
+  const { at, heardAt, ...rest } = fields;
   return {
     ...rest,
     shownAt: at,
+    heardAt: heardAt ?? at,
     armed: false,
     checking: false,
     picked: null,
@@ -786,6 +790,12 @@ export function speechReducer(
             ? false
             : (state.proposal?.truncated ?? false),
           at: action.at,
+          heardAt:
+            !action.edited &&
+            !state.proposal?.edited &&
+            state.proposal?.transcript === action.transcript
+              ? state.proposal.heardAt
+              : undefined,
         }),
       };
     }

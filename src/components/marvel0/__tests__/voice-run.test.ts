@@ -4,7 +4,12 @@
 import { describe, expect, test } from "bun:test";
 import en from "@/i18n/en.json";
 import { runView, type RunView } from "../run-logic";
-import { readMatch, type Proposal } from "../speech-logic";
+import {
+  initialSpeech,
+  readMatch,
+  speechReducer,
+  type Proposal,
+} from "../speech-logic";
 import {
   GATE_WAIT_MS,
   autoPick,
@@ -99,16 +104,16 @@ describe("which proposal runs by itself", () => {
     expect(pick(proposal(matchC({ generated: generated() })))).toEqual({
       prompt: "put eggplant into blue bowl",
     });
-    const translated = generated({
+    // An English name said as such (not translated) has no dataset original.
+    const english = generated({
       prompt: "put the kumquat in the blue bowl",
       dataset_original: null,
       slots: [
-        { said: "金桔", english: "kumquat", source: "translation" },
+        { said: "kumquat", english: "kumquat", source: "english" },
         { said: "碗", english: "bowl", source: "lexicon" },
       ],
-      translations: [translation()],
     });
-    expect(pick(proposal(matchC({ generated: translated })))).toEqual({
+    expect(pick(proposal(matchC({ generated: english })))).toEqual({
       prompt: "put the kumquat in the blue bowl",
     });
   });
@@ -188,6 +193,62 @@ describe("which proposal runs by itself (review 2026-11-01)", () => {
       prompt: "put eggplant into blue bowl",
     });
     expect(pick(proposal(matchB()))).toEqual({ why: "choose" });
+  });
+});
+
+describe("which proposal runs by itself (re-review 2026-11-01)", () => {
+  test("words heard before the switch stay 'earlier' when a model switch shows them again", () => {
+    const first = speechReducer(initialSpeech, {
+      type: "checked",
+      seq: 0,
+      at: 100,
+      transcript: "叠盘子",
+      match: readMatch(matchA(KNOWN[1]))!,
+      forModel: ALL,
+      edited: false,
+    });
+    const again = speechReducer(first, {
+      type: "checked",
+      seq: 0,
+      at: 5000,
+      transcript: "叠盘子",
+      match: readMatch(matchA(KNOWN[1]))!,
+      forModel: "pi05_fr3_sp_v1",
+      edited: false,
+    });
+    expect(again.proposal?.shownAt).toBe(5000);
+    expect(again.proposal?.heardAt).toBe(100);
+    expect(autoPick(again.proposal!, 1000)).toEqual({ why: "earlier" });
+  });
+
+  test("a generated sentence with a name the local model translated waits for a press", () => {
+    const translated = generated({
+      prompt: "put the kumquat in the blue bowl",
+      dataset_original: null,
+      slots: [
+        { said: "金桔", english: "kumquat", source: "translation" },
+        { said: "碗", english: "bowl", source: "lexicon" },
+      ],
+      translations: [translation()],
+    });
+    expect(pick(proposal(matchC({ generated: translated })))).toEqual({
+      why: "translated",
+    });
+    expect(pick(proposal(matchB({ generated: translated })))).toEqual({
+      why: "translated",
+    });
+  });
+
+  test("the first gate needs an episode record", () => {
+    const wait: GateWait = {
+      route: "start",
+      generation: 1,
+      prompt: "new",
+      afterRunId: RUN,
+      until: 10_000,
+    };
+    const gate = view("at_gate", savedForm("new"), "20261101T150000-bbbbbb");
+    expect(gateStep(wait, { ...gate, episode: null }, true, 0)).toBe("wait");
   });
 });
 

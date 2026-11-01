@@ -153,14 +153,19 @@ async function open(
 ) {
   audio = installFakeAudio();
   network(heard);
-  const { api, calls } = fakeApi({ preview: ok(preview()) });
+  const gates: {
+    start: null | Promise<void>;
+    press: null | Promise<void>;
+    preview: null | Promise<void>;
+  } = { start: null, press: null, preview: null };
+  const { api, calls } = fakeApi({
+    preview: async () => {
+      if (gates.preview) await gates.preview;
+      return ok(preview());
+    },
+  });
   const pressed: string[] = [];
   const starts: Started[] = [];
-  /** A start or a key held on its way while set. */
-  const gates: { start: null | Promise<void>; press: null | Promise<void> } = {
-    start: null,
-    press: null,
-  };
   const base: RunActions = {
     working: null,
     holding: false,
@@ -433,7 +438,7 @@ describe("the voice run on the action page", () => {
     hold.resolve();
     await flushAll();
     expect(byTest(h, "marvel0-speech-run")?.dataset.on).toBe("false");
-    expect(status(h)).toBeFalsy();
+    expect(status(h)?.getAttribute("data-phase")).toBe("off_pending");
     await h.show(poll("starting", NEXT, KNOWN[1]));
     await h.show(poll("at_gate", NEXT, KNOWN[1]));
     await advance(5000);
@@ -586,6 +591,60 @@ describe("the voice run on the action page", () => {
       en["marvel0.speech.run.dropped"],
     );
     await h.show(poll("at_gate", NEXT, KNOWN[1]));
+    expect(h.pressed).toEqual([]);
+  });
+  // Regression tests for the re-review of 2026-11-01 (R1, R3, R4).
+  test("R1: another sentence while a start is on its way: the first leaves no Enter, the second is not run", async () => {
+    let next = () => matchA(KNOWN[1]);
+    const h = await open(poll("idle_ready"), () => next());
+    const slow = deferred();
+    h.gates.start = slow.promise;
+    await switchOn(h);
+    await speak(h);
+    await advance(2100);
+    await flushAll();
+    expect(h.starts).toHaveLength(1);
+    next = () => matchA(KNOWN[0]);
+    await speak(h);
+    await advance(2100);
+    await flushAll();
+    expect(status(h)?.getAttribute("data-phase")).toBe("refused");
+    expect(byTest(h, "marvel0-speech-run-status")?.textContent).toContain(
+      en["marvel0.speech.run.dropped"],
+    );
+    slow.resolve();
+    await flushAll();
+    await h.show(poll("starting", NEXT, KNOWN[1]));
+    await h.show(poll("at_gate", NEXT, KNOWN[1]));
+    await advance(5000);
+    expect(h.pressed).toEqual([]);
+    expect(h.starts).toHaveLength(1);
+  });
+
+  test("R3: switching off while the command is being made: the client is not started", async () => {
+    const h = await open(poll("idle_ready"));
+    const slow = deferred();
+    h.gates.preview = slow.promise;
+    await switchOn(h);
+    await speak(h);
+    await advance(2100);
+    await flushAll();
+    expect(h.calls.preview).toHaveLength(1);
+    await act(async () => byTest(h, "marvel0-speech-run-off")!.click());
+    slow.resolve();
+    await flushAll();
+    expect(h.starts).toHaveLength(0);
+  });
+
+  test("R4: a gate without an episode record is not entered", async () => {
+    const h = await open(poll("idle_ready"));
+    await switchOn(h);
+    await speak(h);
+    await advance(2100);
+    await flushAll();
+    const gate = poll("at_gate", NEXT, KNOWN[1]);
+    (gate.value as { episode: unknown }).episode = null;
+    await h.show(gate);
     expect(h.pressed).toEqual([]);
   });
 });

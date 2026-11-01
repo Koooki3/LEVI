@@ -6407,5 +6407,7 @@
   "marvel0.speech.run.no_auto.earlier": "This answer was shown before voice run was switched on, so it does not run by itself: press a run button to run it.",
   "marvel0.speech.run.why.model": "The client at the start gate runs another model than step 3's, and the sentence was checked for step 3's model.",
   "marvel0.speech.run.status.held": "A hold was sent while the client was starting, so the episode is not started: {prompt}",
-  "marvel0.speech.run.dropped": "The episode of the earlier instruction does not start by itself either."
+  "marvel0.speech.run.dropped": "The episode of the earlier instruction does not start by itself either.",
+  "marvel0.speech.run.status.off_pending": "Voice run is off. What was already sent may still bring the client up to its start gate, where nothing moves; the episode does not start by itself: {prompt}",
+  "marvel0.speech.run.no_auto.translated": "This sentence has an object name the local model translated, which the policy was never trained on: check it and press a run button."
 }

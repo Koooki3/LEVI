@@ -262,13 +262,19 @@ export function CommandPanel({
   /** The voice run's start: the form with the spoken instruction is made into
    * the command, and that very command's client is started with the ticks
    * given when the voice run was switched on. */
-  async function startFor(prompt: string, ack: Ack): Promise<boolean> {
+  async function startFor(
+    prompt: string,
+    ack: Ack,
+    still: () => boolean,
+  ): Promise<boolean> {
     if (!runActions || resuming || !models || !site) return false;
     const next: CommandForm = { ...form, prompt };
     edit({ prompt });
     const request = commandBody(next, control?.default ?? DEFAULT_HZ);
     if (!(await makeFor(request.body, request.errors, bodyKey(request.body))))
       return false;
+    // Switched off, or another sentence came, while the command was made.
+    if (!still()) return false;
     const group = next.group.trim() || placeholders(next, models, site).group;
     return runActions.start(request.body, startPhrase(run, group), ack);
   }
@@ -333,8 +339,8 @@ export function CommandPanel({
                 voiceRun={voiceRun}
                 onUse={(prompt) => {
                   if (voiceRun?.on) {
-                    void voiceRun.submit(prompt, form.modelId, (ack) =>
-                      startFor(prompt, ack),
+                    void voiceRun.submit(prompt, form.modelId, (ack, still) =>
+                      startFor(prompt, ack, still),
                     );
                     return;
                   }

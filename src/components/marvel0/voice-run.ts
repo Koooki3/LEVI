@@ -45,7 +45,8 @@ export type NoAutoWhy =
   | "disagree"
   | "choose"
   | "person"
-  | "earlier";
+  | "earlier"
+  | "translated";
 
 export type AutoPick = { prompt: string } | { why: NoAutoWhy };
 
@@ -55,12 +56,15 @@ export type AutoPick = { prompt: string } | { why: NoAutoWhy };
  * one: the policy was trained on that wording). The generated sentence also
  * runs for a tier-B or C answer: B and C mean no allowed instruction says what
  * was heard, while the generated sentence was read back to hold exactly the
- * heard objects with their colours and sizes. `armedAt` is when the switch
- * was turned on: an answer shown before it never runs by itself. */
+ * heard objects with their colours and sizes; but not when one of its names
+ * was translated by the local model. `armedAt` is when the switch was turned
+ * on: words heard before it never run by themselves, even when a model switch
+ * shows them again. */
 export function autoPick(proposal: Proposal, armedAt: number): AutoPick {
   const match = proposal.match;
   if (effectiveTier(match) === "V") return { why: "vetoed" };
-  if (proposal.shownAt < armedAt) return { why: "earlier" };
+  if ((proposal.heardAt ?? proposal.shownAt) < armedAt)
+    return { why: "earlier" };
   if (proposal.edited) return { why: "edited" };
   if (proposal.truncated) return { why: "truncated" };
   if (proposal.showAll || proposal.editing || proposal.picked !== null)
@@ -70,6 +74,14 @@ export function autoPick(proposal: Proposal, armedAt: number): AutoPick {
   if (generated.length > 0 && match.generated) {
     if (match.generated.repairs.length > 0) return { why: "guessed" };
     if (best !== null && !generated.includes(best)) return { why: "disagree" };
+    // A name the local model translated is one the policy was never trained
+    // on, and this path has no measured error rate: a person presses Run
+    // (independent review 2026-11-01; the owner may choose otherwise).
+    if (
+      best === null &&
+      match.generated.slots.some((slot) => slot.source === "translation")
+    )
+      return { why: "translated" };
     return {
       prompt: best ?? match.generated.datasetOriginal ?? generated[0],
     };
@@ -177,7 +189,8 @@ export function gateStep(
     // and the scene was not reset for this sentence. The client counts its
     // episodes per run from 0 (openpi fr3_local eval_session.py).
     const episode = view.episode;
-    if ((episode?.counted ?? 0) !== 0 || (episode?.no ?? 0) > 1) return "gone";
+    if (!episode) return "wait";
+    if (episode.counted !== 0 || (episode.no ?? 0) > 1) return "gone";
     return view.actions.enter.allowed ? "enter" : "wait";
   }
   if (view.state === "preflight" || view.state === "starting") return "wait";

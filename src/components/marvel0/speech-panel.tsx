@@ -685,6 +685,7 @@ const RUN_STATUS_KEY: Record<VoiceRunPhase, string> = {
   gone: "marvel0.speech.run.status.gone",
   held: "marvel0.speech.run.status.held",
   off_held: "marvel0.speech.run.status.off_held",
+  off_pending: "marvel0.speech.run.status.off_pending",
 };
 /** The phases that are progress, not a sentence that did not run. */
 const RUN_PROGRESS = new Set<VoiceRunPhase>([
@@ -704,6 +705,7 @@ const NO_AUTO_KEY: Record<NoAutoWhy, string> = {
   choose: "marvel0.speech.run.no_auto.choose",
   person: "marvel0.speech.run.no_auto.person",
   earlier: "marvel0.speech.run.no_auto.earlier",
+  translated: "marvel0.speech.run.no_auto.translated",
 };
 
 /** With the voice run on: the sentence a clear proposal runs by itself after

@@ -16,7 +16,13 @@ import type { Say } from "./marvel0-logic";
 import type { ChangeAttest, EpisodeChangeStatus } from "./run-panel";
 import type { Ack, RunActions } from "./use-run-actions";
 import type { RunPoll } from "./use-run-poll";
-import { GATE_WAIT_MS, gateStep, voiceRoute, type GateWait } from "./voice-run";
+import {
+  GATE_WAIT_MS,
+  WHY,
+  gateStep,
+  voiceRoute,
+  type GateWait,
+} from "./voice-run";
 
 export type VoiceRunPhase =
   /** Making the command and starting the client. */
@@ -35,7 +41,10 @@ export type VoiceRunPhase =
   /** A hold was sent while waiting for the gate: Enter is not pressed. */
   | "held"
   /** Switched off by itself: the client was frozen or lost. */
-  | "off_held";
+  | "off_held"
+  /** Switched off while a start or change was on its way: the client may
+   * still come up to its gate, where nothing moves; Enter is not pressed. */
+  | "off_pending";
 
 export interface VoiceRunStatus {
   phase: VoiceRunPhase;
@@ -58,7 +67,7 @@ export interface VoiceRun {
   submit: (
     prompt: string,
     modelId: string,
-    start: (ack: Ack) => Promise<boolean>,
+    start: (ack: Ack, still: () => boolean) => Promise<boolean>,
   ) => Promise<void>;
 }
 
@@ -87,7 +96,11 @@ export function useVoiceRun({
   armedRef.current = armed;
   /** Bumped by every arm, disarm and automatic switch-off. */
   const generation = useRef(0);
+  /** Bumped by a newer sentence that replaces the one on its way. */
+  const sentence = useRef(0);
   const busy = useRef(false);
+  /** The sentence on its way while `busy`. */
+  const busyPrompt = useRef<string | null>(null);
   /** The run Enter was pressed for: never twice for one run. */
   const entered = useRef<string | null>(null);
   const view = run?.value ?? null;
@@ -103,7 +116,19 @@ export function useVoiceRun({
     setWait(null);
     setStatus(next);
   }, []);
-  const disarm = useCallback(() => off(null), [off]);
+  const disarm = useCallback(
+    () =>
+      off(
+        busy.current || waitRef.current
+          ? {
+              phase: "off_pending",
+              prompt: busyPrompt.current ?? waitRef.current?.prompt ?? "",
+              why: null,
+            }
+          : null,
+      ),
+    [off],
+  );
   const arm = useCallback((ticks: ChangeAttest) => {
     if (!ticks.estop || !ticks.scene_reset || !ticks.area_clear) return;
     // A frozen or lost client is ended first; the ticks are for a scene after it.
@@ -122,12 +147,28 @@ export function useVoiceRun({
     async (
       prompt: string,
       modelId: string,
-      start: (ack: Ack) => Promise<boolean>,
+      start: (ack: Ack, still: () => boolean) => Promise<boolean>,
     ) => {
       const ticks = armedRef.current?.attest;
-      if (!ticks || !runActions || busy.current) return;
+      if (!ticks || !runActions) return;
+      if (busy.current) {
+        // A start or change is on its way. The same sentence again changes
+        // nothing; another one means the person changed their mind: the one
+        // on its way leaves no Enter behind, and this one is not run.
+        if (prompt === busyPrompt.current) return;
+        sentence.current += 1;
+        setStatus({
+          phase: "refused",
+          prompt,
+          why: { say: { key: WHY.busy }, text: "" },
+          dropped: true,
+        });
+        return;
+      }
       const mine = generation.current;
-      const still = () => generation.current === mine;
+      const said = sentence.current;
+      const still = () =>
+        generation.current === mine && sentence.current === said;
       const { view: now, current: fresh } = viewRef.current;
       const route = voiceRoute(
         now,
@@ -148,6 +189,7 @@ export function useVoiceRun({
         return;
       }
       busy.current = true;
+      busyPrompt.current = prompt;
       setWait(null);
       try {
         if (route.kind === "enter") {
@@ -174,7 +216,7 @@ export function useVoiceRun({
           return;
         }
         say("starting");
-        const started = await start(ticks);
+        const started = await start(ticks, still);
         if (!still()) return;
         if (started) {
           say("waiting");
@@ -188,6 +230,7 @@ export function useVoiceRun({
         } else say("start_failed");
       } finally {
         busy.current = false;
+        busyPrompt.current = null;
       }
     },
     [runActions, changeInstruction],

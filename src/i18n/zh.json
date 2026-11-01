@@ -6407,5 +6407,7 @@
   "marvel0.speech.run.no_auto.earlier": "这条结果是在开启语音直跑之前出现的，不会自动运行：点运行按钮才会运行。",
   "marvel0.speech.run.why.model": "开始闸门处的客户端用的模型和第 3 步选的不同，而这句话是按第 3 步的模型检查的。",
   "marvel0.speech.run.status.held": "客户端启动期间发出了“保持”，不会自动开始片段：{prompt}",
-  "marvel0.speech.run.dropped": "之前那条指令的片段也不会再自动开始。"
+  "marvel0.speech.run.dropped": "之前那条指令的片段也不会再自动开始。",
+  "marvel0.speech.run.status.off_pending": "语音直跑已关闭。已经发出的操作可能仍会把客户端启动到开始闸门，那里不会动；片段不会自动开始：{prompt}",
+  "marvel0.speech.run.no_auto.translated": "这句话里有本地模型翻译的物体名，策略没训练过：确认后点运行按钮。"
 }
