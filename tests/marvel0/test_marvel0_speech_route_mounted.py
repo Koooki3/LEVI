@@ -71,7 +71,8 @@ def test_the_service_serves_each_speech_route_once():
     assert sorted(p for p in schema if p.startswith(BASE)) == sorted(
         {path for _, path in ROUTES}
     )
-    assert [str(w.message) for w in caught if "speech" in str(w.message)] == []
+    # Match the route path, not the word: a checkout path may contain "speech".
+    assert [str(w.message) for w in caught if "/marvel0/speech" in str(w.message)] == []
 
 
 @pytest.mark.parametrize("method, path", ROUTES)

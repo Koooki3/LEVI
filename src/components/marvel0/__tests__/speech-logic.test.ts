@@ -1072,6 +1072,27 @@ describe("the sentence as heard", () => {
       expect(canUse(state, prompt, 1800)).toBe(true);
   });
 
+  test("is no second block when the words are already the best match or a generated sentence", () => {
+    // Its notes ("not a trained instruction", "never starts by itself") would
+    // be wrong for a sentence the card already offers (review 2026-11-01).
+    const best = match(
+      matchA(KNOWN[2], { as_heard: asHeard(KNOWN[2].toLowerCase()) }),
+    );
+    expect(best.best?.prompt).toBe(KNOWN[2]);
+    expect(heardOption(best)).toBeNull();
+    const gen = match(
+      matchA(KNOWN[2], {
+        generated: generated(),
+        as_heard: asHeard("put eggplant into blue bowl"),
+      }),
+    );
+    expect(generatedPrompts(gen)).toContain("put eggplant into blue bowl");
+    expect(heardOption(gen)).toBeNull();
+    // A different sentence is still offered.
+    const other = match(matchA(KNOWN[2], { as_heard: asHeard(TENNIS) }));
+    expect(heardOption(other)?.prompt).toBe(TENNIS);
+  });
+
   test("is not usable for the restricted family, whatever the server says of it", () => {
     const read = match(
       matchC({

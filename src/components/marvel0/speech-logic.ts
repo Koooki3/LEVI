@@ -522,6 +522,15 @@ export interface HeardOption {
 export function heardOption(match: Match): HeardOption | null {
   const heard = match.asHeard;
   if (!heard || effectiveTier(match) === "V") return null;
+  // The same words as an instruction the card already offers (the best
+  // match or a generated sentence): no second block, whose notes (not a
+  // trained instruction, never starts by itself) would be wrong for it.
+  const same = (text: string) => text.trim().toLowerCase() === heard.prompt;
+  if (
+    (match.best && same(match.best.prompt)) ||
+    generatedPrompts(match).some(same)
+  )
+    return null;
   const why = match.family === "restricted" ? "restricted" : heard.problem;
   return {
     prompt: heard.prompt,
