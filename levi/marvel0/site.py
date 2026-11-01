@@ -148,7 +148,7 @@ cpu_affinity = "8-15"          # a taskset list; choose cores the arm controller
 cpu_quota_percent = 0          # 0 = no CPUQuota property
 stop_timeout_s = 90
 start_timeout_s = 600
-# jax_cache_dir = "/abs/path/jax-cache"   # optional: JAX's persistent compilation cache for the policy server, so a restarted server does not compile again (about 12 s on the first inference)
+# jax_cache_dir = "/path/to/jax-cache"   # optional: JAX's persistent compilation cache for the policy server, so a restarted server does not compile again (about 12 s on the first inference)
 
 [catalog]
 known_configs = ["pi05_fr3_all_state", "pi05_fr3_all_state_cfg"]
