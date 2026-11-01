@@ -45,7 +45,7 @@ matcher's lexicon is asked of the loaded worker's text model (forward
 translation, back-translation, same-object judgement), and only an answer that
 passes ``speech_translate.judge`` fills the slot. This never starts a worker,
 runs only while the gate is open, and loads the text model only when the GPU
-has ``TRANSLATE_VRAM_MIB`` plus the site margin free. Verdicts are kept in
+has the model's ``TRANSLATE_VRAM_MIB`` plus the site margin free. Verdicts are kept in
 memory (``_TRANSLATED_MAX``, per text model), never on disk or in a log.
 """
 
@@ -576,7 +576,7 @@ def _verdict_view(verdict) -> dict:
 
 def _text_model_check(site) -> Callable[[], None]:
     """``may_load`` for ``Manager.translate``: the gate is open and the GPU has
-    room for the text model (``TRANSLATE_VRAM_MIB`` plus the site margin). The
+    room for the text model (its ``TRANSLATE_VRAM_MIB`` plus the site margin). The
     status is read fresh: the cached one may be from before the speech worker
     itself loaded (a cold start takes about a second), and would count its
     memory as free."""
@@ -595,7 +595,7 @@ def _text_model_check(site) -> Callable[[], None]:
         if gate(site, status, loaded=True):
             raise SttError("translate_blocked", "the speech gate is closed")
         gpu = status.get("gpu") if isinstance(status, dict) else None
-        if _gpu_reasons(site, gpu, stt_settings.TRANSLATE_VRAM_MIB):
+        if _gpu_reasons(site, gpu, stt_settings.translate_vram_mib()):
             raise SttError(
                 "translate_gpu", "too little free GPU memory for the text model"
             )

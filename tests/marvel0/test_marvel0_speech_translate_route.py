@@ -179,7 +179,7 @@ def test_a_closed_gate_asks_nobody(machine):
 
 
 def test_the_text_model_loads_only_with_room_on_the_gpu(machine):
-    needed = settings.TRANSLATE_VRAM_MIB + 1024  # the sample site's margin
+    needed = settings.translate_vram_mib() + 1024  # the sample site's margin
     machine.policy.doc = policy_status(free_mib=needed - 1)
     assert match(machine)["untranslated_why"] == "gpu_memory"
     machine.policy.doc = policy_status(free_mib=needed)

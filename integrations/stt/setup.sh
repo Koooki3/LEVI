@@ -7,8 +7,8 @@
 # The model (Qwen/Qwen3-ASR-1.7B-hf at a pinned commit, 4.1 GB) is downloaded
 # into MODEL_DIR/qwen3-asr-1.7b-hf and MANIFEST.sha256 is written next to it;
 # the shared Hugging Face cache is never touched. `./setup.sh --model
-# qwen3-4b-instruct-2507` installs the object-name translation model (7.6 GB)
-# the same way.
+# qwen3.5-2b` installs the object-name translation model (4.3 GB) the same way
+# (`--model qwen3-4b-instruct-2507`: the 4B, 7.6 GB).
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"

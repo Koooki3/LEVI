@@ -3,7 +3,7 @@
     python -m levi_stt_worker.cli --check
     python -m levi_stt_worker.cli serve --model-dir D [--model N] [--device cuda]
         [--max-seconds 10] [--cpu-affinity 8-15] [--provider qwen3-asr|fake]
-        [--translate-model qwen3-4b-instruct-2507]
+        [--translate-model qwen3.5-2b]
     python -m levi_stt_worker.cli install-model --model-dir D [--model N] [--from-dir SNAPSHOT]
     python -m levi_stt_worker.cli verify-model --model-dir D [--model N]
 

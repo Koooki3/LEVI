@@ -12,7 +12,7 @@ would turn every existing site file into a 412):
   no model and no GPU (tests and demonstrations).
 - ``LEVI_STT_TRANSLATE_MODEL``: the folder (in the same model folder) of the
   model that translates Chinese object names for the voice card's generated
-  sentence (default ``qwen3-4b-instruct-2507``); ``off`` turns translation
+  sentence (default ``qwen3.5-2b``; ``qwen3-4b-instruct-2507`` also); ``off`` turns translation
   off. A folder that is not installed also leaves it off. With the ``fake``
   speech model, any name other than ``off`` selects the fake translator.
 
@@ -30,9 +30,9 @@ from .. import paths
 
 DEFAULT_MODEL = "qwen3-asr-1.7b-hf"
 FAKE_MODEL = "fake"
-DEFAULT_TRANSLATE_MODEL = "qwen3-4b-instruct-2507"
+DEFAULT_TRANSLATE_MODEL = "qwen3.5-2b"
 # The text models whose prompts were evaluated (the worker's TRANSLATION_MODELS).
-TRANSLATE_MODELS = ("qwen3-4b-instruct-2507",)
+TRANSLATE_MODELS = ("qwen3.5-2b", "qwen3-4b-instruct-2507")
 TRANSLATE_OFF = "off"
 MANIFEST = "MANIFEST.sha256"
 DEVICE = "cuda"
@@ -52,8 +52,9 @@ REQUEST_TIMEOUT_S = 20
 # peak of the 1.7B model: 4878 MiB).
 STT_VRAM_MIB = 5000
 # The free GPU memory loading the translation model needs besides the site's
-# margin (measured peak of Qwen3-4B-Instruct-2507 in bf16: 9359 MiB, 2026-10-31).
-TRANSLATE_VRAM_MIB = 9500
+# margin, per model (measured in the worker's process: Qwen3.5-2B 4382 MiB on
+# 2026-11-01; Qwen3-4B-Instruct-2507's evaluation peak 9359 MiB on 2026-10-31).
+TRANSLATE_VRAM_MIB = {"qwen3.5-2b": 4600, "qwen3-4b-instruct-2507": 9500}
 # A translate request answers up to three short questions per name (at most
 # four names of at most 16 characters, a body of at most 1024 bytes: the
 # worker's own limits in integrations/stt/levi_stt_worker/common.py). Measured
@@ -143,6 +144,14 @@ def worker_state() -> WorkerState:
 
 def translate_model_name() -> str:
     return os.getenv("LEVI_STT_TRANSLATE_MODEL") or DEFAULT_TRANSLATE_MODEL
+
+
+def translate_vram_mib() -> int:
+    """The free GPU memory the configured text model needs to load (the most
+    any known model needs when the name is not one of them)."""
+    return TRANSLATE_VRAM_MIB.get(
+        translate_model_name(), max(TRANSLATE_VRAM_MIB.values())
+    )
 
 
 def translation_state() -> str:

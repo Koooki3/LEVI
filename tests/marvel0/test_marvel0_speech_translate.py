@@ -1,8 +1,9 @@
 """``levi/marvel0/speech_translate.py``: which machine translations of a Chinese
 object name the voice card may use.
 
-The fixture holds the answers Qwen3-4B-Instruct-2507 gave in the 2026-10-31
-evaluation (levi-hub programs/rig-console/reviews/voice-translate-20261031.md):
+Two fixtures hold recorded answers: Qwen3-4B-Instruct-2507 in the 2026-10-31
+evaluation, and Qwen3.5-2B (the default since 2026-11-01) on 2026-11-01 with
+the production prompts. The first's evaluation (levi-hub programs/rig-console/reviews/voice-translate-20261031.md):
 81 names outside the lexicon, 11 words that are not objects, and a held-out
 set of 40 frozen before it was run. Replaying them pins the rule to the numbers
 the documentation reports; a change of the rule that moves them fails here.
@@ -19,12 +20,18 @@ from levi.marvel0 import speech_translate as translate
 ANSWERS = json.loads(
     (Path(__file__).parent / "fixtures" / "speech_translate_answers.json").read_text()
 )
+# The default model since 2026-11-01, answering the production prompts.
+ANSWERS_2B = json.loads(
+    (
+        Path(__file__).parent / "fixtures" / "speech_translate_answers_qwen35_2b.json"
+    ).read_text()
+)
 
 
-def replay(name: str) -> tuple[list, list]:
+def replay(name: str, answers: dict = ANSWERS) -> tuple[list, list]:
     """``(passed, passed but not one of the accepted English names)``."""
     passed, off = [], []
-    for row in ANSWERS["sets"][name]:
+    for row in answers["sets"][name]:
         verdict = translate.judge(
             row["said"], row["english"], row["chinese"], row["same"]
         )
@@ -204,3 +211,28 @@ def test_a_phrase_that_is_not_one_object_is_refused(english):
 @pytest.mark.parametrize("back", [3, ["金桔"], b"x"])
 def test_an_answer_of_the_wrong_type_never_raises(back):
     assert translate.judge("金桔", "kumquat", back, True).reason == "unchecked"
+
+
+def test_the_default_models_recorded_answers_give_the_documented_numbers():
+    passed, off = replay("new", ANSWERS_2B)
+    assert len(passed) == 69
+    # All usable names, none wrong (the 4B had honeydew and cup pad).
+    assert sorted(off) == sorted(
+        [
+            ("夹子", "clips"),
+            ("衣夹", "clothing clip"),
+            ("毛线球", "wool ball"),
+            ("弹力球", "elastic ball"),
+        ]
+    )
+    passed, off = replay("heldout", ANSWERS_2B)
+    assert len(passed) == 29
+    assert sorted(off) == sorted(
+        [
+            ("开瓶器", "corkscrew"),
+            ("保鲜盒", "preservation box"),
+            ("棒棒糖", "candy stick"),
+        ]
+    )
+    passed, _ = replay("not_object", ANSWERS_2B)
+    assert passed == []

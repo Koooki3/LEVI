@@ -58,6 +58,18 @@ MANIFEST_NAME = "MANIFEST.sha256"
 # programs/rig-console/reviews/voice-translate-20261031.md): 31 of the 40
 # held-out names passed the checks, none of them wrongly.
 TRANSLATION_MODELS: dict[str, tuple[str, str, dict[str, str]]] = {
+    # Default since 2026-11-01: as good as the 4B on the evaluation (69/81 new
+    # names, 0 wrong) in 4.4 GB instead of 9.4 GB. Loaded text-only
+    # (AutoModelForCausalLM): the vision tower's weights are not read.
+    "qwen3.5-2b": (
+        "Qwen/Qwen3.5-2B",
+        "15852e8c16360a2fea060d615a32b45270f8a8fc",
+        {
+            "model.safetensors-00001-of-00001.safetensors": "aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1",
+            # Hugging Face's LFS etag of the pinned commit (a sha256).
+            "tokenizer.json": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+        },
+    ),
     "qwen3-4b-instruct-2507": (
         "Qwen/Qwen3-4B-Instruct-2507",
         "cdbee75f17c01a7cc42f958dc650907174af0554",
@@ -70,7 +82,7 @@ TRANSLATION_MODELS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
 }
-DEFAULT_TRANSLATION_MODEL = "qwen3-4b-instruct-2507"
+DEFAULT_TRANSLATION_MODEL = "qwen3.5-2b"
 TRANSLATE_MAX_NAMES = 4  # object names in one request (a spoken task has two per step)
 TRANSLATE_MAX_CHARS = 16  # characters of one Chinese name
 TRANSLATE_MAX_BYTES = 1024  # the request body (UTF-8 JSON)

@@ -195,7 +195,7 @@ def test_real_model_transcribes_a_spoken_command():
     assert result["text"].lower() not in err.lower()  # the transcript is not on stderr
 
 
-TRANSLATE_MODEL = "qwen3-4b-instruct-2507"
+TRANSLATE_MODEL = os.getenv("LEVI_STT_TRANSLATE_MODEL") or "qwen3.5-2b"
 
 
 def translate_request(request_id: str, names: list[str]) -> bytes:
@@ -209,8 +209,9 @@ def translate_request(request_id: str, names: list[str]) -> bytes:
     reason="the translation model is not installed",
 )
 def test_real_text_model_translates_and_the_check_keeps_only_good_names():
-    """About 15 GB of GPU memory (speech and text model): run it through the
-    resource driver like the rest of this file."""
+    """About 9.3 GB of GPU memory with the default Qwen3.5-2B (speech and text
+    model; 14.3 GB with the 4B): run it through the resource driver like the
+    rest of this file."""
     from levi.marvel0 import speech_translate
 
     names = ["金桔", "卷笔刀", "停下"]

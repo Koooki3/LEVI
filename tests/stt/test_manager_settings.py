@@ -162,7 +162,7 @@ def test_the_fake_provider_runs_with_the_python_of_levi(monkeypatch):
     assert argv[-2:] == ["--provider", "fake"]
     assert argv[argv.index("--cpu-affinity") + 1] == ""
     # The fake provider answers translations from its script: always on.
-    assert argv[argv.index("--translate-model") + 1] == "qwen3-4b-instruct-2507"
+    assert argv[argv.index("--translate-model") + 1] == "qwen3.5-2b"
 
 
 def test_the_translation_model_is_passed_only_when_it_is_installed_and_on(
@@ -173,12 +173,15 @@ def test_the_translation_model_is_passed_only_when_it_is_installed_and_on(
     monkeypatch.setattr(settings, "model_dir", lambda: tmp_path)
     assert settings.translation_state() == "model_missing"
     assert "--translate-model" not in settings.command("")
-    folder = tmp_path / "qwen3-4b-instruct-2507"
+    folder = tmp_path / "qwen3.5-2b"
     folder.mkdir()
     (folder / settings.MANIFEST).write_text("")
     assert settings.translation_state() == "ready"
     argv = settings.command("")
-    assert argv[argv.index("--translate-model") + 1] == "qwen3-4b-instruct-2507"
+    assert argv[argv.index("--translate-model") + 1] == "qwen3.5-2b"
+    # The 4B stays a choice; it needs its own folder.
+    monkeypatch.setenv("LEVI_STT_TRANSLATE_MODEL", "qwen3-4b-instruct-2507")
+    assert settings.translation_state() == "model_missing"
     monkeypatch.setenv("LEVI_STT_TRANSLATE_MODEL", "off")
     assert settings.translation_state() == "off"
     assert "--translate-model" not in settings.command("")
@@ -206,3 +209,13 @@ def test_the_core_modules_import_without_the_model_stack():
         check=False,
     )
     assert done.returncode == 0, done.stderr[-2000:]
+
+
+def test_the_memory_to_load_follows_the_configured_model(monkeypatch):
+    monkeypatch.delenv("LEVI_STT_TRANSLATE_MODEL", raising=False)
+    assert settings.translate_vram_mib() == settings.TRANSLATE_VRAM_MIB["qwen3.5-2b"]
+    monkeypatch.setenv("LEVI_STT_TRANSLATE_MODEL", "qwen3-4b-instruct-2507")
+    assert settings.translate_vram_mib() == 9500
+    monkeypatch.setenv("LEVI_STT_TRANSLATE_MODEL", "off")
+    assert settings.translate_vram_mib() == max(settings.TRANSLATE_VRAM_MIB.values())
+    assert set(settings.TRANSLATE_VRAM_MIB) == set(settings.TRANSLATE_MODELS)

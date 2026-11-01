@@ -6,12 +6,12 @@ Isolated speech-to-text worker for the marvel0 page's voice input. LEVI's servic
 ./setup.sh                      # uv venv (torch 2.13.0 cu132) + model into ${LEVI_WORKSPACE:-<checkout>/.state}/checkpoints/stt
 ./setup.sh /data/stt            # other model folder
 ./setup.sh --from-dir SNAPSHOT  # copy a local snapshot instead of downloading
-./setup.sh --model qwen3-4b-instruct-2507   # the object-name translation model (7.6 GB)
+./setup.sh --model qwen3.5-2b               # the object-name translation model (4.3 GB; qwen3-4b-instruct-2507: 7.6 GB)
 .venv/bin/python -m levi_stt_worker.cli --check                      # versions only, no model, no CUDA probe
 .venv/bin/python -m levi_stt_worker.cli verify-model --model-dir D   # sha256 of every file against MANIFEST.sha256
 ```
 
-The installer downloads one pinned commit into `<model-dir>/qwen3-asr-1.7b-hf/`, refuses weights whose sha256 differs from the pinned one, and writes `MANIFEST.sha256` (`sha256sum -c` format). It uses a scratch Hugging Face cache inside the model folder and removes it; the shared cache is never written. `qwen3-asr-0.6b-hf` (2.5 GB of GPU memory in the benchmark, not run through this worker) is the low-memory alternative. `qwen3-4b-instruct-2507` (`Qwen/Qwen3-4B-Instruct-2507`; its three weight files and `tokenizer.json` are pinned by sha256; any other `*.safetensors`, at any depth, and an index that names another shard are refused) is the text model that translates Chinese object names for the voice card's generated sentence; LEVI passes it with `--translate-model` when it is installed.
+The installer downloads one pinned commit into `<model-dir>/qwen3-asr-1.7b-hf/`, refuses weights whose sha256 differs from the pinned one, and writes `MANIFEST.sha256` (`sha256sum -c` format). It uses a scratch Hugging Face cache inside the model folder and removes it; the shared cache is never written. `qwen3-asr-0.6b-hf` (2.5 GB of GPU memory in the benchmark, not run through this worker) is the low-memory alternative. `qwen3.5-2b` (`Qwen/Qwen3.5-2B`, the default, 4.3 GB, loaded text-only) and `qwen3-4b-instruct-2507` (`Qwen/Qwen3-4B-Instruct-2507`, 7.6 GB) are the text models that translate Chinese object names for the voice card's generated sentence; for both, the weight files and `tokenizer.json` are pinned by sha256, and any other `*.safetensors`, at any depth, and an index that names another shard are refused. LEVI passes the configured one (`LEVI_STT_TRANSLATE_MODEL`) with `--translate-model` when it is installed.
 
 ## Protocol
 
