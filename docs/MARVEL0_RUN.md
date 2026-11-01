@@ -1,7 +1,7 @@
 # The evaluation run buttons of the marvel_workstation page
 
 English first, Chinese after the line below. Backend: `levi/marvel0/run.py` (state rules, keys, supervisor),
-`run_api.py` (routes), `hostchild.py` (the launcher). Tests: `tests/marvel0/test_marvel0_run*.py`, the fake client
+`run_api.py` (routes), `live_frame.py` (the live camera view), `hostchild.py` (the launcher). Tests: `tests/marvel0/test_marvel0_run*.py`, the fake client
 `tests/marvel0/fake_client.py` and the drift check `scripts/check_client_prompts.py`. Design record:
 `LEVI/lab/levi-hub/programs/rig-console/reviews/control-design-20261020.md` (section 2.10-2.12, 5.3) and the client-hosting
 review next to it, whose adversarial part wins where the pieces differ.
@@ -66,6 +66,30 @@ the one the command card renders (`command.render` is the only producer of the c
 - **Records.** `<workspace>/marvel0/run/`: `record.json`, `requests/` (answers kept for replay), `history.jsonl` (time,
   person, key name, request id, episode number; no transcript, no path) and `logs/` (the client's output, 0600). The page
   shows the last lines of the log without paths (`GET /run/log`).
+
+## The live view
+
+Below the Run card (step 4) the page shows two pictures side by side: the third-person (side) camera on the left and
+the wrist camera on the right (one column on a narrow screen). They are the newest frames of the episode the client is
+recording. **The client owns both RealSense cameras, so LEVI opens none of them.** While an episode runs the client writes
+`side_camera_raw.avi` and `wrist_camera_raw.avi` (MJPG, one frame per executed action, about 10 a second) into the
+episode folder `<rollout root>/<group>/<task folder>/demo_NNNN/`; at the episode's end it turns them into mp4, deletes the
+raw files and creates `.complete`. Each MJPG frame is a complete JPEG, so `GET /run/frame?camera=side|wrist`
+(`live_frame.py`, `Supervisor.frame`) reads the tail of the growing file (at most the last 1 MiB) and returns the last
+complete JPEG (`image/jpeg`, `Cache-Control: no-store`, `X-Levi-Frame-Age-Ms` and `X-Levi-Frame-Episode`). The folder is
+the one without `.complete` whose raw file was written most recently, among all task folders of this run's group, and only
+files written since the run began count; a link at any level is refused.
+
+- **It reads files only.** No camera is opened, no port is connected to, nothing is sent to the client, the control loop
+  is not touched. The route is a read like `/run/log`; it answers `404` with `no_run` (no active run of this page),
+  `no_episode` (no episode is recording) or `no_frame` (no complete frame yet), and `422` for any other camera.
+- **Limits.** There is no picture between episodes: the client records frames only while an episode runs, and the page
+  says so. The source is about 10 frames a second and the page asks about 4 times a second (one request at a time per
+  camera, only while the run is active and the tab is visible), so a picture can be a few tenths of a second old; its age
+  and episode folder are written under it. The last picture stays for 3 seconds when the next one is missing. The client
+  buffers its video output, so the picture can also trail the camera by about one frame.
+- The proxy of the page (`src/utils/backendProxy.ts`) passes the two `X-Levi-Frame-*` headers on, besides the content
+  type and the cache policy it already passed.
 
 ## What the gates are worth, and what nothing here is
 
@@ -180,7 +204,7 @@ with the owner at the arm and a hand on the emergency stop.
 
 # 评测运行按键
 
-上文是英文，下文是中文。后端：`levi/marvel0/run.py`（状态规则、按键、监管者）、`run_api.py`（路由）、`hostchild.py`（启动器）。
+上文是英文，下文是中文。后端：`levi/marvel0/run.py`（状态规则、按键、监管者）、`run_api.py`（路由）、`live_frame.py`（实时相机画面）、`hostchild.py`（启动器）。
 测试：`tests/marvel0/test_marvel0_run*.py`，假客户端 `tests/marvel0/fake_client.py`，漂移检查 `scripts/check_client_prompts.py`。
 设计记录：`LEVI/lab/levi-hub/programs/rig-console/reviews/control-design-20261020.md`（2.10-2.12 与 5.3）以及旁边的客户端托管复审，
 两者不一致时以复审中的对抗部分为准。
@@ -227,6 +251,22 @@ with the owner at the arm and a hand on the emergency stop.
   （客户端让显式的 `--min-z` 压过它的任务表，风险 RIG-08）；其他任务只给警告。机器人服务器没有在监听只是提示，不拒绝。
 - **记录。** `<工作区>/marvel0/run/`：`record.json`、`requests/`（保留回答以供重放）、`history.jsonl`（时间、人、按键名、请求号、片段号；没有记录文本，没有路径）和
   `logs/`（客户端的输出，0600）。页面显示日志的末尾几行，路径已去掉（`GET /run/log`）。
+
+## 实时画面
+
+运行卡片（第 4 步）下面并排显示两张画面：左边是第三视角（侧面）相机，右边是腕部相机（窄屏时排成一列）。它们是客户端正在录制的片段的最新帧。
+**两台 RealSense 相机都归客户端使用，所以 LEVI 不打开任何一台。** 片段运行时，客户端把 `side_camera_raw.avi` 和 `wrist_camera_raw.avi`
+（MJPG，每执行一个动作一帧，约每秒 10 帧）写进片段文件夹 `<采集根目录>/<组>/<任务文件夹>/demo_NNNN/`；片段结束时它把这些文件转成 mp4，
+删除原始文件，并创建 `.complete`。MJPG 的每一帧都是一张完整的 JPEG，所以 `GET /run/frame?camera=side|wrist`（`live_frame.py`、`Supervisor.frame`）
+读正在增长的文件的尾部（最多最后 1 MiB），返回最后一张完整的 JPEG（`image/jpeg`，`Cache-Control: no-store`，另有 `X-Levi-Frame-Age-Ms` 和 `X-Levi-Frame-Episode`）。
+选中的文件夹是本次运行所在组的所有任务文件夹里、没有 `.complete` 且原始文件最近写过的那一个，并且只算运行开始之后写过的文件；任何一层是链接都会被拒绝。
+
+- **只读文件。** 不打开相机，不连接任何端口，不给客户端发送任何东西，不碰控制回路。这个路由和 `/run/log` 一样是读取；没有画面时返回 `404`，
+  原因为 `no_run`（本页没有活动的运行）、`no_episode`（没有正在录制的片段）或 `no_frame`（还没有完整的一帧）；其他相机名返回 `422`。
+- **限制。** 片段之间没有画面：客户端只在片段运行期间记录画面，页面会这样说明。源头约每秒 10 帧，页面约每秒请求 4 次（每台相机同时只有一个请求，
+  且只在运行进行中、标签页可见时请求），所以画面可能晚零点几秒；画面下方写着它的年龄和片段文件夹。下一张缺失时，上一张保留 3 秒。
+  客户端对视频输出有缓冲，画面还可能比相机慢约一帧。
+- 页面的代理（`src/utils/backendProxy.ts`）除了原来就转发的内容类型和缓存策略，现在也转发这两个 `X-Levi-Frame-*` 响应头。
 
 ## 这些门的分量，以及这里什么都不是
 

@@ -9,7 +9,10 @@
 - ``POST /api/levi/marvel0/run/key``: press one key the state allows;
 - ``POST /api/levi/marvel0/run/hold``: freeze the client (SIGSTOP of its group);
 - ``POST /api/levi/marvel0/run/end``: end a held, lost or still starting client;
-- ``GET /api/levi/marvel0/run/log``: the printable tail of the client's log.
+- ``GET /api/levi/marvel0/run/log``: the printable tail of the client's log;
+- ``GET /api/levi/marvel0/run/frame?camera=side|wrist``: the newest camera frame of
+  the episode being recorded, as a JPEG read from the client's raw video file
+  (``live_frame.py``; a read, and no picture between episodes).
 
 The writes are **a person's**: the same local authentication as the policy
 deploy, and any Bearer credential is refused (``deploy_api.person_only``). Each
@@ -27,11 +30,12 @@ body. No answer names a path.
 import threading
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
-from . import run, stack_act
+from . import live_frame, run, stack_act
 from .deploy_api import person_only
+from .errors import fail
 
 router = APIRouter(prefix="/api/levi/marvel0", tags=["marvel0"])
 
@@ -174,6 +178,27 @@ def run_end(body: EndBody):
 def run_log(lines: int = 80):
     """The last printable lines of the client's log (1-200)."""
     return supervisor().log(lines)
+
+
+@router.get("/run/frame")
+def run_frame(camera: Literal["side", "wrist"]):
+    """The newest complete frame of one camera of the episode being recorded
+    (``image/jpeg``). 404 with a reason code (``no_run``, ``no_episode``,
+    ``no_frame``) when there is no picture; a camera other than ``side`` or
+    ``wrist`` is a 422."""
+    try:
+        found = supervisor().frame(camera)
+    except live_frame.NoFrame as exc:
+        raise fail(404, exc.reason, exc.message) from exc
+    return Response(
+        content=found.jpeg,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Levi-Frame-Age-Ms": str(round(found.age_s * 1000)),
+            "X-Levi-Frame-Episode": found.episode,
+        },
+    )
 
 
 # Software-stage translation sessions share this process's Supervisor. Every

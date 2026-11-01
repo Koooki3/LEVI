@@ -40,6 +40,7 @@ ROUTES = [
     ("POST", f"{BASE}/run/hold"),
     ("POST", f"{BASE}/run/end"),
     ("GET", f"{BASE}/run/log"),
+    ("GET", f"{BASE}/run/frame"),
 ]
 
 

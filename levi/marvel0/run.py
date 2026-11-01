@@ -61,7 +61,16 @@ from levi.live import gpumgr, jsonio
 from levi.setup import probes
 from levi.workspace import Workspace
 
-from . import command, deploy, inference_mode, net, record, stack, status
+from . import (
+    command,
+    deploy,
+    inference_mode,
+    live_frame,
+    net,
+    record,
+    stack,
+    status,
+)
 from .errors import fail
 from .manual_worker import production_factory
 
@@ -2696,6 +2705,27 @@ class Supervisor:
             "size_bytes": size,
             "lines": deploy.page_lines(path, lines),
         }
+
+    # ---- the live picture
+
+    def frame(self, camera: str) -> live_frame.Frame:
+        """The newest complete camera frame of the episode this page's run is
+        recording (``GET /run/frame``), read from the client's raw video file
+        (``live_frame.py``): while the run is active only. Raises
+        ``live_frame.NoFrame`` with ``no_run``, ``no_episode`` or ``no_frame``."""
+        self.adopt()
+        with self._mutex:
+            rec = dict(self._rec or {})
+        if rec.get("phase") not in ("intent", "started"):
+            raise live_frame.NoFrame("no_run")
+        began = rec.get("created_epoch")
+        return live_frame.newest_frame(
+            rec.get("rollout_root"),
+            rec.get("group"),
+            camera,
+            self.host.now(),
+            since=began if isinstance(began, (int, float)) else None,
+        )
 
 
 def _writable(root) -> bool:

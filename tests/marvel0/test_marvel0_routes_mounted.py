@@ -77,6 +77,7 @@ ROUTES = [
     ("POST", f"{BASE}/run/hold"),
     ("POST", f"{BASE}/run/end"),
     ("GET", f"{BASE}/run/log"),
+    ("GET", f"{BASE}/run/frame"),
     # Manual preview/control admission shares run_api's supervisor.
     ("GET", f"{BASE}/arm/manual"),
     ("POST", f"{BASE}/arm/manual/challenge"),
