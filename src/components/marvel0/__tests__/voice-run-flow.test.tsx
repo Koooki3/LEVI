@@ -647,4 +647,24 @@ describe("the voice run on the action page", () => {
     await h.show(gate);
     expect(h.pressed).toEqual([]);
   });
+  test("the same sentence again after its start went stale (switched off and on) is refused, not ignored", async () => {
+    const h = await open(poll("idle_ready"));
+    const slow = deferred();
+    h.gates.start = slow.promise;
+    await switchOn(h);
+    await speak(h);
+    await advance(2100);
+    await flushAll();
+    expect(h.starts).toHaveLength(1);
+    await act(async () => byTest(h, "marvel0-speech-run-off")!.click());
+    await switchOn(h);
+    await speak(h);
+    await advance(2100);
+    await flushAll();
+    expect(status(h)?.getAttribute("data-phase")).toBe("refused");
+    slow.resolve();
+    await flushAll();
+    await h.show(poll("at_gate", NEXT, KNOWN[1]));
+    expect(h.pressed).toEqual([]);
+  });
 });

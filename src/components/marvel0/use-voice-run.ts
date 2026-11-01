@@ -99,8 +99,17 @@ export function useVoiceRun({
   /** Bumped by a newer sentence that replaces the one on its way. */
   const sentence = useRef(0);
   const busy = useRef(false);
-  /** The sentence on its way while `busy`. */
+  /** The sentence on its way while `busy`, its route, and whether it is
+   * still live (same switch turn, not replaced). */
   const busyPrompt = useRef<string | null>(null);
+  const busyRoute = useRef<"enter" | "change" | "start" | null>(null);
+  const busyLive = useRef<() => boolean>(() => false);
+  /** A start or change on its way can still leave a wait (an Enter already
+   * sent cannot be taken back, so it is not "pending"). */
+  const pending = useCallback(
+    () => busy.current && busyRoute.current !== "enter",
+    [],
+  );
   /** The run Enter was pressed for: never twice for one run. */
   const entered = useRef<string | null>(null);
   const view = run?.value ?? null;
@@ -119,7 +128,7 @@ export function useVoiceRun({
   const disarm = useCallback(
     () =>
       off(
-        busy.current || waitRef.current
+        pending() || waitRef.current
           ? {
               phase: "off_pending",
               prompt: busyPrompt.current ?? waitRef.current?.prompt ?? "",
@@ -127,7 +136,7 @@ export function useVoiceRun({
             }
           : null,
       ),
-    [off],
+    [off, pending],
   );
   const arm = useCallback((ticks: ChangeAttest) => {
     if (!ticks.estop || !ticks.scene_reset || !ticks.area_clear) return;
@@ -155,13 +164,13 @@ export function useVoiceRun({
         // A start or change is on its way. The same sentence again changes
         // nothing; another one means the person changed their mind: the one
         // on its way leaves no Enter behind, and this one is not run.
-        if (prompt === busyPrompt.current) return;
+        if (prompt === busyPrompt.current && busyLive.current()) return;
         sentence.current += 1;
         setStatus({
           phase: "refused",
           prompt,
           why: { say: { key: WHY.busy }, text: "" },
-          dropped: true,
+          dropped: pending(),
         });
         return;
       }
@@ -190,6 +199,8 @@ export function useVoiceRun({
       }
       busy.current = true;
       busyPrompt.current = prompt;
+      busyRoute.current = route.kind;
+      busyLive.current = still;
       setWait(null);
       try {
         if (route.kind === "enter") {
@@ -231,9 +242,10 @@ export function useVoiceRun({
       } finally {
         busy.current = false;
         busyPrompt.current = null;
+        busyRoute.current = null;
       }
     },
-    [runActions, changeInstruction],
+    [runActions, changeInstruction, pending],
   );
 
   // An instruction change whose new client the page will not start is over
