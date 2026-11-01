@@ -24,6 +24,9 @@ import {
 } from "./speech-fixtures";
 
 const known = new Set(Object.keys(en));
+const ALL = "pi05_fr3_all_step49999";
+/** The switch was turned on at 0, before every proposal here was shown. */
+const pick = (p: Proposal) => autoPick(p, 0);
 
 function proposal(
   match: Record<string, unknown>,
@@ -56,8 +59,10 @@ function view(
   name: string,
   form: Record<string, unknown> | null = null,
   runId: string | null = RUN,
+  episode: { no?: number; counted?: number } = {},
 ): RunView {
   const doc = runDoc(name, (entry) => {
+    if (entry.episode) Object.assign(entry.episode, episode);
     if (form || runId)
       entry.run = {
         run_id: runId,
@@ -85,13 +90,13 @@ const savedForm = (prompt: string) => ({
 
 describe("which proposal runs by itself", () => {
   test("a tier-A instruction runs", () => {
-    expect(autoPick(proposal(matchA(KNOWN[1])))).toEqual({
+    expect(pick(proposal(matchA(KNOWN[1])))).toEqual({
       prompt: KNOWN[1],
     });
   });
 
   test("a generated sentence runs as its dataset original when there is one, else as generated", () => {
-    expect(autoPick(proposal(matchC({ generated: generated() })))).toEqual({
+    expect(pick(proposal(matchC({ generated: generated() })))).toEqual({
       prompt: "put eggplant into blue bowl",
     });
     const translated = generated({
@@ -103,7 +108,7 @@ describe("which proposal runs by itself", () => {
       ],
       translations: [translation()],
     });
-    expect(autoPick(proposal(matchC({ generated: translated })))).toEqual({
+    expect(pick(proposal(matchC({ generated: translated })))).toEqual({
       prompt: "put the kumquat in the blue bowl",
     });
   });
@@ -112,9 +117,9 @@ describe("which proposal runs by itself", () => {
     const agree = matchA(KNOWN[2], {
       generated: generated({ dataset_original: KNOWN[2] }),
     });
-    expect(autoPick(proposal(agree))).toEqual({ prompt: KNOWN[2] });
+    expect(pick(proposal(agree))).toEqual({ prompt: KNOWN[2] });
     const disagree = matchA(KNOWN[1], { generated: generated() });
-    expect(autoPick(proposal(disagree))).toEqual({ why: "disagree" });
+    expect(pick(proposal(disagree))).toEqual({ why: "disagree" });
   });
 
   test("a restricted model's generated sentence is never run; its tier-A instruction is", () => {
@@ -122,62 +127,89 @@ describe("which proposal runs by itself", () => {
       family: "restricted",
       generated: generated(),
     });
-    expect(autoPick(proposal(restricted))).toEqual({ prompt: KNOWN[1] });
+    expect(pick(proposal(restricted))).toEqual({ prompt: KNOWN[1] });
     expect(
-      autoPick(
-        proposal(matchC({ family: "restricted", generated: generated() })),
-      ),
+      pick(proposal(matchC({ family: "restricted", generated: generated() }))),
     ).toEqual({ why: "choose" });
   });
 
   test("a flag, an edit, a cut recording, a guessed word or several candidates wait for a person", () => {
-    expect(autoPick(proposal(matchV("stop")))).toEqual({ why: "vetoed" });
+    expect(pick(proposal(matchV("stop")))).toEqual({ why: "vetoed" });
     expect(
-      autoPick(proposal(matchV("negation", { generated: generated() }))),
+      pick(proposal(matchV("negation", { generated: generated() }))),
     ).toEqual({ why: "vetoed" });
-    expect(autoPick(proposal(matchA(KNOWN[1]), { edited: true }))).toEqual({
+    expect(pick(proposal(matchA(KNOWN[1]), { edited: true }))).toEqual({
       why: "edited",
     });
-    expect(autoPick(proposal(matchA(KNOWN[1]), { truncated: true }))).toEqual({
+    expect(pick(proposal(matchA(KNOWN[1]), { truncated: true }))).toEqual({
       why: "truncated",
     });
     const guessed = generated({
       repairs: [{ heard: "pearl", as: "pear" }],
       slots: [{ said: "pearl", english: "pear", source: "repair" }],
     });
-    expect(autoPick(proposal(matchC({ generated: guessed })))).toEqual({
+    expect(pick(proposal(matchC({ generated: guessed })))).toEqual({
       why: "guessed",
     });
-    expect(autoPick(proposal(matchB()))).toEqual({ why: "choose" });
-    expect(autoPick(proposal(matchC()))).toEqual({ why: "choose" });
+    expect(pick(proposal(matchB()))).toEqual({ why: "choose" });
+    expect(pick(proposal(matchC()))).toEqual({ why: "choose" });
     for (const status of ["no_task", "unsupported", "untranslated", "unclear"])
       expect(
-        autoPick(
+        pick(
           proposal(matchC({ generated: generated({ status, prompt: null }) })),
         ),
       ).toEqual({ why: "choose" });
   });
 });
 
+describe("which proposal runs by itself (review 2026-11-01)", () => {
+  test("an answer shown before the switch was turned on never runs by itself", () => {
+    expect(
+      autoPick(proposal(matchA(KNOWN[1]), { shownAt: 999 }), 1000),
+    ).toEqual({ why: "earlier" });
+    expect(
+      autoPick(proposal(matchA(KNOWN[1]), { shownAt: 1000 }), 1000),
+    ).toEqual({ prompt: KNOWN[1] });
+  });
+
+  test("the other choices open, the editor open or a choice picked: the person decides", () => {
+    for (const over of [
+      { showAll: true },
+      { editing: true },
+      { picked: KNOWN[0] },
+    ] as Partial<Proposal>[])
+      expect(pick(proposal(matchA(KNOWN[1]), over))).toEqual({
+        why: "person",
+      });
+  });
+
+  test("a tier-B answer runs its generated sentence on purpose (no allowed instruction says what was heard), and without one waits", () => {
+    expect(pick(proposal(matchB({ generated: generated() })))).toEqual({
+      prompt: "put eggplant into blue bowl",
+    });
+    expect(pick(proposal(matchB()))).toEqual({ why: "choose" });
+  });
+});
+
 describe("where a sentence goes", () => {
   test("no client: start, after the run that was there", () => {
     expect(
-      voiceRoute(view("idle_ready", null, null), true, false, "x"),
+      voiceRoute(view("idle_ready", null, null), true, false, "x", ALL),
     ).toEqual({ kind: "start", afterRunId: null });
     expect(
-      voiceRoute(view("done", savedForm("old")), true, false, "x"),
+      voiceRoute(view("done", savedForm("old")), true, false, "x", ALL),
     ).toEqual({ kind: "start", afterRunId: RUN });
     expect(
-      voiceRoute(view("failed", savedForm("old")), true, false, "x"),
+      voiceRoute(view("failed", savedForm("old")), true, false, "x", ALL),
     ).toEqual({ kind: "start", afterRunId: RUN });
   });
 
   test("at the start gate: the same instruction presses Enter, another one changes it", () => {
     expect(
-      voiceRoute(view("at_gate", savedForm("same")), true, false, "same"),
+      voiceRoute(view("at_gate", savedForm("same")), true, false, "same", ALL),
     ).toEqual({ kind: "enter" });
     expect(
-      voiceRoute(view("at_gate", savedForm("old")), true, false, "new"),
+      voiceRoute(view("at_gate", savedForm("old")), true, false, "new", ALL),
     ).toEqual({ kind: "change", runId: RUN });
   });
 
@@ -187,11 +219,21 @@ describe("where a sentence goes", () => {
       true,
       false,
       "same",
+      ALL,
     );
     expect(sent.kind).toBe("refuse");
     // a gate without the saved form cannot be changed
-    const formless = voiceRoute(view("at_gate", null), true, false, "new");
+    const formless = voiceRoute(view("at_gate", null), true, false, "new", ALL);
     expect(formless.kind).toBe("refuse");
+  });
+
+  test("at the gate, another instruction for a client of another model is refused", () => {
+    const other = { ...savedForm("old"), model_id: "pi05_fr3_sp_v1" };
+    const route = voiceRoute(view("at_gate", other), true, false, "new", ALL);
+    expect(route).toEqual({
+      kind: "refuse",
+      why: { say: { key: "marvel0.speech.run.why.model" }, text: "" },
+    });
   });
 
   test("an episode that runs, waits for its label or is frozen refuses, never queues", () => {
@@ -205,10 +247,22 @@ describe("where a sentence goes", () => {
       "lost",
       "preflight",
     ]) {
-      const route = voiceRoute(view(name, savedForm("x")), true, false, "y");
+      const route = voiceRoute(
+        view(name, savedForm("x")),
+        true,
+        false,
+        "y",
+        ALL,
+      );
       expect(route.kind, name).toBe("refuse");
     }
-    const live = voiceRoute(view("running", savedForm("x")), true, false, "y");
+    const live = voiceRoute(
+      view("running", savedForm("x")),
+      true,
+      false,
+      "y",
+      ALL,
+    );
     expect(live).toEqual({
       kind: "refuse",
       why: {
@@ -222,16 +276,24 @@ describe("where a sentence goes", () => {
   });
 
   test("a stale read, a missing read or another write in flight refuses", () => {
-    expect(voiceRoute(null, true, false, "x").kind).toBe("refuse");
-    expect(voiceRoute(view("idle_ready"), false, false, "x").kind).toBe(
+    expect(voiceRoute(null, true, false, "x", ALL).kind).toBe("refuse");
+    expect(voiceRoute(view("idle_ready"), false, false, "x", ALL).kind).toBe(
       "refuse",
     );
-    expect(voiceRoute(view("idle_ready"), true, true, "x").kind).toBe("refuse");
+    expect(voiceRoute(view("idle_ready"), true, true, "x", ALL).kind).toBe(
+      "refuse",
+    );
   });
 });
 
 describe("Enter at the gate of the client the voice started", () => {
-  const wait: GateWait = { prompt: "new", afterRunId: RUN, until: 10_000 };
+  const wait: GateWait = {
+    route: "start",
+    generation: 1,
+    prompt: "new",
+    afterRunId: RUN,
+    until: 10_000,
+  };
   const NEXT = "20261101T150000-aaaaaa";
 
   test("waits while the old run is still the one shown, or the new one starts", () => {
@@ -270,6 +332,25 @@ describe("Enter at the gate of the client the voice started", () => {
         0,
       ),
     ).toBe("wait");
+  });
+
+  test("only the new client's first gate: a gate after episodes this page did not see is given up", () => {
+    expect(
+      gateStep(
+        wait,
+        view("at_gate", savedForm("new"), NEXT, { no: 2 }),
+        true,
+        0,
+      ),
+    ).toBe("gone");
+    expect(
+      gateStep(
+        wait,
+        view("at_gate", savedForm("new"), NEXT, { no: 1, counted: 1 }),
+        true,
+        0,
+      ),
+    ).toBe("gone");
   });
 
   test("gives up on another instruction, a failed or frozen client, and after the wait", () => {

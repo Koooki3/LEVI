@@ -256,6 +256,14 @@ export function Marvel0Actions({
     changeInstruction,
     changeState: changeStatus.state,
   });
+  // The voice card (and its switch) is not shown while step 3 is filled from
+  // a failed instruction change or the site cannot be read: the voice run
+  // goes off rather than stay on out of sight.
+  const voiceHidden = episodeBody !== null || !ready;
+  const { on: voiceOn, disarm: voiceOff } = voiceRun;
+  useEffect(() => {
+    if (voiceHidden && voiceOn) voiceOff();
+  }, [voiceHidden, voiceOn, voiceOff]);
   return (
     <div className="rg-steps" data-testid="marvel0-actions">
       <section

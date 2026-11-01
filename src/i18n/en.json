@@ -6367,7 +6367,7 @@
   "marvel0.speech.run.btn.off": "Switch voice run off",
   "marvel0.speech.run.btn.cancel": "Cancel",
   "marvel0.speech.run.off_hint": "Off: speech only proposes. On: a clear instruction runs by itself {s} s after it is shown (the command is made, the client started and the episode started), without another confirmation.",
-  "marvel0.speech.run.on": "Voice run is on. A clear instruction runs {s} s after it is shown unless you press Cancel, and the episode starts without asking: the arm first goes home without any limit check, then the policy runs. Speech cannot stop the arm: keep a hand on the physical e-stop.",
+  "marvel0.speech.run.on": "Voice run is on. A clear instruction runs {s} s after it is shown unless you press Cancel, and when its client reaches the start gate (within {gate} s) the episode starts without asking: the arm first goes home without any limit check, then the policy runs. Switching voice run off stops an episode that has not started yet. Speech cannot stop the arm: keep a hand on the physical e-stop.",
   "marvel0.speech.run.read_first": "Read the sentence first. With voice run on, Use runs it: the command is made, the client started and the episode started.",
   "marvel0.speech.btn.run": "Use and run",
   "marvel0.speech.btn.run_selected": "Run selected",
@@ -6383,7 +6383,7 @@
   "marvel0.speech.run.no_auto.choose": "No single instruction is clear: choose one and press its run button.",
   "marvel0.speech.run.status.starting": "Making the command and starting the client for: {prompt}",
   "marvel0.speech.run.status.changing": "Ending the client at its start gate to start it again with: {prompt}",
-  "marvel0.speech.run.status.waiting": "Client started for: {prompt}. The episode starts by itself when the client reaches its start gate.",
+  "marvel0.speech.run.status.waiting": "Client started for: {prompt}. The episode starts by itself when the client reaches its start gate within {s} s; switch voice run off to stop that.",
   "marvel0.speech.run.status.entering": "Starting the episode: {prompt}",
   "marvel0.speech.run.status.entered": "Episode started: {prompt}. The arm first goes home without any limit check, then the policy runs.",
   "marvel0.speech.run.status.refused": "Not run: {prompt}.",
@@ -6400,7 +6400,12 @@
   "marvel0.speech.run.dialog.title": "Switch voice run on",
   "marvel0.speech.run.dialog.intro": "Until you switch it off or reload the page, what you say runs without another confirmation: a clear instruction {s} s after it is shown (Cancel stops it), any other one when you press its run button.",
   "marvel0.speech.run.dialog.route": "With no client, the command is made from step 3's form and the client is started. At the start gate with the same instruction, the episode starts. At the start gate with another instruction, the client is ended there and started again with it. While an episode runs or waits for its label, speech is refused, not queued.",
-  "marvel0.speech.run.dialog.enter": "When the client the voice started reaches its start gate, the page presses Start next episode: the arm goes home without any limit check, then the policy runs.",
+  "marvel0.speech.run.dialog.enter": "When the client the voice started reaches its first start gate within {gate} s, the page presses Start next episode: the arm goes home without any limit check, then the policy runs. Switching voice run off before that stops it.",
   "marvel0.speech.run.dialog.ticks": "The ticks below are sent with every start the voice makes. A frozen or lost client switches voice run off.",
-  "marvel0.speech.run.dialog.go": "Switch on"
+  "marvel0.speech.run.dialog.go": "Switch on",
+  "marvel0.speech.run.no_auto.person": "You opened the other choices or the editor, so nothing runs by itself: press a run button to run one.",
+  "marvel0.speech.run.no_auto.earlier": "This answer was shown before voice run was switched on, so it does not run by itself: press a run button to run it.",
+  "marvel0.speech.run.why.model": "The client at the start gate runs another model than step 3's, and the sentence was checked for step 3's model.",
+  "marvel0.speech.run.status.held": "A hold was sent while the client was starting, so the episode is not started: {prompt}",
+  "marvel0.speech.run.dropped": "The episode of the earlier instruction does not start by itself either."
 }

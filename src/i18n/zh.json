@@ -6367,7 +6367,7 @@
   "marvel0.speech.run.btn.off": "关闭语音直跑",
   "marvel0.speech.run.btn.cancel": "取消",
   "marvel0.speech.run.off_hint": "关闭时语音只给建议。开启后，明确的指令显示 {s} 秒后自动运行（生成命令、启动客户端、开始片段），不再逐步确认。",
-  "marvel0.speech.run.on": "语音直跑已开启。明确的指令显示 {s} 秒后自动运行，期间可以点“取消”；片段开始前不再询问：手臂先不受任何限制地回位，然后策略开始运行。语音不能让手臂停下：手放在实体急停上。",
+  "marvel0.speech.run.on": "语音直跑已开启。明确的指令显示 {s} 秒后自动运行，期间可以点“取消”；它的客户端到开始闸门后（{gate} 秒内），片段开始前不再询问：手臂先不受任何限制地回位，然后策略开始运行。关闭语音直跑能让还没开始的片段不再自动开始。语音不能让手臂停下：手放在实体急停上。",
   "marvel0.speech.run.read_first": "请先读一遍这句话。语音直跑开启时，点“使用并运行”会直接运行：生成命令、启动客户端并开始片段。",
   "marvel0.speech.btn.run": "使用并运行",
   "marvel0.speech.btn.run_selected": "运行所选",
@@ -6383,7 +6383,7 @@
   "marvel0.speech.run.no_auto.choose": "没有唯一明确的指令：选一条后点它的运行按钮。",
   "marvel0.speech.run.status.starting": "正在生成命令并启动客户端：{prompt}",
   "marvel0.speech.run.status.changing": "正在开始闸门结束客户端，并用新指令重启：{prompt}",
-  "marvel0.speech.run.status.waiting": "客户端已启动：{prompt}。到开始闸门后会自动开始片段。",
+  "marvel0.speech.run.status.waiting": "客户端已启动：{prompt}。它在 {s} 秒内到开始闸门后会自动开始片段；关闭语音直跑可以阻止。",
   "marvel0.speech.run.status.entering": "正在开始片段：{prompt}",
   "marvel0.speech.run.status.entered": "已开始片段：{prompt}。手臂先不受任何限制地回位，然后策略开始运行。",
   "marvel0.speech.run.status.refused": "没有运行：{prompt}。",
@@ -6400,7 +6400,12 @@
   "marvel0.speech.run.dialog.title": "开启语音直跑",
   "marvel0.speech.run.dialog.intro": "在你关闭它或刷新页面之前，你说的指令不再逐步确认：明确的指令显示 {s} 秒后运行（可点“取消”），其他的在你点它的运行按钮时运行。",
   "marvel0.speech.run.dialog.route": "没有客户端时，按第 3 步的表单生成命令并启动客户端。客户端在开始闸门且指令相同时，直接开始片段。在开始闸门但指令不同时，先在闸门处结束客户端，再用新指令重启。片段运行中或等待判定时，语音会被拒绝，不会排队。",
-  "marvel0.speech.run.dialog.enter": "语音启动的客户端到开始闸门后，页面会自动点“开始下一个片段”：手臂先不受任何限制地回位，然后策略开始运行。",
+  "marvel0.speech.run.dialog.enter": "语音启动的客户端在 {gate} 秒内到达第一个开始闸门后，页面会自动点“开始下一个片段”：手臂先不受任何限制地回位，然后策略开始运行。在那之前关闭语音直跑可以阻止。",
   "marvel0.speech.run.dialog.ticks": "下面的勾选会随语音发起的每次启动一起发送。客户端被冻结或失联时，语音直跑会自动关闭。",
-  "marvel0.speech.run.dialog.go": "开启"
+  "marvel0.speech.run.dialog.go": "开启",
+  "marvel0.speech.run.no_auto.person": "你打开了其他候选或编辑框，不会自动运行：点运行按钮才会运行。",
+  "marvel0.speech.run.no_auto.earlier": "这条结果是在开启语音直跑之前出现的，不会自动运行：点运行按钮才会运行。",
+  "marvel0.speech.run.why.model": "开始闸门处的客户端用的模型和第 3 步选的不同，而这句话是按第 3 步的模型检查的。",
+  "marvel0.speech.run.status.held": "客户端启动期间发出了“保持”，不会自动开始片段：{prompt}",
+  "marvel0.speech.run.dropped": "之前那条指令的片段也不会再自动开始。"
 }

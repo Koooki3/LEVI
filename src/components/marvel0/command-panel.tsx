@@ -333,7 +333,7 @@ export function CommandPanel({
                 voiceRun={voiceRun}
                 onUse={(prompt) => {
                   if (voiceRun?.on) {
-                    void voiceRun.submit(prompt, (ack) =>
+                    void voiceRun.submit(prompt, form.modelId, (ack) =>
                       startFor(prompt, ack),
                     );
                     return;

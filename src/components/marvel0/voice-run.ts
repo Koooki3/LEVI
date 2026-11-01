@@ -7,8 +7,10 @@
 // the start window (hand on the e-stop, scene reset, area clear); those ticks
 // are then sent with every start the voice makes until it is switched off.
 // While it is on:
-//   * a proposal with one clear sentence (`autoPick`) is used by itself after
-//     VOICE_RUN_DELAY_MS on screen, unless the person presses Cancel; any
+//   * a proposal shown after the switch was turned on, with one clear
+//     sentence (`autoPick`), is used by itself after VOICE_RUN_DELAY_MS on
+//     screen unless the person presses Cancel (which also revokes a use
+//     already being checked), opens the other choices or edits the text; any
 //     other proposal waits for a Use press, and that press runs the sentence;
 //   * the sentence goes where the hosted client is (`voiceRoute`): no client,
 //     make the command and start one; at the start gate with the same
@@ -17,7 +19,9 @@
 //     instruction change); anything else (an episode running or waiting for
 //     its label, a client starting) is refused, never queued;
 //   * after a start, Enter is pressed once when that new client reaches its
-//     start gate with that instruction (`gateStep`), within GATE_WAIT_MS.
+//     first start gate with that instruction (`gateStep`), within
+//     GATE_WAIT_MS, while the switch is still on and no hold is on its way.
+//     Switching off (or a frozen client) drops a start still in flight.
 // The push-to-talk button is still the only way in: speech near the page does
 // nothing unless a person holds the button. Every check of the backend (the
 // start's preflight, the challenge of each key) still applies. Pure: no React.
@@ -39,19 +43,28 @@ export type NoAutoWhy =
   | "truncated"
   | "guessed"
   | "disagree"
-  | "choose";
+  | "choose"
+  | "person"
+  | "earlier";
 
 export type AutoPick = { prompt: string } | { why: NoAutoWhy };
 
 /** The one sentence a proposal runs by itself, or why it waits for a person.
  * It is always a sentence a Use press could hand over (`canUse`): the tier-A
  * instruction, or the generated sentence (its dataset original when there is
- * one: the policy was trained on that wording). */
-export function autoPick(proposal: Proposal): AutoPick {
+ * one: the policy was trained on that wording). The generated sentence also
+ * runs for a tier-B or C answer: B and C mean no allowed instruction says what
+ * was heard, while the generated sentence was read back to hold exactly the
+ * heard objects with their colours and sizes. `armedAt` is when the switch
+ * was turned on: an answer shown before it never runs by itself. */
+export function autoPick(proposal: Proposal, armedAt: number): AutoPick {
   const match = proposal.match;
   if (effectiveTier(match) === "V") return { why: "vetoed" };
+  if (proposal.shownAt < armedAt) return { why: "earlier" };
   if (proposal.edited) return { why: "edited" };
   if (proposal.truncated) return { why: "truncated" };
+  if (proposal.showAll || proposal.editing || proposal.picked !== null)
+    return { why: "person" };
   const best = match.tier === "A" && match.best ? match.best.prompt : null;
   const generated = generatedPrompts(match);
   if (generated.length > 0 && match.generated) {
@@ -82,6 +95,8 @@ export function voiceRoute(
   current: boolean,
   working: boolean,
   prompt: string,
+  /** The model of step 3's form: the sentence was checked against its list. */
+  modelId: string,
 ): VoiceRoute {
   if (!view || !current) return { kind: "refuse", why: said(WHY.unread) };
   if (working) return { kind: "refuse", why: said(WHY.busy) };
@@ -94,7 +109,12 @@ export function voiceRoute(
         : { kind: "refuse", why: enter.whyNot ?? said(WHY.gate) };
     }
     const end = view.actions.end_at_gate;
-    if (end.allowed && record?.runId && commandFormFromRun(record.form))
+    const saved = commandFormFromRun(record?.form);
+    // The change restarts the client with its saved form, so its model must
+    // be the one the sentence was checked for.
+    if (saved && saved.modelId !== modelId)
+      return { kind: "refuse", why: said(WHY.model) };
+    if (end.allowed && record?.runId && saved)
       return { kind: "change", runId: record.runId };
     return { kind: "refuse", why: end.whyNot ?? said(WHY.gate) };
   }
@@ -118,10 +138,16 @@ export const WHY = {
   gate: "marvel0.speech.run.why.gate",
   live: "marvel0.speech.run.why.live",
   cannot_start: "marvel0.speech.run.why.cannot_start",
+  model: "marvel0.speech.run.why.model",
 } as const;
 
 /** A start the voice made, waiting for its client's start gate. */
 export interface GateWait {
+  /** How the client is being started: an instruction change can still fail
+   * on the page's side (`changeState`), a start cannot. */
+  route: "start" | "change";
+  /** The switch's turn it belongs to: switching off or on again ends it. */
+  generation: number;
   prompt: string;
   /** The run that was there before (ended, or being ended): not this one. */
   afterRunId: string | null;
@@ -130,8 +156,8 @@ export interface GateWait {
 }
 
 /** wait: not yet; enter: press Enter now; gone: that client will not reach
- * its gate with this instruction (it ended, was frozen or runs another
- * instruction); late: GATE_WAIT_MS passed. */
+ * its first gate with this instruction (it ended, was frozen, runs another
+ * instruction, or is past its first episode); late: GATE_WAIT_MS passed. */
 export type GateStep = "wait" | "enter" | "gone" | "late";
 
 export function gateStep(
@@ -145,8 +171,15 @@ export function gateStep(
   const runId = view.run?.runId ?? null;
   if (runId === null || runId === wait.afterRunId) return "wait";
   if (view.run?.form?.prompt !== wait.prompt) return "gone";
-  if (view.state === "at_gate")
+  if (view.state === "at_gate") {
+    // Only the gate of the new client's first episode: a later one means
+    // episodes went by that this page did not see (another tab, a stale read),
+    // and the scene was not reset for this sentence. The client counts its
+    // episodes per run from 0 (openpi fr3_local eval_session.py).
+    const episode = view.episode;
+    if ((episode?.counted ?? 0) !== 0 || (episode?.no ?? 0) > 1) return "gone";
     return view.actions.enter.allowed ? "enter" : "wait";
+  }
   if (view.state === "preflight" || view.state === "starting") return "wait";
   return "gone";
 }

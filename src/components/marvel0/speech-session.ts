@@ -124,6 +124,8 @@ export interface SpeechSession {
   /** The ref of the level bar; the session sets `--rg-level` on it (0..1). */
   meter: (bar: HTMLElement | null) => void;
   use: (prompt: string) => void;
+  /** Revokes a Use whose check is still on its way (the voice run's Cancel). */
+  cancelUse: () => void;
   pick: (prompt: string) => void;
   showAll: () => void;
   edit: (on: boolean) => void;
@@ -659,6 +661,15 @@ export function useSpeechSession({
     },
     [api, dispatch, recheck],
   );
+  const cancelUse = useCallback(() => {
+    const pending = pendingUse.current;
+    const proposal = stateRef.current.proposal;
+    if (pending && pending === inflight.current && !pending.signal.aborted) {
+      pending.abort();
+      pendingUse.current = null;
+      if (proposal) dispatch({ type: "cancel_use", id: proposal.id });
+    }
+  }, [dispatch]);
   const rematch = useCallback(
     (text: string) => {
       const proposal = stateRef.current.proposal;
@@ -718,20 +729,11 @@ export function useSpeechSession({
       meter,
       use,
       pick: (prompt) => dispatch({ type: "pick", prompt }),
+      cancelUse,
       showAll: () => {
-        const pending = pendingUse.current;
-        const proposal = stateRef.current.proposal;
-        if (
-          pending &&
-          pending === inflight.current &&
-          !pending.signal.aborted
-        ) {
-          // Rejecting the candidate also revokes the pending Use, even if its
-          // status response arrives later with the same proposal/model IDs.
-          pending.abort();
-          pendingUse.current = null;
-          if (proposal) dispatch({ type: "cancel_use", id: proposal.id });
-        }
+        // Rejecting the candidate also revokes the pending Use, even if its
+        // status response arrives later with the same proposal/model IDs.
+        cancelUse();
         dispatch({ type: "show_all" });
       },
       edit: (on) => dispatch({ type: "edit", on }),
@@ -749,6 +751,7 @@ export function useSpeechSession({
       attach,
       meter,
       use,
+      cancelUse,
       rematch,
       recheck,
       release,
