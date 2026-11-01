@@ -1100,3 +1100,120 @@ describe("production manual capability and stop proof", () => {
     expect(f.controller.beginDrag()).toBe(false);
   });
 });
+
+describe("a session left open, after a reload (RIG-MANUAL-STRANDED-SESSION)", () => {
+  // What the server showed at 17:20 on 2026-10-30: a real session, fault
+  // locked after a release, that the reloaded page did not start.
+  const leftOpen = (): ManualView => ({
+    ...view(true),
+    environment: "production",
+    state: "fault_locked",
+    reason_code: "delivery_unknown",
+    admission: "closed",
+    session_id: "left-session",
+    generation: 3,
+    capabilities: {
+      real_motion: true,
+      synthetic_only: false,
+      can_start: false,
+      gripper: true,
+    },
+  });
+  const ended = (): ManualView => ({
+    ...leftOpen(),
+    state: "ended",
+    stop_evidence: "physical_settled",
+  });
+  function reloaded() {
+    const f = fixture();
+    let current = leftOpen();
+    f.api.status = async () => {
+      f.calls.push({ kind: "status" });
+      return current;
+    };
+    f.api.stop = async (body) => {
+      f.calls.push({ kind: "stop", body });
+      return { ...leftOpen(), state: "held" };
+    };
+    f.api.end = async (body) => {
+      f.calls.push({ kind: "end", body });
+      current = ended();
+      return ended();
+    };
+    return f;
+  }
+  const writes = (f: ReturnType<typeof fixture>) =>
+    f.calls.filter((call) => call.kind !== "status");
+
+  test("is shown as a fault the person can stop, and nothing is sent by reading it", async () => {
+    const f = reloaded();
+    await f.controller.refresh();
+    expect(f.controller.snapshot().phase).toBe("fault");
+    expect(f.controller.snapshot().reason).toBe("session_left_open");
+    expect(writes(f)).toHaveLength(0);
+    expect(f.controller.beginDrag()).toBe(false);
+  });
+
+  test("only a person's stop closes it: blur, unmount or a drag end send nothing", async () => {
+    const f = reloaded();
+    await f.controller.refresh();
+    for (const reason of ["blur", "hidden", "drag_end", "release"])
+      f.controller.revoke(reason);
+    await settle();
+    expect(writes(f)).toHaveLength(0);
+  });
+
+  test("a stop press stops and ends that session by the identity the server shows", async () => {
+    const f = reloaded();
+    await f.controller.refresh();
+    f.controller.revoke("person_stop");
+    await settle();
+    const sent = writes(f);
+    expect(sent.map((call) => call.kind)).toEqual(["stop", "end"]);
+    for (const call of sent)
+      expect(call.body).toMatchObject({
+        session_id: "left-session",
+        generation: 3,
+      });
+    expect(f.controller.snapshot().phase).toBe("closed");
+    await f.controller.refresh();
+    expect(f.controller.snapshot().reason).not.toBe("session_left_open");
+  });
+
+  test("an end that is refused leaves the stop offered again", async () => {
+    const f = reloaded();
+    let refuse = true;
+    const end = f.api.end;
+    f.api.end = async (body) => {
+      if (refuse) {
+        f.calls.push({ kind: "end", body });
+        throw new ManualApiError("physical_stop_unproven");
+      }
+      return end(body);
+    };
+    await f.controller.refresh();
+    f.controller.revoke("person_stop");
+    await settle();
+    expect(f.controller.snapshot().phase).toBe("fault");
+    refuse = false;
+    f.controller.revoke("person_stop");
+    await settle();
+    expect(writes(f).map((call) => call.kind)).toEqual([
+      "stop",
+      "end",
+      "stop",
+      "end",
+    ]);
+    expect(f.controller.snapshot().phase).toBe("closed");
+  });
+
+  test("an ended or idle session is not offered", async () => {
+    const f = reloaded();
+    f.api.status = async () => ended();
+    await f.controller.refresh();
+    expect(f.controller.snapshot().reason).not.toBe("session_left_open");
+    f.controller.revoke("person_stop");
+    await settle();
+    expect(writes(f)).toHaveLength(0);
+  });
+});

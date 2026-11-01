@@ -98,6 +98,13 @@ export function manualLimitsFromDraft(
   return validManualLimits(limits) ? limits : null;
 }
 
+/** Reasons said in words; any other reason is shown as its code. */
+const REASON_TEXT: Record<string, string> = {
+  stop_unproven: "robotStudio.manual.stopUnproven",
+  session_left_open: "robotStudio.manual.leftOpen",
+  anchor_expired: "robotStudio.manual.anchorExpired",
+};
+
 export default function ManualControls({
   workspaceBox,
   teleopDraft,
@@ -470,11 +477,7 @@ export default function ManualControls({
       {reason && (
         <p className="rs-meta">
           {t("robotStudio.manual.gate")}{" "}
-          {reason === "stop_unproven" ? (
-            t("robotStudio.manual.stopUnproven")
-          ) : (
-            <code>{reason}</code>
-          )}
+          {REASON_TEXT[reason] ? t(REASON_TEXT[reason]) : <code>{reason}</code>}
         </p>
       )}
       {!limits && (

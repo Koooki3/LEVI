@@ -5383,7 +5383,7 @@
   "marvel0.ctl.block.operation_running": "机械臂栈上还有另一个操作在进行。",
   "marvel0.ctl.block.record_open": "这一部分上一次启动没有收尾（失败或消失了）：请先停止它，这会清掉记录。",
   "marvel0.ctl.block.record_corrupt": "这一部分的记录读不出来。",
-  "marvel0.ctl.block.run_active": "托管的客户端正在运行（或无法判断）：请先结束它。",
+  "marvel0.ctl.block.run_active": "托管的客户端或 3D 页的手动遥操会话正在运行（或无法判断）：请先结束它。遥操会话在“FR3 三维预览”页点“停止并关闭会话”结束。",
   "marvel0.ctl.block.arm_lock_held": "手臂锁被占用（或无法判断）：有东西在使用手臂。",
   "marvel0.ctl.block.marker_young": "标记才存在 {age_s} 秒；要等标记满 {wait_s} 秒、且本机没有重任务还在运行，才启动 A。",
   "marvel0.ctl.block.heavy_jobs_running": "本机还有 {count} 个重任务在运行（{kinds}）。它们会在标记设置后约 30 秒内停下；停下之后才启动 A。",
@@ -6081,7 +6081,7 @@
   "robotStudio.manual.extraLimits": "必填会话限值（无默认值）",
   "robotStudio.manual.gate": "阻断原因：",
   "robotStudio.manual.limitsRequired": "请补齐共享边界框、速度、步长及全部会话限值。",
-  "robotStudio.manual.max_anchor_age_s": "锚点最大时龄（s）",
+  "robotStudio.manual.max_anchor_age_s": "会话最长时长，从启动算起（s）",
   "robotStudio.manual.max_delta_m": "最大相对位移（m）",
   "robotStudio.manual.max_orientation_drift_rad": "最大姿态漂移（rad）",
   "robotStudio.manual.max_reading_age_s": "反馈最大时龄（s）",
@@ -6409,5 +6409,7 @@
   "marvel0.speech.run.status.held": "客户端启动期间发出了“保持”，不会自动开始片段：{prompt}",
   "marvel0.speech.run.dropped": "之前那条指令的片段也不会再自动开始。",
   "marvel0.speech.run.status.off_pending": "语音直跑已关闭。已经发出的操作可能仍会把客户端启动到开始闸门，那里不会动；片段不会自动开始：{prompt}",
-  "marvel0.speech.run.auto_translated": "{s} 秒后自动运行：{prompt}。含本地模型翻译的词（策略没训练过）：{words}"
+  "marvel0.speech.run.auto_translated": "{s} 秒后自动运行：{prompt}。含本地模型翻译的词（策略没训练过）：{words}",
+  "robotStudio.manual.leftOpen": "上次启动的会话在服务端还没结束（页面刷新过，或是另一个标签页启动的）。点“停止并关闭会话”结束它，机械臂不会动。",
+  "robotStudio.manual.anchorExpired": "会话已到时：从启动算起，最长只能用下面设置的会话时长。请重新准备会话。"
 }

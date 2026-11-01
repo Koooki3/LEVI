@@ -5383,7 +5383,7 @@
   "marvel0.ctl.block.operation_running": "Another operation on the arm stack is running.",
   "marvel0.ctl.block.record_open": "The last start of this part was never closed (it failed or vanished): stop it first, which clears it.",
   "marvel0.ctl.block.record_corrupt": "This part's record cannot be read.",
-  "marvel0.ctl.block.run_active": "A hosted client run is active (or cannot be told): end it first.",
+  "marvel0.ctl.block.run_active": "A hosted client run or a 3D manual session is active (or cannot be told): end it first. A manual session ends with “Stop and close session” on the FR3 3D page.",
   "marvel0.ctl.block.arm_lock_held": "The arm lock is held (or cannot be told): something is using the arm.",
   "marvel0.ctl.block.marker_young": "The marker is {age_s} s old; A starts when it is {wait_s} s old and no heavy job of this computer still runs.",
   "marvel0.ctl.block.heavy_jobs_running": "{count} heavy job(s) of this computer ({kinds}) still run. They stop within about 30 s of the marker; A starts when they have.",
@@ -6081,7 +6081,7 @@
   "robotStudio.manual.extraLimits": "Required session limits (no defaults)",
   "robotStudio.manual.gate": "Blocked reason:",
   "robotStudio.manual.limitsRequired": "Complete the shared box, speed, step and all session limits.",
-  "robotStudio.manual.max_anchor_age_s": "Maximum anchor age (s)",
+  "robotStudio.manual.max_anchor_age_s": "Session lifetime from its start (s)",
   "robotStudio.manual.max_delta_m": "Maximum relative displacement (m)",
   "robotStudio.manual.max_orientation_drift_rad": "Maximum orientation drift (rad)",
   "robotStudio.manual.max_reading_age_s": "Maximum feedback age (s)",
@@ -6409,5 +6409,7 @@
   "marvel0.speech.run.status.held": "A hold was sent while the client was starting, so the episode is not started: {prompt}",
   "marvel0.speech.run.dropped": "The episode of the earlier instruction does not start by itself either.",
   "marvel0.speech.run.status.off_pending": "Voice run is off. What was already sent may still bring the client up to its start gate, where nothing moves; the episode does not start by itself: {prompt}",
-  "marvel0.speech.run.auto_translated": "Runs by itself in {s} s: {prompt}. Translated by the local model, not a name the policy was trained on: {words}"
+  "marvel0.speech.run.auto_translated": "Runs by itself in {s} s: {prompt}. Translated by the local model, not a name the policy was trained on: {words}",
+  "robotStudio.manual.leftOpen": "A session started earlier is still open on the server (the page was reloaded, or another tab started it). Press “Stop and close session” to end it; the arm does not move.",
+  "robotStudio.manual.anchorExpired": "The session ran out: it lasts at most the session lifetime set below, counted from its start. Prepare a new session."
 }

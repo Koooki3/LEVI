@@ -134,6 +134,20 @@ function ownerOf(view: ManualView): ManualOwner | null {
 }
 const sameOwner = (view: ManualView, id: ManualOwner) =>
   view.session_id === id.session_id && view.generation === id.generation;
+/** States in which a session still holds the arm until it is ended. */
+const OPEN_STATES: ManualView["state"][] = [
+  "owned_idle",
+  "moving",
+  "held",
+  "fault_locked",
+];
+/** A session the server still holds that this page did not start (a reload, or
+ * another tab): its owner, so a person can stop and end it from here. */
+export function leftOpenOwner(view: ManualView | null): ManualOwner | null {
+  return view && admittedView(view) && OPEN_STATES.includes(view.state)
+    ? ownerOf(view)
+    : null;
+}
 const syntheticView = (view: ManualView) =>
   view.environment === "synthetic" &&
   view.capabilities.synthetic_only === true &&
@@ -189,6 +203,9 @@ export class ManualSessionController implements ManualDragController {
   private gripperRatio: number | null = null;
   private gripperSent = false;
   private owner: ManualIdentity | null = null;
+  // A session the server holds and this page did not start (after a reload):
+  // only a person's stop press closes it (RIG-MANUAL-STRANDED-SESSION).
+  private leftOpen: ManualOwner | null = null;
   private origin: ManualPoint | null = null;
   private desired: ManualPoint = [0, 0, 0];
   private timer: unknown = null;
@@ -238,6 +255,14 @@ export class ManualSessionController implements ManualDragController {
         ["unavailable", "ready", "closed", "fault"].includes(this.state.phase)
       ) {
         this.permission = manualStartAllowed(view);
+        this.leftOpen =
+          this.owner || this.pendingStartRequestID ? null : leftOpenOwner(view);
+        if (this.leftOpen) {
+          // The page cannot start while this one is open; it offers the stop.
+          this.permission = false;
+          this.emit({ phase: "fault", reason: "session_left_open" });
+          return;
+        }
         this.emit({
           phase: this.permission ? "ready" : "unavailable",
           reason: view.reason_code,
@@ -530,6 +555,16 @@ export class ManualSessionController implements ManualDragController {
   }
   revoke(reason: string): void {
     if (this.state.phase === "closing") return;
+    const left = this.leftOpen;
+    if (!this.owner && left && reason === "person_stop" && this.state.view) {
+      // Only a person's press, never a blur or an unmount, closes a session
+      // this page did not start. The same stop -> end path proves the stop.
+      this.realSession = productionView(this.state.view);
+      const epoch = ++this.epoch;
+      this.emit({ phase: "closing", reason, anchor: null, confirm: null });
+      void this.closeIdentity(left, epoch, null);
+      return;
+    }
     if (this.pendingStartRequestID && this.uncertainStart) {
       this.permission = false;
       this.emit({ phase: "fault", reason: "stop_unproven", anchor: null });
@@ -638,6 +673,8 @@ export class ManualSessionController implements ManualDragController {
         )
           throw new ManualApiError("stop_unproven");
         this.owner = null;
+        if (this.leftOpen && sameOwner(ended, this.leftOpen))
+          this.leftOpen = null;
         if (startRequestID) this.closedStartRequests.add(startRequestID);
         if (this.pendingStartRequestID === startRequestID) {
           this.pendingStartRequestID = null;
