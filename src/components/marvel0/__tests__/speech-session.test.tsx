@@ -6,11 +6,14 @@ import { afterEach, describe, expect, jest, test } from "bun:test";
 import { useSpeechSession, type SpeechSession } from "../speech-session";
 import {
   KNOWN,
+  TENNIS,
+  asHeard,
   captureFactory,
   fakeSpeechApi,
   heardAnswer,
   installFakeAudio,
   matchA,
+  matchC,
   matchV,
   ok,
   type FakeAudio,
@@ -123,5 +126,90 @@ describe("use()", () => {
     expect(h.session().state.proposal).toBeNull();
     await press(h, KNOWN[2]);
     expect(h.used).toEqual([]);
+  });
+});
+
+describe("use() of the sentence as heard", () => {
+  test("hands it over once the proposal is armed, and only exactly as the server tidied it", async () => {
+    const h = await open(matchC({ as_heard: asHeard(TENNIS) }));
+    await press(h, TENNIS);
+    expect(h.used).toEqual([]); // not before the 800 ms
+    await advance(800);
+    await press(h, TENNIS.toUpperCase()); // not a spelling of its own
+    await press(h, `${TENNIS}.`);
+    await press(h, "pick the cup");
+    expect(h.used).toEqual([]);
+    await press(h, TENNIS, TENNIS);
+    expect(h.used).toEqual([TENNIS]);
+  });
+
+  const refused: Array<[string, Record<string, unknown>]> = [
+    [
+      "a sentence the task instruction field would refuse",
+      matchC({ as_heard: asHeard("pick the cup's lid", "forbidden_char") }),
+    ],
+    [
+      "a restricted model",
+      matchC({ family: "restricted", as_heard: asHeard(TENNIS) }),
+    ],
+    ["a flagged result", matchV("stop", { as_heard: asHeard(TENNIS) })],
+    ["an answer without one", matchC()],
+  ];
+  for (const [name, raw] of refused)
+    test(`hands over nothing for ${name}`, async () => {
+      const h = await open(raw);
+      await advance(800);
+      await press(h, TENNIS, "pick the cup's lid");
+      expect(h.used).toEqual([]);
+    });
+});
+
+describe("the timing of an answer", () => {
+  test("is the page's wait from the release of the button, with the server's numbers", async () => {
+    jest.useFakeTimers();
+    audio = installFakeAudio();
+    const captures = captureFactory();
+    const { api } = fakeSpeechApi({
+      transcribe: (call) => {
+        jest.advanceTimersByTime(1800);
+        return ok(
+          heardAnswer(call.requestId, matchA(KNOWN[2]), {
+            timing_ms: { load: 0, infer: 900, match: 100, total: 1200 },
+          }),
+        );
+      },
+    });
+    const latest: { current: SpeechSession | null } = { current: null };
+    function Probe() {
+      const session = useSpeechSession({
+        api,
+        modelId: "m",
+        onUse: () => undefined,
+        createCapture: captures.make,
+      });
+      latest.current = session;
+      return <button ref={session.attach} />;
+    }
+    const view = await render(<Probe />);
+    await flushAll();
+    await act(async () => {
+      view.host.querySelector("button")!.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          pointerId: 1,
+          pointerType: "mouse",
+          button: 0,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    expect(latest.current!.state.timing).toBeNull();
+    await advance(5_000); // held for five seconds: not part of the wait
+    await act(async () => captures.current.deliver());
+    await flushAll();
+    expect(latest.current!.state.timing).toEqual({
+      totalMs: 1800,
+      server: { load: 0, infer: 900, match: 100, total: 1200 },
+    });
   });
 });

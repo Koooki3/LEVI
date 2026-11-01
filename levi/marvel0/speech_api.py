@@ -18,6 +18,13 @@ command card's task instruction. Nothing here builds a command, starts the
 client or the arm, or says anything about stopping the robot: speech does not
 stop it, the physical e-stop does.
 
+**The sentence as heard.** Every answer with a transcript also carries
+``match.as_heard``: the transcript made tidy (``as_heard_sentence``) and the
+reason, if any, why the client command card would refuse it as a task
+instruction (``command.prompt_problem``, the card's own check, not a copy of
+it). The page offers it as one more option, never as the default and, in the
+voice run, never by itself; nothing is logged of it.
+
 All four routes are a person's (``person_only``) and need the site file first
 (412 without it). Errors have the shape of ``errors.fail``; ``SPEECH_REFUSALS``
 lists the codes of this module. **The audio exists only in memory and in the
@@ -53,6 +60,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import secrets
 import threading
 import time
@@ -68,7 +76,7 @@ from levi.stt import settings as stt_settings
 from levi.stt import wav as stt_wav
 from levi.stt.errors import SttError
 
-from . import deploy_api, models
+from . import command, deploy_api, models
 from . import site as marvel0_site
 from .deploy_api import person_only
 from .errors import fail
@@ -387,17 +395,55 @@ def _allowed_revision(allowed, family: str) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _match(transcript: str, allowed: tuple, family: str, translator=None):
+def _match(
+    transcript: str, allowed: tuple, family: str, translator=None, as_heard=None
+):
     try:
         result = _matcher().match_transcript(transcript, allowed, family=family)
         return {
             **result,
             "allowed_revision": _allowed_revision(allowed, family),
             "generated": _generated(transcript, family, translator),
+            "as_heard": as_heard,
         }
     except Exception as exc:  # noqa: BLE001 - the text is not in the log, only the kind
         log.warning("matching failed (%s)", type(exc).__name__)
         raise refuse("speech_failed") from None
+
+
+# ------------------------------------------------------------- as heard ----
+_SENTENCE_END = re.compile(r"[\s.!?\u3002\uff01\uff1f]+$")
+
+
+def as_heard_sentence(transcript: str) -> str:
+    """What the person said as a task instruction would be written: white
+    space trimmed and folded, sentence-ending punctuation (. ! ? and the
+    full-width 。！？) dropped, lower case (the datasets' instructions are
+    lower case). Chinese stays as it is. Empty when nothing is left."""
+    folded = " ".join(transcript.split())
+    return _SENTENCE_END.sub("", folded).lower()
+
+
+def _as_heard(site, model_id, transcript: str) -> dict | None:
+    """``{"prompt", "problem"}`` for the sentence as heard, or ``None`` when
+    nothing is left of it (or the check itself broke: it never fails a match).
+    ``problem`` is the reason the client command card would refuse it for this
+    model (``command.prompt_problem``; with no model, the same text rule the
+    card applies first), else ``None``."""
+    sentence = as_heard_sentence(transcript)
+    if not sentence:
+        return None
+    try:
+        model = models.get(site, model_id) if model_id else None
+        problem = (
+            command.prompt_problem(sentence, site, model)
+            if model is not None
+            else marvel0_site.prompt_reason(sentence, site.caps.prompt_max_chars)
+        )
+    except Exception as exc:  # noqa: BLE001 - the text is not in the log, only the kind
+        log.warning("the sentence as heard was not checked (%s)", type(exc).__name__)
+        return None
+    return {"prompt": sentence, "problem": problem}
 
 
 # ------------------------------------------------------------ generated ----
@@ -780,9 +826,19 @@ def _match_text(site, transcript: str, model_id) -> dict:
         site, f"match:{secrets.token_hex(6)}", stt_settings.MATCH_BUDGET_S
     )
     allowed, family = _allowed(site, model_id)
+    started = time.monotonic()
+    match = _match(
+        transcript,
+        allowed,
+        family,
+        translator,
+        _as_heard(site, model_id, transcript),
+    )
+    took = _ms(time.monotonic() - started)
     return {
         "schema": MATCH_SCHEMA,
-        "match": _match(transcript, allowed, family, translator),
+        "match": match,
+        "timing_ms": {"match": took, "total": took},
     }
 
 
@@ -826,7 +882,12 @@ def _transcribe(site, request_id: str, model_id, body: bytes) -> dict:
     return answer
 
 
+def _ms(seconds: float) -> int:
+    return max(0, round(seconds * 1000))
+
+
 def _run(site, request_id: str, model_id, body: bytes, facts: dict) -> dict:
+    began = time.monotonic()
     # The translation's share of the page's wait starts now, not after the
     # transcription.
     translator = _translator(
@@ -856,11 +917,28 @@ def _run(site, request_id: str, model_id, body: bytes, facts: dict) -> dict:
             raise refuse("speech_busy", reason="in_flight") from None
         raise refuse(STT_CODES.get(exc.code, "speech_failed")) from None
     match = None
+    match_ms = 0
     if result.heard:
         facts.update(
             chars=len(result.text), text_mac=_fingerprint(result.text.encode())
         )
-        match = _match(result.text, allowed, family, translator)
+        matching = time.monotonic()
+        match = _match(
+            result.text,
+            allowed,
+            family,
+            translator,
+            _as_heard(site, model_id, result.text),
+        )
+        match_ms = _ms(time.monotonic() - matching)
+    total_ms = _ms(time.monotonic() - began)
+    # Numbers only: where the wait went (the page shows them).
+    facts.update(
+        load_ms=result.load_ms,
+        infer_ms=result.infer_ms,
+        match_ms=match_ms,
+        total_ms=total_ms,
+    )
     return {
         "schema": RESULT_SCHEMA,
         "ok": True,
@@ -875,5 +953,10 @@ def _run(site, request_id: str, model_id, body: bytes, facts: dict) -> dict:
             "device": stt_settings.DEVICE,
             "loaded_now": result.loaded_now,
         },
-        "timing_ms": {"load": result.load_ms, "infer": result.infer_ms},
+        "timing_ms": {
+            "load": result.load_ms,
+            "infer": result.infer_ms,
+            "match": match_ms,
+            "total": total_ms,
+        },
     }

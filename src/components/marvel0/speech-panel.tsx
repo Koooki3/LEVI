@@ -9,6 +9,9 @@
 // the voice run (voice-run.ts), which the person switches on here through a
 // confirm window: then a clear sentence is used by itself after a short
 // countdown with Cancel, and Use runs the sentence instead of filling it in.
+// Beside the matched and generated sentences the card always offers the
+// sentence as heard (tidied, `HeardChoice`): a Use press of its own, never the
+// default and never by itself, even in the voice run.
 import {
   Fragment,
   useEffect,
@@ -54,11 +57,14 @@ import {
   engineSay,
   failureWords,
   generatedPrompts,
+  heardOption,
   heardSay,
+  heardWhySay,
   languageSay,
   micSay,
   proposalView,
   sayParts,
+  timingSay,
   topChoices,
   type EngineState,
   type Flag,
@@ -268,6 +274,14 @@ export function SpeechPanel({
             ? t("marvel0.speech.review_ready")
             : ""}
       </div>
+
+      {state.timing &&
+        !state.proposal?.checking &&
+        (state.phase === "proposal" || state.phase === "idle") && (
+          <p className="rg-muted" data-testid="marvel0-speech-timing">
+            {sayText(timingSay(state.timing), t)}
+          </p>
+        )}
 
       {state.problem && <ProblemView problem={state.problem} />}
       {state.phase === "idle" && state.notice && (
@@ -858,6 +872,11 @@ function ProposalCard({
         <FlagBanner flag={proposal.match.flag} />
       ) : (
         <>
+          <HeardChoice
+            session={session}
+            proposal={proposal}
+            running={running}
+          />
           <GeneratedChoice
             session={session}
             proposal={proposal}
@@ -873,6 +892,79 @@ function ProposalCard({
       )}
       <p className="rg-muted">{t("marvel0.speech.expires")}</p>
     </section>
+  );
+}
+
+/** The sentence as the person said it, tidied (lower case, no ending
+ * punctuation), always offered first when something was heard. It is an extra
+ * option: the default stays the matched or generated sentence, and it has a
+ * Use press of its own that nothing else, the voice run's countdown included,
+ * ever makes. It is disabled, with the reason, for a restricted model and when
+ * the task instruction field would refuse it (the server's check). */
+function HeardChoice({
+  session,
+  proposal,
+  running,
+}: {
+  session: SpeechSession;
+  proposal: Proposal;
+  running: boolean;
+}) {
+  const { t } = useLocale();
+  const option = heardOption(proposal.match);
+  if (!option) return null;
+  const blocked = !option.usable || !proposal.armed || proposal.checking;
+  // The main button when nothing else is on offer to use.
+  const alone =
+    generatedPrompts(proposal.match).length === 0 &&
+    proposal.match.tier !== "A" &&
+    proposal.match.tier !== "B";
+  return (
+    <div
+      className="rg-speech__generated"
+      data-testid="marvel0-speech-asheard"
+      data-usable={option.usable}
+    >
+      <p className="rg-muted">{t("marvel0.speech.asheard.title")}</p>
+      <p
+        className="rg-speech__prompt"
+        lang={option.chinese ? "zh" : "en"}
+        data-testid="marvel0-speech-asheard-prompt"
+      >
+        <bdi>{option.prompt}</bdi>
+      </p>
+      {option.why ? (
+        <p className="rg-warn" data-testid="marvel0-speech-asheard-why">
+          {sayText(heardWhySay(option.why), t)}
+        </p>
+      ) : (
+        <p className="rg-muted">{t("marvel0.speech.asheard.note")}</p>
+      )}
+      {option.usable && option.chinese && (
+        <p className="rg-warn" data-testid="marvel0-speech-asheard-chinese">
+          {t("marvel0.speech.asheard.chinese")}
+        </p>
+      )}
+      {option.usable && running && (
+        <p className="rg-muted" data-testid="marvel0-speech-asheard-no-auto">
+          {t("marvel0.speech.asheard.no_auto")}
+        </p>
+      )}
+      <div className="rg-actions-row">
+        <Button
+          variant={alone ? "primary" : "secondary"}
+          disabled={blocked}
+          data-testid="marvel0-speech-use-asheard"
+          onClick={() => session.use(option.prompt)}
+        >
+          {t(
+            running
+              ? "marvel0.speech.btn.run_asheard"
+              : "marvel0.speech.btn.use_asheard",
+          )}
+        </Button>
+      </div>
+    </div>
   );
 }
 

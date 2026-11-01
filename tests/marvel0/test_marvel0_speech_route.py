@@ -8,8 +8,10 @@ of every refusal, the rate limit, and that no answer names a path."""
 import asyncio
 import copy
 import itertools
+import logging
 import re
 import struct
+import types
 from pathlib import Path
 
 import pytest
@@ -853,6 +855,15 @@ def test_a_transcription_answers_with_the_contract_shape(machine):
     answer = response.json()
     assert re.fullmatch(r"[0-9a-f]{64}", answer["match"].pop("allowed_revision"))
     assert set(answer["match"].pop("generated")) == GENERATED_KEYS
+    # The sentence as heard, made tidy and checked (test_marvel0_speech_as_heard.py).
+    assert answer["match"].pop("as_heard") == {
+        "prompt": "pick the eggplant in the blue plate",
+        "problem": None,
+    }
+    timing = answer.pop("timing_ms")
+    assert set(timing) == {"load", "infer", "match", "total"}
+    assert (timing["load"], timing["infer"]) == (900, 104)
+    assert all(isinstance(v, int) and v >= 0 for v in timing.values())
     assert answer == {
         "schema": "levi.marvel0.speech.v1",
         "ok": True,
@@ -875,8 +886,69 @@ def test_a_transcription_answers_with_the_contract_shape(machine):
             "allowed": list(machine.matcher.calls[0][1]),
         },
         "engine": {"model": "qwen3-asr-1.7b-hf", "device": "cuda", "loaded_now": True},
-        "timing_ms": {"load": 900, "infer": 104},
     }
+
+
+class Clock:
+    """A clock the stand-in worker and matcher move: what the server measures
+    is exactly what they spent."""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def monotonic(self):
+        return self.now
+
+
+@pytest.fixture
+def clock(machine, monkeypatch):
+    fake = Clock()
+    monkeypatch.setattr(
+        speech_api, "time", types.SimpleNamespace(monotonic=fake.monotonic)
+    )
+    transcribe, match = machine.manager.transcribe, machine.matcher.match_transcript
+
+    def slow_transcribe(*args, **kwargs):
+        fake.now += 0.9 + 0.104  # model load, then inference
+        return transcribe(*args, **kwargs)
+
+    def slow_match(*args, **kwargs):
+        fake.now += 0.12
+        return match(*args, **kwargs)
+
+    monkeypatch.setattr(machine.manager, "transcribe", slow_transcribe)
+    monkeypatch.setattr(machine.matcher, "match_transcript", slow_match)
+    return fake
+
+
+def test_the_answer_says_where_the_server_spent_the_time(machine, clock):
+    timing = machine.post().json()["timing_ms"]
+    # load and infer are the worker's own numbers; match and total are measured
+    # around the stages (the stand-ins spent 1.004 s and 0.12 s).
+    assert timing == {"load": 900, "infer": 104, "match": 120, "total": 1124}
+
+
+def test_a_recording_without_speech_spends_no_matching_time(machine, clock):
+    machine.manager.answer = transcript("", heard=False, reason="no_speech")
+    timing = machine.post().json()["timing_ms"]
+    assert (timing["match"], timing["total"]) == (0, 1004)
+
+
+def test_the_text_route_says_how_long_the_matching_took(machine, clock):
+    answer = match(machine, {"transcript": "stack the plates"}).json()
+    assert answer["timing_ms"] == {"match": 120, "total": 120}
+
+
+def test_the_audit_line_carries_the_timing_as_numbers_only(machine, clock, caplog):
+    caplog.set_level(logging.INFO, logger="levi.marvel0.speech")
+    machine.post()
+    (record,) = [r for r in caplog.records if r.name == "levi.marvel0.speech"]
+    message = record.getMessage()
+    assert message.startswith(f"speech request_id={REQ} outcome=heard ")
+    assert "load_ms=900 infer_ms=104 match_ms=120 total_ms=1124" in message
+    # Still no transcript: the sentence as heard is in the answer, not the log.
+    assert HEARD not in caplog.text and "eggplant" not in caplog.text
+    assert "as_heard" not in message and "prompt" not in message
 
 
 def test_nothing_heard_is_a_normal_answer_without_a_match(machine):

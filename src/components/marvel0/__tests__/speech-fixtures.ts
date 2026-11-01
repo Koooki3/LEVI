@@ -710,6 +710,31 @@ export function generated(over: Rec = {}): Rec {
   };
 }
 
+/** The sentence as heard of a match (`match.as_heard`): the tidy transcript
+ * and the server's reason the task instruction field would refuse it. */
+export function asHeard(
+  prompt = "pick tennis from white plate to green plate",
+  problem: string | null = null,
+): Rec {
+  return { prompt, problem };
+}
+
+/** The sentence a person said, whose generation and matching both failed:
+ * tier C and no generated sentence, with the sentence as heard beside them. */
+export const TENNIS_SAID = "Pick tennis from white plate to green plate.";
+export const TENNIS = "pick tennis from white plate to green plate";
+export function matchNothing(over: Rec = {}): Rec {
+  return matchC({
+    generated: generated({
+      status: "unclear",
+      prompt: null,
+      dataset_original: null,
+    }),
+    as_heard: asHeard(TENNIS),
+    ...over,
+  });
+}
+
 /** The server's verdict on one translated name (speech_translate.judge). */
 export function translation(over: Rec = {}): Rec {
   return {

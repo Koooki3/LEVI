@@ -16,8 +16,11 @@ import {
   engineSay,
   failureWords,
   generatedPrompts,
+  heardOption,
   heardSay,
+  heardWhySay,
   initialSpeech,
+  isUsableHeard,
   languageSay,
   micSay,
   plain,
@@ -25,10 +28,12 @@ import {
   readHeard,
   readMatch,
   readMatched,
+  readServerTiming,
   readSpeechStatus,
   reasonWords,
   sayParts,
   speechReducer,
+  timingSay,
   topChoices,
   visiblePrompts,
   type Heard,
@@ -40,12 +45,15 @@ import {
 import {
   KNOWN,
   RESTRICTED,
+  TENNIS,
+  asHeard,
   candidate,
   generated,
   heardAnswer,
   matchA,
   matchB,
   matchC,
+  matchNothing,
   matchV,
   matchedAnswer,
   statusAnswer,
@@ -1012,5 +1020,296 @@ describe("the generated sentence (owner decision 2026-10-30)", () => {
         1800,
       ),
     ).toBe(false);
+  });
+});
+
+describe("the sentence as heard", () => {
+  test("is read from the answer; an older answer without it has none", () => {
+    expect(match(matchNothing()).asHeard).toEqual({
+      prompt: TENNIS,
+      problem: null,
+    });
+    expect(match(matchC()).asHeard).toBeNull();
+    expect(match(matchC({ as_heard: "pick" })).asHeard).toBeNull();
+    expect(match(matchC({ as_heard: { prompt: "" } })).asHeard).toBeNull();
+  });
+
+  test("is an option when generation and matching both failed, first of the extras, and usable", () => {
+    const option = heardOption(match(matchNothing()))!;
+    expect(option).toEqual({
+      prompt: TENNIS,
+      usable: true,
+      why: null,
+      chinese: false,
+    });
+    const state = withProposal(matchNothing());
+    expect(visiblePrompts(state.proposal!)).toEqual(KNOWN);
+    expect(generatedPrompts(match(matchNothing()))).toEqual([]);
+    // Use works for it only after the 800 ms, like any other sentence.
+    expect(canUse(state, TENNIS, 1000)).toBe(false);
+    const armed = run([{ type: "arm", id: 1 }], state);
+    expect(canUse(armed, TENNIS, 1800)).toBe(true);
+    expect(canUse(armed, TENNIS + " now", 1800)).toBe(false);
+    expect(canUse(armed, TENNIS, 1800 + 60_000)).toBe(false);
+  });
+
+  test("stays an extra: the matched and generated sentences are as they were", () => {
+    const raw = matchA(KNOWN[2], {
+      generated: generated(),
+      as_heard: asHeard(TENNIS),
+    });
+    const read = match(raw);
+    expect(effectiveTier(read)).toBe("A");
+    expect(read.best?.prompt).toBe(KNOWN[2]);
+    expect(generatedPrompts(read)).toEqual([
+      "pick eggplant into blue bowl",
+      "put eggplant into blue bowl",
+    ]);
+    expect(heardOption(read)?.usable).toBe(true);
+    const state = run([{ type: "arm", id: 1 }], withProposal(raw));
+    expect(visiblePrompts(state.proposal!)).toEqual([KNOWN[2]]);
+    for (const prompt of [KNOWN[2], "pick eggplant into blue bowl", TENNIS])
+      expect(canUse(state, prompt, 1800)).toBe(true);
+  });
+
+  test("is not usable for the restricted family, whatever the server says of it", () => {
+    const read = match(
+      matchC({
+        family: "restricted",
+        allowed: RESTRICTED,
+        as_heard: asHeard(TENNIS, null),
+      }),
+    );
+    expect(heardOption(read)).toEqual({
+      prompt: TENNIS,
+      usable: false,
+      why: "restricted",
+      chinese: false,
+    });
+    expect(isUsableHeard(read, TENNIS)).toBe(false);
+    expect(words(heardWhySay("restricted"))).toBe(
+      en["marvel0.speech.family.restricted"],
+    );
+    const state = run(
+      [{ type: "arm", id: 1 }],
+      withProposal(
+        matchC({
+          family: "restricted",
+          allowed: RESTRICTED,
+          as_heard: asHeard(TENNIS),
+        }),
+      ),
+    );
+    expect(canUse(state, TENNIS, 1800)).toBe(false);
+  });
+
+  test("is not usable when the task instruction field would refuse it, and says why in the field's words", () => {
+    for (const problem of [
+      "forbidden_char",
+      "too_long",
+      "leading_dash",
+      "control_char",
+      "empty",
+    ]) {
+      const read = match(
+        matchC({ as_heard: asHeard("pick the cup's lid", problem) }),
+      );
+      const option = heardOption(read)!;
+      expect(option.usable, problem).toBe(false);
+      expect(option.why, problem).toBe(problem);
+      expect(isUsableHeard(read, "pick the cup's lid"), problem).toBe(false);
+      expect(words(heardWhySay(option.why!)), problem).toBe(
+        en[`marvel0.err.prompt.${problem}` as keyof typeof en]
+          .replace("{n}", "300")
+          .replace("{chars}", "' \" \\ $ ` !"),
+      );
+    }
+    // A reason this page does not know still disables it.
+    const odd = match(matchC({ as_heard: asHeard(TENNIS, "new_rule") }));
+    expect(heardOption(odd)).toMatchObject({ usable: false, why: "other" });
+    expect(words(heardWhySay("other"))).toBe(en["marvel0.err.prompt.generic"]);
+  });
+
+  test("a sentence the server passed but that cannot be a task value is shown cleaned and not usable", () => {
+    for (const prompt of [
+      "pick the\u200b cup",
+      " pick the cup",
+      "x".repeat(301),
+    ]) {
+      const read = match(matchC({ as_heard: asHeard(prompt) }));
+      expect(read.asHeard?.problem, prompt).toBe("other");
+      expect(heardOption(read)?.usable, prompt).toBe(false);
+    }
+  });
+
+  test("a flagged result has no candidates at all, this one included", () => {
+    for (const flag of ["stop", "negation", "unsafe"]) {
+      const read = match(matchV(flag, { as_heard: asHeard(TENNIS) }));
+      expect(heardOption(read), flag).toBeNull();
+      const state = run(
+        [{ type: "arm", id: 1 }],
+        withProposal(matchV(flag, { as_heard: asHeard(TENNIS) })),
+      );
+      expect(canUse(state, TENNIS, 1800), flag).toBe(false);
+    }
+  });
+
+  test("marks a sentence with Chinese in it", () => {
+    const read = match(matchC({ as_heard: asHeard("把网球放进绿色盘子") }));
+    expect(heardOption(read)).toMatchObject({ usable: true, chinese: true });
+    expect(heardOption(match(matchNothing()))?.chinese).toBe(false);
+  });
+});
+
+describe("where the time went", () => {
+  const en_ = (timing: Parameters<typeof timingSay>[0]) =>
+    words(timingSay(timing));
+
+  test("reads the server's numbers, and none from a bad value", () => {
+    expect(
+      readServerTiming({
+        timing_ms: { load: 3100, infer: 900, match: 100, total: 4100 },
+      }),
+    ).toEqual({ load: 3100, infer: 900, match: 100, total: 4100 });
+    expect(readServerTiming({ timing_ms: { load: 0, infer: 104 } })).toEqual({
+      load: 0,
+      infer: 104,
+      match: null,
+      total: null,
+    });
+    expect(
+      readServerTiming({ timing_ms: { load: -1, infer: "5", total: NaN } }),
+    ).toEqual({ load: null, infer: null, match: null, total: null });
+    expect(readServerTiming({})).toBeNull();
+    expect(readServerTiming(null)).toBeNull();
+  });
+
+  test("words the wait: load, transcription, matching and the rest", () => {
+    expect(
+      en_({
+        totalMs: 4800,
+        server: { load: 3100, infer: 900, match: 100, total: 4100 },
+      }),
+    ).toBe(
+      "Took 4.8 s: model load 3.1 s, transcription 0.9 s, matching 0.1 s, rest (upload, page) 0.7 s",
+    );
+    expect(
+      words(
+        timingSay({
+          totalMs: 4800,
+          server: { load: 3100, infer: 900, match: 100, total: 4100 },
+        }),
+        "zh",
+      ),
+    ).toBe(
+      "用时 4.8 s：加载模型 3.1 s，转写 0.9 s，匹配 0.1 s，其余（上传、页面）0.7 s",
+    );
+  });
+
+  test("leaves the load out when it is 0, and the matching when nothing was matched", () => {
+    const said = en_({
+      totalMs: 1700,
+      server: { load: 0, infer: 900, match: 100, total: 1000 },
+    });
+    expect(said).toBe(
+      "Took 1.7 s: transcription 0.9 s, matching 0.1 s, rest (upload, page) 0.7 s",
+    );
+    expect(said).not.toContain("model load");
+    expect(
+      en_({
+        totalMs: 1700,
+        server: { load: 0, infer: 900, match: 0, total: 900 },
+      }),
+    ).toBe("Took 1.7 s: transcription 0.9 s, rest (upload, page) 0.8 s");
+  });
+
+  test("an answer to edited text has no transcription, and the rest is never negative", () => {
+    expect(
+      en_({
+        totalMs: 300,
+        server: { load: null, infer: null, match: 120, total: 120 },
+      }),
+    ).toBe("Took 0.3 s: matching 0.1 s, rest (upload, page) 0.2 s");
+    expect(
+      en_({
+        totalMs: 100,
+        server: { load: 0, infer: 90, match: 60, total: 150 },
+      }),
+    ).toContain("rest (upload, page) 0.0 s");
+  });
+
+  test("without the server's numbers it says only how long the page waited", () => {
+    expect(en_({ totalMs: 2250, server: null })).toBe("Took 2.3 s");
+    expect(
+      en_({
+        totalMs: 2000,
+        server: { load: 0, infer: 104, match: null, total: null },
+      }),
+    ).toBe("Took 2.0 s");
+  });
+
+  test("an answer carries it, a new request or a failure drops it", () => {
+    const timing = { totalMs: 1000, server: null };
+    const answered = run([
+      { type: "begin", seq: 1 },
+      { type: "uploading", seq: 1 },
+      {
+        type: "answer",
+        seq: 1,
+        at: 1000,
+        heard: heardOf(matchA()),
+        forModel: "m",
+        truncated: false,
+        timing,
+      },
+    ]);
+    expect(answered.timing).toEqual(timing);
+    expect(run([{ type: "begin", seq: 2 }], answered).timing).toBeNull();
+    expect(
+      run([{ type: "failed", seq: 1, problem: { kind: "format" } }], answered)
+        .timing,
+    ).toBeNull();
+    const checked = run(
+      [
+        {
+          type: "checked",
+          seq: 1,
+          at: 2000,
+          transcript: "x",
+          match: match(matchA()),
+          forModel: "m",
+          edited: true,
+          timing: { totalMs: 300, server: null },
+        },
+      ],
+      answered,
+    );
+    expect(checked.timing).toEqual({ totalMs: 300, server: null });
+    expect(run([{ type: "used" }], answered).timing).toBeNull();
+  });
+
+  test("a recording nobody could read still shows what the wait was", () => {
+    const state = run([
+      { type: "begin", seq: 1 },
+      { type: "uploading", seq: 1 },
+      {
+        type: "answer",
+        seq: 1,
+        at: 1000,
+        heard: readHeard(
+          heardAnswer("req-12345678", null, {
+            heard: false,
+            reason: "no_speech",
+            transcript: "",
+          }),
+          "req-12345678",
+        ) as Heard,
+        forModel: "m",
+        truncated: false,
+        timing: { totalMs: 900, server: null },
+      },
+    ]);
+    expect(state.proposal).toBeNull();
+    expect(state.timing).toEqual({ totalMs: 900, server: null });
   });
 });

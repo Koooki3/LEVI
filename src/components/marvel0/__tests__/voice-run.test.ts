@@ -22,10 +22,13 @@ import {
 import { runDoc } from "./ctl-fixtures";
 import {
   KNOWN,
+  TENNIS,
+  asHeard,
   generated,
   matchA,
   matchB,
   matchC,
+  matchNothing,
   matchV,
   translation,
 } from "./speech-fixtures";
@@ -265,6 +268,46 @@ describe("which proposal runs by itself (re-review 2026-11-01)", () => {
     };
     const gate = view("at_gate", savedForm("new"), "20261101T150000-bbbbbb");
     expect(gateStep(wait, { ...gate, episode: null }, true, 0)).toBe("wait");
+  });
+});
+
+describe("the sentence as heard never runs by itself (2026-11-01)", () => {
+  test("alone it waits for a person: there is nothing clear to run", () => {
+    expect(pick(proposal(matchNothing()))).toEqual({ why: "choose" });
+    expect(pick(proposal(matchC({ as_heard: asHeard(TENNIS) })))).toEqual({
+      why: "choose",
+    });
+  });
+
+  test("it does not change what a matched or generated sentence does", () => {
+    const heard = { as_heard: asHeard(TENNIS) };
+    expect(pick(proposal(matchA(KNOWN[1], heard)))).toEqual(runs(KNOWN[1]));
+    expect(
+      pick(proposal(matchC({ generated: generated(), ...heard }))),
+    ).toEqual(runs("put eggplant into blue bowl"));
+    expect(
+      pick(proposal(matchC({ generated: generated(), ...heard }))),
+    ).toEqual(pick(proposal(matchC({ generated: generated() }))));
+    const english = generated({ repairs: [{ heard: "egg", as: "eggplant" }] });
+    expect(pick(proposal(matchC({ generated: english, ...heard })))).toEqual({
+      why: "guessed",
+    });
+  });
+
+  test("a flagged result has none, whatever the answer carries", () => {
+    expect(
+      pick(proposal(matchV("stop", { as_heard: asHeard(TENNIS) }))),
+    ).toEqual({ why: "vetoed" });
+  });
+
+  test("a generated sentence that reads the same still runs as the generated one", () => {
+    // The run is the generated sentence a Use press already handed over,
+    // never the extra option.
+    const same = matchC({
+      generated: generated({ prompt: TENNIS, dataset_original: null }),
+      as_heard: asHeard(TENNIS),
+    });
+    expect(pick(proposal(same))).toEqual(runs(TENNIS));
   });
 });
 

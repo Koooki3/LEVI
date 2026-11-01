@@ -16,9 +16,12 @@
 //   * a result with a stop, negation or unsafe flag has no candidates at all;
 //   * a sentence is offered only if it is in the server's allowed list, or is
 //     the generated sentence (or its dataset original) of a result without a
-//     flag, for a model that is not of the restricted family.
+//     flag, for a model that is not of the restricted family, or is the
+//     sentence as heard (`heardOption`: the transcript made tidy by the server
+//     and checked by the command card's own rule; owner decision 2026-11-01),
+//     which is never the default and never starts by itself.
 import type { ApiFailure } from "./deploy-api";
-import { sayFailure } from "./marvel0-failure";
+import { promptReasonSay, sayFailure } from "./marvel0-failure";
 import { bool, list, num, rec, str, type Worded } from "./marvel0-json";
 import type { Say } from "./marvel0-logic";
 import type { CaptureErrorCode } from "./voice-capture";
@@ -150,6 +153,38 @@ export interface Match {
   /** A sentence written in the datasets' most common phrasing, or why there
    * is none (owner decision 2026-10-30). Absent from older answers. */
   generated?: Generated | null;
+  /** The transcript as a task instruction would be written, and why the task
+   * instruction field would refuse it (the server's check). Absent from older
+   * answers. */
+  asHeard?: AsHeard | null;
+}
+
+/** Why the task instruction field refuses a sentence (the server's reasons of
+ * `prompt_reason`, and `unknown_for_model`); `other` is a reason this page does
+ * not know. */
+export type AsHeardProblem =
+  | "empty"
+  | "too_long"
+  | "control_char"
+  | "leading_dash"
+  | "forbidden_char"
+  | "unknown_for_model"
+  | "other";
+const AS_HEARD_PROBLEMS: AsHeardProblem[] = [
+  "empty",
+  "too_long",
+  "control_char",
+  "leading_dash",
+  "forbidden_char",
+  "unknown_for_model",
+];
+/** The longest text the server sends back for matching (it answers for up to
+ * this many characters; the field takes fewer). */
+const AS_HEARD_MAX = 500;
+
+export interface AsHeard {
+  prompt: string;
+  problem: AsHeardProblem | null;
 }
 
 export type GeneratedStatus =
@@ -345,6 +380,22 @@ function readGenerated(value: unknown): Generated | null {
   };
 }
 
+function readAsHeard(value: unknown): AsHeard | null {
+  const item = rec(value);
+  if (!item || typeof item.prompt !== "string") return null;
+  const named =
+    item.problem === null || item.problem === undefined
+      ? null
+      : (AS_HEARD_PROBLEMS.find((entry) => entry === item.problem) ?? "other");
+  // A sentence the server passed is handed over exactly as it is, so it must
+  // be one a task value can be (no invisible character, not too long, trimmed);
+  // anything else is shown cleaned and cannot be used.
+  const exact = named === null ? exactPrompt(item.prompt) : null;
+  if (exact) return { prompt: exact, problem: null };
+  const shown = plain(item.prompt, AS_HEARD_MAX);
+  return shown ? { prompt: shown, problem: named ?? "other" } : null;
+}
+
 const TIERS: Tier[] = ["A", "B", "C", "V"];
 const FLAGS: Flag[] = ["stop", "negation", "unsafe"];
 const MAX_ALLOWED = 200;
@@ -421,6 +472,7 @@ export function readMatch(data: unknown): Match | null {
     allowed,
     revision: plain(body.allowed_revision, 64),
     generated: readGenerated(body.generated),
+    asHeard: readAsHeard(body.as_heard),
   };
   const effective = effectiveTier(match);
   if ((effective === "A" || effective === "B") && !best) return null;
@@ -451,6 +503,40 @@ export function generatedPrompts(match: Match): string[] {
       ),
     ),
   ];
+}
+
+/** The sentence as heard, as the card offers it: one more option beside the
+ * allowed and generated ones, never the default. Null when there is none
+ * (nothing left of the transcript) and for a V result, which has no
+ * candidates at all. Not usable for the restricted family, nor when the task
+ * instruction field would refuse it (`why` says which). */
+export interface HeardOption {
+  prompt: string;
+  usable: boolean;
+  /** The server's reason, or "restricted"; null when it is usable. */
+  why: AsHeardProblem | "restricted" | null;
+  /** The sentence holds Chinese: the policy was trained on English. */
+  chinese: boolean;
+}
+
+export function heardOption(match: Match): HeardOption | null {
+  const heard = match.asHeard;
+  if (!heard || effectiveTier(match) === "V") return null;
+  const why = match.family === "restricted" ? "restricted" : heard.problem;
+  return {
+    prompt: heard.prompt,
+    usable: why === null,
+    why,
+    chinese: /\p{Script=Han}/u.test(heard.prompt),
+  };
+}
+
+/** Why the sentence as heard cannot be used, in words (the task instruction
+ * field's own sentences for its reasons). */
+export function heardWhySay(why: NonNullable<HeardOption["why"]>): Say {
+  return why === "restricted" || why === "unknown_for_model"
+    ? { key: "marvel0.speech.family.restricted" }
+    : promptReasonSay(why);
 }
 
 export type HeardReason =
@@ -524,6 +610,80 @@ export function readMatched(data: unknown): Match | null {
   const body = rec(data);
   if (!body || body.schema !== MATCH_SCHEMA) return null;
   return readMatch(body.match);
+}
+
+// -- where the time went
+
+/** What the server measured (`timing_ms` of an answer), in milliseconds. A
+ * field the server did not send is null; `match` is 0 when nothing was
+ * matched, `infer` is null for an answer to edited text (no recording). */
+export interface ServerTiming {
+  load: number | null;
+  infer: number | null;
+  match: number | null;
+  total: number | null;
+}
+
+/** One answer's wait: the page's own clock from the end of the recording (or
+ * the press of "match again") to the answer, and the server's share of it. */
+export interface Timing {
+  totalMs: number;
+  server: ServerTiming | null;
+}
+
+/** The `timing_ms` of a transcribe or match answer, or null when it has none. */
+export function readServerTiming(data: unknown): ServerTiming | null {
+  const item = rec(rec(data)?.timing_ms);
+  if (!item) return null;
+  const ms = (value: unknown) => {
+    const found = num(value);
+    return found !== null && found >= 0 ? found : null;
+  };
+  return {
+    load: ms(item.load),
+    infer: ms(item.infer),
+    match: ms(item.match),
+    total: ms(item.total),
+  };
+}
+
+// Tenths of a second, rounded half up (toFixed would show 0.15 as 0.1).
+const seconds = (ms: number) => (Math.round(ms / 100) / 10).toFixed(1);
+
+/** "Took 4.8 s: model load 3.1 s, transcription 0.9 s, matching 0.1 s, rest
+ * (upload, page) 0.7 s". The model load is left out when it was 0 (the model
+ * was loaded already), the matching when nothing was matched, and the rest is
+ * the page's wait minus the server's total. Without the server's numbers, the
+ * wait alone. */
+export function timingSay(timing: Timing): Say {
+  const total = Math.max(0, timing.totalMs);
+  const server = timing.server;
+  if (!server || server.total === null)
+    return {
+      key: "marvel0.speech.timing.only",
+      params: { total: seconds(total) },
+    };
+  const part = (key: string, ms: number): Say => ({
+    key,
+    params: { s: seconds(ms) },
+  });
+  const parts: Say[] = [];
+  if (server.load) parts.push(part("marvel0.speech.timing.load", server.load));
+  if (server.infer !== null)
+    parts.push(part("marvel0.speech.timing.infer", server.infer));
+  if (server.match)
+    parts.push(part("marvel0.speech.timing.match", server.match));
+  parts.push(
+    part("marvel0.speech.timing.rest", Math.max(0, total - server.total)),
+  );
+  const joined = parts.reduce((a, b) => ({
+    key: "marvel0.speech.timing.then",
+    params: { a, b },
+  }));
+  return {
+    key: "marvel0.speech.timing.took",
+    params: { total: seconds(total), parts: joined },
+  };
 }
 
 // -- the proposal
@@ -619,6 +779,8 @@ export interface SpeechState {
   proposal: Proposal | null;
   problem: Problem | null;
   notice: Notice | null;
+  /** How long the newest answer took (shown under it). */
+  timing: Timing | null;
 }
 
 export const initialSpeech: SpeechState = {
@@ -628,6 +790,7 @@ export const initialSpeech: SpeechState = {
   proposal: null,
   problem: null,
   notice: null,
+  timing: null,
 };
 
 export type SpeechAction =
@@ -643,6 +806,7 @@ export type SpeechAction =
       heard: Heard;
       forModel: string;
       truncated: boolean;
+      timing?: Timing | null;
     }
   | { type: "failed"; seq: number; problem: Problem }
   | { type: "check"; seq: number }
@@ -655,6 +819,7 @@ export type SpeechAction =
       match: Match;
       forModel: string;
       edited: boolean;
+      timing?: Timing | null;
     }
   | { type: "arm"; id: number }
   | { type: "expire"; id: number }
@@ -704,6 +869,7 @@ export function speechReducer(
         proposal: null,
         problem: null,
         notice: null,
+        timing: null,
       };
     case "recording":
       return state.phase === "recording" ? { ...state, opening: false } : state;
@@ -722,6 +888,7 @@ export function speechReducer(
         opening: false,
         proposal: null,
         problem: { kind: "mic", code: action.code },
+        timing: null,
       };
     case "answer": {
       if (action.seq !== state.seq || state.phase !== "uploading") return state;
@@ -731,6 +898,7 @@ export function speechReducer(
           ...state,
           phase: "idle",
           notice: { kind: "heard", reason: heard.reason ?? "other" },
+          timing: action.timing ?? null,
         };
       return {
         ...state,
@@ -746,6 +914,7 @@ export function speechReducer(
           truncated: action.truncated,
           at: action.at,
         }),
+        timing: action.timing ?? null,
       };
     }
     case "failed":
@@ -755,6 +924,7 @@ export function speechReducer(
         phase: "error",
         proposal: null,
         problem: action.problem,
+        timing: null,
       };
     case "check":
       if (!state.proposal) return { ...state, seq: action.seq };
@@ -797,6 +967,7 @@ export function speechReducer(
               ? state.proposal.heardAt
               : undefined,
         }),
+        timing: action.timing ?? null,
       };
     }
     case "arm":
@@ -810,6 +981,7 @@ export function speechReducer(
             phase: "idle",
             proposal: null,
             notice: { kind: "expired" },
+            timing: null,
           }
         : state;
     case "pick":
@@ -846,6 +1018,7 @@ export function speechReducer(
         proposal: null,
         problem: null,
         notice: { kind: "used" },
+        timing: null,
       };
   }
 }
@@ -868,8 +1041,15 @@ export function canUse(
     age < PROPOSAL_TTL_MS &&
     ((visiblePrompts(proposal).includes(prompt) &&
       proposal.match.allowed.includes(prompt)) ||
-      generatedPrompts(proposal.match).includes(prompt))
+      generatedPrompts(proposal.match).includes(prompt) ||
+      isUsableHeard(proposal.match, prompt))
   );
+}
+
+/** Whether `prompt` is the sentence as heard and may be handed over. */
+export function isUsableHeard(match: Match, prompt: string): boolean {
+  const option = heardOption(match);
+  return option !== null && option.usable && option.prompt === prompt;
 }
 
 // -- words

@@ -6,10 +6,14 @@ import zh from "@/i18n/zh.json";
 import { LocaleProvider } from "@/components/levi-locale";
 import { MIC_CHOICE_KEY, MIC_SEEN_KEY } from "../mic-choice";
 import { SpeechPanel } from "../speech-panel";
+import type { VoiceRun } from "../use-voice-run";
 import { button, choose, nothing, refused, type } from "./actions-helpers";
 import {
   KNOWN,
   RESTRICTED,
+  TENNIS,
+  TENNIS_SAID,
+  asHeard,
   candidate,
   captureFactory,
   deferred,
@@ -20,6 +24,7 @@ import {
   matchA,
   matchB,
   matchC,
+  matchNothing,
   matchV,
   matchedAnswer,
   ok,
@@ -74,12 +79,14 @@ async function open({
   zhLanguage = false,
   secure = true,
   devices,
+  voiceRun = null,
 }: {
   script?: Script;
   modelId?: string;
   zhLanguage?: boolean;
   secure?: boolean;
   devices?: FakeDevice[];
+  voiceRun?: VoiceRun | null;
 } = {}) {
   jest.useFakeTimers();
   audio = installFakeAudio({ secure, devices });
@@ -94,6 +101,7 @@ async function open({
         modelId={id}
         onUse={(prompt) => used.push(prompt)}
         createCapture={captures.make}
+        voiceRun={voiceRun}
       />
     );
     return zhLanguage ? <LocaleProvider>{panel}</LocaleProvider> : panel;
@@ -1936,5 +1944,470 @@ describe("the generated sentence", () => {
     await armed();
     await act(async () => use(h)!.click());
     expect(h.used).toEqual([KNOWN[2]]);
+  });
+});
+
+describe("the sentence as heard", () => {
+  const block = (h: H) => q(h, "marvel0-speech-asheard");
+  const useHeard = (h: H) =>
+    q(h, "marvel0-speech-use-asheard") as HTMLButtonElement | null;
+  const said = (match: Record<string, unknown>, over = {}) =>
+    echo(match, { transcript: TENNIS_SAID, ...over });
+
+  test("is offered first when generation and matching both failed, and Use fills the tidy sentence", async () => {
+    const h = await open({ script: { transcribe: said(matchNothing()) } });
+    await speak(h);
+    expect(q(h, "marvel0-speech-transcript")?.textContent).toBe(TENNIS_SAID);
+    expect(q(h, "marvel0-speech-generated-none")).not.toBeNull();
+    expect(q(h, "marvel0-speech-asheard-prompt")?.textContent).toBe(TENNIS);
+    expect(block(h)?.textContent).toContain(en["marvel0.speech.asheard.title"]);
+    expect(useHeard(h)?.textContent).toBe(en["marvel0.speech.btn.use_asheard"]);
+    // above the generation's reason and the list of the allowed instructions
+    for (const later of [
+      "marvel0-speech-generated-none",
+      "marvel0-speech-tier-list",
+    ])
+      expect(
+        block(h)!.compareDocumentPosition(q(h, later)!) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    // alone, it is the main button; it waits for the 800 ms like any Use
+    expect(useHeard(h)!.disabled).toBe(true);
+    await armed();
+    expect(useHeard(h)!.disabled).toBe(false);
+    await act(async () => useHeard(h)!.click());
+    await flushAll();
+    expect(h.used).toEqual([TENNIS]);
+    expect(q(h, "marvel0-speech-notice")?.getAttribute("data-kind")).toBe(
+      "used",
+    );
+  });
+
+  test("is an extra option when a sentence was generated or matched: the default stays what it was", async () => {
+    const h = await open({
+      script: {
+        transcribe: said(
+          matchA(KNOWN[2], {
+            generated: generated(),
+            as_heard: asHeard(TENNIS),
+          }),
+        ),
+      },
+    });
+    await speak(h);
+    // the matched instruction is still the preselected, primary answer
+    expect(q(h, "marvel0-speech-best")?.textContent).toBe(KNOWN[2]);
+    expect(q(h, "marvel0-speech-generated-prompt")?.textContent).toBe(
+      "pick eggplant into blue bowl",
+    );
+    expect(
+      block(h)!.compareDocumentPosition(q(h, "marvel0-speech-generated")!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    await armed();
+    await act(async () => use(h)!.click());
+    await flushAll();
+    expect(h.used).toEqual([KNOWN[2]]);
+  });
+
+  test("is there for a tier-B result and after Not this one, beside the list", async () => {
+    const h = await open({
+      script: { transcribe: said(matchB({ as_heard: asHeard(TENNIS) })) },
+    });
+    await speak(h);
+    expect(q(h, "marvel0-speech-tier-b")).not.toBeNull();
+    expect(useHeard(h)).not.toBeNull();
+    await armed();
+    await act(async () => q(h, "marvel0-speech-none")!.click());
+    await flushAll();
+    expect(q(h, "marvel0-speech-tier-list")).not.toBeNull();
+    expect(useHeard(h)!.disabled).toBe(false);
+  });
+
+  test("an edited text gets its own sentence as heard", async () => {
+    const h = await open({
+      script: {
+        transcribe: said(matchNothing()),
+        match: ok(
+          matchedAnswer(
+            matchC({
+              as_heard: asHeard("stack the plates"),
+              generated: generated({ status: "unclear", prompt: null }),
+            }),
+          ),
+        ),
+      },
+    });
+    await speak(h);
+    await act(async () =>
+      Array.from(h.host.querySelectorAll("button"))
+        .find((b) => b.textContent === en["marvel0.speech.btn.edit"])!
+        .click(),
+    );
+    await type(
+      h.host.querySelector("input[data-speech-draft]") as HTMLInputElement,
+      "Stack the Plates.",
+    );
+    await act(async () =>
+      Array.from(h.host.querySelectorAll("button"))
+        .find((b) => b.textContent === en["marvel0.speech.btn.match_again"])!
+        .click(),
+    );
+    await flushAll();
+    expect(h.calls.match.map((c) => c.transcript)).toEqual([
+      "Stack the Plates.",
+    ]);
+    expect(q(h, "marvel0-speech-asheard-prompt")?.textContent).toBe(
+      "stack the plates",
+    );
+    await armed();
+    await act(async () => useHeard(h)!.click());
+    await flushAll();
+    expect(h.used).toEqual(["stack the plates"]);
+  });
+
+  test("is disabled for a restricted model, with the reason, even if the server found no fault", async () => {
+    const h = await open({
+      modelId: SP_MODEL,
+      script: {
+        transcribe: said(
+          matchNothing({ family: "restricted", allowed: RESTRICTED }),
+        ),
+      },
+    });
+    await speak(h);
+    await armed();
+    expect(block(h)).not.toBeNull();
+    expect(useHeard(h)!.disabled).toBe(true);
+    expect(q(h, "marvel0-speech-asheard-why")?.textContent).toBe(
+      en["marvel0.speech.family.restricted"],
+    );
+    await act(async () => useHeard(h)!.click());
+    await flushAll();
+    expect(h.used).toEqual([]);
+  });
+
+  test("is disabled with the field's own reason when the task instruction would be refused", async () => {
+    const h = await open({
+      script: {
+        transcribe: said(
+          matchNothing({
+            as_heard: asHeard("pick the cup's lid", "forbidden_char"),
+          }),
+        ),
+      },
+    });
+    await speak(h);
+    await armed();
+    expect(q(h, "marvel0-speech-asheard-prompt")?.textContent).toBe(
+      "pick the cup's lid",
+    );
+    expect(useHeard(h)!.disabled).toBe(true);
+    expect(q(h, "marvel0-speech-asheard-why")?.textContent).toBe(
+      en["marvel0.err.prompt.forbidden_char"]
+        .replace("{n}", "300")
+        .replace("{chars}", "' \" \\ $ ` !"),
+    );
+    await act(async () => useHeard(h)!.click());
+    await flushAll();
+    expect(h.used).toEqual([]);
+  });
+
+  test("a Chinese sentence is offered as it is, with the warning that the policy was trained on English", async () => {
+    const h = await open({
+      script: {
+        transcribe: echo(
+          matchNothing({ as_heard: asHeard("把网球放进绿色盘子") }),
+          {
+            transcript: "把网球放进绿色盘子。",
+            language: "Chinese",
+          },
+        ),
+      },
+    });
+    await speak(h);
+    expect(q(h, "marvel0-speech-asheard-prompt")?.textContent).toBe(
+      "把网球放进绿色盘子",
+    );
+    expect(q(h, "marvel0-speech-asheard-chinese")?.textContent).toBe(
+      en["marvel0.speech.asheard.chinese"],
+    );
+    await armed();
+    await act(async () => useHeard(h)!.click());
+    await flushAll();
+    expect(h.used).toEqual(["把网球放进绿色盘子"]);
+  });
+
+  test("an English sentence has no such warning", async () => {
+    const h = await open({ script: { transcribe: said(matchNothing()) } });
+    await speak(h);
+    expect(q(h, "marvel0-speech-asheard-chinese")).toBeNull();
+    expect(q(h, "marvel0-speech-asheard-no-auto")).toBeNull();
+  });
+
+  test("a flagged result offers nothing, this included", async () => {
+    const h = await open({
+      script: {
+        transcribe: said(matchV("stop", { as_heard: asHeard(TENNIS) })),
+      },
+    });
+    await speak(h);
+    expect(block(h)).toBeNull();
+    expect(useHeard(h)).toBeNull();
+  });
+
+  test("an answer without it (an older server) shows no such option", async () => {
+    const h = await open({ script: { transcribe: said(matchC()) } });
+    await speak(h);
+    expect(block(h)).toBeNull();
+  });
+
+  test("a model switch shows the new model's verdict on the same words", async () => {
+    const h = await open({
+      script: {
+        transcribe: said(matchNothing()),
+        match: ok(
+          matchedAnswer(
+            matchNothing({
+              family: "restricted",
+              allowed: RESTRICTED,
+              as_heard: asHeard(TENNIS, "unknown_for_model"),
+            }),
+          ),
+        ),
+      },
+    });
+    await speak(h);
+    await armed();
+    expect(useHeard(h)!.disabled).toBe(false);
+    await h.setModel(SP_MODEL);
+    expect(h.calls.match.map((c) => c.modelId)).toEqual([SP_MODEL]);
+    expect(useHeard(h)!.disabled).toBe(true);
+    expect(q(h, "marvel0-speech-asheard-why")?.textContent).toBe(
+      en["marvel0.speech.family.restricted"],
+    );
+  });
+
+  test("in Chinese the option and its button are in Chinese", async () => {
+    const h = await open({
+      zhLanguage: true,
+      script: { transcribe: said(matchNothing()) },
+    });
+    await speak(h);
+    expect(block(h)?.textContent).toContain(zh["marvel0.speech.asheard.title"]);
+    expect(useHeard(h)?.textContent).toBe(zh["marvel0.speech.btn.use_asheard"]);
+  });
+});
+
+describe("the sentence as heard in the voice run", () => {
+  const RUNNING: VoiceRun = {
+    on: true,
+    armedAt: 1,
+    status: null,
+    arm: () => undefined,
+    disarm: () => undefined,
+    submit: async () => undefined,
+  };
+  const useHeard = (h: H) =>
+    q(h, "marvel0-speech-use-asheard") as HTMLButtonElement | null;
+
+  test("never starts by itself, however long the countdown: it says so and waits for a press", async () => {
+    const h = await open({
+      voiceRun: RUNNING,
+      script: {
+        transcribe: echo(matchNothing(), { transcript: TENNIS_SAID }),
+      },
+    });
+    await speak(h);
+    await advance(5_000);
+    await advance(5_000);
+    await advance(5_000);
+    expect(h.used).toEqual([]);
+    expect(q(h, "marvel0-speech-run-no-auto")?.getAttribute("data-why")).toBe(
+      "choose",
+    );
+    expect(q(h, "marvel0-speech-run-auto")).toBeNull();
+    expect(q(h, "marvel0-speech-asheard-no-auto")?.textContent).toBe(
+      en["marvel0.speech.asheard.no_auto"],
+    );
+    expect(useHeard(h)?.textContent).toBe(en["marvel0.speech.btn.run_asheard"]);
+    // a press runs it
+    await act(async () => useHeard(h)!.click());
+    await flushAll();
+    expect(h.used).toEqual([TENNIS]);
+  });
+
+  test("the generated sentence beside it still runs by itself, and only that one", async () => {
+    const h = await open({
+      voiceRun: RUNNING,
+      script: {
+        transcribe: echo(
+          matchC({ generated: generated(), as_heard: asHeard(TENNIS) }),
+          { transcript: TENNIS_SAID },
+        ),
+      },
+    });
+    await speak(h);
+    expect(q(h, "marvel0-speech-run-auto")).not.toBeNull();
+    expect(useHeard(h)!.disabled).toBe(true);
+    await advance(2_100);
+    await flushAll();
+    expect(h.used).toEqual(["put eggplant into blue bowl"]);
+  });
+
+  test("a tier-A instruction beside it still runs by itself", async () => {
+    const h = await open({
+      voiceRun: RUNNING,
+      script: {
+        transcribe: echo(matchA(KNOWN[1], { as_heard: asHeard(TENNIS) }), {
+          transcript: TENNIS_SAID,
+        }),
+      },
+    });
+    await speak(h);
+    await advance(2_100);
+    await flushAll();
+    expect(h.used).toEqual([KNOWN[1]]);
+  });
+
+  test("with the voice run off the card does not mention the countdown", async () => {
+    const h = await open({
+      script: { transcribe: echo(matchNothing(), { transcript: TENNIS_SAID }) },
+    });
+    await speak(h);
+    expect(q(h, "marvel0-speech-asheard-no-auto")).toBeNull();
+    expect(useHeard(h)?.textContent).toBe(en["marvel0.speech.btn.use_asheard"]);
+  });
+});
+
+describe("where the time went", () => {
+  const timing = (h: H) => q(h, "marvel0-speech-timing");
+  /** An answer that takes `ms` of the fake clock, with the server's numbers. */
+  const slow =
+    (ms: number, server: Record<string, number>, match = matchA()) =>
+    (call: { requestId: string }) => {
+      jest.advanceTimersByTime(ms);
+      return ok(heardAnswer(call.requestId, match, { timing_ms: server }));
+    };
+
+  test("is one muted line under the answer, with the load left out when it is 0", async () => {
+    const h = await open({
+      script: {
+        transcribe: slow(2300, {
+          load: 0,
+          infer: 900,
+          match: 100,
+          total: 1700,
+        }),
+      },
+    });
+    await speak(h);
+    expect(timing(h)?.textContent).toBe(
+      "Took 2.3 s: transcription 0.9 s, matching 0.1 s, rest (upload, page) 0.6 s",
+    );
+    expect(timing(h)?.className).toContain("rg-muted");
+  });
+
+  test("says the model load when there was one, in the page's language", async () => {
+    const h = await open({
+      zhLanguage: true,
+      script: {
+        transcribe: slow(4800, {
+          load: 3100,
+          infer: 900,
+          match: 100,
+          total: 4100,
+        }),
+      },
+    });
+    await speak(h);
+    expect(timing(h)?.textContent).toBe(
+      "用时 4.8 s：加载模型 3.1 s，转写 0.9 s，匹配 0.1 s，其余（上传、页面）0.7 s",
+    );
+  });
+
+  test("counts from the release of the button, not from the press", async () => {
+    const h = await open({
+      script: { transcribe: slow(1000, { load: 0, infer: 400, total: 600 }) },
+    });
+    await speak(h, 3000);
+    expect(timing(h)?.textContent).toContain("Took 1.0 s");
+  });
+
+  test("an answer that lacks the server's numbers still says how long the wait was", async () => {
+    const h = await open({
+      script: {
+        transcribe: (call: { requestId: string }) => {
+          jest.advanceTimersByTime(2000);
+          return ok(
+            heardAnswer(call.requestId, matchA(), { timing_ms: undefined }),
+          );
+        },
+      },
+    });
+    await speak(h);
+    expect(timing(h)?.textContent).toBe("Took 2.0 s");
+  });
+
+  test("is shown for a recording nobody could read too, and goes with a new press", async () => {
+    const h = await open({
+      script: {
+        transcribe: (call: { requestId: string }) => {
+          jest.advanceTimersByTime(1500);
+          return ok(
+            heardAnswer(call.requestId, null, {
+              heard: false,
+              reason: "no_speech",
+              transcript: "",
+              language: null,
+              timing_ms: { load: 0, infer: 800, match: 0, total: 1000 },
+            }),
+          );
+        },
+      },
+    });
+    await speak(h);
+    expect(timing(h)?.textContent).toBe(
+      "Took 1.5 s: transcription 0.8 s, rest (upload, page) 0.5 s",
+    );
+    await pointer(mic(h), "pointerdown");
+    expect(timing(h)).toBeNull();
+  });
+
+  test("an answer to edited text says how long matching took", async () => {
+    const h = await open({
+      script: {
+        transcribe: echo(matchA()),
+        match: () => {
+          jest.advanceTimersByTime(400);
+          return {
+            ...ok(matchedAnswer(matchC())),
+            data: {
+              ...matchedAnswer(matchC()),
+              timing_ms: { match: 150, total: 150 },
+            },
+          };
+        },
+      },
+    });
+    await speak(h);
+    await act(async () =>
+      Array.from(h.host.querySelectorAll("button"))
+        .find((b) => b.textContent === en["marvel0.speech.btn.edit"])!
+        .click(),
+    );
+    await type(
+      h.host.querySelector("input[data-speech-draft]") as HTMLInputElement,
+      "stack the plates",
+    );
+    await act(async () =>
+      Array.from(h.host.querySelectorAll("button"))
+        .find((b) => b.textContent === en["marvel0.speech.btn.match_again"])!
+        .click(),
+    );
+    await flushAll();
+    expect(timing(h)?.textContent).toBe(
+      "Took 0.4 s: matching 0.2 s, rest (upload, page) 0.3 s",
+    );
   });
 });

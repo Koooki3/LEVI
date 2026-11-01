@@ -10,6 +10,9 @@
 //     for another number is dropped, so a slow answer cannot replace a newer
 //     one.
 //   * A proposal is armed for Use after 800 ms and expires after 60 s.
+//   * Each answer carries how long it took: the page's own clock from the end
+//     of the recording (or the press of "match again") to the answer, with the
+//     server's numbers (`timing_ms`), for the line under the answer.
 //   * Leaving the page aborts what is in flight and releases the microphone.
 //
 //   * The inputs are listed with `enumerateDevices` (it opens nothing) when the
@@ -59,6 +62,7 @@ import {
   initialSpeech,
   readHeard,
   readMatched,
+  readServerTiming,
   readSpeechStatus,
   speechReducer,
   type Availability,
@@ -204,6 +208,8 @@ export function useSpeechSession({
   const statusAt = useRef(0);
   const capture = useRef<CaptureLike | null>(null);
   const detach = useRef<(() => void) | null>(null);
+  /** When the button was released (the recording ended), until its clip is sent. */
+  const releasedAt = useRef<number | null>(null);
 
   // -- the voice state
 
@@ -385,6 +391,7 @@ export function useSpeechSession({
       seq.current += 1;
       const mine = seq.current;
       const forModel = modelRef.current;
+      const startedAt = Date.now();
       dispatch({ type: "check", seq: mine });
       api
         .match({ transcript, modelId: forModel }, controller.signal)
@@ -405,14 +412,19 @@ export function useSpeechSession({
             });
           // The model was switched while this was on its way.
           if (modelRef.current !== forModel) return check(transcript, edited);
+          const at = Date.now();
           dispatch({
             type: "checked",
             seq: mine,
-            at: Date.now(),
+            at,
             transcript,
             match,
             forModel,
             edited,
+            timing: {
+              totalMs: at - startedAt,
+              server: readServerTiming(answer.data),
+            },
           });
         })
         .catch(() => undefined);
@@ -428,6 +440,10 @@ export function useSpeechSession({
       const mine = seq.current;
       const forModel = modelRef.current;
       const requestId = newRequestId();
+      // The wait counts from the release of the button, not from the end of
+      // the encoding that follows it.
+      const releasedFrom = releasedAt.current ?? Date.now();
+      releasedAt.current = null;
       // A very quiet clip is still sent; the card says how to fix the level.
       setQuietDb(clip.peakDb < QUIET_PEAK_DB ? clip.peakDb : null);
       dispatch({ type: "uploading", seq: mine });
@@ -455,13 +471,18 @@ export function useSpeechSession({
               seq: mine,
               problem: { kind: "format" },
             });
+          const at = Date.now();
           dispatch({
             type: "answer",
             seq: mine,
-            at: Date.now(),
+            at,
             heard,
             forModel,
             truncated: clip.truncated,
+            timing: {
+              totalMs: at - releasedFrom,
+              server: readServerTiming(answer.data),
+            },
           });
           // The model was switched while the clip was on its way: its match
           // belongs to the old model's list.
@@ -485,6 +506,7 @@ export function useSpeechSession({
       if (!button) return;
       const cap = makeCapture.current({
         onState: (next, prev) => {
+          if (prev === "recording") releasedAt.current = Date.now();
           // A new recording starts from idle: it is the newest request.
           if (prev === "idle") {
             setQuietDb(null);

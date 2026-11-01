@@ -99,6 +99,17 @@ const PROMPT_REASON: Record<string, string> = {
   leading_dash: "marvel0.err.prompt.leading_dash",
   control_char: "marvel0.err.prompt.control_char",
 };
+/** A task instruction's refusal reason (`prompt_reason` of the site module,
+ * as the server names it) in words; for a page that checks a sentence before
+ * the form does (the voice card's "sentence as heard"). The length shown is
+ * the default one: this page has no site view at hand. */
+export function promptReasonSay(reason: string): Say {
+  return {
+    key: PROMPT_REASON[reason] ?? "marvel0.err.prompt.generic",
+    params: { n: 300, chars: FORBIDDEN_CHARS },
+  };
+}
+
 const NOTE_REASON: Record<string, string> = {
   empty: "marvel0.err.note.empty",
   too_long: "marvel0.err.note.too_long",
