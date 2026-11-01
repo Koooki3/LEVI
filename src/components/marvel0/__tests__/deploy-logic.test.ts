@@ -985,7 +985,7 @@ describe("the Stop control", () => {
     expect(stopRoute(stopControl(null), false)).toBe("direct");
   });
 
-  test("an unreadable socket table counts as a client being possible", () => {
+  test("an unreadable socket table goes direct: the server refuses it with net_table_unreadable", () => {
     const unknown = stopControl(
       status(
         ready({

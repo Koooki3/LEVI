@@ -739,6 +739,32 @@ describe("a server that runs", () => {
     await waitFor(() => route() === "window", { label: "the window again" });
   });
 
+  test("a phrase typed while a client was connected is not sent once the client has left", async () => {
+    let now: Record<string, unknown> = connected();
+    const { host, calls } = await open(
+      { deploy: () => ok(now), stopDeploy: ok(stopped()) },
+      20,
+    );
+    await click(button(card(host), STOP)!);
+    const d = dialog(host)!;
+    await type(
+      field(d, "Extra phrase for a connected client"),
+      "stop with client connected",
+    );
+    now = ready();
+    const route = () =>
+      host
+        .querySelector("[data-testid=marvel0-deploy-stop-line]")
+        ?.getAttribute("data-route");
+    await waitFor(() => route() === "direct", { label: "the client left" });
+    const open_ = dialog(host);
+    const go = open_ ? button(open_, STOP) : button(card(host), STOP);
+    if (go && !go.disabled) await click(go);
+    await tick();
+    for (const body of calls.stopDeploy)
+      expect(body).toMatchObject({ client_override: "" });
+  });
+
   test("a client that connects after the page last read: the server refuses the press, the window opens and asks for the extra phrase", async () => {
     let asked = 0;
     const { host, calls } = await open({

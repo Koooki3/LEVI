@@ -284,7 +284,9 @@ export function DeployPanel({
               stopBody(
                 id,
                 stopPhrase(status),
-                override,
+                // A phrase typed while a client was connected is never sent
+                // once the field is hidden (the client left): review minor 1.
+                clientsNow ? override : "",
                 overridePhrase(status),
               ),
             );
