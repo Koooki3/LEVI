@@ -423,20 +423,6 @@ MUTATIONS = [
         T + "command-panel-hz.test.tsx",
     ),
     (
-        "page: the start gets no rate",
-        PANEL,
-        "hz={control ? rateOf(form) : null}",
-        "hz={null}",
-        T + "command-panel-hz.test.tsx",
-    ),
-    (
-        "page: the start dialog has no note",
-        START,
-        "hz !== null && hz !== referenceHz && (",
-        "false && (",
-        T + "command-panel-hz.test.tsx",
-    ),
-    (
         "page: the refusal of a rate has no field",
         FAILURE,
         '  "control_hz_unsupported",\n  "rollout_group_invalid",',

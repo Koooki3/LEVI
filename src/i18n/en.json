@@ -5795,7 +5795,7 @@
   "marvel0.run.episode_of": "Episode {no} of {target} ({counted} counted)",
   "marvel0.run.steps": "Step {step} of {max}",
   "marvel0.run.start.button": "Start the client",
-  "marvel0.run.start.means": "Pressing Start states that a hand is on the physical e-stop, the scene is reset and the area around the arm is clear.",
+  "marvel0.run.start.means": "Pressing “Start the client” states that a hand is on the physical e-stop, the scene is reset and the area around the arm is clear.",
   "marvel0.run.start.estop": "Keep a hand on the physical e-stop. Nothing on this page is an emergency stop.",
   "marvel0.run.start.first_enter": "Nothing moves until you press Start next episode at the gate; that first move sends the arm home without any limit check.",
   "marvel0.run.start.stale": "The form changed after the command was made: make it again first.",
