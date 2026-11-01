@@ -1207,6 +1207,45 @@ describe("a session left open, after a reload (RIG-MANUAL-STRANDED-SESSION)", ()
     expect(f.controller.snapshot().phase).toBe("closed");
   });
 
+  test("a blur, a hidden tab or Escape keeps the offer", async () => {
+    const f = reloaded();
+    await f.controller.refresh();
+    for (const reason of [
+      "blur",
+      "hidden",
+      "escape",
+      "drag_end",
+      "feedback_stale",
+    ])
+      f.controller.revoke(reason);
+    expect(f.controller.snapshot().phase).toBe("fault");
+    expect(f.controller.snapshot().reason).toBe("session_left_open");
+  });
+
+  test("the press stops the session the server shows now, not the one seen before", async () => {
+    const f = reloaded();
+    await f.controller.refresh();
+    f.api.status = async () => ({
+      ...leftOpen(),
+      session_id: "newer",
+      generation: 4,
+    });
+    f.controller.revoke("person_stop");
+    await settle();
+    const stop = writes(f).find((call) => call.kind === "stop");
+    expect(stop?.body).toMatchObject({ session_id: "newer", generation: 4 });
+  });
+
+  test("a press after the session was closed elsewhere sends nothing", async () => {
+    const f = reloaded();
+    await f.controller.refresh();
+    f.api.status = async () => ended();
+    f.controller.revoke("person_stop");
+    await settle();
+    expect(writes(f)).toHaveLength(0);
+    expect(f.controller.snapshot().reason).not.toBe("session_left_open");
+  });
+
   test("an ended or idle session is not offered", async () => {
     const f = reloaded();
     f.api.status = async () => ended();
@@ -1215,5 +1254,50 @@ describe("a session left open, after a reload (RIG-MANUAL-STRANDED-SESSION)", ()
     f.controller.revoke("person_stop");
     await settle();
     expect(writes(f)).toHaveLength(0);
+  });
+});
+
+describe("the end has its own deadline (review 2026-11-01)", () => {
+  async function endAfter(delayMs: number, endTimeoutMs: number) {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, delayMs);
+        init?.signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      });
+      void input;
+      return new Response(
+        JSON.stringify({ ...view(true), state: "ended", admission: "closed" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+    try {
+      const api = createManualApi({ requestTimeoutMs: 30, endTimeoutMs });
+      return await api
+        .end({ session_id: "s", generation: 1, request_id: "r-1" })
+        .then((v) => v.state)
+        .catch(() => "failed");
+    } finally {
+      globalThis.fetch = original;
+    }
+  }
+
+  test("an end slower than the other calls' deadline still gets its answer", async () => {
+    expect(await endAfter(80, 1000)).toBe("ended");
+  });
+
+  test("an end slower than its own deadline fails", async () => {
+    expect(await endAfter(80, 30)).toBe("failed");
+  });
+
+  test("the deadlines must be positive and finite", () => {
+    expect(() => createManualApi({ endTimeoutMs: 0 })).toThrow();
+    expect(() => createManualApi({ endTimeoutMs: Number.NaN })).toThrow();
   });
 });

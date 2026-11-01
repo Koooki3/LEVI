@@ -456,10 +456,13 @@ class LockedRealEngine:
         return self.view()
 
     def physical_evidence(self):
-        raise ManualRefused("physical_stop_unproven")
+        # Its own code: a start whose delivery is unknown never settles into
+        # proof here, so the supervisor's end does not wait for it (it waits
+        # only on physical_stop_unproven, which can still clear).
+        raise ManualRefused("physical_stop_unproven_start_unknown")
 
     def end(self, evidence):
-        raise ManualRefused("physical_stop_unproven")
+        raise ManualRefused("physical_stop_unproven_start_unknown")
 
     def target(self, **kwargs):
         raise ManualRefused("admission_closed")

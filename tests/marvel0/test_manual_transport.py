@@ -466,3 +466,44 @@ def test_a_refusal_that_is_not_waiting_is_not_waited_for(machine, monkeypatch):
 
         os.close(m.sup.manual.fd)
         m.sup.manual.fd = None
+
+
+def test_a_start_whose_delivery_is_unknown_is_refused_at_once(machine, monkeypatch):
+    m = machine
+    remote = SettlingRemote(settle_reads=1, clock=m.host.monotonic)
+    remote.fail_start = True
+    m.host.manual_factory = production_factory
+    m.host.manual_enabled = lambda: True
+    monkeypatch.setattr(
+        real.Transport,
+        "_http",
+        lambda self, method, path, body: remote.request(method, path, body),
+    )
+    challenge = m.sup.manual.challenge({"limits": LIMITS, "stop_limits": STOPS})
+    view = m.sup.manual.start(
+        {
+            "limits": LIMITS,
+            "stop_limits": STOPS,
+            "request_id": m.rid(),
+            "attest": ATTEST,
+            "confirm": challenge["confirm"],
+            "challenge": challenge["challenge"],
+        }
+    )
+    assert view["state"] == "fault_locked"
+    started = m.host.monotonic()
+    with pytest.raises(run.Refuse):
+        m.sup.manual.end(
+            {
+                "session_id": view["session_id"],
+                "generation": view["generation"],
+                "request_id": m.rid(),
+            }
+        )
+    assert m.host.monotonic() - started < 0.2  # never "not yet": no settle wait
+    assert flock_busy(m.tmp / "arm.lock")
+    if m.sup.manual.fd is not None:
+        import os
+
+        os.close(m.sup.manual.fd)
+        m.sup.manual.fd = None

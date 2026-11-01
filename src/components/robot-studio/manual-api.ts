@@ -199,17 +199,24 @@ function answer(result: ApiResult): unknown {
  * HTTP deadlines bound transport only and are not physical operating limits. */
 export function createManualApi({
   requestTimeoutMs = 5000,
-}: { requestTimeoutMs?: number } = {}): ManualApi {
-  if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0)
-    throw new Error("requestTimeoutMs must be positive and finite");
+  // The server's end waits up to 10 s for the arm to settle after a release,
+  // then makes one call to the robot server: the page waits longer than that,
+  // so it does not report a failure for a session the server did close.
+  endTimeoutMs = 20000,
+}: { requestTimeoutMs?: number; endTimeoutMs?: number } = {}): ManualApi {
+  for (const value of [requestTimeoutMs, endTimeoutMs])
+    if (!Number.isFinite(value) || value <= 0)
+      throw new Error("timeouts must be positive and finite");
   const call = createCaller();
   const path = "arm/manual";
   const get = async (signal?: AbortSignal) =>
     viewOf(answer(await call(path, requestTimeoutMs, undefined, signal)));
-  const post = async (action: string, body: unknown, signal?: AbortSignal) =>
-    viewOf(
-      answer(await call(path + "/" + action, requestTimeoutMs, body, signal)),
-    );
+  const post = async (
+    action: string,
+    body: unknown,
+    signal?: AbortSignal,
+    timeoutMs = requestTimeoutMs,
+  ) => viewOf(answer(await call(path + "/" + action, timeoutMs, body, signal)));
   return {
     status: get,
     challenge: async (body) => {
@@ -259,11 +266,16 @@ export function createManualApi({
         generation: body.generation,
       }),
     end: (body) =>
-      post("end", {
-        request_id: body.request_id,
-        session_id: body.session_id,
-        generation: body.generation,
-      }),
+      post(
+        "end",
+        {
+          request_id: body.request_id,
+          session_id: body.session_id,
+          generation: body.generation,
+        },
+        undefined,
+        endTimeoutMs,
+      ),
   };
 }
 export const manualApi = createManualApi();

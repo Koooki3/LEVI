@@ -555,14 +555,10 @@ export class ManualSessionController implements ManualDragController {
   }
   revoke(reason: string): void {
     if (this.state.phase === "closing") return;
-    const left = this.leftOpen;
-    if (!this.owner && left && reason === "person_stop" && this.state.view) {
-      // Only a person's press, never a blur or an unmount, closes a session
-      // this page did not start. The same stop -> end path proves the stop.
-      this.realSession = productionView(this.state.view);
-      const epoch = ++this.epoch;
-      this.emit({ phase: "closing", reason, anchor: null, confirm: null });
-      void this.closeIdentity(left, epoch, null);
+    if (!this.owner && this.leftOpen) {
+      // A session this page did not start: only a person's press closes it.
+      // A blur, a hidden tab, Escape or a drag end leaves the offer as it is.
+      if (reason === "person_stop") void this.closeLeftOpen();
       return;
     }
     if (this.pendingStartRequestID && this.uncertainStart) {
@@ -634,6 +630,35 @@ export class ManualSessionController implements ManualDragController {
       }
     })();
     return this.recovery;
+  }
+
+  /** Close the session the server shows now (read again at the press: the
+   * one seen at the last refresh may have been replaced since). */
+  private async closeLeftOpen(): Promise<void> {
+    const epoch = ++this.epoch;
+    this.emit({ phase: "closing", anchor: null, confirm: null });
+    let view: ManualView | null = null;
+    try {
+      view = await this.api.status();
+    } catch (error) {
+      if (epoch === this.epoch)
+        this.emit({ phase: "fault", reason: reasonOf(error) });
+      return;
+    }
+    if (this.disposed || epoch !== this.epoch) return;
+    const owner = this.owner ? null : leftOpenOwner(view);
+    this.leftOpen = owner;
+    if (!owner) {
+      this.permission = manualStartAllowed(view);
+      this.emit({
+        view,
+        phase: this.permission ? "ready" : "unavailable",
+        reason: view.reason_code,
+      });
+      return;
+    }
+    this.realSession = productionView(view);
+    await this.closeIdentity(owner, epoch, null);
   }
 
   private closeIdentity(
