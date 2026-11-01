@@ -114,6 +114,7 @@ class _Request:
         self.done = threading.Event()
         self.value = None
         self.error = None
+        self.latency_s = None  # request start to reply, set only when the call succeeded
         self.started = time.monotonic()
         self.thread = threading.Thread(
             target=self._run, args=(function,), daemon=True, name="vlash-inference"
@@ -123,6 +124,7 @@ class _Request:
     def _run(self, function):
         try:
             self.value = function()
+            self.latency_s = time.monotonic() - self.started
         except BaseException as error:  # noqa: BLE001 - transfer every worker failure to caller
             self.error = error
         finally:
@@ -174,6 +176,14 @@ class VlashChunker:
             "discarded_replies": 0,
             "adjusted_targets": 0,
         }
+        # Reply latency of every request, in order. The first one is the blocking request
+        # at the start of an episode (on a freshly deployed server it includes the JAX
+        # compile, ~12 s on 2026-10-30); the rest are the prefetches.
+        self.latency_ms = []
+
+    def _record_latency(self, seconds):
+        if seconds is not None:
+            self.latency_ms.append(seconds * 1000.0)
 
     def _chunk(self, answer):
         chunk, _ = answer
@@ -198,14 +208,19 @@ class VlashChunker:
         if self.chunk is None:
             self._drain()
             self.stats["requests"] += 1
-            self.chunk = self._chunk(self.request(copy.deepcopy(observation), None)())
+            started = time.monotonic()
+            answer = self.request(copy.deepcopy(observation), None)()
+            self._record_latency(time.monotonic() - started)
+            self.chunk = self._chunk(answer)
             self.index = 0
         elif self.index == self.horizon:
             if self.pending is None:
                 raise RuntimeError("missing VLASH prefetch")
             if not self.pending.done.is_set():
                 self.stats["starvations"] += 1
-            self.chunk = self._chunk(self.pending.take(self.timeout))
+            pending = self.pending
+            self.chunk = self._chunk(pending.take(self.timeout))
+            self._record_latency(pending.latency_s)
             self.pending = None
             self.index = 0
         if self.index == self.horizon - self.overlap and self.pending is None:
@@ -236,6 +251,8 @@ class VlashChunker:
         self._drain()
 
     def summary(self):
+        first = self.latency_ms[0] if self.latency_ms else None
+        prefetch = self.latency_ms[1:]
         return {
             "mode": self.mode,
             "overlap_steps": self.overlap,
@@ -243,4 +260,10 @@ class VlashChunker:
             "experimental": True,
             "delay_training_verified": False,
             **self.stats,
+            # Client-side wall time per request, like rtc's latency_ms_*. `first` is kept
+            # apart because it can include the server's one-off compile; median and max
+            # cover the prefetches only.
+            "latency_ms_first": round(first, 1) if first is not None else None,
+            "latency_ms_median": round(float(np.median(prefetch)), 1) if prefetch else None,
+            "latency_ms_max": round(max(prefetch), 1) if prefetch else None,
         }
