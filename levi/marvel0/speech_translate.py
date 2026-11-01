@@ -27,8 +27,9 @@ only, which answers may be used:
    when the model also judges the two the same object. Otherwise the
    translation is ``unchecked`` and refused.
 
-Measured on 2026-10-31 with Qwen3-4B-Instruct-2507 (since 2026-11-01 the default
-is Qwen3.5-2B: 69 of the same 81 passed, none wrong; docs/SPEECH.md) (levi-hub
+The default model since 2026-11-01 is Qwen3.5-2B: of the 81 names below 69
+passed and none was wrong (docs/SPEECH.md). Measured on 2026-10-31 with
+Qwen3-4B-Instruct-2507 (levi-hub
 programs/rig-console/reviews/voice-translate-20261031.md): on 81 names outside
 the lexicon 69 passed and 2 of those were near misses ("honeydew" for 哈密瓜,
 "cup pad" for 杯垫); on a held-out set of 40, frozen before it was run, 31

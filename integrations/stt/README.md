@@ -15,7 +15,7 @@ The installer downloads one pinned commit into `<model-dir>/qwen3-asr-1.7b-hf/`,
 
 ## Protocol
 
-`python -m levi_stt_worker.cli serve --model-dir D [--model qwen3-asr-1.7b-hf] [--device cuda] [--max-seconds 10] [--cpu-affinity 8-15] [--translate-model qwen3-4b-instruct-2507] [--provider qwen3-asr|fake]`
+`python -m levi_stt_worker.cli serve --model-dir D [--model qwen3-asr-1.7b-hf] [--device cuda] [--max-seconds 10] [--cpu-affinity 8-15] [--translate-model qwen3.5-2b] [--provider qwen3-asr|fake]`
 
 stdin: one JSON line per request followed by exactly `bytes` raw bytes (a 16 kHz mono 16-bit WAV with a 44-byte header, 0.3 to `max-seconds` + 0.5 s):
 
