@@ -47,6 +47,7 @@ const SOURCES = [
   "components/marvel0/run-logic.ts",
   "components/marvel0/run-panel.tsx",
   "components/marvel0/run-start.tsx",
+  "components/marvel0/live-frames.tsx",
   "components/marvel0/use-run-actions.ts",
   "components/marvel0/use-run-poll.ts",
   "components/marvel0/selection.ts",
