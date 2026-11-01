@@ -3,7 +3,10 @@
 // filled task instruction, and what must NOT happen on the way.
 import { render, setupDom } from "@/components/ds/__tests__/dom";
 import { act } from "react";
-import { installApplicationClock } from "./application-clock";
+import {
+  installApplicationClock,
+  installDomApplicationClock,
+} from "./application-clock";
 import {
   afterAll,
   afterEach,
@@ -36,7 +39,7 @@ import {
 // Keep the application clock through cleanup; restore before DOM globals.
 let clock: ReturnType<typeof installApplicationClock>;
 beforeAll(() => {
-  clock = installApplicationClock();
+  clock = installDomApplicationClock();
 });
 afterAll(() => clock.restore());
 // Effects dispose their resources synchronously; verify that before restoring

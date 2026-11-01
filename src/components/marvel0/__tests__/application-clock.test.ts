@@ -1,5 +1,10 @@
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { expect, test } from "bun:test";
-import { advanceInSteps, installApplicationClock } from "./application-clock";
+import {
+  advanceInSteps,
+  installApplicationClock,
+  installDomApplicationClock,
+} from "./application-clock";
 
 test("orders deadlines, cancels, and handles self-cancelling intervals and nested timers", () => {
   const clock = installApplicationClock();
@@ -139,4 +144,22 @@ test("advanceInSteps settles Promise work between steps of at most 30 s", async 
   } finally {
     clock.restore();
   }
+});
+
+test("a DOM file's clock leaves the native timers behind after an earlier DOM file in the same process", async () => {
+  const native = globalThis.setTimeout;
+  // an earlier DOM file: setupDom registered happy-dom and unregistered it at its end
+  if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+  await GlobalRegistrator.unregister();
+  expect(globalThis.setTimeout).toBe(native);
+  // this file: the clock first (beforeAll), then setupDom's beforeAll finds happy-dom registered
+  const clock = installDomApplicationClock();
+  expect(GlobalRegistrator.isRegistered).toBe(true);
+  expect(globalThis.setTimeout).not.toBe(native);
+  // its end: afterAll(clock.restore) before setupDom's unregister
+  clock.restore();
+  await GlobalRegistrator.unregister();
+  expect(globalThis.setTimeout).toBe(native);
+  // the next file still has working timers
+  await new Promise((resolve) => setTimeout(resolve, 0));
 });

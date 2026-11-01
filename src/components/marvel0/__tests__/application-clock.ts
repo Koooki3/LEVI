@@ -1,3 +1,5 @@
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+
 /** Application-only test clock. Load React first; never replace its captured host objects. */
 export function installApplicationClock() {
   type Timer = { due: number; period: number | null; run: () => void };
@@ -151,4 +153,18 @@ export async function advanceInSteps(
     await settle();
     left -= part;
   } while (left > 0);
+}
+
+/**
+ * installApplicationClock for a DOM test file (one that calls setupDom()); call
+ * it in beforeAll and register afterAll(() => clock.restore()) before
+ * setupDom(). happy-dom is registered first: when an earlier DOM file in the
+ * same process has unregistered it, setupDom's own beforeAll would register it
+ * after the clock, take the clock's timers for the originals and put them back
+ * at the end, so every later setTimeout in that process would throw
+ * "application clock is restored".
+ */
+export function installDomApplicationClock() {
+  if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+  return installApplicationClock();
 }
