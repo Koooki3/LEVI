@@ -1,6 +1,10 @@
 import { render, setupDom } from "@/components/ds/__tests__/dom";
 import { act } from "react";
-import { advanceInSteps, installApplicationClock } from "./application-clock";
+import {
+  advanceInSteps,
+  installApplicationClock,
+  installDomApplicationClock,
+} from "./application-clock";
 import {
   afterAll,
   afterEach,
@@ -47,7 +51,7 @@ import {
 // application clock stays through cleanup; restore it before the DOM globals go.
 let clock: ReturnType<typeof installApplicationClock>;
 beforeAll(() => {
-  clock = installApplicationClock();
+  clock = installDomApplicationClock();
 });
 afterAll(() => clock.restore());
 setupDom();

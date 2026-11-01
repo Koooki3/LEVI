@@ -18,7 +18,10 @@ import { Marvel0Actions } from "../marvel0-actions";
 import { runView } from "../run-logic";
 import type { RunActions } from "../use-run-actions";
 import type { RunPoll } from "../use-run-poll";
-import { installApplicationClock } from "./application-clock";
+import {
+  installApplicationClock,
+  installDomApplicationClock,
+} from "./application-clock";
 import { button, fakeApi, field, ok, tickAll } from "./actions-helpers";
 import { preview } from "./command-fixtures";
 import { runDoc } from "./ctl-fixtures";
@@ -38,7 +41,7 @@ import {
 
 let clock: ReturnType<typeof installApplicationClock>;
 beforeAll(() => {
-  clock = installApplicationClock();
+  clock = installDomApplicationClock();
 });
 afterAll(() => clock.restore());
 setupDom({ unmount: "sync" });
