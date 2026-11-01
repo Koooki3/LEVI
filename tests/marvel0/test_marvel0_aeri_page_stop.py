@@ -94,9 +94,23 @@ def world(tmp_path):
         check=False,
     )
 
-    def signals(log):
-        time.sleep(0.3)
-        return Path(log).read_text().split() if Path(log).exists() else []
+    def signals(log, want=None):
+        """What the child logged. With ``want``, wait (up to a scaled 5 s) until
+        it is there: a signal is logged by the child after it arrives, and a busy
+        CI runner took longer than a fixed 0.3 s (LITE-AERI-PAGE-STOP-SIGNAL-FLAKE).
+        Without it, wait 0.3 s and read once: that is how "nothing was sent" is
+        checked."""
+
+        def read():
+            return Path(log).read_text().split() if Path(log).exists() else []
+
+        if want is None:
+            time.sleep(0.3)
+            return read()
+        deadline = time.monotonic() + scaled(5)
+        while read() != want and time.monotonic() < deadline:
+            time.sleep(0.02)
+        return read()
 
     w.signals = signals
     yield w
@@ -119,7 +133,9 @@ def test_one_sigint_goes_to_the_pid_in_the_heartbeat_and_the_record_remembers(wo
     assert done.returncode == 0, done.stderr
     assert f"SIGINT sent to terminal D (pid {proc.pid})" in done.stdout
     assert "does not go home" in done.stdout
-    assert world.signals(log) == [str(int(signal.SIGINT))]
+    assert world.signals(log, want=[str(int(signal.SIGINT))]) == [
+        str(int(signal.SIGINT))
+    ]
     rec = json.loads(world.record_path.read_text())
     assert (
         rec["stop_sent_epoch"] > 0 and rec["name"] == NAME and rec["phase"] == "started"
@@ -131,12 +147,18 @@ def test_a_second_sigint_is_refused_unless_asked_for(world):
     proc, log = world.spawn()
     world.write(runner=runner_of(proc))
     assert world.run().returncode == 0
+    sigint = [str(int(signal.SIGINT))]
+    assert world.signals(log, want=sigint) == sigint  # the first one has arrived
     again = world.run()
     assert again.returncode == 1 and "already sent" in again.stderr
+    # Then wait the fixed time and check that the refused run added nothing.
     assert world.signals(log) == [str(int(signal.SIGINT))], "nothing more was sent"
     forced = world.run("--again")
     assert forced.returncode == 0
-    assert world.signals(log) == [str(int(signal.SIGINT))] * 2
+    assert (
+        world.signals(log, want=[str(int(signal.SIGINT))] * 2)
+        == [str(int(signal.SIGINT))] * 2
+    )
 
 
 def test_a_dry_run_sends_nothing_and_changes_nothing(world):
@@ -170,7 +192,9 @@ def test_without_a_heartbeat_the_launchers_group_gets_it(world):
     world.write(leader=proc)  # (no runner.json at all)
     done = world.run()
     assert done.returncode == 0 and f"process group {proc.pid}" in done.stdout
-    assert world.signals(log) == [str(int(signal.SIGINT))]
+    assert world.signals(log, want=[str(int(signal.SIGINT))]) == [
+        str(int(signal.SIGINT))
+    ]
 
 
 def test_a_process_that_is_gone_is_not_signalled(world):
@@ -360,7 +384,9 @@ def test_a_record_that_cannot_be_written_never_keeps_the_signal_from_going_out(
     monkeypatch.setattr(script, "mark_sent", broken)
     assert script.main(["--record", str(world.record_path)]) == 0
     assert "will not know of this Stop" in capsys.readouterr().err
-    assert world.signals(log) == [str(int(signal.SIGINT))]
+    assert world.signals(log, want=[str(int(signal.SIGINT))]) == [
+        str(int(signal.SIGINT))
+    ]
 
 
 # --- the check and the write are one step under the record's lock (N13) ------------------------
@@ -401,7 +427,9 @@ def test_again_is_still_allowed_after_a_stop_was_sent(world):
     world.write(runner=runner_of(proc), stop_sent_epoch=1234.5)
     assert world.run().returncode == 1
     assert world.run("--again").returncode == 0
-    assert world.signals(log) == [str(int(signal.SIGINT))]
+    assert world.signals(log, want=[str(int(signal.SIGINT))]) == [
+        str(int(signal.SIGINT))
+    ]
     assert json.loads(world.record_path.read_text())["stop_sent_epoch"] > 1234.5
 
 
@@ -423,7 +451,9 @@ def test_a_record_lock_someone_holds_does_not_keep_the_signal_back(
     finally:
         os.close(held)
     assert "will not know of this Stop" in capsys.readouterr().err
-    assert world.signals(log) == [str(int(signal.SIGINT))]
+    assert world.signals(log, want=[str(int(signal.SIGINT))]) == [
+        str(int(signal.SIGINT))
+    ]
 
 
 # --- the record cannot be read: terminal D by its systemd scope (N8) ------------------------------
@@ -467,7 +497,9 @@ def test_the_scope_route_signals_the_d_process_found_by_its_command_line(world):
     assert done.returncode == 0, done.stderr
     assert f"pid {d.pid}" in done.stdout and SCOPE in done.stdout
     assert "page will not know" in done.stdout
-    assert world.signals(d_log) == [str(int(signal.SIGINT))]
+    assert world.signals(d_log, want=[str(int(signal.SIGINT))]) == [
+        str(int(signal.SIGINT))
+    ]
     assert world.signals(other_log) == [], "nothing else in the scope was touched"
     assert world.record_path.read_text() == "{not json", "and the record is left alone"
 
@@ -485,7 +517,9 @@ def test_the_scope_route_does_not_signal_uv_which_has_the_same_words(world):
     done = run_scope(world, root)
     assert done.returncode == 0, done.stderr
     assert f"pid {d.pid}" in done.stdout
-    assert world.signals(d_log) == [str(int(signal.SIGINT))]
+    assert world.signals(d_log, want=[str(int(signal.SIGINT))]) == [
+        str(int(signal.SIGINT))
+    ]
     assert world.signals(uv_log) == []
 
 
@@ -496,7 +530,9 @@ def test_the_scope_route_sends_to_the_group_when_d_is_not_there_yet(world):
     done = run_scope(world, root)
     assert done.returncode == 0, done.stderr
     assert "process group" in done.stdout
-    assert world.signals(log) == [str(int(signal.SIGINT))]
+    assert world.signals(log, want=[str(int(signal.SIGINT))]) == [
+        str(int(signal.SIGINT))
+    ]
 
 
 def test_the_scope_route_does_not_send_to_a_launcher_that_is_not_a_group_leader(world):
@@ -572,7 +608,9 @@ def test_the_scope_route_skips_a_pid_that_is_gone_or_not_a_number(world):
     root = fake_cgroup(world, [d.pid, 4_194_300, "x"])
     world.record_path.write_text("{not json")
     assert run_scope(world, root).returncode == 0
-    assert world.signals(log) == [str(int(signal.SIGINT))]
+    assert world.signals(log, want=[str(int(signal.SIGINT))]) == [
+        str(int(signal.SIGINT))
+    ]
 
 
 def test_the_scope_route_runs_no_program_and_opens_no_socket():

@@ -454,7 +454,8 @@ WATCHER = textwrap.dedent(
     signal.signal(signal.SIGINT, on_int)
     signal.signal(signal.SIGHUP, on_hup)
     signal.signal(signal.SIGTERM, lambda *a: note("TERM"))
-    open("up", "w").write("up")
+    open("up.tmp", "w").write("up")  # whole before it is seen (os.replace)
+    os.replace("up.tmp", "up")
     while True:
         time.sleep(0.05)
     """
@@ -658,7 +659,8 @@ D_IN_ITS_OWN_GROUP = textwrap.dedent(
     json.dump({"pid": os.getpid(), "state": "running",
                "identity": {"start_ticks": stat[19], "boot": boot}},
               open("runner.json", "w"))
-    open("up", "w").write(str(os.getpid()))
+    open("up.tmp", "w").write(str(os.getpid()))  # never read half written
+    os.replace("up.tmp", "up")
     while True:
         time.sleep(0.05)
     """
@@ -826,7 +828,8 @@ CLIENT_THAT_LEAVES = textwrap.dedent(
     os.setpgid(0, 0)
     straggler = subprocess.Popen([sys.executable, "-c", STRAGGLER])
     open("straggler", "w").write(str(straggler.pid))
-    open("up", "w").write(str(os.getpid()))
+    open("up.tmp", "w").write(str(os.getpid()))  # never read half written
+    os.replace("up.tmp", "up")
     time.sleep(120)
     """
 )

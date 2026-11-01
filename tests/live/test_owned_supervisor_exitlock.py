@@ -96,9 +96,12 @@ if mode == "launch_receipt_none":
     supervisor.workers["failed"] = receipt
 for signum in (signal.SIGTERM, signal.SIGINT):
     signal.signal(signum, supervisor.request_stop_from_signal)
-(base / "started.json").write_text(json.dumps({
+# Whole before it is seen, as the supervisor writes its receipt: the parent
+# polls for this file and read it empty once under load (RIG-MERGE-TIER-FLAKES).
+(base / "started.json.tmp").write_text(json.dumps({
     "leader": leader_identity.__dict__, "leaf": survivor_identity.__dict__
 }))
+os.replace(base / "started.json.tmp", base / "started.json")
 code = supervisor.shutdown(sup.EX_OK, "controlled stop")
 os.close(int(sys.argv[3]))  # Returning releases the production descriptor.
 leader.wait(timeout=2)
