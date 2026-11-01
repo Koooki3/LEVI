@@ -6409,5 +6409,5 @@
   "marvel0.speech.run.status.held": "客户端启动期间发出了“保持”，不会自动开始片段：{prompt}",
   "marvel0.speech.run.dropped": "之前那条指令的片段也不会再自动开始。",
   "marvel0.speech.run.status.off_pending": "语音直跑已关闭。已经发出的操作可能仍会把客户端启动到开始闸门，那里不会动；片段不会自动开始：{prompt}",
-  "marvel0.speech.run.no_auto.translated": "这句话里有本地模型翻译的物体名，策略没训练过：确认后点运行按钮。"
+  "marvel0.speech.run.auto_translated": "{s} 秒后自动运行：{prompt}。含本地模型翻译的词（策略没训练过）：{words}"
 }

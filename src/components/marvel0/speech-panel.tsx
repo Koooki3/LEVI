@@ -705,7 +705,6 @@ const NO_AUTO_KEY: Record<NoAutoWhy, string> = {
   choose: "marvel0.speech.run.no_auto.choose",
   person: "marvel0.speech.run.no_auto.person",
   earlier: "marvel0.speech.run.no_auto.earlier",
-  translated: "marvel0.speech.run.no_auto.translated",
 };
 
 /** With the voice run on: the sentence a clear proposal runs by itself after
@@ -726,6 +725,8 @@ function AutoRun({
   const [cancelled, setCancelled] = useState<number | null>(null);
   const pick = autoPick(proposal, armedAt);
   const prompt = "prompt" in pick ? pick.prompt : null;
+  const delayMs = "prompt" in pick ? pick.delayMs : VOICE_RUN_DELAY_MS;
+  const translated = "prompt" in pick ? pick.translated : [];
   const live = prompt !== null && cancelled !== proposal.id;
   const use = session.use;
   const { id, shownAt, checking } = proposal;
@@ -733,10 +734,10 @@ function AutoRun({
     if (!live || prompt === null || checking) return;
     const timer = setTimeout(
       () => use(prompt),
-      Math.max(0, shownAt + VOICE_RUN_DELAY_MS - Date.now()),
+      Math.max(0, shownAt + delayMs - Date.now()),
     );
     return () => clearTimeout(timer);
-  }, [live, prompt, checking, use, id, shownAt]);
+  }, [live, prompt, checking, use, id, shownAt, delayMs]);
   if (prompt === null)
     return (
       <p
@@ -757,13 +758,21 @@ function AutoRun({
     <div className="rg-speech__auto" data-testid="marvel0-speech-run-auto">
       <Note tone="warning">
         <SayLine
-          say={{
-            key: "marvel0.speech.run.auto",
-            params: {
-              s: VOICE_RUN_DELAY_MS / 1000,
-              prompt: { raw: prompt },
-            },
-          }}
+          say={
+            translated.length > 0
+              ? {
+                  key: "marvel0.speech.run.auto_translated",
+                  params: {
+                    s: delayMs / 1000,
+                    prompt: { raw: prompt },
+                    words: { raw: translated.join(", ") },
+                  },
+                }
+              : {
+                  key: "marvel0.speech.run.auto",
+                  params: { s: delayMs / 1000, prompt: { raw: prompt } },
+                }
+          }
         />
       </Note>
       <div className="rg-actions-row">

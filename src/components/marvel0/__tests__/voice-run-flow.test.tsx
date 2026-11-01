@@ -26,10 +26,13 @@ import {
   KNOWN,
   heardAnswer,
   installFakeAudio,
+  generated,
   matchA,
   matchB,
+  matchC,
   matchedAnswer,
   statusAnswer,
+  translation,
   type FakeAudio,
 } from "./speech-fixtures";
 
@@ -666,5 +669,32 @@ describe("the voice run on the action page", () => {
     await flushAll();
     await h.show(poll("at_gate", NEXT, KNOWN[1]));
     expect(h.pressed).toEqual([]);
+  });
+  test("a sentence with a translated name runs after 4 s, with the translation shown", async () => {
+    const kumquat = generated({
+      prompt: "put the kumquat in the blue bowl",
+      dataset_original: null,
+      slots: [
+        { said: "金桔", english: "kumquat", source: "translation" },
+        { said: "碗", english: "bowl", source: "lexicon" },
+      ],
+      translations: [translation()],
+    });
+    const h = await open(poll("idle_ready"), () =>
+      matchC({ generated: kumquat }),
+    );
+    await switchOn(h);
+    await speak(h);
+    const note = byTest(h, "marvel0-speech-run-auto")?.textContent ?? "";
+    expect(note).toContain("put the kumquat in the blue bowl");
+    expect(note).toContain("金桔 → kumquat");
+    await advance(2500);
+    await flushAll();
+    expect(h.calls.preview).toHaveLength(0);
+    await advance(1600);
+    await flushAll();
+    expect(h.calls.preview).toHaveLength(1);
+    expect(h.calls.preview[0].prompt).toBe("put the kumquat in the blue bowl");
+    expect(h.starts).toHaveLength(1);
   });
 });

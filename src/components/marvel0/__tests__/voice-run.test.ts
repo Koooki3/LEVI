@@ -12,6 +12,8 @@ import {
 } from "../speech-logic";
 import {
   GATE_WAIT_MS,
+  TRANSLATED_DELAY_MS,
+  VOICE_RUN_DELAY_MS,
   autoPick,
   gateStep,
   voiceRoute,
@@ -32,6 +34,11 @@ const known = new Set(Object.keys(en));
 const ALL = "pi05_fr3_all_step49999";
 /** The switch was turned on at 0, before every proposal here was shown. */
 const pick = (p: Proposal) => autoPick(p, 0);
+const runs = (prompt: string) => ({
+  prompt,
+  delayMs: VOICE_RUN_DELAY_MS,
+  translated: [],
+});
 
 function proposal(
   match: Record<string, unknown>,
@@ -95,15 +102,13 @@ const savedForm = (prompt: string) => ({
 
 describe("which proposal runs by itself", () => {
   test("a tier-A instruction runs", () => {
-    expect(pick(proposal(matchA(KNOWN[1])))).toEqual({
-      prompt: KNOWN[1],
-    });
+    expect(pick(proposal(matchA(KNOWN[1])))).toEqual(runs(KNOWN[1]));
   });
 
   test("a generated sentence runs as its dataset original when there is one, else as generated", () => {
-    expect(pick(proposal(matchC({ generated: generated() })))).toEqual({
-      prompt: "put eggplant into blue bowl",
-    });
+    expect(pick(proposal(matchC({ generated: generated() })))).toEqual(
+      runs("put eggplant into blue bowl"),
+    );
     // An English name said as such (not translated) has no dataset original.
     const english = generated({
       prompt: "put the kumquat in the blue bowl",
@@ -113,16 +118,16 @@ describe("which proposal runs by itself", () => {
         { said: "碗", english: "bowl", source: "lexicon" },
       ],
     });
-    expect(pick(proposal(matchC({ generated: english })))).toEqual({
-      prompt: "put the kumquat in the blue bowl",
-    });
+    expect(pick(proposal(matchC({ generated: english })))).toEqual(
+      runs("put the kumquat in the blue bowl"),
+    );
   });
 
   test("tier A and a generated sentence run only when they agree", () => {
     const agree = matchA(KNOWN[2], {
       generated: generated({ dataset_original: KNOWN[2] }),
     });
-    expect(pick(proposal(agree))).toEqual({ prompt: KNOWN[2] });
+    expect(pick(proposal(agree))).toEqual(runs(KNOWN[2]));
     const disagree = matchA(KNOWN[1], { generated: generated() });
     expect(pick(proposal(disagree))).toEqual({ why: "disagree" });
   });
@@ -132,7 +137,7 @@ describe("which proposal runs by itself", () => {
       family: "restricted",
       generated: generated(),
     });
-    expect(pick(proposal(restricted))).toEqual({ prompt: KNOWN[1] });
+    expect(pick(proposal(restricted))).toEqual(runs(KNOWN[1]));
     expect(
       pick(proposal(matchC({ family: "restricted", generated: generated() }))),
     ).toEqual({ why: "choose" });
@@ -174,7 +179,7 @@ describe("which proposal runs by itself (review 2026-11-01)", () => {
     ).toEqual({ why: "earlier" });
     expect(
       autoPick(proposal(matchA(KNOWN[1]), { shownAt: 1000 }), 1000),
-    ).toEqual({ prompt: KNOWN[1] });
+    ).toEqual(runs(KNOWN[1]));
   });
 
   test("the other choices open, the editor open or a choice picked: the person decides", () => {
@@ -189,9 +194,9 @@ describe("which proposal runs by itself (review 2026-11-01)", () => {
   });
 
   test("a tier-B answer runs its generated sentence on purpose (no allowed instruction says what was heard), and without one waits", () => {
-    expect(pick(proposal(matchB({ generated: generated() })))).toEqual({
-      prompt: "put eggplant into blue bowl",
-    });
+    expect(pick(proposal(matchB({ generated: generated() })))).toEqual(
+      runs("put eggplant into blue bowl"),
+    );
     expect(pick(proposal(matchB()))).toEqual({ why: "choose" });
   });
 });
@@ -221,7 +226,7 @@ describe("which proposal runs by itself (re-review 2026-11-01)", () => {
     expect(autoPick(again.proposal!, 1000)).toEqual({ why: "earlier" });
   });
 
-  test("a generated sentence with a name the local model translated waits for a press", () => {
+  test("a generated sentence with a name the local model translated runs after the longer countdown, with the translation", () => {
     const translated = generated({
       prompt: "put the kumquat in the blue bowl",
       dataset_original: null,
@@ -231,12 +236,14 @@ describe("which proposal runs by itself (re-review 2026-11-01)", () => {
       ],
       translations: [translation()],
     });
-    expect(pick(proposal(matchC({ generated: translated })))).toEqual({
-      why: "translated",
-    });
-    expect(pick(proposal(matchB({ generated: translated })))).toEqual({
-      why: "translated",
-    });
+    const expected = {
+      prompt: "put the kumquat in the blue bowl",
+      delayMs: TRANSLATED_DELAY_MS,
+      translated: ["金桔 → kumquat"],
+    };
+    expect(pick(proposal(matchC({ generated: translated })))).toEqual(expected);
+    expect(pick(proposal(matchB({ generated: translated })))).toEqual(expected);
+    expect(TRANSLATED_DELAY_MS).toBeGreaterThan(VOICE_RUN_DELAY_MS);
   });
 
   test("the first gate needs an episode record", () => {

@@ -33,6 +33,9 @@ import { effectiveTier, generatedPrompts, type Proposal } from "./speech-logic";
 
 /** How long a clear proposal is on screen before it runs by itself. */
 export const VOICE_RUN_DELAY_MS = 2_000;
+/** The same for a sentence with a name the local model translated: longer,
+ * so the translation shown beside it can be read (and Cancel pressed). */
+export const TRANSLATED_DELAY_MS = 4_000;
 /** How long a started client has to reach its start gate for Enter. */
 export const GATE_WAIT_MS = 120_000;
 
@@ -45,10 +48,23 @@ export type NoAutoWhy =
   | "disagree"
   | "choose"
   | "person"
-  | "earlier"
-  | "translated";
+  | "earlier";
 
-export type AutoPick = { prompt: string } | { why: NoAutoWhy };
+export type AutoPick =
+  | {
+      prompt: string;
+      /** On screen this long before it runs. */
+      delayMs: number;
+      /** "said → english" of every name the local model translated. */
+      translated: string[];
+    }
+  | { why: NoAutoWhy };
+
+const clear = (prompt: string): AutoPick => ({
+  prompt,
+  delayMs: VOICE_RUN_DELAY_MS,
+  translated: [],
+});
 
 /** The one sentence a proposal runs by itself, or why it waits for a person.
  * It is always a sentence a Use press could hand over (`canUse`): the tier-A
@@ -56,8 +72,10 @@ export type AutoPick = { prompt: string } | { why: NoAutoWhy };
  * one: the policy was trained on that wording). The generated sentence also
  * runs for a tier-B or C answer: B and C mean no allowed instruction says what
  * was heard, while the generated sentence was read back to hold exactly the
- * heard objects with their colours and sizes; but not when one of its names
- * was translated by the local model. `armedAt` is when the switch was turned
+ * heard objects with their colours and sizes. A sentence with a name the local
+ * model translated (and its check passed) runs after TRANSLATED_DELAY_MS with
+ * the translation shown: the policy was never trained on that name (owner
+ * 2026-11-01: run it, with time to read it). `armedAt` is when the switch was turned
  * on: words heard before it never run by themselves, even when a model switch
  * shows them again. */
 export function autoPick(proposal: Proposal, armedAt: number): AutoPick {
@@ -74,19 +92,20 @@ export function autoPick(proposal: Proposal, armedAt: number): AutoPick {
   if (generated.length > 0 && match.generated) {
     if (match.generated.repairs.length > 0) return { why: "guessed" };
     if (best !== null && !generated.includes(best)) return { why: "disagree" };
+    const prompt = best ?? match.generated.datasetOriginal ?? generated[0];
     // A name the local model translated is one the policy was never trained
-    // on, and this path has no measured error rate: a person presses Run
-    // (independent review 2026-11-01; the owner may choose otherwise).
-    if (
-      best === null &&
-      match.generated.slots.some((slot) => slot.source === "translation")
-    )
-      return { why: "translated" };
-    return {
-      prompt: best ?? match.generated.datasetOriginal ?? generated[0],
-    };
+    // on: it runs after a longer countdown with the translation shown.
+    const translated =
+      best === null
+        ? match.generated.slots
+            .filter((slot) => slot.source === "translation")
+            .map((slot) => `${slot.said} → ${slot.english}`)
+        : [];
+    return translated.length > 0
+      ? { prompt, delayMs: TRANSLATED_DELAY_MS, translated }
+      : clear(prompt);
   }
-  if (best !== null) return { prompt: best };
+  if (best !== null) return clear(best);
   return { why: "choose" };
 }
 
