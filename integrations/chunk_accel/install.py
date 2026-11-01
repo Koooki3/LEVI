@@ -5,9 +5,25 @@ import ast
 import hashlib
 import json
 import os
+import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
-FILES = ("accel.py", "run_collect_accel.py")
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+import client_check  # stdlib only; the same check run_collect_phase.py repeats at every start
+
+# v1/v2 (accel.py, run_collect_accel.py) first: their installed bytes are never rewritten (a different existing file is
+# refused). The rest is the v3 phase clock: the core, the schedulers, the entry and the client check they share.
+FILES = (
+    "accel.py",
+    "run_collect_accel.py",
+    "phase.py",
+    "schedulers.py",
+    "run_collect_phase.py",
+    "client_check.py",
+)
+RECEIPT = "installation-receipt.json"
+RECEIPT_SCHEMA = "chunk_accel.installation.v1"
 
 
 def no_links(path):
@@ -30,8 +46,14 @@ def _defines(tree, name):
 
 
 def check_client(root):
-    """What run_collect_accel.py wraps must exist as it expects: the policy query, the episode, the action check, the
-    eval log's header, and the recorder's metadata, close (with extra) and abort (with detail)."""
+    """What the adapters wrap must exist as they expect.
+
+    v1/v2 (run_collect_accel.py): the policy query, the episode, the action check, the eval log's header, and the
+    recorder's metadata, close (with extra) and abort (with detail).
+    v3 (run_collect_phase.py, client_check.py): also the RTC hook (_rtc_chunker called by _run_episode), the calls the
+    loop makes on the scheduler and the recorder, the policy payload helpers, RtcChunker.__init__'s three fields, the
+    collector's scheduler_factory / server_validator, and the VLASH runtime's symbols.
+    Returns {name: sha256} of the four client files (rc, rtcc, coll, vrt), hashed from the bytes that were parsed."""
     rc = ast.parse((root / "examples/fr3_local/run_robotiq_client.py").read_text())
     for fn in ("_query_policy", "_run_episode", "_clamp_action", "EvalLog"):
         if _defines(rc, fn) is None:
@@ -60,15 +82,31 @@ def check_client(root):
         raise ValueError(
             "RolloutRecorder no longer has _session_metadata, close(extra) and abort(detail)"
         )
+    return client_check.check_client(root)
+
+
+def _write_receipt(path, receipt):
+    """Atomic write of the receipt next to the adapters (a new file, never an adapter)."""
+    no_links(path)
+    tmp = path.with_name(path.name + ".tmp")
+    no_links(tmp)
+    if tmp.exists():
+        tmp.unlink()
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    with os.fdopen(fd, "w") as stream:
+        stream.write(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(tmp, path)
 
 
 def install(root, apply=False):
     no_links(root)
     if not root.is_dir():
         raise ValueError("openpi checkout missing")
-    for name in ("run_robotiq_client.py", "run_robotiq_client_collect_data.py"):
-        no_links(root / "examples/fr3_local" / name)
-    check_client(root)
+    for rel in client_check.CLIENT_FILES.values():
+        no_links(root / rel)
+    shas = check_client(root)
     dest = root / "lab/chunk_accel"
     no_links(dest)
     source = Path(__file__).parent
@@ -83,6 +121,16 @@ def install(root, apply=False):
                 "refusing to overwrite a different isolated adapter: " + name
             )
         records.append({"name": name, "sha256": hashlib.sha256(data).hexdigest()})
+    receipt = {
+        "schema": RECEIPT_SCHEMA,
+        "files": records,
+        "client": {
+            name: {"path": client_check.CLIENT_FILES[name], "sha256": sha}
+            for name, sha in shas.items()
+        },
+        "vrt_reviewed_sha256": client_check.VRT_REVIEWED_SHA256,
+        "vrt_matches_reviewed": shas["vrt"] == client_check.VRT_REVIEWED_SHA256,
+    }
     if apply:
         dest.mkdir(parents=True, exist_ok=True)
         for row in records:
@@ -101,7 +149,11 @@ def install(root, apply=False):
                 hashlib.sha256((dest / row["name"]).read_bytes()).hexdigest()
                 == row["sha256"]
             )
-    return {"applied": apply, "files": records}
+        # last: the receipt run_collect_phase.py compares the client files against (code_drift). It is rewritten on
+        # every apply, so applying again after the client changed re-baselines it (deliberately a human step).
+        receipt["installed_iso"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _write_receipt(dest / RECEIPT, receipt)
+    return {"applied": apply, **receipt}
 
 
 if __name__ == "__main__":
