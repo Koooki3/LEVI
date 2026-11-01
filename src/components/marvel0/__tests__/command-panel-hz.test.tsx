@@ -8,7 +8,7 @@ import { CommandPanel } from "../command-panel";
 import { readDeploy } from "../deploy-logic";
 import { runView } from "../run-logic";
 import { NO_CHOICE, effectiveSelection } from "../selection";
-import type { RunActions } from "../use-run-actions";
+import type { Ack, RunActions } from "../use-run-actions";
 import type { Marvel0Catalog } from "../use-marvel0-actions";
 import {
   button,
@@ -18,7 +18,6 @@ import {
   ok,
   refused,
   tick,
-  tickAll,
   type,
   type Canned,
 } from "./actions-helpers";
@@ -48,6 +47,7 @@ const catalog = (site: Record<string, unknown>): Marvel0Catalog => ({
 interface Started {
   form: Record<string, unknown>;
   phrase: string;
+  ack: Ack;
 }
 
 async function open(
@@ -77,8 +77,8 @@ async function open(
     press: async () => true,
     hold: async () => true,
     end: async () => true,
-    start: async (form, phrase) => {
-      started.push({ form, phrase });
+    start: async (form, phrase, ack) => {
+      started.push({ form, phrase, ack });
       return true;
     },
     clear: () => {},
@@ -373,41 +373,48 @@ describe("the control rate in Chinese", () => {
 });
 
 describe("starting the client at a chosen rate", () => {
-  async function startDialog(hz: string) {
+  async function startPress(hz: string) {
     const view = await open({ withRun: true });
     if (hz !== "10") await choose(select(view.host), hz);
     await make(view.host);
-    await click(button(view.host, "Start the client")!);
-    const dialog = view.host.ownerDocument.querySelector(
-      "[data-testid=marvel0-run-start-dialog]",
-    ) as HTMLElement;
-    return { ...view, dialog };
+    return view;
   }
+  const start = (host: HTMLElement) => button(panel(host), "Start the client")!;
 
-  test("the very form of the command, with the rate, goes to the start", async () => {
-    const { dialog, started } = await startDialog("20");
-    expect(text(dialog)).toContain("Control rate");
-    expect(
-      text(dialog.querySelector("[data-testid=marvel0-run-start-hz]")),
-    ).toContain("20 Hz");
-    expect(text(dialog)).toContain(en["marvel0.hz.start.note"]);
-    // The window asks three checks and nothing to type: tick them, then start.
-    const win = dialog.ownerDocument.querySelector(
-      "[role=dialog]",
-    ) as HTMLElement;
-    await tickAll(win);
-    const go = button(win, "Start the client");
-    await click(go!);
+  test("one press sends the very form of the command, with the rate, and the three statements; no window opens", async () => {
+    const { host, started } = await startPress("20");
+    // The rate and its note are in the form, above the button.
+    expect(text(note(host))).toContain("20 Hz");
+    expect(started).toHaveLength(0);
+    await click(start(host));
     await tick(3, 10);
+    expect(host.ownerDocument.querySelector("[role=dialog]")).toBeNull();
+    expect(
+      host.ownerDocument.querySelector(
+        "[data-testid=marvel0-run-start-dialog]",
+      ),
+    ).toBeNull();
     expect(started).toHaveLength(1);
     expect(started[0].form).toMatchObject({ control_hz: 20, rtc: true });
+    expect(started[0].ack).toEqual({
+      estop: true,
+      scene_reset: true,
+      area_clear: true,
+    });
+    expect(started[0].phrase).toMatch(/^start client /);
   });
 
-  test("at 10 Hz the dialog shows the rate and no extra note, and the form has no rate", async () => {
-    const { dialog } = await startDialog("10");
-    expect(
-      text(dialog.querySelector("[data-testid=marvel0-run-start-hz]")),
-    ).toContain("10 Hz");
-    expect(text(dialog)).not.toContain(en["marvel0.hz.start.note"]);
+  test("at 10 Hz the form has no rate and the press sends the same statements", async () => {
+    const { host, started } = await startPress("10");
+    expect(note(host)).toBeNull();
+    await click(start(host));
+    await tick(3, 10);
+    expect(started).toHaveLength(1);
+    expect(started[0].form).not.toHaveProperty("control_hz");
+    expect(started[0].ack).toEqual({
+      estop: true,
+      scene_reset: true,
+      area_clear: true,
+    });
   });
 });

@@ -1235,6 +1235,13 @@
   align-items: center;
   gap: var(--ds-space-2) var(--ds-space-3);
 }
+/* The warning under Start and the refusal of a start take the whole row. */
+.rg-runstart__line {
+  display: flex;
+  flex: 1 1 100%;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
 .rg-step__run {
   margin-top: var(--ds-space-4);
 }

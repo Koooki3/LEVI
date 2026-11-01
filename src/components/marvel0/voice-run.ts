@@ -3,9 +3,9 @@
 // 2026-11-01: "按这个按钮后，按麦克风说的话会直接输入给模型开跑，而不用人工确认").
 //
 // Off (the default, and after every page load) the voice card only proposes,
-// as before. Switching it on opens one confirm window with the three ticks of
-// the start window (hand on the e-stop, scene reset, area clear); those ticks
-// are then sent with every start the voice makes until it is switched off.
+// as before. Switching it on opens one confirm window with the three ticks
+// (hand on the e-stop, scene reset, area clear: what one press of Start in
+// run-start.tsx states); those ticks are then sent with every start the voice makes until it is switched off.
 // While it is on:
 //   * a proposal shown after the switch was turned on, with one clear
 //     sentence (`autoPick`), is used by itself after VOICE_RUN_DELAY_MS on

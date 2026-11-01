@@ -66,8 +66,8 @@ export type EpisodeChangeStatus =
   | { state: "unknown" | "refused" | "failed"; runId: string }
   | { state: "ready"; runId: string };
 
-/** The three things only a person can check before a client starts; the same
- * ticks as the start window (run-start.tsx). */
+/** The three things only a person can check before a client starts; the
+ * statements one press of Start makes (run-start.tsx), ticked here. */
 export const CHANGE_ACKS = ["estop", "scene_reset", "area_clear"] as const;
 export type ChangeAttest = Record<(typeof CHANGE_ACKS)[number], boolean>;
 /** While the old client is being ended or the new one started, Enter stays

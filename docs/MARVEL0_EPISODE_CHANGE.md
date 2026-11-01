@@ -7,9 +7,9 @@ runs with the current instruction, shown under the field.
 Type a different instruction and the Start button turns off, because it would
 start the episode with the old instruction. Either clear the field ("Keep the
 current instruction") or press "Change instruction and restart the client".
-That opens a confirm window with the old and new instruction and the same
-three checks as starting a client (a hand on the physical e-stop, the scene is
-reset, the area is clear). Then LEVI:
+That opens a confirm window with the old and new instruction and three checks
+(a hand on the physical e-stop, the scene is reset, the area is clear: the
+three statements one press of "Start the client" makes). Then LEVI:
 
 1. presses `q` at the gate once, ending the current client. The saved episodes
    and the policy server stay;
@@ -31,8 +31,8 @@ the end action. If a later read confirms them for the same run within 1 minute
 of the person's confirmation, it starts the new client then; the ticks describe
 that moment, so later than that it does not. If the start is refused or not
 answered, or the exit came too late, LEVI fills step 3 with the saved form and
-the new instruction, and the person starts it there through the usual start
-window. While the old client is being ended or the new one started, Start next
+the new instruction, and the person starts it there with the usual "Start the
+client" button. While the old client is being ended or the new one started, Start next
 episode stays off; after a refused or unknown end it is available again. An incomplete saved form blocks the change.
 Finish and label an episode before changing the next instruction.
 
@@ -43,8 +43,8 @@ Finish and label an episode before changing the next instruction.
 
 输入了不同的指令后，“开始”按钮会变灰，因为点它会用旧指令开始片段。这时
 要么清空输入栏（“沿用当前指令”），要么点“换指令并重启客户端”。确认窗口
-列出新旧指令，并要求勾选和启动客户端时相同的三项（手放在实体急停上、
-场景已复位、手臂周围已清空）。确认后 LEVI 会：
+列出新旧指令，并要求勾选三项（手放在实体急停上、场景已复位、手臂周围已清空；
+点一下“启动客户端”就代表这三句话）。确认后 LEVI 会：
 
 1. 在闸门按一次 `q`，结束当前客户端，已保存的片段和策略服务器保留；
 2. 等待同一个运行 ID 显示已结束、状态静止且监管锁已释放；
@@ -59,7 +59,7 @@ HTTP 成功返回只代表结束请求已收到。如果无法确认客户端退
 不会启动客户端，也不会重发结束操作。如果之后某次读取确认同一运行在用户
 确认后 1 分钟内退出，再启动新客户端；勾选的三项只代表确认那一刻，超过
 1 分钟就不再自动启动。如果启动被拒绝、没有回应或退出确认得太晚，LEVI 会把
-已保存的表单和新指令回填到第 3 步，由用户通过常规启动窗口启动。结束旧客户端
+已保存的表单和新指令回填到第 3 步，由用户点常规的“启动客户端”按钮启动。结束旧客户端
 和启动新客户端期间，“开始下一个片段”保持不可点；结束请求被拒绝或结果未知时，
 它恢复可用。已保存的表单不完整时不能更改。
 更改下一条指令前，请先完成并标注当前片段。

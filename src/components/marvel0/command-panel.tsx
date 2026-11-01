@@ -620,10 +620,6 @@ export function CommandPanel({
                 actions={runActions}
                 form={body}
                 group={form.group.trim() || hints.group}
-                modelId={form.modelId}
-                rtc={form.rtc}
-                hz={control ? rateOf(form) : null}
-                referenceHz={control?.referenceHz ?? DEFAULT_HZ}
                 stale={stale}
               />
             ) : null

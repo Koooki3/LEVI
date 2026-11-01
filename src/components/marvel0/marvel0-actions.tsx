@@ -208,7 +208,7 @@ export function Marvel0Actions({
       // A newer run already took the card: this change is over.
       if (observedRunId.current !== operation.runId) return;
       // The start was refused or not answered: step 3 shows the same body
-      // and the ordinary start window (the refusal stays on the run card).
+      // and the ordinary Start button (the refusal stays on the run card).
       setEpisodeOperation({ ...operation, state: "ready" });
       goTo(COMMAND_ANCHOR);
       setEpisodeBody(body);

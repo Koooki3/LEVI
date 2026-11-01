@@ -772,8 +772,6 @@ describe("starting from the page", () => {
           actions={actions}
           form={form}
           group={group}
-          modelId="m"
-          rtc
           stale={stale}
         />
       );
@@ -782,25 +780,20 @@ describe("starting from the page", () => {
     await tick(6, 30);
     return { ...view, ...f, form };
   }
-  test("a window asks the three checks, with Cancel in focus; the page sends the phrase with the group; then a challenge for this form and the start, once", async () => {
+  const go = (host: HTMLElement) => button(host, "Start the client")!;
+
+  test("one press starts it: no window, no tick box, nothing to type; the page sends the phrase with the group and the three statements after a challenge for this form, once", async () => {
     const { host, state, form } = await openStart();
-    await click(button(host, "Start the client")!);
-    const d = dialog(host)!;
-    expect(text(d)).toContain(en["marvel0.run.start.estop"]);
-    expect(text(d)).toContain(en["marvel0.stack.gates_scope"]);
-    // The model, RTC and the group of the run, and nothing to type.
-    expect(text(d)).toContain("my_group");
-    expect(textFields(d)).toHaveLength(0);
-    expect(text(d)).not.toMatch(/Confirmation phrase|Type exactly/);
-    expect(document.activeElement).toBe(button(d, "Cancel"));
-    const go = () => button(d, "Start the client")!;
-    expect(go().disabled).toBe(true);
-    await click(d.querySelectorAll("input[type=checkbox]")[0]);
-    expect(go().disabled).toBe(true); // two checks are still not ticked
-    await tickAll(d);
-    expect(go().disabled).toBe(false);
-    await doubleClick(go());
+    // Nothing is sent by showing the button.
+    expect(state.calls).toEqual([]);
+    expect(go(host).disabled).toBe(false);
+    await doubleClick(go(host));
     await tick(3, 10);
+    expect(dialog(host)).toBeNull();
+    expect(host.ownerDocument.querySelector("[role=dialog]")).toBeNull();
+    expect(host.querySelectorAll("input[type=checkbox]")).toHaveLength(0);
+    expect(textFields(host)).toHaveLength(0);
+    expect(text(host)).not.toMatch(/Confirmation phrase|Type exactly/);
     expect(state.order).toEqual(["challenge", "start"]);
     expect(state.calls[0].body).toMatchObject({ purpose: "start", form });
     expect(state.calls[1].body).toMatchObject({
@@ -809,88 +802,127 @@ describe("starting from the page", () => {
       confirm: "start client my_group",
       attest: { estop: true, scene_reset: true, area_clear: true },
     });
-    expect(dialog(host)).toBeNull();
+    expect(Object.keys(state.calls[1].body.attest as object).sort()).toEqual([
+      "area_clear",
+      "estop",
+      "scene_reset",
+    ]);
   });
 
-  test("the mode names in-chunk acceleration when the command has it on", async () => {
-    const accel = en["marvel0.cmd.field.chunk_accel"];
-    const off = await openStart();
-    await click(button(off.host, "Start the client")!);
-    expect(text(dialog(off.host)!)).not.toContain(accel);
-    await click(button(dialog(off.host)!, "Cancel")!);
-    const on = await openStart("idle_ready", false, "my_group", {
-      rtc: false,
-      inference_mode: "plain",
-      chunk_accel: true,
-    });
-    await click(button(on.host, "Start the client")!);
-    expect(text(dialog(on.host)!)).toContain(
-      `${en["marvel0.inference.plain"]} + ${accel}`,
+  test("the three statements and the e-stop warning stay on the page next to the button, in both languages", async () => {
+    const { host } = await openStart();
+    const warning = host.querySelector(
+      "[data-testid=marvel0-run-start-warning]",
     );
-    // a v1 command (the default) names no rule
-    expect(text(dialog(on.host)!)).not.toContain(
-      en["marvel0.cmd.field.chunk_accel_rule_v2_short"],
-    );
+    expect(text(warning)).toContain(en["marvel0.run.start.means"]);
+    expect(text(warning)).toContain(en["marvel0.run.start.estop"]);
+    expect(text(warning)).toContain(en["marvel0.run.start.first_enter"]);
+    expect(en["marvel0.run.start.means"]).toMatch(/e-stop/);
+    expect(en["marvel0.run.start.means"]).toMatch(/scene is reset/);
+    expect(en["marvel0.run.start.means"]).toMatch(/area .* is clear/);
+    expect(zh["marvel0.run.start.means"]).toMatch(/急停/);
+    expect(zh["marvel0.run.start.means"]).toMatch(/场景已复位/);
+    expect(zh["marvel0.run.start.means"]).toMatch(/区域已清空/);
+    // The three ack labels the other windows tick are still the same words.
+    for (const name of ["estop", "scene_reset", "area_clear"])
+      expect(zh[`marvel0.run.ack.${name}` as keyof typeof zh]).toBeTruthy();
   });
 
-  test("the mode names rule v2 when the command has it", async () => {
-    const accel = en["marvel0.cmd.field.chunk_accel"];
-    const v2 = await openStart("idle_ready", false, "my_group", {
-      rtc: false,
-      inference_mode: "plain",
-      chunk_accel: true,
-      chunk_accel_rule: "v2",
-    });
-    await click(button(v2.host, "Start the client")!);
-    expect(text(dialog(v2.host)!)).toContain(
-      `${en["marvel0.inference.plain"]} + ${accel}, rule v2`,
+  test("the warning is shown in Chinese with the language switched", async () => {
+    localStorage.setItem("levi-language", "zh");
+    const f = fake(runDoc("idle_ready"));
+    function Start() {
+      const poll = useRunPoll(f.api, { pollMs: 25 });
+      const actions = useRunActions(f.api, poll);
+      return (
+        <RunStart
+          view={poll.value}
+          actions={actions}
+          form={{ model_id: "m" }}
+          group="g"
+          stale={false}
+        />
+      );
+    }
+    const { host } = await render(
+      <LocaleProvider>
+        <Start />
+      </LocaleProvider>,
     );
-  });
-
-  test("Cancel, Escape and a tick that does not outlive its window: nothing is sent", async () => {
-    const { host, state } = await openStart();
-    await click(button(host, "Start the client")!);
-    await tickAll(dialog(host)!);
-    await click(button(dialog(host)!, "Cancel")!);
-    expect(dialog(host)).toBeNull();
-    await click(button(host, "Start the client")!);
+    await tick(6, 30);
     expect(
-      Array.from(
-        dialog(host)!.querySelectorAll<HTMLInputElement>(
-          "input[type=checkbox]",
-        ),
-      ).map((box) => box.checked),
-    ).toEqual([false, false, false]);
-    await press(document.activeElement, "Escape");
-    expect(dialog(host)).toBeNull();
-    expect(state.calls).toEqual([]);
+      text(host.querySelector("[data-testid=marvel0-run-start-means]")),
+    ).toBe(zh["marvel0.run.start.means"]);
+    expect(button(host, "启动客户端")).toBeDefined();
+  });
+
+  test("the button is off while the write is on its way, so a second press sends nothing; the same request id is kept when no answer came", async () => {
+    const { host, state } = await openStart();
+    let release: (value: ApiResult) => void = () => {};
+    const pending = new Promise<ApiResult>((resolve) => {
+      release = resolve;
+    });
+    const basic = state.answer;
+    state.answer = (call) => (call.op === "start" ? pending : basic(call));
+    await click(go(host));
+    await tick(2, 10);
+    expect(go(host).disabled).toBe(true);
+    await click(go(host));
+    await tick(2, 10);
+    expect(state.order).toEqual(["challenge", "start"]);
+    await act(async () =>
+      release({ ok: true, status: 202, data: { done: true } }),
+    );
+    await tick(4, 20);
+    expect(state.order).toEqual(["challenge", "start"]);
+
+    // No answer at all (status 0): a press again is the same request.
+    const second = await openStart();
+    second.state.answer = (call) =>
+      call.op === "start"
+        ? errorOf(0, { message: "fetch failed" })
+        : basic(call);
+    await click(go(second.host));
+    await tick(4, 20);
+    await click(go(second.host));
+    await tick(4, 20);
+    const ids = second.state.calls
+      .filter((call) => call.op === "start")
+      .map((call) => call.body.request_id);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toBeTruthy();
+    expect(ids[1]).toBe(ids[0]);
   });
 
   test("the phrase the page sends names the group of the run", async () => {
     const { host, state } = await openStart("idle_ready", false, "other");
-    await click(button(host, "Start the client")!);
-    const d = dialog(host)!;
-    await tickAll(d);
-    await click(button(d, "Start the client")!);
+    await click(go(host));
     await tick(3, 10);
     expect(state.calls[1].body).toMatchObject({
       confirm: "start client other",
     });
   });
 
-  test("off while a client runs or a check fails, with the backend's reason; off when the form changed", async () => {
+  test("off while a client runs or a check fails, with the backend's reason; off when the form changed; a press then sends nothing", async () => {
     const live = await openStart("running");
-    expect(button(live.host, "Start the client")!.disabled).toBe(true);
+    expect(go(live.host).disabled).toBe(true);
     expect(
       text(live.host.querySelector("[data-testid=marvel0-run-start-why]")),
     ).toContain(en["marvel0.run.why.run_live"]);
+    await click(go(live.host));
+    await tick(2, 10);
+    expect(live.state.calls).toEqual([]);
     const stale = await openStart("idle_ready", true);
-    expect(button(stale.host, "Start the client")!.disabled).toBe(true);
+    expect(go(stale.host).disabled).toBe(true);
     expect(text(stale.host)).toContain(en["marvel0.run.start.stale"]);
+    await click(go(stale.host));
+    await tick(2, 10);
+    expect(stale.state.calls).toEqual([]);
   });
 
-  test("a refused start is shown inside the window in words", async () => {
+  test("a refused start is shown under the button in words, and the next press asks for a new challenge", async () => {
     const { host, state } = await openStart();
+    const basic = state.answer;
     state.answer = (call) =>
       call.op === "challenge"
         ? errorOf(409, {
@@ -901,17 +933,21 @@ describe("starting from the page", () => {
             },
           })
         : { ok: true, status: 202, data: {} };
-    await click(button(host, "Start the client")!);
-    const d = dialog(host)!;
-    await tickAll(d);
-    await click(button(d, "Start the client")!);
+    await click(go(host));
     await tick(3, 10);
     expect(
       text(host.querySelector("[data-testid=marvel0-run-start-refused]")),
     ).toContain("policy_ready");
     expect(state.order).toEqual(["challenge"]);
-    // The window stays so that it is read; the three ticks are still set.
-    expect(dialog(host)).not.toBeNull();
+    expect(host.ownerDocument.querySelector("[role=dialog]")).toBeNull();
+    // Pressing again clears the refusal and tries again.
+    state.answer = basic;
+    await click(go(host));
+    await tick(3, 10);
+    expect(state.order).toEqual(["challenge", "challenge", "start"]);
+    expect(host.querySelector("[data-testid=marvel0-run-start-refused]")).toBe(
+      null,
+    );
   });
 
   test("the backend refusing the phrase is an internal error with the mismatch, never a prompt to type", async () => {
@@ -930,10 +966,7 @@ describe("starting from the page", () => {
               phrase: "start client x",
             },
           });
-    await click(button(host, "Start the client")!);
-    const d = dialog(host)!;
-    await tickAll(d);
-    await click(button(d, "Start the client")!);
+    await click(go(host));
     await tick(3, 10);
     const shown = host.querySelector(
       "[data-testid=marvel0-run-start-refused]",
@@ -941,7 +974,41 @@ describe("starting from the page", () => {
     expect(shown.getAttribute("data-internal")).toBe("true");
     expect(text(shown)).toContain("The server expects: start client x");
     expect(text(shown)).not.toContain("Type the confirmation phrase");
-    expect(textFields(dialog(host)!)).toHaveLength(0);
+    expect(textFields(host)).toHaveLength(0);
+  });
+
+  test("the press is the only start here: no window, tick box or effect in the component, and only the three known callers start the hosted client", () => {
+    const dir = join(import.meta.dir, "..");
+    const code = readFileSync(join(dir, "run-start.tsx"), "utf8");
+    expect(code).not.toMatch(/<ConfirmWindow|<Checkbox|attest=\{/);
+    expect(code).not.toMatch(
+      /useEffect|useLayoutEffect|setTimeout|setInterval/,
+    );
+    expect(code.match(/actions\.start\(/g)).toHaveLength(1);
+    // The voice run and the instruction change start the client through
+    // their own windows' ticks; nothing else may call the start.
+    const callers = [] as string[];
+    for (const file of new Bun.Glob("*.{ts,tsx}").scanSync(dir)) {
+      const source = readFileSync(join(dir, file), "utf8");
+      if (/(?:runActions|actions)\s*\??\.start\(/.test(source))
+        callers.push(file);
+    }
+    // autonomy-prepare.tsx starts step 5's autonomy system, another action.
+    expect(callers.sort()).toEqual([
+      "autonomy-prepare.tsx",
+      "command-panel.tsx",
+      "marvel0-actions.tsx",
+      "run-start.tsx",
+    ]);
+    // Both others pass the ticks of their own windows, not a fixed set.
+    const change = readFileSync(join(dir, "marvel0-actions.tsx"), "utf8");
+    expect(change).toContain(
+      ".start(body, startPhrase(current, group), operation.attest)",
+    );
+    const voice = readFileSync(join(dir, "command-panel.tsx"), "utf8");
+    expect(voice).toContain(
+      "runActions.start(request.body, startPhrase(run, group), ack)",
+    );
   });
 });
 

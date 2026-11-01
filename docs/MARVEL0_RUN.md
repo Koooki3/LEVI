@@ -16,9 +16,16 @@ the one the command card renders (`command.render` is the only producer of the c
 
 - **Start** (`POST /run/start`). The page asks for a token first (`POST /run/challenge`, purpose `start`, with the form):
   the answer carries every start check and the command's warnings; a token is only issued when all checks pass. The start
-  then needs the token, the phrase `start client <rollout group>` (`confirm`: the page's confirm window sends it for the
-  person, with the checklist ticked there; a script sends it itself), the checklist (`attest`: scene reset, area clear, a
-  hand on the physical e-stop) and a fresh `request_id`. The client runs through `hostchild.py` (a launcher that gives it
+  then needs the token, the phrase `start client <rollout group>` (`confirm`), the checklist (`attest`: scene reset, area
+  clear, a hand on the physical e-stop) and a fresh `request_id`. **On the page, one press of "Start the client" does all of
+  it** (owner request 2026-11-01: the three tick boxes and the confirm window are gone): the press stands for the three
+  statements, and the line under the button says so ("Pressing Start states that a hand is on the physical e-stop, the scene
+  is reset and the area around the arm is clear", next to the e-stop warning), the page sends the phrase and
+  `attest: {estop, scene_reset, area_clear}` all `true` itself, and the backend still requires and checks both exactly as for
+  a script, which sends them itself. The button is off while a request is on its way or wherever the backend says the client
+  cannot be started (the reason is written beside it); a press again after an unanswered request is the same request
+  (`request_id` idempotency). The voice run and the instruction change still start the client with the ticks of their own
+  windows; nothing starts it without a press or one of those two. The client runs through `hostchild.py` (a launcher that gives it
   a keyboard, a pty) inside its own `systemd-run --user --scope` (`env -i` with the allowlist in front of the launcher; `systemd-run` itself gets
   only the user bus variables), so a restart of the product does not signal it. The core keeps the pty's master. Output goes to a private log (0600) in the workspace.
 - **Keys.** Only these five bytes are ever written to the client's keyboard: Enter, `s`, `f`, `d`, `q`. Which of them
@@ -102,8 +109,10 @@ folder (task folder, episode folder, raw file) is refused. The route never adopt
 **The gates stop mistakes. They do not stop another program of the same account**: anything that runs as this user can send
 the same requests (ask for a token, then use it), forge the page's headers, write to the client's keyboard or signal its
 process. The tokens, phrases and checklist are clicks that are recorded, not proofs. **Nothing is typed any more**: every
-start and stop of the page (the client, the arm stack, the policy server, the deploy) is one confirm window with its hazard
-sentences and tick boxes, and the page sends the phrase itself; the backend still checks it. The two overrides that cut
+stop of the page, and the start of the arm stack, the policy server and the deploy, is one confirm window with its hazard
+sentences and tick boxes, and the page sends the phrase itself; the backend still checks it. Starting the hosted client is
+one press without a window (the press states the three checks the boxes used to ask; the phrase and the checklist are still
+sent and checked). The two overrides that cut
 something that is in use stay typed fields: stopping the robot server C with a client connected, and stopping the policy
 server with a client connected. The real barriers are Franka Desk and
 the **physical emergency stop; keep a hand on it**. **Nothing on this page is an emergency stop**: hold freezes the client,
@@ -161,7 +170,7 @@ lengths, angles or times and do not depend on the rate. `--video-fps` is 0, the 
 `meta/info.json` of `lerobot_fr3_filtered_robotiq_v3` says `"fps": 10`, `action_horizon=10` in `src/openpi/training/config.py:1145`,
 `run_robotiq_client.py:294`; the client's README says raising the rate "plays the training trajectories faster, leaves the
 action distribution and triggers reflexes more easily", `README_ROBOTIQ_ZH.md:233`); `control_hz_untested` (the first use
-changes the arm's speed profile and is untested on this rig: the owner present with a hand on the physical e-stop; the start dialog
+changes the arm's speed profile and is untested on this rig: the owner present with a hand on the physical e-stop; the rate field's note
 repeats it); `step_cap_tight` (the scaled caps are below the 99th percentile of the 10 Hz training steps); `episode_short`.
 
 **Measured, read only** (2026-10-21, every 6th episode of `lerobot_fr3_filtered_robotiq_v3`: 250 of 1497, 30336 rows): the
@@ -222,8 +231,11 @@ with the owner at the arm and a hand on the emergency stop.
 （客户端的 argv 只由 `command.render` 产生）；页面只多加 `--no-display-images`，别的都不加。
 
 - **开始**（`POST /run/start`）。页面先要一个令牌（`POST /run/challenge`，用途 `start`，带上表单）：回答里有全部开始检查和命令的警告；
-  只有全部检查通过才会发令牌。开始还需要：令牌、短语 `start client <rollout group>`（`confirm`：由页面的确认弹窗替人发送，清单在弹窗里勾选；脚本自己发）、清单（`attest`：场景已复位、区域已清空、手在物理急停上）
-  和新的 `request_id`。客户端通过 `hostchild.py`（给它一个键盘，即伪终端的启动器）运行在它自己的 `systemd-run --user --scope` 里（启动器前面是带白名单的 `env -i`；`systemd-run` 自己只拿到用户总线变量），所以产品重启不会
+  只有全部检查通过才会发令牌。开始还需要：令牌、短语 `start client <rollout group>`（`confirm`）、清单（`attest`：场景已复位、区域已清空、手在物理急停上）
+  和新的 `request_id`。**在页面上，点一下“启动客户端”就全做了**（用户 2026-11-01 的要求：三个勾选框和确认弹窗已去掉）：这一下代表那三句话，按钮下面的一行字写明
+  （“按下‘启动客户端’即表示：手已放在实体急停上，场景已复位，手臂周围的区域已清空”，旁边是急停警告）；短语和 `attest: {estop, scene_reset, area_clear}`（全为 `true`）由页面自己发送，
+  后端和对脚本一样仍然要求并核对这两样，脚本则自己发。请求在途时，或后端说现在不能启动时，按钮是灰的（原因写在旁边）；没有收到回答之后再点一次是同一个请求（`request_id` 幂等）。
+  语音直跑和换指令仍然用它们自己弹窗里的勾选启动客户端；没有点击，也没有这两者，就不会启动客户端。客户端通过 `hostchild.py`（给它一个键盘，即伪终端的启动器）运行在它自己的 `systemd-run --user --scope` 里（启动器前面是带白名单的 `env -i`；`systemd-run` 自己只拿到用户总线变量），所以产品重启不会
   给它发信号。核心保留伪终端的主端。输出写入工作区里的私有日志（0600）。
 - **按键。** 写给客户端键盘的字节只有这五个：回车、`s`、`f`、`d`、`q`。页面提供哪些，取决于客户端所处的状态，状态由它的会话文件、日志和
   伪终端读出：
@@ -280,8 +292,8 @@ with the owner at the arm and a hand on the emergency stop.
 ## 这些门的分量，以及这里什么都不是
 
 **这些门只防误操作，防不了同一账号下的其他程序**：任何以这个用户运行的程序都能发出同样的请求（先要令牌再用令牌）、伪造页面的请求头、直接写客户端的键盘或给它的进程发信号。
-令牌、短语和清单是被记录下来的点击，不是证明。**现在不需要再输入任何东西**：页面上每一次启动和停止（客户端、机械臂栈、策略服务器、部署）都是一个带危险提示和勾选项的确认弹窗，
-短语由页面自己发送，后端仍然核对它。仍然要手输的只有两个会切断正在使用的东西的覆盖：C 上有客户端连接时停止机器人服务器，以及有客户端连接时停止策略服务器。真正的屏障是 Franka Desk 和**物理急停；手要放在上面**。**页面上没有任何东西是急停**：保持只冻结客户端，不会让机械臂停下，
+令牌、短语和清单是被记录下来的点击，不是证明。**现在不需要再输入任何东西**：页面上每一次停止，以及机械臂栈、策略服务器和部署的启动，都是一个带危险提示和勾选项的确认弹窗，
+短语由页面自己发送，后端仍然核对它。启动托管客户端是一次没有弹窗的点击（这一下代表原来勾选框问的三项；短语和清单仍然发送并被核对）。仍然要手输的只有两个会切断正在使用的东西的覆盖：C 上有客户端连接时停止机器人服务器，以及有客户端连接时停止策略服务器。真正的屏障是 Franka Desk 和**物理急停；手要放在上面**。**页面上没有任何东西是急停**：保持只冻结客户端，不会让机械臂停下，
 机械臂保持最后收到的目标；成功、失败、作废、退出和回车都会让机械臂不受任何限位检查地回位。agent 会话从不调用 `/run` 和 `/stack` 的写路由（在共享账号上这是规则，不是机制）。
 写操作只在产品 LEVI（主检出里的 `levi-product.service`）中生效；其他实例只显示运行状态并拒绝写操作（`not_product`）。核心结束时伪终端的主端关闭，内核会让客户端挂断。
 
@@ -322,7 +334,7 @@ with the owner at the arm and a hand on the emergency stop.
 
 **警告**（都不是拒绝），频率不是 10 Hz 时：`control_hz_not_trained`（策略是用 10 Hz 的数据训练的：`lerobot_fr3_filtered_robotiq_v3` 的 `meta/info.json` 写着 `"fps": 10`，
 `src/openpi/training/config.py:1145` 的 `action_horizon=10`，`run_robotiq_client.py:294`；客户端 README 说调高频率“等于加速播放训练轨迹，会走出动作分布，也更容易触发 reflex”，`README_ROBOTIQ_ZH.md:233`）；
-`control_hz_untested`（第一次使用会改变机械臂的速度曲线，在这台设备上没有试过：机主在场，手放在实体急停上；开始对话框里再说一遍）；`step_cap_tight`（缩放后的每步上限低于 10 Hz 训练步长的第 99 百分位）；`episode_short`。
+`control_hz_untested`（第一次使用会改变机械臂的速度曲线，在这台设备上没有试过：机主在场，手放在实体急停上；频率字段旁的说明里再说一遍）；`step_cap_tight`（缩放后的每步上限低于 10 Hz 训练步长的第 99 百分位）；`episode_short`。
 
 **实测，只读**（2026-10-21，`lerobot_fr3_filtered_robotiq_v3` 每 6 个片段取 1 个：1497 个里的 250 个，30336 行）：训练动作与其对应状态的距离，也就是客户端每步检查用的量：中位数 0.0098 米，
 第 90 百分位 0.0227，第 99 百分位 0.0384；旋转（三个包裹后角度差里最大的一个）0.0164、0.0445、0.0883 弧度。超过缩放后上限的行：20 Hz 为 0.11 %（米）和 0 %（弧度），25 Hz 为 0.77 % 和 0.06 %，

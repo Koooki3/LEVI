@@ -1,35 +1,42 @@
 "use client";
 // "Start the client", under the command the command card made: it starts
 // the very client that command describes, hosted by LEVI (run-panel.tsx drives
-// it afterwards). A start is one confirm window: what will run, the three
-// things only a person can check (the scene is reset, the area is clear, a
-// hand is on the physical e-stop) as tick boxes, Cancel (focused) and Start.
-// The page sends the confirmation phrase itself; nothing is typed. The copy of
+// it afterwards). One press starts it: a challenge for this form, then the
+// start. There is no window and there are no tick boxes (owner request
+// 2026-11-01); the press itself is the person's statement of the three things
+// only a person can check (a hand is on the physical e-stop, the scene is
+// reset, the area is clear), and the line under the button says so, next to
+// the e-stop warning. The page sends the confirmation phrase and those three
+// statements itself; the backend still requires and checks both. The copy of
 // the command stays as the manual route. The checks stop mistakes, not another
 // program of the same account.
-import { modeLabel } from "./inference-mode";
-import { useState } from "react";
+//
+// The press is the only thing that starts it: nothing here starts on its own,
+// and the button is off while a write is on its way (the actions' own busy
+// guard is a second layer) and wherever the backend says the client cannot be
+// started. Voice run and the instruction change start the client through
+// `actions.start` with the ticks their own windows asked for, not from here.
 import { Play } from "lucide-react";
 import { Button } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
+import { Note } from "@/components/pages-ui/feedback";
 import { WordedText } from "./action-parts";
-import { ConfirmRefusal, ConfirmWindow } from "./confirm-window";
-import { wordOf } from "./ctl-text";
-import { sayText } from "./marvel0-say";
+import { ConfirmRefusal } from "./confirm-window";
 import { startPhrase, type RunView } from "./run-logic";
-import type { RunActions } from "./use-run-actions";
+import type { Ack, RunActions } from "./use-run-actions";
 
-const ACKS = ["estop", "scene_reset", "area_clear"] as const;
+/** What one press of Start states, sent as the `attest` of the start. */
+export const PRESS_STATES: Readonly<Ack> = Object.freeze({
+  estop: true,
+  scene_reset: true,
+  area_clear: true,
+});
 
 export function RunStart({
   view,
   actions,
   form,
   group,
-  modelId,
-  rtc,
-  hz = null,
-  referenceHz = 10,
   stale,
 }: {
   /** The hosted client's state; null while it is not read. */
@@ -39,22 +46,14 @@ export function RunStart({
   form: Record<string, unknown>;
   /** The rollout group of this run: the phrase names it. */
   group: string;
-  modelId: string;
-  rtc: boolean;
-  /** The control rate of the command, null when the site offers none. A rate
-   * other than `referenceHz` is shown in the dialog with its note. */
-  hz?: number | null;
-  referenceHz?: number;
   /** The form changed after the command was made: it is made again first. */
   stale: boolean;
 }) {
   const { t } = useLocale();
-  const [open, setOpen] = useState(false);
   const action = view?.actions.start ?? null;
   const phrase = startPhrase(view, group);
   const working = actions.working !== null;
   const refused = actions.refused?.key === "start" ? actions.refused : null;
-  const close = () => setOpen(false);
   const off = !action?.allowed || stale || working;
   return (
     <div className="rg-runstart" data-testid="marvel0-run-start">
@@ -62,9 +61,10 @@ export function RunStart({
         variant="primary"
         icon={Play}
         disabled={off}
+        loading={actions.working === "start"}
         onClick={() => {
           actions.clear();
-          setOpen(true);
+          void actions.start(form, phrase, { ...PRESS_STATES });
         }}
       >
         {t("marvel0.run.start.button")}
@@ -78,85 +78,28 @@ export function RunStart({
           <WordedText worded={action.whyNot} />
         </span>
       ) : null}
-      <ConfirmWindow
-        open={open}
-        testId="marvel0-run-start-dialog"
-        title={t("marvel0.run.start.title")}
-        intro={t("marvel0.run.start.intro")}
-        facts={
-          <dl className="rg-facts">
-            <div className="rg-fact">
-              <dt>{t("marvel0.deploy.fact.model")}</dt>
-              <dd>
-                <code>{modelId}</code>
-              </dd>
-            </div>
-            <div className="rg-fact">
-              <dt>{t("marvel0.inference.label")}</dt>
-              <dd>
-                {t(modeLabel(form.inference_mode, rtc))}
-                {form.chunk_accel === true &&
-                  ` + ${t("marvel0.cmd.field.chunk_accel")}`}
-                {form.chunk_accel === true &&
-                  form.chunk_accel_rule === "v2" &&
-                  `, ${t("marvel0.cmd.field.chunk_accel_rule_v2_short")}`}
-              </dd>
-            </div>
-            <div className="rg-fact">
-              <dt>{t("marvel0.cmd.field.group")}</dt>
-              <dd>
-                <code>{group}</code>
-              </dd>
-            </div>
-            {hz !== null && (
-              <div className="rg-fact" data-testid="marvel0-run-start-hz">
-                <dt>{t("marvel0.hz.start.fact")}</dt>
-                <dd>
-                  {sayText({ key: "marvel0.hz.option", params: { hz } }, t)}
-                </dd>
-              </div>
-            )}
-          </dl>
-        }
-        estop={t("marvel0.run.start.estop")}
-        hazards={[t("marvel0.run.start.first_enter")]}
-        notes={[
-          ...(hz !== null && hz !== referenceHz
-            ? [t("marvel0.hz.start.note")]
-            : []),
-          t("marvel0.stack.gates_scope"),
-        ]}
-        attest={ACKS.map((name) => ({
-          code: name,
-          label: wordOf(t, "marvel0.run.ack.", name),
-        }))}
-        confirmLabel={t("marvel0.run.start.go")}
-        confirmIcon={Play}
-        ready={!working}
-        working={actions.working === "start"}
-        refused={
-          refused ? (
-            <ConfirmRefusal
-              failure={refused.failure}
-              testId="marvel0-run-start-refused"
-            >
-              <WordedText worded={refused.worded} />
-            </ConfirmRefusal>
-          ) : null
-        }
-        onCancel={close}
-        onConfirm={(ticked) =>
-          actions
-            .start(form, phrase, {
-              estop: ticked.estop === true,
-              scene_reset: ticked.scene_reset === true,
-              area_clear: ticked.area_clear === true,
-            })
-            .then((ok) => {
-              if (ok) close();
-            })
-        }
-      />
+      <div
+        className="rg-runstart__line"
+        data-testid="marvel0-run-start-warning"
+      >
+        <Note tone="warning">
+          <span data-testid="marvel0-run-start-means">
+            {t("marvel0.run.start.means")}
+          </span>{" "}
+          {t("marvel0.run.start.estop")}
+        </Note>
+        <p className="rg-muted">{t("marvel0.run.start.first_enter")}</p>
+      </div>
+      {refused && (
+        <div className="rg-runstart__line">
+          <ConfirmRefusal
+            failure={refused.failure}
+            testId="marvel0-run-start-refused"
+          >
+            <WordedText worded={refused.worded} />
+          </ConfirmRefusal>
+        </div>
+      )}
     </div>
   );
 }

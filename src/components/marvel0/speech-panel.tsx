@@ -564,7 +564,8 @@ const FLAG_WORDS: Record<Flag, { title: string; body: string }> = {
 };
 
 /** The voice run's switch: off, a button that opens the confirm window with
- * the start window's three ticks; on, the warning that says what it does and
+ * the three ticks (the three statements one press of Start makes, run-start.tsx);
+ * on, the warning that says what it does and
  * the button that turns it off. Below, what the last sentence did. */
 function VoiceRunSwitch({ voiceRun }: { voiceRun: VoiceRun }) {
   const { t } = useLocale();
