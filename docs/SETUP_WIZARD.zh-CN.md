@@ -241,6 +241,7 @@ ROS 日志目录取 `LEVI_ROS_LOG_DIR`，其次 `ROS_LOG_DIR`，再次 `~/.ros/l
 | `margin_mib`、`lock_hold_max_s` | 比例之外再留的空闲显存（至少 1024）；服务器加载期间 GPU 锁最长持有多久 | `1024`、`600` |
 | `[unit]` `nice`、`cpu_affinity`、`cpu_quota_percent` | 策略服务器单元的 CPU 设置：nice 0 到 19，`taskset` 的核心列表（选机械臂控制器不用的核心；模板里的 `8-15` 是对没有 CPU 隔离的主机的猜测，安装站点文件之前由 marvel0 的主人确认），CPU 配额百分比（0 表示不限） | `10`、`"8-15"`、`0` |
 | `stop_timeout_s`、`start_timeout_s` | 停止最多多久之后 systemd 强制结束单元（10 到 600）；启动多久还没完成就算 `failed`（30 到 1800） | `90`、`600` |
+| `jax_cache_dir`（可选） | JAX 持久编译缓存的绝对路径，以 `JAX_COMPILATION_CACHE_DIR` 传给服务器。不设时，服务器每次启动后的第一次推理都要重新编译模型（marvel0 上 pi0.5 约 12 s，2026-10-30 实测），部署后第一个 episode 的第一帧就要等这么久；设了之后，重启的服务器直接读回编译结果。不写（或写 `""`）就是不用缓存 | 不设 |
 | `[catalog]` `known_configs`、`cfg_configs` | 面板接受的服务配置，以及其中接受 CFG 系数的 | `["pi05_fr3_all_state", "pi05_fr3_all_state_cfg"]`、`["pi05_fr3_all_state_cfg"]` |
 | `restricted_prefixes`、`verified`、`excluded` | 只接受客户端那两条任务指令的模型系列；有真机 GPU 部署记录的检查点；永远不列出的检查点 | `["pi05_fr3_sp"]`、`["pi05_fr3_all_step49999"]`、`["reset_r1_step20000"]` |
 | `[prompts]` `default`、`known` | 默认任务指令，以及表单为其他模型给出的提示列表（1 到 32 条） | `"pick the eggplant in the blue plate"` 和另外四条 |

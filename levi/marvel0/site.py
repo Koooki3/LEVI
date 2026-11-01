@@ -11,7 +11,7 @@ the file every route that needs it answers 412 ``site_missing`` with the path it
 looked at and ``TEMPLATE`` to start from.
 
 The schema is closed (an unknown key is an error, a missing one too, except
-``server.port``), every error is listed as ``{"field", "code"}`` (never the
+``server.port`` and ``unit.jax_cache_dir``), every error is listed as ``{"field", "code"}`` (never the
 value), and nothing on the file system is checked here; whether a path exists
 is a deploy-time check. The file must be a regular file of the current user
 that no one else can write; it is read through ``probes.read_regular`` (``lstat``
@@ -148,6 +148,7 @@ cpu_affinity = "8-15"          # a taskset list; choose cores the arm controller
 cpu_quota_percent = 0          # 0 = no CPUQuota property
 stop_timeout_s = 90
 start_timeout_s = 600
+# jax_cache_dir = "/abs/path/jax-cache"   # optional: JAX's persistent compilation cache for the policy server, so a restarted server does not compile again (about 12 s on the first inference)
 
 [catalog]
 known_configs = ["pi05_fr3_all_state", "pi05_fr3_all_state_cfg"]
@@ -255,6 +256,9 @@ class Unit:
     cpu_quota_percent: int
     stop_timeout_s: int
     start_timeout_s: int
+    # JAX_COMPILATION_CACHE_DIR of the policy server unit; "" = no persistent cache (the server compiles on its
+    # first inference after every start, about 12 s for pi05 on this machine)
+    jax_cache_dir: str = ""
 
 
 @dataclass(frozen=True)
@@ -365,6 +369,11 @@ def unsafe_text(text) -> bool:
     """True when ``text`` holds `$`, `%`, whitespace or a control character:
     nothing that reaches systemd, a path or an argv may."""
     return bool(_UNSAFE.search(text))
+
+
+def _optional_path(value):
+    """An absolute, normalised path, or "" for none."""
+    return "" if value == "" else _path(value)
 
 
 def _path(value):
@@ -588,6 +597,7 @@ SCHEMA_CHECKS = {
         "cpu_quota_percent": _integer(0, 6400),
         "stop_timeout_s": _integer(10, 600),
         "start_timeout_s": _integer(30, 1800),
+        "jax_cache_dir": _optional_path,
     },
     "catalog": {
         "known_configs": _names(1, 16),
@@ -600,7 +610,7 @@ SCHEMA_CHECKS = {
     "source": {"hash_files": _items(_relative(), 0, 32), "manifest": _relative(True)},
 }
 SCHEMA_KEYS = {section: tuple(keys) for section, keys in SCHEMA_CHECKS.items()}
-DEFAULTS = {("server", "port"): 8000}
+DEFAULTS = {("server", "port"): 8000, ("unit", "jax_cache_dir"): ""}
 SECTIONS = {
     "live": Live,
     "ros": Ros,

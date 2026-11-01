@@ -108,6 +108,27 @@ def test_the_port_defaults_to_8000(tmp_path):
     assert S.parse(data, "env").port == 8000
 
 
+def test_the_jax_cache_dir_is_optional_and_must_be_a_clean_absolute_path(tmp_path):
+    # 2026-11-01: a restarted policy server compiled again on its first inference (about 12 s)
+    data = sample(tmp_path)
+    data["unit"].pop("jax_cache_dir", None)
+    assert S.parse(data, "env").unit.jax_cache_dir == ""
+    data["unit"]["jax_cache_dir"] = "/var/cache/levi-jax"
+    assert S.parse(data, "env").unit.jax_cache_dir == "/var/cache/levi-jax"
+    data["unit"]["jax_cache_dir"] = ""
+    assert S.parse(data, "env").unit.jax_cache_dir == ""
+    for bad, code in (
+        ("relative/jax", "not_absolute"),
+        ("/a b", "unsafe_chars"),
+        ("/a/../b", "not_normalized"),
+        (3, "type"),
+    ):
+        found = invalid(
+            tmp_path, lambda d, bad=bad: d["unit"].update(jax_cache_dir=bad)
+        )
+        assert {"field": "unit.jax_cache_dir", "code": code} in found, bad
+
+
 def test_the_limits_the_owner_set_are_still_allowed(tmp_path):
     site = make_site(
         tmp_path,

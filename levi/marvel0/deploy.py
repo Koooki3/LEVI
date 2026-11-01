@@ -480,10 +480,14 @@ def unit_env(manager_env_text, site) -> UnitEnv:
     with the user manager's environment, not the caller's, and the policy
     server terminal has no ROS and no conda: those variables are unset, the
     library path loses its ROS entries (and any entry systemd would expand),
-    and three fixed variables are set."""
+    and three fixed variables are set. With ``unit.jax_cache_dir`` in the site file the
+    server also gets JAX's persistent compilation cache, so a restarted server reads its
+    compiled model instead of compiling again on the first inference."""
     env = _manager_env(manager_env_text)
     unset = sorted(name for name in env if UNSET_NAMES.fullmatch(name))
     setenv = dict(FIXED_ENV)
+    if site.unit.jax_cache_dir:
+        setenv["JAX_COMPILATION_CACHE_DIR"] = site.unit.jax_cache_dir
     if "LD_LIBRARY_PATH" in env:
         entries = [e for e in env["LD_LIBRARY_PATH"].split(":") if e]
         kept = [

@@ -248,6 +248,18 @@ def test_a_clean_environment_unsets_nothing(site):
     assert sorted(env.setenv) == ["PYTHONUNBUFFERED", "no_proxy"]
 
 
+def test_the_jax_cache_dir_of_the_site_reaches_the_unit(tmp_path):
+    # without it the server compiles again on its first inference after every start (about 12 s)
+    site = make_site(tmp_path, unit={"jax_cache_dir": "/var/cache/levi-jax"})
+    env = deploy.unit_env("HOME=/h\n", site)
+    assert env.setenv["JAX_COMPILATION_CACHE_DIR"] == "/var/cache/levi-jax"
+    _, _, argv = systemd_run(site, env=env)
+    assert "--setenv=JAX_COMPILATION_CACHE_DIR=/var/cache/levi-jax" in argv
+    assert argv.index(
+        "--setenv=JAX_COMPILATION_CACHE_DIR=/var/cache/levi-jax"
+    ) < argv.index("--")
+
+
 def test_library_entries_systemd_would_expand_are_dropped(site):
     text = "LD_LIBRARY_PATH=/ok/lib:/has space/lib:/has$dollar:/has%pct\n"
     assert deploy.unit_env(text, site).setenv["LD_LIBRARY_PATH"] == "/ok/lib"
