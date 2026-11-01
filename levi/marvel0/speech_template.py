@@ -640,7 +640,20 @@ def _empty(status: Status, untranslated: Sequence[str] = ()) -> Generated:
 _NOT_NAMES: Final = frozenset(
     """left right up down back out forward forwards backward backwards away
     here there over under front behind side top bottom middle center centre
-    now again later quick slow gently carefully please thing stuff""".split()  # noqa: SIM905
+    now again later quick slow gently carefully please thing stuff
+    upward upwards downward downwards sideways leftward leftwards rightward
+    rightwards across along through toward towards aside onward onwards
+    elsewhere somewhere anywhere""".split()  # noqa: SIM905
+)
+
+# Chinese words that say where, never what (左边 is "the left", not an object):
+# heard where a name should be, they make the request unclear before any
+# translation is asked for (a translator would answer "left", and "left"
+# passes a back-translation check).
+_ZH_PLACE_WORDS: Final = frozenset(
+    """左边 右边 左侧 右侧 左面 右面 上面 下面 上边 下边 上方 下方 里面 里边
+    外面 外边 旁边 前面 后面 前边 后边 前方 后方 中间 中央 这里 那里 这边 那边
+    这儿 那儿 左 右 上 下 里 外 前 后 旁""".split()  # noqa: SIM905
 )
 
 
@@ -662,7 +675,9 @@ def unknown_names(transcript: str) -> list[str]:
         {
             t.heard
             for t in tokens
-            if t.concept == "U" and matcher._CJK.fullmatch(t.heard)
+            if t.concept == "U"
+            and matcher._CJK.fullmatch(t.heard)
+            and t.heard not in _ZH_PLACE_WORDS
         }
     )
 
@@ -728,6 +743,8 @@ def generate(
             if thing.noun is not None:
                 english = _ENGLISH_FORM[thing.noun]
                 source = "repair" if thing.repaired else "lexicon"
+            elif thing.said in _ZH_PLACE_WORDS:
+                return _empty("unclear")  # "放到左边": a place, not an object
             elif matcher._CJK.fullmatch(thing.said):
                 english = translate(thing.said) if translate else None
                 english = _english_name(english)
@@ -828,8 +845,10 @@ def _english_name(value: str | None) -> str | None:
         return None
     words = [w for w in text.split(" ") if w not in _ARTICLES]
     name = " ".join(words)
-    if not _NAME.fullmatch(name) or any(w in _NOT_IN_NAME for w in words):
-        return None
+    if not _NAME.fullmatch(name) or any(
+        w in _NOT_IN_NAME or w in _NOT_NAMES for w in words
+    ):
+        return None  # "left", "the left side": a place or manner, not a name
     concepts = {
         matcher._lookup_english(w)[0] for w in words if matcher._lookup_english(w)
     }

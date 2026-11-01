@@ -167,7 +167,7 @@ def test_a_new_name_holding_a_lexicon_word_reaches_the_translator_whole(
 ):
     assert T.unknown_names(said) == [name]
     asked = []
-    result = gen(said, frames, translate=lambda zh: asked.append(zh) or "new thing")
+    result = gen(said, frames, translate=lambda zh: asked.append(zh) or "widget")
     assert asked == [name] and result["status"] == "ok"
 
 
@@ -587,3 +587,30 @@ def test_the_name_filter_refuses_place_words(bad):
 @pytest.mark.parametrize("said", ["拿起哈密瓜放到蓝色碗里", "拿哈密瓜放到蓝色碗里"])
 def test_only_zhe_is_a_particle_after_a_verb(frames, said):
     assert T.unknown_names(said) == ["哈密瓜"]
+
+
+# ------------------------- a place is never a name (2026-11-01, review L1)
+
+
+@pytest.mark.parametrize(
+    "translation",
+    ["left", "the left side", "back", "out", "here", "top", "upward", "sideways"],
+)
+def test_a_translation_that_is_a_place_or_direction_is_refused(frames, translation):
+    result = gen("把苹果放到榴莲上", frames, translate=lambda zh: translation)
+    assert result["status"] == "untranslated" and result["prompt"] is None
+
+
+@pytest.mark.parametrize("name", ["kumquat", "dragon fruit", "jelly", "lily"])
+def test_real_object_names_still_pass(frames, name):
+    result = gen("把榴莲放到蓝色盘子里", frames, translate=lambda zh: name)
+    assert result["status"] == "ok" and result["prompt"].startswith(f"pick {name} ")
+
+
+@pytest.mark.parametrize("said", ["把苹果放到左边", "把苹果放到旁边", "把苹果放到这里"])
+def test_a_chinese_place_word_is_unclear_and_never_translated(frames, said):
+    asked = []
+    result = gen(said, frames, translate=lambda zh: asked.append(zh) or "left")
+    # 这/里 are fillers, so 放到这里 has one thing only: no_task, also no sentence.
+    assert result["status"] in {"unclear", "no_task"} and result["prompt"] is None
+    assert asked == [] and T.unknown_names(said) == []
