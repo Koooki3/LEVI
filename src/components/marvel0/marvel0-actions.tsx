@@ -25,6 +25,7 @@ import { commandFormFromRun } from "./command-logic";
 import { bodyWithNextPrompt, confirmedRunExit } from "./episode-change";
 import { startPhrase } from "./run-logic";
 import { effectiveSelection, useChoice } from "./selection";
+import { useVoiceRun } from "./use-voice-run";
 import type { RunActions } from "./use-run-actions";
 import type { RunPoll } from "./use-run-poll";
 import {
@@ -107,7 +108,11 @@ export function Marvel0Actions({
       isSiteProblem(problem) && !isFormat(problem!),
   );
   const ready = !site && catalog.loaded;
-  const changeInstruction = async (prompt: string, attest: ChangeAttest) => {
+  /** True when the end at the gate was sent (the new client follows). */
+  const changeInstruction = async (
+    prompt: string,
+    attest: ChangeAttest,
+  ): Promise<boolean> => {
     const view = run?.value;
     const record = view?.run;
     const runId = record?.runId;
@@ -126,7 +131,7 @@ export function Marvel0Actions({
       !runActions ||
       attemptedRun.current === runId
     )
-      return;
+      return false;
     attemptedRun.current = runId;
     const operation = {
       state: "ending" as const,
@@ -151,17 +156,18 @@ export function Marvel0Actions({
     } catch {
       // An interrupted request may have reached the host; never send it again.
       setEpisodeOperation({ ...operation, state: "unknown" });
-      return;
+      return false;
     }
     if (sent) {
       setEpisodeOperation({ ...operation, state: "waiting" });
-      return;
+      return true;
     }
     const uncertain = runActions.refused?.failure.status === 0;
     setEpisodeOperation({
       ...operation,
       state: uncertain ? "unknown" : "refused",
     });
+    return false;
   };
 
   useEffect(() => {
@@ -244,6 +250,12 @@ export function Marvel0Actions({
   const changeStatus: EpisodeChangeStatus = episodeOperation
     ? { state: episodeOperation.state, runId: episodeOperation.runId }
     : { state: "idle" };
+  const voiceRun = useVoiceRun({
+    run,
+    runActions,
+    changeInstruction,
+    changeState: changeStatus.state,
+  });
   return (
     <div className="rg-steps" data-testid="marvel0-actions">
       <section
@@ -314,6 +326,7 @@ export function Marvel0Actions({
               run={run?.value ?? null}
               runActions={runActions}
               resumeBody={episodeBody}
+              voiceRun={run && runActions ? voiceRun : null}
             />
           )}
           {clientStatus}

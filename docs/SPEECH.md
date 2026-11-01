@@ -1,8 +1,8 @@
 # Speech input for the marvel0 page / marvel0 页面的语音输入
 
-The demo client command card of the **marvel0** page can take the task instruction by voice. You hold a button and say the instruction; a speech model on this machine turns it into text; LEVI finds the closest of the **allowed** task instructions; and when you click **Use**, that sentence from the list (never the transcript) is put into the task instruction field. From there it is what typing would have done: you click **Make command**, copy it, and press Enter in the client terminal yourself. Nothing here starts the client or the arm.
+The demo client command card of the **marvel0** page can take the task instruction by voice. You hold a button and say the instruction; a speech model on this machine turns it into text; LEVI finds the closest of the **allowed** task instructions; and when you click **Use**, that sentence from the list (never the transcript) is put into the task instruction field. From there it is what typing would have done: you click **Make command**, copy it, and press Enter in the client terminal yourself. Nothing here starts the client or the arm, unless you switch on [voice run](#voice-run--语音直跑).
 
-marvel0 页面的评测客户端命令卡片可以用语音填写任务指令。按住按钮说出指令，本机上的语音模型把它转成文字，LEVI 在**允许的**任务指令里找最接近的一句；你点击“使用”之后，填进任务指令框的是列表里的那句原文（绝不是转写文字）。之后和手打一样：你点“生成命令”、复制，再自己在客户端终端按 Enter。这里没有任何一步会启动客户端或机械臂。
+marvel0 页面的评测客户端命令卡片可以用语音填写任务指令。按住按钮说出指令，本机上的语音模型把它转成文字，LEVI 在**允许的**任务指令里找最接近的一句；你点击“使用”之后，填进任务指令框的是列表里的那句原文（绝不是转写文字）。之后和手打一样：你点“生成命令”、复制，再自己在客户端终端按 Enter。除非你打开[语音直跑](#voice-run--语音直跑)，这里没有任何一步会启动客户端或机械臂。
 
 ## What it does, and never does / 做什么，绝不做什么
 
@@ -15,7 +15,7 @@ It does:
 
 It never:
 
-- starts, stops or connects to the policy server, the client or the arm stack, presses Enter, or sends a motion command; the sequence **Use**, **Make command**, **Copy** is three separate clicks of yours;
+- starts, stops or connects to the policy server, the client or the arm stack, presses Enter, or sends a motion command; the sequence **Use**, **Make command**, **Copy** is three separate clicks of yours. The one exception is [voice run](#voice-run--语音直跑), which you switch on yourself: it makes the command, starts the hosted client and presses its start gate's key, and still never stops anything or touches the policy server;
 - stops or pauses the robot. There is no voice stop and nothing on the page listens for one. **Speech cannot stop the arm: use the physical e-stop.** The page says so next to the card, permanently;
 - changes any other field (`--min-z`, RTC, steps, episode count, rollout group, note, the confirmation phrases of the deploy card, the automatic-evaluation wizard);
 - puts the transcript into a command. The form check accepts almost any text for a non-restricted model, so the speech path is stricter by design: what can reach the field is a sentence of the allowed list, or the sentence LEVI generated in the datasets' most common phrasing, shown as generated (see [Generated sentences](#generated-sentences--生成句)); never the transcript itself;
@@ -33,7 +33,7 @@ It never:
 
 它绝不做的：
 
-- 启动、停止或连接策略服务器、客户端或机械臂栈，按 Enter，或发运动命令；“使用”“生成命令”“复制”是你的三次独立点击；
+- 启动、停止或连接策略服务器、客户端或机械臂栈，按 Enter，或发运动命令；“使用”“生成命令”“复制”是你的三次独立点击。唯一的例外是你自己打开的[语音直跑](#voice-run--语音直跑)：它会生成命令、启动托管客户端并按开始闸门的键，但仍然不停止任何东西，也不碰策略服务器；
 - 让机器人停下或暂停。没有语音停机，页面上也没有任何东西在听停止词。**语音不能让机械臂停下，请按物理急停。** 页面在卡片旁永久写着这句话；
 - 改任何其他字段（`--min-z`、RTC、步数、片段数、rollout 组、备注、部署卡片的确认短语、自动评测向导）；
 - 把转写文字放进命令。非受限模型的表单检查几乎放过任何文字，所以语音这条路故意更严：能进入输入框的只有允许列表里的句子，或者 LEVI 按数据集最常见句式生成、并标明是生成句的那一句（见[生成句](#generated-sentences--生成句)）；转写原文本身永远不会进去；
@@ -41,6 +41,22 @@ It never:
 - 保存音频或文字。音频只存在于内存和工作进程的管道里；转写文字只存在于给页面的回答里（以及页面内存里 60 秒）。两者都不写入文件、日志、错误信息或 URL。日志只有请求 ID、一个结果词、字节数和 SHA-256 的前八个字符；
 - 把任何东西发到本机之外：模型离线运行（`HF_HUB_OFFLINE=1`），不涉及云端识别，也不涉及语言模型；
 - 取物理 GPU 锁或使用 `levi/inference/gpu.py`（前者会挡住策略服务器部署，后者恰好在策略服务器运行时拒绝）。
+
+## Voice run / 语音直跑
+
+The voice card has a **Switch voice run on** button (owner request 2026-11-01). It opens a confirm window with the three ticks of the start window (a hand on the physical e-stop, the scene reset, the area clear); after **Switch on**, a spoken instruction runs without another confirmation until you press **Switch voice run off** or reload the page (the switch is not remembered).
+
+- **Which answer runs by itself**: one clear sentence, used 2 s after it is shown unless you press **Cancel**: a tier-A instruction, or the generated sentence (its dataset original when there is one). It is the same press as yours, with the same checks (on screen 800 ms, not expired, the allowed list unchanged). An answer with a stop, negation or unsafe word, edited text, a recording cut at 10 s, a guessed word, several candidates, or a generated sentence that disagrees with the tier-A instruction does not run by itself; its buttons read **Use and run** / **Run selected** / **Run the generated sentence**, and your press runs it.
+- **Where it goes**: with no client, the command is made from step 3's form with that sentence and the hosted client is started with your ticks; at the start gate with the same instruction, **Start next episode** is pressed; at the start gate with another instruction, the page's instruction change ends the client at the gate and starts it again with the new one. When the client the voice started reaches its start gate with that instruction (within 120 s), the page presses **Start next episode** once: the arm goes home without any limit check, then the policy runs. While an episode runs, waits for its label, or a client is starting, the sentence is refused and not queued.
+- **What stays**: the push-to-talk button is still the only way in (speech near the page does nothing unless a person holds it); every check of the backend applies (the start's preflight: policy server ready and matching, monitor green, arm lock free, and so on; the one-time challenge of each key); voice still cannot stop or pause the arm. A frozen or lost client switches voice run off, so the ticks are given again for the next scene.
+- The rules are in `src/components/marvel0/voice-run.ts`, the page's state in `use-voice-run.ts`; tests: `voice-run.test.ts` and `voice-run-flow.test.tsx`. Not yet tried on the real arm.
+
+语音卡片上有一个“开启语音直跑”按钮（用户 2026-11-01 的要求）。它会打开一个确认窗，勾选和“启动客户端”相同的三项（手放在实体急停上、场景已复位、区域已清空）；点“开启”之后，说出的指令不再逐步确认，直到你点“关闭语音直跑”或刷新页面（开关不会被记住）。
+
+- **哪些结果会自动运行**：唯一明确的一句，显示 2 秒后自动使用，期间可以点“取消”：A 档指令，或生成句（有数据集原句时用原句）。这和你自己点是同一个操作，检查也一样（显示满 800 毫秒、没过期、允许列表没变）。带停止、否定或不安全词的结果、改过的文字、被 10 秒截断的录音、有猜测的词、有几条候选、生成句和 A 档指令不一致，这些都不会自动运行；这时按钮显示“使用并运行”“运行所选”“运行生成句”，你点哪条就运行哪条。
+- **去哪里**：没有客户端时，用第 3 步的表单加这句指令生成命令，并带着你的勾选启动托管客户端；客户端在开始闸门且指令相同时，直接按“开始下一个片段”；在开始闸门但指令不同时，用页面已有的换指令流程先在闸门处结束客户端，再用新指令重启。语音启动的客户端带着这句指令到达开始闸门后（120 秒内），页面会按一次“开始下一个片段”：手臂先不受任何限制地回位，然后策略开始运行。片段运行中、等待判定或客户端正在启动时，这句话会被拒绝，不会排队。
+- **不变的**：按住说话按钮仍是唯一入口（没人按住时，页面附近说话没有任何作用）；后端的所有检查照旧（启动前检查：策略服务器就绪且匹配、健康监视器绿灯、手臂锁空闲等；每个按键的一次性确认令牌）；语音仍然不能让手臂停下或暂停。客户端被冻结或失联时语音直跑会自动关闭，下一次要重新勾选。
+- 规则在 `src/components/marvel0/voice-run.ts`，页面状态在 `use-voice-run.ts`；测试是 `voice-run.test.ts` 和 `voice-run-flow.test.tsx`。还没在真机上试过。
 
 ## Choosing the microphone / 选择麦克风
 
@@ -94,7 +110,7 @@ Owner decision 2026-10-30: besides the closest allowed instruction, the card off
 - a word no slot can hold (a number, a word in another script) gives no sentence (`unclear`), so nothing heard is dropped silently;
 - the frames are learned from every instruction, reset instructions (`Reset: ...`) included, since they are the same robot's phrasing; the episode count shown includes them.
 
-What keeps it safe: the block is labelled "generated: not an instruction the policy was trained on" and shows the frame and how many episodes use it; only its own **Use** press hands it over, after the same 800 ms and freshness checks as any proposal; a dataset instruction with the same meaning is shown beside it exactly as the dataset wrote it, since the policy may know that wording better, only when every object is a lexicon word (the matcher's comparison skips a word it does not know, so "pencil sharpener" would have matched "pick pen ..."), and only a task instruction (never a `Reset:` one) that the matcher reads without a flag or an unknown word; a word the matcher guessed from a likely recognition mistake ("pearl" read as "pear") is listed as a guess (`repairs`, slot source `repair`); nothing is generated for a result with a stop, negation or unsafe flag, or for a model of the restricted family (both the server and the page enforce this); a frame that cannot hold the request ("same colour", "corresponding", "from ...", one object without a place) gives no sentence and says why; and the sentence is read back with the matcher's reader and must contain exactly the heard objects with their colours and sizes (a translated name counts as the one object it was heard as). Speech still never starts, stops or moves anything. The answer field is `match.generated`: `status` (`ok`, `vetoed`, `restricted`, `no_task`, `unsupported`, `no_frame`, `untranslated`, `unclear`), `prompt`, `frames`, `episodes`, `slots` (`said`, `english`, `source`: `lexicon`, `repair`, `english`, `translation`), `untranslated`, `dataset_original`, `repairs` (`heard`, `as`), `translations` (below) and `untranslated_why`. A malformed row of a dataset is skipped and an unreadable dataset is left out; neither stops generation.
+What keeps it safe: the block is labelled "generated: not an instruction the policy was trained on" and shows the frame and how many episodes use it; only its own **Use** press hands it over, after the same 800 ms and freshness checks as any proposal; a dataset instruction with the same meaning is shown beside it exactly as the dataset wrote it, since the policy may know that wording better, only when every object is a lexicon word (the matcher's comparison skips a word it does not know, so "pencil sharpener" would have matched "pick pen ..."), and only a task instruction (never a `Reset:` one) that the matcher reads without a flag or an unknown word; a word the matcher guessed from a likely recognition mistake ("pearl" read as "pear") is listed as a guess (`repairs`, slot source `repair`); nothing is generated for a result with a stop, negation or unsafe flag, or for a model of the restricted family (both the server and the page enforce this); a frame that cannot hold the request ("same colour", "corresponding", "from ...", one object without a place) gives no sentence and says why; and the sentence is read back with the matcher's reader and must contain exactly the heard objects with their colours and sizes (a translated name counts as the one object it was heard as). Speech still never stops anything, and starts something only with [voice run](#voice-run--语音直跑) switched on. The answer field is `match.generated`: `status` (`ok`, `vetoed`, `restricted`, `no_task`, `unsupported`, `no_frame`, `untranslated`, `unclear`), `prompt`, `frames`, `episodes`, `slots` (`said`, `english`, `source`: `lexicon`, `repair`, `english`, `translation`), `untranslated`, `dataset_original`, `repairs` (`heard`, `as`), `translations` (below) and `untranslated_why`. A malformed row of a dataset is skipped and an unreadable dataset is left out; neither stops generation.
 
 维护者 2026-10-30 决定：除了最接近的允许指令，卡片还给出一句按所说内容**生成**的句子，用已登记数据集里最常见的说法，而不是只检索一句已有的。`levi/marvel0/speech_template.py`（只用标准库）通过匹配器的词表读出转写里的动作和物体（中英文都可以），填进从目录里所有数据集的任务指令中学到的句式；统计按片段数加权（忽略 `Reset:` 前缀，命名空间不重复计数；数据集版本变化时重新读取）：
 
@@ -106,7 +122,7 @@ What keeps it safe: the block is labelled "generated: not an instruction the pol
 - 有放不进任何槽位的词（数字、其他文字的词）时不生成（`unclear`），听到的内容不会被悄悄丢掉；
 - 句式从所有指令里学，包括复位指令（`Reset: ...`），因为它们是同一台机器人的说法；显示的片段数也包含它们。
 
-安全措施：这一块标明“模板生成，不在训练过的指令里”，并显示句式和用它的片段数；只有点它自己的**使用**才会交出，和其他提案一样要过 800 毫秒和时效检查；数据集里意思相同的原句按数据集原样并排给出，因为策略可能更熟悉那个说法；只在所有物体都是词表词时给（匹配器比较时会跳过不认识的词，“pencil sharpener”会被当成“pick pen ...”），而且只给任务指令（不给 `Reset:` 指令）、匹配器读来没有标记也没有未知词的句子；匹配器根据常见识别错误猜出来的词（“pearl”读成“pear”）会作为猜测列出（`repairs`，槽位来源 `repair`）；结果带停止、否定或不安全标记时，以及受限族模型，都不生成（服务端和页面都检查）；句式装不下的请求（“相同颜色”“对应”“从……”、只有一个物体没有目标）不给句子并说明原因；生成的句子会用匹配器的读取器回读，必须正好包含听到的物体及其颜色和大小（译名按听到时的那一个物体算）。语音仍然不能启动、停止或移动任何东西。回答字段是 `match.generated`：`status`（`ok`、`vetoed`、`restricted`、`no_task`、`unsupported`、`no_frame`、`untranslated`、`unclear`）、`prompt`、`frames`、`episodes`、`slots`（`said`、`english`、`source`：`lexicon`、`repair`、`english`、`translation`）、`untranslated`、`dataset_original`、`repairs`（`heard`、`as`）、`translations`（见下）和 `untranslated_why`。数据集里格式不对的行会跳过，读不了的数据集不计入，都不会让生成停下。
+安全措施：这一块标明“模板生成，不在训练过的指令里”，并显示句式和用它的片段数；只有点它自己的**使用**才会交出，和其他提案一样要过 800 毫秒和时效检查；数据集里意思相同的原句按数据集原样并排给出，因为策略可能更熟悉那个说法；只在所有物体都是词表词时给（匹配器比较时会跳过不认识的词，“pencil sharpener”会被当成“pick pen ...”），而且只给任务指令（不给 `Reset:` 指令）、匹配器读来没有标记也没有未知词的句子；匹配器根据常见识别错误猜出来的词（“pearl”读成“pear”）会作为猜测列出（`repairs`，槽位来源 `repair`）；结果带停止、否定或不安全标记时，以及受限族模型，都不生成（服务端和页面都检查）；句式装不下的请求（“相同颜色”“对应”“从……”、只有一个物体没有目标）不给句子并说明原因；生成的句子会用匹配器的读取器回读，必须正好包含听到的物体及其颜色和大小（译名按听到时的那一个物体算）。语音仍然不能停止任何东西；只有打开[语音直跑](#voice-run--语音直跑)时才会启动东西。回答字段是 `match.generated`：`status`（`ok`、`vetoed`、`restricted`、`no_task`、`unsupported`、`no_frame`、`untranslated`、`unclear`）、`prompt`、`frames`、`episodes`、`slots`（`said`、`english`、`source`：`lexicon`、`repair`、`english`、`translation`）、`untranslated`、`dataset_original`、`repairs`（`heard`、`as`）、`translations`（见下）和 `untranslated_why`。数据集里格式不对的行会跳过，读不了的数据集不计入，都不会让生成停下。
 
 ### Translated object names / 翻译物体名
 

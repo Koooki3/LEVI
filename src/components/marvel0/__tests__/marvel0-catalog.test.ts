@@ -69,6 +69,8 @@ const SOURCES = [
   "components/marvel0/speech-panel.tsx",
   "components/marvel0/speech-session.ts",
   "components/marvel0/voice-capture.ts",
+  "components/marvel0/voice-run.ts",
+  "components/marvel0/use-voice-run.ts",
   // The card to the offline 3D preview.
   "components/marvel0/studio-link.tsx",
   // The navigation entry's word after its label.

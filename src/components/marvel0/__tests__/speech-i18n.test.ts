@@ -14,6 +14,8 @@ const SOURCES = [
   "speech-logic.ts",
   "speech-api.ts",
   "voice-capture.ts",
+  "voice-run.ts",
+  "use-voice-run.ts",
 ];
 const PREFIX = /^marvel0\.(err\.)?speech\./;
 const keysIn = (catalogue: Record<string, string>) =>

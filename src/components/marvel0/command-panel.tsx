@@ -12,7 +12,9 @@ import { inferenceMode, modeLabel } from "./inference-mode";
 // on the physical e-stop; this card itself starts nothing. The voice card
 // above the task instruction (speech-panel.tsx) only proposes one of the
 // allowed instructions; pressing its Use fills the task instruction and does
-// nothing else.
+// nothing else, unless the person switched its voice run on (voice-run.ts):
+// then the sentence it hands over is made into the command here and the
+// client is started with the ticks given when the switch was turned on.
 import {
   useId,
   useMemo,
@@ -69,7 +71,9 @@ import { sayText } from "./marvel0-say";
 import type { RunView } from "./run-logic";
 import { RunStart } from "./run-start";
 import type { Effective } from "./selection";
-import type { RunActions } from "./use-run-actions";
+import type { Ack, RunActions } from "./use-run-actions";
+import type { VoiceRun } from "./use-voice-run";
+import { startPhrase } from "./run-logic";
 import { SpeechPanel } from "./speech-panel";
 import type { Marvel0Catalog } from "./use-marvel0-actions";
 
@@ -88,6 +92,7 @@ export function CommandPanel({
   run = null,
   runActions,
   resumeBody = null,
+  voiceRun = null,
 }: {
   api: Marvel0Api;
   catalog: Marvel0Catalog;
@@ -104,6 +109,9 @@ export function CommandPanel({
   runActions?: RunActions;
   /** Saved body of an ended run with only its prompt replaced. */
   resumeBody?: Record<string, unknown> | null;
+  /** The page's voice run: while it is on, the voice card's sentence is run
+   * instead of only filled in. */
+  voiceRun?: VoiceRun | null;
 }) {
   const { t } = useLocale();
   const models = catalog.models;
@@ -210,23 +218,28 @@ export function CommandPanel({
   const otherFailure =
     failure && Object.keys(remote).length === 0 ? failure : null;
 
-  async function make() {
-    if (busy.current || !model) return;
-    setLocal(errors);
-    if (Object.keys(errors).length > 0) return;
+  /** Asks the backend for the command of `request`; true when it was made. */
+  async function makeFor(
+    request: Record<string, unknown>,
+    requestErrors: Partial<Record<FieldName, Say>>,
+    requestKey: string,
+  ): Promise<boolean> {
+    if (busy.current || !model) return false;
+    setLocal(requestErrors);
+    if (Object.keys(requestErrors).length > 0) return false;
     busy.current = true;
     setPending(true);
     setFailure(null);
     let answer;
     try {
-      answer = await api.preview(body);
+      answer = await api.preview(request);
     } finally {
       busy.current = false;
       setPending(false);
     }
     if (!answer.ok) {
       setFailure(answer);
-      return;
+      return false;
     }
     const preview = readPreview(answer.data);
     if (!preview) {
@@ -239,9 +252,25 @@ export function CommandPanel({
         field: null,
         fields: [],
       });
-      return;
+      return false;
     }
-    setMade({ preview, key });
+    setMade({ preview, key: requestKey });
+    return true;
+  }
+  const make = () => makeFor(body, errors, key);
+
+  /** The voice run's start: the form with the spoken instruction is made into
+   * the command, and that very command's client is started with the ticks
+   * given when the voice run was switched on. */
+  async function startFor(prompt: string, ack: Ack): Promise<boolean> {
+    if (!runActions || resuming || !models || !site) return false;
+    const next: CommandForm = { ...form, prompt };
+    edit({ prompt });
+    const request = commandBody(next, control?.default ?? DEFAULT_HZ);
+    if (!(await makeFor(request.body, request.errors, bodyKey(request.body))))
+      return false;
+    const group = next.group.trim() || placeholders(next, models, site).group;
+    return runActions.start(request.body, startPhrase(run, group), ack);
   }
 
   return (
@@ -301,7 +330,14 @@ export function CommandPanel({
             {!resuming && (
               <SpeechPanel
                 modelId={form.modelId}
+                voiceRun={voiceRun}
                 onUse={(prompt) => {
+                  if (voiceRun?.on) {
+                    void voiceRun.submit(prompt, (ack) =>
+                      startFor(prompt, ack),
+                    );
+                    return;
+                  }
                   edit({ prompt });
                   taskInput.current?.focus();
                 }}

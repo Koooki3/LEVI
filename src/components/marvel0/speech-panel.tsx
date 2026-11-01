@@ -5,9 +5,19 @@
 // transcript) into the task instruction field. Use fills one field. Making the
 // command and copying it stay the two separate presses they were, and nothing
 // here starts the client or the arm: voice cannot stop or pause the robot, and
-// the card says so next to the microphone at all times.
-import { Fragment, useId, useRef, type ReactNode } from "react";
-import { Mic, RefreshCw } from "lucide-react";
+// the card says so next to the microphone at all times. The one exception is
+// the voice run (voice-run.ts), which the person switches on here through a
+// confirm window: then a clear sentence is used by itself after a short
+// countdown with Cancel, and Use runs the sentence instead of filling it in.
+import {
+  Fragment,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { Mic, Play, RefreshCw } from "lucide-react";
 import {
   Badge,
   Button,
@@ -21,6 +31,18 @@ import {
 import { useLocale } from "@/components/levi-locale";
 import { Note, Problem } from "@/components/pages-ui/feedback";
 import { FailureDetail, WordedText } from "./action-parts";
+import { ConfirmWindow } from "./confirm-window";
+import { wordOf } from "./ctl-text";
+import { CHANGE_ACKS } from "./run-panel";
+import type { VoiceRun, VoiceRunPhase } from "./use-voice-run";
+import {
+  GATE_WAIT_MS,
+  VOICE_RUN_DELAY_MS,
+  autoPick,
+  type NoAutoWhy,
+} from "./voice-run";
+
+const GATE_WAIT_S = GATE_WAIT_MS / 1000;
 import { sayText } from "./marvel0-say";
 import type { Say } from "./marvel0-logic";
 import { speechApi, type SpeechApi } from "./speech-api";
@@ -89,6 +111,7 @@ export function SpeechPanel({
   modelId,
   onUse,
   createCapture,
+  voiceRun = null,
 }: {
   api?: SpeechApi;
   /** The model of the form: it decides which instructions are allowed. */
@@ -97,10 +120,13 @@ export function SpeechPanel({
   onUse: (prompt: string) => void;
   /** Replaces the microphone capture (tests). */
   createCapture?: (events: CaptureEvents) => CaptureLike;
+  /** The page's voice run; without it the card has no such switch. */
+  voiceRun?: VoiceRun | null;
 }) {
   const { t } = useLocale();
   const session = useSpeechSession({ api, modelId, onUse, createCapture });
   const { state, availability: access } = session;
+  const running = voiceRun?.on === true;
   const titleId = useId();
   const reasonsId = useId();
   const recording = state.phase === "recording";
@@ -163,6 +189,7 @@ export function SpeechPanel({
       <div data-testid="marvel0-speech-estop">
         <Note tone="warning">{t("marvel0.speech.no_estop")}</Note>
       </div>
+      {voiceRun && <VoiceRunSwitch voiceRun={voiceRun} />}
 
       {!micProblem && (
         <MicField
@@ -246,7 +273,11 @@ export function SpeechPanel({
         <NoticeView notice={state.notice} />
       )}
       {state.proposal && (
-        <ProposalCard session={session} proposal={state.proposal} />
+        <ProposalCard
+          session={session}
+          proposal={state.proposal}
+          running={running}
+        />
       )}
     </section>
   );
@@ -517,12 +548,227 @@ const FLAG_WORDS: Record<Flag, { title: string; body: string }> = {
   },
 };
 
-function ProposalCard({
+/** The voice run's switch: off, a button that opens the confirm window with
+ * the start window's three ticks; on, the warning that says what it does and
+ * the button that turns it off. Below, what the last sentence did. */
+function VoiceRunSwitch({ voiceRun }: { voiceRun: VoiceRun }) {
+  const { t } = useLocale();
+  const [open, setOpen] = useState(false);
+  const seconds = VOICE_RUN_DELAY_MS / 1000;
+  const status = voiceRun.status;
+  return (
+    <div
+      className="rg-speech__run"
+      data-testid="marvel0-speech-run"
+      data-on={voiceRun.on}
+    >
+      <div className="rg-actions-row">
+        <h4>{t("marvel0.speech.run.title")}</h4>
+        {voiceRun.on ? (
+          <Button
+            size="sm"
+            data-testid="marvel0-speech-run-off"
+            onClick={voiceRun.disarm}
+          >
+            {t("marvel0.speech.run.btn.off")}
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            icon={Play}
+            data-testid="marvel0-speech-run-on"
+            onClick={() => setOpen(true)}
+          >
+            {t("marvel0.speech.run.btn.on")}
+          </Button>
+        )}
+      </div>
+      {voiceRun.on ? (
+        <div data-testid="marvel0-speech-run-warning">
+          <Note tone="warning">
+            {sayText(
+              { key: "marvel0.speech.run.on", params: { s: seconds } },
+              t,
+            )}
+          </Note>
+        </div>
+      ) : (
+        <p className="rg-muted">
+          {sayText(
+            { key: "marvel0.speech.run.off_hint", params: { s: seconds } },
+            t,
+          )}
+        </p>
+      )}
+      <div role="status" data-testid="marvel0-speech-run-status">
+        {status && (
+          <p
+            className={RUN_PROGRESS.has(status.phase) ? "rg-muted" : "rg-warn"}
+            data-phase={status.phase}
+          >
+            <SayLine
+              say={{
+                key: RUN_STATUS_KEY[status.phase],
+                params: {
+                  prompt: { raw: status.prompt },
+                  s: GATE_WAIT_S,
+                },
+              }}
+            />
+            {status.why && (
+              <>
+                {" "}
+                <WordedText worded={status.why} />
+              </>
+            )}
+          </p>
+        )}
+      </div>
+      <ConfirmWindow
+        open={open}
+        testId="marvel0-speech-run-dialog"
+        title={t("marvel0.speech.run.dialog.title")}
+        intro={sayText(
+          { key: "marvel0.speech.run.dialog.intro", params: { s: seconds } },
+          t,
+        )}
+        estop={t("marvel0.run.start.estop")}
+        hazards={[
+          t("marvel0.speech.run.dialog.route"),
+          t("marvel0.speech.run.dialog.enter"),
+        ]}
+        notes={[
+          t("marvel0.speech.run.dialog.ticks"),
+          t("marvel0.run.notice.gates_scope"),
+        ]}
+        attest={CHANGE_ACKS.map((name) => ({
+          code: name,
+          label: wordOf(t, "marvel0.run.ack.", name),
+        }))}
+        confirmLabel={t("marvel0.speech.run.dialog.go")}
+        confirmIcon={Play}
+        onCancel={() => setOpen(false)}
+        onConfirm={(ticked) => {
+          voiceRun.arm({
+            estop: ticked.estop === true,
+            scene_reset: ticked.scene_reset === true,
+            area_clear: ticked.area_clear === true,
+          });
+          setOpen(false);
+        }}
+      />
+    </div>
+  );
+}
+
+const RUN_STATUS_KEY: Record<VoiceRunPhase, string> = {
+  starting: "marvel0.speech.run.status.starting",
+  changing: "marvel0.speech.run.status.changing",
+  waiting: "marvel0.speech.run.status.waiting",
+  entering: "marvel0.speech.run.status.entering",
+  entered: "marvel0.speech.run.status.entered",
+  refused: "marvel0.speech.run.status.refused",
+  start_failed: "marvel0.speech.run.status.start_failed",
+  enter_failed: "marvel0.speech.run.status.enter_failed",
+  late: "marvel0.speech.run.status.late",
+  gone: "marvel0.speech.run.status.gone",
+  off_held: "marvel0.speech.run.status.off_held",
+};
+/** The phases that are progress, not a sentence that did not run. */
+const RUN_PROGRESS = new Set<VoiceRunPhase>([
+  "starting",
+  "changing",
+  "waiting",
+  "entering",
+  "entered",
+]);
+
+const NO_AUTO_KEY: Record<NoAutoWhy, string> = {
+  vetoed: "marvel0.speech.run.no_auto.vetoed",
+  edited: "marvel0.speech.run.no_auto.edited",
+  truncated: "marvel0.speech.run.no_auto.truncated",
+  guessed: "marvel0.speech.run.no_auto.guessed",
+  disagree: "marvel0.speech.run.no_auto.disagree",
+  choose: "marvel0.speech.run.no_auto.choose",
+};
+
+/** With the voice run on: the sentence a clear proposal runs by itself after
+ * VOICE_RUN_DELAY_MS on screen, with Cancel; or why it waits for a Use press.
+ * The press it makes is the same `use` as the person's, with the same checks
+ * (on screen 800 ms, not expired, the allowed list unchanged). */
+function AutoRun({
   session,
   proposal,
 }: {
   session: SpeechSession;
   proposal: Proposal;
+}) {
+  const { t } = useLocale();
+  const [cancelled, setCancelled] = useState<number | null>(null);
+  const pick = autoPick(proposal);
+  const prompt = "prompt" in pick ? pick.prompt : null;
+  const live = prompt !== null && cancelled !== proposal.id;
+  const use = session.use;
+  const { id, shownAt, checking } = proposal;
+  useEffect(() => {
+    if (!live || prompt === null || checking) return;
+    const timer = setTimeout(
+      () => use(prompt),
+      Math.max(0, shownAt + VOICE_RUN_DELAY_MS - Date.now()),
+    );
+    return () => clearTimeout(timer);
+  }, [live, prompt, checking, use, id, shownAt]);
+  if (prompt === null)
+    return (
+      <p
+        className="rg-muted"
+        data-testid="marvel0-speech-run-no-auto"
+        data-why={"why" in pick ? pick.why : undefined}
+      >
+        {t(NO_AUTO_KEY["why" in pick ? pick.why : "choose"])}
+      </p>
+    );
+  if (!live)
+    return (
+      <p className="rg-muted" data-testid="marvel0-speech-run-cancelled">
+        {t("marvel0.speech.run.cancelled")}
+      </p>
+    );
+  return (
+    <div className="rg-speech__auto" data-testid="marvel0-speech-run-auto">
+      <Note tone="warning">
+        <SayLine
+          say={{
+            key: "marvel0.speech.run.auto",
+            params: {
+              s: VOICE_RUN_DELAY_MS / 1000,
+              prompt: { raw: prompt },
+            },
+          }}
+        />
+      </Note>
+      <div className="rg-actions-row">
+        <Button
+          variant="primary"
+          data-testid="marvel0-speech-run-cancel"
+          onClick={() => setCancelled(id)}
+        >
+          {t("marvel0.speech.run.btn.cancel")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ProposalCard({
+  session,
+  proposal,
+  running,
+}: {
+  session: SpeechSession;
+  proposal: Proposal;
+  /** The voice run is on: Use runs the sentence. */
+  running: boolean;
 }) {
   const { t } = useLocale();
   const view = proposalView(proposal);
@@ -572,12 +818,22 @@ function ProposalCard({
         </p>
       )}
       <TranscriptEditor session={session} proposal={proposal} />
+      {running && <AutoRun session={session} proposal={proposal} />}
       {view === "V" ? (
         <FlagBanner flag={proposal.match.flag} />
       ) : (
         <>
-          <GeneratedChoice session={session} proposal={proposal} />
-          <Choices session={session} proposal={proposal} view={view} />
+          <GeneratedChoice
+            session={session}
+            proposal={proposal}
+            running={running}
+          />
+          <Choices
+            session={session}
+            proposal={proposal}
+            view={view}
+            running={running}
+          />
         </>
       )}
       <p className="rg-muted">{t("marvel0.speech.expires")}</p>
@@ -604,9 +860,11 @@ const GENERATED_WHY: Record<
 function GeneratedChoice({
   session,
   proposal,
+  running,
 }: {
   session: SpeechSession;
   proposal: Proposal;
+  running: boolean;
 }) {
   const { t } = useLocale();
   const generated = proposal.match.generated;
@@ -729,7 +987,11 @@ function GeneratedChoice({
           data-testid="marvel0-speech-use-generated"
           onClick={() => session.use(prompt)}
         >
-          {t("marvel0.speech.btn.use_generated")}
+          {t(
+            running
+              ? "marvel0.speech.btn.run_generated"
+              : "marvel0.speech.btn.use_generated",
+          )}
         </Button>
       </div>
       {original && usable.includes(original) && (
@@ -748,7 +1010,11 @@ function GeneratedChoice({
               data-testid="marvel0-speech-use-original"
               onClick={() => session.use(original)}
             >
-              {t("marvel0.speech.btn.use_original")}
+              {t(
+                running
+                  ? "marvel0.speech.btn.run_original"
+                  : "marvel0.speech.btn.use_original",
+              )}
             </Button>
           </div>
         </>
@@ -920,12 +1186,21 @@ function Choices({
   session,
   proposal,
   view,
+  running,
 }: {
   session: SpeechSession;
   proposal: Proposal;
   view: "A" | "B" | "list";
+  running: boolean;
 }) {
   const { t } = useLocale();
+  const readFirst = (
+    <p className="rg-muted">
+      {t(
+        running ? "marvel0.speech.run.read_first" : "marvel0.speech.read_first",
+      )}
+    </p>
+  );
   const name = useId();
   const blocked = !proposal.armed || proposal.checking;
   const best = proposal.match.best;
@@ -947,7 +1222,7 @@ function Choices({
         </p>
         <Differences proposal={proposal} prompt={best.prompt} />
         {family}
-        <p className="rg-muted">{t("marvel0.speech.read_first")}</p>
+        {readFirst}
         <div className="rg-actions-row">
           <Button
             variant="primary"
@@ -955,7 +1230,7 @@ function Choices({
             data-testid="marvel0-speech-use"
             onClick={() => session.use(best.prompt)}
           >
-            {t("marvel0.speech.btn.use")}
+            {t(running ? "marvel0.speech.btn.run" : "marvel0.speech.btn.use")}
           </Button>
           <Button
             onClick={session.showAll}
@@ -1007,7 +1282,7 @@ function Choices({
         </RadioGroup>
       )}
       {family}
-      <p className="rg-muted">{t("marvel0.speech.read_first")}</p>
+      {readFirst}
       <div className="rg-actions-row">
         <Button
           variant="primary"
@@ -1015,7 +1290,11 @@ function Choices({
           data-testid="marvel0-speech-use"
           onClick={() => proposal.picked && session.use(proposal.picked)}
         >
-          {t("marvel0.speech.btn.use_selected")}
+          {t(
+            running
+              ? "marvel0.speech.btn.run_selected"
+              : "marvel0.speech.btn.use_selected",
+          )}
         </Button>
         {view === "B" && (
           <Button onClick={session.showAll} data-testid="marvel0-speech-none">
