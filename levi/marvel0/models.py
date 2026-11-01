@@ -95,6 +95,10 @@ class Model:
                 "vlash": default_group(self.id, "vlash"),
                 "accel": default_group(self.id, "accel"),
                 "accel_v2": default_group(self.id, "accel_v2"),
+                # rule v3 (the phase clock), one group per inference mode
+                "accel3": default_group(self.id, "accel3"),
+                "rtc_accel3": default_group(self.id, "rtc_accel3"),
+                "vlash_accel3": default_group(self.id, "vlash_accel3"),
             },
         }
 
@@ -114,16 +118,28 @@ def default_group(model_id: str, rtc: bool) -> str:
         return f"{model_id}_accel_demo"
     if rtc == "accel_v2":  # in-chunk acceleration with rule v2, apart from v1's runs
         return f"{model_id}_accel_v2_demo"
+    if rtc in ("accel3", "rtc_accel3", "vlash_accel3"):  # rule v3, apart from v1 and v2
+        return f"{model_id}_{rtc}_demo"
     return f"{model_id}_rtc_demo" if rtc is True or rtc == "rtc" else f"{model_id}_demo"
 
 
-# Every default group the form can resolve: RTC, plain, VLASH, and in-chunk acceleration with rule v1 and v2.
-DEFAULT_GROUP_MODES = (True, False, "vlash", "accel", "accel_v2")
+# Every default group the form can resolve: RTC, plain, VLASH, and in-chunk acceleration with rule v1 and v2, and
+# with rule v3 over each of the three inference modes.
+DEFAULT_GROUP_MODES = (
+    True,
+    False,
+    "vlash",
+    "accel",
+    "accel_v2",
+    "accel3",
+    "rtc_accel3",
+    "vlash_accel3",
+)
 
 
 def default_group_fits(model_id: str) -> bool:
     """Whether every default rollout group of this model is one the client
-    command form accepts (``<id>_accel_v2_demo`` is the longest): a model is
+    command form accepts (``<id>_vlash_accel3_demo`` is the longest): a model is
     offered only if no mode's default form is refused for its group."""
     return all(
         len(default_group(model_id, mode)) <= GROUP_MAX_CHARS

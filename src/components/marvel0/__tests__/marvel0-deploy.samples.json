@@ -834,10 +834,13 @@
         "restricted_prompts": false,
         "rollout_group_default": {
           "accel": "pi05_fr3_all_step49999_accel_demo",
+          "accel3": "pi05_fr3_all_step49999_accel3_demo",
           "accel_v2": "pi05_fr3_all_step49999_accel_v2_demo",
           "plain": "pi05_fr3_all_step49999_demo",
           "rtc": "pi05_fr3_all_step49999_rtc_demo",
-          "vlash": "pi05_fr3_all_step49999_vlash_demo"
+          "rtc_accel3": "pi05_fr3_all_step49999_rtc_accel3_demo",
+          "vlash": "pi05_fr3_all_step49999_vlash_demo",
+          "vlash_accel3": "pi05_fr3_all_step49999_vlash_accel3_demo"
         },
         "size_bytes": 3,
         "step": null,
@@ -858,10 +861,13 @@
         "restricted_prompts": false,
         "rollout_group_default": {
           "accel": "recap_cfg_r1_step10000_jax_accel_demo",
+          "accel3": "recap_cfg_r1_step10000_jax_accel3_demo",
           "accel_v2": "recap_cfg_r1_step10000_jax_accel_v2_demo",
           "plain": "recap_cfg_r1_step10000_jax_demo",
           "rtc": "recap_cfg_r1_step10000_jax_rtc_demo",
-          "vlash": "recap_cfg_r1_step10000_jax_vlash_demo"
+          "rtc_accel3": "recap_cfg_r1_step10000_jax_rtc_accel3_demo",
+          "vlash": "recap_cfg_r1_step10000_jax_vlash_demo",
+          "vlash_accel3": "recap_cfg_r1_step10000_jax_vlash_accel3_demo"
         },
         "size_bytes": 54,
         "step": 10000,
@@ -882,10 +888,13 @@
         "restricted_prompts": false,
         "rollout_group_default": {
           "accel": "recap_cfg_r2_best_step14300_jax_accel_demo",
+          "accel3": "recap_cfg_r2_best_step14300_jax_accel3_demo",
           "accel_v2": "recap_cfg_r2_best_step14300_jax_accel_v2_demo",
           "plain": "recap_cfg_r2_best_step14300_jax_demo",
           "rtc": "recap_cfg_r2_best_step14300_jax_rtc_demo",
-          "vlash": "recap_cfg_r2_best_step14300_jax_vlash_demo"
+          "rtc_accel3": "recap_cfg_r2_best_step14300_jax_rtc_accel3_demo",
+          "vlash": "recap_cfg_r2_best_step14300_jax_vlash_demo",
+          "vlash_accel3": "recap_cfg_r2_best_step14300_jax_vlash_accel3_demo"
         },
         "size_bytes": 70,
         "step": 14300,
@@ -906,10 +915,13 @@
         "restricted_prompts": false,
         "rollout_group_default": {
           "accel": "recap_cfg_r2_step15000_jax_accel_demo",
+          "accel3": "recap_cfg_r2_step15000_jax_accel3_demo",
           "accel_v2": "recap_cfg_r2_step15000_jax_accel_v2_demo",
           "plain": "recap_cfg_r2_step15000_jax_demo",
           "rtc": "recap_cfg_r2_step15000_jax_rtc_demo",
-          "vlash": "recap_cfg_r2_step15000_jax_vlash_demo"
+          "rtc_accel3": "recap_cfg_r2_step15000_jax_rtc_accel3_demo",
+          "vlash": "recap_cfg_r2_step15000_jax_vlash_demo",
+          "vlash_accel3": "recap_cfg_r2_step15000_jax_vlash_accel3_demo"
         },
         "size_bytes": 54,
         "step": 15000,

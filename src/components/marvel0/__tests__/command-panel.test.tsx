@@ -16,10 +16,11 @@ import { readDeploy } from "../deploy-logic";
 import { NO_CHOICE, effectiveSelection, type Effective } from "../selection";
 import type { Marvel0Catalog } from "../use-marvel0-actions";
 import { modelsAnswer, siteAnswer, model, cfgModel } from "./catalog-fixtures";
-import { COMMAND, preview } from "./command-fixtures";
+import { COMMAND, preview, siteWithRate } from "./command-fixtures";
 import { deployInfo, idle, ready, starting } from "./deploy-fixtures";
 import {
   button,
+  choose as pick,
   fakeApi,
   field,
   nothing,
@@ -346,9 +347,9 @@ describe("in-chunk acceleration", () => {
     });
   });
 
-  test("with RTC or VLASH it is disabled with the reason, and never sent", async () => {
+  test("with RTC or VLASH it can be turned on too: rule v3 is the only rule there, and it is sent", async () => {
     for (const over of [
-      { rtc: true },
+      { rtc: true, inferenceMode: "rtc" as const },
       { rtc: false, inferenceMode: "vlash" as const },
     ]) {
       const { host, calls } = await open(
@@ -357,19 +358,35 @@ describe("in-chunk acceleration", () => {
         false,
         over,
       );
-      expect(accel(host).disabled).toBe(true);
+      expect(accel(host).disabled).toBe(false);
       expect(accel(host).checked).toBe(false);
-      const mode = over.inferenceMode === "vlash" ? "VLASH" : "RTC";
-      expect(text(why(host))).toBe(
-        `Not available with ${mode}: in-chunk acceleration runs only with plain inference.`,
-      );
-      expect(accel(host).getAttribute("aria-describedby")).toBe(why(host)!.id);
+      expect(why(host)).toBeNull();
       await make(host);
       expect(calls.preview[0]).not.toHaveProperty("chunk_accel");
+      await click(accel(host));
+      expect(accel(host).checked).toBe(true);
+      // rules v1 and v2 run with plain inference only: they are shown, disabled, and v3 is chosen
+      const radio = (value: string) =>
+        card(host).querySelector<HTMLInputElement>(
+          `[data-testid=marvel0-command-chunk-accel-rule-${value}]`,
+        )!;
+      expect(radio("v3").checked).toBe(true);
+      expect(radio("v3").disabled).toBe(false);
+      expect(radio("v1").disabled).toBe(true);
+      expect(radio("v2").disabled).toBe(true);
+      await make(host);
+      expect(calls.preview[1]).toMatchObject({
+        inference_mode: over.inferenceMode,
+        rtc: over.rtc,
+        chunk_accel: true,
+        chunk_accel_rule: "v3",
+        chunk_accel_alpha: 0.005,
+      });
+      expect(calls.preview[1]).not.toHaveProperty("chunk_accel_lambda");
     }
   });
 
-  test("turned on with plain inference, then RTC chosen: shown off and not sent", async () => {
+  test("turned on with plain inference, then RTC chosen: it stays on as rule v3, and plain brings the old rule back", async () => {
     const { host, calls, choose } = await open(
       undefined,
       readDeploy(idle()),
@@ -377,15 +394,63 @@ describe("in-chunk acceleration", () => {
       { rtc: false },
     );
     await click(accel(host));
+    // v2 remembered from plain
+    await click(
+      card(host).querySelector<HTMLInputElement>(
+        "[data-testid=marvel0-command-chunk-accel-rule-v2]",
+      )!,
+    );
     await choose({ rtc: true });
+    expect(accel(host).checked).toBe(true);
+    expect(accel(host).disabled).toBe(false);
+    await make(host);
+    expect(calls.preview[0]).toMatchObject({
+      inference_mode: "rtc",
+      chunk_accel: true,
+      chunk_accel_rule: "v3",
+    });
+    // back to plain: the choice made there is the form's again
+    await choose({ rtc: false });
+    expect(accel(host).checked).toBe(true);
+    expect(
+      card(host).querySelector<HTMLInputElement>(
+        "[data-testid=marvel0-command-chunk-accel-rule-v2]",
+      )!.checked,
+    ).toBe(true);
+    await make(host);
+    expect(calls.preview[1]).toMatchObject({
+      inference_mode: "plain",
+      chunk_accel_rule: "v2",
+    });
+  });
+
+  test("at another rate than 10 Hz it is off and disabled with the reason, and never sent", async () => {
+    const { api, calls } = fakeApi({ preview: ok(preview()) });
+    const status = readDeploy(idle());
+    const { host } = await render(
+      <CommandPanel
+        api={api}
+        catalog={catalog({ site: readSite(siteWithRate()) })}
+        status={status}
+        selection={selectionFor(status, { rtc: false })}
+        onUseAnother={() => {}}
+      />,
+    );
+    await click(accel(host));
+    expect(accel(host).checked).toBe(true);
+    // another rate turns the switch off (the accelerated clients run at 10 Hz only)
+    await pick(
+      host.querySelector<HTMLSelectElement>("[data-testid=marvel0-command-hz]"),
+      "20",
+    );
     expect(accel(host).checked).toBe(false);
     expect(accel(host).disabled).toBe(true);
+    expect(text(why(host))).toBe(
+      "Not available at 20 Hz: in-chunk acceleration runs only at the policy's 10 Hz.",
+    );
     await make(host);
     expect(calls.preview[0]).not.toHaveProperty("chunk_accel");
-    // back to plain: it stays off until someone turns it on again (review 2026-10-31)
-    await choose({ rtc: false });
-    expect(accel(host).disabled).toBe(false);
-    expect(accel(host).checked).toBe(false);
+    expect(calls.preview[0]).toMatchObject({ control_hz: 20 });
   });
 
   test("a changed switch marks the command on show as no longer matching", async () => {
@@ -500,8 +565,9 @@ describe("in-chunk acceleration", () => {
     expect(calls.preview[1]).toMatchObject({ chunk_accel: true });
   });
 
-  test("a resumed accelerated run edited under RTC stays off when plain is chosen later", async () => {
-    // final review 2026-10-31: the restored value came back on by itself once plain was chosen
+  test("a resumed v1 run edited under RTC is rule v3 there, and plain brings its v1 back", async () => {
+    // final review 2026-10-31: with rules v1 and v2 only, RTC cleared the restored value and plain did not bring it
+    // back; rule v3 runs with RTC, so the switch stays and v1 (plain only) waits behind it
     const saved = {
       model_id: SFT,
       prompt: "old task",
@@ -528,14 +594,19 @@ describe("in-chunk acceleration", () => {
       { label: "the saved run form" },
     );
     await click(button(host, en["marvel0.episodeChange.editAll"])!);
-    expect(accel(host).checked).toBe(false);
+    expect(accel(host).checked).toBe(true);
+    await make(host);
+    expect(calls.preview[calls.preview.length - 1]).toMatchObject({
+      chunk_accel: true,
+      chunk_accel_rule: "v3",
+    });
     await choose({ rtc: false });
     expect(accel(host).disabled).toBe(false);
-    expect(accel(host).checked).toBe(false);
+    expect(accel(host).checked).toBe(true);
     await make(host);
-    expect(calls.preview[calls.preview.length - 1]).not.toHaveProperty(
-      "chunk_accel",
-    );
+    const last = calls.preview[calls.preview.length - 1];
+    expect(last).toMatchObject({ chunk_accel: true, inference_mode: "plain" });
+    expect(last).not.toHaveProperty("chunk_accel_rule");
   });
 });
 
@@ -544,9 +615,17 @@ describe("the rule of in-chunk acceleration", () => {
     card(host).querySelector<HTMLInputElement>(
       "[data-testid=marvel0-command-chunk-accel] input[role=switch]",
     )!;
-  const rule = (host: HTMLElement, value: "v1" | "v2") =>
+  const rule = (host: HTMLElement, value: "v1" | "v2" | "v3") =>
     card(host).querySelector<HTMLInputElement>(
       `[data-testid=marvel0-command-chunk-accel-rule-${value}]`,
+    );
+  const lambda = (host: HTMLElement) =>
+    card(host).querySelector<HTMLSelectElement>(
+      "[data-testid=marvel0-command-chunk-accel-lambda]",
+    );
+  const alpha = (host: HTMLElement) =>
+    card(host).querySelector<HTMLSelectElement>(
+      "[data-testid=marvel0-command-chunk-accel-alpha]",
     );
   const box = (host: HTMLElement) =>
     card(host).querySelector("[data-testid=marvel0-command-chunk-accel]")!;
@@ -566,20 +645,24 @@ describe("the rule of in-chunk acceleration", () => {
     chunk_accel_rule: "v2",
   };
 
-  test("hidden while the switch is off; on, v1 is chosen and nothing more is sent, v2 sends its rule", async () => {
+  test("hidden while the switch is off; on, v3 is chosen; v1 sends nothing more, v2 and v3 send their rule", async () => {
     const { host, calls } = await open(undefined, readDeploy(idle()), false, {
       rtc: false,
     });
     expect(rule(host, "v1")).toBeNull();
     expect(rule(host, "v2")).toBeNull();
+    expect(rule(host, "v3")).toBeNull();
+    expect(lambda(host)).toBeNull();
     await click(accel(host));
-    expect(rule(host, "v1")!.checked).toBe(true);
+    // the finished rule is on by default: v3, the phase clock
+    expect(rule(host, "v3")!.checked).toBe(true);
+    expect(rule(host, "v1")!.checked).toBe(false);
     expect(rule(host, "v2")!.checked).toBe(false);
-    expect(rule(host, "v1")!.disabled).toBe(false);
-    expect(rule(host, "v2")!.disabled).toBe(false);
-    // two radio buttons of one group (arrow keys move between them), each with its words
+    for (const value of ["v1", "v2", "v3"] as const)
+      expect(rule(host, value)!.disabled).toBe(false);
+    // three radio buttons of one group (arrow keys move between them), each with its words
     expect(rule(host, "v1")!.type).toBe("radio");
-    expect(rule(host, "v1")!.name).toBe(rule(host, "v2")!.name);
+    expect(rule(host, "v1")!.name).toBe(rule(host, "v3")!.name);
     expect(rule(host, "v1")!.closest("fieldset")).not.toBeNull();
     for (const key of [
       "marvel0.cmd.field.chunk_accel_rule",
@@ -587,34 +670,155 @@ describe("the rule of in-chunk acceleration", () => {
       "marvel0.cmd.field.chunk_accel_rule_v1_hint",
       "marvel0.cmd.field.chunk_accel_rule_v2",
       "marvel0.cmd.field.chunk_accel_rule_v2_hint",
+      "marvel0.cmd.field.chunk_accel_rule_v3",
+      "marvel0.cmd.field.chunk_accel_rule_v3_hint",
     ] as const)
       expect(text(box(host)), key).toContain(en[key]);
     expect(card(host).querySelectorAll("[role=switch]")).toHaveLength(1);
-    expect(card(host).querySelectorAll("select")).toHaveLength(0);
     await make(host);
-    expect(calls.preview[0]).toMatchObject({ chunk_accel: true });
-    expect(calls.preview[0]).not.toHaveProperty("chunk_accel_rule");
+    expect(calls.preview[0]).toMatchObject({
+      chunk_accel: true,
+      chunk_accel_rule: "v3",
+      chunk_accel_alpha: 0.005,
+    });
+    expect(calls.preview[0]).not.toHaveProperty("chunk_accel_lambda");
     await click(rule(host, "v2")!);
     expect(rule(host, "v2")!.checked).toBe(true);
-    expect(rule(host, "v1")!.checked).toBe(false);
+    expect(rule(host, "v3")!.checked).toBe(false);
     await make(host);
     expect(calls.preview[1]).toMatchObject({
       inference_mode: "plain",
       chunk_accel: true,
       chunk_accel_rule: "v2",
     });
+    expect(calls.preview[1]).not.toHaveProperty("chunk_accel_alpha");
+    await click(rule(host, "v1")!);
+    await make(host);
+    expect(calls.preview[2]).toMatchObject({ chunk_accel: true });
+    expect(calls.preview[2]).not.toHaveProperty("chunk_accel_rule");
   });
 
-  test("the group placeholder follows the rule", async () => {
-    const { host } = await open(undefined, readDeploy(idle()), false, {
+  test("rule v3 shows the lambda and the alpha to choose, only while it is the rule", async () => {
+    const { host, calls } = await open(undefined, readDeploy(idle()), false, {
+      rtc: false,
+    });
+    await click(accel(host));
+    // one more select each, in the box of the switch, with their words
+    expect(card(host).querySelectorAll("select")).toHaveLength(2);
+    expect(box(host).contains(lambda(host))).toBe(true);
+    expect(box(host).contains(alpha(host))).toBe(true);
+    for (const key of [
+      "marvel0.cmd.field.chunk_accel_lambda",
+      "marvel0.cmd.field.chunk_accel_lambda_hint",
+      "marvel0.cmd.field.chunk_accel_alpha",
+      "marvel0.cmd.field.chunk_accel_alpha_hint",
+    ] as const)
+      expect(text(box(host)), key).toContain(en[key]);
+    // the lambda opens on "default" (the server's number), then the page's options
+    expect(
+      Array.from(lambda(host)!.options).map((o) => [o.value, o.text]),
+    ).toEqual([
+      ["", en["marvel0.cmd.field.chunk_accel_lambda_default"]],
+      ["2.0", "2.0"],
+      ["2.5", "2.5"],
+      ["3.0", "3.0"],
+    ]);
+    expect(lambda(host)!.value).toBe("");
+    // the alpha opens on the controller's default and says that the choice has to match set_clip.py --show
+    expect(Array.from(alpha(host)!.options).map((o) => o.value)).toEqual([
+      "0.005",
+      "0.01",
+    ]);
+    expect(alpha(host)!.value).toBe("0.005");
+    expect(text(alpha(host))).toContain("the controller's default");
+    expect(en["marvel0.cmd.field.chunk_accel_alpha_hint"]).toContain(
+      "set_clip.py --show",
+    );
+    expect(zh["marvel0.cmd.field.chunk_accel_alpha_hint"]).toContain(
+      "set_clip.py --show",
+    );
+    await pick(lambda(host), "2.5");
+    await pick(alpha(host), "0.01");
+    await make(host);
+    expect(calls.preview[0]).toMatchObject({
+      chunk_accel: true,
+      chunk_accel_rule: "v3",
+      chunk_accel_lambda: 2.5,
+      chunk_accel_alpha: 0.01,
+    });
+    // choosing the empty lambda again sends none
+    await pick(lambda(host), "");
+    await make(host);
+    expect(calls.preview[1]).not.toHaveProperty("chunk_accel_lambda");
+    expect(calls.preview[1]).toMatchObject({ chunk_accel_alpha: 0.01 });
+    // another rule hides them and sends neither; the choice is back when v3 is
+    await click(rule(host, "v1")!);
+    expect(lambda(host)).toBeNull();
+    expect(alpha(host)).toBeNull();
+    await make(host);
+    expect(calls.preview[2]).not.toHaveProperty("chunk_accel_alpha");
+    await click(rule(host, "v3")!);
+    expect(alpha(host)!.value).toBe("0.01");
+  });
+
+  test("the lambda and the alpha belong to a mode of the form too: under RTC and VLASH they are shown and sent", async () => {
+    const { host, calls } = await open(undefined, readDeploy(idle()), false, {
+      rtc: true,
+      inferenceMode: "rtc",
+    });
+    await click(accel(host));
+    expect(lambda(host)).not.toBeNull();
+    await pick(lambda(host), "2.5");
+    await make(host);
+    expect(calls.preview[0]).toMatchObject({
+      inference_mode: "rtc",
+      rtc: true,
+      chunk_accel_rule: "v3",
+      chunk_accel_lambda: 2.5,
+      chunk_accel_alpha: 0.005,
+    });
+  });
+
+  test("the server's refusal of a number lands under its select, in the page's words", async () => {
+    const { host } = await open(
+      {
+        preview: refused(
+          422,
+          "chunk_accel_lambda_invalid",
+          { field: "chunk_accel_lambda" },
+          "English lambda sentence",
+        ),
+      },
+      readDeploy(idle()),
+      false,
+      { rtc: false },
+    );
+    await click(accel(host));
+    await pick(lambda(host), "2.5");
+    await make(host);
+    expect(text(box(host).querySelector(".ds-field__error"))).toBe(
+      en["marvel0.err.chunk_accel_lambda_invalid"],
+    );
+    expect(text(card(host))).not.toContain("English lambda sentence");
+  });
+
+  test("the group placeholder follows the rule and the mode", async () => {
+    const { host, choose } = await open(undefined, readDeploy(idle()), false, {
       rtc: false,
     });
     const group = () =>
       (field(card(host), "Rollout group") as HTMLInputElement).placeholder;
     await click(accel(host));
+    expect(group()).toBe(`${SFT}_accel3_demo`);
+    await click(rule(host, "v1")!);
     expect(group()).toBe(`${SFT}_accel_demo`);
     await click(rule(host, "v2")!);
     expect(group()).toBe(`${SFT}_accel_v2_demo`);
+    await click(rule(host, "v3")!);
+    await choose({ rtc: true });
+    expect(group()).toBe(`${SFT}_rtc_accel3_demo`);
+    await choose({ rtc: false, inferenceMode: "vlash" });
+    expect(group()).toBe(`${SFT}_vlash_accel3_demo`);
   });
 
   test("turned off, the choice is kept but nothing is sent; on again it is still v2", async () => {
@@ -632,7 +836,7 @@ describe("the rule of in-chunk acceleration", () => {
     expect(rule(host, "v2")!.checked).toBe(true);
   });
 
-  test("with RTC chosen it is hidden and not sent; back to plain and on again it is still v2", async () => {
+  test("with RTC chosen v1 and v2 are disabled and v3 is the rule sent; back to plain it is still v2", async () => {
     const { host, calls, choose } = await open(
       undefined,
       readDeploy(idle()),
@@ -642,15 +846,15 @@ describe("the rule of in-chunk acceleration", () => {
     await click(accel(host));
     await click(rule(host, "v2")!);
     await choose({ rtc: true });
-    expect(rule(host, "v1")).toBeNull();
-    expect(rule(host, "v2")).toBeNull();
+    expect(rule(host, "v1")!.disabled).toBe(true);
+    expect(rule(host, "v2")!.disabled).toBe(true);
+    expect(rule(host, "v3")!.checked).toBe(true);
     await make(host);
-    expect(calls.preview[0]).not.toHaveProperty("chunk_accel_rule");
+    expect(calls.preview[0]).toMatchObject({ chunk_accel_rule: "v3" });
     await choose({ rtc: false });
-    expect(accel(host).checked).toBe(false);
-    expect(rule(host, "v2")).toBeNull();
-    await click(accel(host));
+    expect(accel(host).checked).toBe(true);
     expect(rule(host, "v2")!.checked).toBe(true);
+    expect(rule(host, "v2")!.disabled).toBe(false);
   });
 
   test("editing every parameter of a v2 run with the server's group and note, then choosing v1, files it under v1's default", async () => {

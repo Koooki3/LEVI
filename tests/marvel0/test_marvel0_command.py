@@ -385,6 +385,21 @@ def test_the_catalog_offers_exactly_the_names_whose_default_form_is_accepted(
         "vlash": {"inference_mode": "vlash"},
         "accel": {"chunk_accel": True},
         "accel_v2": {"chunk_accel": True, "chunk_accel_rule": "v2"},
+        "accel3": {
+            "chunk_accel": True,
+            "chunk_accel_rule": "v3",
+            "inference_mode": "plain",
+        },
+        "rtc_accel3": {
+            "chunk_accel": True,
+            "chunk_accel_rule": "v3",
+            "inference_mode": "rtc",
+        },
+        "vlash_accel3": {
+            "chunk_accel": True,
+            "chunk_accel_rule": "v3",
+            "inference_mode": "vlash",
+        },
     }
     for length in range(60, 81):
         name = "m" * (length - len("_step49999")) + "_step49999"
@@ -397,7 +412,9 @@ def test_the_catalog_offers_exactly_the_names_whose_default_form_is_accepted(
                 assert error.code == "rollout_group_invalid", (length, mode)
                 accepted[mode] = False
         assert M.default_group_fits(name) == all(accepted.values()), length
-        assert M.default_group_fits(name) == (length <= 66), length
+        assert M.default_group_fits(name) == (length <= 62), length
+    # the longest default group is v3's "<name>_vlash_accel3_demo": 62 + 18 = 80, 63 + 18 = 81
+    assert len(M.default_group("m" * 62, "vlash_accel3")) == 80
     assert len(M.default_group("m" * 66, "accel_v2")) == 80
 
 
@@ -635,6 +652,8 @@ def test_the_form_has_exactly_the_documented_fields():
         "vlash_overlap_steps",
         "chunk_accel",
         "chunk_accel_rule",
+        "chunk_accel_lambda",
+        "chunk_accel_alpha",
     ]
 
 
@@ -651,6 +670,9 @@ def test_the_flags_of_the_form_are_a_closed_list():
         "--vlash-overlap-steps",
         "--open-loop-horizon",
         "--accel-rule",
+        "--phase-mode",
+        "--phase-lambda-max",
+        "--phase-alpha",
         "--rollout-group",
         "--eval-note",
     }
@@ -1314,8 +1336,8 @@ def test_chunk_accel_rule_v2_needs_the_switch(tmp_path):
         )
 
 
-@pytest.mark.parametrize("value", ["v3", "V2", "", "2", "v2 "])
-def test_chunk_accel_rule_must_be_v1_or_v2(tmp_path, value):
+@pytest.mark.parametrize("value", ["v4", "V2", "V3", "", "2", "v2 ", "v3 "])
+def test_chunk_accel_rule_must_be_v1_v2_or_v3(tmp_path, value):
     err = refused(tmp_path, {"chunk_accel": True, "chunk_accel_rule": value})
     assert (err.code, err.field) == ("chunk_accel_rule_invalid", "chunk_accel_rule")
 
@@ -1362,3 +1384,439 @@ def test_chunk_accel_rule_argv_cannot_be_relabelled(tmp_path):
     v1_argv = C.render(site, mdl, v1).argv
     with pytest.raises(C.SelfCheckError):
         C.verify_argv(v1_argv + ["--accel-rule=v2"], site, mdl.restricted)
+
+
+# ---- in-chunk acceleration, rule v3 (the phase clock) ----
+
+ARGV_GOLDENS = Path(__file__).parent / "fixtures" / "chunk_accel_argv.json"
+
+
+def v3(**body):
+    return {"chunk_accel": True, "chunk_accel_rule": "v3", **body}
+
+
+def phase_flags(argv):
+    return [t for t in argv if t.startswith("--phase-")]
+
+
+def test_the_v1_and_v2_commands_are_byte_identical_to_before_rule_v3(tmp_path):
+    # The goldens were captured from the code before rule v3 existed: adding a rule must not move a byte of the other two.
+    gold = json.loads(ARGV_GOLDENS.read_text())
+    root = str(tmp_path)
+    for name, body in (
+        ("v1", {"chunk_accel": True}),
+        ("v2", {"chunk_accel": True, "chunk_accel_rule": "v2"}),
+    ):
+        preview = rendered(tmp_path, body)
+        assert preview.argv == [
+            t.replace("{root}", root) for t in gold[name]["argv"]
+        ], name
+        assert preview.command == gold[name]["command"].replace("{root}", root), name
+        assert not phase_flags(preview.argv), name
+
+
+@pytest.mark.parametrize(
+    "mode,extra",
+    [("plain", {}), ("rtc", {}), ("vlash", {"vlash_overlap_steps": 2})],
+)
+def test_the_v3_command_of_each_mode_is_the_golden_one(tmp_path, mode, extra):
+    # The argv contract with lab/chunk_accel/run_collect_phase.py (design section 6).
+    gold = json.loads(ARGV_GOLDENS.read_text())[f"v3_{mode}"]
+    body = v3(
+        inference_mode=mode, chunk_accel_lambda=2.0, chunk_accel_alpha=0.005, **extra
+    )
+    preview = rendered(tmp_path, body)
+    root = str(tmp_path)
+    assert preview.argv == [t.replace("{root}", root) for t in gold["argv"]]
+    assert preview.command == gold["command"].replace("{root}", root)
+
+
+@pytest.mark.parametrize("mode", ["plain", "rtc", "vlash"])
+def test_the_v3_client_is_one_entry_point_for_all_three_modes(tmp_path, mode):
+    from levi.marvel0.inference_mode import (
+        CHUNK_ACCEL_PHASE_CLIENT,
+        CHUNK_ACCEL_V3_ALPHA_DEFAULT,
+        CHUNK_ACCEL_V3_LAMBDA_DEFAULT,
+    )
+
+    site, mdl, form = form_for(tmp_path, v3(inference_mode=mode))
+    preview = C.render(site, mdl, form)
+    argv = preview.argv
+    # before the VLASH branch: the VLASH mode has no client of its own once rule v3 is on
+    assert argv[len(C.PREFIX) - 1] == CHUNK_ACCEL_PHASE_CLIENT
+    assert (form.chunk_accel, form.chunk_accel_rule) == (True, "v3")
+    assert form.inference_mode == mode and form.rtc == (mode == "rtc")
+    # empty fields take the page constants
+    assert form.chunk_accel_lambda == CHUNK_ACCEL_V3_LAMBDA_DEFAULT
+    assert form.chunk_accel_alpha == CHUNK_ACCEL_V3_ALPHA_DEFAULT
+    assert phase_flags(argv) == [
+        f"--phase-mode={mode}",
+        f"--phase-lambda-max={C.marvel0_site.number(CHUNK_ACCEL_V3_LAMBDA_DEFAULT)}",
+        f"--phase-alpha={C.marvel0_site.number(CHUNK_ACCEL_V3_ALPHA_DEFAULT)}",
+    ]
+    assert not any(t.startswith("--accel-rule") for t in argv)
+    # the mode's own flags are the ones the plain, RTC and VLASH commands have
+    own = {
+        "plain": ["--open-loop-horizon=6"],
+        "rtc": ["--rtc", "--rtc-execute-horizon=6"],
+        "vlash": ["--vlash-overlap-steps=2"],
+    }[mode]
+    mode_flags = {
+        "--rtc",
+        "--rtc-execute-horizon",
+        "--open-loop-horizon",
+        "--vlash-overlap-steps",
+    }
+    assert [t for t in argv if t.split("=")[0] in mode_flags] == own
+    # nothing that guards the arm moves: after the client, every flag but the --phase-* ones is the mode's own command
+    same = {
+        "inference_mode": mode,
+        "rollout_group": form.rollout_group,
+        "note": form.note,
+    }
+    base = C.render(site, mdl, form_for(tmp_path, same)[2]).argv
+    rest = [t for t in argv[len(C.PREFIX) :] if not t.startswith("--phase-")]
+    assert rest == base[len(C.PREFIX) :]
+    C.verify_argv(argv, site, mdl.restricted)
+
+
+def test_rule_v3_alone_means_rtc_like_the_page_and_v1_v2_alone_mean_plain(tmp_path):
+    # review-worthy asymmetry (design section 11): v3 does not force plain, so the page's own default mode stays
+    assert form_for(tmp_path, v3())[2].inference_mode == "rtc"
+    assert form_for(tmp_path, v3(rtc=False))[2].inference_mode == "plain"
+    assert form_for(tmp_path, v3(rtc=True))[2].inference_mode == "rtc"
+    assert form_for(tmp_path, {"chunk_accel": True})[2].inference_mode == "plain"
+    assert (
+        form_for(tmp_path, {"chunk_accel": True, "chunk_accel_rule": "v2"})[
+            2
+        ].inference_mode
+        == "plain"
+    )
+
+
+def test_rule_v3_files_its_runs_apart_per_mode_with_its_own_note(tmp_path):
+    mid = "pi05_fr3_all_step49999"
+    cases = {
+        "plain": (f"{mid}_accel3_demo", "horizon=6"),
+        "rtc": (f"{mid}_rtc_accel3_demo", "horizon=6"),
+        "vlash": (f"{mid}_vlash_accel3_demo", "overlap=2"),
+    }
+    for mode, (group, tail) in cases.items():
+        form = form_for(
+            tmp_path,
+            v3(inference_mode=mode, chunk_accel_lambda=2.5, chunk_accel_alpha=0.01),
+        )[2]
+        assert form.rollout_group == group
+        assert form.note == (
+            f"marvel0 page: {mid} chunk accel v3 mode={mode} lambda=2.5 alpha=0.01 {tail}"
+        )
+    # a chosen group or note is kept
+    form = form_for(tmp_path, v3(rollout_group="mine", note="my note"))[2]
+    assert (form.rollout_group, form.note) == ("mine", "my note")
+
+
+@pytest.mark.parametrize("value", [2.0, 2.5, 3.0, 2, 3])
+def test_the_lambdas_of_the_page_are_accepted(tmp_path, value):
+    form = form_for(tmp_path, v3(chunk_accel_lambda=value))[2]
+    assert form.chunk_accel_lambda == float(value)
+    assert isinstance(form.chunk_accel_lambda, float)
+    tokens = phase_flags(rendered(tmp_path, v3(chunk_accel_lambda=value)).argv)
+    assert tokens[1] == f"--phase-lambda-max={C.marvel0_site.number(value)}"
+
+
+@pytest.mark.parametrize("value", [0.005, 0.01])
+def test_the_alphas_of_the_page_are_accepted(tmp_path, value):
+    form = form_for(tmp_path, v3(chunk_accel_alpha=value))[2]
+    assert form.chunk_accel_alpha == value
+    tokens = phase_flags(rendered(tmp_path, v3(chunk_accel_alpha=value)).argv)
+    assert tokens[2] == f"--phase-alpha={C.marvel0_site.number(value)}"
+
+
+@pytest.mark.parametrize(
+    "value", [1.0, 1.5, 1.75, 2.4, 3.5, 0, -2.0, math.nan, math.inf]
+)
+def test_a_lambda_the_page_does_not_offer_is_refused(tmp_path, value):
+    # 1.0 to 3.0 is valid for the engine; the page offers 2.0 / 2.5 / 3.0 only (1.5 was dropped on 2026-11-02)
+    err = refused(tmp_path, v3(chunk_accel_lambda=value))
+    assert (err.code, err.field) == ("chunk_accel_lambda_invalid", "chunk_accel_lambda")
+    assert err.extra["options"] == [2.0, 2.5, 3.0]
+
+
+@pytest.mark.parametrize("value", [0.0, 0.007, 0.02, 0.05, 1, -0.005, math.nan])
+def test_an_alpha_the_controller_does_not_take_is_refused(tmp_path, value):
+    err = refused(tmp_path, v3(chunk_accel_alpha=value))
+    assert (err.code, err.field) == ("chunk_accel_alpha_invalid", "chunk_accel_alpha")
+
+
+@pytest.mark.parametrize("field", ["chunk_accel_lambda", "chunk_accel_alpha"])
+@pytest.mark.parametrize("value", ["2.0", True, [2.0], {"x": 1}])
+def test_the_v3_numbers_must_be_numbers(tmp_path, field, value):
+    err = refused(tmp_path, v3(**{field: value}))
+    assert (err.code, err.field) == ("invalid_type", field)
+
+
+@pytest.mark.parametrize("field", ["chunk_accel_lambda", "chunk_accel_alpha"])
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"chunk_accel": False},
+        {"chunk_accel": True},
+        {"chunk_accel": True, "chunk_accel_rule": "v1"},
+        {"chunk_accel": True, "chunk_accel_rule": "v2"},
+    ],
+)
+def test_the_v3_numbers_belong_to_rule_v3_only(tmp_path, field, body):
+    value = 2.0 if field == "chunk_accel_lambda" else 0.005
+    err = refused(tmp_path, {**body, field: value})
+    assert (err.code, err.field) == ("chunk_accel_v3_field_needs_v3", field)
+    # empty (None) is what a saved form of another run carries, and is fine
+    form = form_for(tmp_path, {**body, field: None})[2]
+    assert (form.chunk_accel_lambda, form.chunk_accel_alpha) == (None, None)
+
+
+def test_the_forms_of_v1_and_v2_carry_no_v3_numbers(tmp_path):
+    for body in (
+        {},
+        {"rtc": False},
+        {"chunk_accel": True},
+        {"chunk_accel": True, "chunk_accel_rule": "v2"},
+    ):
+        form = form_for(tmp_path, body)[2]
+        assert (form.chunk_accel_lambda, form.chunk_accel_alpha) == (None, None), body
+
+
+def test_rule_v3_needs_the_switch(tmp_path):
+    for body in ({}, {"chunk_accel": False}, {"chunk_accel": None}, {"rtc": False}):
+        err = refused(tmp_path, {**body, "chunk_accel_rule": "v3"})
+        assert (err.code, err.field) == (
+            "chunk_accel_rule_needs_switch",
+            "chunk_accel_rule",
+        )
+
+
+@pytest.mark.parametrize("mode", ["rtc", "vlash"])
+def test_v1_and_v2_still_run_with_plain_inference_only(tmp_path, mode):
+    # RELAXED E12 is for rule v3; the other two keep the old refusal, with every way of naming the mode
+    for rule in ({}, {"chunk_accel_rule": "v1"}, {"chunk_accel_rule": "v2"}):
+        for named in (
+            {"inference_mode": mode},
+            {"rtc": mode == "rtc"} if mode == "rtc" else {"inference_mode": mode},
+        ):
+            err = refused(tmp_path, {"chunk_accel": True, **rule, **named})
+            assert (err.code, err.field) == (
+                "chunk_accel_requires_plain",
+                "chunk_accel",
+            ), (rule, named)
+
+
+def test_v3_rtc_and_vlash_conflicts_are_the_ordinary_mode_errors(tmp_path):
+    err = refused(tmp_path, v3(rtc=True, inference_mode="plain"))
+    assert (err.code, err.field) == ("inference_mode_conflict", "rtc")
+    err = refused(tmp_path, v3(inference_mode="vlash", vlash_overlap_steps=10))
+    assert err.code == "vlash_overlap_out_of_range"
+    err = refused(tmp_path, v3(inference_mode="rtc", vlash_overlap_steps=2))
+    assert err.code == "vlash_overlap_not_allowed"
+    err = refused(tmp_path, v3(inference_mode="fast"))
+    assert err.code == "inference_mode_invalid"
+
+
+def test_v3_vlash_still_needs_a_vlash_capable_model(tmp_path):
+    err = refused(
+        tmp_path,
+        v3(inference_mode="vlash"),
+        mdl=model(config="pi05_fr3_all"),
+    )
+    assert (err.code, err.field) == ("vlash_model_incompatible", "model_id")
+    # RTC and plain do not care
+    form_for(tmp_path, v3(inference_mode="rtc"), mdl=model(config="pi05_fr3_all"))
+    form_for(tmp_path, v3(inference_mode="plain"), mdl=model(config="pi05_fr3_all"))
+
+
+@pytest.mark.parametrize("mode", ["plain", "rtc", "vlash"])
+def test_a_mode_dropped_from_v3_is_refused_and_the_others_still_run(
+    tmp_path, monkeypatch, mode
+):
+    # the one-line cut: CHUNK_ACCEL_V3_MODES without a mode
+    from levi.marvel0 import inference_mode as I
+
+    rest = tuple(m for m in I.CHUNK_ACCEL_V3_MODES if m != mode)
+    monkeypatch.setattr(I, "CHUNK_ACCEL_V3_MODES", rest)
+    err = refused(tmp_path, v3(inference_mode=mode))
+    assert (err.code, err.field) == ("chunk_accel_v3_mode_disabled", "chunk_accel")
+    assert err.extra["modes"] == list(rest)
+    for other in rest:
+        assert form_for(tmp_path, v3(inference_mode=other))[2].inference_mode == other
+    # the other rules and the plain commands are not touched
+    form_for(tmp_path, {"chunk_accel": True})
+    form_for(tmp_path, {"inference_mode": mode})
+
+
+def test_v3_hidden_from_the_page_is_an_invalid_rule_not_a_way_past_plain_only(
+    tmp_path, monkeypatch
+):
+    # CHUNK_ACCEL_RULES = ("v1", "v2") hides the whole of v3 (design section 15)
+    from levi.marvel0 import inference_mode as I
+
+    monkeypatch.setattr(I, "CHUNK_ACCEL_RULES", ("v1", "v2"))
+    for mode in ("plain", "rtc", "vlash"):
+        err = refused(tmp_path, v3(inference_mode=mode))
+        assert err.code in ("chunk_accel_rule_invalid", "chunk_accel_requires_plain")
+    err = refused(tmp_path, v3(inference_mode="plain"))
+    assert (err.code, err.field) == ("chunk_accel_rule_invalid", "chunk_accel_rule")
+    assert "v1 or v2" in err.message
+    assert form_for(tmp_path, {"chunk_accel": True, "chunk_accel_rule": "v2"})[2]
+
+
+@pytest.mark.parametrize("hz", [5, 20, 25, 50])
+def test_v3_runs_at_10hz_only(tmp_path, hz):
+    err = refused(tmp_path, v3(control_hz=hz))
+    assert (err.code, err.field) == ("chunk_accel_requires_10hz", "chunk_accel")
+
+
+def test_v3_needs_a_binarized_gripper(tmp_path):
+    site = make_site(tmp_path, safety={"binarize_gripper": False})
+    err = refused(tmp_path, v3(), site=site)
+    assert (err.code, err.field) == (
+        "chunk_accel_requires_binarized_gripper",
+        "chunk_accel",
+    )
+
+
+def test_the_v3_summary_and_warnings_say_what_the_command_makes(tmp_path):
+    preview = rendered(
+        tmp_path,
+        v3(inference_mode="vlash", chunk_accel_lambda=2.5, chunk_accel_alpha=0.01),
+    )
+    # v3 has no ramp speed: only its own numbers (v1 and v2 keep speed_m_s and tau_s)
+    assert preview.control["chunk_accel"] == {
+        "enabled": True,
+        "experimental": True,
+        "rule": "v3",
+        "mode": "vlash",
+        "lambda_max": 2.5,
+        "alpha": 0.01,
+    }
+    warnings = {w["code"]: w for w in preview.warnings}
+    assert {"chunk_accel_v3", "chunk_accel_v3_alpha"} <= set(warnings)
+    assert "chunk_accel_experimental" not in warnings
+    assert warnings["chunk_accel_v3"]["params"] == {
+        "mode": "vlash",
+        "lambda_max": "2.5",
+    }
+    assert warnings["chunk_accel_v3_alpha"]["params"] == {"alpha": "0.01"}
+    # the other two rules keep their warnings
+    assert "chunk_accel_experimental" in [
+        w["code"] for w in rendered(tmp_path, {"chunk_accel": True}).warnings
+    ]
+
+
+def test_v3_round_trips_through_verify_argv_for_every_option(tmp_path):
+    from levi.marvel0 import inference_mode as I
+
+    for mode in I.CHUNK_ACCEL_V3_MODES:
+        for lam in I.CHUNK_ACCEL_V3_LAMBDAS:
+            for alpha in I.CHUNK_ACCEL_V3_ALPHAS:
+                site, mdl, form = form_for(
+                    tmp_path,
+                    v3(
+                        inference_mode=mode,
+                        chunk_accel_lambda=lam,
+                        chunk_accel_alpha=alpha,
+                    ),
+                )
+                C.verify_argv(C.render(site, mdl, form).argv, site, mdl.restricted)
+
+
+def test_the_v3_argv_cannot_be_relabelled(tmp_path):
+    from levi.marvel0.inference_mode import (
+        CHUNK_ACCEL_CLIENT,
+        CHUNK_ACCEL_PHASE_CLIENT,
+        VLASH_CLIENT,
+    )
+
+    site, mdl, form = form_for(tmp_path, v3(inference_mode="rtc"))
+    argv = C.render(site, mdl, form).argv
+
+    def check(changed, match=None):
+        with pytest.raises(C.SelfCheckError, match=match):
+            C.verify_argv(changed, site, mdl.restricted)
+
+    at = {t.split("=")[0]: i for i, t in enumerate(argv) if t.startswith("--phase-")}
+    # a mode that does not agree with --rtc, an unknown mode, no mode, no number
+    check(
+        [
+            ("--phase-mode=plain" if i == at["--phase-mode"] else t)
+            for i, t in enumerate(argv)
+        ]
+    )
+    check(
+        [
+            ("--phase-mode=vlash" if i == at["--phase-mode"] else t)
+            for i, t in enumerate(argv)
+        ]
+    )
+    check(
+        [
+            ("--phase-mode=fast" if i == at["--phase-mode"] else t)
+            for i, t in enumerate(argv)
+        ],
+        "plain, rtc or vlash",
+    )
+    for flag in ("--phase-mode", "--phase-lambda-max", "--phase-alpha"):
+        check([t for i, t in enumerate(argv) if i != at[flag]])
+        check(argv + [argv[at[flag]]], "twice")
+    # numbers the page does not offer, in a good command
+    for flag, bad in (
+        ("--phase-lambda-max", "1.5"),
+        ("--phase-lambda-max", "3.5"),
+        ("--phase-lambda-max", "2.2"),
+        ("--phase-lambda-max", "nan"),
+        ("--phase-lambda-max", "abc"),
+        ("--phase-alpha", "0.02"),
+        ("--phase-alpha", "0.0"),
+    ):
+        check([(f"{flag}={bad}" if i == at[flag] else t) for i, t in enumerate(argv)])
+    # the flag's other spelling (two tokens)
+    check(
+        argv[: at["--phase-alpha"]]
+        + ["--phase-alpha", "0.005"]
+        + argv[at["--phase-alpha"] + 1 :]
+    )
+    # the phase client takes no --accel-rule and no other rate
+    check(argv + ["--accel-rule=v2"], "accelerated client")
+    check(argv + ["--control-hz=20"])
+    # --phase-* flags with any other client
+    for client in (C.SCRIPT, CHUNK_ACCEL_CLIENT, VLASH_CLIENT):
+        check([client if t == CHUNK_ACCEL_PHASE_CLIENT else t for t in argv], "phase")
+    # and an ordinary or v1/v2 command given them
+    _, _, v1 = form_for(tmp_path, {"chunk_accel": True})
+    check(C.render(site, mdl, v1).argv + phase_flags(argv))
+    _, _, rtc = form_for(tmp_path, {"rtc": True})
+    check(C.render(site, mdl, rtc).argv + phase_flags(argv), "phase")
+    # a v3 command given the v1/v2 client: its group and note are v3's
+    check([CHUNK_ACCEL_CLIENT if t == CHUNK_ACCEL_PHASE_CLIENT else t for t in argv])
+
+
+def test_the_v3_vlash_argv_needs_its_overlap_and_no_rtc(tmp_path):
+    site, mdl, form = form_for(
+        tmp_path, v3(inference_mode="vlash", vlash_overlap_steps=3)
+    )
+    argv = C.render(site, mdl, form).argv
+    assert "--vlash-overlap-steps=3" in argv
+    C.verify_argv(argv, site, mdl.restricted)
+    with pytest.raises(C.SelfCheckError):
+        C.verify_argv(
+            [t for t in argv if t != "--vlash-overlap-steps=3"], site, mdl.restricted
+        )
+    with pytest.raises(C.SelfCheckError):
+        C.verify_argv(argv + ["--rtc"], site, mdl.restricted)
+    with pytest.raises(C.SelfCheckError):
+        C.verify_argv(argv + ["--open-loop-horizon=6"], site, mdl.restricted)
+
+
+def test_the_relaxation_of_the_plain_only_rule_is_tagged_in_the_code_once():
+    # check_relaxed.py (WP4) wants the ledger row E12 and one tag in this file
+    source = (ROOT / "levi/marvel0/command.py").read_text()
+    tags = re.findall(r"RELAXED\[2026-11-01\] E(\d+) was: ", source)
+    assert tags == ["12"]

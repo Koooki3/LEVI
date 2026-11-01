@@ -42,6 +42,7 @@ import contextlib
 import dataclasses
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -969,6 +970,12 @@ def _iso(epoch) -> str | None:
     return record.iso(epoch) if isinstance(epoch, (int, float)) else None
 
 
+def _finite(value) -> float | None:
+    """A number out of a stored record (a bool, text or NaN is no number)."""
+    ok = isinstance(value, (int, float)) and not isinstance(value, bool)
+    return float(value) if ok and math.isfinite(value) else None
+
+
 def _session_fr3(session) -> dict | None:
     raw = (session or {}).get("fr3")
     if not isinstance(raw, dict):
@@ -1024,7 +1031,12 @@ def _run_view(f: Facts) -> dict | None:
         "vlash_overlap_steps": rec.get("vlash_overlap_steps"),
         "chunk_accel": rec.get("chunk_accel") is True,
         # a record from before the rule ran v1, the client's default
-        "chunk_accel_rule": "v2" if rec.get("chunk_accel_rule") == "v2" else "v1",
+        "chunk_accel_rule": rec.get("chunk_accel_rule")
+        if rec.get("chunk_accel_rule") in ("v2", "v3")
+        else "v1",
+        # rule v3 only (the phase clock); a record of any other run has neither
+        "chunk_accel_lambda": _finite(rec.get("chunk_accel_lambda")),
+        "chunk_accel_alpha": _finite(rec.get("chunk_accel_alpha")),
         "prompt": rec.get("prompt"),
         # Only the original user-editable form, never argv, environment or paths.
         # The next-episode UI uses this after confirmed client exit; start still
@@ -1410,15 +1422,17 @@ def _group_of(form_body: dict) -> str:
 
     group = form_body.get("rollout_group")
     if group is None:
+        accel = form_body.get("chunk_accel") is True
+        rule = form_body.get("chunk_accel_rule")
+        # rules v1 and v2 mean plain inference when none is named, rule v3 the page's default (RTC)
+        v3 = accel and rule == "v3" and "v3" in inference_mode.CHUNK_ACCEL_RULES
         try:
-            mode = inference_mode.resolve(
-                form_body, default_rtc=form_body.get("chunk_accel") is not True
-            )
+            mode = inference_mode.resolve(form_body, default_rtc=not accel or v3)
         except inference_mode.ModeError as exc:
             raise FormRefuse(command.FormError(exc.code, exc.field, str(exc))) from exc
-        if form_body.get("chunk_accel") is True:
-            mode = "accel_v2" if form_body.get("chunk_accel_rule") == "v2" else "accel"
-        group = models.default_group(str(form_body.get("model_id")), mode)
+        group = models.default_group(
+            str(form_body.get("model_id")), command.group_mode(accel, rule, mode)
+        )
     return str(group)
 
 
@@ -2218,6 +2232,8 @@ class Supervisor:
             "vlash_overlap_steps": form.vlash_overlap_steps,
             "chunk_accel": form.chunk_accel,
             "chunk_accel_rule": form.chunk_accel_rule,
+            "chunk_accel_lambda": form.chunk_accel_lambda,
+            "chunk_accel_alpha": form.chunk_accel_alpha,
             "prompt": form.prompt,
             "form": dataclasses.asdict(form),
             "argv_sha256": hashlib.sha256(

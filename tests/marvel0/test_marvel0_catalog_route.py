@@ -513,7 +513,84 @@ def test_preview_with_rule_v2_answers_its_flag_and_refuses_it_without_the_switch
     alone = preview(client, rtc=False, chunk_accel_rule="v2")
     assert alone.status_code == 422
     assert "chunk_accel_rule_needs_switch" in alone.text
-    for bad in ("v3", 2, True):
+    for bad in ("v4", 2, True):
         assert (
             preview(client, chunk_accel=True, chunk_accel_rule=bad).status_code == 422
         )
+
+
+@pytest.mark.parametrize("mode", ["plain", "rtc", "vlash"])
+def test_preview_with_rule_v3_answers_the_phase_client_for_each_mode(machine, mode):
+    client, _ = machine
+    doc = preview(
+        client,
+        chunk_accel=True,
+        chunk_accel_rule="v3",
+        inference_mode=mode,
+        chunk_accel_lambda=2.5,
+        chunk_accel_alpha=0.01,
+    )
+    assert doc.status_code == 200, doc.text
+    doc = doc.json()
+    assert "lab/chunk_accel/run_collect_phase.py" in doc["argv"]
+    assert "--phase-lambda-max=2.5" in doc["argv"]
+    assert "--phase-alpha=0.01" in doc["argv"]
+    assert f"--phase-mode={mode}" in doc["argv"]
+    # the policy server is the mode's own: acceleration does not change what is served
+    assert doc["server_requirements"]["inference_mode"] == mode
+    assert doc["server_requirements"]["rtc"] is (mode == "rtc")
+    assert doc["control"]["chunk_accel"] == {
+        "enabled": True,
+        "experimental": True,
+        "rule": "v3",
+        "mode": mode,
+        "lambda_max": 2.5,
+        "alpha": 0.01,
+    }
+    codes = [w["code"] for w in doc["warnings"]]
+    assert "chunk_accel_v3" in codes and "chunk_accel_v3_alpha" in codes
+
+
+def test_preview_with_rule_v3_alone_is_the_page_default_rtc(machine):
+    client, _ = machine
+    doc = preview(client, chunk_accel=True, chunk_accel_rule="v3").json()
+    assert doc["server_requirements"]["inference_mode"] == "rtc"
+    assert "--rtc" in doc["argv"]
+    # a whole number is a number (JSON writes 2.0 as 2)
+    assert (
+        preview(
+            client, chunk_accel=True, chunk_accel_rule="v3", chunk_accel_lambda=2
+        ).status_code
+        == 200
+    )
+
+
+def test_preview_refuses_what_rule_v3_does_not_offer(machine):
+    client, _ = machine
+    on = {"chunk_accel": True, "chunk_accel_rule": "v3"}
+    for bad, code in (
+        ({"chunk_accel_lambda": 1.5}, "chunk_accel_lambda_invalid"),
+        ({"chunk_accel_alpha": 0.02}, "chunk_accel_alpha_invalid"),
+    ):
+        answer = preview(client, **on, **bad)
+        assert answer.status_code == 422 and code in answer.text, answer.text
+    for body in (
+        {"chunk_accel_lambda": "2.0"},
+        {"chunk_accel_lambda": True},
+        {"chunk_accel_alpha": "0.005"},
+    ):
+        assert preview(client, **on, **body).status_code == 422, body
+    # the numbers belong to rule v3
+    for body in (
+        {"chunk_accel_lambda": 2.0},
+        {"chunk_accel": True, "chunk_accel_alpha": 0.005},
+        {"chunk_accel": True, "chunk_accel_rule": "v2", "chunk_accel_lambda": 2.0},
+    ):
+        answer = preview(client, **body)
+        assert (
+            answer.status_code == 422 and "chunk_accel_v3_field_needs_v3" in answer.text
+        )
+    # v1 and v2 with RTC are still refused
+    for rule in ("v1", "v2"):
+        answer = preview(client, chunk_accel=True, chunk_accel_rule=rule, rtc=True)
+        assert answer.status_code == 422 and "chunk_accel_requires_plain" in answer.text

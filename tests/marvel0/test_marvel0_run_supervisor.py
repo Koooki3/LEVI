@@ -133,6 +133,60 @@ def test_a_v2_accelerated_start_launches_its_rule_and_records_it(machine):
     assert view["form"]["chunk_accel_rule"] == "v2"
 
 
+@pytest.mark.parametrize("mode", ["plain", "rtc", "vlash"])
+def test_a_v3_start_launches_the_phase_client_and_records_its_numbers(machine, mode):
+    import hashlib
+
+    from test_marvel0_run import MODEL
+
+    from levi.marvel0 import command, inference_mode
+
+    m = machine
+    m.deploy = m.ready_view(rtc=mode == "rtc")
+    if mode == "vlash":
+        m.deploy["deploy"].update(inference_mode="vlash", vlash_overlap_steps=2)
+    body = {
+        "rtc": mode == "rtc",
+        "inference_mode": mode,
+        "chunk_accel": True,
+        "chunk_accel_rule": "v3",
+        "chunk_accel_lambda": 2.5,
+        "chunk_accel_alpha": 0.01,
+    }
+    answer = m.start(**body)
+    assert answer["created"] is True
+    spec = json.loads(m.log_path().with_suffix(".spec.json").read_text())
+    assert [t for t in spec["argv"] if t.startswith("--phase-")] == [
+        f"--phase-mode={mode}",
+        "--phase-lambda-max=2.5",
+        "--phase-alpha=0.01",
+    ]
+    rec = m.record()
+    argv = command.render(
+        m.site, MODEL, command.validate(m.site, MODEL, m.form(**body))
+    ).argv
+    # the phase client for VLASH too: not the VLASH client, which the mode alone would have chosen
+    assert argv[len(command.PREFIX) - 1] == inference_mode.CHUNK_ACCEL_PHASE_CLIENT
+    hosted = "\0".join(run.hosted_argv(argv)).encode()
+    assert rec["argv_sha256"] == hashlib.sha256(hosted).hexdigest()
+    assert (rec["chunk_accel"], rec["chunk_accel_rule"]) == (True, "v3")
+    assert (rec["chunk_accel_lambda"], rec["chunk_accel_alpha"]) == (2.5, 0.01)
+    assert rec["form"]["chunk_accel_lambda"] == 2.5
+    assert rec["form"]["chunk_accel_alpha"] == 0.01
+    assert rec["inference_mode"] == mode
+    group = {
+        "plain": "_accel3_demo",
+        "rtc": "_rtc_accel3_demo",
+        "vlash": "_vlash_accel3_demo",
+    }
+    assert rec["group"].endswith(group[mode])
+    view = m.view()["run"]
+    assert (view["chunk_accel"], view["chunk_accel_rule"]) == (True, "v3")
+    assert (view["chunk_accel_lambda"], view["chunk_accel_alpha"]) == (2.5, 0.01)
+    assert view["form"]["chunk_accel_rule"] == "v3"
+    assert view["inference_mode"] == mode
+
+
 def test_the_whole_run_holds_the_arm_lock_and_lets_go_at_the_end(machine):
     m = machine
     arm = m.tmp / "arm.lock"

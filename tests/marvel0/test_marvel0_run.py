@@ -1528,6 +1528,30 @@ def test_an_accelerated_run_group_follows_its_rule_as_the_form_does(machine):
         ).rollout_group == run._group_of(body)
 
 
+def test_a_v3_run_group_follows_its_mode_as_the_form_does(machine):
+    # rule v3 is the one rule that does not mean plain inference: alone it is the page's default, RTC
+    v3 = {"chunk_accel": True, "chunk_accel_rule": "v3"}
+    for extra, suffix in (
+        ({}, "_rtc_accel3_demo"),
+        ({"rtc": True}, "_rtc_accel3_demo"),
+        ({"rtc": False}, "_accel3_demo"),
+        ({"rtc": False, "inference_mode": "plain"}, "_accel3_demo"),
+        ({"rtc": False, "inference_mode": "vlash"}, "_vlash_accel3_demo"),
+        ({"rtc": True, "inference_mode": "rtc"}, "_rtc_accel3_demo"),
+    ):
+        body = machine.form(**{**v3, **extra})
+        if "rtc" not in extra:
+            del body["rtc"]  # a body that names no mode at all
+        assert run._group_of(body) == f"{SFT}{suffix}", extra
+        assert command.validate(
+            machine.site, MODEL, body
+        ).rollout_group == run._group_of(body), extra
+    # a named group is kept, and a refused mode is refused here too
+    assert run._group_of(machine.form(**v3, rollout_group="mine")) == "mine"
+    with pytest.raises(run.FormRefuse):
+        run._group_of(machine.form(**v3, rtc=True, inference_mode="plain"))
+
+
 def test_vlash_run_group_and_conflicts_are_not_plain(machine):
     assert run._group_of(machine.form(rtc=False, inference_mode="vlash")).endswith(
         "_vlash_demo"

@@ -78,6 +78,10 @@ const BY_CODE: Record<string, string> = {
     "marvel0.err.chunk_accel_requires_binarized_gripper",
   chunk_accel_rule_needs_switch: "marvel0.err.chunk_accel_rule_needs_switch",
   chunk_accel_rule_invalid: "marvel0.err.chunk_accel_rule_invalid",
+  chunk_accel_v3_mode_disabled: "marvel0.err.chunk_accel_v3_mode_disabled",
+  chunk_accel_lambda_invalid: "marvel0.err.chunk_accel_lambda_invalid",
+  chunk_accel_alpha_invalid: "marvel0.err.chunk_accel_alpha_invalid",
+  chunk_accel_v3_field_needs_v3: "marvel0.err.chunk_accel_v3_field_needs_v3",
 
   min_z_not_positive: "marvel0.err.min_z_not_positive",
   min_z_below_floor: "marvel0.err.min_z_below_floor",
@@ -290,6 +294,10 @@ const FORM_CODES = new Set([
   "chunk_accel_requires_binarized_gripper",
   "chunk_accel_rule_needs_switch",
   "chunk_accel_rule_invalid",
+  "chunk_accel_v3_mode_disabled",
+  "chunk_accel_lambda_invalid",
+  "chunk_accel_alpha_invalid",
+  "chunk_accel_v3_field_needs_v3",
 ]);
 
 /** The refusals of a form, by the field each is about: LEVI's own form codes

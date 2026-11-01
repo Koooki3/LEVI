@@ -1,5 +1,5 @@
 "use client";
-import { inferenceMode, modeLabel } from "./inference-mode";
+import { modeLabel } from "./inference-mode";
 // The Client command card of the marvel0: a form for the demo client's
 // run (task instruction, steps, eval number, lowest height, RTC horizon, group,
 // note) and the exact command for it. LEVI's backend validates the form and
@@ -42,11 +42,15 @@ import { COMMAND_ANCHOR } from "./chain-logic";
 import { wordOf } from "./ctl-text";
 import {
   CHUNK_ACCEL_RULES,
+  CHUNK_ACCEL_V3_ALPHA_DEFAULT,
+  CHUNK_ACCEL_V3_ALPHAS,
+  CHUNK_ACCEL_V3_LAMBDAS,
   DEFAULT_HZ,
   bodyKey,
   chunkAccelAllowed,
   chunkAccelRateOk,
   chunkAccelRuleOf,
+  chunkAccelRulesFor,
   type ChunkAccelRule,
   commandBody,
   editableSavedForm,
@@ -160,17 +164,21 @@ export function CommandPanel({
       previousResume.current = null;
     }
   }, [savedForm, savedKey, resumeBodyKey, models, site]);
-  // The switch belongs to plain inference: when the followed mode leaves plain it is turned off, so coming back to
-  // plain never turns it on again by itself.
-  const selectedMode = selection
-    ? inferenceMode(selection.inferenceMode, selection.rtc)
+  // The switch belongs to the modes acceleration runs with (plain for rules v1 and v2, every mode for rule v3 while the
+  // page offers it): when the followed mode is one it does not run with, it is turned off, so coming back never turns
+  // it on again by itself.
+  const selectedAllowed = selection
+    ? chunkAccelAllowed({
+        inferenceMode: selection.inferenceMode,
+        rtc: selection.rtc,
+      })
     : null;
-  // It also reacts to the edited value: a saved accelerated run restored while RTC or VLASH is chosen is cleared too
+  // It also reacts to the edited value: a saved accelerated run restored while such a mode is chosen is cleared too
   // (final review 2026-10-31: it came back on when plain was chosen later).
   useEffect(() => {
-    if (selectedMode !== null && selectedMode !== "plain" && edits.chunkAccel)
+    if (selectedAllowed === false && edits.chunkAccel)
       setEdits((cur) => ({ ...cur, chunkAccel: false }));
-  }, [selectedMode, edits.chunkAccel]);
+  }, [selectedAllowed, edits.chunkAccel]);
   if (!models || !site || !initial || !selection) return null;
 
   // A resumed run is pinned to its saved form. Only the prompt remains editable;
@@ -514,8 +522,15 @@ export function CommandPanel({
               error={fieldError("chunk_accel")}
               onChange={(chunkAccel) => edit({ chunkAccel })}
               rule={chunkAccelRuleOf(form)}
+              rules={chunkAccelRulesFor(form)}
               ruleError={fieldError("chunk_accel_rule")}
               onRule={(chunkAccelRule) => edit({ chunkAccelRule })}
+              lambda={form.chunkAccelLambda ?? ""}
+              lambdaError={fieldError("chunk_accel_lambda")}
+              onLambda={(chunkAccelLambda) => edit({ chunkAccelLambda })}
+              alpha={form.chunkAccelAlpha ?? CHUNK_ACCEL_V3_ALPHA_DEFAULT}
+              alphaError={fieldError("chunk_accel_alpha")}
+              onAlpha={(chunkAccelAlpha) => edit({ chunkAccelAlpha })}
             />
             <Field
               className="rg-span"
@@ -850,12 +865,19 @@ const RULE_TEXT: Record<ChunkAccelRule, { label: string; hint: string }> = {
     label: "marvel0.cmd.field.chunk_accel_rule_v2",
     hint: "marvel0.cmd.field.chunk_accel_rule_v2_hint",
   },
+  v3: {
+    label: "marvel0.cmd.field.chunk_accel_rule_v3",
+    hint: "marvel0.cmd.field.chunk_accel_rule_v3_hint",
+  },
 };
 
-/** In-chunk acceleration (experimental): one switch, on only with plain
- * inference; with RTC or VLASH it is shown off and disabled, with the reason
- * in words. While it is on, its rule is chosen under it (two radio buttons);
- * the choice is kept while it is off, and sent only while it is on. */
+/** In-chunk acceleration (experimental): one switch. Rule v3 (the phase clock)
+ * runs with every inference mode; rules v1 and v2 with plain inference only,
+ * so with RTC or VLASH their buttons are disabled. A mode acceleration does not
+ * run with shows the switch off and disabled, with the reason in words. While
+ * it is on, its rule is chosen under it (radio buttons, opening on v3); the
+ * choice is kept while it is off, and sent only while it is on. With rule v3
+ * the most rows per tick and the controller's filter are chosen too. */
 function ChunkAccel({
   on,
   allowed,
@@ -864,11 +886,18 @@ function ChunkAccel({
   error,
   onChange,
   rule,
+  rules,
   ruleError,
   onRule,
+  lambda,
+  lambdaError,
+  onLambda,
+  alpha,
+  alphaError,
+  onAlpha,
 }: {
   on: boolean;
-  /** The form's inference mode is plain and its rate 10 Hz. */
+  /** The form's inference mode is one acceleration runs with, and its rate is 10 Hz. */
   allowed: boolean;
   /** Why it is not allowed, in words of the page. */
   why: Say;
@@ -876,8 +905,18 @@ function ChunkAccel({
   error?: string;
   onChange: (on: boolean) => void;
   rule: ChunkAccelRule;
+  /** The rules the form's inference mode can use. */
+  rules: readonly ChunkAccelRule[];
   ruleError?: string;
   onRule: (rule: ChunkAccelRule) => void;
+  /** The most rows per tick of rule v3, as text; empty is the server's default. */
+  lambda: string;
+  lambdaError?: string;
+  onLambda: (lambda: string) => void;
+  /** The controller's setpoint filter for rule v3, as text. */
+  alpha: string;
+  alphaError?: string;
+  onAlpha: (alpha: string) => void;
 }) {
   const { t } = useLocale();
   const id = useId();
@@ -923,7 +962,7 @@ function ChunkAccel({
               name={`${id}-rule`}
               value={value}
               checked={rule === value}
-              disabled={disabled}
+              disabled={disabled || !rules.includes(value)}
               aria-invalid={ruleError ? true : undefined}
               aria-describedby={ruleError ? ruleErrorId : undefined}
               data-testid={`marvel0-command-chunk-accel-rule-${value}`}
@@ -938,6 +977,57 @@ function ChunkAccel({
         <p id={ruleErrorId} className="ds-field__error">
           {ruleError}
         </p>
+      )}
+      {allowed && on && rule === "v3" && (
+        <div className="rg-accel-rule" data-testid="marvel0-command-phase">
+          <Field
+            label={t("marvel0.cmd.field.chunk_accel_lambda")}
+            hint={t("marvel0.cmd.field.chunk_accel_lambda_hint")}
+            error={lambdaError}
+          >
+            <Select
+              data-testid="marvel0-command-chunk-accel-lambda"
+              value={lambda}
+              disabled={disabled}
+              onChange={(event) => onLambda(event.target.value)}
+            >
+              <option value="">
+                {t("marvel0.cmd.field.chunk_accel_lambda_default")}
+              </option>
+              {CHUNK_ACCEL_V3_LAMBDAS.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field
+            label={t("marvel0.cmd.field.chunk_accel_alpha")}
+            hint={t("marvel0.cmd.field.chunk_accel_alpha_hint")}
+            error={alphaError}
+          >
+            <Select
+              data-testid="marvel0-command-chunk-accel-alpha"
+              value={alpha}
+              disabled={disabled}
+              onChange={(event) => onAlpha(event.target.value)}
+            >
+              {CHUNK_ACCEL_V3_ALPHAS.map((value) => (
+                <option key={value} value={value}>
+                  {value === CHUNK_ACCEL_V3_ALPHA_DEFAULT
+                    ? sayText(
+                        {
+                          key: "marvel0.cmd.field.chunk_accel_alpha_default",
+                          params: { alpha: value },
+                        },
+                        t,
+                      )
+                    : value}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
       )}
     </div>
   );
@@ -1100,14 +1190,23 @@ function CommandResult({
       {preview.chunkAccel && (
         <p data-testid="marvel0-command-chunk-accel-on">
           {sayText(
-            {
-              key: "marvel0.cmd.result.chunk_accel",
-              params: {
-                rule: preview.chunkAccel.rule,
-                speed: preview.chunkAccel.speedMS,
-                tau: preview.chunkAccel.tauS,
-              },
-            },
+            preview.chunkAccel.rule === "v3"
+              ? {
+                  key: "marvel0.cmd.result.chunk_accel_v3",
+                  params: {
+                    mode: t(modeLabel(preview.chunkAccel.mode)),
+                    lambda: preview.chunkAccel.lambdaMax,
+                    alpha: preview.chunkAccel.alpha,
+                  },
+                }
+              : {
+                  key: "marvel0.cmd.result.chunk_accel",
+                  params: {
+                    rule: preview.chunkAccel.rule,
+                    speed: preview.chunkAccel.speedMS,
+                    tau: preview.chunkAccel.tauS,
+                  },
+                },
             t,
           )}
         </p>

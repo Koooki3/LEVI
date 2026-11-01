@@ -3,10 +3,17 @@ import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
 import { readModels, readSite } from "../catalog-logic";
 import {
+  CHUNK_ACCEL_RULES,
+  CHUNK_ACCEL_V3_ALPHAS,
+  CHUNK_ACCEL_V3_LAMBDAS,
+  CHUNK_ACCEL_V3_MODES,
   bodyKey,
   chunkAccelAllowed,
+  chunkAccelOn,
   chunkAccelRateOk,
+  chunkAccelRuleDefault,
   chunkAccelRuleOf,
+  chunkAccelRulesFor,
   commandFormFromRun,
   commandBody,
   editableSavedForm,
@@ -22,6 +29,7 @@ import { sayText } from "../marvel0-say";
 import { modelsAnswer, siteAnswer } from "./catalog-fixtures";
 import { COMMAND, preview } from "./command-fixtures";
 import { deployInfo, idle, ready, starting } from "./deploy-fixtures";
+import deploySamples from "./marvel0-deploy.samples.json";
 
 const catalogue = (lang: "en" | "zh") => (key: string) =>
   (lang === "en" ? en : zh)[key as keyof typeof en] ?? key;
@@ -212,7 +220,7 @@ describe("the request body", () => {
 describe("in-chunk acceleration", () => {
   const plain = { rtc: false, inferenceMode: "plain" as const };
 
-  test("is sent only when on and the mode is plain", () => {
+  test("is sent only when on, and with every inference mode (rule v3 runs with all three)", () => {
     expect(commandBody(base(plain)).body).not.toHaveProperty("chunk_accel");
     expect(
       commandBody(base({ ...plain, chunkAccel: false })).body,
@@ -225,11 +233,26 @@ describe("in-chunk acceleration", () => {
       { rtc: false, inferenceMode: "vlash" as const },
       // An old form without the mode: RTC on means RTC.
       { rtc: true },
-    ])
+    ]) {
+      const body = commandBody(base({ ...mode, chunkAccel: true })).body;
+      expect(body, JSON.stringify(mode)).toMatchObject({ chunk_accel: true });
+      // rules v1 and v2 run with plain inference only: with these modes the rule can only be v3
+      expect(body, JSON.stringify(mode)).toMatchObject({
+        chunk_accel_rule: "v3",
+      });
+    }
+    // and with a rule v1 or v2 remembered from plain, never v1 or v2 under another mode
+    for (const rule of ["v1", "v2"] as const)
       expect(
-        commandBody(base({ ...mode, chunkAccel: true })).body,
-        JSON.stringify(mode),
-      ).not.toHaveProperty("chunk_accel");
+        commandBody(
+          base({
+            rtc: true,
+            inferenceMode: "rtc",
+            chunkAccel: true,
+            chunkAccelRule: rule,
+          }),
+        ).body,
+      ).toMatchObject({ chunk_accel_rule: "v3" });
   });
 
   test("runs at 10 Hz only: at another rate it is not sent", () => {
@@ -241,12 +264,22 @@ describe("in-chunk acceleration", () => {
     ).not.toHaveProperty("chunk_accel");
   });
 
-  test("is allowed with plain inference only", () => {
+  test("is allowed with plain, RTC and VLASH inference, the three modes rule v3 runs with", () => {
+    expect([...CHUNK_ACCEL_V3_MODES]).toEqual(["plain", "rtc", "vlash"]);
     expect(chunkAccelAllowed(plain)).toBe(true);
     expect(chunkAccelAllowed({ rtc: false })).toBe(true);
-    expect(chunkAccelAllowed({ rtc: true })).toBe(false);
-    expect(chunkAccelAllowed({ rtc: true, inferenceMode: "rtc" })).toBe(false);
+    expect(chunkAccelAllowed({ rtc: true })).toBe(true);
+    expect(chunkAccelAllowed({ rtc: true, inferenceMode: "rtc" })).toBe(true);
     expect(chunkAccelAllowed({ rtc: false, inferenceMode: "vlash" })).toBe(
+      true,
+    );
+  });
+
+  test("the switch is on for a form when it is chosen, the mode allows it and the rate is 10 Hz", () => {
+    expect(chunkAccelOn(base({ ...plain, chunkAccel: true }))).toBe(true);
+    expect(chunkAccelOn(base({ ...plain, chunkAccel: false }))).toBe(false);
+    expect(chunkAccelOn(base(plain))).toBe(false);
+    expect(chunkAccelOn(base({ ...plain, chunkAccel: true, hz: "20" }))).toBe(
       false,
     );
   });
@@ -327,14 +360,42 @@ describe("in-chunk acceleration", () => {
     }
   });
 
-  test("rule v1, the default, adds nothing to the body: a v1 command is the one it always was", () => {
-    const on = { ...plain, chunkAccel: true };
-    const always = commandBody(base(on)).body;
-    expect(always).not.toHaveProperty("chunk_accel_rule");
-    expect(commandBody(base({ ...on, chunkAccelRule: "v1" })).body).toEqual(
-      always,
+  test("rule v1 adds nothing to the body when it is chosen: a v1 command is the one it always was", () => {
+    const body = commandBody(
+      base({ ...plain, chunkAccel: true, chunkAccelRule: "v1" }),
+    ).body;
+    expect(body).toMatchObject({ chunk_accel: true });
+    for (const field of [
+      "chunk_accel_rule",
+      "chunk_accel_lambda",
+      "chunk_accel_alpha",
+    ])
+      expect(body).not.toHaveProperty(field);
+  });
+
+  test("the rule of a form is v3 until another is chosen, while the page offers v3", () => {
+    expect([...CHUNK_ACCEL_RULES]).toEqual(["v1", "v2", "v3"]);
+    expect(chunkAccelRuleDefault()).toBe("v3");
+    expect(chunkAccelRuleOf(base(plain))).toBe("v3");
+    expect(chunkAccelRuleOf(base({ ...plain, chunkAccelRule: "v1" }))).toBe(
+      "v1",
     );
-    expect(chunkAccelRuleOf(base())).toBe("v1");
+    expect(chunkAccelRuleOf(base({ ...plain, chunkAccelRule: "v2" }))).toBe(
+      "v2",
+    );
+    // v1 and v2 run with plain inference only; the remembered choice comes back with plain
+    expect(
+      chunkAccelRuleOf(
+        base({ rtc: true, inferenceMode: "rtc", chunkAccelRule: "v1" }),
+      ),
+    ).toBe("v3");
+    expect(chunkAccelRulesFor(plain)).toEqual(["v1", "v2", "v3"]);
+    expect(chunkAccelRulesFor({ rtc: true, inferenceMode: "rtc" })).toEqual([
+      "v3",
+    ]);
+    expect(chunkAccelRulesFor({ rtc: false, inferenceMode: "vlash" })).toEqual([
+      "v3",
+    ]);
   });
 
   test("rule v2 is sent only with the switch on, plain inference and 10 Hz", () => {
@@ -346,12 +407,182 @@ describe("in-chunk acceleration", () => {
       { ...plain, chunkAccel: false },
       { ...plain },
       { ...plain, chunkAccel: true, hz: "20" },
-      { rtc: true, inferenceMode: "rtc" as const, chunkAccel: true },
-      { rtc: false, inferenceMode: "vlash" as const, chunkAccel: true },
     ]) {
       const body = commandBody(base({ ...over, chunkAccelRule: "v2" })).body;
       expect(body, JSON.stringify(over)).not.toHaveProperty("chunk_accel_rule");
     }
+    // another inference mode: never rule v2 (it is rule v3 there)
+    for (const over of [
+      { rtc: true, inferenceMode: "rtc" as const, chunkAccel: true },
+      { rtc: false, inferenceMode: "vlash" as const, chunkAccel: true },
+    ]) {
+      const body = commandBody(base({ ...over, chunkAccelRule: "v2" })).body;
+      expect(body.chunk_accel_rule, JSON.stringify(over)).toBe("v3");
+    }
+  });
+
+  test("rule v3 sends its rule and the alpha, and the lambda only when one is chosen", () => {
+    const v3 = { ...plain, chunkAccel: true };
+    const body = commandBody(base(v3)).body;
+    expect(body).toMatchObject({
+      chunk_accel: true,
+      chunk_accel_rule: "v3",
+      chunk_accel_alpha: 0.005,
+    });
+    // empty: the backend's constant applies (the 04:30 default is set there, once)
+    expect(body).not.toHaveProperty("chunk_accel_lambda");
+    expect(
+      commandBody(base({ ...v3, chunkAccelLambda: "" })).body,
+    ).not.toHaveProperty("chunk_accel_lambda");
+    for (const lambda of CHUNK_ACCEL_V3_LAMBDAS)
+      expect(
+        commandBody(base({ ...v3, chunkAccelLambda: lambda })).body
+          .chunk_accel_lambda,
+      ).toBe(Number(lambda));
+    for (const alpha of CHUNK_ACCEL_V3_ALPHAS)
+      expect(
+        commandBody(base({ ...v3, chunkAccelAlpha: alpha })).body
+          .chunk_accel_alpha,
+      ).toBe(Number(alpha));
+    // the numbers are not sent without v3, nor without the switch
+    for (const over of [
+      { ...v3, chunkAccelRule: "v2" as const },
+      { ...v3, chunkAccelRule: "v1" as const },
+      { ...plain, chunkAccelRule: "v3" as const },
+      { ...v3, hz: "20" },
+    ])
+      for (const field of ["chunk_accel_lambda", "chunk_accel_alpha"])
+        expect(
+          commandBody(
+            base({ ...over, chunkAccelLambda: "2.5", chunkAccelAlpha: "0.01" }),
+          ).body,
+          JSON.stringify(over),
+        ).not.toHaveProperty(field);
+  });
+
+  test("rule v3 keeps the mode's own fields: the RTC horizon, the VLASH overlap", () => {
+    const rtc = commandBody(
+      base({
+        rtc: true,
+        inferenceMode: "rtc",
+        horizon: "5",
+        chunkAccel: true,
+        chunkAccelLambda: "2.5",
+      }),
+    ).body;
+    expect(rtc).toMatchObject({
+      rtc: true,
+      inference_mode: "rtc",
+      rtc_horizon: 5,
+      chunk_accel: true,
+      chunk_accel_rule: "v3",
+      chunk_accel_lambda: 2.5,
+    });
+    const vlash = commandBody(
+      base({
+        rtc: false,
+        inferenceMode: "vlash",
+        vlashOverlapSteps: "3",
+        chunkAccel: true,
+      }),
+    ).body;
+    expect(vlash).toMatchObject({
+      rtc: false,
+      inference_mode: "vlash",
+      vlash_overlap_steps: 3,
+      chunk_accel: true,
+      chunk_accel_rule: "v3",
+    });
+  });
+
+  test("a lambda or an alpha the page does not offer is an error on its field, not a request", () => {
+    const v3 = { ...plain, chunkAccel: true };
+    const bad = commandBody(
+      base({ ...v3, chunkAccelLambda: "1.5", chunkAccelAlpha: "0.02" }),
+    );
+    expect(bad.errors.chunk_accel_lambda).toEqual({
+      key: "marvel0.err.chunk_accel_lambda_invalid",
+    });
+    expect(bad.errors.chunk_accel_alpha).toEqual({
+      key: "marvel0.err.chunk_accel_alpha_invalid",
+    });
+    expect(bad.body).not.toHaveProperty("chunk_accel_lambda");
+    expect(bad.body).not.toHaveProperty("chunk_accel_alpha");
+    expect(commandBody(base(v3)).errors).toEqual({});
+  });
+
+  test("a saved v3 run round-trips into the form and back into the same body, for each mode", () => {
+    for (const mode of ["plain", "rtc", "vlash"] as const) {
+      const saved = {
+        model_id: "pi05_fr3_all_step49999",
+        prompt: "pick the eggplant in the blue plate",
+        max_steps: 500,
+        eval_num: 5,
+        min_z: 0.025,
+        rtc: mode === "rtc",
+        inference_mode: mode,
+        vlash_overlap_steps: 2,
+        rtc_horizon: 7,
+        rollout_group: "saved_group",
+        note: "saved note",
+        control_hz: 10,
+        chunk_accel: true,
+        chunk_accel_rule: "v3",
+        chunk_accel_lambda: 2,
+        chunk_accel_alpha: 0.01,
+      };
+      const form = commandFormFromRun(saved)!;
+      expect(form.chunkAccelRule).toBe("v3");
+      // 2 is the offer "2.0"
+      expect(form.chunkAccelLambda).toBe("2.0");
+      expect(form.chunkAccelAlpha).toBe("0.01");
+      const sent: Record<string, unknown> = { ...saved };
+      delete sent.control_hz;
+      if (mode !== "vlash") delete sent.vlash_overlap_steps;
+      expect(commandBody(form).body, mode).toEqual(sent);
+    }
+    // numbers the page does not offer, or none (a v1 or v2 run), restore nothing
+    const form = commandFormFromRun({
+      model_id: "m",
+      prompt: "p",
+      max_steps: 1,
+      eval_num: 1,
+      min_z: 0.05,
+      rtc: false,
+      rtc_horizon: 6,
+      rollout_group: "g",
+      note: "n",
+      control_hz: 10,
+      chunk_accel: true,
+      chunk_accel_rule: "v3",
+      chunk_accel_lambda: 1.5,
+      chunk_accel_alpha: null,
+    })!;
+    expect(form.chunkAccelLambda).toBeUndefined();
+    expect(form.chunkAccelAlpha).toBeUndefined();
+  });
+
+  test("a saved run with the switch on keeps the rule it ran with: the v3 default never turns a v1 run into v3", () => {
+    const saved = {
+      model_id: "m",
+      prompt: "p",
+      max_steps: 1,
+      eval_num: 1,
+      min_z: 0.05,
+      rtc: false,
+      inference_mode: "plain",
+      rtc_horizon: 6,
+      rollout_group: "g",
+      note: "n",
+      control_hz: 10,
+      chunk_accel: true,
+    };
+    expect(commandFormFromRun(saved)!.chunkAccelRule).toBe("v1");
+    expect(chunkAccelRuleOf(commandFormFromRun(saved)!)).toBe("v1");
+    // a run with the switch off remembers no rule: turning it on afterwards opens on the default
+    const off = commandFormFromRun({ ...saved, chunk_accel: false })!;
+    expect(off.chunkAccelRule).toBeUndefined();
+    expect(chunkAccelRuleOf(off)).toBe("v3");
   });
 
   test("a changed rule changes the request key", () => {
@@ -393,6 +624,70 @@ describe("in-chunk acceleration", () => {
       const back = commandFormFromRun(run)!;
       expect(chunkAccelRuleOf(back)).toBe("v1");
       expect(commandBody(back).body).not.toHaveProperty("chunk_accel_rule");
+    }
+  });
+
+  test("the preview's control part of rule v3 says the mode, the lambda and the alpha", () => {
+    const on = {
+      enabled: true,
+      experimental: true,
+      rule: "v3",
+      mode: "vlash",
+      lambda_max: 2.5,
+      alpha: 0.01,
+    };
+    const read = (chunk_accel: Record<string, unknown>) =>
+      readPreview(preview({ control: { hz: 10, chunk_accel } }))!.chunkAccel;
+    expect(read(on)).toEqual({
+      rule: "v3",
+      mode: "vlash",
+      lambdaMax: 2.5,
+      alpha: 0.01,
+    });
+    // a part that lacks a number or the mode, or is not enabled, is no answer (v3 has no ramp speed to fall back on)
+    for (const broken of [
+      { ...on, lambda_max: "fast" },
+      { ...on, alpha: null },
+      { ...on, mode: "fast" },
+      { ...on, enabled: false },
+    ])
+      expect(read(broken), JSON.stringify(broken)).toBeUndefined();
+  });
+
+  test("the result line and the warnings of rule v3 are worded in both languages with their numbers", () => {
+    for (const lang of ["en", "zh"] as const) {
+      const line = sayText(
+        {
+          key: "marvel0.cmd.result.chunk_accel_v3",
+          params: { mode: "RTC", lambda: 2.5, alpha: 0.01 },
+        },
+        catalogue(lang),
+      );
+      expect(line).toContain("2.5");
+      expect(line).toContain("0.01");
+      expect(line).toContain("RTC");
+      expect(line).not.toContain("{");
+    }
+    const main = warningSay({
+      code: "chunk_accel_v3",
+      text: "English",
+      params: { mode: "rtc", lambda_max: "2.0" },
+    });
+    const alpha = warningSay({
+      code: "chunk_accel_v3_alpha",
+      text: "English",
+      params: { alpha: "0.005" },
+    });
+    expect(main.say?.key).toBe("marvel0.cmd.warning.chunk_accel_v3");
+    expect(alpha.say?.key).toBe("marvel0.cmd.warning.chunk_accel_v3_alpha");
+    for (const lang of ["en", "zh"] as const) {
+      const a = sayText(main.say!, catalogue(lang));
+      const b = sayText(alpha.say!, catalogue(lang));
+      expect(a).toContain("2.0");
+      expect(a).toContain("rtc");
+      expect(b).toContain("0.005");
+      expect(b).toContain("set_clip.py --show");
+      expect(a + b).not.toMatch(/\{|marvel0\./);
     }
   });
 
@@ -442,12 +737,59 @@ describe("what the form shows as its defaults", () => {
   test("with in-chunk acceleration the default group is the accel one the backend files it under", () => {
     // review 2026-10-31: the page showed <id>_demo while the backend used <id>_accel_demo, so the start phrase
     // never matched and every start from the page was refused
+    const v1 = { chunkAccel: true, chunkAccelRule: "v1" as const };
+    expect(placeholders(base({ rtc: false, ...v1 }), models, site).group).toBe(
+      "pi05_fr3_all_step49999_accel_demo",
+    );
+    // v1 runs with plain inference only: under RTC the rule is v3, filed under its own group
+    expect(placeholders(base({ rtc: true, ...v1 }), models, site).group).toBe(
+      "pi05_fr3_all_step49999_rtc_accel3_demo",
+    );
+    // and a form at another rate than 10 Hz sends no acceleration, so it is filed as without
     expect(
-      placeholders(base({ rtc: false, chunkAccel: true }), models, site).group,
-    ).toBe("pi05_fr3_all_step49999_accel_demo");
-    expect(
-      placeholders(base({ rtc: true, chunkAccel: true }), models, site).group,
-    ).toBe("pi05_fr3_all_step49999_rtc_demo");
+      placeholders(base({ rtc: false, hz: "20", ...v1 }), models, site).group,
+    ).toBe("pi05_fr3_all_step49999_demo");
+  });
+
+  test("with rule v3 the default group is the one of its mode, as the backend files it", () => {
+    const on = { chunkAccel: true };
+    const group = (over: Partial<CommandForm>) =>
+      placeholders(base({ ...on, ...over }), models, site).group;
+    expect(group({ rtc: false, inferenceMode: "plain" })).toBe(
+      "pi05_fr3_all_step49999_accel3_demo",
+    );
+    expect(group({ rtc: true, inferenceMode: "rtc" })).toBe(
+      "pi05_fr3_all_step49999_rtc_accel3_demo",
+    );
+    expect(group({ rtc: false, inferenceMode: "vlash" })).toBe(
+      "pi05_fr3_all_step49999_vlash_accel3_demo",
+    );
+    // without the switch, the mode's own group
+    expect(group({ chunkAccel: false, rtc: true })).toBe(
+      "pi05_fr3_all_step49999_rtc_demo",
+    );
+    // the page repeats the backend's naming: it holds for every model the backend's own sample lists
+    const rows = deploySamples.models.models;
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      const names = row.rollout_group_default as Record<string, string>;
+      const mine = (over: Partial<CommandForm>) =>
+        placeholders(
+          base({ ...on, modelId: row.id, ...over }),
+          {
+            models: [{ ...models.models[0], id: row.id }],
+            skipped: [],
+            problems: [],
+            defaults: models.defaults,
+          },
+          site,
+        ).group;
+      expect(mine({ rtc: false, inferenceMode: "plain" })).toBe(names.accel3);
+      expect(mine({ rtc: true, inferenceMode: "rtc" })).toBe(names.rtc_accel3);
+      expect(mine({ rtc: false, inferenceMode: "vlash" })).toBe(
+        names.vlash_accel3,
+      );
+    }
   });
 
   test("with rule v2 the default group is the v2 one the backend files it under", () => {

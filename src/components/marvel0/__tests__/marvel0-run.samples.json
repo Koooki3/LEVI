@@ -149,6 +149,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -326,6 +328,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -501,6 +505,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -664,6 +670,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -1096,6 +1104,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -1320,6 +1330,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -1538,6 +1550,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -1711,6 +1725,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -1888,6 +1904,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -2062,6 +2080,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -2236,6 +2256,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -2409,6 +2431,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -2776,6 +2800,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -2943,6 +2969,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -3649,6 +3677,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -3820,6 +3850,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -3991,6 +4023,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -4154,6 +4188,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -4310,6 +4346,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",
@@ -4477,6 +4515,8 @@
     "run": {
       "age_s": 300.0,
       "chunk_accel": false,
+      "chunk_accel_alpha": null,
+      "chunk_accel_lambda": null,
       "chunk_accel_rule": "v1",
       "form": null,
       "group": "pi05_fr3_all_step49999_rtc_demo",

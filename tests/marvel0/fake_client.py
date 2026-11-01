@@ -72,6 +72,7 @@ VALUE = [
     "--franka-server-url", "--prompt", "--max-timesteps", "--control-hz", "--eval-num",
     "--min-z", "--home-duration-s", "--max-xy", "--max-step-m", "--max-step-rad", "--levi-mode",
     "--vlash-overlap-steps", "--rtc-execute-horizon", "--open-loop-horizon", "--accel-rule",
+    "--phase-mode", "--phase-lambda-max", "--phase-alpha",
     "--rollout-root", "--rollout-group", "--eval-note",
 ]  # fmt: skip
 SWITCH = [

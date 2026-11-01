@@ -398,4 +398,29 @@ describe("fieldMessages", () => {
       key: "marvel0.err.invalid_type",
     });
   });
+
+  test("rule v3's refusals belong to the field each is about, in both languages", () => {
+    const cases: Array<[string, string, RegExp]> = [
+      // the mode goes with the switch, the numbers with their own selects
+      ["chunk_accel_v3_mode_disabled", "chunk_accel", /v3/],
+      ["chunk_accel_lambda_invalid", "chunk_accel_lambda", /3\.0/],
+      ["chunk_accel_alpha_invalid", "chunk_accel_alpha", /0\.005/],
+      ["chunk_accel_v3_field_needs_v3", "chunk_accel_lambda", /v3/],
+      ["chunk_accel_v3_field_needs_v3", "chunk_accel_alpha", /v3/],
+    ];
+    for (const [code, field, mention] of cases) {
+      const messages = fieldMessages(fail(code, { field }, 422), {});
+      expect(Object.keys(messages), `${code} ${field}`).toEqual([field]);
+      expect(messages[field].say).toEqual({ key: `marvel0.err.${code}` });
+      for (const lang of ["en", "zh"] as const) {
+        const said = sayText(messages[field].say!, catalogue(lang));
+        expect(said, `${code} ${lang}`).not.toMatch(/^marvel0\./);
+        expect(said, `${code} ${lang}`).toMatch(mention);
+      }
+    }
+    for (const field of ["chunk_accel_lambda", "chunk_accel_alpha"])
+      expect(
+        fieldMessages(fail("invalid_type", { field }, 422), {})[field].say,
+      ).toEqual({ key: "marvel0.err.invalid_type" });
+  });
 });
