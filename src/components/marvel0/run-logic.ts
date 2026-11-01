@@ -86,6 +86,13 @@ export const mayMove = (state: RunState): boolean => MAY_MOVE.includes(state);
 export const isQuiet = (state: RunState): boolean =>
   state === "idle" || state === "done" || state === "failed";
 
+/** The states with a client the page started (a run record in phase intent or
+ * started): the live view asks for pictures in all of them, and in none
+ * other. Held and lost have no new frames but the last one is still worth
+ * seeing. */
+export const hasPictures = (state: RunState): boolean =>
+  !isQuiet(state) && state !== "preflight";
+
 export interface RunAction {
   allowed: boolean;
   whyNot: Worded<Say> | null;

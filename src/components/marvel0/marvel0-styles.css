@@ -819,6 +819,68 @@
   }
 }
 
+/* The live view under the Run card: the side (third-person) camera on the left,
+ * the wrist camera on the right, one column on a phone. A picture is black in
+ * both themes; before the first one (or between episodes) a quiet box says why. */
+.rg-live__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ds-space-3);
+}
+@media (min-width: 640px) {
+  .rg-live__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.rg-live__cam {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  margin: 0;
+  min-width: 0;
+}
+.rg-live__label {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+  font-weight: var(--ds-weight-medium);
+}
+.rg-live__box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-sunken);
+}
+.rg-live__box[data-shown="true"] {
+  background: var(--ds-media-bg);
+}
+.rg-live__img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.rg-live__empty {
+  margin: 0;
+  padding: var(--ds-space-3);
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-caption-size);
+  text-align: center;
+}
+.rg-live__meta {
+  min-height: var(--ds-text-caption-line);
+  margin: 0;
+  color: var(--ds-text-tertiary);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  font-variant-numeric: tabular-nums;
+}
+.rg-live__meta[data-late="true"] {
+  color: var(--ds-warning);
+}
+
 /* "Updated 3 s ago": calm while current, a warning when the polls are late. */
 .rg-age {
   color: var(--ds-text-tertiary);

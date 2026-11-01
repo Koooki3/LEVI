@@ -6,7 +6,7 @@
 import { MARVEL0_REQUEST_MS } from "./marvel0-logic";
 import { rec, str } from "./marvel0-json";
 
-const BASE = "/api/levi/marvel0";
+export const BASE = "/api/levi/marvel0";
 
 /** A call that did not succeed. `status` is 0 when no answer came at all
  * (code `network`); `code` is the server's stable name for the refusal, FastAPI's

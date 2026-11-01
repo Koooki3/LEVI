@@ -5,7 +5,8 @@
 // `request_id` the caller keeps across a retry. Nothing here talks to a
 // robot-side port, and no key but the named actions can be sent: there is no
 // field for a raw key.
-import { createCaller, type ApiResult } from "./deploy-api";
+import { BASE, createCaller, type ApiResult } from "./deploy-api";
+import { rec } from "./marvel0-json";
 import { MARVEL0_REQUEST_MS } from "./marvel0-logic";
 import type { ActionId, Purpose } from "./run-logic";
 
@@ -28,6 +29,26 @@ export type KeyAction = Extract<
   "enter" | "success" | "failure" | "discard" | "end_at_gate" | "exit_home"
 >;
 
+/** The cameras of the live view (`GET .../run/frame?camera=`). */
+export const FRAME_CAMERAS = ["side", "wrist"] as const;
+export type FrameCamera = (typeof FRAME_CAMERAS)[number];
+
+/** Why there is no picture: the backend's three reasons (404), or
+ * `unavailable` for anything else (no answer, a body that is no picture). */
+export type FrameReason = "no_run" | "no_episode" | "no_frame" | "unavailable";
+const FRAME_REASONS: readonly string[] = ["no_run", "no_episode", "no_frame"];
+
+export type FrameResult =
+  | {
+      ok: true;
+      blob: Blob;
+      /** How long ago the recording file was last written (ms), when stated. */
+      ageMs: number | null;
+      /** The episode folder's name (`demo_0003`), when stated. */
+      episode: string | null;
+    }
+  | { ok: false; reason: FrameReason };
+
 export interface RunApi {
   read(signal?: AbortSignal): Promise<ApiResult>;
   challenge(body: unknown): Promise<ApiResult>;
@@ -36,7 +57,21 @@ export interface RunApi {
   hold(body: unknown): Promise<ApiResult>;
   end(body: unknown): Promise<ApiResult>;
   log(signal?: AbortSignal): Promise<ApiResult>;
+  /** The newest frame of one camera of the episode being recorded. Resolves
+   * (never rejects) unless `signal` aborts it. */
+  frame(camera: FrameCamera, signal?: AbortSignal): Promise<FrameResult>;
 }
+
+/** A frame is small and local; an answer later than this is given up, so one
+ * stuck request cannot hold the live view's one-in-flight rule forever. */
+export const FRAME_DEADLINE_MS = 5_000;
+
+const headerNumber = (value: string | null): number | null => {
+  if (value === null || !/^\d{1,9}$/.test(value)) return null;
+  return Number(value);
+};
+const headerName = (value: string | null): string | null =>
+  value !== null && /^[\w.-]{1,80}$/.test(value) ? value : null;
 
 export function createRunApi({
   fetchFn,
@@ -55,6 +90,63 @@ export function createRunApi({
     hold: (body) => call("run/hold", limit.write, body),
     end: (body) => call("run/end", limit.write, body),
     log: (signal) => call("run/log", limit.read, undefined, signal),
+    frame: async (camera, signal) => {
+      const request = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let dropped = () => {};
+      // A race as well as an abort, so a fetch that ignores its signal cannot
+      // hold the caller either.
+      const cut = new Promise<never>((_, reject) => {
+        const giveUp = (why: string) => {
+          reject(new Error(why));
+          request.abort();
+        };
+        dropped = () => giveUp("aborted");
+        timer = setTimeout(() => giveUp("no answer"), FRAME_DEADLINE_MS);
+      });
+      cut.catch(() => {});
+      if (signal?.aborted) dropped();
+      else signal?.addEventListener("abort", dropped, { once: true });
+      try {
+        const response = await Promise.race([
+          (fetchFn ?? ((input, init) => globalThis.fetch(input, init)))(
+            `${BASE}/run/frame?camera=${camera}`,
+            { cache: "no-store", signal: request.signal },
+          ),
+          cut,
+        ]);
+        if (response.ok) {
+          const blob = await Promise.race([response.blob(), cut]);
+          if (!blob.type.startsWith("image/") || blob.size === 0)
+            return { ok: false, reason: "unavailable" };
+          return {
+            ok: true,
+            blob,
+            ageMs: headerNumber(response.headers.get("x-levi-frame-age-ms")),
+            episode: headerName(response.headers.get("x-levi-frame-episode")),
+          };
+        }
+        const code = rec(
+          rec(await Promise.race([response.json().catch(() => null), cut]))
+            ?.detail,
+        )?.code;
+        return {
+          ok: false,
+          reason:
+            response.status === 404 &&
+            typeof code === "string" &&
+            FRAME_REASONS.includes(code)
+              ? (code as FrameReason)
+              : "unavailable",
+        };
+      } catch {
+        if (signal?.aborted) throw new Error("aborted");
+        return { ok: false, reason: "unavailable" };
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", dropped);
+      }
+    },
   };
 }
 

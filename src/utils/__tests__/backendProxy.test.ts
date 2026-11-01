@@ -301,6 +301,36 @@ describe("backendProxy", () => {
     expect(unbound.headers.get("X-LEVI-Stats-Source-Binding")).toBeNull();
   });
 
+  test("a live camera frame passes as the bytes it is, with its content type and its two facts", async () => {
+    const jpeg = new Uint8Array([
+      0xff, 0xd8, 0xff, 0xe0, 0x00, 0x7f, 0xff, 0xd9,
+    ]);
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(jpeg, {
+          headers: {
+            "content-type": "image/jpeg",
+            "cache-control": "no-store",
+            "x-levi-frame-age-ms": "180",
+            "x-levi-frame-episode": "demo_0003",
+            "x-levi-other": "kept back",
+          },
+        }),
+      ),
+    ) as unknown as typeof fetch;
+    const response = await call("GET", { host: "localhost:7860" }, [
+      "marvel0",
+      "run",
+      "frame",
+    ]);
+    expect(response.headers.get("content-type")).toBe("image/jpeg");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-levi-frame-age-ms")).toBe("180");
+    expect(response.headers.get("x-levi-frame-episode")).toBe("demo_0003");
+    expect(response.headers.get("x-levi-other")).toBeNull();
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(jpeg);
+  });
+
   test("a read from the page is forwarded with the UI token", async () => {
     const response = await call("GET", { host: "localhost:7860" });
     expect(response.status).toBe(200);

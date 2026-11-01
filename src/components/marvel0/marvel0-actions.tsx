@@ -20,10 +20,11 @@ import { StepHeading } from "./marvel0-card";
 import { RunPanel } from "./run-panel";
 import type { ChangeAttest, EpisodeChangeStatus } from "./run-panel";
 import { goTo } from "./chain-strip";
+import { LiveFrames } from "./live-frames";
 import { COMMAND_ANCHOR } from "./chain-logic";
 import { commandFormFromRun } from "./command-logic";
 import { bodyWithNextPrompt, confirmedRunExit } from "./episode-change";
-import { startPhrase } from "./run-logic";
+import { hasPictures, startPhrase } from "./run-logic";
 import { effectiveSelection, useChoice } from "./selection";
 import { useVoiceRun } from "./use-voice-run";
 import type { RunActions } from "./use-run-actions";
@@ -354,6 +355,9 @@ export function Marvel0Actions({
             actions={runActions}
             episodeChange={changeStatus}
             onChangeInstruction={changeInstruction}
+          />
+          <LiveFrames
+            active={run.lastSeen !== null && hasPictures(run.lastSeen.state)}
           />
         </section>
       )}

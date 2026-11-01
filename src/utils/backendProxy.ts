@@ -273,6 +273,10 @@ export async function backendProxy(
       // Report assets (levi/report.py): an SVG must stay sandboxed.
       "content-security-policy",
       "x-content-type-options",
+      // The marvel0 page's live camera frame (levi/marvel0/run_api.py,
+      // GET .../run/frame): how old the picture is and which episode it is of.
+      "x-levi-frame-age-ms",
+      "x-levi-frame-episode",
     ]) {
       const value = upstream.headers.get(key);
       if (value) responseHeaders.set(key, value);
