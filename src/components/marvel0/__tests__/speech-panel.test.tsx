@@ -1,6 +1,14 @@
 import { render, setupDom } from "@/components/ds/__tests__/dom";
 import { act } from "react";
-import { afterEach, describe, expect, jest, test } from "bun:test";
+import { advanceInSteps, installApplicationClock } from "./application-clock";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
 import { LocaleProvider } from "@/components/levi-locale";
@@ -35,9 +43,13 @@ import {
   type Script,
 } from "./speech-fixtures";
 
-// Bun runs afterEach hooks in registration order. Restore the clock before
-// setupDom awaits React unmount; audio/network fakes stay installed until after it.
-afterEach(() => jest.useRealTimers());
+// Install after React loads so its captured host clocks stay real. The
+// application clock stays through cleanup; restore it before the DOM globals go.
+let clock: ReturnType<typeof installApplicationClock>;
+beforeAll(() => {
+  clock = installApplicationClock();
+});
+afterAll(() => clock.restore());
 setupDom();
 
 const ALL_MODEL = "pi05_fr3_all_step49999";
@@ -61,8 +73,9 @@ async function flushAll() {
 }
 const advance = (ms: number) =>
   act(async () => {
-    jest.advanceTimersByTime(ms);
-    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    await advanceInSteps(clock, ms, async () => {
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
   });
 
 const echo =
@@ -88,7 +101,6 @@ async function open({
   devices?: FakeDevice[];
   voiceRun?: VoiceRun | null;
 } = {}) {
-  jest.useFakeTimers();
   audio = installFakeAudio({ secure, devices });
   if (zhLanguage) localStorage.setItem("levi-language", "zh");
   const captures = captureFactory();
@@ -2286,7 +2298,7 @@ describe("where the time went", () => {
   const slow =
     (ms: number, server: Record<string, number>, match = matchA()) =>
     (call: { requestId: string }) => {
-      jest.advanceTimersByTime(ms);
+      clock.advance(ms);
       return ok(heardAnswer(call.requestId, match, { timing_ms: server }));
     };
 
@@ -2338,7 +2350,7 @@ describe("where the time went", () => {
     const h = await open({
       script: {
         transcribe: (call: { requestId: string }) => {
-          jest.advanceTimersByTime(2000);
+          clock.advance(2000);
           return ok(
             heardAnswer(call.requestId, matchA(), { timing_ms: undefined }),
           );
@@ -2353,7 +2365,7 @@ describe("where the time went", () => {
     const h = await open({
       script: {
         transcribe: (call: { requestId: string }) => {
-          jest.advanceTimersByTime(1500);
+          clock.advance(1500);
           return ok(
             heardAnswer(call.requestId, null, {
               heard: false,
@@ -2379,7 +2391,7 @@ describe("where the time went", () => {
       script: {
         transcribe: echo(matchA()),
         match: () => {
-          jest.advanceTimersByTime(400);
+          clock.advance(400);
           return {
             ...ok(matchedAnswer(matchC())),
             data: {

@@ -127,3 +127,28 @@ export function installApplicationClock() {
     },
   };
 }
+
+/**
+ * Advances `ms` in steps of at most `step` (default: the 30 s status refresh of
+ * the voice card), awaiting `settle` after each so Promise work answers before
+ * the next periodic timer, as it would in a browser. One long jump runs every
+ * due timer back to back, before any pending Promise body can settle.
+ */
+export async function advanceInSteps(
+  clock: { advance(ms: number): void },
+  ms: number,
+  settle: () => Promise<void>,
+  step = 30_000,
+) {
+  if (!Number.isFinite(ms) || ms < 0 || !(step > 0))
+    throw new Error(
+      "advanceInSteps requires a finite nonnegative duration and a positive step",
+    );
+  let left = ms;
+  do {
+    const part = Math.min(left, step);
+    clock.advance(part);
+    await settle();
+    left -= part;
+  } while (left > 0);
+}
