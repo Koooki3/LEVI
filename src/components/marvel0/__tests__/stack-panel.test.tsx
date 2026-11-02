@@ -339,79 +339,165 @@ describe("outside the product, or with the controls off or unread, nothing can b
     );
   });
 
-  test("the arm controller the stack is configured for is said on A, read-only", async () => {
+  describe("the arm controller on A's card", () => {
     const line = (host: HTMLElement) =>
       host.querySelector("[data-testid=marvel0-arm-controller]");
-    const lab = await open(stackDoc("idle"));
-    expect(text(line(lab.host))).toBe(en["marvel0.ctl.arm.lab"]);
-    expect(line(lab.host)!.getAttribute("data-controller")).toBe("lab");
-    // (in the card of A, beside its controls)
-    expect(comp(lab.host, "A").parentElement!.contains(line(lab.host))).toBe(
-      true,
-    );
-    expect(comp(lab.host, "B").parentElement!.contains(line(lab.host))).toBe(
-      false,
-    );
-    expect(
-      lab.host.querySelectorAll("[data-testid=marvel0-arm-controller]"),
-    ).toHaveLength(1);
-  });
-
-  test("the anyspeedup controller: its preset and the alpha the client command is tied to, in both languages", async () => {
-    const doc = () =>
-      stackDoc("idle", (d) => {
-        d.act.control.arm = {
-          controller: "anyspeedup",
-          preset: "S1",
-          alpha: 0.01,
+    const armDoc = (change: Record<string, unknown>, name = "idle") =>
+      stackDoc(name, (d) => {
+        d.act.arm = {
+          configured: { controller: "lab", preset: null },
+          enabled: true,
+          running: null,
+          status: "idle",
+          alpha: null,
+          problem: null,
+          ramp_ok: true,
+          suffix: "",
+          ...change,
         };
       });
-    const english = await open(doc());
-    const said = text(
-      english.host.querySelector("[data-testid=marvel0-arm-controller]"),
+    const anySay = (preset: string) => ({ controller: "anyspeedup", preset });
+
+    test("the lab's controller is said on A's card, read-only, and asks nothing else", async () => {
+      const { host } = await open(stackDoc("idle"));
+      const said = text(line(host));
+      expect(said).toContain("The control file names: the lab's controller.");
+      expect(said).not.toContain("anyspeedup");
+      expect(said).not.toContain("not run on the arm");
+      expect(line(host)!.getAttribute("data-status")).toBe("idle");
+      // (in the card of A, beside its controls, and nowhere else)
+      expect(comp(host, "A").parentElement!.contains(line(host))).toBe(true);
+      expect(comp(host, "B").parentElement!.contains(line(host))).toBe(false);
+      expect(
+        host.querySelectorAll("[data-testid=marvel0-arm-controller]"),
+      ).toHaveLength(1);
+    });
+
+    test("what runs is said as well as what the file names, with the alpha and the e-stop note, in both languages", async () => {
+      const doc = () =>
+        armDoc({
+          configured: anySay("S1"),
+          running: anySay("S1"),
+          status: "match",
+          alpha: 0.01,
+          ramp_ok: false,
+          suffix: "_any-S1",
+        });
+      const english = await open(doc());
+      const said = text(line(english.host));
+      expect(said).toContain("The control file names: anyspeedup, preset S1.");
+      expect(said).toContain("A runs: anyspeedup, preset S1.");
+      expect(said).toContain("alpha 0.01");
+      expect(said).toContain("has not run on the arm yet");
+      expect(said).toContain("stop A, change the control file, start A");
+      expect(said).not.toMatch(/[{}]/);
+      expect(line(english.host)!.getAttribute("data-running")).toBe(
+        "anyspeedup",
+      );
+      const chinese = await open(doc(), true);
+      const dito = text(line(chinese.host));
+      for (const part of ["anyspeedup", "S1", "0.01"])
+        expect(dito).toContain(part);
+      expect(dito).not.toMatch(/[{}]/);
+      expect(dito).not.toContain("has not run");
+    });
+
+    test("a file that no longer names the A that runs says so, and what to do", async () => {
+      const { host } = await open(
+        armDoc({
+          configured: { controller: "lab", preset: null },
+          running: anySay("today"),
+          status: "changed",
+          problem: "changed",
+        }),
+      );
+      const said = text(line(host));
+      expect(said).toContain("A runs: anyspeedup, preset today.");
+      expect(said).toContain("The control file names: the lab's controller.");
+      expect(said).toContain("Rule v3 is refused until they agree");
+      expect(said).toContain("stop A, change the control file, start A");
+      expect(line(host)!.getAttribute("data-status")).toBe("changed");
+    });
+
+    test.each(["foreign", "unknown"] as const)(
+      "an A the page cannot vouch for (%s) with the file naming anyspeedup refuses rule v3 in words",
+      async (problem) => {
+        const { host } = await open(
+          armDoc({
+            configured: anySay("today"),
+            status: problem,
+            problem,
+          }),
+        );
+        const said = text(line(host));
+        expect(said).toContain("Rule v3 is refused");
+        expect(said).toContain("cannot tell which arm controller");
+        expect(said).not.toContain("A runs:");
+      },
     );
-    expect(said).toContain("anyspeedup, preset S1");
-    expect(said).toContain("alpha 0.01");
-    expect(said).not.toMatch(/[{}]/);
-    const chinese = await open(doc(), true);
-    const dito = text(
-      chinese.host.querySelector("[data-testid=marvel0-arm-controller]"),
-    );
-    expect(dito).toContain("anyspeedup");
-    expect(dito).toContain("S1");
-    expect(dito).toContain("0.01");
-    expect(dito).not.toMatch(/[{}]/);
-    expect(zh["marvel0.ctl.arm.anyspeedup"]).not.toBe(
-      en["marvel0.ctl.arm.anyspeedup"],
-    );
+
+    test("the stack off: the file is said with its words and no alpha is promised", async () => {
+      const { host } = await open(
+        armDoc(
+          { configured: anySay("today"), enabled: false },
+          "control_disabled",
+        ),
+      );
+      const said = text(line(host));
+      expect(said).toContain("the stack is switched off");
+      expect(said).not.toContain("alpha");
+    });
+
+    test("a document that does not say shows no line", async () => {
+      const { host } = await open(
+        stackDoc("idle", (d) => {
+          delete d.act.arm;
+        }),
+      );
+      expect(line(host)).toBeNull();
+    });
   });
 
-  test("the anyspeedup controller with the stack off: the preset only, no alpha", async () => {
-    const { host } = await open(
+  describe("the control file's problems", () => {
+    const invalid = (errors: unknown[]) =>
       stackDoc("control_disabled", (d) => {
-        d.act.control.arm = {
-          controller: "anyspeedup",
-          preset: "today",
-          alpha: null,
-        };
-      }),
-    );
-    const said = text(
-      host.querySelector("[data-testid=marvel0-arm-controller]"),
-    );
-    expect(said).toContain("preset today");
-    expect(said).not.toContain("alpha");
-  });
+        d.act.control.state = "invalid";
+        d.act.control.errors = errors;
+      });
 
-  test("a document that does not say shows no line", async () => {
-    const { host } = await open(
-      stackDoc("idle", (d) => {
-        delete d.act.control.arm;
-      }),
-    );
-    expect(
-      host.querySelector("[data-testid=marvel0-arm-controller]"),
-    ).toBeNull();
+    test("the S2 refusal and its reason reach the page, in both languages", async () => {
+      const errors = [
+        { field: "stack.arm_preset", code: "needs_shaped_profile" },
+      ];
+      const english = await open(invalid(errors));
+      const box = english.host.querySelector(
+        "[data-testid=marvel0-control-errors]",
+      );
+      expect(text(box)).toContain('"S2" is refused');
+      expect(text(box)).toContain("real-arm check of S1");
+      const chinese = await open(invalid(errors), true);
+      const dito = text(
+        chinese.host.querySelector("[data-testid=marvel0-control-errors]"),
+      );
+      expect(dito).toContain("S2");
+      expect(dito).not.toContain("needs_shaped_profile");
+    });
+
+    test("an error without a sentence of its own is said as field and code, never a value", async () => {
+      const { host } = await open(
+        invalid([{ field: "stack.robot_ip", code: "range" }]),
+      );
+      expect(
+        text(host.querySelector("[data-testid=marvel0-control-errors]")),
+      ).toContain("stack.robot_ip: range");
+    });
+
+    test("a valid control file shows no list", async () => {
+      const { host } = await open(stackDoc("idle"));
+      expect(
+        host.querySelector("[data-testid=marvel0-control-errors]"),
+      ).toBeNull();
+    });
   });
 
   test("an older backend without the controls: the cards only show", async () => {

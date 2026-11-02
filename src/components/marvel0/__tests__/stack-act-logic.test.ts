@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import en from "@/i18n/en.json";
 import {
+  armSays,
   armView,
   canCheckFci,
   canCheckServer,
@@ -637,61 +638,171 @@ describe("the phrases", () => {
   });
 });
 
-describe("the arm controller the stack is configured for", () => {
+describe("the arm controller the control file names and the one A runs", () => {
   const arm = (value: unknown) =>
     act("idle", (doc) => {
-      doc.act.control.arm = value;
+      doc.act.arm = value;
     }).arm;
+  const quiet = {
+    configured: { controller: "lab", preset: null },
+    enabled: true,
+    running: null,
+    status: "idle",
+    alpha: null,
+    problem: null,
+    ramp_ok: true,
+    suffix: "",
+  };
 
-  test("the backend's own views say the lab's controller", () => {
-    for (const name of STACK_VIEWS)
-      expect(act(name).arm, name).toEqual({
+  test("the backend's own views say the lab's controller and ask nothing", () => {
+    for (const name of STACK_VIEWS) {
+      const view = act(name).arm;
+      expect(view?.configured, name).toEqual({
         controller: "lab",
         preset: null,
-        alpha: null,
       });
+      expect(view?.alpha, name).toBeNull();
+      expect(view?.problem, name).toBeNull();
+      expect(view?.rampOk, name).toBe(true);
+      expect(view?.suffix, name).toBe("");
+    }
   });
 
-  test("the anyspeedup controller comes with its preset and, when the stack is on, its alpha", () => {
+  test("what runs, what the file names, and what follows are read as sent", () => {
     expect(
-      arm({ controller: "anyspeedup", preset: "S1", alpha: 0.01 }),
-    ).toEqual({ controller: "anyspeedup", preset: "S1", alpha: 0.01 });
-    expect(
-      arm({ controller: "anyspeedup", preset: "today", alpha: null }),
-    ).toEqual({ controller: "anyspeedup", preset: "today", alpha: null });
-  });
-
-  test("a lab controller carries no preset or alpha, whatever else was sent", () => {
-    expect(arm({ controller: "lab", preset: "S1", alpha: 0.01 })).toEqual({
-      controller: "lab",
-      preset: null,
-      alpha: null,
+      arm({
+        configured: { controller: "anyspeedup", preset: "S1" },
+        enabled: true,
+        running: { controller: "anyspeedup", preset: "S1" },
+        status: "match",
+        alpha: 0.01,
+        problem: null,
+        ramp_ok: false,
+        suffix: "_any-S1",
+      }),
+    ).toEqual({
+      configured: { controller: "anyspeedup", preset: "S1" },
+      enabled: true,
+      running: { controller: "anyspeedup", preset: "S1" },
+      status: "match",
+      alpha: 0.01,
+      problem: null,
+      rampOk: false,
+      suffix: "_any-S1",
     });
   });
 
-  test("anything that is not a known controller reads as not said", () => {
-    for (const value of [
-      null,
-      "lab",
-      42,
-      [],
-      {},
-      { controller: "other", preset: "S1", alpha: 0.01 },
-      { preset: "S1" },
-    ])
+  test.each(["changed", "foreign", "unknown"] as const)(
+    "the problem %s is rule v3's refusal and forces no alpha",
+    (problem) => {
+      const view = arm({
+        ...quiet,
+        configured: { controller: "anyspeedup", preset: "S1" },
+        status: problem,
+        problem,
+        ramp_ok: false,
+      });
+      expect(view?.problem).toBe(problem);
+      expect(view?.status).toBe(problem);
+      expect(view?.alpha).toBeNull();
+    },
+  );
+
+  test("a lab controller carries no preset, whatever else was sent", () => {
+    expect(
+      arm({ ...quiet, running: { controller: "lab", preset: "S1" } })?.running,
+    ).toEqual({ controller: "lab", preset: null });
+  });
+
+  test("odd values are not trusted", () => {
+    for (const value of [null, "lab", 42, []])
       expect(arm(value), JSON.stringify(value)).toBeNull();
+    const odd = arm({
+      configured: { controller: "other", preset: "S1" },
+      running: 3,
+      status: "weird",
+      alpha: "0.01",
+      problem: "weird",
+      ramp_ok: "no",
+      suffix: "../x",
+    });
+    expect(odd).toEqual({
+      configured: null,
+      enabled: false,
+      running: null,
+      status: "unknown",
+      alpha: null,
+      problem: null,
+      rampOk: true,
+      suffix: "",
+    });
     expect(armView(undefined)).toBeNull();
-    // a document without a control part reads as not said, too
+    // a document without the part reads as not said
     expect(
       act("idle", (doc) => {
-        delete doc.act.control;
+        delete doc.act.arm;
       }).arm,
     ).toBeNull();
   });
 
-  test("a preset or alpha of the wrong type is dropped, not trusted", () => {
-    expect(arm({ controller: "anyspeedup", preset: 5, alpha: "0.01" })).toEqual(
-      { controller: "anyspeedup", preset: null, alpha: null },
-    );
+  test("the card's sentences follow the facts", () => {
+    const keys = (view: Parameters<typeof armSays>[0]) =>
+      armSays(view).map((say) => ("key" in say ? say.key : "?"));
+    expect(
+      keys(
+        armView({ ...quiet, running: { controller: "lab" }, status: "match" })!,
+      ),
+    ).toEqual(["marvel0.ctl.arm.configured", "marvel0.ctl.arm.running"]);
+    const s1 = armView({
+      configured: { controller: "anyspeedup", preset: "S1" },
+      enabled: true,
+      running: { controller: "anyspeedup", preset: "S1" },
+      status: "match",
+      alpha: 0.01,
+      problem: null,
+      ramp_ok: false,
+      suffix: "_any-S1",
+    })!;
+    expect(keys(s1)).toEqual([
+      "marvel0.ctl.arm.configured",
+      "marvel0.ctl.arm.running",
+      "marvel0.ctl.arm.alpha",
+      "marvel0.ctl.arm.untried",
+      "marvel0.ctl.arm.change",
+    ]);
+    const changed = armView({
+      ...quiet,
+      configured: { controller: "lab", preset: null },
+      running: { controller: "anyspeedup", preset: "today" },
+      status: "changed",
+      problem: "changed",
+    })!;
+    expect(keys(changed)).toContain("marvel0.ctl.arm.problem_changed");
+    expect(keys(changed)).toContain("marvel0.ctl.arm.change");
+    // the stack off: the file's words say so, and no alpha is promised
+    const off = armView({
+      ...quiet,
+      configured: { controller: "anyspeedup", preset: "S1" },
+      enabled: false,
+    })!;
+    expect(keys(off)).toContain("marvel0.ctl.arm.configured_off");
+    expect(keys(off)).not.toContain("marvel0.ctl.arm.alpha");
+    expect(keys(off)).not.toContain("marvel0.ctl.arm.untried");
+  });
+
+  test("the control file's problems are read as field and code, never a value", () => {
+    const view = act("control_disabled", (doc) => {
+      doc.act.control.state = "invalid";
+      doc.act.control.errors = [
+        { field: "stack.arm_preset", code: "needs_shaped_profile" },
+        { field: "", code: "x" },
+        { field: "stack.robot_ip" },
+        "junk",
+      ];
+    });
+    expect(view.controlErrors).toEqual([
+      { field: "stack.arm_preset", code: "needs_shaped_profile" },
+    ]);
+    expect(act("idle").controlErrors).toEqual([]);
   });
 });

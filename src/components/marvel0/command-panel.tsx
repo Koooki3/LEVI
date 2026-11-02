@@ -74,7 +74,12 @@ import type { Say } from "./marvel0-logic";
 import { sayText } from "./marvel0-say";
 import type { RunView } from "./run-logic";
 import { RunStart } from "./run-start";
-import type { ArmView } from "./stack-act-logic";
+import {
+  ARM_PROBLEM_KEY,
+  armSubject,
+  type ArmProblem,
+  type ArmView,
+} from "./stack-act-logic";
 import type { Effective } from "./selection";
 import type { Ack, RunActions } from "./use-run-actions";
 import type { VoiceRun } from "./use-voice-run";
@@ -196,11 +201,16 @@ export function CommandPanel({
   // its request body carries every other field verbatim from that run.
   const resuming =
     resumeMode && savedForm !== null && savedKey === resumeBodyKey;
+  // The ramp rules (v1, v2) assume the lab controller's 0.2 s lag: with the
+  // anyspeedup controller at a preset other than today only rule v3 is offered
+  // (the backend refuses the others), so the form is on it.
+  const rampLocked = arm !== null && !arm.rampOk;
   const form: CommandForm = resuming
     ? { ...savedForm, prompt: resumePrompt ?? savedForm.prompt }
     : {
         ...initial,
         ...edits,
+        ...(rampLocked && { chunkAccelRule: "v3" as const }),
         modelId: selection.modelId,
         rtc: selection.rtc,
         inferenceMode: selection.inferenceMode,
@@ -212,7 +222,10 @@ export function CommandPanel({
   const hints = placeholders(form, models, site);
   const control = site.control;
   const facts = rateFacts(form, models, site);
-  const armAlpha = arm?.controller === "anyspeedup" ? arm.alpha : null;
+  // The alpha the arm controller that runs forces on rule v3 (null: none), and
+  // the suffix the default rollout group gets.
+  const armAlpha = arm?.alpha ?? null;
+  const groupHint = hints.group + (arm?.suffix ?? "");
   const built = commandBody(form, control?.default ?? DEFAULT_HZ, armAlpha);
   const body =
     resuming && resumeBody
@@ -295,7 +308,9 @@ export function CommandPanel({
       return false;
     // Switched off, or another sentence came, while the command was made.
     if (!still()) return false;
-    const group = next.group.trim() || placeholders(next, models, site).group;
+    const group =
+      next.group.trim() ||
+      placeholders(next, models, site).group + (arm?.suffix ?? "");
     return runActions.start(request.body, startPhrase(run, group), ack);
   }
 
@@ -534,7 +549,10 @@ export function CommandPanel({
               error={fieldError("chunk_accel")}
               onChange={(chunkAccel) => edit({ chunkAccel })}
               rule={chunkAccelRuleOf(form)}
-              rules={chunkAccelRulesFor(form)}
+              rules={chunkAccelRulesFor(form).filter(
+                (value) => !rampLocked || value === "v3",
+              )}
+              rampLockedBy={rampLocked ? arm : null}
               ruleError={fieldError("chunk_accel_rule")}
               onRule={(chunkAccelRule) => edit({ chunkAccelRule })}
               lambda={form.chunkAccelLambda ?? ""}
@@ -548,6 +566,7 @@ export function CommandPanel({
               alphaError={fieldError("chunk_accel_alpha")}
               onAlpha={(chunkAccelAlpha) => edit({ chunkAccelAlpha })}
               alphaFixedBy={armAlpha !== null && arm ? arm : null}
+              armProblem={arm?.problem ?? null}
             />
             <Field
               className="rg-span"
@@ -563,7 +582,7 @@ export function CommandPanel({
                 autoCorrect="off"
                 spellCheck={false}
                 lang="en"
-                placeholder={hints.group}
+                placeholder={groupHint}
                 onChange={(event) => edit({ group: event.target.value })}
               />
             </Field>
@@ -652,7 +671,7 @@ export function CommandPanel({
                 view={run}
                 actions={runActions}
                 form={body}
-                group={form.group.trim() || hints.group}
+                group={form.group.trim() || groupHint}
                 stale={stale}
               />
             ) : null
@@ -914,6 +933,8 @@ function ChunkAccel({
   alphaError,
   onAlpha,
   alphaFixedBy = null,
+  armProblem = null,
+  rampLockedBy = null,
 }: {
   on: boolean;
   /** The form's inference mode is one acceleration runs with, and its rate is 10 Hz. */
@@ -939,6 +960,12 @@ function ChunkAccel({
   /** The stack's arm controller when it decides the alpha: the field then
    * shows that alpha, says why, and cannot be changed here. */
   alphaFixedBy?: ArmView | null;
+  /** Why rule v3 is refused at the client's start (the arm controller that runs
+   * is not the control file's, or not known): said under the alpha. */
+  armProblem?: ArmProblem | null;
+  /** The arm controller that keeps the ramp rules away (they assume the lab's
+   * 0.2 s lag): the rule choice says so. */
+  rampLockedBy?: ArmView | null;
 }) {
   const { t } = useLocale();
   const id = useId();
@@ -995,6 +1022,19 @@ function ChunkAccel({
           ))}
         </RadioGroup>
       )}
+      {allowed && on && rampLockedBy && (
+        <p className="rg-muted" data-testid="marvel0-command-ramp-locked">
+          {sayText(
+            {
+              key: "marvel0.cmd.field.chunk_accel_ramp_locked",
+              params: {
+                preset: armSubject(rampLockedBy)?.preset ?? "?",
+              },
+            },
+            t,
+          )}
+        </p>
+      )}
       {ruleError && (
         <p id={ruleErrorId} className="ds-field__error">
           {ruleError}
@@ -1031,7 +1071,7 @@ function ChunkAccel({
                     {
                       key: "marvel0.cmd.field.chunk_accel_alpha_arm",
                       params: {
-                        preset: alphaFixedBy.preset ?? "?",
+                        preset: armSubject(alphaFixedBy)?.preset ?? "?",
                         alpha,
                       },
                     },
@@ -1043,7 +1083,9 @@ function ChunkAccel({
           >
             <Select
               data-testid="marvel0-command-chunk-accel-alpha"
-              data-fixed-by={alphaFixedBy ? alphaFixedBy.controller : undefined}
+              data-fixed-by={
+                alphaFixedBy ? armSubject(alphaFixedBy)?.controller : undefined
+              }
               value={alpha}
               disabled={disabled || alphaFixedBy !== null}
               onChange={(event) => onAlpha(event.target.value)}
@@ -1063,6 +1105,15 @@ function ChunkAccel({
               ))}
             </Select>
           </Field>
+          {armProblem && (
+            <p
+              className="ds-field__error"
+              role="status"
+              data-testid="marvel0-command-arm-problem"
+            >
+              {t(ARM_PROBLEM_KEY[armProblem])}
+            </p>
+          )}
         </div>
       )}
     </div>

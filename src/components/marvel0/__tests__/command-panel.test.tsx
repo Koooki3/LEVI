@@ -772,13 +772,38 @@ describe("the rule of in-chunk acceleration", () => {
     expect(alpha(host)!.value).toBe("0.01");
   });
 
-  describe("with the stack's anyspeedup arm controller", () => {
-    const anyspeedup = (preset: string, alpha: number | null): ArmView => ({
-      controller: "anyspeedup",
-      preset,
-      alpha,
-    });
-    const openArm = (arm: ArmView | null, zhLanguage = false) =>
+  describe("with the arm controller that runs", () => {
+    /** The facts of `act.arm` for an anyspeedup A (or none) at a preset. */
+    const arm = (
+      preset: string,
+      over: Partial<ArmView> = {},
+      running = true,
+    ): ArmView => {
+      const alpha = preset === "today" ? 0.005 : 0.01;
+      const named = { controller: "anyspeedup" as const, preset };
+      return {
+        configured: named,
+        enabled: true,
+        running: running ? named : null,
+        status: running ? "match" : "idle",
+        alpha,
+        problem: null,
+        rampOk: preset === "today",
+        suffix: `_any-${preset}`,
+        ...over,
+      };
+    };
+    const lab: ArmView = {
+      configured: { controller: "lab", preset: null },
+      enabled: true,
+      running: { controller: "lab", preset: null },
+      status: "match",
+      alpha: null,
+      problem: null,
+      rampOk: true,
+      suffix: "",
+    };
+    const openArm = (given: ArmView | null, zhLanguage = false) =>
       open(
         undefined,
         readDeploy(idle()),
@@ -786,7 +811,7 @@ describe("the rule of in-chunk acceleration", () => {
         { rtc: false },
         null,
         undefined,
-        arm,
+        given,
       );
 
     test.each([
@@ -795,7 +820,7 @@ describe("the rule of in-chunk acceleration", () => {
     ] as const)(
       "preset %s: the alpha field shows %s, cannot be changed, says why, and the command is made with it",
       async (preset, alphaNumber, shown) => {
-        const { host, calls } = await openArm(anyspeedup(preset, alphaNumber));
+        const { host, calls } = await openArm(arm(preset));
         await click(accel(host));
         expect(alpha(host)!.value).toBe(shown);
         expect(alpha(host)!.disabled).toBe(true);
@@ -803,6 +828,9 @@ describe("the rule of in-chunk acceleration", () => {
         expect(text(box(host))).toContain(
           `anyspeedup, preset ${preset}): alpha ${shown}`,
         );
+        // the anyspeedup controller's own read-back tool, not the lab's
+        expect(text(box(host))).toContain("set_shaping.py --show");
+        expect(text(box(host))).toContain("stop A, change the control file");
         expect(text(box(host))).not.toContain(
           en["marvel0.cmd.field.chunk_accel_alpha_hint"],
         );
@@ -829,7 +857,7 @@ describe("the rule of in-chunk acceleration", () => {
       expect(alpha(host)!.disabled).toBe(false);
       await make(host);
       expect(calls.preview[0]).toMatchObject({ chunk_accel_alpha: 0.005 });
-      await setArm(anyspeedup("S1", 0.01));
+      await setArm(arm("S1"));
       expect(alpha(host)!.value).toBe("0.01");
       expect(alpha(host)!.disabled).toBe(true);
       // the command on show was made for the other alpha: the form has outgrown it
@@ -841,15 +869,20 @@ describe("the rule of in-chunk acceleration", () => {
       expect(alpha(host)!.value).toBe("0.005");
     });
 
-    test("the lab's controller, an unknown one and the anyspeedup one with the stack off leave the field free", async () => {
-      for (const arm of [
+    test("the lab's controller, an unknown one and a stack with no A running leave the field free", async () => {
+      for (const given of [
         null,
-        { controller: "lab", preset: null, alpha: null } as ArmView,
-        anyspeedup("S1", null),
+        lab,
+        // (the file names anyspeedup but the stack is off: the page starts nothing)
+        arm(
+          "S1",
+          { enabled: false, alpha: null, suffix: "", rampOk: true },
+          false,
+        ),
       ]) {
-        const { host, calls } = await openArm(arm);
+        const { host, calls } = await openArm(given);
         await click(accel(host));
-        expect(alpha(host)!.disabled, JSON.stringify(arm)).toBe(false);
+        expect(alpha(host)!.disabled, JSON.stringify(given)).toBe(false);
         expect(alpha(host)!.value).toBe("0.005");
         expect(alpha(host)!.hasAttribute("data-fixed-by")).toBe(false);
         expect(text(box(host))).toContain(
@@ -861,19 +894,85 @@ describe("the rule of in-chunk acceleration", () => {
       }
     });
 
+    test.each(["changed", "foreign", "unknown"] as const)(
+      "an A that is not the file's (%s): nothing is forced and the card says rule v3 will be refused",
+      async (problem) => {
+        const { host, calls } = await openArm(
+          arm("S1", {
+            running: null,
+            status: problem,
+            problem,
+            alpha: null,
+            rampOk: false,
+          }),
+        );
+        await click(accel(host));
+        expect(alpha(host)!.disabled).toBe(false);
+        const said = text(
+          box(host).querySelector("[data-testid=marvel0-command-arm-problem]"),
+        );
+        expect(said).toBe(en[`marvel0.ctl.arm.problem_${problem}`]);
+        await pick(alpha(host), "0.01");
+        await make(host);
+        expect(calls.preview[0]).toMatchObject({ chunk_accel_alpha: 0.01 });
+      },
+    );
+
+    test("preset S1: rules v1 and v2 are not offered, rule v3 is on, and the words say why", async () => {
+      const { host, calls } = await openArm(arm("S1"));
+      await click(accel(host));
+      expect(rule(host, "v3")!.checked).toBe(true);
+      expect(rule(host, "v1")!.disabled).toBe(true);
+      expect(rule(host, "v2")!.disabled).toBe(true);
+      expect(rule(host, "v3")!.disabled).toBe(false);
+      expect(
+        text(
+          box(host).querySelector("[data-testid=marvel0-command-ramp-locked]"),
+        ),
+      ).toContain("preset S1 only rule v3");
+      // even a v2 the person had chosen before is not sent
+      await make(host);
+      expect(calls.preview[0]).toMatchObject({ chunk_accel_rule: "v3" });
+    });
+
+    test("preset today keeps the ramp rules, as the lab's controller does", async () => {
+      for (const given of [arm("today"), lab, null]) {
+        const { host } = await openArm(given);
+        await click(accel(host));
+        for (const value of ["v1", "v2", "v3"] as const)
+          expect(rule(host, value)!.disabled, JSON.stringify(given)).toBe(
+            false,
+          );
+        expect(
+          box(host).querySelector("[data-testid=marvel0-command-ramp-locked]"),
+        ).toBeNull();
+      }
+    });
+
+    test("the default group's placeholder carries the controller's suffix", async () => {
+      const group = (host: HTMLElement) =>
+        Array.from(card(host).querySelectorAll("input")).find((input) =>
+          input.placeholder.includes("_demo"),
+        )!.placeholder;
+      const plain = await openArm(lab);
+      const tagged = await openArm(arm("S1"));
+      expect(group(tagged.host)).toBe(`${group(plain.host)}_any-S1`);
+    });
+
     test("the words are in both languages and hold no placeholder", async () => {
       expect(zh["marvel0.cmd.field.chunk_accel_alpha_arm"]).not.toBe(
         en["marvel0.cmd.field.chunk_accel_alpha_arm"],
       );
-      const { host } = await openArm(anyspeedup("S1", 0.01), true);
+      const { host } = await openArm(arm("S1"), true);
       await click(accel(host));
       const said = text(box(host));
       expect(said).toContain("S1");
       expect(said).toContain("0.01");
+      expect(said).toContain("set_shaping.py");
       expect(said).not.toMatch(/[{}]/);
     });
 
-    test("the server's refusal of another alpha lands under the select, with the alpha it wants", async () => {
+    test("the server's refusal of another alpha lands under the select, with the alpha it wants and the way out of a continued run", async () => {
       const { host } = await open(
         {
           preview: refused(422, "chunk_accel_alpha_arm_mismatch", {
@@ -889,6 +988,25 @@ describe("the rule of in-chunk acceleration", () => {
       await make(host);
       expect(text(box(host))).toContain("anyspeedup");
       expect(text(box(host))).toContain("0.01");
+      expect(text(box(host))).toContain("make a new command");
+    });
+
+    test("the server's refusal of a ramp rule lands on the rule choice", async () => {
+      const { host } = await open(
+        {
+          preview: refused(422, "chunk_accel_rule_arm_preset", {
+            field: "chunk_accel_rule",
+          }),
+        },
+        readDeploy(idle()),
+        false,
+        { rtc: false },
+      );
+      await click(accel(host));
+      await make(host);
+      expect(text(box(host))).toContain(
+        en["marvel0.err.chunk_accel_rule_arm_preset"],
+      );
     });
   });
 

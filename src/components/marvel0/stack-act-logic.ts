@@ -282,14 +282,40 @@ export interface OperationAct {
   finishedAt: number | null;
 }
 
-/** The arm controller the control file asks terminal A to start (read-only
- * fact of the stack document's `control.arm`). `preset` and `alpha` belong to
- * the anyspeedup controller; `alpha` is the setpoint filter the client's v3
- * phase clock is forced to, present only while the stack is switched on. */
-export interface ArmView {
+/** One arm controller: the lab's, or the anyspeedup one with its preset. */
+export interface ArmController {
   controller: "lab" | "anyspeedup";
   preset: string | null;
+}
+
+export type ArmStatus = "idle" | "match" | "changed" | "foreign" | "unknown";
+/** Why rule v3 is refused at the client's start (the backend's `problem`). */
+export type ArmProblem = "changed" | "foreign" | "unknown";
+
+/** Which arm controller the control file names and which one A runs (the
+ * stack document's `act.arm`, read-only facts). `running` is what the page's
+ * own A was started as: the file can be changed while A runs, and the page
+ * goes by the A that runs. `alpha` is what rule v3's filter is forced to (the
+ * running A's preset's; null when nothing is forced), `problem` why rule v3 is
+ * refused, `rampOk` whether rules v1 and v2 are offered, and `suffix` what the
+ * default rollout group gets. */
+export interface ArmView {
+  configured: ArmController | null;
+  /** The stack is switched on (the page starts A). */
+  enabled: boolean;
+  running: ArmController | null;
+  status: ArmStatus;
   alpha: number | null;
+  problem: ArmProblem | null;
+  rampOk: boolean;
+  suffix: string;
+}
+
+/** A line of the control file the backend refused: the field and a short
+ * code, never a value. */
+export interface ControlError {
+  field: string;
+  code: string;
 }
 
 export interface ActView {
@@ -305,9 +331,11 @@ export interface ActView {
   server: ServerCheck | null;
   /** An operation of the page that runs now, or ended last. */
   operation: OperationAct | null;
-  /** Which arm controller the stack is configured for; null when the document
-   * does not say (an older backend, or an unreadable control file). */
+  /** Which arm controller the control file names and which one A runs; null
+   * when the document does not say (an older backend). */
   arm: ArmView | null;
+  /** Why the control file is not valid, when it is not (field and code). */
+  controlErrors: ControlError[];
   /** Notices of the backend, by code, with their facts. */
   notices: Array<{ code: string; params: Record<string, string | number> }>;
   /** The phrases to type, by name, as the backend names them. */
@@ -591,20 +619,59 @@ function phraseMap(raw: unknown): Record<string, string> {
   return out;
 }
 
-/** `control.arm` of the stack document; anything but a known controller reads
- * as "not said". */
+const ARM_STATUS: readonly ArmStatus[] = [
+  "idle",
+  "match",
+  "changed",
+  "foreign",
+  "unknown",
+];
+const ARM_PROBLEMS: readonly ArmProblem[] = ["changed", "foreign", "unknown"];
+/** A status the page does not know: nothing is forced (the backend's `unknown`). */
+const ARM_STATUS_NOT_KNOWN: ArmStatus = "unknown";
+
+function armController(raw: unknown): ArmController | null {
+  const item = rec(raw);
+  if (!item) return null;
+  if (item.controller === "lab") return { controller: "lab", preset: null };
+  if (item.controller === "anyspeedup")
+    return { controller: "anyspeedup", preset: str(item.preset, 16) };
+  return null;
+}
+
+/** `act.arm` of the stack document; anything that is not a record reads as
+ * "not said". A status it does not know reads as `unknown` (nothing is
+ * forced), a missing `ramp_ok` as true (an older backend). */
 export function armView(raw: unknown): ArmView | null {
   const arm = rec(raw);
   if (!arm) return null;
-  if (arm.controller === "lab")
-    return { controller: "lab", preset: null, alpha: null };
-  if (arm.controller === "anyspeedup")
-    return {
-      controller: "anyspeedup",
-      preset: str(arm.preset, 16),
-      alpha: num(arm.alpha),
-    };
-  return null;
+  const status =
+    ARM_STATUS.find((entry) => entry === arm.status) ?? ARM_STATUS_NOT_KNOWN;
+  const problem = ARM_PROBLEMS.find((entry) => entry === arm.problem) ?? null;
+  const suffix = str(arm.suffix, 40);
+  return {
+    configured: armController(arm.configured),
+    enabled: bool(arm.enabled) === true,
+    running: armController(arm.running),
+    status,
+    alpha: num(arm.alpha),
+    problem,
+    rampOk: bool(arm.ramp_ok) !== false,
+    suffix: suffix !== null && /^[A-Za-z0-9._-]+$/.test(suffix) ? suffix : "",
+  };
+}
+
+/** The controller the facts are about: the one that runs, else the file's. */
+export const armSubject = (arm: ArmView): ArmController | null =>
+  arm.running ?? arm.configured;
+
+function controlErrors(raw: unknown): ControlError[] {
+  return list(rec(raw)?.errors).flatMap((entry) => {
+    const item = rec(entry);
+    const field = str(item?.field, 60);
+    const code = str(item?.code, 60);
+    return field && code ? [{ field, code }] : [];
+  });
 }
 
 /** The control view of the stack document, or null when it has no `act` part
@@ -645,7 +712,8 @@ export function actView(
     fci: fciCheck(checks?.fci),
     server: serverCheck(checks?.c_preflight),
     operation: operationAct(act.operation),
-    arm: armView(rec(act.control)?.arm),
+    arm: armView(act.arm),
+    controlErrors: controlErrors(act.control),
     notices: list(act.notices).flatMap((entry) => {
       const item = rec(entry);
       const code = str(item?.code, 80);
@@ -815,4 +883,51 @@ export function canStartSequence(act: ActView): boolean {
     act.sequence.state !== "running" &&
     act.sequence.state !== "waiting_confirm"
   );
+}
+
+// -- the arm controller on A's card
+
+/** The sentence of each reason rule v3 is refused (the card and the command card). */
+export const ARM_PROBLEM_KEY: Record<ArmProblem, string> = {
+  changed: "marvel0.ctl.arm.problem_changed",
+  foreign: "marvel0.ctl.arm.problem_foreign",
+  unknown: "marvel0.ctl.arm.problem_unknown",
+};
+
+/** What the card says of the arm controller, sentence by sentence (the page
+ * joins them): what the control file names, what A runs, why rule v3 is
+ * refused, the alpha it is tied to, that the anyspeedup controller has not run
+ * on the arm yet, and how to change it. */
+export function armSays(arm: ArmView): Say[] {
+  const name = (entry: ArmController): Say =>
+    entry.controller === "anyspeedup"
+      ? {
+          key: "marvel0.ctl.arm.name_anyspeedup",
+          params: { preset: entry.preset ?? "?" },
+        }
+      : { key: "marvel0.ctl.arm.name_lab" };
+  const out: Say[] = [];
+  if (arm.configured)
+    out.push({
+      key: arm.enabled
+        ? "marvel0.ctl.arm.configured"
+        : "marvel0.ctl.arm.configured_off",
+      params: { what: name(arm.configured) },
+    });
+  if (arm.running)
+    out.push({
+      key: "marvel0.ctl.arm.running",
+      params: { what: name(arm.running) },
+    });
+  if (arm.problem) out.push({ key: ARM_PROBLEM_KEY[arm.problem] });
+  if (arm.alpha !== null)
+    out.push({ key: "marvel0.ctl.arm.alpha", params: { alpha: arm.alpha } });
+  const anyspeedup =
+    arm.running?.controller === "anyspeedup" ||
+    (arm.configured?.controller === "anyspeedup" && arm.enabled);
+  if (anyspeedup) {
+    out.push({ key: "marvel0.ctl.arm.untried" });
+    out.push({ key: "marvel0.ctl.arm.change" });
+  }
+  return out;
 }

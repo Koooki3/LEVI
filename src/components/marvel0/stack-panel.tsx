@@ -34,8 +34,10 @@ import {
   markerRemaining,
   operationRunning,
   stateKey,
+  armSays,
   type ActView,
   type ArmView,
+  type ControlError,
   type CompState,
   type CompId,
 } from "./stack-act-logic";
@@ -231,36 +233,52 @@ function MarkerBlock({
   );
 }
 
-/** Which arm controller the control file asks terminal A to start, read-only:
- * the lab's, or the anyspeedup one with its preset (and, while the stack is
- * on, the filter alpha the client command's phase clock is tied to). */
+/** Which arm controller the control file names and which one A runs,
+ * read-only (stack-act-logic `armSays`): the file's, A's (what it was started
+ * as; the file can be changed while A runs), why rule v3 is refused, the alpha
+ * the client command is tied to, that the anyspeedup controller has not run on
+ * the arm yet, and how to change it. */
 function ArmController({ arm }: { arm: ArmView }) {
   const { t } = useLocale();
   return (
     <p
       className="rg-muted"
       data-testid="marvel0-arm-controller"
-      data-controller={arm.controller}
+      data-status={arm.status}
+      data-running={arm.running?.controller ?? "none"}
     >
-      {arm.controller === "anyspeedup"
-        ? sayText(
-            {
-              key: "marvel0.ctl.arm.anyspeedup",
-              params: { preset: arm.preset ?? "?" },
-            },
-            t,
-          )
-        : t("marvel0.ctl.arm.lab")}
-      {arm.controller === "anyspeedup" && arm.alpha !== null && (
-        <>
-          {" "}
-          {sayText(
-            { key: "marvel0.ctl.arm.alpha", params: { alpha: arm.alpha } },
-            t,
-          )}
-        </>
-      )}
+      {armSays(arm)
+        .map((say) => sayText(say, t))
+        .join(" ")}
     </p>
+  );
+}
+
+/** Why the control file is not valid, line by line: the field and a short
+ * code (never a value); the ones about the arm controller have sentences. */
+function ControlErrors({ errors }: { errors: ControlError[] }) {
+  const { t } = useLocale();
+  const worded = (error: ControlError) => {
+    const id = `${error.field}.${error.code}`;
+    const word = wordOf(t, "marvel0.ctl.control_error.", id);
+    return word !== id
+      ? word
+      : sayText(
+          {
+            key: "marvel0.ctl.control_error.other",
+            params: { field: error.field, code: error.code },
+          },
+          t,
+        );
+  };
+  return (
+    <Notice tone="warning" testId="marvel0-control-errors">
+      <ul className="rg-scope">
+        {errors.map((error) => (
+          <li key={`${error.field}:${error.code}`}>{worded(error)}</li>
+        ))}
+      </ul>
+    </Notice>
   );
 }
 
@@ -435,6 +453,9 @@ export function StackPanel({
         <Notice tone="info" testId="marvel0-stack-disabled">
           {t("marvel0.ctl.disabled")}
         </Notice>
+      )}
+      {act && act.controlErrors.length > 0 && (
+        <ControlErrors errors={act.controlErrors} />
       )}
       {passive?.notices
         .filter((n) => "key" in n && n.key === "marvel0.stack.logout")
