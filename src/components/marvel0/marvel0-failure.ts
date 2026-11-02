@@ -82,6 +82,7 @@ const BY_CODE: Record<string, string> = {
   chunk_accel_lambda_invalid: "marvel0.err.chunk_accel_lambda_invalid",
   chunk_accel_alpha_invalid: "marvel0.err.chunk_accel_alpha_invalid",
   chunk_accel_alpha_arm_mismatch: "marvel0.err.chunk_accel_alpha_arm_mismatch",
+  chunk_accel_rule_arm_preset: "marvel0.err.chunk_accel_rule_arm_preset",
   chunk_accel_v3_field_needs_v3: "marvel0.err.chunk_accel_v3_field_needs_v3",
 
   min_z_not_positive: "marvel0.err.min_z_not_positive",
@@ -301,6 +302,7 @@ const FORM_CODES = new Set([
   "chunk_accel_lambda_invalid",
   "chunk_accel_alpha_invalid",
   "chunk_accel_alpha_arm_mismatch",
+  "chunk_accel_rule_arm_preset",
   "chunk_accel_v3_field_needs_v3",
 ]);
 

@@ -407,6 +407,8 @@ describe("fieldMessages", () => {
       ["chunk_accel_alpha_invalid", "chunk_accel_alpha", /0\.005/],
       ["chunk_accel_v3_field_needs_v3", "chunk_accel_lambda", /v3/],
       ["chunk_accel_v3_field_needs_v3", "chunk_accel_alpha", /v3/],
+      // the ramp rules belong to the rule choice, and say what is left
+      ["chunk_accel_rule_arm_preset", "chunk_accel_rule", /v3/],
     ];
     for (const [code, field, mention] of cases) {
       const messages = fieldMessages(fail(code, { field }, 422), {});
@@ -443,5 +445,7 @@ describe("fieldMessages", () => {
       expect(said, lang).not.toContain("{alpha}");
       expect(said, lang).toMatch(/anyspeedup/);
     }
+    // a continued run with the earlier controller's alpha can fix it: new command
+    expect(sayText(say, catalogue("en"))).toContain("make a new command");
   });
 });

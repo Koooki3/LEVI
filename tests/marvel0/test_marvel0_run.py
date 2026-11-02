@@ -160,8 +160,19 @@ class Machine:
         self.sockets = []
         self.profile = PRODUCT_CGROUP
         self.enabled = True
-        # the alpha the stack's arm controller forces on rule v3 (None: the lab's)
-        self.arm_alpha = None
+        # what the arm controller the stack runs asks of the form (arm_facts.py):
+        # nothing, as with the lab's controller; a test changes it
+        self.arm = {
+            "configured": None,
+            "enabled": False,
+            "running": None,
+            "status": "idle",
+            "alpha": None,
+            "problem": None,
+            "ramp_ok": True,
+            "suffix": "",
+        }
+        self.arm_asked = []
         self.deploy = self.ready_view()
         self.aeri = []
         self.environ = {
@@ -191,7 +202,7 @@ class Machine:
             aeri_runs=lambda: list(self.aeri),
             deploy_view=lambda: self.deploy,
             control_enabled=lambda: self.enabled,
-            arm_alpha=lambda: self.arm_alpha,
+            arm_facts=self.arm_facts,
             cgroup=lambda: self.profile,
             in_main_checkout=lambda: True,
             environ=self.environ,
@@ -209,6 +220,10 @@ class Machine:
         self.health()
 
     # ---- hooks of the host
+
+    def arm_facts(self, fresh=False):
+        self.arm_asked.append(fresh)
+        return dict(self.arm)
 
     def spawn(self, argv, *, stdin, stdout, env, cwd):
         self.spawned.append({"argv": argv, "env": dict(env), "cwd": cwd})

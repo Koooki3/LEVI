@@ -148,6 +148,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -327,6 +329,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -504,6 +508,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -669,6 +675,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -1103,6 +1111,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -1329,6 +1339,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -1549,6 +1561,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -1724,6 +1738,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -1903,6 +1919,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -2079,6 +2097,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -2255,6 +2275,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -2430,6 +2452,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -2799,6 +2823,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -2968,6 +2994,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -3676,6 +3704,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -3849,6 +3879,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -4022,6 +4054,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -4187,6 +4221,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -4345,6 +4381,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,
@@ -4514,6 +4552,8 @@
     },
     "run": {
       "age_s": 300.0,
+      "arm_controller": null,
+      "arm_preset": null,
       "chunk_accel": false,
       "chunk_accel_alpha": null,
       "chunk_accel_lambda": null,

@@ -63,6 +63,7 @@ from levi.setup import probes
 from levi.workspace import Workspace
 
 from . import (
+    arm_facts,
     command,
     deploy,
     inference_mode,
@@ -346,6 +347,8 @@ CHECK_OK = {
     "run_idle": "No client is running.",
     "policy_ready": "The policy server of this page is ready.",
     "policy_matches": "The policy server serves the model and inference mode of the form.",
+    "arm_controller_matches": "The arm controller A runs is known and is the one the "
+    "control file names.",
     "no_connection": "Nobody is connected to the policy server.",
     "no_session": "No evaluation session is active.",
     "arm_lock": "The arm lock is free.",
@@ -363,6 +366,9 @@ CHECK_REFUSE = {
     "policy_ready": "The policy server of this page is not ready ({state}).",
     "policy_matches": "The server serves {served} (mode {served_rtc}); the form "
     "asks for {wanted} (mode {wanted_rtc}).",
+    "arm_controller_matches": "Rule v3 is tied to the arm controller's filter, and "
+    "which controller A runs is not settled ({problem}): stop A, change the control "
+    "file, start A.",
     "no_connection": "{count} connection(s) to the policy server; another client "
     "may be running.",
     "no_session": "An evaluation session is active ({count}); end it first.",
@@ -1045,6 +1051,14 @@ def _run_view(f: Facts) -> dict | None:
         # rule v3 only (the phase clock); a record of any other run has neither
         "chunk_accel_lambda": _finite(rec.get("chunk_accel_lambda")),
         "chunk_accel_alpha": _finite(rec.get("chunk_accel_alpha")),
+        # the arm controller the page's A was started as when the run began
+        # (null: an A the page did not start; a record from before: also null)
+        "arm_controller": rec.get("arm_controller")
+        if rec.get("arm_controller") in ("lab", "anyspeedup")
+        else None,
+        "arm_preset": rec.get("arm_preset")
+        if isinstance(rec.get("arm_preset"), str)
+        else None,
         "prompt": rec.get("prompt"),
         # Only the original user-editable form, never argv, environment or paths.
         # The next-episode UI uses this after confirmed client exit; start still
@@ -1250,18 +1264,6 @@ def _control_enabled() -> bool:
         return False
 
 
-def _arm_alpha():
-    """The alpha the stack's arm controller forces on rule v3's phase clock
-    (``control_site.arm_alpha``): None for the lab's controller, without a valid
-    control file, or when it cannot be read."""
-    try:
-        from . import control_site
-
-        return control_site.arm_alpha()
-    except Exception:  # noqa: BLE001 - what cannot be read forces nothing
-        return None
-
-
 def _manual_enabled() -> bool:
     """Manual v1 is opt-in; checking the local switch never contacts hardware."""
     try:
@@ -1342,8 +1344,9 @@ class Host:
     # ``preview.HandbackFailed`` when the worker did not let the cameras go.
     camera_handback: Callable = preview.handback
     control_enabled: Callable = _control_enabled
-    # () -> the alpha rule v3 is forced to by the stack's arm controller, or None
-    arm_alpha: Callable = _arm_alpha
+    # (fresh) -> what the arm controller the stack runs asks of the form (the
+    # ``arm`` of the stack document, ``arm_facts.py``); never raises
+    arm_facts: Callable = arm_facts.read
     cgroup: Callable = stack._read_self_cgroup
     in_main_checkout: Callable = stack._in_main_checkout
     environ: dict = field(default_factory=lambda: os.environ)
@@ -1442,8 +1445,9 @@ def _fingerprint_body(body: dict) -> dict:
 # --- the supervisor -----------------------------------------------------------------------
 
 
-def _group_of(form_body: dict) -> str:
-    """The rollout group the form will have (``command._validate``'s default)."""
+def _group_of(form_body: dict, suffix: str = "") -> str:
+    """The rollout group the form will have (``command._validate``'s default,
+    with the arm controller's ``suffix``: ``command.Arm.suffix``)."""
     from . import models
 
     group = form_body.get("rollout_group")
@@ -1456,8 +1460,11 @@ def _group_of(form_body: dict) -> str:
             mode = inference_mode.resolve(form_body, default_rtc=not accel or v3)
         except inference_mode.ModeError as exc:
             raise FormRefuse(command.FormError(exc.code, exc.field, str(exc))) from exc
-        group = models.default_group(
-            str(form_body.get("model_id")), command.group_mode(accel, rule, mode)
+        group = (
+            models.default_group(
+                str(form_body.get("model_id")), command.group_mode(accel, rule, mode)
+            )
+            + suffix
         )
     return str(group)
 
@@ -1821,10 +1828,10 @@ class Supervisor:
     def _enabled(self) -> bool:
         return bool(self.host.control_enabled())
 
-    def _preflight(self, site, form=None, deep=False) -> list:
+    def _preflight(self, site, form=None, deep=False, facts=None) -> list:
         """The start checks, each read passively. ``form`` adds the ones that
         need it; ``deep`` also reads the automatic evaluation registry (too
-        much for a page that polls)."""
+        much for a page that polls). ``facts``: the arm controller's."""
         h = self.host
         now = h.now()
         rows = [check_row("client_enabled", self._enabled())]
@@ -1855,6 +1862,18 @@ class Supervisor:
                     served_rtc=inference_mode.recorded(served),
                     wanted=form.model_id,
                     wanted_rtc=form.inference_mode,
+                )
+            )
+        if form is not None and form.chunk_accel and form.chunk_accel_rule == "v3":
+            # Rule v3's alpha is tied to the arm controller A runs. The form was
+            # made with the facts of the running A (the file can be changed while
+            # A runs); when they say the file and A disagree, or A is not known
+            # (not started by this page, with the file naming the anyspeedup
+            # controller), nothing makes the alpha right: refused.
+            problem = arm_facts.problem_of(self._arm() if facts is None else facts)
+            rows.append(
+                check_row(
+                    "arm_controller_matches", problem is None, problem=problem or "none"
                 )
             )
         count = listener.get("established")
@@ -2094,9 +2113,19 @@ class Supervisor:
 
     # ---- start
 
-    def _form(self, site, form_body):
+    def _arm(self, fresh=False) -> dict:
+        """What the arm controller the stack runs asks of a form now (never
+        raises; a start looks at the stack again, ``fresh``)."""
+        try:
+            facts = self.host.arm_facts(fresh)
+        except Exception:  # noqa: BLE001 - what cannot be read is answered from the file
+            facts = None
+        return facts if isinstance(facts, dict) else arm_facts.from_file()
+
+    def _form(self, site, form_body, facts=None):
         """``(model, form, preview)`` of a form body; the preview is
-        ``command.render``'s, whose argv is the client's."""
+        ``command.render``'s, whose argv is the client's. ``facts``: the arm
+        controller's (``_arm``)."""
         if not isinstance(form_body, dict):
             raise Refuse("request_id_invalid")
         model = self.catalog.get(site, form_body.get("model_id"))
@@ -2105,9 +2134,9 @@ class Supervisor:
                 raise command.FormError(
                     "model_unknown", "model_id", "this model is not in the catalog"
                 )
-            arm_alpha = self.host.arm_alpha()
-            form = command.validate(site, model, form_body, arm_alpha)
-            preview = command.render(site, model, form, arm_alpha)
+            arm = arm_facts.arm_of(self._arm() if facts is None else facts)
+            form = command.validate(site, model, form_body, arm)
+            preview = command.render(site, model, form, arm)
         except command.FormError as exc:
             raise FormRefuse(exc) from None
         problem = min_z_problem(form.prompt, form.min_z)
@@ -2115,8 +2144,8 @@ class Supervisor:
             raise Refuse("min_z_below_task_floor", **problem)
         return model, form, preview
 
-    def _gate_checks(self, site, form, deep=True):
-        rows = self._preflight(site, form, deep=deep)
+    def _gate_checks(self, site, form, deep=True, facts=None):
+        rows = self._preflight(site, form, deep=deep, facts=facts)
         failing = [r for r in rows if r["level"] in ("refuse", "unknown")]
         if failing:
             raise Refuse(
@@ -2156,8 +2185,9 @@ class Supervisor:
         if not self._enabled():
             raise Refuse("run_disabled")
         self._require_real()
-        _, form, preview = self._form(site, body.get("form"))
-        rows = self._gate_checks(site, form)
+        facts = self._arm()
+        _, form, preview = self._form(site, body.get("form"), facts)
+        rows = self._gate_checks(site, form, facts=facts)
         issued = self.challenges.issue("start", {"form": _form_fingerprint(form)})
         return {
             "schema": RESULT_SCHEMA,
@@ -2178,7 +2208,12 @@ class Supervisor:
             raise Refuse("run_disabled")
         self._require_real()
         form_body = body.get("form")
-        phrase = PHRASES["start"].format(group=_group_of(form_body or {}))
+        # A start looks at the stack again: what A runs now decides the alpha, the
+        # ramp rules and the group (a challenge's answer may be seconds old).
+        facts = self._arm(fresh=True)
+        phrase = PHRASES["start"].format(
+            group=_group_of(form_body or {}, arm_facts.arm_of(facts).suffix)
+        )
         if body.get("confirm") != phrase:
             raise Refuse("confirm_required", phrase=phrase)
         attest = body.get("attest") or {}
@@ -2193,17 +2228,17 @@ class Supervisor:
             directory,
             request_id,
             body,
-            lambda mark_sent: self._start(site, directory, request_id, body),
+            lambda mark_sent: self._start(site, directory, request_id, body, facts),
         )
 
-    def _start(self, site, directory, request_id, body) -> dict:
+    def _start(self, site, directory, request_id, body, facts=None) -> dict:
         with self._mutex:
             if self._rec is None:
                 with contextlib.suppress(record.RecordCorrupt):
                     self._rec = record.read_record(directory)
             self._preflighting = True
         try:
-            _, form, preview_ = self._form(site, body.get("form"))
+            _, form, preview_ = self._form(site, body.get("form"), facts)
             self.challenges.consume(
                 body.get("challenge"), "start", {"form": _form_fingerprint(form)}
             )
@@ -2213,16 +2248,21 @@ class Supervisor:
             # does not exit refuses the start rather than failing the client.
             try:
                 with self.host.camera_handback():
-                    self._gate_checks(site, form)
-                    return self._launch(site, directory, request_id, form, preview_)
+                    self._gate_checks(site, form, facts=facts)
+                    return self._launch(
+                        site, directory, request_id, form, preview_, facts
+                    )
             except preview.HandbackFailed:
                 raise Refuse("camera_preview_busy") from None
         finally:
             with self._mutex:
                 self._preflighting = False
 
-    def _launch(self, site, directory, request_id, form, preview) -> dict:
+    def _launch(self, site, directory, request_id, form, preview, facts=None) -> dict:
         h = self.host
+        # which arm controller the page's own A was started as (None: an A the
+        # page did not start, or none: nothing is claimed)
+        arm_controller, arm_preset = arm_facts.running_of(facts)
         argv = h.client_argv(preview.argv)
         if not os.path.isdir(site.openpi_checkout) or not os.path.isfile(h.hostchild):
             raise Refuse("start_failed")
@@ -2269,6 +2309,8 @@ class Supervisor:
             "chunk_accel_rule": form.chunk_accel_rule,
             "chunk_accel_lambda": form.chunk_accel_lambda,
             "chunk_accel_alpha": form.chunk_accel_alpha,
+            "arm_controller": arm_controller,
+            "arm_preset": arm_preset,
             "prompt": form.prompt,
             "form": dataclasses.asdict(form),
             "argv_sha256": hashlib.sha256(

@@ -577,10 +577,17 @@ const WARNING_KEY: Record<string, string> = {
   chunk_accel_rule_v2: "marvel0.cmd.warning.chunk_accel_rule_v2",
   chunk_accel_v3: "marvel0.cmd.warning.chunk_accel_v3",
   chunk_accel_v3_alpha: "marvel0.cmd.warning.chunk_accel_v3_alpha",
+  chunk_accel_v3_alpha_anyspeedup:
+    "marvel0.cmd.warning.chunk_accel_v3_alpha_anyspeedup",
+  arm_controller_problem: "marvel0.cmd.warning.arm_controller_problem",
 };
 
 /** The warnings whose sentence holds numbers or names the backend sends as `params`. */
-const PARAM_WARNING = new Set(["chunk_accel_v3", "chunk_accel_v3_alpha"]);
+const PARAM_WARNING = new Set([
+  "chunk_accel_v3",
+  "chunk_accel_v3_alpha",
+  "chunk_accel_v3_alpha_anyspeedup",
+]);
 
 /** The warnings of a control rate other than the default: their sentences hold
  * numbers, which the backend sends as `params`. */

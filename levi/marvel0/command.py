@@ -229,6 +229,32 @@ class Form:
 
 
 @dataclass(frozen=True)
+class Arm:
+    """What the stack's arm controller asks of a form (``arm_facts.py`` builds
+    it from the stack document; the default asks nothing, which is how the lab's
+    controller, no control file and a stack that is off read).
+
+    ``alpha``: rule v3's setpoint filter is forced to it (an empty field is that
+    alpha, another is refused). ``ramp_ok``: rules v1 and v2 may be asked for
+    (they hard-code the lab controller's 0.2 s lag, ``accel.TAU``, so they are
+    only right for the lab's controller and for anyspeedup's ``today``).
+    ``suffix``: what the default rollout group gets, so that runs under
+    different controllers cannot mix (``_any-today``); a named group is kept.
+    ``anyspeedup``: the controller in question is the anyspeedup one (the
+    warning names the tool that reads its filter back)."""
+
+    alpha: float | None = None
+    ramp_ok: bool = True
+    suffix: str = ""
+    anyspeedup: bool = False
+
+
+NO_ARM = (
+    Arm()
+)  # asks nothing: the lab's controller, no control file, a stack that is off
+
+
+@dataclass(frozen=True)
 class Preview:
     argv: list
     env: list
@@ -498,16 +524,16 @@ def _phase_choice(body, field, options, default, code, label):
     return float(value)
 
 
-def _phase_numbers(body, v3, mode, arm_alpha=None):
+def _phase_numbers(body, v3, mode, arm=NO_ARM):
     """``(lambda_max, alpha)`` of rule v3, or ``(None, None)`` for every other
     form (which then refuses both fields). Rule v3 also needs its inference mode
     to be one the page offers it for.
 
-    ``arm_alpha``: the setpoint filter alpha of the arm controller the stack
-    starts, when the page starts the anyspeedup one (``control_site``); None for
-    the lab's controller, which leaves the choice as it always was. The phase
-    clock leads the arm by the controller's lag, so the alpha is forced to it:
-    an empty field is that alpha, another one is refused."""
+    ``arm.alpha``: the setpoint filter alpha of the arm controller the stack
+    runs, when it is the anyspeedup one; None for the lab's controller, which
+    leaves the choice as it always was. The phase clock leads the arm by the
+    controller's lag, so the alpha is forced to it: an empty field is that
+    alpha, another one is refused."""
     fields = ("chunk_accel_lambda", "chunk_accel_alpha")
     if not v3:
         for field in fields:
@@ -540,12 +566,12 @@ def _phase_numbers(body, v3, mode, arm_alpha=None):
                 "chunk_accel_alpha",
                 inference_mode.CHUNK_ACCEL_V3_ALPHAS,
                 inference_mode.CHUNK_ACCEL_V3_ALPHA_DEFAULT
-                if arm_alpha is None
-                else arm_alpha,
+                if arm.alpha is None
+                else arm.alpha,
                 "chunk_accel_alpha_invalid",
                 "the controller filter alpha",
             ),
-            arm_alpha,
+            arm.alpha,
         ),
     )
 
@@ -560,15 +586,16 @@ def _arm_alpha(alpha, arm_alpha):
         raise FormError(
             "chunk_accel_alpha_arm_mismatch",
             "chunk_accel_alpha",
-            "this stack starts the anyspeedup arm controller, whose setpoint filter alpha is "
+            "the anyspeedup arm controller of this stack has the setpoint filter alpha "
             f"{marvel0_site.number(arm_alpha)}: the phase clock has to be tuned for the same alpha "
-            "(leave the field empty, or choose that one)",
+            "(leave the field empty, or choose that one). If this continues an earlier run, "
+            "the arm controller changed since it began: make a new command",
             alpha=marvel0_site.number(arm_alpha),
         )
     return alpha
 
 
-def _validate(site, restricted, model_id, body, arm_alpha=None):
+def _validate(site, restricted, model_id, body, arm=NO_ARM):
     for key in body:
         if key not in FIELDS:
             raise FormError(
@@ -686,9 +713,15 @@ def _validate(site, restricted, model_id, body, arm_alpha=None):
             "chunk_accel_rule",
             "rule v2 and v3 belong to in-chunk acceleration: turn it on, or leave the rule at v1",
         )
-    phase_lambda, phase_alpha = _phase_numbers(
-        body, accel and rule == "v3", mode, arm_alpha
-    )
+    if accel and rule != "v3" and not arm.ramp_ok:
+        raise FormError(
+            "chunk_accel_rule_arm_preset",
+            "chunk_accel_rule",
+            "rules v1 and v2 hard-code the lab controller's 0.2 s lag; with the "
+            "anyspeedup controller at a preset other than today only rule v3 (or no "
+            "acceleration) is offered",
+        )
+    phase_lambda, phase_alpha = _phase_numbers(body, accel and rule == "v3", mode, arm)
     rtc = mode == "rtc"
     horizon = _whole(
         body,
@@ -703,7 +736,7 @@ def _validate(site, restricted, model_id, body, arm_alpha=None):
     group = body.get("rollout_group")
     if group is None:
         # v2's runs are filed apart from v1's, so the two can be compared
-        group = default_group(model_id, group_mode(accel, rule, mode))
+        group = default_group(model_id, group_mode(accel, rule, mode)) + arm.suffix
     if not isinstance(group, str):
         raise FormError("invalid_type", "rollout_group", "rollout_group must be text")
     if not _GROUP.fullmatch(group) or ".." in group:
@@ -756,15 +789,14 @@ def _validate(site, restricted, model_id, body, arm_alpha=None):
     )
 
 
-def validate(site, model, body, arm_alpha=None) -> Form:
+def validate(site, model, body, arm=NO_ARM) -> Form:
     """The ``Form`` of a request body for this model, with defaults filled in;
-    raises ``FormError``. A key outside the form is an error. ``arm_alpha`` is
-    the alpha of the arm controller the stack starts when it is not the lab's
-    (``control_site.arm_alpha()``); rule v3's alpha must match it."""
+    raises ``FormError``. A key outside the form is an error. ``arm`` is what
+    the stack's arm controller asks of the form (``Arm``)."""
     named = body.get("model_id")
     if named is not None and named != model.id:
         raise FormError("model_unknown", "model_id", "the body names another model")
-    form = _validate(site, model.restricted, model.id, body, arm_alpha)
+    form = _validate(site, model.restricted, model.id, body, arm)
     if form.inference_mode == "vlash" and not inference_mode.capable(model.config):
         raise FormError(
             "vlash_model_incompatible",
@@ -910,7 +942,7 @@ def _read_back(argv) -> dict:
     return found
 
 
-def verify_argv(argv, site, restricted, arm_alpha=None) -> None:
+def verify_argv(argv, site, restricted, arm=NO_ARM) -> None:
     """Refuse (``SelfCheckError``) an argv that is not exactly what the site
     and the form allow: the prefix, then known flags only, none twice, the right
     count of numbers after a tuple flag, the form's values valid again (for a
@@ -980,7 +1012,7 @@ def verify_argv(argv, site, restricted, arm_alpha=None) -> None:
             body["chunk_accel_rule"] = found["--accel-rule"]
         if "--control-hz" in found:
             body["control_hz"] = int(found["--control-hz"])
-        form = _validate(site, restricted, None, body, arm_alpha)
+        form = _validate(site, restricted, None, body, arm)
     except (KeyError, ValueError) as exc:
         raise SelfCheckError(
             f"a flag is missing or malformed ({type(exc).__name__})"
@@ -1114,7 +1146,28 @@ def _rate_warnings(site, form) -> list:
     return out
 
 
-def _warnings(site, model, form) -> list:
+ARM_PROBLEM_TEXT = {
+    "changed": "the control file names another arm controller than the one A was "
+    "started as",
+    "foreign": "the control file names the anyspeedup arm controller, but A was not "
+    "started by this page",
+    "unknown": "it could not be told which arm controller A runs",
+}
+
+
+def arm_warning(problem) -> dict:
+    """The preview's warning that rule v3 would be refused at the client's
+    start (the hosted start checks it, ``arm_controller_matches``)."""
+    return _warning(
+        "arm_controller_problem",
+        "Rule v3 will be refused when the client starts: "
+        + ARM_PROBLEM_TEXT.get(problem, ARM_PROBLEM_TEXT["unknown"])
+        + ". Stop A, change the control file, start A.",
+        problem=str(problem),
+    )
+
+
+def _warnings(site, model, form, arm=NO_ARM) -> list:
     out = []
     if not model.verified:
         out.append(
@@ -1139,15 +1192,28 @@ def _warnings(site, model, form) -> list:
                 lambda_max=marvel0_site.number(form.chunk_accel_lambda),
             )
         )
-        out.append(
-            _warning(
-                "chunk_accel_v3_alpha",
-                f"The phase clock is tuned for a controller setpoint filter of alpha "
-                f"{marvel0_site.number(form.chunk_accel_alpha)}: it must be what `set_clip.py --show` reads back, "
-                "or the arm lags the targets by another amount.",
-                alpha=marvel0_site.number(form.chunk_accel_alpha),
+        if arm.anyspeedup:
+            # the anyspeedup controller's own read-back tool (set_clip.py is the lab's)
+            out.append(
+                _warning(
+                    "chunk_accel_v3_alpha_anyspeedup",
+                    f"The phase clock is tuned for a controller setpoint filter of alpha "
+                    f"{marvel0_site.number(form.chunk_accel_alpha)}: it must be what "
+                    "`set_shaping.py --show` reads back from the anyspeedup controller, "
+                    "or the arm lags the targets by another amount.",
+                    alpha=marvel0_site.number(form.chunk_accel_alpha),
+                )
             )
-        )
+        else:
+            out.append(
+                _warning(
+                    "chunk_accel_v3_alpha",
+                    f"The phase clock is tuned for a controller setpoint filter of alpha "
+                    f"{marvel0_site.number(form.chunk_accel_alpha)}: it must be what `set_clip.py --show` reads back, "
+                    "or the arm lags the targets by another amount.",
+                    alpha=marvel0_site.number(form.chunk_accel_alpha),
+                )
+            )
     elif form.chunk_accel:
         out.append(
             _warning(
@@ -1178,7 +1244,7 @@ def _warnings(site, model, form) -> list:
     return out + _rate_warnings(site, form)
 
 
-def render(site, model, form, arm_alpha=None) -> Preview:
+def render(site, model, form, arm=NO_ARM) -> Preview:
     """The command for this form as an argv and as text to copy. Checks its own
     output (``verify_argv``) before returning it, against the same arm
     controller ``validate`` was given."""
@@ -1186,7 +1252,7 @@ def render(site, model, form, arm_alpha=None) -> Preview:
         raise ValueError("the form is for another model")
     lines = _lines(site, form)
     argv = [token for line in lines for token in line]
-    verify_argv(argv, site, model.restricted, arm_alpha)
+    verify_argv(argv, site, model.restricted, arm)
     text = " \\\n  ".join(
         [f"cd {quote(site.openpi_checkout)} &&"]
         + [" ".join(quote(t) for t in line) for line in lines]
@@ -1196,6 +1262,6 @@ def render(site, model, form, arm_alpha=None) -> Preview:
         env=[NO_PROXY],
         cwd=site.openpi_checkout,
         command=text,
-        warnings=_warnings(site, model, form),
+        warnings=_warnings(site, model, form, arm),
         control=control_summary(site, form),
     )
