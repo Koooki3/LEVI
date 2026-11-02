@@ -81,6 +81,7 @@ const BY_CODE: Record<string, string> = {
   chunk_accel_v3_mode_disabled: "marvel0.err.chunk_accel_v3_mode_disabled",
   chunk_accel_lambda_invalid: "marvel0.err.chunk_accel_lambda_invalid",
   chunk_accel_alpha_invalid: "marvel0.err.chunk_accel_alpha_invalid",
+  chunk_accel_alpha_arm_mismatch: "marvel0.err.chunk_accel_alpha_arm_mismatch",
   chunk_accel_v3_field_needs_v3: "marvel0.err.chunk_accel_v3_field_needs_v3",
 
   min_z_not_positive: "marvel0.err.min_z_not_positive",
@@ -188,6 +189,8 @@ function paramsOf(f: ApiFailure): Params {
             .filter((option): option is number => option !== null)
             .join(", ") || "?",
       };
+    case "chunk_accel_alpha_arm_mismatch":
+      return { alpha: show(x.alpha) };
     case "min_z_below_floor":
       return { floor: show(x.floor) };
     case "min_z_above_home":
@@ -297,6 +300,7 @@ const FORM_CODES = new Set([
   "chunk_accel_v3_mode_disabled",
   "chunk_accel_lambda_invalid",
   "chunk_accel_alpha_invalid",
+  "chunk_accel_alpha_arm_mismatch",
   "chunk_accel_v3_field_needs_v3",
 ]);
 

@@ -31,6 +31,8 @@ def machine(tmp_path, monkeypatch):
     that has only the routes under test."""
     make_checkpoints(tmp_path)
     monkeypatch.setenv("LEVI_MARVEL0_SITE", str(write_site(tmp_path)))
+    # (no control file: the preview must not read the machine's own)
+    monkeypatch.setenv("LEVI_MARVEL0_CONTROL", str(tmp_path / "no-control.toml"))
     marvel0_site.clear_cache()
     models.cache_clear()
     app = FastAPI()
@@ -379,7 +381,7 @@ def test_a_number_that_is_not_finite_is_not_a_min_z(machine, number):
 def test_a_failed_self_check_is_a_500_with_a_code_and_no_command(machine, monkeypatch):
     client, tmp_path = machine
 
-    def broken(argv, site, restricted):
+    def broken(argv, site, restricted, arm_alpha=None):
         raise command.SelfCheckError("test")
 
     monkeypatch.setattr(command, "verify_argv", broken)

@@ -6,7 +6,10 @@
   and the control-rate options with the numbers behind them;
 - ``POST /api/levi/marvel0/command/preview``: the demo client command for a form,
   as text to copy (``command.py``). **Nothing is executed, started, connected
-  to or written**; a person pastes the command into a terminal.
+  to or written**; a person pastes the command into a terminal. When the control
+  file says the stack starts the anyspeedup arm controller, rule v3's
+  ``chunk_accel_alpha`` is the one that controller's preset sets (an empty field
+  is that alpha, another is refused: 422 ``chunk_accel_alpha_arm_mismatch``).
 
 The local authentication is the service's own (the web UI token; a Bearer
 credential is refused by its middleware), as for ``GET /api/levi/marvel0/status``.
@@ -22,7 +25,7 @@ from typing import Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict
 
-from . import command, models
+from . import command, control_site, models
 from . import site as marvel0_site
 from .errors import fail
 
@@ -86,9 +89,13 @@ def command_preview(body: PreviewBody):
             "this model is not offered",
             field="model_id",
         )
+    # The phase clock's alpha follows the arm controller the stack starts
+    # (control file); with the lab's controller, or without a control file, this
+    # is None and nothing is forced.
+    arm_alpha = control_site.arm_alpha()
     try:
-        form = command.validate(site, model, body.model_dump())
-        preview = command.render(site, model, form)
+        form = command.validate(site, model, body.model_dump(), arm_alpha)
+        preview = command.render(site, model, form, arm_alpha)
     except command.FormError as exc:
         raise fail(422, exc.code, exc.message, field=exc.field, **exc.extra) from exc
     except command.SelfCheckError as exc:

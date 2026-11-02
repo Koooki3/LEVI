@@ -1250,6 +1250,18 @@ def _control_enabled() -> bool:
         return False
 
 
+def _arm_alpha():
+    """The alpha the stack's arm controller forces on rule v3's phase clock
+    (``control_site.arm_alpha``): None for the lab's controller, without a valid
+    control file, or when it cannot be read."""
+    try:
+        from . import control_site
+
+        return control_site.arm_alpha()
+    except Exception:  # noqa: BLE001 - what cannot be read forces nothing
+        return None
+
+
 def _manual_enabled() -> bool:
     """Manual v1 is opt-in; checking the local switch never contacts hardware."""
     try:
@@ -1330,6 +1342,8 @@ class Host:
     # ``preview.HandbackFailed`` when the worker did not let the cameras go.
     camera_handback: Callable = preview.handback
     control_enabled: Callable = _control_enabled
+    # () -> the alpha rule v3 is forced to by the stack's arm controller, or None
+    arm_alpha: Callable = _arm_alpha
     cgroup: Callable = stack._read_self_cgroup
     in_main_checkout: Callable = stack._in_main_checkout
     environ: dict = field(default_factory=lambda: os.environ)
@@ -2091,8 +2105,9 @@ class Supervisor:
                 raise command.FormError(
                     "model_unknown", "model_id", "this model is not in the catalog"
                 )
-            form = command.validate(site, model, form_body)
-            preview = command.render(site, model, form)
+            arm_alpha = self.host.arm_alpha()
+            form = command.validate(site, model, form_body, arm_alpha)
+            preview = command.render(site, model, form, arm_alpha)
         except command.FormError as exc:
             raise FormRefuse(exc) from None
         problem = min_z_problem(form.prompt, form.min_z)

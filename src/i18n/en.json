@@ -6393,6 +6393,7 @@
   "marvel0.err.chunk_accel_v3_mode_disabled": "Rule v3 is not offered with this inference mode. Choose another mode, or turn acceleration off.",
   "marvel0.err.chunk_accel_lambda_invalid": "The most rows per tick must be 2.0, 2.5 or 3.0.",
   "marvel0.err.chunk_accel_alpha_invalid": "The controller filter must be 0.005 or 0.01.",
+  "marvel0.err.chunk_accel_alpha_arm_mismatch": "This stack starts the anyspeedup arm controller, whose setpoint filter alpha is {alpha}. The phase clock has to be tuned for the same alpha: leave the field empty, or choose {alpha}.",
   "marvel0.err.chunk_accel_v3_field_needs_v3": "This value belongs to rule v3. Choose rule v3, or leave it empty.",
   "marvel0.cmd.warning.chunk_accel_v3": "In-chunk acceleration v3 (the phase clock) is experimental and has not run on the real robot: with {mode} inference the schedule advances up to {lambda_max} chunk rows per tick, so the arm moves faster between gripper events. Keep a hand on the physical e-stop.",
   "marvel0.cmd.warning.chunk_accel_v3_alpha": "The phase clock is tuned for a controller setpoint filter α of {alpha}. It must be what set_clip.py --show reads back, or the arm lags the targets by another amount.",

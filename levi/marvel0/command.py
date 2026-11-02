@@ -498,10 +498,16 @@ def _phase_choice(body, field, options, default, code, label):
     return float(value)
 
 
-def _phase_numbers(body, v3, mode):
+def _phase_numbers(body, v3, mode, arm_alpha=None):
     """``(lambda_max, alpha)`` of rule v3, or ``(None, None)`` for every other
     form (which then refuses both fields). Rule v3 also needs its inference mode
-    to be one the page offers it for."""
+    to be one the page offers it for.
+
+    ``arm_alpha``: the setpoint filter alpha of the arm controller the stack
+    starts, when the page starts the anyspeedup one (``control_site``); None for
+    the lab's controller, which leaves the choice as it always was. The phase
+    clock leads the arm by the controller's lag, so the alpha is forced to it:
+    an empty field is that alpha, another one is refused."""
     fields = ("chunk_accel_lambda", "chunk_accel_alpha")
     if not v3:
         for field in fields:
@@ -528,18 +534,41 @@ def _phase_numbers(body, v3, mode):
             "chunk_accel_lambda_invalid",
             "the most rows per tick",
         ),
-        _phase_choice(
-            body,
-            "chunk_accel_alpha",
-            inference_mode.CHUNK_ACCEL_V3_ALPHAS,
-            inference_mode.CHUNK_ACCEL_V3_ALPHA_DEFAULT,
-            "chunk_accel_alpha_invalid",
-            "the controller filter alpha",
+        _arm_alpha(
+            _phase_choice(
+                body,
+                "chunk_accel_alpha",
+                inference_mode.CHUNK_ACCEL_V3_ALPHAS,
+                inference_mode.CHUNK_ACCEL_V3_ALPHA_DEFAULT
+                if arm_alpha is None
+                else arm_alpha,
+                "chunk_accel_alpha_invalid",
+                "the controller filter alpha",
+            ),
+            arm_alpha,
         ),
     )
 
 
-def _validate(site, restricted, model_id, body):
+def _arm_alpha(alpha, arm_alpha):
+    """``alpha`` once it is known to match the arm controller the stack starts
+    (``arm_alpha``; None: the lab's, nothing to match). An alpha the page does
+    not offer cannot match either."""
+    if arm_alpha is None:
+        return alpha
+    if alpha != arm_alpha or alpha not in inference_mode.CHUNK_ACCEL_V3_ALPHAS:
+        raise FormError(
+            "chunk_accel_alpha_arm_mismatch",
+            "chunk_accel_alpha",
+            "this stack starts the anyspeedup arm controller, whose setpoint filter alpha is "
+            f"{marvel0_site.number(arm_alpha)}: the phase clock has to be tuned for the same alpha "
+            "(leave the field empty, or choose that one)",
+            alpha=marvel0_site.number(arm_alpha),
+        )
+    return alpha
+
+
+def _validate(site, restricted, model_id, body, arm_alpha=None):
     for key in body:
         if key not in FIELDS:
             raise FormError(
@@ -657,7 +686,9 @@ def _validate(site, restricted, model_id, body):
             "chunk_accel_rule",
             "rule v2 and v3 belong to in-chunk acceleration: turn it on, or leave the rule at v1",
         )
-    phase_lambda, phase_alpha = _phase_numbers(body, accel and rule == "v3", mode)
+    phase_lambda, phase_alpha = _phase_numbers(
+        body, accel and rule == "v3", mode, arm_alpha
+    )
     rtc = mode == "rtc"
     horizon = _whole(
         body,
@@ -725,13 +756,15 @@ def _validate(site, restricted, model_id, body):
     )
 
 
-def validate(site, model, body) -> Form:
+def validate(site, model, body, arm_alpha=None) -> Form:
     """The ``Form`` of a request body for this model, with defaults filled in;
-    raises ``FormError``. A key outside the form is an error."""
+    raises ``FormError``. A key outside the form is an error. ``arm_alpha`` is
+    the alpha of the arm controller the stack starts when it is not the lab's
+    (``control_site.arm_alpha()``); rule v3's alpha must match it."""
     named = body.get("model_id")
     if named is not None and named != model.id:
         raise FormError("model_unknown", "model_id", "the body names another model")
-    form = _validate(site, model.restricted, model.id, body)
+    form = _validate(site, model.restricted, model.id, body, arm_alpha)
     if form.inference_mode == "vlash" and not inference_mode.capable(model.config):
         raise FormError(
             "vlash_model_incompatible",
@@ -877,7 +910,7 @@ def _read_back(argv) -> dict:
     return found
 
 
-def verify_argv(argv, site, restricted) -> None:
+def verify_argv(argv, site, restricted, arm_alpha=None) -> None:
     """Refuse (``SelfCheckError``) an argv that is not exactly what the site
     and the form allow: the prefix, then known flags only, none twice, the right
     count of numbers after a tuple flag, the form's values valid again (for a
@@ -947,7 +980,7 @@ def verify_argv(argv, site, restricted) -> None:
             body["chunk_accel_rule"] = found["--accel-rule"]
         if "--control-hz" in found:
             body["control_hz"] = int(found["--control-hz"])
-        form = _validate(site, restricted, None, body)
+        form = _validate(site, restricted, None, body, arm_alpha)
     except (KeyError, ValueError) as exc:
         raise SelfCheckError(
             f"a flag is missing or malformed ({type(exc).__name__})"
@@ -1145,14 +1178,15 @@ def _warnings(site, model, form) -> list:
     return out + _rate_warnings(site, form)
 
 
-def render(site, model, form) -> Preview:
+def render(site, model, form, arm_alpha=None) -> Preview:
     """The command for this form as an argv and as text to copy. Checks its own
-    output (``verify_argv``) before returning it."""
+    output (``verify_argv``) before returning it, against the same arm
+    controller ``validate`` was given."""
     if form.model_id != model.id:
         raise ValueError("the form is for another model")
     lines = _lines(site, form)
     argv = [token for line in lines for token in line]
-    verify_argv(argv, site, model.restricted)
+    verify_argv(argv, site, model.restricted, arm_alpha)
     text = " \\\n  ".join(
         [f"cd {quote(site.openpi_checkout)} &&"]
         + [" ".join(quote(t) for t in line) for line in lines]

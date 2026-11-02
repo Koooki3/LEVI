@@ -6393,6 +6393,7 @@
   "marvel0.err.chunk_accel_v3_mode_disabled": "这种推理模式下不提供规则 v3。请换一种模式，或关闭加速。",
   "marvel0.err.chunk_accel_lambda_invalid": "每拍最多走几行只能是 2.0、2.5 或 3.0。",
   "marvel0.err.chunk_accel_alpha_invalid": "控制器滤波系数只能是 0.005 或 0.01。",
+  "marvel0.err.chunk_accel_alpha_arm_mismatch": "这套机械臂栈启动的是 anyspeedup 控制器，它的设定点滤波系数是 {alpha}。相位时钟必须按同一个系数调：把这一栏留空，或选 {alpha}。",
   "marvel0.err.chunk_accel_v3_field_needs_v3": "这个值只属于规则 v3。请选规则 v3，或把它留空。",
   "marvel0.cmd.warning.chunk_accel_v3": "chunk 内加速 v3（相位时钟）是实验功能，还没有在真机上跑过：{mode} 推理下每拍最多推进 {lambda_max} 行，夹爪动作之间手臂会走得更快。请把手放在实体急停上。",
   "marvel0.cmd.warning.chunk_accel_v3_alpha": "相位时钟是按控制器设定值滤波系数 α = {alpha} 调的。它必须等于 set_clip.py --show 读回的值，否则手臂落后目标的程度会不同。",

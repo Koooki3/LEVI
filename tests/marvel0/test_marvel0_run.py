@@ -160,6 +160,8 @@ class Machine:
         self.sockets = []
         self.profile = PRODUCT_CGROUP
         self.enabled = True
+        # the alpha the stack's arm controller forces on rule v3 (None: the lab's)
+        self.arm_alpha = None
         self.deploy = self.ready_view()
         self.aeri = []
         self.environ = {
@@ -189,6 +191,7 @@ class Machine:
             aeri_runs=lambda: list(self.aeri),
             deploy_view=lambda: self.deploy,
             control_enabled=lambda: self.enabled,
+            arm_alpha=lambda: self.arm_alpha,
             cgroup=lambda: self.profile,
             in_main_checkout=lambda: True,
             environ=self.environ,

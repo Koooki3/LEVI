@@ -1000,10 +1000,13 @@ def test_the_self_check_is_what_render_ends_with(tmp_path, monkeypatch):
     site, mdl, form = form_for(tmp_path)
     calls = []
     monkeypatch.setattr(
-        C, "verify_argv", lambda argv, s, r: calls.append((list(argv), s, r))
+        C, "verify_argv", lambda argv, s, r, a: calls.append((list(argv), s, r, a))
     )
     preview = C.render(site, mdl, form)
-    assert calls == [(preview.argv, site, mdl.restricted)]
+    assert calls == [(preview.argv, site, mdl.restricted, None)]
+    # (the arm controller's alpha, when there is one, is checked against too)
+    preview = C.render(site, mdl, form, 0.005)
+    assert calls[-1] == (preview.argv, site, mdl.restricted, 0.005)
 
 
 def test_render_refuses_a_form_for_another_model(tmp_path):

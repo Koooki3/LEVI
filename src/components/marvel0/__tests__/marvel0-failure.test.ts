@@ -423,4 +423,25 @@ describe("fieldMessages", () => {
         fieldMessages(fail("invalid_type", { field }, 422), {})[field].say,
       ).toEqual({ key: "marvel0.err.invalid_type" });
   });
+
+  test("an alpha that does not match the stack's arm controller names the alpha it must be", () => {
+    const messages = fieldMessages(
+      fail(
+        "chunk_accel_alpha_arm_mismatch",
+        { field: "chunk_accel_alpha", alpha: "0.01" },
+        422,
+      ),
+      {},
+    );
+    expect(Object.keys(messages)).toEqual(["chunk_accel_alpha"]);
+    const say = messages.chunk_accel_alpha.say!;
+    expect(say.key).toBe("marvel0.err.chunk_accel_alpha_arm_mismatch");
+    for (const lang of ["en", "zh"] as const) {
+      const said = sayText(say, catalogue(lang));
+      expect(said, lang).not.toMatch(/^marvel0\./);
+      expect(said, lang).toContain("0.01");
+      expect(said, lang).not.toContain("{alpha}");
+      expect(said, lang).toMatch(/anyspeedup/);
+    }
+  });
 });
