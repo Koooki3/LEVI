@@ -20,6 +20,16 @@ The file must be a regular file of the current user that no one else can
 write, and it is read through ``probes.read_regular`` and parsed again only
 when its identity, modification time or size changes.
 
+The arm controller is a choice of the stack, not of the machine: ``arm_controller``
+is ``lab`` (the default: the lab's ``serl_franka_controllers_ros2`` launch, exactly
+as before) or ``anyspeedup`` (the anyspeedup package's launch, built in its own
+workspace under ``anyspeedup_root``), and only the page's terminal A follows it;
+every terminal started by hand keeps the lab's controller. ``arm_preset`` names the
+anyspeedup controller's preset (``today`` or ``S1``; ``S2`` is refused until the
+engine has the shaped profile it needs) and ``anyspeedup_root`` its checkout; both
+are only read when ``arm_controller`` is ``anyspeedup``, but a file is checked for
+all three whichever is chosen, so that flipping the one word cannot reveal a typo.
+
 What the switches are worth: they stop a page that was never meant to act (a
 worktree instance, a fresh checkout, a second LEVI). They do not stop another
 program of the same account, which can edit this file; the real barriers are
@@ -62,6 +72,27 @@ JOINT_LIMIT = 3.2  # radians; no FR3 joint goes further
 # policy server, the learner and the tunnel (root AGENTS.md); 5001 is the
 # second robot server.
 FORBIDDEN_PORTS = (5001, 5100, 7470, 8000)
+# The arm controller the page's terminal A starts. ``lab`` is what every stack
+# has always run; ``anyspeedup`` is the dedicated plugin of the anyspeedup flow
+# (``controllers/fr3_serl`` of the anyspeedup checkout, its own colcon workspace).
+ARM_CONTROLLERS = ("lab", "anyspeedup")
+ARM_CONTROLLER_DEFAULT = "lab"
+ARM_PRESETS = ("today", "S1")
+ARM_PRESET_DEFAULT = "today"
+# The controller also has a preset ``S2`` (setpoint filter alpha 0.02). The v3
+# phase clock of the client can only be tuned for the alphas of
+# ``inference_mode.CHUNK_ACCEL_V3_ALPHAS`` and the engine has no shaped profile
+# for S2's lag yet (it comes after a real-arm check of S1), so a file that names
+# it is refused with this code rather than started with a lag model that does not
+# match.
+ARM_PRESETS_REFUSED = {"S2": "needs_shaped_profile"}
+# The setpoint filter alpha each offered preset sets in the controller
+# (``controllers/fr3_serl/presets.py``: today 0.005, S1 0.01). The client's
+# ``--phase-alpha`` must be the same number, or the phase clock leads the arm by
+# the wrong lag: ``command.py`` forces it (a test compares this table with
+# ``inference_mode.CHUNK_ACCEL_V3_ALPHAS`` and, where the checkout is there,
+# with ``presets.py``).
+ARM_PRESET_ALPHA = {"today": 0.005, "S1": 0.01}
 
 # What systemd would expand or split on, in a path that reaches a unit.
 _UNSAFE = re.compile(r"[$%\s\x00-\x1f\x7f]")
@@ -81,6 +112,9 @@ com_port           = "/dev/serial/by-id/usb-FTDI_USB_TO_RS-485_XXXXXXXX-if00-por
 server_port        = 5000                        # the robot server's loopback port
 reset_joint_target = [-0.8063, -0.0623, 0.9130, -2.4036, 0.0580, 2.3011, 1.5844]
 marker_wait_s      = 3                           # 2 to 600: the least age of the marker before A starts (the page also waits for heavy jobs to end)
+arm_controller     = "lab"                       # "lab" (default) or "anyspeedup": which arm controller the page's terminal A starts
+# arm_preset       = "today"                     # anyspeedup only: "today" (alpha 0.005) or "S1" (alpha 0.01); "S2" is refused for now
+# anyspeedup_root  = "/path/to/anyspeedup"       # anyspeedup only, required then: the checkout with controllers/fr3_serl/ (built by its build.sh)
 
 [client]
 enabled            = false                      # true: the page may host the evaluation client
@@ -108,6 +142,31 @@ class StackControl:
     server_port: int = DEFAULT_SERVER_PORT
     reset_joint_target: tuple = ()
     marker_wait_s: float = DEFAULT_MARKER_WAIT_S
+    # Which arm controller terminal A starts (see the module doc). The preset and
+    # the root are kept as the file wrote them whichever controller is chosen;
+    # ``arm_preset_in_use`` and ``arm_alpha`` say what is in force.
+    arm_controller: str = ARM_CONTROLLER_DEFAULT
+    arm_preset: str = ARM_PRESET_DEFAULT
+    anyspeedup_root: str | None = None
+
+    @property
+    def anyspeedup(self) -> bool:
+        return self.arm_controller == "anyspeedup"
+
+    @property
+    def arm_preset_in_use(self) -> str | None:
+        """The preset of the controller terminal A starts; None for the lab's."""
+        return self.arm_preset if self.anyspeedup else None
+
+    @property
+    def arm_alpha(self) -> float | None:
+        """The controller's setpoint filter alpha that the v3 phase clock has
+        to be tuned for, when the page starts the anyspeedup controller and the
+        stack is switched on; None otherwise (the lab's controller: nothing is
+        forced; a stack the page does not start: its controller is not known)."""
+        if not (self.enabled and self.anyspeedup):
+            return None
+        return ARM_PRESET_ALPHA.get(self.arm_preset)
 
     @property
     def health_file(self) -> str | None:
@@ -227,6 +286,25 @@ def _seconds(value):
     return float(value)
 
 
+def _choice(options):
+    def check(value):
+        if not isinstance(value, str):
+            raise _Bad("type")
+        if value not in options:
+            raise _Bad("range")
+        return value
+
+    return check
+
+
+def _arm_preset(value):
+    """A preset the page can start. ``S2`` gets a code of its own, so that the
+    reason (the engine has no shaped profile for it) is not a bare "range"."""
+    if isinstance(value, str) and value in ARM_PRESETS_REFUSED:
+        raise _Bad(ARM_PRESETS_REFUSED[value])
+    return _choice(ARM_PRESETS)(value)
+
+
 STACK_CHECKS = {
     "enabled": _flag,
     "franka_control": _path,
@@ -235,6 +313,9 @@ STACK_CHECKS = {
     "server_port": _port,
     "reset_joint_target": _pose,
     "marker_wait_s": _seconds,
+    "arm_controller": _choice(ARM_CONTROLLERS),
+    "arm_preset": _arm_preset,
+    "anyspeedup_root": _path,
 }
 # The machine values a switched-on stack cannot do without.
 STACK_NEEDED = ("franka_control", "robot_ip", "com_port", "reset_joint_target")
@@ -308,6 +389,11 @@ def parse(data, origin="main_checkout") -> ControlSite:
             for key in STACK_NEEDED
             if key not in stack
         )
+    # The anyspeedup controller cannot be started without its checkout. This is
+    # asked whether or not the stack is on: a half-chosen controller is a file to
+    # fix, not one to show a controller for that cannot start.
+    if stack.get("arm_controller") == "anyspeedup" and "anyspeedup_root" not in stack:
+        errors.append({"field": "stack.anyspeedup_root", "code": "missing"})
     if errors:
         raise ControlSiteError(errors)
     aeri, aeri_errors = _aeri_section(data)
@@ -422,11 +508,14 @@ def load(environ=None, checkouts=None) -> ControlSite | None:
 
 def view(loaded: ControlLoad) -> dict:
     """What the page may see of the file: whether each switch is on and why
-    not. Holds no path and no value of the file."""
+    not, and which arm controller it asks for (``arm_view``). Holds no path and
+    no machine value of the file."""
+    arm = None
     if loaded.state == "ok":
         stack_on = loaded.site.stack.enabled
         client_on = loaded.site.client.enabled
         code = "control.enabled" if stack_on else "control.disabled"
+        arm = arm_view(loaded.site.stack)
     elif loaded.state == "missing":
         stack_on = client_on = False
         code = "control.missing"
@@ -440,7 +529,34 @@ def view(loaded: ControlLoad) -> dict:
         "client_enabled": client_on,
         "errors": [dict(e) for e in loaded.errors],
         "env": ENV,
+        # null when the file cannot be read: the page then says nothing about it
+        "arm": arm,
     }
+
+
+def arm_view(stack: StackControl) -> dict:
+    """The arm controller the file asks for, as the page may show it: the
+    controller (``lab`` or ``anyspeedup``), its preset (null for the lab's) and
+    the setpoint filter alpha the client's v3 phase clock is forced to (null
+    when nothing is forced). No path."""
+    return {
+        "controller": stack.arm_controller,
+        "preset": stack.arm_preset_in_use,
+        "alpha": stack.arm_alpha,
+    }
+
+
+def arm_alpha(environ=None, checkouts=None) -> float | None:
+    """The alpha the client's v3 phase clock is forced to now (see
+    ``StackControl.arm_alpha``), read from the control file; None when there is
+    no valid file or the lab's controller is chosen. Never raises."""
+    try:
+        loaded = read(environ, checkouts)
+    except Exception:  # noqa: BLE001 - what cannot be read forces nothing
+        return None
+    if loaded.state != "ok" or loaded.site is None:
+        return None
+    return loaded.site.stack.arm_alpha
 
 
 def aeri_view(loaded: ControlLoad) -> dict:

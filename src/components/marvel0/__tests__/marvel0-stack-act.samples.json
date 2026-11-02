@@ -404,7 +404,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -1140,7 +1145,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -1858,7 +1868,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -2560,7 +2575,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -3285,7 +3305,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -3993,7 +4018,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -4741,7 +4771,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -5475,7 +5510,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -6216,7 +6256,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -6958,7 +7003,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -7758,7 +7808,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -8571,7 +8626,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -9409,7 +9469,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -10149,7 +10214,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -10881,7 +10951,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -11679,7 +11754,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -12444,7 +12524,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -13252,7 +13337,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -14045,7 +14135,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -14864,7 +14959,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -15685,7 +15785,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -16575,7 +16680,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -17440,7 +17550,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -18258,7 +18373,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -19052,7 +19172,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -19876,7 +20001,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -20678,7 +20808,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -21497,7 +21632,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -22331,7 +22471,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -23133,7 +23278,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -23945,7 +24095,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -24751,7 +24906,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -25625,7 +25785,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -26425,7 +26590,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -27164,7 +27334,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -27940,7 +28115,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -28773,7 +28953,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -29598,7 +29783,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -30321,7 +30511,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -31064,7 +31259,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -31776,7 +31976,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -32487,7 +32692,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -33208,7 +33418,12 @@
           "stack_enabled": true,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -34071,7 +34286,12 @@
           "stack_enabled": false,
           "client_enabled": false,
           "errors": [],
-          "env": "LEVI_MARVEL0_CONTROL"
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
         },
         "spec_profile": null,
         "order": ["m", "a", "b", "c"],
