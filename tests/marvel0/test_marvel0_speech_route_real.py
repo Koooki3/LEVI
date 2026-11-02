@@ -8,9 +8,11 @@ import hashlib
 import importlib.util
 import logging
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
+from conftest import scaled
 from test_marvel0_speech_route import (  # noqa: F401 - helpers and fixtures
     BASE,
     REQ,
@@ -125,6 +127,45 @@ def test_the_status_never_starts_the_worker_and_release_ends_it(real):
     )
     assert real.client.post(f"{BASE}/release").json()["released"] is True
     assert pid is not None
+
+
+def wait_for(check, seconds, what):
+    deadline = time.monotonic() + scaled(seconds)
+    while time.monotonic() < deadline:
+        if check():
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"timed out waiting for {what}")
+
+
+def test_the_watcher_keeps_the_worker_at_the_start_gate_and_releases_it_when_the_episode_starts(
+    real,
+):
+    # The gate guard of the real service (the fixture replaces ``manager()``,
+    # which would register it) and a short period for the watcher.
+    real.manager.set_guard(speech_api._guard_closed)
+    real.manager._guard_every = 0.05
+    real.hosted.state = "at_gate"
+    real.policy.doc = policy_status(established=2, arm="refuse")
+    real.state["script"] = [{"text": "pick the eggplant in the blue plate"}]
+    assert real.post().status_code == 200
+    pid = real.manager.worker_pid()
+    assert pid is not None
+    # The watcher wakes once a second: it looks at the gate more than once
+    # here and leaves the worker alone while the run waits at its gate.
+    time.sleep(scaled(2.5))
+    assert real.manager.worker_pid() == pid
+    assert real.client.get(BASE).json()["gate"]["allowed"] is True
+    # The episode starts: the same client and lock, now moving the arm.
+    real.hosted.state = "running"
+    wait_for(
+        lambda: real.manager.worker_pid() is None, 10, "the release after the start"
+    )
+    shown = real.client.get(BASE).json()
+    assert shown["state"] == "off"
+    assert shown["gate"]["reasons"] == ["client_connected", "arm_in_use"]
+    # And a new recording is refused again.
+    assert real.post(query="?request_id=speech-req-0002").status_code == 409
 
 
 def test_a_dead_worker_is_shown_failed_and_the_next_request_recovers(real):

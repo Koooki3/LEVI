@@ -19,7 +19,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from site_sample import make_checkpoint, make_checkpoints, write_site
 
-from levi.marvel0 import deploy_api, models, speech_api
+from levi.marvel0 import deploy_api, models, run, run_api, speech_api
 from levi.marvel0 import site as marvel0_site
 from levi.stt import settings
 from levi.stt.errors import SttError
@@ -137,6 +137,36 @@ class Policy:
         return copy.deepcopy(self.doc)
 
 
+class HostedRun:
+    """Stands for ``run.Supervisor`` as the speech gate reads it: ``active()``
+    (memory only) and ``view()`` (the ``levi.marvel0.run.v1`` document). With
+    ``state`` None no hosted run exists, which is the usual case."""
+
+    def __init__(self):
+        self.state = None
+        self.clients = 1
+        self.error = None  # raised by both reads
+        self.reads = 0
+
+    def active(self):
+        self.reads += 1
+        if self.error:
+            raise self.error
+        if self.state is None:
+            return None
+        return {"kind": "marvel0-client", "id": "run-1", "running_seconds": 5}
+
+    def view(self):
+        self.reads += 1
+        if self.error:
+            raise self.error
+        return {
+            "schema": "levi.marvel0.run.v1",
+            "state": self.state,
+            "clients": self.clients,
+        }
+
+
 class FakeManager:
     """Stands for ``levi.stt.manager.Manager``."""
 
@@ -223,9 +253,10 @@ class Matcher:
 
 
 class Machine:
-    def __init__(self, client, tmp_path, policy, manager, matcher):
+    def __init__(self, client, tmp_path, policy, manager, matcher, hosted=None):
         self.client, self.tmp_path = client, tmp_path
         self.policy, self.manager, self.matcher = policy, manager, matcher
+        self.hosted = hosted
 
     def post(self, body=None, *, headers=None, query=f"?request_id={REQ}"):
         return self.client.post(
@@ -251,13 +282,15 @@ def build_machine(tmp_path, monkeypatch, manager, matcher=None):
     models.cache_clear()
     policy = Policy()
     monkeypatch.setattr(deploy_api, "supervisor", lambda: policy)
+    hosted = HostedRun()
+    monkeypatch.setattr(run_api, "supervisor", lambda: hosted)
     monkeypatch.setattr(speech_api, "manager", lambda: manager)
     if matcher is not None:
         monkeypatch.setattr(speech_api, "_matcher", lambda: matcher)
     monkeypatch.setattr(speech_api, "RATE", speech_api.RateLimit(10, 60.0))
     app = FastAPI()
     app.include_router(speech_api.router)
-    return Machine(TestClient(app), tmp_path, policy, manager, matcher)
+    return Machine(TestClient(app), tmp_path, policy, manager, matcher, hosted)
 
 
 @pytest.fixture
@@ -740,6 +773,129 @@ def test_the_first_reason_is_reported_and_all_are_listed(machine):
         "arm_in_use",
         "gpu_insufficient",
     ]
+
+
+# A hosted client waiting at its start gate: the policy server has its
+# connection (a local client shows as two rows) and the arm lock is LEVI's own.
+def at_gate_status(**fields):
+    return policy_status(established=2, arm="refuse", **fields)
+
+
+def test_a_hosted_client_at_its_start_gate_leaves_the_gate_open(machine):
+    machine.hosted.state = "at_gate"
+    machine.policy.doc = at_gate_status()
+    assert view(machine)["gate"] == {"allowed": True, "reasons": []}
+    assert speech_api._guard_closed() is False
+    response = machine.post()
+    assert response.status_code == 200, response.text
+    assert len(machine.manager.calls) == 1
+
+
+def test_a_cold_start_at_the_start_gate_passes_the_whole_gate_again(machine):
+    machine.hosted.state = "at_gate"
+    machine.manager.cold = True
+    machine.policy.doc = at_gate_status()
+    assert machine.post().status_code == 200 and machine.manager.asked == 1
+    machine.manager.calls.clear()
+    machine.hosted.state = "running"
+    assert_refused(machine, machine.post(), "speech_client_connected")
+
+
+@pytest.mark.parametrize(
+    "state", [s for s in run.STATES if s != "at_gate"] + ["not_a_state"]
+)
+def test_every_other_state_of_the_hosted_run_refuses_as_before(machine, state):
+    machine.hosted.state = state
+    machine.policy.doc = at_gate_status()
+    response = machine.post()
+    assert_refused(machine, response, "speech_client_connected")
+    assert response.json()["detail"]["reasons"] == ["client_connected", "arm_in_use"]
+    assert view(machine)["gate"] == {
+        "allowed": False,
+        "reasons": ["client_connected", "arm_in_use"],
+    }
+    assert speech_api._guard_closed() is True
+
+
+def test_a_client_without_a_hosted_run_refuses_as_before(machine):
+    assert machine.hosted.state is None
+    machine.policy.doc = at_gate_status()
+    response = machine.post()
+    assert_refused(machine, response, "speech_client_connected")
+    assert response.json()["detail"]["reasons"] == ["client_connected", "arm_in_use"]
+    assert speech_api._guard_closed() is True
+    # the arm lock alone, from a run LEVI did not start, is refused as well
+    machine.policy.doc = policy_status(arm="refuse")
+    assert_refused(machine, machine.post(), "speech_arm_in_use")
+
+
+def test_a_second_connection_next_to_the_hosted_client_refuses(machine):
+    machine.hosted.state = "at_gate"
+    machine.policy.doc = at_gate_status()
+    for clients in (2, None, True, "1"):
+        machine.hosted.clients = clients
+        assert_refused(machine, machine.post(), "speech_client_connected")
+        assert speech_api._guard_closed() is True
+    machine.hosted.clients = (
+        0  # nothing counted on the run's port yet: the lock is LEVI's
+    )
+    assert machine.post().status_code == 200
+
+
+@pytest.mark.parametrize("fails", ["supervisor", "active", "view"])
+def test_a_hosted_run_that_cannot_be_read_refuses(machine, monkeypatch, fails):
+    machine.hosted.state = "at_gate"
+    machine.policy.doc = at_gate_status()
+    if fails == "supervisor":
+
+        def broken():
+            raise RuntimeError("the run supervisor could not be built")
+
+        monkeypatch.setattr(run_api, "supervisor", broken)
+    elif fails == "active":
+        machine.hosted.active = lambda: (_ for _ in ()).throw(RuntimeError("x"))
+    else:
+        machine.hosted.view = lambda: (_ for _ in ()).throw(RuntimeError("x"))
+    response = machine.post()
+    assert_refused(machine, response, "speech_client_connected")
+    assert view(machine)["gate"]["allowed"] is False
+    assert speech_api._guard_closed() is True
+
+
+def test_a_run_document_without_a_state_refuses(machine):
+    machine.hosted.state = "at_gate"
+    machine.policy.doc = at_gate_status()
+    machine.hosted.view = lambda: {"clients": 1}
+    assert_refused(machine, machine.post(), "speech_client_connected")
+    machine.hosted.view = lambda: None
+    assert_refused(machine, machine.post(), "speech_client_connected")
+
+
+def test_the_start_gate_lifts_only_the_client_and_the_arm_lock(machine):
+    machine.hosted.state = "at_gate"
+    # a policy server that is starting, or a deploy in progress, still refuses
+    machine.policy.doc = at_gate_status(state="starting")
+    response = machine.post()
+    assert_refused(machine, response, "speech_policy_starting")
+    assert response.json()["detail"]["reasons"] == ["policy_starting"]
+    machine.policy.doc = {**at_gate_status(), "operation": {"action": "stop"}}
+    assert_refused(machine, machine.post(), "speech_policy_starting")
+    # so does a GPU without room for a worker that is not loaded
+    machine.policy.doc = at_gate_status(free_mib=10)
+    response = machine.post()
+    assert_refused(machine, response, "speech_gpu_insufficient")
+    assert response.json()["detail"]["reasons"] == ["gpu_insufficient"]
+    machine.policy.doc = at_gate_status(gpu="unknown")
+    assert_refused(machine, machine.post(), "speech_gpu_unreadable")
+
+
+def test_the_run_is_read_only_when_the_gate_would_refuse_without_it(machine):
+    machine.hosted.state = "at_gate"
+    machine.policy.doc = policy_status()
+    assert machine.post().status_code == 200
+    assert view(machine)["gate"]["allowed"] is True
+    assert speech_api._guard_closed() is False
+    assert machine.hosted.reads == 0
 
 
 def test_an_uninstalled_worker_is_reported_before_the_guards(machine):

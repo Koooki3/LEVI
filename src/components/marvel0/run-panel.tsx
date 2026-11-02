@@ -14,7 +14,11 @@
 // There is no `s` and no `p` anywhere here: at the client's start gate they
 // run another task. A key is an action of run-logic.ts; the card never sends
 // a raw key and has no keyboard shortcut of its own.
-import { useState } from "react";
+//
+// At the start gate the next episode's instruction can also be spoken: a voice
+// card (GateVoice) joins the field and does one thing, fill it. It never presses
+// the change button, ticks the confirm window, or starts or enters anything.
+import { useEffect, useState } from "react";
 import {
   ArrowRight,
   CircleStop,
@@ -59,6 +63,9 @@ import type { RunPoll } from "./use-run-poll";
 import { RUN_FRESH_MS } from "./use-run-poll";
 import type { RunActions } from "./use-run-actions";
 import { commandFormFromRun } from "./command-logic";
+import { speechApi, type SpeechApi } from "./speech-api";
+import { SpeechPanel } from "./speech-panel";
+import type { CaptureEvents, CaptureLike } from "./voice-capture";
 
 export type EpisodeChangeStatus =
   | { state: "idle" }
@@ -90,6 +97,52 @@ const EPISODE_CHANGE_KEY: Record<
 /** Notices of the backend that the card already says in its own place (the
  * caption beside HOLD, the keys' "moves the arm home"): not listed again. */
 const SAID_ELSEWHERE = new Set(["hold_not_estop", "blind_home"]);
+
+/** The voice routes and the microphone the gate's voice card uses (tests
+ * replace them; the page uses the real ones). */
+export interface GateSpeech {
+  api?: SpeechApi;
+  createCapture?: (events: CaptureEvents) => CaptureLike;
+}
+
+/** Voice input for the next episode's instruction. It exists only while the
+ * client waits at its start gate: opening it reads the voice state at once (the
+ * card is not left "paused" from before the gate), and closing it, when the
+ * episode starts or the change begins, frees the speech model. The backend
+ * unloads the model by itself within seconds of the gate closing; this is the
+ * page's own, earlier say. A sentence only goes to `onFill`. */
+function GateVoice({
+  modelId,
+  onFill,
+  speech,
+}: {
+  modelId: string;
+  onFill: (prompt: string) => void;
+  speech?: GateSpeech;
+}) {
+  const { t } = useLocale();
+  const api = speech?.api ?? speechApi;
+  useEffect(
+    () => () => {
+      void api.release().catch(() => undefined);
+    },
+    [api],
+  );
+  return (
+    <>
+      <p className="rg-muted" data-testid="marvel0-episode-change-voice-hint">
+        {t("marvel0.episodeChange.voiceHint")}
+      </p>
+      <SpeechPanel
+        api={api}
+        modelId={modelId}
+        voiceRun={null}
+        createCapture={speech?.createCapture}
+        onUse={onFill}
+      />
+    </>
+  );
+}
 
 const ICON: Partial<Record<ActionId, typeof Play>> = {
   enter: Play,
@@ -375,11 +428,13 @@ export function RunPanel({
   actions,
   episodeChange = { state: "idle" },
   onChangeInstruction,
+  speech,
 }: {
   poll: RunPoll;
   actions: RunActions;
   episodeChange?: EpisodeChangeStatus;
   onChangeInstruction?: (prompt: string, attest: ChangeAttest) => void;
+  speech?: GateSpeech;
 }) {
   const { t } = useLocale();
   const [ending, setEnding] = useState(false);
@@ -399,6 +454,10 @@ export function RunPanel({
   }
   const currentPrompt =
     typeof view?.run?.form?.prompt === "string" ? view.run.form.prompt : null;
+  // The instruction a sentence is checked against belongs to the running
+  // client's model; without it the card is not offered (the field still types).
+  const gateModel =
+    typeof view?.run?.form?.model_id === "string" ? view.run.form.model_id : "";
   const wanted = nextPrompt.trim();
   const changing =
     onChangeInstruction !== undefined &&
@@ -648,6 +707,13 @@ export function RunPanel({
         >
           {episodeChange.state === "idle" ? (
             <>
+              {gateModel !== "" && (
+                <GateVoice
+                  modelId={gateModel}
+                  onFill={setNextPrompt}
+                  speech={speech}
+                />
+              )}
               <Field label={t("marvel0.episodeChange.promptLabel")}>
                 <Input
                   autoComplete="off"

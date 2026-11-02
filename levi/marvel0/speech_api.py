@@ -38,13 +38,21 @@ Guards (``gate``) are read from the policy deploy's passive status (cached for
 two seconds): a policy server that is starting or in an unknown state, a deploy
 or stop in progress (``operation``, read live), a client connected to it, the
 AERI arm lock held, and, while the worker is not loaded, too little free GPU
-memory all refuse a transcription. The memory part is asked again, under the
-manager's request lock, when the worker turns out to need a cold start
-(``may_start``), and the manager's idle watcher asks the other parts every two
-seconds and releases a loaded worker once they close (``set_guard``). The
-physical GPU lock is not taken (it would stop a policy deploy), and
-``levi/inference/gpu.py`` is not used (its quiet-GPU rule would refuse exactly
-while the policy server runs).
+memory all refuse a transcription. **One exception:** the two parts a hosted
+client causes itself (a client connected, the arm lock held) are not a reason
+while LEVI's own hosted run waits at its start gate (``_hosted_at_start_gate``:
+the run supervisor says ``at_gate``, with no second connection), because that
+is where the next episode's instruction is chosen. Any other state of the run
+(starting, homing, running, awaiting a label, finishing, held, lost), an
+unreadable run state, and a client LEVI did not start refuse as before, and
+``_view``, ``_run`` and the idle watcher all go through the same ``gate``, so
+a worker loaded at the gate is released within the watcher's period once the
+episode starts. The memory part is asked again, under the manager's request
+lock, when the worker turns out to need a cold start (``may_start``), and the
+manager's idle watcher asks the other parts every two seconds and releases a
+loaded worker once they close (``set_guard``). The physical GPU lock is not
+taken (it would stop a policy deploy), and ``levi/inference/gpu.py`` is not
+used (its quiet-GPU rule would refuse exactly while the policy server runs).
 
 **Translated object names.** The sentence in the datasets' phrasing
 (``speech_template``) needs English object names. A Chinese name outside the
@@ -76,7 +84,7 @@ from levi.stt import settings as stt_settings
 from levi.stt import wav as stt_wav
 from levi.stt.errors import SttError
 
-from . import command, deploy_api, models
+from . import command, deploy_api, models, run_api
 from . import site as marvel0_site
 from .deploy_api import person_only
 from .errors import fail
@@ -255,10 +263,13 @@ def gate(site, status, loaded: bool) -> list:
     they are reported (empty when it may). ``status`` is the policy deploy's
     ``levi.marvel0.deploy.v1`` document, or ``None`` when it could not be read:
     unknown counts as a policy server that is starting. ``loaded`` says the
-    worker already holds its GPU memory, so the memory check is skipped."""
+    worker already holds its GPU memory, so the memory check is skipped. The
+    connected client and the held arm lock are no reason while LEVI's own
+    hosted client waits at its start gate (``_hosted_at_start_gate``)."""
     if not isinstance(status, dict):
         return [("policy_starting", {})]
     reasons: list = []
+    in_use: list = []  # the two reasons a hosted client at its gate lifts
     listener = status.get("listener")
     established = listener.get("established") if isinstance(listener, dict) else None
     unsettled = status.get("state") in ("starting", "unknown") or not isinstance(
@@ -274,7 +285,7 @@ def gate(site, status, loaded: bool) -> list:
     if unsettled:
         reasons.append(("policy_starting", {}))
     elif established > 0:
-        reasons.append(("client_connected", {"established": established}))
+        in_use.append(("client_connected", {"established": established}))
     # The arm lock row of the deploy's checks is its own ``_check_arm``: held or
     # unreadable is "in use", and so is a row that is missing.
     row = next(
@@ -286,10 +297,41 @@ def gate(site, status, loaded: bool) -> list:
         None,
     )
     if row is None or row.get("level") != "ok":
-        reasons.append(("arm_in_use", {}))
+        in_use.append(("arm_in_use", {}))
+    # Asked only when one of the two would refuse, so a plain refusal or an
+    # open gate reads nothing of the run.
+    if in_use and not _hosted_at_start_gate():
+        reasons += in_use
     if not loaded:
         reasons += _gpu_reasons(site, status.get("gpu"))
     return reasons
+
+
+def _hosted_at_start_gate() -> bool:
+    """Whether LEVI's own hosted client waits at its start gate, between two
+    episodes, and nothing else is connected to the policy server. The run
+    supervisor decides (its state ``at_gate`` needs the client's own session
+    file, a confirmed gate prompt and a live launcher); every other state of
+    the run, a client this page did not start (no live hosted run) and a run
+    that cannot be read are False: the gate stays closed. Used by ``gate``
+    only."""
+    try:
+        sup = run_api.supervisor()
+        # ``active`` reads memory only: with no live hosted run nothing else
+        # is read (the full view also runs the start checks).
+        if sup.active() is None:
+            return False
+        doc = sup.view()
+    except Exception as exc:  # noqa: BLE001 - unreadable is "not at the gate"
+        log.warning("the hosted run could not be read (%s)", type(exc).__name__)
+        return False
+    if not isinstance(doc, dict) or doc.get("state") != "at_gate":
+        return False
+    # The supervisor holds a run that sees a second connection within half a
+    # second; until then, or when the connections cannot be counted, it is not
+    # the hosted client alone.
+    clients = doc.get("clients")
+    return isinstance(clients, int) and not isinstance(clients, bool) and clients <= 1
 
 
 def _gpu_reasons(site, gpu, reserved: int = stt_settings.STT_VRAM_MIB) -> list:
@@ -336,8 +378,10 @@ def _loaded(state: dict) -> bool:
 def _guard_closed() -> bool:
     """For the manager's idle watcher: whether a loaded worker must go because
     the gate closed (a policy server starting, a client connected, the arm
-    lock held). The memory part is not asked: the worker already holds its
-    memory. A site file that cannot be read raises, which counts as closed."""
+    lock held; the hosted client at its start gate does not close it, the
+    episode that starts does). The memory part is not asked: the worker
+    already holds its memory. A site file that cannot be read raises, which
+    counts as closed."""
     return bool(gate(marvel0_site.require(), _policy_status(), loaded=True))
 
 

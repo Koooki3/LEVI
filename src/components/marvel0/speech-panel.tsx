@@ -192,7 +192,9 @@ export function SpeechPanel({
           </Badge>
         )}
       </div>
-      <p className="rg-muted">{t("marvel0.speech.scope")}</p>
+      <p className="rg-muted">
+        {t(voiceRun ? "marvel0.speech.scope" : "marvel0.speech.scope_fill")}
+      </p>
       <div data-testid="marvel0-speech-estop">
         <Note tone="warning">{t("marvel0.speech.no_estop")}</Note>
       </div>

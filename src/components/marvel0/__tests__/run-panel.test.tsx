@@ -1,4 +1,4 @@
-import { act } from "react";
+import { act, useState } from "react";
 import {
   click,
   press,
@@ -28,6 +28,7 @@ import {
   type as typeInto,
 } from "./actions-helpers";
 import { RUN_VIEWS, runDoc } from "./ctl-fixtures";
+import { fakeSpeechApi } from "./speech-fixtures";
 
 setupDom();
 afterEach(() => {
@@ -93,11 +94,14 @@ function Harness({
 }) {
   const poll = useRunPoll(api, { pollMs: 25 });
   const actions = useRunActions(api, poll);
+  // The voice card of the start gate reads the voice state; here it is canned.
+  const [speech] = useState(() => ({ api: fakeSpeechApi().api }));
   return (
     <RunPanel
       poll={poll}
       actions={actions}
       onChangeInstruction={onChangeInstruction}
+      speech={speech}
     />
   );
 }

@@ -2,7 +2,11 @@
 
 The demo client command card of the **marvel0** page can take the task instruction by voice. You hold a button and say the instruction; a speech model on this machine turns it into text; LEVI finds the closest of the **allowed** task instructions; and when you click **Use**, that sentence from the list is put into the task instruction field. Beside it the card always offers [the sentence as you said it](#the-sentence-as-heard--听到的这句), tidied, with a **Use** of its own. From there it is what typing would have done: you click **Make command**, copy it, and press Enter in the client terminal yourself. Nothing here starts the client or the arm, unless you switch on [voice run](#voice-run--语音直跑).
 
+While the hosted client waits at its start gate, the Run card (step 4) offers the same voice input for the **next episode's instruction**, beside the "Next episode instruction" field: a sentence you press **Use** for only fills that field. You still press **Change instruction and restart the client** and confirm in its window, as when typing; the voice never presses either, and never starts, enters or restarts anything.
+
 marvel0 页面的评测客户端命令卡片可以用语音填写任务指令。按住按钮说出指令，本机上的语音模型把它转成文字，LEVI 在**允许的**任务指令里找最接近的一句；你点击“使用”之后，填进任务指令框的是列表里的那句原文。卡片旁边总会多给一个[按你说的话整理的那一句](#the-sentence-as-heard--听到的这句)，有它自己的“使用”。之后和手打一样：你点“生成命令”、复制，再自己在客户端终端按 Enter。除非你打开[语音直跑](#voice-run--语音直跑)，这里没有任何一步会启动客户端或机械臂。
+
+托管客户端停在开始闸门时，运行卡片（第 4 步）在“下一片段指令”输入框旁边提供同样的语音输入，用来说**下一个片段的指令**：你点“使用”的那一句只会填进这个输入框。仍要你自己点**换指令并重启客户端**，并在它的确认窗口里确认，和手打一样；语音不会替你点这两处，也不会启动、按 Enter 或重启任何东西。
 
 ## What it does, and never does / 做什么，绝不做什么
 
@@ -198,25 +202,29 @@ Under every answer (also under "nothing heard" and under the answer to edited te
 
 Every transcription asks the policy deploy's passive status (`GET /api/levi/marvel0/deploy`, cached for two seconds, so no extra `nvidia-smi` or socket read) and refuses when:
 
-| Reason             | Refusal                   | Status | Meaning                                                                                                                                                           |
-| ------------------ | ------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `policy_starting`  | `speech_policy_starting`  | 409    | the policy server is `starting`, or its state is `unknown` (also when the status cannot be read)                                                                  |
-| `client_connected` | `speech_client_connected` | 409    | a client is connected to the policy port: a run may be moving the arm, and the task instruction is the client's start parameter, so changing it now means nothing |
-| `arm_in_use`       | `speech_arm_in_use`       | 409    | the AERI arm lock is held or cannot be read (the deploy's own check)                                                                                              |
-| `gpu_insufficient` | `speech_gpu_insufficient` | 409    | the worker is not loaded and fewer than 5000 MiB plus the site's `gpu.margin_mib` are free                                                                        |
-| `gpu_unreadable`   | `speech_gpu_unreadable`   | 503    | the worker is not loaded and the GPU's memory use cannot be read                                                                                                  |
+| Reason             | Refusal                   | Status | Meaning                                                                                                                                                                                                                            |
+| ------------------ | ------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `policy_starting`  | `speech_policy_starting`  | 409    | the policy server is `starting`, or its state is `unknown` (also when the status cannot be read)                                                                                                                                   |
+| `client_connected` | `speech_client_connected` | 409    | a client is connected to the policy port: a run may be moving the arm, and the task instruction is the client's start parameter, so changing it now means nothing (not while the hosted client waits at its start gate, see below) |
+| `arm_in_use`       | `speech_arm_in_use`       | 409    | the AERI arm lock is held or cannot be read (the deploy's own check; not while the hosted client waits at its start gate, see below)                                                                                               |
+| `gpu_insufficient` | `speech_gpu_insufficient` | 409    | the worker is not loaded and fewer than 5000 MiB plus the site's `gpu.margin_mib` are free                                                                                                                                         |
+| `gpu_unreadable`   | `speech_gpu_unreadable`   | 503    | the worker is not loaded and the GPU's memory use cannot be read                                                                                                                                                                   |
+
+**The hosted client at its start gate.** The two reasons a client causes itself, `client_connected` and `arm_in_use`, are lifted while LEVI's own hosted run (the Run card, step 4) waits at its start gate between two episodes: that is where the next episode's instruction is chosen, and the gate is the only place where the instruction can change. The run supervisor decides (state `at_gate`: the client's own session file, its confirmed gate prompt and a live launcher; exactly one connection on the policy port). Every other state of the hosted run (starting, homing, running an episode, awaiting a label, finishing, held, lost, ended), a client LEVI did not start, a second connection next to the hosted one, and a run state that cannot be read keep both reasons, exactly as above; `policy_starting`, `gpu_insufficient` and `gpu_unreadable` are never lifted. `GET speech`, the transcription, the text-model check and the idle watcher use the same decision, so a worker loaded at the gate is released within the watcher's two-second period once the episode starts (and the page frees it as soon as it sees the gate go). The run is read only when one of the two reasons would refuse; the voice card at the gate can only fill the next-instruction field.
 
 A running arm stack alone is **not** a reason: it is the normal state during operation. Before a policy server is deployed, the deploy route releases the speech worker, so its roughly 4.9 GB never counts against the deploy's memory check.
 
 每次转写都会读取策略部署的被动状态（`GET /api/levi/marvel0/deploy`，缓存两秒，所以不会多一次 `nvidia-smi` 或套接字读取），出现下面的情形就拒绝：
 
-| 原因               | 拒绝码                    | 状态码 | 含义                                                                                             |
-| ------------------ | ------------------------- | ------ | ------------------------------------------------------------------------------------------------ |
-| `policy_starting`  | `speech_policy_starting`  | 409    | 策略服务器是 `starting`，或状态为 `unknown`（状态读不到时也算）                                  |
-| `client_connected` | `speech_client_connected` | 409    | 有客户端连在策略端口上：可能正在运行并驱动机械臂，而任务指令是客户端的启动参数，此时修改没有意义 |
-| `arm_in_use`       | `speech_arm_in_use`       | 409    | AERI 手臂锁被占用或读不到（部署自己的检查）                                                      |
-| `gpu_insufficient` | `speech_gpu_insufficient` | 409    | 工作进程尚未加载，且空闲显存少于 5000 MiB 加站点文件的 `gpu.margin_mib`                          |
-| `gpu_unreadable`   | `speech_gpu_unreadable`   | 503    | 工作进程尚未加载，且读不到 GPU 的显存占用                                                        |
+| 原因               | 拒绝码                    | 状态码 | 含义                                                                                                                                   |
+| ------------------ | ------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `policy_starting`  | `speech_policy_starting`  | 409    | 策略服务器是 `starting`，或状态为 `unknown`（状态读不到时也算）                                                                        |
+| `client_connected` | `speech_client_connected` | 409    | 有客户端连在策略端口上：可能正在运行并驱动机械臂，而任务指令是客户端的启动参数，此时修改没有意义（托管客户端停在开始闸门时除外，见下） |
+| `arm_in_use`       | `speech_arm_in_use`       | 409    | AERI 手臂锁被占用或读不到（部署自己的检查；托管客户端停在开始闸门时除外，见下）                                                        |
+| `gpu_insufficient` | `speech_gpu_insufficient` | 409    | 工作进程尚未加载，且空闲显存少于 5000 MiB 加站点文件的 `gpu.margin_mib`                                                                |
+| `gpu_unreadable`   | `speech_gpu_unreadable`   | 503    | 工作进程尚未加载，且读不到 GPU 的显存占用                                                                                              |
+
+**托管客户端停在开始闸门时。** LEVI 自己的托管运行（运行卡片，第 4 步）在两个片段之间停在开始闸门时，客户端自己造成的两条原因 `client_connected` 和 `arm_in_use` 不再拒绝：下一个片段的指令正是在这里选的，闸门也是指令唯一能换的地方。由运行监督器判定（状态为 `at_gate`：客户端自己的会话文件、已确认的闸门提示和存活的启动器；策略端口上恰好一个连接）。托管运行的其他任何状态（启动中、回位中、片段运行中、等待判定、收尾中、保持、丢失、已结束）、不是 LEVI 启动的客户端、托管连接旁边的第二个连接，以及读不到的运行状态，都照旧保留这两条原因；`policy_starting`、`gpu_insufficient`、`gpu_unreadable` 从不放开。`GET speech`、转写、文本模型检查和空闲监视用同一个判定，所以闸门上加载的工作进程会在片段开始后的监视周期（两秒）内被释放（页面一看到闸门离开也会立即释放）。只有这两条原因本来要拒绝时才会去读运行状态；闸门处的语音卡片只能填写下一片段指令的输入框。
 
 只是机械臂栈在运行**不是**拒绝的理由：那是操作时的常态。部署策略服务器之前，部署路由会先释放语音工作进程，所以它约 4.9 GB 的显存不会计入部署的显存检查。
 
@@ -317,6 +325,7 @@ On 2026-10-27 the owner used the card on marvel0 with a UGREEN USB MIC-CM727 (ch
 - accuracy over many real voices and microphones (synthetic speech is an upper bound; mixed Chinese and English, 0 dB signal-to-noise, 1.4 times speaking speed and several people talking at once were wrong in the benchmark, which is why every transcript needs a person's confirmation);
 - the effect of the worker on a running arm controller (a GPU burst of 0.1 to 0.3 s and a few threads at `nice` 19 on the site's cores, never measured with the controller active; the core list is a guess); try it with the owner present;
 - the guards against a real policy server, a real client and a real arm lock: the tests build the deploy status document with fakes (the arm-lock row is the deploy's own `_check_arm`);
+- the start gate against a real hosted client: the tests fake the run supervisor's document (`state`, `clients`) and the deploy status; that a real client waiting at its start gate reads `at_gate` with exactly one connection, loads the worker on the first recording and has it released when the episode starts, is a check for a session with the owner and the arm present;
 - that a worker exit gives the GPU memory back as measured for the benchmark processes, through this manager and a policy deploy at the 0.45 fraction;
 - matching quality for instructions other than the five of the sample site file;
 - translation of object names from real speech: the evaluation fed typed names, not transcripts, and did not run with an arm controller or a policy server on the machine; whether the policy acts sensibly on a translated name it never saw in training is a separate, open question;
@@ -331,6 +340,7 @@ On 2026-10-27 the owner used the card on marvel0 with a UGREEN USB MIC-CM727 (ch
 - 多种真人声音和麦克风下的准确率（合成语音只是上限；基准里中英文混说、0 dB 信噪比、1.4 倍语速和多人同时说话都会出错，所以每一条转写都需要人确认）；
 - 工作进程对正在运行的机械臂控制器的影响（0.1 到 0.3 秒的 GPU 脉冲和 `nice` 19 下站点核心上的几个线程，从未在控制器激活时测过；核心列表是猜测）；请在主人在场时试；
 - 对真实策略服务器、真实客户端和真实手臂锁的守卫：测试用假对象构造部署状态文档（手臂锁一行就是部署自己的 `_check_arm`）；
+- 对真实托管客户端的开始闸门：测试用假对象构造运行监督器的文档（`state`、`clients`）和部署状态；真实客户端停在开始闸门时是否读到 `at_gate` 且恰好一个连接、第一次录音是否加载工作进程、片段开始后是否释放，要在机主和机械臂在场的一次会话里确认；
 - 经由这个管理器、在 0.45 比例的策略部署旁边，工作进程退出后是否像基准里的进程那样归还显存；
 - 站点文件示例里那五句之外的指令的匹配质量；
 - 真实语音下的物体名翻译：评测输入的是打出来的名字，不是转写结果，也没有在机械臂控制器或策略服务运行时测；策略对训练里没见过的译名能否正确执行，是另一个尚未回答的问题；
@@ -338,6 +348,6 @@ On 2026-10-27 the owner used the card on marvel0 with a UGREEN USB MIC-CM727 (ch
 
 ## Fresh proposals / 提案时效
 
-The page refreshes passive voice status every 30 seconds while visible and scopes it to the form's model. Matching and status carry an `allowed_revision` digest of the exact task list and model family. Pressing Use checks that revision again; a changed list, unavailable gate, model switch or expired proposal leaves the task field untouched. Prompt values are preserved exactly; invisible/control characters are rejected rather than rewritten. Uploading and checking disable another microphone capture. Changing the task hides the old command until the person generates a fresh preview.
+The page refreshes passive voice status every 30 seconds while visible and scopes it to the form's model. The voice card at the start gate exists only while the run is at its gate: it reads the status as it appears (so it is not left "paused" from before the gate) and frees the speech model as it goes away, scoped to the running client's saved model. Matching and status carry an `allowed_revision` digest of the exact task list and model family. Pressing Use checks that revision again; a changed list, unavailable gate, model switch or expired proposal leaves the task field untouched. Prompt values are preserved exactly; invisible/control characters are rejected rather than rewritten. Uploading and checking disable another microphone capture. Changing the task hides the old command until the person generates a fresh preview.
 
-页面可见时每 30 秒被动刷新语音状态，并传入表单选择的模型。匹配与状态返回任务列表原值及模型类别的 `allowed_revision` 摘要。按“使用”时再次检查该版本；列表变化、守卫不可用、模型切换或提案过期都不会填写任务。任务文本保留原值，含不可见字符或控制字符的值直接拒绝，不静默改写。上传和复核期间不能再次录音。任务变化后隐藏旧命令，直到用户重新生成预览。
+页面可见时每 30 秒被动刷新语音状态，并传入表单选择的模型。开始闸门处的语音卡片只在运行停在闸门时存在：它出现时立即读取状态（不会停留在闸门之前的“已暂停”），消失时释放语音模型，传入的是运行中客户端保存的模型。匹配与状态返回任务列表原值及模型类别的 `allowed_revision` 摘要。按“使用”时再次检查该版本；列表变化、守卫不可用、模型切换或提案过期都不会填写任务。任务文本保留原值，含不可见字符或控制字符的值直接拒绝，不静默改写。上传和复核期间不能再次录音。任务变化后隐藏旧命令，直到用户重新生成预览。
