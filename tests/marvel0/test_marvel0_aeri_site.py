@@ -282,11 +282,15 @@ def test_the_template_switches_aeri_off_and_parses(tmp_path):
 
 def test_the_control_view_of_the_stack_and_client_is_unchanged(tmp_path):
     loaded = control(tmp_path, "[aeri]\nenabled = true\n")
-    assert set(cs.view(loaded)) == {
+    view = cs.view(loaded)
+    assert set(view) == {
         "state",
         "code",
         "stack_enabled",
         "client_enabled",
         "errors",
         "env",
+        "arm",
     }
+    # the [aeri] section leaves the arm controller at the lab's default
+    assert view["arm"] == {"controller": "lab", "preset": None, "alpha": None}
