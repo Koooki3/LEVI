@@ -29,6 +29,8 @@ anyspeedup controller's preset (``today`` or ``S1``; ``S2`` is refused until the
 engine has the shaped profile it needs) and ``anyspeedup_root`` its checkout; both
 are only read when ``arm_controller`` is ``anyspeedup``, but a file is checked for
 all three whichever is chosen, so that flipping the one word cannot reveal a typo.
+The page goes by the controller A was *started* as (its record), not by this file:
+to change it, stop A, change the file, start A (``stack_act.Act._arm_doc``).
 
 What the switches are worth: they stop a page that was never meant to act (a
 worktree instance, a fresh checkout, a second LEVI). They do not stop another
@@ -112,9 +114,9 @@ com_port           = "/dev/serial/by-id/usb-FTDI_USB_TO_RS-485_XXXXXXXX-if00-por
 server_port        = 5000                        # the robot server's loopback port
 reset_joint_target = [-0.8063, -0.0623, 0.9130, -2.4036, 0.0580, 2.3011, 1.5844]
 marker_wait_s      = 3                           # 2 to 600: the least age of the marker before A starts (the page also waits for heavy jobs to end)
-arm_controller     = "lab"                       # "lab" (default) or "anyspeedup": which arm controller the page's terminal A starts
+arm_controller     = "lab"                       # "lab" (default) or "anyspeedup": which arm controller the page's terminal A starts (change it with A stopped)
 # arm_preset       = "today"                     # anyspeedup only: "today" (alpha 0.005) or "S1" (alpha 0.01); "S2" is refused for now
-# anyspeedup_root  = "/path/to/anyspeedup"       # anyspeedup only, required then: the checkout with controllers/fr3_serl/ (built by its build.sh)
+# anyspeedup_root  = "/path/to/anyspeedup"       # anyspeedup only, required then: the checkout with controllers/fr3_serl/ (letters, digits and . _ / - only) (built by its build.sh)
 
 [client]
 enabled            = false                      # true: the page may host the evaluation client
@@ -561,9 +563,11 @@ def arm_view(stack: StackControl) -> dict:
 
 
 def arm_alpha(environ=None, checkouts=None) -> float | None:
-    """The alpha the client's v3 phase clock is forced to now (see
-    ``StackControl.arm_alpha``), read from the control file; None when there is
-    no valid file or the lab's controller is chosen. Never raises."""
+    """The alpha the control file alone would force on the client's v3 phase
+    clock (see ``StackControl.arm_alpha``); None when there is no valid file or
+    the lab's controller is chosen. Never raises, and fails open: an unreadable
+    file forces nothing. The page and the hosted start do not use it for the
+    decision: they go by the A that runs (``arm_facts.py``)."""
     try:
         loaded = read(environ, checkouts)
     except Exception:  # noqa: BLE001 - what cannot be read forces nothing
