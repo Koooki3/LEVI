@@ -85,6 +85,7 @@ _GOLDEN_FORCED = {
     "governor": False,
     "early_trigger": False,
     "grasp_replan_m": 0.0,
+    "close_hold": False,
 }
 
 # Validated ranges (section 5, "validation range" column): name -> (lo, hi, lo_open). Optional (None) fields are
@@ -195,6 +196,7 @@ _BOOL_FIELDS = frozenset(
         "open_settle",
         "governor",
         "early_trigger",
+        "close_hold",
     }
 )
 _OPTIONAL_FIELDS = frozenset(
@@ -346,6 +348,12 @@ class PhaseParams:
     grip_settle: bool = (
         True  # lambda <= 1 after a close until the fingers have moved and stopped
     )
+    # Close hold (real runs 2026-11-02): with the settle above lambda is only kept <= 1, and the policy's plan lifts 3-5
+    # rows after a close; three closes of 13 accelerated ones caught nothing because the arm rose while the fingers had
+    # not yet closed (finger opening 0.39-0.81 when the lift started; on a re-grasp the fingers start up to 0.5 s after
+    # the command). With close_hold the phase does not advance after a close until that settle is done (the fingers
+    # have moved and stopped, at least settle_min_s; settle_timeout_s at most, settle_unknown_s without a reading).
+    close_hold: bool = True
     settle_min_s: float = 0.3
     settle_aperture_delta: float = 0.02
     settle_stable_ticks: int = 2
@@ -607,6 +615,7 @@ BINDINGS = (
     "hard_leash",
     "step",
     "end",
+    "grasp",
 )  # the keys of summary()["binding"] (section 8): which term bound lambda on a tick
 _SNAP = 1e-9  # a phase this close to an integer row IS that row (float sums like (o + G) - o must not drop a row)
 _GATE_STOP = (
@@ -1845,6 +1854,12 @@ class PhaseEngine:
                     self._st["gate_waits"] += 1
             elif self._gate_since is not None and not self._close_ahead():
                 self._gate_clear()
+        # ---- close hold: after a close the plan waits for the fingers (PhaseParams.close_hold) ----
+        if p.close_hold and not self._golden and self._settle_active and s_c > s:
+            s_c = s
+            u_c = s_c - o
+            bind = "grasp"
+            self._st["grasp_hold_ticks"] += 1
         # ---- 8. issued phase e (section 3.5) ----
         e_prev = (s - o) + self._e_off
         e_c = u_c
@@ -2326,6 +2341,7 @@ class PhaseEngine:
             "rejected": int(st["rejected"]),
             "reanchors": int(st["reanchors"]),
             "grasp_replans": int(st["grasp_replans"]),
+            "grasp_hold_ticks": int(st["grasp_hold_ticks"]),
             "ws_shrinks": int(st["ws_shrinks"]),
             "reanchored_to_measured": int(st["reanchored_to_measured"]),
             "leash_recoveries": int(st["leash_recoveries"]),

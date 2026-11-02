@@ -113,6 +113,7 @@ DEFAULTS = {
     "early_trigger": True,
     "delay_history": 8,
     "grasp_replan_m": 0.035,
+    "close_hold": True,
 }
 
 # Section 5 / 15: the ledger numbers phase.py must carry (E8 is a tightening, E11 and E12 live in other files).
@@ -443,7 +444,7 @@ class TestInterface(unittest.TestCase):
         self.assertIs(
             TickOut(np.zeros(7, np.float32), 0.0, 0.0, 0.0, 1.0, 1.0).reset, False
         )
-        self.assertEqual(len(phase.BINDINGS), 15)
+        self.assertEqual(len(phase.BINDINGS), 16)
 
     def test_dataclass_fields(self):
         self.assertEqual(
@@ -825,7 +826,8 @@ class TestGripperExact(unittest.TestCase):
             landed = {}
             for u_before, out, _ in log:
                 for gi in G:
-                    if abs(out.u - gi) < 1e-9:
+                    # a tick that stays on the row (the close hold waits there for the fingers) is the same landing
+                    if abs(out.u - gi) < 1e-9 and abs(u_before - gi) >= 1e-9:
                         landed.setdefault(gi, []).append(out)
                     self.assertFalse(
                         u_before + 1e-9 < gi < out.u - 1e-9,
@@ -970,6 +972,7 @@ class TestCapsAndRates(unittest.TestCase):
                             "soft_leash",
                             "gov",
                             "rate",
+                            "grasp",
                         }
                         or prev < 1.0,
                         f"{out.binding} lam {lam}",
@@ -2074,9 +2077,14 @@ class TestPlainSplice(unittest.TestCase):
                     # (replay of the 11-02 fixes: + gate_max_ticks + 1 parked plain H1 at the plan's end, 0.757 ->
                     # 0.784)
                     # (measured: 9 ticks predicted, 11 reached with 2 gate waits; the allowance predicted 15)
+                    # The close hold (11-02 real runs) is not in the prediction either: a re-query during the hold
+                    # only brings a chunk planned after the close, and the hold survives the reload.
                     waits = eng.summary()["gate_waits"]
+                    held = eng.summary()["grasp_hold_ticks"]
                     self.assertLessEqual(
-                        reached - m_ticks, waits + 1, (m_ticks, reached, waits)
+                        reached - m_ticks,
+                        waits + held + 1,
+                        (m_ticks, reached, waits, held),
                     )
 
 
@@ -2363,6 +2371,41 @@ class TestGateAndSettle(unittest.TestCase):
         self.assertGreaterEqual(ev["settle_s"], 0.3)
         self.assertLess(ev["settle_s"], 1.0)
 
+    def test_the_close_hold_waits_for_the_fingers_before_the_plan_moves_on(self):
+        """Real runs 2026-11-02: the plan lifted 3-5 rows after a close while the fingers were still open. With
+        close_hold the phase stays until the settle is done; without it the plan moves on at lambda <= 1."""
+
+        def issued(k, tc):
+            return 1.0 if tc is None else 0.0
+
+        def aperture(k, tc):
+            if tc is None:
+                return 0.0
+            j = k - tc
+            return 0.0 if j < 2 else min(0.6, 0.2 * (j - 1)) if j < 6 else 0.6
+
+        eng, tc, outs = self._settle_run(aperture, issued)
+        after = [(k - tc, o) for k, o in outs if k > tc]
+        held = [j for j, o in after if o.binding == "grasp"]
+        self.assertTrue(held, "no grasp hold after the close")
+        for j, o in after:
+            if j in held:
+                self.assertEqual(o.lam, 0.0, f"j {j}")
+        moved = next(j for j, o in after if j > held[0] and o.lam > 1e-9)
+        self.assertGreaterEqual(
+            moved, 5, "the plan moved on before the fingers stopped"
+        )
+        self.assertEqual(held, list(range(held[0], moved)))
+        self.assertEqual(eng.summary()["grasp_hold_ticks"], len(held))
+        self.assertGreaterEqual(eng.summary()["binding"]["grasp"], len(held))
+
+        off = PhaseParams(
+            lambda_max=2.5, w_pre=0, w_post=0, grip_gate=False, close_hold=False
+        )
+        _e, tc2, outs2 = self._settle_run(aperture, issued, params=off)
+        early = [o.lam for k, o in outs2 if tc2 + 1 <= k <= tc2 + 4]
+        self.assertTrue(all(lam > 0.5 for lam in early), early)
+
     def test_aperture_that_never_moves_is_held_until_the_timeout(self):
         eng, tc, outs = self._settle_run(
             lambda k, tc: 0.0, lambda k, tc: 1.0 if tc is None else 0.0
@@ -2411,7 +2454,8 @@ class TestGateAndSettle(unittest.TestCase):
             if tc is not None and tc < k <= tc + 8:
                 self.assertLessEqual(o.lam, 1.0 + 1e-9, f"tick {k}")
                 self.assertEqual(
-                    o.binding in {"post", "rate", "landing", "gate", "end"}, True
+                    o.binding in {"post", "rate", "landing", "gate", "end", "grasp"},
+                    True,
                 )
 
     def test_settle_off_when_disabled(self):
@@ -2986,6 +3030,7 @@ class TestSummaryAndRecords(unittest.TestCase):
                 "hard_leash",
                 "step",
                 "end",
+                "grasp",
             },
         )
         self.assertEqual(s["ticks"], 60)
