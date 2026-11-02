@@ -114,6 +114,19 @@ def test_arm_alpha_is_none_without_a_valid_file(tmp_path):
         ("arm_preset = 1", "stack.arm_preset", "type"),
         ('anyspeedup_root = "relative/dir"', "stack.anyspeedup_root", "not_absolute"),
         ('anyspeedup_root = "/opt/any speed"', "stack.anyspeedup_root", "unsafe"),
+        ('anyspeedup_root = "/opt/any+speed"', "stack.anyspeedup_root", "unsafe"),
+        ('anyspeedup_root = "/opt/any:speed"', "stack.anyspeedup_root", "unsafe"),
+        ('anyspeedup_root = "/opt/an\'y"', "stack.anyspeedup_root", "unsafe"),
+        (
+            'anyspeedup_root = "/opt/../anyspeedup"',
+            "stack.anyspeedup_root",
+            "not_absolute",
+        ),
+        (
+            'anyspeedup_root = "/opt/anyspeedup/"',
+            "stack.anyspeedup_root",
+            "not_absolute",
+        ),
         ("anyspeedup_root = 5", "stack.anyspeedup_root", "type"),
     ],
 )

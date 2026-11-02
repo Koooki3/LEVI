@@ -22,7 +22,7 @@ from stack_act_machine import ActMachine, ready_lines
 from test_marvel0_deploy import forbid_real_machine  # noqa: F401 - the guard
 from test_marvel0_stack_act_units import HEALTH_OK
 
-from levi.marvel0 import stack, stack_act, stack_units
+from levi.marvel0 import record, stack, stack_act, stack_units
 
 # --- terminal A's unit ----------------------------------------------------------------------
 
@@ -47,6 +47,8 @@ def test_the_lab_controller_is_the_command_and_environment_of_today():
         None,
         (),
     )
+    assert specs.arm_identity == ("lab", None, None)
+    assert a.setenv == () and specs.arm_env is None
 
 
 def test_the_lab_units_do_not_depend_on_the_inert_anyspeedup_values():
@@ -103,13 +105,20 @@ def test_the_anyspeedup_controller_changes_only_the_environment_file_and_the_com
         assert getattr(specs, name) == getattr(lab, name)
         assert getattr(specs, name)[2] == LAB_ENV
     assert (specs.arm_controller, specs.arm_preset) == ("anyspeedup", preset)
-    assert specs.arm_checks == (
-        ("arm_controller_missing", ANY_ENV),
-        (
-            "arm_controller_not_built",
-            f"{ANY_ROOT}/controllers/fr3_serl/ws/install/anyspeedup_franka_controllers",
-        ),
+    setup = f"{ANY_ROOT}/controllers/fr3_serl/ws/install/setup.bash"
+    package = (
+        f"{ANY_ROOT}/controllers/fr3_serl/ws/install/anyspeedup_franka_controllers"
     )
+    assert specs.arm_checks == (
+        ("arm_controller_missing", "exists", (ANY_ENV,)),
+        ("arm_controller_unsafe", "safe_file", (ANY_ENV,)),
+        # what env.sh sources (setup.bash) and the package: a partial build has one
+        ("arm_controller_not_built", "exists", (setup, package)),
+    )
+    assert specs.arm_identity == ("anyspeedup", preset, ANY_ENV)
+    # env.sh sources the rig's fr3_env.sh of the control file, not a guess
+    assert a.setenv == (f"ANYSPEEDUP_FR3_ENV={LAB_ENV}",)
+    assert all(not u.setenv for k, u in specs.units.items() if k != "a")
 
 
 def test_the_unit_properties_are_the_same_for_both_controllers():
@@ -123,6 +132,16 @@ def test_the_unit_properties_are_the_same_for_both_controllers():
     )
     properties = [t for t in lab if t.startswith("--property=")]
     assert properties == [t for t in any_ if t.startswith("--property=")]
+    # the one difference in the environment: A is told where the rig's file is
+    assert [t for t in any_ if t.startswith("--setenv=")] == [
+        "--setenv=PYTHONUNBUFFERED=1",
+        "--setenv=RCUTILS_COLORIZED_OUTPUT=0",
+        f"--setenv=ANYSPEEDUP_FR3_ENV={LAB_ENV}",
+    ]
+    assert [t for t in lab if t.startswith("--setenv=")] == [
+        "--setenv=PYTHONUNBUFFERED=1",
+        "--setenv=RCUTILS_COLORIZED_OUTPUT=0",
+    ]
     assert [t for t in lab if t.startswith("--description=")] != [
         t for t in any_ if t.startswith("--description=")
     ]
@@ -267,17 +286,22 @@ def m(tmp_path):
     return ActMachine(tmp_path)
 
 
-def fake_checkout(tmp_path, env=True, build=True):
+def fake_checkout(tmp_path, env=True, build=True, mode=0o644):
     root = tmp_path / "anyspeedup"
     folder = root / "controllers" / "fr3_serl"
     folder.mkdir(parents=True)
     if env:
         (folder / "env.sh").write_text("")
+        (folder / "env.sh").chmod(mode)
     if build:
-        (folder / "ws" / "install" / "anyspeedup_franka_controllers").mkdir(
-            parents=True
-        )
+        install = folder / "ws" / "install"
+        (install / "anyspeedup_franka_controllers").mkdir(parents=True)
+        (install / "setup.bash").write_text("")
     return root
+
+
+def a_record(m, key="a"):
+    return record.read_record(m.state_root / key)
 
 
 def choose(m, root, preset="S1"):
@@ -321,6 +345,100 @@ def test_the_anyspeedup_unit_starts_when_its_checkout_and_build_are_there(m, tmp
         "load_gripper:=false",
         "preset:=S1",
     ]
+    # env.sh is told where the rig's environment file is (the control file's
+    # franka_control), through the unit's environment: the wrapper is untouched
+    assert f"--setenv=ANYSPEEDUP_FR3_ENV={m.franka}/env/fr3_env.sh" in argv
+    # and the record says which arm controller this A is
+    record_a = a_record(m)
+    assert (record_a["arm_controller"], record_a["arm_preset"]) == (
+        "anyspeedup",
+        "S1",
+    )
+    assert record_a["arm_env"] == str(
+        tmp_path / "anyspeedup/controllers/fr3_serl/env.sh"
+    )
+
+
+def test_the_lab_records_its_controller_and_asks_for_no_environment(m):
+    m.start_a()
+    [argv] = m.systemd_runs("a")
+    assert not [t for t in argv if t.startswith("--setenv=ANYSPEEDUP")]
+    record_a = a_record(m)
+    assert (record_a["arm_controller"], record_a["arm_preset"]) == ("lab", None)
+    assert record_a["arm_env"] is None
+    # the other units' records do not carry the field
+    m.start_b()
+    assert "arm_controller" not in a_record(m, "b")
+
+
+@pytest.mark.parametrize("mode", [0o664, 0o666, 0o646])
+def test_an_environment_file_others_can_write_refuses_the_start(m, tmp_path, mode):
+    choose(m, fake_checkout(tmp_path, mode=mode))
+    m.ready_for_a()
+    assert "arm_controller_unsafe" in m.blockers("a")
+    assert "arm_controller_missing" not in m.blockers("a")
+    with pytest.raises(stack.Refuse) as caught:
+        m.act.start("a", m.start_body("a"))
+    assert caught.value.code == "arm_controller_unsafe"
+    assert not m.systemd_runs()
+    row = next(
+        b
+        for b in m.terminal("a")["start_blockers"]
+        if b["code"] == "arm_controller_unsafe"
+    )
+    assert "regular file" in row["text"] and str(tmp_path) not in row["text"]
+    assert "arm_controller_unsafe" not in m.blockers("b")
+
+
+def test_an_environment_file_that_is_a_link_refuses_the_start(m, tmp_path):
+    root = fake_checkout(tmp_path)
+    env = root / "controllers" / "fr3_serl" / "env.sh"
+    target = tmp_path / "elsewhere.sh"
+    target.write_text("")
+    target.chmod(0o644)
+    env.unlink()
+    env.symlink_to(target)
+    choose(m, root)
+    m.ready_for_a()
+    assert "arm_controller_unsafe" in m.blockers("a")
+
+
+def test_a_file_check_that_cannot_look_refuses_too(m, tmp_path):
+    choose(m, fake_checkout(tmp_path))
+    m.ready_for_a()
+    assert m.terminal("a")["can_start"] is True
+    m.act.host.file_safe = lambda path: None
+    assert "arm_controller_unsafe" in m.blockers("a")
+
+
+def test_the_environment_file_check_is_the_control_files(tmp_path):
+    safe = tmp_path / "ok.sh"
+    safe.write_text("")
+    safe.chmod(0o644)
+    assert stack_act.file_safe(str(safe)) is True
+    safe.chmod(0o620)
+    assert stack_act.file_safe(str(safe)) is False
+    assert stack_act.file_safe(str(tmp_path / "absent.sh")) is True, (
+        "(the missing row says so)"
+    )
+    assert stack_act.file_safe(str(tmp_path)) is False, "a folder is not a file"
+
+
+def test_a_partial_build_without_setup_bash_is_not_built(m, tmp_path):
+    root = fake_checkout(tmp_path)
+    (root / "controllers/fr3_serl/ws/install/setup.bash").unlink()
+    choose(m, root)
+    m.ready_for_a()
+    assert "arm_controller_not_built" in m.blockers("a")
+    # the package folder alone is not enough either, nor setup.bash alone
+    root2 = fake_checkout(tmp_path / "second")
+    import shutil
+
+    shutil.rmtree(
+        root2 / "controllers/fr3_serl/ws/install/anyspeedup_franka_controllers"
+    )
+    choose(m, root2)
+    assert "arm_controller_not_built" in m.blockers("a")
 
 
 def test_a_missing_environment_file_refuses_the_start_of_a_only(m, tmp_path):

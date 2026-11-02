@@ -238,6 +238,20 @@ def _path(value):
     return value
 
 
+# What reaches a unit's environment file argument and a ``systemctl show`` round
+# trip: letters, digits and . _ / - only.
+_STRICT_PATH = re.compile(r"/[A-Za-z0-9._/-]*")
+
+
+def _strict_path(value):
+    """An absolute, normalised path of the plainest characters only (the root
+    of a checkout whose ``env.sh`` the page sources into a realtime unit)."""
+    value = _path(value)
+    if not _STRICT_PATH.fullmatch(value):
+        raise _Bad("unsafe")
+    return value
+
+
 def _device(value):
     value = _path(value)
     if not value.startswith("/dev/"):
@@ -315,7 +329,7 @@ STACK_CHECKS = {
     "marker_wait_s": _seconds,
     "arm_controller": _choice(ARM_CONTROLLERS),
     "arm_preset": _arm_preset,
-    "anyspeedup_root": _path,
+    "anyspeedup_root": _strict_path,
 }
 # The machine values a switched-on stack cannot do without.
 STACK_NEEDED = ("franka_control", "robot_ip", "com_port", "reset_joint_target")

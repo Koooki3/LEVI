@@ -28,6 +28,9 @@ Nothing here starts anything; ``stack_act.py`` does, through its ``Host``.
   which sources ``fr3_env.sh`` and then the overlay) and the command differ. B, C
   and the one-shot checks keep the rig's ``fr3_env.sh``; the controller keeps the
   name ``cartesian_impedance_controller``, so C and the clients are unchanged.
+  ``env.sh`` sources the rig's file named by ``ANYSPEEDUP_FR3_ENV``, which the
+  unit gets as a ``--setenv`` (the control file's ``franka_control``: A, B and C
+  are in one ROS environment; the wrapper is not touched).
   Whether the checkout and its build are there is asked at A's start
   (``Specs.arm_checks``, ``stack_act``), not here: nothing in this module reads
   the disk. **No unit of this kind has been started on the real machine either.**
@@ -68,6 +71,7 @@ ANYSPEEDUP_PACKAGE = "anyspeedup_franka_controllers"
 ANYSPEEDUP_DIR = ("controllers", "fr3_serl")
 ANYSPEEDUP_ENV = (*ANYSPEEDUP_DIR, "env.sh")
 ANYSPEEDUP_INSTALL = (*ANYSPEEDUP_DIR, "ws", "install", ANYSPEEDUP_PACKAGE)
+ANYSPEEDUP_SETUP = (*ANYSPEEDUP_DIR, "ws", "install", "setup.bash")
 ANYSPEEDUP_LAUNCH = (
     "controllers/fr3_serl/anyspeedup_franka_controllers/launch/impedance.launch.py"
 )
@@ -382,6 +386,10 @@ class UnitSpec:
     limits: tuple  # LimitRTPRIO=, LimitMEMLOCK= properties
     ready_timeout_s: float = 90.0
     stop_timeout_s: int = STOP_TIMEOUT_S
+    # ``NAME=value`` environment of the unit beyond the two every unit gets
+    # (``systemd_run_argv``); empty for every unit but A with the anyspeedup
+    # controller, whose ``env.sh`` reads ``ANYSPEEDUP_FR3_ENV``.
+    setenv: tuple = ()
 
     @property
     def service(self) -> str:
@@ -410,13 +418,25 @@ class Specs:
     ee_cmd: tuple = ()
     nodes_cmd: tuple = ()  # the fast check of the ROS graph (``parse_nodes``)
     # The arm controller A starts: "lab" or "anyspeedup", and the latter's preset
-    # (None for the lab's). ``arm_checks`` are the ``(code, path)`` pairs that
-    # must exist for A to start (empty for the lab's): ``stack_act`` asks the
-    # host, so that this module reads no disk.
+    # (None for the lab's). ``arm_checks`` are ``(code, kind, paths)`` that A's
+    # start needs (empty for the lab's): ``exists`` (every path is there) or
+    # ``safe_file`` (the first path is a regular file of this user that no one
+    # else can write). ``stack_act`` asks the host, so that this module reads no
+    # disk.
     arm_controller: str = "lab"
     arm_preset: str | None = None
+    arm_env: str | None = None  # the anyspeedup env.sh A is started with
     arm_checks: tuple = ()
     extra: dict = field(default_factory=dict)
+
+    @property
+    def arm_identity(self) -> tuple:
+        """Which arm controller A runs when the page starts it with these
+        specs: ``(controller, preset, environment file)``; ``("lab", None,
+        None)`` for the lab's. A's record keeps the same triple
+        (``arm_identity_of``), so a unit can be told from the file that names
+        another one."""
+        return (self.arm_controller, self.arm_preset, self.arm_env)
 
 
 def check_argv(argv, long_lived=True) -> tuple:
@@ -431,6 +451,17 @@ def check_argv(argv, long_lived=True) -> tuple:
 
 def wrapper_sha256(path=WRAPPER) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def arm_identity_of(record) -> tuple:
+    """``Specs.arm_identity`` of the A that ``record`` started. A record from
+    before the arm controller was a choice has none of the fields: the lab's."""
+    record = record or {}
+    return (
+        record.get("arm_controller") or "lab",
+        record.get("arm_preset"),
+        record.get("arm_env"),
+    )
 
 
 def _behind(wrapper, env_file, command) -> tuple:
@@ -481,7 +512,7 @@ def real_specs(control, wrapper=WRAPPER) -> Specs:
     # same for both.
     a_env, a_ready, a_fail = env_file, A_READY, A_FAIL
     a_title = "FR3 arm ROS 2 stack (terminal A)"
-    a_preset, a_checks = None, ()
+    a_preset, a_checks, a_setenv = None, (), ()
     a_cmd = (
         "ros2",
         "launch",
@@ -500,9 +531,22 @@ def real_specs(control, wrapper=WRAPPER) -> Specs:
         a_env = a_root.joinpath(*ANYSPEEDUP_ENV)
         a_title = f"FR3 arm ROS 2 stack (terminal A, anyspeedup controller, preset {a_preset})"
         a_ready, a_fail = a_anyspeedup_ready(a_preset), A_FAIL_ANYSPEEDUP
+        # env.sh sources the rig's fr3_env.sh (the control file's franka_control,
+        # given to it as ANYSPEEDUP_FR3_ENV so that A, B and C are in one ROS
+        # environment) and then ``ws/install/setup.bash``: a partial build
+        # that has the package folder but not that file would exit 78.
+        a_setenv = check_argv((f"ANYSPEEDUP_FR3_ENV={env_file}",))
         a_checks = (
-            ("arm_controller_missing", str(a_env)),
-            ("arm_controller_not_built", str(a_root.joinpath(*ANYSPEEDUP_INSTALL))),
+            ("arm_controller_missing", "exists", (str(a_env),)),
+            ("arm_controller_unsafe", "safe_file", (str(a_env),)),
+            (
+                "arm_controller_not_built",
+                "exists",
+                (
+                    str(a_root.joinpath(*ANYSPEEDUP_SETUP)),
+                    str(a_root.joinpath(*ANYSPEEDUP_INSTALL)),
+                ),
+            ),
         )
         a_cmd = (
             "ros2",
@@ -548,6 +592,7 @@ def real_specs(control, wrapper=WRAPPER) -> Specs:
             "hardware_active",
             None,
             ("LimitRTPRIO=99", "LimitMEMLOCK=infinity"),
+            setenv=a_setenv,
         ),
         "b": UnitSpec(
             "b",
@@ -643,6 +688,7 @@ def real_specs(control, wrapper=WRAPPER) -> Specs:
         nodes_cmd=check_argv(_behind(wrapper, env_file, nodes), long_lived=False),
         arm_controller=arm,
         arm_preset=a_preset,
+        arm_env=str(a_env) if arm == "anyspeedup" else None,
         arm_checks=a_checks,
     )
 
@@ -689,6 +735,7 @@ def systemd_run_argv(spec, log_path, unset=()) -> list:
     if unset:
         run.append("--property=UnsetEnvironment=" + " ".join(unset))
     run += ["--setenv=PYTHONUNBUFFERED=1", "--setenv=RCUTILS_COLORIZED_OUTPUT=0"]
+    run += [f"--setenv={item}" for item in spec.setenv]
     run.append("--")
     run += list(spec.argv)
     return run

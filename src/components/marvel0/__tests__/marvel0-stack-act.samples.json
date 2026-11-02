@@ -411,6 +411,19 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": null,
+          "status": "idle",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -1152,6 +1165,19 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": null,
+          "status": "idle",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -1875,6 +1901,19 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": null,
+          "status": "idle",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -2581,6 +2620,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -3312,6 +3367,22 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -4024,6 +4095,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -4778,6 +4865,22 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -5516,6 +5619,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -6263,6 +6382,22 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -7009,6 +7144,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -7814,6 +7965,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -8632,6 +8799,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -9476,6 +9659,22 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -10221,6 +10420,22 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -10957,6 +11172,19 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": null,
+          "status": "idle",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -11761,6 +11989,22 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -12530,6 +12774,19 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": null,
+          "status": "idle",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -13344,6 +13601,22 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -14141,6 +14414,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -14965,6 +15254,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -15791,6 +16096,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -16687,6 +17008,22 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -17557,6 +17894,19 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": null,
+          "status": "idle",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -18380,6 +18730,19 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": null,
+          "status": "idle",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -19178,6 +19541,19 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": null,
+          "status": "idle",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -20008,6 +20384,22 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -20814,6 +21206,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -21638,6 +22046,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -22478,6 +22902,22 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -23284,6 +23724,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -24102,6 +24558,22 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -24912,6 +25384,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -25792,6 +26280,22 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -26597,6 +27101,19 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": null,
+          "status": "idle",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -27340,6 +27857,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -28121,6 +28654,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -28960,6 +29509,22 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -29790,6 +30355,19 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": null,
+          "status": "idle",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -30517,6 +31095,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -31266,6 +31860,22 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -31983,6 +32593,22 @@
             "alpha": null
           }
         },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
+        },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
         "terminals": {
@@ -32698,6 +33324,19 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": null,
+          "status": "idle",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -33424,6 +34063,22 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": {
+            "controller": "lab",
+            "preset": null
+          },
+          "status": "match",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -34292,6 +34947,19 @@
             "preset": null,
             "alpha": null
           }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": false,
+          "running": null,
+          "status": "idle",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": ""
         },
         "spec_profile": null,
         "order": ["m", "a", "b", "c"],

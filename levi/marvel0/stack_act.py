@@ -75,6 +75,8 @@ from .gripper import MISSING_RATIO
 LOG = logging.getLogger(__name__)
 SCHEMA = "levi.marvel0.stack_act.v1"
 RECORD_SCHEMA = "levi.marvel0.stack_act_record.v1"
+# The ``ActiveState`` values of a unit whose processes may still run.
+RUNNING_UNIT_STATES = ("active", "activating", "reloading", "deactivating")
 LOG_SCHEMA = "levi.marvel0.stack_log.v1"
 LOG_NAME = re.compile(r"[abc]-\d{8}T\d{6}Z(?:-\d{1,2})?\.log")
 KEEP_LOGS = 10
@@ -453,11 +455,20 @@ TEXT = {
             "anyspeedup_root in the control file."
         ),
     ),
+    "arm_controller_unsafe": (
+        409,
+        (
+            "The anyspeedup arm controller's environment file must be a regular "
+            "file of your user that no one else can write; it is sourced into "
+            "the arm's realtime unit."
+        ),
+    ),
     "arm_controller_not_built": (
         409,
         (
-            "The anyspeedup arm controller is not built: run the build.sh in the "
-            "fr3_serl folder of the anyspeedup checkout."
+            "The anyspeedup arm controller is not built: build it with the arm "
+            "controller off (the build.sh in the fr3_serl folder of the anyspeedup "
+            "checkout)."
         ),
     ),
     "c_preflight": (
@@ -1073,6 +1084,23 @@ def heavy_jobs_running(log_path, run, now=time.time) -> dict:
     }
 
 
+def file_safe(path):
+    """True: ``path`` is a regular file (not a link) of this user that no one
+    else can write, or is not there (another row says so). False: anything else
+    (the same test as for the control file). None: it cannot be looked at."""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return None
+    return (
+        stat.S_ISREG(info.st_mode)
+        and info.st_uid == os.geteuid()
+        and not info.st_mode & 0o022
+    )
+
+
 @dataclass
 class ActHost:
     """What ``Act`` reaches beyond ``stack.Host``."""
@@ -1082,6 +1110,9 @@ class ActHost:
     fci_probe: object = tcp_probe  # (ip, port) -> {"state"}
     arm_lock: str = site.ARM_LOCK_FILE
     path_exists: object = os.path.exists
+    # (path) -> True: a regular file of this user that no one else can write, or
+    # missing (the "missing" row says so); False: anything else; None: unreadable
+    file_safe: object = file_safe
     workspace_ok: object = workspace_is_main  # () -> the main checkout's workspace?
     cgroup_procs: object = cgroup_procs  # (control group) -> [pids] | None
     background: bool = True  # slow work in a thread (tests run it inline)
@@ -1551,6 +1582,15 @@ class Act:
         if spec is None:
             # (the control file went away: the unit is still ours to stop)
             return {**base, "state": "unknown", "reason": f"{key}.no_specs"}
+        if (
+            key == "a"
+            and stack_units.arm_identity_of(rec) != ctx_in["specs"].arm_identity
+        ):
+            # The control file names another arm controller than the one this A
+            # was started as (also for an A that was ready: the log's rules are
+            # not read again once latched, and the card must not go on saying
+            # "ready" for the file's controller). Still ours to stop.
+            return {**base, "state": "unknown", "reason": "a.control_changed"}
         path = self._log_path(key, rec)
         latched = self._latched(key, rec)
         # Once ready, the log's rules (the start-up lines and their counts) are
@@ -1840,8 +1880,12 @@ class Act:
             rows.append(c("gripper_b_not_ready", st["b"]["state"] == "ready"))
         if key == "a" and ctx.specs:
             # (empty for the lab's controller: nothing is asked of the disk)
-            for code, path in ctx.specs.arm_checks:
-                rows.append(c(code, bool(self.host.path_exists(path))))
+            for code, kind, paths in ctx.specs.arm_checks:
+                if kind == "safe_file":
+                    ok = self.host.file_safe(paths[0])
+                else:
+                    ok = all(bool(self.host.path_exists(path)) for path in paths)
+                rows.append(c(code, ok))
         if key == "b":
             serial = ctx.specs.com_port if ctx.specs else None
             rows.append(
@@ -2128,6 +2172,7 @@ class Act:
             "schema": SCHEMA,
             "enabled": ctx.enabled,
             "control": control_site.view(ctx.loaded),
+            "arm": self._arm_doc(ctx),
             "spec_profile": ctx.specs.profile if ctx.specs else None,
             "order": list(stack_units.ORDER),
             "terminals": terminals,
@@ -2153,6 +2198,84 @@ class Act:
             },
             "attest": {k: list(v) for k, v in ATTEST_NEEDED.items()},
             "notices": self._notices(ctx),
+        }
+
+    def _arm_doc(self, ctx: Ctx) -> dict:
+        """Which arm controller the file names and which one A runs, and what
+        that makes of the client command (``arm_facts.py`` reads it from here).
+
+        ``running`` is what the page's own A was started as (its record), also
+        after the control file was changed; ``status``: ``match`` (the file
+        still names it), ``changed`` (it names another), ``foreign`` (an A the
+        page did not start runs: which controller it is, is not known), ``unknown``
+        (A could not be judged) or ``idle`` (no A runs: the file is what the
+        page will start). ``alpha`` is the alpha rule v3 is forced to (the
+        running A's preset; the file's while no A runs), None when nothing is
+        forced; ``problem`` is why rule v3 is refused (only while an anyspeedup
+        controller is involved: with the lab's and no anyspeedup file, a
+        terminal started by hand is the usual way and nothing changes);
+        ``ramp_ok``: rules v1 and v2 (a fixed 0.2 s lag) are only offered
+        with the lab's controller and with anyspeedup's ``today``; ``suffix``:
+        what the default rollout group gets."""
+        stack_control = ctx.loaded.site.stack if ctx.loaded.state == "ok" else None
+        configured = None
+        if stack_control is not None:
+            configured = {
+                "controller": stack_control.arm_controller,
+                "preset": stack_control.arm_preset_in_use,
+            }
+        want = ctx.specs.arm_identity if ctx.specs else None
+        file_any = want is not None and want[0] == "anyspeedup"
+        a, rec = ctx.states["a"], ctx.records["a"]
+        running = None
+        ran = None
+        if (
+            a.get("owned")
+            and a.get("unit_state") in RUNNING_UNIT_STATES
+            and isinstance(rec, dict)
+            and rec.get("phase") != "corrupt"
+        ):
+            ran = stack_units.arm_identity_of(rec)
+            running = {"controller": ran[0], "preset": ran[1]}
+        run_any = ran is not None and ran[0] == "anyspeedup"
+        alpha, problem = None, None
+        if running is not None:
+            if ran == want:
+                status = "match"
+                alpha = control_site.ARM_PRESET_ALPHA.get(ran[1]) if run_any else None
+            else:
+                status = "changed"
+                problem = "changed" if (run_any or file_any) else None
+        elif a["state"] == "foreign_running":
+            status = "foreign"
+            problem = "foreign" if file_any else None
+        elif a["state"] == "unknown":
+            status = "unknown"
+            problem = "unknown" if file_any else None
+        else:
+            status = "idle"
+            alpha = stack_control.arm_alpha if (file_any and stack_control) else None
+        presets = []
+        if run_any:
+            presets.append(ran[1])
+        if file_any:
+            presets.append(want[1])
+        # the default rollout group is told apart by the controller that runs
+        # (or, while none runs, the one the page will start)
+        label = None
+        if run_any:
+            label = ran[1]
+        elif status == "idle" and file_any:
+            label = want[1]
+        return {
+            "configured": configured,
+            "enabled": ctx.specs is not None,
+            "running": running,
+            "status": status,
+            "alpha": alpha,
+            "problem": problem,
+            "ramp_ok": all(preset == "today" for preset in presets),
+            "suffix": f"_any-{label}" if label else "",
         }
 
     def _doc_m(self, r, ctx: Ctx) -> dict:
@@ -2722,6 +2845,12 @@ class Act:
             if specs.profile == "real"
             else None,
         }
+        if key == "a":
+            # Which arm controller this A is: the file can be changed while it
+            # runs, and what the page says and forces follows this, not the file
+            # (``_own_unit``, ``_arm_doc``, the run's record).
+            controller, preset, env = specs.arm_identity
+            fields.update(arm_controller=controller, arm_preset=preset, arm_env=env)
         with record.locked(folder):
             record.write_record(folder, fields)
         for latched in [k for k in self._ready_at if k[0] == key]:
