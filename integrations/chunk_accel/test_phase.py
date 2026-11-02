@@ -112,6 +112,7 @@ DEFAULTS = {
     "governor_margin_rows": 0.5,
     "early_trigger": True,
     "delay_history": 8,
+    "grasp_replan_m": 0.035,
 }
 
 # Section 5 / 15: the ledger numbers phase.py must carry (E8 is a tightening, E11 and E12 live in other files).
@@ -119,6 +120,12 @@ RELAXED_IN_PHASE = (1, 2, 3, 4, 5, 6, 7, 9, 10, 13, 14)
 
 
 class TestParamsDefaults(unittest.TestCase):
+    def test_the_grasp_replan_is_off_in_golden_and_range_checked(self):
+        self.assertEqual(PhaseParams.golden_params().grasp_replan_m, 0.0)
+        self.assertEqual(PhaseParams.for_page(3.0, 0.005).grasp_replan_m, 0.035)
+        with self.assertRaises(ValueError):
+            PhaseParams(grasp_replan_m=0.2)
+
     def test_defaults_pinned(self):
         got = PhaseParams().as_dict()
         self.assertEqual(

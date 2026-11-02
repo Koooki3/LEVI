@@ -64,6 +64,9 @@ _BY_ALPHA = {
     0.01: (0.17, 0.35, 1.0, 2.4),
 }
 
+# A VLASH grasp re-plan (PhaseEngine.replan) leaves at least this many rows of the new chunk ahead of the phase.
+REPLAN_RUNWAY_ROWS = 3
+
 # Switches golden mode turns off (section 3.11); `golden` forces these on construction.
 _GOLDEN_FORCED = {
     "lambda_max": 1.0,
@@ -81,6 +84,7 @@ _GOLDEN_FORCED = {
     "open_settle": False,
     "governor": False,
     "early_trigger": False,
+    "grasp_replan_m": 0.0,
 }
 
 # Validated ranges (section 5, "validation range" column): name -> (lo, hi, lo_open). Optional (None) fields are
@@ -155,6 +159,7 @@ _RANGES = {
     "open_settle_unknown_s": (0.3, 1.5, False),
     "governor_margin_rows": (0.0, 5.0, False),
     "delay_history": (1, 32, False),
+    "grasp_replan_m": (0.0, 0.10, False),
 }
 _INT_FIELDS = frozenset(
     {
@@ -369,6 +374,16 @@ class PhaseParams:
     governor_margin_rows: float = 0.5
     early_trigger: bool = True
     delay_history: int = 8
+
+    # ---- VLASH grasp re-plan (2026-11-02 real run) ----
+    # The FR3 policy predicts actions as deltas from the state it is given, and VLASH gives it the planned state at the end
+    # of the queue (chunk[-1]) together with a camera image of where the arm is now. Accelerated, the two drift apart: on
+    # the real arm 45-90 mm at the median, 79-95 mm before the first grasp of three green-plate runs that all missed, and
+    # in replay 68 mm (p50) / 96 mm (p90) at the prefetches whose reply brings a gripper close, against 16 / 27 mm (max 31)
+    # without acceleration. A reply that brings a close (open -> close against the last queued row) and was requested
+    # with a state farther than this from the measured arm is dropped and asked again synchronously from the measured
+    # state, so the grasp is planned from a state that matches the image. 0 turns it off; golden forces 0.
+    grasp_replan_m: float = 0.035
 
     def __post_init__(self) -> None:
         if self.golden:
@@ -1238,6 +1253,39 @@ class PhaseEngine:
             "anchor_rows": anchor,
             "n_blend": int(n_b),
         }
+
+    def replan(self, rows: np.ndarray) -> dict:
+        """VLASH grasp re-plan (PhaseParams.grasp_replan_m): ``rows`` were planned from this tick's measured state and
+        replace the plan while the arm moves. ``set_chunk`` would land on row 0, that is on the lagging arm, at lambda 1,
+        and the target would step back toward the arm (review 2026-11-02: 6 mm per tick in a line-world sim). Here the
+        phase is placed where the last target projects onto the new path, never later than one row before the first
+        gripper change ahead and never closer than REPLAN_RUNWAY_ROWS to the chunk's end, lambda is kept, and what is
+        left of the offset is blended as at any swap. Returns {"anchor_rows", "n_blend"}. Raises NonFiniteChunk."""
+        if self._golden:
+            raise RuntimeError("PhaseEngine.replan: not in golden mode")
+        r64, r32 = self._check_rows(rows)
+        H = len(r64)
+        s_est = self._s + max(self._lam, 1.0)  # the next tick's candidate phase
+        ref_p = None
+        if self._T_prev is not None and np.isfinite(self._T_prev).all():
+            ref_p = np.asarray(self._T_prev[:3], np.float64)
+        self._install(r64, 0, s_est, H - 1, r32[-1].copy(), "replan")
+        self._fresh = False
+        u_p = 0.0
+        hi = float(max(H - 1 - REPLAN_RUNWAY_ROWS, 0))
+        ahead = [g for g in self._G if g > 0.0]
+        if ahead:
+            hi = min(hi, max(0.0, ahead[0] - 1.0))
+        if ref_p is not None and hi > 0.0:
+            u_p, _, _ = self._project(
+                self._R, self._D, self._lo, self._phi_grid(0.0, hi), ref_p
+            )
+        self._o = s_est - u_p
+        self._e_off = 0.0
+        n_b = self._start_blend(self._s - self._o)
+        self._st["grasp_replans"] += 1
+        self._record_chunk(r32, "replan", s_obs=s_est, anchor=u_p, n_blend=n_b)
+        return {"anchor_rows": float(u_p), "n_blend": int(n_b)}
 
     def append(self, rows: np.ndarray) -> None:
         """VLASH: the prefetched chunk joins at origin + H (it was predicted from chunk[-1], so it continues the
@@ -2199,6 +2247,13 @@ class PhaseEngine:
         self._emit({"kind": "request", "k": self._k - 1, "prev": out32.tolist()})
         return out32
 
+    @property
+    def last_gripper(self) -> float | None:
+        """Gripper value of the last queued row (chunk[-1][6]), None when no chunk is loaded."""
+        if self._raw_last is None or self._R is None:
+            return None
+        return float(self._raw_last[6])
+
     def future_row(self) -> np.ndarray:
         """VLASH future state: ``chunk[-1]`` exactly, untouched by lead, blend or leash (I1)."""
         if self._raw_last is None:
@@ -2270,6 +2325,7 @@ class PhaseEngine:
             "gate_waits": int(st["gate_waits"]),
             "rejected": int(st["rejected"]),
             "reanchors": int(st["reanchors"]),
+            "grasp_replans": int(st["grasp_replans"]),
             "ws_shrinks": int(st["ws_shrinks"]),
             "reanchored_to_measured": int(st["reanchored_to_measured"]),
             "leash_recoveries": int(st["leash_recoveries"]),

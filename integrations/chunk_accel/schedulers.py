@@ -79,6 +79,14 @@ _EPS = 1e-9
 # section 3.9, decided in WP2 to meet the test; the design owner may set it back to 0.
 EARLY_MARGIN_TICKS = 1
 
+# VLASH, 2026-11-02: the first call of an episode is synchronous and may include the server's warm-up (1464 ms after a
+# server restart, later replies 61 ms). Counted as a reply delay it made d_hat 16 ticks, the early trigger fired at 9,
+# 17, 24, 27 and 31 rows left, and the arm ran on a plan up to five seconds old. Synchronous calls therefore stay out of
+# the delay history, and the early trigger never queues more than one chunk (the governor brakes for slow replies; a cap
+# on d_hat itself made every chunk starve once replies took over 0.5 s, review 2026-11-02).
+# At most this many grasp re-plans in a row (PhaseParams.grasp_replan_m); then the reply is joined as it is.
+GRASP_REPLAN_MAX_IN_ROW = 8
+
 
 # --------------------------------------------------------------------------------------------------------------
 # Read-only loading of the user's modules (by path, never copied, never edited, no bytecode written next to them)
@@ -983,8 +991,12 @@ class PhaseVlashChunker:
             "starvations": 0,
             "discarded_replies": 0,
             "adjusted_targets": 0,
+            "grasp_replans": 0,
         }
         self.extra = {"sync_fallbacks": 0, "early_prefetches": 0}
+        # |state handed to the policy - measured arm| of the request in flight (m); None for a synchronous one
+        self._pending_gap: float | None = None
+        self._replans_in_row = 0
         # Reply latency of every request, in order (the first is the blocking one at the start of an episode).
         self.latency_ms: list[float] = []
 
@@ -1006,7 +1018,7 @@ class PhaseVlashChunker:
             # accelerated: join the chunk as soon as it is here, so the braking profile sees its first rows (a gripper
             # window right behind the join) before the phase gets there. Golden waits for the join like today (the
             # counters of an abandoned reply are then the same as VlashChunker's).
-            self._append_pending()
+            self._append_pending(observation, k)
         proposal = self.engine.begin(measured, self._inflight_view(k))
         starved = False
         attempts = 0
@@ -1026,7 +1038,7 @@ class PhaseVlashChunker:
                     self.stats["starvations"] += 1
                     _bump(self.engine, "starved_ticks")
                 starved = True
-                self._append_pending()
+                self._append_pending(observation, k)
             proposal = self.engine.begin(measured, self._inflight_view(k))
         out = self.engine.commit()
         self._lam_sum += float(out.lam)
@@ -1041,6 +1053,8 @@ class PhaseVlashChunker:
         if self.pending is not None:
             self.abandoned.append(self.pending)
             self.pending = None
+        self._pending_gap = None
+        self._replans_in_row = 0
         self.engine.reset()
 
     def action_adjusted(self, raw, actual) -> None:
@@ -1077,11 +1091,45 @@ class PhaseVlashChunker:
 
     # ---- internals -------------------------------------------------------------------------------------------
 
-    def _append_pending(self) -> None:
+    def _append_pending(self, observation: dict | None = None, k: int = 0) -> None:
         pending, self.pending = self.pending, None
+        gap, self._pending_gap = self._pending_gap, None
         answer = pending.take()
         self._record_latency(pending.latency_s)
-        self.engine.append(self._chunk(answer))
+        chunk = self._chunk(answer)
+        if observation is not None and self._grasp_replan_due(chunk, gap):
+            # the reply brings a close but was planned from a state far from where the camera saw the arm: plan the
+            # grasp again from the measured state (a synchronous query, the plan restarts from here at lambda 1)
+            self.stats["grasp_replans"] += 1
+            self._replans_in_row += 1
+            _note(self.engine, {"kind": "grasp_replan", "k": k, "gap_m": float(gap)})
+            self._replan(observation)
+            return
+        self._replans_in_row = 0
+        self.engine.append(chunk)
+
+    def _replan(self, observation: dict) -> None:
+        """A synchronous query from this tick's observation (no future state), installed by ``engine.replan``: the
+        phase continues from the last target's place on the new path, lambda kept."""
+        self._drain()
+        self.stats["requests"] += 1
+        started = self._clock()
+        answer = self._request(copy.deepcopy(observation), None)()
+        self.latency_ms.append((self._clock() - started) * 1000.0)
+        self.engine.replan(self._chunk(answer))
+
+    def _grasp_replan_due(self, chunk: np.ndarray, gap: float | None) -> bool:
+        """A prefetched reply brings a gripper close (open -> close against the last queued row) and its request handed
+        the policy a state farther than ``grasp_replan_m`` from the measured arm (PhaseParams.grasp_replan_m)."""
+        limit = float(self.params.grasp_replan_m)
+        if self.params.golden or limit <= 0.0 or gap is None or gap <= limit:
+            return False
+        if self._replans_in_row >= GRASP_REPLAN_MAX_IN_ROW:
+            return False
+        last = getattr(self.engine, "last_gripper", None)
+        g = np.asarray(chunk[:, 6], dtype=np.float64)
+        seq = g if last is None else np.concatenate([[last], g])
+        return bool(np.any((seq[:-1] >= 0.5) & (seq[1:] < 0.5)))
 
     def _record_latency(self, seconds) -> None:
         if seconds is not None:
@@ -1108,7 +1156,8 @@ class PhaseVlashChunker:
         self.abandoned.clear()
 
     def _d_hat(self) -> int:
-        """Expected delay of a prefetch in ticks: the slowest of the last replies (section 3.9)."""
+        """Expected delay of a prefetch in ticks: the slowest of the last prefetch replies (section 3.9); synchronous
+        calls are not in the history (a warm-up is not a reply delay), the seed before the first reply is capped at 4."""
         dt = self.engine.dt
         if self._lat_hist:
             return max(1, _ceil(max(self._lat_hist) / dt)) + self._margin
@@ -1136,7 +1185,8 @@ class PhaseVlashChunker:
         started = self._clock()
         answer = self._request(copy.deepcopy(observation), None)()
         elapsed = self._clock() - started
-        self._record_latency(elapsed)
+        # into the latency report, not into the delay history: a blocking call can include the server's warm-up
+        self.latency_ms.append(elapsed * 1000.0)
         if self._seed_ticks is None:
             self._seed_ticks = min(4, max(1, _ceil(elapsed / self.engine.dt)))
         self.engine.set_chunk(self._chunk(answer), "sync")
@@ -1148,13 +1198,23 @@ class PhaseVlashChunker:
         )  # u == H - overlap (vrt:226) on the current chunk
         early = False
         if self.params.early_trigger:
-            early = rows_left <= float(out.lam) * (self._d_hat() + 1) + 1.0 + _EPS
+            # never queue more than one chunk ahead: every queued row was planned from an older image
+            early = (
+                rows_left
+                <= min(float(out.lam) * (self._d_hat() + 1) + 1.0, float(self.horizon))
+                + _EPS
+            )
         if not (golden_pos or early):
             return
         if early and not golden_pos:
             self.extra["early_prefetches"] += 1
             _bump(self.engine, "early_triggers")
         future = _vector(self.engine.future_row())
+        here = np.asarray(
+            observation["robot_state"]["cartesian_position"], dtype=np.float64
+        )[:3]
+        gap = float(np.linalg.norm(np.asarray(future, dtype=np.float64)[:3] - here))
+        self._pending_gap = gap if math.isfinite(gap) else None
         function = self._request(copy.deepcopy(observation), future)
         self.pending = self._transport_for_start().start(function, k, 0)
         self._pending_k = k

@@ -1357,10 +1357,12 @@ def run_line(
     resets=(),
     rc_clamp=None,
     margin=None,
+    sync_lat=0.083,
 ):
-    """One closed-loop episode on the line world with the arm model. Returns a dict with everything the assertions need."""
+    """One closed-loop episode on the line world with the arm model. Returns a dict with everything the assertions need.
+    ``sync_lat`` is how long a synchronous request blocks (the first call of an episode, for example)."""
     clock = Clock()
-    server = LineServer(H=H, clock=clock)
+    server = LineServer(H=H, lat=sync_lat, clock=clock)
     lat = list(latencies) if latencies is not None else [0.083]
     transport = StrictSimTransport.from_seconds(lat, period_s=0.1)
     engine = make_engine(params, 10.0) if make_engine else None
@@ -1825,6 +1827,222 @@ class AccelVlashTests:
                 1,
                 "one synchronous chunk at the start, then only appends",
             )
+
+
+class _ReadyReply:
+    """A prefetch handle whose reply is already here."""
+
+    def __init__(self, rows: np.ndarray):
+        self.rows = np.asarray(rows, np.float32)
+        self.latency_s = 0.05
+        self.done = threading.Event()
+        self.done.set()
+
+    def take(self):
+        return self.rows.copy(), {}
+
+    def wait(self, limit=None):
+        return None
+
+
+class VlashColdStartAndGraspReplanTests(unittest.TestCase):
+    """Real-run findings of 2026-11-02 (VLASH, phase clock): a cold server's first call stretched the expected reply
+    delay and the queue (plans up to 5 s old), and grasps were planned from a state 79-95 mm from where the camera saw
+    the arm. Real engine."""
+
+    def _loaded(self, params):
+        clock = Clock()
+        server = LineServer(H=10, clock=clock)
+        sched = PhaseVlashChunker(
+            server.vlash_request,
+            overlap_steps=2,
+            horizon=10,
+            params=params,
+            binarize_gripper=True,
+            transport=StrictSimTransport.from_seconds([0.083], period_s=0.1),
+            clock=clock.monotonic,
+        )
+        arm = Arm()
+        clock.now += 0.1
+        sched.next_action(arm.obs(0, 0.0))  # the synchronous first chunk
+        self.assertEqual([c["kind"] for c in server.calls], ["sync"])
+        return sched, server, arm
+
+    @staticmethod
+    def _closing_rows(phi0: float = 12.0) -> np.ndarray:
+        rows = line_rows(phi0)
+        rows[5:, 6] = (
+            0.0  # the reply closes the gripper at its row 5 (the queue ends open)
+        )
+        return rows
+
+    def test_a_slow_first_call_neither_stretches_the_delay_nor_the_queue(self):
+        r = run_line("vlash", SHIPPED, None, ticks=200, sync_lat=1.5)
+        self.assertAlmostEqual(r["summary"]["latency_ms_first"], 1500.0, delta=1.0)
+        reqs = r["requests"]
+        self.assertGreater(len(reqs), 5)
+        worst = max(x["rows_left"] for x in reqs)
+        self.assertLessEqual(
+            worst,
+            10 + 1e-9,
+            f"a prefetch started with {worst:.1f} rows queued: more than one chunk ahead (11-02: 9 -> 31 rows)",
+        )
+        self.assertEqual(
+            r["sched"]._d_hat(),
+            1 + schedulers.EARLY_MARGIN_TICKS,
+            "83 ms prefetch replies: one tick; the 1.5 s synchronous call is not a reply delay",
+        )
+        self.assertEqual(r["summary"]["starvations"], 0)
+        self.assertEqual(
+            r["summary"]["grasp_replans"], 0, "1 mm rows never open a 35 mm gap"
+        )
+
+    def test_the_prefetch_records_how_far_its_state_is_from_the_arm(self):
+        sched, server, arm = self._loaded(SHIPPED)
+        obs = arm.obs(1, sched.engine.s)
+        obs["robot_state"]["cartesian_position"][0] -= (
+            0.06  # the camera sees the arm 6 cm behind
+        )
+        out = types.SimpleNamespace(lam=3.0, s=sched.engine.s, u=sched.engine.u)
+        sched._maybe_prefetch(obs, 1, out)
+        self.assertIsNotNone(sched.pending)
+        future = server.calls[-1]["future"]
+        here = np.asarray(obs["robot_state"]["cartesian_position"], np.float64)[:3]
+        self.assertAlmostEqual(
+            sched._pending_gap, float(np.linalg.norm(future[:3] - here)), places=6
+        )
+        self.assertGreater(sched._pending_gap, 0.05)
+
+    def test_a_close_planned_from_a_far_state_is_planned_again_from_the_arm(self):
+        sched, server, arm = self._loaded(SHIPPED)
+        sched.pending, sched._pending_gap = _ReadyReply(self._closing_rows()), 0.05
+        sched._append_pending(arm.obs(1, sched.engine.s), 1)
+        self.assertEqual(
+            [c["kind"] for c in server.calls],
+            ["sync", "sync"],
+            "the close reply is dropped and the chunk asked again with no future state",
+        )
+        self.assertEqual(sched.stats["grasp_replans"], 1)
+        self.assertIsNone(sched.pending)
+        np.testing.assert_array_equal(
+            sched.engine.last_gripper, server.chunks[-1][-1][6]
+        )
+        self.assertLessEqual(sched.engine.rows_left, 10.0)
+
+    def test_a_close_planned_near_the_arm_is_joined(self):
+        sched, server, arm = self._loaded(SHIPPED)
+        sched.pending, sched._pending_gap = _ReadyReply(self._closing_rows()), 0.02
+        sched._append_pending(arm.obs(1, sched.engine.s), 1)
+        self.assertEqual([c["kind"] for c in server.calls], ["sync"])
+        self.assertEqual(sched.stats["grasp_replans"], 0)
+        self.assertEqual(sched.engine.last_gripper, 0.0)
+
+    def test_a_far_reply_without_a_close_is_joined(self):
+        sched, server, arm = self._loaded(SHIPPED)
+        sched.pending, sched._pending_gap = _ReadyReply(line_rows(12.0)), 0.09
+        sched._append_pending(arm.obs(1, sched.engine.s), 1)
+        self.assertEqual([c["kind"] for c in server.calls], ["sync"])
+        self.assertEqual(sched.stats["grasp_replans"], 0)
+
+    def test_golden_and_the_switch_off_never_replan(self):
+        for params in (GOLDEN, dataclasses.replace(SHIPPED, grasp_replan_m=0.0)):
+            with self.subTest(golden=params.golden):
+                sched, server, arm = self._loaded(params)
+                sched.pending, sched._pending_gap = (
+                    _ReadyReply(self._closing_rows()),
+                    0.09,
+                )
+                sched._append_pending(arm.obs(1, sched.engine.s), 1)
+                self.assertEqual([c["kind"] for c in server.calls], ["sync"])
+                self.assertEqual(sched.stats["grasp_replans"], 0)
+
+    def test_replies_slower_than_a_tick_keep_the_queue_within_one_chunk(self):
+        r = run_line("vlash", SHIPPED, None, ticks=200, latencies=[0.3])
+        worst = max(x["rows_left"] for x in r["requests"])
+        self.assertLessEqual(
+            worst, 10 + 1e-9, f"{worst:.1f} rows queued at a prefetch (one chunk is 10)"
+        )
+
+    def test_a_slow_synchronous_call_stays_out_of_the_delay_history(self):
+        sched, server, arm = self._loaded(SHIPPED)
+        server.lat = 1.5  # a mid-episode synchronous call that waits for a cold server
+        sched._sync(arm.obs(1, sched.engine.s))
+        self.assertEqual(len(sched._lat_hist), 0)
+        self.assertEqual(sched._d_hat(), 1 + schedulers.EARLY_MARGIN_TICKS)
+        self.assertGreater(sched.latency_ms[-1], 1400.0, "still reported")
+
+    def test_a_reply_that_is_closed_from_its_first_row_counts_as_a_close(self):
+        sched, _server, arm = self._loaded(SHIPPED)
+        rows = line_rows(12.0)
+        rows[:, 6] = (
+            0.0  # the close is at the join: the queue ends open, the reply starts closed
+        )
+        sched.pending, sched._pending_gap = _ReadyReply(rows), 0.05
+        sched._append_pending(arm.obs(1, sched.engine.s), 1)
+        self.assertEqual(sched.stats["grasp_replans"], 1)
+
+    def test_the_ninth_far_close_in_a_row_is_joined(self):
+        sched, _server, arm = self._loaded(SHIPPED)
+        cap = schedulers.GRASP_REPLAN_MAX_IN_ROW
+        for i in range(cap + 1):
+            sched.pending, sched._pending_gap = (
+                _ReadyReply(self._closing_rows()),
+                0.09,
+            )
+            sched._append_pending(arm.obs(1 + i, sched.engine.s), 1 + i)
+        self.assertEqual(sched.stats["grasp_replans"], cap)
+        self.assertEqual(sched.engine.last_gripper, 0.0, "the last one was joined")
+
+    def test_a_replan_while_the_arm_lags_never_steps_the_target_back(self):
+        """Closed loop, 8 mm rows at lambda 3 (the arm lags 50-60 mm), the policy planning a synchronous chunk from
+        where the camera sees the arm: the close is re-planned, sent, and the target never moves backward."""
+        here = sys.modules[__name__]
+        orig = LineServer.vlash_request
+
+        def from_arm(self, obs, future):
+            if future is None:
+                obs = dict(obs)
+                obs["phase"] = phase_of(
+                    np.asarray(obs["robot_state"]["cartesian_position"])[:6]
+                )
+            return orig(self, obs, future)
+
+        dx = np.array([0.008, 0.0, 0.0, 0.0, 0.0, 0.0])
+        with (
+            mock.patch.object(here, "DX", dx),
+            mock.patch.object(LineServer, "vlash_request", from_arm),
+        ):
+            r = run_line("vlash", SHIPPED, None, ticks=120, latencies=[0.083])
+        s = r["summary"]
+        self.assertGreaterEqual(s["grasp_replans"], 1)
+        self.assertEqual(s["starvations"], 0)
+        self.assertEqual(s["sync_fallbacks"], 0)
+        self.assertEqual(
+            r["sched"].engine.summary()["grasp_replans"], s["grasp_replans"]
+        )
+        sent = [t["sent"] for t in r["trace"]]
+        self.assertTrue(any(x[6] == 0.0 for x in sent), "the close was sent")
+        back = [
+            round(1000 * float(b[0] - a[0]), 1)
+            for a, b in itertools.pairwise(sent)
+            if b[0] < a[0] - 1e-6
+        ]
+        self.assertEqual(back, [], "backward target steps (mm)")
+
+    def test_replan_is_refused_in_golden(self):
+        engine = phase.PhaseEngine(GOLDEN, 10.0)
+        with self.assertRaises(RuntimeError):
+            engine.replan(line_rows(1.0))
+
+    def test_replans_in_a_row_are_bounded(self):
+        sched, server, arm = self._loaded(SHIPPED)
+        sched._replans_in_row = schedulers.GRASP_REPLAN_MAX_IN_ROW
+        sched.pending, sched._pending_gap = _ReadyReply(self._closing_rows()), 0.09
+        sched._append_pending(arm.obs(1, sched.engine.s), 1)
+        self.assertEqual([c["kind"] for c in server.calls], ["sync"])
+        self.assertEqual(
+            sched._replans_in_row, 0, "a joined reply starts the count again"
+        )
 
 
 class AccelVlashGoldenRef(RefMixin, AccelVlashTests, unittest.TestCase):
