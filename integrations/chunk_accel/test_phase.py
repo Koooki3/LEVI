@@ -115,6 +115,7 @@ DEFAULTS = {
     "grasp_replan_m": 0.035,
     "close_hold": True,
     "close_hold_travel": 0.0,
+    "close_issue_timeout_s": 0.85,
 }
 
 # Section 5 / 15: the ledger numbers phase.py must carry (E8 is a tightening, E11 and E12 live in other files).
@@ -2406,6 +2407,136 @@ class TestGateAndSettle(unittest.TestCase):
         _e, tc2, outs2 = self._settle_run(aperture, issued, params=off)
         early = [o.lam for k, o in outs2 if tc2 + 1 <= k <= tc2 + 4]
         self.assertTrue(all(lam > 0.5 for lam in early), early)
+
+    def test_the_close_hold_starts_at_the_command_when_the_client_throttles_it(self):
+        """Review 2026-11-02: the client may issue the close 3-7 ticks late (its 0.75 s throttle); the hold must not wait
+        for the issued value, or the plan walks toward the lift meanwhile."""
+
+        def issued(k, tc):
+            return 1.0 if (tc is None or k - tc < 8) else 0.0
+
+        def aperture(k, tc):
+            if tc is None or k - tc < 8:
+                return 0.0
+            j = k - tc - 8
+            return 0.0 if j < 2 else min(0.6, 0.2 * (j - 1)) if j < 6 else 0.6
+
+        eng, tc, outs = self._settle_run(aperture, issued, ticks=32)
+        u_close = next(o.u for k, o in outs if k == tc)
+        after = [(k - tc, o) for k, o in outs if k > tc]
+        moved = next(j for j, o in after if o.u > u_close + 1e-9)
+        self.assertGreaterEqual(
+            moved, 13, "the plan moved on before the late close settled"
+        )
+        for j, o in after:
+            if j < moved:
+                self.assertEqual(o.binding, "grasp", f"j {j}")
+                self.assertEqual(o.lam, 0.0, f"j {j}")
+                self.assertEqual(float(o.target[6]), 0.0, f"j {j}")
+        summary = eng.summary()
+        self.assertGreaterEqual(summary["grasp_issue_hold_ticks"], 6)
+        self.assertGreater(summary["grasp_hold_ticks"], 0)
+
+    def test_a_close_the_client_never_issues_is_held_only_until_the_issue_timeout(self):
+        eng, tc, outs = self._settle_run(lambda k, tc: 0.0, lambda k, tc: 1.0, ticks=30)
+        u_close = next(o.u for k, o in outs if k == tc)
+        after = [(k - tc, o) for k, o in outs if k > tc]
+        moved = next(j for j, o in after if o.u > u_close + 1e-9)
+        self.assertGreaterEqual(moved, 9)
+        self.assertLessEqual(moved, 11)
+        for j, o in after:
+            if j >= moved:
+                self.assertLessEqual(
+                    o.lam, 1.0 + 1e-9, "lambda <= 1 while the issued value lags"
+                )
+        self.assertEqual(eng.summary()["grasp_hold_ticks"], 0)
+
+    def test_a_reply_during_the_hold_neither_opens_nor_jumps(self):
+        """Review 2026-11-02: an RTC reply asked from a fractional phase before the close repeats it 0.7 rows later. The
+        frozen phase must not read the open row before it, and a chunk jump must still be blended, not cut."""
+        C = 12
+        master = make_master(200, seed=7, step=0.004, turn=0.0, flips=[(C, 0.0)])
+        for jump in (0.0, 0.03, 0.06):
+            with self.subTest(jump_m=jump):
+                params = PhaseParams(lambda_max=2.5, w_pre=0, w_post=0, grip_gate=False)
+                eng = PhaseEngine(params)
+                eng.set_chunk(chunk_at(master, 0.0, 20), "sync")
+                pos = master[0].copy()
+                pos[6] = 1.0
+                tc, swapped, kinds, after = None, False, [], []
+                for k in range(40):
+                    x = pos.copy()
+                    x[6] = 1.0 if tc is None else 0.0
+                    out = eng.tick(Measured(x, 0.0, k * DT))
+                    eng.executed(out.target)
+                    if out.grip_event:
+                        kinds.append(out.grip_event["kind"])
+                        if tc is None:
+                            tc = k
+                    if tc is not None and k > tc:
+                        after.append(out.target.copy())
+                    if tc is not None and out.binding == "grasp" and not swapped:
+                        swapped = True
+                        u_req = float(eng.u) - 2.3
+                        eng.swap(
+                            chunk_at(master, u_req, 12, offset=[jump, 0.0, 0.0]),
+                            eng.s - 2.3,
+                        )
+                    pos = out.target.copy()
+                self.assertTrue(swapped)
+                self.assertEqual(kinds, ["close"], "an open was commanded mid-grasp")
+                self.assertTrue(all(float(t[6]) == 0.0 for t in after))
+                steps = [
+                    float(np.linalg.norm(b[:3].astype(np.float64) - a[:3]))
+                    for a, b in itertools.pairwise(after)
+                ]
+                self.assertLessEqual(max(steps), params.blend_step_m + 1e-6)
+                self.assertEqual(eng.summary()["leash_holds"], 0)
+
+    def test_a_reply_with_an_open_just_ahead_during_the_hold_is_blended_not_cut(self):
+        """Review 2026-11-02: a held tick whose proposal lands on a change row was treated as a landing, so the blend of a
+        reply's jump was cut in one tick and an infeasible target became leash holds and a dropped plan."""
+        C = 12
+        master = make_master(200, seed=7, step=0.004, turn=0.0, flips=[(C, 0.0)])
+        for jump in (0.03, 0.06):
+            with self.subTest(jump_m=jump):
+                params = PhaseParams(lambda_max=2.5, w_pre=0, w_post=0, grip_gate=False)
+                eng = PhaseEngine(params)
+                eng.set_chunk(chunk_at(master, 0.0, 20), "sync")
+                arm = PerfectArm(master[0])
+                tc, swapped, held_steps, prev = None, False, [], None
+                for k in range(30):
+                    x = arm.pose()
+                    x[6] = 1.0 if tc is None else 0.0
+                    out = eng.tick(Measured(x, 0.0, k * DT))
+                    eng.executed(out.target)
+                    arm.step(out.target)
+                    if out.grip_event and tc is None:
+                        tc = k
+                    if swapped and out.binding == "grasp" and prev is not None:
+                        held_steps.append(
+                            float(
+                                np.linalg.norm(
+                                    out.target[:3].astype(np.float64) - prev[:3]
+                                )
+                            )
+                        )
+                    if tc is not None and out.binding == "grasp" and not swapped:
+                        swapped = True
+                        reply = chunk_at(
+                            master, float(eng.u) - 2.7, 12, offset=[jump, 0.0, 0.0]
+                        )
+                        reply[:3, 6] = 0.0
+                        reply[3:, 6] = (
+                            1.0  # the policy wants to open 0.3 rows ahead of the frozen phase
+                        )
+                        eng.swap(reply, eng.s - 2.7)
+                    prev = out.target.astype(np.float64)
+                self.assertTrue(swapped)
+                self.assertTrue(held_steps, "no held tick after the swap")
+                self.assertLessEqual(max(held_steps), params.blend_step_m + 1e-6)
+                self.assertEqual(eng.summary()["leash_holds"], 0)
+                self.assertEqual(eng.summary()["hold_resets"], 0)
 
     def test_aperture_that_never_moves_is_held_until_the_timeout(self):
         eng, tc, outs = self._settle_run(

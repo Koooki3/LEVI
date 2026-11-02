@@ -162,6 +162,7 @@ _RANGES = {
     "delay_history": (1, 32, False),
     "grasp_replan_m": (0.0, 0.10, False),
     "close_hold_travel": (0.0, 1.0, False),
+    "close_issue_timeout_s": (0.0, 2.0, False),
 }
 _INT_FIELDS = frozenset(
     {
@@ -358,6 +359,11 @@ class PhaseParams:
     # 0: hold for the whole settle; > 0: let the plan go on once the fingers have closed by this fraction of the stroke
     # (they are then on or near the object), or when the settle is done, whichever is first.
     close_hold_travel: float = 0.0
+    # The client issues a gripper command at most every 0.75 s (fr3_env gripper_sleep) and re-sends a command whose fingers
+    # have not reached their end stop, so a close can go out 3-7 ticks after the engine commanded it (real RTC traces,
+    # review 2026-11-02: 4 of 18 closes, two of them the empty re-grasps). The hold therefore starts at the engine's close
+    # command; this bounds the part before the issued value reads closed (0.75 s + one tick). After it lambda <= 1 as before.
+    close_issue_timeout_s: float = 0.85
     settle_min_s: float = 0.3
     settle_aperture_delta: float = 0.02
     settle_stable_ticks: int = 2
@@ -849,6 +855,7 @@ class PhaseEngine:
         self._settle_stable = 0
         self._settle_event = None
         self._hold_released = False
+        self._pend_t0 = None
         self._osettle_active = False
         self._osettle_t0 = 0.0
         self._osettle_ap0 = None
@@ -1248,6 +1255,24 @@ class PhaseEngine:
         if skip > 0.0:
             self._o = s_obs - skip
             self._st["reanchors"] += 1
+        if (
+            p.close_hold
+            and not self._golden
+            and self._settle_active
+            and self._g_ref() == 0
+        ):
+            # During the close hold a reply asked from a fractional phase before the close repeats it less than a row
+            # later; the frozen phase would read the open row before it and command an open mid-grasp. Hold on the
+            # reply's own close row instead (review 2026-11-02).
+            u_now = self._s - self._o
+            nxt = next((g for g in self._G if g > u_now + _SNAP), None)
+            if (
+                nxt is not None
+                and nxt - u_now < 1.0
+                and _b(self._R[nxt - self._lo, 6]) == 0
+                and _b(self._grip_raw(_snap(u_now))) == 1
+            ):
+                self._o = self._s - nxt
         # lead offset carries over (section 3.5); the blend starts from the last target
         self._e_off = min(self._e_off, p.lead_max_rows) if p.lead else 0.0
         e_prev_new = (self._s - self._o) + self._e_off
@@ -1812,6 +1837,7 @@ class PhaseEngine:
         # twice the cap is the hard backstop).
         hold_open = False
         gate_info = None
+        grasp_held = False
         u_c = _snap(s_c - o)
         if p.grip_gate and not self._golden:
             g_c = self._grip_raw(u_c)
@@ -1866,17 +1892,32 @@ class PhaseEngine:
             elif self._gate_since is not None and not self._close_ahead():
                 self._gate_clear()
         # ---- close hold: after a close the plan waits for the fingers (PhaseParams.close_hold) ----
+        pre_issue = False
+        if p.close_hold and not self._golden:
+            # the engine commanded the close but the client has not issued it yet (its 0.75 s throttle)
+            pending = (
+                not self._settle_active and self._g_cmd == 0 and self._last_gi == 1
+            )
+            if not pending:
+                self._pend_t0 = None
+            else:
+                if self._pend_t0 is None:
+                    self._pend_t0 = float(m.t)
+                pre_issue = float(m.t) - self._pend_t0 < p.close_issue_timeout_s
         if (
             p.close_hold
             and not self._golden
-            and self._settle_active
-            and not self._hold_released
             and s_c > s
+            and ((self._settle_active and not self._hold_released) or pre_issue)
         ):
             s_c = s
             u_c = s_c - o
             bind = "grasp"
-            self._st["grasp_hold_ticks"] += 1
+            grasp_held = True
+            if pre_issue:
+                self._st["grasp_issue_hold_ticks"] += 1
+            else:
+                self._st["grasp_hold_ticks"] += 1
         # ---- 8. issued phase e (section 3.5) ----
         e_prev = (s - o) + self._e_off
         e_c = u_c
@@ -1894,7 +1935,8 @@ class PhaseEngine:
             e_c = max(min(e_c, self._u_end), u_c)
         # ---- 9/10. target and the joint bisection against the leash and the step limit ----
         Tp = self._T_prev
-        force_done = bool(prop["landing"]) and not hold_open
+        # a held tick is no landing: the hold kept the phase short of the change row, so the blend must not be cut
+        force_done = bool(prop["landing"]) and not hold_open and not grasp_held
         self._ws_shrunk = False
         T32, w = self._target_at(1.0, s_c, e_c, force_done, hold_open)
         ok, dp, dr, sp, sr, which = self._feasible(T32, x32, Tp)
@@ -1953,7 +1995,11 @@ class PhaseEngine:
         if self._ws_shrunk:
             self._st["ws_shrinks"] += 1
         event = self._grip_event(
-            T32, u_new, lam_eff, gate_info, exact=prop["landing"] and alpha >= 1.0
+            T32,
+            u_new,
+            lam_eff,
+            gate_info,
+            exact=prop["landing"] and alpha >= 1.0 and not grasp_held,
         )
         if prop["past_end"] and alpha >= 1.0 and s_new >= o + self._u_end - 1e-9:
             self._st["end_holds"] += 1
@@ -2359,6 +2405,7 @@ class PhaseEngine:
             "reanchors": int(st["reanchors"]),
             "grasp_replans": int(st["grasp_replans"]),
             "grasp_hold_ticks": int(st["grasp_hold_ticks"]),
+            "grasp_issue_hold_ticks": int(st["grasp_issue_hold_ticks"]),
             "ws_shrinks": int(st["ws_shrinks"]),
             "reanchored_to_measured": int(st["reanchored_to_measured"]),
             "leash_recoveries": int(st["leash_recoveries"]),
