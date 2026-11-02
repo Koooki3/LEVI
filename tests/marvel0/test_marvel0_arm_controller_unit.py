@@ -412,3 +412,17 @@ def test_the_catalog_lists_the_new_codes_for_the_front_end():
     )
     assert "preset_refused" in cat["failures"]
     assert "anyspeedup_start" in cat["readiness"]
+
+
+def test_the_guided_start_is_refused_up_front_with_the_reason_when_the_build_is_missing(
+    m, tmp_path
+):
+    choose(m, fake_checkout(tmp_path, build=False))
+    with pytest.raises(stack.Refuse) as caught:
+        m.act.sequence_start(m.chain_body())
+    assert caught.value.code == "arm_controller_not_built"
+    assert "build.sh" in str(caught.value)
+    assert not m.systemd_runs()
+    # the reason is a code the page words (blocker catalogue, both languages)
+    assert "arm_controller_not_built" in stack_act.catalog()["blockers"]
+    assert m.doc()["sequence"]["state"] == "idle"
