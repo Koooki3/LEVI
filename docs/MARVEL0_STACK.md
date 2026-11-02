@@ -335,6 +335,9 @@ com_port           = "/dev/serial/by-id/usb-FTDI_USB_TO_RS-485_XXXXXXXX-if00-por
 server_port        = 5000                        # the robot server's loopback port (not 5001, 5100, 7470, 8000)
 reset_joint_target = [-0.8063, -0.0623, 0.9130, -2.4036, 0.0580, 2.3011, 1.5844]
 marker_wait_s      = 3                           # 2 to 600: the least age of the marker before A starts
+arm_controller     = "lab"                       # "lab" (default) or "anyspeedup": which arm controller terminal A starts
+# arm_preset       = "today"                     # anyspeedup only: "today" (alpha 0.005) or "S1" (alpha 0.01); "S2" is refused
+# anyspeedup_root  = "/path/to/anyspeedup"       # anyspeedup only, required then: the checkout with controllers/fr3_serl/
 
 [client]
 enabled            = false                      # true: the page may host the evaluation client
@@ -342,6 +345,27 @@ enabled            = false                      # true: the page may host the ev
 
 With `enabled = true` the four machine values are required; no machine value is written in this repository, and every
 argv comes from this file and nowhere else.
+
+**The arm controller (`arm_controller`, `arm_preset`, `anyspeedup_root`).** `lab`, the default and what a file without
+these keys means, is the launch this page has always started for A (`serl_franka_controllers_ros2`); nothing about it
+changes. `anyspeedup` starts the anyspeedup package's controller instead
+(`controllers/fr3_serl/` of its checkout, its own colcon workspace; the lab's install is untouched) and only terminal A
+of this page follows the choice: terminals started by hand and every other project keep the lab's controller. The choice
+is read at A's start, so change the file with A stopped. `arm_preset` is `today` (the lab's numbers, setpoint filter
+alpha 0.005) or `S1` (alpha 0.01, more damping, velocity feed-forward); default `today`. **`S2` (alpha 0.02) is refused**
+(`stack.arm_preset: needs_shaped_profile`): the client's v3 phase clock can only be tuned for 0.005 and 0.01, and
+LEVI's engine has no shaped profile for S2's lag yet; it comes after a real-arm check of S1. `anyspeedup_root` is an
+absolute path and is required when `arm_controller` is `anyspeedup` (also with the stack off). All three values are
+checked whichever controller is chosen, so that flipping the one word cannot reveal a typo; with `lab` the preset and
+the root are ignored.
+
+The controller keeps the name `cartesian_impedance_controller`, so C and the clients are unchanged. The Client command
+card follows the choice: **with `anyspeedup`, rule v3's `--phase-alpha` is the preset's alpha** (`today` 0.005, `S1`
+0.01): the card shows it and cannot change it, an empty `chunk_accel_alpha` is that alpha, and any other is refused
+(`chunk_accel_alpha_arm_mismatch`, both in the preview and when the hosted run starts). With `lab`, or with the stack
+off (the page then does not know what runs on the arm), nothing is forced. Rules v1 and v2 (the ramp client) have no
+alpha and are not coupled. The stack document's `act.control.arm` (`controller`, `preset`, `alpha`; no path) is what the
+page shows on A's card.
 
 ## The units
 
@@ -364,6 +388,22 @@ launch sends SIGINT on to its children even when it was interrupted itself (`lau
 under `KillMode=control-group` a child of launch gets the unit's SIGINT **and** launch's, two where a terminal sends one.
 `control-group` is kept on purpose (it also stops children that outlive a launch that died); whether two SIGINTs matter
 for these nodes is for S4b, and the rehearsal counts them.
+
+**A with the anyspeedup controller.** Behind the same wrapper (`stack_exec.sh` and its pinned sha are unchanged) only the
+environment file argument and the command differ: `stack_exec.sh <anyspeedup_root>/controllers/fr3_serl/env.sh -- ros2
+launch --noninteractive anyspeedup_franka_controllers impedance.launch.py robot_type:=fr3 robot_ip:=<ip>
+load_gripper:=false preset:=<today|S1>`. `env.sh` sources the rig's `fr3_env.sh` and then the overlay
+`controllers/fr3_serl/ws/install/setup.bash`; B, C and the one-shot checks keep `fr3_env.sh`. Nothing in `stack_units.py`
+reads the disk: A's start asks the host whether `env.sh` and `ws/install/anyspeedup_franka_controllers` exist, and
+refuses with `arm_controller_missing` (check `anyspeedup_root`) or `arm_controller_not_built` (run the `build.sh` in the
+`fr3_serl` folder; it builds in its own workspace and is safe while the arm runs, per its README). Its launch prints
+`anyspeedup arm controller, preset <p>` when it started (the page counts it as a ready line, so a unit that started another
+preset is not ready), `A Franka arm ros2_control_node is already running (lab or anyspeedup controller)` when another arm
+controller runs (`duplicate_launch`, the same key as the lab's, its own pattern) and `preset must be one of ...: nothing
+started` for a preset it does not know (`preset_refused`). Each pattern names its source file and line, and a test checks
+them against the launch file when the anyspeedup checkout is beside this one. **Not verified: no unit of this kind has ever
+been started on the real machine, and the anyspeedup controller has never run on the arm; the three lines are read from
+its launch file, not from a real log.**
 
 Not verified on the real machine: **the time of `ros2 node list --no-daemon --spin-time 2.0` in a unit** (about 3.4 s is an estimate:
 the wrapper sourcing the rig's environment, python and rclpy starting, 2 s of discovery; if it is slower A waits for it, because A
@@ -653,6 +693,21 @@ C 之前的检查 5 秒，C 启动、3 秒后就绪：**从按键到 C 就绪约
 返回 403 `control_disabled`，视图显示 `enabled: false`，页面的其余部分照常工作。开关默认关闭，由机器人所有者在场时打开。文件必须属于当前
 用户，且其他人不可写。模板见上文英文部分；`enabled = true` 时四个机器值必须填写。仓库里不写任何机器值，所有 argv 只来自这个文件。
 
+**机械臂控制器（`arm_controller`、`arm_preset`、`anyspeedup_root`）。** `lab` 是默认值，文件里没有这几个键就等于它：A 启动的还是本页一直
+启动的那个 launch（`serl_franka_controllers_ros2`），没有任何变化。`anyspeedup` 改为启动 anyspeedup 软件包的控制器
+（它那份检出里的 `controllers/fr3_serl/`，自己的 colcon 工作区；实验室的安装不动），而且只有本页的终端 A 跟着这个选择：手动开的终端和
+其他项目仍用实验室的控制器。选择在 A 启动时读取，所以改文件要在 A 停止时改。`arm_preset` 是 `today`（实验室的数，设定点滤波系数
+alpha 0.005）或 `S1`（alpha 0.01，阻尼更大，带速度前馈），默认 `today`。**`S2`（alpha 0.02）会被拒绝**（`stack.arm_preset:
+needs_shaped_profile`）：客户端的 v3 相位时钟只能按 0.005 和 0.01 调，而 LEVI 的引擎还没有针对 S2 滞后的整形配置，它要等 S1 在真机上
+检查之后才有。`anyspeedup_root` 是绝对路径，`arm_controller` 为 `anyspeedup` 时必填（栈关闭时也一样）。三个值不论选哪个控制器都会检查，
+这样把那一个词改回去时不会冒出笔误；选 `lab` 时预设和根路径被忽略。
+
+控制器保持 `cartesian_impedance_controller` 这个名字，所以 C 和各个客户端都不变。“客户端指令”卡跟着这个选择：**选 `anyspeedup` 时，
+规则 v3 的 `--phase-alpha` 就是预设的 alpha**（`today` 0.005，`S1` 0.01）：卡片上显示它而且改不了，`chunk_accel_alpha` 留空就是它，
+别的值被拒绝（`chunk_accel_alpha_arm_mismatch`，预览和托管运行启动时都一样）。选 `lab`，或栈关闭时（页面不知道机械臂上跑的是什么），
+什么都不强制。规则 v1、v2（斜坡客户端）没有 alpha，不受影响。栈文档里的 `act.control.arm`（`controller`、`preset`、`alpha`，不含路径）就是页面
+在 A 的卡片上显示的内容。
+
 ## 单元
 
 四个都是 `systemd-run --user` 的临时单元。A、B、C：`Type=exec`、`KillMode=control-group`、`KillSignal=SIGINT`、`SendSIGKILL=no`、
@@ -670,6 +725,18 @@ C 之前的检查 5 秒，C 启动、3 秒后就绪：**从按键到 C 就绪约
 防止以后改了 `StandardInput=` 时被悄悄翻转。该模式下 launch 即使自己被中断也会把 SIGINT 转发给子进程
 （`launch/actions/execute_local.py:448-452`）：在 `KillMode=control-group` 下，launch 的子进程会收到单元的 SIGINT **和** launch 转发的，共两次，
 终端里只发一次。`control-group` 是有意保留的（launch 死了以后留下的子进程也靠它停掉）；两次 SIGINT 对这些节点有没有影响留给 S4b，演练脚本会数。
+
+**用 anyspeedup 控制器的 A。** 同一个包装脚本（`stack_exec.sh` 和它固定的 sha 都没变），只有环境文件参数和命令不同：
+`stack_exec.sh <anyspeedup_root>/controllers/fr3_serl/env.sh -- ros2 launch --noninteractive anyspeedup_franka_controllers
+impedance.launch.py robot_type:=fr3 robot_ip:=<ip> load_gripper:=false preset:=<today|S1>`。`env.sh` 先 source 机器人自己的
+`fr3_env.sh`，再 source 叠加层 `controllers/fr3_serl/ws/install/setup.bash`；B、C 和一次性检查仍用 `fr3_env.sh`。`stack_units.py`
+里不读磁盘：A 启动时由 host 询问 `env.sh` 和 `ws/install/anyspeedup_franka_controllers` 是否存在，缺了就拒绝，
+原因是 `arm_controller_missing`（检查 `anyspeedup_root`）或 `arm_controller_not_built`（在 `fr3_serl` 文件夹里运行 `build.sh`；它在自己的
+工作区里编译，按它的 README，机械臂运行时也可以做）。它的 launch 启动时打印 `anyspeedup arm controller, preset <p>`（页面把它当作就绪行，
+所以用别的预设启动的单元不算就绪）；已有别的机械臂控制器时打印 `A Franka arm ros2_control_node is already running (lab or anyspeedup
+controller)`（`duplicate_launch`，键和实验室的相同，匹配规则是它自己的）；预设不认识时打印 `preset must be one of ...: nothing started`
+（`preset_refused`）。每条规则都注明来源文件和行号，anyspeedup 检出在本仓库旁边时有测试对着 launch 文件核对。**没有验证：这种单元从未在真机上启动过，
+anyspeedup 控制器也从未在机械臂上运行过；这三行读自它的 launch 文件，不是读自真实日志。**
 
 **没有在真机上验证的：** **单元里 `ros2 node list --no-daemon --spin-time 2.0` 要多久**（约 3.4 秒是估计：包装脚本 source 机器人环境、python 和 rclpy 启动、
 2 秒发现；更慢的话 A 要等它，因为 A 需要 B 已知）、**2 秒内发现了监视器的节点，是否就说明夹爪栈的节点也会被看到**（监视器节点证明发现已经运行，不证明发现完整）、
