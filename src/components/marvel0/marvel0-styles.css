@@ -881,6 +881,21 @@
   color: var(--ds-warning);
 }
 
+/* The camera preview's controls above the pictures: one button, what the
+ * preview is doing beside it, and below them the reason it cannot start. */
+.rg-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  margin-bottom: var(--ds-space-3);
+}
+.rg-preview__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-3);
+}
+
 /* "Updated 3 s ago": calm while current, a warning when the polls are late. */
 .rg-age {
   color: var(--ds-text-tertiary);

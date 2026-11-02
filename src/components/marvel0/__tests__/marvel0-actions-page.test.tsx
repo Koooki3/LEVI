@@ -94,12 +94,14 @@ describe("the marvel0 with its action cards", () => {
     // The status routes, the policy server's, the stack's and the client's,
     // and the two of step 5 (readiness, and the hosted terminal D); the log is
     // read only while it is wanted. The voice card reads its passive state
-    // once (it never starts the speech worker).
+    // once (it never starts the speech worker). The live view reads the
+    // camera preview's state (a GET: it opens no camera until a person asks).
     expect(new Set(calls.map((call) => call.path))).toEqual(
       new Set([
         ...READS.slice(0, 5),
         STACK,
         RUN,
+        "/api/levi/marvel0/preview",
         "/api/levi/marvel0/aeri",
         "/api/levi/marvel0/aeri/run",
         "/api/levi/marvel0/speech?model_id=pi05_fr3_all_step49999",

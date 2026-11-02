@@ -89,8 +89,9 @@ export interface Marvel0Card {
   /** Under the card: text the servers sent along (reasons, errors), as
    * written, and the page's own words for what it knows by a code. */
   notes: Marvel0Note[];
-  /** Catalogue key of the static hint: where the manual commands are. */
-  hint: string;
+  /** Catalogue key of the static hint: where the manual commands are. A card
+   * whose summary already says everything has none. */
+  hint?: string;
 }
 
 export interface Marvel0IdleReason {
@@ -637,7 +638,6 @@ function gripperCard(): Marvel0Card {
     summary: k("marvel0.gripper.reason"),
     facts: [],
     notes: [],
-    hint: "marvel0.gripper.hint",
   };
 }
 

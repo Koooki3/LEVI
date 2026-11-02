@@ -97,6 +97,7 @@ export function CommandPanel({
   runActions,
   resumeBody = null,
   voiceRun = null,
+  onCopy,
 }: {
   api: Marvel0Api;
   catalog: Marvel0Catalog;
@@ -116,6 +117,10 @@ export function CommandPanel({
   /** The page's voice run: while it is on, the voice card's sentence is run
    * instead of only filled in. */
   voiceRun?: VoiceRun | null;
+  /** Called when the person copies the command for a terminal; true when the
+   * page stopped the camera preview for it (the preview holds the cameras, and
+   * a client started by hand cannot take them back). */
+  onCopy?: () => boolean;
 }) {
   const { t } = useLocale();
   const models = catalog.models;
@@ -628,6 +633,7 @@ export function CommandPanel({
           preview={made.preview}
           stale={stale}
           modelLabel={made.preview.needs.modelId}
+          onCopy={onCopy}
           start={
             runActions ? (
               <RunStart
@@ -1105,16 +1111,20 @@ function CommandResult({
   preview,
   stale,
   modelLabel,
+  onCopy,
   start,
 }: {
   preview: Preview;
   stale: boolean;
   modelLabel: string;
+  /** Told when the command is copied; true when it stopped the camera preview. */
+  onCopy?: () => boolean;
   /** The "Start the client" control, when the page hosts the client. */
   start?: ReactNode;
 }) {
   const { t } = useLocale();
   const [copied, setCopied] = useState(false);
+  const [stoppedPreview, setStoppedPreview] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   const text = useRef<HTMLPreElement>(null);
@@ -1128,6 +1138,8 @@ function CommandResult({
     }
   };
   const copy = () => {
+    // Before anything else: the cameras must be free by the time it is run.
+    setStoppedPreview(onCopy?.() ?? false);
     const write = navigator.clipboard?.writeText(preview.command);
     if (!write) return select();
     write
@@ -1164,6 +1176,15 @@ function CommandResult({
         )}
       </div>
       <p className="rg-muted">{t("marvel0.cmd.result.hint")}</p>
+      {stoppedPreview && (
+        <p
+          className="rg-muted"
+          role="status"
+          data-testid="marvel0-command-preview-stopped"
+        >
+          {t("marvel0.cmd.result.preview_stopped")}
+        </p>
+      )}
       {!stale && start}
       {!stale && (
         <pre

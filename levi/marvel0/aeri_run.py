@@ -60,7 +60,7 @@ from levi.workspace import Workspace
 from . import aeri_journal as jr
 from . import aeri_screen as sc
 from . import aeri_state as st
-from . import command, deploy, net, record, run, stack
+from . import command, deploy, net, preview, record, run, stack
 from .aeri_state import Refuse
 
 REL = ("marvel0", "aeri")
@@ -320,6 +320,10 @@ class Host:
     # The argv of terminal D from the prepared command's. Tests swap in the
     # fake D; the real one is never run by a test.
     client_argv: Callable = lambda argv: argv
+    # Around the start of D: the camera preview (preview.py) is stopped first
+    # and cannot start again until the block ends; raises
+    # ``preview.HandbackFailed`` when the worker did not let the cameras go.
+    camera_handback: Callable = preview.handback
     openpty: Callable = os.openpty
     killpg: Callable = os.killpg
     kill: Callable = os.kill
@@ -528,6 +532,23 @@ class Challenges:
         for token in [t for t, e in self._open.items() if e["deadline"] < now]:
             del self._open[token]
             self._close(token, "expired")
+
+
+class CameraPreviewBusy(Refuse):
+    """The start is refused because the camera preview did not let the cameras
+    go. The code is the hosted client's (``run.REFUSALS``), which the page words
+    for both cards; it is not in ``aeri_state.REFUSALS``, which the terminal's
+    own samples list."""
+
+    def __init__(self):
+        status, text = run.REFUSALS["camera_preview_busy"]
+        Exception.__init__(self, f"camera_preview_busy: {text}")
+        self.status, self.code, self.message, self.extra = (
+            status,
+            "camera_preview_busy",
+            text,
+            {},
+        )
 
 
 def http(exc: Refuse):
@@ -1587,7 +1608,13 @@ class Supervisor:
         self.challenges.consume(
             body.get("challenge"), "start", {"name": name, "readiness": snap["sha256"]}
         )
-        return self._launch(main_site, aeri, directory, request_id, name, data)
+        # D opens both cameras: the page's camera preview gives them back first
+        # (and none starts again until the launch has answered).
+        try:
+            with self.host.camera_handback():
+                return self._launch(main_site, aeri, directory, request_id, name, data)
+        except preview.HandbackFailed:
+            raise CameraPreviewBusy() from None
 
     def _launch(self, main_site, aeri, directory, request_id, name, data) -> dict:
         h = self.host

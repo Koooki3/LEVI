@@ -68,6 +68,7 @@ from . import (
     inference_mode,
     live_frame,
     net,
+    preview,
     record,
     stack,
     status,
@@ -232,6 +233,13 @@ REFUSALS = {
         ),
     ),
     "start_failed": (502, "The client could not be launched; nothing runs"),
+    "camera_preview_busy": (
+        409,
+        (
+            "The camera preview still holds the cameras, so the client would fail "
+            "on a busy camera; nothing was started"
+        ),
+    ),
     "key_failed": (
         502,
         "The key could not be written to the client; it is not known to have arrived",
@@ -1317,6 +1325,10 @@ class Host:
     # Whether the page's own AERI terminal D is on (see ``_hosted_aeri``).
     hosted_aeri: Callable = lambda: _hosted_aeri()
     deploy_view: Callable = _deploy_view
+    # Around the start of the client: the camera preview (preview.py) is stopped
+    # first and cannot start again until the block ends; raises
+    # ``preview.HandbackFailed`` when the worker did not let the cameras go.
+    camera_handback: Callable = preview.handback
     control_enabled: Callable = _control_enabled
     cgroup: Callable = stack._read_self_cgroup
     in_main_checkout: Callable = stack._in_main_checkout
@@ -2176,12 +2188,20 @@ class Supervisor:
                     self._rec = record.read_record(directory)
             self._preflighting = True
         try:
-            _, form, preview = self._form(site, body.get("form"))
+            _, form, preview_ = self._form(site, body.get("form"))
             self.challenges.consume(
                 body.get("challenge"), "start", {"form": _form_fingerprint(form)}
             )
-            self._gate_checks(site, form)
-            return self._launch(site, directory, request_id, form, preview)
+            # The client opens both cameras when it starts and holds them until
+            # it exits: the page's camera preview gives them back first, and
+            # none starts again until the launch has answered. A worker that
+            # does not exit refuses the start rather than failing the client.
+            try:
+                with self.host.camera_handback():
+                    self._gate_checks(site, form)
+                    return self._launch(site, directory, request_id, form, preview_)
+            except preview.HandbackFailed:
+                raise Refuse("camera_preview_busy") from None
         finally:
             with self._mutex:
                 self._preflighting = False

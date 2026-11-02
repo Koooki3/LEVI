@@ -48,6 +48,10 @@ const SOURCES = [
   "components/marvel0/run-panel.tsx",
   "components/marvel0/run-start.tsx",
   "components/marvel0/live-frames.tsx",
+  // The camera preview between runs (the live view's controls).
+  "components/marvel0/camera-preview-bar.tsx",
+  "components/marvel0/preview-logic.ts",
+  "components/marvel0/use-camera-preview.ts",
   "components/marvel0/use-run-actions.ts",
   "components/marvel0/use-run-poll.ts",
   "components/marvel0/selection.ts",

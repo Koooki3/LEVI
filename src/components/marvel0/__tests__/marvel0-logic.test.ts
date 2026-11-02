@@ -91,7 +91,7 @@ describe("a running marvel0", () => {
     });
   });
 
-  test("the cards come in the page's steps, arm stack first in the strip's order, each with a hint", () => {
+  test("the cards come in the page's steps, arm stack first in the strip's order, each with a hint but the gripper's", () => {
     const result = view(setupStatus());
     expect(result.groups.map((g) => g.id)).toEqual([
       "arm",
@@ -106,7 +106,9 @@ describe("a running marvel0", () => {
       ["live", "vlm", "gpu"],
     ]);
     for (const c of Object.values(cards(result))) {
-      expect(c.hint).toBeTruthy();
+      // (the gripper card's summary says all there is to say: no second line)
+      if (c.id === "gripper") expect(c.hint).toBeUndefined();
+      else expect(c.hint).toBeTruthy();
       expect(STATES).toContain(c.state);
     }
     expect(result.notes).toEqual([]);
@@ -780,6 +782,7 @@ describe("terminal B, the gripper stack", () => {
       expect(c.state).toBe("unknown");
       expect(summary(c)).toBe("marvel0.gripper.reason");
       expect(c.facts).toEqual([]);
+      expect(c.hint).toBeUndefined(); // the reason is the only explanation
     }
   });
 });
@@ -2744,7 +2747,8 @@ describe("words", () => {
       for (const group of result.groups) {
         keys.push({ key: group.title, params: [] });
         for (const c of group.cards) {
-          keys.push({ key: c.title, params: [] }, { key: c.hint, params: [] });
+          keys.push({ key: c.title, params: [] });
+          if (c.hint) keys.push({ key: c.hint, params: [] });
           used(c.summary, keys);
           for (const fact of c.facts) {
             used(fact.label, keys);

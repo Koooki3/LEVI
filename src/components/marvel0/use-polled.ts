@@ -43,7 +43,20 @@ export interface PolledOptions<T> {
   freshMs: number;
   /** False reads nothing (a card whose backend is off). */
   enabled?: boolean;
+  /** Forget the last answer (and that a read ever finished) while `enabled`
+   * is false, so that turning it on again shows nothing until a fresh read has
+   * answered. Without it the old answer stays, which is what a poll that is
+   * only paused wants. */
+  forgetWhenDisabled?: boolean;
 }
+
+const NOTHING = {
+  loaded: false,
+  value: null,
+  current: false,
+  problem: null,
+  lastOk: null,
+} as const;
 
 const MAX_WAIT_MS = 30_000;
 
@@ -54,22 +67,24 @@ export const pollDelay = (failures: number, pollMs: number): number =>
     : Math.min(MAX_WAIT_MS, pollMs * 2 ** Math.min(failures, 6));
 
 export function usePolled<T>(options: PolledOptions<T>): Polled<T> {
-  const { pollMs, freshMs, enabled = true } = options;
+  const {
+    pollMs,
+    freshMs,
+    enabled = true,
+    forgetWhenDisabled = false,
+  } = options;
   const readRef = useRef(options.read);
   const parseRef = useRef(options.parse);
   readRef.current = options.read;
   parseRef.current = options.parse;
   const again = useRef<() => Promise<void>>(async () => {});
   const refresh = useCallback(() => again.current(), []);
-  const [state, setState] = useState<Omit<Polled<T>, "refresh">>({
-    loaded: false,
-    value: null,
-    current: false,
-    problem: null,
-    lastOk: null,
-  });
+  const [state, setState] = useState<Omit<Polled<T>, "refresh">>(NOTHING);
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      if (forgetWhenDisabled) setState((s) => (s === NOTHING ? s : NOTHING));
+      return;
+    }
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let controller: AbortController | undefined;
@@ -139,6 +154,6 @@ export function usePolled<T>(options: PolledOptions<T>): Polled<T> {
       controller?.abort();
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [pollMs, freshMs, enabled]);
+  }, [pollMs, freshMs, enabled, forgetWhenDisabled]);
   return { ...state, refresh };
 }

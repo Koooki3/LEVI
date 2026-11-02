@@ -93,6 +93,7 @@ async function open(
   zhLanguage = false,
   over: Partial<Effective> = {},
   resumeBody: Record<string, unknown> | null = null,
+  onCopy?: () => boolean,
 ) {
   if (zhLanguage) localStorage.setItem("levi-language", "zh");
   const { api, calls } = fakeApi(canned);
@@ -106,6 +107,7 @@ async function open(
         selection={selection}
         onUseAnother={() => used.push("another")}
         resumeBody={resumeBody}
+        onCopy={onCopy}
       />
     );
     return zhLanguage ? <LocaleProvider>{card}</LocaleProvider> : card;
@@ -1155,6 +1157,52 @@ describe("making the command", () => {
     await tick();
     expect(clipboard).toEqual([COMMAND]);
     expect(button(result as HTMLElement, "Copied")).toBeDefined();
+  });
+
+  test("copying the command for a terminal first lets the page stop the camera preview, and says so", async () => {
+    withClipboard();
+    const order: string[] = [];
+    const { host } = await open(undefined, undefined, false, {}, null, () => {
+      order.push(`stop (clipboard has ${clipboard.length})`);
+      return true;
+    });
+    await make(host);
+    const result = host.querySelector(
+      "[data-testid=marvel0-command-result]",
+    ) as HTMLElement;
+    expect(
+      result.querySelector("[data-testid=marvel0-command-preview-stopped]"),
+    ).toBeNull();
+    await click(button(result, "Copy")!);
+    await tick();
+    expect(order).toEqual(["stop (clipboard has 0)"]); // before the copy
+    expect(clipboard).toEqual([COMMAND]);
+    expect(
+      result.querySelector("[data-testid=marvel0-command-preview-stopped]")
+        ?.textContent,
+    ).toBe(en["marvel0.cmd.result.preview_stopped"]);
+  });
+
+  test("a copy that stopped no preview says nothing about one", async () => {
+    withClipboard();
+    const { host } = await open(
+      undefined,
+      undefined,
+      false,
+      {},
+      null,
+      () => false,
+    );
+    await make(host);
+    const result = host.querySelector(
+      "[data-testid=marvel0-command-result]",
+    ) as HTMLElement;
+    await click(button(result, "Copy")!);
+    await tick();
+    expect(clipboard).toEqual([COMMAND]);
+    expect(
+      result.querySelector("[data-testid=marvel0-command-preview-stopped]"),
+    ).toBeNull();
   });
 
   test("without a clipboard the command is selected so that Ctrl+C copies it", async () => {

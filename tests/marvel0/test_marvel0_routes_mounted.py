@@ -22,6 +22,7 @@ from test_marvel0_deploy import (  # noqa: F401 - the fixtures and the fake mach
     body,
     forbid_real_machine,
 )
+from test_marvel0_preview import Rig as PreviewRig
 from test_marvel0_run import Machine as RunMachine
 from test_marvel0_stack import Machine as StackMachine
 
@@ -29,7 +30,15 @@ from test_marvel0_stack import Machine as StackMachine
 # the first request read the machine at import time (huggingface_hub reads the
 # boot id), which the guard of test_marvel0_deploy.py forbids during a test.
 from levi.agent import legacy, security  # noqa: F401
-from levi.marvel0 import aeri_run_api, api, deploy_api, run_api, speech_api, stack_api
+from levi.marvel0 import (
+    aeri_run_api,
+    api,
+    deploy_api,
+    preview,
+    run_api,
+    speech_api,
+    stack_api,
+)
 from levi.service import app
 
 TOKEN = "test-ui-token"
@@ -101,6 +110,11 @@ ROUTES = [
     ("POST", f"{BASE}/aeri/run/end"),
     ("POST", f"{BASE}/aeri/run/presence"),
     ("GET", f"{BASE}/aeri/run/log"),
+    # The camera preview between runs (``preview_api.py``).
+    ("GET", f"{BASE}/preview"),
+    ("POST", f"{BASE}/preview/start"),
+    ("POST", f"{BASE}/preview/stop"),
+    ("GET", f"{BASE}/preview/frame"),
 ]
 # The voice input's routes live on their own router (``speech_api.py``); their
 # token, person and body checks are in test_marvel0_speech_route_mounted.py.
@@ -140,6 +154,10 @@ def service(tmp_path, monkeypatch):
     aeri_machine = AeriMachine(tmp_path / "aeri", monkeypatch)
     aeri_machine.host.locks_path = str(tmp_path / "locks")
     monkeypatch.setattr(aeri_run_api, "supervisor", lambda: aeri_machine.sup)
+    # The camera preview over a scripted worker: no camera, no process.
+    (tmp_path / "preview").mkdir()
+    previewer = PreviewRig(tmp_path / "preview")
+    monkeypatch.setattr(preview, "manager", lambda: previewer.mgr)
     return TestClient(app), marvel0
 
 

@@ -260,3 +260,8 @@ router.routes.extend(aeri_api.router.routes)
 from . import aeri_run_api
 
 router.routes.extend(aeri_run_api.router.routes)
+
+# The camera preview between runs (``preview_api.py``), same prefix as the routers above.
+from . import preview_api
+
+router.routes.extend(preview_api.router.routes)

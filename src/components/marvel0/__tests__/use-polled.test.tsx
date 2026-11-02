@@ -136,6 +136,50 @@ describe("one polled document", () => {
     expect(seen.latest!.value).toBe(2);
   });
 
+  test.each([false, true])(
+    "turned off, then on again with forgetWhenDisabled=%p: the old answer is %p until the next read answers",
+    async (forget) => {
+      const seen: { latest: Polled<number> | null } = { latest: null };
+      let release: () => void = () => {};
+      let hold: Promise<void> | null = null;
+      const read = async () => {
+        if (hold) await hold;
+        return ok(7);
+      };
+      function Probe({ enabled }: { enabled: boolean }) {
+        seen.latest = usePolled<number>({
+          read,
+          parse: (data) => (typeof data === "number" ? data : null),
+          pollMs: 60_000,
+          freshMs: 60_000,
+          enabled,
+          forgetWhenDisabled: forget,
+        });
+        return null;
+      }
+      const view = await render(<Probe enabled />);
+      await waitFor(() => seen.latest?.value === 7, { label: "an answer" });
+      await view.rerender(<Probe enabled={false} />);
+      await act(async () => {});
+      if (forget) {
+        expect(seen.latest!.value).toBeNull();
+        expect(seen.latest!.loaded).toBe(false);
+      } else expect(seen.latest!.value).toBe(7);
+      // turned on again with a read that does not answer: the old answer shows
+      // only when it was kept
+      hold = new Promise<void>((resolve) => (release = resolve));
+      await view.rerender(<Probe enabled />);
+      await act(async () => {});
+      expect(seen.latest!.value).toBe(forget ? null : 7);
+      await act(async () => {
+        release();
+      });
+      await waitFor(() => seen.latest?.value === 7, {
+        label: "a fresh answer",
+      });
+    },
+  );
+
   test("the wait doubles after each failure, up to 30 s", () => {
     expect(pollDelay(0, 2000)).toBe(2000);
     expect(pollDelay(1, 2000)).toBe(4000);

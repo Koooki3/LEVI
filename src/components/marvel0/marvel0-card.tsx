@@ -113,10 +113,10 @@ export function Marvel0CardView({
             {t("marvel0.card.facts").replace("{n}", String(facts.length))}
           </summary>
           <Facts facts={facts} />
-          <p className="rg-hint">{t(card.hint)}</p>
+          {card.hint && <p className="rg-hint">{t(card.hint)}</p>}
         </details>
       ) : (
-        <p className="rg-hint">{t(card.hint)}</p>
+        card.hint && <p className="rg-hint">{t(card.hint)}</p>
       )}
       {card.notes.length > 0 && (
         // The reasons and what the servers wrote: folded away unless the

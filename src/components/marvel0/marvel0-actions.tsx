@@ -21,11 +21,14 @@ import { RunPanel } from "./run-panel";
 import type { ChangeAttest, EpisodeChangeStatus } from "./run-panel";
 import { goTo } from "./chain-strip";
 import { LiveFrames } from "./live-frames";
+import { previewApi } from "./preview-api";
 import { COMMAND_ANCHOR } from "./chain-logic";
 import { commandFormFromRun } from "./command-logic";
 import { bodyWithNextPrompt, confirmedRunExit } from "./episode-change";
+import { holdsCameras } from "./preview-logic";
 import { hasPictures, startPhrase } from "./run-logic";
 import { effectiveSelection, useChoice } from "./selection";
+import { useCameraPreview } from "./use-camera-preview";
 import { useVoiceRun } from "./use-voice-run";
 import type { RunActions } from "./use-run-actions";
 import type { RunPoll } from "./use-run-poll";
@@ -94,6 +97,20 @@ export function Marvel0Actions({
     choice.choice,
     poll.status,
   );
+  // The camera preview of step 4 is read here because the command card of step 3
+  // must be able to stop it: a command pasted into a terminal is a client that
+  // LEVI does not start, and so cannot take the cameras back from the preview.
+  const pictures = Boolean(run?.lastSeen && hasPictures(run.lastSeen.state));
+  const previewControl = useCameraPreview(
+    previewApi,
+    Boolean(run && runActions) && !pictures,
+  );
+  const copyCommand = (): boolean => {
+    const view = previewControl.view;
+    if (!view || !holdsCameras(view.state)) return false;
+    if (view.state !== "stopping") void previewControl.stop();
+    return true;
+  };
   const deployNow = poll.current ? poll.status : null;
   useEffect(() => {
     onDeploy?.(deployNow);
@@ -336,6 +353,7 @@ export function Marvel0Actions({
               runActions={runActions}
               resumeBody={episodeBody}
               voiceRun={run && runActions ? voiceRun : null}
+              onCopy={copyCommand}
             />
           )}
           {clientStatus}
@@ -357,7 +375,9 @@ export function Marvel0Actions({
             onChangeInstruction={changeInstruction}
           />
           <LiveFrames
-            active={run.lastSeen !== null && hasPictures(run.lastSeen.state)}
+            active={pictures}
+            preview={previewApi}
+            control={previewControl}
           />
         </section>
       )}

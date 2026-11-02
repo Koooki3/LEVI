@@ -108,6 +108,11 @@ async def lifespan(app):
         # SIGTERM of the unit or a restart). What is left after the wait is the
         # launcher's hang-up chain. Never a bare kill.
         aeri_activity.shutdown_hosted()
+        from .marvel0 import preview
+
+        # The camera preview lets the cameras go while this process can still
+        # wait for its worker to exit (children.stop_owned below is the backstop).
+        preview.shutdown()
         if monitor_auto:
             monitor_auto.close()
         if gate_resumer:

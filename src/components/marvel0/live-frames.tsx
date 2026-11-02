@@ -9,15 +9,27 @@
 // sends the client anything; it only reads LEVI's own route through the
 // same-origin proxy.
 //
-// Rules of the poll: only while the run is active and the tab is visible; at
-// most one request in flight per camera (a slow answer skips ticks, it never
-// piles requests up); every picture is an object URL that is revoked when the
-// next one replaces it, when the run ends and when the card goes away; a
-// missing picture leaves the last one on screen for a moment (the gap between
-// two frames of one episode, or the client's pause) and then says why.
+// Between runs (no client of the page is on) the card can also show a camera
+// preview, when the page hands it the preview's api (`preview`): a button asks
+// LEVI to open the two cameras itself (levi/marvel0/preview.py), the pictures
+// then come from `preview/frame` the same way, and Stop lets the cameras go. The
+// backend refuses while a run is on, the arm lock is held or a client is
+// connected, and takes the cameras back before any client starts; when a run
+// becomes active this card goes back to the run's pictures at once.
+//
+// Rules of the poll: only while the run is active (or the preview is on) and
+// the tab is visible; at most one request in flight per camera (a slow answer
+// skips ticks, it never piles requests up); every picture is an object URL that
+// is revoked when the next one replaces it, when the run ends and when the card
+// goes away; a missing picture leaves the last one on screen for a moment (the
+// gap between two frames of one episode, or the client's pause) and then says
+// why.
 import { useEffect, useState } from "react";
 import { Card } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
+import { PreviewBar } from "./camera-preview-bar";
+import type { PreviewApi } from "./preview-api";
+import { showsPictures } from "./preview-logic";
 import {
   FRAME_CAMERAS,
   runApi,
@@ -26,6 +38,7 @@ import {
   type FrameResult,
   type RunApi,
 } from "./run-api";
+import { useCameraPreview, type CameraPreview } from "./use-camera-preview";
 
 /** Milliseconds between two asks of a camera (about ten a second, the rate the
  * client writes frames at). */
@@ -49,20 +62,34 @@ const NO_SHOTS: Shots = { side: NO_SHOT, wrist: NO_SHOT };
 export function LiveFrames({
   active,
   api = runApi,
+  preview,
+  control: given,
   pollMs = LIVE_POLL_MS,
   keepMs = LIVE_KEEP_MS,
 }: {
   /** The page's run has a client (run-logic.ts `hasPictures`). */
   active: boolean;
   api?: Pick<RunApi, "frame">;
+  /** The camera preview's api; without it the card offers no preview. */
+  preview?: PreviewApi;
+  /** The preview's state when the page reads it itself (the command card needs
+   * it too); without it the card reads it. */
+  control?: CameraPreview;
   pollMs?: number;
   keepMs?: number;
 }) {
   const { t } = useLocale();
   const [shots, setShots] = useState<Shots>(NO_SHOTS);
+  // The preview is read, and offered, only while no client of the page is on.
+  const own = useCameraPreview(given ? undefined : preview, !active);
+  const control = given ?? own;
+  const previewing =
+    !active && control.view !== null && showsPictures(control.view.state);
+  const live = active || previewing;
+  const source: Pick<RunApi, "frame"> | undefined = active ? api : preview;
 
   useEffect(() => {
-    if (!active) return;
+    if (!live || !source) return;
     let stopped = false;
     const urls: Record<FrameCamera, string | null> = {
       side: null,
@@ -125,7 +152,7 @@ export function LiveFrames({
       asking[camera] = controller;
       let result: FrameResult | null = null;
       try {
-        result = await api.frame(camera, controller.signal);
+        result = await source.frame(camera, controller.signal);
       } catch {
         result = null; // aborted
       }
@@ -158,9 +185,9 @@ export function LiveFrames({
       }
       setShots(NO_SHOTS);
     };
-  }, [active, api, pollMs, keepMs]);
+  }, [live, source, pollMs, keepMs]);
 
-  const shown = active ? shots : NO_SHOTS;
+  const shown = live ? shots : NO_SHOTS;
   const label: Record<FrameCamera, string> = {
     side: t("marvel0.live.side"),
     wrist: t("marvel0.live.wrist"),
@@ -170,15 +197,23 @@ export function LiveFrames({
     wrist: t("marvel0.live.alt.wrist"),
   };
   const placeholder = (reason: FrameReason | null) =>
-    !active || reason === "no_run"
-      ? t("marvel0.live.no_run")
-      : reason === "no_episode"
-        ? t("marvel0.live.no_episode")
-        : reason === "no_frame"
-          ? t("marvel0.live.no_frame")
-          : reason === "unavailable"
-            ? t("marvel0.live.unavailable")
-            : t("marvel0.live.wait");
+    !live
+      ? preview
+        ? t("marvel0.preview.idle")
+        : t("marvel0.live.no_run")
+      : reason === "no_run"
+        ? t("marvel0.live.no_run")
+        : reason === "no_episode"
+          ? t("marvel0.live.no_episode")
+          : reason === "no_frame"
+            ? active
+              ? t("marvel0.live.no_frame")
+              : t("marvel0.preview.frame.no_frame")
+            : reason === "preview_off"
+              ? t("marvel0.preview.frame.preview_off")
+              : reason === "unavailable"
+                ? t("marvel0.live.unavailable")
+                : t("marvel0.live.wait");
   const ageText = (ms: number) => {
     const seconds = ms / 1000;
     return t("marvel0.live.age").replace(
@@ -194,8 +229,11 @@ export function LiveFrames({
       data-testid="marvel0-live"
       data-active={active ? "true" : "false"}
       title={t("marvel0.live.title")}
-      description={t("marvel0.live.lead")}
+      description={
+        preview && !active ? t("marvel0.preview.lead") : t("marvel0.live.lead")
+      }
     >
+      {preview && !active && <PreviewBar control={control} />}
       <div className="rg-live__grid">
         {FRAME_CAMERAS.map((camera) => {
           const shot = shown[camera];
@@ -224,7 +262,13 @@ export function LiveFrames({
                   <p
                     className="rg-live__empty"
                     data-testid={`marvel0-live-${camera}-empty`}
-                    data-reason={active ? (shot.reason ?? "wait") : "no_run"}
+                    data-reason={
+                      live
+                        ? (shot.reason ?? "wait")
+                        : preview
+                          ? "idle"
+                          : "no_run"
+                    }
                   >
                     {placeholder(shot.reason)}
                   </p>
