@@ -162,7 +162,7 @@ class Machine:
         self.enabled = True
         # what the arm controller the stack runs asks of the form (arm_facts.py):
         # nothing, as with the lab's controller; a test changes it
-        self.arm = {
+        self.arm_now = {
             "configured": None,
             "enabled": False,
             "running": None,
@@ -223,7 +223,7 @@ class Machine:
 
     def arm_facts(self, fresh=False):
         self.arm_asked.append(fresh)
-        return dict(self.arm)
+        return dict(self.arm_now)
 
     def spawn(self, argv, *, stdin, stdout, env, cwd):
         self.spawned.append({"argv": argv, "env": dict(env), "cwd": cwd})

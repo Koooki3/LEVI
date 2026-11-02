@@ -470,7 +470,7 @@ def test_the_preview_route_leaves_the_choice_alone_without_the_anyspeedup_contro
 
 
 def test_the_hosted_run_forces_what_the_running_a_asks(rig):
-    rig.arm = running("S1")
+    rig.arm_now = running("S1")
     body = rig.form(**V3)
     with pytest.raises(run.FormRefuse) as caught:
         rig.sup._form(rig.site, {**body, "chunk_accel_alpha": 0.005})
@@ -479,13 +479,13 @@ def test_the_hosted_run_forces_what_the_running_a_asks(rig):
     assert form.chunk_accel_alpha == 0.01
     assert alpha_flag(preview_.argv) == "--phase-alpha=0.01"
     # the lab's A: as it was
-    rig.arm = facts()
+    rig.arm_now = facts()
     _, form, _ = rig.sup._form(rig.site, {**body, "chunk_accel_alpha": 0.005})
     assert form.chunk_accel_alpha == 0.005
 
 
 def test_a_start_looks_at_the_stack_again_but_a_challenge_may_use_the_cache(rig):
-    rig.arm = running("today")
+    rig.arm_now = running("today")
     form = rig.form(**V3)
     challenge = rig.sup.challenge({"purpose": "start", "form": form})
     assert rig.arm_asked == [False]
@@ -503,7 +503,7 @@ def test_a_start_looks_at_the_stack_again_but_a_challenge_may_use_the_cache(rig)
 
 def test_rule_v3_is_refused_at_the_start_when_the_a_that_runs_is_not_the_files(rig):
     for problem in ("changed", "foreign", "unknown"):
-        rig.arm = facts(
+        rig.arm_now = facts(
             configured={"controller": "anyspeedup", "preset": "S1"},
             enabled=True,
             status=problem,
@@ -524,7 +524,7 @@ def test_rule_v3_is_refused_at_the_start_when_the_a_that_runs_is_not_the_files(r
         assert "stop A, change the control file, start A" in row["text"]
     assert rig.spawned == []
     # without rule v3 the same A starts a client as it always could
-    rig.arm = facts(
+    rig.arm_now = facts(
         configured={"controller": "anyspeedup", "preset": "S1"},
         enabled=True,
         status="foreign",
@@ -537,7 +537,7 @@ def test_rule_v3_is_refused_at_the_start_when_the_a_that_runs_is_not_the_files(r
 
 
 def test_the_check_is_passed_and_listed_for_a_matching_a(rig):
-    rig.arm = running("today")
+    rig.arm_now = running("today")
     challenge = rig.sup.challenge({"purpose": "start", "form": rig.form(**V3)})
     row = next(
         r for r in challenge["preflight"] if r["code"] == "arm_controller_matches"
@@ -549,7 +549,7 @@ def test_the_check_is_passed_and_listed_for_a_matching_a(rig):
 
 
 def test_the_run_record_and_view_say_which_arm_controller_the_page_started(rig):
-    rig.arm = running("S1")
+    rig.arm_now = running("S1")
     answer = rig.start(**V3)
     assert answer["created"] is True
     rec = rig.record()
@@ -566,7 +566,7 @@ def test_the_run_record_and_view_say_which_arm_controller_the_page_started(rig):
 
 
 def test_the_confirm_phrase_names_the_suffixed_group(rig):
-    rig.arm = running("today")
+    rig.arm_now = running("today")
     form = rig.form(**V3)
     challenge = rig.sup.challenge({"purpose": "start", "form": form})
     assert challenge["group"].endswith("_any-today")
@@ -577,7 +577,7 @@ def test_the_confirm_phrase_names_the_suffixed_group(rig):
 
 
 def test_a_client_started_beside_an_a_the_page_did_not_start_claims_no_controller(rig):
-    rig.arm = facts(status="foreign")
+    rig.arm_now = facts(status="foreign")
     rig.start()
     rec = rig.record()
     assert rec["arm_controller"] is None and rec["arm_preset"] is None
@@ -586,7 +586,7 @@ def test_a_client_started_beside_an_a_the_page_did_not_start_claims_no_controlle
 
 
 def test_a_lab_a_is_recorded_as_the_lab_without_a_suffix(rig):
-    rig.arm = facts(
+    rig.arm_now = facts(
         configured={"controller": "lab", "preset": None},
         enabled=True,
         running={"controller": "lab", "preset": None},
