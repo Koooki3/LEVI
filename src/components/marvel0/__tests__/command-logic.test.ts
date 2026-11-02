@@ -511,6 +511,54 @@ describe("in-chunk acceleration", () => {
     expect(commandBody(base(v3)).errors).toEqual({});
   });
 
+  test("the alpha of the stack's anyspeedup arm controller replaces whatever the field held", () => {
+    const v3 = { ...plain, chunkAccel: true };
+    for (const [armAlpha, typed] of [
+      [0.01, undefined],
+      [0.01, "0.005"],
+      [0.005, "0.01"],
+      [0.005, undefined],
+    ] as const) {
+      const { body, errors } = commandBody(
+        base({ ...v3, chunkAccelAlpha: typed }),
+        10,
+        armAlpha,
+      );
+      expect(errors, `${armAlpha} ${typed}`).toEqual({});
+      expect(body.chunk_accel_alpha, `${armAlpha} ${typed}`).toBe(armAlpha);
+    }
+    // no arm alpha (the lab's controller, or not known): the field decides, as before
+    expect(commandBody(base(v3), 10, null).body.chunk_accel_alpha).toBe(0.005);
+    expect(
+      commandBody(base({ ...v3, chunkAccelAlpha: "0.01" }), 10, null).body
+        .chunk_accel_alpha,
+    ).toBe(0.01);
+    // and no alpha at all for a rule that has none
+    expect(
+      commandBody(
+        base({ ...plain, chunkAccel: true, chunkAccelRule: "v2" }),
+        10,
+        0.01,
+      ).body,
+    ).not.toHaveProperty("chunk_accel_alpha");
+    expect(commandBody(base(plain), 10, 0.01).body).not.toHaveProperty(
+      "chunk_accel_alpha",
+    );
+  });
+
+  test("an arm alpha the page has no tuning for is an error on the alpha field", () => {
+    const { body, errors } = commandBody(
+      base({ ...plain, chunkAccel: true }),
+      10,
+      0.02,
+    );
+    expect(errors.chunk_accel_alpha).toEqual({
+      key: "marvel0.err.chunk_accel_alpha_arm_mismatch",
+      params: { alpha: "0.02" },
+    });
+    expect(body).not.toHaveProperty("chunk_accel_alpha");
+  });
+
   test("a saved v3 run round-trips into the form and back into the same body, for each mode", () => {
     for (const mode of ["plain", "rtc", "vlash"] as const) {
       const saved = {

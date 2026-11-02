@@ -74,6 +74,7 @@ import type { Say } from "./marvel0-logic";
 import { sayText } from "./marvel0-say";
 import type { RunView } from "./run-logic";
 import { RunStart } from "./run-start";
+import type { ArmView } from "./stack-act-logic";
 import type { Effective } from "./selection";
 import type { Ack, RunActions } from "./use-run-actions";
 import type { VoiceRun } from "./use-voice-run";
@@ -98,6 +99,7 @@ export function CommandPanel({
   resumeBody = null,
   voiceRun = null,
   onCopy,
+  arm = null,
 }: {
   api: Marvel0Api;
   catalog: Marvel0Catalog;
@@ -121,6 +123,10 @@ export function CommandPanel({
    * page stopped the camera preview for it (the preview holds the cameras, and
    * a client started by hand cannot take them back). */
   onCopy?: () => boolean;
+  /** The arm controller the stack is configured for (the stack document's
+   * `control.arm`). With the anyspeedup controller on, rule v3's controller
+   * filter is its preset's and the field only shows it. */
+  arm?: ArmView | null;
 }) {
   const { t } = useLocale();
   const models = catalog.models;
@@ -206,7 +212,8 @@ export function CommandPanel({
   const hints = placeholders(form, models, site);
   const control = site.control;
   const facts = rateFacts(form, models, site);
-  const built = commandBody(form, control?.default ?? DEFAULT_HZ);
+  const armAlpha = arm?.controller === "anyspeedup" ? arm.alpha : null;
+  const built = commandBody(form, control?.default ?? DEFAULT_HZ, armAlpha);
   const body =
     resuming && resumeBody
       ? { ...resumeBody, prompt: form.prompt }
@@ -283,7 +290,7 @@ export function CommandPanel({
     if (!runActions || resuming || !models || !site) return false;
     const next: CommandForm = { ...form, prompt };
     edit({ prompt });
-    const request = commandBody(next, control?.default ?? DEFAULT_HZ);
+    const request = commandBody(next, control?.default ?? DEFAULT_HZ, armAlpha);
     if (!(await makeFor(request.body, request.errors, bodyKey(request.body))))
       return false;
     // Switched off, or another sentence came, while the command was made.
@@ -533,9 +540,14 @@ export function CommandPanel({
               lambda={form.chunkAccelLambda ?? ""}
               lambdaError={fieldError("chunk_accel_lambda")}
               onLambda={(chunkAccelLambda) => edit({ chunkAccelLambda })}
-              alpha={form.chunkAccelAlpha ?? CHUNK_ACCEL_V3_ALPHA_DEFAULT}
+              alpha={
+                armAlpha !== null
+                  ? String(armAlpha)
+                  : (form.chunkAccelAlpha ?? CHUNK_ACCEL_V3_ALPHA_DEFAULT)
+              }
               alphaError={fieldError("chunk_accel_alpha")}
               onAlpha={(chunkAccelAlpha) => edit({ chunkAccelAlpha })}
+              alphaFixedBy={armAlpha !== null && arm ? arm : null}
             />
             <Field
               className="rg-span"
@@ -901,6 +913,7 @@ function ChunkAccel({
   alpha,
   alphaError,
   onAlpha,
+  alphaFixedBy = null,
 }: {
   on: boolean;
   /** The form's inference mode is one acceleration runs with, and its rate is 10 Hz. */
@@ -923,6 +936,9 @@ function ChunkAccel({
   alpha: string;
   alphaError?: string;
   onAlpha: (alpha: string) => void;
+  /** The stack's arm controller when it decides the alpha: the field then
+   * shows that alpha, says why, and cannot be changed here. */
+  alphaFixedBy?: ArmView | null;
 }) {
   const { t } = useLocale();
   const id = useId();
@@ -1009,13 +1025,27 @@ function ChunkAccel({
           </Field>
           <Field
             label={t("marvel0.cmd.field.chunk_accel_alpha")}
-            hint={t("marvel0.cmd.field.chunk_accel_alpha_hint")}
+            hint={
+              alphaFixedBy
+                ? sayText(
+                    {
+                      key: "marvel0.cmd.field.chunk_accel_alpha_arm",
+                      params: {
+                        preset: alphaFixedBy.preset ?? "?",
+                        alpha,
+                      },
+                    },
+                    t,
+                  )
+                : t("marvel0.cmd.field.chunk_accel_alpha_hint")
+            }
             error={alphaError}
           >
             <Select
               data-testid="marvel0-command-chunk-accel-alpha"
+              data-fixed-by={alphaFixedBy ? alphaFixedBy.controller : undefined}
               value={alpha}
-              disabled={disabled}
+              disabled={disabled || alphaFixedBy !== null}
               onChange={(event) => onAlpha(event.target.value)}
             >
               {CHUNK_ACCEL_V3_ALPHAS.map((value) => (

@@ -28,6 +28,7 @@ import { bodyWithNextPrompt, confirmedRunExit } from "./episode-change";
 import { holdsCameras } from "./preview-logic";
 import { hasPictures, startPhrase } from "./run-logic";
 import { effectiveSelection, useChoice } from "./selection";
+import type { ArmView } from "./stack-act-logic";
 import { useCameraPreview } from "./use-camera-preview";
 import { useVoiceRun } from "./use-voice-run";
 import type { RunActions } from "./use-run-actions";
@@ -51,6 +52,7 @@ export function Marvel0Actions({
   run,
   runActions,
   onDeploy,
+  arm = null,
 }: {
   api?: Marvel0Api;
   /** Milliseconds between reads of the policy server's state (default 3 s). */
@@ -67,6 +69,10 @@ export function Marvel0Actions({
   /** Told the policy server's state whenever a read changes it; null while
    * the last read is not current. The chain at the top follows it. */
   onDeploy?: (status: DeployStatus | null) => void;
+  /** The arm controller the stack is configured for (from the stack document,
+   * which the page polls); null while it is not known. The command card ties
+   * rule v3's alpha to it. */
+  arm?: ArmView | null;
 }) {
   type EpisodeOperation = {
     state: EpisodeChangeStatus["state"];
@@ -354,6 +360,7 @@ export function Marvel0Actions({
               resumeBody={episodeBody}
               voiceRun={run && runActions ? voiceRun : null}
               onCopy={copyCommand}
+              arm={arm}
             />
           )}
           {clientStatus}

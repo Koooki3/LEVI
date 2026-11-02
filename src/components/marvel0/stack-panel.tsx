@@ -35,6 +35,7 @@ import {
   operationRunning,
   stateKey,
   type ActView,
+  type ArmView,
   type CompState,
   type CompId,
 } from "./stack-act-logic";
@@ -227,6 +228,39 @@ function MarkerBlock({
         />
       )}
     </div>
+  );
+}
+
+/** Which arm controller the control file asks terminal A to start, read-only:
+ * the lab's, or the anyspeedup one with its preset (and, while the stack is
+ * on, the filter alpha the client command's phase clock is tied to). */
+function ArmController({ arm }: { arm: ArmView }) {
+  const { t } = useLocale();
+  return (
+    <p
+      className="rg-muted"
+      data-testid="marvel0-arm-controller"
+      data-controller={arm.controller}
+    >
+      {arm.controller === "anyspeedup"
+        ? sayText(
+            {
+              key: "marvel0.ctl.arm.anyspeedup",
+              params: { preset: arm.preset ?? "?" },
+            },
+            t,
+          )
+        : t("marvel0.ctl.arm.lab")}
+      {arm.controller === "anyspeedup" && arm.alpha !== null && (
+        <>
+          {" "}
+          {sayText(
+            { key: "marvel0.ctl.arm.alpha", params: { alpha: arm.alpha } },
+            t,
+          )}
+        </>
+      )}
+    </p>
   );
 }
 
@@ -485,6 +519,7 @@ export function StackPanel({
                         act.sequence.next === comp
                       }
                     />
+                    {comp === "A" && act.arm && <ArmController arm={act.arm} />}
                     {comp === "B" && (
                       <GripperTest act={act} actions={actions} />
                     )}

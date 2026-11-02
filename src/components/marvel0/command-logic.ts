@@ -404,6 +404,7 @@ function parseNumber(text: string, whole: boolean): Parsed {
 export function commandBody(
   form: CommandForm,
   defaultHz: number = DEFAULT_HZ,
+  armAlpha: number | null = null,
 ): {
   body: Record<string, unknown>;
   errors: Partial<Record<FieldName, Say>>;
@@ -451,14 +452,22 @@ export function commandBody(
             key: "marvel0.err.chunk_accel_lambda_invalid",
           };
       }
+      // With the anyspeedup arm controller the stack asks for, the alpha is the
+      // preset's whatever the field held (the server forces it the same way).
       const alpha =
-        form.chunkAccelAlpha?.trim() || CHUNK_ACCEL_V3_ALPHA_DEFAULT;
+        armAlpha !== null
+          ? String(armAlpha)
+          : form.chunkAccelAlpha?.trim() || CHUNK_ACCEL_V3_ALPHA_DEFAULT;
       if ((CHUNK_ACCEL_V3_ALPHAS as readonly string[]).includes(alpha))
         body.chunk_accel_alpha = Number(alpha);
       else
-        errors.chunk_accel_alpha = {
-          key: "marvel0.err.chunk_accel_alpha_invalid",
-        };
+        errors.chunk_accel_alpha =
+          armAlpha !== null
+            ? {
+                key: "marvel0.err.chunk_accel_alpha_arm_mismatch",
+                params: { alpha },
+              }
+            : { key: "marvel0.err.chunk_accel_alpha_invalid" };
     }
   }
   put("rtc_horizon", form.horizon, true);

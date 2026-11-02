@@ -282,6 +282,16 @@ export interface OperationAct {
   finishedAt: number | null;
 }
 
+/** The arm controller the control file asks terminal A to start (read-only
+ * fact of the stack document's `control.arm`). `preset` and `alpha` belong to
+ * the anyspeedup controller; `alpha` is the setpoint filter the client's v3
+ * phase clock is forced to, present only while the stack is switched on. */
+export interface ArmView {
+  controller: "lab" | "anyspeedup";
+  preset: string | null;
+  alpha: number | null;
+}
+
 export interface ActView {
   enabled: boolean;
   /** The product LEVI acts on the real machine; anything else only shows. */
@@ -295,6 +305,9 @@ export interface ActView {
   server: ServerCheck | null;
   /** An operation of the page that runs now, or ended last. */
   operation: OperationAct | null;
+  /** Which arm controller the stack is configured for; null when the document
+   * does not say (an older backend, or an unreadable control file). */
+  arm: ArmView | null;
   /** Notices of the backend, by code, with their facts. */
   notices: Array<{ code: string; params: Record<string, string | number> }>;
   /** The phrases to type, by name, as the backend names them. */
@@ -578,6 +591,22 @@ function phraseMap(raw: unknown): Record<string, string> {
   return out;
 }
 
+/** `control.arm` of the stack document; anything but a known controller reads
+ * as "not said". */
+export function armView(raw: unknown): ArmView | null {
+  const arm = rec(raw);
+  if (!arm) return null;
+  if (arm.controller === "lab")
+    return { controller: "lab", preset: null, alpha: null };
+  if (arm.controller === "anyspeedup")
+    return {
+      controller: "anyspeedup",
+      preset: str(arm.preset, 16),
+      alpha: num(arm.alpha),
+    };
+  return null;
+}
+
 /** The control view of the stack document, or null when it has no `act` part
  * (an older backend, or an instance without the actions): the page then shows
  * the passive card alone. `passive` is the S4-0 view of the same document; the
@@ -616,6 +645,7 @@ export function actView(
     fci: fciCheck(checks?.fci),
     server: serverCheck(checks?.c_preflight),
     operation: operationAct(act.operation),
+    arm: armView(rec(act.control)?.arm),
     notices: list(act.notices).flatMap((entry) => {
       const item = rec(entry);
       const code = str(item?.code, 80);

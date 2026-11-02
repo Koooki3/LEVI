@@ -14,6 +14,7 @@ import { readModels, readSite } from "../catalog-logic";
 import { CommandPanel } from "../command-panel";
 import { readDeploy } from "../deploy-logic";
 import { NO_CHOICE, effectiveSelection, type Effective } from "../selection";
+import type { ArmView } from "../stack-act-logic";
 import type { Marvel0Catalog } from "../use-marvel0-actions";
 import { modelsAnswer, siteAnswer, model, cfgModel } from "./catalog-fixtures";
 import { COMMAND, preview, siteWithRate } from "./command-fixtures";
@@ -94,10 +95,12 @@ async function open(
   over: Partial<Effective> = {},
   resumeBody: Record<string, unknown> | null = null,
   onCopy?: () => boolean,
+  arm: ArmView | null = null,
 ) {
   if (zhLanguage) localStorage.setItem("levi-language", "zh");
   const { api, calls } = fakeApi(canned);
   const used: string[] = [];
+  let armNow = arm;
   const panel = (selection: Effective) => {
     const card = (
       <CommandPanel
@@ -108,6 +111,7 @@ async function open(
         onUseAnother={() => used.push("another")}
         resumeBody={resumeBody}
         onCopy={onCopy}
+        arm={armNow}
       />
     );
     return zhLanguage ? <LocaleProvider>{card}</LocaleProvider> : card;
@@ -121,6 +125,11 @@ async function open(
     /** The policy server card chose something else. */
     choose: (change: Partial<Effective>) =>
       view.rerender(panel(selectionFor(status, change))),
+    /** The stack document says another arm controller. */
+    setArm: (next: ArmView | null) => {
+      armNow = next;
+      return view.rerender(panel(selectionFor(status, over)));
+    },
   };
 }
 const card = (host: HTMLElement) =>
@@ -761,6 +770,126 @@ describe("the rule of in-chunk acceleration", () => {
     expect(calls.preview[2]).not.toHaveProperty("chunk_accel_alpha");
     await click(rule(host, "v3")!);
     expect(alpha(host)!.value).toBe("0.01");
+  });
+
+  describe("with the stack's anyspeedup arm controller", () => {
+    const anyspeedup = (preset: string, alpha: number | null): ArmView => ({
+      controller: "anyspeedup",
+      preset,
+      alpha,
+    });
+    const openArm = (arm: ArmView | null, zhLanguage = false) =>
+      open(
+        undefined,
+        readDeploy(idle()),
+        zhLanguage,
+        { rtc: false },
+        null,
+        undefined,
+        arm,
+      );
+
+    test.each([
+      ["S1", 0.01, "0.01"],
+      ["today", 0.005, "0.005"],
+    ] as const)(
+      "preset %s: the alpha field shows %s, cannot be changed, says why, and the command is made with it",
+      async (preset, alphaNumber, shown) => {
+        const { host, calls } = await openArm(anyspeedup(preset, alphaNumber));
+        await click(accel(host));
+        expect(alpha(host)!.value).toBe(shown);
+        expect(alpha(host)!.disabled).toBe(true);
+        expect(alpha(host)!.getAttribute("data-fixed-by")).toBe("anyspeedup");
+        expect(text(box(host))).toContain(
+          `anyspeedup, preset ${preset}): alpha ${shown}`,
+        );
+        expect(text(box(host))).not.toContain(
+          en["marvel0.cmd.field.chunk_accel_alpha_hint"],
+        );
+        // the lambda stays the person's
+        expect(lambda(host)!.disabled).toBe(false);
+        await make(host);
+        expect(calls.preview[0]).toMatchObject({
+          chunk_accel: true,
+          chunk_accel_rule: "v3",
+          chunk_accel_alpha: alphaNumber,
+        });
+      },
+    );
+
+    test("an alpha chosen before the stack document arrived does not survive it: the body carries the preset's", async () => {
+      const { host, calls, setArm } = await open(
+        undefined,
+        readDeploy(idle()),
+        false,
+        { rtc: false },
+      );
+      await click(accel(host));
+      await pick(alpha(host), "0.005");
+      expect(alpha(host)!.disabled).toBe(false);
+      await make(host);
+      expect(calls.preview[0]).toMatchObject({ chunk_accel_alpha: 0.005 });
+      await setArm(anyspeedup("S1", 0.01));
+      expect(alpha(host)!.value).toBe("0.01");
+      expect(alpha(host)!.disabled).toBe(true);
+      // the command on show was made for the other alpha: the form has outgrown it
+      await make(host);
+      expect(calls.preview[1]).toMatchObject({ chunk_accel_alpha: 0.01 });
+      // and back: the person's own choice was kept, and is free again
+      await setArm(null);
+      expect(alpha(host)!.disabled).toBe(false);
+      expect(alpha(host)!.value).toBe("0.005");
+    });
+
+    test("the lab's controller, an unknown one and the anyspeedup one with the stack off leave the field free", async () => {
+      for (const arm of [
+        null,
+        { controller: "lab", preset: null, alpha: null } as ArmView,
+        anyspeedup("S1", null),
+      ]) {
+        const { host, calls } = await openArm(arm);
+        await click(accel(host));
+        expect(alpha(host)!.disabled, JSON.stringify(arm)).toBe(false);
+        expect(alpha(host)!.value).toBe("0.005");
+        expect(alpha(host)!.hasAttribute("data-fixed-by")).toBe(false);
+        expect(text(box(host))).toContain(
+          en["marvel0.cmd.field.chunk_accel_alpha_hint"],
+        );
+        await pick(alpha(host), "0.01");
+        await make(host);
+        expect(calls.preview[0]).toMatchObject({ chunk_accel_alpha: 0.01 });
+      }
+    });
+
+    test("the words are in both languages and hold no placeholder", async () => {
+      expect(zh["marvel0.cmd.field.chunk_accel_alpha_arm"]).not.toBe(
+        en["marvel0.cmd.field.chunk_accel_alpha_arm"],
+      );
+      const { host } = await openArm(anyspeedup("S1", 0.01), true);
+      await click(accel(host));
+      const said = text(box(host));
+      expect(said).toContain("S1");
+      expect(said).toContain("0.01");
+      expect(said).not.toMatch(/[{}]/);
+    });
+
+    test("the server's refusal of another alpha lands under the select, with the alpha it wants", async () => {
+      const { host } = await open(
+        {
+          preview: refused(422, "chunk_accel_alpha_arm_mismatch", {
+            field: "chunk_accel_alpha",
+            alpha: "0.01",
+          }),
+        },
+        readDeploy(idle()),
+        false,
+        { rtc: false },
+      );
+      await click(accel(host));
+      await make(host);
+      expect(text(box(host))).toContain("anyspeedup");
+      expect(text(box(host))).toContain("0.01");
+    });
   });
 
   test("the lambda and the alpha belong to a mode of the form too: under RTC and VLASH they are shown and sent", async () => {

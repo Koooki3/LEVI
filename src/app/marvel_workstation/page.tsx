@@ -164,6 +164,7 @@ export default function Marvel0Page() {
             run={run}
             runActions={runActions}
             onDeploy={setDeploy}
+            arm={stackNow?.act?.arm ?? null}
           />
           {/* Step 5: prepare, start and drive the AERI loop (off until the
               control file says so; only one of it and the client at a time). */}

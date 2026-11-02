@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import en from "@/i18n/en.json";
 import {
+  armView,
   canCheckFci,
   canCheckServer,
   canStartSequence,
@@ -633,5 +634,64 @@ describe("the phrases", () => {
       doc.act.phrases = { ...doc.act.phrases, sequence_stop: "stop it all" };
     });
     expect(phraseFor(named, "sequence_stop")).toBe("stop it all");
+  });
+});
+
+describe("the arm controller the stack is configured for", () => {
+  const arm = (value: unknown) =>
+    act("idle", (doc) => {
+      doc.act.control.arm = value;
+    }).arm;
+
+  test("the backend's own views say the lab's controller", () => {
+    for (const name of STACK_VIEWS)
+      expect(act(name).arm, name).toEqual({
+        controller: "lab",
+        preset: null,
+        alpha: null,
+      });
+  });
+
+  test("the anyspeedup controller comes with its preset and, when the stack is on, its alpha", () => {
+    expect(
+      arm({ controller: "anyspeedup", preset: "S1", alpha: 0.01 }),
+    ).toEqual({ controller: "anyspeedup", preset: "S1", alpha: 0.01 });
+    expect(
+      arm({ controller: "anyspeedup", preset: "today", alpha: null }),
+    ).toEqual({ controller: "anyspeedup", preset: "today", alpha: null });
+  });
+
+  test("a lab controller carries no preset or alpha, whatever else was sent", () => {
+    expect(arm({ controller: "lab", preset: "S1", alpha: 0.01 })).toEqual({
+      controller: "lab",
+      preset: null,
+      alpha: null,
+    });
+  });
+
+  test("anything that is not a known controller reads as not said", () => {
+    for (const value of [
+      null,
+      "lab",
+      42,
+      [],
+      {},
+      { controller: "other", preset: "S1", alpha: 0.01 },
+      { preset: "S1" },
+    ])
+      expect(arm(value), JSON.stringify(value)).toBeNull();
+    expect(armView(undefined)).toBeNull();
+    // a document without a control part reads as not said, too
+    expect(
+      act("idle", (doc) => {
+        delete doc.act.control;
+      }).arm,
+    ).toBeNull();
+  });
+
+  test("a preset or alpha of the wrong type is dropped, not trusted", () => {
+    expect(arm({ controller: "anyspeedup", preset: 5, alpha: "0.01" })).toEqual(
+      { controller: "anyspeedup", preset: null, alpha: null },
+    );
   });
 });

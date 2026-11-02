@@ -339,6 +339,81 @@ describe("outside the product, or with the controls off or unread, nothing can b
     );
   });
 
+  test("the arm controller the stack is configured for is said on A, read-only", async () => {
+    const line = (host: HTMLElement) =>
+      host.querySelector("[data-testid=marvel0-arm-controller]");
+    const lab = await open(stackDoc("idle"));
+    expect(text(line(lab.host))).toBe(en["marvel0.ctl.arm.lab"]);
+    expect(line(lab.host)!.getAttribute("data-controller")).toBe("lab");
+    // (in the card of A, beside its controls)
+    expect(comp(lab.host, "A").parentElement!.contains(line(lab.host))).toBe(
+      true,
+    );
+    expect(comp(lab.host, "B").parentElement!.contains(line(lab.host))).toBe(
+      false,
+    );
+    expect(
+      lab.host.querySelectorAll("[data-testid=marvel0-arm-controller]"),
+    ).toHaveLength(1);
+  });
+
+  test("the anyspeedup controller: its preset and the alpha the client command is tied to, in both languages", async () => {
+    const doc = () =>
+      stackDoc("idle", (d) => {
+        d.act.control.arm = {
+          controller: "anyspeedup",
+          preset: "S1",
+          alpha: 0.01,
+        };
+      });
+    const english = await open(doc());
+    const said = text(
+      english.host.querySelector("[data-testid=marvel0-arm-controller]"),
+    );
+    expect(said).toContain("anyspeedup, preset S1");
+    expect(said).toContain("alpha 0.01");
+    expect(said).not.toMatch(/[{}]/);
+    const chinese = await open(doc(), true);
+    const dito = text(
+      chinese.host.querySelector("[data-testid=marvel0-arm-controller]"),
+    );
+    expect(dito).toContain("anyspeedup");
+    expect(dito).toContain("S1");
+    expect(dito).toContain("0.01");
+    expect(dito).not.toMatch(/[{}]/);
+    expect(zh["marvel0.ctl.arm.anyspeedup"]).not.toBe(
+      en["marvel0.ctl.arm.anyspeedup"],
+    );
+  });
+
+  test("the anyspeedup controller with the stack off: the preset only, no alpha", async () => {
+    const { host } = await open(
+      stackDoc("control_disabled", (d) => {
+        d.act.control.arm = {
+          controller: "anyspeedup",
+          preset: "today",
+          alpha: null,
+        };
+      }),
+    );
+    const said = text(
+      host.querySelector("[data-testid=marvel0-arm-controller]"),
+    );
+    expect(said).toContain("preset today");
+    expect(said).not.toContain("alpha");
+  });
+
+  test("a document that does not say shows no line", async () => {
+    const { host } = await open(
+      stackDoc("idle", (d) => {
+        delete d.act.control.arm;
+      }),
+    );
+    expect(
+      host.querySelector("[data-testid=marvel0-arm-controller]"),
+    ).toBeNull();
+  });
+
   test("an older backend without the controls: the cards only show", async () => {
     const doc = stackDoc("idle");
     delete doc.act;
