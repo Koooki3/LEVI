@@ -446,6 +446,20 @@ TEXT = {
         "The start wrapper is not the reviewed file; nothing is started.",
     ),
     "serial_missing": (409, "The gripper's serial device is not there."),
+    "arm_controller_missing": (
+        409,
+        (
+            "The anyspeedup arm controller's environment file is not there: check "
+            "anyspeedup_root in the control file."
+        ),
+    ),
+    "arm_controller_not_built": (
+        409,
+        (
+            "The anyspeedup arm controller is not built: run the build.sh in the "
+            "fr3_serl folder of the anyspeedup checkout."
+        ),
+    ),
     "c_preflight": (
         409,
         (
@@ -697,6 +711,8 @@ def catalog() -> dict:
         for group in (
             stack_units.A_READY,
             stack_units.A_FAIL,
+            stack_units.a_anyspeedup_ready("today"),
+            stack_units.A_FAIL_ANYSPEEDUP,
             stack_units.B_READY,
             stack_units.B_FAIL,
             stack_units.C_FAIL,
@@ -1822,6 +1838,10 @@ class Act:
             rows.append(c("a_not_ready", a_state == "ready", state=a_state))
         if key == "c":
             rows.append(c("gripper_b_not_ready", st["b"]["state"] == "ready"))
+        if key == "a" and ctx.specs:
+            # (empty for the lab's controller: nothing is asked of the disk)
+            for code, path in ctx.specs.arm_checks:
+                rows.append(c(code, bool(self.host.path_exists(path))))
         if key == "b":
             serial = ctx.specs.com_port if ctx.specs else None
             rows.append(

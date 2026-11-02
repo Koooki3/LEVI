@@ -20,6 +20,17 @@ Nothing here starts anything; ``stack_act.py`` does, through its ``Host``.
   The ROS environment is not copied into the unit: the
   command runs behind ``stack_exec.sh <fr3_env.sh> --``, which sources the
   rig's own file and replaces itself with the command.
+* **The arm controller** of A is a choice of the control file
+  (``control_site.StackControl.arm_controller``). ``lab`` (the default) is the
+  command above, unchanged. ``anyspeedup`` starts the anyspeedup package's launch
+  (``controllers/fr3_serl`` of its checkout, its own colcon workspace) behind the
+  same wrapper: only the environment file argument (the checkout's ``env.sh``,
+  which sources ``fr3_env.sh`` and then the overlay) and the command differ. B, C
+  and the one-shot checks keep the rig's ``fr3_env.sh``; the controller keeps the
+  name ``cartesian_impedance_controller``, so C and the clients are unchanged.
+  Whether the checkout and its build are there is asked at A's start
+  (``Specs.arm_checks``, ``stack_act``), not here: nothing in this module reads
+  the disk. **No unit of this kind has been started on the real machine either.**
 * **The unit** stops with ``SIGINT`` (the terminal's Ctrl+C) and is given 30 s,
   has no restart, no standard input, the realtime limits the control node asks
   for, and an opt-out from the memory-pressure killer. ``SendSIGKILL=no``: the
@@ -44,13 +55,22 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import deploy, stack
+from . import control_site, deploy, stack
 
 WRAPPER = Path(__file__).with_name("stack_exec.sh")
 # The sha256 of ``stack_exec.sh`` the page agrees to start units behind (a
 # test keeps the two equal: edit the file, update the number, review both).
 WRAPPER_SHA256 = "01fe4bab02a3831071efa4ca06e80c84e7c4cff1305be48157fadeb41a2df1d8"
 ENV_FILE = ("env", "fr3_env.sh")
+# The anyspeedup arm controller (control file: arm_controller = "anyspeedup"):
+# where its environment file and its build are under ``anyspeedup_root``.
+ANYSPEEDUP_PACKAGE = "anyspeedup_franka_controllers"
+ANYSPEEDUP_DIR = ("controllers", "fr3_serl")
+ANYSPEEDUP_ENV = (*ANYSPEEDUP_DIR, "env.sh")
+ANYSPEEDUP_INSTALL = (*ANYSPEEDUP_DIR, "ws", "install", ANYSPEEDUP_PACKAGE)
+ANYSPEEDUP_LAUNCH = (
+    "controllers/fr3_serl/anyspeedup_franka_controllers/launch/impedance.launch.py"
+)
 UNIT_PREFIX = "levi-aeri-stack-marvel0-"
 ORDER = ("m", "a", "b", "c")
 KEYS = ("a", "b", "c")
@@ -208,6 +228,51 @@ A_FAIL = (
         late=True,
     ),
 )
+
+
+def a_anyspeedup_ready(preset) -> tuple:
+    """A's ready rules for the anyspeedup launch: the lab's two, behind the line
+    its launch prints when it took the non-duplicate branch (it names the preset
+    that started, so a unit that started another preset is not ready)."""
+    return (
+        rule(
+            "anyspeedup_start",
+            f"The anyspeedup arm controller started with preset {preset}",
+            rf"anyspeedup arm controller, preset {re.escape(str(preset))}(?!\S)",
+            f"{ANYSPEEDUP_LAUNCH}:43",
+            max_count=1,
+        ),
+        *A_READY,
+    )
+
+
+# The anyspeedup launch says "A Franka arm ros2_control_node is already running
+# (lab or anyspeedup controller)" where the lab's says "A Franka
+# ros2_control_node": same key, its own pattern and source. Its two other
+# start-up refusals are the nodes' (the same as the lab's launch, which includes
+# the same franka_bringup launch) and a preset it does not know (the page never
+# sends one).
+A_FAIL_ANYSPEEDUP = (
+    *(
+        rule(
+            item.key,
+            item.text,
+            r"A Franka arm ros2_control_node is already running",
+            f"{ANYSPEEDUP_LAUNCH}:38",
+        )
+        if item.key == "duplicate_launch"
+        else item
+        for item in A_FAIL
+    ),
+    rule(
+        "preset_refused",
+        "The anyspeedup launch does not know the preset",
+        r"preset must be one of .*: nothing started",
+        f"{ANYSPEEDUP_LAUNCH}:35",
+    ),
+)
+
+
 # B. The Robotiq driver activates (full open and close), then three controllers.
 B_READY = (
     rule(
@@ -344,6 +409,13 @@ class Specs:
     controllers_cmd: tuple = ()
     ee_cmd: tuple = ()
     nodes_cmd: tuple = ()  # the fast check of the ROS graph (``parse_nodes``)
+    # The arm controller A starts: "lab" or "anyspeedup", and the latter's preset
+    # (None for the lab's). ``arm_checks`` are the ``(code, path)`` pairs that
+    # must exist for A to start (empty for the lab's): ``stack_act`` asks the
+    # host, so that this module reads no disk.
+    arm_controller: str = "lab"
+    arm_preset: str | None = None
+    arm_checks: tuple = ()
     extra: dict = field(default_factory=dict)
 
 
@@ -396,10 +468,20 @@ def real_specs(control, wrapper=WRAPPER) -> Specs:
     root = Path(control.franka_control)
     env_file = root.joinpath(*ENV_FILE)
     port = control.server_port
+    arm = control.arm_controller
+    if arm not in control_site.ARM_CONTROLLERS:
+        raise ValueError("the arm controller is not one the page knows")
 
     def unit(key):
         return stack.STACK_UNITS[key.upper()].removesuffix(".service")
 
+    # Terminal A. The lab's controller is the command of setup.md; the anyspeedup
+    # one is its own launch file behind its own environment file (which sources
+    # the rig's and then the overlay). Everything else in this function is the
+    # same for both.
+    a_env, a_ready, a_fail = env_file, A_READY, A_FAIL
+    a_title = "FR3 arm ROS 2 stack (terminal A)"
+    a_preset, a_checks = None, ()
     a_cmd = (
         "ros2",
         "launch",
@@ -410,6 +492,29 @@ def real_specs(control, wrapper=WRAPPER) -> Specs:
         f"robot_ip:={control.robot_ip}",
         "load_gripper:=false",
     )
+    if arm == "anyspeedup":
+        a_preset = control.arm_preset
+        if not control.anyspeedup_root or a_preset not in control_site.ARM_PRESETS:
+            raise ValueError("the anyspeedup controller needs its root and a preset")
+        a_root = Path(control.anyspeedup_root)
+        a_env = a_root.joinpath(*ANYSPEEDUP_ENV)
+        a_title = f"FR3 arm ROS 2 stack (terminal A, anyspeedup controller, preset {a_preset})"
+        a_ready, a_fail = a_anyspeedup_ready(a_preset), A_FAIL_ANYSPEEDUP
+        a_checks = (
+            ("arm_controller_missing", str(a_env)),
+            ("arm_controller_not_built", str(a_root.joinpath(*ANYSPEEDUP_INSTALL))),
+        )
+        a_cmd = (
+            "ros2",
+            "launch",
+            "--noninteractive",
+            ANYSPEEDUP_PACKAGE,
+            "impedance.launch.py",
+            "robot_type:=fr3",
+            f"robot_ip:={control.robot_ip}",
+            "load_gripper:=false",
+            f"preset:={a_preset}",
+        )
     b_cmd = (
         "ros2",
         "launch",
@@ -435,11 +540,11 @@ def real_specs(control, wrapper=WRAPPER) -> Specs:
         "a": UnitSpec(
             "a",
             unit("a"),
-            "FR3 arm ROS 2 stack (terminal A)",
-            check_argv(_behind(wrapper, env_file, a_cmd)),
+            a_title,
+            check_argv(_behind(wrapper, a_env, a_cmd)),
             None,
-            A_READY,
-            A_FAIL,
+            a_ready,
+            a_fail,
             "hardware_active",
             None,
             ("LimitRTPRIO=99", "LimitMEMLOCK=infinity"),
@@ -536,6 +641,9 @@ def real_specs(control, wrapper=WRAPPER) -> Specs:
         ),
         ee_cmd=check_argv(_behind(wrapper, env_file, ee), long_lived=False),
         nodes_cmd=check_argv(_behind(wrapper, env_file, nodes), long_lived=False),
+        arm_controller=arm,
+        arm_preset=a_preset,
+        arm_checks=a_checks,
     )
 
 
