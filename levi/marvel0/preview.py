@@ -30,7 +30,7 @@ socket table could not be read is unreadable.
 previews (also one whose start was reading the blockers meanwhile), stops the
 worker and waits (``HANDBACK_S``) until its process has exited, which is when the
 devices are released. A stop closes the worker's standard input (the clean path,
-measured at about 2 s with both D405s), sends SIGTERM, and sends SIGKILL only
+measured at about 1.3 s with both D405s), sends SIGTERM, and sends SIGKILL only
 after ``GRACE_S``; a worker that had to be killed is logged, shown in the state
 (``killed``) and followed by ``SETTLE_S`` of waiting. A worker that does not
 exit in time refuses the start (``HandbackFailed``) instead of letting a client
@@ -80,7 +80,7 @@ LOG_NAME = "worker.log"
 WIDTH, HEIGHT, FPS = 640, 480, 15
 IDLE_S = 20.0  # no frame asked for this long: the page is gone
 MAX_S = 600.0  # the longest a preview holds the cameras
-# The longest a stop waits for the worker to exit. A clean exit takes about 2 s
+# The longest a stop waits for the worker to exit. A clean exit takes 1.2-1.4 s
 # (both D405s, measured 2026-11-02 after the pipe closed): SIGKILL comes only
 # after GRACE_S, and the rest of HANDBACK_S is left for the group to die of it.
 HANDBACK_S = 6.0

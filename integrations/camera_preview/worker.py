@@ -18,7 +18,7 @@ the numpy and OpenCV of that environment encode the pictures.
 
 Stops: ``SIGTERM``, ``SIGINT``, or the end of its standard input (LEVI holds the
 other end of a pipe; when LEVI dies the pipe closes and the cameras are let go
-about 2 s later, with no LEVI left to ask: measured 2026-11-02 with both D405s,
+about 1.3 s later, with no LEVI left to ask: measured 2026-11-02 with both D405s,
 from the close of the pipe to the exit of the process; the time of every
 ``pipeline.stop()`` and of the whole exit is written to standard error, so each
 run leaves its own measurement). Each camera is stopped before the process
