@@ -93,7 +93,7 @@ folder (task folder, episode folder, raw file) is refused. The route never adopt
   is not touched. The route is a read like `/run/log`; it answers `404` with `no_run` (no active run of this page),
   `no_episode` (no episode is recording) or `no_frame` (no complete frame yet), and `422` for any other camera.
 - **Limits.** There is no picture between episodes: the client records frames only while an episode runs, and the page
-  says so. The source is about 10 frames a second and the page asks about 4 times a second (one request at a time per
+  says so. The source is about 10 frames a second and the page asks about 10 times a second (4 until 2026-11-02, which looked jerky) (one request at a time per
   camera, only while the run is active and the tab is visible), so a picture can be a few tenths of a second old; its age
   and episode folder are written under it. The last picture stays for 3 seconds when the next one is missing. The client's
   video writer (OpenCV over FFmpeg) puts its output on disk in blocks of 256 KiB, so the file grows a few frames at a
@@ -283,7 +283,7 @@ with the owner at the arm and a hand on the emergency stop.
 
 - **只读文件。** 不打开相机，不连接任何端口，不给客户端发送任何东西，不碰控制回路。这个路由和 `/run/log` 一样是读取；没有画面时返回 `404`，
   原因为 `no_run`（本页没有活动的运行）、`no_episode`（没有正在录制的片段）或 `no_frame`（还没有完整的一帧）；其他相机名返回 `422`。
-- **限制。** 片段之间没有画面：客户端只在片段运行期间记录画面，页面会这样说明。源头约每秒 10 帧，页面约每秒请求 4 次（每台相机同时只有一个请求，
+- **限制。** 片段之间没有画面：客户端只在片段运行期间记录画面，页面会这样说明。源头约每秒 10 帧，页面约每秒请求 10 次（2026-11-02 前是 4 次，看起来一卡一卡）（每台相机同时只有一个请求，
   且只在运行进行中、标签页可见时请求），所以画面可能晚零点几秒；画面下方写着它的年龄和片段文件夹。下一张缺失时，上一张保留 3 秒。
   客户端的视频写入器（OpenCV 经 FFmpeg）按 256 KiB 一块写盘，文件一次长几帧：画面是一跳一跳更新的，按这台机器的帧大小约每 0.3–0.9 秒一跳，
   也可能比相机落后这么久；显示的年龄是最后写入那一块的时间，每个片段的第一张画面要等第一块写盘后才出现（之前页面会说片段还没有画面）。

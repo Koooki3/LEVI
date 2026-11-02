@@ -160,14 +160,14 @@ describe("the live view", () => {
     await h.setActive(true);
     expect(h.count("side")).toBe(1); // at once
     expect(h.count("wrist")).toBe(1);
-    await wait(4); // one second
+    await wait(4); // 0.4 s: one ask per camera per 100 ms
     expect(h.count("side")).toBe(5);
     expect(h.count("wrist")).toBe(5);
     await h.setActive(false);
     await wait(8);
     expect(h.count("side")).toBe(5);
     expect(h.count("wrist")).toBe(5);
-    expect(LIVE_POLL_MS).toBe(250);
+    expect(LIVE_POLL_MS).toBe(100);
   });
 
   test("the third-person view is on the left and the wrist view on the right", async () => {
@@ -298,10 +298,10 @@ describe("the live view", () => {
     expect(img(h, "side")).not.toBeNull();
     expect(empty(h, "side")).toBeNull();
     expect(meta(h, "side").textContent).toBe(""); // no age for what is no longer current
-    await wait(2);
-    expect(img(h, "side")).not.toBeNull(); // 750 ms after the last picture
-    await wait(3);
-    expect(img(h, "side")).toBeNull();
+    await wait(6);
+    expect(img(h, "side")).not.toBeNull(); // 700 ms after the last picture (keep 1 s)
+    await wait(5);
+    expect(img(h, "side")).toBeNull(); // 1.2 s after it
     expect(empty(h, "side")?.textContent).toBe(en["marvel0.live.no_episode"]);
     // the one picture kept and the earlier one were both let go of
     expect(revoked.sort()).toEqual([...made].sort().slice(0, revoked.length));

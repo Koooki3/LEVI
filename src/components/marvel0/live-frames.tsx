@@ -4,8 +4,8 @@
 // the episode the page's client is recording. The client owns both cameras, so
 // the pictures are the last complete frame of the raw video file it writes
 // while an episode runs (levi/marvel0/live_frame.py): about ten a second at
-// the source, asked for about four times a second here, and none between
-// episodes. Nothing here opens a camera, connects to a robot-side port or
+// the source, asked for about ten times a second here (2026-11-02: four a
+// second looked jerky on the robot), and none between episodes. Nothing here opens a camera, connects to a robot-side port or
 // sends the client anything; it only reads LEVI's own route through the
 // same-origin proxy.
 //
@@ -27,8 +27,9 @@ import {
   type RunApi,
 } from "./run-api";
 
-/** Milliseconds between two asks of a camera (about four a second). */
-export const LIVE_POLL_MS = 250;
+/** Milliseconds between two asks of a camera (about ten a second, the rate the
+ * client writes frames at). */
+export const LIVE_POLL_MS = 100;
 /** How long the last picture stays when the next one is missing. */
 export const LIVE_KEEP_MS = 3_000;
 /** A picture older than this is marked: the client has stopped writing. */
