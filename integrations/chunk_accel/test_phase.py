@@ -114,6 +114,7 @@ DEFAULTS = {
     "delay_history": 8,
     "grasp_replan_m": 0.035,
     "close_hold": True,
+    "close_hold_travel": 0.0,
 }
 
 # Section 5 / 15: the ledger numbers phase.py must carry (E8 is a tightening, E11 and E12 live in other files).

@@ -161,6 +161,7 @@ _RANGES = {
     "governor_margin_rows": (0.0, 5.0, False),
     "delay_history": (1, 32, False),
     "grasp_replan_m": (0.0, 0.10, False),
+    "close_hold_travel": (0.0, 1.0, False),
 }
 _INT_FIELDS = frozenset(
     {
@@ -354,6 +355,9 @@ class PhaseParams:
     # the command). With close_hold the phase does not advance after a close until that settle is done (the fingers
     # have moved and stopped, at least settle_min_s; settle_timeout_s at most, settle_unknown_s without a reading).
     close_hold: bool = True
+    # 0: hold for the whole settle; > 0: let the plan go on once the fingers have closed by this fraction of the stroke
+    # (they are then on or near the object), or when the settle is done, whichever is first.
+    close_hold_travel: float = 0.0
     settle_min_s: float = 0.3
     settle_aperture_delta: float = 0.02
     settle_stable_ticks: int = 2
@@ -844,6 +848,7 @@ class PhaseEngine:
         self._settle_moved = False
         self._settle_stable = 0
         self._settle_event = None
+        self._hold_released = False
         self._osettle_active = False
         self._osettle_t0 = 0.0
         self._osettle_ap0 = None
@@ -1517,6 +1522,7 @@ class PhaseEngine:
             self._settle_ap_prev = m.aperture
             self._settle_moved = False
             self._settle_stable = 0
+            self._hold_released = False
             last = self._events[-1] if self._events else None
             self._settle_event = last if last and last["kind"] == "close" else None
         if gi == 1 and self._last_gi == 0 and p.open_settle:
@@ -1541,6 +1547,11 @@ class PhaseEngine:
         else:
             if abs(ap - self._settle_ap0) >= p.settle_aperture_delta:
                 self._settle_moved = True
+            if (
+                p.close_hold_travel > 0.0
+                and abs(ap - self._settle_ap0) >= p.close_hold_travel
+            ):
+                self._hold_released = True
             if self._settle_moved and self._settle_ap_prev is not None:
                 if abs(ap - self._settle_ap_prev) < p.settle_stable_eps:
                     self._settle_stable += 1
@@ -1855,7 +1866,13 @@ class PhaseEngine:
             elif self._gate_since is not None and not self._close_ahead():
                 self._gate_clear()
         # ---- close hold: after a close the plan waits for the fingers (PhaseParams.close_hold) ----
-        if p.close_hold and not self._golden and self._settle_active and s_c > s:
+        if (
+            p.close_hold
+            and not self._golden
+            and self._settle_active
+            and not self._hold_released
+            and s_c > s
+        ):
             s_c = s
             u_c = s_c - o
             bind = "grasp"
