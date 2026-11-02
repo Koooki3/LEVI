@@ -184,12 +184,13 @@ def run(
     *,
     encode,
     to_image,
-    stop: threading.Event,
+    stop,
     clock=time.monotonic,
     sleep=time.sleep,
     say=lambda text: print(text, file=sys.stderr, flush=True),
 ) -> int:
-    """Open the cameras, keep their pictures current until ``stop`` is set, let
+    """Open the cameras, keep their pictures current until ``stop`` (an object
+    with ``is_set`` and ``set``: ``Stop``, or a ``threading.Event``) is set, let
     them go. The exit code (see the module text)."""
     out = Path(args.out)
     out.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -256,7 +257,7 @@ def run(
             )
 
 
-def watch_stdin(stop: threading.Event, fd: int = 0) -> None:
+def watch_stdin(stop, fd: int = 0) -> None:
     """Set ``stop`` when LEVI's end of our standard input closes. Reads the
     descriptor itself: ``sys.stdin.buffer.read`` would keep the buffered
     reader's lock for as long as it blocks, and the interpreter aborts at exit
@@ -271,17 +272,26 @@ def watch_stdin(stop: threading.Event, fd: int = 0) -> None:
     threading.Thread(target=wait, name="preview-stdin", daemon=True).start()
 
 
-class Stop(threading.Event):
-    """The stop event, which remembers when it was first set (for the log)."""
+class Stop:
+    """The stop flag, which remembers when it was first set (for the log). It
+    has no lock, unlike ``threading.Event`` (whose ``set`` takes a lock that is
+    not reentrant): the signal handlers run in the main thread, possibly one
+    inside the other and inside ``run``'s own ``set``, and a handler that
+    interrupted a ``set`` and then called ``set`` would wait for ever for the
+    lock its own interrupted frame holds. Nobody waits on it; everyone polls
+    ``is_set``."""
 
     def __init__(self):
-        super().__init__()
+        self._flag = False
         self.since: float | None = None
 
     def set(self) -> None:
         if self.since is None:
             self.since = time.monotonic()
-        super().set()
+        self._flag = True
+
+    def is_set(self) -> bool:
+        return self._flag
 
 
 def main(argv=None) -> int:

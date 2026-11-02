@@ -199,6 +199,71 @@ def test_a_hosted_run_record_that_cannot_be_read_refuses_a_preview(
     assert preview.blockers() == []
 
 
+def _supervisor_that_could_not_adopt(machine):
+    """A supervisor over the machine's workspace whose first read of the site
+    failed, so ``adopt`` took the record for "no run" and never looks again (a
+    restart of the service that finds a hosted run on disk)."""
+    calls: list = []
+
+    def site_loader():
+        calls.append(1)
+        if len(calls) == 1:
+            raise OSError("the site file could not be read just then")
+        return machine.site
+
+    sup = run.Supervisor(
+        machine.host, site_loader=site_loader, workspace=machine.workspace
+    )
+    sup.adopt()
+    assert sup.active() is None  # (what the supervisor itself reports)
+    return sup
+
+
+def _blockers_over(monkeypatch, sup):
+    monkeypatch.setattr(run_api, "supervisor", lambda: sup)
+    monkeypatch.setattr(aeri_run_api, "supervisor", lambda: RunSup())
+    monkeypatch.setattr(deploy_api, "supervisor", lambda: DeploySup(status()))
+    return preview.blockers()
+
+
+def test_a_started_hosted_run_the_supervisor_lost_sight_of_is_still_a_run(
+    tmp_path, monkeypatch, machine
+):
+    machine.start()  # the record on disk: started, its launcher alive
+    sup = _supervisor_that_could_not_adopt(machine)
+    assert machine.child.poll() is None
+    assert _blockers_over(monkeypatch, sup) == ["run_active"]
+    rig = preview_rig(tmp_path, monkeypatch)
+    rig.host.blockers = preview.blockers
+    with pytest.raises(preview.Refused) as caught:
+        rig.mgr.start()
+    assert caught.value.code == "run_active" and rig.procs == []
+
+
+def test_a_started_record_whose_launcher_is_gone_is_never_taken_for_no_run(
+    monkeypatch, machine
+):
+    machine.start()
+    sup = _supervisor_that_could_not_adopt(machine)
+    machine.child.exits(0)  # nobody settled the record: the launcher has gone
+    found = _blockers_over(monkeypatch, sup)
+    assert found == ["state_unreadable"]  # a refusal that says what is known
+    # an identity that cannot be checked is the same
+    monkeypatch.setattr(
+        machine.host, "identity", lambda pid: (_ for _ in ()).throw(OSError("proc"))
+    )
+    assert _blockers_over(monkeypatch, sup) == ["state_unreadable"]
+
+
+def test_an_ended_record_is_no_run(monkeypatch, machine):
+    machine.start()
+    machine.child.exits(0)
+    machine.sup.adopt()
+    machine.sup.view()  # settles the dead launcher: the record says ended
+    sup = _supervisor_that_could_not_adopt(machine)
+    assert _blockers_over(monkeypatch, sup) == []
+
+
 def test_every_start_hands_back_again_the_restart_for_a_new_instruction_included(
     tmp_path, monkeypatch, machine
 ):

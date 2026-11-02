@@ -129,8 +129,9 @@ pictures while a client waits at its start gate is not part of this: the client 
   active (`aeri_active`); a client is connected to the policy port (`client_connected`, the deploy status's
   `listener.established`, as the voice input's gate reads it); the arm lock is held (`arm_in_use`); or any of these could
   not be read (`state_unreadable`: unknown counts as in use, so does a deploy status whose state is `unknown` or whose
-  socket table could not be read, which the deploy reports as 0 connections, and a hosted-run record that cannot be read,
-  which the run supervisor itself takes for "no run"). Also `client_starting` (a client is being launched, also one whose
+  socket table could not be read, which the deploy reports as 0 connections, and a hosted-run record that cannot be read
+  or whose launcher is gone but was never settled, both of which the run supervisor itself takes for "no run" after a restart
+  whose first read failed). Also `client_starting` (a client is being launched, also one whose
   launch began while the blockers were being read) and `preview_stopping`. The one refusal that is not a `409` is
   `preview_unavailable` (`503`: the worker file, the openpi checkout, the client environment or the state folder is
   missing). The two writes are a person's, like the other write routes (`person_only`, the page's own origin through the
@@ -150,7 +151,10 @@ pictures while a client waits at its start gate is not part of this: the client 
 - **It stops by itself** 20 s after the last picture was asked for (the page was closed), 10 minutes after it started (so
   it never holds the cameras against a client someone starts from a terminal for long), when LEVI stops, and when it sees a
   client while it starts or runs: a hosted run, an AERI run, the arm lock or a policy connection (the first look is about
-  1 s after the start, then every second). A state that cannot be read twice in a row stops it too. A worker whose input
+  1 s after the start, then every second). A state that cannot be read in two separate readings in a row stops it too, with
+  its own note (`state_unreadable`, "LEVI could not tell whether a client is starting"): the second look drops the deploy
+  status's 2 s cache first, so one bad snapshot never counts twice. While the watcher thread runs, a read of `GET /preview`
+  only notices an exit; the stops (which take seconds, and a kill more) are the watcher's. A worker whose input
   pipe closes (LEVI died) lets the cameras go about 2 s later (measured 2026-11-02 with both D405s, from the close of the
   pipe to the exit of the process). The Copy button of the command card (step 3) stops a preview that holds the cameras,
   because a command pasted into a terminal is a client LEVI does not start.
@@ -271,7 +275,7 @@ run, the same monitor write counted twice, the arm lock row, the z floor row), e
 Regenerate what the front end reads with `uv run --no-sync python tests/marvel0/regen_run_sample.py`
 (`marvel0-run.samples.json`: `GET /run` in every state; `marvel0-run.answers.json`: the other answers and the refusals).
 
-**Not verified on the real machine:** the camera preview's remaining parts. Measured on 2026-11-02 with both D405s (a smoke test of the worker, run by hand, not by a test): both cameras opened through `uv run --no-sync --with pyrealsense2`, JPEGs written, the process exited about 2 s after its input pipe closed, and the devices could be opened again at once. Still unmeasured: the exit time on the SIGTERM path (what LEVI's stop uses; the tests run the real `worker.py` over stand-in libraries and assert exit code 0 well before the SIGKILL point, but not the librealsense timing), a busy D405's answer to `pipeline.start`, and a D405 killed in the middle of `pipeline.stop()`. `systemd-run --user --scope` itself (that the pid is the launcher's, that the group
+**Not verified on the real machine:** the camera preview's remaining parts. Measured on 2026-11-02 with both D405s (a smoke test of the worker, run by hand, not by a test): both cameras opened through `uv run --no-sync --with pyrealsense2`, JPEGs written, the process exited about 2 s after its input pipe closed, and the devices could be opened again at once. Still unmeasured: the exit time when a stop has to rely on SIGTERM alone (LEVI's own stop closes the pipe first and then sends SIGTERM at once: the pipe-close path measured above, with a signal on top; SIGTERM alone is what `children.stop_owned` and a reclaim send; and the measured worker file was the one from before the stop timings were written to `worker.log`, so the first run of the current file on the real cameras is the first to record them), a busy D405's answer to `pipeline.start`, and a D405 killed in the middle of `pipeline.stop()`. The tests run the real `worker.py` over stand-in libraries and assert exit code 0 well before the SIGKILL point, but not the librealsense timing. `systemd-run --user --scope` itself (that the pid is the launcher's, that the group
 survives a restart of the product, the scope's stop behaviour); the real client under the launcher (`uv` offline with the
 environment allowlist, the `uv` chain's signal handling, SIGHUP reaching `python`, `--no-display-images` without a display);
 SIGSTOP for minutes (cameras, the policy server's websocket, the controller holding the last target); the real timing of
@@ -373,7 +377,7 @@ with the owner at the arm and a hand on the emergency stop.
   `levi-product.service` 可以打开真实相机，和托管运行的规则相同，这样工作树或临时实例就不会在产品的交还看不到的地方占着相机）；本页托管的评测运行在进行（`run_active`）；
   本页的 AERI 运行在进行（`aeri_active`）；有客户端连着策略端口（`client_connected`，读部署状态里的 `listener.established`，和语音输入的闸门读法相同）；
   机械臂锁被占用（`arm_in_use`）；或者以上任何一项读不到（`state_unreadable`：未知按“在用”算；部署状态的 state 为 `unknown`、或套接字表读不到
-  （部署此时报告 0 个连接）、或托管运行的记录读不到（运行监督器自己把它当作“没有运行”），都算读不到）。另有 `client_starting`（正在启动客户端，包括启动发生在读取阻挡项期间的情况）
+  （部署此时报告 0 个连接）、或托管运行的记录读不到、或其启动器已不在却从未被结算（重启后第一次读取失败时，运行监督器自己把这两种都当作“没有运行”），都算读不到）。另有 `client_starting`（正在启动客户端，包括启动发生在读取阻挡项期间的情况）
   和 `preview_stopping`。唯一不是 `409` 的拒绝是 `preview_unavailable`（`503`：缺工作进程文件、openpi 检出目录、客户端环境或状态目录）。
   两个写操作和其他写路由一样只属于人（`person_only`，经代理要求来自本页自己的来源）。
 - **客户端启动前先交还相机。** 每条启动客户端的路径都先停止预览，并等待（最多 6 秒）工作进程退出——退出才算相机空闲：托管评测的启动
@@ -383,7 +387,8 @@ with the owner at the arm and a hand on the emergency stop.
   工作进程没能及时退出时，启动被拒绝，原因 `camera_preview_busy`，什么也不启动，而不是启动一个会因相机被占用而失败的客户端；卡片此时请人等实时画面那里显示相机已空闲。
   更早就被拒绝的启动（比如令牌不对）不动预览。工作进程把每台相机 `pipeline.stop()` 的耗时和整个退出的耗时写进它的日志（预览目录下的 `worker.log`），每次运行都留下一次测量。
 - **它会自己停止：** 最后一次请求画面之后 20 秒（页面关了）、启动之后 10 分钟（这样它不会长时间占着相机，妨碍有人在终端里启动的客户端）、LEVI 停止时，
-  以及在启动或运行期间看到客户端时：托管运行、AERI 运行、机械臂锁或策略连接（第一次查看在启动后约 1 秒，之后每秒一次）。连续两次读不到状态也会停止。
+  以及在启动或运行期间看到客户端时：托管运行、AERI 运行、机械臂锁或策略连接（第一次查看在启动后约 1 秒，之后每秒一次）。连续两次独立读取都读不到状态也会停止，并有自己的提示（`state_unreadable`，“读不到是否有客户端在启动”）：第二次查看先丢弃部署状态 2 秒的缓存，所以一份坏的快照不会被算两次。
+  监视线程在运行时，`GET /preview` 的读取只负责发现进程已退出；停止（要几秒，杀掉则更久）由监视线程来做。
   工作进程的输入管道一关闭（LEVI 死了），约 2 秒后放开相机（2026-11-02 用两台 D405 实测，从管道关闭到进程退出）。命令卡片（第 3 步）的“复制”按钮会停止正占用相机的预览，
   因为粘贴到终端里的命令是一个 LEVI 不负责启动的客户端。
 - **失败时** 说明原因，并且不重试：`cameras_busy`（别的程序占着某个相机）、`cameras_not_found`（站点文件里的某个序列号没有连接）、
@@ -458,7 +463,7 @@ with the owner at the arm and a hand on the emergency stop.
 `scripts/check_client_prompts.py` 在 2026-10-21 找到了全部 49 条字符串（加上控制频率的 12 条，共 61 条）。重新生成前端读取的文件：`uv run --no-sync python tests/marvel0/regen_run_sample.py`
 （`marvel0-run.samples.json`：各个状态下的 `GET /run`；`marvel0-run.answers.json`：其他路由的回答和各种拒绝）。
 
-**没有在真机上验证的：** 相机预览的其余部分。2026-11-02 用两台 D405 做过一次工作进程的冒烟测试（手动运行，不是自动测试）：两台相机经 `uv run --no-sync --with pyrealsense2` 打开，JPEG 写出，输入管道关闭后进程约 2 秒退出，设备随即可以再次打开。仍然没有测过：SIGTERM 路径（LEVI 的停止所用）上的退出耗时（测试用替身库运行真正的 `worker.py`，断言退出码为 0 且远早于 SIGKILL 的时间点，但不含 librealsense 的耗时）、被占用的 D405 对 `pipeline.start` 怎么回答、以及 D405 在 `pipeline.stop()` 中途被杀。`systemd-run --user --scope` 本身（pid 是否就是启动器的、进程组是否在产品重启后存活、scope 的停止行为）；启动器下的真实客户端（环境白名单下 `uv` 的离线运行、
+**没有在真机上验证的：** 相机预览的其余部分。2026-11-02 用两台 D405 做过一次工作进程的冒烟测试（手动运行，不是自动测试）：两台相机经 `uv run --no-sync --with pyrealsense2` 打开，JPEG 写出，输入管道关闭后进程约 2 秒退出，设备随即可以再次打开。仍然没有测过：只靠 SIGTERM 的停止的退出耗时（LEVI 自己的停止先关闭管道、随即再发 SIGTERM，即上面测过的管道关闭路径再加一个信号；只发 SIGTERM 的是 `children.stop_owned` 和回收；而且测过的工作进程文件是把停止耗时写进 `worker.log` 之前的那一份，所以当前这份文件在真实相机上的第一次运行才会第一次记下它们）、被占用的 D405 对 `pipeline.start` 怎么回答、以及 D405 在 `pipeline.stop()` 中途被杀。测试用替身库运行真正的 `worker.py`，断言退出码为 0 且远早于 SIGKILL 的时间点，但不含 librealsense 的耗时。`systemd-run --user --scope` 本身（pid 是否就是启动器的、进程组是否在产品重启后存活、scope 的停止行为）；启动器下的真实客户端（环境白名单下 `uv` 的离线运行、
 `uv` 链上的信号处理、SIGHUP 能否到达 `python`、没有显示器时的 `--no-display-images`）；SIGSTOP 持续几分钟的后果（相机、策略服务器的 websocket、控制器保持最后目标）；
 保存、回位的真实耗时和 1 秒的会话心跳（页面的阈值在测量之前只是猜测）；“两次写入”规则所依赖的真实监视器写入频率；真实客户端的措辞
 （只对照过源文件：每天第一次运行前执行 `python3 scripts/check_client_prompts.py`）；挂断的伪终端在真实客户端看来是什么样（Linux 对读取返回 EIO；假客户端取更坏的读法，继续运行）。

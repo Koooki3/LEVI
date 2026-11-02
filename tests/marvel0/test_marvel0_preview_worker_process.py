@@ -88,7 +88,7 @@ class Rig:
                 command=command,
                 directory=lambda: self.out,
                 blockers=list,
-                watch=lambda: (False, False),
+                watch=lambda fresh=False: (False, False),
                 profile=lambda: "real",
                 site_loader=lambda: SITE,
                 children_state=self.tmp / "children",

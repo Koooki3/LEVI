@@ -196,7 +196,9 @@ describe("the camera preview in the live view", () => {
     expect(q(h, "marvel0-preview-status")?.textContent).toBe(
       en["marvel0.preview.status.off"],
     );
-    expect(h.host.textContent).toContain(en["marvel0.preview.lead"]);
+    expect(h.host.textContent).toContain(
+      en["marvel0.preview.lead"].replace("{minutes}", "10"),
+    );
     expect(empty(h, "side")?.textContent).toBe(en["marvel0.preview.idle"]);
     expect(empty(h, "side")?.dataset.reason).toBe("idle");
     // nothing opened by looking: no start, no picture asked for
@@ -477,13 +479,90 @@ describe("when the preview cannot start", () => {
   });
 
   test("a preview that stopped by itself says why", async () => {
-    for (const by of ["idle", "max_lifetime", "client_start", "service"]) {
+    for (const by of [
+      "idle",
+      "max_lifetime",
+      "client_start",
+      "state_unreadable",
+      "service",
+    ]) {
       const p = fakePreview(doc("off", { stopped_by: by }));
       const h = await open(p);
+      // (the lifetime is the document's, in minutes)
       expect(q(h, "marvel0-preview-stopped")?.textContent).toBe(
-        en[`marvel0.preview.stopped.${by}` as keyof typeof en],
+        en[`marvel0.preview.stopped.${by}` as keyof typeof en].replace(
+          "{minutes}",
+          "10",
+        ),
       );
     }
+    // a lifetime the backend changes is the one the texts name
+    const p = fakePreview(
+      doc("off", {
+        stopped_by: "max_lifetime",
+        limits: { idle_s: 20, max_s: 900 },
+      }),
+    );
+    const h = await open(p);
+    expect(q(h, "marvel0-preview-stopped")?.textContent).toContain("15 min");
+    expect(h.host.textContent).toContain("after 15 min");
+  });
+});
+
+describe("the empty boxes invite opening the preview only where Open is on", () => {
+  const boxes = (h: H) => ({
+    text: empty(h, "side")?.textContent,
+    reason: empty(h, "side")?.dataset.reason,
+  });
+  const neutral = {
+    text: en["marvel0.live.no_run"],
+    reason: "no_run",
+  };
+
+  test("Open is on: the invitation", async () => {
+    const h = await open(fakePreview(doc("off")));
+    expect(boxes(h)).toEqual({
+      text: en["marvel0.preview.idle"],
+      reason: "idle",
+    });
+  });
+
+  test.each(["not_product", "client_connected", "arm_in_use"])(
+    "refused for %s: the neutral line, not an invitation",
+    async (code) => {
+      const h = await open(
+        fakePreview(
+          doc("refused", {
+            reason: { code, text: "x" },
+            blocked_by: [code],
+            may_start: false,
+          }),
+        ),
+      );
+      expect(openButton(h)?.disabled).toBe(true);
+      expect(boxes(h)).toEqual(neutral);
+    },
+  );
+
+  test("stopping: the neutral line", async () => {
+    const h = await open(fakePreview(doc("stopping")));
+    expect(boxes(h)).toEqual(neutral);
+  });
+
+  test("a state that cannot be read: the neutral line, with no button", async () => {
+    const p = fakePreview();
+    p.s.readAnswer = nothing();
+    const h = await open(p);
+    expect(openButton(h)).toBeNull();
+    expect(boxes(h)).toEqual(neutral);
+  });
+
+  test("before the first read has answered: the neutral line", async () => {
+    const p = fakePreview();
+    p.s.hold = new Promise<void>(() => {}); // never answers
+    const h = await open(p);
+    expect(q(h, "marvel0-preview")).toBeNull();
+    expect(boxes(h)).toEqual(neutral);
   });
 });
 
@@ -557,7 +636,9 @@ describe("when a run is active", () => {
     expect(p.s.frames).toEqual([]);
     expect(h.run.calls.length).toBeGreaterThan(0);
     expect(h.host.textContent).toContain(en["marvel0.live.lead"]);
-    expect(h.host.textContent).not.toContain(en["marvel0.preview.lead"]);
+    expect(h.host.textContent).not.toContain(
+      en["marvel0.preview.lead"].replace("{minutes}", "10"),
+    );
   });
 
   test("a run that becomes active takes the card over from a running preview", async () => {

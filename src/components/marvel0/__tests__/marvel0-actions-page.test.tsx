@@ -240,6 +240,98 @@ describe("the marvel0 with its action cards", () => {
     ).not.toBeNull();
   });
 
+  describe("Copy on the command card and the camera preview", () => {
+    const PREVIEW = "/api/levi/marvel0/preview";
+    const STOP = `${PREVIEW}/stop`;
+    const doc = (state: string) => ({
+      schema: "levi.marvel0.preview.v1",
+      state,
+      reason: null,
+      may_start: state === "off",
+      blocked_by: null,
+      stopped_by: null,
+      frames: { side: { age_ms: null }, wrist: { age_ms: null } },
+      limits: { idle_s: 20, max_s: 600 },
+      remaining: null,
+    });
+
+    /** Open the page with the preview as `answer` (null: the route is not
+     * there), press "Make the command" and then Copy; the writes sent. */
+    async function copyWith(answer: unknown, ready_: string | null) {
+      const calls = core(
+        {
+          ...healthy(ready()),
+          ...(answer === null ? {} : { [PREVIEW]: answer }),
+        },
+        {
+          "/api/levi/marvel0/command/preview": { status: 200, body: preview() },
+          [STOP]: { status: 200, body: doc("off") },
+        },
+      );
+      const { host } = await render(<Marvel0Page />);
+      await loaded(host);
+      await waitFor(
+        () =>
+          host.querySelector(
+            ready_ === null
+              ? "[data-testid=marvel0-preview-unreadable]"
+              : `[data-testid=marvel0-preview][data-state=${ready_}]`,
+          ),
+        { label: "the preview's state on the card" },
+      );
+      const card = host.querySelector(
+        "[data-testid=marvel0-command]",
+      ) as HTMLElement;
+      await click(button(card, "Make the command")!);
+      await tick(3, 5);
+      const result = host.querySelector(
+        "[data-testid=marvel0-command-result]",
+      ) as HTMLElement;
+      await click(button(result, "Copy")!);
+      await tick(3, 5);
+      return {
+        stops: calls.filter(
+          (call) => call.init?.method === "POST" && call.path === STOP,
+        ).length,
+        note: result.querySelector(
+          "[data-testid=marvel0-command-preview-stopped]",
+        )?.textContent,
+      };
+    }
+
+    test.each(["on", "starting"])(
+      "a preview that is %s is stopped by Copy, once, and the card says so",
+      async (state) => {
+        const sent = await copyWith(doc(state), state);
+        expect(sent.stops).toBe(1);
+        expect(sent.note).toBe(en["marvel0.cmd.result.preview_stopped"]);
+      },
+    );
+
+    test("a preview that is already stopping is not stopped again, and the card still says so", async () => {
+      const sent = await copyWith(doc("stopping"), "stopping");
+      expect(sent.stops).toBe(0);
+      expect(sent.note).toBe(en["marvel0.cmd.result.preview_stopped"]);
+    });
+
+    test("with no preview open nothing is stopped and nothing is said", async () => {
+      const sent = await copyWith(doc("off"), "off");
+      expect(sent.stops).toBe(0);
+      expect(sent.note).toBeUndefined();
+    });
+
+    test("a preview whose state cannot be read is not stopped blindly", async () => {
+      for (const answer of [{ schema: "something.else" }, null]) {
+        const sent = await copyWith(answer, null);
+        expect(sent.stops).toBe(0);
+        expect(sent.note).toBeUndefined();
+        restore();
+        restore = () => {};
+        document.body.innerHTML = "";
+      }
+    });
+  });
+
   test("in Chinese the action cards are in Chinese", async () => {
     localStorage.setItem("levi-language", "zh");
     core(healthy());

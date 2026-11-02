@@ -24,6 +24,7 @@ export const STOPPED_BY = [
   "idle",
   "max_lifetime",
   "client_start",
+  "state_unreadable",
   "service",
 ] as const;
 export type StoppedBy = (typeof STOPPED_BY)[number];
@@ -37,6 +38,14 @@ export interface PreviewView {
   stoppedBy: StoppedBy | null;
   limits: { idleS: number; maxS: number };
 }
+
+/** The longest a preview holds the cameras, in minutes, as the texts say it
+ * until the first read has told (the backend's `MAX_S`, 600 s, divided by 60;
+ * tests/marvel0/test_marvel0_preview.py keeps the two equal). */
+export const PREVIEW_MAX_MINUTES = 10;
+/** The longest a preview holds the cameras, in minutes, from the document. */
+export const maxMinutes = (view: PreviewView | null): number =>
+  view ? Math.round(view.limits.maxS / 60) : PREVIEW_MAX_MINUTES;
 
 /** The states in which the cameras are held (pictures are asked for). */
 export const holdsCameras = (state: PreviewState): boolean =>

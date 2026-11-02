@@ -11,9 +11,11 @@ record in ``levi/children.py``), the clock rules (idle, lifetime, stale pictures
 a client appearing, hand-back) on a scripted process, the command of the real
 worker, and the words of every code in both catalogues."""
 
+import contextlib
 import importlib.util
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -60,6 +62,9 @@ class RunSup:
 class DeploySup:
     def __init__(self, status):
         self._status = status
+
+    def invalidate(self):
+        pass
 
     def status(self):
         if isinstance(self._status, Exception):
@@ -178,7 +183,7 @@ def test_the_watcher_reads_what_cannot_be_read_as_unreadable_not_as_free(
     world.run = RunSup(boom=True)
     assert preview.blockers_safely() == ["state_unreadable"]
 
-    def boom():
+    def boom(fresh=False):
         raise RuntimeError("anything")
 
     monkeypatch.setattr(preview, "blockers", boom)
@@ -208,7 +213,7 @@ def test_the_watcher_keeps_the_site_files_412_apart(world):
 def test_the_watcher_stops_for_everything_a_start_refuses_for(
     monkeypatch, found, expected
 ):
-    monkeypatch.setattr(preview, "blockers", lambda: list(found))
+    monkeypatch.setattr(preview, "blockers", lambda fresh=False: list(found))
     assert preview.watch() == expected
     assert preview.client_signal() is expected[0]
 
@@ -297,6 +302,7 @@ class Rig:
         self.blocked: list = []
         self.client = False
         self.unreadable = False
+        self.fresh: list = []  # whether each look asked for a new reading
         self.real = True
         self.events: list = []  # the stdin close and the signals, in order
         self.ends_on = ends_on
@@ -306,7 +312,7 @@ class Rig:
             killpg=self.killpg,
             directory=lambda: self.out,
             blockers=lambda: list(self.blocked),
-            watch=lambda: (self.client, self.unreadable),
+            watch=self.watch,
             profile=lambda: "real" if self.real else "fake",
             site_loader=lambda: SITE,
             monotonic=self.clock.monotonic,
@@ -314,6 +320,10 @@ class Rig:
             children_state=self.tmp / "children",
         )
         self.mgr = preview.Manager(self.host)
+
+    def watch(self, fresh=False):
+        self.fresh.append(fresh)
+        return self.client, self.unreadable
 
     def spawn(self, argv, **kw):
         proc = Scripted(self.ends_on, self.events)
@@ -472,13 +482,13 @@ def test_the_arm_lock_stops_a_preview_through_the_real_watch(rig, monkeypatch, p
     """``watch`` over ``blockers``: a terminal D takes the arm lock before it
     connects to anything."""
     rig.host.watch = preview.watch
-    monkeypatch.setattr(preview, "blockers", list)
+    monkeypatch.setattr(preview, "blockers", lambda fresh=False: [])
     if phase == "on":
         rig.running()
     else:
         rig.mgr.start()
     rig.clock.advance(preview.PROBE_S + 0.1)
-    monkeypatch.setattr(preview, "blockers", lambda: ["arm_in_use"])
+    monkeypatch.setattr(preview, "blockers", lambda fresh=False: ["arm_in_use"])
     rig.mgr.tick()
     view = rig.mgr.view()
     assert view["state"] == "off" and view["stopped_by"] == "client_start"
@@ -507,7 +517,150 @@ def test_a_state_that_cannot_be_read_twice_in_a_row_stops_it_once_does_not(rig):
     rig.pictures()
     rig.mgr.tick()
     view = rig.mgr.view()
+    # (not "a client was started": none was, and the page must not say so)
+    assert view["state"] == "off" and view["stopped_by"] == "state_unreadable"
+    assert rig.fresh[-1] is True  # the second look asked for a new reading
+    assert rig.fresh[0] is False
+
+
+class CachedDeploy:
+    """The deploy supervisor's status as the watcher gets it: a snapshot is kept
+    for ``CACHE_S`` (``deploy.CACHE_S``) and handed back until then;
+    ``invalidate`` drops it. The snapshots whose number is in ``bad`` say
+    ``unknown`` (a single failed ``systemctl`` is enough in production)."""
+
+    def __init__(self, clock, bad=(), established=0):
+        self.clock, self.bad, self.established = clock, set(bad), established
+        self.taken = 0
+        self._kept = None
+
+    def invalidate(self):
+        self._kept = None
+
+    def status(self):
+        now = self.clock.monotonic()
+        if self._kept is None or now - self._kept[0] >= 2.0:
+            self.taken += 1
+            unknown = self.taken in self.bad
+            body = status(
+                established=self.established,
+                state="unknown" if unknown else "ready",
+                net="unknown" if unknown else "ok",
+            )
+            self._kept = (now, body)
+        return self._kept[1]
+
+
+def _probe_for(rig, seconds):
+    """The watcher's ticks for ``seconds`` of the clock; pictures and frame
+    requests keep the idle and stale rules out of the way."""
+    for _ in range(int(seconds / 0.5)):
+        rig.clock.advance(0.5)
+        rig.pictures()
+        with contextlib.suppress(preview.NoFrame):  # (it has stopped)
+            rig.mgr.frame("side")
+        rig.mgr.tick()
+
+
+def test_one_bad_deploy_snapshot_is_not_two_bad_readings(world, rig):
+    """The deploy status is cached for 2 s, so two looks a second apart used to
+    read the same snapshot twice: the second look asks for a new one."""
+    rig.host.watch = preview.watch
+    world.deploy = CachedDeploy(rig.clock, bad={2})  # exactly one snapshot is bad
+    rig.running()
+    _probe_for(rig, 12)
+    assert rig.mgr.view()["state"] == "on"
+    assert world.deploy.taken >= 4  # the looks did take new readings
+
+
+def test_two_bad_deploy_snapshots_in_a_row_stop_it_for_its_own_reason(world, rig):
+    rig.host.watch = preview.watch
+    world.deploy = CachedDeploy(rig.clock, bad={2, 3})
+    rig.running()
+    _probe_for(rig, 12)
+    view = rig.mgr.view()
+    assert view["state"] == "off" and view["stopped_by"] == "state_unreadable"
+
+
+def test_a_client_still_stops_it_as_a_client_start(world, rig):
+    rig.host.watch = preview.watch
+    world.deploy = CachedDeploy(rig.clock)
+    rig.running()
+    world.deploy.established = 1
+    world.deploy.invalidate()
+    _probe_for(rig, 3)
+    view = rig.mgr.view()
     assert view["state"] == "off" and view["stopped_by"] == "client_start"
+
+
+def test_the_first_look_after_a_good_one_is_not_asked_to_be_fresh(rig):
+    rig.running()
+    _probe_for(rig, 3)
+    assert rig.fresh and not any(rig.fresh)
+    rig.unreadable = True
+    _probe_for(rig, 1)
+    assert rig.fresh[-1] is False  # the first unreadable look has nothing to compare
+
+
+# --- the page's reads leave the stops to the watcher ---------------------------------------
+
+
+def test_a_read_of_the_state_does_not_carry_out_a_stop_while_the_watcher_runs(tmp_path):
+    rig = Rig(tmp_path, ends_on=signal.SIGKILL)  # a kill takes GRACE_S + SETTLE_S
+    rig.running()
+    rig.mgr._watching = True  # the watcher thread exists (it is not started here)
+    rig.clock.advance(preview.STALE_S - 1)
+    rig.mgr.frame("side")
+    rig.pictures(age=preview.STALE_S + 5)  # the worker has stopped writing
+    rig.mgr.tick()
+    rig.clock.advance(2)
+    rig.mgr.frame("side")
+    began = rig.clock.t
+    view = rig.mgr.view()  # what GET /preview does
+    assert rig.clock.t == began and rig.signals == []
+    assert view["state"] == "on"
+    rig.mgr.tick()  # the watcher's own tick does the stop
+    view = rig.mgr.view()
+    assert rig.clock.t - began >= preview.GRACE_S
+    assert view["state"] == "failed" and view["reason"]["code"] == "no_frames"
+    assert view["killed"] is True
+
+
+def test_a_read_still_notices_an_exit_while_the_watcher_runs(rig):
+    rig.running()
+    rig.mgr._watching = True
+    rig.procs[0].code = 3
+    view = rig.mgr.view()
+    assert view["state"] == "failed" and view["reason"]["code"] == "worker_failed"
+
+
+def test_without_a_watcher_thread_a_read_still_carries_the_steps_out(rig):
+    rig.running()
+    assert rig.mgr._watching is False
+    rig.client = True
+    rig.clock.advance(preview.PROBE_S + 0.1)
+    rig.mgr.frame("side")
+    assert rig.mgr.view()["state"] == "off"
+
+
+def test_the_watcher_thread_survives_a_tick_that_raises(rig, caplog):
+    rig.running()
+    calls = []
+    real = rig.mgr.tick
+
+    def tick(act=True):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("a hiccup in a probe")
+        rig.procs[0].code = 0  # the worker has gone by the next tick
+        return real(act)
+
+    rig.mgr.tick = tick
+    rig.mgr._watching = True
+    with caplog.at_level("ERROR", logger="levi.marvel0.preview"):
+        rig.mgr._watch()  # returns when no worker is left
+    assert len(calls) == 2 and rig.mgr._watching is False
+    assert "camera preview watcher" in caplog.text
 
 
 def test_the_stop_button_stops_it_and_removes_the_pictures(rig):
@@ -846,7 +999,7 @@ def test_the_recorded_identity_follows_the_leader_when_nice_execs_the_next_progr
         preview.Host(
             command=command,
             directory=lambda: out,
-            watch=lambda: (False, False),
+            watch=lambda fresh=False: (False, False),
             profile=lambda: "real",
             blockers=list,
             site_loader=lambda: SITE,
@@ -971,7 +1124,7 @@ class Real:
                 command=command,
                 directory=lambda: self.out,
                 blockers=list,
-                watch=lambda: (False, False),
+                watch=lambda fresh=False: (False, False),
                 profile=lambda: "real",
                 site_loader=lambda: SITE,
                 children_state=self.state,
@@ -1239,6 +1392,25 @@ def test_the_page_has_a_sentence_for_every_code_in_both_languages(language):
         if key not in catalogue
     ]
     assert missing == []
+
+
+def test_the_page_names_the_lifetime_from_the_document_not_as_a_literal():
+    for language, catalogue in CATALOGUES.items():
+        for key in (
+            "marvel0.preview.lead",
+            "marvel0.preview.status.on",
+            "marvel0.preview.stopped.max_lifetime",
+        ):
+            assert "{minutes}" in catalogue[key], (language, key)
+        words = [t for k, t in catalogue.items() if k.startswith("marvel0.preview.")]
+        assert not [t for t in words if re.search(r"ten minutes|十分钟", t)]
+
+
+def test_the_pages_fallback_lifetime_is_the_backends():
+    """Until the first read the page says the lifetime from a constant."""
+    source = (ROOT / "src/components/marvel0/preview-logic.ts").read_text()
+    match = re.search(r"PREVIEW_MAX_MINUTES = (\d+);", source)
+    assert match and int(match.group(1)) * 60 == preview.MAX_S
 
 
 def test_the_hosted_client_refusal_is_the_one_the_hand_back_raises():

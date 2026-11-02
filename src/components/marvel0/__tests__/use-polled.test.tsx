@@ -136,8 +136,11 @@ describe("one polled document", () => {
     expect(seen.latest!.value).toBe(2);
   });
 
-  test.each([false, true])(
-    "turned off, then on again with forgetWhenDisabled=%p: the old answer is %p until the next read answers",
+  test.each([
+    [false, "kept"],
+    [true, "forgotten"],
+  ] as const)(
+    "turned off, then on again with forgetWhenDisabled=%p: the old answer is %s until the next read answers",
     async (forget) => {
       const seen: { latest: Polled<number> | null } = { latest: null };
       let release: () => void = () => {};

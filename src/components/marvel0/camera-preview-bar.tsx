@@ -14,7 +14,12 @@ import en from "@/i18n/en.json";
 import { WordedText, RefusedBlock } from "./action-parts";
 import { wordOf } from "./ctl-text";
 import { sayText } from "./marvel0-say";
-import { holdsCameras, reasonWorded, type PreviewView } from "./preview-logic";
+import {
+  holdsCameras,
+  maxMinutes,
+  reasonWorded,
+  type PreviewView,
+} from "./preview-logic";
 import type { CameraPreview } from "./use-camera-preview";
 
 const KNOWN = new Set(Object.keys(en));
@@ -85,7 +90,15 @@ export function PreviewBar({ control }: { control: CameraPreview }) {
         view.stoppedBy !== null &&
         view.stoppedBy !== "requested" && (
           <p className="rg-muted" data-testid="marvel0-preview-stopped">
-            {wordOf(t, "marvel0.preview.stopped.", view.stoppedBy)}
+            {view.stoppedBy === "max_lifetime"
+              ? sayText(
+                  {
+                    key: "marvel0.preview.stopped.max_lifetime",
+                    params: { minutes: maxMinutes(view) },
+                  },
+                  t,
+                )
+              : wordOf(t, "marvel0.preview.stopped.", view.stoppedBy)}
           </p>
         )}
     </div>
@@ -108,7 +121,7 @@ function statusOf(view: PreviewView, t: (key: string) => string): string {
           key: "marvel0.preview.status.on",
           params: {
             idle: Math.round(view.limits.idleS),
-            minutes: Math.round(view.limits.maxS / 60),
+            minutes: maxMinutes(view),
           },
         },
         t,

@@ -14,8 +14,10 @@
 // LEVI to open the two cameras itself (levi/marvel0/preview.py), the pictures
 // then come from `preview/frame` the same way, and Stop lets the cameras go. The
 // backend refuses while a run is on, the arm lock is held or a client is
-// connected, and takes the cameras back before any client starts; when a run
-// becomes active this card goes back to the run's pictures at once.
+// connected, and takes the cameras back before this page starts a client (a
+// client started from a terminal is not covered: the command card's Copy stops
+// the preview first); when a run becomes active this card goes back to the
+// run's pictures at once.
 //
 // Rules of the poll: only while the run is active (or the preview is on) and
 // the tab is visible; at most one request in flight per camera (a slow answer
@@ -29,7 +31,7 @@ import { Card } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { PreviewBar } from "./camera-preview-bar";
 import type { PreviewApi } from "./preview-api";
-import { showsPictures } from "./preview-logic";
+import { maxMinutes, showsPictures } from "./preview-logic";
 import {
   FRAME_CAMERAS,
   runApi,
@@ -38,6 +40,7 @@ import {
   type FrameResult,
   type RunApi,
 } from "./run-api";
+import { sayText } from "./marvel0-say";
 import { useCameraPreview, type CameraPreview } from "./use-camera-preview";
 
 /** Milliseconds between two asks of a camera (about ten a second, the rate the
@@ -86,6 +89,9 @@ export function LiveFrames({
   const previewing =
     !active && control.view !== null && showsPictures(control.view.state);
   const live = active || previewing;
+  // The boxes invite opening the preview only where the button can: not in a
+  // state that refuses it, not while its state cannot be read.
+  const mayOpen = preview !== undefined && control.view?.mayStart === true;
   const source: Pick<RunApi, "frame"> | undefined = active ? api : preview;
 
   useEffect(() => {
@@ -198,7 +204,7 @@ export function LiveFrames({
   };
   const placeholder = (reason: FrameReason | null) =>
     !live
-      ? preview
+      ? mayOpen
         ? t("marvel0.preview.idle")
         : t("marvel0.live.no_run")
       : reason === "no_run"
@@ -230,7 +236,15 @@ export function LiveFrames({
       data-active={active ? "true" : "false"}
       title={t("marvel0.live.title")}
       description={
-        preview && !active ? t("marvel0.preview.lead") : t("marvel0.live.lead")
+        preview && !active
+          ? sayText(
+              {
+                key: "marvel0.preview.lead",
+                params: { minutes: maxMinutes(control.view) },
+              },
+              t,
+            )
+          : t("marvel0.live.lead")
       }
     >
       {preview && !active && <PreviewBar control={control} />}
@@ -265,7 +279,7 @@ export function LiveFrames({
                     data-reason={
                       live
                         ? (shot.reason ?? "wait")
-                        : preview
+                        : mayOpen
                           ? "idle"
                           : "no_run"
                     }

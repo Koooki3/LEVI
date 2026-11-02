@@ -153,7 +153,7 @@ const meta = (h: H, camera: FrameCamera) =>
   )!;
 
 describe("the live view", () => {
-  test("asks about four times a second, and only while the run is active", async () => {
+  test("asks about ten times a second, and only while the run is active", async () => {
     const h = await open(() => picture("x"), { active: false });
     await wait(8);
     expect(h.calls).toEqual([]);

@@ -91,7 +91,7 @@ START_TIMEOUT_S = 30.0  # uv, the overlay and the two pipelines, then a picture
 STALE_S = 10.0  # a running preview whose pictures stopped
 TICK_S = 0.5
 PROBE_S = 1.0  # how often a starting or running preview looks for a client
-UNREADABLE_STOPS = 2  # probes in a row that cannot be read before it stops
+UNREADABLE_STOPS = 2  # separate readings in a row that cannot be read: it stops
 # What the watcher stops for (a start refuses on these too, and on the rest).
 WATCHED = frozenset({"run_active", "aeri_active", "client_connected", "arm_in_use"})
 MAX_FRAME_BYTES = 4 << 20
@@ -173,7 +173,14 @@ FAILURES = {
     "worker_failed": "The camera worker stopped unexpectedly.",
 }
 # why a preview ended without a failure
-STOPPED_BY = ("requested", "idle", "max_lifetime", "client_start", "service")
+STOPPED_BY = (
+    "requested",
+    "idle",
+    "max_lifetime",
+    "client_start",
+    "state_unreadable",
+    "service",
+)
 FRAME_REASONS = {
     "preview_off": "The camera preview is not running.",
     "no_frame": "The preview has no complete picture of this camera yet.",
@@ -230,11 +237,13 @@ def product_profile() -> str:
 
 def _hosted_record(sup) -> str | None:
     """What the hosted run's record says when the supervisor reports no run:
-    ``"active"`` (an ``intent`` or ``started`` record), ``"unreadable"``, or None.
-    The supervisor reads the record once after a restart and takes one it cannot
-    read for "no run" (``adopt``); the preview does not, so it reads it itself,
-    every time. Only the real supervisor is asked (a test's stand-in has no
-    record)."""
+    ``"active"`` (an ``intent`` record, or a ``started`` one whose launcher is
+    the process it names), ``"unreadable"`` (the record cannot be read, or a
+    ``started`` one whose launcher is gone or cannot be checked: ``adopt`` would
+    have settled it, and it has not), or None. The supervisor reads the record
+    once after a restart and takes one it cannot read for "no run" (``adopt``);
+    the preview does not, so it reads it itself, every time. Only the real
+    supervisor is asked (a test's stand-in has no record)."""
     from . import run
 
     if not isinstance(sup, run.Supervisor):
@@ -243,18 +252,31 @@ def _hosted_record(sup) -> str | None:
         rec = record.read_record(sup._folder(sup.site_loader(), create=False))
     except Exception:  # noqa: BLE001 - fail closed
         return "unreadable"
-    if rec is not None and rec.get("phase") in ("intent", "started"):
+    phase = rec.get("phase") if rec is not None else None
+    if phase == "intent":
         return "active"
-    return None
+    if phase != "started":
+        return None
+    leader = rec.get("leader") or {}
+    pid = leader.get("pid")
+    try:
+        alive = isinstance(pid, int) and sup.host.identity(pid) == leader.get(
+            "identity"
+        )
+    except Exception:  # noqa: BLE001 - fail closed
+        return "unreadable"
+    return "active" if alive else "unreadable"
 
 
-def blockers() -> list[str]:
+def blockers(fresh: bool = False) -> list[str]:
     """Why the cameras may not be opened now, in the order they are reported
     (``REFUSALS`` codes); empty when they may. Anything that cannot be read is
     ``state_unreadable``: unknown is "a client may be running" (a deploy status
     that is ``unknown``, a socket table or an arm lock that cannot be read, a
-    hosted-run record that cannot be read). Raises only the site's own 412 (the
-    deploy status cannot be had without the site file)."""
+    hosted-run record that cannot be read). ``fresh`` drops the deploy status's
+    2 s cache first, so the answer is a reading taken after the call began.
+    Raises only the site's own 412 (the deploy status cannot be had without the
+    site file)."""
     from fastapi import HTTPException
 
     from . import aeri_run_api, deploy_api, run_api
@@ -281,7 +303,10 @@ def blockers() -> list[str]:
         unreadable = True
     status = None
     try:
-        status = deploy_api.supervisor().status()
+        deploy = deploy_api.supervisor()
+        if fresh:
+            deploy.invalidate()
+        status = deploy.status()
     except HTTPException:
         raise
     except Exception:  # noqa: BLE001
@@ -319,25 +344,26 @@ def blockers() -> list[str]:
     return found
 
 
-def blockers_safely() -> list[str]:
+def blockers_safely(fresh: bool = False) -> list[str]:
     """``blockers()`` for the watcher: whatever cannot be read is
     ``state_unreadable`` (the site file's own 412 is not: with no site there is
     nothing to compare with, and a preview cannot have been started)."""
     from fastapi import HTTPException
 
     try:
-        return blockers()
+        return blockers(fresh)
     except HTTPException as exc:
         return [] if exc.status_code == 412 else ["state_unreadable"]
     except Exception:  # noqa: BLE001
         return ["state_unreadable"]
 
 
-def watch() -> tuple[bool, bool]:
+def watch(fresh: bool = False) -> tuple[bool, bool]:
     """What the watcher learns in one look: ``(a client is there, the state could
     not be read)``. A client is anything a start refuses for except an unreadable
-    state: a hosted run, an AERI run, a policy connection, the arm lock."""
-    found = set(blockers_safely())
+    state: a hosted run, an AERI run, a policy connection, the arm lock.
+    ``fresh`` makes the deploy status a new reading (see ``blockers``)."""
+    found = set(blockers_safely(fresh))
     return bool(found & WATCHED), "state_unreadable" in found
 
 
@@ -419,8 +445,9 @@ class Host:
     killpg: Callable = os.killpg
     directory: Callable = default_directory
     blockers: Callable = lambda: blockers()  # -> [code]
-    # One look of the watcher: -> (a client is there, the state is unreadable)
-    watch: Callable = lambda: watch()
+    # One look of the watcher: (fresh) -> (a client is there, the state is
+    # unreadable); ``fresh`` asks for a reading newer than the last look's.
+    watch: Callable = lambda fresh=False: watch(fresh)
     profile: Callable = lambda: product_profile()  # -> "real" | "fake"
     site_loader: Callable = None  # -> Site (default: site.require)
     monotonic: Callable = time.monotonic
@@ -485,8 +512,10 @@ class Manager:
         return ages
 
     def view(self) -> dict:
-        """The ``levi.marvel0.preview.v1`` document."""
-        self.tick()
+        """The ``levi.marvel0.preview.v1`` document. It notices an exit; every
+        other step of the watcher (a stop takes seconds, a kill more) is left to
+        the watcher thread while there is one."""
+        self.tick(act=not self._watching)
         with self._mutex:
             state, failure = self._state, self._failure
             stopped_by, held = self._stopped_by, self._held
@@ -651,7 +680,15 @@ class Manager:
 
     def _watch(self) -> None:
         while True:
-            if self.tick():
+            try:
+                alive = self.tick()
+            except (
+                Exception
+            ):  # the thread must not die: ``view`` leaves the stops to it
+                log.exception("camera preview watcher")
+                self.host.sleep(TICK_S)
+                continue
+            if alive:
                 self.host.sleep(TICK_S)
                 continue
             with self._mutex:  # a start since the tick keeps the watcher going
@@ -663,10 +700,11 @@ class Manager:
         """Both pictures are there."""
         return all(age is not None for age in self._ages().values())
 
-    def tick(self) -> bool:
+    def tick(self, act: bool = True) -> bool:
         """One step of the watcher: notice an exit, a first picture, the idle
         time, the lifetime, stale pictures, a client. True while a worker is
-        alive."""
+        alive. Without ``act`` only an exit is noticed (``view`` while the
+        watcher thread runs)."""
         with self._mutex:
             proc, state = self._proc, self._state
         if proc is None:
@@ -675,6 +713,8 @@ class Manager:
         if code is not None:
             self._finish(proc, code)
             return False
+        if not act:
+            return True
         h = self.host
         now = h.monotonic()
         if state == "stopping":
@@ -709,16 +749,21 @@ class Manager:
         return True
 
     def _look(self, now: float) -> bool:
-        """Every ``PROBE_S``: stop for a client (``client_start``) when one is
-        there, or when the state could not be read twice in a row. True when it
+        """Every ``PROBE_S``: stop when a client is there (``client_start``), or
+        when the state could not be read in two separate readings in a row
+        (``state_unreadable``; the second look drops the deploy status's cache,
+        which would otherwise hand back the first look's answer). True when it
         stopped."""
         if now - self._probed < PROBE_S:
             return False
         self._probed = now
-        client, unreadable = self.host.watch()
+        client, unreadable = self.host.watch(self._unreadable > 0)
         self._unreadable = self._unreadable + 1 if unreadable else 0
-        if client or self._unreadable >= UNREADABLE_STOPS:
+        if client:
             self.stop("client_start")
+            return True
+        if self._unreadable >= UNREADABLE_STOPS:
+            self.stop("state_unreadable")
             return True
         return False
 

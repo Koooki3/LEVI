@@ -420,6 +420,57 @@ def test_the_lifeline_is_read_without_the_buffered_readers_lock(worker):
     assert "os._exit(" in source
 
 
+STOP_SIGNAL_SCRIPT = """
+import importlib.util, os, signal, sys
+spec = importlib.util.spec_from_file_location("w", sys.argv[1])
+w = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(w)
+
+def attempt(n):
+    stop = w.Stop()
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())  # as main() installs it
+    seen = [0]
+    def tracer(frame, event, arg):
+        seen[0] += 1
+        if seen[0] == n:  # SIGTERM to ourselves at the n-th step of the call
+            os.kill(os.getpid(), signal.SIGTERM)
+        return tracer
+    sys.settrace(tracer)
+    stop.set()
+    sys.settrace(None)
+    return stop.is_set()
+
+assert all(attempt(n) for n in range(1, 60))
+print("ok")
+"""
+
+
+def test_a_signal_that_arrives_anywhere_inside_a_set_cannot_deadlock_the_stop_flag(
+    worker,
+):
+    """The handler of SIGTERM runs in the main thread, possibly inside another
+    ``set``. A ``threading.Event`` takes a lock that is not reentrant there: the
+    handler's own ``set`` would wait for ever for the lock its interrupted frame
+    holds, and no camera would be stopped. A trace function raises the signal at
+    every step of ``set`` in turn (a flag that hangs fails the timeout)."""
+    import subprocess
+
+    done = subprocess.run(
+        [sys.executable, "-B", "-c", STOP_SIGNAL_SCRIPT, str(WORKER)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "ok"
+
+
+def test_the_stop_flag_has_no_lock(worker):
+    assert not isinstance(worker.Stop(), threading.Event)
+    assert not hasattr(worker.Stop(), "wait")
+
+
 def test_the_stop_event_remembers_when_it_was_first_set(worker):
     stop = worker.Stop()
     assert stop.since is None and not stop.is_set()
