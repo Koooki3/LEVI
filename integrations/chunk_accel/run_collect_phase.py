@@ -701,7 +701,9 @@ def install_gripper_no_resend(robot_env_cls) -> bool:
             st["issued_pos"] is not None
             and self._last_gripper_cmd == want
             and between
-            and abs(pos - st["issued_pos"]) >= GRIPPER_MOVED
+            and ((st["issued_pos"] - pos) if want == 0.0 else (pos - st["issued_pos"]))
+            >= GRIPPER_MOVED  # moved the way of the command: an older, opposite request the server parked can move
+            # the fingers too (review 2026-11-03: a dropped re-open behind a stalled open, then a stale close)
             and prev is not None
             and abs(pos - prev) < GRIPPER_STILL
         ):

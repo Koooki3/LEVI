@@ -185,6 +185,86 @@ def test_a_close_at_full_open_is_never_skipped(loaded):
     assert env.sent[-1][0] == "close" and env.sent[-1][1] >= 6.0, env.sent
 
 
+def _wrapped(entry, env_mod):
+    cls = type("RobotEnvCopy", (env_mod.RobotEnv,), {})
+    entry.install_gripper_no_resend(cls)
+    return _env(env_mod, cls)
+
+
+def test_moved_counts_only_toward_the_command(loaded):
+    """Review 2026-11-03: an open blocked at 0.70, a close parked behind it, the re-open dropped by the server, then the
+    stale close grips at 0.55. The fingers moved, but against the latched open: the open must be re-sent."""
+    entry, env_mod, clock = loaded
+    plan = [(1.0, 0.0, 1.0), (1.1, 0.0, 0.9), (1.2, 0.0, 0.7), (1.3, 0.0, 0.56)]
+    plan += [(round(1.4 + 0.1 * i, 1), 0.0, 0.55) for i in range(6)]
+    plan += [(2.0, 1.0, 0.55), (2.1, 1.0, 0.55), (2.2, 1.0, 0.55), (2.3, 1.0, 0.62)]
+    plan += [(2.4, 1.0, 0.70), (2.5, 1.0, 0.70), (2.6, 1.0, 0.70)]
+    plan += [(2.8, 0.0, 0.70)] + [
+        (round(2.9 + 0.1 * i, 1), 0.0, 0.70) for i in range(6)
+    ]
+    plan += [(3.6, 1.0, 0.70), (3.7, 1.0, 0.65), (3.8, 1.0, 0.56)]
+    plan += [(round(3.9 + 0.1 * i, 1), 1.0, 0.55) for i in range(25)]
+    env = _wrapped(entry, env_mod)
+    _drive(env, clock, plan)
+    assert [s for s in env.sent if s[0] == "open" and s[1] > 3.6], env.sent
+
+
+def test_a_close_that_never_moved_from_mid_stroke_is_re_sent(loaded):
+    """The moved guard alone: the fingers sit at 0.70 (between the stops) and never answer the close."""
+    entry, env_mod, clock = loaded
+    env = _wrapped(entry, env_mod)
+    _drive(env, clock, [(round(1.0 + 0.1 * i, 1), 0.0, 0.70) for i in range(12)])
+    assert [s[0] for s in env.sent] == ["close", "close"], env.sent
+
+
+def test_fingers_still_moving_are_not_treated_as_settled(loaded):
+    """The still guard alone: a slow close that keeps moving past the throttle is re-sent as before."""
+    entry, env_mod, clock = loaded
+    env = _wrapped(entry, env_mod)
+    plan = [
+        (round(1.0 + 0.1 * i, 1), 0.0, round(1.0 - 0.04 * i, 2)) for i in range(12)
+    ]  # 1.0 -> 0.56, never still
+    _drive(env, clock, plan)
+    assert [s[0] for s in env.sent] == ["close", "close"], env.sent
+
+
+def test_a_close_at_the_open_stop_is_re_sent_even_when_still(loaded):
+    """The between guard alone: answered once (moved 0.08 toward closed), then back at the open stop and still."""
+    entry, env_mod, clock = loaded
+    env = _wrapped(entry, env_mod)
+    plan = [(1.0, 0.0, 0.98), (1.1, 0.0, 0.90)]
+    plan += [
+        (round(1.2 + 0.1 * i, 1), 0.0, 0.93) for i in range(9)
+    ]  # back at the open stop (>= 0.9), still
+    _drive(env, clock, plan)
+    assert [s[0] for s in env.sent] == ["close", "close"], env.sent
+
+
+def test_a_latch_changed_elsewhere_forgets_the_wrappers_issue(loaded):
+    """The latch-clear guard alone: a close issued at 0.55, reset() then latches open outside the wrapper inside the
+    throttle while the fingers rest at 0.60; the policy's open must still go out once the throttle allows it."""
+    entry, env_mod, clock = loaded
+    env = _wrapped(entry, env_mod)
+    _drive(env, clock, [(1.0, 0.0, 0.55), (1.1, 0.0, 0.60), (1.2, 0.0, 0.60)])
+    env._last_gripper_cmd = (
+        1.0  # reset(): open sent directly and latched, outside _update_gripper
+    )
+    _drive(env, clock, [(round(1.3 + 0.1 * i, 1), 1.0, 0.60) for i in range(13)])
+    assert [s for s in env.sent if s[0] == "open"], env.sent
+
+
+def test_an_open_after_a_reset_with_the_fingers_mid_stroke_goes_out(loaded):
+    """A reset latched open outside the wrapper while the fingers still rest at 0.55: the policy's open must go out."""
+    entry, env_mod, clock = loaded
+    env = _wrapped(entry, env_mod)
+    _drive(env, clock, _hold_then_release()[:12])  # closed on the ball, still at 0.55
+    env._last_gripper_cmd = (
+        1.0  # reset(): open sent directly and latched, outside _update_gripper
+    )
+    _drive(env, clock, [(round(5.0 + 0.1 * i, 1), 1.0, 0.55) for i in range(10)])
+    assert [s for s in env.sent if s[0] == "open"], env.sent
+
+
 def test_the_entry_wraps_only_when_not_golden():
     """main() wraps the class only for an accelerated run (golden must stay the user's client, bit for bit)."""
     src = (CA / "run_collect_phase.py").read_text()
