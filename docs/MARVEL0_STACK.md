@@ -361,7 +361,9 @@ the root are ignored.
 
 **Choosing the controller on A's card.** The file's `arm_controller` and `arm_preset` are the **default** of terminal A.
 While A is stopped, A's card offers a select of three controllers: the lab's, anyspeedup `today` and anyspeedup `S1`
-(the file's own is marked "(default)"); "Use the control file's default" goes back to the file. The choice is the page's
+(the file's own is marked "(default)"); a pick only moves the select, and "Use this controller" saves it (until then
+the card says that A still starts as the saved one, so stepping through the list with the arrow keys saves nothing);
+"Use the control file's default" goes back to the file. The choice is the page's
 own, saved in the product workspace next to the stack's records (`<workspace>/marvel0/stack/arm_choice/record.json`,
 folder 0700, file 0600, schema `levi.marvel0.arm_choice.v1`, written whole; one audit line per change in `history.jsonl`
 beside it). **The control file is never written.** The route is `POST /api/levi/marvel0/stack/a/controller` with
@@ -761,7 +763,8 @@ C 之前的检查 5 秒，C 启动、3 秒后就绪：**从按键到 C 就绪约
 `lab` 时预设和根路径被忽略。
 
 **在 A 的卡片上选控制器。** 文件里的 `arm_controller`、`arm_preset` 是终端 A 的**默认值**。A 停止时，A 的卡片上有一个下拉框，三个选项：
-实验室的控制器、anyspeedup `today`、anyspeedup `S1`（文件里写的那个标着“（默认）”）；“改回控制文件的默认值”回到文件。这个选择是页面自己的，
+实验室的控制器、anyspeedup `today`、anyspeedup `S1`（文件里写的那个标着“（默认）”）；在下拉框里选只是改变显示，按“改用这个控制器”才保存
+（在那之前卡片写着 A 仍按已保存的那个启动，所以用方向键在列表里移动不会保存任何东西）；“改回控制文件的默认值”回到文件。这个选择是页面自己的，
 保存在产品工作区里、栈的记录旁边（`<workspace>/marvel0/stack/arm_choice/record.json`，文件夹 0700、文件 0600、schema
 `levi.marvel0.arm_choice.v1`、整份写入；每次改动在旁边的 `history.jsonl` 记一行审计）。**控制文件从不被写。** 路由是
 `POST /api/levi/marvel0/stack/a/controller`，带 `request_id` 和 `controller`：`lab`、`anyspeedup`（再带 `preset`：`today` 或 `S1`）

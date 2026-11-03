@@ -244,7 +244,13 @@ function MarkerBlock({
  * way back to the file's default, and what A starts as and what A runs
  * (stack-act-logic `armSays`: A's own record, not the select), why rule v3 is
  * refused, the alpha the client command is tied to, that the anyspeedup
- * controller has not run on the arm yet, and how to change it. */
+ * controller has not run on the arm yet, and how to change it.
+ *
+ * A pick only moves the select; "Use this controller" saves it. On Linux and
+ * Windows the arrow keys on a closed select fire `change` at every step, so a
+ * select that saved on `change` would save each entry a keyboard user passes
+ * (and lose the next key while the write is in flight). Until it is saved, the
+ * card says what A still starts as. */
 function ArmController({
   arm,
   actions,
@@ -256,6 +262,22 @@ function ArmController({
   const current = arm.configured ? armValue(arm.configured) : null;
   const offered = arm.options.length > 0 && current !== null;
   const off = !arm.canChoose || actions.working !== null || actions.locked;
+  const [picked, setPicked] = useState<string | null>(null);
+  // A pick does not outlive the select being closed (A started, the stack
+  // off): adjusted during the render, React's way for state that follows a
+  // prop.
+  const [open, setOpen] = useState(arm.canChoose);
+  if (open !== arm.canChoose) {
+    setOpen(arm.canChoose);
+    if (!arm.canChoose) setPicked(null);
+  }
+  const pending =
+    arm.canChoose && picked !== null && picked !== current ? picked : null;
+  const pick = pending === null ? null : armPick(arm, pending);
+  const save = () => {
+    if (!pick || off) return;
+    void actions.chooseArm(pick).then(() => setPicked(null));
+  };
   const refused =
     actions.refused?.key === ARM_CHOICE_KEY ? actions.refused : null;
   const problem =
@@ -286,11 +308,10 @@ function ArmController({
         >
           <Select
             data-testid="marvel0-arm-select"
-            value={current}
+            value={pending ?? current}
             disabled={off}
             onChange={(event) => {
-              const pick = armPick(arm, event.target.value);
-              if (pick && !off) void actions.chooseArm(pick);
+              if (!off) setPicked(event.target.value);
             }}
           >
             {arm.options.map((option) => (
@@ -305,20 +326,45 @@ function ArmController({
           </Select>
         </Field>
       )}
-      {offered && arm.choice.state !== "default" && (
+      {offered && pending !== null && arm.configured && (
+        <p className="rg-muted" data-testid="marvel0-arm-pending">
+          {sayText(
+            {
+              key: "marvel0.ctl.arm.pending",
+              params: { what: armName(arm.configured) },
+            },
+            t,
+          )}
+        </p>
+      )}
+      {offered && (pending !== null || arm.choice.state !== "default") && (
         <div className="rg-comp__buttons">
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={off}
-            loading={actions.working === ARM_CHOICE_KEY}
-            onClick={() => {
-              if (!off)
-                void actions.chooseArm({ controller: "default", preset: null });
-            }}
-          >
-            {t("marvel0.ctl.arm.use_default")}
-          </Button>
+          {pending !== null && (
+            <Button
+              size="sm"
+              disabled={off || pick === null}
+              loading={actions.working === ARM_CHOICE_KEY}
+              onClick={save}
+            >
+              {t("marvel0.ctl.arm.apply")}
+            </Button>
+          )}
+          {arm.choice.state !== "default" && (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={off}
+              loading={pending === null && actions.working === ARM_CHOICE_KEY}
+              onClick={() => {
+                if (off) return;
+                void actions
+                  .chooseArm({ controller: "default", preset: null })
+                  .then(() => setPicked(null));
+              }}
+            >
+              {t("marvel0.ctl.arm.use_default")}
+            </Button>
+          )}
         </div>
       )}
       {offered && (

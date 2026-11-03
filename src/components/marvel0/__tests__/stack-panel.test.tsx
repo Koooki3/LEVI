@@ -506,7 +506,7 @@ describe("outside the product, or with the controls off or unread, nothing can b
       expect(button(host, "Use the control file's default")).toBeUndefined();
     });
 
-    test("a pick sends the entry; the next read shows it, with the way back to the default", async () => {
+    test("a pick saved with its button sends the entry; the next read shows it, with the way back to the default", async () => {
       const view = await open(stackDoc("arm_choice_offered"));
       view.state.answer = () => ({
         ok: true,
@@ -519,6 +519,9 @@ describe("outside the product, or with the controls off or unread, nothing can b
       });
       view.state.doc = stackDoc("arm_chosen_s1");
       await choose(select(view.host), "anyspeedup:S1");
+      await tick();
+      expect(view.state.calls).toEqual([]); // (a pick alone saves nothing)
+      await click(button(view.host, "Use this controller")!);
       await waitFor(() => view.state.calls.length === 1, {
         label: "the write",
       });
@@ -550,11 +553,93 @@ describe("outside the product, or with the controls off or unread, nothing can b
         preset: null,
       });
       await choose(select(view.host), "lab");
+      await click(button(view.host, "Use this controller")!);
       await waitFor(() => view.state.calls.length === 3, { label: "the pick" });
       expect(view.state.calls[2].body).toMatchObject({
         controller: "default",
         preset: null,
       });
+    });
+
+    test("picks alone save nothing: stepping through the list with the keys sends no write, and the card says A still starts as the saved one", async () => {
+      const { host, state } = await open(stackDoc("arm_choice_offered"));
+      // (each arrow key on a closed select fires `change` on Linux and Windows)
+      await choose(select(host), "anyspeedup:today");
+      await choose(select(host), "anyspeedup:S1");
+      await tick();
+      expect(state.calls).toEqual([]);
+      expect(select(host)!.value).toBe("anyspeedup:S1");
+      expect(
+        text(host.querySelector("[data-testid=marvel0-arm-pending]")),
+      ).toBe(
+        "Not saved yet: A still starts as the lab's controller until “Use this controller” is pressed.",
+      );
+      // the card still says what A starts as: the saved one
+      expect(text(line(host))).toContain(
+        "A starts as: the lab's controller (the control file's default).",
+      );
+      // back to the saved entry: nothing pending, no button
+      await choose(select(host), "lab");
+      expect(
+        host.querySelector("[data-testid=marvel0-arm-pending]"),
+      ).toBeNull();
+      expect(button(host, "Use this controller")).toBeUndefined();
+      expect(state.calls).toEqual([]);
+    });
+
+    test("while the save is in flight the select and its button are off, and another press sends nothing", async () => {
+      const view = await open(stackDoc("arm_choice_offered"));
+      let release: (answer: ApiResult) => void = () => {};
+      view.state.answer = () =>
+        new Promise<ApiResult>((resolve) => {
+          release = resolve;
+        });
+      await choose(select(view.host), "anyspeedup:S1");
+      await click(button(view.host, "Use this controller")!);
+      await waitFor(() => view.state.calls.length === 1, {
+        label: "the write",
+      });
+      expect(select(view.host)!.disabled).toBe(true);
+      expect(button(view.host, "Use this controller")!.disabled).toBe(true);
+      await click(button(view.host, "Use this controller")!);
+      await choose(select(view.host), "anyspeedup:today");
+      await tick();
+      expect(view.state.calls).toHaveLength(1);
+      expect(select(view.host)!.value).toBe("anyspeedup:S1");
+      view.state.doc = stackDoc("arm_chosen_s1");
+      release({
+        ok: true,
+        status: 200,
+        data: {
+          done: "arm_choice_set",
+          controller: "anyspeedup",
+          preset: "S1",
+        },
+      });
+      await waitFor(() => !select(view.host)!.disabled, {
+        label: "the select on again",
+      });
+      expect(select(view.host)!.value).toBe("anyspeedup:S1");
+      expect(button(view.host, "Use this controller")).toBeUndefined();
+      expect(view.state.calls).toHaveLength(1);
+    });
+
+    test("a stale read turns the select off: a pick is not taken and nothing is sent", async () => {
+      const { host, state } = await open(stackDoc("arm_choice_offered"));
+      expect(select(host)!.disabled).toBe(false);
+      state.doc = null;
+      await waitFor(
+        () => host.querySelector("[data-testid=marvel0-stack-stale]"),
+        { label: "the stale note" },
+      );
+      expect(select(host)!.disabled).toBe(true);
+      await choose(select(host), "anyspeedup:S1");
+      await tick();
+      expect(button(host, "Use this controller")).toBeUndefined();
+      expect(
+        host.querySelector("[data-testid=marvel0-arm-pending]"),
+      ).toBeNull();
+      expect(state.calls).toEqual([]);
     });
 
     test("A running: the select is off and says why, and the card still says what A runs", async () => {
@@ -656,6 +741,7 @@ describe("outside the product, or with the controls off or unread, nothing can b
       view.state.answer = () =>
         refusedAnswer(409, "arm_choice_a_not_idle", { state: "starting" });
       await choose(select(view.host), "anyspeedup:today");
+      await click(button(view.host, zh["marvel0.ctl.arm.apply"])!);
       await waitFor(
         () =>
           view.host.querySelector("[data-testid=marvel0-arm-choice-refused]"),
