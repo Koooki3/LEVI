@@ -15,13 +15,13 @@ import numpy as np
 import pytest
 
 CA = Path(__file__).resolve().parent
-OPENPI = Path(
-    os.environ.get("CHUNK_ACCEL_OPENPI_ROOT", "/home/marvel/work/wenkai/openpi")
-)
-FR3_ENV = OPENPI / "examples" / "fr3_local" / "fr3_env.py"
+_ROOT = os.environ.get("CHUNK_ACCEL_OPENPI_ROOT")
+OPENPI = Path(_ROOT) if _ROOT else None
+FR3_ENV = OPENPI / "examples" / "fr3_local" / "fr3_env.py" if OPENPI else None
 
 pytestmark = pytest.mark.skipif(
-    not FR3_ENV.is_file(), reason="needs the openpi checkout (CHUNK_ACCEL_OPENPI_ROOT)"
+    FR3_ENV is None or not FR3_ENV.is_file(),
+    reason="set CHUNK_ACCEL_OPENPI_ROOT to an openpi checkout",
 )
 
 
