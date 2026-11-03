@@ -1147,8 +1147,8 @@ def _rate_warnings(site, form) -> list:
 
 
 ARM_PROBLEM_TEXT = {
-    "changed": "the page would now start another arm controller than the one A was "
-    "started as (the control file changed)",
+    "changed": "the control file changed while A ran, and the page would no "
+    "longer start A as the arm controller A runs",
     "foreign": "the anyspeedup arm controller is chosen for A, but A was not "
     "started by this page",
     "unknown": "it could not be told which arm controller A runs",

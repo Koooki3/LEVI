@@ -1000,12 +1000,23 @@ export const armName = (entry: ArmController): Say =>
 
 /** What the card says of the arm controller, sentence by sentence (the page
  * joins them): what A starts as (chosen on the card, or the control file's
- * default), what A runs, why rule v3 is refused, the alpha it is tied to, that
- * the anyspeedup controller has not run on the arm yet, and how to change it. */
+ * default; or that A does not start while a saved choice cannot be used or
+ * read, since the backend then refuses A's start instead of falling back to
+ * the file's), what A runs, why rule v3 is refused, the alpha it is tied to,
+ * that the anyspeedup controller has not run on the arm yet, and how to
+ * change it. */
 export function armSays(arm: ArmView): Say[] {
   const name = armName;
   const out: Say[] = [];
-  if (arm.configured && !arm.enabled)
+  const blocked =
+    arm.choice.state === "unusable" || arm.choice.state === "unreadable";
+  const file = arm.file ?? arm.configured;
+  if (blocked && file)
+    out.push({
+      key: "marvel0.ctl.arm.configured_blocked",
+      params: { file: name(file) },
+    });
+  else if (arm.configured && !arm.enabled)
     out.push({
       key: "marvel0.ctl.arm.configured_off",
       params: { what: name(arm.configured) },

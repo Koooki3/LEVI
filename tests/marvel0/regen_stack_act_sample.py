@@ -707,6 +707,26 @@ def views() -> tuple:
             {"request_id": "arm-choice-000004", "controller": "lab"},
         )
 
+    # A saved choice the file no longer allows (the owner took anyspeedup_root
+    # out after S1 was chosen): A's start is refused, the card says A does not
+    # start.
+    with machine() as m:
+        root = fake_checkout(Path(m.franka).parent)
+        m.set_control(anyspeedup_root=str(root))
+        status, _ = post(
+            m,
+            "a/controller",
+            {
+                "request_id": "arm-choice-000005",
+                "controller": "anyspeedup",
+                "preset": "S1",
+            },
+        )
+        assert status == 200
+        m.set_control()
+        m.ready_for_a(aged_s=MARKER_AGE_S)
+        out["arm_choice_unusable"] = view(m)
+
     with machine(enabled=False) as m:
         out["control_disabled"] = view(m)
         refusals["control_disabled"] = refusal(

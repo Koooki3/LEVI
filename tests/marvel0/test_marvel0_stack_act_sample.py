@@ -343,3 +343,16 @@ def test_the_samples_hold_the_arm_controller_chosen_on_as_card():
     assert answers["arm_choice_cleared"]["done"] == "arm_choice_cleared"
     assert refusals["arm_choice_s2"]["detail"]["code"] == "arm_choice_preset_refused"
     assert refusals["arm_choice_while_a_runs"]["detail"]["state"] == "ready"
+    # a saved S1 the file no longer allows: shown as the file's controller,
+    # with the code that keeps A from starting
+    unusable = views["arm_choice_unusable"]["act"]
+    assert unusable["arm"]["choice"] == {
+        "state": "unusable",
+        "controller": "anyspeedup",
+        "preset": "S1",
+        "code": "arm_choice_no_anyspeedup",
+        "at": unusable["arm"]["choice"]["at"],
+    }
+    assert unusable["arm"]["configured"] == unusable["arm"]["file"]
+    a_blockers = [b["code"] for b in unusable["terminals"]["a"]["start_blockers"]]
+    assert "arm_choice_no_anyspeedup" in a_blockers

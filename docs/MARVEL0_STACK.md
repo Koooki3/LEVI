@@ -376,7 +376,7 @@ checks (`arm_controller_missing`, `arm_controller_unsafe`, `arm_controller_not_b
 longer be used (the file lost its `anyspeedup_root`) or cannot be read (a record that is not exactly what the page
 writes: the four keys `schema`, `choice`, `request_id`, `at` with their types, and a choice on the list) keeps A from starting (`arm_choice_no_anyspeedup`,
 `arm_choice_unreadable`) instead of starting the file's controller unannounced; "Use the control file's default" clears
-it. If the stack document itself cannot be read, the client command is judged from the file and the saved choice alone;
+it; A's card then says that A does not start, not the file's controller. If the stack document itself cannot be read, the client command is judged from the file and the saved choice alone;
 a choice that cannot be read or used then counts as "which controller A runs is not known" (rule v3 and the ramp rules
 are refused, nothing is forced), since A may have been started from it before it broke. Without a valid control file
 the stack is off and the card shows the file's problem; a saved choice is kept and nothing is said against it until the
@@ -391,9 +391,10 @@ the field (a page loaded before it existed) starts A as before.
 
 **What A runs is A's record, not the select or the file.** The file is read live, but what the page says and forces
 follows the A that runs: A's record keeps the controller, preset and environment file it was started with. The choice
-cannot change while A runs; if the file changes so that the page would now start another controller (with no choice
-saved, or a new `anyspeedup_root`), A shows as not ready (`a.control_changed`: B and C wait, A can still be stopped),
-the card says what A runs and what the page would start, and rule v3 is refused at the client's start (the start check
+cannot change while A runs; if the file changes so that the page would no longer start A as the controller it runs
+(another controller with no choice saved, a new `anyspeedup_root`, or a saved choice the file no longer allows, with
+which the page would start nothing), A shows as not ready (`a.control_changed`: B and C wait, A can still be stopped),
+the card says what A runs and what the page would do now, and rule v3 is refused at the client's start (the start check
 `arm_controller_matches`; the preview warns). The same refusal applies when the anyspeedup controller is chosen (on the
 card or in the file) and the A that runs was not started by this page (the page cannot know what runs) or cannot be
 judged. With the lab's controller and a hand-started A, the usual flow, nothing is asked and nothing changes. The stack
@@ -770,7 +771,7 @@ A 没有停止时 `arm_choice_a_not_idle`（启动中、运行中、停止中、
 `arm_choice_no_anyspeedup`；栈关闭时 `control_disabled`。这时下拉框不可用，旁边写着原因。选了 anyspeedup 仍要过 A 自己的启动检查
 （`arm_controller_missing`、`arm_controller_unsafe`、`arm_controller_not_built`）。保存的选择后来用不了（文件里去掉了 `anyspeedup_root`）或读不出来（记录不完全是页面写的样子：恰好 `schema`、`choice`、`request_id`、`at`
 四个键、类型对，选择在清单上）时，
-A 不启动（`arm_choice_no_anyspeedup`、`arm_choice_unreadable`），而不是悄悄改用文件里的控制器；“改回控制文件的默认值”可以清掉它。
+A 不启动（`arm_choice_no_anyspeedup`、`arm_choice_unreadable`），而不是悄悄改用文件里的控制器；“改回控制文件的默认值”可以清掉它；这时 A 的卡片写的是 A 不会启动，而不是文件里的控制器。
 栈文档本身读不出来时，客户端指令只按文件和保存的选择判断；这时选择读不出来或用不了，就算作“不知道 A 在跑哪个控制器”（规则 v3 和斜坡规则都拒绝，什么都不强制），
 因为 A 可能是在选择坏掉之前按它启动的。没有有效的控制文件时栈是关闭的，卡片显示的是文件的问题；保存的选择留着，文件回来之前不对它说什么。
 A 启动成哪个控制器只在一处决定
@@ -780,8 +781,8 @@ A 只按窗口里写的那个控制器启动。读窗口之后页面要启动的
 引导式启动在接受请求时检查一次，等完标记、真正启动 A 时再检查一次。不带这个字段的请求（字段出现之前打开的页面）照旧启动 A。
 
 **A 在运行什么，看 A 的记录，不看下拉框也不看文件。** 文件是实时读的，但页面说什么、强制什么，跟的是正在运行的 A：A 的记录保存着它启动时用的
-控制器、预设和环境文件。A 运行时选择不能改；如果文件变了、使页面现在会启动另一个控制器（没有保存的选择，或 `anyspeedup_root` 换了），A 就显示为未就绪
-（`a.control_changed`：B、C 等着，A 仍可停止），卡片写出 A 运行的是什么、页面现在会启动什么，客户端启动时规则 v3 被拒绝（启动检查 `arm_controller_matches`，
+控制器、预设和环境文件。A 运行时选择不能改；如果文件变了、使页面不会再按 A 正在运行的控制器启动 A（没有保存的选择时换了控制器，`anyspeedup_root` 换了，
+或保存的选择文件不再允许、页面什么都不会启动），A 就显示为未就绪（`a.control_changed`：B、C 等着，A 仍可停止），卡片写出 A 运行的是什么、页面现在会怎么做，客户端启动时规则 v3 被拒绝（启动检查 `arm_controller_matches`，
 预览会警告）。选的是 anyspeedup（在卡片上或文件里）、而正在运行的 A 不是本页启动的（本页不知道在跑什么）或无法判断时，同样拒绝。用实验室的控制器、A 是手动启动的
 （通常的用法）时，什么都不要求，什么都不变。栈文档的 `act.arm`（`configured`：页面将用哪个控制器启动 A；`file`：文件里的默认值；`choice`：`state` 为
 `default`、`chosen`、`unusable` 或 `unreadable`，带保存的控制器和预设，以及让 A 不能启动的代码；`running`、`status`、`alpha`、`problem`、`ramp_ok`、`suffix`；

@@ -424,7 +424,9 @@ describe("outside the product, or with the controls off or unread, nothing can b
       expect(said).toContain(
         "A starts as: the lab's controller (the control file's default).",
       );
-      expect(said).toContain("Rule v3 is refused until they agree");
+      expect(said).toContain(
+        "The control file changed while A ran: this page would no longer start A as the arm controller A runs. Rule v3 is refused until the two agree again.",
+      );
       expect(said).toContain("stop A, choose it above, start A");
       expect(line(host)!.getAttribute("data-status")).toBe("changed");
     });
@@ -626,6 +628,27 @@ describe("outside the product, or with the controls off or unread, nothing can b
       expect(button(host, "Use the control file's default")!.disabled).toBe(
         false,
       );
+    });
+
+    test("a saved choice the file no longer allows: the card says A does not start, in both languages", async () => {
+      const english = await open(stackDoc("arm_choice_unusable"));
+      const card = text(line(english.host));
+      expect(card).toContain(
+        "A does not start: the arm controller chosen on this page cannot be used now. Choose one again, or use the control file's default (the lab's controller).",
+      );
+      expect(card).not.toContain("A starts as:");
+      expect(
+        text(
+          english.host.querySelector(
+            "[data-testid=marvel0-arm-choice-problem]",
+          ),
+        ),
+      ).toBe(en["marvel0.ctl.block.arm_choice_no_anyspeedup"]);
+      expect(
+        button(english.host, "Use the control file's default")!.disabled,
+      ).toBe(false);
+      const chinese = await open(stackDoc("arm_choice_unusable"), true);
+      expect(text(line(chinese.host))).toContain("A 不会启动");
     });
 
     test("a refusal is said under the select in the backend's words, in Chinese too", async () => {

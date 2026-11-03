@@ -1688,11 +1688,12 @@ class Act:
             key == "a"
             and stack_units.arm_identity_of(rec) != ctx_in["specs"].arm_identity
         ):
-            # The page would now start another arm controller than the one this
-            # A was started as: the control file changed while A ran (the choice
-            # on A's card cannot change then). Also for an A that was ready: the
-            # log's rules are not read again once latched, and the card must not
-            # go on saying "ready" for another controller. Still ours to stop.
+            # The page would no longer start A as the arm controller this A was
+            # started as: the control file changed while A ran (the choice on
+            # A's card cannot change then; a choice the file no longer allows
+            # would start nothing). Also for an A that was ready: the log's
+            # rules are not read again once latched, and the card must not go
+            # on saying "ready" for another controller. Still ours to stop.
             return {**base, "state": "unknown", "reason": "a.control_changed"}
         path = self._log_path(key, rec)
         latched = self._latched(key, rec)

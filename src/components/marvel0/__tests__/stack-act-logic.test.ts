@@ -817,6 +817,41 @@ describe("the arm controller the control file names and the one A runs", () => {
     expect(keys(off)).not.toContain("marvel0.ctl.arm.untried");
   });
 
+  test("a saved choice that cannot be used or read: the card says A does not start, not the file's controller", () => {
+    const keys = (view: Parameters<typeof armSays>[0]) =>
+      armSays(view).map((say) => ("key" in say ? say.key : "?"));
+    // (the backend's view: S1 chosen, then anyspeedup_root taken out of the
+    // file; the start of A is refused there)
+    const unusable = act("arm_choice_unusable").arm!;
+    expect(unusable.choice.state).toBe("unusable");
+    expect(unusable.configured).toEqual(unusable.file);
+    expect(armSays(unusable)[0]).toEqual({
+      key: "marvel0.ctl.arm.configured_blocked",
+      params: { file: { key: "marvel0.ctl.arm.name_lab" } },
+    });
+    expect(keys(unusable)).not.toContain("marvel0.ctl.arm.configured");
+    const unreadable = armView({
+      ...quiet,
+      file: { controller: "anyspeedup", preset: "today" },
+      configured: { controller: "anyspeedup", preset: "today" },
+      choice: { state: "unreadable", code: "arm_choice_unreadable" },
+    })!;
+    expect(armSays(unreadable)[0]).toEqual({
+      key: "marvel0.ctl.arm.configured_blocked",
+      params: {
+        file: {
+          key: "marvel0.ctl.arm.name_anyspeedup",
+          params: { preset: "today" },
+        },
+      },
+    });
+    expect(keys(unreadable)).not.toContain("marvel0.ctl.arm.configured");
+    // the stack off with a broken choice: still that A does not start
+    expect(keys({ ...unusable, enabled: false })[0]).toBe(
+      "marvel0.ctl.arm.configured_blocked",
+    );
+  });
+
   test("the select of A's controller is read from the backend's own views", () => {
     const offered = act("arm_choice_offered").arm!;
     expect(offered.canChoose).toBe(true);
