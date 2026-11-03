@@ -86,6 +86,7 @@ _GOLDEN_FORCED = {
     "early_trigger": False,
     "grasp_replan_m": 0.0,
     "close_hold": False,
+    "hover_dp_m": 0.0,
 }
 
 # Validated ranges (section 5, "validation range" column): name -> (lo, hi, lo_open). Optional (None) fields are
@@ -133,6 +134,10 @@ _RANGES = {
     "bisect_iters": (1, 32, False),
     "pause_dp": (0.0, 0.002, False),
     "pause_dr": (0.0, 0.01, False),
+    # hover: 0 = off; above 10 mm a slow approach would run at today's pace
+    "hover_dp_m": (0.0, 0.01, False),
+    "hover_dr_rad": (0.0, 0.05, False),
+    "hover_rows": (2, 10, False),
     "blend_min_ticks": (1, 5, False),
     "blend_max_ticks": (1, 5, False),
     "blend_stretch_max_ticks": (1, 8, False),
@@ -181,6 +186,7 @@ _INT_FIELDS = frozenset(
         "gate_max_ticks",
         "settle_stable_ticks",
         "delay_history",
+        "hover_rows",
     }
 )
 _BOOL_FIELDS = frozenset(
@@ -308,6 +314,23 @@ class PhaseParams:
     bisect_iters: int = 8
     pause_dp: float = 0.0005  # m and rad: a segment shorter than both is a policy pause, taken at lambda_max
     pause_dr: float = 0.005
+    # Hover (real runs 2026-11-03, tennis ball, RTC + v3 at lambda 3.0): the arm stayed still at the start for 27.6 / 25.5
+    # / 42.9 s (11-03 without acceleration 0.4 and 17.7 s). Every segment of those plans was a pause, so lambda ran at
+    # lambda_max (binding "max") and RTC asked the policy on 0.99 of the ticks with the last plan's 7 remaining rows (3 for
+    # the delay); each reply planned 2.4 mm from row 0 to row 9 (median, p90 3.6). Walking a plan that does not move saves
+    # no time. When the WHOLE plan ahead is static (every stored row from the phase's floor row to the last one, plain's
+    # rows past its horizon included, within hover_dp_m of the first row of that window, every rotation axis within
+    # hover_dr_rad, and no gripper change after the phase), lambda is 1 and the binding "hover"; then the early trigger
+    # and the VLASH prefetch ask at about today's pace. A pause followed by motion in the same plan keeps lambda_max (the
+    # rule above). The window has at least hover_rows rows: with fewer left ahead it reaches back behind the phase, so a
+    # slow steady motion near the end of its plan (1.08 mm per row: 4.3 mm from row 5 to row 9 of 10) or a short rest at
+    # the end of a moving plan is not a hover. Thresholds from the engine logs of those three episodes (960 start-up
+    # ticks, this exact rule): farthest row 2.05 mm median, 3.25 mm p90, 4.41 mm p98, rotation 4.0 / 6.5 / 11.0 mrad;
+    # 98.5 % of those ticks fall under 5 mm and 20 mrad. The plans of the other 23 v3 episodes of 11-02 / 11-03 (tick 10
+    # on) reach 45.9 mm (median) and 57 mrad, and 9.1 % of their ticks count as hover. 0 turns it off; golden forces 0.
+    hover_dp_m: float = 0.005
+    hover_dr_rad: float = 0.02
+    hover_rows: int = 6  # 0.6 s of plan; the logged hover window had 7 rows on 938 of the 960 ticks (u = 3 of 10 rows)
 
     # ---- blending (section 3.7) ----
     blend: bool = True
@@ -626,6 +649,7 @@ BINDINGS = (
     "step",
     "end",
     "grasp",
+    "hover",
 )  # the keys of summary()["binding"] (section 8): which term bound lambda on a tick
 _SNAP = 1e-9  # a phase this close to an integer row IS that row (float sums like (o + G) - o must not drop a row)
 _GATE_STOP = (
@@ -807,6 +831,8 @@ class PhaseEngine:
         self._nseg = 0
         self._dpl = self._drl = self._lv = self._lw = self._lk = []
         self._pause = self._win = []
+        # per stored row: the plan from it to the last row is static (hover)
+        self._static: list[bool] = []
         self._G: list[int] = []  # chunk-local gripper change rows
         self._prof = None
         self._prof_key = None
@@ -1012,6 +1038,22 @@ class PhaseEngine:
                 if 0 <= a < self._nseg:
                     win[a] = True
         self._win = win
+        # hover: the plan from stored row a on is static when the window of rows a0..n-1, a0 = min(a, n - hover_rows),
+        # stays within hover_dp_m / hover_dr_rad of row a0 and no gripper change lies after row a (O(n^2) on n <= ~22
+        # rows, once per plan change)
+        static = np.zeros(n, dtype=bool)
+        if not self._golden and p.hover_dp_m > 0.0 and p.hover_dr_rad > 0.0:
+            P, E = R[:, :3], R[:, 3:6]
+            later = np.triu(np.ones((n, n), dtype=bool))  # [a0, b]: b >= a0
+            dist = np.linalg.norm(P[None, :, :] - P[:, None, :], axis=2)
+            rot = np.abs(wrap_to_pi(E[None, :, :] - E[:, None, :])).max(axis=2)
+            ok = (np.where(later, dist, 0.0).max(axis=1) < p.hover_dp_m) & (
+                np.where(later, rot, 0.0).max(axis=1) < p.hover_dr_rad
+            )
+            static = ok[np.minimum(np.arange(n), max(n - p.hover_rows, 0))]
+            if self._G:
+                static &= lo + np.arange(n) >= self._G[-1]
+        self._static = static.tolist()
 
     def _profile(self, dhat: float):
         """Per-segment braked lambda caps and their labels for the lag estimate ``dhat`` (cached)."""
@@ -1091,6 +1133,25 @@ class PhaseEngine:
         j0 = _floor(u)
         l1, _ = self._cmin(prof, j0, _floor(u + lam_prev))
         return self._cmin(prof, j0, _floor(u + max(lam_prev, l1)))
+
+    def _hover_at(self, u: float) -> bool:
+        """The whole plan ahead of phase u is static (PhaseParams.hover_dp_m): from the floor row to the last stored
+        row, gripper changes included. Not part of the segment profile: a static rest at the end of a moving plan must
+        not brake the motion before it, only the ticks spent inside the rest run at lambda 1."""
+        st = self._static
+        if not st:
+            return False
+        a = _floor(u) - self._lo
+        return st[0 if a < 0 else (len(st) - 1 if a >= len(st) else a)]
+
+    def _cap(self, u: float, lam_prev: float, prof):
+        """(cap, binding, hover): ``_lam_hat`` and then the hover rule, which caps lambda at 1 while the plan ahead is
+        static. The tick (``_propose``) and plain's open-loop count (``_open_loop_ticks``) use the same cap."""
+        cap, bind = self._lam_hat(u, lam_prev, prof)
+        hover = self._hover_at(u)
+        if hover and cap > 1.0:
+            cap, bind = 1.0, "hover"
+        return cap, bind, hover
 
     def _X(self, phi: float) -> np.ndarray:
         """X(phi): the plan interpolated at chunk-local phase phi (float64 (7,)); the gripper is the floor row's."""
@@ -1431,7 +1492,7 @@ class PhaseEngine:
         u, lam, dlam = u0, self._lam, self._dlam
         end = float(h - 1)
         for k in range(1, 400):
-            cap, _ = self._lam_hat(u, lam, prof)
+            cap, _, _ = self._cap(u, lam, prof)
             a = _floor(u) - self._lo
             dp = self._dpl[a] if 0 <= a < self._nseg else 0.0
             rise = min(
@@ -1667,6 +1728,7 @@ class PhaseEngine:
                 "bind": "end",
                 "cap": 0.0,
                 "landing": False,
+                "hover": False,
             }
             self._prop_valid = True
             return
@@ -1675,6 +1737,7 @@ class PhaseEngine:
         bind = "max"
         gov_on = False
         landing = False
+        hover = False
         if self._golden:
             cap = lam = 1.0
             s_c = s + 1.0
@@ -1684,7 +1747,7 @@ class PhaseEngine:
             bind = "landing"
         else:
             prof = self._profile(self._dhat)
-            cap, bind = self._lam_hat(u, self._lam, prof)
+            cap, bind, hover = self._cap(u, self._lam, prof)
             lam0 = cap
             if lam0 > 1.0 and self._post_active():
                 lam0, bind = 1.0, "post"
@@ -1730,6 +1793,7 @@ class PhaseEngine:
             "bind": bind,
             "cap": cap,
             "landing": landing,
+            "hover": hover,
         }
         self._prop_valid = True
 
@@ -1824,6 +1888,8 @@ class PhaseEngine:
         self._st["ticks"] += 1
         if self._R is None:
             return self._hold_tick(m, "end", noplan=True)
+        if prop["hover"]:  # the plan ahead was static: lambda <= 1 by the hover rule
+            self._st["hover_ticks"] += 1
         s, o = self._s, self._o
         s_c = prop["s_cand"]
         bind = prop["bind"]
@@ -2406,6 +2472,7 @@ class PhaseEngine:
             "grasp_replans": int(st["grasp_replans"]),
             "grasp_hold_ticks": int(st["grasp_hold_ticks"]),
             "grasp_issue_hold_ticks": int(st["grasp_issue_hold_ticks"]),
+            "hover_ticks": int(st["hover_ticks"]),
             "ws_shrinks": int(st["ws_shrinks"]),
             "reanchored_to_measured": int(st["reanchored_to_measured"]),
             "leash_recoveries": int(st["leash_recoveries"]),

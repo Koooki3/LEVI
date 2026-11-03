@@ -78,6 +78,9 @@ DEFAULTS = {
     "bisect_iters": 8,
     "pause_dp": 0.0005,
     "pause_dr": 0.005,
+    "hover_dp_m": 0.005,
+    "hover_dr_rad": 0.02,
+    "hover_rows": 6,
     "blend": True,
     "blend_min_ticks": 2,
     "blend_max_ticks": 5,
@@ -446,7 +449,7 @@ class TestInterface(unittest.TestCase):
         self.assertIs(
             TickOut(np.zeros(7, np.float32), 0.0, 0.0, 0.0, 1.0, 1.0).reset, False
         )
-        self.assertEqual(len(phase.BINDINGS), 16)
+        self.assertEqual(len(phase.BINDINGS), 17)
 
     def test_dataclass_fields(self):
         self.assertEqual(
@@ -3101,6 +3104,148 @@ class TestOutputsAndRange(unittest.TestCase):
         self.assertGreater(total, 800)
 
 
+HOVER_POSE = np.array([0.45, 0.0, 0.30, 3.1, 0.01, -0.8, 1.0], np.float32)
+
+
+def hover_plan(n=10, seed=0, pose=HOVER_POSE, jitter=0.0012, rot_jitter=0.002):
+    """A plan that stays put: n rows at ``pose`` with seeded jitter per row and axis (the real hover chunks of
+    2026-11-03 planned 2.4 mm from row 0 to row 9, median, p90 3.6)."""
+    rng = np.random.default_rng(seed)
+    rows = np.tile(np.asarray(pose, np.float64), (n, 1))
+    rows[:, :3] += rng.uniform(-jitter, jitter, (n, 3))
+    rows[:, 3:6] += rng.uniform(-rot_jitter, rot_jitter, (n, 3))
+    return rows.astype(np.float32)
+
+
+def straight_plan(start, n, step, grip=1.0):
+    """n rows along +x from ``start``, ``step`` m apart (a straight line: no curvature cap)."""
+    rows = np.tile(np.asarray(start, np.float64), (n, 1))
+    rows[:, 0] += step * np.arange(n)
+    rows[:, 6] = grip
+    return rows.astype(np.float32)
+
+
+class TestHover(unittest.TestCase):
+    """The hover rule (PhaseParams.hover_dp_m, real runs 2026-11-03): lambda 1 with binding "hover" while the whole plan
+    ahead is static; a pause followed by motion keeps lambda_max; a moving plan releases it at once."""
+
+    P = PhaseParams.for_page(3.0, 0.005)
+    OFF = dataclasses.replace(P, hover_dp_m=0.0)
+
+    def test_a_static_plan_runs_at_lambda_one_with_binding_hover(self):
+        plan = hover_plan(40)
+        eng = PhaseEngine(self.P)
+        log = run_open(eng, PerfectArm(plan[0]), plan, max_ticks=20)
+        self.assertEqual(
+            log[0][1].binding, "landing"
+        )  # the synchronous load lands on row 0
+        rest = [out for _, out, _ in log[1:]]
+        self.assertEqual(len(rest), 19)
+        for out in rest:
+            self.assertEqual((out.lam, out.cap, out.binding), (1.0, 1.0, "hover"))
+        s = eng.summary()
+        self.assertEqual(s["hover_ticks"], 19)
+        self.assertEqual(s["binding"]["hover"], 19)
+        # today's rule on the same plan: every segment is a pause, taken at lambda_max (the 11-03 stall)
+        off = PhaseEngine(self.OFF)
+        log_off = run_open(off, PerfectArm(plan[0]), plan, max_ticks=20)
+        self.assertAlmostEqual(max(out.lam for _, out, _ in log_off), 3.0)
+        self.assertNotIn("hover", {out.binding for _, out, _ in log_off})
+        self.assertEqual(off.summary()["hover_ticks"], 0)
+
+    def test_a_pause_between_motions_keeps_lambda_max(self):
+        start = HOVER_POSE.copy()
+        go = straight_plan(start, 6, 0.005)
+        rest = np.tile(go[-1], (12, 1))
+        on = straight_plan(go[-1], 13, 0.005)[1:]
+        plan = np.vstack([go, rest, on]).astype(np.float32)
+        logs = {}
+        for name, params in (("on", self.P), ("off", self.OFF)):
+            eng = PhaseEngine(params)
+            logs[name] = run_open(eng, PerfectArm(plan[0]), plan, max_ticks=40)
+            self.assertEqual(eng.summary()["hover_ticks"], 0, name)
+        in_pause = [out for u, out, _ in logs["on"] if 6.0 <= u < 17.0]
+        self.assertTrue(in_pause)
+        self.assertAlmostEqual(max(out.lam for out in in_pause), 3.0)
+        self.assertNotIn("hover", {out.binding for _, out, _ in logs["on"]})
+        # the rule changes nothing on a plan that moves after its pause
+        self.assertEqual(len(logs["on"]), len(logs["off"]))
+        for (_, a, _), (_, b, _) in zip(logs["on"], logs["off"]):
+            np.testing.assert_array_equal(a.target, b.target)
+            self.assertEqual((a.lam, a.binding), (b.lam, b.binding))
+
+    def test_hover_releases_within_one_tick_when_a_moving_plan_arrives(self):
+        eng = PhaseEngine(self.P)
+        arm = PerfectArm(HOVER_POSE)
+        eng.set_chunk(hover_plan(10, seed=1), "sync")
+        for k in range(4):
+            eng.begin(Measured(arm.pose(), 0.0, k * DT), None)
+            out = eng.commit()
+            arm.step(out.target)
+            eng.executed(out.target)
+        self.assertEqual((out.binding, out.lam), ("hover", 1.0))
+        hovered = eng.summary()["hover_ticks"]
+        # an RTC reply that moves: 5 mm per row along a straight line from where the target is
+        eng.swap(straight_plan(out.target, 10, 0.005), eng.s)
+        eng.begin(Measured(arm.pose(), 0.0, 4 * DT), None)
+        nxt = eng.commit()
+        self.assertNotEqual(nxt.binding, "hover")
+        self.assertGreater(nxt.lam, 1.0)  # rising at the rate limit from 1, not held
+        self.assertEqual(eng.summary()["hover_ticks"], hovered)
+
+    def test_a_dwell_before_a_gripper_change_is_no_hover(self):
+        plan = hover_plan(20, seed=2)
+        plan[15:, 6] = 0.0  # a close at row 15: the arm waits, then grasps
+        eng = PhaseEngine(self.P)
+        log = run_open(eng, PerfectArm(plan[0]), plan, max_ticks=8)
+        self.assertEqual(eng.summary()["hover_ticks"], 0)
+        self.assertNotIn("hover", {out.binding for _, out, _ in log})
+        self.assertGreater(max(out.lam for _, out, _ in log), 2.0)
+
+    def test_slow_motion_near_the_end_of_its_plan_is_no_hover(self):
+        """1.08 mm per row: rows 5 to 9 span 4.3 mm, under hover_dp_m. The window reaches back to hover_rows rows (6
+        rows, 5.4 mm), so the end of a slowly moving plan is not taken for a hover; with 5 rows it would be."""
+        plan = straight_plan(HOVER_POSE, 10, 0.00108)
+        for rows, want in ((6, 0), (5, None)):
+            eng = PhaseEngine(dataclasses.replace(self.P, hover_rows=rows))
+            run_open(eng, PerfectArm(plan[0]), plan, max_ticks=20)
+            got = eng.summary()["hover_ticks"]
+            if want is None:
+                self.assertGreater(got, 0)
+            else:
+                self.assertEqual(got, want)
+
+    def test_plain_walks_a_static_plan_at_lambda_one(self):
+        """Plain's open-loop count includes the rule: a static plan of h 6 rows takes 5-6 ticks, as today."""
+        for seed in range(5):
+            plan = hover_plan(10, seed=seed)
+            on, off = PhaseEngine(self.P), PhaseEngine(self.OFF)
+            m_on = on.splice_plain(plan, Measured(plan[0], 0.0, 0.0), 6)
+            m_off = off.splice_plain(plan, Measured(plan[0], 0.0, 0.0), 6)
+            self.assertGreaterEqual(m_on, 5, seed)
+            self.assertLess(m_off, m_on, seed)
+
+    def test_golden_has_no_hover_and_the_range_is_checked(self):
+        g = PhaseParams.golden_params()
+        self.assertEqual(g.hover_dp_m, 0.0)
+        eng = PhaseEngine(g)
+        plan = hover_plan(20)
+        log = run_open(eng, PerfectArm(plan[0]), plan, max_ticks=10)
+        self.assertEqual({out.binding for _, out, _ in log}, {"max"})
+        self.assertEqual(eng.summary()["hover_ticks"], 0)
+        for kwargs in (
+            {"hover_dp_m": 0.0101},
+            {"hover_dp_m": -0.001},
+            {"hover_dr_rad": 0.051},
+            {"hover_rows": 1},
+            {"hover_rows": 11},
+            {"hover_rows": 5.5},
+        ):
+            with self.assertRaises(ValueError, msg=str(kwargs)):
+                PhaseParams(**kwargs)
+        PhaseParams(hover_dp_m=0.01, hover_dr_rad=0.05, hover_rows=10)  # inclusive ends
+
+
 class TestSummaryAndRecords(unittest.TestCase):
     """Test 14, engine part: summary() is the section 8 record, JSON-safe; drain_records() the trace lines."""
 
@@ -3163,6 +3308,7 @@ class TestSummaryAndRecords(unittest.TestCase):
                 "step",
                 "end",
                 "grasp",
+                "hover",
             },
         )
         self.assertEqual(s["ticks"], 60)
