@@ -324,13 +324,14 @@ class PhaseParams:
     # and the VLASH prefetch ask at about today's pace. A pause followed by motion in the same plan keeps lambda_max (the
     # rule above). The window has at least hover_rows rows: with fewer left ahead it reaches back behind the phase, so a
     # slow steady motion near the end of its plan (1.08 mm per row: 4.3 mm from row 5 to row 9 of 10) or a short rest at
-    # the end of a moving plan is not a hover. Thresholds from the engine logs of those three episodes (960 start-up
-    # ticks, this exact rule): farthest row 2.05 mm median, 3.25 mm p90, 4.41 mm p98, rotation 4.0 / 6.5 / 11.0 mrad;
-    # 98.5 % of those ticks fall under 5 mm and 20 mrad. The plans of the other 23 v3 episodes of 11-02 / 11-03 (tick 10
-    # on) reach 45.9 mm (median) and 57 mrad, and 9.1 % of their ticks count as hover. 0 turns it off; golden forces 0.
+    # the end of a moving plan is not a hover. Figures from hover_stats.py over the 26 v3 episodes of 11-02 / 11-03
+    # (--stall 20261103_154821, the three tennis episodes; its docstring defines each figure): 952 start-up stall
+    # ticks, window extent 2.85 / 3.98 / 5.22 mm (p50 / p90 / p98) and 5.1 / 7.9 / 10.9 mrad, 0.975 of them under 5 mm
+    # and 20 mrad, hover on 925. The other 23 episodes from tick 10 on: window extent 54.7 mm (median), hover on 222 of
+    # 2760 ticks, 0.080. 0 turns it off; golden forces 0.
     hover_dp_m: float = 0.005
     hover_dr_rad: float = 0.02
-    hover_rows: int = 6  # 0.6 s of plan; the logged hover window had 7 rows on 938 of the 960 ticks (u = 3 of 10 rows)
+    hover_rows: int = 6  # 0.6 s of plan
 
     # ---- blending (section 3.7) ----
     blend: bool = True

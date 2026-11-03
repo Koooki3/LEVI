@@ -6,17 +6,21 @@ either exact (PerfectArm) or a lag plant (first order D_alpha + 20 ms dead time 
 default or a lost tag fails in TestParamsDefaults / TestRelaxedTags, naming the field.
 """
 
+import contextlib
 import dataclasses
 import inspect
+import io
 import itertools
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
+import hover_stats
 import phase
 from phase import (
     ALPHAS,
@@ -3125,6 +3129,70 @@ def straight_plan(start, n, step, grip=1.0):
     return rows.astype(np.float32)
 
 
+def drift_master(n, dz=0.0, dyaw=0.0, pose=HOVER_POSE):
+    """n policy rows from ``pose`` that climb ``dz`` m and turn ``dyaw`` rad of yaw per row: every 10-row plan cut
+    from it stays within hover_dp_m / hover_dr_rad on its own when dz <= 0.5 mm and dyaw <= 2 mrad."""
+    rows = np.tile(np.asarray(pose, np.float64), (n, 1))
+    rows[:, 2] += dz * np.arange(n)
+    rows[:, 5] += dyaw * np.arange(n)
+    return rows.astype(np.float32)
+
+
+def drive(eng, arm, ticks, feed=None, k0=0):
+    """Tick ``eng`` (begin, commit, executed on ``arm``) for ticks k0 .. k0 + ticks - 1; ``feed(eng, k)`` may load or
+    append plans first. Returns [(u_before, TickOut, hovered)]: hovered = the tick counted in summary hover_ticks."""
+    log = []
+    for k in range(k0, k0 + ticks):
+        if feed is not None:
+            feed(eng, k)
+        u = eng.u
+        n0 = eng.summary()["hover_ticks"]
+        eng.begin(Measured(arm.pose(), 0.0, k * DT), None)
+        out = eng.commit()
+        arm.step(out.target)
+        eng.executed(out.target)
+        log.append((u, out, eng.summary()["hover_ticks"] > n0))
+    return log
+
+
+def load_once(rows, k0=0):
+    """A ``drive`` feed that loads ``rows`` synchronously on tick k0."""
+
+    def feed(eng, k):
+        if k == k0:
+            eng.set_chunk(rows, "sync")
+
+    return feed
+
+
+def vlash_feed(master, h=10, low=8.0):
+    """VLASH-like: the first h rows loaded on tick 0, then the next h appended whenever fewer than ``low`` rows are
+    left (a prefetch continues the path, as VLASH's does)."""
+    nxt = [h]
+
+    def feed(eng, k):
+        if k == 0:
+            eng.set_chunk(master[:h], "sync")
+        elif eng.rows_left < low and nxt[0] + h <= len(master):
+            eng.append(master[nxt[0] : nxt[0] + h])
+            nxt[0] += h
+
+    return feed
+
+
+def rtc_feed(master, every=3, h=10):
+    """RTC-like: master row j is global phase j + 1; a reply for the observation at the current phase replaces the
+    plan every ``every`` ticks."""
+
+    def feed(eng, k):
+        if k == 0:
+            eng.set_chunk(master[:h], "sync")
+        elif k % every == 0:
+            eng.swap(chunk_at(master, eng.s - 1.0, h), eng.s)
+
+    return feed
+
+
 class TestHover(unittest.TestCase):
     """The hover rule (PhaseParams.hover_dp_m, real runs 2026-11-03): lambda 1 with binding "hover" while the whole plan
     ahead is static; a pause followed by motion keeps lambda_max; a moving plan releases it at once."""
@@ -3244,6 +3312,82 @@ class TestHover(unittest.TestCase):
             with self.assertRaises(ValueError, msg=str(kwargs)):
                 PhaseParams(**kwargs)
         PhaseParams(hover_dp_m=0.01, hover_dr_rad=0.05, hover_rows=10)  # inclusive ends
+
+
+class TestHoverStats(unittest.TestCase):
+    """hover_stats.py, the source of the PhaseParams hover figures, re-derives the engine's own hover decisions from
+    its trace: RTC swaps and VLASH appends over a plan that stays put, then climbs slowly, then stays put again."""
+
+    P = PhaseParams.for_page(3.0, 0.005)
+
+    @staticmethod
+    def _master():
+        top = drift_master(200, dz=0.0002)[-1]
+        return np.vstack(
+            [
+                hover_plan(60, seed=7),
+                drift_master(200, dz=0.0002)[1:],
+                hover_plan(300, seed=8, pose=top),
+            ]
+        ).astype(np.float32)
+
+    def _trace(self, feed):
+        master = self._master()
+        eng = PhaseEngine(self.P)
+        log = drive(eng, PerfectArm(master[0]), 160, feed(master))
+        return eng, [h for _, _, h in log], eng.drain_records()
+
+    def test_the_script_reproduces_the_engine_tick_by_tick(self):
+        for name, feed in (("rtc", rtc_feed), ("vlash", vlash_feed)):
+            eng, hovered, records = self._trace(feed)
+            got = hover_stats.evaluate(records, self.P)
+            self.assertEqual([x["hover"] for x in got], hovered, name)
+            self.assertEqual(sum(hovered), eng.summary()["hover_ticks"], name)
+            self.assertTrue(any(hovered) and not all(hovered), name)
+
+    def test_the_command_line_reads_a_log_folder(self):
+        traces = {
+            n: self._trace(f)
+            for n, f in (
+                ("a_20261103_000000", rtc_feed),
+                ("b_20261103_000001", vlash_feed),
+            )
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, (_, _, records) in traces.items():
+                d = Path(tmp) / f"{name}.phase"
+                d.mkdir()
+                with (d / "ep_0000.jsonl").open("w") as fh:
+                    for r in records:
+                        fh.write(json.dumps(r) + "\n")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = hover_stats.main([tmp, "--stall", "a_2026", "--per-episode"])
+        self.assertEqual(rc, 0)
+        text = buf.getvalue()
+        self.assertIn("episodes 2, ticks 320,", text)
+        self.assertIn("stall episodes (a_2026): 1;", text)
+        for name, (eng, _, _) in traces.items():
+            self.assertIn(
+                f"{name}.phase/ep_0000.jsonl: ticks 160, hover {eng.summary()['hover_ticks']},",
+                text,
+            )
+
+    def test_plain_records_are_refused(self):
+        rows = hover_plan(10).tolist()
+        with self.assertRaisesRegex(ValueError, "plain"):
+            hover_stats.evaluate(
+                [
+                    {
+                        "kind": "chunk",
+                        "chunk_kind": "plain",
+                        "chunk_id": 0,
+                        "rows": rows,
+                        "origin": 1.0,
+                    }
+                ],
+                self.P,
+            )
 
 
 class TestSummaryAndRecords(unittest.TestCase):
