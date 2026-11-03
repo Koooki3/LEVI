@@ -359,15 +359,38 @@ for S2's lag yet; it comes after a real-arm check of S1. `anyspeedup_root` is an
 checked whichever controller is chosen, so that flipping the one word cannot reveal a typo; with `lab` the preset and
 the root are ignored.
 
-**To change the controller: stop A, change the file, start A.** The file is read live, but what the page says and forces
-follows the A that runs, not the file: A's record keeps the controller, preset and environment file it was started
-with. If the file then names another one, A shows as not ready (`a.control_changed`: B and C wait, A can still be
-stopped), the card says what A runs and what the file names, and rule v3 is refused at the client's start (the start
-check `arm_controller_matches`; the preview warns). The same refusal applies when the file names the anyspeedup
-controller and the A that runs was not started by this page (the page cannot know what runs) or cannot be judged. With
-`lab` in the file and a hand-started A, the usual flow, nothing is asked and nothing changes. The stack document's
-`act.arm` (`configured`, `running`, `status`, `alpha`, `problem`, `ramp_ok`, `suffix`; no path) is what the page shows
-on A's card; `control.arm` is the file's own view.
+**Choosing the controller on A's card.** The file's `arm_controller` and `arm_preset` are the **default** of terminal A.
+While A is stopped, A's card offers a select of three controllers: the lab's, anyspeedup `today` and anyspeedup `S1`
+(the file's own is marked "(default)"); "Use the control file's default" goes back to the file. The choice is the page's
+own, saved in the product workspace next to the stack's records (`<workspace>/marvel0/stack/arm_choice/record.json`,
+folder 0700, file 0600, schema `levi.marvel0.arm_choice.v1`, written whole; one audit line per change in `history.jsonl`
+beside it). **The control file is never written.** The route is `POST /api/levi/marvel0/stack/a/controller` with
+`request_id` and `controller` `lab`, `anyspeedup` (with `preset` `today` or `S1`) or `default` (a person's write, product
+LEVI only, under the machine-wide stack lock; a repeated `request_id` is answered again, never acted on twice). It is
+refused, each with its own code: `arm_choice_a_not_idle` unless A is stopped (starting, running, stopping, failed,
+started elsewhere and not known all count as not stopped), `arm_choice_busy` during a guided start or stop,
+`arm_choice_preset_refused` for `S2` (as in the file), `arm_choice_invalid` for anything else that is not on the list,
+`arm_choice_no_anyspeedup` for an anyspeedup choice when the file names no `anyspeedup_root`, and `control_disabled`
+with the stack off; the select is then off with that reason beside it. An anyspeedup choice still meets A's own start
+checks (`arm_controller_missing`, `arm_controller_unsafe`, `arm_controller_not_built`). A saved choice that can no
+longer be used (the file lost its `anyspeedup_root`) or cannot be read keeps A from starting (`arm_choice_no_anyspeedup`,
+`arm_choice_unreadable`) instead of starting the file's controller unannounced; "Use the control file's default" clears
+it. What A is started as is decided in one place (`arm_choice.effective`: the choice when it can be used, else the file)
+and everything follows it: A's argv and record, `act.arm`, and the client command (the forced alpha, `ramp_ok`, the
+rollout group's suffix). A's start window, and the whole stack's, name the controller A starts.
+
+**What A runs is A's record, not the select or the file.** The file is read live, but what the page says and forces
+follows the A that runs: A's record keeps the controller, preset and environment file it was started with. The choice
+cannot change while A runs; if the file changes so that the page would now start another controller (with no choice
+saved, or a new `anyspeedup_root`), A shows as not ready (`a.control_changed`: B and C wait, A can still be stopped),
+the card says what A runs and what the page would start, and rule v3 is refused at the client's start (the start check
+`arm_controller_matches`; the preview warns). The same refusal applies when the anyspeedup controller is chosen (on the
+card or in the file) and the A that runs was not started by this page (the page cannot know what runs) or cannot be
+judged. With the lab's controller and a hand-started A, the usual flow, nothing is asked and nothing changes. The stack
+document's `act.arm` (`configured`: what the page will start A as; `file`: the file's default; `choice`: `state`
+`default`, `chosen`, `unusable` or `unreadable`, with the saved controller and preset and the code that keeps A from
+starting; `running`, `status`, `alpha`, `problem`, `ramp_ok`, `suffix`; `options`, `choose_blockers`, `can_choose` for
+the select; no path) is what the page shows on A's card; `control.arm` is the file's own view.
 
 The controller keeps the name `cartesian_impedance_controller`, so C and the clients are unchanged. The Client command
 card goes by the A that runs: **with the anyspeedup controller, rule v3's `--phase-alpha` is the running preset's
@@ -379,7 +402,7 @@ refused** (`chunk_accel_rule_arm_preset`); with `today` and with the lab's contr
 and the alpha stays the person's, with the lab's controller, with no control file, or with the stack off (the page then
 does not start A and cannot know what runs). The hosted run's record and view say which controller ran
 (`arm_controller`, `arm_preset`: the A the page started; null for one it did not start), and the default rollout group
-gets the suffix `_any-<preset>` while an anyspeedup controller runs (before A runs, the one the file will start), so a
+gets the suffix `_any-<preset>` while an anyspeedup controller runs (before A runs, the one the page will start), so a
 lab run and an anyspeedup run at `today`, both with alpha 0.005, never share a group; a named group is kept, and a model
 whose default group no longer fits 80 characters needs a named one. The card also says that the anyspeedup controller
 has not run on the arm yet. **Known limit (outside LEVI):** the lab's own launch checks for a running arm controller only
@@ -726,18 +749,34 @@ C 之前的检查 5 秒，C 启动、3 秒后就绪：**从按键到 C 就绪约
 `. _ / -`，`arm_controller` 为 `anyspeedup` 时必填（栈关闭时也一样）。三个值不论选哪个控制器都会检查，这样把那一个词改回去时不会冒出笔误；选
 `lab` 时预设和根路径被忽略。
 
-**要换控制器：先停 A，再改文件，再启动 A。** 文件是实时读的，但页面说什么、强制什么，跟的是正在运行的 A，不是文件：A 的记录保存着它启动时用的
-控制器、预设和环境文件。之后文件里写了别的，A 就显示为未就绪（`a.control_changed`：B、C 等着，A 仍可停止），卡片写出 A 运行的是什么、文件里写的是什么，
-客户端启动时规则 v3 被拒绝（启动检查 `arm_controller_matches`，预览会警告）。文件写 anyspeedup、而正在运行的 A 不是本页启动的（本页不知道在跑什么）或无法判断时，
-同样拒绝。文件写 `lab`、A 是手动启动的（通常的用法）时，什么都不要求，什么都不变。栈文档的 `act.arm`（`configured`、`running`、`status`、`alpha`、`problem`、
-`ramp_ok`、`suffix`，不含路径）就是页面在 A 卡片上显示的内容；`control.arm` 是文件本身的视图。
+**在 A 的卡片上选控制器。** 文件里的 `arm_controller`、`arm_preset` 是终端 A 的**默认值**。A 停止时，A 的卡片上有一个下拉框，三个选项：
+实验室的控制器、anyspeedup `today`、anyspeedup `S1`（文件里写的那个标着“（默认）”）；“改回控制文件的默认值”回到文件。这个选择是页面自己的，
+保存在产品工作区里、栈的记录旁边（`<workspace>/marvel0/stack/arm_choice/record.json`，文件夹 0700、文件 0600、schema
+`levi.marvel0.arm_choice.v1`、整份写入；每次改动在旁边的 `history.jsonl` 记一行审计）。**控制文件从不被写。** 路由是
+`POST /api/levi/marvel0/stack/a/controller`，带 `request_id` 和 `controller`：`lab`、`anyspeedup`（再带 `preset`：`today` 或 `S1`）
+或 `default`（只有人能写，只在产品 LEVI 里，持机器级栈锁；重发同一个 `request_id` 会再答一次，不会做两次）。以下情况拒绝，各有各的代码：
+A 没有停止时 `arm_choice_a_not_idle`（启动中、运行中、停止中、失败、别处启动的、无法判断都算没停）；引导式启动或停止进行中 `arm_choice_busy`；
+`S2` 是 `arm_choice_preset_refused`（和文件一样）；清单以外的其他值 `arm_choice_invalid`；文件没写 `anyspeedup_root` 时选 anyspeedup 是
+`arm_choice_no_anyspeedup`；栈关闭时 `control_disabled`。这时下拉框不可用，旁边写着原因。选了 anyspeedup 仍要过 A 自己的启动检查
+（`arm_controller_missing`、`arm_controller_unsafe`、`arm_controller_not_built`）。保存的选择后来用不了（文件里去掉了 `anyspeedup_root`）或读不出来时，
+A 不启动（`arm_choice_no_anyspeedup`、`arm_choice_unreadable`），而不是悄悄改用文件里的控制器；“改回控制文件的默认值”可以清掉它。A 启动成哪个控制器只在一处决定
+（`arm_choice.effective`：选择能用就用选择，否则用文件），下游全都跟它走：A 的 argv 和记录、`act.arm`、客户端指令（强制的 alpha、`ramp_ok`、rollout 组的后缀）。
+A 的启动确认窗口和整个栈的启动窗口都写明 A 启动的是哪个控制器。
+
+**A 在运行什么，看 A 的记录，不看下拉框也不看文件。** 文件是实时读的，但页面说什么、强制什么，跟的是正在运行的 A：A 的记录保存着它启动时用的
+控制器、预设和环境文件。A 运行时选择不能改；如果文件变了、使页面现在会启动另一个控制器（没有保存的选择，或 `anyspeedup_root` 换了），A 就显示为未就绪
+（`a.control_changed`：B、C 等着，A 仍可停止），卡片写出 A 运行的是什么、页面现在会启动什么，客户端启动时规则 v3 被拒绝（启动检查 `arm_controller_matches`，
+预览会警告）。选的是 anyspeedup（在卡片上或文件里）、而正在运行的 A 不是本页启动的（本页不知道在跑什么）或无法判断时，同样拒绝。用实验室的控制器、A 是手动启动的
+（通常的用法）时，什么都不要求，什么都不变。栈文档的 `act.arm`（`configured`：页面将用哪个控制器启动 A；`file`：文件里的默认值；`choice`：`state` 为
+`default`、`chosen`、`unusable` 或 `unreadable`，带保存的控制器和预设，以及让 A 不能启动的代码；`running`、`status`、`alpha`、`problem`、`ramp_ok`、`suffix`；
+下拉框用的 `options`、`choose_blockers`、`can_choose`；不含路径）就是页面在 A 卡片上显示的内容；`control.arm` 是文件本身的视图。
 
 控制器保持 `cartesian_impedance_controller` 这个名字，所以 C 和各个客户端都不变。“客户端指令”卡跟的是正在运行的 A：**用 anyspeedup 控制器时，
 规则 v3 的 `--phase-alpha` 就是运行中预设的 alpha**（`today` 0.005，`S1` 0.01）：卡片上显示它而且改不了，`chunk_accel_alpha` 留空就是它，别的值被拒绝
 （`chunk_accel_alpha_arm_mismatch`，预览和托管运行启动时都一样；接着上一次运行、而控制器在其间变了的，要重新做一条指令）。规则 v1、v2（斜坡客户端）写死了实验室控制器的
 0.2 s 滞后（`accel.TAU`），所以**用 anyspeedup 控制器、预设不是 `today` 时它们被拒绝**（`chunk_accel_rule_arm_preset`）；`today` 和实验室控制器下照常提供。
 用实验室控制器、没有控制文件、或栈关闭时（页面不启动 A，也无从知道在跑什么）什么都不强制，alpha 由人选。托管运行的记录和视图写明用的是哪个控制器
-（`arm_controller`、`arm_preset`：本页启动的那个 A；不是本页启动的则为 null），anyspeedup 控制器在运行（A 还没运行时，是文件将要启动的那个）时默认的 rollout 组加后缀
+（`arm_controller`、`arm_preset`：本页启动的那个 A；不是本页启动的则为 null），anyspeedup 控制器在运行（A 还没运行时，是页面将要启动的那个）时默认的 rollout 组加后缀
 `_any-<preset>`，这样实验室控制器和 anyspeedup 在 `today`（alpha 同为 0.005）下的两次运行不会混在一组；指定的组名照旧，默认组名超过 80 个字符的模型要指定组名。
 卡片上还写着 anyspeedup 控制器还没有在机械臂上运行过。**已知的限制（在 LEVI 之外）：** 实验室自己的 launch 只按它自己的 `controllers.yaml` 判断有没有机械臂控制器在运行，
 所以它不会拒绝在 anyspeedup 的 A 旁边启动；手动启动任何东西之前先看 `pgrep -af ros2_control_node`（两种都能匹配）。
