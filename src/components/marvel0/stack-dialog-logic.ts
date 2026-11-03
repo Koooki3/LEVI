@@ -11,6 +11,7 @@
 // and stopping from the page is new), and the dialog says so.
 import type { Say } from "./marvel0-logic";
 import {
+  armName,
   compPhrase,
   phraseFor,
   stopControl,
@@ -80,9 +81,19 @@ const attestOf = (keys: string[]): Attest[] =>
 
 /** The hazard lines of the terminals the whole stack's start brings up, A
  * then B then C: each as its own single start's window says it. */
-const SEQUENCE_HAZARD: string[] = ["A", "B", "C"].flatMap(
-  (id) => START_HAZARD[id as CompId],
-);
+/** The hazard lines of starting a terminal, with the arm controller A is
+ * started as right after A's own line (it can be chosen on A's card, so the
+ * window that starts A says which one). */
+function startHazards(ids: CompId[], act: ActView | null): Say[] {
+  const arm = act?.arm?.configured;
+  return ids.flatMap((id) => [
+    ...START_HAZARD[id].map((key) => k(key)),
+    ...(id === "A" && arm
+      ? [k("marvel0.ctl.hazard.arm_controller", { what: armName(arm) })]
+      : []),
+  ]);
+}
+
 /** The checks of the whole stack's start: those of A, B and C, each once, in
  * the order the terminals come up (the backend names them per terminal). */
 export function sequenceAttest(act: ActView | null): string[] {
@@ -98,7 +109,7 @@ export function dialogSpec(want: DialogKind, act: ActView | null): DialogSpec {
       return {
         title: k("marvel0.ctl.dialog.start_title", { name: NAME(want.comp) }),
         intro: k("marvel0.ctl.dialog.start_intro"),
-        hazards: START_HAZARD[want.comp].map((key) => k(key)),
+        hazards: startHazards([want.comp], act),
         estop: want.comp !== "M",
         attest: attestOf(act?.comps[want.comp].attest ?? []),
         phrase: compPhrase(act, "start", want.comp),
@@ -176,7 +187,7 @@ export function dialogSpec(want: DialogKind, act: ActView | null): DialogSpec {
         intro: k("marvel0.ctl.dialog.sequence_intro"),
         hazards: [
           k("marvel0.ctl.hazard.sequence_through"),
-          ...SEQUENCE_HAZARD.map((key) => k(key)),
+          ...startHazards(["A", "B", "C"], act),
         ],
         estop: true,
         attest: attestOf(sequenceAttest(act)),

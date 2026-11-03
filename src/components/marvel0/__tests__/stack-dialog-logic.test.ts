@@ -21,13 +21,35 @@ describe("what each confirmation asks", () => {
       act("ready_to_start_a"),
     );
     expect(spec.estop).toBe(true);
-    expect(spec.hazards).toEqual([{ key: "marvel0.ctl.hazard.start_A" }]);
+    expect(spec.hazards).toEqual([
+      { key: "marvel0.ctl.hazard.start_A" },
+      // which arm controller A starts as (chosen on A's card, else the file's)
+      {
+        key: "marvel0.ctl.hazard.arm_controller",
+        params: { what: { key: "marvel0.ctl.arm.name_lab" } },
+      },
+    ]);
     expect(spec.attest.map((a) => a.code)).toEqual(["desk_done", "estop_hand"]);
     expect(spec.phrase).toBe("start arm stack");
     expect(spec.danger).toBe(false);
     // Nothing is typed: the only text a person types is an override.
     expect(spec).not.toHaveProperty("typed");
     expect(spec.override).toBeNull();
+  });
+
+  test("starting A after a controller was chosen on A's card names that one", () => {
+    const spec = dialogSpec({ kind: "start", comp: "A" }, act("arm_chosen_s1"));
+    expect(spec.hazards[1]).toEqual({
+      key: "marvel0.ctl.hazard.arm_controller",
+      params: {
+        what: {
+          key: "marvel0.ctl.arm.name_anyspeedup",
+          params: { preset: "S1" },
+        },
+      },
+    });
+    const whole = dialogSpec({ kind: "sequence" }, act("arm_chosen_s1"));
+    expect(whole.hazards).toContainEqual(spec.hazards[1]);
   });
 
   test("starting B names the jaws; starting C names the sag and the open port and asks three checks", () => {

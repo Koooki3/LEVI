@@ -32,6 +32,9 @@ export interface StackApi {
   start(id: CompId, body: unknown): Promise<ApiResult>;
   stop(id: CompId, body: unknown): Promise<ApiResult>;
   marker(body: unknown): Promise<ApiResult>;
+  /** Chooses the arm controller A starts as next (only while A is stopped),
+   * or goes back to the control file's default. */
+  armChoice(body: unknown): Promise<ApiResult>;
   /** A's FCI check (`a`) or the read-only checks before C (`c`). */
   preflight(id: "A" | "C", body: unknown): Promise<ApiResult>;
   gripper(body: unknown): Promise<ApiResult>;
@@ -57,6 +60,7 @@ export function createStackApi({
     start: (id, body) => call(`stack/${lower(id)}/start`, limit.start, body),
     stop: (id, body) => call(`stack/${lower(id)}/stop`, limit.stop, body),
     marker: (body) => call("stack/marker", limit.check, body),
+    armChoice: (body) => call("stack/a/controller", limit.check, body),
     preflight: (id, body) =>
       call(`stack/${lower(id)}/preflight`, limit.check, body),
     gripper: (body) => call("stack/b/gripper", limit.check, body),
@@ -105,6 +109,17 @@ export const markerBody = (
   op: MarkerOp,
   confirm: string,
 ): Record<string, unknown> => ({ request_id: requestId, op, confirm });
+
+/** The body of A's controller choice (`ArmChoiceBody` of the backend):
+ * `controller` is `lab`, `anyspeedup` (with its `preset`) or `default`. */
+export const armChoiceBody = (
+  requestId: string,
+  pick: { controller: string; preset: string | null },
+): Record<string, unknown> => ({
+  request_id: requestId,
+  controller: pick.controller,
+  preset: pick.preset,
+});
 
 export const preflightBody = (requestId: string): Record<string, unknown> => ({
   request_id: requestId,

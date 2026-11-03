@@ -16,6 +16,7 @@ import { newRequestId } from "./deploy-logic";
 import type { Worded } from "./marvel0-json";
 import type { Say } from "./marvel0-logic";
 import {
+  armChoiceBody,
   gripperBody,
   markerBody,
   preflightBody,
@@ -56,6 +57,10 @@ export const workKey = (
       return "sequence_stop";
   }
 };
+
+/** The name of the write of A's controller choice (its refusal is shown under
+ * the select). */
+export const ARM_CHOICE_KEY = "arm_choice";
 
 /** How a write ended: went through, or the code of its refusal (`network`
  * when no answer came; null when another write was still going on). */
@@ -103,6 +108,13 @@ export interface StackActions {
   check: (comp: "A" | "C") => Promise<Outcome>;
   /** Ends the guided start or stop; nothing that already runs is stopped. */
   cancelSequence: () => Promise<Outcome>;
+  /** Chooses the arm controller A starts as next (`controller` `default`: the
+   * control file's again). No window: it starts nothing, and A's start has
+   * its own confirmation. */
+  chooseArm: (pick: {
+    controller: string;
+    preset: string | null;
+  }) => Promise<Outcome>;
   clear: () => void;
 }
 
@@ -221,6 +233,12 @@ export function useStackActions(
     [api, run],
   );
 
+  const chooseArm = useCallback(
+    (pick: { controller: string; preset: string | null }) =>
+      run(ARM_CHOICE_KEY, (id) => api.armChoice(armChoiceBody(id, pick))),
+    [api, run],
+  );
+
   const clear = useCallback(() => {
     setRefused(null);
     setDone(null);
@@ -237,6 +255,7 @@ export function useStackActions(
     gripper,
     check,
     cancelSequence,
+    chooseArm,
     clear,
   };
 }

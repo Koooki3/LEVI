@@ -16,7 +16,7 @@
 // stop are the barrier.
 import { useEffect, useState } from "react";
 import { CircleAlert, CircleX, RefreshCw } from "lucide-react";
-import { Badge, Button, Card } from "@/components/ds";
+import { Badge, Button, Card, Field, Select } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Notice } from "./notice";
 import { RefusedBlock, WordedText } from "./action-parts";
@@ -34,8 +34,12 @@ import {
   markerRemaining,
   operationRunning,
   stateKey,
+  armName,
+  armPick,
   armSays,
+  armValue,
   type ActView,
+  type ArmOption,
   type ArmView,
   type ControlError,
   type CompState,
@@ -49,6 +53,7 @@ import { dialogSpec, type DialogKind } from "./stack-dialog-logic";
 import { StackEvidence } from "./stack-evidence";
 import type { Polled } from "./use-polled";
 import {
+  ARM_CHOICE_KEY,
   useStackActions,
   type ConfirmInput,
   type StackActions,
@@ -233,24 +238,124 @@ function MarkerBlock({
   );
 }
 
-/** Which arm controller the control file names and which one A runs,
- * read-only (stack-act-logic `armSays`): the file's, A's (what it was started
- * as; the file can be changed while A runs), why rule v3 is refused, the alpha
- * the client command is tied to, that the anyspeedup controller has not run on
- * the arm yet, and how to change it. */
-function ArmController({ arm }: { arm: ArmView }) {
+/** The arm controller of terminal A: a select of the offered controllers (the
+ * control file's marked as the default; saved on the page, never in the file,
+ * and only while A is stopped: off with the backend's reason otherwise), a
+ * way back to the file's default, and what A starts as and what A runs
+ * (stack-act-logic `armSays`: A's own record, not the select), why rule v3 is
+ * refused, the alpha the client command is tied to, that the anyspeedup
+ * controller has not run on the arm yet, and how to change it. */
+function ArmController({
+  arm,
+  actions,
+}: {
+  arm: ArmView;
+  actions: StackActions;
+}) {
   const { t } = useLocale();
+  const current = arm.configured ? armValue(arm.configured) : null;
+  const offered = arm.options.length > 0 && current !== null;
+  const off = !arm.canChoose || actions.working !== null || actions.locked;
+  const refused =
+    actions.refused?.key === ARM_CHOICE_KEY ? actions.refused : null;
+  const problem =
+    arm.choice.state === "unusable" || arm.choice.state === "unreadable"
+      ? arm.choice.code
+      : null;
+  const label = (option: ArmOption) => {
+    const what = armName(option);
+    if (!option.allowed)
+      return sayText(
+        { key: "marvel0.ctl.arm.option_unavailable", params: { what } },
+        t,
+      );
+    return option.isDefault
+      ? sayText({ key: "marvel0.ctl.arm.option_default", params: { what } }, t)
+      : sayText(what, t);
+  };
   return (
-    <p
-      className="rg-muted"
-      data-testid="marvel0-arm-controller"
-      data-status={arm.status}
-      data-running={arm.running?.controller ?? "none"}
+    <div
+      className="rg-arm-choice"
+      data-testid="marvel0-arm-choice"
+      data-choice={arm.choice.state}
     >
-      {armSays(arm)
-        .map((say) => sayText(say, t))
-        .join(" ")}
-    </p>
+      {offered && (
+        <Field
+          label={t("marvel0.ctl.arm.select_label")}
+          hint={t("marvel0.ctl.arm.select_hint")}
+        >
+          <Select
+            data-testid="marvel0-arm-select"
+            value={current}
+            disabled={off}
+            onChange={(event) => {
+              const pick = armPick(arm, event.target.value);
+              if (pick && !off) void actions.chooseArm(pick);
+            }}
+          >
+            {arm.options.map((option) => (
+              <option
+                key={armValue(option)}
+                value={armValue(option)}
+                disabled={!option.allowed}
+              >
+                {label(option)}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      )}
+      {offered && arm.choice.state !== "default" && (
+        <div className="rg-comp__buttons">
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={off}
+            loading={actions.working === ARM_CHOICE_KEY}
+            onClick={() => {
+              if (!off)
+                void actions.chooseArm({ controller: "default", preset: null });
+            }}
+          >
+            {t("marvel0.ctl.arm.use_default")}
+          </Button>
+        </div>
+      )}
+      {offered && (
+        <Reasons
+          label="marvel0.ctl.off.arm_choice"
+          control={{
+            enabled: arm.canChoose,
+            blockers: arm.chooseBlockers,
+            needsOverride: false,
+          }}
+          testId="marvel0-block-arm-choice"
+        />
+      )}
+      {problem && (
+        <p className="rg-bad" data-testid="marvel0-arm-choice-problem">
+          {wordOf(t, "marvel0.ctl.block.", problem)}
+        </p>
+      )}
+      {refused && (
+        <RefusedBlock
+          testId="marvel0-arm-choice-refused"
+          code={refused.failure.code}
+        >
+          <WordedText worded={refused.worded} />
+        </RefusedBlock>
+      )}
+      <p
+        className="rg-muted"
+        data-testid="marvel0-arm-controller"
+        data-status={arm.status}
+        data-running={arm.running?.controller ?? "none"}
+      >
+        {armSays(arm)
+          .map((say) => sayText(say, t))
+          .join(" ")}
+      </p>
+    </div>
   );
 }
 
@@ -540,7 +645,9 @@ export function StackPanel({
                         act.sequence.next === comp
                       }
                     />
-                    {comp === "A" && act.arm && <ArmController arm={act.arm} />}
+                    {comp === "A" && act.arm && (
+                      <ArmController arm={act.arm} actions={actions} />
+                    )}
                     {comp === "B" && (
                       <GripperTest act={act} actions={actions} />
                     )}

@@ -348,7 +348,7 @@ CHECK_OK = {
     "policy_ready": "The policy server of this page is ready.",
     "policy_matches": "The policy server serves the model and inference mode of the form.",
     "arm_controller_matches": "The arm controller A runs is known and is the one the "
-    "control file names.",
+    "page would start.",
     "no_connection": "Nobody is connected to the policy server.",
     "no_session": "No evaluation session is active.",
     "arm_lock": "The arm lock is free.",
@@ -367,8 +367,8 @@ CHECK_REFUSE = {
     "policy_matches": "The server serves {served} (mode {served_rtc}); the form "
     "asks for {wanted} (mode {wanted_rtc}).",
     "arm_controller_matches": "Rule v3 is tied to the arm controller's filter, and "
-    "which controller A runs is not settled ({problem}): stop A, change the control "
-    "file, start A.",
+    "which controller A runs is not settled ({problem}): stop A, choose the "
+    "controller on A's card, start A.",
     "no_connection": "{count} connection(s) to the policy server; another client "
     "may be running.",
     "no_session": "An evaluation session is active ({count}); end it first.",

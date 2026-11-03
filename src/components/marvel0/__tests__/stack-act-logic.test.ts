@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import en from "@/i18n/en.json";
 import {
+  armPick,
   armSays,
+  armValue,
   armView,
   canCheckFci,
   canCheckServer,
@@ -681,7 +683,7 @@ describe("the arm controller the control file names and the one A runs", () => {
         ramp_ok: false,
         suffix: "_any-S1",
       }),
-    ).toEqual({
+    ).toMatchObject({
       configured: { controller: "anyspeedup", preset: "S1" },
       enabled: true,
       running: { controller: "anyspeedup", preset: "S1" },
@@ -736,6 +738,12 @@ describe("the arm controller the control file names and the one A runs", () => {
       problem: null,
       rampOk: true,
       suffix: "",
+      file: null,
+      // (an older backend: no choice, no select)
+      choice: { state: "default", choice: null, code: null },
+      options: [],
+      chooseBlockers: [],
+      canChoose: false,
     });
     expect(armView(undefined)).toBeNull();
     // a document without the part reads as not said
@@ -780,6 +788,24 @@ describe("the arm controller the control file names and the one A runs", () => {
     })!;
     expect(keys(changed)).toContain("marvel0.ctl.arm.problem_changed");
     expect(keys(changed)).toContain("marvel0.ctl.arm.change");
+    // a controller chosen on the card says so, and names the file's default
+    const picked = armView({
+      ...quiet,
+      configured: { controller: "anyspeedup", preset: "S1" },
+      file: { controller: "lab", preset: null },
+      choice: { state: "chosen", controller: "anyspeedup", preset: "S1" },
+      alpha: 0.01,
+    })!;
+    expect(armSays(picked)[0]).toEqual({
+      key: "marvel0.ctl.arm.configured_chosen",
+      params: {
+        what: {
+          key: "marvel0.ctl.arm.name_anyspeedup",
+          params: { preset: "S1" },
+        },
+        file: { key: "marvel0.ctl.arm.name_lab" },
+      },
+    });
     // the stack off: the file's words say so, and no alpha is promised
     const off = armView({
       ...quiet,
@@ -789,6 +815,92 @@ describe("the arm controller the control file names and the one A runs", () => {
     expect(keys(off)).toContain("marvel0.ctl.arm.configured_off");
     expect(keys(off)).not.toContain("marvel0.ctl.arm.alpha");
     expect(keys(off)).not.toContain("marvel0.ctl.arm.untried");
+  });
+
+  test("the select of A's controller is read from the backend's own views", () => {
+    const offered = act("arm_choice_offered").arm!;
+    expect(offered.canChoose).toBe(true);
+    expect(offered.chooseBlockers).toEqual([]);
+    expect(offered.choice).toEqual({
+      state: "default",
+      choice: null,
+      code: null,
+    });
+    expect(
+      offered.options.map((o) => [armValue(o), o.isDefault, o.allowed]),
+    ).toEqual([
+      ["lab", true, true],
+      ["anyspeedup:today", false, true],
+      ["anyspeedup:S1", false, true],
+    ]);
+    const chosen = act("arm_chosen_s1").arm!;
+    expect(chosen.choice).toEqual({
+      state: "chosen",
+      choice: { controller: "anyspeedup", preset: "S1" },
+      code: null,
+    });
+    expect(chosen.file).toEqual({ controller: "lab", preset: null });
+    expect(chosen.configured).toEqual({
+      controller: "anyspeedup",
+      preset: "S1",
+    });
+    expect(chosen.alpha).toBe(0.01);
+    const running = act("arm_chosen_s1_running").arm!;
+    expect(running.canChoose).toBe(false);
+    expect(running.chooseBlockers.map((b) => b.code)).toEqual([
+      "arm_choice_a_not_idle",
+    ]);
+    expect(running.status).toBe("match");
+    // a document whose select is on but has no options offers nothing
+    const empty = armView({ ...quiet, can_choose: true, options: [] })!;
+    expect(empty.canChoose).toBe(false);
+  });
+
+  test("a pick in the select asks for the entry, or for the file's default", () => {
+    const chosen = act("arm_chosen_s1").arm!;
+    // the file's own entry clears the choice
+    expect(armPick(chosen, "lab")).toEqual({
+      controller: "default",
+      preset: null,
+    });
+    expect(armPick(chosen, "anyspeedup:today")).toEqual({
+      controller: "anyspeedup",
+      preset: "today",
+    });
+    // the entry already in force, or one that is not offered: nothing
+    expect(armPick(chosen, "anyspeedup:S1")).toBeNull();
+    expect(armPick(chosen, "anyspeedup:S2")).toBeNull();
+    const noRoot = armView({
+      ...quiet,
+      can_choose: true,
+      options: [
+        { controller: "lab", preset: null, default: true, allowed: true },
+        {
+          controller: "anyspeedup",
+          preset: "S1",
+          default: false,
+          allowed: false,
+          code: "arm_choice_no_anyspeedup",
+        },
+      ],
+    })!;
+    expect(armPick(noRoot, "anyspeedup:S1")).toBeNull();
+  });
+
+  test("odd choice values are not trusted", () => {
+    const view = armView({
+      ...quiet,
+      choice: { state: "weird", controller: "anyspeedup", preset: "S1" },
+      options: [
+        { controller: "anyspeedup", preset: null, allowed: true },
+        { controller: "other", preset: "S1", allowed: true },
+        "junk",
+      ],
+      can_choose: "yes",
+    })!;
+    expect(view.choice.state).toBe("unreadable");
+    expect(view.options).toEqual([]);
+    expect(view.canChoose).toBe(false);
   });
 
   test("the control file's problems are read as field and code, never a value", () => {

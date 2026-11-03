@@ -272,7 +272,7 @@ def test_the_alpha_warning_names_the_tool_that_reads_the_anyspeedup_filter_back(
 def test_the_problem_warning_tells_what_to_do(problem):
     warning = command.arm_warning(problem)
     assert warning["code"] == "arm_controller_problem"
-    assert "Stop A, change the control file, start A" in warning["text"]
+    assert "Stop A, choose the controller on A's card, start A" in warning["text"]
     assert warning["params"] == {"problem": problem}
 
 
@@ -521,7 +521,7 @@ def test_rule_v3_is_refused_at_the_start_when_the_a_that_runs_is_not_the_files(r
             if r["code"] == "arm_controller_matches"
         )
         assert row["level"] == "refuse" and problem in row["text"]
-        assert "stop A, change the control file, start A" in row["text"]
+        assert "stop A, choose the controller on A's card, start A" in row["text"]
     assert rig.spawned == []
     # without rule v3 the same A starts a client as it always could
     rig.arm_now = facts(

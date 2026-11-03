@@ -830,7 +830,7 @@ describe("the rule of in-chunk acceleration", () => {
         );
         // the anyspeedup controller's own read-back tool, not the lab's
         expect(text(box(host))).toContain("set_shaping.py --show");
-        expect(text(box(host))).toContain("stop A, change the control file");
+        expect(text(box(host))).toContain("stop A, choose it on A's card");
         expect(text(box(host))).not.toContain(
           en["marvel0.cmd.field.chunk_accel_alpha_hint"],
         );

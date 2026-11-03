@@ -292,13 +292,33 @@ export type ArmStatus = "idle" | "match" | "changed" | "foreign" | "unknown";
 /** Why rule v3 is refused at the client's start (the backend's `problem`). */
 export type ArmProblem = "changed" | "foreign" | "unknown";
 
-/** Which arm controller the control file names and which one A runs (the
- * stack document's `act.arm`, read-only facts). `running` is what the page's
- * own A was started as: the file can be changed while A runs, and the page
- * goes by the A that runs. `alpha` is what rule v3's filter is forced to (the
- * running A's preset's; null when nothing is forced), `problem` why rule v3 is
- * refused, `rampOk` whether rules v1 and v2 are offered, and `suffix` what the
- * default rollout group gets. */
+/** The arm controller chosen on A's card (levi/marvel0/arm_choice.py):
+ * `default` (none: the control file's applies), `chosen`, `unusable` (the
+ * file no longer allows it) or `unreadable`; in the last two A's start is
+ * refused with `code`. */
+export type ArmChoiceState = "default" | "chosen" | "unusable" | "unreadable";
+export interface ArmChoice {
+  state: ArmChoiceState;
+  /** The saved choice; null for none (and for one that cannot be read). */
+  choice: ArmController | null;
+  code: string | null;
+}
+/** One entry of A's select: the file's default is marked, and an anyspeedup
+ * entry without the file's `anyspeedup_root` cannot be chosen (`code`). */
+export interface ArmOption extends ArmController {
+  isDefault: boolean;
+  allowed: boolean;
+  code: string | null;
+}
+
+/** Which arm controller the page starts A as and which one A runs (the stack
+ * document's `act.arm`). `configured` is what the page will start A as: the
+ * choice made on A's card, else the control file's (`file`). `running` is
+ * what the page's own A was started as: the page goes by the A that runs.
+ * `alpha` is what rule v3's filter is forced to (the running A's preset's;
+ * null when nothing is forced), `problem` why rule v3 is refused, `rampOk`
+ * whether rules v1 and v2 are offered, and `suffix` what the default rollout
+ * group gets. `options`, `chooseBlockers` and `canChoose` are A's select. */
 export interface ArmView {
   configured: ArmController | null;
   /** The stack is switched on (the page starts A). */
@@ -309,6 +329,13 @@ export interface ArmView {
   problem: ArmProblem | null;
   rampOk: boolean;
   suffix: string;
+  /** The control file's own controller: the default of A. */
+  file: ArmController | null;
+  choice: ArmChoice;
+  /** Empty when the backend does not offer the select (an older one). */
+  options: ArmOption[];
+  chooseBlockers: Blocker[];
+  canChoose: boolean;
 }
 
 /** A line of the control file the backend refused: the field and a short
@@ -639,16 +666,58 @@ function armController(raw: unknown): ArmController | null {
   return null;
 }
 
+const ARM_CHOICE_STATES: readonly ArmChoiceState[] = [
+  "default",
+  "chosen",
+  "unusable",
+  "unreadable",
+];
+
+function armChoice(raw: unknown): ArmChoice {
+  const item = rec(raw);
+  // (an older backend has no choice: the file's default applies)
+  const state =
+    ARM_CHOICE_STATES.find((entry) => entry === item?.state) ??
+    (item ? "unreadable" : "default");
+  return {
+    state,
+    choice: item ? armController(item) : null,
+    code: str(item?.code, 80),
+  };
+}
+
+function armOptions(raw: unknown): ArmOption[] {
+  return list(raw).flatMap((entry): ArmOption[] => {
+    const item = rec(entry);
+    const controller = armController(item);
+    if (!item || !controller) return [];
+    if (controller.controller === "anyspeedup" && !controller.preset) return [];
+    return [
+      {
+        ...controller,
+        isDefault: bool(item.default) === true,
+        allowed: bool(item.allowed) === true,
+        code: str(item.code, 80),
+      },
+    ];
+  });
+}
+
 /** `act.arm` of the stack document; anything that is not a record reads as
  * "not said". A status it does not know reads as `unknown` (nothing is
- * forced), a missing `ramp_ok` as true (an older backend). */
-export function armView(raw: unknown): ArmView | null {
+ * forced), a missing `ramp_ok` as true (an older backend). The select is off
+ * unless the backend says it can be used (`can_choose`). */
+export function armView(
+  raw: unknown,
+  known: Known = new Set<string>(),
+): ArmView | null {
   const arm = rec(raw);
   if (!arm) return null;
   const status =
     ARM_STATUS.find((entry) => entry === arm.status) ?? ARM_STATUS_NOT_KNOWN;
   const problem = ARM_PROBLEMS.find((entry) => entry === arm.problem) ?? null;
   const suffix = str(arm.suffix, 40);
+  const options = armOptions(arm.options);
   return {
     configured: armController(arm.configured),
     enabled: bool(arm.enabled) === true,
@@ -658,7 +727,33 @@ export function armView(raw: unknown): ArmView | null {
     problem,
     rampOk: bool(arm.ramp_ok) !== false,
     suffix: suffix !== null && /^[A-Za-z0-9._-]+$/.test(suffix) ? suffix : "",
+    file: armController(arm.file),
+    choice: armChoice(arm.choice),
+    options,
+    chooseBlockers: blockersOf(arm.choose_blockers, known),
+    canChoose: options.length > 0 && bool(arm.can_choose) === true,
   };
+}
+
+/** The value of a controller in A's select (`lab`, `anyspeedup:S1`). */
+export const armValue = (entry: ArmController): string =>
+  entry.controller === "anyspeedup"
+    ? `anyspeedup:${entry.preset ?? ""}`
+    : "lab";
+
+/** What a pick in A's select asks the backend for: the file's default is
+ * asked for as `default` (the choice is cleared, so A follows the file again),
+ * any other entry by itself; null when nothing would change (the entry shown
+ * already, or one that cannot be chosen). */
+export function armPick(
+  arm: ArmView,
+  value: string,
+): { controller: string; preset: string | null } | null {
+  const option = arm.options.find((entry) => armValue(entry) === value);
+  if (!option || !option.allowed) return null;
+  if (arm.configured && armValue(arm.configured) === value) return null;
+  if (option.isDefault) return { controller: "default", preset: null };
+  return { controller: option.controller, preset: option.preset };
 }
 
 /** The controller the facts are about: the one that runs, else the file's. */
@@ -712,7 +807,7 @@ export function actView(
     fci: fciCheck(checks?.fci),
     server: serverCheck(checks?.c_preflight),
     operation: operationAct(act.operation),
-    arm: armView(act.arm),
+    arm: armView(act.arm, known),
     controlErrors: controlErrors(act.control),
     notices: list(act.notices).flatMap((entry) => {
       const item = rec(entry);
@@ -894,24 +989,35 @@ export const ARM_PROBLEM_KEY: Record<ArmProblem, string> = {
   unknown: "marvel0.ctl.arm.problem_unknown",
 };
 
+/** A controller's name, as the card and the select say it. */
+export const armName = (entry: ArmController): Say =>
+  entry.controller === "anyspeedup"
+    ? {
+        key: "marvel0.ctl.arm.name_anyspeedup",
+        params: { preset: entry.preset ?? "?" },
+      }
+    : { key: "marvel0.ctl.arm.name_lab" };
+
 /** What the card says of the arm controller, sentence by sentence (the page
- * joins them): what the control file names, what A runs, why rule v3 is
- * refused, the alpha it is tied to, that the anyspeedup controller has not run
- * on the arm yet, and how to change it. */
+ * joins them): what A starts as (chosen on the card, or the control file's
+ * default), what A runs, why rule v3 is refused, the alpha it is tied to, that
+ * the anyspeedup controller has not run on the arm yet, and how to change it. */
 export function armSays(arm: ArmView): Say[] {
-  const name = (entry: ArmController): Say =>
-    entry.controller === "anyspeedup"
-      ? {
-          key: "marvel0.ctl.arm.name_anyspeedup",
-          params: { preset: entry.preset ?? "?" },
-        }
-      : { key: "marvel0.ctl.arm.name_lab" };
+  const name = armName;
   const out: Say[] = [];
-  if (arm.configured)
+  if (arm.configured && !arm.enabled)
     out.push({
-      key: arm.enabled
-        ? "marvel0.ctl.arm.configured"
-        : "marvel0.ctl.arm.configured_off",
+      key: "marvel0.ctl.arm.configured_off",
+      params: { what: name(arm.configured) },
+    });
+  else if (arm.configured && arm.choice.state === "chosen" && arm.file)
+    out.push({
+      key: "marvel0.ctl.arm.configured_chosen",
+      params: { what: name(arm.configured), file: name(arm.file) },
+    });
+  else if (arm.configured)
+    out.push({
+      key: "marvel0.ctl.arm.configured",
       params: { what: name(arm.configured) },
     });
   if (arm.running)

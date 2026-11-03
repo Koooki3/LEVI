@@ -28,6 +28,7 @@ describe("the arm stack's routes", () => {
     await api.start("A", { request_id: "x".repeat(8) });
     await api.stop("C", { request_id: "x".repeat(8) });
     await api.marker({});
+    await api.armChoice({});
     await api.preflight("A", {});
     await api.preflight("C", {});
     await api.gripper({});
@@ -40,6 +41,7 @@ describe("the arm stack's routes", () => {
       "POST /api/levi/marvel0/stack/a/start",
       "POST /api/levi/marvel0/stack/c/stop",
       "POST /api/levi/marvel0/stack/marker",
+      "POST /api/levi/marvel0/stack/a/controller",
       "POST /api/levi/marvel0/stack/a/preflight",
       "POST /api/levi/marvel0/stack/c/preflight",
       "POST /api/levi/marvel0/stack/b/gripper",
@@ -77,6 +79,13 @@ describe("the arm stack's routes", () => {
       confirm: "adopt marker",
     });
     expect(stackApi.preflightBody("id")).toEqual({ request_id: "id" });
+    // A's controller: an entry of the list, or `default` (the file's again)
+    expect(
+      stackApi.armChoiceBody("id", { controller: "anyspeedup", preset: "S1" }),
+    ).toEqual({ request_id: "id", controller: "anyspeedup", preset: "S1" });
+    expect(
+      stackApi.armChoiceBody("id", { controller: "default", preset: null }),
+    ).toEqual({ request_id: "id", controller: "default", preset: null });
     expect(
       stackApi.gripperBody("id", "open", "gripper open", { hands_clear: true }),
     ).toEqual({
@@ -279,6 +288,13 @@ describe("the bodies the page sends are the ones the backend's closed models tak
       accepts(m.MarkerBody, stackApi.markerBody("r", "touch", "c")),
     ).toEqual(OK);
     expect(accepts(m.CheckBody, stackApi.preflightBody("r"))).toEqual(OK);
+    expect(m.ArmChoiceBody.required).toEqual(["request_id", "controller"]);
+    expect(
+      accepts(
+        m.ArmChoiceBody,
+        stackApi.armChoiceBody("r", { controller: "lab", preset: null }),
+      ),
+    ).toEqual(OK);
     expect(
       accepts(
         m.GripperBody,

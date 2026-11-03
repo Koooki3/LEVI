@@ -17,7 +17,10 @@ import type { StackApi } from "../stack-api";
 import { useStackPoll } from "../use-stack-poll";
 import {
   button,
+  choose,
   doubleClick,
+  field,
+  refused as refusedAnswer,
   textFields,
   tick,
   tickAll,
@@ -79,6 +82,7 @@ function fake(initial: Doc) {
     start: write("start") as StackApi["start"],
     stop: write("stop") as StackApi["stop"],
     marker: write("marker") as StackApi["marker"],
+    armChoice: write("armChoice") as StackApi["armChoice"],
     preflight: write("preflight") as StackApi["preflight"],
     gripper: write("gripper") as StackApi["gripper"],
     sequence: write("sequence") as StackApi["sequence"],
@@ -361,7 +365,9 @@ describe("outside the product, or with the controls off or unread, nothing can b
     test("the lab's controller is said on A's card, read-only, and asks nothing else", async () => {
       const { host } = await open(stackDoc("idle"));
       const said = text(line(host));
-      expect(said).toContain("The control file names: the lab's controller.");
+      expect(said).toContain(
+        "A starts as: the lab's controller (the control file's default).",
+      );
       expect(said).not.toContain("anyspeedup");
       expect(said).not.toContain("not run on the arm");
       expect(line(host)!.getAttribute("data-status")).toBe("idle");
@@ -385,11 +391,13 @@ describe("outside the product, or with the controls off or unread, nothing can b
         });
       const english = await open(doc());
       const said = text(line(english.host));
-      expect(said).toContain("The control file names: anyspeedup, preset S1.");
+      expect(said).toContain(
+        "A starts as: anyspeedup, preset S1 (the control file's default).",
+      );
       expect(said).toContain("A runs: anyspeedup, preset S1.");
       expect(said).toContain("alpha 0.01");
       expect(said).toContain("has not run on the arm yet");
-      expect(said).toContain("stop A, change the control file, start A");
+      expect(said).toContain("stop A, choose it above, start A");
       expect(said).not.toMatch(/[{}]/);
       expect(line(english.host)!.getAttribute("data-running")).toBe(
         "anyspeedup",
@@ -413,9 +421,11 @@ describe("outside the product, or with the controls off or unread, nothing can b
       );
       const said = text(line(host));
       expect(said).toContain("A runs: anyspeedup, preset today.");
-      expect(said).toContain("The control file names: the lab's controller.");
+      expect(said).toContain(
+        "A starts as: the lab's controller (the control file's default).",
+      );
       expect(said).toContain("Rule v3 is refused until they agree");
-      expect(said).toContain("stop A, change the control file, start A");
+      expect(said).toContain("stop A, choose it above, start A");
       expect(line(host)!.getAttribute("data-status")).toBe("changed");
     });
 
@@ -455,6 +465,200 @@ describe("outside the product, or with the controls off or unread, nothing can b
         }),
       );
       expect(line(host)).toBeNull();
+    });
+  });
+
+  describe("the select of A's arm controller", () => {
+    const line = (host: HTMLElement) =>
+      host.querySelector("[data-testid=marvel0-arm-controller]");
+    const select = (host: HTMLElement) =>
+      host.querySelector(
+        "[data-testid=marvel0-arm-select]",
+      ) as HTMLSelectElement | null;
+    const options = (host: HTMLElement) =>
+      Array.from(select(host)!.options).map((o) => [
+        o.value,
+        o.textContent,
+        o.disabled,
+      ]);
+    const reasons = (host: HTMLElement) =>
+      host.querySelector("[data-testid=marvel0-block-arm-choice]");
+
+    test("A stopped: the three controllers, the file's marked as the default, behind a real label", async () => {
+      const { host } = await open(stackDoc("arm_choice_offered"));
+      const box = comp(host, "A").parentElement!;
+      expect(box.contains(select(host))).toBe(true);
+      expect(select(host)!.disabled).toBe(false);
+      expect(select(host)!.value).toBe("lab");
+      expect(options(host)).toEqual([
+        ["lab", "the lab's controller (default)", false],
+        ["anyspeedup:today", "anyspeedup, preset today", false],
+        ["anyspeedup:S1", "anyspeedup, preset S1", false],
+      ]);
+      // the label is a <label> of the select, not a title
+      expect(
+        field<HTMLSelectElement>(host, "Arm controller of terminal A"),
+      ).toBe(select(host));
+      expect(select(host)!.getAttribute("title")).toBeNull();
+      expect(reasons(host)).toBeNull();
+      expect(button(host, "Use the control file's default")).toBeUndefined();
+    });
+
+    test("a pick sends the entry; the next read shows it, with the way back to the default", async () => {
+      const view = await open(stackDoc("arm_choice_offered"));
+      view.state.answer = () => ({
+        ok: true,
+        status: 200,
+        data: {
+          done: "arm_choice_set",
+          controller: "anyspeedup",
+          preset: "S1",
+        },
+      });
+      view.state.doc = stackDoc("arm_chosen_s1");
+      await choose(select(view.host), "anyspeedup:S1");
+      await waitFor(() => view.state.calls.length === 1, {
+        label: "the write",
+      });
+      const [call] = view.state.calls;
+      expect(call.op).toBe("armChoice");
+      expect(Object.keys(call.body!).sort()).toEqual([
+        "controller",
+        "preset",
+        "request_id",
+      ]);
+      expect(call.body).toMatchObject({
+        controller: "anyspeedup",
+        preset: "S1",
+      });
+      expect(String(call.body!.request_id)).toMatch(/^[A-Za-z0-9._:-]{8,80}$/);
+      await waitFor(() => select(view.host)?.value === "anyspeedup:S1", {
+        label: "the choice shown",
+      });
+      expect(text(line(view.host))).toContain(
+        "A starts as: anyspeedup, preset S1, chosen on this page (the control file's default is the lab's controller).",
+      );
+      // back to the file's default: its own button, and the file's entry
+      await click(button(view.host, "Use the control file's default")!);
+      await waitFor(() => view.state.calls.length === 2, {
+        label: "the clear",
+      });
+      expect(view.state.calls[1].body).toMatchObject({
+        controller: "default",
+        preset: null,
+      });
+      await choose(select(view.host), "lab");
+      await waitFor(() => view.state.calls.length === 3, { label: "the pick" });
+      expect(view.state.calls[2].body).toMatchObject({
+        controller: "default",
+        preset: null,
+      });
+    });
+
+    test("A running: the select is off and says why, and the card still says what A runs", async () => {
+      const { host, state } = await open(stackDoc("arm_chosen_s1_running"));
+      expect(select(host)!.disabled).toBe(true);
+      const why = reasons(host)!;
+      expect(text(why)).toContain(en["marvel0.ctl.off.arm_choice"]);
+      expect(text(why)).toContain(
+        en["marvel0.ctl.block.arm_choice_a_not_idle"],
+      );
+      expect(
+        Array.from(why.querySelectorAll("li")).map((li) =>
+          li.getAttribute("data-code"),
+        ),
+      ).toEqual(["arm_choice_a_not_idle"]);
+      expect(text(line(host))).toContain("A runs: anyspeedup, preset S1.");
+      expect(button(host, "Use the control file's default")!.disabled).toBe(
+        true,
+      );
+      await choose(select(host), "lab");
+      await tick();
+      expect(state.calls).toEqual([]);
+    });
+
+    test("the stack switched off: the select is off with the control file's reason", async () => {
+      const { host } = await open(stackDoc("control_disabled"));
+      expect(select(host)!.disabled).toBe(true);
+      expect(text(reasons(host))).toContain(
+        en["marvel0.ctl.block.control_disabled"],
+      );
+    });
+
+    test("an anyspeedup entry without the file's checkout cannot be picked, and says why", async () => {
+      const { host } = await open(
+        stackDoc("arm_choice_offered", (d) => {
+          for (const option of d.act.arm.options.slice(1)) {
+            option.allowed = false;
+            option.code = "arm_choice_no_anyspeedup";
+          }
+        }),
+      );
+      expect(options(host).slice(1)).toEqual([
+        [
+          "anyspeedup:today",
+          "anyspeedup, preset today (needs anyspeedup_root in the control file)",
+          true,
+        ],
+        [
+          "anyspeedup:S1",
+          "anyspeedup, preset S1 (needs anyspeedup_root in the control file)",
+          true,
+        ],
+      ]);
+    });
+
+    test("a saved choice the page cannot use is said on the card, with the way back", async () => {
+      const { host } = await open(
+        stackDoc("arm_choice_offered", (d) => {
+          d.act.arm.choice = {
+            state: "unreadable",
+            controller: null,
+            preset: null,
+            code: "arm_choice_unreadable",
+            at: null,
+          };
+        }),
+      );
+      expect(
+        text(host.querySelector("[data-testid=marvel0-arm-choice-problem]")),
+      ).toBe(en["marvel0.ctl.block.arm_choice_unreadable"]);
+      expect(button(host, "Use the control file's default")!.disabled).toBe(
+        false,
+      );
+    });
+
+    test("a refusal is said under the select in the backend's words, in Chinese too", async () => {
+      const view = await open(stackDoc("arm_choice_offered"), true);
+      view.state.answer = () =>
+        refusedAnswer(409, "arm_choice_a_not_idle", { state: "starting" });
+      await choose(select(view.host), "anyspeedup:today");
+      await waitFor(
+        () =>
+          view.host.querySelector("[data-testid=marvel0-arm-choice-refused]"),
+        { label: "the refusal" },
+      );
+      expect(
+        text(
+          view.host.querySelector("[data-testid=marvel0-arm-choice-refused]"),
+        ),
+      ).toContain(zh["marvel0.ctl.block.arm_choice_a_not_idle"]);
+      expect(text(view.host.querySelector("label"))).not.toBe("");
+      expect(
+        field<HTMLSelectElement>(view.host, zh["marvel0.ctl.arm.select_label"]),
+      ).toBe(select(view.host));
+      expect(options(view.host)[0][1]).toBe("实验室的控制器（默认）");
+    });
+
+    test("an older backend without the select shows only the card's sentences", async () => {
+      const { host } = await open(
+        stackDoc("idle", (d) => {
+          delete d.act.arm.options;
+          delete d.act.arm.can_choose;
+        }),
+      );
+      expect(select(host)).toBeNull();
+      expect(line(host)).not.toBeNull();
     });
   });
 

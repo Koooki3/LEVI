@@ -1147,9 +1147,9 @@ def _rate_warnings(site, form) -> list:
 
 
 ARM_PROBLEM_TEXT = {
-    "changed": "the control file names another arm controller than the one A was "
-    "started as",
-    "foreign": "the control file names the anyspeedup arm controller, but A was not "
+    "changed": "the page would now start another arm controller than the one A was "
+    "started as (the control file changed)",
+    "foreign": "the anyspeedup arm controller is chosen for A, but A was not "
     "started by this page",
     "unknown": "it could not be told which arm controller A runs",
 }
@@ -1162,7 +1162,7 @@ def arm_warning(problem) -> dict:
         "arm_controller_problem",
         "Rule v3 will be refused when the client starts: "
         + ARM_PROBLEM_TEXT.get(problem, ARM_PROBLEM_TEXT["unknown"])
-        + ". Stop A, change the control file, start A.",
+        + ". Stop A, choose the controller on A's card, start A.",
         problem=str(problem),
     )
 
