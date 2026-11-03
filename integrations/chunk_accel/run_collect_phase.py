@@ -355,6 +355,7 @@ class Run:
                 "relaxed_tag": phase.RELAXED_TAG,
                 "experimental": True,
                 "root": info["root"],
+                "gripper_no_resend": not params.golden,
             }
         )
 
@@ -658,6 +659,77 @@ def install(args, params, info) -> Run:
     return run
 
 
+# Gripper re-sends (real traces 2026-11-02, 20 episodes): while the fingers rest on an object (aperture between the
+# client's closed and open thresholds) fr3_env._update_gripper re-sends the same close every gripper_sleep (0.75 s),
+# and every re-send restarts that throttle, so 15 of 17 releases went out late (median 0.3 s, up to 0.7 s). The v3
+# client skips a re-send of the command it already issued once the fingers have moved since that issue and are now
+# still; a command whose fingers never moved (lost, dropped) is re-sent exactly as before. The user's fr3_env.py is not
+# changed: its method is wrapped in this process only (user 2026-11-03: "第1处可以做").
+GRIPPER_MOVED = 0.02  # normalized aperture: the fingers answered the issued command
+GRIPPER_STILL = (
+    0.01  # between two reads: the fingers have stopped (on an object or at a stop)
+)
+
+
+def install_gripper_no_resend(robot_env_cls) -> bool:
+    """Wrap ``robot_env_cls._update_gripper`` (once). Returns whether it was wrapped now."""
+    orig = robot_env_cls._update_gripper
+    if getattr(orig, "_chunk_accel_no_resend", False):
+        return False
+
+    def _update_gripper(self, command, gripper_pos):
+        st = self.__dict__.setdefault(
+            "_chunk_accel_grip", {"issued_pos": None, "issued_cmd": None, "prev": None}
+        )
+        pos = float(gripper_pos)
+        prev, st["prev"] = st["prev"], pos
+        want = (
+            0.0
+            if float(np.clip(command, 0.0, 1.0)) <= self.gripper_closed_threshold
+            else 1.0
+        )
+        if st["issued_cmd"] is not None and self._last_gripper_cmd != st["issued_cmd"]:
+            st["issued_pos"] = st["issued_cmd"] = (
+                None  # latched elsewhere (reset opens the gripper directly)
+            )
+        between = (
+            pos < self.gripper_open_threshold
+            if want == 0.0
+            else pos > self.gripper_closed_threshold
+        )
+        if (
+            st["issued_pos"] is not None
+            and self._last_gripper_cmd == want
+            and between
+            and abs(pos - st["issued_pos"]) >= GRIPPER_MOVED
+            and prev is not None
+            and abs(pos - prev) < GRIPPER_STILL
+        ):
+            return None  # the same command, answered and settled: no re-send, the throttle is left alone
+        out = orig(self, command, gripper_pos)
+        if isinstance(out, dict) and out.get("command") in (
+            "close_gripper",
+            "open_gripper",
+        ):
+            st["issued_pos"], st["issued_cmd"] = pos, float(self._last_gripper_cmd)
+        return out
+
+    _update_gripper._chunk_accel_no_resend = True
+    _update_gripper.__wrapped__ = orig
+    robot_env_cls._update_gripper = _update_gripper
+    return True
+
+
+def _wrap_client_gripper() -> None:
+    """The collector imports ``fr3_env.RobotEnv`` inside its main(); wrap that class before it does."""
+    try:
+        import fr3_env
+    except ImportError as exc:  # the collector would fail the same way a moment later
+        print(f"WARNING: fr3_env not importable ({exc}); gripper re-sends unchanged")
+        return
+    install_gripper_no_resend(fr3_env.RobotEnv)
+
+
 def main(args):
     params = validate(args)
     info = startup(args.phase_mode)
@@ -682,6 +754,8 @@ def main(args):
         print(
             "WARNING: the VLASH runtime is not the reviewed one (VLASH runs are refused, plain and RTC are not)."
         )
+    if not params.golden:
+        _wrap_client_gripper()
     if args.phase_mode == "vlash":
         vrt = info["vrt_module"]
         factory = run.wrap_factory(schedulers.phase_vlash_factory(params, vrt))
