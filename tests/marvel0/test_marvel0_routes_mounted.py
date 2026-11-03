@@ -68,6 +68,7 @@ ROUTES = [
     ("POST", f"{BASE}/stack/c/start"),
     ("POST", f"{BASE}/stack/c/stop"),
     ("POST", f"{BASE}/stack/marker"),
+    ("POST", f"{BASE}/stack/a/controller"),
     ("POST", f"{BASE}/stack/a/preflight"),
     ("POST", f"{BASE}/stack/b/probe"),
     ("POST", f"{BASE}/stack/c/preflight"),
@@ -211,6 +212,8 @@ def payload(path):
         return {"request_id": "req-mounted-1", "confirm": "not the phrase"}
     if "/aeri/run/" in path:
         return aeri_payload(path)
+    if path.endswith("/stack/a/controller"):
+        return {"request_id": "req-mounted-1", "controller": "lab"}
     if "/stack/" in path:
         return {"request_id": "req-mounted-1", "confirm": "not the phrase"}
     if path.endswith("/aeri/prepare"):

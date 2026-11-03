@@ -34,6 +34,7 @@ from stack_act_machine import (
     ActMachine,
     ready_lines,
 )
+from test_marvel0_arm_controller_unit import fake_checkout
 from test_marvel0_stack import _sock
 
 from levi.marvel0 import net, stack, stack_act, stack_act_api, stack_api
@@ -641,6 +642,59 @@ def views() -> tuple:
         m.doc()  # (the first look latches what is ready)
         m.t += 3600
         out["c_health_lost"] = view(m)
+
+    # The arm controller chosen on A's card (``arm_choice.py``): the file names
+    # the lab's controller and an anyspeedup checkout; S1 is chosen, A started.
+    with machine() as m:
+        root = fake_checkout(Path(m.franka).parent)
+        m.set_control(anyspeedup_root=str(root))
+        out["arm_choice_offered"] = view(m)
+        choice = {"controller": "anyspeedup", "preset": "S1"}
+        status, answers["arm_choice_set"] = post(
+            m, "a/controller", {"request_id": "arm-choice-000001", **choice}
+        )
+        assert status == 200, answers["arm_choice_set"]
+        status, answers["arm_choice_cleared"] = post(
+            m,
+            "a/controller",
+            {"request_id": "arm-choice-000002", "controller": "default"},
+        )
+        assert status == 200, answers["arm_choice_cleared"]
+        refusals["arm_choice_s2"] = refusal(
+            m,
+            "a/controller",
+            {
+                "request_id": "arm-choice-s2-0001",
+                "controller": "anyspeedup",
+                "preset": "S2",
+            },
+        )
+        status, _ = post(
+            m, "a/controller", {"request_id": "arm-choice-000003", **choice}
+        )
+        assert status == 200
+        m.ready_for_a(aged_s=MARKER_AGE_S)
+        out["arm_chosen_s1"] = view(m)
+        status, _ = post(
+            m,
+            "a/start",
+            {
+                "request_id": "start-a-chosen-s1",
+                "confirm": "start arm stack",
+                "attest": {"desk_done": True, "estop_hand": True},
+            },
+        )
+        assert status == 202
+        m.emit("a", "[INFO] [launch.user]: anyspeedup arm controller, preset S1")
+        m.emit("a", *ready_lines("a"))
+        m.a_up(lines=False)
+        keep_fresh(m)
+        out["arm_chosen_s1_running"] = view(m)
+        refusals["arm_choice_while_a_runs"] = refusal(
+            m,
+            "a/controller",
+            {"request_id": "arm-choice-000004", "controller": "lab"},
+        )
 
     with machine(enabled=False) as m:
         out["control_disabled"] = view(m)

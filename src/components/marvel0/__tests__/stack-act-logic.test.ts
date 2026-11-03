@@ -655,7 +655,8 @@ describe("the arm controller the control file names and the one A runs", () => {
   };
 
   test("the backend's own views say the lab's controller and ask nothing", () => {
-    for (const name of STACK_VIEWS) {
+    // (the views of a controller chosen on A's card are read below)
+    for (const name of STACK_VIEWS.filter((n) => !n.startsWith("arm_cho"))) {
       const view = act(name).arm;
       expect(view?.configured, name).toEqual({
         controller: "lab",

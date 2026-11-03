@@ -289,6 +289,8 @@ def test_the_samples_hold_the_refusals_a_page_has_to_word():
         "start_c_while_stopping": 409,
         "marker_touch_while_stopping": 409,
         "sequence_start_chain_without_attest": 400,
+        "arm_choice_s2": 409,
+        "arm_choice_while_a_runs": 409,
         "control_disabled": 403,
     }
     for item in refusals.values():
@@ -300,3 +302,43 @@ def test_the_samples_hold_no_path_but_the_templates():
     found = set(PATH_IN_TEXT.findall(text))
     assert all(p.startswith("/path/to/") for p in found), found
     assert "10.42.0.157" not in text
+
+
+def test_the_samples_hold_the_arm_controller_chosen_on_as_card():
+    views, answers, refusals = (
+        samples()["views"],
+        samples()["answers"],
+        samples()["refusals"],
+    )
+    offered = views["arm_choice_offered"]["act"]["arm"]
+    assert offered["choice"]["state"] == "default" and offered["can_choose"] is True
+    assert [
+        (o["controller"], o["preset"], o["default"]) for o in offered["options"]
+    ] == [
+        ("lab", None, True),
+        ("anyspeedup", "today", False),
+        ("anyspeedup", "S1", False),
+    ]
+    chosen = views["arm_chosen_s1"]["act"]["arm"]
+    assert chosen["configured"] == {"controller": "anyspeedup", "preset": "S1"}
+    assert chosen["file"] == {"controller": "lab", "preset": None}
+    assert (chosen["status"], chosen["alpha"], chosen["suffix"]) == (
+        "idle",
+        0.01,
+        "_any-S1",
+    )
+    running = views["arm_chosen_s1_running"]["act"]["arm"]
+    assert (running["status"], running["alpha"], running["can_choose"]) == (
+        "match",
+        0.01,
+        False,
+    )
+    assert [b["code"] for b in running["choose_blockers"]] == ["arm_choice_a_not_idle"]
+    assert answers["arm_choice_set"] == {
+        "done": "arm_choice_set",
+        "controller": "anyspeedup",
+        "preset": "S1",
+    }
+    assert answers["arm_choice_cleared"]["done"] == "arm_choice_cleared"
+    assert refusals["arm_choice_s2"]["detail"]["code"] == "arm_choice_preset_refused"
+    assert refusals["arm_choice_while_a_runs"]["detail"]["state"] == "ready"

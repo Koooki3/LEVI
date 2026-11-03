@@ -69,7 +69,17 @@ from pathlib import Path
 from levi.live import gpumgr
 from levi.setup import probes
 
-from . import control_site, deploy, gripper, net, record, site, stack, stack_units
+from . import (
+    arm_choice,
+    control_site,
+    deploy,
+    gripper,
+    net,
+    record,
+    site,
+    stack,
+    stack_units,
+)
 from .gripper import MISSING_RATIO
 
 LOG = logging.getLogger(__name__)
@@ -469,6 +479,50 @@ TEXT = {
             "The anyspeedup arm controller is not built: build it with the arm "
             "controller off (the build.sh in the fr3_serl folder of the anyspeedup "
             "checkout)."
+        ),
+    ),
+    # The arm controller chosen on A's card (``arm_choice.py``).
+    "arm_choice_invalid": (
+        400,
+        (
+            "Choose one of the offered arm controllers: the lab's, anyspeedup "
+            "today, anyspeedup S1, or the control file's default."
+        ),
+    ),
+    "arm_choice_preset_refused": (
+        409,
+        (
+            "Preset {preset} is not offered: the client's phase clock has no "
+            "profile for its lag yet."
+        ),
+    ),
+    "arm_choice_no_anyspeedup": (
+        409,
+        (
+            "The anyspeedup controller can be chosen only when the control file "
+            "names its checkout (anyspeedup_root): choose the lab's controller "
+            "or the control file's default."
+        ),
+    ),
+    "arm_choice_unreadable": (
+        409,
+        (
+            "The arm controller chosen on this page cannot be read, so A is not "
+            "started: choose it again, or go back to the control file's default."
+        ),
+    ),
+    "arm_choice_a_not_idle": (
+        409,
+        (
+            "The arm controller can be changed only while A is stopped (A is "
+            "{state}): stop A first."
+        ),
+    ),
+    "arm_choice_busy": (
+        409,
+        (
+            "A guided start or stop is in progress; change the arm controller "
+            "when it has ended."
         ),
     ),
     "c_preflight": (
@@ -1192,6 +1246,11 @@ class Ctx:
     # an operation other than the check of B is running (the start of A does not
     # wait for that one)
     busy_main: bool = False
+    # The control file's ``StackControl`` with terminal A's controller as the
+    # page will start it (``arm_choice.effective``; None without a valid file),
+    # and the view of the choice made on A's card.
+    arm: object = None
+    choice: dict = field(default_factory=dict)
     extra: dict = field(default_factory=dict)
 
 
@@ -1262,7 +1321,42 @@ class Act:
         return self.host.base.now()
 
     def _loaded(self):
-        return self._setup()
+        """``(ControlLoad, Specs | None)``: the control file as read, and the
+        specs with terminal A as the controller the page will start it as
+        (``_setup_now``)."""
+        loaded, specs, _, _ = self._setup_now()
+        return loaded, specs
+
+    def _setup_now(self):
+        """``(loaded, specs, arm, choice)``. ``arm`` is the control file's
+        ``StackControl`` with terminal A's controller decided by
+        ``arm_choice.effective`` (the choice made on A's card when one is saved
+        and usable, else the file's), ``choice`` the view of that choice, and
+        ``specs`` are built from ``arm``: A's argv, the identity its start writes
+        into its record and the checks of its start all follow it. Only the
+        rig's own specs are rebuilt (a fake set, which only tests and the
+        rehearsal make, keeps its units)."""
+        loaded, specs = self._setup()
+        file_stack = (
+            loaded.site.stack
+            if loaded.state == "ok" and loaded.site is not None
+            else None
+        )
+        saved = arm_choice.read(self.host.state_root())
+        arm, choice = arm_choice.effective(file_stack, saved)
+        if (
+            specs is not None
+            and arm is not None
+            and arm is not file_stack
+            and specs.profile == "real"
+        ):
+            try:
+                specs = stack_units.real_specs(arm)
+            except ValueError:
+                # (cannot happen for a usable choice of a file whose own specs
+                # were built; the start is refused rather than run as the file's)
+                specs = None
+        return loaded, specs, arm, choice
 
     def enabled(self) -> bool:
         loaded, specs = self._loaded()
@@ -1586,10 +1680,11 @@ class Act:
             key == "a"
             and stack_units.arm_identity_of(rec) != ctx_in["specs"].arm_identity
         ):
-            # The control file names another arm controller than the one this A
-            # was started as (also for an A that was ready: the log's rules are
-            # not read again once latched, and the card must not go on saying
-            # "ready" for the file's controller). Still ours to stop.
+            # The page would now start another arm controller than the one this
+            # A was started as: the control file changed while A ran (the choice
+            # on A's card cannot change then). Also for an A that was ready: the
+            # log's rules are not read again once latched, and the card must not
+            # go on saying "ready" for another controller. Still ours to stop.
             return {**base, "state": "unknown", "reason": "a.control_changed"}
         path = self._log_path(key, rec)
         latched = self._latched(key, rec)
@@ -1698,7 +1793,7 @@ class Act:
         )
 
     def _context(self, r, holding=False) -> Ctx:
-        loaded, specs = self._loaded()
+        loaded, specs, arm, choice = self._setup_now()
         keys = stack_units.KEYS
         records = {k: self._record(k) for k in keys}
         table = self.host.base.net_table()
@@ -1789,6 +1884,8 @@ class Act:
             enabled=loaded.state == "ok"
             and loaded.site.stack.enabled
             and specs is not None,
+            arm=arm,
+            choice=choice,
         )
 
     # -- blockers -----------------------------------------------------------------
@@ -1878,6 +1975,10 @@ class Act:
             rows.append(c("a_not_ready", a_state == "ready", state=a_state))
         if key == "c":
             rows.append(c("gripper_b_not_ready", st["b"]["state"] == "ready"))
+        if key == "a" and ctx.choice.get("state") in ("unusable", "unreadable"):
+            # A choice made on A's card that cannot be used now (or read) is
+            # not replaced by the file's controller behind the person's back.
+            rows.append(c(ctx.choice["code"], False))
         if key == "a" and ctx.specs:
             # (empty for the lab's controller: nothing is asked of the disk)
             for code, kind, paths in ctx.specs.arm_checks:
@@ -2201,29 +2302,30 @@ class Act:
         }
 
     def _arm_doc(self, ctx: Ctx) -> dict:
-        """Which arm controller the file names and which one A runs, and what
-        that makes of the client command (``arm_facts.py`` reads it from here).
+        """Which arm controller the page starts A as and which one A runs, and
+        what that makes of the client command (``arm_facts.py`` reads it from
+        here).
 
-        ``running`` is what the page's own A was started as (its record), also
-        after the control file was changed; ``status``: ``match`` (the file
-        still names it), ``changed`` (it names another), ``foreign`` (an A the
-        page did not start runs: which controller it is, is not known), ``unknown``
-        (A could not be judged) or ``idle`` (no A runs: the file is what the
-        page will start). ``alpha`` is the alpha rule v3 is forced to (the
-        running A's preset; the file's while no A runs), None when nothing is
-        forced; ``problem`` is why rule v3 is refused (only while an anyspeedup
-        controller is involved: with the lab's and no anyspeedup file, a
-        terminal started by hand is the usual way and nothing changes);
-        ``ramp_ok``: rules v1 and v2 (a fixed 0.2 s lag) are only offered
-        with the lab's controller and with anyspeedup's ``today``; ``suffix``:
-        what the default rollout group gets."""
-        stack_control = ctx.loaded.site.stack if ctx.loaded.state == "ok" else None
-        configured = None
-        if stack_control is not None:
-            configured = {
-                "controller": stack_control.arm_controller,
-                "preset": stack_control.arm_preset_in_use,
-            }
+        ``configured`` is the controller the page will start A as
+        (``arm_choice.effective``: the choice made on A's card, else the control
+        file's); ``file`` is the control file's own (the default), ``choice``
+        the view of the choice. ``running`` is what the page's own A was
+        started as (its record), also after the file was changed; ``status``:
+        ``match`` (the page would still start it), ``changed`` (it would start
+        another), ``foreign`` (an A the page did not start runs: which
+        controller it is, is not known), ``unknown`` (A could not be judged) or
+        ``idle`` (no A runs: ``configured`` is what the page will start).
+        ``alpha`` is the alpha rule v3 is forced to (the running A's preset;
+        ``configured``'s while no A runs), None when nothing is forced;
+        ``problem`` is why rule v3 is refused (only while an anyspeedup
+        controller is involved: with the lab's, a terminal started by hand is
+        the usual way and nothing changes); ``ramp_ok``: rules v1 and v2 (a
+        fixed 0.2 s lag) are only offered with the lab's controller and with
+        anyspeedup's ``today``; ``suffix``: what the default rollout group gets.
+        ``options``, ``choose_blockers`` and ``can_choose`` are the card's
+        select (``arm_choice.options``, ``choice_blockers``)."""
+        file_stack = ctx.loaded.site.stack if ctx.loaded.state == "ok" else None
+        configured = arm_choice.identity(ctx.arm)
         want = ctx.specs.arm_identity if ctx.specs else None
         file_any = want is not None and want[0] == "anyspeedup"
         a, rec = ctx.states["a"], ctx.records["a"]
@@ -2254,7 +2356,7 @@ class Act:
             problem = "unknown" if file_any else None
         else:
             status = "idle"
-            alpha = stack_control.arm_alpha if (file_any and stack_control) else None
+            alpha = ctx.arm.arm_alpha if (file_any and ctx.arm is not None) else None
         presets = []
         if run_any:
             presets.append(ran[1])
@@ -2267,6 +2369,7 @@ class Act:
             label = ran[1]
         elif status == "idle" and file_any:
             label = want[1]
+        choose = self.choice_blockers(ctx)
         return {
             "configured": configured,
             "enabled": ctx.specs is not None,
@@ -2276,7 +2379,34 @@ class Act:
             "problem": problem,
             "ramp_ok": all(preset == "today" for preset in presets),
             "suffix": f"_any-{label}" if label else "",
+            "file": arm_choice.identity(file_stack),
+            "choice": dict(ctx.choice),
+            "options": arm_choice.options(file_stack),
+            "choose_blockers": choose,
+            "can_choose": not [b for b in choose if b["level"] == "required"],
         }
+
+    def choice_blockers(self, ctx: Ctx) -> list:
+        """Why the arm controller cannot be chosen on A's card now: only while
+        A is stopped, positively (its state ``idle`` and no unit of A: not
+        starting, running, stopping, failed, foreign or unknown), no guided start
+        or stop is in progress (a start of A may come next), in the product
+        LEVI with the stack switched on. The choice decides what the next start
+        of A is; it never touches an A that runs."""
+        if not ctx.enabled:
+            return [row("control_disabled")]
+        out = []
+        if not self._is_real(ctx.r):
+            out.append(row("gate.product"))
+        with self._seq_lock:
+            live = self._seq_live(self._seq)
+        if live:
+            out.append(row("arm_choice_busy"))
+        a = ctx.states["a"]
+        if a["state"] != "idle" or ctx.r["units"]["A"] is not False:
+            state = a["state"] if a["state"] != "idle" else "unknown"
+            out.append(row("arm_choice_a_not_idle", state=state))
+        return out
 
     def _doc_m(self, r, ctx: Ctx) -> dict:
         st = ctx.states["m"]
@@ -3159,6 +3289,56 @@ class Act:
         ):
             return False
         return bool(self._locked("marker_release", release))
+
+    # -- the arm controller of A ----------------------------------------------------
+    def choose_arm(self, body) -> dict:
+        """Save the arm controller A is started as next (``body``: ``controller``
+        ``lab`` | ``anyspeedup`` | ``default``, ``preset`` for anyspeedup), or go
+        back to the control file's default. No phrase: it starts nothing (A's
+        start has its own confirmation). Only while A is stopped
+        (``choice_blockers``), under the machine-wide lock like every write, so
+        no start of A can come between the look and the write."""
+        self.require_enabled()
+        return self._write(
+            body, "arm_choice", lambda r: self._do_choose_arm(body, r), phrase=False
+        )
+
+    def _do_choose_arm(self, body, r) -> dict:
+        try:
+            wanted = arm_choice.check(body.get("controller"), body.get("preset"))
+        except arm_choice.Invalid as exc:
+            raise ActRefuse(exc.code, **exc.params) from exc
+        ctx = self._context(r, holding=True)
+        blockers = [b for b in self.choice_blockers(ctx) if b["level"] == "required"]
+        if blockers:
+            raise ActRefuse(blockers[0]["code"], **blockers[0]["params"])
+        file_stack = ctx.loaded.site.stack
+        code = arm_choice.unusable(file_stack, wanted)
+        if code:
+            raise ActRefuse(code)
+        folder = self._folder(arm_choice.FOLDER)
+        now = self.now()
+        request_id = body.get("request_id")
+        try:
+            arm_choice.write(folder, wanted, request_id, now)
+        except OSError as exc:
+            raise ActRefuse("record_unusable") from exc
+        record.audit(
+            folder,
+            {
+                "action": "arm_choice",
+                "phase": "default" if wanted is None else "chosen",
+                "request_id": request_id,
+                "detail": "control file default"
+                if wanted is None
+                else " ".join(part for part in wanted if part),
+            },
+            now,
+        )
+        self._poke()
+        if wanted is None:
+            return {"done": "arm_choice_cleared", "controller": None, "preset": None}
+        return {"done": "arm_choice_set", "controller": wanted[0], "preset": wanted[1]}
 
     # -- the marker ---------------------------------------------------------------
     def marker_op(self, op, body) -> dict:

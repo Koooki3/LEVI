@@ -6,6 +6,10 @@
   page names itself);
 - ``POST .../marker`` with ``op`` ``touch`` | ``adopt`` | ``release``: the
   arm-controller marker;
+- ``POST .../a/controller`` with ``controller`` ``lab`` | ``anyspeedup`` (and
+  ``preset`` ``today`` | ``S1``) | ``default``: the arm controller A starts as
+  next, saved in the page's own workspace (``arm_choice.py``); the control
+  file stays the default and is never written; refused while A is not stopped;
 - ``POST .../a/preflight`` (the arm's FCI port and whether a gripper stack
   runs), ``POST .../b/probe`` (only whether a gripper stack runs: allowed with
   A up, touches no FCI port) and ``POST .../c/preflight`` (QoS, gripper
@@ -119,6 +123,18 @@ class MarkerBody(Closed):
     confirm: str
 
 
+class ArmChoiceBody(Closed):
+    """The arm controller A starts as next: ``controller`` ``lab``,
+    ``anyspeedup`` (with ``preset`` ``today`` or ``S1``) or ``default`` (the
+    control file's, which clears the choice). Checked against the list in
+    ``arm_choice.check``, so that ``S2`` and anything else get their own code
+    rather than a bare 422."""
+
+    request_id: str
+    controller: str
+    preset: str | None = None
+
+
 class GripperBody(Closed):
     request_id: str
     action: Literal["open", "close", "position"]
@@ -192,6 +208,16 @@ def marker(body: MarkerBody, response: Response):
     data = body.model_dump()
     op = data.pop("op")
     return _answer(lambda: act().marker_op(op, data), response, accepted=200)
+
+
+@router.post(
+    "/stack/a/controller", status_code=200, dependencies=[Depends(person_only)]
+)
+def arm_controller_choice(body: ArmChoiceBody, response: Response):
+    """Choose the arm controller A starts as next, or go back to the control
+    file's default (person only, product LEVI only, only while A is stopped).
+    The control file is never written."""
+    return _answer(lambda: act().choose_arm(body.model_dump()), response, accepted=200)
 
 
 @router.post("/stack/a/preflight", dependencies=[Depends(person_only)])

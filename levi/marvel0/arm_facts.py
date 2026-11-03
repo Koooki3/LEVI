@@ -1,24 +1,25 @@
 """What the arm controller the stack runs asks of the client command.
 
 The facts are the ``arm`` part of the stack document's ``act`` (``stack_act.Act
-._arm_doc``): which controller the control file names, which one the page's own A
+._arm_doc``): which controller the page starts A as (the choice made on A's card,
+else the control file's: ``arm_choice.effective``), which one the page's own A
 was *started as* (its record, not the file: the file can be changed while A
 runs), and what follows: the alpha rule v3 is forced to, why rule v3 is refused
-(``changed``: the file names another controller than the running A; ``foreign``:
-an A the page did not start runs while the file names the anyspeedup one;
+(``changed``: the page would start another controller than the running A;
+``foreign``: an A the page did not start runs while the anyspeedup one is chosen;
 ``unknown``: A could not be judged), whether the ramp rules v1 and v2 are
 offered, and the suffix of the default rollout group.
 
 ``read`` never raises. When the stack document cannot be read at all, the control
-file alone answers, and a file that names the anyspeedup controller for a stack
-that is on then reads ``unknown`` (nothing is forced and rule v3 is refused):
-what runs on the arm is not known. With the lab's controller, no control file or
+file and the saved choice answer (``from_file``), and an anyspeedup controller
+chosen for a stack that is on then reads ``unknown`` (nothing is forced and rule
+v3 is refused): what runs on the arm is not known. With the lab's controller, no control file or
 a stack that is off, the answer asks nothing, as it always did.
 """
 
 import math
 
-from . import command, control_site
+from . import arm_choice, command, control_site
 
 PROBLEMS = ("changed", "foreign", "unknown")
 
@@ -36,12 +37,26 @@ def from_document(fresh=False):
     return arm if isinstance(arm, dict) else None
 
 
+def _choice_now() -> dict:
+    """The arm controller chosen on A's card (``arm_choice.read`` of the
+    product's own stack folder); unreadable when it cannot be had."""
+    try:
+        from . import stack_act
+
+        return arm_choice.read(stack_act._state_root())
+    except Exception:  # noqa: BLE001 - what cannot be read is not a choice
+        return dict(arm_choice.UNREADABLE)
+
+
 def from_file() -> dict:
-    """The facts from the control file alone: the best that can be said when the
-    stack document is not there (see the module doc)."""
+    """The facts from the control file and the choice made on A's card alone
+    (``arm_choice.effective``, the same decision the stack document makes): the
+    best that can be said when the stack document is not there (see the module
+    doc)."""
     try:
         loaded = control_site.read()
-        stack_control = loaded.site.stack if loaded.state == "ok" else None
+        file_stack = loaded.site.stack if loaded.state == "ok" else None
+        stack_control, _ = arm_choice.effective(file_stack, _choice_now())
     except Exception:  # noqa: BLE001
         stack_control = None
     anyspeedup = bool(

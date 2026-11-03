@@ -422,7 +422,43 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [],
+          "can_choose": true
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -1176,7 +1212,43 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [],
+          "can_choose": true
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -1912,7 +1984,43 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [],
+          "can_choose": true
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -2635,7 +2743,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is starting): stop A first.",
+              "params": {
+                "state": "starting"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -3381,7 +3534,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -4110,7 +4308,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -4879,7 +5122,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -5634,7 +5922,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -6396,7 +6729,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -7159,7 +7537,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -7980,7 +8403,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -8814,7 +9282,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -9673,7 +10186,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -10434,7 +10992,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is failed): stop A first.",
+              "params": {
+                "state": "failed"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -11184,7 +11787,50 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_busy",
+              "level": "required",
+              "text": "A guided start or stop is in progress; change the arm controller when it has ended.",
+              "params": {}
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -12003,7 +12649,58 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_busy",
+              "level": "required",
+              "text": "A guided start or stop is in progress; change the arm controller when it has ended.",
+              "params": {}
+            },
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -12786,7 +13483,50 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_busy",
+              "level": "required",
+              "text": "A guided start or stop is in progress; change the arm controller when it has ended.",
+              "params": {}
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -13615,7 +14355,58 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_busy",
+              "level": "required",
+              "text": "A guided start or stop is in progress; change the arm controller when it has ended.",
+              "params": {}
+            },
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -14429,7 +15220,58 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_busy",
+              "level": "required",
+              "text": "A guided start or stop is in progress; change the arm controller when it has ended.",
+              "params": {}
+            },
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -15269,7 +16111,58 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_busy",
+              "level": "required",
+              "text": "A guided start or stop is in progress; change the arm controller when it has ended.",
+              "params": {}
+            },
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -16111,7 +17004,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -17022,7 +17960,58 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_busy",
+              "level": "required",
+              "text": "A guided start or stop is in progress; change the arm controller when it has ended.",
+              "params": {}
+            },
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -17905,7 +18894,50 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_busy",
+              "level": "required",
+              "text": "A guided start or stop is in progress; change the arm controller when it has ended.",
+              "params": {}
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -18741,7 +19773,43 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [],
+          "can_choose": true
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -19553,7 +20621,50 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_busy",
+              "level": "required",
+              "text": "A guided start or stop is in progress; change the arm controller when it has ended.",
+              "params": {}
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -20398,7 +21509,58 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_busy",
+              "level": "required",
+              "text": "A guided start or stop is in progress; change the arm controller when it has ended.",
+              "params": {}
+            },
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -21221,7 +22383,58 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_busy",
+              "level": "required",
+              "text": "A guided start or stop is in progress; change the arm controller when it has ended.",
+              "params": {}
+            },
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -22061,7 +23274,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -22916,7 +24174,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -23739,7 +25042,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -24572,7 +25920,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -25399,7 +26792,58 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_busy",
+              "level": "required",
+              "text": "A guided start or stop is in progress; change the arm controller when it has ended.",
+              "params": {}
+            },
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -26294,7 +27738,58 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_busy",
+              "level": "required",
+              "text": "A guided start or stop is in progress; change the arm controller when it has ended.",
+              "params": {}
+            },
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -27112,7 +28607,43 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [],
+          "can_choose": true
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -27872,7 +29403,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -28669,7 +30245,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -29523,7 +31144,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -30366,7 +32032,43 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [],
+          "can_choose": true
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -31110,7 +32812,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -31874,7 +33621,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -32607,7 +34399,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -33336,7 +35173,43 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [],
+          "can_choose": true
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -34078,7 +35951,52 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is unknown): stop A first.",
+              "params": {
+                "state": "unknown"
+              }
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": "real",
         "order": ["m", "a", "b", "c"],
@@ -34537,6 +36455,2330 @@
         }
       ]
     },
+    "arm_choice_offered": {
+      "schema": "levi.marvel0.stack.v1",
+      "sampled_at": 1800000000.0,
+      "profile": "real",
+      "profile_code": "profile.product",
+      "lock": {
+        "state": "free",
+        "holder": null,
+        "file": ".marvel0-stack.lock"
+      },
+      "linger": {
+        "state": "no"
+      },
+      "rt_limits": {
+        "state": "ok",
+        "rtprio": 99,
+        "memlock": "infinity"
+      },
+      "arm_sockets": {
+        "state": "inactive",
+        "detail": "no socket to the arm"
+      },
+      "health": {
+        "state": "missing",
+        "age_s": null,
+        "monitor_pid": null,
+        "hardware_active": null,
+        "controller_active": null,
+        "robot_mode_name": null,
+        "code": "health.missing"
+      },
+      "marker": {
+        "state": "absent",
+        "age_s": null,
+        "ctime_age_s": null,
+        "code": null,
+        "can_clear": false,
+        "clear_blockers": ["marker_absent"]
+      },
+      "terminals": {
+        "M": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "health.state",
+              "value": "missing"
+            },
+            {
+              "code": "health.age_s",
+              "value": null
+            }
+          ],
+          "code": "m.absent_no_health"
+        },
+        "A": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "a.arm_sockets",
+              "value": "inactive"
+            },
+            {
+              "code": "a.hardware_active",
+              "value": null
+            }
+          ],
+          "code": "a.stopped"
+        },
+        "B": {
+          "state": "unknown",
+          "evidence": [],
+          "code": "b.not_observable"
+        },
+        "C": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "c.listening",
+              "value": false
+            },
+            {
+              "code": "c.impedance_active",
+              "value": null
+            }
+          ],
+          "code": "c.stopped"
+        },
+        "policy": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "policy.listening",
+              "value": false
+            }
+          ],
+          "code": "policy.stopped"
+        },
+        "client": {
+          "state": "unknown",
+          "evidence": [
+            {
+              "code": "client.connected",
+              "value": false
+            },
+            {
+              "code": "client.open_session",
+              "value": false
+            }
+          ],
+          "code": "client.not_connected"
+        }
+      },
+      "verdict": {
+        "verdict": "unknown",
+        "active": [],
+        "unknown": ["B"]
+      },
+      "gates": {
+        "A": {
+          "verdict": "would_refuse",
+          "reasons": [
+            "gate.monitor_fresh",
+            "gate.layers_known",
+            "gate.marker_set",
+            "gate.fci_probe"
+          ],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.a_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.marker_set",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "age_s": null
+              }
+            },
+            {
+              "code": "gate.arm_sockets_clear",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.rt_limits",
+              "ok": true,
+              "level": "required",
+              "params": {
+                "rtprio": 99,
+                "memlock": "infinity"
+              }
+            },
+            {
+              "code": "gate.fci_probe",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.linger",
+              "ok": false,
+              "level": "warn",
+              "params": {}
+            },
+            {
+              "code": "gate.person_desk",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        },
+        "B": {
+          "verdict": "would_refuse",
+          "reasons": [
+            "gate.monitor_fresh",
+            "gate.layers_known",
+            "gate.a_running",
+            "gate.b_absent"
+          ],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_running",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_absent",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.person_jaws_clear",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        },
+        "C": {
+          "verdict": "would_refuse",
+          "reasons": [
+            "gate.monitor_fresh",
+            "gate.layers_known",
+            "gate.a_running",
+            "gate.b_known",
+            "gate.b_running",
+            "gate.no_client"
+          ],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_running",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_known",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_running",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.c_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.c_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.no_client",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.person_estop",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            },
+            {
+              "code": "gate.person_no_client",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        }
+      },
+      "monitor": {
+        "unit": "levi-fr3-health-monitor.service",
+        "unit_state": "absent",
+        "owned": false,
+        "restarts": null,
+        "can_start": true,
+        "start_blockers": [],
+        "can_stop": false,
+        "stop_blockers": ["monitor_not_ours"],
+        "auto": true,
+        "auto_setting": "on",
+        "plan": {
+          "action": "none",
+          "code": "auto.idle"
+        },
+        "last_auto": null
+      },
+      "phrases": {
+        "monitor_start": "start health monitor",
+        "monitor_stop": "stop health monitor",
+        "marker_clear": "clear marker",
+        "arm_start": "start arm stack",
+        "sequence_start": "start arm stack",
+        "sequence_stop": "stop whole stack",
+        "arm_stop": "stop arm stack",
+        "gripper_start": "start gripper stack",
+        "gripper_stop": "stop gripper stack",
+        "robot_server_start": "start robot server",
+        "robot_server_stop": "stop robot server",
+        "marker_touch": "set marker",
+        "marker_adopt": "adopt marker",
+        "gripper_open": "gripper open",
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
+      },
+      "act": {
+        "schema": "levi.marvel0.stack_act.v1",
+        "enabled": true,
+        "control": {
+          "state": "ok",
+          "code": "control.enabled",
+          "stack_enabled": true,
+          "client_enabled": false,
+          "errors": [],
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
+        },
+        "arm": {
+          "configured": {
+            "controller": "lab",
+            "preset": null
+          },
+          "enabled": true,
+          "running": null,
+          "status": "idle",
+          "alpha": null,
+          "problem": null,
+          "ramp_ok": true,
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": true,
+              "code": null
+            }
+          ],
+          "choose_blockers": [],
+          "can_choose": true
+        },
+        "spec_profile": "real",
+        "order": ["m", "a", "b", "c"],
+        "terminals": {
+          "m": {
+            "key": "m",
+            "unit": "levi-fr3-health-monitor.service",
+            "state": "idle",
+            "reason": "m.absent_no_health",
+            "failure": null,
+            "unit_state": "absent",
+            "readiness": null,
+            "can_start": true,
+            "start_blockers": [],
+            "can_stop": false,
+            "stop_blockers": [
+              {
+                "code": "monitor_not_ours",
+                "level": "required",
+                "text": "The page has no health monitor to stop",
+                "params": {}
+              }
+            ],
+            "confirm": {
+              "start": "start health monitor",
+              "stop": "stop health monitor"
+            },
+            "attest": {
+              "start": [],
+              "stop": []
+            },
+            "hazard": null,
+            "stop_note": null
+          },
+          "a": {
+            "key": "a",
+            "unit": "levi-aeri-stack-marvel0-a.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "idle",
+            "reason": "a.stopped",
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "gate.monitor_fresh",
+                "level": "required",
+                "text": "The health monitor M is not running with a fresh health file.",
+                "params": {}
+              },
+              {
+                "code": "gate.layers_known",
+                "level": "required",
+                "text": "Part of the stack cannot be seen (B); nothing is changed while that is so. Run the check.",
+                "params": {
+                  "unknown": "B"
+                }
+              },
+              {
+                "code": "gate.marker_set",
+                "level": "required",
+                "text": "The arm-controller marker is not set; it pauses heavy jobs on this computer before A starts.",
+                "params": {
+                  "age_s": null
+                }
+              },
+              {
+                "code": "gate.fci_probe",
+                "level": "required",
+                "text": "The arm's FCI port has not answered a check in the last 300 s: activate FCI in Desk, then run the check.",
+                "params": {
+                  "ttl_s": 300
+                }
+              },
+              {
+                "code": "gate.linger",
+                "level": "warn",
+                "text": "Logging out stops every unit of the stack within about 5 s (Linger is off).",
+                "params": {}
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start arm stack",
+              "stop": "stop arm stack"
+            },
+            "attest": {
+              "start": ["desk_done", "estop_hand"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.a",
+              "text": "Starting A connects the 1 kHz control loop to the arm. The arm does not move, but nothing else may touch it. LEVI's own heavy jobs (the ones that honour the marker) are paused first; other programs on this computer are not."
+            },
+            "stop_note": null,
+            "override": null,
+            "can_stop_with_override": false
+          },
+          "b": {
+            "key": "b",
+            "unit": "levi-aeri-stack-marvel0-b.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "unknown",
+            "reason": "b.not_probed",
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "gate.monitor_fresh",
+                "level": "required",
+                "text": "The health monitor M is not running with a fresh health file.",
+                "params": {}
+              },
+              {
+                "code": "gate.a_running",
+                "level": "required",
+                "text": "The arm controller A is not running.",
+                "params": {}
+              },
+              {
+                "code": "a_not_ready",
+                "level": "required",
+                "text": "The arm controller A is not ready (it is idle).",
+                "params": {
+                  "state": "idle"
+                }
+              },
+              {
+                "code": "b_probe_stale",
+                "level": "warn",
+                "text": "No usable check says whether a gripper stack is already running (none made, too old, or without an answer): pressing start makes the check first (a few seconds); press start again when it has finished.",
+                "params": {
+                  "age_s": null
+                }
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start gripper stack",
+              "stop": "stop gripper stack"
+            },
+            "attest": {
+              "start": ["hands_clear"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.b",
+              "text": "Starting B opens and closes the gripper fully (about 2 s). Keep hands and objects out of the jaws."
+            },
+            "stop_note": null,
+            "override": null,
+            "can_stop_with_override": false
+          },
+          "c": {
+            "key": "c",
+            "unit": "levi-aeri-stack-marvel0-c.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "idle",
+            "reason": "c.stopped",
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "gate.monitor_fresh",
+                "level": "required",
+                "text": "The health monitor M is not running with a fresh health file.",
+                "params": {}
+              },
+              {
+                "code": "gate.layers_known",
+                "level": "required",
+                "text": "Part of the stack cannot be seen (B); nothing is changed while that is so. Run the check.",
+                "params": {
+                  "unknown": "B"
+                }
+              },
+              {
+                "code": "gate.a_running",
+                "level": "required",
+                "text": "The arm controller A is not running.",
+                "params": {}
+              },
+              {
+                "code": "gate.b_known",
+                "level": "required",
+                "text": "Whether the gripper stack runs is not known; run the check.",
+                "params": {}
+              },
+              {
+                "code": "gate.b_running",
+                "level": "required",
+                "text": "The gripper stack B is not running.",
+                "params": {}
+              },
+              {
+                "code": "a_not_ready",
+                "level": "required",
+                "text": "The arm controller A is not ready (it is idle).",
+                "params": {
+                  "state": "idle"
+                }
+              },
+              {
+                "code": "gripper_b_not_ready",
+                "level": "required",
+                "text": "The gripper stack B is not ready.",
+                "params": {}
+              },
+              {
+                "code": "c_preflight",
+                "level": "required",
+                "text": "The checks before C (QoS, gripper controllers, end-effector frame) have not all passed in the last 300 s.",
+                "params": {
+                  "ttl_s": 300
+                }
+              },
+              {
+                "code": "health_not_ok",
+                "level": "required",
+                "text": "The health file does not show a ready arm: fresh, hardware active, idle or moving, no red light.",
+                "params": {}
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start robot server",
+              "stop": "stop robot server"
+            },
+            "attest": {
+              "start": ["estop_hand", "hands_clear", "no_client"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.c",
+              "text": "About 3 s after the server starts, the impedance controller turns on and the arm may sink 1-2 mm. The server's port has no authentication. Keep a hand on the physical emergency stop."
+            },
+            "stop_note": null,
+            "override": "stop robot server with client connected",
+            "can_stop_with_override": false
+          }
+        },
+        "marker": {
+          "state": "absent",
+          "age_s": null,
+          "ctime_age_s": null,
+          "ours": false,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
+          "remaining_s": null,
+          "heavy": null,
+          "touch_blockers": []
+        },
+        "sequence": {
+          "state": "idle",
+          "kind": null
+        },
+        "gripper_test": {
+          "state": "idle",
+          "last": null,
+          "can_run": false,
+          "blockers": [
+            {
+              "code": "gripper_b_not_ready",
+              "level": "required",
+              "text": "The gripper stack B is not ready.",
+              "params": {}
+            }
+          ],
+          "attest": ["hands_clear"]
+        },
+        "operation": null,
+        "checks": {
+          "fci": null,
+          "b_probe": null,
+          "c_preflight": null,
+          "can_probe_b": true,
+          "can_stop_all": false
+        },
+        "stop_all_blockers": [
+          {
+            "code": "nothing_to_stop",
+            "level": "required",
+            "text": "Nothing that this page started is running, so there is nothing to stop.",
+            "params": {}
+          }
+        ],
+        "linger": {
+          "state": "no"
+        },
+        "rt_limits": {
+          "state": "ok",
+          "rtprio": 99,
+          "memlock": "infinity"
+        },
+        "estop": {
+          "text": "Keep a hand on the physical emergency stop for every session. Nothing on this page is an emergency stop: the stop buttons end a program, they do not stop the arm."
+        },
+        "scope": {
+          "text": "These checks stop mistakes. They do not stop another program of this account, which can send the same requests; Franka Desk and the physical emergency stop are the real barriers."
+        },
+        "phrases": {
+          "arm_start": "start arm stack",
+          "arm_stop": "stop arm stack",
+          "gripper_start": "start gripper stack",
+          "gripper_stop": "stop gripper stack",
+          "robot_server_start": "start robot server",
+          "robot_server_stop": "stop robot server",
+          "marker_touch": "set marker",
+          "marker_adopt": "adopt marker",
+          "marker_clear": "clear marker",
+          "gripper_open": "gripper open",
+          "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
+          "sequence_stop": "stop whole stack",
+          "client_override": "stop robot server with client connected"
+        },
+        "attest": {
+          "a": ["desk_done", "estop_hand"],
+          "b": ["hands_clear"],
+          "c": ["estop_hand", "hands_clear", "no_client"],
+          "gripper": ["hands_clear"]
+        },
+        "notices": []
+      },
+      "notices": [
+        {
+          "code": "notice.gates_scope"
+        }
+      ]
+    },
+    "arm_chosen_s1": {
+      "schema": "levi.marvel0.stack.v1",
+      "sampled_at": 1800000000.0,
+      "profile": "real",
+      "profile_code": "profile.product",
+      "lock": {
+        "state": "free",
+        "holder": null,
+        "file": ".marvel0-stack.lock"
+      },
+      "linger": {
+        "state": "no"
+      },
+      "rt_limits": {
+        "state": "ok",
+        "rtprio": 99,
+        "memlock": "infinity"
+      },
+      "arm_sockets": {
+        "state": "inactive",
+        "detail": "no socket to the arm"
+      },
+      "health": {
+        "state": "red",
+        "age_s": 0.1,
+        "monitor_pid": 4242,
+        "hardware_active": null,
+        "controller_active": null,
+        "robot_mode_name": null,
+        "code": "health.fresh"
+      },
+      "marker": {
+        "state": "present",
+        "age_s": 90.0,
+        "ctime_age_s": 90.0,
+        "code": null,
+        "can_clear": true,
+        "clear_blockers": []
+      },
+      "terminals": {
+        "M": {
+          "state": "running",
+          "evidence": [
+            {
+              "code": "health.state",
+              "value": "red"
+            },
+            {
+              "code": "health.age_s",
+              "value": 0.1
+            },
+            {
+              "code": "m.pid_matches",
+              "value": true
+            }
+          ],
+          "code": "m.running"
+        },
+        "A": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "a.arm_sockets",
+              "value": "inactive"
+            },
+            {
+              "code": "a.hardware_active",
+              "value": null
+            }
+          ],
+          "code": "a.stopped"
+        },
+        "B": {
+          "state": "unknown",
+          "evidence": [],
+          "code": "b.not_observable"
+        },
+        "C": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "c.listening",
+              "value": false
+            },
+            {
+              "code": "c.impedance_active",
+              "value": null
+            }
+          ],
+          "code": "c.stopped"
+        },
+        "policy": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "policy.listening",
+              "value": false
+            }
+          ],
+          "code": "policy.stopped"
+        },
+        "client": {
+          "state": "unknown",
+          "evidence": [
+            {
+              "code": "client.connected",
+              "value": false
+            },
+            {
+              "code": "client.open_session",
+              "value": false
+            }
+          ],
+          "code": "client.not_connected"
+        }
+      },
+      "verdict": {
+        "verdict": "busy",
+        "active": ["M"],
+        "unknown": ["B"]
+      },
+      "gates": {
+        "A": {
+          "verdict": "would_refuse",
+          "reasons": ["gate.layers_known", "gate.fci_probe"],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.a_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.marker_set",
+              "ok": true,
+              "level": "required",
+              "params": {
+                "age_s": 90.0
+              }
+            },
+            {
+              "code": "gate.arm_sockets_clear",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.rt_limits",
+              "ok": true,
+              "level": "required",
+              "params": {
+                "rtprio": 99,
+                "memlock": "infinity"
+              }
+            },
+            {
+              "code": "gate.fci_probe",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.linger",
+              "ok": false,
+              "level": "warn",
+              "params": {}
+            },
+            {
+              "code": "gate.person_desk",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        },
+        "B": {
+          "verdict": "would_refuse",
+          "reasons": ["gate.layers_known", "gate.a_running", "gate.b_absent"],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_running",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_absent",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.person_jaws_clear",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        },
+        "C": {
+          "verdict": "would_refuse",
+          "reasons": [
+            "gate.layers_known",
+            "gate.a_running",
+            "gate.b_known",
+            "gate.b_running",
+            "gate.no_client"
+          ],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_running",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_known",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_running",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.c_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.c_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.no_client",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.person_estop",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            },
+            {
+              "code": "gate.person_no_client",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        }
+      },
+      "monitor": {
+        "unit": "levi-fr3-health-monitor.service",
+        "unit_state": "running",
+        "owned": true,
+        "restarts": 0,
+        "can_start": false,
+        "start_blockers": ["monitor_running"],
+        "can_stop": true,
+        "stop_blockers": [],
+        "auto": true,
+        "auto_setting": "on",
+        "plan": {
+          "action": "none",
+          "code": "auto.wait_stack_down"
+        },
+        "last_auto": null
+      },
+      "phrases": {
+        "monitor_start": "start health monitor",
+        "monitor_stop": "stop health monitor",
+        "marker_clear": "clear marker",
+        "arm_start": "start arm stack",
+        "sequence_start": "start arm stack",
+        "sequence_stop": "stop whole stack",
+        "arm_stop": "stop arm stack",
+        "gripper_start": "start gripper stack",
+        "gripper_stop": "stop gripper stack",
+        "robot_server_start": "start robot server",
+        "robot_server_stop": "stop robot server",
+        "marker_touch": "set marker",
+        "marker_adopt": "adopt marker",
+        "gripper_open": "gripper open",
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
+      },
+      "act": {
+        "schema": "levi.marvel0.stack_act.v1",
+        "enabled": true,
+        "control": {
+          "state": "ok",
+          "code": "control.enabled",
+          "stack_enabled": true,
+          "client_enabled": false,
+          "errors": [],
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
+        },
+        "arm": {
+          "configured": {
+            "controller": "anyspeedup",
+            "preset": "S1"
+          },
+          "enabled": true,
+          "running": null,
+          "status": "idle",
+          "alpha": 0.01,
+          "problem": null,
+          "ramp_ok": false,
+          "suffix": "_any-S1",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "chosen",
+            "controller": "anyspeedup",
+            "preset": "S1",
+            "code": null,
+            "at": 1800000000.0
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": true,
+              "code": null
+            }
+          ],
+          "choose_blockers": [],
+          "can_choose": true
+        },
+        "spec_profile": "real",
+        "order": ["m", "a", "b", "c"],
+        "terminals": {
+          "m": {
+            "key": "m",
+            "unit": "levi-fr3-health-monitor.service",
+            "state": "ready",
+            "reason": "m.running",
+            "failure": null,
+            "unit_state": "running",
+            "readiness": null,
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "monitor_running",
+                "level": "required",
+                "text": "The health monitor is already running",
+                "params": {}
+              }
+            ],
+            "can_stop": true,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start health monitor",
+              "stop": "stop health monitor"
+            },
+            "attest": {
+              "start": [],
+              "stop": []
+            },
+            "hazard": null,
+            "stop_note": null
+          },
+          "a": {
+            "key": "a",
+            "unit": "levi-aeri-stack-marvel0-a.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "idle",
+            "reason": "a.stopped",
+            "can_start": true,
+            "start_blockers": [
+              {
+                "code": "gate.linger",
+                "level": "warn",
+                "text": "Logging out stops every unit of the stack within about 5 s (Linger is off).",
+                "params": {}
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start arm stack",
+              "stop": "stop arm stack"
+            },
+            "attest": {
+              "start": ["desk_done", "estop_hand"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.a",
+              "text": "Starting A connects the 1 kHz control loop to the arm. The arm does not move, but nothing else may touch it. LEVI's own heavy jobs (the ones that honour the marker) are paused first; other programs on this computer are not."
+            },
+            "stop_note": null,
+            "override": null,
+            "can_stop_with_override": false
+          },
+          "b": {
+            "key": "b",
+            "unit": "levi-aeri-stack-marvel0-b.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "idle",
+            "reason": "b.not_running",
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "gate.a_running",
+                "level": "required",
+                "text": "The arm controller A is not running.",
+                "params": {}
+              },
+              {
+                "code": "a_not_ready",
+                "level": "required",
+                "text": "The arm controller A is not ready (it is idle).",
+                "params": {
+                  "state": "idle"
+                }
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start gripper stack",
+              "stop": "stop gripper stack"
+            },
+            "attest": {
+              "start": ["hands_clear"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.b",
+              "text": "Starting B opens and closes the gripper fully (about 2 s). Keep hands and objects out of the jaws."
+            },
+            "stop_note": null,
+            "override": null,
+            "can_stop_with_override": false
+          },
+          "c": {
+            "key": "c",
+            "unit": "levi-aeri-stack-marvel0-c.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "idle",
+            "reason": "c.stopped",
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "gate.a_running",
+                "level": "required",
+                "text": "The arm controller A is not running.",
+                "params": {}
+              },
+              {
+                "code": "gate.b_running",
+                "level": "required",
+                "text": "The gripper stack B is not running.",
+                "params": {}
+              },
+              {
+                "code": "a_not_ready",
+                "level": "required",
+                "text": "The arm controller A is not ready (it is idle).",
+                "params": {
+                  "state": "idle"
+                }
+              },
+              {
+                "code": "gripper_b_not_ready",
+                "level": "required",
+                "text": "The gripper stack B is not ready.",
+                "params": {}
+              },
+              {
+                "code": "c_preflight",
+                "level": "required",
+                "text": "The checks before C (QoS, gripper controllers, end-effector frame) have not all passed in the last 300 s.",
+                "params": {
+                  "ttl_s": 300
+                }
+              },
+              {
+                "code": "health_not_ok",
+                "level": "required",
+                "text": "The health file does not show a ready arm: fresh, hardware active, idle or moving, no red light.",
+                "params": {}
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start robot server",
+              "stop": "stop robot server"
+            },
+            "attest": {
+              "start": ["estop_hand", "hands_clear", "no_client"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.c",
+              "text": "About 3 s after the server starts, the impedance controller turns on and the arm may sink 1-2 mm. The server's port has no authentication. Keep a hand on the physical emergency stop."
+            },
+            "stop_note": null,
+            "override": "stop robot server with client connected",
+            "can_stop_with_override": false
+          }
+        },
+        "marker": {
+          "state": "present",
+          "age_s": 90.0,
+          "ctime_age_s": 90.0,
+          "ours": true,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
+          "remaining_s": 0.0,
+          "heavy": {
+            "state": "clear",
+            "count": 0,
+            "kinds": [],
+            "empty": 0,
+            "why": null
+          },
+          "touch_blockers": []
+        },
+        "sequence": {
+          "state": "idle",
+          "kind": null
+        },
+        "gripper_test": {
+          "state": "idle",
+          "last": null,
+          "can_run": false,
+          "blockers": [
+            {
+              "code": "gripper_b_not_ready",
+              "level": "required",
+              "text": "The gripper stack B is not ready.",
+              "params": {}
+            }
+          ],
+          "attest": ["hands_clear"]
+        },
+        "operation": {
+          "kind": "preflight_a",
+          "terminal": null,
+          "state": "done",
+          "started_at": 1800000000.0,
+          "finished_at": 1800000000.0,
+          "code": null
+        },
+        "checks": {
+          "fci": {
+            "at": 1800000000.0,
+            "state": "open",
+            "age_s": 0.0,
+            "fresh": true
+          },
+          "b_probe": {
+            "at": 1800000000.0,
+            "state": "absent",
+            "by": "nodes",
+            "graph": "absent",
+            "confirmed": true,
+            "age_s": 0.0,
+            "fresh": true
+          },
+          "c_preflight": null,
+          "can_probe_b": true,
+          "can_stop_all": false
+        },
+        "stop_all_blockers": [
+          {
+            "code": "nothing_to_stop",
+            "level": "required",
+            "text": "Nothing that this page started is running, so there is nothing to stop.",
+            "params": {}
+          }
+        ],
+        "linger": {
+          "state": "no"
+        },
+        "rt_limits": {
+          "state": "ok",
+          "rtprio": 99,
+          "memlock": "infinity"
+        },
+        "estop": {
+          "text": "Keep a hand on the physical emergency stop for every session. Nothing on this page is an emergency stop: the stop buttons end a program, they do not stop the arm."
+        },
+        "scope": {
+          "text": "These checks stop mistakes. They do not stop another program of this account, which can send the same requests; Franka Desk and the physical emergency stop are the real barriers."
+        },
+        "phrases": {
+          "arm_start": "start arm stack",
+          "arm_stop": "stop arm stack",
+          "gripper_start": "start gripper stack",
+          "gripper_stop": "stop gripper stack",
+          "robot_server_start": "start robot server",
+          "robot_server_stop": "stop robot server",
+          "marker_touch": "set marker",
+          "marker_adopt": "adopt marker",
+          "marker_clear": "clear marker",
+          "gripper_open": "gripper open",
+          "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
+          "sequence_stop": "stop whole stack",
+          "client_override": "stop robot server with client connected"
+        },
+        "attest": {
+          "a": ["desk_done", "estop_hand"],
+          "b": ["hands_clear"],
+          "c": ["estop_hand", "hands_clear", "no_client"],
+          "gripper": ["hands_clear"]
+        },
+        "notices": []
+      },
+      "notices": [
+        {
+          "code": "notice.gates_scope"
+        }
+      ]
+    },
+    "arm_chosen_s1_running": {
+      "schema": "levi.marvel0.stack.v1",
+      "sampled_at": 1800000000.0,
+      "profile": "real",
+      "profile_code": "profile.product",
+      "lock": {
+        "state": "free",
+        "holder": null,
+        "file": ".marvel0-stack.lock"
+      },
+      "linger": {
+        "state": "no"
+      },
+      "rt_limits": {
+        "state": "ok",
+        "rtprio": 99,
+        "memlock": "infinity"
+      },
+      "arm_sockets": {
+        "state": "active",
+        "detail": "2 control sockets"
+      },
+      "health": {
+        "state": "ok",
+        "age_s": 0.1,
+        "monitor_pid": 4242,
+        "hardware_active": true,
+        "controller_active": false,
+        "robot_mode_name": "IDLE",
+        "code": "health.fresh"
+      },
+      "marker": {
+        "state": "present",
+        "age_s": 90.0,
+        "ctime_age_s": 90.0,
+        "code": null,
+        "can_clear": false,
+        "clear_blockers": ["marker_a_unit", "marker_arm_active"]
+      },
+      "terminals": {
+        "M": {
+          "state": "running",
+          "evidence": [
+            {
+              "code": "health.state",
+              "value": "ok"
+            },
+            {
+              "code": "health.age_s",
+              "value": 0.1
+            },
+            {
+              "code": "m.pid_matches",
+              "value": true
+            }
+          ],
+          "code": "m.running"
+        },
+        "A": {
+          "state": "running",
+          "evidence": [
+            {
+              "code": "a.arm_sockets",
+              "value": "active"
+            },
+            {
+              "code": "a.hardware_active",
+              "value": true
+            }
+          ],
+          "code": "a.running"
+        },
+        "B": {
+          "state": "unknown",
+          "evidence": [],
+          "code": "b.not_observable"
+        },
+        "C": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "c.listening",
+              "value": false
+            },
+            {
+              "code": "c.impedance_active",
+              "value": false
+            }
+          ],
+          "code": "c.stopped"
+        },
+        "policy": {
+          "state": "stopped",
+          "evidence": [
+            {
+              "code": "policy.listening",
+              "value": false
+            }
+          ],
+          "code": "policy.stopped"
+        },
+        "client": {
+          "state": "unknown",
+          "evidence": [
+            {
+              "code": "client.connected",
+              "value": false
+            },
+            {
+              "code": "client.open_session",
+              "value": false
+            }
+          ],
+          "code": "client.not_connected"
+        }
+      },
+      "verdict": {
+        "verdict": "busy",
+        "active": ["M", "A"],
+        "unknown": ["B"]
+      },
+      "gates": {
+        "A": {
+          "verdict": "would_refuse",
+          "reasons": [
+            "gate.layers_known",
+            "gate.a_absent",
+            "gate.a_unit_absent",
+            "gate.arm_sockets_clear",
+            "gate.fci_probe"
+          ],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_absent",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.a_unit_absent",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.marker_set",
+              "ok": true,
+              "level": "required",
+              "params": {
+                "age_s": 90.0
+              }
+            },
+            {
+              "code": "gate.arm_sockets_clear",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.rt_limits",
+              "ok": true,
+              "level": "required",
+              "params": {
+                "rtprio": 99,
+                "memlock": "infinity"
+              }
+            },
+            {
+              "code": "gate.fci_probe",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.linger",
+              "ok": false,
+              "level": "warn",
+              "params": {}
+            },
+            {
+              "code": "gate.person_desk",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        },
+        "B": {
+          "verdict": "would_refuse",
+          "reasons": ["gate.layers_known", "gate.b_absent"],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_running",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_absent",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.person_jaws_clear",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        },
+        "C": {
+          "verdict": "would_refuse",
+          "reasons": [
+            "gate.layers_known",
+            "gate.b_known",
+            "gate.b_running",
+            "gate.no_client"
+          ],
+          "checks": [
+            {
+              "code": "gate.product",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.lock_free",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.monitor_fresh",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.layers_known",
+              "ok": false,
+              "level": "required",
+              "params": {
+                "unknown": "B"
+              }
+            },
+            {
+              "code": "gate.a_running",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_known",
+              "ok": false,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.b_running",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.c_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.c_unit_absent",
+              "ok": true,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.no_client",
+              "ok": null,
+              "level": "required",
+              "params": {}
+            },
+            {
+              "code": "gate.person_estop",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            },
+            {
+              "code": "gate.person_no_client",
+              "ok": null,
+              "level": "person",
+              "params": {}
+            }
+          ],
+          "route": false
+        }
+      },
+      "monitor": {
+        "unit": "levi-fr3-health-monitor.service",
+        "unit_state": "running",
+        "owned": true,
+        "restarts": 0,
+        "can_start": false,
+        "start_blockers": ["monitor_running"],
+        "can_stop": false,
+        "stop_blockers": ["stack_running"],
+        "auto": true,
+        "auto_setting": "on",
+        "plan": {
+          "action": "none",
+          "code": "auto.running"
+        },
+        "last_auto": null
+      },
+      "phrases": {
+        "monitor_start": "start health monitor",
+        "monitor_stop": "stop health monitor",
+        "marker_clear": "clear marker",
+        "arm_start": "start arm stack",
+        "sequence_start": "start arm stack",
+        "sequence_stop": "stop whole stack",
+        "arm_stop": "stop arm stack",
+        "gripper_start": "start gripper stack",
+        "gripper_stop": "stop gripper stack",
+        "robot_server_start": "start robot server",
+        "robot_server_stop": "stop robot server",
+        "marker_touch": "set marker",
+        "marker_adopt": "adopt marker",
+        "gripper_open": "gripper open",
+        "gripper_close": "gripper close",
+        "gripper_position": "gripper position"
+      },
+      "act": {
+        "schema": "levi.marvel0.stack_act.v1",
+        "enabled": true,
+        "control": {
+          "state": "ok",
+          "code": "control.enabled",
+          "stack_enabled": true,
+          "client_enabled": false,
+          "errors": [],
+          "env": "LEVI_MARVEL0_CONTROL",
+          "arm": {
+            "controller": "lab",
+            "preset": null,
+            "alpha": null
+          }
+        },
+        "arm": {
+          "configured": {
+            "controller": "anyspeedup",
+            "preset": "S1"
+          },
+          "enabled": true,
+          "running": {
+            "controller": "anyspeedup",
+            "preset": "S1"
+          },
+          "status": "match",
+          "alpha": 0.01,
+          "problem": null,
+          "ramp_ok": false,
+          "suffix": "_any-S1",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "chosen",
+            "controller": "anyspeedup",
+            "preset": "S1",
+            "code": null,
+            "at": 1800000000.0
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": true,
+              "code": null
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "arm_choice_a_not_idle",
+              "level": "required",
+              "text": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+              "params": {
+                "state": "ready"
+              }
+            }
+          ],
+          "can_choose": false
+        },
+        "spec_profile": "real",
+        "order": ["m", "a", "b", "c"],
+        "terminals": {
+          "m": {
+            "key": "m",
+            "unit": "levi-fr3-health-monitor.service",
+            "state": "ready",
+            "reason": "m.running",
+            "failure": null,
+            "unit_state": "running",
+            "readiness": null,
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "monitor_running",
+                "level": "required",
+                "text": "The health monitor is already running",
+                "params": {}
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [
+              {
+                "code": "stack_running",
+                "level": "required",
+                "text": "The arm stack is (or may be) running; the health monitor stops last, after A and C",
+                "params": {}
+              }
+            ],
+            "confirm": {
+              "start": "start health monitor",
+              "stop": "stop health monitor"
+            },
+            "attest": {
+              "start": [],
+              "stop": []
+            },
+            "hazard": null,
+            "stop_note": null
+          },
+          "a": {
+            "key": "a",
+            "unit": "levi-aeri-stack-marvel0-a.service",
+            "unit_state": "active",
+            "failure": null,
+            "readiness": {
+              "seen": [
+                {
+                  "key": "anyspeedup_start",
+                  "kind": "log",
+                  "text": "The anyspeedup arm controller started with preset S1"
+                },
+                {
+                  "key": "fifo",
+                  "kind": "log",
+                  "text": "The control node got realtime priority 98"
+                },
+                {
+                  "key": "spawners",
+                  "kind": "log",
+                  "text": "Both controller spawners finished"
+                },
+                {
+                  "key": "health_hardware_active",
+                  "kind": "health",
+                  "text": "The health file shows hardware active"
+                }
+              ],
+              "missing": [],
+              "waited_s": 0.0,
+              "timeout_s": 90.0
+            },
+            "owned": true,
+            "state": "ready",
+            "reason": "a.ready",
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "gate.a_absent",
+                "level": "required",
+                "text": "The arm controller A is running, or cannot be told to be stopped.",
+                "params": {}
+              },
+              {
+                "code": "gate.a_unit_absent",
+                "level": "required",
+                "text": "A unit of the arm controller exists.",
+                "params": {}
+              },
+              {
+                "code": "gate.arm_sockets_clear",
+                "level": "required",
+                "text": "The arm has a control connection (or its socket table cannot be read).",
+                "params": {}
+              },
+              {
+                "code": "gate.linger",
+                "level": "warn",
+                "text": "Logging out stops every unit of the stack within about 5 s (Linger is off).",
+                "params": {}
+              }
+            ],
+            "can_stop": true,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start arm stack",
+              "stop": "stop arm stack"
+            },
+            "attest": {
+              "start": ["desk_done", "estop_hand"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.a",
+              "text": "Starting A connects the 1 kHz control loop to the arm. The arm does not move, but nothing else may touch it. LEVI's own heavy jobs (the ones that honour the marker) are paused first; other programs on this computer are not."
+            },
+            "stop_note": null,
+            "override": null,
+            "can_stop_with_override": false
+          },
+          "b": {
+            "key": "b",
+            "unit": "levi-aeri-stack-marvel0-b.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "idle",
+            "reason": "b.not_running",
+            "can_start": true,
+            "start_blockers": [],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start gripper stack",
+              "stop": "stop gripper stack"
+            },
+            "attest": {
+              "start": ["hands_clear"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.b",
+              "text": "Starting B opens and closes the gripper fully (about 2 s). Keep hands and objects out of the jaws."
+            },
+            "stop_note": null,
+            "override": null,
+            "can_stop_with_override": false
+          },
+          "c": {
+            "key": "c",
+            "unit": "levi-aeri-stack-marvel0-c.service",
+            "unit_state": null,
+            "failure": null,
+            "readiness": null,
+            "owned": false,
+            "state": "idle",
+            "reason": "c.stopped",
+            "can_start": false,
+            "start_blockers": [
+              {
+                "code": "gate.b_running",
+                "level": "required",
+                "text": "The gripper stack B is not running.",
+                "params": {}
+              },
+              {
+                "code": "gripper_b_not_ready",
+                "level": "required",
+                "text": "The gripper stack B is not ready.",
+                "params": {}
+              },
+              {
+                "code": "c_preflight",
+                "level": "required",
+                "text": "The checks before C (QoS, gripper controllers, end-effector frame) have not all passed in the last 300 s.",
+                "params": {
+                  "ttl_s": 300
+                }
+              }
+            ],
+            "can_stop": false,
+            "stop_blockers": [],
+            "confirm": {
+              "start": "start robot server",
+              "stop": "stop robot server"
+            },
+            "attest": {
+              "start": ["estop_hand", "hands_clear", "no_client"],
+              "stop": []
+            },
+            "hazard": {
+              "code": "hazard.c",
+              "text": "About 3 s after the server starts, the impedance controller turns on and the arm may sink 1-2 mm. The server's port has no authentication. Keep a hand on the physical emergency stop."
+            },
+            "stop_note": null,
+            "override": "stop robot server with client connected",
+            "can_stop_with_override": false
+          }
+        },
+        "marker": {
+          "state": "present",
+          "age_s": 90.0,
+          "ctime_age_s": 90.0,
+          "ours": true,
+          "wait_s": 3.0,
+          "configured_wait_s": 3.0,
+          "remaining_s": 0.0,
+          "heavy": null,
+          "touch_blockers": []
+        },
+        "sequence": {
+          "state": "idle",
+          "kind": null
+        },
+        "gripper_test": {
+          "state": "idle",
+          "last": null,
+          "can_run": false,
+          "blockers": [
+            {
+              "code": "gripper_b_not_ready",
+              "level": "required",
+              "text": "The gripper stack B is not ready.",
+              "params": {}
+            }
+          ],
+          "attest": ["hands_clear"]
+        },
+        "operation": {
+          "kind": "preflight_a",
+          "terminal": null,
+          "state": "done",
+          "started_at": 1800000000.0,
+          "finished_at": 1800000000.0,
+          "code": null
+        },
+        "checks": {
+          "fci": {
+            "at": 1800000000.0,
+            "state": "open",
+            "age_s": 0.0,
+            "fresh": true
+          },
+          "b_probe": {
+            "at": 1800000000.0,
+            "state": "absent",
+            "by": "nodes",
+            "graph": "absent",
+            "confirmed": true,
+            "age_s": 0.0,
+            "fresh": true
+          },
+          "c_preflight": null,
+          "can_probe_b": true,
+          "can_stop_all": true
+        },
+        "stop_all_blockers": [],
+        "linger": {
+          "state": "no"
+        },
+        "rt_limits": {
+          "state": "ok",
+          "rtprio": 99,
+          "memlock": "infinity"
+        },
+        "estop": {
+          "text": "Keep a hand on the physical emergency stop for every session. Nothing on this page is an emergency stop: the stop buttons end a program, they do not stop the arm."
+        },
+        "scope": {
+          "text": "These checks stop mistakes. They do not stop another program of this account, which can send the same requests; Franka Desk and the physical emergency stop are the real barriers."
+        },
+        "phrases": {
+          "arm_start": "start arm stack",
+          "arm_stop": "stop arm stack",
+          "gripper_start": "start gripper stack",
+          "gripper_stop": "stop gripper stack",
+          "robot_server_start": "start robot server",
+          "robot_server_stop": "stop robot server",
+          "marker_touch": "set marker",
+          "marker_adopt": "adopt marker",
+          "marker_clear": "clear marker",
+          "gripper_open": "gripper open",
+          "gripper_close": "gripper close",
+          "gripper_position": "gripper position",
+          "sequence_stop": "stop whole stack",
+          "client_override": "stop robot server with client connected"
+        },
+        "attest": {
+          "a": ["desk_done", "estop_hand"],
+          "b": ["hands_clear"],
+          "c": ["estop_hand", "hands_clear", "no_client"],
+          "gripper": ["hands_clear"]
+        },
+        "notices": []
+      },
+      "notices": [
+        {
+          "code": "notice.gates_scope"
+        },
+        {
+          "code": "notice.logout_stops_stack"
+        }
+      ]
+    },
     "control_disabled": {
       "schema": "levi.marvel0.stack.v1",
       "sampled_at": 1800000000.0,
@@ -34959,7 +39201,50 @@
           "alpha": null,
           "problem": null,
           "ramp_ok": true,
-          "suffix": ""
+          "suffix": "",
+          "file": {
+            "controller": "lab",
+            "preset": null
+          },
+          "choice": {
+            "state": "default",
+            "controller": null,
+            "preset": null,
+            "code": null,
+            "at": null
+          },
+          "options": [
+            {
+              "controller": "lab",
+              "preset": null,
+              "default": true,
+              "allowed": true,
+              "code": null
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "today",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            },
+            {
+              "controller": "anyspeedup",
+              "preset": "S1",
+              "default": false,
+              "allowed": false,
+              "code": "arm_choice_no_anyspeedup"
+            }
+          ],
+          "choose_blockers": [
+            {
+              "code": "control_disabled",
+              "level": "required",
+              "text": "Starting and stopping the arm stack from this page is switched off: the control file is missing, invalid, or has [stack] enabled = false.",
+              "params": {}
+            }
+          ],
+          "can_choose": false
         },
         "spec_profile": null,
         "order": ["m", "a", "b", "c"],
@@ -35251,6 +39536,16 @@
     "probe_b": {
       "done": "probe_started",
       "kind": "probe_b"
+    },
+    "arm_choice_set": {
+      "done": "arm_choice_set",
+      "controller": "anyspeedup",
+      "preset": "S1"
+    },
+    "arm_choice_cleared": {
+      "done": "arm_choice_cleared",
+      "controller": null,
+      "preset": null
     }
   },
   "refusals": {
@@ -35342,6 +39637,23 @@
       "detail": {
         "code": "gate.b_unit_absent",
         "message": "A unit of the gripper stack exists."
+      }
+    },
+    "arm_choice_s2": {
+      "status": 409,
+      "detail": {
+        "code": "arm_choice_preset_refused",
+        "message": "Preset S2 is not offered: the client's phase clock has no profile for its lag yet.",
+        "preset": "S2",
+        "reason": "needs_shaped_profile"
+      }
+    },
+    "arm_choice_while_a_runs": {
+      "status": 409,
+      "detail": {
+        "code": "arm_choice_a_not_idle",
+        "message": "The arm controller can be changed only while A is stopped (A is ready): stop A first.",
+        "state": "ready"
       }
     },
     "control_disabled": {

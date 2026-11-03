@@ -46,8 +46,28 @@ def a_ready(m, tmp_path=None, preset=None):
     assert m.terminal("a")["state"] == "ready"
 
 
+# What ``act.arm`` said before the choice on A's card was added; the keys of the
+# choice (``file``, ``choice``, ``options``, ``choose_blockers``, ``can_choose``)
+# are tested in ``test_marvel0_arm_choice.py``.
+FACTS = (
+    "configured",
+    "enabled",
+    "running",
+    "status",
+    "alpha",
+    "problem",
+    "ramp_ok",
+    "suffix",
+)
+
+
 def arm(m):
     return m.doc()["arm"]
+
+
+def facts(m):
+    got = arm(m)
+    return {key: got[key] for key in FACTS}
 
 
 def terminal(m):
@@ -188,7 +208,7 @@ def test_an_a_that_could_not_be_judged_with_the_anyspeedup_file_refuses_rule_v3(
 
 def test_a_lab_a_with_the_lab_file_asks_nothing_of_the_command(m):
     a_ready(m)
-    assert arm(m) == {
+    assert facts(m) == {
         "configured": {"controller": "lab", "preset": None},
         "enabled": True,
         "running": {"controller": "lab", "preset": None},
@@ -207,7 +227,7 @@ def test_an_anyspeedup_a_that_matches_the_file_forces_its_presets_alpha(
     m, tmp_path, preset, alpha, ramp_ok
 ):
     a_ready(m, tmp_path, preset)
-    assert arm(m) == {
+    assert facts(m) == {
         "configured": {"controller": "anyspeedup", "preset": preset},
         "enabled": True,
         "running": {"controller": "anyspeedup", "preset": preset},

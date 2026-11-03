@@ -27,6 +27,7 @@ ROUTES = [
     *(("POST", f"{BASE}/{k}/start") for k in "mabc"),
     *(("POST", f"{BASE}/{k}/stop") for k in "mabc"),
     ("POST", f"{BASE}/marker"),
+    ("POST", f"{BASE}/a/controller"),
     ("POST", f"{BASE}/a/preflight"),
     ("POST", f"{BASE}/b/probe"),
     ("POST", f"{BASE}/c/preflight"),
@@ -91,6 +92,8 @@ def body_of(m, path):
         return {"request_id": rid, "confirm": phrase}
     if path.endswith("/marker"):
         return {"request_id": rid, "op": "touch", "confirm": "set marker"}
+    if path.endswith("/controller"):
+        return {"request_id": rid, "controller": "lab"}
     if path.endswith(("preflight", "probe", "cancel")):
         return {"request_id": rid}
     return {
