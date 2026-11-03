@@ -3407,6 +3407,72 @@ class TestHover(unittest.TestCase):
         fresh = drive(eng, PerfectArm(here), 5, load_once(rest, 63), k0=63)
         self.assertEqual([h for _, _, h in fresh], [False] + [True] * 4)
 
+    def test_a_pure_rotation_is_no_hover(self):
+        """The window's rotation half (hover_dr_rad), review 2026-11-03: a wrist turn of 10 mrad per row with the
+        position fixed spans 50 mrad over any 6-row window, so it is walked above lambda 1 with or without the
+        history. At 3 mrad per row the window rule alone takes only rows 13..19 (18 mrad) for static; with the
+        history the target has turned 39 mrad by then, so not even that is a hover."""
+        for dyaw, still in ((0.01, 45), (0.01, 0), (0.003, 0), (0.003, 45)):
+            plan = drift_master(20, dyaw=dyaw)
+            eng = PhaseEngine(dataclasses.replace(self.P, hover_still_rows=still))
+            log = drive(eng, PerfectArm(plan[0]), 12, load_once(plan))
+            hov_u = [u for u, _, h in log if h]
+            if (dyaw, still) == (0.003, 0):
+                self.assertTrue(hov_u)
+                self.assertTrue(all(math.floor(u + 1e-9) >= 13 for u in hov_u), hov_u)
+            else:
+                self.assertEqual(hov_u, [], (dyaw, still))
+            if dyaw == 0.01:
+                self.assertGreater(max(out.lam for _, out, _ in log), 2.0)
+
+    def test_plain_rows_past_the_horizon_count(self):
+        """Plain's window runs to the last stored row, past the execute horizon (review 2026-11-03): a plan that is
+        static over its first h rows and moves after them is a pause before motion, not a hover. Rule on and off give
+        the same tick count, lambdas, bindings and targets."""
+        plan = hover_plan(10, seed=4)
+        plan[6:, 0] += 0.02 * np.arange(1, 5)  # rows 6..9: 20 mm per row
+        runs = {}
+        for name, params in (("on", self.P), ("off", self.OFF)):
+            eng = PhaseEngine(params)
+            arm = PerfectArm(plan[0])
+            m = eng.splice_plain(plan, Measured(arm.pose(), 0.0, 0.0), 6)
+            log = []
+            for k in range(1, m + 1):
+                out = eng.tick(Measured(arm.pose(), 0.0, k * DT))
+                arm.step(out.target)
+                eng.executed(out.target)
+                log.append(out)
+            runs[name] = (m, log, eng.summary()["hover_ticks"])
+        self.assertEqual(runs["on"][0], runs["off"][0])
+        self.assertEqual(runs["on"][2], 0)
+        self.assertNotIn("hover", {out.binding for out in runs["on"][1]})
+        for a, b in zip(runs["on"][1], runs["off"][1]):
+            np.testing.assert_array_equal(a.target, b.target)
+            self.assertEqual((a.lam, a.binding), (b.lam, b.binding))
+
+    def test_hover_reads_the_floor_row_and_a_change_row_is_behind_the_phase(self):
+        """Review 2026-11-03: rows 0..3 lie 30 mm behind rows 4..11, so while the phase is on the segment from row 3
+        to row 4 the arm still moves (no hover); from row 4 on the plan ahead is static. A gripper change at row 4 is
+        behind the phase from row 4 on, so the plan from there is static as well."""
+        plan = hover_plan(12, seed=6, jitter=0.0, rot_jitter=0.0)
+        plan[:4, 0] -= 0.03
+        eng = PhaseEngine(self.P)
+        eng.set_chunk(plan, "sync")
+        self.assertEqual(eng._static, [False] * 4 + [True] * 8)
+        for u, want in (
+            (3.0, False),
+            (3.5, False),
+            (3.999, False),
+            (4.0, True),
+            (4.5, True),
+            (11.0, True),
+        ):
+            self.assertIs(eng._hover_at(u), want, u)
+        grip = hover_plan(12, seed=6, jitter=0.0, rot_jitter=0.0)
+        grip[4:, 6] = 0.0  # a close at row 4
+        eng.set_chunk(grip, "sync")
+        self.assertEqual(eng._static, [False] * 4 + [True] * 8)
+
 
 class TestHoverStats(unittest.TestCase):
     """hover_stats.py, the source of the PhaseParams hover figures, re-derives the engine's own hover decisions from
