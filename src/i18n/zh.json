@@ -5407,6 +5407,7 @@
   "marvel0.ctl.block.arm_choice_unreadable": "本页保存的机械臂控制器选择读不出来，所以不启动 A：重新选一次，或改回控制文件的默认值。",
   "marvel0.ctl.block.arm_choice_a_not_idle": "只有 A 停止时才能换机械臂控制器：先停 A。",
   "marvel0.ctl.block.arm_choice_busy": "引导式启动或停止正在进行；结束后再换机械臂控制器。",
+  "marvel0.ctl.block.arm_choice_changed": "A 没有启动：A 现在会启动的机械臂控制器已经不是确认窗口里写的那个了（在此期间被改过）。请重新看一遍窗口再确认。",
   "marvel0.ctl.block.c_preflight": "C 的启动前检查（QoS、夹爪控制器、末端坐标系）在最近 {ttl_s} 秒内没有全部通过。",
   "marvel0.ctl.block.health_not_ok": "健康文件没有显示手臂就绪：需要数据新、硬件已激活、处于空闲或运动状态、没有红灯。",
   "marvel0.ctl.block.port_taken": "机器人服务器的端口 {port} 已有进程在监听。",

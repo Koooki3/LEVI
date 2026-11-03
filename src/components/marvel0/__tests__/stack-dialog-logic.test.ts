@@ -52,6 +52,31 @@ describe("what each confirmation asks", () => {
     expect(whole.hazards).toContainEqual(spec.hazards[1]);
   });
 
+  test("the controller a window names for A is the one its start sends; no other window names one", () => {
+    const s1 = { controller: "anyspeedup", preset: "S1" };
+    expect(
+      dialogSpec({ kind: "start", comp: "A" }, act("arm_chosen_s1")).arm,
+    ).toEqual(s1);
+    expect(dialogSpec({ kind: "sequence" }, act("arm_chosen_s1")).arm).toEqual(
+      s1,
+    );
+    expect(
+      dialogSpec({ kind: "start", comp: "A" }, act("ready_to_start_a")).arm,
+    ).toEqual({ controller: "lab", preset: null });
+    for (const want of [
+      { kind: "start", comp: "B" },
+      { kind: "start", comp: "C" },
+      { kind: "start", comp: "M" },
+      { kind: "stop", comp: "A" },
+      { kind: "sequence_stop" },
+      { kind: "marker", op: "touch" },
+      { kind: "gripper", action: "open" },
+    ] as const)
+      expect(dialogSpec(want, act("arm_chosen_s1")).arm).toBeNull();
+    // a backend that names no controller: none is shown, none is sent
+    expect(dialogSpec({ kind: "start", comp: "A" }, null).arm).toBeNull();
+  });
+
   test("starting B names the jaws; starting C names the sag and the open port and asks three checks", () => {
     const b = dialogSpec({ kind: "start", comp: "B" }, act("a_ready"));
     expect(b.hazards).toEqual([{ key: "marvel0.ctl.hazard.start_B" }]);

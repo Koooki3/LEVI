@@ -118,6 +118,21 @@ describe("the arm stack's routes", () => {
       pause_before_b: true,
       pause_before_c: true,
     });
+    // A's start, and the whole stack's, name the controller the window
+    // showed; without one (B, C, or a backend that names none) no key is sent.
+    const s1 = { controller: "anyspeedup", preset: "S1" };
+    expect(stackApi.startBody("id", "start arm stack", {}, s1)).toEqual({
+      request_id: "id",
+      confirm: "start arm stack",
+      attest: {},
+      arm: s1,
+    });
+    expect(
+      stackApi.startBody("id", "start arm stack", {}, null),
+    ).not.toHaveProperty("arm");
+    expect(
+      stackApi.sequenceBody("id", "start arm stack", {}, false, s1),
+    ).toMatchObject({ arm: s1, through: "c" });
     // The stop of the whole stack has the guided start's closed shape.
     expect(stackApi.sequenceStopBody("id", "stop whole stack", {})).toEqual({
       request_id: "id",
@@ -283,6 +298,27 @@ describe("the bodies the page sends are the ones the backend's closed models tak
     expect(
       accepts(m.StartBody, stackApi.startBody("r", "c", { hands_clear: true })),
     ).toEqual(OK);
+    // A's start (its own model) takes the controller its window named; B's and
+    // C's do not, so the page sends it with A's only.
+    const named = { controller: "anyspeedup", preset: "S1" };
+    expect(
+      accepts(m.StartABody, stackApi.startBody("r", "c", {}, named)),
+    ).toEqual(OK);
+    expect(
+      accepts(m.StartBody, stackApi.startBody("r", "c", {}, named)).unknown,
+    ).toEqual(["arm"]);
+    expect(
+      accepts(
+        m.ArmNamed,
+        stackApi.startBody("r", "c", {}, named).arm as object,
+      ),
+    ).toEqual(OK);
+    expect(
+      readFileSync(
+        join(import.meta.dir, "../../../../levi/marvel0/stack_act_api.py"),
+        "utf8",
+      ),
+    ).toMatch(/if key == "a":\n\n\s+def route\(body: StartABody/);
     expect(accepts(m.StopBody, stackApi.stopBody("r", "c", ""))).toEqual(OK);
     expect(
       accepts(m.MarkerBody, stackApi.markerBody("r", "touch", "c")),
@@ -306,6 +342,12 @@ describe("the bodies the page sends are the ones the backend's closed models tak
     expect(Object.keys(m)).toContain("SequenceStartBody");
     expect(
       accepts(m.SequenceStartBody, stackApi.sequenceBody("r", "c", {}, true)),
+    ).toEqual(OK);
+    expect(
+      accepts(
+        m.SequenceStartBody,
+        stackApi.sequenceBody("r", "c", {}, true, named),
+      ),
     ).toEqual(OK);
     expect(m.SequenceStartBody.all).toEqual(
       expect.arrayContaining(["through", "pause_before_b", "pause_before_c"]),

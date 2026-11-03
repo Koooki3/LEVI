@@ -39648,6 +39648,13 @@
         "reason": "needs_shaped_profile"
       }
     },
+    "arm_choice_changed": {
+      "status": 409,
+      "detail": {
+        "code": "arm_choice_changed",
+        "message": "A was not started: the arm controller A would start as is no longer the one the confirmation window named (it was changed meanwhile). Read the window again and confirm."
+      }
+    },
     "arm_choice_while_a_runs": {
       "status": 409,
       "detail": {

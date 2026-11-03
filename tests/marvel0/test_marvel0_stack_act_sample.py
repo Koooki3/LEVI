@@ -291,6 +291,7 @@ def test_the_samples_hold_the_refusals_a_page_has_to_word():
         "sequence_start_chain_without_attest": 400,
         "arm_choice_s2": 409,
         "arm_choice_while_a_runs": 409,
+        "arm_choice_changed": 409,
         "control_disabled": 403,
     }
     for item in refusals.values():

@@ -675,14 +675,25 @@ def views() -> tuple:
         assert status == 200
         m.ready_for_a(aged_s=MARKER_AGE_S)
         out["arm_chosen_s1"] = view(m)
-        status, _ = post(
+        start_a = {
+            "confirm": "start arm stack",
+            "attest": {"desk_done": True, "estop_hand": True},
+        }
+        # A window read before another tab changed the choice names another
+        # controller than the page would now start: refused, nothing started.
+        refusals["arm_choice_changed"] = refusal(
             m,
             "a/start",
             {
-                "request_id": "start-a-chosen-s1",
-                "confirm": "start arm stack",
-                "attest": {"desk_done": True, "estop_hand": True},
+                "request_id": "start-a-stale-arm",
+                **start_a,
+                "arm": {"controller": "lab", "preset": None},
             },
+        )
+        status, _ = post(
+            m,
+            "a/start",
+            {"request_id": "start-a-chosen-s1", **start_a, "arm": choice},
         )
         assert status == 202
         m.emit("a", "[INFO] [launch.user]: anyspeedup arm controller, preset S1")

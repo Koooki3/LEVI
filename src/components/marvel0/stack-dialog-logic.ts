@@ -16,6 +16,7 @@ import {
   phraseFor,
   stopControl,
   type ActView,
+  type ArmController,
   type CompId,
 } from "./stack-act-logic";
 import type { GripperAction, MarkerOp } from "./stack-api";
@@ -55,6 +56,11 @@ export interface DialogSpec {
    * stack's start; off by default). It is a choice, not a check: Confirm does
    * not wait for it. */
   pauseOption: boolean;
+  /** The arm controller the window names for A (A's start and the whole
+   * stack's; null for every other window, or when the backend names none). It
+   * is sent with the start: the backend starts A only as that one and refuses
+   * (`arm_choice_changed`) when it would now start another. */
+  arm: ArmController | null;
 }
 
 const k = (key: string, params?: Record<string, string | number | Say>): Say =>
@@ -79,13 +85,17 @@ const STOP_HAZARD: Record<CompId, string[]> = {
 const attestOf = (keys: string[]): Attest[] =>
   keys.map((code) => ({ code, label: k(`marvel0.ctl.attest.${code}`) }));
 
-/** The hazard lines of the terminals the whole stack's start brings up, A
- * then B then C: each as its own single start's window says it. */
+/** The arm controller a window that starts A names: the one the page would
+ * start A as now (`act.arm.configured`). The hazard line and the request both
+ * take it from here, so what is sent is what was read. */
+const namedArm = (act: ActView | null): ArmController | null =>
+  act?.arm?.configured ?? null;
+
 /** The hazard lines of starting a terminal, with the arm controller A is
  * started as right after A's own line (it can be chosen on A's card, so the
  * window that starts A says which one). */
 function startHazards(ids: CompId[], act: ActView | null): Say[] {
-  const arm = act?.arm?.configured;
+  const arm = namedArm(act);
   return ids.flatMap((id) => [
     ...START_HAZARD[id].map((key) => k(key)),
     ...(id === "A" && arm
@@ -117,6 +127,7 @@ export function dialogSpec(want: DialogKind, act: ActView | null): DialogSpec {
         danger: false,
         override: null,
         pauseOption: false,
+        arm: want.comp === "A" ? namedArm(act) : null,
       };
     case "stop": {
       const comp = act?.comps[want.comp];
@@ -137,6 +148,7 @@ export function dialogSpec(want: DialogKind, act: ActView | null): DialogSpec {
             }
           : null,
         pauseOption: false,
+        arm: null,
       };
     }
     case "gripper":
@@ -158,6 +170,7 @@ export function dialogSpec(want: DialogKind, act: ActView | null): DialogSpec {
         danger: false,
         override: null,
         pauseOption: false,
+        arm: null,
       };
     case "marker": {
       const name = {
@@ -176,6 +189,7 @@ export function dialogSpec(want: DialogKind, act: ActView | null): DialogSpec {
         danger: want.op === "release",
         override: null,
         pauseOption: false,
+        arm: null,
       };
     }
     case "sequence":
@@ -196,6 +210,7 @@ export function dialogSpec(want: DialogKind, act: ActView | null): DialogSpec {
         danger: false,
         override: null,
         pauseOption: true,
+        arm: namedArm(act),
       };
     case "sequence_stop":
       return {
@@ -213,6 +228,7 @@ export function dialogSpec(want: DialogKind, act: ActView | null): DialogSpec {
         danger: true,
         override: null,
         pauseOption: false,
+        arm: null,
       };
   }
 }

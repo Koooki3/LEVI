@@ -84,14 +84,27 @@ export const stackApi: StackApi = createStackApi();
 
 // -- request bodies (closed: the backend refuses a key it does not know)
 
+/** The arm controller A's start window named, as the backend takes it
+ * (`ArmNamed`); sent only with A's start and the whole stack's. */
+export interface NamedArm {
+  controller: string;
+  preset: string | null;
+}
+const armField = (arm: NamedArm | null | undefined) =>
+  arm ? { arm: { controller: arm.controller, preset: arm.preset } } : {};
+
+/** The body of a single start. `arm` (A only): the controller the window
+ * named; B's and C's closed bodies have no such key, so it is left out. */
 export const startBody = (
   requestId: string,
   confirm: string,
   attest: Record<string, boolean>,
+  arm: NamedArm | null = null,
 ): Record<string, unknown> => ({
   request_id: requestId,
   confirm,
   attest,
+  ...armField(arm),
 });
 
 export const stopBody = (
@@ -139,13 +152,14 @@ export const gripperBody = (
 
 /** The body of the start of the whole stack (`SequenceStartBody` of the
  * backend): the checks of A, B and C, `through: "c"` (all the way to C on this
- * one confirmation) and the two pauses, both off unless the person switched
- * the pause on. */
+ * one confirmation), the two pauses, both off unless the person switched
+ * the pause on, and `arm`, the controller the window named for A. */
 export const sequenceBody = (
   requestId: string,
   confirm: string,
   attest: Record<string, boolean>,
   pause = false,
+  arm: NamedArm | null = null,
 ): Record<string, unknown> => ({
   request_id: requestId,
   confirm,
@@ -153,6 +167,7 @@ export const sequenceBody = (
   through: "c",
   pause_before_b: pause,
   pause_before_c: pause,
+  ...armField(arm),
 });
 
 /** The body of the stop of the whole stack: the same closed shape as a

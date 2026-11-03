@@ -3,7 +3,8 @@
 
 - ``POST .../{m|a|b|c}/start`` and ``.../stop``: start or stop one member of the
   stack (M is the health monitor of ``stack.py``; the others are units this
-  page names itself);
+  page names itself); A's start (and the guided start) may carry ``arm``, the
+  controller its window named, and is then refused if A would start as another;
 - ``POST .../marker`` with ``op`` ``touch`` | ``adopt`` | ``release``: the
   arm-controller marker;
 - ``POST .../a/controller`` with ``controller`` ``lab`` | ``anyspeedup`` (and
@@ -90,6 +91,24 @@ class StartBody(Closed):
     attest: dict[str, bool] = {}
 
 
+class ArmNamed(Closed):
+    """The arm controller A's start window named (``act.arm.configured``):
+    ``controller`` and ``preset`` (null for the lab's controller)."""
+
+    controller: str
+    preset: str | None = None
+
+
+class StartABody(StartBody):
+    """A's start. ``arm``: the controller the confirmation window named; when it
+    is sent, A is started only as that one and the start is refused with
+    ``arm_choice_changed`` when the page would now start another (the choice was
+    changed from another tab, or the control file changed). Optional, for a
+    page loaded before the field existed."""
+
+    arm: ArmNamed | None = None
+
+
 class SequenceStartBody(StartBody):
     """The guided start. ``through``: ``"a"`` (the default: M, the marker, A, then
     wait for the person's own B and C) or ``"c"`` (go on to B and C). The pauses
@@ -100,6 +119,9 @@ class SequenceStartBody(StartBody):
     through: Literal["a", "c"] = "a"
     pause_before_b: bool = False
     pause_before_c: bool = False
+    # (as in ``StartABody``: the controller the window named for A, checked
+    # when the request is taken and again when the chain starts A)
+    arm: ArmNamed | None = None
 
     @model_validator(mode="after")
     def _pauses_go_together(self):
@@ -168,8 +190,15 @@ def _answer(call, response: Response, accepted=202):
 
 
 def _start_route(key):
-    def route(body: StartBody, response: Response):
-        return _answer(lambda: act().start(key, body.model_dump()), response)
+    if key == "a":
+
+        def route(body: StartABody, response: Response):
+            return _answer(lambda: act().start(key, body.model_dump()), response)
+
+    else:
+
+        def route(body: StartBody, response: Response):
+            return _answer(lambda: act().start(key, body.model_dump()), response)
 
     route.__doc__ = f"Start {key.upper()} (person only, product LEVI only)."
     return route

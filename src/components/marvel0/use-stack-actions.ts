@@ -179,7 +179,10 @@ export function useStackActions(
       switch (want.kind) {
         case "start":
           return run(key, (id) =>
-            api.start(want.comp, startBody(id, confirmText, attestBody(spec))),
+            api.start(
+              want.comp,
+              startBody(id, confirmText, attestBody(spec), spec.arm),
+            ),
           );
         case "stop":
           return run(key, (id) =>
@@ -198,7 +201,7 @@ export function useStackActions(
         case "sequence":
           return run(key, (id) =>
             api.sequence(
-              sequenceBody(id, confirmText, attestBody(spec), pause),
+              sequenceBody(id, confirmText, attestBody(spec), pause, spec.arm),
             ),
           );
         case "sequence_stop":

@@ -808,3 +808,119 @@ def test_the_route_refuses_while_a_runs(client, m, root):
     detail = answer.json()["detail"]
     assert detail["code"] == "arm_choice_a_not_idle" and detail["state"] == "ready"
     assert saved(m) is None
+
+
+# --- A's start is the controller its window named ------------------------------------------------
+
+
+def named(controller, preset=None):
+    """What A's start window names (``act.arm.configured``)."""
+    return {"controller": controller, "preset": preset}
+
+
+def test_a_start_with_the_named_controller_starts_it(m, root):
+    with_root(m, root)
+    choose(m, "anyspeedup", "S1")
+    window = arm(m)["configured"]
+    assert window == named("anyspeedup", "S1")
+    m.ready_for_a()
+    m.act.start("a", {**m.start_body("a"), "arm": window})
+    assert "preset:=S1" in a_argv(m)
+
+
+def test_a_start_is_refused_when_the_choice_changed_after_its_window_opened(m, root):
+    """The window was read from the last poll; another tab chose another
+    controller meanwhile: A is not started as one the person did not confirm."""
+    with_root(m, root)
+    choose(m, "anyspeedup", "S1")
+    window = arm(m)["configured"]
+    choose(m, "lab")  # (another tab)
+    m.ready_for_a()
+    with pytest.raises(stack_act.ActRefuse) as caught:
+        m.act.start("a", {**m.start_body("a"), "arm": window})
+    assert caught.value.code == "arm_choice_changed"
+    assert m.systemd_runs("a") == []
+    # the window read again names the lab's controller, which then starts
+    m.act.start(
+        "a", {**m.start_body("a", rid="start-a-0002"), "arm": arm(m)["configured"]}
+    )
+    assert "serl_franka_controllers_ros2" in a_argv(m)
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        named("anyspeedup", "today"),  # the preset differs
+        named("lab", "S1"),
+        {"controller": "anyspeedup"},  # (no preset: the lab's has none)
+        "anyspeedup",
+        [],
+    ],
+)
+def test_a_start_naming_anything_else_is_refused(m, root, said):
+    with_root(m, root)
+    choose(m, "anyspeedup", "S1")
+    m.ready_for_a()
+    with pytest.raises(stack_act.ActRefuse) as caught:
+        m.act.start("a", {**m.start_body("a"), "arm": said})
+    assert caught.value.code == "arm_choice_changed"
+    assert m.systemd_runs("a") == []
+
+
+def test_a_start_from_an_older_page_without_the_field_starts_as_before(m, root):
+    with_root(m, root)
+    choose(m, "anyspeedup", "today")
+    m.ready_for_a()
+    m.act.start("a", m.start_body("a"))  # (no "arm")
+    assert "preset:=today" in a_argv(m)
+
+
+def test_the_guided_start_is_refused_at_once_when_the_window_named_another(m, root):
+    with_root(m, root)
+    choose(m, "anyspeedup", "S1")
+    with pytest.raises(stack_act.ActRefuse) as caught:
+        m.act.sequence_start(m.chain_body(arm=named("lab")))
+    assert caught.value.code == "arm_choice_changed"
+    assert m.doc()["sequence"]["state"] == "idle"
+    assert m.systemd_runs() == []
+
+
+def test_the_guided_start_checks_the_named_controller_again_when_it_starts_a(m, root):
+    """The chain starts A minutes after the click (the marker's wait). The
+    choice cannot change meanwhile, but the control file can: A is then not
+    started as a controller the window did not name."""
+    with_root(m, root)
+    m.act.sequence_start(m.chain_body(arm=arm(m)["configured"]))
+    seq = m.run_chain(stop_at=lambda s: s.get("step") == "arm")
+    assert seq["step"] == "arm" and m.systemd_runs("a") == []
+    with_root(m, root, arm_controller="anyspeedup", arm_preset="today")
+    seq = m.run_chain()
+    assert (seq["state"], seq["reason"]) == ("failed", "arm_choice_changed")
+    assert m.systemd_runs("a") == []
+
+
+def test_the_guided_start_with_the_named_controller_starts_a_as_it(m, root):
+    with_root(m, root)
+    choose(m, "anyspeedup", "S1")
+    m.act.sequence_start(m.chain_body(arm=arm(m)["configured"]))
+    m.run_chain(stop_at=lambda s: s.get("step") == "await_a")
+    assert "preset:=S1" in a_argv(m)
+
+
+def test_the_route_of_a_start_carries_the_named_controller(client, m, root):
+    with_root(m, root)
+    choose(m, "anyspeedup", "S1")
+    m.ready_for_a()
+    answer = client.post(
+        f"{BASE}/a/start",
+        json={**m.start_body("a", rid="route-start-a1"), "arm": named("lab")},
+    )
+    assert answer.status_code == 409, answer.text
+    assert answer.json()["detail"]["code"] == "arm_choice_changed"
+    assert m.systemd_runs("a") == []
+    # B and C name no arm controller: their closed bodies refuse the field
+    other = client.post(
+        f"{BASE}/b/start",
+        json={**m.start_body("b", rid="route-start-b1"), "arm": named("lab")},
+    )
+    assert other.status_code == 422

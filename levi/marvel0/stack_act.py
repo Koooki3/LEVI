@@ -525,6 +525,14 @@ TEXT = {
             "when it has ended."
         ),
     ),
+    "arm_choice_changed": (
+        409,
+        (
+            "A was not started: the arm controller A would start as is no longer "
+            "the one the confirmation window named (it was changed meanwhile). "
+            "Read the window again and confirm."
+        ),
+    ),
     "c_preflight": (
         409,
         (
@@ -2907,6 +2915,8 @@ class Act:
         ]
         if blockers:
             raise ActRefuse(blockers[0]["code"], **blockers[0]["params"])
+        if key == "a":
+            self._check_named_arm(body, ctx)
         attested = attested or self._attested(key, body)
         if key == "b" and self._settled_by_a_press(key, ctx):
             # Nothing is started on a B that cannot be seen: the check is made
@@ -2916,6 +2926,35 @@ class Act:
             self._spawn(op, lambda: self._probe_b_worker(op, ctx))
             raise ActRefuse("b_probe_started", keep_work=True)
         return self._launch(key, ctx, attested, body.get("request_id"))
+
+    @staticmethod
+    def _check_named_arm(body, ctx: Ctx) -> None:
+        """A's start may name the arm controller its confirmation window showed
+        (``arm``: ``{"controller", "preset"}``; absent or null from a page loaded
+        before the field existed). When it does, A is started only as that one:
+        the window is read from the page's last poll, and the choice (another
+        tab) or the control file may have changed since. Checked under the
+        machine lock, against what this very start would launch."""
+        named = body.get("arm") if isinstance(body, dict) else None
+        if named is None:
+            return
+        want = (
+            (named.get("controller"), named.get("preset"))
+            if isinstance(named, dict)
+            else None
+        )
+        now = arm_choice.identity(ctx.arm)
+        if now is None or want != (now["controller"], now["preset"]):
+            raise ActRefuse("arm_choice_changed")
+        # (the rig's specs are built from ``ctx.arm``; a fake set, which only
+        # tests and the rehearsal make, keeps its own units)
+        specs = ctx.specs
+        if (
+            specs is not None
+            and specs.profile == "real"
+            and tuple(specs.arm_identity[:2]) != want
+        ):
+            raise ActRefuse("arm_choice_changed")
 
     def _manager_unset(self) -> list:
         code, text = self.host.base.run(
@@ -3779,6 +3818,7 @@ class Act:
                 ]
                 if hard:
                     raise ActRefuse(hard[0]["code"], **hard[0]["params"])
+                self._check_named_arm(body, ctx)
             now = self.now()
             plan = (*A_STEPS, *CHAIN_STEPS) if chain else A_STEPS
             self._seq = {
@@ -3800,6 +3840,9 @@ class Act:
                 "steps": self._new_steps(plan, lambda name: STEP_TERMINAL[name]),
                 "_attests": attests,
                 "_a_up": a_up,
+                # (the controller the window named for A: checked again when
+                # the chain starts A, minutes later)
+                "_arm": body.get("arm"),
             }
         self._defer(self._ensure_ticker)
         return {"done": "sequence_started"}
@@ -4238,7 +4281,7 @@ class Act:
             if seq["state"] != "running":
                 return  # (cancelled meanwhile: A is not started)
             attested = seq["attest"]
-            body = {"request_id": seq.get("request_id")}
+            body = {"request_id": seq.get("request_id"), "arm": seq.get("_arm")}
         started = self._seq_locked(
             seq,
             "sequence_arm",

@@ -5407,6 +5407,7 @@
   "marvel0.ctl.block.arm_choice_unreadable": "The arm controller chosen on this page cannot be read, so A is not started: choose it again, or go back to the control file's default.",
   "marvel0.ctl.block.arm_choice_a_not_idle": "The arm controller can be changed only while A is stopped: stop A first.",
   "marvel0.ctl.block.arm_choice_busy": "A guided start or stop is in progress; change the arm controller when it has ended.",
+  "marvel0.ctl.block.arm_choice_changed": "A was not started: the arm controller A would start as is no longer the one the confirmation window named (it was changed meanwhile). Read the window again and confirm.",
   "marvel0.ctl.block.c_preflight": "The checks before C (QoS, gripper controllers, end-effector frame) have not all passed in the last {ttl_s} s.",
   "marvel0.ctl.block.health_not_ok": "The health file does not show a ready arm: fresh, hardware active, idle or moving, no red light.",
   "marvel0.ctl.block.port_taken": "Something already listens on the robot server's port {port}.",

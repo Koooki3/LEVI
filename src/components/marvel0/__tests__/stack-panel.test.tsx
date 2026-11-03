@@ -760,11 +760,13 @@ describe("starting a terminal", () => {
     await tick(3, 10);
     expect(state.calls).toHaveLength(1);
     expect(state.calls[0]).toMatchObject({ op: "start", comp: "A" });
-    // The page sent the fixed phrase of the catalogue itself.
+    // The page sent the fixed phrase of the catalogue itself, and the arm
+    // controller the window named (the backend starts A only as that one).
     expect(state.calls[0].body).toEqual({
       request_id: expect.any(String),
       confirm: "start arm stack",
       attest: { desk_done: true, estop_hand: true },
+      arm: { controller: "lab", preset: null },
     });
     expect(
       String(state.calls[0].body!.request_id).length,
@@ -1229,6 +1231,7 @@ describe("the other writes", () => {
       through: "c",
       pause_before_b: false,
       pause_before_c: false,
+      arm: { controller: "lab", preset: null },
     });
   });
 

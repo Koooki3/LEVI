@@ -382,7 +382,12 @@ are refused, nothing is forced), since A may have been started from it before it
 the stack is off and the card shows the file's problem; a saved choice is kept and nothing is said against it until the
 file is back. What A is started as is decided in one place (`arm_choice.effective`: the choice when it can be used, else the file)
 and everything follows it: A's argv and record, `act.arm`, and the client command (the forced alpha, `ramp_ok`, the
-rollout group's suffix). A's start window, and the whole stack's, name the controller A starts.
+rollout group's suffix). A's start window, and the whole stack's, name the controller A starts, and the start sends
+it (`arm`: `controller`, `preset`; only A's start and the guided start take the field): A is started only as the
+controller its window named. If the page would now start another one (the choice was changed from another tab, or the
+file changed, after the window was read), the start is refused with `arm_choice_changed` and nothing is started; the
+guided start checks it when the request is taken and again when it starts A after the marker's wait. A request without
+the field (a page loaded before it existed) starts A as before.
 
 **What A runs is A's record, not the select or the file.** The file is read live, but what the page says and forces
 follows the A that runs: A's record keeps the controller, preset and environment file it was started with. The choice
@@ -770,7 +775,9 @@ A 不启动（`arm_choice_no_anyspeedup`、`arm_choice_unreadable`），而不�
 因为 A 可能是在选择坏掉之前按它启动的。没有有效的控制文件时栈是关闭的，卡片显示的是文件的问题；保存的选择留着，文件回来之前不对它说什么。
 A 启动成哪个控制器只在一处决定
 （`arm_choice.effective`：选择能用就用选择，否则用文件），下游全都跟它走：A 的 argv 和记录、`act.arm`、客户端指令（强制的 alpha、`ramp_ok`、rollout 组的后缀）。
-A 的启动确认窗口和整个栈的启动窗口都写明 A 启动的是哪个控制器。
+A 的启动确认窗口和整个栈的启动窗口都写明 A 启动的是哪个控制器，启动请求也带上它（`arm`：`controller`、`preset`；只有 A 的启动和引导式启动接受这个字段）：
+A 只按窗口里写的那个控制器启动。读窗口之后页面要启动的控制器变了（另一个标签页改了选择，或文件改了），启动被拒绝（`arm_choice_changed`），什么都不启动；
+引导式启动在接受请求时检查一次，等完标记、真正启动 A 时再检查一次。不带这个字段的请求（字段出现之前打开的页面）照旧启动 A。
 
 **A 在运行什么，看 A 的记录，不看下拉框也不看文件。** 文件是实时读的，但页面说什么、强制什么，跟的是正在运行的 A：A 的记录保存着它启动时用的
 控制器、预设和环境文件。A 运行时选择不能改；如果文件变了、使页面现在会启动另一个控制器（没有保存的选择，或 `anyspeedup_root` 换了），A 就显示为未就绪
