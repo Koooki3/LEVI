@@ -375,7 +375,9 @@ with the stack off; the select is then off with that reason beside it. An anyspe
 checks (`arm_controller_missing`, `arm_controller_unsafe`, `arm_controller_not_built`). A saved choice that can no
 longer be used (the file lost its `anyspeedup_root`) or cannot be read keeps A from starting (`arm_choice_no_anyspeedup`,
 `arm_choice_unreadable`) instead of starting the file's controller unannounced; "Use the control file's default" clears
-it. What A is started as is decided in one place (`arm_choice.effective`: the choice when it can be used, else the file)
+it. If the stack document itself cannot be read, the client command is judged from the file and the saved choice alone;
+a choice that cannot be read or used then counts as "which controller A runs is not known" (rule v3 and the ramp rules
+are refused, nothing is forced), since A may have been started from it before it broke. What A is started as is decided in one place (`arm_choice.effective`: the choice when it can be used, else the file)
 and everything follows it: A's argv and record, `act.arm`, and the client command (the forced alpha, `ramp_ok`, the
 rollout group's suffix). A's start window, and the whole stack's, name the controller A starts.
 
@@ -759,7 +761,9 @@ A 没有停止时 `arm_choice_a_not_idle`（启动中、运行中、停止中、
 `S2` 是 `arm_choice_preset_refused`（和文件一样）；清单以外的其他值 `arm_choice_invalid`；文件没写 `anyspeedup_root` 时选 anyspeedup 是
 `arm_choice_no_anyspeedup`；栈关闭时 `control_disabled`。这时下拉框不可用，旁边写着原因。选了 anyspeedup 仍要过 A 自己的启动检查
 （`arm_controller_missing`、`arm_controller_unsafe`、`arm_controller_not_built`）。保存的选择后来用不了（文件里去掉了 `anyspeedup_root`）或读不出来时，
-A 不启动（`arm_choice_no_anyspeedup`、`arm_choice_unreadable`），而不是悄悄改用文件里的控制器；“改回控制文件的默认值”可以清掉它。A 启动成哪个控制器只在一处决定
+A 不启动（`arm_choice_no_anyspeedup`、`arm_choice_unreadable`），而不是悄悄改用文件里的控制器；“改回控制文件的默认值”可以清掉它。
+栈文档本身读不出来时，客户端指令只按文件和保存的选择判断；这时选择读不出来或用不了，就算作“不知道 A 在跑哪个控制器”（规则 v3 和斜坡规则都拒绝，什么都不强制），
+因为 A 可能是在选择坏掉之前按它启动的。A 启动成哪个控制器只在一处决定
 （`arm_choice.effective`：选择能用就用选择，否则用文件），下游全都跟它走：A 的 argv 和记录、`act.arm`、客户端指令（强制的 alpha、`ramp_ok`、rollout 组的后缀）。
 A 的启动确认窗口和整个栈的启动窗口都写明 A 启动的是哪个控制器。
 

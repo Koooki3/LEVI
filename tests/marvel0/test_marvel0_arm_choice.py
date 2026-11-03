@@ -618,17 +618,64 @@ def test_the_file_fallback_of_arm_facts_reads_the_choice_too(
     assert (got["status"], got["ramp_ok"], got["alpha"]) == (status, ramp_ok, None)
 
 
-def test_the_file_fallback_without_a_readable_state_folder_is_the_file(
+@pytest.mark.parametrize(
+    "file, broken",
+    [
+        ({}, "unreadable"),
+        ({}, "unusable"),  # (only a lab file can lose anyspeedup_root)
+        ({}, "no_folder"),
+        ({"arm_controller": "anyspeedup", "arm_preset": "today"}, "unreadable"),
+        ({"arm_controller": "anyspeedup", "arm_preset": "today"}, "no_folder"),
+    ],
+)
+def test_the_file_fallback_says_unknown_when_the_choice_cannot_be_read_or_used(
+    m, root, monkeypatch, file, broken
+):
+    """A page-started S1 A runs, then the saved choice breaks (its record
+    corrupted, the file's anyspeedup_root taken out, or the state folder
+    unreadable) and the stack document cannot be had: the fallback must not
+    answer with the file's controller (ramp rules on, nothing refused), since
+    which controller A runs is not known without A's record."""
+    with_root(m, root, **file)
+    choose(m, "anyspeedup", "S1")
+    a_ready(m, "S1")
+    if broken == "unreadable":
+        (m.state_root / arm_choice.FOLDER / record.RECORD).write_text("not json")
+    elif broken == "unusable":
+        m.set_control(**file)  # (anyspeedup_root taken out of the file)
+    monkeypatch.setattr(control_site, "read", lambda *a, **k: m.loaded)
+    if broken == "no_folder":
+
+        def gone():
+            raise OSError("no workspace")
+
+        monkeypatch.setattr(stack_act, "_state_root", gone)
+    else:
+        monkeypatch.setattr(stack_act, "_state_root", lambda: m.state_root)
+    got = arm_facts.from_file()
+    assert (got["status"], got["problem"], got["ramp_ok"], got["alpha"]) == (
+        "unknown",
+        "unknown",
+        False,
+        None,
+    )
+    facts = arm_facts.arm_of(got)
+    assert (facts.alpha, facts.ramp_ok) == (None, False)
+    assert arm_facts.problem_of(got) == "unknown"
+
+
+def test_the_file_fallback_with_a_broken_choice_and_the_stack_off_asks_nothing(
     m, root, monkeypatch
 ):
     with_root(m, root)
-
-    def broken():
-        raise OSError("no workspace")
-
-    monkeypatch.setattr(stack_act, "_state_root", broken)
+    folder = m.state_root / arm_choice.FOLDER
+    folder.mkdir(parents=True, mode=0o700)
+    (folder / record.RECORD).write_text("not json")
+    m.set_control(anyspeedup_root=str(root), enabled=False)
+    monkeypatch.setattr(stack_act, "_state_root", lambda: m.state_root)
     monkeypatch.setattr(control_site, "read", lambda *a, **k: m.loaded)
-    assert arm_facts.from_file()["status"] == "idle"
+    got = arm_facts.from_file()
+    assert (got["status"], got["problem"], got["ramp_ok"]) == ("idle", None, True)
 
 
 # --- the route --------------------------------------------------------------------------------------

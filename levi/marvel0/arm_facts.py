@@ -12,9 +12,10 @@ offered, and the suffix of the default rollout group.
 
 ``read`` never raises. When the stack document cannot be read at all, the control
 file and the saved choice answer (``from_file``), and an anyspeedup controller
-chosen for a stack that is on then reads ``unknown`` (nothing is forced and rule
-v3 is refused): what runs on the arm is not known. With the lab's controller, no control file or
-a stack that is off, the answer asks nothing, as it always did.
+chosen for a stack that is on, or a saved choice that cannot be read or used,
+then reads ``unknown`` (nothing is forced and rule v3 is refused): what runs on
+the arm is not known. With the lab's controller, no control file or a stack that
+is off, the answer asks nothing, as it always did.
 """
 
 import math
@@ -52,24 +53,33 @@ def from_file() -> dict:
     """The facts from the control file and the choice made on A's card alone
     (``arm_choice.effective``, the same decision the stack document makes): the
     best that can be said when the stack document is not there (see the module
-    doc)."""
+    doc).
+
+    A saved choice that cannot be read or can no longer be used (``effective``
+    then answers with the file's controller) also reads ``unknown`` for a stack
+    that is on, whatever the file names: A may have been started from that
+    choice before it broke, and without A's record (the stack document) which
+    controller runs is not known, so nothing is forced and neither rule v3 nor
+    the ramp rules are offered."""
     try:
         loaded = control_site.read()
         file_stack = loaded.site.stack if loaded.state == "ok" else None
-        stack_control, _ = arm_choice.effective(file_stack, _choice_now())
+        stack_control, view = arm_choice.effective(file_stack, _choice_now())
     except Exception:  # noqa: BLE001
-        stack_control = None
-    anyspeedup = bool(
-        stack_control is not None and stack_control.enabled and stack_control.anyspeedup
-    )
+        stack_control, view = None, {}
+    on = bool(stack_control is not None and stack_control.enabled)
+    anyspeedup = on and bool(stack_control.anyspeedup)
+    blind = on and view.get("state") in ("unreadable", "unusable")
+    unknown = anyspeedup or blind
     return {
         "configured": None,
         "enabled": anyspeedup,
         "running": None,
-        "status": "unknown" if anyspeedup else "idle",
+        "status": "unknown" if unknown else "idle",
         "alpha": None,
-        "problem": "unknown" if anyspeedup else None,
-        "ramp_ok": not anyspeedup or stack_control.arm_preset == "today",
+        "problem": "unknown" if unknown else None,
+        "ramp_ok": not blind
+        and (not anyspeedup or stack_control.arm_preset == "today"),
         "suffix": "",
     }
 
