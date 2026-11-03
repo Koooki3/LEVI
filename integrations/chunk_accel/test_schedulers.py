@@ -1300,6 +1300,30 @@ class LineServer:
         return run
 
 
+def hover_chunk(rng, H: int = 10) -> np.ndarray:
+    """A plan that stays put at the line's start (the arm's start pose): +-1.2 mm and +-2 mrad of seeded jitter per row
+    and axis, gripper open. The real hover chunks of 2026-11-03 planned 2.4 mm from row 0 to row 9 (median, p90 3.6)."""
+    rows = np.tile(np.array([*line(0.0), 1.0]), (H, 1))
+    rows[:, :3] += rng.uniform(-0.0012, 0.0012, (H, 3))
+    rows[:, 3:6] += rng.uniform(-0.002, 0.002, (H, 3))
+    return rows.astype(np.float32)
+
+
+class HoverServer(LineServer):
+    """A policy that stays put (the 2026-11-03 tennis stall): every chunk is ``hover_chunk``, whatever it is asked."""
+
+    def __init__(self, H: int = 10, lat: float = 0.083, clock: Clock | None = None):
+        super().__init__(H=H, lat=lat, clock=clock)
+        self.rng = np.random.default_rng(11)
+
+    def _answer(self, phi0: float, call: dict):
+        rows = hover_chunk(self.rng, self.H)
+        call["chunk_index"] = len(self.chunks)
+        self.chunks.append(rows)
+        self.calls.append(call)
+        return rows
+
+
 class Arm:
     """A first-order follower of the target (0.4 of the gap per tick, about the controller's 0.2 s) with the issued
     gripper command and a finger aperture that starts moving 0.2 s after a command."""
@@ -1358,11 +1382,13 @@ def run_line(
     rc_clamp=None,
     margin=None,
     sync_lat=0.083,
+    server_factory=None,
 ):
     """One closed-loop episode on the line world with the arm model. Returns a dict with everything the assertions need.
-    ``sync_lat`` is how long a synchronous request blocks (the first call of an episode, for example)."""
+    ``sync_lat`` is how long a synchronous request blocks (the first call of an episode, for example);
+    ``server_factory`` replaces the line policy (called like ``LineServer``)."""
     clock = Clock()
-    server = LineServer(H=H, lat=sync_lat, clock=clock)
+    server = (server_factory or LineServer)(H=H, lat=sync_lat, clock=clock)
     lat = list(latencies) if latencies is not None else [0.083]
     transport = StrictSimTransport.from_seconds(lat, period_s=0.1)
     engine = make_engine(params, 10.0) if make_engine else None
@@ -1442,9 +1468,10 @@ def run_line(
     }
 
 
-def run_plain_line(params, make_engine, *, h, ticks, rc_clamp=True):
+def run_plain_line(params, make_engine, *, h, ticks, rc_clamp=True, policy=None):
     """The client's plain open-loop loop (rc:1582-1605) on the line world: query when the plan is used up, one hook-B
-    target per tick, the client's own clamp (the real one when openpi is there), the arm model."""
+    target per tick, the client's own clamp (the real one when openpi is there), the arm model. ``policy(state)``
+    replaces the line policy."""
     clock = Clock()
     pp = PlainPhase(
         params,
@@ -1461,9 +1488,8 @@ def run_plain_line(params, make_engine, *, h, ticks, rc_clamp=True):
         state = arm.obs(k, 0.0)["robot_state"]["cartesian_position"]
         aperture = arm.aperture
         if plan is None or idx >= min(h, len(plan)):
-            chunk = line_rows(
-                phase_of(state[:6]) + 1.0
-            )  # the policy continues from where it sees the arm
+            # the policy continues from where it sees the arm
+            chunk = policy(state) if policy else line_rows(phase_of(state[:6]) + 1.0)
             plan, idx, queries = pp.on_query(chunk, state, aperture), 0, queries + 1
         raw = pp.on_action(state, aperture)
         idx += 1
@@ -1698,6 +1724,88 @@ class AccelRtcSpeed(RealMixin, AccelRtcSpeedTests, unittest.TestCase):
 
 class AccelRtcSpeedShipped(RealMixin, AccelRtcSpeedTests, unittest.TestCase):
     P = SHIPPED
+
+
+class HoverCadence(unittest.TestCase):
+    """Real runs 2026-11-03 (tennis, RTC + v3 at lambda 3.0): while the policy planned to stay put, lambda ran at 3 and
+    RTC asked on 0.99 of the ticks. With the hover rule (PhaseParams.hover_dp_m: lambda 1 while the whole plan ahead is
+    static) the requests fall back to about today's pace. Measured here over 300 ticks of ``hover_chunk`` plans (H 10,
+    execute horizon 6, overlap 2, plain h 6): RTC golden 50 / hover rule 61 / rule off 299 requests; VLASH 31 / 31 / 91;
+    plain 50 / 60 / 111 queries. RTC's remaining gap is the early trigger's tick of margin (EARLY_MARGIN_TICKS): at lambda
+    1 it asks with 4 rows left (u 5) instead of at the execute horizon (u 6), so the policy gets 5 rows of the last plan
+    (1 for the delay) instead of 4 (1); without the rule 7 (3), as on the robot."""
+
+    TICKS = 300
+    OFF = dataclasses.replace(SHIPPED, hover_dp_m=0.0)
+
+    def _rtc(self, params):
+        return run_line(
+            "rtc", params, None, ticks=self.TICKS, server_factory=HoverServer
+        )
+
+    def _vlash(self, params):
+        return run_line(
+            "vlash", params, None, ticks=self.TICKS, server_factory=HoverServer
+        )
+
+    def _plain(self, params):
+        rng = np.random.default_rng(3)
+        return run_plain_line(
+            params,
+            None,
+            h=6,
+            ticks=self.TICKS,
+            rc_clamp=False,
+            policy=lambda _state: hover_chunk(rng),
+        )
+
+    def test_rtc_asks_at_about_todays_pace_while_the_plan_stays_put(self):
+        def payload(run):  # the most common (prev rows, delay rows) of the RTC requests
+            pairs = collections.Counter(
+                (x["prev_rows"], x["delay_rows"]) for x in run["requests"]
+            )
+            return pairs.most_common(1)[0][0]
+
+        golden = self._rtc(GOLDEN)["summary"]["requests"]
+        for params in (ACCEL, SHIPPED):
+            r = self._rtc(params)
+            n = r["summary"]["requests"]
+            self.assertGreaterEqual(n, golden)
+            self.assertLessEqual(
+                n, self.TICKS // 5 + 2, f"{n} requests in {self.TICKS} ticks"
+            )
+            eng = r["sched"].engine.summary()
+            self.assertGreaterEqual(eng["hover_ticks"], self.TICKS - 1)
+            self.assertGreaterEqual(eng["binding"]["hover"], self.TICKS - 2)
+            self.assertTrue(all(x["lam"] <= 1.0 + 1e-9 for x in r["requests"]))
+            # what the policy is given: the last plan's 5 remaining rows, 1 of them for the reply's delay
+            self.assertEqual(payload(r), (5, 1))
+        self.assertEqual(payload(self._rtc(GOLDEN)), (4, 1))  # today's client
+        # without the rule: a request on almost every tick with 7 rows, 3 for the delay, as on the robot on 2026-11-03
+        off = self._rtc(self.OFF)
+        self.assertGreaterEqual(off["summary"]["requests"], 0.9 * self.TICKS)
+        self.assertEqual(payload(off), (7, 3))
+
+    def test_vlash_prefetches_at_todays_pace_while_the_plan_stays_put(self):
+        golden = self._vlash(GOLDEN)["summary"]["requests"]
+        for params in (ACCEL, SHIPPED):
+            r = self._vlash(params)
+            self.assertEqual(r["summary"]["requests"], golden)
+            self.assertGreaterEqual(
+                r["sched"].engine.summary()["hover_ticks"], self.TICKS - 1
+            )
+        self.assertGreaterEqual(
+            self._vlash(self.OFF)["summary"]["requests"], 2.5 * golden
+        )
+
+    def test_plain_queries_at_about_todays_pace_while_the_plan_stays_put(self):
+        golden = self._plain(GOLDEN)["queries"]
+        self.assertEqual(golden, self.TICKS // 6)
+        r = self._plain(SHIPPED)
+        self.assertGreaterEqual(r["queries"], golden)
+        self.assertLessEqual(r["queries"], self.TICKS // 5 + 2)
+        self.assertGreaterEqual(r["pp"].engine.summary()["hover_ticks"], self.TICKS - 1)
+        self.assertGreaterEqual(self._plain(self.OFF)["queries"], 1.8 * r["queries"])
 
 
 class AccelRtcGoldenReal(RealMixin, AccelRtcTests, unittest.TestCase):
