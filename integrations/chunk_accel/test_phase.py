@@ -85,6 +85,7 @@ DEFAULTS = {
     "hover_dp_m": 0.005,
     "hover_dr_rad": 0.02,
     "hover_rows": 6,
+    "hover_still_rows": 45,
     "blend": True,
     "blend_min_ticks": 2,
     "blend_max_ticks": 5,
@@ -3272,16 +3273,20 @@ class TestHover(unittest.TestCase):
 
     def test_slow_motion_near_the_end_of_its_plan_is_no_hover(self):
         """1.08 mm per row: rows 5 to 9 span 4.3 mm, under hover_dp_m. The window reaches back to hover_rows rows (6
-        rows, 5.4 mm), so the end of a slowly moving plan is not taken for a hover; with 5 rows it would be."""
+        rows, 5.4 mm), so the end of a slowly moving plan is not taken for a hover; with 5 rows it would be (the
+        window rule alone, hover_still_rows 0). The history is a second, independent guard: the target has moved more
+        than hover_dp_m by then, so even 5 rows give no hover with it."""
         plan = straight_plan(HOVER_POSE, 10, 0.00108)
-        for rows, want in ((6, 0), (5, None)):
-            eng = PhaseEngine(dataclasses.replace(self.P, hover_rows=rows))
+        for rows, still, want in ((6, 0, 0), (5, 0, None), (5, 45, 0)):
+            eng = PhaseEngine(
+                dataclasses.replace(self.P, hover_rows=rows, hover_still_rows=still)
+            )
             run_open(eng, PerfectArm(plan[0]), plan, max_ticks=20)
             got = eng.summary()["hover_ticks"]
             if want is None:
                 self.assertGreater(got, 0)
             else:
-                self.assertEqual(got, want)
+                self.assertEqual(got, want, (rows, still))
 
     def test_plain_walks_a_static_plan_at_lambda_one(self):
         """Plain's open-loop count includes the rule: a static plan of h 6 rows takes 5-6 ticks, as today."""
@@ -3312,6 +3317,95 @@ class TestHover(unittest.TestCase):
             with self.assertRaises(ValueError, msg=str(kwargs)):
                 PhaseParams(**kwargs)
         PhaseParams(hover_dp_m=0.01, hover_dr_rad=0.05, hover_rows=10)  # inclusive ends
+        for bad in (-1, 91, 4.5):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                PhaseParams(hover_still_rows=bad)
+        PhaseParams(hover_still_rows=0)
+        PhaseParams(hover_still_rows=90)
+
+    def _climb_and_window_rule(self, master):
+        """The same VLASH-like run with the history (default) and with the window rule alone (hover_still_rows 0)."""
+        runs = {}
+        for still in (45, 0):
+            eng = PhaseEngine(dataclasses.replace(self.P, hover_still_rows=still))
+            runs[still] = (
+                eng,
+                drive(eng, PerfectArm(master[0]), 150, vlash_feed(master)),
+            )
+        return runs
+
+    def test_a_slow_steady_climb_across_plans_is_no_hover(self):
+        """Review 2026-11-03 (VLASH, run 11-03 16:31 ep_0002): every plan climbed a median 1.66 mm from first to last
+        row, so each was static on its own, while the target climbed 64.9 mm over 315 rows of phase (0.206 mm per row,
+        k 19-129). The window rule alone walked it at lambda 1 (82 hover ticks in that episode, hover_stats.py); with
+        the history the target's hover_dp_m over the last hover_still_rows rows releases it (5 ticks)."""
+        master = drift_master(700, dz=0.0002)
+        runs = self._climb_and_window_rule(master)
+        eng_off, off = runs[0]
+        # every tick but the landing: lambda 1 all along
+        self.assertEqual(sum(h for _, _, h in off), 149)
+        eng_on, on = runs[45]
+        hovered = [k for k, (_, _, h) in enumerate(on) if h]
+        self.assertTrue(hovered)  # the start: the target has not moved hover_dp_m yet
+        self.assertLessEqual(max(hovered), math.ceil(self.P.hover_dp_m / 0.0002) + 1)
+        start = on[0][1].target[:3]
+        # hover only while the target is within hover_dp_m of where it began
+        for k in hovered:
+            self.assertLess(
+                float(np.linalg.norm(on[k - 1][1].target[:3] - start)),
+                self.P.hover_dp_m,
+            )
+        self.assertAlmostEqual(max(out.lam for _, out, _ in on[75:]), 3.0)
+        self.assertNotIn("hover", {out.binding for _, out, _ in on[75:]})
+        self.assertGreater(eng_on.s, 2.0 * eng_off.s)
+
+    def test_a_slow_steady_turn_across_plans_is_no_hover(self):
+        """The rotation half of the history: 0.8 mrad of yaw per row (8 mrad per plan, under hover_dr_rad) is released
+        once the target has turned hover_dr_rad over the last hover_still_rows rows."""
+        master = drift_master(700, dyaw=0.0008)
+        runs = self._climb_and_window_rule(master)
+        self.assertEqual(sum(h for _, _, h in runs[0][1]), 149)
+        eng_on, on = runs[45]
+        hovered = [k for k, (_, _, h) in enumerate(on) if h]
+        self.assertTrue(hovered)
+        self.assertLessEqual(max(hovered), math.ceil(self.P.hover_dr_rad / 0.0008) + 1)
+        self.assertAlmostEqual(max(out.lam for _, out, _ in on[75:]), 3.0)
+        self.assertGreater(eng_on.s, 2.0 * runs[0][0].s)
+
+    def test_after_a_climb_the_hover_waits_for_rows_of_phase_not_ticks(self):
+        """The history spans hover_still_rows rows of phase: when a climb at lambda 3 stops, the target 45 rows back is
+        on the climb's last 9 mm, so the hover starts after about 25 rows at rest, 8-9 ticks at lambda 3. Counted in
+        ticks the history would reach 135 rows back and the hover would wait about 37 ticks."""
+        top = drift_master(250, dz=0.0002)[-1]
+        master = np.vstack(
+            [drift_master(250, dz=0.0002), hover_plan(500, seed=9, pose=top)]
+        )
+        eng = PhaseEngine(self.P)
+        log = drive(eng, PerfectArm(master[0]), 140, vlash_feed(master))
+        # the phase reaches the last climbing row
+        stop = next(k for k, (u, _, _) in enumerate(log) if u >= 249.0)
+        self.assertAlmostEqual(log[stop - 1][1].lam, 3.0)
+        first = next(k for k, (_, _, h) in enumerate(log) if h and k > stop)
+        self.assertLessEqual(first - stop, 12)
+        rows_at_rest = log[first][0] - log[stop][0]
+        self.assertGreater(rows_at_rest, 15.0)
+        self.assertLessEqual(rows_at_rest, self.P.hover_still_rows)
+        # and it stays: the target no longer moves
+        self.assertTrue(all(h for _, _, h in log[first:]))
+
+    def test_a_new_episode_forgets_the_history_and_a_reset_keeps_it(self):
+        master = drift_master(700, dz=0.0002)
+        eng = PhaseEngine(self.P)
+        arm = PerfectArm(master[0])
+        drive(eng, arm, 60, vlash_feed(master))  # the climb, released
+        here = arm.pose()
+        rest = hover_plan(10, seed=5, pose=here)
+        eng.reset()  # the target really climbed: the last 45 rows still say so
+        after_reset = drive(eng, arm, 3, load_once(rest, 60), k0=60)
+        self.assertEqual([h for _, _, h in after_reset], [False] * 3)
+        eng.new_episode()  # a new episode starts with no history: a start-up stall hovers at once
+        fresh = drive(eng, PerfectArm(here), 5, load_once(rest, 63), k0=63)
+        self.assertEqual([h for _, _, h in fresh], [False] + [True] * 4)
 
 
 class TestHoverStats(unittest.TestCase):
@@ -3344,6 +3438,8 @@ class TestHoverStats(unittest.TestCase):
             self.assertEqual([x["hover"] for x in got], hovered, name)
             self.assertEqual(sum(hovered), eng.summary()["hover_ticks"], name)
             self.assertTrue(any(hovered) and not all(hovered), name)
+            # the history decided some ticks: a plan static on its own while the target had moved
+            self.assertTrue(any(x["plan_static"] and not x["still"] for x in got), name)
 
     def test_the_command_line_reads_a_log_folder(self):
         traces = {

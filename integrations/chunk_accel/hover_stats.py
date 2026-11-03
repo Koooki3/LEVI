@@ -1,17 +1,20 @@
-"""Hover rule statistics from v3 engine logs (PhaseParams.hover_dp_m / hover_dr_rad / hover_rows).
+"""Hover rule statistics from v3 engine logs (PhaseParams.hover_dp_m / hover_dr_rad / hover_rows / hover_still_rows).
 
 The figures in the PhaseParams hover comment come from this script. It replays the rule on the engine's own trace
 lines (``*.phase/ep_*.jsonl``, the records ``PhaseEngine.drain_records`` returns) with ``PhaseEngine``'s own code
-(``_rebuild``, ``_hover_at``), so the numbers follow the engine:
+(``_rebuild``, ``_hover_at``, ``_note_still``), so the numbers follow the engine:
 
 * per chunk record the stored plan is rebuilt as the engine stored it: sync / swap / replan keep the rows with
   chunk-local row 0 first; append adds the rows to the stored plan and drops the rows more than two behind the phase
   (``PhaseEngine.append``). Plain records are refused: plain stores the last target as a virtual row -1 the trace
   does not carry.
 * per tick the rule is evaluated at the pre-tick phase ``u - lam`` (a tick record's ``u`` is the phase after the
-  tick, a hold's ``lam`` is 0). The first advancing tick after a synchronous load lands on row 0 and is never a
-  hover (as in the engine); a tick with no plan at all (after ``reset()``, before the next load) is not marked in the
-  trace and is evaluated on the last plan.
+  tick, a hold's ``lam`` is 0) with the history of the issued targets of the ticks before it, then the tick's target
+  is added to that history at its ``s``. The engine adds the target the client accepted (``executed``); the trace has
+  the engine's target before the client's clamp, and a tick the client rejected is in the trace too. Both differ only
+  when the clamp changed or refused a target. The first advancing tick after a synchronous load lands on row 0 and
+  is never a hover (as in the engine); a tick with no plan at all (after ``reset()``, before the next load) is not
+  marked in the trace and is evaluated on the last plan.
 * "window extent" is the plan-only quantity the thresholds are set on: with ``a`` the floor row of the pre-tick
   phase (clipped to the stored rows) and ``a0 = min(a, n - hover_rows)``, the largest distance (and largest
   per-axis rotation) of any stored row from ``a0`` on from row ``a0``.
@@ -23,7 +26,7 @@ Usage (reads only; prints a summary)::
     python hover_stats.py LOG_DIR [--stall PATTERN] [--lambda-max 3.0] [--set name=value ...] [--per-episode]
 
 ``LOG_DIR`` holds ``*.phase/ep_*.jsonl``; episodes whose path contains PATTERN are the hover episodes, the rest are
-"other".
+"other". ``--set hover_still_rows=0`` evaluates the rule without the history (as first shipped).
 """
 
 from __future__ import annotations
@@ -63,7 +66,8 @@ def _plan_after(kind: str, rows: np.ndarray, R, lo: int, last_s, origin: float):
 
 def evaluate(records, params: PhaseParams) -> list[dict]:
     """Per tick record of one episode: the hover rule's parts at the pre-tick phase. Keys: k, u_pre, lam, plan_static
-    (the window rule), hover (the window rule, off on a landing tick: what the engine counts in hover_ticks), fresh (a landing tick), extent_m, extent_rad (window extent, None without a plan), tgt (issued
+    (the window rule alone), still (the history), hover (both, off on a landing tick: what the engine counts in
+    hover_ticks), fresh (a landing tick), extent_m, extent_rad (window extent, None without a plan), tgt (issued
     target, (7,)). Raises ValueError on a plain record or an append before any plan."""
     eng = PhaseEngine(params)
     plans: dict = {}
@@ -94,6 +98,7 @@ def evaluate(records, params: PhaseParams) -> list[dict]:
                 "u_pre": u_pre,
                 "lam": float(r["lam"]),
                 "plan_static": False,
+                "still": bool(eng._still),
                 "hover": False,
                 "fresh": fresh,
                 "extent_m": None,
@@ -105,7 +110,7 @@ def evaluate(records, params: PhaseParams) -> list[dict]:
                 Rp, lop, st = plan
                 eng._static, eng._lo = st, lop
                 x["plan_static"] = bool(eng._hover_at(u_pre))
-                x["hover"] = x["plan_static"] and not fresh
+                x["hover"] = x["still"] and x["plan_static"] and not fresh
                 n = len(Rp)
                 a = min(max(_floor(u_pre) - lop, 0), n - 1)
                 a0 = min(a, max(n - params.hover_rows, 0))
@@ -116,6 +121,8 @@ def evaluate(records, params: PhaseParams) -> list[dict]:
             if not r.get("hold"):
                 fresh = False
             last_s = float(r["s"])
+            eng._s = last_s
+            eng._note_still(np.asarray(r["tgt"], np.float32))
     return out
 
 
@@ -133,7 +140,7 @@ def summarize(
     flagged = sum(x["hover"] for t in episodes.values() for x in t)
     lines.append(
         f"episodes {len(episodes)}, ticks {total}, hover {flagged}; params hover_dp_m {params.hover_dp_m}"
-        f" hover_dr_rad {params.hover_dr_rad} hover_rows {params.hover_rows}"
+        f" hover_dr_rad {params.hover_dr_rad} hover_rows {params.hover_rows} hover_still_rows {params.hover_still_rows}"
     )
     hov = {p: t for p, t in episodes.items() if stall and stall in p}
     oth = {p: t for p, t in episodes.items() if p not in hov}

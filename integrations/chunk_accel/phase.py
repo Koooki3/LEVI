@@ -138,6 +138,7 @@ _RANGES = {
     "hover_dp_m": (0.0, 0.01, False),
     "hover_dr_rad": (0.0, 0.05, False),
     "hover_rows": (2, 10, False),
+    "hover_still_rows": (0, 90, False),  # 0 = no history condition
     "blend_min_ticks": (1, 5, False),
     "blend_max_ticks": (1, 5, False),
     "blend_stretch_max_ticks": (1, 8, False),
@@ -187,6 +188,7 @@ _INT_FIELDS = frozenset(
         "settle_stable_ticks",
         "delay_history",
         "hover_rows",
+        "hover_still_rows",
     }
 )
 _BOOL_FIELDS = frozenset(
@@ -318,20 +320,28 @@ class PhaseParams:
     # / 42.9 s (11-03 without acceleration 0.4 and 17.7 s). Every segment of those plans was a pause, so lambda ran at
     # lambda_max (binding "max") and RTC asked the policy on 0.99 of the ticks with the last plan's 7 remaining rows (3 for
     # the delay); each reply planned 2.4 mm from row 0 to row 9 (median, p90 3.6). Walking a plan that does not move saves
-    # no time. When the WHOLE plan ahead is static (every stored row from the phase's floor row to the last one, plain's
-    # rows past its horizon included, within hover_dp_m of the first row of that window, every rotation axis within
-    # hover_dr_rad, and no gripper change after the phase), lambda is 1 and the binding "hover"; then the early trigger
-    # and the VLASH prefetch ask at about today's pace. A pause followed by motion in the same plan keeps lambda_max (the
-    # rule above). The window has at least hover_rows rows: with fewer left ahead it reaches back behind the phase, so a
-    # slow steady motion near the end of its plan (1.08 mm per row: 4.3 mm from row 5 to row 9 of 10) or a short rest at
-    # the end of a moving plan is not a hover. Figures from hover_stats.py over the 26 v3 episodes of 11-02 / 11-03
-    # (--stall 20261103_154821, the three tennis episodes; its docstring defines each figure): 952 start-up stall
-    # ticks, window extent 2.85 / 3.98 / 5.22 mm (p50 / p90 / p98) and 5.1 / 7.9 / 10.9 mrad, 0.975 of them under 5 mm
-    # and 20 mrad, hover on 925. The other 23 episodes from tick 10 on: window extent 54.7 mm (median), hover on 222 of
-    # 2760 ticks, 0.080. 0 turns it off; golden forces 0.
+    # no time. Lambda is 1 and the binding "hover" when (a) the WHOLE plan ahead is static (every stored row from the
+    # phase's floor row to the last one, plain's rows past its horizon included, within hover_dp_m of the first row of
+    # that window, every rotation axis within hover_dr_rad, and no gripper change after the phase) and (b) the issued
+    # target has stayed put (within hover_dp_m / hover_dr_rad of the target hover_still_rows rows of phase back, or of the
+    # episode's first while fewer have passed); then the early trigger and the VLASH prefetch ask at about today's pace.
+    # A pause followed by motion in the same plan keeps lambda_max (the rule above). The window has at least hover_rows
+    # rows: with fewer left ahead it reaches back behind the phase, so a slow steady motion near the end of its plan
+    # (1.08 mm per row: 4.3 mm from row 5 to row 9 of 10) or a short rest at the end of a moving plan is not a hover.
+    # (b) catches slow motion no single plan shows (review 2026-11-03, VLASH, 11-03 16:31 ep_0002): every plan climbed a
+    # median 1.66 mm from first to last row while the target climbed 64.9 mm over 315 rows of phase; (a) alone flagged 82
+    # of the episode's 297 ticks, (a) and (b) 5. Rows of phase, not ticks: a plan moves as far per row at lambda 1 as at 3,
+    # so a climb of 0.2 mm per row is released after about 25 rows whatever the pace.
+    # Figures from hover_stats.py over the 26 v3 episodes of 11-02 / 11-03 (--stall 20261103_154821, the three tennis
+    # episodes; its docstring defines each figure): 952 start-up stall ticks, window extent 2.85 / 3.98 / 5.22 mm
+    # (p50 / p90 / p98) and 5.1 / 7.9 / 10.9 mrad, 0.975 of them under 5 mm and 20 mrad, hover on 890 (925 with
+    # hover_still_rows 0). The other 23 episodes from tick 10 on: window extent 54.7 mm (median), hover on 74 of 2760
+    # ticks, 0.027 (222, 0.080, with hover_still_rows 0). hover_still_rows 40 / 50: 895 / 884 start-up ticks, 4 / 4 on
+    # the climb. 0 turns the rule off (hover_dp_m) or only (b) (hover_still_rows); golden forces hover_dp_m 0.
     hover_dp_m: float = 0.005
     hover_dr_rad: float = 0.02
     hover_rows: int = 6  # 0.6 s of plan
+    hover_still_rows: int = 45  # 4.5 s at lambda 1, 1.5 s at lambda 3
 
     # ---- blending (section 3.7) ----
     blend: bool = True
@@ -674,6 +684,9 @@ _INF = math.inf
 _MAX_RECORDS = (
     200_000  # undrained trace lines kept before the oldest are dropped (and counted)
 )
+# Accepted targets kept for the hover history (PhaseParams.hover_still_rows). Only ticks that hardly advance (holds,
+# creeps, gate waits) fill it beyond hover_still_rows rows; past this many the oldest drop and the window gets shorter.
+_STILL_HIST_MAX = 600
 
 
 def _b(g) -> int:
@@ -834,6 +847,11 @@ class PhaseEngine:
         self._pause = self._win = []
         # per stored row: the plan from it to the last row is static (hover)
         self._static: list[bool] = []
+        # hover history (PhaseParams.hover_still_rows): (s, accepted target[:6]) oldest first, and whether the newest
+        # target stayed within hover_dp_m / hover_dr_rad of the one hover_still_rows rows of phase back. Kept across
+        # reset() (the target really moved); a new episode starts with none, so a start-up stall hovers at once.
+        self._still_hist: collections.deque = collections.deque(maxlen=_STILL_HIST_MAX)
+        self._still = True
         self._G: list[int] = []  # chunk-local gripper change rows
         self._prof = None
         self._prof_key = None
@@ -1147,9 +1165,11 @@ class PhaseEngine:
 
     def _cap(self, u: float, lam_prev: float, prof):
         """(cap, binding, hover): ``_lam_hat`` and then the hover rule, which caps lambda at 1 while the plan ahead is
-        static. The tick (``_propose``) and plain's open-loop count (``_open_loop_ticks``) use the same cap."""
+        static and the issued target has stayed put over the last hover_still_rows rows (``_note_still``). The tick
+        (``_propose``) and plain's open-loop count (``_open_loop_ticks``, with the history as it is at the splice)
+        use the same cap."""
         cap, bind = self._lam_hat(u, lam_prev, prof)
-        hover = self._hover_at(u)
+        hover = self._still and self._hover_at(u)
         if hover and cap > 1.0:
             cap, bind = 1.0, "hover"
         return cap, bind, hover
@@ -2344,11 +2364,32 @@ class PhaseEngine:
         if not bool(np.isfinite(sent).all()):
             return
         self._T_prev = sent.copy()
+        self._note_still(sent)
         g = _b(sent[6])
         if self._g_cmd is not None and g != self._g_cmd:
             self._gate_clear()  # the commanded gripper changed: a gate wait is over
         self._g_cmd = g
         self._snap_state = None
+
+    def _note_still(self, sent) -> None:
+        """Hover history (PhaseParams.hover_still_rows): add the accepted target at the phase s it was issued at and
+        decide whether it lies within hover_dp_m / hover_dr_rad of the accepted target hover_still_rows rows of phase
+        back (of the oldest one kept while fewer rows have passed in this episode). Rows of phase, not ticks: a plan
+        that moves 0.2 mm per row has moved the same distance after 45 rows whether lambda was 1 or 3."""
+        p = self.params
+        if self._golden or p.hover_still_rows <= 0 or p.hover_dp_m <= 0.0:
+            return
+        h = self._still_hist
+        x = np.asarray(sent[:6], np.float64)
+        h.append((self._s, x))
+        edge = self._s - p.hover_still_rows + _SNAP
+        while len(h) >= 2 and h[1][0] <= edge:
+            h.popleft()
+        ref = h[0][1]
+        self._still = bool(
+            np.linalg.norm(x[:3] - ref[:3]) < p.hover_dp_m
+            and np.abs(wrap_to_pi(x[3:] - ref[3:])).max() < p.hover_dr_rad
+        )
 
     def rejected(self) -> None:
         """The client refused the target (STEP / ROT notes): roll the tick back as a hold."""
