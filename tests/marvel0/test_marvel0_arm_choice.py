@@ -464,6 +464,31 @@ def test_a_request_id_is_answered_again_never_acted_on_twice(m, root):
     assert saved(m)["choice"] == {"controller": "anyspeedup", "preset": "S1"}
 
 
+# What ``arm_choice.write`` writes for anyspeedup S1.
+WRITTEN = {
+    "schema": arm_choice.SCHEMA,
+    "choice": {"controller": "anyspeedup", "preset": "S1"},
+    "request_id": "arm-choice-written",
+    "at": 1.5,
+}
+
+
+def test_read_takes_exactly_what_write_writes(tmp_path):
+    folder = tmp_path / arm_choice.FOLDER
+    folder.mkdir(mode=0o700)
+    value = arm_choice.write(folder, ("anyspeedup", "S1"), "arm-choice-w1", 2.0)
+    assert set(value) == arm_choice.KEYS
+    assert arm_choice.read(tmp_path) == {
+        "state": "chosen",
+        "choice": ("anyspeedup", "S1"),
+        "at": 2.0,
+    }
+    arm_choice.write(folder, None, None, 3.0)
+    assert arm_choice.read(tmp_path) == {"state": "default", "choice": None, "at": 3.0}
+    (folder / record.RECORD).write_text(json.dumps(WRITTEN))
+    assert arm_choice.read(tmp_path)["state"] == "chosen"
+
+
 @pytest.mark.parametrize(
     "content",
     [
@@ -477,6 +502,15 @@ def test_a_request_id_is_answered_again_never_acted_on_twice(m, root):
         ),
         json.dumps({"schema": arm_choice.SCHEMA, "choice": {"controller": "lab"}}),
         json.dumps({"schema": arm_choice.SCHEMA}),
+        # not exactly what ``write`` writes: an extra key, a missing one, or a
+        # field of the wrong kind
+        json.dumps({**WRITTEN, "junk": [1, 2]}),
+        json.dumps({k: v for k, v in WRITTEN.items() if k != "request_id"}),
+        json.dumps({k: v for k, v in WRITTEN.items() if k != "at"}),
+        json.dumps({**WRITTEN, "at": "yesterday"}),
+        json.dumps({**WRITTEN, "at": True}),
+        json.dumps({**WRITTEN, "at": float("inf")}),
+        json.dumps({**WRITTEN, "request_id": 7}),
     ],
 )
 def test_a_choice_that_cannot_be_read_keeps_a_from_starting_until_it_is_cleared(
@@ -517,11 +551,27 @@ def test_a_choice_the_file_no_longer_allows_keeps_a_from_starting(m, root):
     assert "arm_choice_no_anyspeedup" not in m.blockers("a")
 
 
-def test_effective_without_a_file_is_nothing():
+@pytest.mark.parametrize("pair", arm_choice.CHOICES)
+def test_effective_without_a_file_is_nothing_and_blames_no_choice(pair):
+    """No valid control file: nothing is started and the card says the file's
+    problem; a saved lab choice is not said to need anyspeedup_root."""
     stack_control, view = arm_choice.effective(
-        None, {"state": "chosen", "choice": ("lab", None), "at": 1.0}
+        None, {"state": "chosen", "choice": pair, "at": 1.0}
     )
-    assert stack_control is None and view["state"] == "unusable"
+    assert stack_control is None
+    assert (view["state"], view["code"]) == ("chosen", None)
+    assert (view["controller"], view["preset"]) == pair
+
+
+def test_without_a_file_the_card_shows_no_problem_of_the_choice(m, root):
+    with_root(m, root)
+    choose(m, "lab")
+    m.loaded = control_site.ControlLoad("missing", None)
+    m.specs = None  # (as the real setup gives without a file)
+    got = arm(m)
+    assert got["configured"] is None and got["file"] is None
+    assert got["choice"]["state"] == "chosen" and got["choice"]["code"] is None
+    assert m.blockers("a") == ["control_disabled"]
 
 
 # --- the control file is never written -------------------------------------------------------

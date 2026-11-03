@@ -373,11 +373,14 @@ started elsewhere and not known all count as not stopped), `arm_choice_busy` dur
 `arm_choice_no_anyspeedup` for an anyspeedup choice when the file names no `anyspeedup_root`, and `control_disabled`
 with the stack off; the select is then off with that reason beside it. An anyspeedup choice still meets A's own start
 checks (`arm_controller_missing`, `arm_controller_unsafe`, `arm_controller_not_built`). A saved choice that can no
-longer be used (the file lost its `anyspeedup_root`) or cannot be read keeps A from starting (`arm_choice_no_anyspeedup`,
+longer be used (the file lost its `anyspeedup_root`) or cannot be read (a record that is not exactly what the page
+writes: the four keys `schema`, `choice`, `request_id`, `at` with their types, and a choice on the list) keeps A from starting (`arm_choice_no_anyspeedup`,
 `arm_choice_unreadable`) instead of starting the file's controller unannounced; "Use the control file's default" clears
 it. If the stack document itself cannot be read, the client command is judged from the file and the saved choice alone;
 a choice that cannot be read or used then counts as "which controller A runs is not known" (rule v3 and the ramp rules
-are refused, nothing is forced), since A may have been started from it before it broke. What A is started as is decided in one place (`arm_choice.effective`: the choice when it can be used, else the file)
+are refused, nothing is forced), since A may have been started from it before it broke. Without a valid control file
+the stack is off and the card shows the file's problem; a saved choice is kept and nothing is said against it until the
+file is back. What A is started as is decided in one place (`arm_choice.effective`: the choice when it can be used, else the file)
 and everything follows it: A's argv and record, `act.arm`, and the client command (the forced alpha, `ramp_ok`, the
 rollout group's suffix). A's start window, and the whole stack's, name the controller A starts.
 
@@ -760,10 +763,12 @@ C 之前的检查 5 秒，C 启动、3 秒后就绪：**从按键到 C 就绪约
 A 没有停止时 `arm_choice_a_not_idle`（启动中、运行中、停止中、失败、别处启动的、无法判断都算没停）；引导式启动或停止进行中 `arm_choice_busy`；
 `S2` 是 `arm_choice_preset_refused`（和文件一样）；清单以外的其他值 `arm_choice_invalid`；文件没写 `anyspeedup_root` 时选 anyspeedup 是
 `arm_choice_no_anyspeedup`；栈关闭时 `control_disabled`。这时下拉框不可用，旁边写着原因。选了 anyspeedup 仍要过 A 自己的启动检查
-（`arm_controller_missing`、`arm_controller_unsafe`、`arm_controller_not_built`）。保存的选择后来用不了（文件里去掉了 `anyspeedup_root`）或读不出来时，
+（`arm_controller_missing`、`arm_controller_unsafe`、`arm_controller_not_built`）。保存的选择后来用不了（文件里去掉了 `anyspeedup_root`）或读不出来（记录不完全是页面写的样子：恰好 `schema`、`choice`、`request_id`、`at`
+四个键、类型对，选择在清单上）时，
 A 不启动（`arm_choice_no_anyspeedup`、`arm_choice_unreadable`），而不是悄悄改用文件里的控制器；“改回控制文件的默认值”可以清掉它。
 栈文档本身读不出来时，客户端指令只按文件和保存的选择判断；这时选择读不出来或用不了，就算作“不知道 A 在跑哪个控制器”（规则 v3 和斜坡规则都拒绝，什么都不强制），
-因为 A 可能是在选择坏掉之前按它启动的。A 启动成哪个控制器只在一处决定
+因为 A 可能是在选择坏掉之前按它启动的。没有有效的控制文件时栈是关闭的，卡片显示的是文件的问题；保存的选择留着，文件回来之前不对它说什么。
+A 启动成哪个控制器只在一处决定
 （`arm_choice.effective`：选择能用就用选择，否则用文件），下游全都跟它走：A 的 argv 和记录、`act.arm`、客户端指令（强制的 alpha、`ramp_ok`、rollout 组的后缀）。
 A 的启动确认窗口和整个栈的启动窗口都写明 A 启动的是哪个控制器。
 

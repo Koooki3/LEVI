@@ -39,6 +39,7 @@ on the page; another program of the same account can write the folder.
 """
 
 import dataclasses
+import math
 from pathlib import Path
 
 from . import control_site, record
@@ -52,6 +53,10 @@ CHOICES = (("lab", None), ("anyspeedup", "today"), ("anyspeedup", "S1"))
 DEFAULT = "default"
 # ``state`` of the choice as the page shows it.
 STATES = ("default", "chosen", "unusable", "unreadable")
+
+# The keys ``write`` writes, and only these: a record with another set is
+# unreadable.
+KEYS = frozenset({"schema", "choice", "request_id", "at"})
 
 NONE = {"state": "default", "choice": None, "at": None}
 UNREADABLE = {"state": "unreadable", "choice": None, "at": None}
@@ -123,19 +128,27 @@ def folder(state_root) -> Path:
 def read(state_root) -> dict:
     """The saved choice: ``{"state": "default" | "chosen" | "unreadable",
     "choice": (controller, preset) | None, "at"}``. Never raises and creates
-    nothing. A record that is there and is not exactly what ``write`` writes is
-    unreadable, never a guess."""
+    nothing. A record that is there and is not exactly what ``write`` writes
+    (the keys ``KEYS``, this ``SCHEMA``, a finite number ``at``, a string or
+    null ``request_id``, a choice of ``CHOICES`` or null) is unreadable, never
+    a guess."""
     try:
         value = record.read_record(folder(state_root))
     except (record.RecordCorrupt, OSError, ValueError):
         return dict(UNREADABLE)
     if value is None:
         return dict(NONE)
-    if value.get("schema") != SCHEMA:
+    if set(value) != KEYS or value["schema"] != SCHEMA:
         return dict(UNREADABLE)
-    at = value.get("at")
-    at = at if isinstance(at, (int, float)) and not isinstance(at, bool) else None
-    raw = value.get("choice", "missing")
+    at, request_id = value["at"], value["request_id"]
+    if (
+        isinstance(at, bool)
+        or not isinstance(at, (int, float))
+        or not math.isfinite(at)
+        or not (request_id is None or isinstance(request_id, str))
+    ):
+        return dict(UNREADABLE)
+    raw = value["choice"]
     if raw is None:
         return {**NONE, "at": at}
     if not isinstance(raw, dict) or set(raw) != {"controller", "preset"}:
@@ -184,7 +197,9 @@ def effective(stack_control, saved) -> tuple:
     of the choice. The saved choice (``read``) wins when it can be used;
     otherwise the file's own controller stands (and ``view["code"]`` says why
     the choice was not used: A's start is then refused with that code).
-    ``stack_control`` None (no valid file): None."""
+    ``stack_control`` None (no valid file): None, and a saved choice keeps the
+    state ``chosen`` with no code (the stack is off without a file; the file's
+    problem is the one to show, not one of the choice)."""
     saved = saved if isinstance(saved, dict) else UNREADABLE
     state, choice = saved.get("state"), saved.get("choice")
     view = {
@@ -200,9 +215,15 @@ def effective(stack_control, saved) -> tuple:
     if state == "default":
         return stack_control, view
     view.update(controller=choice[0], preset=choice[1])
+    if stack_control is None:
+        # No valid control file: the page starts nothing, and what the card
+        # says is the file's own problem. The choice stays as saved (nothing is
+        # said against it) and is judged again once the file is back.
+        view["state"] = "chosen"
+        return None, view
     code = unusable(stack_control, choice)
-    if stack_control is None or code is not None:
-        view.update(state="unusable", code=code or "arm_choice_no_anyspeedup")
+    if code is not None:
+        view.update(state="unusable", code=code)
         return stack_control, view
     view["state"] = "chosen"
     changes = {"arm_controller": choice[0]}
