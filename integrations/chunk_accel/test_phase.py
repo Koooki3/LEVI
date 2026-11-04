@@ -1216,19 +1216,45 @@ class TestCloseApproach(unittest.TestCase):
             self._windows(PhaseParams(lambda_max=2.5, w_pre_close=2), master), base
         )
 
-    def test_a_close_at_row_zero_gets_the_window_too(self):
-        master = make_master(30, seed=6, step=0.004, turn=0.0, flips=[(0, 0.0)])
-        pose = master[0].copy()
-        pose[6] = (
-            1.0  # the gripper reads open: row 0 reading closed is a close (test_row0_is_compared_...)
-        )
-        eng = PhaseEngine(PhaseParams(lambda_max=2.5, w_pre_close=10))
-        eng.set_chunk(master, "sync")
-        eng.begin(Measured(pose, 0.0, 0.0), None)
-        self.assertEqual(eng._G, [0])
-        self.assertEqual(
-            [a for a, w in enumerate(eng._win) if w], [0, 1, 2]
-        )  # rows before 0 are not stored
+    def test_a_close_revealed_by_an_append_holds_lambda_at_one_and_never_steps_back(
+        self,
+    ):
+        """The VLASH path (review 2026-11-04): the close arrives in an appended chunk, not in the first plan. From the
+        tick it is stored, every move that meets its window [G - w_pre_close, G + w_post) has lambda <= 1, the phase
+        never goes back, and the lead barrier stops at the close's own window start."""
+        G = 24
+        master = make_master(70, seed=7, step=0.004, turn=0.0, flips=[(G, 0.0)])
+        params = PhaseParams(lambda_max=3.0, w_pre_close=10)
+        eng = PhaseEngine(params)
+        arm = PerfectArm(master[0])
+        feed = vlash_feed(master, h=10, low=8.0)
+        revealed, fast_before, checked = None, False, 0
+        for k in range(70):
+            feed(eng, k)
+            if revealed is None and eng._G:
+                revealed = k
+            s0 = eng.s
+            eng.begin(Measured(arm.pose(), 0.0, k * DT), None)
+            out = eng.commit()
+            arm.step(out.target)
+            eng.executed(out.target)
+            s1 = eng.s
+            self.assertGreaterEqual(s1, s0 - 1e-12, f"tick {k}: the phase went back")
+            if revealed is None:
+                fast_before |= out.lam > 1.5
+            for g in eng._G:
+                self.assertEqual(eng._pre[g], 10)  # the only change is the close
+                if (
+                    s0 - eng._o < g + params.w_post - 1e-9
+                    and s1 - eng._o > g - 10 + 1e-9
+                ):
+                    self.assertLessEqual(
+                        s1 - s0, 1.0 + 1e-9, f"tick {k}: inside the close window"
+                    )
+                    checked += 1
+        self.assertIsNotNone(revealed)
+        self.assertTrue(fast_before, "it accelerated before the close was known")
+        self.assertGreater(checked, 5)
 
     def test_ticks_into_a_close_run_at_one(self):
         G = 30

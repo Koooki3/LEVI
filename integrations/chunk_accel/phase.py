@@ -864,6 +864,9 @@ class PhaseEngine:
         self._still_hist: collections.deque = collections.deque(maxlen=_STILL_HIST_MAX)
         self._still = True
         self._G: list[int] = []  # chunk-local gripper change rows
+        self._pre: dict[
+            int, int
+        ] = {}  # per change row: its window's rows before it (w_pre, or w_pre_close for a close)
         self._prof = None
         self._prof_key = None
         # phase state
@@ -939,6 +942,7 @@ class PhaseEngine:
         self._R = None
         self._D = None
         self._G = []
+        self._pre = {}
         self._prof = None
         self._prof_key = None
         self._blend = None
@@ -1062,17 +1066,13 @@ class PhaseEngine:
             G.insert(0, 0)
         self._G = sorted(set(G))
         win = [False] * self._nseg
+        self._pre = {}
         for g in self._G:
             pre = p.w_pre
-            if p.w_pre_close > p.w_pre:
-                ga = (
-                    g - lo
-                )  # stored index of the change row (row 0's change is stored too: lo <= 0 < lo + n)
-                closed = (
-                    bits[ga] == 0 if 0 <= ga < n else g_ref == 1
-                )  # the row reads closed: an open -> close change
-                if closed:
-                    pre = p.w_pre_close
+            # an open -> close change gets w_pre_close rows before it; every change row is stored (row 0's included)
+            if p.w_pre_close > p.w_pre and bits[g - lo] == 0:
+                pre = p.w_pre_close
+            self._pre[g] = pre
             for j in range(g - pre, g + p.w_post):
                 a = j - lo
                 if 0 <= a < self._nseg:
@@ -2239,7 +2239,7 @@ class PhaseEngine:
         p = self.params
         barrier = _INF
         for g in self._G:
-            ws, we = g - p.w_pre, g + p.w_post
+            ws, we = g - self._pre.get(g, p.w_pre), g + p.w_post
             if u < ws - _SNAP:
                 barrier = min(barrier, float(ws))
             elif u < we - _SNAP and (p.w_pre > 0 or p.w_post > 0):
