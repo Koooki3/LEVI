@@ -776,7 +776,6 @@ describe("the arm controller the control file names and the one A runs", () => {
       "marvel0.ctl.arm.configured",
       "marvel0.ctl.arm.running",
       "marvel0.ctl.arm.alpha",
-      "marvel0.ctl.arm.untried",
       "marvel0.ctl.arm.change",
     ]);
     const changed = armView({
@@ -814,7 +813,7 @@ describe("the arm controller the control file names and the one A runs", () => {
     })!;
     expect(keys(off)).toContain("marvel0.ctl.arm.configured_off");
     expect(keys(off)).not.toContain("marvel0.ctl.arm.alpha");
-    expect(keys(off)).not.toContain("marvel0.ctl.arm.untried");
+    expect(keys(off)).not.toContain("marvel0.ctl.arm.change");
   });
 
   test("a saved choice that cannot be used or read: the card says A does not start, not the file's controller", () => {

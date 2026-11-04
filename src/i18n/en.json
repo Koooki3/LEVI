@@ -5700,7 +5700,6 @@
   "marvel0.ctl.arm.problem_changed": "The control file changed while A ran: this page would no longer start A as the arm controller A runs. Rule v3 is refused until the two agree again.",
   "marvel0.ctl.arm.problem_foreign": "A was not started by this page, so the page cannot tell which arm controller runs, and anyspeedup is chosen for A. Rule v3 is refused.",
   "marvel0.ctl.arm.problem_unknown": "The page cannot tell which arm controller A runs, and anyspeedup is chosen for A. Rule v3 is refused.",
-  "marvel0.ctl.arm.untried": "The anyspeedup controller has not run on the arm yet: keep a hand on the physical e-stop.",
   "marvel0.ctl.arm.change": "To change the controller: stop A, choose it above, start A.",
   "marvel0.ctl.control_error.other": "The control file has a problem: {field}: {code}.",
   "marvel0.ctl.control_error.stack.arm_controller.range": "arm_controller must be \"lab\" or \"anyspeedup\".",

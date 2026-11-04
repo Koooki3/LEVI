@@ -5700,7 +5700,6 @@
   "marvel0.ctl.arm.problem_changed": "A 运行期间控制文件被改了：本页不会再按 A 正在运行的机械臂控制器启动 A。两者重新一致之前，规则 v3 会被拒绝。",
   "marvel0.ctl.arm.problem_foreign": "A 不是本页启动的，本页不知道它运行的是哪个机械臂控制器，而 A 选的是 anyspeedup。规则 v3 会被拒绝。",
   "marvel0.ctl.arm.problem_unknown": "本页无法判断 A 运行的是哪个机械臂控制器，而 A 选的是 anyspeedup。规则 v3 会被拒绝。",
-  "marvel0.ctl.arm.untried": "anyspeedup 控制器还没有在机械臂上运行过：手放在物理急停上。",
   "marvel0.ctl.arm.change": "要换控制器：先停 A，在上面的下拉框里选好，再启动 A。",
   "marvel0.ctl.control_error.other": "控制文件有问题：{field}：{code}。",
   "marvel0.ctl.control_error.stack.arm_controller.range": "arm_controller 只能是 \"lab\" 或 \"anyspeedup\"。",

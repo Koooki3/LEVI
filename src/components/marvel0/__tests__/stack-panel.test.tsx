@@ -396,7 +396,8 @@ describe("outside the product, or with the controls off or unread, nothing can b
       );
       expect(said).toContain("A runs: anyspeedup, preset S1.");
       expect(said).toContain("alpha 0.01");
-      expect(said).toContain("has not run on the arm yet");
+      // anyspeedup ran on the arm on 2026-11-03: the card no longer says it has not (MARVEL0-ARM-UNTRIED-SENTENCE)
+      expect(said).not.toContain("has not run on the arm yet");
       expect(said).toContain("stop A, choose it above, start A");
       expect(said).not.toMatch(/[{}]/);
       expect(line(english.host)!.getAttribute("data-running")).toBe(

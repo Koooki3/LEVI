@@ -1003,8 +1003,7 @@ export const armName = (entry: ArmController): Say =>
  * default; or that A does not start while a saved choice cannot be used or
  * read, since the backend then refuses A's start instead of falling back to
  * the file's), what A runs, why rule v3 is refused, the alpha it is tied to,
- * that the anyspeedup controller has not run on the arm yet, and how to
- * change it. */
+ * and how to change it. */
 export function armSays(arm: ArmView): Say[] {
   const name = armName;
   const out: Say[] = [];
@@ -1042,9 +1041,8 @@ export function armSays(arm: ArmView): Say[] {
   const anyspeedup =
     arm.running?.controller === "anyspeedup" ||
     (arm.configured?.controller === "anyspeedup" && arm.enabled);
-  if (anyspeedup) {
-    out.push({ key: "marvel0.ctl.arm.untried" });
-    out.push({ key: "marvel0.ctl.arm.change" });
-  }
+  // No "has not run on the arm yet" line any more: anyspeedup today and S1 ran on the arm on 2026-11-03
+  // (MARVEL0-ARM-UNTRIED-SENTENCE).
+  if (anyspeedup) out.push({ key: "marvel0.ctl.arm.change" });
   return out;
 }

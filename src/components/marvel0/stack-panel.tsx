@@ -243,8 +243,7 @@ function MarkerBlock({
  * and only while A is stopped: off with the backend's reason otherwise), a
  * way back to the file's default, and what A starts as and what A runs
  * (stack-act-logic `armSays`: A's own record, not the select), why rule v3 is
- * refused, the alpha the client command is tied to, that the anyspeedup
- * controller has not run on the arm yet, and how to change it.
+ * refused, the alpha the client command is tied to, and how to change it.
  *
  * A pick only moves the select; "Use this controller" saves it. On Linux and
  * Windows the arrow keys on a closed select fire `change` at every step, so a
