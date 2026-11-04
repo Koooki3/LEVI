@@ -3,7 +3,8 @@
 No robot, no GPU, no server, no port. The user's rtc_chunker.py, lab/vlash/runtime.py (installed copy), the client's
 _clamp_action / _rtc_chunker and lab/vlash/run_collect_vlash.py are loaded read-only BY PATH (compiled from their bytes,
 no bytecode written next to them, a stub for the two libraries the client imports at module level); without an openpi
-checkout (CHUNK_ACCEL_OPENPI_ROOT, or an `openpi` folder above this one) those tests skip. Nothing of theirs is copied.
+checkout named by CHUNK_ACCEL_OPENPI_ROOT those tests skip (no default: the run in CI, the merge tier and on the
+workstation is the same unless the variable is set). Nothing of theirs is copied.
 
 HARNESS. A golden comparison runs one scripted episode (chunks, reply delays, resets, failed steps) through today's
 scheduler and through the phase scheduler and compares everything the client sees. Time is deterministic:
@@ -74,13 +75,12 @@ SHIPPED = PhaseParams.for_page(
 
 
 def _find_openpi() -> Path | None:
+    # Only the variable, never a search of the parent folders: a checkout inside the workspace would otherwise find the
+    # user's openpi and run ~45 more tests than CI does, against uncommitted real-robot code (review 2026-11-05).
     env = os.environ.get("CHUNK_ACCEL_OPENPI_ROOT")
     if env:
         root = Path(env)
         return root if (root / "examples/fr3_local/rtc_chunker.py").is_file() else None
-    for parent in HERE.parents:
-        if (parent / "openpi/examples/fr3_local/rtc_chunker.py").is_file():
-            return parent / "openpi"
     return None
 
 
@@ -2600,7 +2600,6 @@ class VlashPayloadTests(unittest.TestCase):
         np.testing.assert_array_equal(c_new.payloads[1]["vlash_future_state"], future)
 
     @needs_openpi
-    @needs_openpi
     def test_the_factory_runs_the_prefetch_on_the_given_runtimes_request_class(self):
         rc = client_module()
         vrt = load_ro("vrt_for_transport", VRT_INSTALLED)
@@ -2614,6 +2613,7 @@ class VlashPayloadTests(unittest.TestCase):
         self.assertIs(sched._transport_for_start().request_cls, vrt._Request)
         self.assertEqual(sched.timeout, 30.0)
 
+    @needs_openpi
     def test_the_factory_validates_the_server_like_the_original(self):
         rc = client_module()
         vrt = load_ro("vrt_for_validation", VRT_INSTALLED)
