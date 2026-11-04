@@ -125,6 +125,8 @@ DEFAULTS = {
     "close_hold": True,
     "close_hold_travel": 0.0,
     "close_issue_timeout_s": 0.85,
+    "grip_keep_rows": 3,
+    "grip_keep_ticks": 15,
 }
 
 # Section 5 / 15: the ledger numbers phase.py must carry (E8 is a tightening, E11 and E12 live in other files).
@@ -281,6 +283,8 @@ class TestValidation(unittest.TestCase):
             "reanchor_cos_min": 0.4,
             "hold_reset_after": 4,
             "w_pre_close": 21,
+            "grip_keep_rows": 11,
+            "grip_keep_ticks": 0,
             "w_pre_float": None,
         }
         for name, value in bad.items():
@@ -291,10 +295,21 @@ class TestValidation(unittest.TestCase):
             with self.assertRaises(ValueError, msg=f"{name}={value}"):
                 PhaseParams(**{name: value})
         PhaseParams(
-            v_cap=0.40, omega_cap=1.2, a_lat=2.4, w_pre=6, w_post=10, w_pre_close=20
+            v_cap=0.40,
+            omega_cap=1.2,
+            a_lat=2.4,
+            w_pre=6,
+            w_post=10,
+            w_pre_close=20,
+            grip_keep_rows=10,
+            grip_keep_ticks=50,
         )  # the inclusive upper ends
+        PhaseParams(grip_keep_rows=0, grip_keep_ticks=1)  # off / the lower ends
+        for name in ("w_pre_close", "grip_keep_rows", "grip_keep_ticks"):
+            with self.assertRaises(ValueError, msg=name):
+                PhaseParams(**{name: 2.5})  # integer fields, like w_pre
         with self.assertRaises(ValueError):
-            PhaseParams(w_pre_close=2.5)  # an integer field, like w_pre
+            PhaseParams(grip_keep_ticks=51)
 
     def test_hard_leash_stays_inside_the_client_limits(self):
         self.assertLess(PhaseParams().hard_leash_m, CLIENT_MAX_M)
@@ -3288,6 +3303,61 @@ def rtc_feed(master, every=3, h=10):
             eng.swap(chunk_at(master, eng.s - 1.0, h), eng.s)
 
     return feed
+
+
+class TestGripKeep(unittest.TestCase):
+    """PhaseParams.grip_keep_rows (CHUNK-ACCEL-REGRASP-AFTER-SWITCH-IN-HOLD): a reply that arrives during the close hold
+    with the same close a row later must not open the gripper again; a real reversal still goes out."""
+
+    G = 30
+    P = PhaseParams.for_page(3.0, 0.01)
+
+    def _run(self, params, later):
+        """RTC-like replies every 3 ticks from master m1 (close at G) until the close is issued, then every tick from
+        ``later`` (the same path with another gripper column). -> (tick of the close, gripper value sent per tick)."""
+        m1 = make_master(90, seed=3, step=0.004, turn=0.0, flips=[(self.G, 0.0)])
+        eng, arm = PhaseEngine(params), PerfectArm(m1[0])
+        closed_at, sent = None, []
+        for k in range(60):
+            if k == 0:
+                eng.set_chunk(m1[:10], "sync")
+            elif closed_at is None and k % 3 == 0:
+                eng.swap(chunk_at(m1, eng.s - 1.0, 10), eng.s)
+            elif closed_at is not None:
+                eng.swap(chunk_at(later, eng.s - 1.0, 10), eng.s)
+            eng.begin(Measured(arm.pose(), 0.0, k * DT), None)
+            out = eng.commit()
+            arm.step(out.target)
+            eng.executed(out.target)
+            sent.append(b_of(out.target[6]))
+            if closed_at is None and sent[-1] == 0:
+                closed_at = k
+        return closed_at, sent
+
+    def _later(self, rows_open):
+        m = make_master(90, seed=3, step=0.004, turn=0.0, flips=[(self.G, 0.0)])
+        m[self.G : self.G + rows_open, 6] = 1.0  # the same close, rows_open rows later
+        return m
+
+    def test_a_reply_with_the_close_a_row_later_keeps_the_gripper_closed(self):
+        closed_at, sent = self._run(self.P, self._later(1))
+        self.assertIsNotNone(closed_at)
+        self.assertEqual(sent[closed_at:], [0] * (len(sent) - closed_at))
+        # without the rule the same replies open it again right after the close (the replay's re-grasp)
+        closed_off, sent_off = self._run(
+            dataclasses.replace(self.P, grip_keep_rows=0), self._later(1)
+        )
+        self.assertEqual(closed_off, closed_at)
+        self.assertIn(1, sent_off[closed_off:])
+
+    def test_a_reversal_the_plan_keeps_longer_goes_out(self):
+        # the reply opens for more than grip_keep_rows rows: a real re-open (failed grasp), sent as before
+        later = self._later(self.P.grip_keep_rows + 2)
+        closed_at, sent = self._run(self.P, later)
+        self.assertIn(1, sent[closed_at:])
+
+    def test_golden_forces_it_off(self):
+        self.assertEqual(PhaseParams.golden_params().grip_keep_rows, 0)
 
 
 class TestHover(unittest.TestCase):

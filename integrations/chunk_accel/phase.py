@@ -75,6 +75,7 @@ _GOLDEN_FORCED = {
     "w_pre": 0,
     "w_post": 0,
     "w_pre_close": 0,
+    "grip_keep_rows": 0,
     "soft_leash": False,
     "hard_leash": False,
     "step_limit": False,
@@ -101,6 +102,8 @@ _RANGES = {
     "w_pre": (0, 6, False),
     "w_post": (0, 10, False),
     "w_pre_close": (0, 20, False),
+    "grip_keep_rows": (0, 10, False),
+    "grip_keep_ticks": (1, 50, False),
     "v_cap": (0.0, 0.40, True),
     "omega_cap": (0.0, 1.2, True),
     "a_lat": (0.0, 2.4, True),
@@ -177,6 +180,8 @@ _INT_FIELDS = frozenset(
         "w_pre",
         "w_post",
         "w_pre_close",
+        "grip_keep_rows",
+        "grip_keep_ticks",
         "d_meas_window",
         "hold_reset_after",
         "bisect_iters",
@@ -409,6 +414,15 @@ class PhaseParams:
     # review 2026-11-02: 4 of 18 closes, two of them the empty re-grasps). The hold therefore starts at the engine's close
     # command; this bounds the part before the issued value reads closed (0.75 s + one tick). After it lambda <= 1 as before.
     close_issue_timeout_s: float = 0.85
+    # A gripper change the engine has just issued is kept while the plan returns to it within grip_keep_rows rows ahead of
+    # the phase, for grip_keep_ticks ticks after the change (CHUNK-ACCEL-REGRASP-AFTER-SWITCH-IN-HOLD): a chunk that came
+    # during the close hold (phase frozen) with its close a fraction of a row later read open again at the frozen phase,
+    # so the engine opened about 0.8 s after the close and closed again. Replay 2026-11-05 (S1, tail_p 0, the client's
+    # gripper rules incl. no-resend): runs with an extra close RTC H0 3/97 -> 0, H1 19 -> 8, plain H0 6/24 -> 1; RTC H1
+    # median ratio 0.675 -> 0.665, plain H1 0.817 -> 0.761; VLASH unchanged. A reversal the plan keeps for longer than
+    # grip_keep_rows rows goes out as before. 0 = off; golden forces 0.
+    grip_keep_rows: int = 3
+    grip_keep_ticks: int = 15
     settle_min_s: float = 0.3
     settle_aperture_delta: float = 0.02
     settle_stable_ticks: int = 2
@@ -851,6 +865,10 @@ class PhaseEngine:
         self._built_g = None
         self._ws_shrunk = False
         self._event_k = -1
+        # the tick of the last issued gripper change (grip_keep_ticks) and the plan it came from: grip_keep_rows acts only
+        # on a later plan (within one plan its rows land exactly, I3)
+        self._chg_k = -(10**9)
+        self._chg_chunk = -1
         self._row0_change = None  # None: not decided yet (the commanded gripper value was not known at load)
         self._row0_ahead = False
         self._nseg = 0
@@ -1845,7 +1863,23 @@ class PhaseEngine:
         if hold_open and _b(g) == 0:
             tp = self._T_prev
             return float(tp[6]) if tp is not None and _b(tp[6]) == 1 else GRIP_OPEN
+        if self._grip_kept(u, g):
+            return GRIP_CLOSED if self._g_cmd == 0 else GRIP_OPEN
         return g
+
+    def _grip_kept(self, u: float, g: float) -> bool:
+        """grip_keep_rows: the change issued at most grip_keep_ticks ticks ago, from an earlier plan, stays while the
+        current plan at phase u reads the other value but returns to it within grip_keep_rows rows ahead (a later copy of
+        the same change, not a reversal). Within the plan that issued it nothing is kept: its rows land exactly (I3)."""
+        p = self.params
+        n = p.grip_keep_rows
+        if n <= 0 or self._golden or self._g_cmd is None or _b(g) == self._g_cmd:
+            return False
+        if self._chunk_id == self._chg_chunk:
+            return False
+        if self._k - self._chg_k > p.grip_keep_ticks:
+            return False
+        return any(_b(self._grip_raw(u + j)) == self._g_cmd for j in range(1, n + 1))
 
     def _target_at(self, alpha, s_c, e_c, force_done, hold_open):
         """T(alpha): the plan at the partial advance (section 3.8) with the blend offset, float32 (7,), and the
@@ -2296,6 +2330,8 @@ class PhaseEngine:
             )
         self._gate_clear()
         self._g_cmd = new
+        self._chg_k = self._k - 1
+        self._chg_chunk = self._chunk_id
         self._events.append(ev)
         self._event_k = self._k - 1
         self._emit({**ev, "kind": "grip", "event": ev["kind"], "k": self._k - 1})
@@ -2430,6 +2466,7 @@ class PhaseEngine:
         if self._events and self._event_k == self._k - 1:
             self._events.pop()  # the gripper command never went out
             self._event_k = -1
+            self._chg_k = -(10**9)
 
     # ------------------------------------------------------------------ views
     def prev_rows(self) -> np.ndarray:
