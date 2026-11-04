@@ -3312,13 +3312,15 @@ class TestGripKeep(unittest.TestCase):
     G = 30
     P = PhaseParams.for_page(3.0, 0.01)
 
-    def _run(self, params, later):
+    def _run(self, params, later, arm=None, ticks=60):
         """RTC-like replies every 3 ticks from master m1 (close at G) until the close is issued, then every tick from
-        ``later`` (the same path with another gripper column). -> (tick of the close, gripper value sent per tick)."""
+        ``later`` (the same path with another gripper column). -> (tick of the close, gripper value sent per tick,
+        engine, global phase s after each tick)."""
         m1 = make_master(90, seed=3, step=0.004, turn=0.0, flips=[(self.G, 0.0)])
-        eng, arm = PhaseEngine(params), PerfectArm(m1[0])
-        closed_at, sent = None, []
-        for k in range(60):
+        eng = PhaseEngine(params)
+        arm = PerfectArm(m1[0]) if arm is None else arm(m1[0])
+        closed_at, sent, us = None, [], []
+        for k in range(ticks):
             if k == 0:
                 eng.set_chunk(m1[:10], "sync")
             elif closed_at is None and k % 3 == 0:
@@ -3330,9 +3332,10 @@ class TestGripKeep(unittest.TestCase):
             arm.step(out.target)
             eng.executed(out.target)
             sent.append(b_of(out.target[6]))
+            us.append(eng.s)
             if closed_at is None and sent[-1] == 0:
                 closed_at = k
-        return closed_at, sent
+        return closed_at, sent, eng, us
 
     def _later(self, rows_open):
         m = make_master(90, seed=3, step=0.004, turn=0.0, flips=[(self.G, 0.0)])
@@ -3340,20 +3343,81 @@ class TestGripKeep(unittest.TestCase):
         return m
 
     def test_a_reply_with_the_close_a_row_later_keeps_the_gripper_closed(self):
-        closed_at, sent = self._run(self.P, self._later(1))
+        closed_at, sent, eng, _ = self._run(self.P, self._later(1))
         self.assertIsNotNone(closed_at)
         self.assertEqual(sent[closed_at:], [0] * (len(sent) - closed_at))
+        self.assertGreater(
+            eng.summary()["grip_kept_ticks"], 0
+        )  # the trace's evidence that the rule acted
         # without the rule the same replies open it again right after the close (the replay's re-grasp)
-        closed_off, sent_off = self._run(
+        closed_off, sent_off, eng_off, _ = self._run(
             dataclasses.replace(self.P, grip_keep_rows=0), self._later(1)
         )
         self.assertEqual(closed_off, closed_at)
         self.assertIn(1, sent_off[closed_off:])
+        self.assertEqual(eng_off.summary()["grip_kept_ticks"], 0)
+
+    def test_the_rows_boundary_is_grip_keep_rows(self):
+        # the same close 3 rows later is kept, 4 rows later is a reversal the plan keeps longer: it goes out
+        closed_at, sent, _, _ = self._run(self.P, self._later(self.P.grip_keep_rows))
+        self.assertEqual(sent[closed_at:], [0] * (len(sent) - closed_at))
+        closed_at, sent, _, _ = self._run(
+            self.P, self._later(self.P.grip_keep_rows + 1)
+        )
+        self.assertIn(1, sent[closed_at:])
+
+    def test_a_hold_longer_than_the_window_does_not_run_it_out(self):
+        """Review 2026-11-05: the client issues the close up to 0.85 s late and the settle can take 1.0 s, so the phase can
+        wait longer than grip_keep_ticks after the engine's close; only ticks that advance the phase age the window."""
+
+        class LateGripArm(PerfectArm):
+            LATE = 7  # the client's 0.75 s throttle: the close goes out 7 ticks after the engine's command
+
+            def __init__(self, pose):
+                super().__init__(pose)
+                self.sent = []
+
+            def step(self, target):
+                g_issued = self.p[6]
+                super().step(target)
+                self.sent.append(float(b_of(target[6])))
+                self.p[6] = (
+                    self.sent[-1 - self.LATE]
+                    if len(self.sent) > self.LATE
+                    else g_issued
+                )
+
+        closed_at, sent, _, ss = self._run(
+            self.P, self._later(1), arm=LateGripArm, ticks=70
+        )
+        frozen = 0
+        while ss[closed_at + 1 + frozen] == ss[closed_at]:
+            frozen += 1
+        self.assertGreater(
+            frozen, self.P.grip_keep_ticks
+        )  # the phase waited longer than the window
+        self.assertEqual(sent[closed_at:], [0] * (len(sent) - closed_at))
+
+    def test_an_append_continues_the_plan_that_issued_the_change(self):
+        """Review 2026-11-05 (I3 with VLASH): a plan's own close, open, close two rows apart all land, also when chunks
+        are appended between them; an append is not a later plan."""
+        master = make_master(
+            90,
+            seed=11,
+            step=0.004,
+            turn=0.0,
+            flips=[(self.G, 0.0), (self.G + 2, 1.0), (self.G + 4, 0.0)],
+        )
+        eng = PhaseEngine(self.P)
+        drive(eng, PerfectArm(master[0]), 80, feed=vlash_feed(master, h=10, low=8.0))
+        kinds = [e["kind"] for e in eng.summary()["grip_events"]]
+        self.assertEqual(kinds[:3], ["close", "open", "close"])
+        self.assertEqual(eng.summary()["grip_kept_ticks"], 0)
 
     def test_a_reversal_the_plan_keeps_longer_goes_out(self):
         # the reply opens for more than grip_keep_rows rows: a real re-open (failed grasp), sent as before
         later = self._later(self.P.grip_keep_rows + 2)
-        closed_at, sent = self._run(self.P, later)
+        closed_at, sent, _, _ = self._run(self.P, later)
         self.assertIn(1, sent[closed_at:])
 
     def test_golden_forces_it_off(self):

@@ -420,7 +420,9 @@ class PhaseParams:
     # so the engine opened about 0.8 s after the close and closed again. Replay 2026-11-05 (S1, tail_p 0, the client's
     # gripper rules incl. no-resend): runs with an extra close RTC H0 3/97 -> 0, H1 19 -> 8, plain H0 6/24 -> 1; RTC H1
     # median ratio 0.675 -> 0.665, plain H1 0.817 -> 0.761; VLASH unchanged. A reversal the plan keeps for longer than
-    # grip_keep_rows rows goes out as before. 0 = off; golden forces 0.
+    # grip_keep_rows rows goes out as before. grip_keep_ticks counts only ticks that advance the phase: a close hold, a
+    # gate park or a leash hold can outlast 15 ticks (issue lag up to 0.85 s + settle up to 1.0 s, review 2026-11-05) and
+    # must not let the window run out while the phase waits. 0 = off; golden forces 0.
     grip_keep_rows: int = 3
     grip_keep_ticks: int = 15
     settle_min_s: float = 0.3
@@ -865,9 +867,9 @@ class PhaseEngine:
         self._built_g = None
         self._ws_shrunk = False
         self._event_k = -1
-        # the tick of the last issued gripper change (grip_keep_ticks) and the plan it came from: grip_keep_rows acts only
-        # on a later plan (within one plan its rows land exactly, I3)
-        self._chg_k = -(10**9)
+        # ticks that advanced the phase since the last issued gripper change (grip_keep_ticks) and the plan it came from:
+        # grip_keep_rows acts only on a later plan (within one plan, appends included, its rows land exactly, I3)
+        self._chg_age = 10**9
         self._chg_chunk = -1
         self._row0_change = None  # None: not decided yet (the commanded gripper value was not known at load)
         self._row0_ahead = False
@@ -1027,6 +1029,8 @@ class PhaseEngine:
         self._u_end = float(u_end)
         self._raw_last = raw_last
         self._chunk_kind = kind
+        if keep_row0 and self._chg_chunk == self._chunk_id:
+            self._chg_chunk += 1  # an append continues the plan that issued the change (I3, review 2026-11-05)
         self._chunk_id += 1
         self._geom_ver += 1
         self._prof = None
@@ -1868,16 +1872,17 @@ class PhaseEngine:
         return g
 
     def _grip_kept(self, u: float, g: float) -> bool:
-        """grip_keep_rows: the change issued at most grip_keep_ticks ticks ago, from an earlier plan, stays while the
-        current plan at phase u reads the other value but returns to it within grip_keep_rows rows ahead (a later copy of
-        the same change, not a reversal). Within the plan that issued it nothing is kept: its rows land exactly (I3)."""
+        """grip_keep_rows: the change issued less than grip_keep_ticks phase-advancing ticks ago, from an earlier plan,
+        stays while the current plan at phase u reads the other value but returns to it within grip_keep_rows rows ahead
+        (a later copy of the same change, not a reversal). Within the plan that issued it, appends included, nothing is
+        kept: its rows land exactly (I3)."""
         p = self.params
         n = p.grip_keep_rows
         if n <= 0 or self._golden or self._g_cmd is None or _b(g) == self._g_cmd:
             return False
         if self._chunk_id == self._chg_chunk:
             return False
-        if self._k - self._chg_k > p.grip_keep_ticks:
+        if self._chg_age >= p.grip_keep_ticks:
             return False
         return any(_b(self._grip_raw(u + j)) == self._g_cmd for j in range(1, n + 1))
 
@@ -1957,7 +1962,7 @@ class PhaseEngine:
             self._g_cmd, self._gate_wait, self._holds, self._dir_prev,
             None if self._blend is None else self._blend["k"],
             self._blend_pending, self._gate_since, self._recov_run,
-            self._gate_pos, self._gate_total,
+            self._gate_pos, self._gate_total, self._chg_age, self._chg_chunk,
         )  # fmt: skip
         k = self._k
         self._k += 1
@@ -2118,6 +2123,9 @@ class PhaseEngine:
         u_new = _snap(s_new - o)
         lam_eff = s_new - s
         # ---- state update ----
+        # grip_keep_ticks: only ticks that advance the phase age the window
+        if s_new > s + 1e-9:
+            self._chg_age += 1
         self._s = s_new
         self._e_off = max(e_new - u_new, 0.0) if (p.lead and not self._golden) else 0.0
         self._dlam = lam_eff - self._lam
@@ -2136,6 +2144,10 @@ class PhaseEngine:
         self._update_dmeas(dp, hold=False)
         if self._ws_shrunk:
             self._st["ws_shrinks"] += 1
+        raw_g = self._grip_raw(u_new)
+        # grip_kept_ticks: the sent value is the kept one (grip_keep_rows), not the plan's
+        if _b(T32[6]) != _b(raw_g) and not (hold_open and _b(raw_g) == 0):
+            self._st["grip_kept_ticks"] += 1
         event = self._grip_event(
             T32,
             u_new,
@@ -2330,7 +2342,7 @@ class PhaseEngine:
             )
         self._gate_clear()
         self._g_cmd = new
-        self._chg_k = self._k - 1
+        self._chg_age = 0
         self._chg_chunk = self._chunk_id
         self._events.append(ev)
         self._event_k = self._k - 1
@@ -2455,7 +2467,8 @@ class PhaseEngine:
             return
         (self._s, self._lam, self._dlam, self._e_off, self._fresh, self._T_prev,
          self._g_cmd, self._gate_wait, self._holds, self._dir_prev, bk, self._blend_pending,
-         self._gate_since, self._recov_run, self._gate_pos, self._gate_total) = st  # fmt: skip
+         self._gate_since, self._recov_run, self._gate_pos, self._gate_total, self._chg_age,
+         self._chg_chunk) = st  # fmt: skip
         if self._blend is not None and bk is not None:
             self._blend["k"] = bk
         elif bk is not None and self._blend is None:
@@ -2466,7 +2479,6 @@ class PhaseEngine:
         if self._events and self._event_k == self._k - 1:
             self._events.pop()  # the gripper command never went out
             self._event_k = -1
-            self._chg_k = -(10**9)
 
     # ------------------------------------------------------------------ views
     def prev_rows(self) -> np.ndarray:
@@ -2572,6 +2584,7 @@ class PhaseEngine:
             "grasp_replans": int(st["grasp_replans"]),
             "grasp_hold_ticks": int(st["grasp_hold_ticks"]),
             "grasp_issue_hold_ticks": int(st["grasp_issue_hold_ticks"]),
+            "grip_kept_ticks": int(st["grip_kept_ticks"]),
             "hover_ticks": int(st["hover_ticks"]),
             "ws_shrinks": int(st["ws_shrinks"]),
             "reanchored_to_measured": int(st["reanchored_to_measured"]),
