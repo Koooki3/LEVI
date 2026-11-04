@@ -3420,6 +3420,35 @@ class TestGripKeep(unittest.TestCase):
         closed_at, sent, _, _ = self._run(self.P, later)
         self.assertIn(1, sent[closed_at:])
 
+    def test_a_rejected_tick_restores_the_window(self):
+        # the client refused the tick that carried the close: the close never went out, so the window and the plan it
+        # belongs to are those of before the tick, and no event remains (rejected() restores them from the snapshot)
+        m1 = make_master(90, seed=3, step=0.004, turn=0.0, flips=[(self.G, 0.0)])
+        eng, arm = PhaseEngine(self.P), PerfectArm(m1[0])
+        for k in range(80):
+            if k == 0:
+                eng.set_chunk(m1[:10], "sync")
+            elif k % 3 == 0:
+                eng.swap(chunk_at(m1, eng.s - 1.0, 10), eng.s)
+            before = (eng._chg_age, eng._chg_chunk, len(eng.summary()["grip_events"]))
+            eng.begin(Measured(arm.pose(), 0.0, k * DT), None)
+            out = eng.commit()
+            if b_of(out.target[6]) == 0:
+                self.assertEqual(
+                    eng._chg_age, 0
+                )  # the close was latched on this tick ...
+                eng.rejected()  # ... and the client refused it
+                after = (
+                    eng._chg_age,
+                    eng._chg_chunk,
+                    len(eng.summary()["grip_events"]),
+                )
+                self.assertEqual(after, before)
+                return
+            arm.step(out.target)
+            eng.executed(out.target)
+        self.fail("the close never came")
+
     def test_golden_forces_it_off(self):
         self.assertEqual(PhaseParams.golden_params().grip_keep_rows, 0)
 
