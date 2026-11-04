@@ -57,6 +57,10 @@ LAMBDA_RANGE = (
     1.0,
     3.0,
 )  # PhaseParams validates the same range; the page offers 2.0 / 2.5 / 3.0
+# VLASH only: lambda <= 1 over the last rows before a close (PhaseParams.w_pre_close, CHUNK-ACCEL-VLASH-GRASP-APPROACH).
+# 10 rows = 1 s of demonstration: the final approach runs at the unaccelerated pace (2026-11-04: accelerated VLASH on S1
+# missed a 2x2 brick, 1/2/11/4 closes per episode, against one close each without acceleration). A tightening.
+VLASH_CLOSE_APPROACH_ROWS = 10
 OWN_FILES = (
     "phase.py",
     "schedulers.py",
@@ -135,7 +139,10 @@ def validate(args) -> "phase.PhaseParams":
         type(args.vlash_overlap_steps) is not int or args.vlash_overlap_steps < 1
     ):
         raise ValueError("--vlash-overlap-steps must be an integer of at least 1")
-    return phase.PhaseParams.for_page(float(lam), float(alpha))
+    params = phase.PhaseParams.for_page(float(lam), float(alpha))
+    if mode == "vlash":
+        params = dataclasses.replace(params, w_pre_close=VLASH_CLOSE_APPROACH_ROWS)
+    return params
 
 
 def load_receipt(path=None):

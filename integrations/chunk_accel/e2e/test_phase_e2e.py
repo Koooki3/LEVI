@@ -799,6 +799,15 @@ def world(tmp_path, monkeypatch):
     return StubWorld(tmp_path, monkeypatch)
 
 
+def test_validate_sets_the_close_approach_for_vlash_only(world):
+    """CHUNK-ACCEL-VLASH-GRASP-APPROACH: VLASH gets PhaseParams.w_pre_close, the other modes keep the default 0."""
+    entry = world.entry
+    vlash = entry.validate(world.args("vlash"))
+    assert vlash.w_pre_close == entry.VLASH_CLOSE_APPROACH_ROWS == 10
+    assert entry.validate(world.args("rtc", rtc=True)).w_pre_close == 0
+    assert entry.validate(world.args("plain")).w_pre_close == 0
+
+
 def test_validate_refuses_what_the_design_refuses(world):
     entry = world.entry
     params = entry.validate(world.args("plain"))

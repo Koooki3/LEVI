@@ -74,6 +74,7 @@ _GOLDEN_FORCED = {
     "swap_reanchor": False,
     "w_pre": 0,
     "w_post": 0,
+    "w_pre_close": 0,
     "soft_leash": False,
     "hard_leash": False,
     "step_limit": False,
@@ -99,6 +100,7 @@ _RANGES = {
     ),  # the page offers 2.0 / 2.5 / 3.0 (2026-11-02)
     "w_pre": (0, 6, False),
     "w_post": (0, 10, False),
+    "w_pre_close": (0, 20, False),
     "v_cap": (0.0, 0.40, True),
     "omega_cap": (0.0, 1.2, True),
     "a_lat": (0.0, 2.4, True),
@@ -174,6 +176,7 @@ _INT_FIELDS = frozenset(
     {
         "w_pre",
         "w_post",
+        "w_pre_close",
         "d_meas_window",
         "hold_reset_after",
         "bisect_iters",
@@ -258,6 +261,14 @@ class PhaseParams:
     # RELAXED[2026-11-01] E3 was: whole 10-row gripper check (accel.py:205-208) + GRIP_HOLD_S 1.0 s that restarts; 11-02 w_post 5 -> 3
     w_pre: int = 3
     w_post: int = 3
+    # A longer window before a CLOSE (open -> close) only: lambda <= 1 over the w_pre_close rows before it (the larger of
+    # this and w_pre counts). A tightening, 0 = off (the default; golden forces 0). The VLASH entry sets
+    # VLASH_CLOSE_APPROACH_ROWS (run_collect_phase.py): on 2026-11-04 accelerated VLASH on S1 missed a 2x2 brick (closes
+    # per episode 1/2/11/4, wrist frames: fingers beside the brick) where unaccelerated VLASH took it 3/3 in one close
+    # each and RTC + v3 7/7; the close gate had the arm within 1-4 mm of its target, so the plan's grasp point was off.
+    # The final approach then runs at the unaccelerated pace, with the queue end (VLASH's future state) as close to the
+    # arm as without acceleration (CHUNK-ACCEL-VLASH-GRASP-APPROACH).
+    w_pre_close: int = 0
 
     # ---- speed caps (section 3.2); None = by alpha (0.005 / 0.01) ----
     # RELAXED[2026-11-01] E4 was: SPEED 0.25 m/s, hard cap 0.30 (accel.py:42, run_collect_accel.py:136); lag cap 0.265 m/s
@@ -1052,7 +1063,17 @@ class PhaseEngine:
         self._G = sorted(set(G))
         win = [False] * self._nseg
         for g in self._G:
-            for j in range(g - p.w_pre, g + p.w_post):
+            pre = p.w_pre
+            if p.w_pre_close > p.w_pre:
+                ga = (
+                    g - lo
+                )  # stored index of the change row (row 0's change is stored too: lo <= 0 < lo + n)
+                closed = (
+                    bits[ga] == 0 if 0 <= ga < n else g_ref == 1
+                )  # the row reads closed: an open -> close change
+                if closed:
+                    pre = p.w_pre_close
+            for j in range(g - pre, g + p.w_post):
                 a = j - lo
                 if 0 <= a < self._nseg:
                     win[a] = True

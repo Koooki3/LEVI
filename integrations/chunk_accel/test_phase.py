@@ -48,6 +48,7 @@ DEFAULTS = {
     "swap_reanchor": False,
     "w_pre": 3,
     "w_post": 3,
+    "w_pre_close": 0,
     "v_cap": None,
     "omega_cap": None,
     "a_lat": None,
@@ -279,6 +280,7 @@ class TestValidation(unittest.TestCase):
             "open_settle_unknown_s": 0.29,
             "reanchor_cos_min": 0.4,
             "hold_reset_after": 4,
+            "w_pre_close": 21,
             "w_pre_float": None,
         }
         for name, value in bad.items():
@@ -289,8 +291,10 @@ class TestValidation(unittest.TestCase):
             with self.assertRaises(ValueError, msg=f"{name}={value}"):
                 PhaseParams(**{name: value})
         PhaseParams(
-            v_cap=0.40, omega_cap=1.2, a_lat=2.4, w_pre=6, w_post=10
+            v_cap=0.40, omega_cap=1.2, a_lat=2.4, w_pre=6, w_post=10, w_pre_close=20
         )  # the inclusive upper ends
+        with self.assertRaises(ValueError):
+            PhaseParams(w_pre_close=2.5)  # an integer field, like w_pre
 
     def test_hard_leash_stays_inside_the_client_limits(self):
         self.assertLess(PhaseParams().hard_leash_m, CLIENT_MAX_M)
@@ -340,8 +344,11 @@ class TestGolden(unittest.TestCase):
             "early_trigger",
         ):
             self.assertIs(getattr(g, name), False, name)
-        self.assertEqual((g.w_pre, g.w_post), (0, 0))
+        self.assertEqual((g.w_pre, g.w_post, g.w_pre_close), (0, 0, 0))
         self.assertEqual(g.alpha, 0.005)
+        self.assertEqual(
+            PhaseParams(golden=True, w_pre_close=10), PhaseParams.golden_params()
+        )
 
     def test_golden_is_a_master_switch(self):
         self.assertEqual(
@@ -1181,6 +1188,69 @@ def accel_vertex_curvatures(points):
                 out.append(0.0)
         i += 1
     return np.array(out)
+
+
+class TestCloseApproach(unittest.TestCase):
+    """PhaseParams.w_pre_close (CHUNK-ACCEL-VLASH-GRASP-APPROACH): a longer lambda <= 1 window before a close only."""
+
+    @staticmethod
+    def _windows(params, master):
+        eng = PhaseEngine(params)
+        eng.set_chunk(master, "sync")
+        return [a for a, w in enumerate(eng._win) if w]
+
+    def test_the_longer_window_is_before_a_close_only(self):
+        master = make_master(
+            60, seed=5, step=0.004, turn=0.0, flips=[(30, 0.0), (50, 1.0)]
+        )
+        base = self._windows(PhaseParams(lambda_max=2.5), master)
+        self.assertEqual(
+            base, list(range(27, 33)) + list(range(47, 53))
+        )  # w_pre 3 / w_post 3 around both
+        wide = self._windows(PhaseParams(lambda_max=2.5, w_pre_close=10), master)
+        self.assertEqual(
+            wide, list(range(20, 33)) + list(range(47, 53))
+        )  # the open keeps w_pre 3
+        # not shorter than w_pre: a smaller value changes nothing
+        self.assertEqual(
+            self._windows(PhaseParams(lambda_max=2.5, w_pre_close=2), master), base
+        )
+
+    def test_a_close_at_row_zero_gets_the_window_too(self):
+        master = make_master(30, seed=6, step=0.004, turn=0.0, flips=[(0, 0.0)])
+        pose = master[0].copy()
+        pose[6] = (
+            1.0  # the gripper reads open: row 0 reading closed is a close (test_row0_is_compared_...)
+        )
+        eng = PhaseEngine(PhaseParams(lambda_max=2.5, w_pre_close=10))
+        eng.set_chunk(master, "sync")
+        eng.begin(Measured(pose, 0.0, 0.0), None)
+        self.assertEqual(eng._G, [0])
+        self.assertEqual(
+            [a for a, w in enumerate(eng._win) if w], [0, 1, 2]
+        )  # rows before 0 are not stored
+
+    def test_ticks_into_a_close_run_at_one(self):
+        G = 30
+        master = make_master(70, seed=3, step=0.003, turn=0.0, flips=[(G, 0.0)])
+
+        def run(params):
+            eng = PhaseEngine(params)
+            return run_open(eng, PerfectArm(master[0]), master[:40], max_ticks=60)
+
+        wide = PhaseParams(lambda_max=2.5, w_pre_close=10)
+        log = run(wide)
+        self.assertGreater(
+            max(o.lam for u, o, _ in log if o.u < G - 10), 1.5
+        )  # it did accelerate before the window
+        for u_before, out, _ in log:
+            if u_before < G + wide.w_post and out.u > G - 10 + 1e-9:
+                self.assertLessEqual(out.lam, 1.0 + 1e-9)
+        # without the setting the same stretch runs faster than 1
+        base = run(PhaseParams(lambda_max=2.5))
+        self.assertTrue(
+            any(o.lam > 1.0 + 1e-6 for u, o, _ in base if G - 10 < o.u < G - 3)
+        )
 
 
 class TestCurvature(unittest.TestCase):
