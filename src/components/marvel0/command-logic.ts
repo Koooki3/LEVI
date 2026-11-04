@@ -326,6 +326,24 @@ export const DEFAULT_NOTE_PREFIX = "marvel0 page: ";
  * they are those defaults, so a mode or rule chosen next gets its own default
  * group and note (review 2026-11-01: after "Edit all parameters", v1 episodes
  * were filed under the v2 run's `<model>_accel_v2_demo` with its v2 note). */
+/** What the backend appends to a default rollout group under the anyspeedup
+ * arm controller (`stack_act.py` "suffix": `_any-<preset>`; the presets are
+ * `control_site.ARM_PRESETS`, today and S1). A preset with `_` or `-` would be
+ * kept as a typed name, which is what happened before this check. */
+const ARM_GROUP_SUFFIX = /^_any-[A-Za-z0-9.]+$/;
+
+/** Whether `group` is the default rollout group `base`, with or without an arm
+ * controller's suffix: a saved run records the group the server filled in, so
+ * under anyspeedup it reads `<default>_any-today` (11-03: kept as a typed name,
+ * it stayed the non-accelerated group after the switch was turned on). */
+export function isDefaultGroup(group: string, base: string): boolean {
+  if (!base) return false;
+  if (group === base) return true;
+  return (
+    group.startsWith(base) && ARM_GROUP_SUFFIX.test(group.slice(base.length))
+  );
+}
+
 export function editableSavedForm(
   saved: CommandForm,
   models: ModelsView,
@@ -333,10 +351,9 @@ export function editableSavedForm(
 ): CommandForm {
   return {
     ...saved,
-    group:
-      saved.group === placeholders(saved, models, site).group
-        ? ""
-        : saved.group,
+    group: isDefaultGroup(saved.group, placeholders(saved, models, site).group)
+      ? ""
+      : saved.group,
     note: saved.note.startsWith(DEFAULT_NOTE_PREFIX) ? "" : saved.note,
   };
 }

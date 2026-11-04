@@ -18,6 +18,7 @@ import {
   commandBody,
   editableSavedForm,
   initialCommandForm,
+  isDefaultGroup,
   placeholders,
   readPreview,
   serverMatch,
@@ -883,6 +884,63 @@ describe("what the form shows as its defaults", () => {
         site,
       ).group,
     ).toBe("");
+  });
+
+  test("a saved default group with the arm controller's suffix follows the switch again (MARVEL0-ACCEL-GROUP-NAME-STALE)", () => {
+    // 2026-11-03 15:37: a non-accelerated RTC run under anyspeedup today was saved as `<id>_rtc_demo_any-today`;
+    // opened for editing it was kept as typed text, so turning v3 on still filed two accelerated episodes there
+    const id = "pi05_fr3_all_step49999";
+    const saved = base({ rtc: true, group: `${id}_rtc_demo_any-today` });
+    const editable = editableSavedForm(saved, models, site);
+    expect(editable.group).toBe("");
+    // the switch then picks the accelerated default (the panel appends the running controller's suffix)
+    const on = {
+      ...editable,
+      chunkAccel: true,
+      chunkAccelRule: "v3" as const,
+    };
+    expect(placeholders(on, models, site).group).toBe(`${id}_rtc_accel3_demo`);
+    // any preset's suffix, and the accelerated groups too
+    expect(
+      editableSavedForm(
+        base({ rtc: true, group: `${id}_rtc_demo_any-S1` }),
+        models,
+        site,
+      ).group,
+    ).toBe("");
+    expect(
+      editableSavedForm(
+        base({
+          rtc: true,
+          inferenceMode: "rtc",
+          chunkAccel: true,
+          chunkAccelRule: "v3",
+          group: `${id}_rtc_accel3_demo_any-S1`,
+        }),
+        models,
+        site,
+      ).group,
+    ).toBe("");
+    // a typed name stays, even one that ends like a suffix or starts like the default
+    for (const group of [
+      "my_group_any-today",
+      `${id}_rtc_demo_v2`,
+      `${id}_rtc_demo_any-`,
+      `${id}_rtc_demo_any-to day`,
+    ])
+      expect(
+        editableSavedForm(base({ rtc: true, group }), models, site).group,
+      ).toBe(group);
+  });
+
+  test("isDefaultGroup: the default, or the default plus one arm suffix", () => {
+    expect(isDefaultGroup("a_demo", "a_demo")).toBe(true);
+    expect(isDefaultGroup("a_demo_any-today", "a_demo")).toBe(true);
+    expect(isDefaultGroup("a_demo_any-S1", "a_demo")).toBe(true);
+    expect(isDefaultGroup("a_demo_any-S1_any-S1", "a_demo")).toBe(false);
+    expect(isDefaultGroup("a_demox", "a_demo")).toBe(false);
+    expect(isDefaultGroup("", "")).toBe(false);
+    expect(isDefaultGroup("_any-today", "")).toBe(false);
   });
 
   test("a model that is not in the list has no group to show", () => {

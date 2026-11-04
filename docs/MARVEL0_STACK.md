@@ -417,8 +417,8 @@ does not start A and cannot know what runs). The hosted run's record and view sa
 (`arm_controller`, `arm_preset`: the A the page started; null for one it did not start), and the default rollout group
 gets the suffix `_any-<preset>` while an anyspeedup controller runs (before A runs, the one the page will start), so a
 lab run and an anyspeedup run at `today`, both with alpha 0.005, never share a group; a named group is kept, and a model
-whose default group no longer fits 80 characters needs a named one. The card also says that the anyspeedup controller
-has not run on the arm yet. **Known limit (outside LEVI):** the lab's own launch checks for a running arm controller only
+whose default group no longer fits 80 characters needs a named one. A saved run opened for editing treats its group as
+the default, with or without the `_any-<preset>` suffix, so the group follows the acceleration switch again. **Known limit (outside LEVI):** the lab's own launch checks for a running arm controller only
 by its own `controllers.yaml`, so it does not refuse to start beside an anyspeedup A; check `pgrep -af
 ros2_control_node` (it matches both) before starting anything by hand.
 
@@ -798,7 +798,7 @@ A 只按窗口里写的那个控制器启动。读窗口之后页面要启动的
 用实验室控制器、没有控制文件、或栈关闭时（页面不启动 A，也无从知道在跑什么）什么都不强制，alpha 由人选。托管运行的记录和视图写明用的是哪个控制器
 （`arm_controller`、`arm_preset`：本页启动的那个 A；不是本页启动的则为 null），anyspeedup 控制器在运行（A 还没运行时，是页面将要启动的那个）时默认的 rollout 组加后缀
 `_any-<preset>`，这样实验室控制器和 anyspeedup 在 `today`（alpha 同为 0.005）下的两次运行不会混在一组；指定的组名照旧，默认组名超过 80 个字符的模型要指定组名。
-卡片上还写着 anyspeedup 控制器还没有在机械臂上运行过。**已知的限制（在 LEVI 之外）：** 实验室自己的 launch 只按它自己的 `controllers.yaml` 判断有没有机械臂控制器在运行，
+打开已保存的运行来编辑时，组名等于默认组名（带不带 `_any-<preset>` 后缀都算）就当作默认，打开加速后组名会跟着变。**已知的限制（在 LEVI 之外）：** 实验室自己的 launch 只按它自己的 `controllers.yaml` 判断有没有机械臂控制器在运行，
 所以它不会拒绝在 anyspeedup 的 A 旁边启动；手动启动任何东西之前先看 `pgrep -af ros2_control_node`（两种都能匹配）。
 
 ## 单元
