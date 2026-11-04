@@ -938,6 +938,9 @@ describe("what the form shows as its defaults", () => {
     expect(isDefaultGroup("a_demo_any-today", "a_demo")).toBe(true);
     expect(isDefaultGroup("a_demo_any-S1", "a_demo")).toBe(true);
     expect(isDefaultGroup("a_demo_any-S1_any-S1", "a_demo")).toBe(false);
+    // the check is generic over the preset name (letters, digits, dots), so a typed
+    // `<default>_any-run2` also reads as a default; tests/marvel0 pins the presets to it
+    expect(isDefaultGroup("a_demo_any-run2", "a_demo")).toBe(true);
     expect(isDefaultGroup("a_demox", "a_demo")).toBe(false);
     expect(isDefaultGroup("", "")).toBe(false);
     expect(isDefaultGroup("_any-today", "")).toBe(false);

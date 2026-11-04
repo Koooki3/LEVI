@@ -417,9 +417,10 @@ does not start A and cannot know what runs). The hosted run's record and view sa
 (`arm_controller`, `arm_preset`: the A the page started; null for one it did not start), and the default rollout group
 gets the suffix `_any-<preset>` while an anyspeedup controller runs (before A runs, the one the page will start), so a
 lab run and an anyspeedup run at `today`, both with alpha 0.005, never share a group; a named group is kept, and a model
-whose default group no longer fits 80 characters needs a named one. A saved run opened for editing treats its group as
-the default, with or without the `_any-<preset>` suffix, so the group follows the acceleration switch again. **Known limit (outside LEVI):** the lab's own launch checks for a running arm controller only
-by its own `controllers.yaml`, so it does not refuse to start beside an anyspeedup A; check `pgrep -af
+whose default group no longer fits 80 characters needs a named one. When a saved run is opened for editing, a group that
+equals the default (with or without the `_any-<preset>` suffix) counts as the default again, so it follows the
+acceleration switch; any other name is kept. **Known limit (outside LEVI):** the lab's own launch checks for a running
+arm controller only by its own `controllers.yaml`, so it does not refuse to start beside an anyspeedup A; check `pgrep -af
 ros2_control_node` (it matches both) before starting anything by hand.
 
 ## The units
@@ -461,9 +462,9 @@ when the arm is idle). Its launch prints
 preset is not ready), `A Franka arm ros2_control_node is already running (lab or anyspeedup controller)` when another arm
 controller runs (`duplicate_launch`, the same key as the lab's, its own pattern) and `preset must be one of ...: nothing
 started` for a preset it does not know (`preset_refused`). Each pattern names its source file and line, and a test checks
-them against the launch file when the anyspeedup checkout is beside this one. **Not verified: no unit of this kind has ever
-been started on the real machine, and the anyspeedup controller has never run on the arm; the three lines are read from
-its launch file, not from a real log.**
+them against the launch file when the anyspeedup checkout is beside this one. The ready line is in the page's own A logs
+of real runs since 2026-11-03 (presets today and S1). **Not verified: the other two lines are read from the launch file,
+not from a real log.**
 
 Not verified on the real machine: **the time of `ros2 node list --no-daemon --spin-time 2.0` in a unit** (about 3.4 s is an estimate:
 the wrapper sourcing the rig's environment, python and rclpy starting, 2 s of discovery; if it is slower A waits for it, because A
@@ -798,7 +799,8 @@ A 只按窗口里写的那个控制器启动。读窗口之后页面要启动的
 用实验室控制器、没有控制文件、或栈关闭时（页面不启动 A，也无从知道在跑什么）什么都不强制，alpha 由人选。托管运行的记录和视图写明用的是哪个控制器
 （`arm_controller`、`arm_preset`：本页启动的那个 A；不是本页启动的则为 null），anyspeedup 控制器在运行（A 还没运行时，是页面将要启动的那个）时默认的 rollout 组加后缀
 `_any-<preset>`，这样实验室控制器和 anyspeedup 在 `today`（alpha 同为 0.005）下的两次运行不会混在一组；指定的组名照旧，默认组名超过 80 个字符的模型要指定组名。
-打开已保存的运行来编辑时，组名等于默认组名（带不带 `_any-<preset>` 后缀都算）就当作默认，打开加速后组名会跟着变。**已知的限制（在 LEVI 之外）：** 实验室自己的 launch 只按它自己的 `controllers.yaml` 判断有没有机械臂控制器在运行，
+打开已保存的运行来编辑时，组名等于默认组名（带不带 `_any-<preset>` 后缀都算）就重新当作默认，打开加速后组名会跟着变；别的组名照旧。
+**已知的限制（在 LEVI 之外）：** 实验室自己的 launch 只按它自己的 `controllers.yaml` 判断有没有机械臂控制器在运行，
 所以它不会拒绝在 anyspeedup 的 A 旁边启动；手动启动任何东西之前先看 `pgrep -af ros2_control_node`（两种都能匹配）。
 
 ## 单元
@@ -831,8 +833,8 @@ impedance.launch.py robot_type:=fr3 robot_ip:=<ip> load_gripper:=false preset:=<
 `anyspeedup arm controller, preset <p>`（页面把它当作就绪行，
 所以用别的预设启动的单元不算就绪）；已有别的机械臂控制器时打印 `A Franka arm ros2_control_node is already running (lab or anyspeedup
 controller)`（`duplicate_launch`，键和实验室的相同，匹配规则是它自己的）；预设不认识时打印 `preset must be one of ...: nothing started`
-（`preset_refused`）。每条规则都注明来源文件和行号，anyspeedup 检出在本仓库旁边时有测试对着 launch 文件核对。**没有验证：这种单元从未在真机上启动过，
-anyspeedup 控制器也从未在机械臂上运行过；这三行读自它的 launch 文件，不是读自真实日志。**
+（`preset_refused`）。每条规则都注明来源文件和行号，anyspeedup 检出在本仓库旁边时有测试对着 launch 文件核对。就绪行从 2026-11-03 起出现在页面自己记录的
+A 的真实运行日志里（预设 today 和 S1）。**没有验证：另外两行读自 launch 文件，不是读自真实日志。**
 
 **没有在真机上验证的：** **单元里 `ros2 node list --no-daemon --spin-time 2.0` 要多久**（约 3.4 秒是估计：包装脚本 source 机器人环境、python 和 rclpy 启动、
 2 秒发现；更慢的话 A 要等它，因为 A 需要 B 已知）、**2 秒内发现了监视器的节点，是否就说明夹爪栈的节点也会被看到**（监视器节点证明发现已经运行，不证明发现完整）、

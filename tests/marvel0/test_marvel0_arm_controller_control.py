@@ -6,6 +6,7 @@ until the engine has the shaped profile it needs. The anyspeedup checkout is rea
 (read-only) only when it is beside this one, to keep the preset table honest."""
 
 import ast
+import re
 import tomllib
 from pathlib import Path
 
@@ -205,3 +206,15 @@ def test_the_preset_table_is_the_anyspeedup_controllers_when_it_is_beside_this_c
     assert offered == cs.ARM_PRESET_ALPHA
     # every other preset of the controller is one this page refuses
     assert set(presets) - set(cs.ARM_PRESETS) == set(cs.ARM_PRESETS_REFUSED)
+
+
+def test_preset_names_fit_the_page_group_suffix_check():
+    """command-logic.ts isDefaultGroup treats `<default>_any-<preset>` as a default group only for preset names of letters,
+    digits and dots (ARM_GROUP_SUFFIX, MARVEL0-ACCEL-GROUP-NAME-STALE). A preset outside that alphabet would make a saved
+    default group stick as a typed name again: change the regex there together with the preset."""
+    page = (
+        Path(__file__).resolve().parents[2] / "src/components/marvel0/command-logic.ts"
+    ).read_text(encoding="utf-8")
+    assert "const ARM_GROUP_SUFFIX = /^_any-[A-Za-z0-9.]+$/;" in page
+    for name in (*cs.ARM_PRESETS, *cs.ARM_PRESETS_REFUSED):
+        assert re.fullmatch(r"[A-Za-z0-9.]+", name), name

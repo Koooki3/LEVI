@@ -321,11 +321,6 @@ export function placeholders(
  * default note). */
 export const DEFAULT_NOTE_PREFIX = "marvel0 page: ";
 
-/** A saved run's form opened for editing every parameter. The server saved
- * the group and note it filled in for that run; they are emptied again when
- * they are those defaults, so a mode or rule chosen next gets its own default
- * group and note (review 2026-11-01: after "Edit all parameters", v1 episodes
- * were filed under the v2 run's `<model>_accel_v2_demo` with its v2 note). */
 /** What the backend appends to a default rollout group under the anyspeedup
  * arm controller (`stack_act.py` "suffix": `_any-<preset>`; the presets are
  * `control_site.ARM_PRESETS`, today and S1). A preset with `_` or `-` would be
@@ -344,6 +339,11 @@ export function isDefaultGroup(group: string, base: string): boolean {
   );
 }
 
+/** A saved run's form opened for editing every parameter. The server saved
+ * the group and note it filled in for that run; they are emptied again when
+ * they are those defaults, so a mode or rule chosen next gets its own default
+ * group and note (review 2026-11-01: after "Edit all parameters", v1 episodes
+ * were filed under the v2 run's `<model>_accel_v2_demo` with its v2 note). */
 export function editableSavedForm(
   saved: CommandForm,
   models: ModelsView,
