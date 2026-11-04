@@ -55,7 +55,11 @@ build-backend = "hatchling.build"
 packages = ["levi", "backend"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# integrations/chunk_accel: the chunk-acceleration engine's own suites (pure numpy;
+# the tests that need an openpi checkout skip unless CHUNK_ACCEL_OPENPI_ROOT is set).
+# tests/test_integration_tests_reach_ci.py checks that every integration test file is
+# collected here, exposed from tests/, or run in its own worker environment.
+testpaths = ["tests", "integrations/chunk_accel"]
 # A test that hangs fails on its own after this many seconds (pytest-timeout,
 # SIGALRM), with its name and stack, instead of holding the run until the CI
 # job's limit cancels it with no result. The slowest test takes about 80 s on
