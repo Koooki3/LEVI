@@ -246,11 +246,13 @@ def test_a_speed_minimum_gets_a_boundary_and_steady_motion_gets_none():
 
 
 def test_a_long_pause_is_cut_in_its_middle():
+    # A pause from 5 to 8 s whose speed creeps up from 0.01 to 0.03 m/s: its
+    # lowest point is at its start, but the cut belongs in the middle.
     t = np.arange(0, 16, 0.05)
-    speed = np.where((t > 5) & (t < 8), 0.0, 0.3)
+    pause = (t > 5) & (t < 8)
+    speed = np.where(pause, 0.01 + 0.02 * (t - 5) / 3, 0.3)
     x = np.concatenate([[0], np.cumsum(speed[1:] * 0.05)])
-    noise = np.random.default_rng(2).normal(0, 2e-4, (len(t), 3))
-    pos = np.stack([x, np.zeros_like(t), np.zeros_like(t)], axis=1) + noise
+    pos = np.stack([x, np.zeros_like(t), np.zeros_like(t)], axis=1)
     proposal = propose_clips(ClipSignals(t, pos))
     assert reasons_of(proposal) == ["boundary_speed_min"]
     assert abs(proposal.boundaries[0].time_s - 6.5) < 0.4
@@ -391,6 +393,27 @@ def test_a_ripple_that_is_not_a_cue_does_not_move_a_cut():
     proposal = propose_clips(ClipSignals(t, np.stack([x, 0 * x, 0 * x], axis=1)))
     assert reasons_of(proposal) == ["split_long_even"] * 2
     assert near([b.time_s for b in proposal.boundaries], [10.0, 20.0], 0.1)
+
+
+def test_a_cut_leaves_a_rest_that_the_other_pieces_can_fill():
+    # 41 s: a deep dip at 36 s is the only cue (a gap of 30 s holds the dip at
+    # 10 s back), so the 36 s before it need 3 pieces, which leaves exactly
+    # one cut point, 12 s. A cut at the held-back dip (10 s, inside the
+    # window around 12 s) would leave 26 s, which 2 pieces cannot fill.
+    t = np.arange(0, 41.0, 0.05)
+    speed = 0.3 * (1 - 0.95 * np.exp(-(((t - 36.0) / 0.4) ** 2)))
+    speed = speed * (1 - 0.8 * np.exp(-(((t - 10.0) / 0.4) ** 2)))
+    x = np.concatenate([[0], np.cumsum(speed[1:] * 0.05)])
+    signals = ClipSignals(t, np.stack([x, 0 * x, 0 * x], axis=1))
+    proposal = propose_clips(signals, ClipParams(min_gap_s=30.0))
+    assert partition_problems(proposal, signals) == []
+    assert reasons_of(proposal) == [
+        "split_long_even",
+        "split_long_even",
+        "boundary_speed_min",
+    ]
+    assert near([b.time_s for b in proposal.boundaries], [12.0, 24.0, 36.0], 0.3)
+    assert [d.why for d in proposal.dropped] == ["min_gap"]
 
 
 def test_short_clips_are_merged_and_the_dropped_cut_is_recorded():
