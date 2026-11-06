@@ -380,11 +380,18 @@ export default function ReplayPanel({
             <div className="vw-r3d-gripper">
               <div
                 className="vw-r3d-gripper-bar"
-                role="meter"
-                aria-label={t(gripperText.bar)}
-                aria-valuemin={0}
-                aria-valuemax={1}
-                aria-valuenow={clampedGripper ?? undefined}
+                // A meter needs a value (aria-valuenow is required): with
+                // none, the bar is empty decoration and the text beside it
+                // says "–".
+                {...(clampedGripper === null
+                  ? { "aria-hidden": true }
+                  : {
+                      role: "meter",
+                      "aria-label": t(gripperText.bar),
+                      "aria-valuemin": 0,
+                      "aria-valuemax": 1,
+                      "aria-valuenow": clampedGripper,
+                    })}
                 style={
                   { "--vw-r3d-grip": clampedGripper ?? 0 } as CSSProperties
                 }

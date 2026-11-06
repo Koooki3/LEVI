@@ -261,6 +261,30 @@ describe("ReplayPanel: what it says", () => {
     ).toBe("0");
   });
 
+  test("a row with no gripper value: the bar is hidden from assistive technology, not a meter without a value", async () => {
+    // role="meter" requires aria-valuenow, so a meter is only there with a value.
+    const rows = jointRows(10).map((row, i) => {
+      if (i >= 5) delete row["observation.state | gripper"];
+      return row;
+    });
+    const { host } = await render(panel({ rows }));
+    // (Counted, not compared: a failed toEqual on DOM nodes prints the whole tree.)
+    const meters = () => Array.from(host.querySelectorAll('[role="meter"]'));
+    expect(meters().length).toBe(1);
+    expect(meters()[0].getAttribute("aria-valuenow")).toBe("1");
+    await act(async () => time.seek(3)); // row 6: no value
+    expect(meters().length).toBe(0);
+    const bar = host.querySelector(".vw-r3d-gripper-bar")!;
+    expect(bar.getAttribute("aria-hidden")).toBe("true");
+    expect(bar.hasAttribute("aria-label")).toBe(false);
+    expect(host.querySelector(".vw-r3d-gripper")!.textContent).toContain(
+      "Gripper: –",
+    );
+    await act(async () => time.seek(1)); // back to a row with a value
+    expect(meters().length).toBe(1);
+    expect(meters()[0].getAttribute("aria-valuenow")).toBe("1");
+  });
+
   test("a measured gripper width is shown in metres, against the stroke, and not as a command", async () => {
     const rows = jointRows(10).map((row, i) => ({
       ...row,
