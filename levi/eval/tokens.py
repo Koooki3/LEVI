@@ -18,15 +18,26 @@ Rules:
 - The caller passes the transcript files explicitly. Nothing here lists a
   directory, expands a glob or looks into a home folder, so a caller cannot
   sweep up sessions that are not part of the round.
+- **Exact holds only for the files given.** A teacher that answers through
+  sub-agents leaves a result line (``type: user`` with a ``toolUseResult`` that
+  carries an ``agentId``) in the main session and the sub-agent's own
+  messages in ``<session>/subagents/agent-<id>.jsonl``. Such a result line is
+  counted (``subagent_results``); its aggregate usage is never added, because
+  the sub-agent's file holds the per-message counts and adding both would count
+  twice. A sub-agent whose file was not given is ``subagents_uncovered``: its
+  tokens are missing from the totals, ``exact`` is false and ``source`` says so.
 - Fields are reported apart, never summed: ``input_new`` (``input_tokens``),
   ``output`` (``output_tokens``), ``cache_read``
   (``cache_read_input_tokens``) and ``cache_write``
   (``cache_creation_input_tokens``), the names of
   ``levi.aeri.external_report.v1``.
 - **Unknown is not zero.** A field that no counted message carried is ``None``
-  in the result. A message whose final usage lacks a field, a line that cannot
-  be parsed and a message that cannot be placed in the time window are counted
-  and reported (``Usage.exact`` is then false), never dropped silently.
+  in the result. A message whose final usage lacks a field (an empty ``{}``
+  usage lacks all four), a line that cannot be parsed, a half-written last line
+  (``truncated_tail``), a message keyed by ``uuid`` because it has no
+  ``message.id`` (``uuid_fallback``: lines of one message then count apart) and
+  a message that cannot be placed in the time window are counted and reported
+  (``Usage.exact`` is then false), never dropped silently.
 - A time window keeps a message when its *first* line's timestamp lies in
   ``[since, until]``; its usage is then the final one, so a message that
   straddles the window's end is neither cut in half nor counted twice.
@@ -39,6 +50,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -100,6 +112,30 @@ def _count(value) -> int | None:
     return None
 
 
+def _subagent_result(row: dict) -> tuple[bool, str | None]:
+    """(is a sub-agent result line, its agent id). The main session records a
+    finished sub-agent as a ``user`` line whose ``toolUseResult`` names the
+    agent (``agentId``) and carries its aggregate ``totalTokens`` / ``usage``;
+    other tools' results have neither."""
+    result = row.get("toolUseResult")
+    if not isinstance(result, dict):
+        return False, None
+    agent_id = result.get("agentId")
+    if isinstance(agent_id, str) and agent_id:
+        return True, agent_id
+    if "totalTokens" in result:
+        return True, None
+    return False, None
+
+
+def _outside(stamp: float | None, lo: float | None, hi: float | None) -> bool:
+    """True when ``stamp`` is a time and lies outside the window (a line
+    without a time is kept: it cannot be ruled out)."""
+    if stamp is None:
+        return False
+    return (lo is not None and stamp < lo) or (hi is not None and stamp > hi)
+
+
 @dataclass(frozen=True)
 class Usage:
     """Token usage summed over the counted messages, with what was left out."""
@@ -110,23 +146,43 @@ class Usage:
     files: int
     lines: int  # non-blank lines read
     other_lines: int  # lines that carry no assistant usage record
-    bad_lines: int  # mention "usage" but are not a parseable record
+    bad_lines: int  # mention "usage" or "toolUseResult" but are not a parseable record
     no_id: int  # assistant usage lines with neither message.id nor uuid
     unplaced: int  # messages without a valid timestamp, left out of a window
     outside_window: int  # messages whose first line is outside the window
     missing_fields: dict[str, int] = field(default_factory=dict)
+    uuid_fallback: int = 0  # counted messages keyed by uuid (no message.id)
+    truncated_tail: int = 0  # files whose last line is half written
+    subagent_results: int = 0  # sub-agent result lines in the given files
+    subagents_uncovered: int = 0  # ... whose own transcript was not given
+
+    @property
+    def reasons(self) -> tuple[str, ...]:
+        """Why the count is not exact (empty = exact). Codes, not text."""
+        found = []
+        if not self.messages:
+            found.append("nothing_counted")
+        for code, value in (
+            ("bad_lines", self.bad_lines),
+            ("no_id", self.no_id),
+            ("unplaced", self.unplaced),
+            ("missing_fields", sum(self.missing_fields.values())),
+            ("uuid_fallback", self.uuid_fallback),
+            ("truncated_tail", self.truncated_tail),
+            ("subagent_uncovered", self.subagents_uncovered),
+        ):
+            if value:
+                found.append(code)
+        return tuple(found)
 
     @property
     def exact(self) -> bool:
-        """True only if nothing was set aside and every field was present on
-        every counted message. Otherwise a total is a lower bound."""
-        return (
-            self.messages > 0
-            and self.bad_lines == 0
-            and self.no_id == 0
-            and self.unplaced == 0
-            and not any(self.missing_fields.values())
-        )
+        """True only if nothing was set aside, every field was present on every
+        counted message and no sub-agent's transcript is missing. It speaks
+        for the files given, not for everything the round cost. Otherwise a
+        total is a lower bound (a ``uuid`` fallback can also count a message
+        that spans several lines more than once)."""
+        return not self.reasons
 
     @property
     def source(self) -> str:
@@ -142,7 +198,10 @@ class Usage:
         return (
             text
             + f"; LOWER BOUND: {self.bad_lines} bad lines, {self.no_id} without id, "
-            f"{self.unplaced} unplaced, {sum(self.missing_fields.values())} missing fields"
+            f"{self.unplaced} unplaced, {sum(self.missing_fields.values())} missing "
+            f"fields, {self.uuid_fallback} keyed by uuid (may double count), "
+            f"{self.truncated_tail} truncated tails, {self.subagents_uncovered} of "
+            f"{self.subagent_results} sub-agent results without their transcript"
         )
 
     def external_tokens(self) -> dict[str, int | None]:
@@ -163,6 +222,11 @@ class Usage:
             "unplaced": self.unplaced,
             "outside_window": self.outside_window,
             "missing_fields": dict(self.missing_fields),
+            "uuid_fallback": self.uuid_fallback,
+            "truncated_tail": self.truncated_tail,
+            "subagent_results": self.subagent_results,
+            "subagents_uncovered": self.subagents_uncovered,
+            "reasons": list(self.reasons),
         }
 
 
@@ -188,17 +252,31 @@ def usage_from_files(
     if lo is not None and hi is not None and lo > hi:
         raise ValueError("since is after until")
 
-    lines = other = bad = no_id = 0
-    # message id -> [first timestamp or None, last usage dict, model]
+    lines = other = bad = no_id = truncated = 0
+    # message id -> [first timestamp or None, last usage dict, model, keyed by uuid]
     messages: dict[str, list] = {}
+    results: set[str] = set()  # agent ids of sub-agent result lines
+    results_without_id = 0
+    covered: set[str] = set()  # agent ids whose own transcript was given
     for path in files:
+        file_agents: set[str] = set()
+        file_messages = 0
         with path.open("rb") as handle:
             for raw in handle:
+                half_written = not raw.endswith(b"\n")
                 raw = raw.strip()
                 if not raw:
                     continue
                 lines += 1
-                if b'"usage"' not in raw:
+                if half_written:
+                    # Only the last line of a file can lack its newline. A
+                    # complete record without one is fine; a cut one is not.
+                    try:
+                        json.loads(raw)
+                    except (ValueError, RecursionError):
+                        truncated += 1
+                        continue
+                if b'"usage"' not in raw and b'"toolUseResult"' not in raw:
                     other += 1
                     continue
                 try:
@@ -209,6 +287,17 @@ def usage_from_files(
                 if not isinstance(row, dict):
                     bad += 1
                     continue
+                if row.get("type") == "user":
+                    is_result, agent_id = _subagent_result(row)
+                    if not is_result or _outside(
+                        _line_time(row.get("timestamp")), lo, hi
+                    ):
+                        other += 1
+                    elif agent_id is None:
+                        results_without_id += 1
+                    else:
+                        results.add(agent_id)
+                    continue
                 message = row.get("message")
                 if row.get("type") != "assistant" or message is None:
                     other += 1
@@ -216,34 +305,42 @@ def usage_from_files(
                 if not isinstance(message, dict):
                     bad += 1
                     continue
-                usage = message.get("usage")
-                if not usage:
+                if "usage" not in message:
                     other += 1
                     continue
+                usage = message.get("usage")
                 if not isinstance(usage, dict):
                     bad += 1
                     continue
-                key = message.get("id") or row.get("uuid")
+                by_uuid = not message.get("id")
+                key = row.get("uuid") if by_uuid else message.get("id")
                 if not isinstance(key, str) or not key:
                     no_id += 1
                     continue
+                file_messages += 1
+                if isinstance(row.get("agentId"), str) and row["agentId"]:
+                    file_agents.add(row["agentId"])
                 stamp = _line_time(row.get("timestamp"))
                 entry = messages.get(key)
                 if entry is None:
-                    messages[key] = [stamp, usage, message.get("model")]
+                    messages[key] = [stamp, usage, message.get("model"), by_uuid]
                     continue
                 if stamp is not None and (entry[0] is None or stamp < entry[0]):
                     entry[0] = stamp
                 entry[1] = usage  # the last line of a message is the final count
                 entry[2] = message.get("model") or entry[2]
+        covered |= file_agents
+        named = re.fullmatch(r"agent-(.+)", path.stem)
+        if named and file_messages:
+            covered.add(named.group(1))
 
-    unplaced = outside = 0
+    unplaced = outside = by_uuid_counted = 0
     totals = dict.fromkeys(FIELDS, 0)
     seen = dict.fromkeys(FIELDS, 0)
     missing = dict.fromkeys(FIELDS, 0)
     models, counted = set(), 0
     windowed = lo is not None or hi is not None
-    for first, usage, model in messages.values():
+    for first, usage, model, by_uuid in messages.values():
         if windowed:
             if first is None:
                 unplaced += 1
@@ -252,6 +349,7 @@ def usage_from_files(
                 outside += 1
                 continue
         counted += 1
+        by_uuid_counted += by_uuid
         if isinstance(model, str) and model:
             models.add(model)
         for name, key in USAGE_KEYS.items():
@@ -273,6 +371,10 @@ def usage_from_files(
         unplaced=unplaced,
         outside_window=outside,
         missing_fields=missing,
+        uuid_fallback=by_uuid_counted,
+        truncated_tail=truncated,
+        subagent_results=len(results) + results_without_id,
+        subagents_uncovered=len(results - covered) + results_without_id,
     )
 
 

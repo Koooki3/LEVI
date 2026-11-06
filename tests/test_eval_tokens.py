@@ -33,6 +33,7 @@ def row(
     uuid=None,
     model="claude-x",
     usage=None,
+    **extra,
 ):
     """One transcript line: an assistant message's usage record."""
     message = {
@@ -51,7 +52,25 @@ def row(
     out = {"type": kind, "timestamp": at, "message": message}
     if uuid is not None:
         out["uuid"] = uuid
+    out.update(extra)
     return out
+
+
+AGENT = "a0123456789abcdef"
+
+
+def agent_result(agent_id=AGENT, *, at=T0, total=999):
+    """The main session's line for a finished sub-agent: a ``user`` line whose
+    ``toolUseResult`` names the agent and carries its aggregate usage."""
+    result = {
+        "status": "completed",
+        "totalTokens": total,
+        "totalDurationMs": 1234,
+        "usage": {"input_tokens": 1, "output_tokens": total},
+    }
+    if agent_id is not None:
+        result["agentId"] = agent_id
+    return {"type": "user", "timestamp": at, "toolUseResult": result}
 
 
 def transcript(path, *rows):
@@ -332,3 +351,139 @@ def test_command_line_prints_the_usage_and_refuses_bad_input(tmp_path, capsys):
     assert tokens.main([str(tmp_path / "missing.jsonl")]) == 2
     assert tokens.main([str(f), "--since", "2026-11-06T09:00:00"]) == 2
     assert "error:" in capsys.readouterr().err
+
+
+def test_a_sub_agent_result_in_the_main_session_is_counted_and_makes_it_inexact(
+    tmp_path,
+):
+    # The teacher answered through a sub-agent: the main session holds only the
+    # result line, the sub-agent's own messages are in another file. Without
+    # that file most of the cost is missing and the total must not claim to be
+    # exact.
+    main = transcript(tmp_path / "s.jsonl", row("msg_a", 10), agent_result())
+    usage = tokens.usage_from_files([main])
+    assert usage.tokens["output"] == 10  # the aggregate on the result line is not added
+    assert (usage.subagent_results, usage.subagents_uncovered) == (1, 1)
+    assert usage.other_lines == 0
+    assert not usage.exact
+    assert "subagent_uncovered" in usage.reasons
+    assert "1 of 1 sub-agent results without their transcript" in usage.source
+    assert tokens.usage_from_files([main]).to_dict()["subagents_uncovered"] == 1
+
+
+def test_the_sub_agent_transcript_given_covers_its_result_without_double_counting(
+    tmp_path,
+):
+    main = transcript(tmp_path / "s.jsonl", row("msg_a", 10), agent_result(total=415))
+    (tmp_path / "subagents").mkdir()
+    sub = transcript(
+        tmp_path / "subagents" / f"agent-{AGENT}.jsonl",
+        row("msg_s", 16, agentId=AGENT, isSidechain=True),
+        row("msg_s", 415, agentId=AGENT, isSidechain=True),
+    )
+    usage = tokens.usage_from_files([main, sub])
+    assert usage.tokens["output"] == 10 + 415  # the sub-agent once, by its own file
+    assert (usage.subagent_results, usage.subagents_uncovered) == (1, 0)
+    assert usage.exact
+    assert usage.reasons == ()
+    # The same result line repeated by a resumed session is one sub-agent.
+    again = transcript(tmp_path / "s2.jsonl", agent_result(), agent_result())
+    assert tokens.usage_from_files([main, again, sub]).subagent_results == 1
+
+
+def test_a_sub_agent_file_is_matched_by_the_agent_id_on_its_lines_or_its_name(tmp_path):
+    main = transcript(tmp_path / "s.jsonl", agent_result("abc"), agent_result("def"))
+    by_lines = transcript(tmp_path / "one.jsonl", row("m1", 1, agentId="abc"))
+    by_name = transcript(tmp_path / "agent-def.jsonl", row("m2", 2))
+    usage = tokens.usage_from_files([main, by_lines, by_name])
+    assert (usage.subagent_results, usage.subagents_uncovered) == (2, 0)
+    # An empty file named for an agent covers nothing.
+    empty = tmp_path / "agent-ghi.jsonl"
+    empty.write_text("")
+    lost = transcript(tmp_path / "t.jsonl", row("m3", 3), agent_result("ghi"))
+    assert tokens.usage_from_files([lost, empty]).subagents_uncovered == 1
+
+
+def test_a_sub_agent_result_without_an_id_cannot_be_covered(tmp_path):
+    main = transcript(tmp_path / "s.jsonl", row("msg_a", 1), agent_result(None))
+    sub = transcript(tmp_path / "agent-x.jsonl", row("m", 1, agentId="x"))
+    usage = tokens.usage_from_files([main, sub])
+    assert (usage.subagent_results, usage.subagents_uncovered) == (1, 1)
+    assert not usage.exact
+
+
+def test_other_tool_results_are_not_sub_agent_results_and_the_window_applies(tmp_path):
+    read = {
+        "type": "user",
+        "toolUseResult": {"stdout": "usage: tool", "is_error": False},
+    }
+    early = agent_result("early", at="2026-11-06T08:00:00Z")
+    f = transcript(tmp_path / "s.jsonl", row("msg_a", 4), read, early)
+    usage = tokens.usage_from_files([f], since="2026-11-06T08:59:00Z")
+    assert usage.subagent_results == 0  # the early result is outside the window
+    assert usage.other_lines == 2
+    assert usage.exact
+
+
+def test_a_message_keyed_by_uuid_is_reported_and_makes_the_count_inexact(tmp_path):
+    f = transcript(
+        tmp_path / "s.jsonl",
+        row("msg_a", 5),
+        row(None, 6, uuid="u1"),
+        row(None, 7, uuid="u2"),
+    )
+    usage = tokens.usage_from_files([f])
+    assert (usage.messages, usage.uuid_fallback) == (3, 2)
+    assert not usage.exact
+    assert "uuid_fallback" in usage.reasons
+    assert "2 keyed by uuid" in usage.source
+    clean = transcript(tmp_path / "c.jsonl", row("msg_a", 5))
+    assert tokens.usage_from_files([clean]).uuid_fallback == 0
+
+
+def test_a_half_written_last_line_is_reported_not_swallowed(tmp_path):
+    whole = json.dumps(row("msg_a", 4))
+    cut_inside_usage = '{"type": "assistant", "message": {"id": "msg_b", "usage": {"out'
+    cut_before_usage = '{"type": "assist'
+    for tail in (cut_inside_usage, cut_before_usage):
+        f = tmp_path / "s.jsonl"
+        f.write_text(whole + "\n" + tail)  # no newline at the end
+        usage = tokens.usage_from_files([f])
+        assert usage.truncated_tail == 1
+        assert (usage.bad_lines, usage.other_lines) == (0, 0)  # counted once, apart
+        assert usage.tokens["output"] == 4
+        assert not usage.exact and "truncated_tail" in usage.reasons
+        assert "1 truncated tails" in usage.source
+    # A complete record that merely lacks its newline is a record.
+    f.write_text(whole + "\n" + json.dumps(row("msg_b", 6)))
+    usage = tokens.usage_from_files([f])
+    assert (usage.truncated_tail, usage.tokens["output"]) == (0, 10)
+    assert usage.exact
+    # A broken line in the middle is a bad line, as before.
+    f.write_text(cut_inside_usage + "\n" + whole + "\n")
+    middle = tokens.usage_from_files([f])
+    assert (middle.truncated_tail, middle.bad_lines) == (0, 1)
+
+
+def test_an_empty_usage_dict_lacks_every_field_and_a_non_dict_is_a_bad_line(tmp_path):
+    f = transcript(tmp_path / "s.jsonl", row("msg_a", 8), row("msg_b", 0, usage={}))
+    usage = tokens.usage_from_files([f])
+    assert usage.messages == 2
+    assert usage.missing_fields == dict.fromkeys(tokens.FIELDS, 1)
+    assert usage.tokens["output"] == 8
+    assert not usage.exact
+    # Only {} counts as a record with nothing in it. [], 0, "" and null are
+    # not a usage record at all.
+    for junk in ([], 0, "", None, False):
+        row_ = row("msg_c", 0)
+        row_["message"]["usage"] = junk
+        g = transcript(tmp_path / "g.jsonl", row("msg_a", 8), row_)
+        bad = tokens.usage_from_files([g])
+        assert (bad.bad_lines, bad.messages) == (1, 1), junk
+        assert not bad.exact
+    # An assistant line with no usage key says nothing about usage.
+    none = row("msg_d", 0)
+    del none["message"]["usage"]
+    h = transcript(tmp_path / "h.jsonl", row("msg_a", 8), none)
+    quiet = tokens.usage_from_files([h])
+    assert (quiet.bad_lines, quiet.other_lines, quiet.exact) == (0, 1, True)
