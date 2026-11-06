@@ -32,9 +32,7 @@ import {
 export type Fr3View = "perspective" | "front" | "top";
 
 /** Where the orbit camera looks, in `fr3_link0` metres. */
-export const FR3_ORBIT_TARGET: readonly [number, number, number] = [
-  0.25, 0, 0.4,
-];
+export const FR3_ORBIT_TARGET: [number, number, number] = [0.25, 0, 0.4];
 
 /** The studio's Canvas settings, spread into `<Canvas>` by both scenes. */
 export const FR3_CANVAS_PROPS: Pick<
