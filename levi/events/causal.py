@@ -330,7 +330,9 @@ class Trigger:
 def _chunk(value):
     if value is None:
         return None
-    array = np.asarray(value, dtype=float)
+    # Always the trigger's own copy: the previous chunk is kept between steps,
+    # and a policy may rewrite one buffer in place for every plan.
+    array = np.array(value, dtype=float)
     if array.ndim == 1:
         array = array[:, None]
     if (
