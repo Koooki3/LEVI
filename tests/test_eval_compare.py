@@ -57,6 +57,9 @@ def arm(name="teacher", **over):
         episode_set=EPISODES,
     )
     row.update(over)
+    if "scored_count" not in over:  # by default every problem was scored
+        ids = row.get("episode_set")
+        row["scored_count"] = len(set(ids)) if ids else row.get("episode_count")
     return ArmRecord(**row)
 
 
@@ -550,6 +553,11 @@ def test_a_record_is_validated():
         {"per_episode": [1, 2]},
         {"split": "dev"},
         {"split": None},
+        {"decoding": {}},  # nothing declared would match anything
+        {"scored_count": 13},  # more than the 12 problems
+        {"scored_count": -1},
+        {"scored_count": True},
+        {"scored_count": 1.5},
     ]
     for over in bad:
         with pytest.raises(RecordError):
@@ -781,3 +789,94 @@ def test_command_line_refuses_and_says_why(tmp_path, capsys):
     assert compare.main([forgot]) == 2
     assert "per_episode scores" in capsys.readouterr().err
     assert compare.main([leaky, "--basis", "bogus"]) == 2
+
+
+def test_whole_floats_and_ints_are_one_value_in_decoding_and_scoring():
+    # 0 and 0.0 are the same declared temperature; the arms must not be
+    # refused for the way a number was typed.
+    a = {"temperature": 0, "top_k": 1, "nested": {"p": 1.0}}
+    b = {"temperature": 0.0, "top_k": 1.0, "nested": {"p": 1}}
+    table = compare.compare(
+        [arm("teacher", decoding=a), arm("local_direct", decoding=b)]
+    )
+    assert table.conditions["decoding"] == a
+    assert arm(decoding=b).decoding == a and arm(decoding=b) == arm(decoding=a)
+    # A real difference is still refused: 0.5 is not 0.
+    with pytest.raises(CompareError, match="decoding differs"):
+        compare.compare(
+            [
+                arm("teacher", decoding=a),
+                arm("local_direct", decoding={**a, "temperature": 0.5}),
+            ]
+        )
+    # nan and infinity are not JSON and are refused, not normalised.
+    with pytest.raises(RecordError, match="plain JSON"):
+        arm(decoding={"temperature": math.nan})
+
+
+def test_a_difference_names_the_first_key_that_differs():
+    base = {"temperature": 0, "seed": 1, "max_tokens": 512}
+    other = {"temperature": 0.7, "seed": 2, "max_tokens": 512}
+    with pytest.raises(CompareError) as refused:
+        compare.compare(
+            [arm("teacher", decoding=base), arm("local_direct", decoding=other)]
+        )
+    text = str(refused.value)
+    # Keys are visited in sorted order: max_tokens agrees, seed is first to differ.
+    assert "decoding differs at 'seed' (teacher=1, local_direct=2)" in text
+    assert "temperature" not in text
+    # Nested and one-sided keys are named by path.
+    with pytest.raises(
+        CompareError, match=r"at 'a.b' \(teacher=1, local_direct=<absent>"
+    ):
+        compare.compare(
+            [
+                arm("teacher", decoding={"a": {"b": 1}}),
+                arm("local_direct", decoding={"a": {"c": 1}}),
+            ]
+        )
+    # Each other arm is named against the first.
+    with pytest.raises(CompareError) as three_way:
+        compare.compare(
+            [
+                arm("teacher", scoring={"metric": "f1", "reference": "gold"}),
+                arm("local_harness", scoring={"metric": "f1", "reference": "panel"}),
+                arm("local_direct", scoring={"metric": "iou", "reference": "gold"}),
+            ]
+        )
+    assert "at 'reference' (teacher=" in str(three_way.value)
+    assert "at 'metric' (teacher=" in str(three_way.value)
+
+
+def test_an_empty_decoding_is_refused_not_matched_with_everything():
+    with pytest.raises(RecordError, match="decoding must be a non-empty dict"):
+        arm(decoding={})
+
+
+def test_the_direct_arm_must_be_the_same_model_as_the_harness_arm():
+    with pytest.raises(CompareError, match="different models") as refused:
+        compare.compare(three(local_direct={"model": "qwen3-vl-small"}))
+    assert "qwen3-vl" in str(refused.value) and "R13" in str(refused.value)
+    # The teacher is another model by definition, and a table without the
+    # direct arm has nothing to compare it with.
+    compare.compare(three())
+    compare.compare([arm("teacher"), arm("local_harness")])
+    # In a confirm table the model names are codes, so naming them is safe.
+    with pytest.raises(CompareError, match="different models"):
+        compare.compare(blind(local_direct={"model": "qwen3-vl-small"}))
+
+
+def test_every_arm_must_have_scored_all_the_problems():
+    # The hash and the count agree, but the harness arm was blocked on 2 of
+    # the 12 and its quality is over the 10 it answered: not comparable.
+    with pytest.raises(CompareError, match="local_harness scored 10 of 12") as refused:
+        compare.compare(three(local_harness={"scored_count": 10}))
+    assert "denominator" in str(refused.value)
+    with pytest.raises(CompareError, match="teacher has a quality but no scored_count"):
+        compare.compare(three(teacher={"scored_count": None}))
+    # An arm with no quality (blocked, not measured) has nothing to be compared.
+    blocked = three(
+        local_harness={"quality": None, "scored_count": None, "blocked": "gpu_busy"}
+    )
+    assert rows(compare.compare(blocked))["local_harness"]["quality"] is None
+    assert arm(scored_count=12).to_dict()["scored_count"] == 12

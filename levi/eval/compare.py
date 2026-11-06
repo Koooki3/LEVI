@@ -178,11 +178,43 @@ def _text(value, name) -> str | None:
     return value.strip()
 
 
+def _normalize(value):
+    """Plain JSON with whole floats written as ints, so ``0`` and ``0.0`` (and
+    ``1`` and ``1.0``) are one value: two arms that declared the same decoding
+    in two spellings must not be refused as different."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {key: _normalize(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalize(item) for item in value]
+    return value
+
+
 def _json_copy(value, name):
     try:
-        return json.loads(_canonical(value))
+        return _normalize(json.loads(_canonical(value)))
     except (TypeError, ValueError, RecursionError) as exc:
         raise RecordError(f"{name} must be plain JSON") from exc
+
+
+_ABSENT = "<absent>"
+
+
+def _first_difference(a, b, path: str = ""):
+    """(path, a's value, b's value) of the first place two JSON values differ,
+    keys visited in sorted order; ``None`` if they are equal. A key one side
+    lacks has the value ``_ABSENT``."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        for key in sorted(set(a) | set(b)):
+            where = f"{path}.{key}" if path else str(key)
+            if key not in a or key not in b:
+                return where, a.get(key, _ABSENT), b.get(key, _ABSENT)
+            found = _first_difference(a[key], b[key], where)
+            if found:
+                return found
+        return None
+    return None if _canonical(a) == _canonical(b) else (path, a, b)
 
 
 def _not_flat_codes(value) -> str | None:
@@ -231,7 +263,10 @@ class ArmRecord:
 
     The problems are given either as ``episode_set`` (the ids) or as
     ``episode_set_hash`` plus ``episode_count``; if both are given they must
-    agree. ``per_episode`` (episode id -> score) is the one per-item field
+    agree. ``scored_count`` is how many of them ``quality`` was computed over:
+    it must equal ``episode_count`` in any table (a problem the arm was blocked
+    on or failed stays in the denominator, scored as a failure; an arm that
+    dropped it would be measured on an easier set). ``per_episode`` (episode id -> score) is the one per-item field
     allowed outside confirm mode.
     """
 
@@ -244,6 +279,7 @@ class ArmRecord:
     episode_set_hash: str | None = None
     episode_count: int | None = None
     episode_set: tuple | None = None
+    scored_count: int | None = None
     quality: float | None = None
     quality_ci: tuple[float, float] | None = None
     quality_ci_method: str | None = None
@@ -268,8 +304,11 @@ class ArmRecord:
             if getattr(self, name) is None:
                 raise RecordError(f"{name} is required")
             put(name, _text(getattr(self, name), name))
-        if not isinstance(self.decoding, dict):
-            raise RecordError("decoding must be a dict (the round's declared decoding)")
+        if not isinstance(self.decoding, dict) or not self.decoding:
+            raise RecordError(
+                "decoding must be a non-empty dict: the round's declared decoding "
+                "(an empty one would match any other and compare nothing)"
+            )
         put("decoding", _json_copy(self.decoding, "decoding"))
         if not isinstance(self.scoring, (dict, str)) or not self.scoring:
             raise RecordError("scoring must be a non-empty dict or string")
@@ -294,6 +333,10 @@ class ArmRecord:
         put("episode_set_hash", digest)
         put("episode_count", count)
 
+        scored = _count(self.scored_count, "scored_count")
+        if scored is not None and scored > count:
+            raise RecordError("scored_count is larger than episode_count")
+        put("scored_count", scored)
         put("quality", _real(self.quality, "quality"))
         if self.quality_ci is not None:
             ci = self.quality_ci
@@ -629,17 +672,34 @@ def compare(
         ("task", lambda r: r.task),
         ("episode_set_hash", lambda r: r.episode_set_hash),
         ("episode_count", lambda r: r.episode_count),
-        ("decoding", lambda r: _canonical(r.decoding)),
-        ("scoring", lambda r: _canonical(r.scoring)),
+        ("decoding", lambda r: r.decoding),
+        ("scoring", lambda r: r.scoring),
     ):
         values = [getter(r) for r in records]
-        if len(set(values)) > 1:
-            shown = ", ".join(
-                f"{a}={_short(v)}" for a, v in zip(labels, values, strict=True)
-            )
+        if len({_canonical(v) for v in values}) > 1:
+            problems.append(_difference(name, labels, values))
+    harness = next((r for r in records if r.arm == "local_harness"), None)
+    direct = next((r for r in records if r.arm == "local_direct"), None)
+    if harness and direct and harness.model != direct.model:
+        problems.append(
+            "local_harness and local_direct ran different models "
+            f"({_short(harness.model, 40)} and {_short(direct.model, 40)}); the "
+            "direct arm is the same model without LEVI (R13), otherwise the "
+            "harness is credited with a model change"
+        )
+    for record, label in zip(records, labels, strict=True):
+        if record.quality is None:
+            continue
+        if record.scored_count is None:
             problems.append(
-                f"{name} differs ({shown}); a round needs the same problems, "
-                "decoding and scoring in every arm"
+                f"{label} has a quality but no scored_count: say over how many "
+                "problems it was computed"
+            )
+        elif record.scored_count != record.episode_count:
+            problems.append(
+                f"{label} scored {record.scored_count} of {record.episode_count} "
+                "problems; a score over fewer problems than the round has is not "
+                "comparable (a blocked or failed problem stays in the denominator)"
             )
     if problems:
         raise CompareError(problems)
@@ -669,9 +729,31 @@ def compare(
     )
 
 
-def _short(value) -> str:
+def _short(value, limit: int = 24) -> str:
     text = str(value)
-    return text if len(text) <= 24 else text[:12] + "…"
+    return text if len(text) <= limit else text[: limit // 2] + "…"
+
+
+def _value(value) -> str:
+    return _ABSENT if value == _ABSENT else _short(_canonical(value))
+
+
+def _difference(name: str, labels: list[str], values: list) -> str:
+    """The message for a condition that differs between arms. For a dict it
+    names the first key that differs (each other arm against the first)."""
+    tail = "; a round needs the same problems, decoding and scoring in every arm"
+    if all(isinstance(v, dict) for v in values):
+        found = []
+        for label, value in zip(labels[1:], values[1:], strict=True):
+            diff = _first_difference(values[0], value)
+            if diff:
+                path, mine, theirs = diff
+                found.append(
+                    f"at {path!r} ({labels[0]}={_value(mine)}, {label}={_value(theirs)})"
+                )
+        return f"{name} differs " + "; ".join(found) + tail
+    shown = ", ".join(f"{a}={_short(v)}" for a, v in zip(labels, values, strict=True))
+    return f"{name} differs ({shown}){tail}"
 
 
 # ---------------------------------------------------------------- Markdown
