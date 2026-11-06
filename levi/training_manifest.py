@@ -327,8 +327,8 @@ TEMPOS: dict[str, Tempo] = {
             "`frames` times the share it kept), so that the weights of an event "
             "whose frames the operation weighted 1 and kept add up to `frames` "
             "however long it is. include is never changed and every action chunk "
-            "stays whole. A frame in no event keeps its weight. This is not the "
-            "paper's method.",
+            "stays whole. A frame in no event keeps its weight unless "
+            "outside=scale. This is not the paper's method.",
             2,
             {
                 "frames": Param(
