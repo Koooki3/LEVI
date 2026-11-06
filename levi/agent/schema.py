@@ -43,6 +43,14 @@ class Budget(Contract):
 LOCAL_MODEL_KINDS = frozenset({"ollama", "openai-local"})
 # The most one model call may reserve (its whole context window).
 MAX_CONTEXT_TOKENS = 131072
+# The pixel budget an openai-local profile may ask the server's image processor
+# for (``max_pixels``). The lower bound is the Qwen3-VL processor's own pixel
+# floor (its ``shortest_edge``, 256 x 256): a smaller image is enlarged to it,
+# so a budget below it would contradict itself. The upper bound is the
+# processor's default ceiling and ``image_max_side``'s 4096 squared. Read the
+# server's own values from its ``processor_config.json``.
+MIN_IMAGE_PIXELS = 256 * 256
+MAX_IMAGE_PIXELS = 4096 * 4096
 
 
 class ProviderConfig(Contract):
@@ -64,6 +72,12 @@ class ProviderConfig(Contract):
     # keep their native size; only the copy sent is scaled.
     max_images: int | None = Field(default=None, ge=1, le=1000)
     image_max_side: int | None = Field(default=None, ge=128, le=4096)
+    # openai-local: cap the pixels the server's image processor keeps per image,
+    # sent as the request's ``mm_processor_kwargs.max_pixels`` (docs/OLLAMA.md).
+    # None sends nothing, so the request is exactly what it was before the field.
+    max_pixels: int | None = Field(
+        default=None, ge=MIN_IMAGE_PIXELS, le=MAX_IMAGE_PIXELS
+    )
     # Let the model reason before its schema-bound answer (off: it costs
     # tokens and time the structured answer rarely needs).
     think: bool = False
@@ -81,6 +95,15 @@ class ProviderConfig(Contract):
     # reads another prompt; more than it batches only queues. Greedy answers
     # can then differ in the last digits between runs (batched arithmetic).
     requests_in_flight: int = Field(default=1, ge=1, le=8)
+
+    @model_validator(mode="after")
+    def _max_pixels_is_for_openai_local(self):
+        if self.max_pixels is not None and self.kind != "openai-local":
+            raise ValueError(
+                "max_pixels applies to openai-local profiles only: it is sent "
+                "as the server's mm_processor_kwargs"
+            )
+        return self
 
     @model_validator(mode="before")
     @classmethod

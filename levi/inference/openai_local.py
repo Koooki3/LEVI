@@ -16,6 +16,8 @@ restarted with other weights blocks inference until a person binds again.
 import hashlib
 import json
 
+from levi.agent.schema import MAX_IMAGE_PIXELS, MIN_IMAGE_PIXELS
+
 from .ollama import ModelDetails, OllamaError, Transport
 
 
@@ -25,6 +27,27 @@ def served_digest(item: dict) -> str:
     return hashlib.sha256(
         json.dumps(identity, sort_keys=True).encode("utf-8")
     ).hexdigest()
+
+
+def mm_processor_kwargs(max_pixels) -> dict | None:
+    """The request's ``mm_processor_kwargs`` for a profile's ``max_pixels``, or
+    None when the profile sets no budget (the request then carries no such
+    key). vLLM takes the field at the top of the chat-completions body, beside
+    ``chat_template_kwargs``, and hands it to the model's processor; Qwen3-VL
+    reads ``max_pixels`` as the ceiling on one image's pixels. A value outside
+    the profile's range is refused here as well, for a config that skipped
+    ``ProviderConfig``'s validation."""
+    if max_pixels is None:
+        return None
+    if (
+        type(max_pixels) is not int
+        or not MIN_IMAGE_PIXELS <= max_pixels <= MAX_IMAGE_PIXELS
+    ):
+        raise ValueError(
+            f"Invalid max_pixels {max_pixels!r}: use an integer from "
+            f"{MIN_IMAGE_PIXELS} (the processor's pixel floor) to {MAX_IMAGE_PIXELS}"
+        )
+    return {"max_pixels": max_pixels}
 
 
 def _mime(data: str) -> str:
@@ -72,6 +95,7 @@ class OpenAILocalClient:
     def __init__(self, transport: Transport, config=None):
         self.transport = transport
         self.fold_system = bool(getattr(config, "fold_system", False))
+        self.max_pixels = getattr(config, "max_pixels", None)
 
     def _request(self, method, path, payload=None):
         response = self.transport.request(method, path, payload)
@@ -152,6 +176,7 @@ class OpenAILocalClient:
             or max_output_tokens > context_tokens
         ):
             raise ValueError("Invalid token limits")
+        budget = mm_processor_kwargs(self.max_pixels)  # refused before any request
         self.require_model(model, digest)
         response = self._request(
             "POST",
@@ -173,6 +198,8 @@ class OpenAILocalClient:
                 "stream": False,
                 # Qwen3-family templates think unless told not to.
                 "chat_template_kwargs": {"enable_thinking": bool(think)},
+                # Only a profile that sets a budget sends the key at all.
+                **({} if budget is None else {"mm_processor_kwargs": budget}),
             },
         )
         choices = response.get("choices")
