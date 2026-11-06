@@ -14,7 +14,9 @@ let failLoad = false;
 // A model that loads when the test says so (and ignores poses until then, as the real one does).
 let holdLoads = false;
 let loadGates: Array<() => void> = [];
-const invalidate = mock(() => {});
+// `drawn` remembers how many poses the arm had been given when each draw was asked for.
+const drawn: number[] = [];
+const invalidate = mock(() => void drawn.push(calls.length));
 mock.module("@react-three/fiber", () => ({
   Canvas: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="canvas">{children}</div>
@@ -58,6 +60,7 @@ beforeEach(() => {
   holdLoads = false;
   loadGates = [];
   invalidate.mockClear();
+  drawn.length = 0;
   console.error = () => {}; // <primitive> is a three element
 });
 afterEach(() => {
@@ -144,6 +147,21 @@ function scene(sources: Sources, replay: ReplayData, extra = {}) {
       {...extra}
     />
   );
+}
+/** Pose mode: five rows of x, y, z, rx, ry, rz at one second each; no arm. */
+function poseReplay(): ReplayData {
+  const names6 = ["x", "y", "z", "rx", "ry", "rz"];
+  const rows = Array.from({ length: 5 }, (_, i) => ({
+    timestamp: i,
+    ...Object.fromEntries(names6.map((n) => [`observation.state | ${n}`, i])),
+  }));
+  return buildReplayData(
+    detectFr3Replay({ robot_type: "generic_arm" }, [
+      "timestamp",
+      ...names6.map((n) => `observation.state | ${n}`),
+    ]),
+    rows,
+  )!;
 }
 const solidCalls = () => calls.filter((call) => !call.ghost);
 const expectRow = (joints: number[], row: number, joint = stateJoint) =>
@@ -277,23 +295,70 @@ describe("ReplayScene: the action ghost and loading", () => {
     await render(scene(sources, data(), { onLoad }));
     expect(onLoad).toHaveBeenCalledWith(false);
 
-    const names6 = ["x", "y", "z", "rx", "ry", "rz"];
-    const rows = Array.from({ length: 5 }, (_, i) => ({
-      timestamp: i,
-      ...Object.fromEntries(names6.map((n) => [`observation.state | ${n}`, i])),
-    }));
-    const poseData = buildReplayData(
-      detectFr3Replay({ robot_type: "generic_arm" }, [
-        "timestamp",
-        ...names6.map((n) => `observation.state | ${n}`),
-      ]),
-      rows,
-    )!;
+    const poseData = poseReplay();
     calls = [];
     const poseLoaded = mock((ok: boolean) => void ok);
     await render(scene(sources, poseData, { onLoad: poseLoaded }));
     expect(poseLoaded).toHaveBeenCalledWith(true);
     expect(calls).toEqual([]);
+  });
+});
+
+describe("ReplayScene: every time update asks for one redraw", () => {
+  // The Canvas draws on demand (`frameloop="demand"`): a pose set on an
+  // object draws nothing until `invalidate()` is called. A pose-mode scene
+  // has no arm model that would call it as a side effect.
+  test("joints mode: one invalidate per seek, after the arm was posed", async () => {
+    const sources = makeClockSources();
+    await render(scene(sources, data()));
+    invalidate.mockClear();
+    drawn.length = 0;
+    for (const row of [2, 5, 9]) {
+      const posed = calls.length;
+      await act(async () => sources.seek(row * 0.125));
+      expect(calls.length).toBe(posed + 1);
+      // Asked for after the pose was set, not before it.
+      expect(drawn.at(-1)).toBe(calls.length);
+    }
+    expect(invalidate).toHaveBeenCalledTimes(3);
+  });
+
+  test("joints mode: one invalidate per presented video frame", async () => {
+    const sources = makeClockSources();
+    await render(scene(sources, data()));
+    invalidate.mockClear();
+    sources.video.paused = false;
+    await act(async () => {
+      for (let frame = 1; frame <= 10; frame++)
+        sources.video.present(frame / 30);
+    });
+    expect(invalidate).toHaveBeenCalledTimes(10);
+  });
+
+  test("pose mode: one invalidate per seek and per presented frame, with no arm to ask for it", async () => {
+    const sources = makeClockSources();
+    await render(scene(sources, poseReplay()));
+    expect(calls).toEqual([]);
+    invalidate.mockClear();
+    await act(async () => sources.seek(1));
+    await act(async () => sources.seek(2.5));
+    await act(async () => sources.seek(4));
+    expect(invalidate).toHaveBeenCalledTimes(3);
+    sources.video.paused = false;
+    await act(async () => {
+      for (let frame = 1; frame <= 6; frame++)
+        sources.video.present(4 + frame / 30);
+    });
+    expect(invalidate).toHaveBeenCalledTimes(9);
+  });
+
+  test("a toggle that changes what is drawn redraws too", async () => {
+    const sources = makeClockSources();
+    const replay = data();
+    const rendered = await render(scene(sources, replay));
+    invalidate.mockClear();
+    await rendered.rerender(scene(sources, replay, { trail: true }));
+    expect(invalidate).toHaveBeenCalled();
   });
 });
 
