@@ -18,3 +18,5 @@
 ## 机械臂交互
 
 [FR3 机械臂工作台](ROBOT_STUDIO.zh-CN.md) · [English](ROBOT_STUDIO.md)：离线法兰拖拽、关节预览与不可执行的草稿导出。
+
+[FR3 片段的三维回放](REPLAY_3D.zh-CN.md) · [English](REPLAY_3D.md)：查看器的 Episodes 标签页让机械臂（或末端轨迹）随视频运动；数据要求、两种模式和限制。

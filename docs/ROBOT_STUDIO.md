@@ -20,7 +20,7 @@ The rendering and solver share the official FR3 nominal chain, base `fr3_link0` 
 
 Forward kinematics is checked against the URDF transform chain. Inverse kinematics uses bounded, seeded damped least squares and joint limits; an unsuccessful solve never applies a partial result. Drawing is demand-driven. Meshes load locally, without a third-party environment image or external runtime CDN.
 
-The arm model, lights, floor grid, camera presets and Canvas settings live in `src/components/robot-3d/fr3-model.tsx`; this page and the dataset viewer's 3D replay both draw the arm from it, so a change there changes both.
+The arm model, lights, floor grid, camera presets and Canvas settings live in `src/components/robot-3d/fr3-model.tsx`; this page and the dataset viewer's [3D replay](REPLAY_3D.md) both draw the arm from it, so a change there changes both.
 
 Joint limits and an IK solution do **not** establish collision freedom, dynamics, calibration or physical safety. Self-collision and scene collision checking are not implemented.
 
