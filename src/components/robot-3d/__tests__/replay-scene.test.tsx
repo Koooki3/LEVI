@@ -23,7 +23,14 @@ mock.module("@react-three/fiber", () => ({
   ),
   useThree: () => ({ invalidate }),
 }));
-mock.module("@react-three/drei", () => ({ OrbitControls: () => null }));
+// OrbitControls records the props it is given.
+let orbitProps: Array<Record<string, unknown>> = [];
+mock.module("@react-three/drei", () => ({
+  OrbitControls: (props: Record<string, unknown>) => {
+    orbitProps.push(props);
+    return null;
+  },
+}));
 mock.module("../fr3-model", () => ({
   FR3_CANVAS_PROPS: {},
   FR3_ORBIT_TARGET: [0, 0, 0],
@@ -61,10 +68,12 @@ beforeEach(() => {
   loadGates = [];
   invalidate.mockClear();
   drawn.length = 0;
+  orbitProps = [];
   console.error = () => {}; // <primitive> is a three element
 });
 afterEach(() => {
   console.error = consoleError;
+  document.documentElement.removeAttribute("data-motion");
 });
 
 const names = Array.from({ length: 7 }, (_, i) => `joint_${i + 1}`);
@@ -404,5 +413,42 @@ describe("ReplayScene: a hole in the first row, under the page's own TimeProvide
     await act(async () => time.seek(6 * 0.125));
     expectRow(solidCalls().at(-1)!.joints, 6);
     expect(host.querySelector("output")!.textContent).toBe("0.750");
+  });
+});
+
+describe("ReplayScene: the orbit camera and reduced motion", () => {
+  // drei's OrbitControls damps by default: the camera keeps turning for a
+  // moment after a drag. That is motion `prefers-reduced-motion` asks to drop.
+  test("damping is on by default and off when the in-app motion setting is reduce", async () => {
+    const sources = makeClockSources();
+    const replay = data();
+    await render(scene(sources, replay));
+    expect(orbitProps.at(-1)!.enableDamping).toBe(true);
+    orbitProps = [];
+    document.documentElement.setAttribute("data-motion", "reduce");
+    await render(scene(sources, replay));
+    expect(orbitProps.at(-1)!.enableDamping).toBe(false);
+  });
+
+  test("a system preference for less motion turns damping off, and the in-app 'full' setting turns it on again", async () => {
+    const sources = makeClockSources();
+    const replay = data();
+    const matchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes("prefers-reduced-motion"),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia;
+    try {
+      await render(scene(sources, replay));
+      expect(orbitProps.at(-1)!.enableDamping).toBe(false);
+      orbitProps = [];
+      document.documentElement.setAttribute("data-motion", "full");
+      await render(scene(sources, replay));
+      expect(orbitProps.at(-1)!.enableDamping).toBe(true);
+    } finally {
+      window.matchMedia = matchMedia;
+    }
   });
 });

@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
+import { usePrefersReducedMotion } from "@/lib/design/motion";
 import type { ReplayData } from "@/lib/replay/frames";
 import {
   startReplayClock,
@@ -60,6 +61,8 @@ function ReplayContents({
   onLoad,
 }: ReplayScenePropsBase) {
   const { invalidate } = useThree();
+  // drei's OrbitControls keeps turning after a drag (damping) unless told not to.
+  const reducedMotion = usePrefersReducedMotion();
   const sampler = useMemo(() => createReplaySampler(data), [data]);
   const rig = useMemo(() => createReplayRig(data, sampler), [data, sampler]);
   useEffect(() => () => rig.dispose(), [rig]);
@@ -131,6 +134,7 @@ function ReplayContents({
       <primitive object={rig.group} />
       <OrbitControls
         makeDefault
+        enableDamping={!reducedMotion}
         minDistance={0.35}
         maxDistance={4}
         target={FR3_ORBIT_TARGET}

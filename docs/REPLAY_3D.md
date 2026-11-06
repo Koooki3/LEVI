@@ -30,7 +30,7 @@ Units are radians and metres. Joint values are clamped to the FR3 limits; a valu
 - The panel is open by default in both modes; hide it with the button in its header. The choice, the switches and the view are kept for the session.
 - If the model or WebGL fails to load, an error state with a **Retry** button replaces the viewport; the video and charts are unaffected.
 
-Space (play/pause) and ↑/↓ (previous/next episode) work as everywhere in the Episodes tab; pressed on the panel's own switches and view buttons they act on those controls only. The panel has no animation, and the camera views jump, so `prefers-reduced-motion` has nothing to turn off.
+Space (play/pause) and ↑/↓ (previous/next episode) work as everywhere in the Episodes tab; pressed on the panel's own switches and view buttons they act on those controls only. The panel has no animation and the camera views jump. The one moving thing is the orbit camera's inertia after a drag (damping): it is turned off under `prefers-reduced-motion` and when the in-app motion setting says reduce, and the camera then stops with the pointer.
 
 ## How it stays in time with the video
 
