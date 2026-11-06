@@ -805,6 +805,37 @@ def test_a_refused_joint_file_stops_the_conversion_before_anything_is_written(tm
     assert JOINT_FEATURE in info["features"] and info["total_episodes"] == 1
 
 
+def test_the_checks_cover_every_row_including_rows_a_resample_drops(tmp_path):
+    # fps 5 from a 10 fps capture keeps rows 0, 2, 4 ...: row 1 is never
+    # written, and a gap in it still refuses the demo (deliberately
+    # conservative: a joint file with a hole is a damaged file).
+    capture = build_capture(tmp_path / "capture")
+    mutate(capture / "task/demo_001", _set("joint_3_pos", 1, np.nan))
+    with pytest.raises(ValueError, match=r"row 1, joint_3_pos"):
+        execute("pipeline", capture, tmp_path / "x", options(fps=5))
+    # likewise an angle outside the FR3 limits on a dropped row keeps
+    # generic_arm, and a width outside metres on one skips the width column
+    other = build_capture(tmp_path / "other")
+    mutate(other / "task/demo_001", _set("joint_6_pos", 1, 0.0))
+    mutate(
+        other / "task/demo_001",
+        lambda f: f.assign(gripper_width=np.where(f.index == 1, 85.0, f.gripper_width)),
+        "gripper_state.csv",
+    )
+    dataset = Path(
+        execute("pipeline", other, tmp_path / "y", options(fps=5))["dataset_path"]
+    )
+    info = read_json(dataset / "meta/info.json")
+    assert info["robot_type"] == "generic_arm"
+    assert GRIPPER_FEATURE not in info["features"]
+    assert (
+        1
+        not in read_json_lines(dataset / "meta/levi_provenance.jsonl")[0][
+            "source_positions"
+        ]
+    )
+
+
 def test_a_misaligned_joint_file_is_refused_even_with_the_export_off(tmp_path):
     # Not new: any extra CSV with a frame_index must match the pose rows.
     capture = build_capture(tmp_path / "capture", joints=True)
