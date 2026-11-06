@@ -327,3 +327,34 @@ def test_feed_never_changes_the_action_chunk():
             assert chunk == before, step
     # The chunks were compared, not skipped.
     assert "chunk_disagreement" in cues
+
+
+@pytest.mark.parametrize("shape", [(10, 1), (10,)], ids=["2d", "1d"])
+def test_a_reused_action_buffer_still_yields_chunk_disagreement(shape):
+    """A policy may write every plan into one buffer, in place. The trigger
+    keeps the previous plan to compare it with the next one, so it must hold
+    its own copy: with one reused buffer the decisions equal those with a
+    fresh array per step, and the plan going from all 0 to all 1 (and back)
+    is reported at the steps where it changed."""
+    levels = [0.0, 1.0, 1.0, 0.0]
+
+    def decisions(reuse):
+        trigger = make(chunk_disagreement=0.1)
+        buffer = np.zeros(shape)
+        out = []
+        for step, level in enumerate(levels):
+            buffer[...] = level
+            chunk = buffer if reuse else buffer.copy()
+            row = {"x": 0.0, "z": 0.2, "w": 0.08, "chunk": chunk}
+            out.append(feed(trigger, step, row))
+        return out
+
+    reused, fresh = decisions(reuse=True), decisions(reuse=False)
+    assert [[c.cue for c in d.cues] for d in reused] == [
+        [],
+        ["chunk_disagreement"],
+        [],
+        ["chunk_disagreement"],
+    ]
+    assert [d.cues for d in reused] == [d.cues for d in fresh]
+    assert [d.as_dict() for d in reused] == [d.as_dict() for d in fresh]
