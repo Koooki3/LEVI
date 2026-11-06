@@ -1,0 +1,95 @@
+/* The Episodes tab's 3D replay panel. Spacing from --ds-space-*, colours
+   from tokens (the viewport is media: black in both themes). */
+
+/* Video(s) and the panel: side by side from the lg breakpoint, stacked below. */
+.vw-replay-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ds-space-3);
+}
+.vw-replay-layout > * {
+  min-width: 0;
+}
+@media (min-width: 1200px) {
+  .vw-replay-layout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+
+.vw-r3d {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+.vw-r3d-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.vw-r3d-head h2 {
+  margin: 0;
+}
+.vw-r3d-spacer {
+  flex: 1;
+}
+.vw-r3d-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+.vw-r3d-viewport {
+  position: relative;
+  min-height: 280px;
+  height: clamp(280px, 42vh, 480px);
+  overflow: hidden;
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-media-bg);
+  color: var(--ds-text-secondary);
+}
+.vw-r3d-status {
+  margin: 0;
+  padding: var(--ds-space-3);
+  font-size: var(--ds-text-caption-size);
+}
+.vw-r3d-readout {
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+  overflow-wrap: anywhere;
+}
+.vw-r3d-readout p,
+.vw-r3d-gripper p,
+.vw-r3d-note {
+  margin: 0;
+}
+.vw-r3d-gripper {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+}
+/* A bar 0..1: the fill is the data colour for "action" and its width is the value. */
+.vw-r3d-gripper-bar {
+  flex: none;
+  width: 96px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface-sunken);
+}
+.vw-r3d-gripper-bar::after {
+  content: "";
+  display: block;
+  width: calc(var(--vw-r3d-grip, 0) * 100%);
+  height: 100%;
+  background: var(--dv-2);
+}
+.vw-r3d-notes {
+  margin: 0;
+  padding-inline-start: var(--ds-space-4);
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+}
