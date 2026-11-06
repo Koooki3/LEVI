@@ -113,19 +113,24 @@ def test_three_arms_make_one_table_with_the_derived_columns():
     assert [r["arm"] for r in table.rows] == list(compare.ARMS)
     teacher, harness, direct = (rows(table)[a] for a in compare.ARMS)
 
-    assert teacher["external_tokens_total"] == 1000 + 500 + 3000  # cache_read apart
+    # Two totals side by side: without cache_read, and all four fields.
+    assert teacher["external_tokens_total_fresh"] == 1000 + 500 + 3000
+    assert teacher["external_tokens_total_all"] == 1000 + 500 + 20000 + 3000
     assert teacher["quality_per_second"] == pytest.approx(0.80 / 600)
-    assert teacher["quality_per_external_token"] == pytest.approx(0.80 / 4500)
+    assert teacher["quality_per_external_token_fresh"] == pytest.approx(0.80 / 4500)
+    assert teacher["quality_per_external_token_all"] == pytest.approx(0.80 / 24500)
     assert harness["quality_per_second"] == pytest.approx(0.82 / 200)
     # Zero external tokens: the ratio has no denominator, and it is not "unknown".
-    assert harness["quality_per_external_token"] is None
-    assert "quality_per_external_token" in harness["undefined"]
+    for basis in ("fresh", "all"):
+        assert harness[f"quality_per_external_token_{basis}"] is None
+        assert f"quality_per_external_token_{basis}" in harness["undefined"]
     assert harness["unknown"] == []
 
     assert harness["vs_teacher"] == {
         "quality_delta": pytest.approx(0.02),
         "wall_s_delta": -400.0,
-        "external_tokens_delta": -4500,
+        "external_tokens_delta_fresh": -4500,
+        "external_tokens_delta_all": -24500,
         "external_tokens_delta_is_bound": False,
         "quality_delta_ci": [-0.03, 0.07],
     }
@@ -138,7 +143,11 @@ def test_three_arms_make_one_table_with_the_derived_columns():
         "quality_status": "yes",
         "quality_point_not_worse": True,
         "faster": True,
+        "fewer_external_tokens_fresh": True,
+        "fewer_external_tokens_all": True,
         "fewer_external_tokens": True,
+        "fewer_external_tokens_basis_dependent": False,
+        "fewer_external_tokens_basis": "both",
         "all": True,
         "non_inferiority": {
             "higher_is_better": True,
@@ -181,7 +190,11 @@ def test_the_json_is_plain_and_complete():
     table = compare.compare(three())
     data = json.loads(table.to_json())
     assert data["schema"] == compare.TABLE_SCHEMA
-    assert data["conditions"]["external_token_basis"] == list(compare.FRESH_BASIS)
+    assert data["conditions"]["external_token_bases"] == {
+        "fresh": list(compare.FRESH_BASIS),
+        "all": list(compare.TOKEN_FIELDS),
+    }
+    assert data["conditions"]["verdict_basis"] == "both"
     assert [r["arm"] for r in data["rows"]] == list(compare.ARMS)
     for key in (
         "quality",
@@ -190,7 +203,10 @@ def test_the_json_is_plain_and_complete():
         "local_tokens",
         "external_tokens",
         "quality_per_second",
-        "quality_per_external_token",
+        "external_tokens_total_fresh",
+        "external_tokens_total_all",
+        "quality_per_external_token_fresh",
+        "quality_per_external_token_all",
         "vs_teacher",
         "vs_direct",
     ):
@@ -201,13 +217,15 @@ def test_a_missing_teacher_token_count_is_unknown_never_zero():
     table = compare.compare(three(teacher={"external_tokens": None}))
     teacher, harness, _ = (rows(table)[a] for a in compare.ARMS)
     assert teacher["external_tokens"] == dict.fromkeys(compare.TOKEN_FIELDS)
-    assert teacher["external_tokens_total"] is None
-    assert teacher["quality_per_external_token"] is None
-    assert "quality_per_external_token" in teacher["unknown"]
-    assert "external_tokens_total" in teacher["unknown"]
-    # What needs the teacher's tokens is unknown too, and the headline cannot say "yes".
-    assert harness["vs_teacher"]["external_tokens_delta"] is None
-    assert "vs_teacher.external_tokens_delta" in harness["unknown"]
+    for basis in ("fresh", "all"):
+        assert teacher[f"external_tokens_total_{basis}"] is None
+        assert teacher[f"quality_per_external_token_{basis}"] is None
+        assert f"quality_per_external_token_{basis}" in teacher["unknown"]
+        assert f"external_tokens_total_{basis}" in teacher["unknown"]
+        # What needs the teacher's tokens is unknown too.
+        assert harness["vs_teacher"][f"external_tokens_delta_{basis}"] is None
+        assert f"vs_teacher.external_tokens_delta_{basis}" in harness["unknown"]
+    # ... and the headline cannot say "yes".
     assert table.main_metric["fewer_external_tokens"] is None
     assert table.main_metric["all"] is None
 
@@ -215,11 +233,11 @@ def test_a_missing_teacher_token_count_is_unknown_never_zero():
     teacher_line = next(
         line for line in text.splitlines() if line.startswith("| teacher | 0 |")
     )
-    assert teacher_line.count("未知") == 5  # four fields and the total
+    assert teacher_line.count("未知") == 6  # four fields and the two totals
     quality_line = next(
         line for line in text.splitlines() if line.startswith("| teacher | claude")
     )
-    assert quality_line.endswith("| 未知 | — |")  # quality per external token
+    assert quality_line.endswith("| 未知 | 未知 | — |")  # per token, on both bases
     assert "外部 token 更少：未知" in text
     assert "三项全满足：未知" in text
 
@@ -230,34 +248,28 @@ def test_unknown_and_zero_are_different_rows():
     ]
     unknown = rows(compare.compare(three(teacher={"external_tokens": None})))["teacher"]
     assert zero["external_tokens"] == ZERO and unknown["external_tokens"] != ZERO
-    assert zero["unknown"] == [] and zero["undefined"] == ["quality_per_external_token"]
-    assert "quality_per_external_token" in unknown["unknown"]
+    assert zero["unknown"] == []
+    assert zero["undefined"] == [
+        "quality_per_external_token_fresh",
+        "quality_per_external_token_all",
+    ]
+    assert "quality_per_external_token_fresh" in unknown["unknown"]
     assert unknown["undefined"] == []
 
 
-def test_one_missing_field_makes_the_total_unknown_only_if_the_basis_uses_it():
+def test_one_missing_field_makes_a_total_unknown_only_if_its_basis_uses_it():
     base = {"input_new": 10, "output": 20, "cache_read": 30, "cache_write": 40}
-    no_read = dict(base, cache_read=None)
-    no_write = dict(base, cache_write=None)
-    assert (
-        rows(compare.compare([arm(external_tokens=no_read)]))["teacher"][
-            "external_tokens_total"
-        ]
-        == 10 + 20 + 40
-    )
-    assert (
-        rows(compare.compare([arm(external_tokens=no_write)]))["teacher"][
-            "external_tokens_total"
-        ]
-        is None
-    )
-    wide = compare.compare(
-        [arm(external_tokens=no_read)], token_basis=compare.TOKEN_FIELDS
-    )
-    assert rows(wide)["teacher"]["external_tokens_total"] is None
-    only = compare.compare([arm(external_tokens=base)], token_basis=("output",))
-    assert rows(only)["teacher"]["external_tokens_total"] == 20
-    assert only.conditions["external_token_basis"] == ["output"]
+
+    def totals(external):
+        row = rows(compare.compare([arm(external_tokens=external)]))["teacher"]
+        return row["external_tokens_total_fresh"], row["external_tokens_total_all"]
+
+    assert totals(base) == (10 + 20 + 40, 10 + 20 + 30 + 40)
+    # cache_read unknown: the fresh total (which leaves it out) is still known.
+    assert totals(dict(base, cache_read=None)) == (10 + 20 + 40, None)
+    # cache_write unknown: both totals need it.
+    assert totals(dict(base, cache_write=None)) == (None, None)
+    assert totals(dict(base, input_new=None, output=None)) == (None, None)
 
 
 @pytest.mark.parametrize(
@@ -290,7 +302,7 @@ def test_a_slower_or_worse_student_is_reported_as_no():
                 # -0.10 against the teacher; even the better end is beyond -0.05
                 "quality_delta_ci_vs_teacher": (-0.2, -0.06),
                 "wall_s": 900.0,
-                "external_tokens": {**ZERO, "output": 10000},
+                "external_tokens": {**ZERO, "output": 100000},
             }
         )
     )
@@ -377,9 +389,11 @@ def test_nothing_to_compare_is_refused():
         compare.compare([])
     with pytest.raises(CompareError, match="not an ArmRecord"):
         compare.compare([{"arm": "teacher"}])
-    for basis in ((), ("output", "output"), ("bogus",)):
-        with pytest.raises(CompareError, match="token_basis"):
-            compare.compare([arm()], token_basis=basis)
+    for basis in ("", "fresh,all", "bogus", None):
+        with pytest.raises(CompareError, match="verdict_basis"):
+            compare.compare([arm()], verdict_basis=basis)
+    with pytest.raises(TypeError):  # the single configurable total is gone
+        compare.compare([arm()], token_basis=("output",))
 
 
 def test_confirm_allows_aggregate_scores_only():
@@ -632,7 +646,7 @@ def test_a_pipe_in_a_name_does_not_break_the_table():
 def test_a_lower_bound_student_is_never_called_fewer_even_when_its_number_is_low():
     bound = {"external_tokens_exact": False, "external_tokens": {**ZERO, "output": 10}}
     table = compare.compare(three(local_harness=bound))
-    assert rows(table)["local_harness"]["external_tokens_total"] == 10
+    assert rows(table)["local_harness"]["external_tokens_total_fresh"] == 10
     assert table.main_metric["fewer_external_tokens"] is None
     assert table.main_metric["all"] is None
     # An exact student at the same number is "fewer", and exact=None (not
@@ -662,7 +676,10 @@ def test_a_lower_bound_teacher_is_marked_and_only_a_student_below_it_is_fewer():
     assert table.main_metric["fewer_external_tokens"] is True
     # A student above the bound cannot be called "not fewer": the teacher may
     # have used more than what could be counted.
-    above = {"external_tokens": {**ZERO, "output": 6000}, "external_tokens_exact": True}
+    above = {
+        "external_tokens": {**ZERO, "output": 100000},
+        "external_tokens_exact": True,
+    }
     over = compare.compare(three(teacher=teacher, local_harness=above))
     assert over.main_metric["fewer_external_tokens"] is None
     # With the teacher exact, the same numbers are a plain "no".
@@ -679,6 +696,7 @@ def test_a_lower_bound_teacher_is_marked_and_only_a_student_below_it_is_fewer():
         l for l in text.splitlines() if l.startswith("| teacher | claude")
     )
     assert "≤0.178" in quality_line  # 0.80 / 4500 * 1000, an upper bound
+    assert "≤0.0327" in quality_line  # and the same on the all-four basis
     assert "-4,500（含下限）" in text  # the difference to the teacher is a bound too
     plain = compare.compare(three()).to_markdown()
     assert "≥" not in plain.split("注：")[0] and "（含下限）" not in plain
@@ -763,7 +781,8 @@ def test_the_teacher_tokens_come_from_the_session_reader(tmp_path):
         "cache_read": 70,
         "cache_write": 9,
     }
-    assert row["external_tokens_total"] == 5 + 415 + 9
+    assert row["external_tokens_total_fresh"] == 5 + 415 + 9
+    assert row["external_tokens_total_all"] == 5 + 415 + 70 + 9
     assert "last usage record per message id" in row["external_tokens_source"]
 
 
@@ -814,7 +833,8 @@ def test_command_line_refuses_and_says_why(tmp_path, capsys):
     )
     assert compare.main([forgot]) == 2
     assert "per_episode scores" in capsys.readouterr().err
-    assert compare.main([leaky, "--basis", "bogus"]) == 2
+    with pytest.raises(SystemExit):  # argparse refuses an unknown choice
+        compare.main([leaky, "--verdict-basis", "bogus"])
 
 
 def test_whole_floats_and_ints_are_one_value_in_decoding_and_scoring():
@@ -1080,3 +1100,82 @@ def test_an_interval_that_excludes_its_own_point_difference_is_refused():
                 }
             )
         )
+
+
+def student_with(**tokens_by_field):
+    return {"external_tokens": {**ZERO, **tokens_by_field}}
+
+
+def test_fewer_external_tokens_can_flip_with_the_basis_and_the_table_says_so():
+    # The teacher: fresh 4,500 and cache_read 20,000 (all 24,500). A student
+    # that writes 3,000 fresh tokens but re-reads a 60,000-token cache is
+    # fewer on the fresh basis and more on the full one.
+    flip = student_with(output=3000, cache_read=60000)
+    table = compare.compare(three(local_harness=flip))
+    m = table.main_metric
+    assert (m["fewer_external_tokens_fresh"], m["fewer_external_tokens_all"]) == (
+        True,
+        False,
+    )
+    assert m["fewer_external_tokens"] is None  # a claim one basis can reverse
+    assert m["fewer_external_tokens_basis_dependent"] is True
+    assert m["fewer_external_tokens_basis"] == "both"
+    assert m["all"] is None
+    text = table.to_markdown()
+    assert "外部 token 更少：未定" not in text  # unknown is for what is not measured
+    assert "新增口径 是，全量口径 否" in text and "结论随口径翻转" in text
+    # One basis registered before the round decides, and the table names it.
+    fresh = compare.compare(three(local_harness=flip), verdict_basis="fresh")
+    assert fresh.main_metric["fewer_external_tokens"] is True
+    assert fresh.main_metric["fewer_external_tokens_basis"] == "fresh"
+    assert fresh.main_metric["fewer_external_tokens_basis_dependent"] is False
+    assert "按事先登记的口径：新增" in fresh.to_markdown()
+    full = compare.compare(three(local_harness=flip), verdict_basis="all")
+    assert full.main_metric["fewer_external_tokens"] is False
+    assert full.main_metric["all"] is False
+    assert full.conditions["verdict_basis"] == "all"
+
+
+def test_both_bases_agreeing_give_a_plain_answer():
+    fewer = compare.compare(three(local_harness=student_with(output=3000)))
+    assert fewer.main_metric["fewer_external_tokens"] is True
+    more = compare.compare(three(local_harness=student_with(output=100000)))
+    assert more.main_metric["fewer_external_tokens"] is False
+    assert more.main_metric["fewer_external_tokens_basis_dependent"] is False
+
+
+def test_both_totals_have_their_own_quality_per_thousand_tokens_in_the_table():
+    row = next(
+        line
+        for line in compare.compare(three()).to_markdown().splitlines()
+        if line.startswith("| teacher | claude")
+    )
+    assert "0.178" in row  # 0.80 / 4,500 x 1000, without cache_read
+    assert "0.0327" in row  # 0.80 / 24,500 x 1000, all four fields
+    text = compare.compare(three()).to_markdown()
+    assert "新增口径 = input_new + output + cache_write" in text
+    assert "全量口径 = input_new + output + cache_read + cache_write" in text
+    assert "-4,500" in text and "-24,500" in text  # the difference on each basis
+
+
+def test_a_missing_cache_read_leaves_only_the_full_basis_unknown():
+    no_read = {
+        "external_tokens": {
+            "input_new": 1000,
+            "output": 500,
+            "cache_read": None,
+            "cache_write": 3000,
+        }
+    }
+    table = compare.compare(three(teacher=no_read))
+    m = table.main_metric
+    assert m["fewer_external_tokens_fresh"] is True
+    assert m["fewer_external_tokens_all"] is None
+    assert m["fewer_external_tokens"] is None  # both must say yes
+    assert m["fewer_external_tokens_basis_dependent"] is False  # unknown, not flipped
+    assert (
+        compare.compare(three(teacher=no_read), verdict_basis="fresh").main_metric[
+            "fewer_external_tokens"
+        ]
+        is True
+    )

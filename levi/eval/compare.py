@@ -48,13 +48,16 @@ Rules this module enforces:
   includes queueing (a sub-agent's duration does, a local call's need not);
   times of different or unstated bases are not compared.
 - **External tokens are four separate fields** (``input_new``, ``output``,
-  ``cache_read``, ``cache_write``, as in ``levi.aeri.external_report.v1``).
-  Quality per external token needs one denominator; the default is
-  ``input_new + output + cache_write`` (what the external model newly read or
-  wrote; ``cache_read`` is cheap re-reading of a cached prefix and stays a
-  column of its own, the convention of the lab's experiment ledger). It is
-  unknown as soon as one of those fields is. The basis is printed with the
-  table and can be changed with ``token_basis``.
+  ``cache_read``, ``cache_write``, as in ``levi.aeri.external_report.v1``), and
+  there are two totals side by side, because "fewer external tokens" can flip
+  with the choice: ``fresh`` = ``input_new + output + cache_write`` (what the
+  external model newly read or wrote; ``cache_read`` is cheap re-reading of a
+  cached prefix) and ``all`` = the four. Each has its own quality per 1,000
+  tokens and difference, and is unknown as soon as one of its fields is. The
+  headline answers "fewer external tokens" under both (yes only if both say yes,
+  no only if both say no, undetermined if they disagree, and the table says it
+  was the basis), or under one basis that was registered before the round
+  (``verdict_basis="fresh"`` or ``"all"``, written in the table).
 
 Records come from ``ArmRecord`` (JSON via ``to_dict`` / ``from_dict``);
 ``levi.eval.tokens`` produces the teacher's ``external_tokens`` from session
@@ -85,6 +88,9 @@ SPLITS = ("tune", "confirm", "other")
 REQUIRED = ("arm", "task", "model", "decoding", "scoring", "split")
 # input_new + output + cache_write; cache_read is a column of its own.
 FRESH_BASIS = ("input_new", "output", "cache_write")
+ALL_BASIS = TOKEN_FIELDS
+BASES = {"fresh": FRESH_BASIS, "all": ALL_BASIS}
+VERDICT_BASES = ("both", "fresh", "all")
 UNKNOWN = "未知"
 NOT_APPLICABLE = "不适用"
 NONE_SELF = "—"
@@ -564,14 +570,14 @@ def _fewer(student: dict, teacher: dict, key: str) -> bool | None:
     return mine < reference
 
 
-def _row(record: ArmRecord, basis, confirm: bool) -> dict:
-    total = _total(record, basis)
+def _row(record: ArmRecord, confirm: bool) -> dict:
+    totals = {name: _total(record, basis) for name, basis in BASES.items()}
     per_second, second_status = _ratio(record.quality, record.wall_s)
-    per_token, token_status = _ratio(record.quality, total)
+    per_token = {name: _ratio(record.quality, t) for name, t in totals.items()}
     if not record.scoring["higher_is_better"]:
         # An error per second or per token does not grow with merit.
         per_second, second_status = None, "undefined"
-        per_token, token_status = None, "undefined"
+        per_token = dict.fromkeys(BASES, (None, "undefined"))
     # (column, value, why it has no value)
     columns = [
         ("quality", record.quality, "unknown"),
@@ -581,9 +587,12 @@ def _row(record: ArmRecord, basis, confirm: bool) -> dict:
             (f"external_tokens.{n}", record.external(n), "unknown")
             for n in TOKEN_FIELDS
         ],
-        ("external_tokens_total", total, "unknown"),
+        *[(f"external_tokens_total_{n}", t, "unknown") for n, t in totals.items()],
         ("quality_per_second", per_second, second_status),
-        ("quality_per_external_token", per_token, token_status),
+        *[
+            (f"quality_per_external_token_{n}", value, status)
+            for n, (value, status) in per_token.items()
+        ],
     ]
     row = {
         "arm": record.arm,
@@ -601,11 +610,11 @@ def _row(record: ArmRecord, basis, confirm: bool) -> dict:
         "wall_s": record.wall_s,
         "local_tokens": record.local_tokens,
         "external_tokens": {name: record.external(name) for name in TOKEN_FIELDS},
-        "external_tokens_total": total,
+        **{f"external_tokens_total_{n}": t for n, t in totals.items()},
         "external_tokens_exact": record.external_tokens_exact,
         "external_tokens_source": record.external_tokens_source,
         "quality_per_second": per_second,
-        "quality_per_external_token": per_token,
+        **{f"quality_per_external_token_{n}": v for n, (v, _) in per_token.items()},
         "blocked": record.blocked,
     }
     if not confirm:
@@ -624,9 +633,13 @@ def _vs(row: dict, reference: dict | None, key: str) -> dict | None:
     out = {
         "quality_delta": _delta(row["quality"], reference["quality"]),
         "wall_s_delta": _delta(row["wall_s"], reference["wall_s"]),
-        "external_tokens_delta": _delta(
-            row["external_tokens_total"], reference["external_tokens_total"]
-        ),
+        **{
+            f"external_tokens_delta_{n}": _delta(
+                row[f"external_tokens_total_{n}"],
+                reference[f"external_tokens_total_{n}"],
+            )
+            for n in BASES
+        },
     }
     for name, value in out.items():
         if value is None:
@@ -665,7 +678,9 @@ def _point_not_worse(mine, reference, higher_is_better: bool):
     return mine >= reference if higher_is_better else mine <= reference
 
 
-def _verdict(student: dict, teacher: dict | None, scoring: dict) -> dict | None:
+def _verdict(
+    student: dict, teacher: dict | None, scoring: dict, verdict_basis: str = "both"
+) -> dict | None:
     """The round's headline: the harness arm against the teacher arm.
 
     Quality is a non-inferiority call on the paired difference interval against
@@ -686,8 +701,24 @@ def _verdict(student: dict, teacher: dict | None, scoring: dict) -> dict | None:
             student["quality"], teacher["quality"], higher
         ),
         "faster": _holds(student["wall_s"], teacher["wall_s"], "<"),
-        "fewer_external_tokens": _fewer(student, teacher, "external_tokens_total"),
     }
+    fewer = {n: _fewer(student, teacher, f"external_tokens_total_{n}") for n in BASES}
+    checks["fewer_external_tokens_fresh"] = fewer["fresh"]
+    checks["fewer_external_tokens_all"] = fewer["all"]
+    if verdict_basis == "both":
+        # Both bases must agree: a claim that one choice of denominator can
+        # reverse is not made.
+        answers = list(fewer.values())
+        checks["fewer_external_tokens"] = (
+            answers[0] if answers[0] is not None and answers[0] == answers[1] else None
+        )
+        checks["fewer_external_tokens_basis_dependent"] = (
+            None not in answers and answers[0] != answers[1]
+        )
+    else:
+        checks["fewer_external_tokens"] = fewer[verdict_basis]
+        checks["fewer_external_tokens_basis_dependent"] = False
+    checks["fewer_external_tokens_basis"] = verdict_basis
     needed = [
         checks["quality_non_inferior"],
         checks["faster"],
@@ -736,7 +767,7 @@ def compare(
     records: Iterable[ArmRecord],
     *,
     assert_confirm: bool = False,
-    token_basis: Iterable[str] = FRESH_BASIS,
+    verdict_basis: str = "both",
 ) -> Table:
     """One table for one round. Raises ``CompareError`` if the records were not
     run on the same problems under the same conditions (or break the confirm
@@ -746,7 +777,12 @@ def compare(
     decided by the records' ``split``. ``assert_confirm=True`` only adds the
     demand that every record is a ``confirm`` one (the command line's
     ``--confirm``), so a round that was meant to be confirm cannot pass as
-    another split."""
+    another split.
+
+    ``verdict_basis`` is how "fewer external tokens" is decided: ``"both"``
+    (default: the ``fresh`` and the ``all`` total must agree) or the one basis
+    registered before the round, ``"fresh"`` or ``"all"``. Both totals are in
+    the table either way."""
     records = list(records)
     problems = []
     if not records:
@@ -754,10 +790,9 @@ def compare(
     for record in records:
         if not isinstance(record, ArmRecord):
             raise CompareError(f"not an ArmRecord: {type(record).__name__}")
-    basis = tuple(token_basis)
-    if not basis or len(set(basis)) != len(basis) or set(basis) - set(TOKEN_FIELDS):
+    if verdict_basis not in VERDICT_BASES:
         raise CompareError(
-            f"token_basis must be distinct fields among {TOKEN_FIELDS}, got {basis}"
+            f"verdict_basis must be one of {VERDICT_BASES}, got {_show(verdict_basis)}"
         )
 
     arms = [r.arm for r in records]
@@ -839,7 +874,7 @@ def compare(
         raise CompareError(problems)
 
     ordered = sorted(records, key=lambda r: ARMS.index(r.arm))
-    rows = [_row(r, basis, confirm) for r in ordered]
+    rows = [_row(r, confirm) for r in ordered]
     by_arm = {row["arm"]: row for row in rows}
     teacher, harness, direct = (by_arm.get(a) for a in ARMS)
     for row in rows:
@@ -861,12 +896,15 @@ def compare(
             "non_inferiority_margin": first.scoring["non_inferiority_margin"],
             "split": first.split,
             "confirm": confirm,
-            "external_token_basis": list(basis),
+            "external_token_bases": {n: list(b) for n, b in BASES.items()},
+            "verdict_basis": verdict_basis,
         },
         rows=rows,
         missing_arms=[a for a in ARMS if a not in by_arm],
         main_metric=(
-            _verdict(harness, teacher, first.scoring) if harness and teacher else None
+            _verdict(harness, teacher, first.scoring, verdict_basis)
+            if harness and teacher
+            else None
         ),
     )
 
@@ -913,6 +951,22 @@ def _tri(value) -> str:
     return UNKNOWN if value is None else "是" if value else "否"
 
 
+def _fewer_line(verdict: dict) -> str:
+    basis = verdict["fewer_external_tokens_basis"]
+    how = (
+        "两个口径要一致才算"
+        if basis == "both"
+        else f"按事先登记的口径：{'新增' if basis == 'fresh' else '全量'}"
+    )
+    if verdict["fewer_external_tokens_basis_dependent"]:
+        how += "；两个口径给出相反的答案，结论随口径翻转"
+    return (
+        f"- 外部 token 更少：{_tri(verdict['fewer_external_tokens'])}"
+        f"（新增口径 {_tri(verdict['fewer_external_tokens_fresh'])}，"
+        f"全量口径 {_tri(verdict['fewer_external_tokens_all'])}；{how}）"
+    )
+
+
 def _status_cell(status: str) -> str:
     return {
         "yes": "是",
@@ -926,7 +980,8 @@ def _ratio_cell(row: dict, name: str, fmt: str, scale: float = 1.0) -> str:
     value = row[name]
     if value is not None:
         # Per external token with a lower-bound denominator is an upper bound.
-        mark = "≤" if name == "quality_per_external_token" and _is_bound(row) else ""
+        per_token = name.startswith("quality_per_external_token")
+        mark = "≤" if per_token and _is_bound(row) else ""
         return mark + format(value * scale, fmt)
     return NOT_APPLICABLE if name in row["undefined"] else UNKNOWN
 
@@ -948,18 +1003,25 @@ def _exactness(row: dict) -> str:
 
 
 def _vs_cells(row: dict, key: str) -> list[str]:
+    """Quality, wall time, then the external token difference on each basis."""
     vs = row[key]
     if vs is None:
-        return [NO_ARM] * 3
+        return [NO_ARM] * 4
     if vs.get("self"):
-        return [NONE_SELF] * 3
-    tokens = _num(vs["external_tokens_delta"], "+,d")
-    if vs["external_tokens_delta"] is not None and vs["external_tokens_delta_is_bound"]:
-        tokens += "（含下限）"
+        return [NONE_SELF] * 4
+    tokens = []
+    for name in BASES:
+        value = vs[f"external_tokens_delta_{name}"]
+        text = _num(value, "+,d")
+        tokens.append(
+            text + "（含下限）"
+            if value is not None and vs["external_tokens_delta_is_bound"]
+            else text
+        )
     return [
         _num(vs["quality_delta"], "+.3f"),
         _num(vs["wall_s_delta"], "+,.1f"),
-        tokens,
+        *tokens,
     ]
 
 
@@ -1010,7 +1072,8 @@ def _markdown(table: Table) -> str:
             "与教师一致率",
             "墙钟 (s)",
             "每秒质量",
-            "每千外部 token 质量",
+            "每千外部 token 质量（新增口径）",
+            "每千外部 token 质量（全量口径）",
             "阻塞",
         ],
         [
@@ -1029,16 +1092,20 @@ def _markdown(table: Table) -> str:
                 else _num(r["agreement_with_teacher"], ".3f"),
                 _num(r["wall_s"], ",.1f"),
                 _ratio_cell(r, "quality_per_second", ".3g"),
-                _ratio_cell(r, "quality_per_external_token", ".3g", scale),
+                _ratio_cell(r, "quality_per_external_token_fresh", ".3g", scale),
+                _ratio_cell(r, "quality_per_external_token_all", ".3g", scale),
                 r["blocked"] or NONE_SELF,
             ]
             for r in rows
         ],
     )
-    basis = " + ".join(c["external_token_basis"])
+    fresh = " + ".join(c["external_token_bases"]["fresh"])
     out += [
         "",
-        f"### token（本地与外部分开记；外部口径合计 = {basis}）",
+        "### token（本地与外部分开记；外部合计并列两个口径）",
+        "",
+        f"- 新增口径 = {fresh}",
+        f"- 全量口径 = {' + '.join(c['external_token_bases']['all'])}（含 cache_read）",
         "",
     ]
     out += _table(
@@ -1049,7 +1116,8 @@ def _markdown(table: Table) -> str:
             "外部 output",
             "外部 cache_read",
             "外部 cache_write",
-            "外部合计（口径）",
+            "外部合计（新增口径）",
+            "外部合计（全量口径）",
             "计数",
             "外部 token 来源",
         ],
@@ -1058,7 +1126,8 @@ def _markdown(table: Table) -> str:
                 r["arm"],
                 _num(r["local_tokens"], ",d"),
                 *[_token_cell(r, r["external_tokens"][n]) for n in TOKEN_FIELDS],
-                _token_cell(r, r["external_tokens_total"]),
+                _token_cell(r, r["external_tokens_total_fresh"]),
+                _token_cell(r, r["external_tokens_total_all"]),
                 _exactness(r),
                 r["external_tokens_source"] or NONE_SELF,
             ]
@@ -1072,10 +1141,12 @@ def _markdown(table: Table) -> str:
             "对教师 Δ质量",
             "对教师 Δ质量配对区间",
             "对教师 Δ墙钟 (s)",
-            "对教师 Δ外部 token",
+            "对教师 Δ外部 token（新增口径）",
+            "对教师 Δ外部 token（全量口径）",
             "对直接调用 Δ质量",
             "对直接调用 Δ墙钟 (s)",
-            "对直接调用 Δ外部 token",
+            "对直接调用 Δ外部 token（新增口径）",
+            "对直接调用 Δ外部 token（全量口径）",
         ],
         [
             [
@@ -1106,7 +1177,7 @@ def _markdown(table: Table) -> str:
             ),
             f"- 质量点估计不劣于教师（辅助，不进结论）：{_tri(verdict['quality_point_not_worse'])}",
             f"- 耗时更低：{_tri(verdict['faster'])}",
-            f"- 外部 token 更少：{_tri(verdict['fewer_external_tokens'])}",
+            _fewer_line(verdict),
             f"- 三项全满足：{_tri(verdict['all'])}",
         ]
     out += [
@@ -1115,7 +1186,8 @@ def _markdown(table: Table) -> str:
             f"注：`{UNKNOWN}` = 没有测量，不是 0；依赖它的每秒质量、每外部 token 质量和相对差也是"
             f"`{UNKNOWN}`。`{NOT_APPLICABLE}` = 分母为 0（例如本臂外部 token 真为 0），"
             "或质量越小越好（误差除以秒或 token 不是越大越好的比值）。"
-            "每千外部 token 质量 = 质量 ÷ 外部合计 × 1000。`≥` = 外部 token 只是下限"
+            "每千外部 token 质量 = 质量 ÷ 外部合计 × 1000（新增、全量各算一次）。"
+            "`≥` = 外部 token 只是下限"
             "（计数不完整），带 `≤` 的每千 token 质量是上限，含下限的差也只是下限；"
             "学生臂是下限时，“外部 token 更少”写未知。"
         ),
@@ -1161,9 +1233,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
     parser.add_argument(
-        "--basis",
-        default=",".join(FRESH_BASIS),
-        help="external token fields summed for the per-token ratio (default: %(default)s)",
+        "--verdict-basis",
+        choices=VERDICT_BASES,
+        default="both",
+        help=(
+            "how 'fewer external tokens' is decided: both totals must agree "
+            "(default), or the one basis registered before the round; "
+            "both totals are in the table either way"
+        ),
     )
     args = parser.parse_args(argv)
     try:
@@ -1171,7 +1248,7 @@ def main(argv: list[str] | None = None) -> int:
         table = compare(
             records,
             assert_confirm=args.confirm,
-            token_basis=[b.strip() for b in args.basis.split(",") if b.strip()],
+            verdict_basis=args.verdict_basis,
         )
     except (OSError, ValueError) as exc:  # CompareError is a ValueError
         print(f"refused: {exc}", file=sys.stderr)
