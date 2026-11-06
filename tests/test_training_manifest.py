@@ -1076,6 +1076,9 @@ def test_per_event_uniform_gives_every_event_the_same_total_weight():
         "frames_in_events": 33,
         "frames_excluded_in_events": 0,
         "frames_outside_events": 3,
+        "weight_in_events_before": 33.0,
+        "weight_in_events_after": pytest.approx(24),  # 3 events of N = 8
+        "weight_outside_events": 3.0,
         "min_factor": pytest.approx(0.4),
         "max_factor": pytest.approx(1.6),
     }
@@ -1176,7 +1179,12 @@ def test_per_event_uniform_changes_weight_only_and_only_inside_events(repo):
     # Said in manifest.json: what ran, with which numbers, and what it found.
     tempo = result["tempo"]
     assert tempo["name"] == "per_event_uniform" and tempo["version"] == 2
-    assert tempo["params"] == {"frames": 4, "segments": "reviewed", "count": "segment"}
+    assert tempo["params"] == {
+        "frames": 4,
+        "segments": "reviewed",
+        "count": "segment",
+        "outside": "keep",
+    }
     assert tempo["events"] == {
         "spans": 4,
         "spans_not_events": 1,
@@ -1193,7 +1201,20 @@ def test_per_event_uniform_changes_weight_only_and_only_inside_events(repo):
         "episodes_with_events": 2,
         "min_factor": pytest.approx(4 / 7, abs=1e-6),
         "max_factor": 0.8,
+        # 17 frames in events weighed 17 and now weigh 3 x 4; 13 outside weigh 13.
+        "weight_in_events_before": 17.0,
+        "weight_in_events_after": 12.0,
+        "weight_outside_events_before": 13.0,
+        "weight_outside_events_after": 13.0,
+        "in_event_share_before": pytest.approx(17 / 30, abs=1e-6),
+        "in_event_share_after": pytest.approx(12 / 25, abs=1e-6),
+        "outside_factor": 1.0,
+        "mean_weight_in_events": pytest.approx(12 / 17, abs=1e-6),
+        "mean_weight_outside_events": 1.0,
+        "outside_to_inside_weight_ratio": pytest.approx(17 / 12, abs=1e-6),
+        "imbalance_warn_ratio": tm.OUTSIDE_IMBALANCE_WARN,
     }
+    assert tempo["warnings"] == []  # 1.42 times is under the threshold
     assert result["counts"]["weight_sum"] == pytest.approx(13 + 3 * 4, abs=1e-4)
     assert [e.get("tempo_events_scaled") for e in result["episodes"]] == [2, 0, 1]
     assert "approximation" not in tempo and "not the paper's method" in tempo["summary"]
@@ -1299,6 +1320,9 @@ def test_without_any_segment_the_tempo_step_changes_no_weight(repo):
     events = result["tempo"]["events"]
     assert events["events"] == 0 and events["frames_outside_events"] == 30
     assert events["min_factor"] is None and events["max_factor"] is None
+    # Nothing is inside an event, so there is no gap to warn about.
+    assert events["outside_to_inside_weight_ratio"] is None
+    assert result["tempo"]["warnings"] == []
 
 
 def test_an_event_the_operation_thinned_does_not_hand_its_last_frame_the_whole_n():
@@ -1368,6 +1392,110 @@ def test_an_event_total_is_continuous_in_the_operations_cutoff(repo):
     assert abs(soft["grasp"] - gone["grasp"]) > 3 and gone["grasp"] == pytest.approx(8)
 
 
+def _two_events_and_an_unannotated_rest(repo):
+    # Episode 0 is two reviewed events (5 + 7 frames); episodes 1 and 2 (18
+    # frames) have no segment.
+    _segments(
+        _name(repo),
+        0,
+        [("grasp", 0.0, 0.5, None, None), ("place", 0.5, None, None, None)],
+    )
+
+
+def test_the_weight_inside_and_outside_events_is_recorded_and_a_big_gap_is_flagged(
+    repo,
+):
+    _two_events_and_an_unannotated_rest(repo)
+    # N = 2: the event frames weigh 0.4 and 2/7, the 18 frames outside stay at 1.
+    result = _tempo(repo, frames=2)
+    events = result["tempo"]["events"]
+    assert events["weight_in_events_before"] == 12.0
+    assert events["weight_in_events_after"] == 4.0
+    assert events["weight_outside_events_before"] == 18.0
+    assert events["weight_outside_events_after"] == 18.0
+    assert events["in_event_share_before"] == pytest.approx(12 / 30, abs=1e-6)
+    assert events["in_event_share_after"] == pytest.approx(4 / 22, abs=1e-6)
+    assert events["mean_weight_in_events"] == pytest.approx(4 / 12, abs=1e-6)
+    # A frame outside every event is drawn 3 times as often as one inside.
+    assert events["outside_to_inside_weight_ratio"] == pytest.approx(3.0)
+    (warning,) = result["tempo"]["warnings"]
+    assert warning["code"] == "outside_weight_imbalance"
+    assert "3.00 times" in warning["message"] and "outside=scale" in warning["message"]
+    # The warning is in the manifest on disk too, and in what the CLI prints.
+    on_disk = json.loads((Path(result["output_dir"]) / tm.MANIFEST).read_text())
+    assert on_disk["tempo"]["warnings"] == result["tempo"]["warnings"]
+    # N = 8 is 1.5 times at most here: under the threshold, no warning.
+    assert _tempo(repo, frames=8)["tempo"]["warnings"] == []
+    # The other way round: two-frame events weigh 4 per frame at N = 8 and the
+    # frames outside are drawn a quarter as often as they.
+    _segments(
+        _name(repo), 0, [("x", 0.0, 0.2, None, None), ("y", 0.2, 0.4, None, None)]
+    )
+    short = _tempo(repo, frames=8)
+    assert short["tempo"]["events"]["outside_to_inside_weight_ratio"] == pytest.approx(
+        0.25
+    )
+    assert "0.25 times" in short["tempo"]["warnings"][0]["message"]
+    _two_events_and_an_unannotated_rest(repo)
+    # With every outside frame out of scope there is no outside to compare with.
+    only = tm.build(
+        repo,
+        "all_rollouts",
+        episodes=[0],
+        tempo="per_event_uniform",
+        tempo_params={"frames": 2},
+    )
+    assert only["tempo"]["events"]["outside_to_inside_weight_ratio"] is None
+    assert only["tempo"]["warnings"] == []
+
+
+def test_outside_scale_gives_the_frames_outside_events_the_mean_factor_of_the_events(
+    repo,
+):
+    _two_events_and_an_unannotated_rest(repo)
+    keep = _frames(_tempo(repo, frames=2))
+    result = _tempo(repo, frames=2, outside="scale")
+    f = _frames(result)
+    outside = f.subtask_id.isna()
+    # The events received 4 for 12 (a mean factor of 1/3): so do the 18 outside.
+    assert f.weight[outside].tolist() == pytest.approx([1 / 3] * 18)
+    pd.testing.assert_series_equal(f.weight[~outside], keep.weight[~outside])
+    others = [c for c in f.columns if c != "weight"]
+    pd.testing.assert_frame_equal(f[others], keep[others])  # include and the rest
+    _assert_sound_weights(f)
+    events = result["tempo"]["events"]
+    assert events["outside_factor"] == pytest.approx(1 / 3, abs=1e-6)
+    assert events["weight_outside_events_before"] == 18.0
+    assert events["weight_outside_events_after"] == pytest.approx(6.0)
+    # The share of the weight in events is what it was before the step.
+    assert events["in_event_share_after"] == pytest.approx(
+        events["in_event_share_before"], abs=1e-6
+    )
+    assert events["outside_to_inside_weight_ratio"] == pytest.approx(1.0)
+    assert result["tempo"]["warnings"] == []
+    assert result["tempo"]["params"]["outside"] == "scale"
+    # Totals follow the scaled frames: counts, the per-episode table, the file.
+    assert result["counts"]["weight_sum"] == pytest.approx(4 + 6, abs=1e-4)
+    assert [e["weight"] for e in result["episodes"]] == pytest.approx(
+        [4, 10 / 3, 8 / 3]
+    )
+    on_disk = json.loads((Path(result["output_dir"]) / tm.MANIFEST).read_text())
+    assert on_disk["counts"]["weight_sum"] == result["counts"]["weight_sum"]
+
+    # A frame the operation excluded stays at 0: only included frames are scaled.
+    flagged = _frames(_tempo(repo, "robot_flag_success", frames=2, outside="scale"))
+    assert (flagged[flagged.episode_index == 1].weight == 0).all()
+    assert flagged[flagged.episode_index == 2].weight.tolist() == pytest.approx(
+        [1 / 3] * 8
+    )
+    # With no event at all there is no factor: nothing moves.
+    _segments(_name(repo), 0, [])
+    plain = _frames(tm.build(repo, "all_rollouts"))
+    pd.testing.assert_frame_equal(
+        _frames(_tempo(repo, frames=2, outside="scale")), plain
+    )
+
+
 def test_tempo_parameters_are_in_the_fingerprint_and_in_compare(repo):
     name = _name(repo)
     _segments(
@@ -1382,19 +1510,21 @@ def test_tempo_parameters_are_in_the_fingerprint_and_in_compare(repo):
     assert fp(eight) == tm.tempo_fingerprint(
         "per_event_uniform",
         2,
-        {"frames": 8, "segments": "reviewed", "count": "segment"},
+        {"frames": 8, "segments": "reviewed", "count": "segment", "outside": "keep"},
     )
     # A changed step with the same parameters is a different input.
     assert tm.tempo_fingerprint("per_event_uniform", 3, eight["tempo"]["params"]) != fp(
         eight
     )
     included = _tempo(repo, frames=8, count="included")
-    assert fp(included) not in {fp(four), fp(eight), fp(everything)}
+    scaled = _tempo(repo, frames=8, outside="scale")
+    assert len({fp(four), fp(eight), fp(everything), fp(included), fp(scaled)}) == 5
     on_disk = json.loads((Path(four["output_dir"]) / tm.MANIFEST).read_text())["tempo"]
     assert on_disk["params"] == {
         "frames": 4,
         "segments": "reviewed",
         "count": "segment",
+        "outside": "keep",
     }
     assert on_disk["fingerprint"] == fp(four)
 
@@ -1460,9 +1590,10 @@ def test_tempo_refusals_cli_and_docs(repo, capsys):
         ({"frames": "many"}, "frames must be a whole number"),
         ({"segments": "some"}, "segments must be one of reviewed, all"),
         ({"count": "kept"}, "count must be one of segment, included"),
+        ({"outside": "drop"}, "outside must be one of keep, scale"),
         (
             {"stride": 3},
-            r"takes no parameter stride \(it takes frames, segments, count\)",
+            r"takes no parameter stride \(it takes frames, segments, count, outside\)",
         ),
     ):
         with pytest.raises(tm.ManifestError, match=message):
@@ -1480,6 +1611,8 @@ def test_tempo_refusals_cli_and_docs(repo, capsys):
     ]
     count = steps["per_event_uniform"]["params"]["count"]
     assert count["default"] == "segment" and count["choices"] == ["segment", "included"]
+    outside = steps["per_event_uniform"]["params"]["outside"]
+    assert outside["default"] == "keep" and outside["choices"] == ["keep", "scale"]
     assert tm.main(["manifest", repo, "--operation", "all_rollouts"]) == 0
     assert "tempo" not in json.loads(capsys.readouterr().out)
     assert tm.main(["manifest", repo, "--operation", "all_rollouts",
@@ -1489,7 +1622,9 @@ def test_tempo_refusals_cli_and_docs(repo, capsys):
         "frames": 4,
         "segments": "reviewed",
         "count": "segment",
+        "outside": "keep",
     }
+    assert printed["tempo"]["warnings"] == []
     for extra, text in (
         (["--tempo", "per_event_uniform", "--tempo-param", "frames=0"], "at least 1"),
         (["--tempo", "per_event_uniform", "--tempo-param", "frames=2.5"], "whole"),

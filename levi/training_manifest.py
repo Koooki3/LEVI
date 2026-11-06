@@ -292,6 +292,9 @@ def _params(
 # one frame in k.
 
 DEFAULT_EVENT_FRAMES = 8
+# manifest.json warns when, after the step, a frame outside every event weighs
+# more than this many times a frame inside one, or less than 1/this.
+OUTSIDE_IMBALANCE_WARN = 2.0
 
 
 @dataclass(frozen=True)
@@ -357,6 +360,20 @@ TEMPOS: dict[str, Tempo] = {
                     "in a long event weighs as much as the whole event, and the "
                     "total jumps when a weight becomes 0)",
                     ("segment", "included"),
+                ),
+                "outside": Param(
+                    str,
+                    "keep",
+                    "what happens to the included frames that are in no event "
+                    "(no segment covers them, or the segment is not an event): "
+                    "keep leaves their weight as the operation gave it, so they "
+                    "weigh more per frame than the frames of an event whenever "
+                    "events are longer than `frames`; scale multiplies them by "
+                    "the mean factor the events received (weight after over "
+                    "weight before, over the whole dataset), so the share of "
+                    "the weight in events is what it was before the step. "
+                    "manifest.json warns when the two weigh very differently",
+                    ("keep", "scale"),
                 ),
             },
         ),
@@ -435,16 +452,102 @@ class _TempoStats:
             0,
         )
         self.factors: list[float] = []
+        # Weight mass, over the whole dataset: kept frames inside events before
+        # and after the step, and kept frames outside every event.
+        self.mass = {"in_before": 0.0, "in_after": 0.0, "out_before": 0.0}
+        self.outside_factor = 1.0
 
     def add(self, found: dict[str, Any], spans: int):
         for key, value in found.items():
             if key in self.counts:
                 self.counts[key] += value
+        self.mass["in_before"] += found["weight_in_events_before"]
+        self.mass["in_after"] += found["weight_in_events_after"]
+        self.mass["out_before"] += found["weight_outside_events"]
         self.counts["spans"] += spans
         self.counts["spans_not_events"] += spans - found["events"]
         self.counts["episodes_with_events"] += bool(found["events_scaled"])
         if found["events_scaled"]:
             self.factors += [found["min_factor"], found["max_factor"]]
+
+    def finish(self, outside: str) -> float:
+        """The factor to multiply the frames outside every event by: the mean
+        factor the events received (weight after over weight before) with
+        ``outside="scale"``, otherwise 1. One factor for the whole dataset, so
+        an episode without a single event is scaled like the rest."""
+        before = self.mass["in_before"]
+        if outside == "scale" and before > 0:
+            self.outside_factor = self.mass["in_after"] / before
+        return self.outside_factor
+
+    def balance(self) -> dict[str, Any]:
+        """How the weight divides between the frames inside events and the ones
+        outside, before the step and after it (and after ``outside``)."""
+        inside_before, inside_after = self.mass["in_before"], self.mass["in_after"]
+        outside_before = self.mass["out_before"]
+        outside_after = outside_before * self.outside_factor
+        inside_n = self.counts["frames_in_events"]
+        outside_n = self.counts["frames_outside_events"]
+
+        def share(inside, outside):
+            return round(inside / (inside + outside), 6) if inside + outside else None
+
+        inside_mean = inside_after / inside_n if inside_n else None
+        outside_mean = outside_after / outside_n if outside_n else None
+        ratio = (
+            outside_mean / inside_mean
+            if inside_mean and outside_mean is not None
+            else None
+        )
+        return {
+            "weight_in_events_before": round(inside_before, 6),
+            "weight_in_events_after": round(inside_after, 6),
+            "weight_outside_events_before": round(outside_before, 6),
+            "weight_outside_events_after": round(outside_after, 6),
+            "in_event_share_before": share(inside_before, outside_before),
+            "in_event_share_after": share(inside_after, outside_after),
+            "outside_factor": round(self.outside_factor, 6),
+            "mean_weight_in_events": None
+            if inside_mean is None
+            else round(inside_mean, 6),
+            "mean_weight_outside_events": None
+            if outside_mean is None
+            else round(outside_mean, 6),
+            # A sampler draws a frame in proportion to its weight: this is how
+            # many times more often a frame outside every event is drawn than
+            # one inside an event.
+            "outside_to_inside_weight_ratio": None
+            if ratio is None
+            else round(ratio, 6),
+            "imbalance_warn_ratio": OUTSIDE_IMBALANCE_WARN,
+        }
+
+    def warnings(self) -> list[dict[str, str]]:
+        ratio = self.balance()["outside_to_inside_weight_ratio"]
+        if (
+            ratio is None
+            or 1 / OUTSIDE_IMBALANCE_WARN <= ratio <= OUTSIDE_IMBALANCE_WARN
+        ):
+            return []
+        balance = self.balance()
+        return [
+            {
+                "code": "outside_weight_imbalance",
+                "message": (
+                    f"A frame outside every event weighs {ratio:.2f} times as much "
+                    f"as a frame inside one (mean "
+                    f"{balance['mean_weight_outside_events']:.3g} over "
+                    f"{self.counts['frames_outside_events']} frames against "
+                    f"{balance['mean_weight_in_events']:.3g} over "
+                    f"{self.counts['frames_in_events']}), so a weighted sampler "
+                    f"draws it {ratio:.2f} times as often. Outside are the "
+                    "frames no segment covers and those of a segment that is "
+                    "not an event (with segments=reviewed, an unreviewed "
+                    "automatic one). Review or edit those segments, or pass "
+                    "outside=scale."
+                ),
+            }
+        ]
 
     def record(self) -> dict[str, Any]:
         return {
@@ -453,7 +556,17 @@ class _TempoStats:
             # multiplied by the whole `frames`.
             "min_factor": round(min(self.factors), 6) if self.factors else None,
             "max_factor": round(max(self.factors), 6) if self.factors else None,
+            **self.balance(),
         }
+
+
+def event_frames(span_of: np.ndarray, is_event: list[bool] | np.ndarray) -> np.ndarray:
+    """Which frames are owned by a segment that is an event."""
+    usable = np.asarray(is_event, dtype=bool)
+    own = np.zeros(len(span_of), dtype=bool)
+    if len(usable):
+        own = (span_of >= 0) & usable[np.maximum(span_of, 0)]
+    return own
 
 
 def per_event_uniform(
@@ -495,10 +608,10 @@ def per_event_uniform(
     if count not in ("segment", "included"):
         raise ManifestError(f"count must be one of segment, included, not {count!r}")
     usable = np.asarray(is_event, dtype=bool)
-    own = np.zeros(len(span_of), dtype=bool)
-    if len(usable):
-        own = (span_of >= 0) & usable[np.maximum(span_of, 0)]
+    own = event_frames(span_of, usable)
     keep = include & own
+    before = float(weight[keep].sum(dtype=np.float64))
+    outside = float(weight[include & ~own].sum(dtype=np.float64))
     retained = np.bincount(span_of[keep], minlength=len(usable))
     owned = np.bincount(span_of[own], minlength=len(usable))
     total = owned if count == "segment" else retained
@@ -526,6 +639,11 @@ def per_event_uniform(
         "frames_in_events": int(keep.sum()),
         "frames_excluded_in_events": int((own & ~include).sum()),
         "frames_outside_events": int((include & ~own).sum()),
+        # Weight mass before and after, for how the step moves weight between
+        # the frames inside events and the ones outside (_TempoStats.balance).
+        "weight_in_events_before": before,
+        "weight_in_events_after": float(weight[keep].sum(dtype=np.float64)),
+        "weight_outside_events": outside,
         "min_factor": float(factor[scaled].min()) if scaled.any() else None,
         "max_factor": float(factor[scaled].max()) if scaled.any() else None,
     }
@@ -831,6 +949,10 @@ def build(
     columns: dict[str, list] = {f.name: [] for f in FRAMES_SCHEMA}
     prompt_stats = _PromptStats()
     per_episode = []
+    # Every episode's weights are kept until the loop is over: the frames
+    # outside every event may be rescaled by a factor that needs all the events.
+    weights: list[np.ndarray] = []
+    outside_masks: list[np.ndarray] = []
     for ep in known:
         row = ds.rows[ep]
         path = ds.data_path(ep)
@@ -964,19 +1086,22 @@ def build(
         tempo_found: dict[str, Any] | None = None
         if tempo == "per_event_uniform":
             # After the operation and not instead of it; touches weight only.
+            is_event = [
+                tempo_settings["segments"] == "all"
+                or s["review"] in manifest_prompts.REVIEWED
+                for s in spans
+            ]
             tempo_found = per_event_uniform(
                 include,
                 weight,
                 span_of,
-                [
-                    tempo_settings["segments"] == "all"
-                    or s["review"] in manifest_prompts.REVIEWED
-                    for s in spans
-                ],
+                is_event,
                 tempo_settings["frames"],
                 tempo_settings["count"],
             )
             tempo_stats.add(tempo_found, len(spans))
+            outside_masks.append(include & ~event_frames(span_of, is_event))
+        weights.append(weight)
 
         columns["episode_index"] += [ep] * n
         columns["frame_index"] += frame_index.tolist()
@@ -984,7 +1109,6 @@ def build(
         columns["source_demo"] += [row.get("source_demo")] * n
         columns["task"] += [task_of[ep]] * n
         columns["include"] += include.tolist()
-        columns["weight"] += weight.tolist()
         columns["exclude_reason"] += reason
         columns["episode_success"] += [success] * n
         columns["episode_success_source"] += [source] * n
@@ -1041,6 +1165,15 @@ def build(
             }
         )
 
+    if tempo_stats is not None:
+        outside_factor = tempo_stats.finish(tempo_settings["outside"])
+        if outside_factor != 1.0:
+            for w, mask, entry in zip(weights, outside_masks, per_episode, strict=True):
+                w[mask] = (w[mask].astype(np.float64) * outside_factor).astype(
+                    np.float32
+                )
+                entry["weight"] = round(float(w.sum()), 6)
+    columns["weight"] = np.concatenate(weights).tolist()
     frames = pa.table(
         columns, schema=_frames_schema(prompt_template, subtask_max_chars)
     )
@@ -1072,6 +1205,7 @@ def build(
                         tempo, tempo_step.version, tempo_settings
                     ),
                     "events": tempo_stats.record(),
+                    "warnings": tempo_stats.warnings(),
                 }
             }
             if tempo_stats
