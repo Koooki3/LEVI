@@ -78,8 +78,15 @@ def robot_type(requested: str) -> str:
     return FR3_ROBOT_TYPE if requested == DEFAULT_ROBOT_TYPE else requested
 
 
+# What every refusal ends with: the way out.
+EXIT = (
+    "Set export_joints to false to convert without joint columns, or "
+    "exclude this demo (exclude_demos)."
+)
+
+
 def _fail(message: str) -> raw.CaptureError:
-    return raw.CaptureError("joint_states", f"{FILE}: {message}")
+    return raw.CaptureError("joint_states", f"{FILE}: {message}. {EXIT}")
 
 
 def read(demo, pose: pd.DataFrame, grip: pd.DataFrame) -> Joints | None:
@@ -125,17 +132,14 @@ def read(demo, pose: pd.DataFrame, grip: pd.DataFrame) -> Joints | None:
         row, column = np.argwhere(bad)[0]
         raise _fail(
             f"{int(bad.sum())} joint angle(s) are missing or not finite "
-            f"(first: row {row}, {POSITION_COLUMNS[column]}); gaps are not "
-            "filled. Fix the capture, exclude the demo, or set export_joints "
-            "to false"
+            f"(first: row {row}, {POSITION_COLUMNS[column]}); gaps are not filled"
         )
     if (np.abs(angles) > MAX_ABS_RADIANS).any():
         row, column = np.argwhere(np.abs(angles) > MAX_ABS_RADIANS)[0]
         raise _fail(
             f"{POSITION_COLUMNS[column]} is {angles[row, column]:g} at row "
             f"{row}: joint angles must be radians (beyond one turn, +-"
-            f"{MAX_ABS_RADIANS:.2f}, is degrees or ticks). Set export_joints "
-            "to false to convert without them"
+            f"{MAX_ABS_RADIANS:.2f}, is degrees or ticks)"
         )
     width = pd.to_numeric(grip.gripper_width, errors="coerce").to_numpy(float)
     low, high = GRIPPER_WIDTH_RANGE

@@ -501,6 +501,9 @@ def test_an_unusable_joint_file_is_refused_with_its_reason(tmp_path, case):
         joint_states.read(demo, pose, grip)
     assert caught.value.code == "joint_states"
     assert "robot_joint_states.csv" in str(caught.value)
+    # every refusal ends with the way out
+    assert "export_joints" in str(caught.value)
+    assert "exclude this demo (exclude_demos)" in str(caught.value)
 
 
 def test_no_joint_columns_or_no_file_is_no_source_not_an_error(tmp_path):
@@ -516,22 +519,32 @@ def test_no_joint_columns_or_no_file_is_no_source_not_an_error(tmp_path):
 
 
 def test_a_refused_joint_file_stops_the_conversion_before_anything_is_written(tmp_path):
-    capture = build_capture(tmp_path / "capture", joints=True)
-    mutate(capture / "task/demo_001", _set("joint_4_pos", 3, np.nan))
+    capture = build_capture(tmp_path / "capture", demos=("demo_001", "demo_002"))
+    mutate(capture / "task/demo_002", _set("joint_4_pos", 3, np.nan))
     target = tmp_path / "refused"
     with pytest.raises(
         ValueError,
-        match=r"preflight failed.*robot_joint_states\.csv.*row 3, joint_4_pos",
-    ):
+        match=r"preflight failed.*task/demo_002.*robot_joint_states\.csv.*row 3, joint_4_pos",
+    ) as caught:
         execute("pipeline", capture, target, options())
     assert not target.exists() and not (tmp_path / ".refused.partial").exists()
-    # the documented way out: turn the export off, the capture converts as before
+    # the two ways out the error names: turn the export off ...
+    assert "export_joints" in str(caught.value) and "exclude_demos" in str(caught.value)
     result = execute(
         "pipeline", capture, tmp_path / "off", options(export_joints=False)
     )
     info = read_json(Path(result["dataset_path"]) / "meta/info.json")
     assert info["robot_type"] == "generic_arm"
     assert JOINT_FEATURE not in info["features"]
+    # ... or leave the damaged demo out
+    result = execute(
+        "pipeline",
+        capture,
+        tmp_path / "excluded",
+        options(exclude_demos=["task/demo_002"]),
+    )
+    info = read_json(Path(result["dataset_path"]) / "meta/info.json")
+    assert JOINT_FEATURE in info["features"] and info["total_episodes"] == 1
 
 
 def test_a_misaligned_joint_file_is_refused_even_with_the_export_off(tmp_path):
@@ -565,8 +578,9 @@ def test_settle_decides_one_layout_for_all_episodes():
         layout.gripper_width is False
         and "gripper_width spans" in layout.gripper_problem
     )
-    with pytest.raises(ValueError, match="1 of 2 episodes"):
+    with pytest.raises(ValueError, match="1 of 2 episodes") as caught:
         joint_states.settle([("a", good), ("b", None)])
+    assert "export_joints" in str(caught.value) and "exclude_demos" in str(caught.value)
 
 
 def test_an_implausible_gripper_width_is_not_exported_and_says_so(tmp_path):
