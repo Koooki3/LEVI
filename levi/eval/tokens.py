@@ -9,9 +9,9 @@ final count**; keeping the first line under-counts a message several times
 over (measured on a sub-agent transcript: output 16 on the first line, 415 on
 the last). So this module keeps the last usage record per message id.
 
-The rule is the one of ``lab/aeri-external/tools/agent_tokens.py`` (the
-sub-agent branch, lines 76-96), rewritten here so the evaluation code does not
-depend on the git-ignored lab folder.
+The same rule is what the maintainers' external-agent accounting script
+applies to a sub-agent transcript; it is written out here so the evaluation code
+depends on no script outside the repository.
 
 Rules:
 
