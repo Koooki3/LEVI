@@ -1,0 +1,537 @@
+"""The three-arm teacher / harness / direct table (levi/eval/compare.py).
+
+The records are built by the tests; nothing here reads a dataset or calls a model.
+"""
+
+import json
+import math
+
+import pytest
+
+from levi.automatic import external_report
+from levi.eval import compare, tokens
+from levi.eval.compare import ArmRecord, CompareError, RecordError
+
+EPISODES = list(range(12))
+ZERO = dict.fromkeys(compare.TOKEN_FIELDS, 0)
+
+
+def arm(name="teacher", **over):
+    """A complete record of one arm; ``over`` replaces fields."""
+    row = {
+        "teacher": {
+            "model": "claude-opus",
+            "quality": 0.80,
+            "wall_s": 600.0,
+            "local_tokens": 0,
+            "external_tokens": {
+                "input_new": 1000,
+                "output": 500,
+                "cache_read": 20000,
+                "cache_write": 3000,
+            },
+        },
+        "local_harness": {
+            "model": "qwen3-vl",
+            "quality": 0.82,
+            "agreement_with_teacher": 0.9,
+            "wall_s": 200.0,
+            "local_tokens": 90000,
+            "external_tokens": dict(ZERO),
+        },
+        "local_direct": {
+            "model": "qwen3-vl",
+            "quality": 0.60,
+            "agreement_with_teacher": 0.7,
+            "wall_s": 150.0,
+            "local_tokens": 70000,
+            "external_tokens": dict(ZERO),
+        },
+    }[name]
+    row.update(
+        arm=name,
+        task="plates-subtask",
+        decoding={"temperature": 0, "seed": 1},
+        scoring={"metric": "segment_f1", "reference": "gold"},
+        episode_set=EPISODES,
+    )
+    row.update(over)
+    return ArmRecord(**row)
+
+
+def three(**over_by_arm):
+    return [arm(n, **over_by_arm.get(n, {})) for n in compare.ARMS]
+
+
+def blind(**over_by_arm):
+    """Three arms that name their problems by hash and count only (confirm)."""
+    digest = compare.episode_set_hash(EPISODES)
+    return [
+        arm(
+            n,
+            episode_set=None,
+            episode_set_hash=digest,
+            episode_count=len(EPISODES),
+            **over_by_arm.get(n, {}),
+        )
+        for n in compare.ARMS
+    ]
+
+
+def rows(table):
+    return {r["arm"]: r for r in table.rows}
+
+
+def test_the_names_are_the_ones_of_the_external_report():
+    assert compare.TOKEN_FIELDS == external_report.TOKEN_FIELDS
+
+
+def test_three_arms_make_one_table_with_the_derived_columns():
+    table = compare.compare(reversed(three()))  # the input order does not matter
+    assert [r["arm"] for r in table.rows] == list(compare.ARMS)
+    teacher, harness, direct = (rows(table)[a] for a in compare.ARMS)
+
+    assert teacher["external_tokens_total"] == 1000 + 500 + 3000  # cache_read apart
+    assert teacher["quality_per_second"] == pytest.approx(0.80 / 600)
+    assert teacher["quality_per_external_token"] == pytest.approx(0.80 / 4500)
+    assert harness["quality_per_second"] == pytest.approx(0.82 / 200)
+    # Zero external tokens: the ratio has no denominator, and it is not "unknown".
+    assert harness["quality_per_external_token"] is None
+    assert "quality_per_external_token" in harness["undefined"]
+    assert harness["unknown"] == []
+
+    assert harness["vs_teacher"] == {
+        "quality_delta": pytest.approx(0.02),
+        "wall_s_delta": -400.0,
+        "external_tokens_delta": -4500,
+    }
+    assert harness["vs_direct"]["quality_delta"] == pytest.approx(0.22)
+    assert harness["vs_direct"]["wall_s_delta"] == 50.0
+    assert teacher["vs_teacher"] == {"self": True}
+    assert direct["vs_direct"] == {"self": True}
+    assert table.main_metric == {
+        "quality_not_lower": True,
+        "faster": True,
+        "fewer_external_tokens": True,
+        "all": True,
+        "point_estimates_only": True,
+    }
+    assert table.conditions["episode_count"] == 12
+    assert table.missing_arms == []
+
+
+def test_the_markdown_has_one_row_per_arm_with_every_column():
+    text = compare.compare(three()).to_markdown()
+    for head in (
+        "质量（对金标准）",
+        "与教师一致率",
+        "墙钟 (s)",
+        "本地 token",
+        "外部 input_new",
+        "外部 output",
+        "外部 cache_read",
+        "外部 cache_write",
+        "每秒质量",
+        "每千外部 token 质量",
+        "对教师 Δ质量",
+        "对直接调用 Δ质量",
+    ):
+        assert head in text
+    for name in compare.ARMS:
+        assert text.count(f"| {name} |") == 3  # once in each of the three tables
+    assert "| teacher | claude-opus | 0.800 |" in text
+    assert "0.178" in text  # 0.80 / 4500 * 1000
+    assert "+0.020" in text and "-400.0" in text and "-4,500" in text
+    assert "三项全满足：是" in text
+    assert "外部 token 来源" in text
+
+
+def test_the_json_is_plain_and_complete():
+    table = compare.compare(three())
+    data = json.loads(table.to_json())
+    assert data["schema"] == compare.TABLE_SCHEMA
+    assert data["conditions"]["external_token_basis"] == list(compare.FRESH_BASIS)
+    assert [r["arm"] for r in data["rows"]] == list(compare.ARMS)
+    for key in (
+        "quality",
+        "agreement_with_teacher",
+        "wall_s",
+        "local_tokens",
+        "external_tokens",
+        "quality_per_second",
+        "quality_per_external_token",
+        "vs_teacher",
+        "vs_direct",
+    ):
+        assert key in data["rows"][0]
+
+
+def test_a_missing_teacher_token_count_is_unknown_never_zero():
+    table = compare.compare(three(teacher={"external_tokens": None}))
+    teacher, harness, _ = (rows(table)[a] for a in compare.ARMS)
+    assert teacher["external_tokens"] == dict.fromkeys(compare.TOKEN_FIELDS)
+    assert teacher["external_tokens_total"] is None
+    assert teacher["quality_per_external_token"] is None
+    assert "quality_per_external_token" in teacher["unknown"]
+    assert "external_tokens_total" in teacher["unknown"]
+    # What needs the teacher's tokens is unknown too, and the headline cannot say "yes".
+    assert harness["vs_teacher"]["external_tokens_delta"] is None
+    assert "vs_teacher.external_tokens_delta" in harness["unknown"]
+    assert table.main_metric["fewer_external_tokens"] is None
+    assert table.main_metric["all"] is None
+
+    text = table.to_markdown()
+    teacher_line = next(
+        line for line in text.splitlines() if line.startswith("| teacher | 0 |")
+    )
+    assert teacher_line.count("未知") == 5  # four fields and the total
+    quality_line = next(
+        line for line in text.splitlines() if line.startswith("| teacher | claude")
+    )
+    assert quality_line.endswith("| 未知 | — |")  # quality per external token
+    assert "外部 token 更少：未知" in text
+    assert "三项全满足：未知" in text
+
+
+def test_unknown_and_zero_are_different_rows():
+    zero = rows(compare.compare(three(teacher={"external_tokens": dict(ZERO)})))[
+        "teacher"
+    ]
+    unknown = rows(compare.compare(three(teacher={"external_tokens": None})))["teacher"]
+    assert zero["external_tokens"] == ZERO and unknown["external_tokens"] != ZERO
+    assert zero["unknown"] == [] and zero["undefined"] == ["quality_per_external_token"]
+    assert "quality_per_external_token" in unknown["unknown"]
+    assert unknown["undefined"] == []
+
+
+def test_one_missing_field_makes_the_total_unknown_only_if_the_basis_uses_it():
+    base = {"input_new": 10, "output": 20, "cache_read": 30, "cache_write": 40}
+    no_read = dict(base, cache_read=None)
+    no_write = dict(base, cache_write=None)
+    assert (
+        rows(compare.compare([arm(external_tokens=no_read)]))["teacher"][
+            "external_tokens_total"
+        ]
+        == 10 + 20 + 40
+    )
+    assert (
+        rows(compare.compare([arm(external_tokens=no_write)]))["teacher"][
+            "external_tokens_total"
+        ]
+        is None
+    )
+    wide = compare.compare(
+        [arm(external_tokens=no_read)], token_basis=compare.TOKEN_FIELDS
+    )
+    assert rows(wide)["teacher"]["external_tokens_total"] is None
+    only = compare.compare([arm(external_tokens=base)], token_basis=("output",))
+    assert rows(only)["teacher"]["external_tokens_total"] == 20
+    assert only.conditions["external_token_basis"] == ["output"]
+
+
+@pytest.mark.parametrize(
+    ("field", "unknown_columns"),
+    [
+        ("quality", ["quality_per_second", "vs_teacher.quality_delta"]),
+        ("wall_s", ["quality_per_second", "vs_teacher.wall_s_delta"]),
+        ("local_tokens", []),
+    ],
+)
+def test_other_missing_measurements_are_unknown_in_every_dependent_column(
+    field, unknown_columns
+):
+    table = compare.compare(three(local_harness={field: None}))
+    harness = rows(table)["local_harness"]
+    assert harness[field] is None
+    assert {field, *unknown_columns} <= set(harness["unknown"])
+    assert "未知" in table.to_markdown()
+    assert (table.main_metric["all"] is None) == bool(unknown_columns)
+
+
+def test_a_slower_or_worse_student_is_reported_as_no():
+    table = compare.compare(
+        three(
+            local_harness={
+                "quality": 0.7,
+                "wall_s": 900.0,
+                "external_tokens": {**ZERO, "output": 10000},
+            }
+        )
+    )
+    assert table.main_metric["quality_not_lower"] is False
+    assert table.main_metric["faster"] is False
+    assert table.main_metric["fewer_external_tokens"] is False
+    assert table.main_metric["all"] is False
+    # One "no" decides even when another answer is unknown.
+    partial = compare.compare(
+        three(local_harness={"quality": 0.7}, teacher={"external_tokens": None})
+    )
+    assert partial.main_metric["all"] is False
+
+
+def test_a_round_may_lack_arms():
+    table = compare.compare([arm("teacher")])
+    assert table.missing_arms == ["local_harness", "local_direct"]
+    assert table.main_metric is None
+    assert rows(table)["teacher"]["vs_direct"] is None
+    assert "本轮缺少：local_harness, local_direct" in table.to_markdown()
+    assert "无此臂" in table.to_markdown()
+
+
+def test_the_same_problems_have_one_hash_however_they_are_written():
+    a = compare.episode_set_hash([3, 1, 2])
+    assert a == compare.episode_set_hash(["2", "3", "1", 1])
+    assert a != compare.episode_set_hash([1, 2, 4])
+    by_ids = arm(episode_set=[1, 2, 3])
+    by_hash = arm(episode_set=None, episode_set_hash=a, episode_count=3)
+    assert by_ids.episode_set_hash == by_hash.episode_set_hash == a
+    compare.compare(
+        [
+            by_ids,
+            arm("local_harness", episode_set=None, episode_set_hash=a, episode_count=3),
+        ]
+    )
+
+
+def test_records_over_different_problems_are_refused_and_the_difference_is_named():
+    other = arm("local_harness", episode_set=EPISODES[:-1])
+    with pytest.raises(CompareError) as refused:
+        compare.compare([arm("teacher"), other, arm("local_direct")])
+    text = str(refused.value)
+    assert "episode_set_hash differs" in text
+    assert "teacher=" in text and "local_harness=" in text
+    assert "episode_count differs" in text
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "named"),
+    [
+        ("decoding", {"temperature": 0.7, "seed": 1}, "decoding differs"),
+        ("scoring", {"metric": "accuracy", "reference": "gold"}, "scoring differs"),
+        ("task", "screws-subtask", "task differs"),
+    ],
+)
+def test_a_different_decoding_scoring_or_task_is_refused(field, value, named):
+    with pytest.raises(CompareError, match=named):
+        compare.compare([arm("teacher"), arm("local_direct", **{field: value})])
+
+
+def test_every_difference_is_listed_at_once():
+    odd = arm(
+        "local_direct",
+        decoding={"temperature": 1},
+        scoring="other",
+        episode_set=[1, 2],
+    )
+    with pytest.raises(CompareError) as refused:
+        compare.compare([arm("teacher"), odd])
+    assert len(refused.value.problems) >= 4
+
+
+def test_two_records_for_one_arm_are_refused():
+    with pytest.raises(CompareError, match="two records for arm teacher"):
+        compare.compare([arm("teacher"), arm("teacher", quality=0.5)])
+
+
+def test_nothing_to_compare_is_refused():
+    with pytest.raises(CompareError, match="no records"):
+        compare.compare([])
+    with pytest.raises(CompareError, match="not an ArmRecord"):
+        compare.compare([{"arm": "teacher"}])
+    for basis in ((), ("output", "output"), ("bogus",)):
+        with pytest.raises(CompareError, match="token_basis"):
+            compare.compare([arm()], token_basis=basis)
+
+
+def test_confirm_allows_aggregate_scores_only():
+    table = compare.compare(blind(), confirm=True)
+    assert table.conditions["confirm"] is True
+    assert "confirm" in table.to_markdown()
+    assert all("per_episode" not in r for r in table.rows)
+    assert "per_episode" not in table.to_json()
+
+
+def test_confirm_refuses_per_episode_content():
+    scores = {"7": 1.0, "9": 0.0}
+    with pytest.raises(CompareError, match="per_episode scores"):
+        compare.compare(blind(local_harness={"per_episode": scores}), confirm=True)
+    # Outside confirm the same record is fine and the scores are passed through.
+    table = compare.compare(three(local_harness={"per_episode": scores}))
+    assert rows(table)["local_harness"]["per_episode"] == scores
+
+
+def test_confirm_refuses_an_explicit_episode_list_but_takes_the_hash():
+    assert compare.compare(blind(), confirm=True).conditions["episode_count"] == 12
+    with pytest.raises(CompareError, match="explicit episode_set"):
+        compare.compare(three(), confirm=True)
+
+
+def test_confirm_takes_a_reason_code_but_not_free_text():
+    free = "episode 7 failed because the plate was upside down"
+    with pytest.raises(CompareError, match="blocked text"):
+        compare.compare(blind(local_harness={"blocked": free}), confirm=True)
+    with pytest.raises(CompareError, match="external_tokens_source text"):
+        compare.compare(
+            blind(teacher={"external_tokens_source": "see session of episode 7"}),
+            confirm=True,
+        )
+    ok = compare.compare(blind(local_harness={"blocked": "gpu_busy"}), confirm=True)
+    assert rows(ok)["local_harness"]["blocked"] == "gpu_busy"
+    # The free text is fine in an open round.
+    compare.compare(three(local_harness={"blocked": free}))
+
+
+def test_a_field_the_record_does_not_know_is_refused_in_both_modes():
+    row = arm().to_dict()
+    row["answers"] = {"7": "grasp the plate"}
+    with pytest.raises(RecordError, match="unknown fields"):
+        ArmRecord.from_dict(row)
+
+
+def test_a_record_is_validated():
+    bad = [
+        {"arm": "student"},
+        {"quality": math.nan},
+        {"quality": True},
+        {"quality": "0.8"},
+        {"wall_s": 0},
+        {"wall_s": -3},
+        {"local_tokens": True},
+        {"local_tokens": -1},
+        {"local_tokens": 1.5},
+        {"external_tokens": {"input_new": True}},
+        {"external_tokens": {"input_new": -1}},
+        {"external_tokens": {"input": 1}},
+        {"agreement_with_teacher": 1.2, "arm": "local_direct"},
+        {"agreement_with_teacher": 0.5},  # the teacher arm has none
+        {"quality_ci": (0.9, 0.7)},
+        {"quality_ci": (0.5,)},
+        {"blocked": "two\nlines"},
+        {"blocked": ""},
+        {"decoding": "greedy"},
+        {"scoring": ""},
+        {"episode_set": []},
+        {"episode_set": [1, True]},
+        {"episode_set": [1, 2], "episode_count": 5},
+        {"episode_set": [1, 2], "episode_set_hash": "0" * 64},
+        {"episode_set": None},
+        {"model": None},
+        {"per_episode": [1, 2]},
+    ]
+    for over in bad:
+        with pytest.raises(RecordError):
+            arm(**over)
+
+
+def test_a_record_survives_json_and_is_not_changed_by_its_source():
+    source = {"temperature": 0, "seed": 1}
+    tokens_in = {"input_new": 1, "output": 2}
+    record = arm(
+        decoding=source,
+        external_tokens=tokens_in,
+        quality_ci=(0.7, 0.9),
+        quality_ci_method="wilson95",
+        per_episode={"1": 1.0},
+    )
+    source["temperature"] = 9
+    tokens_in["output"] = 99
+    assert record.decoding["temperature"] == 0
+    assert record.external_tokens == {
+        "input_new": 1,
+        "output": 2,
+        "cache_read": None,
+        "cache_write": None,
+    }
+    again = ArmRecord.from_dict(json.loads(json.dumps(record.to_dict())))
+    assert again == record
+    assert record.to_dict()["schema"] == compare.ARM_SCHEMA
+    with pytest.raises(RecordError, match="schema"):
+        ArmRecord.from_dict({**record.to_dict(), "schema": "other.v9"})
+    with pytest.raises(RecordError, match="missing fields"):
+        ArmRecord.from_dict({"arm": "teacher"})
+
+
+def test_a_pipe_in_a_name_does_not_break_the_table():
+    text = compare.compare([arm(model="a|b")]).to_markdown()
+    assert "a\\|b" in text
+
+
+def test_the_teacher_tokens_come_from_the_session_reader(tmp_path):
+    session = tmp_path / "s.jsonl"
+    session.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "timestamp": "2026-11-06T09:00:00Z",
+                    "message": {
+                        "id": "msg_a",
+                        "model": "claude-opus",
+                        "usage": {
+                            "input_tokens": 5,
+                            "output_tokens": out,
+                            "cache_read_input_tokens": 70,
+                            "cache_creation_input_tokens": 9,
+                        },
+                    },
+                }
+            )
+            for out in (16, 415)
+        )
+    )
+    usage = tokens.usage_from_files([session])
+    record = arm(
+        model=usage.models[0],
+        external_tokens=usage.external_tokens(),
+        external_tokens_source=usage.source,
+    )
+    row = rows(compare.compare([record]))["teacher"]
+    assert row["external_tokens"] == {
+        "input_new": 5,
+        "output": 415,
+        "cache_read": 70,
+        "cache_write": 9,
+    }
+    assert row["external_tokens_total"] == 5 + 415 + 9
+    assert "last usage record per message id" in row["external_tokens_source"]
+
+
+def write_records(tmp_path, name, value):
+    path = tmp_path / name
+    path.write_text(json.dumps(value))
+    return str(path)
+
+
+def test_command_line_reads_files_in_three_shapes(tmp_path, capsys):
+    a, b, c = (r.to_dict() for r in three())
+    files = [
+        write_records(tmp_path, "teacher.json", a),  # one record
+        write_records(tmp_path, "rest.json", {"records": [b, c]}),  # an envelope
+    ]
+    assert compare.main(files) == 0
+    text = capsys.readouterr().out
+    assert "教师–学生三组对比" in text and "local_direct" in text
+    all_three = write_records(tmp_path, "all.json", [a, b, c])  # a list
+    assert compare.main([all_three, "--format", "json"]) == 0
+    assert [r["arm"] for r in json.loads(capsys.readouterr().out)["rows"]] == list(
+        compare.ARMS
+    )
+
+
+def test_command_line_refuses_and_says_why(tmp_path, capsys):
+    a = arm("teacher").to_dict()
+    b = arm("local_harness", episode_set=EPISODES[:3]).to_dict()
+    both = write_records(tmp_path, "both.json", [a, b])
+    assert compare.main([both]) == 2
+    assert "episode_set_hash differs" in capsys.readouterr().err
+    assert compare.main([str(tmp_path / "missing.json")]) == 2
+    broken = tmp_path / "broken.json"
+    broken.write_text("{not json")
+    assert compare.main([str(broken)]) == 2
+    leaky = write_records(
+        tmp_path, "leaky.json", [arm(per_episode={"1": 1.0}).to_dict()]
+    )
+    assert compare.main([leaky, "--confirm"]) == 2
+    assert "per_episode scores" in capsys.readouterr().err
+    assert compare.main([leaky]) == 0
+    assert compare.main([leaky, "--basis", "bogus"]) == 2
