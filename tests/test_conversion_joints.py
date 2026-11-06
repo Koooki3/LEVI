@@ -45,8 +45,38 @@ def options(**changes) -> Options:
     return Options(cameras=CAMERAS, workers=1, **changes)
 
 
-def build_capture(root: Path, joints=True, demos=("demo_001",)) -> Path:
-    """``task/<demo>`` folders. Real captures number frames from 1."""
+def encode_camera(path: Path):
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc2=size=64x48:rate={FPS}:duration={ROWS / FPS}",
+            "-frames:v",
+            str(ROWS),
+            "-c:v",
+            "libx264",
+            "-threads",
+            "1",
+            "-pix_fmt",
+            "yuv420p",
+            str(path),
+        ],
+        check=True,
+    )
+
+
+def build_capture(
+    root: Path, joints=True, demos=("demo_001",), names=None, video=True
+) -> Path:
+    """``task/<demo>`` folders. Real captures number frames from 1. ``names``
+    is the ``robot_joint_names`` the teleoperation collector saves in
+    metadata.json (the AERI collector saves none); ``video=False`` skips the
+    camera for tests that only read the CSVs."""
     task = root / "task"
     first = task / demos[0]
     first.mkdir(parents=True)
@@ -91,28 +121,10 @@ def build_capture(root: Path, joints=True, demos=("demo_001",)) -> Path:
             first / "robot_joint_states.csv", index=False
         )
     (task / "task_description.txt").write_text("Move the gripper")
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-nostdin",
-            "-v",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            f"testsrc2=size=64x48:rate={FPS}:duration={ROWS / FPS}",
-            "-frames:v",
-            str(ROWS),
-            "-c:v",
-            "libx264",
-            "-threads",
-            "1",
-            "-pix_fmt",
-            "yuv420p",
-            str(first / "wrist_camera.mp4"),
-        ],
-        check=True,
-    )
+    if names is not None:
+        (first / "metadata.json").write_text(json.dumps({"robot_joint_names": names}))
+    if video:
+        encode_camera(first / "wrist_camera.mp4")
     for name in demos[1:]:
         shutil.copytree(first, task / name)
     return root
@@ -366,6 +378,120 @@ def test_joint_limits_in_the_model_leave_room_for_the_radian_guard():
     ]
     assert len(limits) >= 14
     assert max(abs(v) for v in limits) < joint_states.MAX_ABS_RADIANS
+
+
+# --- robot_type: franka_fr3 only on evidence ------------------------------------------
+
+FR3_NAMES = [f"fr3_joint{i}" for i in range(1, 8)]
+PANDA_NAMES = [f"panda_joint{i}" for i in range(1, 8)]
+FINGERS = ["fr3_finger_joint1", "fr3_finger_joint2"]
+# a collector that lists the joints in another order than 1..7
+SHIFTED = [*FR3_NAMES[1:], FR3_NAMES[0]]
+# (names in metadata.json, a change to the angles, shown to be an FR3?)
+EVIDENCE = {
+    "fr3_names": (FR3_NAMES, None, True),
+    "fr3_names_and_fingers": ([*FR3_NAMES, *FINGERS], None, True),
+    "panda_names": (PANDA_NAMES, None, True),
+    "wrong_names": (SHIFTED, None, False),
+    "other_arm_names": ([f"joint{i}" for i in range(1, 8)], None, False),
+    "too_few_names": (FR3_NAMES[:3], None, False),
+    "no_names_within_limits": (None, None, True),
+    # joint 6 starts at 0.4398; the viewer tolerates 0.1 rad beyond a limit
+    "no_names_just_inside_the_tolerance": (None, ("joint_6_pos", 0.35), True),
+    "no_names_just_outside_the_tolerance": (None, ("joint_6_pos", 0.33), False),
+    "no_names_outside_the_limits": (None, ("joint_6_pos", 0.0), False),
+    # names win over the limits, both ways
+    "fr3_names_outside_the_limits": (FR3_NAMES, ("joint_6_pos", 0.0), True),
+    "wrong_names_within_the_limits": (SHIFTED, None, False),
+}
+
+
+def _read_with_evidence(tmp_path, names, change):
+    capture = build_capture(tmp_path / "capture", names=names, video=False)
+    demo = capture / "task/demo_001"
+    if change:
+        column, value = change
+        mutate(demo, lambda frame: frame.assign(**{column: value}))
+    pose, grip, *_ = raw.load(demo)
+    return joint_states.read(demo, pose, grip)
+
+
+@pytest.mark.parametrize("case", EVIDENCE)
+def test_franka_fr3_only_when_the_capture_shows_fr3_joints(tmp_path, case):
+    names, change, shown = EVIDENCE[case]
+    joints = _read_with_evidence(tmp_path, names, change)
+    assert joints.fr3_evidence()[0] is shown, joints.fr3_evidence()
+    layout = joint_states.settle([("task/demo_001", joints)])
+    assert layout.fr3 is shown
+    expected = "franka_fr3" if shown else "generic_arm"
+    assert joint_states.robot_type("generic_arm", layout) == expected
+    # an explicit robot_type is never replaced, proven or not
+    assert joint_states.robot_type("xarm7", layout) == "xarm7"
+    assert "set explicitly" in joint_states.robot_type_basis("xarm7", layout)
+    basis = joint_states.robot_type_basis("generic_arm", layout)
+    assert basis and ("task/demo_001" in basis) is (not shown)  # names the culprit
+    # the angles are exported either way, as the CSV has them
+    assert joints.positions.shape == (ROWS, 7)
+
+
+def test_one_demo_without_evidence_keeps_generic_arm_for_the_dataset():
+    angles = np.zeros((3, 7))
+    named = Joints(angles, None, None, FR3_NAMES, True)
+    inside = Joints(angles, None, None, None, True)
+    outside = Joints(angles, None, None, None, False)
+    assert joint_states.settle([("a", named), ("b", inside)]).fr3 is True
+    layout = joint_states.settle([("a", named), ("b", outside)])
+    assert layout.fr3 is False and layout.basis.startswith("b: ")
+    assert joint_states.robot_type("generic_arm", layout) == "generic_arm"
+
+
+def test_the_limits_are_the_ones_of_the_model_the_viewer_draws():
+    urdf = ROOT / "public/robots/fr3/fr3.urdf"
+    if not urdf.is_file():
+        pytest.skip("the FR3 model is not in this checkout")
+    found = re.findall(r'lower="([-\d.]+)" upper="([-\d.]+)"', urdf.read_text())
+    arm = [(float(lower), float(upper)) for lower, upper in found[:7]]
+    assert arm == list(joint_states.FR3_LIMITS)
+
+
+@pytest.mark.parametrize(
+    ("names", "change", "requested", "expected"),
+    [
+        (FR3_NAMES, None, "generic_arm", "franka_fr3"),
+        (SHIFTED, None, "generic_arm", "generic_arm"),
+        (None, ("joint_6_pos", 0.0), "generic_arm", "generic_arm"),
+        (FR3_NAMES, None, "my_arm", "my_arm"),  # explicit: kept
+        (None, None, "my_arm", "my_arm"),
+    ],
+    ids=[
+        "names_right",
+        "names_wrong",
+        "no_names_out_of_limits",
+        "explicit",
+        "explicit_unnamed",
+    ],
+)
+def test_the_converted_dataset_carries_the_decided_robot_type(
+    tmp_path, names, change, requested, expected
+):
+    rule = _ts_constants()
+    capture = build_capture(tmp_path / "capture", names=names)
+    if change:
+        column, value = change
+        mutate(capture / "task/demo_001", lambda frame: frame.assign(**{column: value}))
+    result = execute(
+        "pipeline", capture, tmp_path / "out", options(robot_type=requested)
+    )
+    dataset = Path(result["dataset_path"])
+    info = read_json(dataset / "meta/info.json")
+    assert info["robot_type"] == expected
+    assert JOINT_FEATURE in info["features"]  # the columns are written regardless
+    block = read_json(dataset / "meta/levi_conversion.json")["joint_positions"]
+    assert block["robot_type"] == expected and block["robot_type_basis"]
+    mode, _, _ = detect(rule, info["robot_type"], flat_keys(info, rule["delimiter"]))
+    # franka_fr3 is drawn from joints, generic_arm as a pose, anything else
+    # stays on the viewer it already had
+    assert mode == {"franka_fr3": "joints", "generic_arm": "pose"}.get(expected, "none")
 
 
 # --- no joint source: the output is what it was ---------------------------------------

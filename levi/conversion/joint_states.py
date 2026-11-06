@@ -17,12 +17,19 @@ from that file):
 - ``observation.gripper_width``: float32, shape [1], metres, the *measured*
   aperture. The gripper channel of ``observation.state`` / ``action`` stays
   the open/close command;
-- ``robot_type`` becomes ``franka_fr3`` when the requested one is still the
-  default ``generic_arm``, because the viewer only drives an FR3 from joint
-  columns when the robot type names the FR3 family (any 7-joint arm names its
-  joints ``joint_1..7``).
+- ``robot_type`` becomes ``franka_fr3`` only when the requested one is still
+  the default ``generic_arm`` *and* the capture shows these are FR3 joints:
+  ``metadata.json`` ``robot_joint_names`` (the teleoperation collector saves
+  the ROS joint-state names, in the order of the angles it writes) start with
+  ``fr3_joint1..7`` / ``panda_joint1..7``, or no names were recorded (the
+  AERI collector, ``levi/automatic/fr3_media.py``) and every angle of every
+  demo lies inside the FR3 limits +-0.1 rad. The viewer only drives an FR3
+  from joint columns when the robot type names the Franka family, and any
+  7-joint arm names its joints ``joint_1..7``; otherwise the columns are still
+  written and the robot type stays ``generic_arm``.
 """
 
+import json
 from dataclasses import dataclass
 
 import numpy as np
@@ -41,6 +48,21 @@ FR3_ROBOT_TYPE = "franka_fr3"
 # Joint angles are radians. FR3 joints stay within about +-3.1 (joint 6 reaches
 # 4.62), so a value beyond one full turn is degrees or ticks, never a pose.
 MAX_ABS_RADIANS = 2 * np.pi
+# FR3 joint limits in radians, as in the model the viewer draws
+# (public/robots/fr3/fr3.urdf; tests/test_conversion_joints.py compares them),
+# and the viewer's own tolerance for a value beyond a limit.
+FR3_LIMITS = (
+    (-2.9007, 2.9007),
+    (-1.8361, 1.8361),
+    (-2.9007, 2.9007),
+    (-3.077, -0.1169),
+    (-2.8763, 2.8763),
+    (0.4398, 4.6216),
+    (-3.0508, 3.0508),
+)
+LIMIT_TOLERANCE = 0.1
+FR3_NAMES = [f"fr3_joint{i}" for i in range(1, 8)]
+PANDA_NAMES = [f"panda_joint{i}" for i in range(1, 8)]
 # Measured aperture in metres: a 2F-85 opens 0.085, a Franka hand 0.08.
 # Millimetres (85) or a 0..1 fraction would silently mislabel the unit.
 GRIPPER_WIDTH_RANGE = (-0.005, 0.2)
@@ -54,6 +76,10 @@ class Joints:
     positions: np.ndarray  # (rows, 7) radians
     gripper_width: np.ndarray | None  # (rows,) metres, None when unusable
     gripper_problem: str | None = None
+    # metadata.json robot_joint_names (None: not recorded) and whether every
+    # angle of the demo, dropped rows included, is inside the FR3 limits.
+    names: list[str] | None = None
+    within_limits: bool = True
 
     def select(self, positions) -> "Joints":
         return Joints(
@@ -62,6 +88,25 @@ class Joints:
             if self.gripper_width is None
             else self.gripper_width[positions].astype(np.float32),
             self.gripper_problem,
+            self.names,
+            self.within_limits,
+        )
+
+    def fr3_evidence(self) -> tuple[bool, str]:
+        """Whether this demo's columns are shown to be FR3 joints 1..7."""
+        if self.names:
+            first = self.names[:7]
+            if first in (FR3_NAMES, PANDA_NAMES):
+                return True, f"robot_joint_names start {first[0]}..{first[-1]}"
+            return False, f"robot_joint_names start {first}, not fr3_joint1..7"
+        if self.within_limits:
+            return (
+                True,
+                f"no joint names recorded, every angle within the FR3 limits +-{LIMIT_TOLERANCE} rad",
+            )
+        return (
+            False,
+            f"no joint names recorded and an angle is outside the FR3 limits +-{LIMIT_TOLERANCE} rad",
         )
 
 
@@ -71,11 +116,24 @@ class Layout:
 
     gripper_width: bool
     gripper_problem: str | None = None
+    # Every demo is shown to be FR3 joints 1..7 (Joints.fr3_evidence), and why
+    # or why not, naming the first demo that is not.
+    fr3: bool = False
+    basis: str = ""
 
 
-def robot_type(requested: str) -> str:
-    """``franka_fr3`` for the default, any explicit choice unchanged."""
-    return FR3_ROBOT_TYPE if requested == DEFAULT_ROBOT_TYPE else requested
+def robot_type(requested: str, layout: Layout) -> str:
+    """``franka_fr3`` for the default when every demo is shown to be an FR3,
+    any explicit choice (and an unproven FR3) unchanged."""
+    return (
+        FR3_ROBOT_TYPE if requested == DEFAULT_ROBOT_TYPE and layout.fr3 else requested
+    )
+
+
+def robot_type_basis(requested: str, layout: Layout) -> str:
+    if requested != DEFAULT_ROBOT_TYPE:
+        return f"robot_type {requested!r} was set explicitly and is kept"
+    return layout.basis
 
 
 # What every refusal ends with: the way out.
@@ -87,6 +145,20 @@ EXIT = (
 
 def _fail(message: str) -> raw.CaptureError:
     return raw.CaptureError("joint_states", f"{FILE}: {message}. {EXIT}")
+
+
+def _names(demo) -> list[str] | None:
+    """``robot_joint_names`` of the demo's metadata.json, in the order of the
+    angle columns (the teleoperation collector writes the first seven of its
+    joint-state message); ``None`` when not recorded."""
+    try:
+        meta = json.loads((demo / "metadata.json").read_text())
+    except (OSError, ValueError):
+        return None
+    names = meta.get("robot_joint_names") if isinstance(meta, dict) else None
+    if not isinstance(names, list) or not names:
+        return None
+    return [str(name) for name in names]
 
 
 def read(demo, pose: pd.DataFrame, grip: pd.DataFrame) -> Joints | None:
@@ -154,7 +226,14 @@ def read(demo, pose: pd.DataFrame, grip: pd.DataFrame) -> Joints | None:
             f"gripper_state.csv gripper_width spans {width.min():g}..{width.max():g}, "
             f"outside {low:g}..{high:g} m: not metres?"
         )
-    return Joints(angles, None if problem else width, problem)
+    low_limits, high_limits = np.array(FR3_LIMITS).T
+    within = bool(
+        (
+            (angles >= low_limits - LIMIT_TOLERANCE)
+            & (angles <= high_limits + LIMIT_TOLERANCE)
+        ).all()
+    )
+    return Joints(angles, None if problem else width, problem, _names(demo), within)
 
 
 def settle(items: list[tuple[str, Joints | None]]) -> Layout | None:
@@ -182,7 +261,26 @@ def settle(items: list[tuple[str, Joints | None]]) -> Layout | None:
         for source, joints in items
         if joints is not None and joints.gripper_problem
     ]
-    if problems:
-        source, problem = problems[0]
-        return Layout(False, f"{source}: {problem}")
-    return Layout(True)
+    unproven = [
+        (source, why)
+        for source, joints in items
+        if joints is not None
+        for ok, why in [joints.fr3_evidence()]
+        if not ok
+    ]
+    fr3 = not unproven
+    named = sum(1 for _, joints in items if joints is not None and joints.names)
+    if unproven:
+        source, why = unproven[0]
+        basis = (
+            f"{source}: {why}; the columns are exported, robot_type stays "
+            f"{DEFAULT_ROBOT_TYPE}"
+        )
+    else:
+        basis = (
+            f"{named} demo(s) with robot_joint_names fr3_joint1..7 / "
+            f"panda_joint1..7, {len(items) - named} without names and every "
+            f"angle within the FR3 limits +-{LIMIT_TOLERANCE} rad"
+        )
+    problem = f"{problems[0][0]}: {problems[0][1]}" if problems else None
+    return Layout(not problems, problem, fr3, basis)

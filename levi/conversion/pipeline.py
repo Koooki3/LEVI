@@ -539,7 +539,9 @@ def _write(
                 "names": list(joint_states.GRIPPER_NAMES),
             }
     robot_type = (
-        joint_states.robot_type(options.robot_type) if layout else options.robot_type
+        joint_states.robot_type(options.robot_type, layout)
+        if layout
+        else options.robot_type
     )
 
     total = offset
@@ -593,7 +595,9 @@ def _write(
             "position_units": "metres",
             "gripper": "command: open=1, close=0; not measured aperture",
             **(
-                {"joint_positions": _joint_record(layout, robot_type)} if layout else {}
+                {"joint_positions": _joint_record(layout, robot_type, options)}
+                if layout
+                else {}
             ),
             "image_statistics": "all decoded output pixels, RGB normalized to [0,1]",
         },
@@ -610,7 +614,7 @@ def _write(
     return {"validation": validation, "video_modes": modes}
 
 
-def _joint_record(layout, robot_type) -> dict:
+def _joint_record(layout, robot_type, options) -> dict:
     """What ``levi_conversion.json`` says about the joint columns."""
     measured = (
         {
@@ -630,6 +634,7 @@ def _joint_record(layout, robot_type) -> dict:
         f"{joint_states.POSITION_COLUMNS[-1]}, row for row with "
         "end_effector_pose.csv",
         "robot_type": robot_type,
+        "robot_type_basis": joint_states.robot_type_basis(options.robot_type, layout),
         "gripper_width": measured,
     }
 
