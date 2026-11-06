@@ -1072,7 +1072,9 @@ def test_per_event_uniform_gives_every_event_the_same_total_weight():
         "events_upweighted": 1,  # 5 frames < 8
         "events_unchanged": 1,  # 8 frames == 8
         "events_downweighted": 1,  # 20 frames > 8
+        "events_partly_excluded": 0,
         "frames_in_events": 33,
+        "frames_excluded_in_events": 0,
         "frames_outside_events": 3,
         "min_factor": pytest.approx(0.4),
         "max_factor": pytest.approx(1.6),
@@ -1091,6 +1093,7 @@ def test_degenerate_events_never_produce_nan_or_negative_weights():
     assert np.isfinite(weight).all() and (weight >= 0).all()
     assert (found["events"], found["events_scaled"], found["events_empty"]) == (3, 1, 2)
     assert (found["frames_in_events"], found["frames_outside_events"]) == (1, 3)
+    assert found["frames_excluded_in_events"] == 3  # event 0, kept by nobody
     assert found["max_factor"] == found["min_factor"] == 8
 
     # N == T changes nothing; N = 1 gives every event a total of one.
@@ -1172,8 +1175,8 @@ def test_per_event_uniform_changes_weight_only_and_only_inside_events(repo):
     _assert_sound_weights(f)
     # Said in manifest.json: what ran, with which numbers, and what it found.
     tempo = result["tempo"]
-    assert tempo["name"] == "per_event_uniform" and tempo["version"] == 1
-    assert tempo["params"] == {"frames": 4, "segments": "reviewed"}
+    assert tempo["name"] == "per_event_uniform" and tempo["version"] == 2
+    assert tempo["params"] == {"frames": 4, "segments": "reviewed", "count": "segment"}
     assert tempo["events"] == {
         "spans": 4,
         "spans_not_events": 1,
@@ -1183,7 +1186,9 @@ def test_per_event_uniform_changes_weight_only_and_only_inside_events(repo):
         "events_upweighted": 0,
         "events_unchanged": 0,
         "events_downweighted": 3,
+        "events_partly_excluded": 0,
         "frames_in_events": 17,
+        "frames_excluded_in_events": 0,
         "frames_outside_events": 13,
         "episodes_with_events": 2,
         "min_factor": pytest.approx(4 / 7, abs=1e-6),
@@ -1204,14 +1209,17 @@ def test_the_tempo_step_follows_whichever_operation_ran(repo):
     _segments(
         name, 0, [("grasp", 0.0, 0.5, None, None), ("place", 0.5, None, None, None)]
     )
-    # Only included frames count: grasp keeps frames 0, 2, 4 and place 6, 8, 10.
+    # grasp (5 frames) keeps frames 0, 2, 4 and place (7 frames) keeps 6, 8, 10;
+    # the frames the operation dropped count in T as weight 0.
     none = _frames(tm.build(repo, "advantage_positive_mask"))
     f = _frames(_tempo(repo, "advantage_positive_mask", frames=8))
     assert (f.include == none.include).all()
     assert (f.exclude_reason.fillna("") == none.exclude_reason.fillna("")).all()
-    for event in ("grasp", "place"):
+    for event, covered in (("grasp", 5), ("place", 7)):
         kept = f[f.include & (f.subtask_id == event)]
-        assert len(kept) == 3 and kept.weight.tolist() == pytest.approx([8 / 3] * 3)
+        assert len(kept) == 3 and kept.weight.tolist() == pytest.approx(
+            [8 / covered] * 3
+        )
     assert (f[~f.include].weight == 0).all()
     _assert_sound_weights(f)
 
@@ -1293,6 +1301,73 @@ def test_without_any_segment_the_tempo_step_changes_no_weight(repo):
     assert events["min_factor"] is None and events["max_factor"] is None
 
 
+def test_an_event_the_operation_thinned_does_not_hand_its_last_frame_the_whole_n():
+    # An event of 5 frames of which the operation kept one (advantage_positive_mask
+    # leaves one positive frame). T counts the segment, so that frame gets N / 5,
+    # not N: the event adds up to N times the share it kept.
+    include, weight, span_of = _unit(
+        [0] * 5 + [1] * 5, include=[1, 0, 0, 0, 0] + [1] * 5
+    )
+    found = tm.per_event_uniform(include, weight, span_of, [True, True], 8)
+    assert weight.tolist() == pytest.approx([1.6, 0, 0, 0, 0] + [1.6] * 5)
+    assert weight[:5].sum() == pytest.approx(8 * 1 / 5)
+    assert weight[5:].sum() == pytest.approx(8)  # kept whole: exactly N
+    assert found["events_partly_excluded"] == 1
+    assert found["frames_excluded_in_events"] == 4
+    assert found["events_empty"] == 0 and found["max_factor"] == pytest.approx(1.6)
+    # count=included is the first version: the lone frame gets all of N.
+    include, weight, span_of = _unit([0] * 5, include=[1, 0, 0, 0, 0])
+    found = tm.per_event_uniform(include, weight, span_of, [True], 8, "included")
+    assert weight.tolist() == [8, 0, 0, 0, 0] and found["events_partly_excluded"] == 1
+    with pytest.raises(tm.ManifestError, match="count must be one of"):
+        tm.per_event_uniform(include, weight, span_of, [True], 8, "kept")
+
+
+def test_the_lone_positive_frame_of_an_event_is_not_weighted_like_the_event(repo):
+    name = _name(repo)
+    _recap(repo)  # frame f is positive when f is even
+    # Episode 1: frames 1-3 are one event and only frame 2 is positive.
+    _segments(name, 1, [("x", 0.1, 0.4, None, None)])
+    f = _frames(_tempo(repo, "advantage_positive_mask", frames=8))
+    kept = f[(f.episode_index == 1) & f.include & (f.subtask_id == "x")]
+    assert kept.frame_index.tolist() == [2]
+    assert kept.weight.tolist() == pytest.approx([8 / 3])  # not 8
+    old = _frames(_tempo(repo, "advantage_positive_mask", frames=8, count="included"))
+    lone = old[(old.episode_index == 1) & old.include & (old.subtask_id == "x")]
+    assert lone.weight.tolist() == [8]
+
+
+def test_an_event_total_is_continuous_in_the_operations_cutoff(repo):
+    name = _name(repo)
+    _recap(repo)
+    _segments(
+        name, 0, [("grasp", 0.0, 0.5, None, None), ("place", 0.5, None, None, None)]
+    )
+
+    def totals(negative, **tempo_params):
+        params = {"negative_weight": negative, "unlabelled_weight": 0.5}
+        f = _frames(
+            tm.build(
+                repo,
+                "advantage_weighted",
+                params,
+                tempo="per_event_uniform",
+                tempo_params={"frames": 8, **tempo_params},
+            )
+        )
+        return {e: f[f.subtask_id == e].weight.sum() for e in ("grasp", "place")}
+
+    # A negative frame going from weight 0.001 to excluded (zero_weight) must
+    # change an event's total by about 0.001 of N, not make it jump to N.
+    soft, gone = totals(0.001), totals(0)
+    for event in soft:
+        assert abs(soft[event] - gone[event]) < 0.01, (event, soft, gone)
+    assert gone["grasp"] == pytest.approx(8 * 3 / 5)  # 3 positive of 5 frames
+    # count=included, the first version, jumps: the negatives leave T.
+    soft, gone = totals(0.001, count="included"), totals(0, count="included")
+    assert abs(soft["grasp"] - gone["grasp"]) > 3 and gone["grasp"] == pytest.approx(8)
+
+
 def test_tempo_parameters_are_in_the_fingerprint_and_in_compare(repo):
     name = _name(repo)
     _segments(
@@ -1305,14 +1380,22 @@ def test_tempo_parameters_are_in_the_fingerprint_and_in_compare(repo):
     assert tm.DEFAULT_EVENT_FRAMES == 8 and fp(default) == fp(eight)
     assert len({fp(four), fp(eight), fp(everything)}) == 3
     assert fp(eight) == tm.tempo_fingerprint(
-        "per_event_uniform", 1, {"frames": 8, "segments": "reviewed"}
+        "per_event_uniform",
+        2,
+        {"frames": 8, "segments": "reviewed", "count": "segment"},
     )
     # A changed step with the same parameters is a different input.
-    assert tm.tempo_fingerprint("per_event_uniform", 2, eight["tempo"]["params"]) != fp(
+    assert tm.tempo_fingerprint("per_event_uniform", 3, eight["tempo"]["params"]) != fp(
         eight
     )
+    included = _tempo(repo, frames=8, count="included")
+    assert fp(included) not in {fp(four), fp(eight), fp(everything)}
     on_disk = json.loads((Path(four["output_dir"]) / tm.MANIFEST).read_text())["tempo"]
-    assert on_disk["params"] == {"frames": 4, "segments": "reviewed"}
+    assert on_disk["params"] == {
+        "frames": 4,
+        "segments": "reviewed",
+        "count": "segment",
+    }
     assert on_disk["fingerprint"] == fp(four)
 
     diff = tm.compare(four["output_dir"], eight["output_dir"])
@@ -1376,9 +1459,10 @@ def test_tempo_refusals_cli_and_docs(repo, capsys):
         ({"frames": True}, "frames must be a whole number"),
         ({"frames": "many"}, "frames must be a whole number"),
         ({"segments": "some"}, "segments must be one of reviewed, all"),
+        ({"count": "kept"}, "count must be one of segment, included"),
         (
             {"stride": 3},
-            r"takes no parameter stride \(it takes frames, segments\)",
+            r"takes no parameter stride \(it takes frames, segments, count\)",
         ),
     ):
         with pytest.raises(tm.ManifestError, match=message):
@@ -1394,12 +1478,18 @@ def test_tempo_refusals_cli_and_docs(repo, capsys):
         "reviewed",
         "all",
     ]
+    count = steps["per_event_uniform"]["params"]["count"]
+    assert count["default"] == "segment" and count["choices"] == ["segment", "included"]
     assert tm.main(["manifest", repo, "--operation", "all_rollouts"]) == 0
     assert "tempo" not in json.loads(capsys.readouterr().out)
     assert tm.main(["manifest", repo, "--operation", "all_rollouts",
                     "--tempo", "per_event_uniform", "--tempo-param", "frames=4"]) == 0  # fmt: skip
     printed = json.loads(capsys.readouterr().out)
-    assert printed["tempo"]["params"] == {"frames": 4, "segments": "reviewed"}
+    assert printed["tempo"]["params"] == {
+        "frames": 4,
+        "segments": "reviewed",
+        "count": "segment",
+    }
     for extra, text in (
         (["--tempo", "per_event_uniform", "--tempo-param", "frames=0"], "at least 1"),
         (["--tempo", "per_event_uniform", "--tempo-param", "frames=2.5"], "whole"),

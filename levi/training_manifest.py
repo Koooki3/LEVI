@@ -318,12 +318,15 @@ TEMPOS: dict[str, Tempo] = {
             "length). A manifest can only say per frame whether it is included "
             "and how much it weighs, so it cannot draw N frames out of an "
             "event: instead every included frame of a subtask segment (the "
-            "event) is multiplied by frames / T, T being the segment's included "
-            "frames, so that the weights of an event whose frames the operation "
-            "weighted 1 add up to `frames` however long it is. include is never "
-            "changed and every action chunk stays whole. A frame in no "
-            "event keeps its weight. This is not the paper's method.",
-            1,
+            "event) is multiplied by frames / T, T being the number of frames "
+            "the segment covers (count=segment; a frame the operation excluded "
+            "counts as weight 0, so an event the operation thinned adds up to "
+            "`frames` times the share it kept), so that the weights of an event "
+            "whose frames the operation weighted 1 and kept add up to `frames` "
+            "however long it is. include is never changed and every action chunk "
+            "stays whole. A frame in no event keeps its weight. This is not the "
+            "paper's method.",
+            2,
             {
                 "frames": Param(
                     int,
@@ -338,9 +341,22 @@ TEMPOS: dict[str, Tempo] = {
                     str,
                     "reviewed",
                     "which subtask segments are events: reviewed (review empty "
-                    "or edited, the rule the prompt columns use; unreviewed "
-                    "automatic segments never steer the weights) or all",
+                    "or edited, the rule the prompt columns use; an unreviewed "
+                    "automatic segment is not an event) or all",
                     ("reviewed", "all"),
+                ),
+                "count": Param(
+                    str,
+                    "segment",
+                    "what T is in frames / T: segment (every frame the segment "
+                    "covers; a frame the operation excluded counts as weight 0, "
+                    "so the event's total follows the share the operation kept "
+                    "and moves continuously with the operation's cutoff) or "
+                    "included (only the frames the operation kept: the event "
+                    "always adds up to `frames`, so a single positive frame left "
+                    "in a long event weighs as much as the whole event, and the "
+                    "total jumps when a weight becomes 0)",
+                    ("segment", "included"),
                 ),
             },
         ),
@@ -410,7 +426,9 @@ class _TempoStats:
                 "events_upweighted",
                 "events_unchanged",
                 "events_downweighted",
+                "events_partly_excluded",
                 "frames_in_events",
+                "frames_excluded_in_events",
                 "frames_outside_events",
                 "episodes_with_events",
             ),
@@ -444,11 +462,12 @@ def per_event_uniform(
     span_of: np.ndarray,
     is_event: list[bool] | np.ndarray,
     frames: int,
+    count: str = "segment",
 ) -> dict[str, Any]:
-    """Rescale ``weight`` in place so each event's weights add up to ``frames``
-    times the mean weight the operation gave its frames (exactly ``frames``
-    when that weight is 1, the case of every operation but
-    ``advantage_weighted``).
+    """Rescale ``weight`` in place so that an event whose frames the operation
+    weighted 1 adds up to ``frames`` times the share of its frames the
+    operation kept (exactly ``frames`` when it kept all of them, and with
+    ``count="included"`` always).
 
     ``span_of[i]`` is the index of the subtask segment that owns frame i, -1
     for none: a frame covered by several segments belongs to the one that
@@ -456,23 +475,36 @@ def per_event_uniform(
     scaled twice. ``is_event[k]`` says whether segment k is used. ``include``
     is only read.
 
-    T is the number of included frames an event owns. T == 0 (the segment
-    covers no frame, the operation dropped them all, or a later overlapping
-    segment owns them) leaves nothing to scale and is counted, never
-    divided by. 0 < T < ``frames`` multiplies by more than 1 (the event is
-    brought up to ``frames``); T == ``frames`` changes nothing. The factor
-    ``frames / T`` is positive and finite, so no weight becomes NaN or
-    negative.
+    T, the divisor, is what ``count`` says. ``segment`` (the default): the
+    frames the event owns, kept or not. A frame the operation excluded has
+    weight 0 and stays 0, so it counts in T as weight 0: the event's total is
+    ``frames`` times the share kept, and moves continuously when the
+    operation's cutoff moves (a negative frame going from weight 0.001 to
+    excluded changes the total by 0.001 frames, not from a share to
+    ``frames``). ``included``: only the frames the operation kept, the first
+    version of this step: the event always adds up to ``frames``, so the one
+    positive frame left in a long event weighs as much as all of it would.
+
+    An event with no kept frame (the segment covers no frame, the operation
+    dropped them all, or a later overlapping segment owns them) leaves
+    nothing to scale and is counted in ``events_empty``, never divided by.
+    0 < T < ``frames`` multiplies by more than 1 (the event is brought up to
+    ``frames``); T == ``frames`` changes nothing. The factor ``frames / T`` is
+    positive and finite, so no weight becomes NaN or negative.
     """
+    if count not in ("segment", "included"):
+        raise ManifestError(f"count must be one of segment, included, not {count!r}")
     usable = np.asarray(is_event, dtype=bool)
     own = np.zeros(len(span_of), dtype=bool)
     if len(usable):
         own = (span_of >= 0) & usable[np.maximum(span_of, 0)]
     keep = include & own
     retained = np.bincount(span_of[keep], minlength=len(usable))
+    owned = np.bincount(span_of[own], minlength=len(usable))
+    total = owned if count == "segment" else retained
     scaled = usable & (retained > 0)
     factor = np.ones(len(usable), dtype=np.float64)
-    factor[scaled] = frames / retained[scaled]
+    factor[scaled] = frames / total[scaled]
     weight[keep] = (weight[keep].astype(np.float64) * factor[span_of[keep]]).astype(
         np.float32
     )
@@ -485,10 +517,14 @@ def per_event_uniform(
         "events": int(usable.sum()),
         "events_scaled": int(scaled.sum()),
         "events_empty": int((usable & ~scaled).sum()),
-        "events_upweighted": int((scaled & (retained < frames)).sum()),
-        "events_unchanged": int((scaled & (retained == frames)).sum()),
-        "events_downweighted": int((scaled & (retained > frames)).sum()),
+        "events_upweighted": int((scaled & (total < frames)).sum()),
+        "events_unchanged": int((scaled & (total == frames)).sum()),
+        "events_downweighted": int((scaled & (total > frames)).sum()),
+        # Events the operation thinned: T counted by segment differs from T
+        # counted by included frames in exactly these.
+        "events_partly_excluded": int((scaled & (retained < owned)).sum()),
         "frames_in_events": int(keep.sum()),
+        "frames_excluded_in_events": int((own & ~include).sum()),
         "frames_outside_events": int((include & ~own).sum()),
         "min_factor": float(factor[scaled].min()) if scaled.any() else None,
         "max_factor": float(factor[scaled].max()) if scaled.any() else None,
@@ -938,6 +974,7 @@ def build(
                     for s in spans
                 ],
                 tempo_settings["frames"],
+                tempo_settings["count"],
             )
             tempo_stats.add(tempo_found, len(spans))
 
@@ -1402,8 +1439,9 @@ def main(argv=None) -> int:
         choices=list(TEMPOS),
         help="a step after the operation that only rescales weight inside each "
         "subtask segment (include is never changed). per_event_uniform: every "
-        "segment's weights add up to `frames` however long it is, a weight "
-        "approximation of VPP2's N-frame draw per event, not that method; "
+        "segment's weights add up to `frames` (times the share of its frames "
+        "the operation kept) however long it is, a weight approximation of "
+        "VPP2's N-frame draw per event, not that method; "
         "`levi export tempos` lists the parameters (default: %(default)s, the "
         "manifest is unchanged)",
     )
@@ -1411,7 +1449,8 @@ def main(argv=None) -> int:
         "--tempo-param",
         action="append",
         default=[],
-        help="key=value for --tempo, e.g. frames=8 or segments=all (repeatable)",
+        help="key=value for --tempo, e.g. frames=8, segments=all or "
+        "count=included (repeatable)",
     )
     make.add_argument("--output", help="a new directory inside the workspace")
     make.add_argument("--json", action="store_true", help="print the whole manifest")
