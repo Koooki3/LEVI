@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
 import { FR3_JOINT_LIMITS } from "@/lib/robot-studio/fr3-kinematics";
+import { ROBOTIQ_STROKE_M } from "@/lib/robot-studio/robotiq-2f85";
 import { detectFr3Replay } from "@/lib/replay/fr3-columns";
 import { TimeProvider, useTime } from "@/context/time-context";
 import { LocaleProvider } from "@/components/levi-locale";
@@ -211,6 +212,31 @@ describe("ReplayPanel: what it says", () => {
     expect(
       host.querySelector('[role="meter"]')!.getAttribute("aria-valuenow"),
     ).toBe("0");
+  });
+
+  test("a measured gripper width is shown in metres, against the stroke, and not as a command", async () => {
+    const rows = jointRows(10).map((row, i) => ({
+      ...row,
+      "observation.gripper_width | gripper_width": i < 5 ? 0.042 : 0,
+    }));
+    const detection = detectFr3Replay({ robot_type: "franka_fr3" }, [
+      "timestamp",
+      ...keys("observation.state", [...jointNames, "gripper"]),
+      "observation.gripper_width | gripper_width",
+    ]);
+    expect(detection.gripperKind).toBe("width");
+    const { host } = await render(panel({ detection, rows }));
+    const text = host.textContent ?? "";
+    expect(text).toContain("Gripper opening, measured: 0.042 m (0 = closed)");
+    expect(text).not.toContain("a command, not a measured width");
+    const meter = host.querySelector('[role="meter"]')!;
+    expect(meter.getAttribute("aria-label")).toBe("Measured gripper opening");
+    expect(Number(meter.getAttribute("aria-valuenow"))).toBeCloseTo(
+      0.042 / ROBOTIQ_STROKE_M,
+      6,
+    );
+    await act(async () => time.seek(3));
+    expect(host.textContent).toContain("Gripper opening, measured: 0.000 m");
   });
 
   test("a long episode is flagged as possibly thinned; joints beyond the limits are reported", async () => {

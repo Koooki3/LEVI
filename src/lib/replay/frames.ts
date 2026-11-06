@@ -6,6 +6,7 @@
 import { FR3_JOINT_LIMITS } from "@/lib/robot-studio/fr3-kinematics";
 import { packTrack, type ReplayTrack } from "./clock";
 import type {
+  Fr3GripperKind,
   Fr3ReplayDetection,
   Fr3ReplayMode,
   Fr3Rotation,
@@ -41,6 +42,8 @@ export interface ReplayData {
   actionRotation: Fr3Rotation | null;
   /** The observation gripper column, one value per row, or null. */
   gripper: ReplayTrack | null;
+  /** `width`: measured metres (blended between rows); `command`: open = 1 / closed = 0 (held). */
+  gripperKind: Fr3GripperKind | null;
   /** Episode-relative seconds of the first and last row. */
   startS: number;
   endS: number;
@@ -138,6 +141,7 @@ export function buildReplayData(
     actionMode: action ? detection.actionMode : "none",
     actionRotation: action ? detection.actionRotation : null,
     gripper,
+    gripperKind: gripper ? detection.gripperKind : null,
     startS: state.t[0],
     endS: state.t[n - 1],
     rows: n,

@@ -24,6 +24,7 @@ import {
   SegmentedControl,
   Switch,
 } from "@/components/ds";
+import { fill } from "@/components/viewer/analysis-ui";
 import { SeriesSwatch } from "@/components/viewer/series-swatch";
 import { useLocale } from "@/components/levi-locale";
 import { useTime } from "@/context/time-context";
@@ -31,6 +32,7 @@ import { indexAt } from "@/lib/replay/clock";
 import type { Fr3ReplayDetection } from "@/lib/replay/fr3-columns";
 import { buildReplayData, type ReplayData } from "@/lib/replay/frames";
 import type { ReplayVideoSource } from "@/lib/replay/playback-clock";
+import { ROBOTIQ_STROKE_M } from "@/lib/robot-studio/robotiq-2f85";
 import type { Fr3View } from "./fr3-model";
 import {
   readBrowserStorage,
@@ -105,16 +107,6 @@ function keepKeysLocal(event: KeyboardEvent) {
 
 type SceneStatus = "loading" | "ready" | "failed";
 const DEG = 180 / Math.PI;
-
-/** "Row {row}" -> "Row 3": fills the named holes of a catalogue sentence. */
-export function fill(
-  template: string,
-  values: Record<string, string | number>,
-): string {
-  return template.replace(/\{(\w+)\}/g, (hole, name: string) =>
-    name in values ? String(values[name]) : hole,
-  );
-}
 
 const fixed = (
   values: ArrayLike<number>,
@@ -205,9 +197,15 @@ export default function ReplayPanel({
   const gripperRow = data.gripper ? indexAt(currentTime, data.gripper.t) : -1;
   const gripper =
     data.gripper && gripperRow >= 0 ? data.gripper.values[gripperRow] : null;
+  // The bar is 0..1: the command as it is, a measured width against the
+  // Robotiq 2F-85's full stroke (the only gripper the studio models).
+  const measuredGripper = data.gripperKind === "width";
   const clampedGripper =
     gripper !== null && Number.isFinite(gripper)
-      ? Math.min(1, Math.max(0, gripper))
+      ? Math.min(
+          1,
+          Math.max(0, measuredGripper ? gripper / ROBOTIQ_STROKE_M : gripper),
+        )
       : null;
 
   return (
@@ -360,7 +358,11 @@ export default function ReplayPanel({
               <div
                 className="vw-r3d-gripper-bar"
                 role="meter"
-                aria-label={t("viewer.replay3d.gripperBar")}
+                aria-label={t(
+                  measuredGripper
+                    ? "viewer.replay3d.gripperWidthBar"
+                    : "viewer.replay3d.gripperBar",
+                )}
                 aria-valuemin={0}
                 aria-valuemax={1}
                 aria-valuenow={clampedGripper ?? undefined}
@@ -369,12 +371,19 @@ export default function ReplayPanel({
                 }
               />
               <p>
-                {fill(t("viewer.replay3d.gripper"), {
-                  value:
-                    gripper !== null && Number.isFinite(gripper)
-                      ? gripper.toFixed(2)
-                      : "–",
-                })}
+                {fill(
+                  t(
+                    measuredGripper
+                      ? "viewer.replay3d.gripperWidth"
+                      : "viewer.replay3d.gripper",
+                  ),
+                  {
+                    value:
+                      gripper !== null && Number.isFinite(gripper)
+                        ? gripper.toFixed(measuredGripper ? 3 : 2)
+                        : "–",
+                  },
+                )}
               </p>
             </div>
           )}

@@ -91,6 +91,123 @@ describe("detectFr3Replay: joints", () => {
   });
 });
 
+describe("detectFr3Replay: the gripper column (a measured width beats the command)", () => {
+  const jointNames = range(1, 7).map((i) => `joint_${i}`);
+  // What the converter exports with joint angles: pose + command in
+  // observation.state, joints and a separate measured width.
+  const exported = [
+    "timestamp",
+    ...keys("observation.state", poseEuler),
+    ...keys("observation.joint_positions", jointNames),
+    ...keys("observation.gripper_width", ["gripper_width"]),
+    ...keys("action", poseEuler),
+  ];
+
+  test("the exported layout: joints from joint_positions, the gripper from the measured width", () => {
+    const result = detectFr3Replay({ robot_type: "franka_fr3" }, exported);
+    expect(result.mode).toBe("joints");
+    expect(result.stateFeature).toBe("observation.joint_positions");
+    expect(result.gripperCol).toBe("observation.gripper_width | gripper_width");
+    expect(result.gripperKind).toBe("width");
+  });
+
+  test("the same without the width column: the command, as before", () => {
+    const result = detectFr3Replay(
+      { robot_type: "franka_fr3" },
+      exported.filter((key) => !key.startsWith("observation.gripper_width")),
+    );
+    expect(result.gripperCol).toBe("observation.state | gripper");
+    expect(result.gripperKind).toBe("command");
+  });
+
+  test("a width named inside observation.state also beats the command next to it", () => {
+    const result = detectFr3Replay({ robot_type: "fr3" }, [
+      ...keys("observation.state", [
+        ...droidNames.slice(0, 7),
+        "gripper",
+        "gripper_width",
+      ]),
+    ]);
+    expect(result.gripperCol).toBe("observation.state | gripper_width");
+    expect(result.gripperKind).toBe("width");
+  });
+
+  test("a scalar width feature in v3 (bare) and v2 (| 0) form is a width", () => {
+    const state = keys("observation.state", poseEuler);
+    expect(
+      detectFr3Replay({ robot_type: "generic_arm" }, [
+        ...state,
+        "observation.gripper_width",
+      ]),
+    ).toMatchObject({
+      gripperCol: "observation.gripper_width",
+      gripperKind: "width",
+    });
+    expect(
+      detectFr3Replay({ robot_type: "generic_arm" }, [
+        ...state,
+        "observation.gripper_width | 0",
+      ]),
+    ).toMatchObject({
+      gripperCol: "observation.gripper_width | 0",
+      gripperKind: "width",
+    });
+  });
+
+  test("pose mode takes the measured width too", () => {
+    const result = detectFr3Replay({ robot_type: "generic_arm" }, [
+      ...keys("observation.state", poseEuler),
+      ...keys("observation.gripper_width", ["gripper_width"]),
+    ]);
+    expect(result.mode).toBe("pose");
+    expect(result.gripperKind).toBe("width");
+  });
+
+  test("only a command column: gripperKind is command; none at all: null", () => {
+    expect(
+      detectFr3Replay(
+        { robot_type: "generic_arm" },
+        keys("observation.state", poseEuler),
+      ),
+    ).toMatchObject({
+      gripperCol: "observation.state | gripper",
+      gripperKind: "command",
+    });
+    expect(
+      detectFr3Replay(
+        { robot_type: "generic_arm" },
+        keys("observation.state", ["x", "y", "z", "rx", "ry", "rz"]),
+      ),
+    ).toMatchObject({ gripperCol: null, gripperKind: null });
+  });
+
+  test("a width in the action is not an observation: it is ignored", () => {
+    const result = detectFr3Replay({ robot_type: "generic_arm" }, [
+      ...keys("observation.state", poseEuler),
+      ...keys("action", [...poseEuler, "gripper_width"]),
+    ]);
+    expect(result.gripperCol).toBe("observation.state | gripper");
+    expect(result.gripperKind).toBe("command");
+  });
+
+  test("other 'gripper' names (gripper_pos, gripper_state) stay commands, not widths", () => {
+    const result = detectFr3Replay({ robot_type: "fr3" }, [
+      ...keys("observation.state", [...droidNames.slice(0, 7), "gripper_pos"]),
+    ]);
+    expect(result.gripperKind).toBe("command");
+  });
+
+  test("none results carry no gripper", () => {
+    expect(
+      detectFr3Replay({ robot_type: "so101_follower" }, exported),
+    ).toMatchObject({
+      mode: "none",
+      gripperCol: null,
+      gripperKind: null,
+    });
+  });
+});
+
 describe("detectFr3Replay: generic arms never get joints", () => {
   // xArm7, Kinova Gen3 and others also name 7 joints joint_1..7: without an
   // FR3/Franka robot_type the arm would be drawn as a wrong but plausible FR3.

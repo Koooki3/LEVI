@@ -147,6 +147,30 @@ describe("sampler: joints", () => {
     expect(sampler.at(0.45).gripper).toBe(0);
   });
 
+  test("a measured width is interpolated between rows; a command is not", () => {
+    const widthRows = Array.from({ length: 4 }, (_, i) => {
+      const row: Record<string, number> = { timestamp: i * 0.1 };
+      jointNames.forEach((name, c) => {
+        row[`observation.joint_positions | ${name}`] = joint(i, c);
+      });
+      row["observation.gripper_width | gripper_width"] = i * 0.02;
+      return row;
+    });
+    const flat = [
+      "timestamp",
+      ...keys("observation.joint_positions", jointNames),
+      "observation.gripper_width | gripper_width",
+    ];
+    const detection = detectFr3Replay({ robot_type: "franka_fr3" }, flat);
+    expect(detection.gripperKind).toBe("width");
+    const data = buildReplayData(detection, widthRows)!;
+    expect(data.gripperKind).toBe("width");
+    const sampler = createReplaySampler(data);
+    expect(sampler.at(0.15).gripper).toBeCloseTo(0.03, 12);
+    const command = createReplaySampler(jointsData(6, { gripper: true }));
+    expect(command.at(0.15).gripper).toBe(1);
+  });
+
   test("no gripper column gives null", () => {
     expect(createReplaySampler(jointsData(3)).at(0.1).gripper).toBeNull();
   });

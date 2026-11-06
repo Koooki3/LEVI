@@ -35,7 +35,7 @@ export interface ReplayFrame {
   /** The action as a pose (when `actionMode` is pose). */
   actionPosition: Float64Array;
   actionQuaternion: Float64Array;
-  /** Gripper column value at the time (a step, never blended), or null. */
+  /** Gripper column at the time: a command held until its row, a measured width interpolated; or null. */
   gripper: number | null;
 }
 
@@ -174,7 +174,13 @@ export function createReplaySampler(data: ReplayData): ReplaySampler {
       }
     }
     if (data.gripper) {
-      sampleAt(t, data.gripper, "step", gripperScratch);
+      // A measured width is continuous; a command changes at its row.
+      sampleAt(
+        t,
+        data.gripper,
+        data.gripperKind === "width" ? "linear" : "step",
+        gripperScratch,
+      );
       frame.gripper = Number.isFinite(gripperScratch[0])
         ? gripperScratch[0]
         : frame.gripper;

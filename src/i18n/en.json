@@ -6571,5 +6571,7 @@
   "viewer.replay3d.legendTrail": "Line = at most the last 300 end-effector positions",
   "viewer.replay3d.errorTitle": "The 3D view could not start",
   "viewer.replay3d.errorBody": "WebGL or the arm model failed to load. The video and the charts are not affected.",
-  "viewer.replay3d.retry": "Retry"
+  "viewer.replay3d.retry": "Retry",
+  "viewer.replay3d.gripperWidthBar": "Measured gripper opening",
+  "viewer.replay3d.gripperWidth": "Gripper opening, measured: {value} m (0 = closed)"
 }
