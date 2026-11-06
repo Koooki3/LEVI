@@ -570,11 +570,6 @@ def _write(
     atomic(root / "meta/stats.json", dataset.aggregate(epstats))
     dataset.jsonl(root / "meta/levi_provenance.jsonl", provenance)
     output_format.finalize(root, episodes_meta, info, settings)
-    # export_joints is recorded when it took effect or was turned off; left at
-    # its default with nothing to export, the record is what it was before the
-    # option existed.
-    unused = not layout and options.export_joints
-    recorded = options.model_dump(exclude={"export_joints"} if unused else None)
     atomic(
         root / "meta/levi_conversion.json",
         {
@@ -583,7 +578,7 @@ def _write(
             "input_format": report.format,
             "input_variant": report.variant,
             "source": str(source),
-            "options": recorded,
+            "options": options.model_dump(),
             "target_options": settings.model_dump(),
             "fps": fps,
             "timing": options.timing,

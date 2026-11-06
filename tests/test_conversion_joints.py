@@ -249,7 +249,8 @@ def test_gripper_width_is_the_measured_aperture_in_metres(converted, plan):
     assert record["joint_positions"]["unit"] == "radians"
     assert record["joint_positions"]["gripper_width"]["unit"] == "metres"
     assert record["joint_positions"]["robot_type"] == "franka_fr3"
-    assert record["options"]["export_joints"] is True
+    # the default is not recorded; the block above says what was exported
+    assert "export_joints" not in record["options"]
 
 
 # --- the viewer's rule (src/lib/replay/fr3-columns.ts) -------------------------------
@@ -616,7 +617,7 @@ def test_no_joint_source_gives_the_same_dataset_as_before(tmp_path):
     assert info["robot_type"] == "generic_arm"
     assert not [k for k in info["features"] if "joint" in k or "gripper_width" in k]
     assert "joint_positions" not in read_json(default / "meta/levi_conversion.json")
-    # Left at its default with nothing to export, the record has no new key.
+    # Left at its default, the record has no new key.
     assert (
         "export_joints"
         not in read_json(default / "meta/levi_conversion.json")["options"]
@@ -639,6 +640,38 @@ def test_the_option_defaults_on_and_has_an_off_switch():
     assert Options(export_joints=False).export_joints is False
     assert registry.output_format("lerobot_v21").joint_columns is True
     assert registry.output_format("recap_value").joint_columns is False
+
+
+def test_export_joints_is_in_a_dumped_options_dict_only_when_it_is_off():
+    # Records made from Options (job plans, the training pool's manifests,
+    # levi_conversion.json) stay what they were before the option existed.
+    assert "export_joints" not in Options().model_dump()
+    assert "export_joints" not in Options().model_dump(mode="json")
+    assert Options(export_joints=False).model_dump()["export_joints"] is False
+    # and a dumped dict reads back to the same option
+    assert Options.model_validate(Options().model_dump()).export_joints is True
+    off = Options.model_validate(Options(export_joints=False).model_dump())
+    assert off.export_joints is False
+
+
+def test_the_pool_and_job_records_do_not_mention_joint_export(tmp_path, monkeypatch):
+    # The training pool never exports joints, and a Workbench plan that left
+    # the option alone has nothing to say about it.
+    from levi import jobs
+    from levi.pool.export import ExportOptions
+
+    pool = ExportOptions(format="lerobot_v21", name="x").conversion().model_dump()
+    assert "export_joints" not in pool
+    monkeypatch.setattr(jobs, "STATE", tmp_path / "state")
+    monkeypatch.setattr(jobs, "ROOT", tmp_path)
+    monkeypatch.setattr(jobs, "labels_for_source", lambda source: {})
+    capture = build_capture(tmp_path / "capture")
+    plan = jobs.plan("pipeline", capture, options={"cameras": CAMERAS})
+    assert "export_joints" not in plan["options"]
+    off = jobs.plan(
+        "pipeline", capture, options={"cameras": CAMERAS, "export_joints": False}
+    )
+    assert off["options"]["export_joints"] is False
 
 
 def test_recap_and_browsing_views_never_carry_joint_columns(tmp_path):

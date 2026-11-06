@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
 STAGES = (
     "pipeline",
@@ -74,6 +74,18 @@ class Options(BaseModel):
     outcome_labels: dict[str, Literal["success", "failure"]] = Field(
         default_factory=dict
     )
+
+    @model_serializer(mode="wrap")
+    def _omit_default_export_joints(self, handler):
+        # export_joints appears in a dumped options dict (job plans, the
+        # training pool's records, meta/levi_conversion.json) only when it is
+        # turned off: left at its default it is not news, and records made
+        # before the option existed stay what they were (the training pool
+        # never exports joints). Validating a dict without it gives True.
+        data = handler(self)
+        if data.get("export_joints") is True:
+            del data["export_joints"]
+        return data
 
     @field_validator("cameras")
     @classmethod
