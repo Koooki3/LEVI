@@ -8,7 +8,9 @@ levi export manifest local/<name> --operation verified_success [--param fallback
     [--task "stack the plates of same color together"] [--episodes 0-49] \
     [--anchored-run <run id>] [--allow-candidate-anchored] [--anchored-task "<task it is valid for>"] \
     [--recap-revision <id>] [--allow-stale] [--prompt-template v1-en] [--subtask-max-chars 80] \
+    [--tempo none|per_event_uniform] [--tempo-param frames=8] [--tempo-param segments=reviewed] \
     [--output <new dir in the workspace>] [--json]
+levi export tempos                                        # tempo steps (--tempo) and their parameters
 levi export list local/<name>                             # manifests written for a dataset
 levi export diff <manifest dir A> <manifest dir B>        # how different two training inputs are
 ```
@@ -26,6 +28,50 @@ The API is `GET /api/levi/manifest/operations`, `GET /api/levi/manifest?repo_id=
 | `advantage_weighted` | every frame, weight `positive_weight` (1.0) or `negative_weight` (0.2); frames without a label get `unlabelled_weight` (0.0) | a RECAP revision |
 
 `--task` and `--episodes` narrow the scope for every operation. Frames outside the scope stay in the file with `include = false` and the reason `out_of_scope`, so one file always covers the whole dataset. `--anchored-task` names the tasks the anchored review's spec has been validated for. Episodes of any other task keep the robot's flag even when the review did cover them. RECAP labels that are stale (the capture or an outcome label changed after they were computed) are refused unless you pass `--allow-stale`. The manifest then lists the reasons.
+
+## Tempo step
+
+`--tempo` is an optional step that runs **after** the operation and may rescale `weight` inside the dataset's subtask segments. It is not a sixth operation: operations are mutually exclusive and decide which frames and episodes enter the loss, while a tempo step decides how much each retained frame counts against the rest of its segment, so it combines with any operation. It only multiplies `weight`. It never changes `include`, `exclude_reason` or any other column.
+
+```bash
+levi export tempos
+levi export manifest local/<name> --operation all_rollouts --tempo per_event_uniform --tempo-param frames=8
+levi export diff <manifest dir without --tempo> <manifest dir with it>
+```
+
+| Step | Effect |
+| --- | --- |
+| `none` (default) | no tempo step. The manifest is byte for byte what it was before the step existed: no `tempo` key, no new column or per-episode field |
+| `per_event_uniform` | every subtask segment (an *event*) is rescaled so that its weights add up to `frames`, however long it is |
+
+`per_event_uniform` parameters (`--tempo-param key=value`, repeatable):
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `frames` | 8 | N, the total weight each event gets. A whole number from 1 to 100000. 8 is our own placeholder for a first comparison, not a tuned value and not the paper's: the spec this was written from does not record the paper's N |
+| `segments` | `reviewed` | which segments are events: `reviewed` (review empty or `edited`, the rule the [prompt columns](#prompt-columns) use; a segment the live service wrote and nobody reviewed never steers the weights) or `all` |
+
+**What it approximates, and what it does not.** VPP2 (arXiv 2610.10270) trains event by event: from each event it draws N frames evenly, y = (o_0, o_⌊T/N⌋, …, o_T), whatever the event's length T, so long events are thinned and short ones are kept dense. A manifest lists only `include` and `weight` per frame; it cannot say "draw N frames out of this event and train on those". `per_event_uniform` is therefore a **weight approximation**: it gives each event the same total contribution to the loss, independent of its length. That is the property the draw has in expectation. It is not the paper's method and results are not to be described as reproducing it: every included frame stays, with its whole action chunk (nothing is drawn, so nothing is repeated or skipped), and the trainer still decides what to sample.
+
+**The rule.** For each event let T be the number of its frames that are **included** after the operation. Each of those frames' weight is multiplied by `frames` / T. Where the operation gave them weight 1 (every operation except `advantage_weighted`), the event's weights add up to `frames` exactly (up to float32 rounding). With `advantage_weighted` the ratio between its positive and negative frames survives, and the event adds up to `frames` times the mean weight the operation gave its frames. A frame the operation excluded stays at weight 0 and is not counted in T. A frame in no event keeps its weight.
+
+**Why weight only.** The reader's `action_mask` counts action target k of a chunk only when frame t+k is included. Thinning a segment with `include = false` would therefore mask most targets of the frames that stay, and delete their action supervision, while any test that checks only the kept frames' own actions would not notice. A weight of `frames` / T keeps every chunk whole and has the same expectation as drawing one frame in T / `frames`. `action_mask`, `episodes()` and `sampling_weights` need no change; the reader is untouched.
+
+**Which segments are events.** The subtask segments the manifest already lists (`subtask_id`), one event per segment, not per id: the same id twice is two events. A frame covered by two segments belongs to the one that starts last, the same one its `subtask_id` column names, so no frame is scaled twice. With `segments=reviewed` an `auto` or unrecognised segment is not an event and its frames count as outside every event.
+
+| Case | Behaviour |
+| --- | --- |
+| T = 0 (the operation excluded the event's frames, the segment covers no frame, or a later overlapping segment owns them) | nothing to scale: left alone, never divided by; counted in `events_empty` |
+| 0 < T < `frames` | weights go **up**, by `frames` / T, so that the event still adds up to `frames`; a one-frame event gets the whole `frames`. Counted in `events_upweighted`; check `max_factor` before training, since a very short event then weighs as much as a long one |
+| T = `frames` | factor 1, unchanged (`events_unchanged`) |
+| T > `frames` | weights go down (`events_downweighted`) |
+| no segment in the episode | no weight changes; the frames count in `frames_outside_events` |
+| overlapping segments | the later-starting one owns the shared frames (above) |
+| non-finite or negative weight | cannot arise: the factor is positive and finite, and a non-finite weight from the operation is refused with an error |
+
+Frames in no event keep weight 1 while an event's frames usually weigh less than 1, so in a dataset that is only partly annotated the unannotated part is drawn relatively more often. Annotate whole episodes, or compare with `levi export diff` against the manifest without the step.
+
+**Recorded.** `manifest.json` gets a `tempo` object (absent for `none`): `name`, `summary`, `version`, `params`, a `fingerprint` (sha256 over name, version and the resolved parameters, so a different `frames` or `segments` is a different fingerprint, and a change to what the step does bumps `version`), and `events`: segments read, events, events scaled/empty/up-/unchanged/down-weighted, frames inside and outside events, episodes with events, and the smallest and largest factor. Each per-episode entry gets `tempo_events_scaled`. The dataset's own `fingerprint` is unchanged by the step, so manifests with and without it stay comparable. `levi export diff` prints each side's tempo and `tempo_differs`, true when the fingerprints differ **even if the weights happen to agree** (no annotated segment, say), and `levi export list` shows the step of the manifests that have one. The HTTP API (`POST /api/levi/manifest`) does not take `tempo` yet; use the command line or `build(..., tempo=..., tempo_params=...)`.
 
 ## Files
 
@@ -47,6 +93,7 @@ The API is `GET /api/levi/manifest/operations`, `GET /api/levi/manifest?repo_id=
 `manifest.json` records:
 - `levi_commit`;
 - the operation and its resolved parameters, and the scope;
+- the tempo step when one ran (`tempo`: name, version, parameters, `fingerprint`, what it found; see [Tempo step](#tempo-step));
 - the dataset: catalog name, namespace and base, root, fps, and a content `fingerprint` (sha256 of the metadata files and of every episode's data parquet, the capture's `source_fingerprint`);
 - the annotation revision and digest;
 - the anchored review run: spec id, version and sha256, and the provider and model;
@@ -138,6 +185,13 @@ For openpi (`pi05_fr3_*` configs), without changing openpi's main branch:
 **输出文件**：
 - `frames.parquet`：每帧一行，包括 include/weight、片段成败及其来源、当前标注的子任务与结果、RECAP 值/优势/正负；
 - `frames.parquet` 另有逐帧 prompt 列（`prompt_task` 只有任务；`prompt_subtask` 任务加当前子任务，没有可用子任务时与前者相同；`prompt_has_subtask`、`prompt_subtask_skip`、`prompt_subtask_source`、`episode_task_count`）。子任务只来自**人审过的时间片段**（`subtask_review` 为空或 `edited`）；实时标注服务写的 `auto` 段和任何未识别的值一律不用，`manifest.json` 的 `prompt` 记录拒绝了多少帧。模板版本化（`--prompt-template`，默认 `v1-en`，`"{task}; current subtask: {subtask}"`）；**模板用英文**：任务文本是英文，英文提示里夹中文词对模型是训练中没见过的输入、可能有害，语言待用户确认（项目计划里的中文“草案 v1”对应这里的英文 `v1-en`，换中文要新开一个版本）。子任务文本去首尾空白和边缘标点，超过 `--subtask-max-chars`（默认 80）截断并计数；清洗还会去掉零宽和控制字符，含 `advantage:`、`task:`、`state:`、`action:`（不分大小写）的文本不用（`reserved_word`），`Unknown.` 这类带标点的特殊标签也不用。长度按字符算而 openpi 按 token 截断（pi05 为 200，pi0 为 48，超长从末尾截，会切掉 `State` 和 `Action:`），`manifest.json` 的 `prompt` 记录最长 prompt 的字符数和 UTF-8 字节数，训练前请用真实 tokenizer 抽查。**review 为空不等于有人看过**：脚本用人工身份批准的 agent 片段同样为空；清单用 `prompt_subtask_origin`（`human`、`agent_run`、`edited`）和按来源的帧数记录，是否只用人工和 edited 片段由训练团队按该列过滤（读取器参数 `subtask_origins`，默认全部）。`mix_ratio` 是在有可用子任务的帧里取子任务版本的比例，整个数据集里的比例是它乘以有子任务的帧占比。读取器 `m.prompt(..., mode="task"|"subtask"|"mix", mix_ratio=0.5, seed=…)`：`mix` 对（片段、帧、seed）确定，同一帧每个 epoch 取同一版本；`Advantage: positive` 后缀始终在最后；没有这些列的旧清单读取行为不变。这些列是向后兼容的附加列，清单 `schema` 仍是 `levi.training_manifest.v1`。openpi 侧两种接入方式：改 prompt 来源，或导出时写逐帧 `task_index`（详见英文部分）。
+- **节奏步骤**（`--tempo none|per_event_uniform`，参数用 `--tempo-param frames=8`、`--tempo-param segments=reviewed`，`levi export tempos` 列出）：在操作之后再跑的可选一步，只改 `weight`，**不改 `include`** 和任何其他列，所以可以和任何操作搭配；`none`（默认）时清单与加这一步之前逐字节相同（没有 `tempo` 键）。
+  - `per_event_uniform` 是 VPP2 “每个事件均匀取 N 帧”在清单侧的**权重近似**，不是论文的方法：清单只能逐帧给 `include` 和 `weight`，说不出“从事件里抽 N 帧再训练”，所以改为让每个事件对 loss 的总贡献相同、与长度无关；不能说成复现了论文。每个保留的帧及其完整动作块都还在，不抽、不重复。
+  - 规则：事件 = 清单里已有的子任务片段（每个片段一个事件，同一个 id 出现两次是两个事件；两个片段重叠的帧归后开始的那个，与 `subtask_id` 列一致）。设某事件在操作之后有 T 个 `include=true` 的帧，这些帧的 `weight` 都乘以 `frames`/T；操作给的权重是 1 时（除 `advantage_weighted` 外的操作），事件内权重之和正好等于 `frames`；`advantage_weighted` 时正负帧的权重比例保留，事件之和等于 `frames` 乘以操作给的平均权重。操作排除的帧仍为 0，不计入 T；不在任何事件里的帧权重不变。
+  - 为什么只改权重：读取器的 `action_mask` 规定动作块第 k 个目标只有在 frame+k 被 included 时才计入损失；把帧标成 `include=false` 来抽帧会遮掉留下来的帧的大部分动作目标，等于删掉动作监督，而只检查保留帧自身动作的测试发现不了。
+  - 参数：`frames`（N，整数 1 到 100000，默认 8；8 是我们自己定的起点，不是调出来的，也不是论文的值，参考的规格里没有记论文的 N）；`segments`（`reviewed` 默认，只取 review 为空或 `edited` 的片段，与 prompt 列的规则一致，实时服务写的 `auto` 片段不参与定权重；`all` 取全部片段）。
+  - 边界：T=0（操作把事件的帧都排除了、片段没有覆盖任何帧、或帧被后开始的重叠片段占了）不处理也不除零，计入 `events_empty`；T<`frames`（含只有 1 帧的事件）权重会**上调**到事件之和仍为 `frames`，计入 `events_upweighted`，训练前看 `max_factor`；T=`frames` 不变；T>`frames` 下调；没有片段的帧权重不变。权重不会是 NaN 或负数，操作给出非有限权重时直接报错。数据集只标了一部分时，没标的部分相对被抽得更多，请标整条片段或用 `levi export diff` 与不加这一步的清单对比。
+  - 记录：`manifest.json` 的 `tempo`（`none` 时没有）含名称、版本、参数、指纹（名称、版本和解析后参数的 sha256，参数不同指纹就不同）和统计；每个片段条目有 `tempo_events_scaled`；`levi export diff` 输出两边的 `tempo` 和 `tempo_differs`（指纹不同即为真，即使两份权重恰好相同）。数据集自身的指纹不受影响。HTTP 接口暂不支持 `tempo`，用命令行或 `build(..., tempo=..., tempo_params=...)`。
 - `manifest.json`：记录 LEVI 提交、数据集内容指纹、命名空间、标注修订、锚定复核的运行与规格、RECAP 的检查点、修订与阈值，以及操作名与参数。
 
 **训练端读取**：用单文件读取器 `integrations/training_manifest/levi_manifest_reader.py`，提供片段过滤、加权采样、逐动作步掩码、RECAP 条件提示。训练后用 `audit` 核对：被排除的帧从未被抽到，且各片段的抽样比例符合权重。

@@ -1021,3 +1021,401 @@ def test_the_reader_can_keep_only_some_origins(repo):
     old = reader.ManifestFrames.open(result["output_dir"], catalog.local_root(repo))
     with pytest.raises(ValueError, match="prompt columns"):
         old.prompt(task, 0, 0, rng, mode="subtask", **only)
+
+
+# ------------------------------------------------------------ tempo step
+#
+# ``--tempo per_event_uniform`` only multiplies ``weight`` inside subtask
+# segments ("events"); it is a weight approximation of VPP2's N-frame draw per
+# event, not that method. Its invariants: include and every other column are
+# untouched (a trainer's action_mask counts a target only when its frame is
+# included, so thinning by include would delete action supervision), each
+# event's weights add up to N, a frame in no event keeps its weight, the
+# parameters are in the fingerprint, and ``none`` changes nothing.
+
+
+def _tempo(repo, op="all_rollouts", frames=None, **params):
+    if frames is not None:
+        params["frames"] = frames
+    return tm.build(repo, op, tempo="per_event_uniform", tempo_params=params)
+
+
+def _assert_sound_weights(f):
+    weight = f.weight.to_numpy(dtype=float)
+    assert np.isfinite(weight).all() and (weight >= 0).all()
+    assert (weight[~f.include.to_numpy()] == 0).all()
+
+
+def _unit(owner, include=None, weight=None):
+    span_of = np.array(owner, dtype=np.int64)
+    include = np.ones(len(owner), bool) if include is None else np.array(include, bool)
+    start = np.ones(len(owner)) if weight is None else np.array(weight, float)
+    return include, np.where(include, start, 0.0).astype(np.float32), span_of
+
+
+def test_per_event_uniform_gives_every_event_the_same_total_weight():
+    # Events of 20, 5 and 8 frames, then three frames in no event; N = 8.
+    include, weight, span_of = _unit([0] * 20 + [1] * 5 + [2] * 8 + [-1] * 3)
+    before = include.copy()
+    found = tm.per_event_uniform(include, weight, span_of, [True] * 3, 8)
+    for event, length in enumerate((20, 5, 8)):
+        mine = weight[span_of == event]
+        assert mine.sum() == pytest.approx(8, rel=1e-5)
+        assert mine == pytest.approx(8 / length, rel=1e-5)
+    assert (weight[span_of == -1] == 1).all()  # outside every event: as it was
+    assert (include == before).all()  # include is never written
+    assert found == {
+        "events": 3,
+        "events_scaled": 3,
+        "events_empty": 0,
+        "events_upweighted": 1,  # 5 frames < 8
+        "events_unchanged": 1,  # 8 frames == 8
+        "events_downweighted": 1,  # 20 frames > 8
+        "frames_in_events": 33,
+        "frames_outside_events": 3,
+        "min_factor": pytest.approx(0.4),
+        "max_factor": pytest.approx(1.6),
+    }
+
+
+def test_degenerate_events_never_produce_nan_or_negative_weights():
+    # event 0: all three frames excluded (T = 0); 1: a single frame (T = 1);
+    # 2: owns no frame at all; 3: owns two frames but is not an event;
+    # frame 6 is in no event.
+    include, weight, span_of = _unit(
+        [0, 0, 0, 1, 3, 3, -1], include=[0, 0, 0, 1, 1, 1, 1]
+    )
+    found = tm.per_event_uniform(include, weight, span_of, [True, True, True, False], 8)
+    assert weight.tolist() == [0, 0, 0, 8, 1, 1, 1]  # T = 1 gets all of N
+    assert np.isfinite(weight).all() and (weight >= 0).all()
+    assert (found["events"], found["events_scaled"], found["events_empty"]) == (3, 1, 2)
+    assert (found["frames_in_events"], found["frames_outside_events"]) == (1, 3)
+    assert found["max_factor"] == found["min_factor"] == 8
+
+    # N == T changes nothing; N = 1 gives every event a total of one.
+    include, weight, span_of = _unit([0] * 4 + [1] * 2)
+    tm.per_event_uniform(include, weight, span_of, [True, True], 4)
+    assert weight.tolist() == [1, 1, 1, 1, 2, 2]  # the 2-frame event is raised to 4
+    include, weight, span_of = _unit([0] * 4 + [1] * 2)
+    tm.per_event_uniform(include, weight, span_of, [True, True], 1)
+    assert weight.tolist() == pytest.approx([0.25] * 4 + [0.5] * 2)
+
+    # No segment at all: nothing happens, and nothing is divided.
+    include, weight, span_of = _unit([-1] * 5)
+    found = tm.per_event_uniform(include, weight, span_of, [], 8)
+    assert weight.tolist() == [1] * 5 and found["events"] == 0
+    assert found["min_factor"] is None and found["frames_outside_events"] == 5
+
+
+def test_the_operations_own_weights_keep_their_ratio_inside_an_event():
+    # advantage_weighted gives 1.0 and 0.2: the factor depends on T alone, so
+    # the event adds up to N times the mean weight it had, not to N.
+    include, weight, span_of = _unit([0] * 5, weight=[1.0, 0.2, 1.0, 0.2, 1.0])
+    tm.per_event_uniform(include, weight, span_of, [True], 8)
+    assert weight.tolist() == pytest.approx([1.6, 0.32, 1.6, 0.32, 1.6])
+    assert weight.sum() == pytest.approx(8 * 3.4 / 5)
+    # A weight that is not a finite number is refused, never carried on.
+    for bad in (np.inf, np.nan):
+        include, weight, span_of = _unit([0, 0, 0], weight=[1.0, bad, 1.0])
+        with pytest.raises(tm.ManifestError, match="finite"):
+            tm.per_event_uniform(include, weight, span_of, [True], 8)
+
+
+def test_tempo_none_is_the_default_and_changes_nothing(repo):
+    name = _name(repo)
+    _anchored(name, {0: "failure", 1: "failure"})
+    _recap(repo)
+    _segments(
+        name, 0, [("grasp", 0.0, 0.5, None, None), ("place", 0.5, None, None, None)]
+    )
+    for op in ("all_rollouts", "verified_success", "advantage_weighted"):
+        plain, none = tm.build(repo, op), tm.build(repo, op, tempo="none")
+        a, b = Path(plain["output_dir"]), Path(none["output_dir"])
+        assert (a / tm.FRAMES).read_bytes() == (b / tm.FRAMES).read_bytes()
+        ma, mb = (json.loads((d / tm.MANIFEST).read_text()) for d in (a, b))
+        ma.pop("created_at"), mb.pop("created_at")  # the only thing a clock changes
+        assert ma == mb
+        # Not even a new key: a `none` manifest is what it was before the step.
+        assert "tempo" not in ma
+        assert all("tempo_events_scaled" not in e for e in ma["episodes"])
+        diff = tm.compare(a, b)
+        assert diff["input_difference"] == 0 and diff["tempo_differs"] is False
+        assert diff["a"]["tempo"] == diff["b"]["tempo"]
+        assert diff["a"]["tempo"]["name"] == "none"
+    with pytest.raises(tm.ManifestError, match="Tempo step none takes no parameter"):
+        tm.build(repo, "all_rollouts", tempo="none", tempo_params={"frames": 4})
+
+
+def test_per_event_uniform_changes_weight_only_and_only_inside_events(repo):
+    name = _name(repo)
+    # Episode 0: 5 + 7 frames, both reviewed. Episode 2: 3 frames of an
+    # automatic (unreviewed) segment, then 5 frames of an edited one.
+    _segments(
+        name, 0, [("grasp", 0.0, 0.5, None, None), ("place", 0.5, None, None, None)]
+    )
+    _segments(
+        name, 2, [("a", 0.0, 0.3, "auto", None), ("b", 0.3, None, "edited", None)]
+    )
+    base = _frames(tm.build(repo, "all_rollouts"))
+    result = _tempo(repo, frames=4)
+    f = _frames(result)
+    e0, e1, e2 = (f[f.episode_index == e] for e in (0, 1, 2))
+    assert e0[e0.subtask_id == "grasp"].weight.tolist() == pytest.approx([0.8] * 5)
+    assert e0[e0.subtask_id == "place"].weight.tolist() == pytest.approx([4 / 7] * 7)
+    assert e2[e2.subtask_id == "b"].weight.sum() == pytest.approx(4)
+    # The automatic segment is not an event, and episode 1 has no segment.
+    assert (e2[e2.subtask_id == "a"].weight == 1).all() and (e1.weight == 1).all()
+    # Every other column, include and exclude_reason among them, is as before.
+    others = [c for c in f.columns if c != "weight"]
+    pd.testing.assert_frame_equal(f[others], base[others])
+    _assert_sound_weights(f)
+    # Said in manifest.json: what ran, with which numbers, and what it found.
+    tempo = result["tempo"]
+    assert tempo["name"] == "per_event_uniform" and tempo["version"] == 1
+    assert tempo["params"] == {"frames": 4, "segments": "reviewed"}
+    assert tempo["events"] == {
+        "spans": 4,
+        "spans_not_events": 1,
+        "events": 3,
+        "events_scaled": 3,
+        "events_empty": 0,
+        "events_upweighted": 0,
+        "events_unchanged": 0,
+        "events_downweighted": 3,
+        "frames_in_events": 17,
+        "frames_outside_events": 13,
+        "episodes_with_events": 2,
+        "min_factor": pytest.approx(4 / 7, abs=1e-6),
+        "max_factor": 0.8,
+    }
+    assert result["counts"]["weight_sum"] == pytest.approx(13 + 3 * 4, abs=1e-4)
+    assert [e.get("tempo_events_scaled") for e in result["episodes"]] == [2, 0, 1]
+    assert "approximation" not in tempo and "not the paper's method" in tempo["summary"]
+    # `segments=all` also takes the automatic segment as an event.
+    f = _frames(_tempo(repo, frames=4, segments="all"))
+    e2 = f[f.episode_index == 2]
+    assert e2[e2.subtask_id == "a"].weight.tolist() == pytest.approx([4 / 3] * 3)
+
+
+def test_the_tempo_step_follows_whichever_operation_ran(repo):
+    name = _name(repo)
+    _recap(repo)  # frame f is positive when f is even; ep 0's last is unlabelled
+    _segments(
+        name, 0, [("grasp", 0.0, 0.5, None, None), ("place", 0.5, None, None, None)]
+    )
+    # Only included frames count: grasp keeps frames 0, 2, 4 and place 6, 8, 10.
+    none = _frames(tm.build(repo, "advantage_positive_mask"))
+    f = _frames(_tempo(repo, "advantage_positive_mask", frames=8))
+    assert (f.include == none.include).all()
+    assert (f.exclude_reason.fillna("") == none.exclude_reason.fillna("")).all()
+    for event in ("grasp", "place"):
+        kept = f[f.include & (f.subtask_id == event)]
+        assert len(kept) == 3 and kept.weight.tolist() == pytest.approx([8 / 3] * 3)
+    assert (f[~f.include].weight == 0).all()
+    _assert_sound_weights(f)
+
+    # advantage_weighted: positive 1.0, negative 0.25 -- the ratio survives.
+    params = {"negative_weight": 0.25, "unlabelled_weight": 0.5}
+    none = _frames(tm.build(repo, "advantage_weighted", params))
+    result = tm.build(
+        repo,
+        "advantage_weighted",
+        params,
+        tempo="per_event_uniform",
+        tempo_params={"frames": 8},
+    )
+    f = _frames(result)
+    grasp, before = f[f.subtask_id == "grasp"], none[none.subtask_id == "grasp"]
+    assert grasp.weight.sum() == pytest.approx(8 * before.weight.mean(), rel=1e-5)
+    assert (grasp.weight / before.weight).tolist() == pytest.approx([8 / 5] * 5)
+    assert (f.include == none.include).all()
+    outside = f.subtask_id.isna()
+    assert (f.weight[outside] == none.weight[outside]).all()
+
+    # An event the operation emptied is counted and left alone (T = 0).
+    _segments(
+        name, 1, [("x", 0.0, 0.5, None, None), ("y", 0.5, None, None, None)]
+    )  # episode 1: robot flag failure -> out under robot_flag_success
+    result = _tempo(repo, "robot_flag_success")
+    f = _frames(result)
+    assert (f[f.episode_index == 1].weight == 0).all()
+    found = result["tempo"]["events"]
+    # grasp and place of episode 0 are scaled; x and y of episode 1 are empty.
+    assert (found["events"], found["events_scaled"], found["events_empty"]) == (4, 2, 2)
+    _assert_sound_weights(f)
+
+
+def test_overlapping_empty_and_tiny_segments_are_each_accounted_for(repo):
+    name = _name(repo)
+    # Overlap: b starts last, so frames 5-7 belong to it (as in subtask_id);
+    # nothing is scaled twice.
+    _segments(name, 0, [("a", 0.0, 0.8, None, None), ("b", 0.5, None, None, None)])
+    f = _frames(_tempo(repo, frames=6))
+    e0 = f[f.episode_index == 0]
+    assert e0[e0.subtask_id == "a"].weight.tolist() == pytest.approx([6 / 5] * 5)
+    assert e0[e0.subtask_id == "b"].weight.tolist() == pytest.approx([6 / 7] * 7)
+    assert e0.weight.sum() == pytest.approx(12)
+
+    # Two segments from the same start: the second owns everything, the first
+    # owns nothing and is an empty event, not a division by zero.
+    _segments(name, 0, [("c", 0.0, 0.3, None, None), ("d", 0.0, None, None, None)])
+    result = _tempo(repo, frames=6)
+    f = _frames(result)
+    assert f[f.episode_index == 0].weight.tolist() == pytest.approx([0.5] * 12)
+    assert result["tempo"]["events"]["events_empty"] == 1
+
+    # Episode 2 (8 frames): a segment after the episode ends, a one-frame
+    # segment (it gets the whole N) and a segment of seven frames.
+    _segments(
+        name,
+        2,
+        [("blink", 0.0, 0.1, None, None), ("rest", 0.1, 0.7, None, None),
+         ("late", 5.0, None, None, None)],
+    )  # fmt: skip
+    result = _tempo(repo, frames=8)
+    f = _frames(result)
+    e2 = f[f.episode_index == 2]
+    assert e2[e2.subtask_id == "blink"].weight.tolist() == [8]
+    assert e2[e2.subtask_id == "rest"].weight.tolist() == pytest.approx([8 / 6] * 6)
+    assert (e2[e2.subtask_id.isna()].weight == 1).all()  # the frame after "rest"
+    assert result["tempo"]["events"]["max_factor"] == 8
+    assert result["tempo"]["events"]["events_empty"] >= 2  # "c" and "late"
+    _assert_sound_weights(f)
+
+
+def test_without_any_segment_the_tempo_step_changes_no_weight(repo):
+    none = _frames(tm.build(repo, "all_rollouts"))
+    result = _tempo(repo, frames=4)
+    pd.testing.assert_frame_equal(_frames(result), none)
+    events = result["tempo"]["events"]
+    assert events["events"] == 0 and events["frames_outside_events"] == 30
+    assert events["min_factor"] is None and events["max_factor"] is None
+
+
+def test_tempo_parameters_are_in_the_fingerprint_and_in_compare(repo):
+    name = _name(repo)
+    _segments(
+        name, 0, [("grasp", 0.0, 0.5, None, None), ("place", 0.5, None, None, None)]
+    )
+    _segments(name, 2, [("a", 0.0, 0.3, "auto", None), ("b", 0.3, None, None, None)])
+    four, eight = _tempo(repo, frames=4), _tempo(repo, frames=8)
+    default, everything = _tempo(repo), _tempo(repo, frames=8, segments="all")
+    fp = lambda r: r["tempo"]["fingerprint"]
+    assert tm.DEFAULT_EVENT_FRAMES == 8 and fp(default) == fp(eight)
+    assert len({fp(four), fp(eight), fp(everything)}) == 3
+    assert fp(eight) == tm.tempo_fingerprint(
+        "per_event_uniform", 1, {"frames": 8, "segments": "reviewed"}
+    )
+    # A changed step with the same parameters is a different input.
+    assert tm.tempo_fingerprint("per_event_uniform", 2, eight["tempo"]["params"]) != fp(
+        eight
+    )
+    on_disk = json.loads((Path(four["output_dir"]) / tm.MANIFEST).read_text())["tempo"]
+    assert on_disk["params"] == {"frames": 4, "segments": "reviewed"}
+    assert on_disk["fingerprint"] == fp(four)
+
+    diff = tm.compare(four["output_dir"], eight["output_dir"])
+    assert diff["tempo_differs"] is True and diff["input_difference"] > 0
+    assert diff["a"]["tempo"]["params"]["frames"] == 4
+    assert diff["b"]["tempo"]["params"]["frames"] == 8
+    same = tm.compare(eight["output_dir"], default["output_dir"])
+    assert same["tempo_differs"] is False and same["input_difference"] == 0
+    plain = tm.build(repo, "all_rollouts")
+    diff = tm.compare(plain["output_dir"], eight["output_dir"])
+    assert diff["tempo_differs"] and diff["a"]["tempo"]["name"] == "none"
+    assert diff["b"]["tempo"]["name"] == "per_event_uniform"
+    # `levi export list` shows the step of the manifests that have one.
+    listed = {Path(m["output_dir"]): m for m in tm.listing(repo)}
+    assert "tempo" not in listed[Path(plain["output_dir"])]
+    assert listed[Path(four["output_dir"])]["tempo"]["params"]["frames"] == 4
+
+
+def test_a_different_tempo_parameter_is_flagged_even_when_the_weights_agree(repo):
+    # No segment: the weights are the same whatever N is, yet the two inputs
+    # were asked for differently, and compare must say so.
+    four, eight = _tempo(repo, frames=4), _tempo(repo, frames=8)
+    diff = tm.compare(four["output_dir"], eight["output_dir"])
+    assert diff["input_difference"] == 0 and diff["tempo_differs"] is True
+
+
+def test_the_reader_masks_and_includes_exactly_as_without_the_tempo_step(repo):
+    reader = _reader()
+    name = _name(repo)
+    _recap(repo)
+    _segments(
+        name, 0, [("grasp", 0.0, 0.5, None, None), ("place", 0.5, None, None, None)]
+    )
+    root = catalog.local_root(repo)
+    plain = tm.build(repo, "advantage_positive_mask")
+    tempo = _tempo(repo, "advantage_positive_mask", frames=6)  # 3 kept frames each
+    a = reader.ManifestFrames.open(plain["output_dir"], root)
+    b = reader.ManifestFrames.open(tempo["output_dir"], root)
+    assert a.episodes() == b.episodes()
+    assert (a.include == b.include).all()
+    for ep, (*_, n) in EPISODES.items():
+        for frame in range(n):
+            assert (
+                a.action_mask(ep, frame, 5).tolist()
+                == b.action_mask(ep, frame, 5).tolist()
+            )
+    keys = [(ep, frame) for ep, (*_, n) in EPISODES.items() for frame in range(n)]
+    drawn = b.sampling_weights(keys)
+    assert drawn.sum() == pytest.approx(tempo["counts"]["weight_sum"], abs=1e-4)
+    assert not np.allclose(a.sampling_weights(keys), drawn)  # weights differ
+    assert (drawn[~b.include[[b._row[k] for k in keys]]] == 0).all()
+
+
+def test_tempo_refusals_cli_and_docs(repo, capsys):
+    with pytest.raises(tm.ManifestError, match="Unknown tempo step"):
+        tm.build(repo, "all_rollouts", tempo="thin_free_motion")
+    for params, message in (
+        ({"frames": 0}, "frames must be at least 1"),
+        ({"frames": 100001}, "frames must be at most"),
+        ({"frames": 2.5}, "frames must be a whole number"),
+        ({"frames": True}, "frames must be a whole number"),
+        ({"frames": "many"}, "frames must be a whole number"),
+        ({"segments": "some"}, "segments must be one of reviewed, all"),
+        (
+            {"stride": 3},
+            r"takes no parameter stride \(it takes frames, segments\)",
+        ),
+    ):
+        with pytest.raises(tm.ManifestError, match=message):
+            _tempo(repo, **params)
+    assert _tempo(repo, frames=8.0)["tempo"]["params"]["frames"] == 8  # a whole 8.0
+
+    assert tm.main(["tempos"]) == 0
+    steps = {s["name"]: s for s in json.loads(capsys.readouterr().out)}
+    assert list(steps) == list(tm.TEMPOS) == ["none", "per_event_uniform"]
+    frames = steps["per_event_uniform"]["params"]["frames"]
+    assert frames["default"] == 8 and frames["minimum"] == 1
+    assert steps["per_event_uniform"]["params"]["segments"]["choices"] == [
+        "reviewed",
+        "all",
+    ]
+    assert tm.main(["manifest", repo, "--operation", "all_rollouts"]) == 0
+    assert "tempo" not in json.loads(capsys.readouterr().out)
+    assert tm.main(["manifest", repo, "--operation", "all_rollouts",
+                    "--tempo", "per_event_uniform", "--tempo-param", "frames=4"]) == 0  # fmt: skip
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["tempo"]["params"] == {"frames": 4, "segments": "reviewed"}
+    for extra, text in (
+        (["--tempo", "per_event_uniform", "--tempo-param", "frames=0"], "at least 1"),
+        (["--tempo", "per_event_uniform", "--tempo-param", "frames=2.5"], "whole"),
+        (["--tempo", "per_event_uniform", "--tempo-param", "frames"], "key=value"),
+        (["--tempo-param", "frames=4"], "Tempo step none takes no parameter"),
+    ):
+        assert tm.main(["manifest", repo, "--operation", "all_rollouts", *extra]) == 1
+        assert text in capsys.readouterr().out
+    with pytest.raises(SystemExit):  # argparse names the choices
+        tm.main(["manifest", repo, "--operation", "all_rollouts", "--tempo", "x"])
+    assert "per_event_uniform" in capsys.readouterr().err
+
+    # The documentation names every step and every parameter of the code.
+    doc = (PROJECT / "docs/TRAINING_MANIFEST.md").read_text()
+    for step in tm.TEMPOS.values():
+        assert f"`{step.name}`" in doc
+        for param in step.params:
+            assert f"`{param}`" in doc, param
+    for flag in ("--tempo", "--tempo-param", "levi export tempos"):
+        assert flag in doc
