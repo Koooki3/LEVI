@@ -36,7 +36,7 @@ SO-100/101、OpenArm 和 Unitree G1 的数据集保留原来的 **3D Replay**（
 
 每一行按它自己的 `timestamp` 查找，不用帧号除以 fps，所以被查看器抽稀过的片段也能在正确的时间回放。分段（v3）视频的时间是视频时间减去片段起点，与播放器和曲线游标的算法一致。
 
-第一个可见摄像头播放时，机械臂在每个显示出来的视频帧更新（`requestVideoFrameCallback`，约每秒 30 次）。暂停和每次拖动时，用页面的时间（播放条、点击曲线）。没有 `requestVideoFrameCallback` 的浏览器，在播放器两次 `timeupdate`（约每秒 4 次）之间用时钟和 `playbackRate` 估算，并且不超过上一次之后 0.5 秒，所以视频卡在缓冲时机械臂不会跑到前面再跳回来。更新路径不经过 React 渲染。
+第一个可见摄像头播放时，机械臂在每个显示出来的视频帧更新（`requestVideoFrameCallback`，约每秒 30 次）。暂停和每次拖动时，用页面的时间（播放条、点击曲线）。没有 `requestVideoFrameCallback` 的浏览器，在播放器两次 `timeupdate`（约每秒 4 次）之间用时钟和 `playbackRate` 估算，并且不超过上一次之后 0.5 秒。视频报告缺数据时（`waiting` 事件，或 `readyState` 低于 `HAVE_FUTURE_DATA`；缓冲中的视频并不处于暂停状态）估算停在原处，数据回来后从机械臂当时的姿态继续。浏览器没有报告的卡顿仍可能让估算跑到前面最多 0.5 秒，下一次 `timeupdate` 再把机械臂拉回同样的幅度：这个上限限制的是往回跳的幅度，并不能杜绝往回跳。更新路径不经过 React 渲染。
 
 ## 限制
 

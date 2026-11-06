@@ -11,10 +11,14 @@
 // - paused, and every seek: the TimeProvider's `subscribe` (it is called
 //   synchronously by every `seek`, whoever made it);
 // - only where the browser has no `requestVideoFrameCallback`: an estimate
-//   between two reports from the TimeProvider, wall time x playbackRate, and
-//   never more than `MAX_EXTRAPOLATION_S` past the last report. Without that
-//   cap a video stalled on its buffer lets the arm run ahead, and it jumps
-//   back when playback resumes.
+//   between two reports from the TimeProvider, wall time x playbackRate, never
+//   more than `MAX_EXTRAPOLATION_S` past the last report, and standing still
+//   while the video says it is short of data (a `waiting` event, or
+//   `readyState` below HAVE_FUTURE_DATA; `paused` stays false while a video
+//   buffers). It carries on from where the arm is when the data is back. The
+//   cap bounds how far a stall the browser does not report can run the arm
+//   ahead (the next report then moves it back by that much); it does not
+//   remove the jump.
 //
 // Episode time is `mediaTime - segmentStart` (`videoToEpisodeTime`), the same
 // subtraction the player does for a segmented (v3) video.
@@ -30,6 +34,8 @@ export const MAX_EXTRAPOLATION_S = 0.5;
 export const SEEK_TOLERANCE_S = 0.25;
 /** A frame callback this recent counts as "frames are arriving". */
 const FRAME_FRESH_MS = 500;
+/** `HTMLMediaElement.HAVE_FUTURE_DATA`: below it the video cannot play on without waiting. */
+const HAVE_FUTURE_DATA = 3;
 
 /** What the clock needs of the primary `<video>`; an `HTMLVideoElement` fits. */
 export interface ReplayVideo {
@@ -37,6 +43,8 @@ export interface ReplayVideo {
   ended?: boolean;
   currentTime: number;
   playbackRate: number;
+  /** `HTMLMediaElement.readyState`; the estimate stands still below 3. */
+  readyState?: number;
   requestVideoFrameCallback?: (
     callback: (now: number, metadata: { mediaTime: number }) => void,
   ) => number;
@@ -111,12 +119,20 @@ export function startReplayClock(options: ReplayClockOptions): () => void {
 
   let stopped = false;
   let reported: { t: number; wall: number } | null = null;
+  // Where the estimate counts from: the last report, or, after a stall, the
+  // pose the arm stood at when the data came back.
+  let base: { t: number; wall: number } | null = null;
+  let lastEstimate: number | null = null;
+  let waiting = false;
+  let wasStalled = false;
   let lastFrame: { t: number; wall: number } | null = null;
   let frameHandle: number | null = null;
   let rafHandle: number | null = null;
 
   const unsubscribe = subscribe((t) => {
     reported = { t, wall: now() };
+    base = reported;
+    lastEstimate = t;
     const followingFrames =
       hasFrameCallback &&
       playing() &&
@@ -142,17 +158,35 @@ export function startReplayClock(options: ReplayClockOptions): () => void {
   };
   if (hasFrameCallback) frameHandle = el.requestVideoFrameCallback!(onFrame);
 
+  // The video has no data for the next frames: it is "playing" (not paused)
+  // but nothing is moving, and the page's clock is not either.
+  const stalled = () =>
+    waiting ||
+    (el !== null &&
+      typeof el.readyState === "number" &&
+      el.readyState < HAVE_FUTURE_DATA);
   const tick = () => {
     rafHandle = null;
     if (stopped || el === null || !playing()) return;
-    if (reported !== null) {
-      const estimate = nextTimeEstimate(
-        reported.t,
-        reported.wall,
-        now(),
-        el.playbackRate,
-      );
-      emit(Math.min(estimate, reported.t + maxAhead));
+    if (stalled()) {
+      wasStalled = true;
+    } else {
+      if (wasStalled) {
+        // Data is back: count on from where the arm stands, not from the
+        // report the stall started after (that would jump it ahead).
+        wasStalled = false;
+        if (lastEstimate !== null) base = { t: lastEstimate, wall: now() };
+      }
+      if (reported !== null && base !== null) {
+        const estimate = nextTimeEstimate(
+          base.t,
+          base.wall,
+          now(),
+          el.playbackRate,
+        );
+        lastEstimate = Math.min(estimate, reported.t + maxAhead);
+        emit(lastEstimate);
+      }
     }
     rafHandle = requestFrame(tick);
   };
@@ -162,9 +196,17 @@ export function startReplayClock(options: ReplayClockOptions): () => void {
     if (hasFrameCallback || stopped || rafHandle !== null || !playing()) return;
     rafHandle = requestFrame(tick);
   };
+  const onWaiting = () => {
+    waiting = true;
+  };
+  const onPlaying = () => {
+    waiting = false;
+    startEstimate();
+  };
   if (!hasFrameCallback) {
     el?.addEventListener?.("play", startEstimate);
-    el?.addEventListener?.("playing", startEstimate);
+    el?.addEventListener?.("playing", onPlaying);
+    el?.addEventListener?.("waiting", onWaiting);
     startEstimate();
   }
 
@@ -177,6 +219,7 @@ export function startReplayClock(options: ReplayClockOptions): () => void {
     frameHandle = null;
     rafHandle = null;
     el?.removeEventListener?.("play", startEstimate);
-    el?.removeEventListener?.("playing", startEstimate);
+    el?.removeEventListener?.("playing", onPlaying);
+    el?.removeEventListener?.("waiting", onWaiting);
   };
 }

@@ -81,6 +81,8 @@ class PlainVideo extends EventTarget {
   ended = false;
   currentTime = 0;
   playbackRate = 1;
+  /** HAVE_ENOUGH_DATA; 2 and below is "short of data". */
+  readyState = 4;
   play() {
     this.paused = false;
     this.dispatchEvent(new Event("play"));
@@ -422,5 +424,95 @@ describe("frames that stopped arriving", () => {
     const before = times.length;
     env.report(0.55);
     expect(times.length).toBe(before);
+  });
+});
+
+describe("without requestVideoFrameCallback: a video that is short of data", () => {
+  // A buffering video is not paused, so `playing()` stays true: without these
+  // the estimate would run its whole 0.5 s while nothing moves, and the next
+  // report would bring the arm back.
+  function playing(env: Env, video: PlainVideo, from = 2) {
+    const { times } = start(env, video);
+    env.report(from);
+    video.play();
+    env.advance(100); // estimate: from + 0.1
+    return times;
+  }
+
+  test("readyState below HAVE_FUTURE_DATA: no update while it lasts, and it resumes where the arm is", () => {
+    const env = makeEnv();
+    const video = new PlainVideo();
+    const times = playing(env, video);
+    expect(times.at(-1)).toBeCloseTo(2.1, 9);
+    const before = times.length;
+    video.readyState = 2;
+    for (let i = 0; i < 24; i++) env.advance(1000 / 60); // 400 ms of stall
+    expect(times.length).toBe(before);
+    expect(env.pendingFrames()).toBe(1); // the loop stays alive to notice the data coming back
+    video.readyState = 4;
+    env.advance(1000 / 60);
+    // Not 2.5 (the cap, as if the stall had not been noticed): the pose it was at.
+    expect(times.at(-1)).toBeCloseTo(2.1, 9);
+    env.advance(100);
+    expect(times.at(-1)).toBeCloseTo(2.2, 9);
+  });
+
+  test("a waiting event freezes the estimate until playing", () => {
+    const env = makeEnv();
+    const video = new PlainVideo();
+    const times = playing(env, video);
+    const before = times.length;
+    video.dispatchEvent(new Event("waiting"));
+    for (let i = 0; i < 24; i++) env.advance(1000 / 60);
+    expect(times.length).toBe(before);
+    video.dispatchEvent(new Event("playing"));
+    env.advance(1000 / 60);
+    expect(times.at(-1)).toBeCloseTo(2.1, 9);
+    env.advance(100);
+    expect(times.at(-1)).toBeCloseTo(2.2, 9);
+  });
+
+  test("a report during a stall still moves the arm (the page's time wins), and the estimate continues from it", () => {
+    const env = makeEnv();
+    const video = new PlainVideo();
+    const times = playing(env, video);
+    video.dispatchEvent(new Event("waiting"));
+    env.advance(300);
+    env.report(2.15);
+    expect(times.at(-1)).toBe(2.15);
+    video.dispatchEvent(new Event("playing"));
+    env.advance(100);
+    expect(times.at(-1)).toBeCloseTo(2.15, 9); // the rebase tick: nothing elapsed yet
+    env.advance(100);
+    expect(times.at(-1)).toBeCloseTo(2.25, 9);
+  });
+
+  test("a stall nobody reported still ends at the cap: the arm runs at most MAX_EXTRAPOLATION_S ahead", () => {
+    const env = makeEnv();
+    const video = new PlainVideo();
+    const times = playing(env, video);
+    for (let i = 0; i < 120; i++) env.advance(1000 / 60);
+    expect(Math.max(...times)).toBeCloseTo(2 + MAX_EXTRAPOLATION_S, 9);
+  });
+
+  test("stop removes the waiting and playing listeners too", () => {
+    const env = makeEnv();
+    const video = new PlainVideo();
+    const added: string[] = [];
+    const removed: string[] = [];
+    const add = video.addEventListener.bind(video);
+    const remove = video.removeEventListener.bind(video);
+    video.addEventListener = ((type: string, ...rest: [never, never]) => {
+      added.push(type);
+      return add(type, ...rest);
+    }) as typeof video.addEventListener;
+    video.removeEventListener = ((type: string, ...rest: [never, never]) => {
+      removed.push(type);
+      return remove(type, ...rest);
+    }) as typeof video.removeEventListener;
+    const { stop } = start(env, video);
+    expect([...added].sort()).toEqual(["play", "playing", "waiting"]);
+    stop();
+    expect([...removed].sort()).toEqual(["play", "playing", "waiting"]);
   });
 });
