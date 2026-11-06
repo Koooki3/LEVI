@@ -647,6 +647,27 @@ def test_a_record_survives_json_and_is_not_changed_by_its_source():
         ArmRecord.from_dict(no_split)
 
 
+def test_every_field_of_every_arm_survives_json():
+    # A scorer writes records as JSON files: the interval, the bases, the
+    # exactness flag and the counts must come back equal, whichever arm.
+    for name in compare.ARMS:
+        record = arm(
+            name,
+            quality_ci=(0.7, 0.9),
+            quality_ci_method="wilson95",
+            external_tokens_exact=False,
+            external_tokens_source="claude_jsonl.last_usage:lower_bound",
+        )
+        again = ArmRecord.from_dict(json.loads(json.dumps(record.to_dict())))
+        assert again == record, name
+    harness = arm("local_harness")
+    assert harness.quality_delta_ci_vs_teacher == (-0.03, 0.07)
+    assert harness.to_dict()["quality_delta_ci_vs_teacher"] == [-0.03, 0.07]
+    assert harness.to_dict()["wall_s_basis"] == "excludes_queue"
+    assert harness.to_dict()["scored_count"] == 12
+    assert harness.to_dict()["split"] == "tune"
+
+
 def test_a_pipe_in_a_name_does_not_break_the_table():
     text = compare.compare([arm(model="a|b")]).to_markdown()
     assert "a\\|b" in text
