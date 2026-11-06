@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   MAX_EXTRAPOLATION_S,
   SEEK_TOLERANCE_S,
@@ -102,6 +102,24 @@ function start(env: Env, video: ReplayVideo | null, segmentStart = 0) {
     cancelFrame: env.cancelFrame,
   });
   return { times, stop };
+}
+
+/** `start`, but `onTime` is the given function and `onError` is recorded. */
+function startWith(
+  env: Env,
+  video: ReplayVideo | null,
+  onTime: (t: number) => void,
+  onError?: (error: unknown) => void,
+) {
+  return startReplayClock({
+    subscribe: env.subscribe,
+    video: video && { el: video, segmentStart: 0 },
+    onTime,
+    onError,
+    now: env.now,
+    requestFrame: env.requestFrame,
+    cancelFrame: env.cancelFrame,
+  });
 }
 
 /** One second of 30 fps playback: a frame every 1/30 s, a timeupdate every 250 ms. */
@@ -273,5 +291,136 @@ describe("without requestVideoFrameCallback", () => {
     video.play();
     expect(env.pendingFrames()).toBe(0);
     expect(times).toEqual([1]);
+  });
+});
+
+describe("an onTime that throws", () => {
+  const boom = new Error("pose out of range");
+
+  test("a seek or a report: the throw stays inside the clock, the other listeners still run", () => {
+    const env = makeEnv();
+    const errors: unknown[] = [];
+    const seen: number[] = [];
+    startWith(
+      env,
+      null,
+      () => {
+        throw boom;
+      },
+      (error) => errors.push(error),
+    );
+    // What the TimeProvider does: every listener, in turn, and then its own state.
+    env.subscribe((t) => seen.push(t));
+    expect(() => env.report(2.5)).not.toThrow();
+    expect(seen).toEqual([2.5]);
+    expect(errors).toEqual([boom]);
+    // The clock is still subscribed: the next report reaches onTime again.
+    env.report(3);
+    expect(errors).toEqual([boom, boom]);
+    expect(seen).toEqual([2.5, 3]);
+  });
+
+  test("a video frame: the next frame callback is still registered and the next frame still arrives", () => {
+    const env = makeEnv();
+    const video = new FakeVideo();
+    const calls: number[] = [];
+    const errors: unknown[] = [];
+    startWith(
+      env,
+      video,
+      (t) => {
+        calls.push(t);
+        if (calls.length === 1) throw boom;
+      },
+      (error) => errors.push(error),
+    );
+    video.play();
+    env.advance(33);
+    expect(() => video.present(0.1)).not.toThrow();
+    expect(errors).toEqual([boom]);
+    expect(video.pendingFrameCallbacks()).toBe(1);
+    video.present(0.2);
+    expect(calls).toEqual([0.1, 0.2]);
+    expect(video.pendingFrameCallbacks()).toBe(1);
+  });
+
+  test("the estimate loop (no frame callbacks) keeps running after a throw", () => {
+    const env = makeEnv();
+    const video = new PlainVideo();
+    const calls: number[] = [];
+    const errors: unknown[] = [];
+    startWith(
+      env,
+      video,
+      (t) => {
+        calls.push(t);
+        if (calls.length === 2) throw boom;
+      },
+      (error) => errors.push(error),
+    );
+    env.report(1);
+    video.play();
+    for (let i = 0; i < 5; i++) env.advance(1000 / 60);
+    expect(errors).toEqual([boom]);
+    expect(calls.length).toBe(1 + 5);
+    expect(env.pendingFrames()).toBe(1);
+  });
+
+  test("by default the first failure goes to console.error and the rest are dropped", () => {
+    const env = makeEnv();
+    const logged = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      startWith(env, null, () => {
+        throw boom;
+      });
+      env.report(1);
+      env.report(2);
+      env.report(3);
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect(logged.mock.calls[0]).toContain(boom);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+});
+
+describe("frames that stopped arriving", () => {
+  /** Playing, one frame presented at 0.4 s of the video, no more frames after it. */
+  function stalled() {
+    const env = makeEnv();
+    const video = new FakeVideo();
+    const { times } = start(env, video);
+    video.play();
+    env.advance(33);
+    video.present(0.4);
+    return { env, video, times };
+  }
+
+  test("a report within the tolerance is ignored while the last frame is at most 500 ms old", () => {
+    const { env, times } = stalled();
+    const before = times.length;
+    env.advance(500); // the boundary itself still counts as fresh
+    env.report(0.45);
+    expect(times.length).toBe(before);
+  });
+
+  test("a report within the tolerance is used once the last frame is older than 500 ms", () => {
+    const { env, times } = stalled();
+    const before = times.length;
+    env.advance(501); // the video is playing but no frame has come: the page's time is all there is
+    env.report(0.45);
+    expect(times.length).toBe(before + 1);
+    expect(times.at(-1)).toBe(0.45);
+  });
+
+  test("a frame arriving again makes the page's agreeing reports redundant again", () => {
+    const { env, video, times } = stalled();
+    env.advance(600);
+    env.report(0.45); // used: frames are stale
+    env.advance(33);
+    video.present(0.5);
+    const before = times.length;
+    env.report(0.55);
+    expect(times.length).toBe(before);
   });
 });

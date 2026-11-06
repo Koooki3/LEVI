@@ -1,6 +1,7 @@
 import { render, setupDom } from "@/components/ds/__tests__/dom";
 import { act, forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { TimeProvider, useTime } from "@/context/time-context";
 import { FR3_JOINT_LIMITS } from "@/lib/robot-studio/fr3-kinematics";
 import { detectFr3Replay } from "@/lib/replay/fr3-columns";
 import { buildReplayData, type ReplayData } from "@/lib/replay/frames";
@@ -293,5 +294,50 @@ describe("ReplayScene: the action ghost and loading", () => {
     await render(scene(sources, poseData, { onLoad: poseLoaded }));
     expect(poseLoaded).toHaveBeenCalledWith(true);
     expect(calls).toEqual([]);
+  });
+});
+
+describe("ReplayScene: a hole in the first row, under the page's own TimeProvider", () => {
+  type Time = ReturnType<typeof useTime>;
+  let time: Time;
+  function Bound({ replay }: { replay: ReplayData }) {
+    time = useTime();
+    return (
+      <>
+        <output>{time.currentTime.toFixed(3)}</output>
+        <ReplayScene
+          data={replay}
+          showAction={false}
+          trail={false}
+          view="perspective"
+          viewRevision={0}
+          subscribe={time.subscribe}
+          video={null}
+          initialTime={0}
+          onLoad={() => {}}
+        />
+      </>
+    );
+  }
+
+  test("the arm starts at the first whole row and every seek still moves the arm and the page's time", async () => {
+    const replay = data();
+    (replay.state.values as Float64Array)[4] = NaN; // row 0, joint 5
+    const { host } = await render(
+      <TimeProvider duration={10}>
+        <Bound replay={replay} />
+      </TimeProvider>,
+    );
+    // Posed at t = 0 over the hole: the first whole row (row 1), inside the limits.
+    expectRow(solidCalls().at(-1)!.joints, 1);
+    await act(async () => time.seek(3 * 0.125));
+    expectRow(solidCalls().at(-1)!.joints, 3);
+    expect(host.querySelector("output")!.textContent).toBe("0.375");
+    // Back over the hole: the arm holds the pose it had.
+    await act(async () => time.seek(0));
+    expectRow(solidCalls().at(-1)!.joints, 3);
+    await act(async () => time.seek(6 * 0.125));
+    expectRow(solidCalls().at(-1)!.joints, 6);
+    expect(host.querySelector("output")!.textContent).toBe("0.750");
   });
 });

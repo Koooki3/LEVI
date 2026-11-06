@@ -55,8 +55,19 @@ export interface ReplayClockOptions {
   /** `useTime().subscribe`: called with the episode time on every report and seek. */
   subscribe: (callback: (episodeTime: number) => void) => () => void;
   video: ReplayVideoSource | null;
-  /** Receives episode-relative seconds; keep it cheap, it can run once per frame. */
+  /**
+   * Receives episode-relative seconds; keep it cheap, it can run once per
+   * frame. A throw is caught (see `onError`): it never reaches the
+   * TimeProvider that called `subscribe`'s callback, and never stops the
+   * frame or animation-frame loop.
+   */
   onTime: (episodeTime: number) => void;
+  /**
+   * Called with what `onTime` threw. Default: the first one goes to
+   * `console.error`, the rest are dropped (a bad frame would repeat 30 times a
+   * second).
+   */
+  onError?: (error: unknown) => void;
   /** Milliseconds, monotonic. Default `performance.now`. */
   now?: () => number;
   /** Default `requestAnimationFrame` / `cancelAnimationFrame`. */
@@ -74,6 +85,24 @@ export function startReplayClock(options: ReplayClockOptions): () => void {
   const cancelFrame =
     options.cancelFrame ?? ((handle) => cancelAnimationFrame(handle));
   const maxAhead = options.maxExtrapolation ?? MAX_EXTRAPOLATION_S;
+  let reportedFailure = false;
+  const onError =
+    options.onError ??
+    ((error: unknown) => {
+      if (reportedFailure) return;
+      reportedFailure = true;
+      console.error("3D replay: updating the scene failed", error);
+    });
+  // Every path below goes through here. A throw out of `onTime` would pass
+  // through the TimeProvider's `listeners.forEach` (and stop the seek that
+  // called it), or end the frame callback before it asks for the next frame.
+  const emit = (episodeTime: number) => {
+    try {
+      onTime(episodeTime);
+    } catch (error) {
+      onError(error);
+    }
+  };
   const el = video?.el ?? null;
   const segmentStart = video?.segmentStart ?? 0;
   const hasFrameCallback =
@@ -94,7 +123,7 @@ export function startReplayClock(options: ReplayClockOptions): () => void {
       lastFrame !== null &&
       now() - lastFrame.wall <= FRAME_FRESH_MS &&
       Math.abs(t - lastFrame.t) <= SEEK_TOLERANCE_S;
-    if (!followingFrames) onTime(t);
+    if (!followingFrames) emit(t);
   });
 
   const onFrame = (_now: number, metadata?: { mediaTime?: number }) => {
@@ -108,7 +137,7 @@ export function startReplayClock(options: ReplayClockOptions): () => void {
     lastFrame = { t, wall: now() };
     // Paused, a frame is a seek settling: the page's own time already moved
     // the arm (see `subscribe` above) and stays the reference.
-    if (playing()) onTime(t);
+    if (playing()) emit(t);
     frameHandle = el.requestVideoFrameCallback!(onFrame);
   };
   if (hasFrameCallback) frameHandle = el.requestVideoFrameCallback!(onFrame);
@@ -123,7 +152,7 @@ export function startReplayClock(options: ReplayClockOptions): () => void {
         now(),
         el.playbackRate,
       );
-      onTime(Math.min(estimate, reported.t + maxAhead));
+      emit(Math.min(estimate, reported.t + maxAhead));
     }
     rafHandle = requestFrame(tick);
   };

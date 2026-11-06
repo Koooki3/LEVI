@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+  FR3_INITIAL_JOINTS,
   FR3_JOINT_LIMITS,
   forwardPose,
+  jointsWithinLimits,
 } from "@/lib/robot-studio/fr3-kinematics";
 import { detectFr3Replay } from "../fr3-columns";
 import { buildReplayData, type ReplayData } from "../frames";
@@ -115,6 +117,68 @@ describe("sampler: joints", () => {
     (data.state.values as Float64Array)[2 * 7 + 4] = NaN;
     sampler.at(0.2);
     expect(Array.from(sampler.frame.joints)).toEqual(held);
+  });
+
+  test("a hole in the first row: the arm starts at the first whole row, and nothing throws", () => {
+    const data = jointsData(4, { action: true });
+    // Row 0 has a NaN in the state's joint 5 and in the action's joint 2.
+    (data.state.values as Float64Array)[4] = NaN;
+    (data.action!.values as Float64Array)[1] = NaN;
+    const sampler = createReplaySampler(data);
+    // Before the first sample the buffers already hold row 1 (state) and
+    // row 1 (action), which are inside the limits (all zeros are not: joints
+    // 4 and 6 have no zero inside their limits).
+    const seeded = Array.from(sampler.frame.joints);
+    expect(jointsWithinLimits(seeded)).toBe(true);
+    jointNames.forEach((_, c) => {
+      expect(seeded[c]).toBeCloseTo(joint(1, c), 12);
+      expect(sampler.frame.actionJoints[c]).toBeCloseTo(joint(2, c), 12);
+    });
+    const expected = forwardPose(seeded);
+    expected.position.forEach((v, i) =>
+      expect(sampler.frame.position[i]).toBeCloseTo(v, 12),
+    );
+    // The first sample is that row 0 itself: the arm holds the seed.
+    expect(() => sampler.at(0)).not.toThrow();
+    expect(sampler.frame.index).toBe(0);
+    expect(Array.from(sampler.frame.joints)).toEqual(seeded);
+    expected.position.forEach((v, i) =>
+      expect(sampler.frame.position[i]).toBeCloseTo(v, 12),
+    );
+    // And the next whole row is followed as usual.
+    sampler.at(0.2);
+    jointNames.forEach((_, c) =>
+      expect(sampler.frame.joints[c]).toBeCloseTo(joint(2, c), 12),
+    );
+    expect(() => sampler.path()).not.toThrow();
+  });
+
+  test("every row has a hole: the arm stays at FR3_INITIAL_JOINTS and nothing throws", () => {
+    const data = jointsData(4);
+    const values = data.state.values as Float64Array;
+    for (let i = 0; i < 4; i++) values[i * 7 + 2] = NaN;
+    const sampler = createReplaySampler(data);
+    expect(Array.from(sampler.frame.joints)).toEqual([...FR3_INITIAL_JOINTS]);
+    for (const t of [0, 0.15, 0.3, 9]) {
+      expect(() => sampler.at(t)).not.toThrow();
+    }
+    expect(Array.from(sampler.frame.joints)).toEqual([...FR3_INITIAL_JOINTS]);
+    const expected = forwardPose(FR3_INITIAL_JOINTS);
+    expected.position.forEach((v, i) =>
+      expect(sampler.frame.position[i]).toBeCloseTo(v, 12),
+    );
+    expect(() => sampler.path()).not.toThrow();
+  });
+
+  test("a row beyond the limits that reached the sampler unclamped does not make path() throw", () => {
+    const data = jointsData(4);
+    // Joint 4 = 0 is past its upper limit; buildReplayData would have clamped
+    // it, this writes around that.
+    (data.state.values as Float64Array)[2 * 7 + 3] = 0;
+    const path = createReplaySampler(data).path();
+    expect(path.length).toBe(12);
+    // The bad row holds the previous row's position.
+    for (let i = 0; i < 3; i++) expect(path[2 * 3 + i]).toBe(path[1 * 3 + i]);
   });
 
   test("a joint interpolated between two values on its limit stays inside the limit", () => {

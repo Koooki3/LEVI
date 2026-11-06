@@ -8,10 +8,12 @@
 // value in place: the arm holds its pose over a gap instead of snapping to
 // NaN or to zero.
 import {
+  FR3_INITIAL_JOINTS,
   FR3_JOINT_LIMITS,
   forwardPose,
+  jointsWithinLimits,
 } from "@/lib/robot-studio/fr3-kinematics";
-import { indexAt, sampleAt, type SampleKind } from "./clock";
+import { indexAt, sampleAt, type ReplayTrack, type SampleKind } from "./clock";
 import type { ReplayData } from "./frames";
 import { normalizedQuaternion, quaternionFromRpy, type Quat } from "./pose";
 
@@ -21,9 +23,13 @@ export const MAX_TRAIL_POINTS = 300;
 export interface ReplayFrame {
   /** Row at or before the time (state track). */
   index: number;
-  /** Seven FR3 joints (joints mode only; zeros in pose mode). */
+  /**
+   * Seven FR3 joints (joints mode only), always inside the FR3 limits: before
+   * the first sample they are the first row without a hole, or
+   * `FR3_INITIAL_JOINTS` when every row has one (and in pose mode).
+   */
   joints: Float64Array;
-  /** The action as seven joints (when `actionMode` is joints). */
+  /** The action as seven joints (when `actionMode` is joints); seeded like `joints`. */
   actionJoints: Float64Array;
   /**
    * The state's end effector: the flange from forward kinematics in joints
@@ -61,6 +67,28 @@ function clampToLimits(joints: Float64Array) {
   for (let c = 0; c < 7; c++) {
     const { lower, upper } = FR3_JOINT_LIMITS[c];
     joints[c] = Math.min(upper, Math.max(lower, joints[c]));
+  }
+}
+
+/**
+ * Seeds `out` with the first row of a 7-wide joints track that has no hole,
+ * or with `FR3_INITIAL_JOINTS` when there is none (or no track). All zeros
+ * would not do: joint 4 and joint 6 have no zero inside their limits, so a
+ * hole in the first row would hand `forwardPose` a pose it throws on.
+ */
+function seedJoints(track: ReplayTrack | null, out: Float64Array) {
+  out.set(FR3_INITIAL_JOINTS);
+  if (!track || track.width !== 7) return;
+  const { values } = track;
+  for (let row = 0; row < track.t.length; row++) {
+    let whole = true;
+    for (let c = 0; c < 7 && whole; c++) {
+      whole = Number.isFinite(values[row * 7 + c]);
+    }
+    if (!whole) continue;
+    for (let c = 0; c < 7; c++) out[c] = values[row * 7 + c];
+    clampToLimits(out);
+    return;
   }
 }
 
@@ -116,6 +144,11 @@ export function createReplaySampler(data: ReplayData): ReplaySampler {
     actionQuaternion: Float64Array.of(0, 0, 0, 1),
     gripper: null,
   };
+  seedJoints(data.mode === "joints" ? data.state : null, frame.joints);
+  seedJoints(
+    data.actionMode === "joints" ? data.action : null,
+    frame.actionJoints,
+  );
   const stateScratch = new Float64Array(data.state.width);
   const actionScratch = data.action
     ? new Float64Array(data.action.width)
@@ -135,11 +168,22 @@ export function createReplaySampler(data: ReplayData): ReplaySampler {
       : "linear";
   let path: Float32Array | null = null;
 
-  /** FK of a joints row; false when the row has a hole. */
+  /**
+   * FK of a joints row; null when the row has a hole or a joint outside the
+   * FR3 limits (`forwardPose` throws on both, and a throw here would travel
+   * up through the clock into the page's time provider).
+   */
   const flange = (joints: ArrayLike<number>) => {
-    if (!finite(joints, 7)) return null;
-    return forwardPose(Array.from(joints));
+    const row = Array.from(joints);
+    return jointsWithinLimits(row) ? forwardPose(row) : null;
   };
+
+  // Before the first sample the frame already shows the seed pose, not zeros.
+  const seed = data.mode === "joints" ? flange(frame.joints) : null;
+  if (seed) {
+    frame.position.set(seed.position);
+    frame.quaternion.set(seed.quaternion);
+  }
 
   const at = (t: number): ReplayFrame => {
     frame.index = indexAt(t, data.state.t);
