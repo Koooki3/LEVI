@@ -1,6 +1,10 @@
-import { click, render, setupDom } from "@/components/ds/__tests__/dom";
+import { click, press, render, setupDom } from "@/components/ds/__tests__/dom";
 import { act, useEffect, type ComponentProps } from "react";
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import en from "@/i18n/en.json";
+import zh from "@/i18n/zh.json";
 import { FR3_JOINT_LIMITS } from "@/lib/robot-studio/fr3-kinematics";
 import { detectFr3Replay } from "@/lib/replay/fr3-columns";
 import { TimeProvider, useTime } from "@/context/time-context";
@@ -10,10 +14,17 @@ import { LocaleProvider } from "@/components/levi-locale";
 // robot studio's test).
 type SceneProps = ComponentProps<typeof import("../replay-scene").default>;
 let scene: SceneProps | null = null;
+// "fail": the model does not load; "throw": WebGL cannot start (a render error).
+let behavior: "ok" | "fail" | "throw" = "ok";
+let mounts = 0;
 function FakeScene(props: SceneProps) {
+  if (behavior === "throw") throw new Error("WebGL is not available");
   scene = props;
   const { onLoad } = props;
-  useEffect(() => onLoad(true), [onLoad]);
+  useEffect(() => {
+    mounts++;
+  }, []);
+  useEffect(() => onLoad(behavior !== "fail"), [onLoad]);
   return <div data-testid="fake-scene" />;
 }
 mock.module("next/dynamic", () => ({ default: () => FakeScene }));
@@ -26,10 +37,16 @@ function Grab() {
   time = useTime();
   return null;
 }
+const consoleError = console.error;
 beforeEach(() => {
   scene = null;
+  behavior = "ok";
+  mounts = 0;
   window.sessionStorage.clear();
   window.localStorage.clear();
+});
+afterEach(() => {
+  console.error = consoleError;
 });
 
 const keys = (feature: string, names: readonly string[]) =>
@@ -43,12 +60,18 @@ function jointRows(n: number, step = 0.01) {
     const row: Record<string, number> = { timestamp: i * 0.5 };
     jointNames.forEach((name, c) => {
       row[`observation.state | ${name}`] = mid(c) + i * step;
+      row[`action | ${name}`] = mid(c) - i * step;
     });
     row["observation.state | gripper"] = i < 5 ? 1 : 0;
     return row;
   });
 }
 const jointDetection = detectFr3Replay({ robot_type: "franka_panda" }, [
+  "timestamp",
+  ...keys("observation.state", [...jointNames, "gripper"]),
+  ...keys("action", jointNames),
+]);
+const noActionDetection = detectFr3Replay({ robot_type: "franka_panda" }, [
   "timestamp",
   ...keys("observation.state", [...jointNames, "gripper"]),
 ]);
@@ -218,5 +241,224 @@ describe("ReplayPanel: what it says", () => {
     expect(text).toContain("收起三维回放");
     expect(text).toContain("夹爪指令");
     expect(text).not.toContain("viewer.replay3d");
+  });
+});
+
+const radio = (host: HTMLElement, name: string) =>
+  Array.from(host.querySelectorAll<HTMLElement>('[role="radio"]')).find((r) =>
+    r.textContent?.includes(name),
+  ) ?? null;
+const switchNamed = (host: HTMLElement, name: string) =>
+  Array.from(host.querySelectorAll<HTMLInputElement>('[role="switch"]')).find(
+    (input) => input.closest("label")?.textContent?.includes(name),
+  ) ?? null;
+
+describe("ReplayPanel: switches and views", () => {
+  test("show action is off at first and turns the scene's ghost on, with its legend", async () => {
+    const { host } = await render(panel());
+    expect(scene!.showAction).toBe(false);
+    expect(host.textContent).toContain("Solid arm = observation.state");
+    expect(host.textContent).not.toContain("Translucent arm = action");
+    await click(switchNamed(host, "Show action"));
+    expect(scene!.showAction).toBe(true);
+    const text = host.textContent ?? "";
+    expect(text).toContain(
+      "Translucent arm = action, a commanded target, not a measurement",
+    );
+    expect(text).toContain("it leads the state by one frame only");
+    await click(switchNamed(host, "Show action"));
+    expect(scene!.showAction).toBe(false);
+    expect(host.textContent).not.toContain("Translucent arm = action");
+  });
+
+  test("a dataset without action columns has no action switch", async () => {
+    const { host } = await render(panel({ detection: noActionDetection }));
+    expect(switchNamed(host, "Show action")).toBeNull();
+    expect(switchNamed(host, "Trail")).not.toBeNull();
+    expect(scene!.showAction).toBe(false);
+  });
+
+  test("an action given as a pose is described as axes", async () => {
+    const rows = poseRows.map((row) => ({
+      ...row,
+      "action | x": 1,
+      "action | y": 0,
+      "action | z": 0.5,
+      "action | rx": 0,
+      "action | ry": 0,
+      "action | rz": 0,
+    }));
+    const detection = detectFr3Replay({ robot_type: "generic_arm" }, [
+      "timestamp",
+      ...keys("observation.state", poseNames),
+      ...keys("action", ["x", "y", "z", "rx", "ry", "rz"]),
+    ]);
+    const { host } = await render(panel({ detection, rows, family: "fr3" }));
+    await click(switchNamed(host, "Show action"));
+    expect(host.textContent).toContain(
+      "Faint axes = action, a commanded target, not a measurement",
+    );
+    expect(host.textContent).toContain("Axes and path = observation.state");
+  });
+
+  test("the trail switch reaches the scene and adds its legend line", async () => {
+    const { host } = await render(panel());
+    expect(scene!.trail).toBe(false);
+    await click(switchNamed(host, "Trail"));
+    expect(scene!.trail).toBe(true);
+    expect(host.textContent).toContain(
+      "at most the last 300 end-effector positions",
+    );
+  });
+
+  test("the view buttons set the camera view; choosing again re-applies it", async () => {
+    const { host } = await render(panel());
+    expect(scene!.view).toBe("perspective");
+    expect(
+      host.querySelector('[role="radiogroup"]')!.getAttribute("aria-label"),
+    ).toBe("View");
+    const revision = scene!.viewRevision;
+    await click(radio(host, "Front"));
+    expect(scene!.view).toBe("front");
+    expect(scene!.viewRevision).toBeGreaterThan(revision);
+    await click(radio(host, "Top"));
+    expect(scene!.view).toBe("top");
+    expect(radio(host, "Top")!.getAttribute("aria-checked")).toBe("true");
+  });
+
+  test("the choices are kept for the next episode", async () => {
+    const first = await render(panel());
+    await click(switchNamed(first.host, "Trail"));
+    await click(switchNamed(first.host, "Show action"));
+    await click(radio(first.host, "Top"));
+    const second = await render(panel());
+    expect(scene!.trail).toBe(true);
+    expect(scene!.showAction).toBe(true);
+    expect(scene!.view).toBe("top");
+    expect(switchNamed(second.host, "Trail")!.checked).toBe(true);
+  });
+
+  test("a stored choice that makes no sense is ignored", async () => {
+    window.sessionStorage.setItem(
+      "replay3dPrefs",
+      '{"view":"sideways","trail":"yes"}',
+    );
+    await render(panel());
+    expect(scene!.view).toBe("perspective");
+    expect(scene!.trail).toBe(false);
+    window.sessionStorage.setItem("replay3dPrefs", "{not json");
+    await render(panel());
+    expect(scene!.view).toBe("perspective");
+  });
+});
+
+describe("ReplayPanel: when the 3D view cannot start", () => {
+  test("a model that does not load shows what happened and a Retry button that tries again", async () => {
+    behavior = "fail";
+    const { host } = await render(panel());
+    const alert = host.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain("The 3D view could not start");
+    expect(alert.textContent).toContain(
+      "The video and the charts are not affected",
+    );
+    expect(host.querySelector('[data-testid="fake-scene"]')).toBeNull();
+    behavior = "ok";
+    const before = mounts;
+    await click(button(host, "Retry"));
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(host.querySelector('[data-testid="fake-scene"]')).not.toBeNull();
+    expect(mounts).toBe(before + 1);
+  });
+
+  test("a WebGL error while rendering the scene shows the same state; Retry mounts it again", async () => {
+    console.error = () => {};
+    behavior = "throw";
+    const { host } = await render(panel());
+    expect(host.querySelector('[role="alert"]')!.textContent).toContain(
+      "could not start",
+    );
+    behavior = "ok";
+    await click(button(host, "Retry"));
+    expect(host.querySelector('[data-testid="fake-scene"]')).not.toBeNull();
+  });
+
+  test("the rest of the panel stays: readout and notes are still there", async () => {
+    behavior = "fail";
+    const { host } = await render(panel());
+    expect(host.textContent).toContain("Row 1 of 10");
+  });
+});
+
+describe("ReplayPanel: keyboard", () => {
+  test("Space and the arrow keys on a panel control stay there; elsewhere they reach the page", async () => {
+    const seen: string[] = [];
+    const onKey = (event: KeyboardEvent) => seen.push(event.key);
+    window.addEventListener("keydown", onKey);
+    try {
+      const { host } = await render(panel());
+      const trail = switchNamed(host, "Trail")!;
+      await press(trail, " ");
+      await press(trail, "ArrowDown");
+      await press(radio(host, "Perspective"), "ArrowUp");
+      expect(seen).toEqual([]);
+      // Focus on the viewport or the heading: the page's play/pause and episode keys work.
+      await press(host.querySelector(".vw-r3d-viewport"), " ");
+      await press(host.querySelector(".vw-r3d-readout"), "ArrowDown");
+      expect(seen).toEqual([" ", "ArrowDown"]);
+      // Other keys on a control are not swallowed either.
+      await press(trail, "Escape");
+      expect(seen.at(-1)).toBe("Escape");
+    } finally {
+      window.removeEventListener("keydown", onKey);
+    }
+  });
+});
+
+describe("ReplayPanel: text and motion", () => {
+  const keys3d = (catalog: Record<string, string>) =>
+    Object.keys(catalog).filter((key) => key.startsWith("viewer.replay3d."));
+  const holes = (text: string) => (text.match(/\{\w+\}/g) ?? []).sort();
+
+  test("every viewer.replay3d.* text exists in English and Chinese with the same holes", () => {
+    const english = keys3d(en as Record<string, string>);
+    expect(english.length).toBeGreaterThan(30);
+    expect(keys3d(zh as Record<string, string>).sort()).toEqual(
+      [...english].sort(),
+    );
+    for (const key of english) {
+      const a = (en as Record<string, string>)[key];
+      const b = (zh as Record<string, string>)[key];
+      expect(a.trim(), key).not.toBe("");
+      expect(b.trim(), key).not.toBe("");
+      expect(holes(b), key).toEqual(holes(a));
+      expect(/[\u4e00-\u9fff]/.test(b), `${key} has no Chinese`).toBe(true);
+    }
+  });
+
+  test("every viewer.replay3d.* key the panel can show is in the block (none shows as a raw key)", async () => {
+    // Joints with action, switches on, then a failure: the visible text never contains a key.
+    const { host } = await render(panel());
+    await click(switchNamed(host, "Show action"));
+    await click(switchNamed(host, "Trail"));
+    expect(host.textContent).not.toContain("viewer.replay3d");
+    behavior = "fail";
+    const failed = await render(panel());
+    expect(failed.host.textContent).not.toContain("viewer.replay3d");
+  });
+
+  test("the panel's styles animate nothing, so prefers-reduced-motion has nothing to stop", () => {
+    const css = readFileSync(
+      join(import.meta.dir, "../replay-panel.css"),
+      "utf8",
+    );
+    expect(css).not.toMatch(/animation|transition|@keyframes/);
+  });
+
+  test("the camera views jump; there is no camera animation to reduce", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "../fr3-model.tsx"),
+      "utf8",
+    );
+    expect(source).not.toMatch(/requestAnimationFrame|lerp|tween|gsap/);
   });
 });

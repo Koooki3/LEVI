@@ -93,3 +93,32 @@
   font-size: var(--ds-text-caption-size);
   color: var(--ds-text-secondary);
 }
+.vw-r3d-status--over {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.vw-r3d-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ds-space-3) var(--ds-space-4);
+}
+.vw-r3d-legend {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--ds-text-caption-size);
+  color: var(--ds-text-secondary);
+}
+.vw-r3d-legend li {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+}

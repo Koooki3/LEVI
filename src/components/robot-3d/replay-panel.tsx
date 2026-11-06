@@ -5,45 +5,106 @@
 // pose frame is not verified. The scene itself (three.js, React Three Fiber)
 // is loaded on demand and only when the panel is open.
 import {
+  Component,
   useCallback,
   useId,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import dynamic from "next/dynamic";
-import { ChevronDown, ChevronUp } from "lucide-react";
-import { Badge, Button } from "@/components/ds";
+import { ChevronDown, ChevronUp, RotateCw } from "lucide-react";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  SegmentedControl,
+  Switch,
+} from "@/components/ds";
+import { SeriesSwatch } from "@/components/viewer/series-swatch";
 import { useLocale } from "@/components/levi-locale";
 import { useTime } from "@/context/time-context";
 import { indexAt } from "@/lib/replay/clock";
 import type { Fr3ReplayDetection } from "@/lib/replay/fr3-columns";
 import { buildReplayData, type ReplayData } from "@/lib/replay/frames";
 import type { ReplayVideoSource } from "@/lib/replay/playback-clock";
+import type { Fr3View } from "./fr3-model";
 import {
   readBrowserStorage,
   writeBrowserStorage,
 } from "@/utils/browserStorage";
 import "./replay-panel.css";
 
+// While the chunk loads the viewport shows the "Loading" line of the panel.
 const ReplayScene = dynamic(() => import("./replay-scene"), {
   ssr: false,
-  loading: () => <SceneLoading />,
+  loading: () => null,
 });
 
 const OPEN_KEY = "replay3dOpen";
-const ignoreLoad = () => {};
-const DEG = 180 / Math.PI;
+const PREFS_KEY = "replay3dPrefs";
+const VIEWS: readonly Fr3View[] = ["perspective", "front", "top"];
 
-function SceneLoading() {
-  const { t } = useLocale();
-  return (
-    <p className="vw-r3d-status" role="status">
-      {t("viewer.replay3d.loading")}
-    </p>
-  );
+interface Prefs {
+  action: boolean;
+  trail: boolean;
+  view: Fr3View;
 }
+const DEFAULT_PREFS: Prefs = {
+  action: false,
+  trail: false,
+  view: "perspective",
+};
+
+/** The toggles and the view, kept for the session so browsing episodes does not reset them. */
+function readPrefs(): Prefs {
+  try {
+    const parsed = JSON.parse(
+      readBrowserStorage("session", PREFS_KEY) ?? "null",
+    );
+    if (!parsed || typeof parsed !== "object") return DEFAULT_PREFS;
+    return {
+      action: parsed.action === true,
+      trail: parsed.trail === true,
+      view: VIEWS.includes(parsed.view) ? parsed.view : DEFAULT_PREFS.view,
+    };
+  } catch {
+    return DEFAULT_PREFS;
+  }
+}
+
+/** WebGL or a render error in the scene shows the retry state instead of an empty page. */
+class SceneBoundary extends Component<
+  { children: ReactNode; onFailure: () => void },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch() {
+    this.props.onFailure();
+  }
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
+/**
+ * The panel's own controls handle Space and the arrow keys (a switch toggles,
+ * the view buttons move); the page's shortcuts (play/pause, previous and next
+ * episode) must not fire as well.
+ */
+function keepKeysLocal(event: KeyboardEvent) {
+  if (event.key === " " || event.key === "ArrowUp" || event.key === "ArrowDown")
+    event.stopPropagation();
+}
+
+type SceneStatus = "loading" | "ready" | "failed";
+const DEG = 180 / Math.PI;
 
 /** "Row {row}" -> "Row 3": fills the named holes of a catalogue sentence. */
 export function fill(
@@ -101,8 +162,27 @@ export default function ReplayPanel({
     writeBrowserStorage("session", OPEN_KEY, next ? "1" : "0");
     setOpen(next);
     setOpenedAt(timeNow.current);
+    setStatus("loading");
   }, [open]);
 
+  const [prefs, setPrefs] = useState(readPrefs);
+  const [viewRevision, setViewRevision] = useState(0);
+  const changePrefs = useCallback(
+    (change: Partial<Prefs>) => {
+      const next = { ...prefs, ...change };
+      writeBrowserStorage("session", PREFS_KEY, JSON.stringify(next));
+      setPrefs(next);
+    },
+    [prefs],
+  );
+  const [status, setStatus] = useState<SceneStatus>("loading");
+  const onLoad = useCallback(
+    (ok: boolean) => setStatus(ok ? "ready" : "failed"),
+    [],
+  );
+  const onFailure = useCallback(() => setStatus("failed"), []);
+  // While failed the scene is not rendered, so loading again mounts it afresh.
+  const retry = useCallback(() => setStatus("loading"), []);
   const titleId = useId();
   const bodyId = useId();
   const readoutId = useId();
@@ -168,18 +248,77 @@ export default function ReplayPanel({
             )}
             aria-describedby={readoutId}
           >
-            <ReplayScene
-              data={data}
-              showAction={false}
-              trail={false}
-              view="perspective"
-              viewRevision={0}
-              subscribe={subscribe}
-              video={video}
-              initialTime={openedAt}
-              onLoad={ignoreLoad}
+            {status === "failed" ? (
+              <div role="alert">
+                <EmptyState
+                  title={t("viewer.replay3d.errorTitle")}
+                  description={t("viewer.replay3d.errorBody")}
+                  action={
+                    <Button variant="primary" icon={RotateCw} onClick={retry}>
+                      {t("viewer.replay3d.retry")}
+                    </Button>
+                  }
+                />
+              </div>
+            ) : (
+              <SceneBoundary onFailure={onFailure}>
+                <ReplayScene
+                  data={data}
+                  showAction={prefs.action && data.actionMode !== "none"}
+                  trail={prefs.trail}
+                  view={prefs.view}
+                  viewRevision={viewRevision}
+                  subscribe={subscribe}
+                  video={video}
+                  initialTime={openedAt}
+                  onLoad={onLoad}
+                />
+              </SceneBoundary>
+            )}
+            {status === "loading" && joints && (
+              <p className="vw-r3d-status vw-r3d-status--over" role="status">
+                {t("viewer.replay3d.loading")}
+              </p>
+            )}
+          </div>
+          <div className="vw-r3d-controls" onKeyDown={keepKeysLocal}>
+            <SegmentedControl
+              size="sm"
+              label={t("viewer.replay3d.viewLabel")}
+              value={prefs.view}
+              onChange={(value) => {
+                changePrefs({ view: value as Fr3View });
+                setViewRevision((revision) => revision + 1);
+              }}
+              options={[
+                {
+                  value: "perspective",
+                  label: t("viewer.replay3d.viewPerspective"),
+                },
+                { value: "front", label: t("viewer.replay3d.viewFront") },
+                { value: "top", label: t("viewer.replay3d.viewTop") },
+              ]}
+            />
+            {data.actionMode !== "none" && (
+              <Switch
+                label={t("viewer.replay3d.showAction")}
+                checked={prefs.action}
+                onChange={(event) =>
+                  changePrefs({ action: event.target.checked })
+                }
+              />
+            )}
+            <Switch
+              label={t("viewer.replay3d.trail")}
+              checked={prefs.trail}
+              onChange={(event) => changePrefs({ trail: event.target.checked })}
             />
           </div>
+          <ReplayLegend
+            data={data}
+            showAction={prefs.action && data.actionMode !== "none"}
+            trail={prefs.trail}
+          />
           <div id={readoutId} className="vw-r3d-readout">
             <p>
               {fill(t("viewer.replay3d.frame"), {
@@ -243,6 +382,45 @@ export default function ReplayPanel({
         </div>
       )}
     </section>
+  );
+}
+
+function ReplayLegend({
+  data,
+  showAction,
+  trail,
+}: {
+  data: ReplayData;
+  showAction: boolean;
+  trail: boolean;
+}) {
+  const { t } = useLocale();
+  const joints = data.mode === "joints";
+  return (
+    <ul className="vw-r3d-legend" aria-label={t("viewer.replay3d.legendLabel")}>
+      <li>
+        <SeriesSwatch index={0} />
+        {t(
+          joints
+            ? "viewer.replay3d.legendState"
+            : "viewer.replay3d.legendStatePose",
+        )}
+      </li>
+      {showAction && (
+        <>
+          <li>
+            <SeriesSwatch index={1} />
+            {t(
+              data.actionMode === "joints"
+                ? "viewer.replay3d.legendAction"
+                : "viewer.replay3d.legendActionPose",
+            )}
+          </li>
+          <li>{t("viewer.replay3d.legendNextState")}</li>
+        </>
+      )}
+      {trail && <li>{t("viewer.replay3d.legendTrail")}</li>}
+    </ul>
   );
 }
 
