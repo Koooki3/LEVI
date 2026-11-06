@@ -1,22 +1,6 @@
 /* The Episodes tab's 3D replay panel. Spacing from --ds-space-*, colours
    from tokens (the viewport is media: black in both themes). */
 
-/* Video(s) and the panel: side by side from the lg breakpoint, stacked below. */
-.vw-replay-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--ds-space-3);
-}
-.vw-replay-layout > * {
-  min-width: 0;
-}
-@media (min-width: 1200px) {
-  .vw-replay-layout {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: start;
-  }
-}
-
 .vw-r3d {
   display: flex;
   flex-direction: column;
