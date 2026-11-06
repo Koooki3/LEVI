@@ -39,15 +39,15 @@
     "Orchestra's mandatory wall-clock loop (/loop 20m, cron.add): an unattended recurring schedule, which lab section 4 reserves to the user",
     "Orchestra's 'fully autonomous, do not ask' (SKILL.md 16, 351), pip install (101-102), messages to the user through Telegram or Slack (271) and 'use whatever compute, do not block' (352), per the independent review"
   ],
-  "local_changes": "Adds the LEVI guardrails: tune/confirm split with a pinned id-list hash, frozen/held-out/blind sets outside the loop (R9, R11), checked through gold_tool ids and never .env, stop rule (R10), new version file per prompt iteration (R13), git revert for discards, GPU lock and arm gates, external token budget asked once from the user, the teacher/student scoring rules of 2026-11-06.",
+  "local_changes": "Adds the LEVI guardrails: tune/confirm split with a pinned id-list hash, frozen/held-out/blind sets outside the loop (R9, R11), checked through gold_tool ids and never .env, stop rule (R10), new version file per prompt iteration (R13), git revert for discards, GPU lock and arm gates, external tokens counted and reported with no cap (the user's decision of 2026-11-06), the teacher/student scoring rules of 2026-11-06.",
   "validation": {
     "static": "scripts/check_skills.py (frontmatter parses without strict-YAML pitfalls, hashes match, links resolve) with tests/test_check_skills.py; the first version failed PyYAML 6.0.3 strict parsing (found by the independent review, reproduced by the manager)",
     "behavioural": "references/evals.md defines four tasks; the independent reviewer walked the first version through them on paper; no agent has run them",
     "independent_review": "2026-11-06: first review done, blockers and important findings addressed in the follow-up commit; no second review yet"
   },
   "files": {
-    "SKILL.md": "dc216f593a8397e90c9cec0b6385f28b3aaaee66b31b329aa643fd16d8304ca0",
-    "references/evals.md": "d16099e854305266c9bcf52a73b3ff2c3c37294285af80c0e18be39f420db6ac",
+    "SKILL.md": "0f0beef5d759741c7e5d40189d5db2ec29f0bd02ea8d556b0fa4cd67125b2d4f",
+    "references/evals.md": "57c992cd5c61a0f784288b2e3761d26858b3dd8887ae94c8729e29c988129b32",
     "references/round-record.md": "14dc217a31871dc4529fe24b19b1cd90e725a1fba0c2eec47348c3c0a154b18b"
   }
 }
