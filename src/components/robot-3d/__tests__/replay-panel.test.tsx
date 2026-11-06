@@ -10,6 +10,7 @@ import { ROBOTIQ_STROKE_M } from "@/lib/robot-studio/robotiq-2f85";
 import { detectFr3Replay } from "@/lib/replay/fr3-columns";
 import { TimeProvider, useTime } from "@/context/time-context";
 import { LocaleProvider } from "@/components/levi-locale";
+import { seriesColor } from "@/components/viewer/data-palette";
 
 // The scene is three.js: a recorder takes its place (the same trick as the
 // robot studio's test).
@@ -569,6 +570,17 @@ describe("ReplayPanel: text and motion", () => {
       "utf8",
     );
     expect(css).not.toMatch(/animation|transition|@keyframes/);
+  });
+
+  test("the gripper bar is drawn in the colour of observation.state (series 0), not the action's", () => {
+    const css = readFileSync(
+      join(import.meta.dir, "../replay-panel.css"),
+      "utf8",
+    );
+    const fillRule = /\.vw-r3d-gripper-bar::after\s*\{([^}]*)\}/.exec(css)![1];
+    const fill = /background:\s*([^;]+);/.exec(fillRule)![1].trim();
+    expect(fill).toBe(seriesColor(0));
+    expect(fill).not.toBe(seriesColor(1));
   });
 
   test("the camera views jump; there is no camera animation to reduce", () => {
