@@ -17,6 +17,7 @@
 | `third_party.json`、`third_party` | 本包所用外部来源的结构化登记，以及它必须遵守的规则。 |
 | `boundary_metrics` | 多个容差下的边界召回率、每分钟误报候选数、边界 MAE/P90、多个 IoU 阈值下的时间片段 F1。 |
 | `candidates` | 一个片段各来源的事件候选，合并后按取证优先级排序。 |
+| `clips` | 在夹爪开合与末端速度极小处，把片段切成 1 到 12 秒的片，每个边界带原因码（VPP2 第 P1 步；不用模型，离线）。 |
 | `sampling` | 证据规划器：按层级贪心地把一次精修的帧预算分给各个窗口。 |
 | `ablation` | 同预算下有无事件候选的对照（脚手架，不调模型）。 |
 
@@ -141,9 +142,59 @@ python -m levi.events.calibrate --root <工作区> \
 
 命令行拒绝任何路径里带冻结集或留出集字样的输入，只写到标准输出或 `--out`。同样待测的还有每组请求的 token 成本（每次精修请求的图像更多）和墙钟时间。
 
+## 片段提议器（VPP2 第 P1 步）
+
+`clips.propose_clips(signals, params)` 把整段已记录的片段（episode）切成 1 到 12 秒的小片，切点选在机器人动作自然转折的地方：夹爪张开或闭合处，以及末端几乎停下处。它是 VPP2（Video Prediction Policy 2，arXiv:2610.10270，读的是 v1 的第 2、3.1 节和附录 A；第 4 节没读）数据处理描述里不用模型的第一步。**来自论文的只有：1 到 12 秒的范围，和这两条线索。** 论文接着让视觉语言模型合并相邻片段、调整起止点，**这一步这里没有实现**。论文没有说速度极小值怎么找、阈值是多少、过长或过短的片段怎么处理，这些全部**是我们自选的（ours）**，靠推理定下，没有在任何金标准上调过。本模块不是论文管线的复现，它的任何结果都不能说成复现。
+
+它是离线的（读整段，含未来）、纯计算、确定性的：不用模型，不用随机数，不读文件，只导入 numpy。输入输出都是纯数据，其他项目可以通过自己的适配器调用。它不描述片段，不看图精修边界，不裁掉空闲的开头结尾，不用姿态旋转；一个线索只是“该去看一看的地方”，本身不是子任务边界。
+
+**输入。** `ClipSignals(times, positions, gripper, gripper_bounds)`：严格递增的秒；每个采样的末端位置（形状 `(n, d)`）；一个夹爪通道（哪一端是张开都行）；可选的该通道自身量程。位置和夹爪至少要有一个。名字不会被用来推断任何东西：`signals_from_table(table, feature, position, gripper_index)` 由调用方声明列，再做出 `ClipSignals`。**读不了的输入一律拒绝，不修补**：`ClipInputError` 有稳定的 `code`（`empty`、`too_few_samples`、`not_numeric`、`shape_mismatch`、`non_finite`、`non_monotonic`、`no_signal`、`bad_bounds`、`bad_table`、`bad_params`、`bad_record`），消息写明原因和第一个坏行。NaN、重复或倒退的时间戳、空数组、长度不一致，都会让调用失败；剔除坏行属于这一步之前的过滤（VPP2 的 P0 步）。
+
+**参数**（`ClipParams`，一个具名数据类；`PARAM_SOURCES` 标明哪些来自论文）：
+
+| 参数 | 默认值 | 来源 | 理由 |
+| --- | --- | --- | --- |
+| `min_s`、`max_s` | 1.0 秒、12.0 秒 | 论文 | “语义连贯、时长 1–12 秒的片段”。要求 `max_s >= 2 * min_s`，否则有些长度（比如区间 5 到 8 秒时的 9 秒）无法切成范围内的片段。 |
+| `smooth_s` | 0.5 秒 | 自选 | 在 10 到 30 Hz 下覆盖 5 到 15 个采样，单个噪声步不会形成极小值；又短于真正的停顿。本包已把 0.5 秒当作最短的有意义状态（`motion.STILL_SECONDS`、`change_points.MIN_SECONDS`）。 |
+| `min_prominence` | 0.2 | 自选 | 平滑后的速度在极小值两侧都至少升高“该片段快速（第 95 百分位，同 `motion`）速度”的这一比例，极小值才算数。快速一划上 20% 的起伏不算停下。 |
+| `max_level` | 0.5 | 自选 | ……并且极小值本身不超过快速速度的这一比例：手臂慢到一半或更低。 |
+| `min_gap_s` | 2.0 秒 | 自选 | 两个速度线索靠得比这更近，只留更显著的一个；减速是最弱的线索，2 秒内的两个更像同一次停顿加一点起伏。夹爪线索不受此限。 |
+| `split_window` | 0.25 | 自选 | 过长的片段在均分点附近、一片长度的这一比例之内，找被压下的速度线索来切；再宽就是拿片段的均衡换一个稍深的低点。 |
+| `gripper_min_travel` | 0.2 | 自选 | 给定夹爪量程（`gripper_bounds`）时，通道移动不到量程的这一比例就没有事件：与 `facts.read` 的规则相同。穿越阈值是共用内核的（`gripper.LOW`、`gripper.HIGH`）。 |
+
+`ClipParams.sha256()` 对参数的规范化 JSON 取哈希（整数和等值浮点哈希相同）；任何值改变，哈希就变。**这些值没有在真实数据上试过**，只是起点。改一个值会改变哈希；改了找片段的方式而参数里看不出来，则升 `VERSION`。
+
+**步骤。**
+
+1. *线索。* 夹爪穿越来自 `gripper.read`（带滞回，按该片段自己的量程或给定量程），取穿越的时刻。速度是末端位置的路径长度除以以该点为中心、宽 `smooth_s` 的窗口（采样不均匀也不会变成跳变）。内部的局部极小值通过 `max_level` 和 `min_prominence` 就是线索；线索放在半显著度处山谷的中点，所以长停顿切在中间，而不是某个噪声起伏上。离任一端不到 `min_s` 的线索丢掉。速度线索按显著度从大到小，离已保留线索不到 `min_gap_s` 的丢掉。夹爪线索在这里不会被丢，并且压过旁边的速度线索。
+2. *合并过短。* 最短且不足 `min_s` 的片段去掉它两个边界中的一个：先去较弱的（速度线索先于夹爪线索，显著度小的速度线索先去），再看哪一个合并后不超过 `max_s`，再看合并后较短的，最后取较早的。被去掉的边界记在 `dropped` 里。贪心，不是最优。
+3. *拆分过长。* 超过 `max_s` 的片段切成最少的片数（`ceil(长度 / max_s)`），从左到右一刀一刀切，每一刀都要让剩下的部分仍能被剩余片数填进 `[min_s, max_s]`。切点放在均分点附近 `split_window` 之内最显著的速度线索处（第 1 步丢掉的或被合并掉的那种），没有就放在均分点。不是线索的起伏不会移动切点。
+4. 短于 `min_s` 的整段是一个标 `too_short_episode` 的片段，不会被丢掉。
+
+**输出与原因码。** `ClipProposal` 含 `clips`、`dropped`、`params` 和 `algorithm_version`（`levi.events.clips.v1`）；`as_dict()` 是带 `schema_version` `levi.clips.v1`、参数、`params_sha256` 和 `param_sources` 的 JSON；`ClipProposal.from_dict` 读回，并拒绝参数与哈希不符的记录。一个片段有 `start_s`、`end_s`、`start_reason`、`end_reason` 和 `flags`；`reasons` 列出适用的全部原因码。
+
+| 原因码 | 出现位置 | 含义 |
+| --- | --- | --- |
+| `boundary_gripper` | 边界 | 夹爪在此处穿越（张开或闭合）。 |
+| `boundary_speed_min` | 边界 | 末端速度在此处有显著的极小值。 |
+| `split_long` | 边界 | 过长的片段在此被切开，切在第 1 步被压下的速度线索上。 |
+| `split_long_even` | 边界 | 过长的片段被等分：附近没有线索。证据最弱。 |
+| `episode_start`、`episode_end` | 片段端点 | 整段的起止。 |
+| `merge_short` | 片段标记、`dropped.why` | 这个片段里有个边界被去掉了，因为邻近片段短于 `min_s`。 |
+| `too_short_episode` | 片段标记 | 整段短于 `min_s`。 |
+| `near_edge`、`min_gap` | `dropped.why` | 第 1 步找到的线索离某一端不到 `min_s`，或离更强的线索不到 `min_gap_s`。 |
+
+**保证了什么（用固定种子的 400 个随机信号和手算样例测试）。** 片段按顺序覆盖从第一个到最后一个时间戳的整段，没有间隙和重叠；每个片段都在 `[min_s, max_s]` 内（精确到 1e-9 秒），唯一的例外是单独的 `too_short_episode` 片段；同一输入得到同一输出。夹爪穿越保有它的边界，除非它离某一端或另一次穿越不到 `min_s`，那时长度限制优先，`dropped` 会写明。
+
+### 怎么评它
+
+`clips.evaluate(episodes, params, signals_of=..., baseline=...)` 用 `boundary_metrics` 把提议的边界（0.2、0.5、1.0 秒容差下的召回、精确率、F1 和每分钟误报）、用 Segment F1 把片段，对照参考边界打分。给出 `baseline=candidates_baseline()` 时，它在**同一份参考、同一批片段、同样的容差**下给**现行候选管线**打分：保留下来的全部候选，以及提议器出了 n 个边界时它的前 n 个。基线是每分钟很多候选的证据排序，不是片段提议器，所以看它的召回要对照它的数量。任何一臂读不了的片段，两臂都不计分，列在 `skipped`。
+
+`clips.evaluate_gold(folders, root, params)` 读金标准文件夹（`calibrate` 的布局），**只经 `calibrate.Guard`**：文件夹或来源含 `frozen`、`heldout`、`held-out`，或在排除名单上（`exclusion_lists`、`LEVI_POOL_HELDOUT`），整个运行终止。它是本模块里唯一读文件的函数。只对开发集金标准使用。**现状：只在合成信号上测过**（`tests/test_events_clips.py`）；它的边界与人工边界、与现有候选在真实数据上的比较结果目前未知。
+
 ## 第三方来源
 
-`levi/events/third_party.json`（`levi.third_party_registry.v1`）登记本包依赖或借鉴的每个外部来源：来源 `source`、版本 `version`、许可 `licenses`（代码、权重、数据）、采用方式 `use`（`dependency`、`adopt-idea`、`adapt-code`、`vendored`）、是否随 LEVI 分发（`shipped`）或拷贝了代码（`code_copied`）、能否再分发（`redistributable`）、带核实过的 `reference_key` 的引用 `citation`，以及用在哪里（`where`）。测试用 `levi.events.third_party.problems` 强制这些规则：代码许可为非商业、缺失或未核实的来源只能借鉴思路（不拷贝、不分发）；有引用就必须对应已核实的参考条目；依赖必须在 `pyproject.toml` 里声明；`levi/events` 模块里出现的每个 arXiv 编号都必须属于某个已登记来源。目前登记了 `ruptures`（只借鉴思路，BSD-2-Clause，未安装）、VideoSeek（只借鉴思路：证据规划器的分层名称来自它的 overview、skim、focus 三个工具；Lin 等 2026，arXiv:2603.20185，代码 MIT，未拷贝任何代码）和现有核心依赖 NumPy、pydantic：本包没有新增依赖。发布用的清单仍是 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
+`levi/events/third_party.json`（`levi.third_party_registry.v1`）登记本包依赖或借鉴的每个外部来源：来源 `source`、版本 `version`、许可 `licenses`（代码、权重、数据）、采用方式 `use`（`dependency`、`adopt-idea`、`adapt-code`、`vendored`）、是否随 LEVI 分发（`shipped`）或拷贝了代码（`code_copied`）、能否再分发（`redistributable`）、带核实过的 `reference_key` 的引用 `citation`，以及用在哪里（`where`）。测试用 `levi.events.third_party.problems` 强制这些规则：代码许可为非商业、缺失或未核实的来源只能借鉴思路（不拷贝、不分发）；有引用就必须对应已核实的参考条目；依赖必须在 `pyproject.toml` 里声明；`levi/events` 模块里出现的每个 arXiv 编号都必须属于某个已登记来源。目前登记了 `ruptures`（只借鉴思路，BSD-2-Clause，未安装）、VideoSeek（只借鉴思路：证据规划器的分层名称来自它的 overview、skim、focus 三个工具；Lin 等 2026，arXiv:2603.20185，代码 MIT，未拷贝任何代码）、VPP2（只借鉴思路：片段提议器的 1 到 12 秒范围和两条线索；Guo 等 2026，arXiv:2610.10270；未拷贝任何内容，提议器的其余部分是我们自选的）和现有核心依赖 NumPy、pydantic：本包没有新增依赖。发布用的清单仍是 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
 
 ## 显式启用的在线观测流
 
