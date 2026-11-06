@@ -11,6 +11,15 @@ problems, with the same decoding and the same scoring:
 The headline is whether ``local_harness`` reaches at least the teacher's
 quality while being faster and spending fewer external tokens, so the table
 carries quality per second and quality per external token, not accuracy alone.
+"At least the teacher's quality" is a non-inferiority claim, judged on an
+interval, not on two point estimates (a confirm round has about six problems,
+and one flipped problem moves a rate by 0.14 to 0.17): ``scoring`` states the
+direction (``higher_is_better``) and the margin δ
+(``non_inferiority_margin``) before the round, the scorer who can see the
+problems one by one supplies the paired difference interval
+(``quality_delta_ci_vs_teacher``, student minus teacher), and the answer is yes
+if its worse end is still within δ, no if even its better end is beyond δ,
+undetermined otherwise. The point estimates stay in the table as a side line.
 
 Rules this module enforces:
 
@@ -35,6 +44,9 @@ Rules this module enforces:
   the content it refused. What the guard cannot do is judge intent: a caller
   who writes an episode-specific word as a "code" gets it through, but only a
   few of 64 characters per field, never a score list or a sentence.
+- **Time is compared like with like.** ``wall_s_basis`` says whether a time
+  includes queueing (a sub-agent's duration does, a local call's need not);
+  times of different or unstated bases are not compared.
 - **External tokens are four separate fields** (``input_new``, ``output``,
   ``cache_read``, ``cache_write``, as in ``levi.aeri.external_report.v1``).
   Quality per external token needs one denominator; the default is
@@ -249,8 +261,14 @@ class ArmRecord:
     ``other``); a ``confirm`` record is held to the confirm rules in every table
     (see the module docstring).
 
+    ``scoring`` must state ``higher_is_better`` (bool) and
+    ``non_inferiority_margin`` (δ, a number >= 0, declared before the round).
     ``quality`` is the primary metric against the gold standard (the metric is
-    named in ``scoring``); ``quality_ci`` its interval. ``None`` means not
+    named in ``scoring``); ``quality_ci`` its interval.
+    ``quality_delta_ci_vs_teacher`` is the interval of the paired difference
+    (this arm's quality minus the teacher's, same problems) computed by whoever
+    can see the problems one by one; the table only reads it (not on the
+    teacher arm). ``quality_delta_ci_method`` says how (level and method). ``None`` means not
     measured. ``agreement_with_teacher`` is the share of the teacher's answers
     this arm reproduces (not set on the teacher arm). ``external_tokens`` has
     the four fields of ``levi.aeri.external_report.v1``; ``None`` for the whole
@@ -274,7 +292,7 @@ class ArmRecord:
     task: str
     model: str
     decoding: dict
-    scoring: dict | str
+    scoring: dict
     split: str
     episode_set_hash: str | None = None
     episode_count: int | None = None
@@ -283,6 +301,8 @@ class ArmRecord:
     quality: float | None = None
     quality_ci: tuple[float, float] | None = None
     quality_ci_method: str | None = None
+    quality_delta_ci_vs_teacher: tuple[float, float] | None = None
+    quality_delta_ci_method: str | None = None
     agreement_with_teacher: float | None = None
     wall_s: float | None = None
     local_tokens: int | None = None
@@ -310,9 +330,23 @@ class ArmRecord:
                 "(an empty one would match any other and compare nothing)"
             )
         put("decoding", _json_copy(self.decoding, "decoding"))
-        if not isinstance(self.scoring, (dict, str)) or not self.scoring:
-            raise RecordError("scoring must be a non-empty dict or string")
-        put("scoring", _json_copy(self.scoring, "scoring"))
+        scoring = _json_copy(self.scoring, "scoring")
+        if not isinstance(scoring, dict):
+            raise RecordError(
+                "scoring must be a dict that states higher_is_better and "
+                "non_inferiority_margin (the direction of the metric and the "
+                "margin δ declared before the round)"
+            )
+        if not isinstance(scoring.get("higher_is_better"), bool):
+            raise RecordError("scoring.higher_is_better must be true or false")
+        margin = scoring.get("non_inferiority_margin")
+        if (
+            isinstance(margin, bool)
+            or not isinstance(margin, (int, float))
+            or margin < 0
+        ):
+            raise RecordError("scoring.non_inferiority_margin must be a number >= 0")
+        put("scoring", scoring)
 
         ids, count, digest = self.episode_set, self.episode_count, self.episode_set_hash
         if ids is not None:
@@ -347,6 +381,32 @@ class ArmRecord:
                 raise RecordError("quality_ci must be [low, high] with low <= high")
             put("quality_ci", (low, high))
         put("quality_ci_method", _text(self.quality_ci_method, "quality_ci_method"))
+        if self.quality_delta_ci_vs_teacher is not None:
+            if self.arm == "teacher":
+                raise RecordError("the teacher arm has no quality_delta_ci_vs_teacher")
+            ci = self.quality_delta_ci_vs_teacher
+            if self.quality is None:
+                raise RecordError(
+                    "quality_delta_ci_vs_teacher is the interval of a difference "
+                    "of qualities: it needs this arm's quality"
+                )
+            if not isinstance(ci, (list, tuple)) or len(ci) != 2:
+                raise RecordError("quality_delta_ci_vs_teacher must be [low, high]")
+            low = _real(ci[0], "quality_delta_ci_vs_teacher[0]")
+            high = _real(ci[1], "quality_delta_ci_vs_teacher[1]")
+            if low is None or high is None or low > high:
+                raise RecordError(
+                    "quality_delta_ci_vs_teacher must be [low, high] with low <= high"
+                )
+            put("quality_delta_ci_vs_teacher", (low, high))
+        elif self.quality_delta_ci_method is not None:
+            raise RecordError(
+                "quality_delta_ci_method needs quality_delta_ci_vs_teacher"
+            )
+        put(
+            "quality_delta_ci_method",
+            _text(self.quality_delta_ci_method, "quality_delta_ci_method"),
+        )
         agreement = _real(
             self.agreement_with_teacher, "agreement_with_teacher", lo=0, hi=1
         )
@@ -411,6 +471,7 @@ class ArmRecord:
             "task",
             "model",
             "quality_ci_method",
+            "quality_delta_ci_method",
             "blocked",
             "external_tokens_source",
         ):
@@ -507,6 +568,10 @@ def _row(record: ArmRecord, basis, confirm: bool) -> dict:
     total = _total(record, basis)
     per_second, second_status = _ratio(record.quality, record.wall_s)
     per_token, token_status = _ratio(record.quality, total)
+    if not record.scoring["higher_is_better"]:
+        # An error per second or per token does not grow with merit.
+        per_second, second_status = None, "undefined"
+        per_token, token_status = None, "undefined"
     # (column, value, why it has no value)
     columns = [
         ("quality", record.quality, "unknown"),
@@ -526,6 +591,12 @@ def _row(record: ArmRecord, basis, confirm: bool) -> dict:
         "quality": record.quality,
         "quality_ci": list(record.quality_ci) if record.quality_ci else None,
         "quality_ci_method": record.quality_ci_method,
+        "quality_delta_ci_vs_teacher": (
+            list(record.quality_delta_ci_vs_teacher)
+            if record.quality_delta_ci_vs_teacher
+            else None
+        ),
+        "quality_delta_ci_method": record.quality_delta_ci_method,
         "agreement_with_teacher": record.agreement_with_teacher,
         "wall_s": record.wall_s,
         "local_tokens": record.local_tokens,
@@ -562,22 +633,73 @@ def _vs(row: dict, reference: dict | None, key: str) -> dict | None:
             row["unknown"].append(f"{key}.{name}")
     # A difference with a lower bound in it is itself only a bound.
     out["external_tokens_delta_is_bound"] = _is_bound(row) or _is_bound(reference)
+    # The paired interval exists only against the teacher (the scorer pairs the
+    # problems arm by arm).
+    out["quality_delta_ci"] = (
+        row["quality_delta_ci_vs_teacher"] if key == "vs_teacher" else None
+    )
     return out
 
 
-def _verdict(student: dict, teacher: dict | None) -> dict | None:
-    """The round's headline: the harness arm against the teacher arm, point
-    estimates only (read the intervals before believing a small difference)."""
+def _non_inferior(interval, higher_is_better: bool, margin: float) -> str:
+    """Is the student non-inferior to the teacher, from the paired interval of
+    (student - teacher)? ``yes`` if the worse end is within the margin, ``no``
+    if even the better end is beyond it, ``undetermined`` if the interval
+    covers the margin, ``unknown`` if there is no interval. For a metric where
+    smaller is better (an error) the interval is turned around first."""
+    if interval is None:
+        return "unknown"
+    low, high = interval
+    if not higher_is_better:
+        low, high = -high, -low
+    if low >= -margin:
+        return "yes"
+    if high < -margin:
+        return "no"
+    return "undetermined"
+
+
+def _point_not_worse(mine, reference, higher_is_better: bool):
+    if mine is None or reference is None:
+        return None
+    return mine >= reference if higher_is_better else mine <= reference
+
+
+def _verdict(student: dict, teacher: dict | None, scoring: dict) -> dict | None:
+    """The round's headline: the harness arm against the teacher arm.
+
+    Quality is a non-inferiority call on the paired difference interval against
+    the margin declared in ``scoring``; the point estimates are a side line that
+    never enters ``all``. Time and external tokens are measured totals, compared
+    as numbers (wall time only when both are of the same basis)."""
     if teacher is None or student is None:
         return None
+    higher, margin = scoring["higher_is_better"], scoring["non_inferiority_margin"]
+    interval = student["quality_delta_ci_vs_teacher"]
+    if student["quality"] is None or teacher["quality"] is None:
+        interval = None  # an interval of a difference needs both qualities
+    status = _non_inferior(interval, higher, margin)
     checks = {
-        "quality_not_lower": _holds(student["quality"], teacher["quality"], ">="),
+        "quality_non_inferior": {"yes": True, "no": False}.get(status),
+        "quality_status": status,
+        "quality_point_not_worse": _point_not_worse(
+            student["quality"], teacher["quality"], higher
+        ),
         "faster": _holds(student["wall_s"], teacher["wall_s"], "<"),
         "fewer_external_tokens": _fewer(student, teacher, "external_tokens_total"),
     }
-    values = list(checks.values())
-    checks["all"] = False if False in values else None if None in values else True
-    checks["point_estimates_only"] = True
+    needed = [
+        checks["quality_non_inferior"],
+        checks["faster"],
+        checks["fewer_external_tokens"],
+    ]
+    checks["all"] = False if False in needed else None if None in needed else True
+    checks["non_inferiority"] = {
+        "higher_is_better": higher,
+        "margin": margin,
+        "delta_ci": student["quality_delta_ci_vs_teacher"],
+        "method": student["quality_delta_ci_method"],
+    }
     return checks
 
 
@@ -701,6 +823,18 @@ def compare(
                 "problems; a score over fewer problems than the round has is not "
                 "comparable (a blocked or failed problem stays in the denominator)"
             )
+    teacher_quality = next((r.quality for r in records if r.arm == "teacher"), None)
+    for record, label in zip(records, labels, strict=True):
+        ci = record.quality_delta_ci_vs_teacher
+        if ci and record.quality is not None and teacher_quality is not None:
+            point = record.quality - teacher_quality
+            if not ci[0] - 1e-9 <= point <= ci[1] + 1e-9:
+                problems.append(
+                    f"{label}: the paired interval [{ci[0]:.3f}, {ci[1]:.3f}] does "
+                    f"not contain its own point difference {point:+.3f} "
+                    "(this arm's quality minus the teacher's); the sign or the "
+                    "arm order is probably reversed"
+                )
     if problems:
         raise CompareError(problems)
 
@@ -719,13 +853,21 @@ def compare(
             "episode_count": first.episode_count,
             "decoding": first.decoding,
             "scoring": first.scoring,
+            "quality_direction": (
+                "higher_is_better"
+                if first.scoring["higher_is_better"]
+                else "lower_is_better"
+            ),
+            "non_inferiority_margin": first.scoring["non_inferiority_margin"],
             "split": first.split,
             "confirm": confirm,
             "external_token_basis": list(basis),
         },
         rows=rows,
         missing_arms=[a for a in ARMS if a not in by_arm],
-        main_metric=_verdict(harness, teacher) if harness and teacher else None,
+        main_metric=(
+            _verdict(harness, teacher, first.scoring) if harness and teacher else None
+        ),
     )
 
 
@@ -771,6 +913,15 @@ def _tri(value) -> str:
     return UNKNOWN if value is None else "是" if value else "否"
 
 
+def _status_cell(status: str) -> str:
+    return {
+        "yes": "是",
+        "no": "否",
+        "undetermined": "未定（区间跨过界，样本不足以判）",
+        "unknown": f"{UNKNOWN}（没有配对差区间）",
+    }[status]
+
+
 def _ratio_cell(row: dict, name: str, fmt: str, scale: float = 1.0) -> str:
     value = row[name]
     if value is not None:
@@ -812,6 +963,16 @@ def _vs_cells(row: dict, key: str) -> list[str]:
     ]
 
 
+def _ci_cell(row: dict) -> str:
+    vs = row["vs_teacher"]
+    if vs is None:
+        return NO_ARM
+    if vs.get("self"):
+        return NONE_SELF
+    ci = vs["quality_delta_ci"]
+    return UNKNOWN if ci is None else f"[{ci[0]:+.3f}, {ci[1]:+.3f}]"
+
+
 def _table(header: list[str], rows: list[list[str]]) -> list[str]:
     lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
     lines += ["| " + " | ".join(_cell(c) for c in row) + " |" for row in rows]
@@ -828,6 +989,12 @@ def _markdown(table: Table) -> str:
         f"- 解码：`{_canonical(c['decoding'])}`",
         f"- 评分：`{_canonical(c['scoring'])}`",
     ]
+    direction = (
+        "越大越好" if c["quality_direction"] == "higher_is_better" else "越小越好"
+    )
+    out.append(
+        f"- 质量方向：{direction}；非劣效界 δ = {c['non_inferiority_margin']:g}（事先声明）"
+    )
     out.append(f"- 数据划分：{c['split']}")
     if c["confirm"]:
         out.append("- 模式：confirm，表中只有聚合分数，没有逐条内容")
@@ -903,6 +1070,7 @@ def _markdown(table: Table) -> str:
         [
             "臂",
             "对教师 Δ质量",
+            "对教师 Δ质量配对区间",
             "对教师 Δ墙钟 (s)",
             "对教师 Δ外部 token",
             "对直接调用 Δ质量",
@@ -910,17 +1078,33 @@ def _markdown(table: Table) -> str:
             "对直接调用 Δ外部 token",
         ],
         [
-            [r["arm"], *_vs_cells(r, "vs_teacher"), *_vs_cells(r, "vs_direct")]
+            [
+                r["arm"],
+                *_vs_cells(r, "vs_teacher")[:1],
+                _ci_cell(r),
+                *_vs_cells(r, "vs_teacher")[1:],
+                *_vs_cells(r, "vs_direct"),
+            ]
             for r in rows
         ],
     )
     verdict = table.main_metric
     if verdict:
+        rule = verdict["non_inferiority"]
+        better = "大" if rule["higher_is_better"] else "小"
+        bound = f"{rule['margin']:g}"
+        ci = rule["delta_ci"]
+        shown = f"[{ci[0]:+.3f}, {ci[1]:+.3f}]" if ci else "没有"
+        method = f"（{_cell(rule['method'])}）" if rule["method"] else ""
         out += [
             "",
-            "### 主指标：本地 + harness 对教师（只比点估计，小差异先看区间）",
+            "### 主指标：本地 + harness 对教师（质量按非劣效，耗时和外部 token 比合计）",
             "",
-            f"- 质量不低于教师：{_tri(verdict['quality_not_lower'])}",
+            (
+                f"- 质量不低于教师（越{better}越好；配对差区间 {shown}{method}，"
+                f"界 δ = {bound}）：{_status_cell(verdict['quality_status'])}"
+            ),
+            f"- 质量点估计不劣于教师（辅助，不进结论）：{_tri(verdict['quality_point_not_worse'])}",
             f"- 耗时更低：{_tri(verdict['faster'])}",
             f"- 外部 token 更少：{_tri(verdict['fewer_external_tokens'])}",
             f"- 三项全满足：{_tri(verdict['all'])}",
@@ -929,7 +1113,8 @@ def _markdown(table: Table) -> str:
         "",
         (
             f"注：`{UNKNOWN}` = 没有测量，不是 0；依赖它的每秒质量、每外部 token 质量和相对差也是"
-            f"`{UNKNOWN}`。`{NOT_APPLICABLE}` = 分母为 0（例如本臂外部 token 真为 0）。"
+            f"`{UNKNOWN}`。`{NOT_APPLICABLE}` = 分母为 0（例如本臂外部 token 真为 0），"
+            "或质量越小越好（误差除以秒或 token 不是越大越好的比值）。"
             "每千外部 token 质量 = 质量 ÷ 外部合计 × 1000。`≥` = 外部 token 只是下限"
             "（计数不完整），带 `≤` 的每千 token 质量是上限，含下限的差也只是下限；"
             "学生臂是下限时，“外部 token 更少”写未知。"

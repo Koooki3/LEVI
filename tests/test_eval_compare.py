@@ -14,6 +14,13 @@ from levi.eval.compare import ArmRecord, CompareError, RecordError
 
 EPISODES = list(range(12))
 ZERO = dict.fromkeys(compare.TOKEN_FIELDS, 0)
+# The direction and the margin delta are declared before the round.
+SCORING = {
+    "metric": "segment_f1",
+    "reference": "gold",
+    "higher_is_better": True,
+    "non_inferiority_margin": 0.05,
+}
 
 
 def arm(name="teacher", **over):
@@ -34,6 +41,9 @@ def arm(name="teacher", **over):
         "local_harness": {
             "model": "qwen3-vl",
             "quality": 0.82,
+            # Paired difference to the teacher, +0.02 as a point estimate.
+            "quality_delta_ci_vs_teacher": (-0.03, 0.07),
+            "quality_delta_ci_method": "paired_bootstrap_95",
             "agreement_with_teacher": 0.9,
             "wall_s": 200.0,
             "local_tokens": 90000,
@@ -42,6 +52,7 @@ def arm(name="teacher", **over):
         "local_direct": {
             "model": "qwen3-vl",
             "quality": 0.60,
+            "quality_delta_ci_vs_teacher": (-0.30, -0.10),
             "agreement_with_teacher": 0.7,
             "wall_s": 150.0,
             "local_tokens": 70000,
@@ -52,7 +63,7 @@ def arm(name="teacher", **over):
         arm=name,
         task="plates-subtask",
         decoding={"temperature": 0, "seed": 1},
-        scoring={"metric": "segment_f1", "reference": "gold"},
+        scoring=SCORING,
         split="tune",
         episode_set=EPISODES,
     )
@@ -116,17 +127,25 @@ def test_three_arms_make_one_table_with_the_derived_columns():
         "wall_s_delta": -400.0,
         "external_tokens_delta": -4500,
         "external_tokens_delta_is_bound": False,
+        "quality_delta_ci": [-0.03, 0.07],
     }
     assert harness["vs_direct"]["quality_delta"] == pytest.approx(0.22)
     assert harness["vs_direct"]["wall_s_delta"] == 50.0
     assert teacher["vs_teacher"] == {"self": True}
     assert direct["vs_direct"] == {"self": True}
     assert table.main_metric == {
-        "quality_not_lower": True,
+        "quality_non_inferior": True,
+        "quality_status": "yes",
+        "quality_point_not_worse": True,
         "faster": True,
         "fewer_external_tokens": True,
         "all": True,
-        "point_estimates_only": True,
+        "non_inferiority": {
+            "higher_is_better": True,
+            "margin": 0.05,
+            "delta_ci": [-0.03, 0.07],
+            "method": "paired_bootstrap_95",
+        },
     }
     assert table.conditions["episode_count"] == 12
     assert table.missing_arms == []
@@ -252,7 +271,10 @@ def test_one_missing_field_makes_the_total_unknown_only_if_the_basis_uses_it():
 def test_other_missing_measurements_are_unknown_in_every_dependent_column(
     field, unknown_columns
 ):
-    table = compare.compare(three(local_harness={field: None}))
+    over = {field: None}
+    if field == "quality":  # an interval of a difference needs the quality
+        over |= {"quality_delta_ci_vs_teacher": None, "quality_delta_ci_method": None}
+    table = compare.compare(three(local_harness=over))
     harness = rows(table)["local_harness"]
     assert harness[field] is None
     assert {field, *unknown_columns} <= set(harness["unknown"])
@@ -265,18 +287,23 @@ def test_a_slower_or_worse_student_is_reported_as_no():
         three(
             local_harness={
                 "quality": 0.7,
+                # -0.10 against the teacher; even the better end is beyond -0.05
+                "quality_delta_ci_vs_teacher": (-0.2, -0.06),
                 "wall_s": 900.0,
                 "external_tokens": {**ZERO, "output": 10000},
             }
         )
     )
-    assert table.main_metric["quality_not_lower"] is False
+    assert table.main_metric["quality_non_inferior"] is False
+    assert table.main_metric["quality_status"] == "no"
+    assert table.main_metric["quality_point_not_worse"] is False
     assert table.main_metric["faster"] is False
     assert table.main_metric["fewer_external_tokens"] is False
     assert table.main_metric["all"] is False
     # One "no" decides even when another answer is unknown.
+    worse = {"quality": 0.7, "quality_delta_ci_vs_teacher": (-0.2, -0.06)}
     partial = compare.compare(
-        three(local_harness={"quality": 0.7}, teacher={"external_tokens": None})
+        three(local_harness=worse, teacher={"external_tokens": None})
     )
     assert partial.main_metric["all"] is False
 
@@ -319,7 +346,7 @@ def test_records_over_different_problems_are_refused_and_the_difference_is_named
     ("field", "value", "named"),
     [
         ("decoding", {"temperature": 0.7, "seed": 1}, "decoding differs"),
-        ("scoring", {"metric": "accuracy", "reference": "gold"}, "scoring differs"),
+        ("scoring", {**SCORING, "metric": "accuracy"}, "scoring differs"),
         ("task", "screws-subtask", "task differs"),
     ],
 )
@@ -332,7 +359,7 @@ def test_every_difference_is_listed_at_once():
     odd = arm(
         "local_direct",
         decoding={"temperature": 1},
-        scoring="other",
+        scoring={**SCORING, "metric": "other"},
         episode_set=[1, 2],
     )
     with pytest.raises(CompareError) as refused:
@@ -471,11 +498,14 @@ def test_confirm_checks_every_text_field_not_only_blocked_and_the_source(field):
     ],
 )
 def test_confirm_refuses_nested_or_free_decoding_and_scoring(field, smuggled):
-    # decoding and scoring were any JSON and were printed as written.
+    # decoding and scoring were any JSON and were printed as written. (The
+    # scoring must state its direction and margin, which are flat, so the
+    # smuggled keys are added to them.)
+    value = {**SCORING, **smuggled} if field == "scoring" else smuggled
     with pytest.raises(CompareError, match=f"{field} that is not a short flat dict"):
-        compare.compare(blind(local_harness={field: smuggled}))
+        compare.compare(blind(local_harness={field: value}))
     # A tune round takes the same JSON as written.
-    compare.compare(three(**every_arm(**{field: smuggled})))
+    compare.compare(three(**every_arm(**{field: value})))
 
 
 def test_confirm_takes_flat_codes_numbers_and_booleans_in_decoding_and_scoring():
@@ -483,12 +513,8 @@ def test_confirm_takes_flat_codes_numbers_and_booleans_in_decoding_and_scoring()
     table = compare.compare(blind(**{n: {"decoding": decoding} for n in compare.ARMS}))
     assert table.conditions["decoding"] == decoding
     assert "do_sample" in table.to_markdown()
-    # A plain string scoring must be one code.
-    codes = {n: {"scoring": "segment_f1"} for n in compare.ARMS}
-    assert compare.compare(blind(**codes)).conditions["scoring"] == "segment_f1"
-    spaced = {n: {"scoring": "segment f1 on gold"} for n in compare.ARMS}
-    with pytest.raises(CompareError, match="scoring that is not"):
-        compare.compare(blind(**spaced))
+    # The scoring's direction and margin are flat and pass.
+    assert table.conditions["scoring"] == SCORING
 
 
 def test_a_refusal_does_not_repeat_the_content_it_refused():
@@ -839,9 +865,12 @@ def test_a_difference_names_the_first_key_that_differs():
     with pytest.raises(CompareError) as three_way:
         compare.compare(
             [
-                arm("teacher", scoring={"metric": "f1", "reference": "gold"}),
-                arm("local_harness", scoring={"metric": "f1", "reference": "panel"}),
-                arm("local_direct", scoring={"metric": "iou", "reference": "gold"}),
+                arm("teacher", scoring={**SCORING, "metric": "f1"}),
+                arm(
+                    "local_harness",
+                    scoring={**SCORING, "metric": "f1", "reference": "panel"},
+                ),
+                arm("local_direct", scoring={**SCORING, "metric": "iou"}),
             ]
         )
     assert "at 'reference' (teacher=" in str(three_way.value)
@@ -876,7 +905,178 @@ def test_every_arm_must_have_scored_all_the_problems():
         compare.compare(three(teacher={"scored_count": None}))
     # An arm with no quality (blocked, not measured) has nothing to be compared.
     blocked = three(
-        local_harness={"quality": None, "scored_count": None, "blocked": "gpu_busy"}
+        local_harness={
+            "quality": None,
+            "quality_delta_ci_vs_teacher": None,
+            "quality_delta_ci_method": None,
+            "scored_count": None,
+            "blocked": "gpu_busy",
+        }
     )
     assert rows(compare.compare(blocked))["local_harness"]["quality"] is None
     assert arm(scored_count=12).to_dict()["scored_count"] == 12
+
+
+def harness_vs_teacher(
+    interval, *, quality=None, margin=0.05, higher=True, teacher=0.80
+):
+    """A round where only the paired interval of local_harness changes."""
+    scoring = {**SCORING, "higher_is_better": higher, "non_inferiority_margin": margin}
+    if quality is None:
+        quality = teacher + sum(interval) / 2  # the point estimate in the middle
+    harness = {
+        "scoring": scoring,
+        "quality": quality,
+        "quality_delta_ci_vs_teacher": interval,
+    }
+    if interval is None:
+        harness["quality_delta_ci_method"] = None
+    return compare.compare(
+        three(
+            teacher={"scoring": scoring, "quality": teacher},
+            local_harness=harness,
+            local_direct={"scoring": scoring, "quality_delta_ci_vs_teacher": None},
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("interval", "status", "answer"),
+    [
+        ((-0.03, 0.07), "yes", True),  # the worse end is within the margin
+        ((-0.05, 0.02), "yes", True),  # exactly at the margin counts
+        ((-0.06, 0.10), "undetermined", None),  # covers the margin
+        ((-0.20, -0.0501), "no", False),  # even the better end is beyond it
+        ((-0.20, -0.05), "undetermined", None),  # the better end is AT the margin
+        (None, "unknown", None),  # no interval, no call
+    ],
+)
+def test_quality_is_judged_on_the_paired_interval_against_the_margin(
+    interval, status, answer
+):
+    table = harness_vs_teacher(interval, quality=0.82 if interval is None else None)
+    assert table.main_metric["quality_status"] == status
+    assert table.main_metric["quality_non_inferior"] is answer
+    # What the table says in words.
+    text = table.to_markdown()
+    word = {"yes": "是", "no": "否", "undetermined": "未定", "unknown": "未知"}[status]
+    line = next(l for l in text.splitlines() if l.startswith("- 质量不低于教师"))
+    assert line.split("：")[-1].startswith(word)
+    assert "δ = 0.05" in line
+
+
+def test_a_point_estimate_that_looks_fine_is_not_enough_when_the_interval_is_wide():
+    # About six problems: one flipped problem moves a rate by 0.14-0.17. The
+    # harness is +0.02 above the teacher, but the paired interval reaches -0.17.
+    table = harness_vs_teacher((-0.17, 0.21), quality=0.82)
+    assert table.main_metric["quality_point_not_worse"] is True  # the side line
+    assert table.main_metric["quality_status"] == "undetermined"
+    assert table.main_metric["all"] is None  # an undetermined quality never makes "yes"
+    assert "质量点估计不劣于教师（辅助，不进结论）：是" in table.to_markdown()
+    # A point estimate below the teacher is no refutation either.
+    low = harness_vs_teacher((-0.10, 0.05), quality=0.77)
+    assert low.main_metric["quality_point_not_worse"] is False
+    assert low.main_metric["quality_status"] == "undetermined"
+
+
+def test_a_missing_interval_leaves_the_headline_unknown_whatever_the_points_say():
+    table = compare.compare(
+        three(
+            local_harness={
+                "quality_delta_ci_vs_teacher": None,
+                "quality_delta_ci_method": None,
+            }
+        )
+    )
+    assert table.main_metric["quality_status"] == "unknown"
+    assert table.main_metric["quality_point_not_worse"] is True
+    assert table.main_metric["all"] is None
+    assert "未知（没有配对差区间）" in table.to_markdown()
+    # An unknown teacher quality also leaves the quality call open.
+    no_teacher = compare.compare(three(teacher={"quality": None}))
+    assert no_teacher.main_metric["quality_status"] == "unknown"
+
+
+def test_a_metric_where_smaller_is_better_is_read_the_other_way_round():
+    # An error (MAE, P90): the student is better when its value is LOWER.
+    # Interval of (student - teacher) of an error: positive = worse.
+    margin = 0.5
+    ok = harness_vs_teacher((-0.1, 0.3), higher=False, margin=margin, teacher=0.8)
+    assert ok.main_metric["quality_status"] == "yes"
+    assert (
+        ok.main_metric["quality_point_not_worse"] is False
+    )  # 0.9 > 0.8: a point estimate
+    assert ok.conditions["quality_direction"] == "lower_is_better"
+    worse = harness_vs_teacher((0.7, 1.7), higher=False, margin=margin, teacher=0.8)
+    assert worse.main_metric["quality_status"] == "no"
+    mid = harness_vs_teacher((0.2, 1.0), higher=False, margin=margin, teacher=0.8)
+    assert mid.main_metric["quality_status"] == "undetermined"
+    better = harness_vs_teacher((-0.9, -0.2), higher=False, margin=margin, teacher=0.8)
+    assert better.main_metric["quality_status"] == "yes"
+    assert better.main_metric["quality_point_not_worse"] is True  # 0.25 <= 0.8
+    # The same interval means the opposite for a metric where larger is better.
+    flipped = harness_vs_teacher((0.7, 1.7), higher=True, margin=margin, teacher=0.8)
+    assert flipped.main_metric["quality_status"] == "yes"
+    # An error divided by seconds or tokens is not a rate of merit.
+    row = rows(ok)["local_harness"]
+    assert row["quality_per_second"] is None
+    assert "quality_per_second" in row["undefined"]
+    assert "越小越好" in ok.to_markdown()
+
+
+def test_the_scoring_must_state_its_direction_and_margin():
+    for bad in (
+        {"metric": "f1"},  # nothing stated
+        {**SCORING, "higher_is_better": "yes"},
+        {**SCORING, "higher_is_better": 1},
+        {**SCORING, "non_inferiority_margin": -0.01},
+        {**SCORING, "non_inferiority_margin": True},
+        {**SCORING, "non_inferiority_margin": "0.05"},
+        {k: v for k, v in SCORING.items() if k != "non_inferiority_margin"},
+        {k: v for k, v in SCORING.items() if k != "higher_is_better"},
+        "segment_f1",  # a bare name states neither
+    ):
+        with pytest.raises(RecordError, match="scoring"):
+            arm(scoring=bad)
+    assert (
+        arm(scoring={**SCORING, "non_inferiority_margin": 0}).scoring[
+            "non_inferiority_margin"
+        ]
+        == 0
+    )  # zero margin = strict non-inferiority, allowed
+
+
+def test_the_paired_interval_is_validated_and_belongs_to_a_student():
+    for bad in ((0.1, -0.1), (0.1,), ("a", 1), (math.nan, 1), True):
+        with pytest.raises(RecordError, match="quality_delta_ci_vs_teacher"):
+            arm("local_harness", quality_delta_ci_vs_teacher=bad)
+    with pytest.raises(RecordError, match="teacher arm has no"):
+        arm("teacher", quality_delta_ci_vs_teacher=(-0.1, 0.1))
+    with pytest.raises(RecordError, match="needs this arm's quality"):
+        arm("local_harness", quality=None, quality_delta_ci_vs_teacher=(-0.1, 0.1))
+    with pytest.raises(RecordError, match="quality_delta_ci_method needs"):
+        arm(
+            "local_harness",
+            quality_delta_ci_vs_teacher=None,
+            quality_delta_ci_method="x",
+        )
+    # Confirm: the method is a code, the interval is two numbers.
+    compare.compare(blind())
+    with pytest.raises(CompareError, match="quality_delta_ci_method text"):
+        compare.compare(blind(local_harness={"quality_delta_ci_method": FREE}))
+
+
+def test_an_interval_that_excludes_its_own_point_difference_is_refused():
+    # The classic slip is a reversed sign (teacher minus student). The harness
+    # is +0.02 above the teacher; an interval of the opposite sign cannot be
+    # that difference's own interval.
+    with pytest.raises(CompareError, match="does not contain its own point difference"):
+        compare.compare(
+            three(
+                local_harness={
+                    "quality_delta_ci_vs_teacher": (-0.07, 0.03)
+                    if False
+                    else (-0.30, -0.05)
+                }
+            )
+        )
