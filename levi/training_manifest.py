@@ -1200,7 +1200,7 @@ def build(
     frames = pa.table(
         columns, schema=_frames_schema(prompt_template, subtask_max_chars)
     )
-    target = _target(ds.name, operation, output)
+    target = _target(ds.name, operation, output, tempo)
     temp = target / f".{FRAMES}.tmp"
     pq.write_table(frames, temp)
     temp.replace(target / FRAMES)
@@ -1444,7 +1444,11 @@ def _result_digest(record) -> str | None:
     return "sha256:" + digest.hexdigest()
 
 
-def _target(name: str, operation: str, output) -> Path:
+def _target(name: str, operation: str, output, tempo: str = "none") -> Path:
+    """The new directory of a manifest. Its name is ``<time>-<operation>``, and
+    ``<time>-<operation>-<tempo>`` when a tempo step ran, so that picking "the
+    newest manifest of an operation" by name cannot hand over one whose weights
+    a tempo step rescaled; a ``none`` manifest keeps the name it always had."""
     if output:
         target = paths.inside(Path(output).expanduser())
         if target.exists() and any(target.iterdir()):
@@ -1452,8 +1456,9 @@ def _target(name: str, operation: str, output) -> Path:
         target.mkdir(parents=True, exist_ok=True)
         return target
     parent = root(name)
-    rid = naming.timestamp_id(parent, suffix=f"-{operation}", create_dir=True)
-    return parent / f"{rid}-{operation}"
+    tag = f"-{operation}" if tempo == "none" else f"-{operation}-{tempo}"
+    rid = naming.timestamp_id(parent, suffix=tag, create_dir=True)
+    return parent / f"{rid}{tag}"
 
 
 def root(name: str) -> Path:

@@ -15,7 +15,7 @@ levi export list local/<name>                             # manifests written fo
 levi export diff <manifest dir A> <manifest dir B>        # how different two training inputs are
 ```
 
-The API is `GET /api/levi/manifest/operations`, `GET /api/levi/manifest?repo_id=…` and `POST /api/levi/manifest` ([API](API.md)). A manifest can be made for a registered LeRobot v2.x dataset or for a raw capture's browsing view. It is written to `outputs/LEVI/exports/<name>/training_manifests/<timestamp>-<operation>/`. Each namespace keeps its own evidence and its own manifests.
+The API is `GET /api/levi/manifest/operations`, `GET /api/levi/manifest?repo_id=…` and `POST /api/levi/manifest` ([API](API.md)). A manifest can be made for a registered LeRobot v2.x dataset or for a raw capture's browsing view. It is written to `outputs/LEVI/exports/<name>/training_manifests/<timestamp>-<operation>/`, or `<timestamp>-<operation>-<tempo>` when a [tempo step](#tempo-step) ran, so that a name pattern for an operation never picks up a manifest whose weights a tempo step rescaled. Each namespace keeps its own evidence and its own manifests.
 
 ## Operations
 
@@ -212,7 +212,7 @@ For openpi (`pi05_fr3_*` configs), without changing openpi's main branch:
   - 为什么只改权重：读取器的 `action_mask` 规定动作块第 k 个目标只有在 frame+k 被 included 时才计入损失；把帧标成 `include=false` 来抽帧会遮掉留下来的帧的大部分动作目标，等于删掉动作监督，而只检查保留帧自身动作的测试发现不了。
   - 参数：`frames`（N，整数 1 到 100000，默认 8；8 是我们自己定的起点，不是调出来的，也不是论文的值，参考的规格里没有记论文的 N）；`segments`（审阅策略名：`reviewed` 默认，只取 review 为空或 `edited` 的片段，与 prompt 列的策略一致，实时服务写的 `auto` 片段不是事件；`all` 取全部片段）；`count`（`segment` 默认：T 取片段覆盖的全部帧；`included`：T 只取操作保留的帧，第一版的做法）；`outside`（`keep` 默认：不在任何事件里的保留帧权重不变；`scale`：把这些帧乘以各事件得到的平均因子，即全数据集的事件内权重之和（步骤之后）除以（步骤之前），使事件内权重占总权重的份额与这一步之前相同）。
   - 边界：事件没有保留的帧（操作把事件的帧都排除了、片段没有覆盖任何帧、或帧被后开始的重叠片段占了）不处理也不除零，计入 `events_empty`；T<`frames`（含只有 1 帧的片段）权重会**上调**到整段事件之和仍为 `frames`，计入 `events_upweighted`，训练前看 `max_factor`；操作排除了事件的一部分帧时，事件之和小于 `frames`，计入 `events_partly_excluded`（排除的帧数见 `frames_excluded_in_events`）；T=`frames` 不变；T>`frames` 下调；没有片段的帧权重不变。权重不会是 NaN 或负数，操作给出非有限权重时直接报错。不在事件里的帧权重不变，而事件内每帧权重是 `frames`/T，片段超过 `frames` 帧时小于 1，所以事件外的帧被抽到的频率更高（10 fps 下已审的 3 秒片段每帧 8/30≈0.27，未审的 `auto` 片段在 `segments=reviewed` 下不是事件，每帧仍是 1，高 3.75 倍）；标整条片段并不能消除这一点，除非它们被审过或编辑过。`manifest.json` 的 `tempo.events` 记录事件内外的权重（步骤前后）、事件内权重占比、每帧平均权重和比值 `outside_to_inside_weight_ratio`，比值大于 2 或小于 1/2 时 `tempo.warnings` 给出 `outside_weight_imbalance` 警告。处理办法：审阅或编辑自动片段（它们就成了事件）；`outside=scale`；`segments=all`（未审片段也会参与定权重，慎用）；用 `levi export diff` 与不加这一步的清单对比。
-  - 记录：`manifest.json` 的 `tempo`（`none` 时没有）含名称、版本、参数、指纹（名称、版本和解析后参数的 sha256，参数不同指纹就不同）和统计；每个片段条目有 `tempo_events_scaled`；`levi export diff` 输出两边的 `tempo` 和 `tempo_differs`（指纹不同即为真，即使两份权重恰好相同）。数据集自身的指纹不受影响。HTTP 接口暂不支持 `tempo`，并且对不认识的字段返回 422 而不是忽略（`tempo`、`prompt_template` 之类不会被静默丢掉后返回一份没有它们的清单），用命令行或 `build(..., tempo=..., tempo_params=...)`。
+  - 记录：`manifest.json` 的 `tempo`（`none` 时没有）含名称、版本、参数、指纹（名称、版本和解析后参数的 sha256，参数不同指纹就不同）和统计；每个片段条目有 `tempo_events_scaled`；`levi export diff` 输出两边的 `tempo` 和 `tempo_differs`（指纹不同即为真，即使两份权重恰好相同）。数据集自身的指纹不受影响。清单目录名在加了节奏步骤时是 `<时间>-<操作>-<步骤>`（`none` 仍是 `<时间>-<操作>`），按操作名取“最新清单”不会拿到权重被改过的那份。HTTP 接口暂不支持 `tempo`，并且对不认识的字段返回 422 而不是忽略（`tempo`、`prompt_template` 之类不会被静默丢掉后返回一份没有它们的清单），用命令行或 `build(..., tempo=..., tempo_params=...)`。
 - `manifest.json`：记录 LEVI 提交、数据集内容指纹、命名空间、标注修订、锚定复核的运行与规格、RECAP 的检查点、修订与阈值，以及操作名与参数。
 
 **训练端读取**：用单文件读取器 `integrations/training_manifest/levi_manifest_reader.py`，提供片段过滤、加权采样、逐动作步掩码、RECAP 条件提示。训练后用 `audit` 核对：被排除的帧从未被抽到，且各片段的抽样比例符合权重。

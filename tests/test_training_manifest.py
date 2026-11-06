@@ -1431,6 +1431,25 @@ def _two_events_and_an_unannotated_rest(repo):
     )
 
 
+def test_a_tempo_manifest_is_named_for_its_step_and_a_none_one_is_not(repo, tmp_path):
+    plain = Path(tm.build(repo, "all_rollouts")["output_dir"])
+    same = Path(tm.build(repo, "all_rollouts", tempo="none")["output_dir"])
+    step = Path(_tempo(repo)["output_dir"])
+    assert plain.name.endswith("-all_rollouts") and same.name.endswith("-all_rollouts")
+    assert step.name.endswith("-all_rollouts-per_event_uniform")
+    # What somebody who picks "the newest all_rollouts manifest" by name finds.
+    named = {p.name for p in plain.parent.glob("*-all_rollouts")}
+    assert named == {plain.name, same.name}
+    assert step.parent == plain.parent and step.name not in named
+    # A directory the caller names is theirs: no suffix is added.
+    chosen = Path(
+        tm.build(
+            repo, "all_rollouts", tempo="per_event_uniform", output=tmp_path / "mine"
+        )["output_dir"]
+    )
+    assert chosen.name == "mine"
+
+
 def test_the_weight_inside_and_outside_events_is_recorded_and_a_big_gap_is_flagged(
     repo,
 ):
