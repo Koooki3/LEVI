@@ -10,6 +10,7 @@
 | `motion` | Speed and stillness on the recorded timestamps. |
 | `contracts` | `SignalObservation` and `EventCandidate`, the records the readers produce. |
 | `stream` | Causal candidates of a bounded observed prefix, with an explicit declaration and fixed thresholds. |
+| `causal`, `causal_eval` | Typed look/no-look decisions per step over `stream` (the quick check), and the offline replay that scores them against reference boundaries and `candidates`. |
 | `signal_profiles` | What each recorded channel means: role, actor, units, frame, which end of a gripper is open. |
 | `facts` | The signal facts of one episode as `SignalObservation`s, per channel and actor. |
 | `change_points` | Penalised change points of each actor's speed, gripper level and rotation speed, as `EventCandidate`s. |
@@ -140,6 +141,35 @@ Whether event candidates make annotation better at the same frame budget needs t
 3. `python -m levi.events.ablation score --reference <ref.json> --durations <durations.json> --arm off=<a.json> --arm candidates=<b.json>`: boundary scores at 0.1/0.2/0.5 s and segment F1 per arm, and each arm's difference from `off`.
 
 The command line refuses any input path naming a frozen or held-out set and writes only to stdout or `--out`. Also pending: the requests' token cost per arm (more refinement images per request) and wall time.
+
+## Causal quick check: look/no-look decisions
+
+`levi.events.causal.Trigger` answers, at each policy step, whether this is a moment worth pausing for a local VLM to look. It is the first, model-free level of the guided harness's quick check and reads no video. Three layers, one detector each:
+
+| Layer | Reads | Output |
+| --- | --- | --- |
+| `candidates` | the whole recorded episode (change points and still-span edges use later samples) | event candidates; the offline upper bound |
+| `stream.CausalSignals` | one observed prefix | gripper crossings, motion stop/start, height turns (opt-in `height_turn_m`) |
+| `causal.Trigger` | the stream's candidates, plus the gripper command (as a commanded gripper channel of the stream), the policy's action chunks, the subtask and a distance to the goal when known | one `Decision` per step |
+
+The trigger does not detect gripper, motion or height events itself: it maps the stream's candidates to reasons and adds only what needs decision context. Each decision has `look`, a `reason` from a fixed set (`grasp`, `release`, `stall`, `anomaly`, `maybe_done`; none when there is nothing to look at), `score`, `time_s` (when it was decided), `event_time_s` (the rule's estimate of when it happened), `delay_s` (the difference) and `cue` (which rule). `score` is an evidence priority set by hand, **not a probability**: do not compare it with a probability threshold such as 0.5. `probability` stays empty until a calibrated estimate exists. `delay_s` is measured from the rule's own estimate of when the thing happened, not from the physical event: a gripper crossing is decided at the sample that leaves the hysteresis band, so its `delay_s` is 0 although the fingers started moving earlier. The detection delay to report is `latency_vs_reference` from `causal_eval`, never `delay_s`.
+
+| Cue | Reason | Delay built into the rule |
+| --- | --- | --- |
+| `gripper_close` / `gripper_open` (measured width or command) | `grasp` / `release` | none: decided at the sample that leaves the hysteresis band |
+| `height_low` | `grasp` if the gripper was last seen closed (the lift after a grasp), else `release` | until the height has risen `height_turn_m` from the low |
+| `motion_stop` | `stall` (a pause, low score) | the still time, 0.5 s |
+| `no_progress` / `no_goal_progress` | `stall` | `stall_seconds` (3 s) still without a gripper change, or without `goal_progress_m` of progress to the goal |
+| `released_and_still` | `maybe_done` | `done_seconds` (2 s) after a release, still |
+| a stream gap or missing/out-of-range signal; `chunk_disagreement` | `anomaly` | none (once per run of bad samples) |
+
+Height highs and motion starts are not looks. `refractory_seconds` (0.5 s) folds a second look of the same reason (a command and then the measured width) into the first. A decision can only ask to pause and look; pausing goes through the existing hold, it never causes an action. The trigger runs next to the policy, once per policy step, never in the 1 kHz control loop, and starts no thread. **CPU budget**: below 1 % of one core at the policy step rate (`causal.CPU_BUDGET_PERCENT`), measured with `causal_eval --timing --pace recorded` on the robot host while the arm controller is off; above it, it is not enabled on the robot.
+
+`python -m levi.events.causal_eval --root <dir> --gold <dir> --split <split.json> --role dev|confirm --exclusion-list <list.json> [--params <dev-report.json>] [--budget-per-minute 6] [--timing] [--pace recorded] [--out report.json]` replays raw captures row by row through the stream and the trigger and scores the looks with `boundary_metrics` at 0.1, 0.2, 0.5 and 1.0 s, next to `candidates.read` of the same episodes:
+
+- `causal.live` scores the decision times (what a running harness sees), `causal.retro` the rules' event times; `per_reason` gives counts, looks per minute and the rule delay; `latency_vs_reference` and `latency_vs_offline` give how long after a reference boundary or an offline candidate the first look came (from 0.5 s before to `--max-latency` after); `offline` scores the whole-episode candidates; `cpu` the CPU seconds per step and the share of one core (mean and peak).
+- Development and confirmation never mix. `--split` lists gold file names under `dev` and `confirm`; only the `--role` list is opened. A dev run derives the dataset-level parameters (gripper range, still speed as 0.1 of the median 95th-percentile speed, height turn as 0.15 of the median height span: the offline rules with each whole-episode quantity fixed for the dataset) and chooses the score threshold with the highest live recall at 0.5 s within the looks-per-minute budget. A confirm run requires `--params` from a dev report, uses it unchanged and refuses any episode of that dev run (by name or capture sha256).
+- Test sets are refused as in [calibration](#calibration): gold folders and sources whose path names a frozen or held-out set, and sources on an exclusion list (`levi.pool.heldout.load` format, by path or video sha256). At least one `--exclusion-list` is required; `LEVI_POOL_HELDOUT` lists are added. A refused folder is refused before any of its gold files is opened. A refused source is reported only by its gold file's name (`refused: source <name> is on a list`): nothing of the refused gold file (source, labels, subtask names, boundaries) reaches stdout, stderr, the report or the error, and no report is written. **Residual risk**: a refused source is found only after its gold JSON has been read, since the gold file is what names the source; it is refused before its capture is read. So a gold file kept outside the frozen and held-out folders that happens to describe a held-out episode has its labels read, though never its capture: keep test-set gold only in folders whose path names the set.
 
 ## Third-party sources
 

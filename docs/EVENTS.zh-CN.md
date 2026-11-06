@@ -10,6 +10,7 @@
 | `motion` | 按记录的时间戳计算速度和静止。 |
 | `contracts` | 读取器产出的记录：`SignalObservation` 和 `EventCandidate`。 |
 | `stream` | 有界已观测前缀的因果候选内核；显式声明与固定阈值。 |
+| `causal`、`causal_eval` | 基于 `stream` 的逐步、带类型的“看/不看”判定（快捷判定），以及按人工参照边界和 `candidates` 给它打分的离线回放。 |
 | `signal_profiles` | 每个记录通道的含义：角色、执行器、单位、坐标系、夹爪哪一端是张开。 |
 | `facts` | 把一个片段的信号事实按通道和执行器整理成 `SignalObservation`。 |
 | `change_points` | 对每个执行器的速度、夹爪电平、角速度做带惩罚的变点检测，输出 `EventCandidate`。 |
@@ -140,6 +141,35 @@ python -m levi.events.calibrate --root <工作区> \
 3. `python -m levi.events.ablation score --reference <ref.json> --durations <durations.json> --arm off=<a.json> --arm candidates=<b.json>`：每组在 0.1/0.2/0.5 s 下的边界得分和时间片段 F1，以及每组相对 `off` 的差值。
 
 命令行拒绝任何路径里带冻结集或留出集字样的输入，只写到标准输出或 `--out`。同样待测的还有每组请求的 token 成本（每次精修请求的图像更多）和墙钟时间。
+
+## 因果快捷判定：看还是不看
+
+`levi.events.causal.Trigger` 在策略的每一步回答：这一刻值不值得暂停，让本地 VLM 看一眼。它是引导型 harness 快捷判定的第一级，不靠模型，不读视频。三层各有一个检测实现：
+
+| 层 | 读什么 | 输出 |
+| --- | --- | --- |
+| `candidates` | 整段记录（变点和静止段边缘要用到后面的数据） | 事件候选；离线上限 |
+| `stream.CausalSignals` | 一个已观测前缀 | 夹爪开合、运动停止/开始、高度转折（`height_turn_m` 显式开启） |
+| `causal.Trigger` | 流的候选，加上夹爪指令（作为流里的指令型夹爪通道）、策略动作块、当前子任务，以及已知时到目标的距离 | 每步一个 `Decision` |
+
+判定器自己不检测夹爪、运动或高度事件：它把流的候选映射成原因，只补需要决策上下文的几项。每个决策有 `look`、固定集合里的 `reason`（`grasp`、`release`、`stall`、`anomaly`、`maybe_done`；没有可看的就为空）、`score`、`time_s`（判出的时刻）、`event_time_s`（规则估计的发生时刻）、`delay_s`（两者之差）和 `cue`（哪条规则）。`score` 是人工设定的取证优先级，**不是概率**：不能拿它和 0.5 之类的概率阈值比较。校准过的估计出来之前，`probability` 一直为空。`delay_s` 是相对于规则自己估计的发生时刻算的，不是相对于实际的物理动作：夹爪在离开滞回带的那一步判出，`delay_s` 为 0，而手指其实更早就开始动了。报告检测延迟要用 `causal_eval` 的 `latency_vs_reference`，不要用 `delay_s`。
+
+| 线索 | 原因 | 规则固有的延迟 |
+| --- | --- | --- |
+| `gripper_close` / `gripper_open`（测得的宽度或指令） | `grasp` / `release` | 无：在离开滞回带的那一步判出 |
+| `height_low` | 夹爪最近一次是闭合的就是 `grasp`（抓住后抬起），否则 `release`（放下后抬起） | 要等高度从最低点回升 `height_turn_m` |
+| `motion_stop` | `stall`（短暂停顿，分低） | 静止时长 0.5 s |
+| `no_progress` / `no_goal_progress` | `stall` | 静止且夹爪没变化满 `stall_seconds`（3 s），或者到目标的距离 `stall_seconds` 内没有缩短 `goal_progress_m` |
+| `released_and_still` | `maybe_done` | 松开后静止满 `done_seconds`（2 s） |
+| 流的中断、信号缺失或越界；`chunk_disagreement` | `anomaly` | 无（每段连续的坏样本只报一次） |
+
+高度的高点和运动开始不触发。`refractory_seconds`（0.5 s）把同一原因的第二次触发（先是指令，再是测得的宽度）并入第一次。判定只能请求暂停并查看，暂停走现有的 hold 流程，永远不会引起动作。判定器和策略并排运行，每个策略步一次，不进 1 kHz 控制环，不新开线程。**CPU 预算**：按策略步频计，低于单核的 1%（`causal.CPU_BUDGET_PERCENT`），在机械臂控制器停用时于机器人主机上用 `causal_eval --timing --pace recorded` 测量；超过就不在真机上启用。
+
+`python -m levi.events.causal_eval --root <dir> --gold <dir> --split <split.json> --role dev|confirm --exclusion-list <list.json> [--params <dev-report.json>] [--budget-per-minute 6] [--timing] [--pace recorded] [--out report.json]` 把原始录制逐行喂给流和判定器，用 `boundary_metrics` 在 0.1、0.2、0.5、1.0 s 容差下给触发打分，同时对同一批片段跑 `candidates.read` 作对照：
+
+- `causal.live` 按判出时刻打分（运行中的 harness 实际看到的），`causal.retro` 按规则估计的发生时刻打分；`per_reason` 给出各原因的次数、每分钟触发数和规则延迟；`latency_vs_reference`、`latency_vs_offline` 给出人工参照边界或整段离线候选之后，第一次触发来得多晚（窗口从提前 0.5 s 到滞后 `--max-latency`）；`offline` 是整段离线候选的得分；`cpu` 是每步 CPU 秒数和单核占用（平均与峰值）。
+- 开发集和留出集不混用。`--split` 在 `dev` 和 `confirm` 下列出金标准文件名，只打开 `--role` 那一份。开发运行推导数据集级参数（夹爪范围；静止速度取各片段第 95 百分位速度中位数的 0.1；高度转折取高度跨度中位数的 0.15：也就是离线规则把每个“整段才知道”的量换成整个数据集固定的值），并在每分钟触发数预算内选出 0.5 s 实时召回最高的分数阈值。确认运行必须用 `--params` 指定一份开发运行报告，原样使用，并拒绝该开发运行用过的任何片段（按名字或录制文件的 sha256）。
+- 测试集按[校准](#校准)的规则拒绝：路径里带冻结集或留出集字样的金标准目录和来源，以及排除名单上的来源（`levi.pool.heldout.load` 格式，按路径或视频 sha256）。至少要给一个 `--exclusion-list`；`LEVI_POOL_HELDOUT` 的名单会自动加入。被拒绝的目录在打开其中任何金标准文件之前就被拒绝。被拒绝的来源只按金标准文件名报出（`refused: source <名字> is on a list`）：被拒金标准里的任何内容（来源、标签、子任务名、边界）都不进入标准输出、标准错误、报告或异常信息，也不写报告。**残余风险**：来源级的拒绝发生在读金标准 JSON 之后、读录制数据之前，因为不读金标准就不知道它指向哪个片段。所以如果某个不在冻结或留出目录里的金标准描述的恰好是留出片段，它的标签会被读到，录制数据不会：测试集的金标准只放在路径带有集合名字的目录里。
 
 ## 第三方来源
 
