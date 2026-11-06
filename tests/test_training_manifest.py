@@ -1,6 +1,7 @@
 """Training manifests: operations, provenance, refusals, CLI/API and the
 standalone trainer-side reader (integrations/training_manifest)."""
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -1419,3 +1420,132 @@ def test_tempo_refusals_cli_and_docs(repo, capsys):
             assert f"`{param}`" in doc, param
     for flag in ("--tempo", "--tempo-param", "levi export tempos"):
         assert flag in doc
+
+
+# --------------------------------------------- `none` is what main wrote
+#
+# `--tempo none` must leave a manifest exactly as it was before the tempo step
+# existed. Two of the checks above (no `tempo` key, equal bytes to a build
+# without the argument) compare this code with itself and cannot see a change
+# that both paths share. This one compares with the code of main (c57d53ab, the
+# commit this branch started from): `tests/fixtures/manifest/none-golden.json`
+# holds sha256 digests of what main's `build()` wrote for six builds over the
+# small synthetic dataset above, so no output file is committed. It is a
+# digest of content (every frames.parquet row and its schema, and manifest.json
+# with the fields that differ between two runs of the same code removed), not
+# of file bytes: pyarrow writes its own version into a parquet footer.
+#
+# Why a golden and not a second checkout of main in the test: CI has no main
+# beside the branch under test, and a digest written once cannot drift with
+# the code it guards. The file was written by main's code, never by this
+# branch: copy this test module into `git archive c57d53ab`, replace the final
+# assertion of the test below by `print(json.dumps(got))`, run it there, and
+# keep `input` and `arms`. Rewrite it only when `none` is changed on purpose,
+# and then say so in the commit; never to make this test pass.
+
+GOLDEN = PROJECT / "tests" / "fixtures" / "manifest" / "none-golden.json"
+GOLDEN_ARMS = {
+    "all_rollouts": ("all_rollouts", {}, {}),
+    "robot_flag_success": ("robot_flag_success", {}, {}),
+    "verified_success": ("verified_success", {}, {}),
+    "verified_success_scoped": (
+        "verified_success",
+        {},
+        {"anchored_tasks": ["pick the screws"], "episodes": [0, 2]},
+    ),
+    "advantage_positive_mask": ("advantage_positive_mask", {}, {}),
+    "advantage_weighted": (
+        "advantage_weighted",
+        {"negative_weight": 0.25, "unlabelled_weight": 0.5},
+        {},
+    ),
+}
+# manifest.json fields that differ between two runs of the same code over the
+# same input: a clock, a path, a revision stamp, a hash of bytes a library
+# wrote (parquet), and the hash of an anchored spec shipped with LEVI.
+GOLDEN_VOLATILE = (
+    ("created_at",),
+    ("levi_commit",),
+    ("annotation", "path"),
+    ("dataset", "root"),
+    ("dataset", "fingerprint", "sha256"),
+    ("dataset", "fingerprint", "dataset_revision"),
+    ("files", tm.FRAMES, "sha256"),
+    ("recap", "version"),
+    ("recap", "result_digest"),
+    ("anchored", "spec", "sha256"),
+)
+
+
+def _digest(value):
+    text = json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _golden_digest(result):
+    """sha256 of the frames, of their schema and of the manifest's stable part."""
+    directory = Path(result["output_dir"])
+    manifest = json.loads((directory / tm.MANIFEST).read_text())
+    for *path, last in GOLDEN_VOLATILE:
+        node = manifest
+        for key in path:
+            node = node.get(key) or {}
+        node.pop(last, None)
+    table = pq.read_table(directory / tm.FRAMES)
+    schema = [
+        [
+            f.name,
+            str(f.type),
+            {k.decode(): v.decode() for k, v in (f.metadata or {}).items()},
+        ]
+        for f in table.schema
+    ]
+    return {
+        "frames": _digest(table.to_pylist()),
+        "schema": _digest(schema),
+        "manifest": _digest(manifest),
+    }
+
+
+def _golden_inputs(repo):
+    name = _name(repo)
+    _anchored(name, {0: "failure", 1: "failure"})
+    _recap(repo)
+    _segments(
+        name, 0, [("grasp", 0.0, 0.5, None, None), ("place", 0.5, None, None, None)]
+    )
+    _segments(
+        name, 2, [("a", 0.0, 0.3, "auto", None), ("b", 0.3, None, "edited", None)]
+    )
+
+
+def _golden_arms(repo, **extra):
+    """The digests of every arm and of the input; ``extra`` is passed on to
+    build() (``tempo="none"`` here, nothing on main, which has no such argument)."""
+    arms, inputs = {}, None
+    for arm, (operation, params, scope) in GOLDEN_ARMS.items():
+        result = tm.build(repo, operation, dict(params), **scope, **extra)
+        arms[arm] = _golden_digest(result)
+        inputs = {
+            "meta_sha256": result["dataset"]["fingerprint"]["meta_sha256"],
+            "annotation_digest": result["annotation"]["digest"],
+        }
+    return {"input": inputs, "arms": arms}
+
+
+def test_tempo_none_writes_what_main_wrote(repo):
+    golden = json.loads(GOLDEN.read_text())
+    _golden_inputs(repo)
+    got = _golden_arms(repo, tempo="none")
+    # The input first: a changed helper above is not a changed `none`.
+    assert got["input"] == golden["input"], (
+        "the synthetic input of this test changed (EPISODES, _dataset, _anchored, "
+        "_recap or _segments); regenerate the golden from main as the comment says"
+    )
+    for arm, digests in golden["arms"].items():
+        assert got["arms"][arm] == digests, (
+            f"--tempo none no longer writes what main wrote for {arm}: "
+            "compare frames, schema and manifest to see which part changed"
+        )
+    # And the default, the argument left out, is that same thing.
+    assert _golden_arms(repo)["arms"] == golden["arms"]
