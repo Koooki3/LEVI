@@ -43,6 +43,7 @@ JOINT_FEATURE = "observation.joint_positions"
 JOINT_NAMES = [f"joint_{i}" for i in range(1, 8)]
 GRIPPER_FEATURE = "observation.gripper_width"
 GRIPPER_NAMES = ["gripper_width"]
+COLUMNS = (JOINT_FEATURE, GRIPPER_FEATURE)
 DEFAULT_ROBOT_TYPE = "generic_arm"  # Options.robot_type default
 FR3_ROBOT_TYPE = "franka_fr3"
 # Joint angles are radians. FR3 joints stay within about +-3.1 (joint 6 reaches

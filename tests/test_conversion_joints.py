@@ -494,6 +494,39 @@ def test_the_converted_dataset_carries_the_decided_robot_type(
     assert mode == {"franka_fr3": "joints", "generic_arm": "pose"}.get(expected, "none")
 
 
+def test_recap_from_a_dataset_with_joint_columns_drops_them(converted, tmp_path):
+    capture, datasets = converted
+    source = datasets["retime"]  # a LeRobot dataset that has the joint columns
+    assert JOINT_FEATURE in read_json(source / "meta/info.json")["features"]
+    plan = registry.with_defaults(
+        options(target_options={"dataset_type": "sft", "tag": "v1"}), "recap_value"
+    )
+    derived = Path(
+        execute("pipeline", source, tmp_path / "derived", plan)["dataset_path"]
+    )
+    direct = Path(
+        execute("pipeline", capture, tmp_path / "direct", plan)["dataset_path"]
+    )
+    info = read_json(derived / "meta/info.json")
+    for column in joint_states.COLUMNS:
+        assert column not in info["features"]
+        assert column not in episode_frame(derived).columns
+        assert column not in read_json(derived / "meta/stats.json")
+        for row in read_json_lines(derived / "meta/episodes_stats.jsonl"):
+            assert column not in row["stats"]
+    assert "joint_positions" not in read_json(derived / "meta/levi_conversion.json")
+    # the same schema as a RECAP export made straight from the raw capture
+    assert set(info["features"]) == set(
+        read_json(direct / "meta/info.json")["features"]
+    )
+    assert list(episode_frame(derived).columns) == list(episode_frame(direct).columns)
+    assert set(read_json(derived / "meta/stats.json")) == set(
+        read_json(direct / "meta/stats.json")
+    )
+    # the source dataset keeps its columns
+    assert JOINT_FEATURE in episode_frame(source).columns
+
+
 # --- inspection says it before the run -------------------------------------------------
 
 
