@@ -6573,5 +6573,8 @@
   "viewer.replay3d.errorBody": "WebGL or the arm model failed to load. The video and the charts are not affected.",
   "viewer.replay3d.retry": "Retry",
   "viewer.replay3d.gripperWidthBar": "Measured gripper opening",
-  "viewer.replay3d.gripperWidth": "Gripper opening, measured: {value} m (0 = closed)"
+  "viewer.replay3d.gripperWidth": "Gripper opening, measured: {value} m (0 = closed)",
+  "viewer.replay3d.gripperUnknownBar": "Gripper value",
+  "viewer.replay3d.gripperUnknown": "Gripper: {value}",
+  "viewer.replay3d.gripperUnknownNote": "The dataset does not say what its gripper column is (a command or a measurement) or which way is open, so the value is shown as it is."
 }

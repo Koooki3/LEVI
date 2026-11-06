@@ -6573,5 +6573,8 @@
   "viewer.replay3d.errorBody": "WebGL 或机械臂模型加载失败。视频和曲线不受影响。",
   "viewer.replay3d.retry": "重试",
   "viewer.replay3d.gripperWidthBar": "实测夹爪开度",
-  "viewer.replay3d.gripperWidth": "夹爪开度，实测：{value} 米（0 为闭合）"
+  "viewer.replay3d.gripperWidth": "夹爪开度，实测：{value} 米（0 为闭合）",
+  "viewer.replay3d.gripperUnknownBar": "夹爪数值",
+  "viewer.replay3d.gripperUnknown": "夹爪：{value}",
+  "viewer.replay3d.gripperUnknownNote": "数据集没有说明夹爪列是指令还是实测、哪个方向是张开，所以数值按原样显示。"
 }

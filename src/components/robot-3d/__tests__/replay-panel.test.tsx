@@ -216,14 +216,45 @@ describe("ReplayPanel: what it says", () => {
     expect(text).not.toContain("Joints (deg)");
   });
 
-  test("the gripper is a command value in a 0..1 meter, with the no-model note", async () => {
+  test("a gripper column of unknown meaning (the DROID view's) is a bare value: no command, no polarity", async () => {
+    // jointDetection is franka_panda with `observation.state | gripper`: the
+    // DROID view's measured position, 0 = open and 1 = closed (inferred), the
+    // opposite of LEVI's command. The panel must not say which way is open.
     const { host } = await render(panel());
+    expect(jointDetection.gripperKind).toBe("unknown");
     const meter = host.querySelector('[role="meter"]')!;
+    expect(meter.getAttribute("aria-label")).toBe("Gripper value");
     expect(meter.getAttribute("aria-valuenow")).toBe("1");
-    expect(host.textContent).toContain(
+    const text = host.textContent ?? "";
+    expect(text).toContain("Gripper: 1.00");
+    expect(text).not.toContain("1 = open");
+    expect(text).not.toContain("Gripper command");
+    expect(text).not.toContain("a command, not a measured width");
+    expect(text).toContain("does not say what its gripper column is");
+    expect(text).toContain("There is no gripper model yet");
+    await act(async () => time.seek(3)); // row 6
+    expect(
+      host.querySelector('[role="meter"]')!.getAttribute("aria-valuenow"),
+    ).toBe("0");
+    expect(host.textContent).toContain("Gripper: 0.00");
+  });
+
+  test("LEVI's own conversion (robot_type generic_arm): the gripper is the open = 1 command", async () => {
+    const rows = poseRows.map((row, i) => ({
+      ...row,
+      "observation.state | gripper": i < 5 ? 1 : 0,
+    }));
+    expect(poseDetection.gripperKind).toBe("command");
+    const { host } = await render(panel({ detection: poseDetection, rows }));
+    const meter = host.querySelector('[role="meter"]')!;
+    expect(meter.getAttribute("aria-label")).toBe("Gripper command");
+    expect(meter.getAttribute("aria-valuenow")).toBe("1");
+    const text = host.textContent ?? "";
+    expect(text).toContain(
       "Gripper command: 1.00 (1 = open, 0 = closed; a command, not a measured width)",
     );
-    expect(host.textContent).toContain("There is no gripper model yet");
+    expect(text).not.toContain("does not say what its gripper column is");
+    expect(text).toContain("There is no gripper model yet");
     await act(async () => time.seek(3)); // row 6: closed
     expect(
       host.querySelector('[role="meter"]')!.getAttribute("aria-valuenow"),
@@ -281,8 +312,28 @@ describe("ReplayPanel: what it says", () => {
     expect(text).toContain("三维回放");
     expect(text).toContain("关节角");
     expect(text).toContain("收起三维回放");
-    expect(text).toContain("夹爪指令");
+    // franka_panda: a gripper of unknown meaning, said neutrally.
+    expect(text).toContain("夹爪：1.00");
+    expect(text).not.toContain("夹爪指令");
     expect(text).not.toContain("viewer.replay3d");
+  });
+
+  test("in Chinese a LEVI command gripper says 1 is open, and a gripper of unknown meaning says nothing about it", async () => {
+    window.localStorage.setItem("levi-language", "zh");
+    const { host } = await render(
+      <LocaleProvider>
+        {panel({ detection: poseDetection, rows: poseRows })}
+      </LocaleProvider>,
+    );
+    const text = host.textContent ?? "";
+    expect(text).toContain(
+      "夹爪指令：1.00（1 为张开，0 为闭合；是指令值，不是实测开度）",
+    );
+    expect(text).not.toContain("数据集没有说明夹爪列");
+    const unknown = await render(<LocaleProvider>{panel()}</LocaleProvider>);
+    expect(unknown.host.textContent).toContain("夹爪：1.00");
+    expect(unknown.host.textContent).toContain("数据集没有说明夹爪列");
+    expect(unknown.host.textContent).not.toContain("1 为张开");
   });
 });
 

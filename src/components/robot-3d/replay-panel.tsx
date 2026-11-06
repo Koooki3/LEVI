@@ -29,7 +29,10 @@ import { SeriesSwatch } from "@/components/viewer/series-swatch";
 import { useLocale } from "@/components/levi-locale";
 import { useTime } from "@/context/time-context";
 import { indexAt } from "@/lib/replay/clock";
-import type { Fr3ReplayDetection } from "@/lib/replay/fr3-columns";
+import type {
+  Fr3GripperKind,
+  Fr3ReplayDetection,
+} from "@/lib/replay/fr3-columns";
 import { buildReplayData, type ReplayData } from "@/lib/replay/frames";
 import type { ReplayVideoSource } from "@/lib/replay/playback-clock";
 import { ROBOTIQ_STROKE_M } from "@/lib/robot-studio/robotiq-2f85";
@@ -104,6 +107,27 @@ function keepKeysLocal(event: KeyboardEvent) {
   if (event.key === " " || event.key === "ArrowUp" || event.key === "ArrowDown")
     event.stopPropagation();
 }
+
+/**
+ * What the gripper column is called. Only a measured width and LEVI's own
+ * command (open = 1) say more than "a number"; any other column (a DROID view's
+ * measured `gripper`, whose direction is the opposite) is shown as the bare
+ * value, with no claim about what it means or which way is open.
+ */
+const GRIPPER_TEXT: Record<Fr3GripperKind, { bar: string; value: string }> = {
+  width: {
+    bar: "viewer.replay3d.gripperWidthBar",
+    value: "viewer.replay3d.gripperWidth",
+  },
+  command: {
+    bar: "viewer.replay3d.gripperBar",
+    value: "viewer.replay3d.gripper",
+  },
+  unknown: {
+    bar: "viewer.replay3d.gripperUnknownBar",
+    value: "viewer.replay3d.gripperUnknown",
+  },
+};
 
 type SceneStatus = "loading" | "ready" | "failed";
 const DEG = 180 / Math.PI;
@@ -198,6 +222,7 @@ export default function ReplayPanel({
   // The bar is 0..1: the command as it is, a measured width against the
   // Robotiq 2F-85's full stroke (the only gripper the studio models).
   const measuredGripper = data.gripperKind === "width";
+  const gripperText = GRIPPER_TEXT[data.gripperKind ?? "unknown"];
   const clampedGripper =
     gripper !== null && Number.isFinite(gripper)
       ? Math.min(
@@ -356,11 +381,7 @@ export default function ReplayPanel({
               <div
                 className="vw-r3d-gripper-bar"
                 role="meter"
-                aria-label={t(
-                  measuredGripper
-                    ? "viewer.replay3d.gripperWidthBar"
-                    : "viewer.replay3d.gripperBar",
-                )}
+                aria-label={t(gripperText.bar)}
                 aria-valuemin={0}
                 aria-valuemax={1}
                 aria-valuenow={clampedGripper ?? undefined}
@@ -369,19 +390,12 @@ export default function ReplayPanel({
                 }
               />
               <p>
-                {fill(
-                  t(
-                    measuredGripper
-                      ? "viewer.replay3d.gripperWidth"
-                      : "viewer.replay3d.gripper",
-                  ),
-                  {
-                    value:
-                      gripper !== null && Number.isFinite(gripper)
-                        ? gripper.toFixed(measuredGripper ? 3 : 2)
-                        : "–",
-                  },
-                )}
+                {fill(t(gripperText.value), {
+                  value:
+                    gripper !== null && Number.isFinite(gripper)
+                      ? gripper.toFixed(measuredGripper ? 3 : 2)
+                      : "–",
+                })}
               </p>
             </div>
           )}
@@ -437,6 +451,9 @@ function ReplayNotes({ data }: { data: ReplayData }) {
     <ul className="vw-r3d-notes">
       {data.mode === "pose" && <li>{t("viewer.replay3d.poseNote")}</li>}
       {data.gripper && <li>{t("viewer.replay3d.noGripperModel")}</li>}
+      {data.gripperKind === "unknown" && (
+        <li>{t("viewer.replay3d.gripperUnknownNote")}</li>
+      )}
       {data.maybeSampled && (
         <li>{fill(t("viewer.replay3d.sampled"), { rows: data.rows })}</li>
       )}
