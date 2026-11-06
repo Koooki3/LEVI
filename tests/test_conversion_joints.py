@@ -259,8 +259,10 @@ def test_gripper_width_is_the_measured_aperture_in_metres(converted, plan):
 def _ts_constants():
     path = ROOT / "src/lib/replay/fr3-columns.ts"
     constants = ROOT / "src/utils/constants.ts"
-    if not (path.is_file() and constants.is_file()):
-        pytest.skip("the viewer sources are not in this checkout")
+    assert path.is_file() and constants.is_file(), (
+        "src/lib/replay/fr3-columns.ts and src/utils/constants.ts must exist: "
+        "this test restates the viewer's rule from them"
+    )
     text = path.read_text()
 
     def regex(name):
@@ -370,8 +372,7 @@ def test_joint_limits_in_the_model_leave_room_for_the_radian_guard():
     # joint_states refuses |angle| > 2*pi as "not radians"; every FR3 limit
     # in the model the viewer draws (public/robots/fr3/fr3.urdf) is below it.
     urdf = ROOT / "public/robots/fr3/fr3.urdf"
-    if not urdf.is_file():
-        pytest.skip("the FR3 model is not in this checkout")
+    assert urdf.is_file(), "public/robots/fr3/fr3.urdf must exist in this repository"
     limits = [
         float(v)
         for pair in re.findall(r'lower="([-\d.]+)" upper="([-\d.]+)"', urdf.read_text())
@@ -448,8 +449,7 @@ def test_one_demo_without_evidence_keeps_generic_arm_for_the_dataset():
 
 def test_the_limits_are_the_ones_of_the_model_the_viewer_draws():
     urdf = ROOT / "public/robots/fr3/fr3.urdf"
-    if not urdf.is_file():
-        pytest.skip("the FR3 model is not in this checkout")
+    assert urdf.is_file(), "public/robots/fr3/fr3.urdf must exist in this repository"
     found = re.findall(r'lower="([-\d.]+)" upper="([-\d.]+)"', urdf.read_text())
     arm = [(float(lower), float(upper)) for lower, upper in found[:7]]
     assert arm == list(joint_states.FR3_LIMITS)
