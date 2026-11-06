@@ -1,23 +1,25 @@
 {
   "name": "autoresearch",
-  "kind": "local adaptation: original text, method credited; no upstream file is copied",
+  "kind": "local adaptation: original text, method credited; no upstream file is copied (the results.tsv columns and the keep/discard/crash convention follow karpathy's program.md)",
   "created": "2026-11-06",
+  "revised": "2026-11-06 after the independent review (2 blocking, 11 important, 13 minor findings)",
   "sources": [
     {
       "repository": "https://github.com/karpathy/autoresearch",
       "commit": "228791fb499afffb54b46200aca536f79142f117",
-      "license": "MIT (README)",
-      "read": "program.md in full, README license section",
-      "used_for": "fixed read-only evaluator, one editable surface, baseline first, keep or discard, simplicity rule, results.tsv"
+      "license": "MIT (README:90-92)",
+      "read": "program.md in full; README license section and install steps",
+      "used_for": "fixed read-only evaluator, one editable surface, baseline first, keep or discard, simplicity rule, results.tsv",
+      "note": "program.md forbids installing packages (line 30); the README tells a person to install uv and sync (lines 27-31); prepare.py writes ~/.cache/autoresearch (line 38)"
     },
     {
       "repository": "https://github.com/Orchestra-Research/AI-Research-SKILLs",
       "path": "0-autoresearch-skill",
       "commit": "773a52944ba4747a18bd4ae9ade53fff041adcbc",
-      "version": "skill 1.0.0 (repository v1.7.2)",
+      "version": "skill 1.0.0 (repository packages at v1.7.2)",
       "license": "MIT",
-      "read": "SKILL.md headings and the sections on the two-loop architecture and agent continuity; references/agent-continuity.md first 40 lines",
-      "used_for": "two-loop structure: inner experiments, outer synthesis every few iterations"
+      "read": "manager: SKILL.md headings and grep hits, the two-loop and agent-continuity sections, references/agent-continuity.md first 40 lines; the independent reviewer read the whole file",
+      "used_for": "two-loop structure (inner experiments, outer synthesis every few iterations); writing the hypothesis and expected sign before the run"
     }
   ],
   "reviewed_not_used": [
@@ -26,25 +28,26 @@
       "commit": "7bddd056dfd0b0ded8360588d8101b1ecb5c0baa",
       "version": "2.3.0",
       "license": "MIT",
-      "read": "file layout, AGENTS.md header and LICENSE only; the Node hooks and scripts were NOT read",
-      "reason": "ships host hooks (Node), 14 commands and a plugin-marketplace install, i.e. it would change host configuration and is far larger than the gap"
+      "read": "file layout (13 sub-command files plus the root command), AGENTS.md header and LICENSE; the Node hooks and scripts were NOT read",
+      "reason": "ships host hooks (Node .cjs), 14 commands and a plugin-marketplace install: it would change host configuration and is far larger than the gap"
     }
   ],
   "left_out_on_purpose": [
-    "upstream 'LOOP FOREVER / never ask the human': replaced by a budget, a stop rule (R10) and the questions the workspace rules reserve to a person",
-    "upstream discard by git reset: replaced by restoring the surface from the last kept commit; no history rewrite",
-    "upstream writes to ~/.cache and installs packages: caches stay in LEVI/lab/cache, no installs",
-    "Orchestra's mandatory wall-clock loop (/loop 20m, cron.add): an unattended recurring schedule, which the workspace rules reserve to the user"
+    "upstream 'LOOP FOREVER / NEVER STOP / do not ask the human': replaced by a budget, a stop rule (R10) and the questions the workspace rules reserve to a person",
+    "upstream discard by git reset: replaced by git revert; no history rewrite",
+    "upstream writes to ~/.cache (prepare.py) and the README's install steps: caches stay in LEVI/lab/cache, no installs",
+    "Orchestra's mandatory wall-clock loop (/loop 20m, cron.add): an unattended recurring schedule, which lab section 4 reserves to the user",
+    "Orchestra's 'fully autonomous, do not ask' (SKILL.md 16, 351), pip install (101-102), messages to the user through Telegram or Slack (271) and 'use whatever compute, do not block' (352), per the independent review"
   ],
-  "local_changes": "Adds the LEVI guardrails: tune/confirm split with a pinned hash, frozen/held-out/blind sets excluded (R9, R11), stop rule (R10), R13 pairing and experiments.py registry, GPU lock and arm gates, external token budget set by the user, external tokens counted apart.",
+  "local_changes": "Adds the LEVI guardrails: tune/confirm split with a pinned id-list hash, frozen/held-out/blind sets outside the loop (R9, R11), checked through gold_tool ids and never .env, stop rule (R10), new version file per prompt iteration (R13), git revert for discards, GPU lock and arm gates, external token budget asked once from the user, the teacher/student scoring rules of 2026-11-06.",
   "validation": {
-    "static": "frontmatter and relative links checked by reading; skill is listed by the host skill discovery in the session that created it",
-    "behavioural": "references/evals.md defines four tasks (positive, negative, regression, held-out); NOT RUN",
-    "independent_review": "pending"
+    "static": "scripts/check_skills.py (frontmatter parses without strict-YAML pitfalls, hashes match, links resolve) with tests/test_check_skills.py; the first version failed PyYAML 6.0.3 strict parsing (found by the independent review, reproduced by the manager)",
+    "behavioural": "references/evals.md defines four tasks; the independent reviewer walked the first version through them on paper; no agent has run them",
+    "independent_review": "2026-11-06: first review done, blockers and important findings addressed in the follow-up commit; no second review yet"
   },
   "files": {
-    "SKILL.md": "40ef14bfafca4a39b2cab033de463a77fcd65fba433c42f70b76c371d9914048",
-    "references/evals.md": "4e246a03f627098322229b993320a8638f09a576cc475d2aa8e932b5400aa2c1",
-    "references/round-record.md": "90ce1f509efffe64d411e6404d47dfde2942a02142ee0bce649712067774a21c"
+    "SKILL.md": "dc216f593a8397e90c9cec0b6385f28b3aaaee66b31b329aa643fd16d8304ca0",
+    "references/evals.md": "d16099e854305266c9bcf52a73b3ff2c3c37294285af80c0e18be39f420db6ac",
+    "references/round-record.md": "14dc217a31871dc4529fe24b19b1cd90e725a1fba0c2eec47348c3c0a154b18b"
   }
 }
