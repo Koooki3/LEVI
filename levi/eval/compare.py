@@ -6,7 +6,7 @@ problems, with the same decoding and the same scoring:
 - ``teacher``: the external agent (the source of the paradigm and the
   experience entries). Its answer is a reference, not the gold standard;
 - ``local_harness``: the local VLM through LEVI's harness;
-- ``local_direct``: the same local VLM called directly, without LEVI (R13).
+- ``local_direct``: the same local VLM called directly, without LEVI.
 
 The headline is whether ``local_harness`` reaches at least the teacher's
 quality while being faster and spending fewer external tokens, so the table
@@ -48,7 +48,7 @@ Rules this module enforces:
   includes queueing (``includes_queue``: a sub-agent's duration does) or not
   (``excludes_queue``); a difference of times, and "faster", are only given
   between arms of the same stated basis, otherwise they are unknown.
-- **The direct arm is part of the round (R13).** Without ``local_direct`` the
+- **The direct arm is part of the round.** Without ``local_direct`` the
   table is built but its headline is marked incomplete and is never "yes".
 - **External tokens are four separate fields** (``input_new``, ``output``,
   ``cache_read``, ``cache_write``, as in ``levi.aeri.external_report.v1``), and
@@ -777,7 +777,7 @@ def _verdict(
     ]
     checks["all"] = False if False in needed else None if None in needed else True
     if not complete and checks["all"]:
-        checks["all"] = None  # a round without the direct arm is not a round (R13)
+        checks["all"] = None  # a round without the direct arm is not a round
     checks["non_inferiority"] = {
         "higher_is_better": higher,
         "margin": margin,
@@ -888,7 +888,7 @@ def compare(
         problems.append(
             "local_harness and local_direct ran different models "
             f"({_short(harness.model, 40)} and {_short(direct.model, 40)}); the "
-            "direct arm is the same model without LEVI (R13), otherwise the "
+            "direct arm is the same model without LEVI, otherwise the "
             "harness is credited with a model change"
         )
     for record, label in zip(records, labels, strict=True):
@@ -1230,7 +1230,7 @@ def _markdown(table: Table) -> str:
         ci = rule["delta_ci"]
         shown = f"[{ci[0]:+.3f}, {ci[1]:+.3f}]" if ci else "没有"
         method = f"（{_cell(rule['method'])}）" if rule["method"] else ""
-        gap = "" if verdict["complete"] else "；不完整：缺 local_direct（R13 要求三组）"
+        gap = "" if verdict["complete"] else "；不完整：缺 local_direct（一轮要三组）"
         out += [
             "",
             f"### 主指标：本地 + harness 对教师（质量按非劣效，耗时和外部 token 比合计{gap}）",

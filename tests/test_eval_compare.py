@@ -913,7 +913,7 @@ def test_an_empty_decoding_is_refused_not_matched_with_everything():
 def test_the_direct_arm_must_be_the_same_model_as_the_harness_arm():
     with pytest.raises(CompareError, match="different models") as refused:
         compare.compare(three(local_direct={"model": "qwen3-vl-small"}))
-    assert "qwen3-vl" in str(refused.value) and "R13" in str(refused.value)
+    assert "qwen3-vl" in str(refused.value) and "without LEVI" in str(refused.value)
     # The teacher is another model by definition, and a table without the
     # direct arm has nothing to compare it with.
     compare.compare(three())
@@ -1190,7 +1190,7 @@ def test_a_missing_cache_read_leaves_only_the_full_basis_unknown():
 
 
 def test_a_time_with_queueing_is_not_compared_with_one_without():
-    # A sub-agent's duration includes its queueing (AERI-EXT-V1 section 3); a
+    # A sub-agent's duration includes its queueing (measured in external-agent rounds); a
     # local call's time need not. The difference between them is not "the
     # speed difference".
     queued = {"wall_s_basis": "includes_queue"}
