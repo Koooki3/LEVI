@@ -86,7 +86,7 @@ class RecapValue(LeRobotV21):
     options_model = RecapOptions
     defaults: ClassVar[dict] = {"timing": "retime", "filter_static": False}
     inputs = ("robot_capture", "image_sequence", "lerobot")
-    ignored_warnings = ()
+    ignored_warnings = ("joint_states",)
     # Training datasets keep the schema RECAP training pins; joint columns
     # (and the robot_type that comes with them) are for demonstration
     # datasets that are browsed and replayed.

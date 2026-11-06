@@ -494,6 +494,72 @@ def test_the_converted_dataset_carries_the_decided_robot_type(
     assert mode == {"franka_fr3": "joints", "generic_arm": "pose"}.get(expected, "none")
 
 
+# --- inspection says it before the run -------------------------------------------------
+
+
+def requirement(report, rid):
+    return next((r for r in report.requirements if r.id == rid), None)
+
+
+def test_inspect_has_no_joint_row_for_a_capture_without_joint_columns(tmp_path):
+    plain = build_capture(tmp_path / "plain", joints=False)
+    assert requirement(registry.inspect(plain, options()), "joint_states") is None
+    # a file in another layout is not a joint source either
+    other = build_capture(tmp_path / "other")
+    mutate(
+        other / "task/demo_001",
+        lambda f: f[["timestamp_sec", "frame_index", "joint_1_vel"]],
+    )
+    assert requirement(registry.inspect(other, options()), "joint_states") is None
+
+
+def test_inspect_says_what_a_usable_joint_source_will_become(tmp_path):
+    named = build_capture(tmp_path / "named", names=FR3_NAMES)
+    item = requirement(registry.inspect(named, options()), "joint_states")
+    assert item.status == "pass" and "franka_fr3" in item.detail
+    wrong = build_capture(tmp_path / "wrong", names=SHIFTED)
+    item = requirement(registry.inspect(wrong, options()), "joint_states")
+    assert item.status == "pass" and "generic_arm" in item.detail
+    off = registry.inspect(named, options(export_joints=False))
+    item = requirement(off, "joint_states")
+    assert item.status == "info" and "export_joints is false" in item.detail
+
+
+def test_inspect_warns_about_what_the_run_would_refuse(tmp_path):
+    capture = build_capture(tmp_path / "capture", demos=("demo_001", "demo_002"))
+    mutate(capture / "task/demo_002", _set("joint_4_pos", 3, np.nan))
+    report = registry.inspect(capture, options())
+    item = requirement(report, "joint_states")
+    assert item.status == "warn" and not report.failed  # the card stays usable
+    assert "task/demo_002" in item.detail and "row 3, joint_4_pos" in item.detail
+    assert "export_joints" in item.fix and "exclude_demos" in item.fix
+    cards = {t.target: t for t in report.targets}
+    card = cards["lerobot_v21"]
+    assert card.status == "warnings"
+    assert any("joint" in reason.lower() for reason in card.reasons)
+    solution = next(s for s in card.solutions if s.id == "no_joint_export")
+    assert solution.options == {"export_joints": False}
+    # RECAP never writes joint columns: no warning and no such fix on its card
+    recap = cards["recap_value"]
+    assert not any("joint" in reason.lower() for reason in recap.reasons)
+    assert all(s.id != "no_joint_export" for s in recap.solutions)
+    # and the run stops on exactly what the inspection said
+    with pytest.raises(ValueError, match=r"task/demo_002.*row 3, joint_4_pos"):
+        execute("pipeline", capture, tmp_path / "out", options())
+    # the offered fix clears the warning
+    fixed = registry.inspect(capture, options(**solution.options))
+    assert requirement(fixed, "joint_states").status == "info"
+
+
+def test_inspect_warns_when_only_some_demos_have_the_joint_file(tmp_path):
+    capture = build_capture(tmp_path / "capture", demos=("demo_001", "demo_002"))
+    (capture / "task/demo_002/robot_joint_states.csv").unlink()
+    item = requirement(registry.inspect(capture, options()), "joint_states")
+    assert item.status == "warn"
+    assert "1 of 2 demo(s) have no joint file" in item.detail
+    assert "task/demo_002" in item.detail and "exclude_demos" in item.fix
+
+
 # --- no joint source: the output is what it was ---------------------------------------
 
 

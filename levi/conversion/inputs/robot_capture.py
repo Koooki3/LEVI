@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .. import media, raw
+from .. import joint_states, media, raw
 from ..episodes import SourceEpisode
 from ..options import Options
 from ..report import EpisodeFinding, InputReport, Requirement
@@ -66,6 +66,11 @@ REQUIREMENTS = [
         "gripper_commands",
         "Gripper commands are open/close",
         "Only 'open' and 'close' are understood; exclude the affected demos.",
+    ),
+    (
+        "joint_states",
+        "Joint angles in robot_joint_states.csv usable for export",
+        "Set export_joints to false to convert without joint columns, or exclude the listed demos (exclude_demos).",
     ),
     (
         "cameras",
@@ -193,6 +198,21 @@ class RobotCapture(InputFormat):
                 return 1.0
         return 0.0
 
+    @staticmethod
+    def _inspect_joints(demo: Path, pose, grip, options: Options) -> dict:
+        """What the conversion would do with this demo's robot_joint_states.csv
+        (``joint_states.read``), without raising: the same checks, so the
+        report says now what the run would otherwise stop on."""
+        if not options.export_joints:
+            return {"state": "off"}
+        try:
+            joints = joint_states.read(demo, pose, grip)
+        except (OSError, ValueError) as exc:  # CaptureError is a ValueError
+            return {"state": "refused", "reason": str(exc)}
+        if joints is None:
+            return {"state": "none"}
+        return {"state": "ok", "fr3": joints.fr3_evidence()[0]}
+
     def _inspect_demo(self, root: Path, demo: Path, options: Options) -> dict:
         found = {
             "id": demo.relative_to(root).as_posix(),
@@ -208,13 +228,15 @@ class RobotCapture(InputFormat):
             # free-text messages so aggregation never parses them.
             "codec": [],
             "incomplete": [],
+            # The joint source (joint_states.py): none | off | ok | refused.
+            "joints": {"state": "none"},
         }
 
         def fail(code, message):
             found["codes"].setdefault(code, message)
 
         try:
-            pose, *_ = raw.load(demo)
+            pose, grip, *_ = raw.load(demo)
             found["frames"] = len(pose)
         except raw.CaptureError as exc:
             fail(exc.code, str(exc))
@@ -222,6 +244,8 @@ class RobotCapture(InputFormat):
         except (OSError, ValueError, KeyError) as exc:
             fail("csv_schema", str(exc))
             pose = None
+        if pose is not None and (demo / joint_states.FILE).is_file():
+            found["joints"] = self._inspect_joints(demo, pose, grip, options)
         for camera in options.cameras:
             try:
                 info = camera_info(demo, camera, options)
@@ -300,6 +324,52 @@ class RobotCapture(InputFormat):
             found["incomplete"].append("No events.csv")
         found["outcome"] = raw.demo_outcome(demo)
         return found
+
+    @staticmethod
+    def _joint_requirement(results: list[dict], options: Options):
+        """``(status, detail)`` of the ``joint_states`` requirement, or
+        ``None`` when no demo has a robot_joint_states.csv in a layout LEVI
+        reads (the report is then what it was before joints were exported)."""
+        found = [r for r in results if r["joints"]["state"] != "none"]
+        if not found:
+            return None
+        if not options.export_joints:
+            detail = (
+                f"{len(found)} demo(s) have robot_joint_states.csv; export_joints "
+                "is false, so no joint columns are written"
+            )
+            return "info", detail
+        refused = [r for r in found if r["joints"]["state"] == "refused"]
+        lacking = [r for r in results if r["joints"]["state"] == "none"]
+        if refused or lacking:
+            parts = []
+            if refused:
+                first = refused[0]["joints"]["reason"]
+                parts.append(
+                    f"{len(refused)} demo(s) would be refused: "
+                    f"{_examples([r['id'] for r in refused])} — e.g. {first}"
+                )
+            if lacking:
+                parts.append(
+                    f"{len(lacking)} of {len(results)} demo(s) have no joint "
+                    f"file ({_examples([r['id'] for r in lacking])}), so none "
+                    "can be written"
+                )
+            return (
+                "warn",
+                "; ".join(parts) + ". The conversion stops with that reason "
+                "instead of skipping or filling anything",
+            )
+        robot_type = (
+            f"{joint_states.FR3_ROBOT_TYPE} (FR3 joint names or limits)"
+            if all(r["joints"]["fr3"] for r in found)
+            else f"{joint_states.DEFAULT_ROBOT_TYPE} (not shown to be FR3 joints)"
+        )
+        detail = (
+            f"{len(found)} demo(s): observation.joint_positions (radians) and the "
+            f"measured gripper width will be written; robot_type becomes {robot_type}"
+        )
+        return "pass", detail
 
     def inspect(self, root: Path, options: Options, progress=None) -> InputReport:
         root = Path(root)
@@ -420,6 +490,10 @@ class RobotCapture(InputFormat):
             if incomplete
             else "",
         )
+
+        joint = self._joint_requirement(results, options)
+        if joint:
+            put("joint_states", *joint)
 
         rates = [f for r in results for f in r["fps"]]
         variants = Counter(r["variant"] for r in results)
