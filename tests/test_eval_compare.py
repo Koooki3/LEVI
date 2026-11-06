@@ -5,6 +5,7 @@ The records are built by the tests; nothing here reads a dataset or calls a mode
 
 import json
 import math
+from pathlib import Path
 
 import pytest
 
@@ -1265,3 +1266,49 @@ def test_a_round_without_the_direct_arm_is_marked_incomplete_and_never_yes():
     assert worse.main_metric["all"] is False and worse.main_metric["complete"] is False
     # No teacher, no headline at all (unchanged).
     assert compare.compare([arm("local_harness")]).main_metric is None
+
+
+DOCS = Path(__file__).resolve().parent.parent / "docs"
+
+
+@pytest.mark.parametrize("page", ["EVALUATION.md", "EVALUATION.zh-CN.md"])
+def test_each_edition_of_the_page_names_every_field_and_option_of_the_record(page):
+    # The field table is the contract a scorer writes records against: a field
+    # added to ArmRecord without a row (in both languages) fails here.
+    text = (DOCS / page).read_text()
+    # The first cell of a table row: where a field is described, not merely
+    # mentioned in some other sentence.
+    cells = " ".join(
+        line.split("|")[1] for line in text.splitlines() if line.startswith("| `")
+    )
+    missing = [
+        name for name in ArmRecord.__dataclass_fields__ if f"`{name}`" not in cells
+    ]
+    assert not missing, f"{page} does not describe {missing}"
+    for word in (
+        "levi.eval.arm_record.v1",
+        "--confirm",
+        "--verdict-basis",
+        "source_code",
+        "record_fields",
+        "subagents_uncovered",
+        "truncated_tail",
+        "uuid_fallback",
+        "non_inferiority_margin",
+        "higher_is_better",
+        "wall_s_basis",
+    ):
+        assert word in text, f"{page} does not mention {word}"
+
+
+def test_the_docs_index_links_both_editions_of_the_evaluation_page():
+    for index, targets in (
+        ("README.md", ("EVALUATION.md", "EVALUATION.zh-CN.md")),
+        ("README.zh-CN.md", ("EVALUATION.md", "EVALUATION.zh-CN.md")),
+    ):
+        text = (DOCS / index).read_text()
+        for target in targets:
+            assert f"]({target})" in text, f"{index} does not link {target}"
+    english = (DOCS / "EVALUATION.md").read_text()
+    chinese = (DOCS / "EVALUATION.zh-CN.md").read_text()
+    assert "](EVALUATION.zh-CN.md)" in english and "](EVALUATION.md)" in chinese

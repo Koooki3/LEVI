@@ -1,6 +1,6 @@
 # Annotation evaluation records
 
-LEVI records how well and how fast a person or an agent annotated subtasks, in one format, so the two can be compared line by line.
+LEVI records how well and how fast a person or an agent annotated subtasks, in one format, so the two can be compared line by line. 中文：[EVALUATION.zh-CN.md](EVALUATION.zh-CN.md). The last section describes the teacher / harness / direct comparison table of a teacher-student round.
 
 | Who | When the record is written | File |
 | --- | --- | --- |
@@ -75,44 +75,54 @@ The teacher-student method runs every round three ways on the same problems, wit
 | `local_harness` | The local VLM through LEVI's harness |
 | `local_direct` | The same local VLM called directly, without LEVI |
 
-The headline is whether `local_harness` reaches at least the teacher's quality while being faster and spending fewer external tokens. So the table reports quality per second and quality per external token, not accuracy alone.
+The headline is whether `local_harness` is **not worse than the teacher** in quality by a margin declared beforehand, while being faster and spending fewer external tokens. So the table reports quality per second and quality per external token, not accuracy alone.
 
 ### What one arm records (`levi.eval.arm_record.v1`)
 
 | Field | Meaning |
 | --- | --- |
-| `arm`, `task`, `model` | The arm (`teacher`, `local_harness`, `local_direct`), the task name, the model that answered |
+| `arm`, `task`, `model` | The arm, the task name, the model that answered |
+| `split` | **Required**: `tune`, `confirm` or `other`, the data the arm ran on. A `confirm` record is held to the confirm rules (below) in every table, whatever a caller passes |
 | `episode_set` or `episode_set_hash` + `episode_count` | The problems. `episode_set_hash` is the SHA-256 of the sorted, de-duplicated episode ids written as strings; if both forms are given they must agree |
-| `decoding`, `scoring` | The round's declared decoding and scoring (a JSON object, or a string for `scoring`), compared as written. An external agent's real sampling cannot be observed or enforced, so the teacher arm records the declared decoding |
+| `scored_count` | Over how many of those problems `quality` was computed. It must equal `episode_count` in a table: a problem the arm was blocked on or failed stays in the denominator, scored as a failure. Needed whenever `quality` is given |
+| `decoding` | The round's declared decoding, a non-empty JSON object. An external agent's real sampling cannot be observed or enforced, so the teacher arm records the declared decoding |
+| `scoring` | The round's declared scoring, a JSON object that **must** state `higher_is_better` (`true`/`false`: is a larger `quality` better; `false` for an error such as MAE or P90) and `non_inferiority_margin` (the margin δ, a number of 0 or more, written before the round). Compared as written, with `0` and `0.0` the same |
 | `quality`, `quality_ci`, `quality_ci_method` | The primary metric against the **gold standard** (its name belongs in `scoring`), its interval `[low, high]` and how it was computed. `null` = not measured |
+| `quality_delta_ci_vs_teacher`, `quality_delta_ci_method` | The interval `[low, high]` of the **paired difference** (this arm's quality minus the teacher's, over the same problems) and how it was computed. It is an aggregate, computed by whoever can see the problems one by one; the table only reads it. Not on the teacher arm |
 | `agreement_with_teacher` | Share of the teacher's answers this arm reproduces, 0 to 1. Not set on the teacher arm |
-| `wall_s` | Wall-clock seconds, greater than 0 |
+| `wall_s`, `wall_s_basis` | Wall-clock seconds (greater than 0) and whether they include queueing: `includes_queue` (a sub-agent's duration does) or `excludes_queue`. `null` = not stated |
 | `local_tokens` | Tokens spent on this machine's GPU |
 | `external_tokens` | `input_new`, `output`, `cache_read`, `cache_write` (the fields of `levi.aeri.external_report.v1`), kept apart. `null` for the whole object or for one field = unknown; `0` = measured zero |
+| `external_tokens_exact` | `true` = the counts are complete, `false` = lower bounds (see below), `null` = not stated. Needs `external_tokens` |
 | `external_tokens_source` | Where the external numbers came from (one line) |
 | `blocked` | What blocked the arm, if anything (one line) |
-| `per_episode` | Episode id to score. The only per-item field, and not allowed in a confirm table |
+| `per_episode` | Episode id to score. The only per-item field; not allowed in a confirm record |
 
-A record with a field not in this table is refused, so per-item content cannot ride along.
+A record with a field not in this table is refused.
 
 ### One command
 
 ```bash
 python -m levi.eval.compare teacher.json harness.json direct.json            # Markdown
 python -m levi.eval.compare teacher.json harness.json direct.json --format json
-python -m levi.eval.compare ... --confirm        # aggregate scores only
+python -m levi.eval.compare ... --confirm              # assert: every record is split=confirm
+python -m levi.eval.compare ... --verdict-basis fresh  # the token basis registered beforehand
 ```
 
-Each file holds a record, a list of records, or `{"records": [...]}`. The command reads those files and prints; it starts no service, uses no GPU and opens no port. From Python: `compare.compare(records, confirm=False, token_basis=...)` returns a `Table` with `to_markdown()` and `to_json()`.
+Each file holds a record, a list of records, or `{"records": [...]}`. The command reads those files and prints; it starts no service, uses no GPU and opens no port. From Python: `compare.compare(records, assert_confirm=False, verdict_basis="both")` returns a `Table` with `to_markdown()` and `to_json()`. There is no `confirm` switch to forget: whether a table is a confirm table follows the records' `split`, and `--confirm` / `assert_confirm` only adds the demand that every record is one.
 
-The Markdown has three tables with one row per arm (quality and speed; local and external tokens; differences to the teacher and to the direct arm) and a headline for `local_harness` against the teacher: quality not lower, faster, fewer external tokens. The headline compares point estimates only; read the intervals before believing a small difference. The JSON has one row per arm with every column.
+The Markdown has three tables with one row per arm (quality and speed; local and external tokens; differences to the teacher and to the direct arm) and a headline for `local_harness` against the teacher. The JSON has one row per arm with every column.
 
 ### Rules the table enforces
 
-- **Same problems, same conditions.** Records whose `task`, episode-set hash, `decoding` or `scoring` differ are refused, and the message names every difference. So are two records for one arm.
-- **Unknown is not zero.** A measurement that is `null` is printed `未知` and every ratio or difference that needs it is `未知`. A ratio with a denominator of exactly 0 (a local arm that spent no external tokens) is `不适用`, not `未知`. The headline answers `未知` instead of "yes" when an input is missing.
-- **Quality per external token** divides quality by `input_new + output + cache_write` by default: what the external model newly read or wrote. `cache_read` is cheap re-reading of a cached prefix, stays a column of its own and is not summed in (the convention of the experiment ledger; `AERI_EXTERNAL.md` also says cache dimensions are not summed or converted to price). The total is unknown as soon as one field of the basis is. Change it with `token_basis` or `--basis`; the table prints the basis it used.
-- **Confirm stays blind.** With `confirm=True` or `--confirm` a record with `per_episode`, with an explicit `episode_set` (give the hash and the count), or with free text in `blocked` or `external_tokens_source` (only a reason code such as `gpu_busy` is allowed) is refused. Confirm episodes' contents and labels are not shown to the teacher or the coordinator.
+- **Same problems, same conditions.** Records whose `task`, episode-set hash, episode count, `decoding` or `scoring` differ are refused, and the message names every difference; for `decoding` and `scoring` it names the first key that differs and each arm's value. A `local_direct` record must have the same `model` as `local_harness` (the direct arm is the same model without LEVI). Every arm must have `scored_count` equal to `episode_count`. Two records for one arm, or records of different splits, are refused.
+- **Unknown is not zero.** A measurement that is `null` is printed `未知` and every ratio or difference that needs it is `未知`. A ratio with a denominator of exactly 0 (a local arm that spent no external tokens) is `不适用`, not `未知`; so is an error divided by seconds or tokens (when smaller is better, such ratios are not rates of merit).
+- **Quality is a non-inferiority call on an interval.** A confirm round has about six problems, and one flipped problem moves a rate by 0.14 to 0.17, so two point estimates say almost nothing. With the margin δ and direction from `scoring` and the harness record's `quality_delta_ci_vs_teacher` (oriented so that larger is better; for an error it is turned around): the answer is **yes** if the interval's worse end is within δ (lower end >= −δ), **no** if even its better end is beyond δ (upper end < −δ), `未定` (undetermined) if the interval covers the margin, and `未知` if there is no interval. The point estimate is a side line (`quality_point_not_worse`) that never enters the "all three" line. A table refuses an interval that does not contain its own point difference (usually a reversed sign).
+- **External tokens: two totals side by side.** `fresh` = `input_new + output + cache_write` (what the external model newly read or wrote) and `all` = the four fields (with `cache_read`, the cheap re-reading of a cached prefix). Each has its own quality per 1,000 tokens and its own difference to the teacher, and is unknown as soon as one of its fields is. "Fewer external tokens" is answered on both: yes only if both say yes, no only if both say no, `未知` otherwise, and `fewer_external_tokens_basis_dependent` says when the two disagree (a student that re-reads a large cached prefix is fewer on one and more on the other). If a basis was registered before the round, `verdict_basis="fresh"` or `"all"` decides on that one and the table names it; both totals stay in the table.
+- **A lower bound is not a count.** `external_tokens_exact: false` marks the counts as lower bounds: the table writes `≥N`, quality per token as `≤x` and differences containing one as `（含下限）`. A student arm with a lower bound is never called "fewer" (unknown). With a lower-bound teacher, a student below that bound is "fewer"; above it the answer is unknown, never "no".
+- **Time is compared like with like.** A difference of times and "faster" are only given between arms of the same stated `wall_s_basis`; a different or unstated basis makes them unknown, and the table says why. A sub-agent's duration, as measured in external-agent rounds, includes queueing; a local call's time need not.
+- **The direct arm is part of the round.** Without `local_direct` the table is built, but its headline is marked incomplete and its "all three" line is never yes (a no stays a no).
+- **Confirm stays blind.** A record with `split: "confirm"` may carry aggregate numbers and short codes only: no `per_episode`, no explicit `episode_set` (give the hash and the count), `task`, `model`, `quality_ci_method`, `quality_delta_ci_method`, `blocked` and `external_tokens_source` each one code (at most 64 characters of `A-Za-z0-9_.:+-`), and `decoding` and `scoring` each a flat object of at most 16 entries and 256 characters whose keys are codes and whose values are codes, numbers or booleans. The check runs before any difference is reported, and error messages never repeat the content they refuse. What this cannot do is judge intent: a caller who writes an episode-specific word as a "code" (`ep7_flipped`) gets one short code through, but never a score list, an id list or a sentence. Confirm episodes' contents and labels are not shown to the teacher or the coordinator.
 
 ### External tokens from a Claude session (`levi/eval/tokens.py`)
 
@@ -124,9 +134,10 @@ python -m levi.eval.tokens session.jsonl [more.jsonl ...] --since 2026-11-06T09:
 
 - **You name the files.** The code lists no directory, expands no glob and looks into no home folder, so it cannot sweep up sessions that are not part of the round. Pass resumed sessions oldest first (a later copy of a message replaces an earlier one).
 - A message belongs to the window by the time of its first line, and then counts with its final usage.
-- Lines that cannot be parsed, assistant lines with neither `message.id` nor `uuid`, messages without a valid time (when a window is set) and usage fields that are missing or not a count are **counted and reported**, never dropped silently. `exact` is false then and the totals are lower bounds. A field that no counted message carried is `null`, not 0.
-- `Usage.external_tokens()` and `Usage.source` fill `external_tokens` and `external_tokens_source` of the teacher's record.
+- **`exact` speaks for the files given, not for everything the round cost.** A teacher that answers through sub-agents leaves a result line (`type: user` with a `toolUseResult` that names an `agentId`) in the main session and the sub-agent's own messages in its own file (`<session>/subagents/agent-<id>.jsonl`). Pass those files too: a result line whose sub-agent file was not given is counted (`subagent_results`, `subagents_uncovered`), its aggregate usage is not added (the sub-agent's file holds the per-message counts, and adding both would count twice), `exact` is false and `source` says so.
+- Lines that cannot be parsed, a half-written last line (`truncated_tail`), assistant lines with neither `message.id` nor `uuid`, messages keyed by `uuid` because they have no `message.id` (`uuid_fallback`; lines of one message then count apart), messages without a valid time (when a window is set) and usage fields that are missing (`usage: {}` lacks all four) or not a count are **counted and reported**, never dropped silently. `exact` is false then and the totals are lower bounds (`reasons` lists the codes). A field that no counted message carried is `null`, not 0.
+- `Usage.record_fields()` returns the three record fields to fill: `external_tokens`, `external_tokens_exact` and `external_tokens_source` (a sentence of at most 200 characters). For a confirm record use `record_fields(confirm=True)`: the sentence has spaces and punctuation that a confirm record refuses, so `source_code` (`claude_jsonl.last_usage:exact`, `:lower_bound`, `:not_exact` or `:nothing_counted`) stands in for it.
 
 ### Not done yet
 
-There is no adapter yet from the existing eval records, the `levi-vlm-eval` results or the AERI queue's `tokens.jsonl` to `levi.eval.arm_record.v1`; a round builds its records itself. The teacher arm's decoding is declared, not enforced. The table is not a significance test.
+There is no adapter yet from the existing eval records, the `levi-vlm-eval` results or the AERI queue's `tokens.jsonl` to `levi.eval.arm_record.v1`; a round builds its records itself. The teacher arm's decoding is declared, not enforced. The table does not compute the paired interval (it cannot see the problems one by one) and does not check that δ was written before the round. A real Claude transcript's sub-agent result line was not read for this module; its layout (`toolUseResult.agentId`) follows the AERI token tool and its tests use hand-written fixtures.
