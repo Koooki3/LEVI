@@ -45,8 +45,11 @@ Rules this module enforces:
   who writes an episode-specific word as a "code" gets it through, but only a
   few of 64 characters per field, never a score list or a sentence.
 - **Time is compared like with like.** ``wall_s_basis`` says whether a time
-  includes queueing (a sub-agent's duration does, a local call's need not);
-  times of different or unstated bases are not compared.
+  includes queueing (``includes_queue``: a sub-agent's duration does) or not
+  (``excludes_queue``); a difference of times, and "faster", are only given
+  between arms of the same stated basis, otherwise they are unknown.
+- **The direct arm is part of the round (R13).** Without ``local_direct`` the
+  table is built but its headline is marked incomplete and is never "yes".
 - **External tokens are four separate fields** (``input_new``, ``output``,
   ``cache_read``, ``cache_write``, as in ``levi.aeri.external_report.v1``), and
   there are two totals side by side, because "fewer external tokens" can flip
@@ -91,6 +94,7 @@ FRESH_BASIS = ("input_new", "output", "cache_write")
 ALL_BASIS = TOKEN_FIELDS
 BASES = {"fresh": FRESH_BASIS, "all": ALL_BASIS}
 VERDICT_BASES = ("both", "fresh", "all")
+WALL_BASES = ("includes_queue", "excludes_queue")
 UNKNOWN = "未知"
 NOT_APPLICABLE = "不适用"
 NONE_SELF = "—"
@@ -261,7 +265,8 @@ def _not_flat_codes(value) -> str | None:
 
 @dataclass(frozen=True)
 class ArmRecord:
-    """One arm of one round.
+    """One arm of one round. ``None`` in a measured field means not measured
+    (unknown), never zero.
 
     ``split`` says which data the arm ran on (``tune``, ``confirm`` or
     ``other``); a ``confirm`` record is held to the confirm rules in every table
@@ -272,26 +277,31 @@ class ArmRecord:
     ``quality`` is the primary metric against the gold standard (the metric is
     named in ``scoring``); ``quality_ci`` its interval.
     ``quality_delta_ci_vs_teacher`` is the interval of the paired difference
-    (this arm's quality minus the teacher's, same problems) computed by whoever
-    can see the problems one by one; the table only reads it (not on the
-    teacher arm). ``quality_delta_ci_method`` says how (level and method). ``None`` means not
-    measured. ``agreement_with_teacher`` is the share of the teacher's answers
-    this arm reproduces (not set on the teacher arm). ``external_tokens`` has
-    the four fields of ``levi.aeri.external_report.v1``; ``None`` for the whole
-    dict or one field means unknown, ``0`` means measured zero.
-    ``external_tokens_exact`` says whether those counts are complete: ``False``
-    = lower bounds (a transcript with lines set aside, sub-agents missing, ...;
-    ``levi.eval.tokens.Usage.exact``), ``True`` = exact, ``None`` = not stated.
-    A lower bound is marked in the table and never decides "fewer external
-    tokens" for the student arm.
+    (this arm's quality minus the teacher's, same problems), computed by
+    whoever can see the problems one by one; the table only reads it (not on
+    the teacher arm), and ``quality_delta_ci_method`` says how (level, method).
+    ``agreement_with_teacher`` is the share of the teacher's answers this arm
+    reproduces (not set on the teacher arm).
+
+    ``wall_s`` is wall-clock seconds; ``wall_s_basis`` says whether it includes
+    queueing (``includes_queue``: a sub-agent's duration does) or not
+    (``excludes_queue``), ``None`` = not stated.
+
+    ``external_tokens`` has the four fields of ``levi.aeri.external_report.v1``;
+    ``None`` for the whole dict or one field means unknown, ``0`` means measured
+    zero. ``external_tokens_exact`` says whether those counts are complete:
+    ``False`` = lower bounds (a transcript with lines set aside, sub-agents
+    missing, ...; ``levi.eval.tokens.Usage.exact``), ``True`` = exact, ``None``
+    = not stated. A lower bound is marked in the table and never decides "fewer
+    external tokens" for the student arm.
 
     The problems are given either as ``episode_set`` (the ids) or as
     ``episode_set_hash`` plus ``episode_count``; if both are given they must
     agree. ``scored_count`` is how many of them ``quality`` was computed over:
     it must equal ``episode_count`` in any table (a problem the arm was blocked
     on or failed stays in the denominator, scored as a failure; an arm that
-    dropped it would be measured on an easier set). ``per_episode`` (episode id -> score) is the one per-item field
-    allowed outside confirm mode.
+    dropped it would be measured on an easier set). ``per_episode`` (episode
+    id -> score) is the one per-item field allowed outside a confirm record.
     """
 
     arm: str
@@ -311,6 +321,7 @@ class ArmRecord:
     quality_delta_ci_method: str | None = None
     agreement_with_teacher: float | None = None
     wall_s: float | None = None
+    wall_s_basis: str | None = None
     local_tokens: int | None = None
     external_tokens: dict | None = None
     external_tokens_exact: bool | None = None
@@ -420,6 +431,14 @@ class ArmRecord:
             raise RecordError("the teacher arm has no agreement_with_teacher")
         put("agreement_with_teacher", agreement)
         put("wall_s", _real(self.wall_s, "wall_s", positive=True))
+        if self.wall_s_basis is not None:
+            if self.wall_s_basis not in WALL_BASES:
+                raise RecordError(
+                    f"wall_s_basis must be one of {WALL_BASES}, "
+                    f"got {_show(self.wall_s_basis)}"
+                )
+            if self.wall_s is None:
+                raise RecordError("wall_s_basis needs wall_s")
         put("local_tokens", _count(self.local_tokens, "local_tokens"))
 
         external = self.external_tokens
@@ -608,6 +627,7 @@ def _row(record: ArmRecord, confirm: bool) -> dict:
         "quality_delta_ci_method": record.quality_delta_ci_method,
         "agreement_with_teacher": record.agreement_with_teacher,
         "wall_s": record.wall_s,
+        "wall_s_basis": record.wall_s_basis,
         "local_tokens": record.local_tokens,
         "external_tokens": {name: record.external(name) for name in TOKEN_FIELDS},
         **{f"external_tokens_total_{n}": t for n, t in totals.items()},
@@ -624,6 +644,17 @@ def _row(record: ArmRecord, confirm: bool) -> dict:
     return row
 
 
+def _wall_problem(row: dict, reference: dict) -> str | None:
+    """Why two measured times cannot be compared (None = they can, or one is
+    not measured at all): a time with and one without queueing are not the same
+    quantity, and an unstated basis cannot be told."""
+    if row["wall_s"] is None or reference["wall_s"] is None:
+        return None
+    if row["wall_s_basis"] is None or reference["wall_s_basis"] is None:
+        return "unstated"
+    return None if row["wall_s_basis"] == reference["wall_s_basis"] else "different"
+
+
 def _vs(row: dict, reference: dict | None, key: str) -> dict | None:
     """Differences ``row - reference``; ``None`` if the round has no such arm."""
     if reference is None:
@@ -632,7 +663,11 @@ def _vs(row: dict, reference: dict | None, key: str) -> dict | None:
         return {"self": True}
     out = {
         "quality_delta": _delta(row["quality"], reference["quality"]),
-        "wall_s_delta": _delta(row["wall_s"], reference["wall_s"]),
+        "wall_s_delta": (
+            None
+            if _wall_problem(row, reference)
+            else _delta(row["wall_s"], reference["wall_s"])
+        ),
         **{
             f"external_tokens_delta_{n}": _delta(
                 row[f"external_tokens_total_{n}"],
@@ -644,6 +679,7 @@ def _vs(row: dict, reference: dict | None, key: str) -> dict | None:
     for name, value in out.items():
         if value is None:
             row["unknown"].append(f"{key}.{name}")
+    out["wall_s_problem"] = _wall_problem(row, reference)
     # A difference with a lower bound in it is itself only a bound.
     out["external_tokens_delta_is_bound"] = _is_bound(row) or _is_bound(reference)
     # The paired interval exists only against the teacher (the scorer pairs the
@@ -678,8 +714,21 @@ def _point_not_worse(mine, reference, higher_is_better: bool):
     return mine >= reference if higher_is_better else mine <= reference
 
 
+def _faster(student: dict, teacher: dict) -> bool | None:
+    if _wall_problem(student, teacher) or None in (
+        student["wall_s"],
+        teacher["wall_s"],
+    ):
+        return None
+    return student["wall_s"] < teacher["wall_s"]
+
+
 def _verdict(
-    student: dict, teacher: dict | None, scoring: dict, verdict_basis: str = "both"
+    student: dict,
+    teacher: dict | None,
+    scoring: dict,
+    verdict_basis: str = "both",
+    complete: bool = True,
 ) -> dict | None:
     """The round's headline: the harness arm against the teacher arm.
 
@@ -700,7 +749,9 @@ def _verdict(
         "quality_point_not_worse": _point_not_worse(
             student["quality"], teacher["quality"], higher
         ),
-        "faster": _holds(student["wall_s"], teacher["wall_s"], "<"),
+        "faster": _faster(student, teacher),
+        "faster_problem": _wall_problem(student, teacher),
+        "complete": complete,
     }
     fewer = {n: _fewer(student, teacher, f"external_tokens_total_{n}") for n in BASES}
     checks["fewer_external_tokens_fresh"] = fewer["fresh"]
@@ -725,6 +776,8 @@ def _verdict(
         checks["fewer_external_tokens"],
     ]
     checks["all"] = False if False in needed else None if None in needed else True
+    if not complete and checks["all"]:
+        checks["all"] = None  # a round without the direct arm is not a round (R13)
     checks["non_inferiority"] = {
         "higher_is_better": higher,
         "margin": margin,
@@ -732,12 +785,6 @@ def _verdict(
         "method": student["quality_delta_ci_method"],
     }
     return checks
-
-
-def _holds(mine, reference, op):
-    if mine is None or reference is None:
-        return None
-    return mine >= reference if op == ">=" else mine < reference
 
 
 @dataclass(frozen=True)
@@ -902,7 +949,7 @@ def compare(
         rows=rows,
         missing_arms=[a for a in ARMS if a not in by_arm],
         main_metric=(
-            _verdict(harness, teacher, first.scoring, verdict_basis)
+            _verdict(harness, teacher, first.scoring, verdict_basis, direct is not None)
             if harness and teacher
             else None
         ),
@@ -949,6 +996,12 @@ def _num(value, fmt) -> str:
 
 def _tri(value) -> str:
     return UNKNOWN if value is None else "是" if value else "否"
+
+
+def _faster_line(verdict: dict) -> str:
+    problem = verdict["faster_problem"]
+    note = f"（两臂耗时{WALL_PROBLEMS[problem]}，不比较）" if problem else ""
+    return f"- 耗时更低：{_tri(verdict['faster'])}{note}"
 
 
 def _fewer_line(verdict: dict) -> str:
@@ -1002,6 +1055,17 @@ def _exactness(row: dict) -> str:
     return "下限" if _is_bound(row) else "精确"
 
 
+WALL_NAMES = {"includes_queue": "含排队", "excludes_queue": "不含排队"}
+WALL_PROBLEMS = {"unstated": "口径未说明", "different": "口径不同"}
+
+
+def _wall_cell(row: dict) -> str:
+    if row["wall_s"] is None:
+        return UNKNOWN
+    basis = WALL_NAMES.get(row["wall_s_basis"], "口径未说明")
+    return f"{row['wall_s']:,.1f}（{basis}）"
+
+
 def _vs_cells(row: dict, key: str) -> list[str]:
     """Quality, wall time, then the external token difference on each basis."""
     vs = row[key]
@@ -1018,11 +1082,10 @@ def _vs_cells(row: dict, key: str) -> list[str]:
             if value is not None and vs["external_tokens_delta_is_bound"]
             else text
         )
-    return [
-        _num(vs["quality_delta"], "+.3f"),
-        _num(vs["wall_s_delta"], "+,.1f"),
-        *tokens,
-    ]
+    wall = _num(vs["wall_s_delta"], "+,.1f")
+    if vs["wall_s_problem"]:
+        wall += f"（{WALL_PROBLEMS[vs['wall_s_problem']]}）"
+    return [_num(vs["quality_delta"], "+.3f"), wall, *tokens]
 
 
 def _ci_cell(row: dict) -> str:
@@ -1090,7 +1153,7 @@ def _markdown(table: Table) -> str:
                 NONE_SELF
                 if r["arm"] == "teacher"
                 else _num(r["agreement_with_teacher"], ".3f"),
-                _num(r["wall_s"], ",.1f"),
+                _wall_cell(r),
                 _ratio_cell(r, "quality_per_second", ".3g"),
                 _ratio_cell(r, "quality_per_external_token_fresh", ".3g", scale),
                 _ratio_cell(r, "quality_per_external_token_all", ".3g", scale),
@@ -1167,18 +1230,23 @@ def _markdown(table: Table) -> str:
         ci = rule["delta_ci"]
         shown = f"[{ci[0]:+.3f}, {ci[1]:+.3f}]" if ci else "没有"
         method = f"（{_cell(rule['method'])}）" if rule["method"] else ""
+        gap = "" if verdict["complete"] else "；不完整：缺 local_direct（R13 要求三组）"
         out += [
             "",
-            "### 主指标：本地 + harness 对教师（质量按非劣效，耗时和外部 token 比合计）",
+            f"### 主指标：本地 + harness 对教师（质量按非劣效，耗时和外部 token 比合计{gap}）",
             "",
             (
                 f"- 质量不低于教师（越{better}越好；配对差区间 {shown}{method}，"
                 f"界 δ = {bound}）：{_status_cell(verdict['quality_status'])}"
             ),
             f"- 质量点估计不劣于教师（辅助，不进结论）：{_tri(verdict['quality_point_not_worse'])}",
-            f"- 耗时更低：{_tri(verdict['faster'])}",
+            _faster_line(verdict),
             _fewer_line(verdict),
-            f"- 三项全满足：{_tri(verdict['all'])}",
+            (
+                f"- 三项全满足：{_tri(verdict['all'])}"
+                if verdict["complete"]
+                else "- 三项全满足：不完整（缺 local_direct，不能判；此行不是“是”）"
+            ),
         ]
     out += [
         "",

@@ -30,6 +30,7 @@ def arm(name="teacher", **over):
             "model": "claude-opus",
             "quality": 0.80,
             "wall_s": 600.0,
+            "wall_s_basis": "excludes_queue",
             "local_tokens": 0,
             "external_tokens": {
                 "input_new": 1000,
@@ -46,6 +47,7 @@ def arm(name="teacher", **over):
             "quality_delta_ci_method": "paired_bootstrap_95",
             "agreement_with_teacher": 0.9,
             "wall_s": 200.0,
+            "wall_s_basis": "excludes_queue",
             "local_tokens": 90000,
             "external_tokens": dict(ZERO),
         },
@@ -55,6 +57,7 @@ def arm(name="teacher", **over):
             "quality_delta_ci_vs_teacher": (-0.30, -0.10),
             "agreement_with_teacher": 0.7,
             "wall_s": 150.0,
+            "wall_s_basis": "excludes_queue",
             "local_tokens": 70000,
             "external_tokens": dict(ZERO),
         },
@@ -129,6 +132,7 @@ def test_three_arms_make_one_table_with_the_derived_columns():
     assert harness["vs_teacher"] == {
         "quality_delta": pytest.approx(0.02),
         "wall_s_delta": -400.0,
+        "wall_s_problem": None,
         "external_tokens_delta_fresh": -4500,
         "external_tokens_delta_all": -24500,
         "external_tokens_delta_is_bound": False,
@@ -143,6 +147,8 @@ def test_three_arms_make_one_table_with_the_derived_columns():
         "quality_status": "yes",
         "quality_point_not_worse": True,
         "faster": True,
+        "faster_problem": None,
+        "complete": True,
         "fewer_external_tokens_fresh": True,
         "fewer_external_tokens_all": True,
         "fewer_external_tokens": True,
@@ -286,6 +292,8 @@ def test_other_missing_measurements_are_unknown_in_every_dependent_column(
     over = {field: None}
     if field == "quality":  # an interval of a difference needs the quality
         over |= {"quality_delta_ci_vs_teacher": None, "quality_delta_ci_method": None}
+    if field == "wall_s":  # and a time basis needs the time
+        over |= {"wall_s_basis": None}
     table = compare.compare(three(local_harness=over))
     harness = rows(table)["local_harness"]
     assert harness[field] is None
@@ -1179,3 +1187,81 @@ def test_a_missing_cache_read_leaves_only_the_full_basis_unknown():
         ]
         is True
     )
+
+
+def test_a_time_with_queueing_is_not_compared_with_one_without():
+    # A sub-agent's duration includes its queueing (AERI-EXT-V1 section 3); a
+    # local call's time need not. The difference between them is not "the
+    # speed difference".
+    queued = {"wall_s_basis": "includes_queue"}
+    table = compare.compare(three(teacher=queued))
+    m = table.main_metric
+    assert m["faster"] is None and m["faster_problem"] == "different"
+    assert m["all"] is None
+    harness = rows(table)["local_harness"]
+    assert harness["vs_teacher"]["wall_s_delta"] is None
+    assert harness["vs_teacher"]["wall_s_problem"] == "different"
+    assert "vs_teacher.wall_s_delta" in harness["unknown"]
+    # The two local arms were measured the same way and are still compared.
+    assert harness["vs_direct"]["wall_s_delta"] == 50.0
+    text = table.to_markdown()
+    assert "600.0（含排队）" in text and "200.0（不含排队）" in text
+    assert "耗时更低：未知（两臂耗时口径不同，不比较）" in text
+    assert "-400.0" not in text
+    # Both with queueing: compared.
+    same = compare.compare(
+        three(
+            teacher=queued,
+            local_harness=queued,
+            local_direct=queued,
+        )
+    )
+    assert (
+        same.main_metric["faster"] is True
+        and same.main_metric["faster_problem"] is None
+    )
+
+
+def test_an_unstated_time_basis_is_not_guessed():
+    table = compare.compare(three(teacher={"wall_s_basis": None}))
+    assert table.main_metric["faster"] is None
+    assert table.main_metric["faster_problem"] == "unstated"
+    assert "耗时更低：未知（两臂耗时口径未说明，不比较）" in table.to_markdown()
+    assert "600.0（口径未说明）" in table.to_markdown()
+    # An unmeasured time is plain unknown: there is no basis to dispute.
+    unmeasured = compare.compare(three(teacher={"wall_s": None, "wall_s_basis": None}))
+    assert unmeasured.main_metric["faster"] is None
+    assert unmeasured.main_metric["faster_problem"] is None
+
+
+def test_the_time_basis_is_validated():
+    for bad in ("with_queue", "", 1, True):
+        with pytest.raises(RecordError, match="wall_s_basis"):
+            arm(wall_s_basis=bad)
+    with pytest.raises(RecordError, match="wall_s_basis needs wall_s"):
+        arm(wall_s=None, wall_s_basis="includes_queue")
+    # A basis is a code, allowed in a confirm record.
+    compare.compare(blind())
+
+
+def test_a_round_without_the_direct_arm_is_marked_incomplete_and_never_yes():
+    table = compare.compare(three()[:2])  # teacher and harness only
+    m = table.main_metric
+    assert m["complete"] is False
+    # The three measured answers are all yes, yet "all" does not say yes.
+    assert (m["quality_non_inferior"], m["faster"], m["fewer_external_tokens"]) == (
+        True,
+        True,
+        True,
+    )
+    assert m["all"] is None
+    text = table.to_markdown()
+    assert "不完整：缺 local_direct" in text
+    assert "三项全满足：不完整" in text and "三项全满足：是" not in text
+    # With the direct arm present the same numbers are a plain yes.
+    assert compare.compare(three()).main_metric["complete"] is True
+    # A "no" is a no with or without the direct arm.
+    worse = compare.compare([arm("teacher"), arm("local_harness", wall_s=900.0)])
+    assert worse.main_metric["all"] is False and worse.main_metric["complete"] is False
+    # No teacher, no headline at all (unchanged).
+    assert compare.compare([arm("local_harness")]).main_metric is None
