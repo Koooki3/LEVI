@@ -143,6 +143,7 @@ curl -X POST -H "x-levi-ui-token: $(cat "$LEVI_WORKSPACE/outputs/LEVI/workbench/
 - **`model`** 是 `--served-model-name`。绑定的 digest 标识服务自报的内容：模型 id、启动时加载的权重（`/v1/models` 中的 `root`）和上下文长度。服务换了权重重启后，推理会被阻止，直到重新绑定模型。要固定到确切的版本，请从本地快照目录启动服务：目录路径中带有版本号。
 - **`context_tokens`** 由绑定设为服务的 `--max-model-len`（最多 131072，更长的会被拒绝绑定）。服务的上下文在启动时就已固定，请求无法缩小它，所以这就是一次调用可能用掉的量，LEVI 也按这个数预留。
 - **`max_images`** 即服务 `--limit-mm-per-prompt` 中的图像数。图像更多的请求在发送前就被拒绝，精修批次的大小也按它确定。某个片段按计划的 `coarse_step_seconds` 粗标时，（所有相机合计）图像数超过该值，就只为这个片段把粗标间隔加大，取使均匀分布的帧放得下的最小值（精确到 0.01 s），始终保留首尾帧，运行不再被阻塞；事件 `coarse_step_adjusted` 记录片段号、计划间隔和实际间隔、计划图数和实际图数以及 `max_images`，证据摘要里的 `coarse_step_seconds` 是实际间隔。放得下的片段照计划取帧，不变。只有每个相机的首尾两帧都放不下时才停止，并指出 `max_images`。**`image_max_side`**（可选）把每张图按长边缩到不超过该像素数后再发送；证据文件保持原始尺寸，标定也按缩放后的图像计价。
+- **`max_pixels`**（可选，仅 `openai-local` 档案，65536 到 16777216，默认不设）让服务端的图像处理器对每张图最多保留这么多像素：请求体顶层（与 `chat_template_kwargs` 并列）随即带上 `"mm_processor_kwargs": {"max_pixels": N}`。不设时什么都不加，请求与该字段出现之前逐字节相同（有测试比较序列化后的请求体）。`image_max_side` 缩小的是 LEVI 发出的那份副本；`max_pixels` 不动图像，由服务端处理器来缩，每条边向下取整到 32 的倍数，所以长宽比正常时结果不会超过预算。两者都设时 LEVI 先缩。65536 是 Qwen3 处理器的像素下限（更小的图会被放大到它，所以更低的预算自相矛盾），16777216 是它的上限。超出范围的值、非整数，以及在 `ollama` 或 `openai-compatible` 档案上设这个字段，保存档案时就被拒绝；客户端在联系服务之前对坏值再拒绝一次。请用提供方 API 设置：档案表单不显示它，在表单里保存档案会把它重置为不设。请求成本拟合按档案名保存，键只含模型和 `image_max_side`，不含 `max_pixels`，所以改预算后请换一个新的档案名，让拟合重新开始。它是做实测实验的手段：实时服务或随附服务用的档案里不要设。能省多少、哪些还没测，见下面的“图像 token 预算”。
 - **思考模式**默认关闭：每次请求都发送 `chat_template_kwargs: {"enable_thinking": false}`，Qwen3 系模板会遵守，其他模板会忽略。`think: true` 可以打开，但服务端必须配置 `--reasoning-parser` 才有效（schema 在推理结束后才生效），而且推理与答案共用同一份输出额度。如果服务只返回推理而没有答案，请求会失败并给出这个原因。
 - **`fold_system: true`** 用于不接受 system 角色、并要求 user/assistant 严格交替的对话模板：系统提示放在第一条用户消息的开头，所有图像都放在文字之前，按证据顺序排列（第 *n* 张图对应编号为 *n* 的证据行）。
 - **`prompt_style: "lean"`**（两种本地类型均可）：发送计划的原始指令和帧列表（“image *n* = *t* s”），不再发送 LEVI 的 skills 和整份 JSON 文档；记忆中只保留教师备注、经验、反复出现的不确定性和其他片段的示例（不再重复一遍指令）；只要求模型给出 LEVI 无法自己补上的内容：每个区间的子任务、起点、终点、结局和描述（计划允许多种标注类型时还要给类型）；边界精修时只要求每个草稿区间的起点、终点和结局，子任务和描述沿用草稿。LEVI 补上片段信息，为每个区间引用区间内至多三帧，并用区间描述作为证据说明。本地模型的耗时主要花在输出 token 上（解码每个 token 比读提示慢约 30 倍），所以每少一个字段都能省时间。同一模型用与不用 LEVI 的配对实验显示，完整提示会降低本地模型的时间片段 F1，并使输出 token 约翻倍，因此时序标注（子任务与事件）推荐使用 `lean`。档案的提示风格同样作用于数据集审查，而审查在 `lean` 下实测更差（balanced accuracy 0.590，`full` 为 0.621）：审查请使用 `full` 档案。默认 `full`。
@@ -152,6 +153,23 @@ curl -X POST -H "x-levi-ui-token: $(cat "$LEVI_WORKSPACE/outputs/LEVI/workbench/
 - **密钥**：不需要。如果服务使用了 `--api-key`，请把它设在 `LEVI_LOCAL_MODEL_KEY`（这类档案默认的 `key_env`，这样云端 key 永远不会发到本机端口）或会话凭据中。
 - **GPU 守护**：为该档案端口提供服务的进程（在端口上监听的 API 服务及其启动的引擎进程）通过监听套接字被识别为 LEVI 自己的模型，从不按进程名识别，因此不会挡住该档案的请求；其他人的工作仍会挡住。守护无法卸载 vLLM 的模型：服务运行期间一直占用 `--gpu-memory-utilization` 比例的显存。对 Ollama 档案以及其他端口上的档案来说，它就是别人的工作：Ollama 的模型会为它卸载，run 会等它离开；守护只在 GPU 对被挡住的 run 所用的档案而言空闲时，才恢复该 run。运行 Ollama 前请先停掉 vLLM，不要两者同时运行。档案的请求会把在其端口上监听的任何程序都当作它的服务；另一个程序占用该端口期间（openpi 的策略服务默认也用 8000），请停用该档案。加载/卸载控制和下载不适用（HTTP 409）。识别要通过 `/proc` 读取服务的套接字，因此服务必须与 LEVI 以同一用户运行；否则请在 `workbench/models/gpu-policy.json` 中加一条忽略规则，例如 `{"rules": [{"match": "(?i)vllm", "class": "ignore"}]}`。
 - **Token**：vLLM 报告完整的提示 token，而 Ollama 不计入已缓存的前缀；跨引擎比较时请看输出 token 和单次调用耗时。Ollama 调用还会在每个阶段的用量中记录 `load_seconds`、`prefill_seconds` 和 `decode_seconds`。
+
+**图像 token 预算。** Qwen3-VL 系模型的一个视觉 token 对应处理后图像的一个 32 x 32 像素块（patch 16，merge 2）。处理器把每条边取整到 32 的倍数（用 Python 的 `round`，恰好一半时取偶数那一侧），图像超过 `max_pixels` 就缩小，低于 65536 的像素下限就放大。`scripts/vllm/image_tokens.py MODEL_DIR` 只读模型目录里的 `processor_config.json` 就能对任意帧尺寸打印这张表：不加载权重，不用 GPU、服务或网络（`--markdown FILE`、`--json FILE` 写文件）。Qwen3.8 27B INT4 处理器（下限 65536，上限 16777216）对一帧 640x480 的结果：
+
+| 设置 | 发给服务的尺寸 | 处理器缩放到 | 视觉 token |
+| --- | --- | --- | ---: |
+| 两个字段都不设（原生） | 640x480 | 640x480 | 300 |
+| `image_max_side` 448 | 448x336 | 448x320 | 140 |
+| `image_max_side` 384 | 384x288 | 384x288 | 108 |
+| `image_max_side` 320 | 320x240 | 320x256 | 80 |
+| `image_max_side` 256 | 256x192 | 320x224（放大到下限） | 70 |
+| `max_pixels` 150528 | 640x480 | 448x320 | 140 |
+| `max_pixels` 110592 | 640x480 | 384x288 | 108 |
+| `max_pixels` 76800 | 640x480 | 320x224 | 70 |
+
+两个字段都不设时，每帧原生图像是 300 个 token。“448 约 154 个 token”的估计来自把 336 / 32 = 10.5 进位到 11；处理器取整到 10，所以 448 的副本是 140。低于约 320 时下限让节省停住：256 的副本被放大到 320x224，仍是 70，`max_pixels` 取 49152（48 个 token）也因同一原因被拒绝。这些行是算术结果。它们与 Hugging Face 图像处理器在 CPU 上的实际输出一致（这九行，外加另外十一组尺寸与预算的组合；transformers 5.17.0，未加载权重；一次性核对，不在测试套件里）。
+
+哪些核实过、哪些没有。在 vLLM 0.30.0 源码里读到的：chat-completions 请求把 `mm_processor_kwargs` 作为顶层字段接收（`vllm/entrypoints/openai/chat_completion/protocol.py`，`ChatCompletionRequest.mm_processor_kwargs`）；在线渲染器把它传下去（`vllm/renderers/online_renderer.py`，`preprocess_chat`）；多模态处理器把它当作处理器的关键字参数接收，并把它算进每张已处理图像的缓存键，所以改了预算不会命中别的预算的缓存（`vllm/renderers/base.py`；`vllm/multimodal/processing/inputs.py`，`get_mm_hashes`）；对 Qwen3-VL，`max_pixels` 会替换图像处理器的 `longest_edge`，既用于 vLLM 自己的 token 计数（`vllm/model_executor/models/qwen3_vl.py`，`_get_vision_info`），也用于 vLLM 构造的 Hugging Face 处理器（`vllm/transformers_utils/processor.py`，`cached_get_processor_without_dynamic_kwargs`：`max_pixels` 不是处理器的逐次调用参数，所以它进入构造函数）。最后这一点很关键：transformers 的 Qwen2-VL 图像处理器会忽略单独逐次传入、没有配 `min_pixels` 的 `max_pixels`（CPU 上核对过：得到 300 个 token 而不是 140），所以逐次传入的版本什么都不会缩。没有核实的，因为需要运行中的服务：你运行的服务设了这个字段后是否真的返回更少的 `prompt_tokens`（用同样的帧分别带与不带该字段发送并比较）、它对首 token 时间和吞吐的影响、它对回答质量的影响。无论用哪个字段降低图像分辨率，正式使用前都要在同样的片段上与未降低的设置做配对质量比较。处理器不认识 `max_pixels` 的服务或模型可能忽略该字段，也可能返回 HTTP 400；那时请取消设置。
 
 长时间运行前先跑试标：绑定不做推理，试标才是服务回答的第一个请求。
 
