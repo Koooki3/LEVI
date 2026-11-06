@@ -87,6 +87,10 @@ class RecapValue(LeRobotV21):
     defaults: ClassVar[dict] = {"timing": "retime", "filter_static": False}
     inputs = ("robot_capture", "image_sequence", "lerobot")
     ignored_warnings = ()
+    # Training datasets keep the schema RECAP training pins; joint columns
+    # (and the robot_type that comes with them) are for demonstration
+    # datasets that are browsed and replayed.
+    joint_columns = False
 
     def check(self, report: InputReport, options: Options) -> TargetCompatibility:
         settings = self.target_options(options.target_options)

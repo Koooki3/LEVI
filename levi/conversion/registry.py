@@ -132,7 +132,19 @@ def export(
         return out.from_dataset(
             source, target, options, Progress(progress_path, pipeline.STAGES)
         )
-    return pipeline.run(source, target, options, fmt, out, progress_path, intermediate)
+    # Joint columns are opt-in for pipeline.run (its other callers, browsing
+    # views and training-pool parts, are not conversions to a dataset that is
+    # replayed); a conversion turns them on here.
+    return pipeline.run(
+        source,
+        target,
+        options,
+        fmt,
+        out,
+        progress_path,
+        intermediate,
+        joint_columns=options.export_joints and out.joint_columns,
+    )
 
 
 def capabilities() -> dict:

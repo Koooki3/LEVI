@@ -40,6 +40,13 @@ class Options(BaseModel):
     orientation: Literal["euler", "quaternion"] = "euler"
     action_mode: Literal["next_state", "state"] = "next_state"
     robot_type: str = Field("generic_arm", min_length=1, max_length=100)
+    # Write the capture's measured joint angles (robot_joint_states.csv) and
+    # gripper width as observation.joint_positions / observation.gripper_width
+    # when it has them, and name the robot "franka_fr3" if robot_type is still
+    # the default (see joint_states.py). False converts exactly as before.
+    # Honoured by `convert pipeline` into lerobot_v21; RECAP exports, browsing
+    # views and training-pool parts never carry the columns.
+    export_joints: bool = True
     cameras: dict[str, str] = Field(
         default_factory=lambda: {
             "wrist_camera": "observation.images.hand",

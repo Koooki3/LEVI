@@ -16,6 +16,7 @@ class LeRobotV21(OutputFormat):
     evidence = "real-data"
     inputs = ("robot_capture", "image_sequence")
     ignored_warnings = ("outcomes",)
+    joint_columns = True
 
     def check(self, report: InputReport, options: Options) -> TargetCompatibility:
         reasons, solutions = [], []
