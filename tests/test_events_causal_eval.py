@@ -81,6 +81,58 @@ def test_replay_counts_rejected_and_clipped_samples():
     assert out["steps"] == len(ep["times"]) - 1
 
 
+def _record_feeds(monkeypatch):
+    """Make ``replay`` build a ``Trigger`` that records every ``feed`` call
+    (the sample and ``now_ns``) before passing it on, and return that list."""
+    fed = []
+    real = causal_eval.Trigger
+
+    class Recording(real):
+        def feed(self, sample, **kwargs):
+            fed.append((sample, kwargs["now_ns"]))
+            return super().feed(sample, **kwargs)
+
+    monkeypatch.setattr(causal_eval, "Trigger", Recording)
+    return fed
+
+
+@pytest.mark.parametrize("damaged", [False, True])
+def test_replay_hands_the_trigger_exactly_the_recorded_samples(monkeypatch, damaged):
+    """At row k the trigger is fed row k's recorded values, stamped with row
+    k's own time, and nothing from a later row: the evaluator never reads
+    ahead of the step it scores. ``damaged`` adds a repeated timestamp (the
+    stream rejects that sample) and a width outside the declared range
+    (clipped into it): the rows still map one to one."""
+    ep = episode()
+    params = causal_eval.derive([ep])
+    lo, hi = params["gripper_range"]
+    if damaged:
+        ep["times"] = ep["times"].copy()
+        ep["times"][20] = ep["times"][19]
+        ep["width"] = ep["width"].copy()
+        ep["width"][50] = 0.2
+    fed = _record_feeds(monkeypatch)
+    causal_eval.replay(ep, params)
+    assert len(fed) == len(ep["times"])
+    steps = 0
+    for row, (sample, now_ns) in enumerate(fed):
+        stamp = causal_eval.ORIGIN_NS + round(float(ep["times"][row]) * 1e9)
+        # Not earlier and not later than the row's own time, and the clock
+        # the stream checks against is that same instant.
+        assert sample.observed_ns == stamp and now_ns == stamp, row
+        width = float(ep["width"][row])
+        assert sample.values == {
+            (causal_eval.STATE, 0): float(ep["xyz"][row, 0]),
+            (causal_eval.STATE, 1): float(ep["xyz"][row, 1]),
+            (causal_eval.STATE, 2): float(ep["xyz"][row, 2]),
+            (causal_eval.STATE, 6): min(max(width, lo), hi),
+            (causal_eval.COMMAND, 0): float(ep["command"][row]),
+        }, row
+        assert sample.step == steps, row
+        if not (damaged and row == 20):
+            steps += 1
+
+
 def test_evaluate_scores_decisions_against_reference_boundaries():
     eps = [episode("a"), episode("b")]
     params = causal_eval.derive(eps)
