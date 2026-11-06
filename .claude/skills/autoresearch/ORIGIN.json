@@ -1,0 +1,50 @@
+{
+  "name": "autoresearch",
+  "kind": "local adaptation: original text, method credited; no upstream file is copied",
+  "created": "2026-11-06",
+  "sources": [
+    {
+      "repository": "https://github.com/karpathy/autoresearch",
+      "commit": "228791fb499afffb54b46200aca536f79142f117",
+      "license": "MIT (README)",
+      "read": "program.md in full, README license section",
+      "used_for": "fixed read-only evaluator, one editable surface, baseline first, keep or discard, simplicity rule, results.tsv"
+    },
+    {
+      "repository": "https://github.com/Orchestra-Research/AI-Research-SKILLs",
+      "path": "0-autoresearch-skill",
+      "commit": "773a52944ba4747a18bd4ae9ade53fff041adcbc",
+      "version": "skill 1.0.0 (repository v1.7.2)",
+      "license": "MIT",
+      "read": "SKILL.md headings and the sections on the two-loop architecture and agent continuity; references/agent-continuity.md first 40 lines",
+      "used_for": "two-loop structure: inner experiments, outer synthesis every few iterations"
+    }
+  ],
+  "reviewed_not_used": [
+    {
+      "repository": "https://github.com/uditgoenka/autoresearch",
+      "commit": "7bddd056dfd0b0ded8360588d8101b1ecb5c0baa",
+      "version": "2.3.0",
+      "license": "MIT",
+      "read": "file layout, AGENTS.md header and LICENSE only; the Node hooks and scripts were NOT read",
+      "reason": "ships host hooks (Node), 14 commands and a plugin-marketplace install, i.e. it would change host configuration and is far larger than the gap"
+    }
+  ],
+  "left_out_on_purpose": [
+    "upstream 'LOOP FOREVER / never ask the human': replaced by a budget, a stop rule (R10) and the questions the workspace rules reserve to a person",
+    "upstream discard by git reset: replaced by restoring the surface from the last kept commit; no history rewrite",
+    "upstream writes to ~/.cache and installs packages: caches stay in LEVI/lab/cache, no installs",
+    "Orchestra's mandatory wall-clock loop (/loop 20m, cron.add): an unattended recurring schedule, which the workspace rules reserve to the user"
+  ],
+  "local_changes": "Adds the LEVI guardrails: tune/confirm split with a pinned hash, frozen/held-out/blind sets excluded (R9, R11), stop rule (R10), R13 pairing and experiments.py registry, GPU lock and arm gates, external token budget set by the user, external tokens counted apart.",
+  "validation": {
+    "static": "frontmatter and relative links checked by reading; skill is listed by the host skill discovery in the session that created it",
+    "behavioural": "references/evals.md defines four tasks (positive, negative, regression, held-out); NOT RUN",
+    "independent_review": "pending"
+  },
+  "files": {
+    "SKILL.md": "40ef14bfafca4a39b2cab033de463a77fcd65fba433c42f70b76c371d9914048",
+    "references/evals.md": "4e246a03f627098322229b993320a8638f09a576cc475d2aa8e932b5400aa2c1",
+    "references/round-record.md": "90ce1f509efffe64d411e6404d47dfde2942a02142ee0bce649712067774a21c"
+  }
+}
