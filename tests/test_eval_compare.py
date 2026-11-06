@@ -112,6 +112,7 @@ def test_three_arms_make_one_table_with_the_derived_columns():
         "quality_delta": pytest.approx(0.02),
         "wall_s_delta": -400.0,
         "external_tokens_delta": -4500,
+        "external_tokens_delta_is_bound": False,
     }
     assert harness["vs_direct"]["quality_delta"] == pytest.approx(0.22)
     assert harness["vs_direct"]["wall_s_delta"] == 50.0
@@ -592,6 +593,104 @@ def test_a_record_survives_json_and_is_not_changed_by_its_source():
 def test_a_pipe_in_a_name_does_not_break_the_table():
     text = compare.compare([arm(model="a|b")]).to_markdown()
     assert "a\\|b" in text
+
+
+def test_a_lower_bound_student_is_never_called_fewer_even_when_its_number_is_low():
+    bound = {"external_tokens_exact": False, "external_tokens": {**ZERO, "output": 10}}
+    table = compare.compare(three(local_harness=bound))
+    assert rows(table)["local_harness"]["external_tokens_total"] == 10
+    assert table.main_metric["fewer_external_tokens"] is None
+    assert table.main_metric["all"] is None
+    # An exact student at the same number is "fewer", and exact=None (not
+    # stated) is not treated as a bound.
+    exact = {"external_tokens_exact": True, "external_tokens": {**ZERO, "output": 10}}
+    assert compare.compare(three(local_harness=exact)).main_metric[
+        "fewer_external_tokens"
+    ]
+    assert compare.compare(
+        three(local_harness={"external_tokens": {**ZERO, "output": 10}})
+    ).main_metric["fewer_external_tokens"]
+    # Above the teacher's total a bound is certain: still not "yes", and it
+    # does not turn into "no" either.
+    big = {"external_tokens_exact": False, "external_tokens": {**ZERO, "output": 9000}}
+    assert (
+        compare.compare(three(local_harness=big)).main_metric["fewer_external_tokens"]
+        is None
+    )
+
+
+def test_a_lower_bound_teacher_is_marked_and_only_a_student_below_it_is_fewer():
+    teacher = {"external_tokens_exact": False}  # the teacher's total: 4500, a bound
+    table = compare.compare(three(teacher=teacher))
+    t = rows(table)["teacher"]
+    assert t["external_tokens_exact"] is False
+    # The student (0 tokens, exact) is below the bound, hence below the truth.
+    assert table.main_metric["fewer_external_tokens"] is True
+    # A student above the bound cannot be called "not fewer": the teacher may
+    # have used more than what could be counted.
+    above = {"external_tokens": {**ZERO, "output": 6000}, "external_tokens_exact": True}
+    over = compare.compare(three(teacher=teacher, local_harness=above))
+    assert over.main_metric["fewer_external_tokens"] is None
+    # With the teacher exact, the same numbers are a plain "no".
+    exact = compare.compare(
+        three(teacher={"external_tokens_exact": True}, local_harness=above)
+    )
+    assert exact.main_metric["fewer_external_tokens"] is False
+
+    text = table.to_markdown()
+    teacher_line = next(l for l in text.splitlines() if l.startswith("| teacher | 0 |"))
+    assert "≥1,000" in teacher_line and "≥4,500" in teacher_line
+    assert "下限" in teacher_line
+    quality_line = next(
+        l for l in text.splitlines() if l.startswith("| teacher | claude")
+    )
+    assert "≤0.178" in quality_line  # 0.80 / 4500 * 1000, an upper bound
+    assert "-4,500（含下限）" in text  # the difference to the teacher is a bound too
+    plain = compare.compare(three()).to_markdown()
+    assert "≥" not in plain.split("注：")[0] and "（含下限）" not in plain
+    assert "精确" not in plain and "未声明" in plain
+
+
+def test_the_exactness_flag_is_validated_and_needs_token_counts():
+    for bad in (1, "yes", 0):
+        with pytest.raises(RecordError, match="external_tokens_exact"):
+            arm(external_tokens_exact=bad)
+    with pytest.raises(RecordError, match="needs external_tokens"):
+        arm(external_tokens=None, external_tokens_exact=False)
+    assert arm(external_tokens_exact=True).external_tokens_exact is True
+
+
+def test_confirm_takes_the_exactness_flag_and_the_source_code_but_not_the_sentence(
+    tmp_path,
+):
+    session = tmp_path / "s.jsonl"
+    session.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "m",
+                    "usage": {"input_tokens": 5, "output_tokens": 6},
+                },
+            }
+        )
+        + "\n"
+    )
+    usage = tokens.usage_from_files([session])  # two fields missing: a lower bound
+    assert not usage.exact
+    # The sentence has spaces and a semicolon: not a code, so a confirm table
+    # refuses it. This is why the code exists.
+    sentence = blind(teacher={"external_tokens_source": usage.source})
+    with pytest.raises(CompareError, match="external_tokens_source text"):
+        compare.compare(sentence)
+    coded = blind(teacher=usage.record_fields(confirm=True))
+    table = compare.compare(coded)
+    t = rows(table)["teacher"]
+    assert t["external_tokens_exact"] is False
+    assert t["external_tokens_source"] == usage.source_code
+    assert compare.CODE.fullmatch(usage.source_code)
+    # Outside confirm the full sentence is the default.
+    assert usage.record_fields()["external_tokens_source"] == usage.source
 
 
 def test_the_teacher_tokens_come_from_the_session_reader(tmp_path):

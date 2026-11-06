@@ -67,6 +67,8 @@ USAGE_KEYS = {
 # The largest count levi.aeri.external_report.v1 accepts.
 MAX_COUNT = 2**53 - 1
 RULE = "last usage record per message id"
+SOURCE_CODE_PREFIX = "claude_jsonl.last_usage"
+MAX_SOURCE = 200  # the longest external_tokens_source an ArmRecord takes
 
 
 def parse_time(value) -> float:
@@ -186,7 +188,9 @@ class Usage:
 
     @property
     def source(self) -> str:
-        """One line for ``ArmRecord.external_tokens_source``."""
+        """One line for ``ArmRecord.external_tokens_source`` (at most 200
+        characters, the record's limit, even when every reason applies). A lower
+        bound lists the reason codes of ``reasons`` with their counts."""
         text = (
             f"claude session jsonl ({RULE}); {self.files} files, "
             f"{self.messages} messages"
@@ -195,17 +199,51 @@ class Usage:
             return text
         if not self.messages:
             return text + "; nothing counted, tokens unknown"
-        return (
-            text
-            + f"; LOWER BOUND: {self.bad_lines} bad lines, {self.no_id} without id, "
-            f"{self.unplaced} unplaced, {sum(self.missing_fields.values())} missing "
-            f"fields, {self.uuid_fallback} keyed by uuid (may double count), "
-            f"{self.truncated_tail} truncated tails, {self.subagents_uncovered} of "
-            f"{self.subagent_results} sub-agent results without their transcript"
-        )
+        counts = {
+            "bad_lines": self.bad_lines,
+            "no_id": self.no_id,
+            "unplaced": self.unplaced,
+            "missing_fields": sum(self.missing_fields.values()),
+            "uuid_fallback": self.uuid_fallback,
+            "truncated_tail": self.truncated_tail,
+            "subagent_uncovered": self.subagents_uncovered,
+        }
+        counts = {name: value for name, value in counts.items() if value}
+        text += "; LOWER BOUND: " + ", ".join(f"{n}={v}" for n, v in counts.items())
+        if len(text) > MAX_SOURCE:  # absurd counts: keep the codes, drop the numbers
+            text = text[: text.index("; LOWER BOUND")] + "; LOWER BOUND: "
+            text += "+".join(counts)
+        return text
+
+    @property
+    def source_code(self) -> str:
+        """The same as ``source`` as one code (``[A-Za-z0-9_.:+-]``, under 64
+        characters), for a confirm record, where ``source``'s sentence is not
+        allowed. ``reasons`` has the details."""
+        if self.exact:
+            state = "exact"
+        elif not self.messages:
+            state = "nothing_counted"
+        elif self.uuid_fallback:
+            state = "not_exact"
+        else:
+            state = "lower_bound"
+        return f"{SOURCE_CODE_PREFIX}:{state}"
 
     def external_tokens(self) -> dict[str, int | None]:
         return dict(self.tokens)
+
+    def record_fields(self, *, confirm: bool = False) -> dict:
+        """The three ``levi.eval.compare.ArmRecord`` fields this count fills:
+        ``external_tokens``, ``external_tokens_exact`` (false = a lower bound;
+        the table then marks the teacher's total and will not call a student
+        with a lower bound "fewer") and ``external_tokens_source`` (the code
+        for a confirm record, the sentence otherwise)."""
+        return {
+            "external_tokens": self.external_tokens(),
+            "external_tokens_exact": self.exact,
+            "external_tokens_source": self.source_code if confirm else self.source,
+        }
 
     def to_dict(self) -> dict:
         return {
@@ -227,6 +265,7 @@ class Usage:
             "subagent_results": self.subagent_results,
             "subagents_uncovered": self.subagents_uncovered,
             "reasons": list(self.reasons),
+            "source_code": self.source_code,
         }
 
 

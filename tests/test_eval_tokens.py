@@ -6,6 +6,7 @@ All transcripts here are built by the tests; nothing reads a real session.
 import glob
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -367,7 +368,7 @@ def test_a_sub_agent_result_in_the_main_session_is_counted_and_makes_it_inexact(
     assert usage.other_lines == 0
     assert not usage.exact
     assert "subagent_uncovered" in usage.reasons
-    assert "1 of 1 sub-agent results without their transcript" in usage.source
+    assert "LOWER BOUND: subagent_uncovered=1" in usage.source
     assert tokens.usage_from_files([main]).to_dict()["subagents_uncovered"] == 1
 
 
@@ -436,7 +437,7 @@ def test_a_message_keyed_by_uuid_is_reported_and_makes_the_count_inexact(tmp_pat
     assert (usage.messages, usage.uuid_fallback) == (3, 2)
     assert not usage.exact
     assert "uuid_fallback" in usage.reasons
-    assert "2 keyed by uuid" in usage.source
+    assert "uuid_fallback=2" in usage.source
     clean = transcript(tmp_path / "c.jsonl", row("msg_a", 5))
     assert tokens.usage_from_files([clean]).uuid_fallback == 0
 
@@ -453,7 +454,7 @@ def test_a_half_written_last_line_is_reported_not_swallowed(tmp_path):
         assert (usage.bad_lines, usage.other_lines) == (0, 0)  # counted once, apart
         assert usage.tokens["output"] == 4
         assert not usage.exact and "truncated_tail" in usage.reasons
-        assert "1 truncated tails" in usage.source
+        assert "truncated_tail=1" in usage.source
     # A complete record that merely lacks its newline is a record.
     f.write_text(whole + "\n" + json.dumps(row("msg_b", 6)))
     usage = tokens.usage_from_files([f])
@@ -487,3 +488,71 @@ def test_an_empty_usage_dict_lacks_every_field_and_a_non_dict_is_a_bad_line(tmp_
     h = transcript(tmp_path / "h.jsonl", row("msg_a", 8), none)
     quiet = tokens.usage_from_files([h])
     assert (quiet.bad_lines, quiet.other_lines, quiet.exact) == (0, 1, True)
+
+
+def test_the_source_code_is_one_code_and_names_the_state(tmp_path):
+    clean = tokens.usage_from_files([transcript(tmp_path / "a.jsonl", row("m", 1))])
+    assert clean.source_code == "claude_jsonl.last_usage:exact"
+    cut = tokens.usage_from_files(
+        [transcript(tmp_path / "b.jsonl", row("m", 1), row("n", 0, usage={}))]
+    )
+    assert cut.source_code == "claude_jsonl.last_usage:lower_bound"
+    uuid = tokens.usage_from_files(
+        [transcript(tmp_path / "c.jsonl", row(None, 1, uuid="u"))]
+    )
+    assert uuid.source_code == "claude_jsonl.last_usage:not_exact"
+    (tmp_path / "e.jsonl").write_text("")
+    empty = tokens.usage_from_files([tmp_path / "e.jsonl"])
+    assert empty.source_code == "claude_jsonl.last_usage:nothing_counted"
+    code = re.compile(r"[A-Za-z0-9_.:+-]{1,64}")  # the confirm rule of compare.py
+    for usage in (clean, cut, uuid, empty):
+        assert code.fullmatch(usage.source_code)
+        assert not code.fullmatch(usage.source)  # the sentence is not a code
+        assert usage.to_dict()["source_code"] == usage.source_code
+
+
+def test_record_fields_carry_the_counts_the_flag_and_the_source(tmp_path):
+    f = transcript(tmp_path / "s.jsonl", row("m", 7), agent_result())
+    usage = tokens.usage_from_files([f])
+    fields = usage.record_fields()
+    assert fields == {
+        "external_tokens": usage.external_tokens(),
+        "external_tokens_exact": False,  # a sub-agent's transcript is missing
+        "external_tokens_source": usage.source,
+    }
+    assert usage.record_fields(confirm=True)["external_tokens_source"] == (
+        usage.source_code
+    )
+
+
+def test_the_source_sentence_fits_the_records_limit_even_with_every_reason(tmp_path):
+    # ArmRecord.external_tokens_source is at most 200 characters, one line.
+    # The sentence once ran past that as soon as it listed its reasons, so the
+    # documented use (fill the record from Usage.source) raised.
+    big = tokens.Usage(
+        tokens=dict.fromkeys(tokens.FIELDS, 1),
+        messages=123456,
+        models=("m",),
+        files=12,
+        lines=0,
+        other_lines=0,
+        bad_lines=123456,
+        no_id=123456,
+        unplaced=123456,
+        outside_window=0,
+        missing_fields=dict.fromkeys(tokens.FIELDS, 123456),
+        uuid_fallback=123456,
+        truncated_tail=12,
+        subagent_results=123456,
+        subagents_uncovered=123456,
+    )
+    assert not big.exact
+    assert len(big.source) <= 200 and "\n" not in big.source
+    assert len(tokens.Usage(**{**big.__dict__, "messages": 0}).source) <= 200
+    huge = tokens.Usage(**{**big.__dict__, "bad_lines": 10**15, "no_id": 10**15})
+    assert len(huge.source) <= 200 and "bad_lines+no_id" in huge.source
+    # Only the reasons that apply are listed.
+    f = tmp_path / "s.jsonl"
+    f.write_text(json.dumps(row("m", 1)) + "\n{cut")  # no newline at the end
+    only = tokens.usage_from_files([f]).source
+    assert "truncated_tail=1" in only and "bad_lines" not in only

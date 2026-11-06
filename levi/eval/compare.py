@@ -223,6 +223,11 @@ class ArmRecord:
     this arm reproduces (not set on the teacher arm). ``external_tokens`` has
     the four fields of ``levi.aeri.external_report.v1``; ``None`` for the whole
     dict or one field means unknown, ``0`` means measured zero.
+    ``external_tokens_exact`` says whether those counts are complete: ``False``
+    = lower bounds (a transcript with lines set aside, sub-agents missing, ...;
+    ``levi.eval.tokens.Usage.exact``), ``True`` = exact, ``None`` = not stated.
+    A lower bound is marked in the table and never decides "fewer external
+    tokens" for the student arm.
 
     The problems are given either as ``episode_set`` (the ids) or as
     ``episode_set_hash`` plus ``episode_count``; if both are given they must
@@ -246,6 +251,7 @@ class ArmRecord:
     wall_s: float | None = None
     local_tokens: int | None = None
     external_tokens: dict | None = None
+    external_tokens_exact: bool | None = None
     external_tokens_source: str | None = None
     blocked: str | None = None
     per_episode: dict | None = None
@@ -319,6 +325,12 @@ class ArmRecord:
                 for name in TOKEN_FIELDS
             }
         put("external_tokens", external)
+        exact = self.external_tokens_exact
+        if exact is not None:
+            if not isinstance(exact, bool):
+                raise RecordError("external_tokens_exact must be true, false or null")
+            if external is None:
+                raise RecordError("external_tokens_exact needs external_tokens")
         put(
             "external_tokens_source",
             _text(self.external_tokens_source, "external_tokens_source"),
@@ -428,6 +440,26 @@ def _delta(mine, reference):
     return None if mine is None or reference is None else mine - reference
 
 
+def _is_bound(row: dict) -> bool:
+    """The row's external token counts are lower bounds (stated, not guessed)."""
+    return row["external_tokens_exact"] is False
+
+
+def _fewer(student: dict, teacher: dict, key: str) -> bool | None:
+    """Does the student arm spend fewer external tokens than the teacher arm?
+
+    A lower bound is not a count. If the student's is one, its true total may
+    be anything above it, so the answer is unknown whatever the numbers say. If
+    the teacher's is one, the student is certainly lower when it is below that
+    bound, and otherwise nothing can be said (the teacher may have used more)."""
+    mine, reference = student[key], teacher[key]
+    if mine is None or reference is None or _is_bound(student):
+        return None
+    if _is_bound(teacher):
+        return True if mine < reference else None
+    return mine < reference
+
+
 def _row(record: ArmRecord, basis, confirm: bool) -> dict:
     total = _total(record, basis)
     per_second, second_status = _ratio(record.quality, record.wall_s)
@@ -456,6 +488,7 @@ def _row(record: ArmRecord, basis, confirm: bool) -> dict:
         "local_tokens": record.local_tokens,
         "external_tokens": {name: record.external(name) for name in TOKEN_FIELDS},
         "external_tokens_total": total,
+        "external_tokens_exact": record.external_tokens_exact,
         "external_tokens_source": record.external_tokens_source,
         "quality_per_second": per_second,
         "quality_per_external_token": per_token,
@@ -484,6 +517,8 @@ def _vs(row: dict, reference: dict | None, key: str) -> dict | None:
     for name, value in out.items():
         if value is None:
             row["unknown"].append(f"{key}.{name}")
+    # A difference with a lower bound in it is itself only a bound.
+    out["external_tokens_delta_is_bound"] = _is_bound(row) or _is_bound(reference)
     return out
 
 
@@ -495,9 +530,7 @@ def _verdict(student: dict, teacher: dict | None) -> dict | None:
     checks = {
         "quality_not_lower": _holds(student["quality"], teacher["quality"], ">="),
         "faster": _holds(student["wall_s"], teacher["wall_s"], "<"),
-        "fewer_external_tokens": _holds(
-            student["external_tokens_total"], teacher["external_tokens_total"], "<"
-        ),
+        "fewer_external_tokens": _fewer(student, teacher, "external_tokens_total"),
     }
     values = list(checks.values())
     checks["all"] = False if False in values else None if None in values else True
@@ -659,8 +692,26 @@ def _tri(value) -> str:
 def _ratio_cell(row: dict, name: str, fmt: str, scale: float = 1.0) -> str:
     value = row[name]
     if value is not None:
-        return format(value * scale, fmt)
+        # Per external token with a lower-bound denominator is an upper bound.
+        mark = "≤" if name == "quality_per_external_token" and _is_bound(row) else ""
+        return mark + format(value * scale, fmt)
     return NOT_APPLICABLE if name in row["undefined"] else UNKNOWN
+
+
+def _token_cell(row: dict, value) -> str:
+    """An external token count; a stated lower bound is written ``≥N``."""
+    text = _num(value, ",d")
+    return "≥" + text if value is not None and _is_bound(row) else text
+
+
+def _exactness(row: dict) -> str:
+    if row["external_tokens_exact"] is None:
+        return (
+            NONE_SELF
+            if all(v is None for v in row["external_tokens"].values())
+            else "未声明"
+        )
+    return "下限" if _is_bound(row) else "精确"
 
 
 def _vs_cells(row: dict, key: str) -> list[str]:
@@ -669,10 +720,13 @@ def _vs_cells(row: dict, key: str) -> list[str]:
         return [NO_ARM] * 3
     if vs.get("self"):
         return [NONE_SELF] * 3
+    tokens = _num(vs["external_tokens_delta"], "+,d")
+    if vs["external_tokens_delta"] is not None and vs["external_tokens_delta_is_bound"]:
+        tokens += "（含下限）"
     return [
         _num(vs["quality_delta"], "+.3f"),
         _num(vs["wall_s_delta"], "+,.1f"),
-        _num(vs["external_tokens_delta"], "+,d"),
+        tokens,
     ]
 
 
@@ -747,14 +801,16 @@ def _markdown(table: Table) -> str:
             "外部 cache_read",
             "外部 cache_write",
             "外部合计（口径）",
+            "计数",
             "外部 token 来源",
         ],
         [
             [
                 r["arm"],
                 _num(r["local_tokens"], ",d"),
-                *[_num(r["external_tokens"][n], ",d") for n in TOKEN_FIELDS],
-                _num(r["external_tokens_total"], ",d"),
+                *[_token_cell(r, r["external_tokens"][n]) for n in TOKEN_FIELDS],
+                _token_cell(r, r["external_tokens_total"]),
+                _exactness(r),
                 r["external_tokens_source"] or NONE_SELF,
             ]
             for r in rows
@@ -792,7 +848,9 @@ def _markdown(table: Table) -> str:
         (
             f"注：`{UNKNOWN}` = 没有测量，不是 0；依赖它的每秒质量、每外部 token 质量和相对差也是"
             f"`{UNKNOWN}`。`{NOT_APPLICABLE}` = 分母为 0（例如本臂外部 token 真为 0）。"
-            "每千外部 token 质量 = 质量 ÷ 外部合计 × 1000。"
+            "每千外部 token 质量 = 质量 ÷ 外部合计 × 1000。`≥` = 外部 token 只是下限"
+            "（计数不完整），带 `≤` 的每千 token 质量是上限，含下限的差也只是下限；"
+            "学生臂是下限时，“外部 token 更少”写未知。"
         ),
         "",
     ]
