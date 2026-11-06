@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import children, jobs, links
 from .agent.store import StoreUnavailable
@@ -763,6 +763,13 @@ def _inspect(payload: Diagnostic, root):
 
 
 class TrainingManifest(BaseModel):
+    # An unknown field is a 422, never ignored: pydantic's default would drop
+    # `tempo` or `prompt_template` and answer 200 with a manifest that has
+    # neither. This body takes the operation's parameters and the scope only;
+    # the tempo step and the prompt template are on the command line and in
+    # build() (docs/TRAINING_MANIFEST.md).
+    model_config = ConfigDict(extra="forbid")
+
     repo_id: str
     operation: str
     params: dict[str, float | str] = Field(default_factory=dict)

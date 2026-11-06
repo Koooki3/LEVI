@@ -508,6 +508,34 @@ def test_cli_and_api(repo, client, capsys):
     assert len(listed["manifests"]) == 2
 
 
+def test_the_manifest_request_refuses_a_field_it_does_not_take(repo, client):
+    """pydantic drops an unknown field by default: a POST that asked for a tempo
+    step (or a prompt template) got a manifest with neither and no word of it."""
+    before = len(
+        client.get("/api/levi/manifest", params={"repo_id": repo}).json()["manifests"]
+    )
+    body = {"repo_id": repo, "operation": "all_rollouts"}
+    for extra in (
+        {"tempo": "per_event_uniform"},
+        {"tempo": "per_event_uniform", "tempo_params": {"frames": 4}},
+        {"prompt_template": "v1-en"},
+        {"subtask_max_chars": 40},
+        {"operaton": "all_rollouts"},  # a typo
+    ):
+        response = client.post("/api/levi/manifest", json={**body, **extra})
+        assert response.status_code == 422, (extra, response.status_code)
+        assert "extra_forbidden" in response.text
+    # Nothing was written for any of them.
+    listed = client.get("/api/levi/manifest", params={"repo_id": repo}).json()
+    assert len(listed["manifests"]) == before
+    # The fields it does take still work, and the manifest has no tempo step.
+    made = client.post(
+        "/api/levi/manifest", json={**body, "episodes": [0], "params": {}}
+    )
+    assert made.status_code == 200, made.text
+    assert "tempo" not in made.json()
+
+
 # ---------------------------------------------------------------- reader
 
 
