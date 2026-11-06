@@ -1,0 +1,16 @@
+{
+  "name": "paper-to-spec",
+  "kind": "local skill written from a workspace incident; no upstream",
+  "created": "2026-11-06",
+  "evidence": "2026-10-21: a web-fetch summary of arXiv 2610.10270 gave abstract and quotes only (SUBTASK-TEMPO-PLAN-20261021.md says so); 2026-11-06: verbatim reading of sections 2, 3.1 and appendix A produced levi-hub/programs/levi2/VPP2-PIPELINE-SPEC-20261106.md",
+  "script": "scripts/html2txt.py (standard library only), --selftest passes; output on the VPP2 HTML differs from the first hand-run version only by a trailing empty heading",
+  "validation": {
+    "static": "script compiles, selftest ok",
+    "behavioural": "not run as a skill by an independent agent",
+    "independent_review": "pending"
+  },
+  "files": {
+    "SKILL.md": "d92015e4b09dfcc22c438b58e260b94f1a8414ae2ab5c640d7940a2e80988a45",
+    "scripts/html2txt.py": "1652206e70dea4b067f773d0b54c9df69b01df09103697e89b758cc0412f8a4f"
+  }
+}
