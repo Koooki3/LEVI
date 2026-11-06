@@ -41,6 +41,7 @@ captures/session-a/
     └── demo_001/
         ├── end_effector_pose.csv
         ├── gripper_state.csv
+        ├── robot_joint_states.csv  (optional: joint angles, see "Joint angles")
         ├── events.csv          (optional)
         ├── metadata.json       (optional)
         ├── wrist_camera.mp4    (or wrist_camera_raw.avi, or wrist_camera/ image folder)
@@ -49,6 +50,7 @@ captures/session-a/
 
 - Pose columns: `timestamp_sec, frame_index, success_flag, source_stamp_sec, px, py, pz, qx, qy, qz, qw`.
 - Gripper columns: `timestamp_sec, frame_index, success_flag, source_stamp_sec, finger_left, finger_right, gripper_width, last_gripper_command`. Extra columns are read but ignored.
+- Joint columns (optional file `robot_joint_states.csv`): `timestamp_sec, frame_index, success_flag, source_stamp_sec, joint_1_pos` .. `joint_7_pos` (radians), plus `joint_N_vel` / `joint_N_eff` (read by nothing here; the FR3 collector writes NaN). See "Joint angles and measured gripper width" below.
 - Quaternion order XYZW; metres; seconds; commands `open` / `close` only.
 - `success_flag` must be **consistent** within one demo (a mix of 0 and 1 means a bad merge). Teleoperation leaves it at 0; policy rollouts set it to the outcome.
 - `metadata.json["data_source"] == "policy_rollout"` marks an eval/RL rollout (variant `policy_rollout`); its `eval.outcome` becomes the episode's `levi_outcome`. Teleoperation omits `data_source` and has no outcome.
@@ -104,6 +106,7 @@ Validation reuses those measurements instead of decoding a third time. `keep_int
   "orientation": "euler",
   "action_mode": "next_state",
   "robot_type": "generic_arm",
+  "export_joints": true,
   "task_map": {"pick_object": "Pick up the object."},
   "exclude_demos": ["task-a/demo_004"],
   "outcome_labels": {}
@@ -147,9 +150,29 @@ The sidebar dot next to each episode shows its outcome: metadata (`levi_outcome`
 
 ## 输出与交接 / Output and review handoff
 
-`meta/levi_provenance.jsonl`: `episode_index`, `source_demo`, `source_positions` (0-based raw rows kept), `source_frame_ids`, `source_capture_timestamps`. `meta/episodes.jsonl` rows carry `source_demo` and, for rollouts, `levi_outcome` (+ `levi_outcome_source` for human labels). `meta/levi_conversion.json` (schema `levi.conversion.v2`) records the input format/variant, target, options, fps, timing and how many videos were remuxed or encoded. State is `[x,y,z,rx,ry,rz,gripper_command]` (open=1/close=0, not measured width); next-state action repeats the final state. Statistics use all decoded output pixels (RGB in [0,1]).
+`meta/levi_provenance.jsonl`: `episode_index`, `source_demo`, `source_positions` (0-based raw rows kept), `source_frame_ids`, `source_capture_timestamps`. `meta/episodes.jsonl` rows carry `source_demo` and, for rollouts, `levi_outcome` (+ `levi_outcome_source` for human labels). `meta/levi_conversion.json` (schema `levi.conversion.v2`) records the input format/variant, target, options, fps, timing and how many videos were remuxed or encoded. State is `[x,y,z,rx,ry,rz,gripper_command]` (open=1/close=0, not measured width); next-state action repeats the final state. When the capture has joint angles, two more columns are written next to them and `meta/levi_conversion.json` gets a `joint_positions` block (below). Statistics use all decoded output pixels (RGB in [0,1]).
 
 Use provenance to map flagged episodes back to capture paths and configure `exclude_demos`; never assume episode N equals `demo_N`. Exit codes: 0 ok; 2 a completed report contains failing checks; 1 execution/configuration/preflight error.
+
+## 关节角与实测夹爪 / Joint angles and measured gripper width
+
+A conversion used to keep only the end-effector pose, so a converted dataset could not drive a 3D replay of the arm. When the capture holds the measured joint angles, `convert pipeline` into `lerobot_v21` now also writes them (`levi/conversion/joint_states.py`):
+
+| Written | Source | Notes |
+| --- | --- | --- |
+| `observation.joint_positions` | `robot_joint_states.csv`, `joint_1_pos` .. `joint_7_pos` | float32, shape `[7]`, names `joint_1` .. `joint_7`, **radians**, the same source row as the pose |
+| `observation.gripper_width` | `gripper_state.csv`, `gripper_width` | float32, shape `[1]`, **metres**, the *measured* aperture (0.085 is a fully open Robotiq 2F-85) |
+| `info.json` `robot_type` | — | `franka_fr3` when `robot_type` is still the default `generic_arm`; any other value you set is kept |
+
+- The existing columns do not change. `observation.state` and `action` keep `[x,y,z,rx,ry,rz,gripper]`, where `gripper` is still the open=1 / close=0 **command**; the measured width is a separate column and never replaces it.
+- Rows are matched one to one with the pose file and kept at exactly the retained positions (`resample`, `retime` and the static filter all apply), so `timestamp` stays `frame_index / fps`. Nothing is interpolated.
+- Why `robot_type` changes: the viewer draws an FR3 from joint columns only when the robot type names the Franka family (`fr3`, `franka`, `panda`); other 7-joint arms also name their joints `joint_1..7` and must not be drawn as an FR3. The names and this rule are read by `src/lib/replay/fr3-columns.ts`; `tests/test_conversion_joints.py` re-derives the rule from that file.
+- Switch: `export_joints` (default `true`: export when the source has them). `false` converts exactly as before. A capture without `robot_joint_states.csv` (or with one that has no `joint_N_pos` column at all, another layout) is converted as before in either case: same files, byte for byte, and the `options` record in `meta/levi_conversion.json` has no new key. Scope: `lerobot_v21` through `convert pipeline` / the Workbench. RECAP value exports, browsing views of raw captures and training-pool exports do not carry these columns.
+- Refused, with the demo and the reason in the error, before anything is written (nothing is filled, interpolated or set to zero): a joint file with only some of the seven `joint_N_pos` columns; a different row count, `frame_index` or `timestamp_sec` than `end_effector_pose.csv` (a missing `frame_index` column too); a missing, non-numeric or non-finite angle; an angle beyond one turn (`|q| > 2π`: degrees or ticks, not radians); a joint file in only some of the selected demos (a dataset has one set of columns; exclude those demos or set `export_joints` to `false`).
+- The measured width is optional: if `gripper_width` is missing, non-finite or outside −0.005..0.2 m in any demo (millimetres, a 0..1 fraction), the joint angles are still written, `observation.gripper_width` is not, a warning is shown and `joint_positions.gripper_width` in `meta/levi_conversion.json` says why. LEVI cannot tell a sensor that was never read from a gripper that stayed closed; the value is exported as recorded.
+- **Older datasets** converted before this change have none of these columns and keep `generic_arm`; they get them only by converting the raw capture again into a **new** output directory (a conversion never writes into an existing dataset). Frozen test sets and gold-labelled datasets are not re-converted: their content hashes and locks identify exactly the files that were evaluated or labelled, so a re-conversion would be a different dataset, not the same one with more columns.
+
+中文说明：转换原来只导出末端位姿，转换后的数据集无法驱动机械臂的三维回放。现在 `convert pipeline`（输出 `lerobot_v21`）在原始采集里有 `robot_joint_states.csv`（`joint_1_pos`..`joint_7_pos`，弧度）时，多写一列 `observation.joint_positions`（7 维，弧度，名字 `joint_1`..`joint_7`）；`gripper_state.csv` 的 `gripper_width`（米，实测开度）另写成 `observation.gripper_width`，不替换 `observation.state` / `action` 里的开合指令。`robot_type` 保持默认 `generic_arm` 时改写为 `franka_fr3`（查看器只对 FR3/Franka/Panda 家族用关节列驱动手臂）。开关是选项 `export_joints`（默认 `true`：源里有就导出；`false` 与原来完全一样）。没有关节文件的采集输出与原来逐字节一致。关节文件只含部分列、行数或帧号对不上、有缺失/非数/超过一圈的角度、或只有部分 demo 有关节文件时，转换在写任何东西之前拒绝并说明原因，不补零、不插值；实测开度不合理时只跳过开度列并记录原因。已有数据集要有这些列，只能重新转换原始采集到新的输出目录；冻结测试集和金标准数据集不重转（哈希和锁定对应的是当时评测或标注的那份文件，重转后就是另一个数据集）。RECAP 导出、浏览视图和训练池导出不带这些列。
 
 ## 新增格式 / Adding a format
 
@@ -161,7 +184,7 @@ Use provenance to map flagged episodes back to capture paths and configure `excl
 
 - Source fingerprints (size, mtime, per-file stat) detect ordinary recording edits; they are not tamper-proof content hashes. Convert stopped, stable captures.
 - Euler unwrap handles branch crossings, not gimbal lock. Quaternion output is available and changes the state feature width.
-- The exported gripper channel is the binary command (open=1, close=0), not a measured aperture. Measured aperture or other hardware-specific semantics need their own input adapter rather than a reinterpretation of this channel.
+- The gripper channel of `observation.state` / `action` is the binary command (open=1, close=0), not a measured aperture. The measured aperture is exported separately as `observation.gripper_width` (see Joint angles); other hardware-specific semantics need their own input adapter rather than a reinterpretation of this channel.
 - Validation is scoped to LEVI's own schema, row and media checks; it does not certify every training framework's loader.
 
 ## 验证范围 / Validation scope
