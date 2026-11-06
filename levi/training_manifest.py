@@ -343,10 +343,12 @@ TEMPOS: dict[str, Tempo] = {
                 "segments": Param(
                     str,
                     "reviewed",
-                    "which subtask segments are events: reviewed (review empty "
-                    "or edited, the rule the prompt columns use; an unreviewed "
-                    "automatic segment is not an event) or all",
-                    ("reviewed", "all"),
+                    "which subtask segments are events, by review policy "
+                    "(manifest_prompts.REVIEW_POLICIES): reviewed (review empty "
+                    "or edited, the policy the prompt columns use; an "
+                    "unreviewed automatic segment is not an event) or all. The "
+                    "policy's name and version are in the fingerprint",
+                    tuple(manifest_prompts.REVIEW_POLICIES),
                 ),
                 "count": Param(
                     str,
@@ -403,13 +405,26 @@ def tempo_steps() -> list[dict[str, Any]]:
     ]
 
 
-def tempo_fingerprint(name: str, version: int, params: dict[str, Any]) -> str:
-    """Digest of a tempo step and every parameter that decides the weights:
-    two manifests with different digests are different training inputs, even
-    when the operation, the scope and the dataset are the same."""
+def tempo_fingerprint(
+    name: str,
+    version: int,
+    params: dict[str, Any],
+    segment_policy: dict[str, Any] | None = None,
+) -> str:
+    """Digest of a tempo step and everything that decides the weights: its
+    parameters and, for a step that reads reviews, the name and version of the
+    review policy that says which segments count. Two manifests with different
+    digests are different training inputs, even when the operation, the scope
+    and the dataset are the same."""
     return hashlib.sha256(
         json.dumps(
-            {"name": name, "version": version, "params": params}, sort_keys=True
+            {
+                "name": name,
+                "version": version,
+                "params": params,
+                **({"segment_policy": segment_policy} if segment_policy else {}),
+            },
+            sort_keys=True,
         ).encode()
     ).hexdigest()
 
@@ -875,6 +890,18 @@ def build(
     tempo_step = TEMPOS[tempo]
     tempo_settings = _params(tempo_step, tempo_params, "Tempo step")
     tempo_stats = _TempoStats() if tempo != "none" else None
+    # Which segments are events: the review policy `segments` names, the same
+    # predicate the prompt columns apply (manifest_prompts.PROMPT_POLICY).
+    segment_policy = (
+        manifest_prompts.review_policy(tempo_settings["segments"])
+        if tempo == "per_event_uniform"
+        else None
+    )
+    policy_record = (
+        {"name": segment_policy.name, "version": segment_policy.version}
+        if segment_policy
+        else None
+    )
     ds = _dataset(repo_id)
     entry = catalog.datasets().get(ds.name, {})
     known = sorted(ds.rows)
@@ -1086,11 +1113,7 @@ def build(
         tempo_found: dict[str, Any] | None = None
         if tempo == "per_event_uniform":
             # After the operation and not instead of it; touches weight only.
-            is_event = [
-                tempo_settings["segments"] == "all"
-                or s["review"] in manifest_prompts.REVIEWED
-                for s in spans
-            ]
+            is_event = [segment_policy.accepts(s["review"]) for s in spans]
             tempo_found = per_event_uniform(
                 include,
                 weight,
@@ -1201,8 +1224,9 @@ def build(
                     "summary": tempo_step.summary,
                     "version": tempo_step.version,
                     "params": tempo_settings,
+                    **({"segment_policy": policy_record} if policy_record else {}),
                     "fingerprint": tempo_fingerprint(
-                        tempo, tempo_step.version, tempo_settings
+                        tempo, tempo_step.version, tempo_settings, policy_record
                     ),
                     "events": tempo_stats.record(),
                     "warnings": tempo_stats.warnings(),

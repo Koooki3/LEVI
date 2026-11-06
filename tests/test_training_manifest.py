@@ -1179,6 +1179,7 @@ def test_per_event_uniform_changes_weight_only_and_only_inside_events(repo):
     # Said in manifest.json: what ran, with which numbers, and what it found.
     tempo = result["tempo"]
     assert tempo["name"] == "per_event_uniform" and tempo["version"] == 2
+    assert tempo["segment_policy"] == {"name": "reviewed", "version": 1}
     assert tempo["params"] == {
         "frames": 4,
         "segments": "reviewed",
@@ -1496,6 +1497,89 @@ def test_outside_scale_gives_the_frames_outside_events_the_mean_factor_of_the_ev
     )
 
 
+def test_the_events_and_the_prompt_columns_share_one_review_policy(repo, monkeypatch):
+    from levi import manifest_prompts as mp
+
+    name = _name(repo)
+    # grasp is reviewed (review empty); place carries a review value this code
+    # does not know ("checked").
+    _segments(
+        name,
+        0,
+        [("grasp", 0.0, 0.5, None, None), ("place", 0.5, None, "checked", None)],
+    )
+
+    def place(result):
+        f = _frames(result)
+        return f[(f.episode_index == 0) & (f.subtask_id == "place")]
+
+    result = _tempo(repo, frames=4)
+    assert not place(result).prompt_has_subtask.any()
+    assert (place(result).prompt_subtask_skip == "review_unrecognised").all()
+    assert (place(result).weight == 1).all()  # and it is not an event either
+    # A policy that accepts "checked" changes both, through the one predicate:
+    # the prompt gets the subtask and the segment is rescaled as an event.
+    monkeypatch.setitem(
+        mp.REVIEW_POLICIES,
+        "reviewed",
+        mp.ReviewPolicy("reviewed", 1, (None, "edited", "checked"), "test"),
+    )
+    result = _tempo(repo, frames=4)
+    assert place(result).prompt_has_subtask.all()
+    assert place(result).weight.tolist() == pytest.approx([4 / 7] * 7)
+    assert result["tempo"]["events"]["events"] == 2
+
+
+def test_the_review_policy_name_and_version_are_in_the_fingerprint(repo, monkeypatch):
+    from levi import manifest_prompts as mp
+
+    base = _tempo(repo)
+    assert base["tempo"]["segment_policy"] == {"name": "reviewed", "version": 1}
+    everything = _tempo(repo, segments="all")
+    assert everything["tempo"]["segment_policy"] == {"name": "all", "version": 1}
+    assert everything["tempo"]["fingerprint"] != base["tempo"]["fingerprint"]
+    # The same words under a new version are another input, whatever the
+    # parameters say.
+    monkeypatch.setitem(
+        mp.REVIEW_POLICIES,
+        "reviewed",
+        mp.ReviewPolicy("reviewed", 2, (None, "edited"), "same words, new version"),
+    )
+    bumped = _tempo(repo)
+    assert bumped["tempo"]["params"] == base["tempo"]["params"]
+    assert bumped["tempo"]["segment_policy"] == {"name": "reviewed", "version": 2}
+    assert bumped["tempo"]["fingerprint"] != base["tempo"]["fingerprint"]
+    assert tm.compare(base["output_dir"], bumped["output_dir"])["tempo_differs"]
+    # The policies are the choices of `segments`; an unknown name is refused.
+    assert tm.TEMPOS["per_event_uniform"].params["segments"].choices == tuple(
+        mp.REVIEW_POLICIES
+    )
+    with pytest.raises(ValueError, match="Unknown review policy"):
+        mp.review_policy("nobody")
+
+
+def test_an_unreviewed_segment_is_no_event_but_takes_the_frames_it_overlaps(repo):
+    name = _name(repo)
+    # Episode 0 (12 frames at 10 fps). Reviewed a covers 0.0-0.8, frames 0-7,
+    # alone: T = 8.
+    _segments(name, 0, [("a", 0.0, 0.8, None, None)])
+    alone = _frames(_tempo(repo, frames=6))
+    e0 = alone[alone.episode_index == 0]
+    assert e0[e0.subtask_id == "a"].weight.tolist() == pytest.approx([6 / 8] * 8)
+    # An automatic segment b from 0.5 starts later, so it owns frames 5-7 (as
+    # its subtask_id says). It is not an event and is not scaled, but it took
+    # three frames from a: T = 5, and those three frames count as outside.
+    _segments(name, 0, [("a", 0.0, 0.8, None, None), ("b", 0.5, None, "auto", None)])
+    result = _tempo(repo, frames=6)
+    e0 = _frames(result)[lambda f: f.episode_index == 0]
+    assert e0[e0.subtask_id == "a"].weight.tolist() == pytest.approx([6 / 5] * 5)
+    assert (e0[e0.subtask_id == "b"].weight == 1).all()  # outside, untouched
+    events = result["tempo"]["events"]
+    assert (events["events"], events["spans_not_events"]) == (1, 1)
+    # Frames 5-11 are b's (7 of episode 0) plus the 18 of the other episodes.
+    assert events["frames_in_events"] == 5 and events["frames_outside_events"] == 25
+
+
 def test_tempo_parameters_are_in_the_fingerprint_and_in_compare(repo):
     name = _name(repo)
     _segments(
@@ -1511,11 +1595,15 @@ def test_tempo_parameters_are_in_the_fingerprint_and_in_compare(repo):
         "per_event_uniform",
         2,
         {"frames": 8, "segments": "reviewed", "count": "segment", "outside": "keep"},
+        {"name": "reviewed", "version": 1},
     )
     # A changed step with the same parameters is a different input.
-    assert tm.tempo_fingerprint("per_event_uniform", 3, eight["tempo"]["params"]) != fp(
-        eight
-    )
+    assert tm.tempo_fingerprint(
+        "per_event_uniform",
+        3,
+        eight["tempo"]["params"],
+        {"name": "reviewed", "version": 1},
+    ) != fp(eight)
     included = _tempo(repo, frames=8, count="included")
     scaled = _tempo(repo, frames=8, outside="scale")
     assert len({fp(four), fp(eight), fp(everything), fp(included), fp(scaled)}) == 5
